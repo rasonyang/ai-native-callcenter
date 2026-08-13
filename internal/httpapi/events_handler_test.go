@@ -30,7 +30,7 @@ func (s *stubReserver) ReserveSeqBlock(context.Context, string, int64) (int64, e
 func serveEvents(t *testing.T, hub *events.Hub, id auth.Identity, lastEventID string, publish func()) string {
 	t.Helper()
 
-	srv := New(config.Config{SessionCookie: "aicc_session"}, nil, hub, nil)
+	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{Hub: hub})
 
 	ctx, cancel := context.WithCancel(contextWithIdentity(context.Background(), id))
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)

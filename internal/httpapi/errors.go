@@ -15,17 +15,20 @@ type ErrorCode string
 
 // Error codes shared by the API surface.
 const (
-	CodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS"
-	CodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
-	CodeForbidden          ErrorCode = "FORBIDDEN"
-	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
-	CodeNotFound           ErrorCode = "NOT_FOUND"
-	CodeConflict           ErrorCode = "CONFLICT"
-	CodeUserSuspended      ErrorCode = "USER_SUSPENDED"
-	CodeSwitchDown         ErrorCode = "SWITCH_DOWN"
-	CodeStorageDown        ErrorCode = "STORAGE_DOWN"
-	CodeRateLimited        ErrorCode = "RATE_LIMITED"
-	CodeInternal           ErrorCode = "INTERNAL"
+	CodeInvalidCredentials   ErrorCode = "INVALID_CREDENTIALS"
+	CodeSessionExpired       ErrorCode = "SESSION_EXPIRED"
+	CodeForbidden            ErrorCode = "FORBIDDEN"
+	CodeValidationFailed     ErrorCode = "VALIDATION_FAILED"
+	CodeNotFound             ErrorCode = "NOT_FOUND"
+	CodeConflict             ErrorCode = "CONFLICT"
+	CodeExtensionInUse       ErrorCode = "EXTENSION_IN_USE"
+	CodeAgentAlreadyLoggedIn ErrorCode = "AGENT_ALREADY_LOGGED_IN"
+	CodeAgentNotLoggedIn     ErrorCode = "AGENT_NOT_LOGGED_IN"
+	CodeUserSuspended        ErrorCode = "USER_SUSPENDED"
+	CodeSwitchDown           ErrorCode = "SWITCH_DOWN"
+	CodeStorageDown          ErrorCode = "STORAGE_DOWN"
+	CodeRateLimited          ErrorCode = "RATE_LIMITED"
+	CodeInternal             ErrorCode = "INTERNAL"
 )
 
 // APIError is the single error envelope of the API.

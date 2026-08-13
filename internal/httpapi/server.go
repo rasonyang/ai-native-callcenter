@@ -3,30 +3,62 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/google/uuid"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 )
 
-// Server owns the HTTP surface: REST, SSE and the embedded SPA.
-type Server struct {
-	cfg  config.Config
-	auth *auth.Service
-	hub  *events.Hub
-	spa  http.Handler
+// AgentService is the agent presence surface used by the API.
+type AgentService interface {
+	Login(ctx context.Context, agentID uuid.UUID, extensionNumber string) (agents.Presence, error)
+	Logout(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
+	Ready(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
+	NotReady(ctx context.Context, agentID uuid.UUID, reason agents.Reason) (agents.Presence, error)
+	Presence(agentID uuid.UUID) agents.Presence
+	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 }
 
-// New builds the server. spa may be nil during development, when the Vite dev
-// server serves the frontend instead.
-func New(cfg config.Config, authSvc *auth.Service, hub *events.Hub, spa http.Handler) *Server {
-	return &Server{cfg: cfg, auth: authSvc, hub: hub, spa: spa}
+// Server owns the HTTP surface: REST, SSE and the embedded SPA.
+type Server struct {
+	cfg      config.Config
+	auth     *auth.Service
+	hub      *events.Hub
+	agents   AgentService
+	agentDir AgentDirectory
+	spa      http.Handler
+}
+
+// Deps are the services the API exposes.
+type Deps struct {
+	Auth     *auth.Service
+	Hub      *events.Hub
+	Agents   AgentService
+	AgentDir AgentDirectory
+	// SPA may be nil during development, when the Vite dev server serves the
+	// frontend instead.
+	SPA http.Handler
+}
+
+// New builds the server.
+func New(cfg config.Config, deps Deps) *Server {
+	return &Server{
+		cfg:      cfg,
+		auth:     deps.Auth,
+		hub:      deps.Hub,
+		agents:   deps.Agents,
+		agentDir: deps.AgentDir,
+		spa:      deps.SPA,
+	}
 }
 
 // Handler builds the router.
@@ -48,6 +80,25 @@ func (s *Server) Handler() http.Handler {
 				private.Use(s.requireSession)
 				private.Post("/auth/logout", s.handleLogout)
 				private.Get("/auth/me", s.handleMe)
+
+				if s.agents != nil {
+					// An agent drives only their own presence.
+					private.Group(func(agent chi.Router) {
+						agent.Use(requireAgentRole)
+						agent.Get("/agent/presence", s.handleAgentPresence)
+						agent.Post("/agent/login", s.handleAgentLogin)
+						agent.Post("/agent/logout", s.handleAgentLogout)
+						agent.Post("/agent/ready", s.handleAgentReady)
+						agent.Post("/agent/not-ready", s.handleAgentNotReady)
+					})
+					// The roster and force-logout belong to supervision.
+					private.Group(func(sup chi.Router) {
+						sup.Use(requireRole(auth.RoleSupervisor))
+						sup.Get("/agents", s.handleAgentRoster)
+						sup.Post("/agents/{agentId}/force-logout", s.handleAgentForceLogout)
+					})
+				}
+
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)
 			})
 		})

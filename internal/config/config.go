@@ -27,6 +27,11 @@ type Config struct {
 
 	ESLAddr     string
 	ESLPassword string
+	// SwitchDomain must match FreeSWITCH own $${domain}: the Lua handler
+	// renders queue names with it and mod_callcenter matches them literally.
+	SwitchDomain string
+	// SIPProfile is the sofia profile agents register to.
+	SIPProfile string
 
 	SessionTTL    time.Duration
 	SessionCookie string
@@ -51,6 +56,8 @@ func Load() (Config, error) {
 		DatabaseMaxConns: int32(envInt("AICC_DATABASE_MAX_CONNS", 10)),
 		ESLAddr:          env("AICC_ESL_ADDR", "127.0.0.1:18021"),
 		ESLPassword:      env("AICC_ESL_PASSWORD", "ClueCon"),
+		SwitchDomain:     env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
+		SIPProfile:       env("AICC_SIP_PROFILE", "internal"),
 		SessionTTL:       envDuration("AICC_SESSION_TTL", 12*time.Hour),
 		SessionCookie:    env("AICC_SESSION_COOKIE", "aicc_session"),
 		SecureCookies:    envBool("AICC_SECURE_COOKIES", false),
