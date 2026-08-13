@@ -26,7 +26,13 @@ export function useEventStream(enabled: boolean) {
     }
 
     const close = connectEvents({
-      onOpen: () => setStatus('connected'),
+      onOpen: () => {
+        setStatus('connected')
+        // Anything fetched before the stream attached may have missed events
+        // in the gap, so snapshots are refetched once the tail is live. This
+        // also covers every reconnect.
+        void queryClient.invalidateQueries()
+      },
       onError: () => setStatus('reconnecting'),
       onReset: () => void queryClient.invalidateQueries(),
       onEvent: (event) => {
