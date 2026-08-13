@@ -29,6 +29,10 @@ type Leg interface {
 	Send(frame []byte) bool
 	// ClearTx drops queued audio and reports how many frames went with it.
 	ClearTx() int
+	// Pending is how many frames are queued but not yet on the wire. Audio
+	// having been generated is not the same as the caller having heard it, and
+	// anything that must happen after the caller hears something waits on this.
+	Pending() int
 	// Stopped closes when the call ends, from either side.
 	Stopped() <-chan struct{}
 	// Stop ends the call.
@@ -47,5 +51,6 @@ func (l dialogLeg) Frames() <-chan []byte    { return l.dialog.RTP.Frames() }
 func (l dialogLeg) Digits() <-chan string    { return l.dialog.RTP.DTMF() }
 func (l dialogLeg) Send(frame []byte) bool   { return l.dialog.RTP.Send(frame) }
 func (l dialogLeg) ClearTx() int             { return l.dialog.RTP.ClearTx() }
+func (l dialogLeg) Pending() int             { return l.dialog.RTP.Pending() }
 func (l dialogLeg) Stopped() <-chan struct{} { return l.dialog.Stopped }
 func (l dialogLeg) Stop()                    { l.dialog.Stop() }

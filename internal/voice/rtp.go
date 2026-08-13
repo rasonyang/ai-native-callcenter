@@ -213,6 +213,11 @@ func (r *RTPSession) Send(frame []byte) bool {
 	}
 }
 
+// Pending is how many frames are queued but not yet sent. Generating audio and
+// the caller hearing it are separated by however much is in this queue, which
+// is what anything sequenced after speech has to wait on.
+func (r *RTPSession) Pending() int { return len(r.tx) }
+
 // ClearTx drops queued audio, which is what barge-in needs. The two frames
 // already in flight mean silence reaches the caller within about 40 ms.
 func (r *RTPSession) ClearTx() int {

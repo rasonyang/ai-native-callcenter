@@ -73,6 +73,20 @@ func (l *fakeLeg) ClearTx() int {
 	return l.pendingFrames
 }
 
+func (l *fakeLeg) Pending() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.pendingFrames
+}
+
+// holdFrames makes the leg report audio still waiting to go out, so a test can
+// separate "the model finished" from "the caller has heard it".
+func (l *fakeLeg) holdFrames(n int) {
+	l.mu.Lock()
+	l.pendingFrames = n
+	l.mu.Unlock()
+}
+
 func (l *fakeLeg) Stop() { l.stopOnce.Do(func() { close(l.stopped) }) }
 
 func (l *fakeLeg) sentFrames() [][]byte {
@@ -191,19 +205,26 @@ func (m *fakeModel) failSends(err error) {
 // Harness.
 //
 
+// startBridge builds a bridge with the timing guards switched off, so a test
+// exercises one behaviour at a time. The guards have tests of their own.
 func startBridge(t *testing.T, profile provider.Profile) (*Session, *fakeLeg, *fakeModel) {
+	t.Helper()
+	return startBridgeWith(t, profile, Config{BargeGuard: -1, NoInput: -1})
+}
+
+func startBridgeWith(t *testing.T, profile provider.Profile, cfg Config) (*Session, *fakeLeg, *fakeModel) {
 	t.Helper()
 
 	leg := newFakeLeg(media.LawMu)
 	model := newFakeModel()
 
-	session, err := New(leg, model, profile, Config{
-		Session: provider.SessionConfig{
-			Instructions: "answer the phone",
-			Turn:         provider.DefaultTurnDetection(),
-		},
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-	})
+	cfg.Session = provider.SessionConfig{
+		Instructions: "answer the phone",
+		Turn:         provider.DefaultTurnDetection(),
+	}
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	session, err := New(leg, model, profile, cfg)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}
@@ -433,6 +454,196 @@ func TestAProviderInitiatedCancelStopsPlayback(t *testing.T) {
 	}
 	if leg.clears() == 0 {
 		t.Error("playback continued after the provider abandoned the turn")
+	}
+}
+
+//
+// The barge-in guard.
+//
+
+// On a real line the bot's own voice comes back through the caller's handset,
+// the detector calls it speech, and the bot interrupts itself mid-greeting.
+// The first moments of a turn are therefore not trusted.
+func TestSpeechDetectedImmediatelyAfterSpeakingIsIgnored(t *testing.T) {
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: 500 * time.Millisecond, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*4),
+	}
+	// Detected the instant the greeting starts, which is what echo looks like.
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+
+	time.Sleep(200 * time.Millisecond)
+	if got := model.recordedInterrupts(); len(got) != 0 {
+		t.Errorf("the bot interrupted itself inside the guard window: %+v", got)
+	}
+}
+
+// Past the window, the caller genuinely is talking over the bot.
+func TestSpeechDetectedAfterTheGuardInterrupts(t *testing.T) {
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: 100 * time.Millisecond, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*4),
+	}
+	time.Sleep(200 * time.Millisecond)
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+
+	awaitBridgeEvent(t, session, EventTypeBargeIn)
+	if got := model.recordedInterrupts(); len(got) != 1 {
+		t.Errorf("recorded %d interrupts, want 1", len(got))
+	}
+}
+
+// A keypress cannot be an echo of anything, so the guard does not apply to it.
+func TestAKeypressInterruptsEvenInsideTheGuard(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: 10 * time.Second, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*4),
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(leg.sentFrames()) < 4 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	leg.digits <- "0"
+	awaitBridgeEvent(t, session, EventTypeBargeIn)
+
+	interrupts := model.recordedInterrupts()
+	if len(interrupts) != 1 || interrupts[0].reason != provider.InterruptReasonDTMF {
+		t.Errorf("interrupts = %+v, want the keypress to have cut in", interrupts)
+	}
+}
+
+//
+// Playback completion.
+//
+
+// The model finishing a sentence and the caller having heard it are separated
+// by everything still queued. A transfer or a goodbye that fires on the first
+// cuts the bot off mid-word.
+func TestPlaybackCompletionIsReportedSeparatelyFromGeneration(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	// Audio is still on its way to the caller when the model finishes.
+	leg.holdFrames(5)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*5),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+
+	awaitBridgeEvent(t, session, EventTypeTurnDone)
+
+	// Nothing should claim the caller has heard it while frames are queued.
+	select {
+	case event := <-session.Events():
+		if event.Type == EventTypePlaybackDone {
+			t.Fatal("playback was reported finished while audio was still queued")
+		}
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	leg.holdFrames(0)
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+}
+
+// An interrupted turn never finishes playing, so nothing should claim it did.
+func TestAnInterruptedTurnReportsNoPlaybackCompletion(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	leg.holdFrames(5)
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*5),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+	awaitBridgeEvent(t, session, EventTypeTurnDone)
+
+	// The caller cuts in before the queue drains.
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	leg.holdFrames(0)
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		select {
+		case event := <-session.Events():
+			if event.Type == EventTypePlaybackDone {
+				t.Fatal("a turn the caller talked over was reported as fully heard")
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+//
+// Dead air.
+//
+
+func TestDeadAirIsReportedWhenTheCallerSaysNothing(t *testing.T) {
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: 150 * time.Millisecond})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+	awaitBridgeEvent(t, session, EventTypeNoInput)
+}
+
+// A caller who answers has not gone quiet, and reporting dead air over them
+// would have the bot prompt someone mid-sentence.
+func TestACallerWhoSpeaksCancelsTheDeadAirWatch(t *testing.T) {
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: 300 * time.Millisecond})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+
+	deadline := time.After(700 * time.Millisecond)
+	for {
+		select {
+		case event := <-session.Events():
+			if event.Type == EventTypeNoInput {
+				t.Fatal("dead air was reported over a caller who was speaking")
+			}
+		case <-deadline:
+			return
+		}
 	}
 }
 

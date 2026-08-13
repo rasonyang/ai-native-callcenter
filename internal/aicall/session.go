@@ -34,7 +34,16 @@ const (
 	// EventTypeToolCall is the model asking for something to be done.
 	EventTypeToolCall EventType = "TOOL_CALL"
 	// EventTypeTurnDone closes a turn, whether it completed or was cut short.
+	// It means the model has finished producing, not that the caller has
+	// finished hearing.
 	EventTypeTurnDone EventType = "TURN_DONE"
+	// EventTypePlaybackDone means the last of that audio has left for the
+	// caller. Anything that must not happen mid-sentence — a transfer, a
+	// hangup — waits for this rather than for TURN_DONE.
+	EventTypePlaybackDone EventType = "PLAYBACK_DONE"
+	// EventTypeNoInput is dead air: the caller has said nothing since the bot
+	// stopped speaking.
+	EventTypeNoInput EventType = "NO_INPUT"
 	// EventTypeBargeIn is the caller taking the floor back.
 	EventTypeBargeIn EventType = "BARGE_IN"
 	// EventTypeDigit is a keypress.
@@ -69,8 +78,32 @@ type Config struct {
 	// Session is the model configuration. Its audio formats are filled in from
 	// the negotiated law and the provider profile.
 	Session provider.SessionConfig
-	Logger  *slog.Logger
+
+	// BargeGuard is how long after the bot starts speaking that speech
+	// detection is ignored.
+	//
+	// This exists because of what happens on a real line rather than in a lab:
+	// the bot's own voice returns through the caller's handset or speakerphone,
+	// the provider's detector hears speech, and the bot interrupts itself
+	// mid-greeting. Zero uses the default; negative disables the guard.
+	BargeGuard time.Duration
+
+	// NoInput is how long of a silent caller, after the bot has finished
+	// speaking, counts as dead air. Zero uses the default; negative disables
+	// the check.
+	NoInput time.Duration
+
+	Logger *slog.Logger
 }
+
+// Defaults chosen from field experience rather than taste.
+const (
+	// defaultBargeGuard matches what the reference implementation settled on
+	// after live calls.
+	defaultBargeGuard = 800 * time.Millisecond
+	// defaultNoInput is long enough not to talk over a caller who is thinking.
+	defaultNoInput = 8 * time.Second
+)
 
 // Session is one AI call.
 //
@@ -101,6 +134,17 @@ type Session struct {
 	framesQueued int
 	// isBotSpeaking gates barge-in: there is nothing to interrupt otherwise.
 	isBotSpeaking bool
+	// speakingSince is when the current turn's first audio was queued, which is
+	// what the barge-in guard window is measured from.
+	speakingSince time.Time
+
+	// watchGeneration invalidates timers that are already in flight. Stopping a
+	// timer races with it firing; letting a stale one fire and recognise itself
+	// as stale does not.
+	watchGeneration uint64
+	// playbackDone is signalled when a turn's audio has finished generating and
+	// the queue should be watched until it drains.
+	playbackDone chan uint64
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -136,17 +180,42 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 	}
 
 	return &Session{
-		leg:        leg,
-		model:      model,
-		log:        log.With("callId", leg.ID()),
-		cfg:        cfg,
-		uplink:     uplink,
-		downlink:   downlink,
-		framer:     newFramer(law),
-		playBuffer: make([]byte, 0, 8*media.FrameSamples),
-		events:     make(chan Event, 128),
-		done:       make(chan struct{}),
+		leg:          leg,
+		model:        model,
+		log:          log.With("callId", leg.ID()),
+		cfg:          cfg,
+		uplink:       uplink,
+		downlink:     downlink,
+		framer:       newFramer(law),
+		playBuffer:   make([]byte, 0, 8*media.FrameSamples),
+		events:       make(chan Event, 128),
+		playbackDone: make(chan uint64, 8),
+		done:         make(chan struct{}),
 	}, nil
+}
+
+// bargeGuard is how long after speech starts that detection is ignored.
+func (s *Session) bargeGuard() time.Duration {
+	switch {
+	case s.cfg.BargeGuard < 0:
+		return 0
+	case s.cfg.BargeGuard == 0:
+		return defaultBargeGuard
+	default:
+		return s.cfg.BargeGuard
+	}
+}
+
+// noInputAfter is how long a silent caller counts as dead air; zero disables.
+func (s *Session) noInputAfter() time.Duration {
+	switch {
+	case s.cfg.NoInput < 0:
+		return 0
+	case s.cfg.NoInput == 0:
+		return defaultNoInput
+	default:
+		return s.cfg.NoInput
+	}
 }
 
 // Events yields what happened on the call. The stream ends with a single ENDED
@@ -169,13 +238,14 @@ func (s *Session) Start(ctx context.Context) error {
 		"fromProvider", sessionCfg.OutputFormat.String(),
 		"isPassthrough", s.uplink.IsPassthrough())
 
-	s.wg.Add(4)
+	s.wg.Add(5)
 	go s.pumpCallerAudio()
 	go s.pumpModelEvents()
 	go s.pumpDigits()
 	go s.watchLeg()
+	go s.watchPlayback()
 
-	// Every publisher is one of those four. Once they have all returned,
+	// Every publisher is one of those five. Once they have all returned,
 	// nothing can emit any more, which is the only point at which closing the
 	// stream is safe.
 	go func() {
@@ -254,7 +324,10 @@ func (s *Session) playAudio(audio []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.isBotSpeaking = true
+	if !s.isBotSpeaking {
+		s.isBotSpeaking = true
+		s.speakingSince = time.Now()
+	}
 	s.playBuffer = s.downlink.Convert(s.playBuffer, audio)
 	s.framer.push(s.playBuffer, s.queueFrame)
 }
@@ -307,6 +380,9 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.playAudio(event.Audio)
 
 	case provider.EventTypeSpeechStarted:
+		// The caller is talking, so there is no dead air to report whether or
+		// not this turns out to be a real interruption.
+		s.cancelDeadAirWatch()
 		s.bargeIn(provider.InterruptReasonSpeech)
 
 	case provider.EventTypeInterrupted:
@@ -360,9 +436,24 @@ func (s *Session) handleModelEvent(event provider.Event) {
 func (s *Session) bargeIn(reason provider.InterruptReason) {
 	s.mu.Lock()
 	isSpeaking := s.isBotSpeaking
+	speakingFor := time.Since(s.speakingSince)
 	s.mu.Unlock()
+
 	if !isSpeaking {
 		return
+	}
+
+	// A keypress is unambiguous and always takes the floor. Detected speech is
+	// not: for the first moments of a turn, what the detector hears is very
+	// often the bot's own voice returning down the line, and acting on it makes
+	// the bot interrupt itself mid-sentence.
+	if reason == provider.InterruptReasonSpeech {
+		if guard := s.bargeGuard(); guard > 0 && speakingFor < guard {
+			s.log.Debug("ignored speech detected inside the barge-in guard",
+				"speakingForMs", speakingFor.Milliseconds(),
+				"guardMs", guard.Milliseconds())
+			return
+		}
 	}
 
 	playedMs := s.stopPlayback()
@@ -385,6 +476,9 @@ func (s *Session) stopPlayback() int {
 	played := max(s.framesQueued-cleared, 0)
 	s.framesQueued = 0
 	s.isBotSpeaking = false
+	// Nothing is left to drain, and no dead-air timer should run: the caller is
+	// already talking.
+	s.watchGeneration++
 
 	return played * frameDurationMs
 }
@@ -392,16 +486,120 @@ func (s *Session) stopPlayback() int {
 func (s *Session) beginTurn() {
 	s.mu.Lock()
 	s.framesQueued = 0
+	// Any pending drain or dead-air watch belongs to the previous turn.
+	s.watchGeneration++
 	s.mu.Unlock()
 }
 
+// endTurn closes out generation and hands the turn to the playback watcher.
 func (s *Session) endTurn() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	// The tail of the last sentence is worth padding out rather than losing.
 	s.framer.flush(s.queueFrame)
 	s.isBotSpeaking = false
+	s.watchGeneration++
+	generation := s.watchGeneration
+	s.mu.Unlock()
+
+	select {
+	case s.playbackDone <- generation:
+	default:
+		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
+	}
+}
+
+//
+// Playback and dead air.
+//
+
+// watchPlayback follows a turn from the end of generation to the end of
+// hearing, and then watches for a caller who says nothing at all.
+//
+// The two are separate events because the model finishing a sentence and the
+// caller having heard it are separated by everything still in the send queue.
+// Anything that must not cut the bot off mid-word — a transfer, a goodbye —
+// has to wait for the second, not the first.
+func (s *Session) watchPlayback() {
+	defer s.wg.Done()
+
+	for {
+		var generation uint64
+		select {
+		case <-s.done:
+			return
+		case generation = <-s.playbackDone:
+		}
+
+		if !s.awaitDrained(generation) {
+			continue
+		}
+		s.emit(Event{Type: EventTypePlaybackDone})
+		s.awaitCallerOrDeadAir(generation)
+	}
+}
+
+// awaitDrained waits for the send queue to empty, reporting false if the turn
+// was superseded — interrupted, or followed by another — while it waited.
+func (s *Session) awaitDrained(generation uint64) bool {
+	ticker := time.NewTicker(frameDurationMs * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if !s.isCurrentGeneration(generation) {
+			return false
+		}
+		if s.leg.Pending() == 0 {
+			// One more frame interval so the last frame is actually on the
+			// wire, not merely off the queue.
+			select {
+			case <-s.done:
+				return false
+			case <-ticker.C:
+			}
+			return s.isCurrentGeneration(generation)
+		}
+		select {
+		case <-s.done:
+			return false
+		case <-ticker.C:
+		}
+	}
+}
+
+// awaitCallerOrDeadAir reports dead air if the caller stays silent.
+func (s *Session) awaitCallerOrDeadAir(generation uint64) {
+	timeout := s.noInputAfter()
+	if timeout <= 0 {
+		return
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-s.done:
+	case <-timer.C:
+		// A stale timer recognises itself rather than being stopped, which
+		// removes the race between cancelling and firing entirely.
+		if !s.isCurrentGeneration(generation) {
+			return
+		}
+		s.log.Info("dead air", "afterMs", timeout.Milliseconds())
+		s.emit(Event{Type: EventTypeNoInput})
+	}
+}
+
+// cancelDeadAirWatch invalidates any timer waiting on the caller.
+func (s *Session) cancelDeadAirWatch() {
+	s.mu.Lock()
+	s.watchGeneration++
+	s.mu.Unlock()
+}
+
+func (s *Session) isCurrentGeneration(generation uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.watchGeneration == generation
 }
 
 //
