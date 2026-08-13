@@ -34,6 +34,12 @@ type VoiceSession interface {
 	// SendAudio forwards caller audio already in the session's input format.
 	SendAudio(audio []byte) error
 
+	// SendUserText puts something the caller did, but did not say, into the
+	// conversation and asks the model to respond to it. Keypresses are the
+	// case that matters: the caller pressed 2, and the model has to know that
+	// as surely as if they had said it.
+	SendUserText(text string) error
+
 	// SendToolResult answers a tool call. hint steers the next turn: it is
 	// what the engine wants said or done next, and it reaches the model
 	// alongside the result rather than as a separate instruction.

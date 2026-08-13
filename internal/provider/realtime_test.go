@@ -5,6 +5,7 @@ package provider
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -588,11 +589,6 @@ func TestInterruptOnAProviderThatCancelsItself(t *testing.T) {
 		t.Errorf("audio_end_ms = %v, want what was actually played", truncate["audio_end_ms"])
 	}
 	f.refuteMessage("response.cancel")
-
-	event := awaitEvent(t, session, EventTypeInterrupted)
-	if event.InterruptedBy != InterruptReasonSpeech {
-		t.Errorf("interrupted by %q", event.InterruptedBy)
-	}
 }
 
 // Where it does not, a missed cancel leaves the model talking over the caller.
@@ -612,7 +608,61 @@ func TestInterruptOnAProviderThatMustBeTold(t *testing.T) {
 	}
 
 	f.awaitMessage("response.cancel")
-	awaitEvent(t, session, EventTypeInterrupted)
+}
+
+// The interruption surfaces where the provider confirms it, not from the call
+// that requested it. Emitting from Interrupt would deadlock: it is normally
+// called from the goroutine draining this very stream.
+func TestACancelledTurnIsReportedAsAnInterruption(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	event := awaitEvent(t, session, EventTypeInterrupted)
+	if event.Status != "cancelled" {
+		t.Errorf("status = %q", event.Status)
+	}
+}
+
+// Interrupting must not block, including when called from the event consumer,
+// which is where a barge-in is actually detected.
+func TestInterruptDoesNotBlockTheEventConsumer(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	// Drain from one goroutine and interrupt from inside that same loop, which
+	// is exactly how the bridge is wired.
+	done := make(chan error, 1)
+	go func() {
+		for event := range session.Events() {
+			if event.Type == EventTypeSpeechStarted {
+				done <- session.Interrupt(InterruptReasonSpeech, 200)
+				return
+			}
+		}
+		done <- errors.New("the stream ended before speech was detected")
+	}()
+
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("interrupt from the consumer goroutine: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("interrupting from the event consumer deadlocked")
+	}
 }
 
 //

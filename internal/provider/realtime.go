@@ -215,6 +215,20 @@ func (r *Realtime) SendAudio(audio []byte) error {
 	return r.conn.sendRaw(message)
 }
 
+// SendUserText adds a caller turn that was not spoken and asks for a reply.
+func (r *Realtime) SendUserText(text string) error {
+	if err := r.conn.send(map[string]any{
+		"type": "conversation.item.create",
+		"item": map[string]any{
+			"type": "message", "role": "user",
+			"content": []map[string]any{{"type": "input_text", "text": text}},
+		},
+	}); err != nil {
+		return err
+	}
+	return r.conn.send(map[string]any{"type": "response.create"})
+}
+
 // SendToolResult answers a tool call and steers what happens next.
 //
 // The hint travels inside the result rather than as a separate instruction
@@ -276,8 +290,12 @@ func (r *Realtime) UpdateInstructions(text string) error {
 //
 // Which side is responsible differs by vendor: one cancels on its own as soon
 // as it hears speech and only needs to be told how much was actually heard;
-// the other does nothing until asked. Both are normalised here so the call
-// only ever sees a single interruption.
+// the other does nothing until asked.
+//
+// No event is emitted here. The caller already knows it interrupted, and
+// emitting from this method would deadlock whenever it is called — as it
+// normally is — from the goroutine draining Events. The interruption surfaces
+// where the provider confirms it, as a cancelled response.
 func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	r.mu.Lock()
 	itemID := r.responseItemID
@@ -302,8 +320,6 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 			return err
 		}
 	}
-
-	r.emit(Event{Type: EventTypeInterrupted, InterruptedBy: reason})
 	return nil
 }
 
@@ -534,10 +550,22 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 			}
 		}
 	}
-	// A cancelled response is the tail of a barge-in that was already
-	// reported, so it is not surfaced as a second interruption.
+	// A cancelled response is a turn that was cut short, whether we asked for
+	// it or the provider decided on its own when it heard the caller. Either
+	// way the consumer needs to know the turn ended early rather than
+	// completing, so it is reported as an interruption in its own right.
+	if out.Status == statusCancelled {
+		r.emit(Event{
+			Type: EventTypeInterrupted, Status: out.Status,
+			Usage: out.Usage, InterruptedBy: InterruptReasonSpeech,
+		})
+		return
+	}
 	r.emit(out)
 }
+
+// statusCancelled is what both providers call a response that was cut short.
+const statusCancelled = "cancelled"
 
 func (r *Realtime) handleError(event *wireEvent) {
 	if event.Error == nil {
