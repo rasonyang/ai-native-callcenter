@@ -62,6 +62,25 @@ type Extension struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
 }
 
+type Flow struct {
+	ID                  uuid.UUID          `json:"id"`
+	Slug                string             `json:"slug"`
+	Name                string             `json:"name"`
+	DraftSpec           []byte             `json:"draftSpec"`
+	PublishedRevisionID *uuid.UUID         `json:"publishedRevisionId"`
+	PublishedAt         pgtype.Timestamptz `json:"publishedAt"`
+	CreatedAt           pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt           pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type FlowRevision struct {
+	ID        uuid.UUID          `json:"id"`
+	FlowID    uuid.UUID          `json:"flowId"`
+	Spec      []byte             `json:"spec"`
+	Note      string             `json:"note"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+}
+
 type LuaccDid struct {
 	Number                 string  `json:"number"`
 	Language               string  `json:"language"`

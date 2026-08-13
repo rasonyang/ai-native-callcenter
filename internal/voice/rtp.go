@@ -131,10 +131,13 @@ func NewRTPSession(localPort int, law media.Law, dtmfPayloadType int, log *slog.
 		payloadType:     law.PayloadType(),
 		dtmfPayloadType: dtmfPayloadType,
 		// Inbound is bounded and drops the oldest: stale caller audio is worse
-		// than no caller audio. Outbound is deeper because a provider can burst
-		// a whole sentence faster than it plays.
+		// than no caller audio. Outbound must hold a whole answer: a provider
+		// delivers half a minute of speech in a couple of seconds, and the
+		// sender cannot block on it — it is the same goroutine that has to
+		// notice the caller barging in. Thirty seconds of frames; anything
+		// beyond that is a runaway response and is dropped with a warning.
 		rx:     make(chan []byte, 50),
-		tx:     make(chan []byte, 250),
+		tx:     make(chan []byte, 1500),
 		dtmf:   make(chan string, 50),
 		jitter: newJitterBuffer(law),
 		// A sequence number from the lower half of the space keeps an early

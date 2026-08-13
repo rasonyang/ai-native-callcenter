@@ -33,6 +33,21 @@ type Config struct {
 	// SIPProfile is the sofia profile agents register to.
 	SIPProfile string
 
+	// The AI voice leg. The SIP port is the target of the switch's bot
+	// gateway; the RTP range sits clear of the switch's own.
+	BotSIPHost string
+	BotSIPPort int
+	// BotAdvertiseIP overrides route probing in SDP answers; empty probes.
+	BotAdvertiseIP string
+	BotRTPPortLow  int
+	BotRTPPortHigh int
+	BotMaxCalls    int
+	// BotBackendBase is the base URL flows' declarative HTTP tools call.
+	BotBackendBase string
+	// IsBotEnabled turns the whole AI leg off, for deployments that only
+	// route to people.
+	IsBotEnabled bool
+
 	SessionTTL    time.Duration
 	SessionCookie string
 	SecureCookies bool
@@ -58,6 +73,14 @@ func Load() (Config, error) {
 		ESLPassword:      env("AICC_ESL_PASSWORD", "ClueCon"),
 		SwitchDomain:     env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
 		SIPProfile:       env("AICC_SIP_PROFILE", "internal"),
+		BotSIPHost:       env("AICC_BOT_SIP_HOST", "0.0.0.0"),
+		BotSIPPort:       envInt("AICC_BOT_SIP_PORT", 6060),
+		BotAdvertiseIP:   env("AICC_BOT_ADVERTISE_IP", ""),
+		BotRTPPortLow:    envInt("AICC_BOT_RTP_PORT_LOW", 40000),
+		BotRTPPortHigh:   envInt("AICC_BOT_RTP_PORT_HIGH", 40999),
+		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
+		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
+		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
 		SessionTTL:       envDuration("AICC_SESSION_TTL", 12*time.Hour),
 		SessionCookie:    env("AICC_SESSION_COOKIE", "aicc_session"),
 		SecureCookies:    envBool("AICC_SECURE_COOKIES", false),

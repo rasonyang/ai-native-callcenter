@@ -71,6 +71,9 @@ session:setVariable("sip_h_X-AICC-Call-ID", call_id)
 session:setVariable("sip_h_X-AICC-DID", route.number)
 session:setVariable("sip_h_X-AICC-Language", route.language)
 session:setVariable("sip_h_X-AICC-ANI", ani)
+-- The caller's own channel, so the application can transfer this leg to a
+-- queue directly when the bot hands the call to a person.
+session:setVariable("sip_h_X-AICC-Channel-ID", session:getVariable("uuid"))
 
 session:answer()
 
@@ -86,7 +89,10 @@ if route.is_recording_enabled == "t" or route.is_recording_enabled == true then
   session:execute("record_session", path)
 end
 
-session:execute("bridge", "sofia/gateway/aicc_bot/" .. route.number)
+-- The codec pin rides the new leg itself: the caller's leg may speak
+-- anything (a loopback test leg speaks L16), and the switch transcodes.
+session:execute("bridge",
+  "{absolute_codec_string=PCMU,PCMA}sofia/gateway/aicc_bot/" .. route.number)
 
 -- Reaching this point means the bot never took the call: the gateway is down,
 -- the application is out of capacity, or a provider is unreachable. The caller

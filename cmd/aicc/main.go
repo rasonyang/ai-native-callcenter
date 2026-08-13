@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/aicall"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
@@ -28,18 +29,28 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 	"github.com/rasonyang/ai-native-callcenter/web"
 )
 
 func main() {
 	// Subcommands come before the server so an operator can bootstrap the
 	// first administrator against an empty database.
-	if len(os.Args) > 1 && os.Args[1] == "useradd" {
-		if err := runUserAdd(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
+	if len(os.Args) > 1 {
+		var handler func([]string) error
+		switch os.Args[1] {
+		case "useradd":
+			handler = runUserAdd
+		case "flowadd":
+			handler = runFlowAdd
 		}
-		return
+		if handler != nil {
+			if err := handler(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "error:", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
 	if err := run(); err != nil {
@@ -130,6 +141,39 @@ func run() error {
 	go link.Run(ctx)
 	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc)
 
+	// The AI voice leg: a SIP server the switch bridges bot calls to, and the
+	// orchestration that runs a conversation on each.
+	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
+	if cfg.IsBotEnabled {
+		orchestrator, err := aicall.NewOrchestrator(aicall.OrchestratorConfig{
+			UAS: voice.Config{
+				SIPHost:          cfg.BotSIPHost,
+				SIPPort:          cfg.BotSIPPort,
+				AdvertiseIP:      cfg.BotAdvertiseIP,
+				RTPPortRange:     [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh},
+				CodecPreferences: voice.DefaultConfig().CodecPreferences,
+				RTPDeadTimeout:   voice.DefaultConfig().RTPDeadTimeout,
+				AckTimeout:       voice.DefaultConfig().AckTimeout,
+				MaxCalls:         cfg.BotMaxCalls,
+				IsDTMFEnabled:    true,
+				RTCPInterval:     voice.DefaultConfig().RTCPInterval,
+			},
+			Catalog:     catalogSvc,
+			Flows:       st.Flows(),
+			Switch:      adapter,
+			BackendBase: cfg.BotBackendBase,
+		})
+		if err != nil {
+			return fmt.Errorf("build ai voice leg: %w", err)
+		}
+		if err := orchestrator.Start(); err != nil {
+			return fmt.Errorf("start ai voice leg: %w", err)
+		}
+		defer orchestrator.Stop()
+		slog.Info("ai voice leg listening",
+			"sipPort", cfg.BotSIPPort, "maxCalls", cfg.BotMaxCalls)
+	}
+
 	var spa http.Handler
 	if dist, err := web.Dist(); err == nil {
 		spa = httpapi.SPAHandler(dist)
@@ -146,7 +190,7 @@ func run() error {
 			Agents:   agentSvc,
 			AgentDir: agentDirectory{st},
 			Calls:    coordinator,
-			Catalog:  catalog.NewService(st.Catalog(), adapter, st.Catalog()),
+			Catalog:  catalogSvc,
 			SPA:      spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

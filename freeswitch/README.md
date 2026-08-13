@@ -34,7 +34,7 @@ Add to `vars.xml`, so no credential is ever committed here:
 ```xml
 <X-PRE-PROCESS cmd="set" data="aicc_lua_dsn=pgsql://hostaddr=127.0.0.1 dbname=aicc user=aicc_lua password='…'"/>
 <X-PRE-PROCESS cmd="set" data="aicc_cc_dsn=pgsql://hostaddr=127.0.0.1 dbname=aicc_fs user=aicc password='…'"/>
-<X-PRE-PROCESS cmd="set" data="aicc_bot_host=sip:127.0.0.1"/>
+<X-PRE-PROCESS cmd="set" data="aicc_bot_host=$${local_ip_v4}"/>
 <X-PRE-PROCESS cmd="set" data="aicc_bot_port=6060"/>
 <X-PRE-PROCESS cmd="set" data="aicc_recordings_dir=$${base_dir}/recordings"/>
 ```

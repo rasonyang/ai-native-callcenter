@@ -59,6 +59,12 @@ const (
 type Event struct {
 	Type EventType
 
+	// Turn numbers the model turn an event belongs to (TURN_DONE and
+	// PLAYBACK_DONE). A consumer sequencing an action "after the line that is
+	// about to be spoken" compares turn numbers: the turn a tool call arrived
+	// in is not the turn its closing line plays in.
+	Turn int
+
 	// Text is transcript text, a digit, or a failure message.
 	Text    string
 	IsFinal bool
@@ -142,9 +148,11 @@ type Session struct {
 	// timer races with it firing; letting a stale one fire and recognise itself
 	// as stale does not.
 	watchGeneration uint64
+	// turnSeq numbers model turns, so events can say which turn they belong to.
+	turnSeq int
 	// playbackDone is signalled when a turn's audio has finished generating and
 	// the queue should be watched until it drains.
-	playbackDone chan uint64
+	playbackDone chan playbackMarker
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -189,7 +197,7 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 		framer:       newFramer(law),
 		playBuffer:   make([]byte, 0, 8*media.FrameSamples),
 		events:       make(chan Event, 128),
-		playbackDone: make(chan uint64, 8),
+		playbackDone: make(chan playbackMarker, 8),
 		done:         make(chan struct{}),
 	}, nil
 }
@@ -390,14 +398,16 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// that on its own, so this doubles as a backstop: whatever the reason,
 		// the caller must not keep hearing the abandoned answer.
 		s.stopPlayback()
-		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status, Usage: event.Usage})
+		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status,
+			Usage: event.Usage, Turn: s.currentTurn()})
 
 	case provider.EventTypeResponseStarted:
 		s.beginTurn()
 
 	case provider.EventTypeResponseDone:
 		s.endTurn()
-		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status, Usage: event.Usage})
+		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status,
+			Usage: event.Usage, Turn: s.currentTurn()})
 
 	case provider.EventTypeInputTranscript:
 		s.emit(Event{Type: EventTypeCallerSaid, Text: event.Text, IsFinal: event.IsFinal})
@@ -409,6 +419,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.emit(Event{
 			Type: EventTypeToolCall, ToolCallID: event.ToolCallID,
 			ToolName: event.ToolName, ToolArgs: event.ToolArgs,
+			Turn: s.currentTurn(),
 		})
 
 	case provider.EventTypeError:
@@ -486,9 +497,17 @@ func (s *Session) stopPlayback() int {
 func (s *Session) beginTurn() {
 	s.mu.Lock()
 	s.framesQueued = 0
+	s.turnSeq++
 	// Any pending drain or dead-air watch belongs to the previous turn.
 	s.watchGeneration++
 	s.mu.Unlock()
+}
+
+// currentTurn reports which model turn is in progress.
+func (s *Session) currentTurn() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.turnSeq
 }
 
 // endTurn closes out generation and hands the turn to the playback watcher.
@@ -498,14 +517,20 @@ func (s *Session) endTurn() {
 	s.framer.flush(s.queueFrame)
 	s.isBotSpeaking = false
 	s.watchGeneration++
-	generation := s.watchGeneration
+	marker := playbackMarker{generation: s.watchGeneration, turn: s.turnSeq}
 	s.mu.Unlock()
 
 	select {
-	case s.playbackDone <- generation:
+	case s.playbackDone <- marker:
 	default:
 		s.log.Warn("playback watcher is behind; a turn boundary was not tracked")
 	}
+}
+
+// playbackMarker identifies one turn's handoff to the playback watcher.
+type playbackMarker struct {
+	generation uint64
+	turn       int
 }
 
 //
@@ -523,18 +548,18 @@ func (s *Session) watchPlayback() {
 	defer s.wg.Done()
 
 	for {
-		var generation uint64
+		var marker playbackMarker
 		select {
 		case <-s.done:
 			return
-		case generation = <-s.playbackDone:
+		case marker = <-s.playbackDone:
 		}
 
-		if !s.awaitDrained(generation) {
+		if !s.awaitDrained(marker.generation) {
 			continue
 		}
-		s.emit(Event{Type: EventTypePlaybackDone})
-		s.awaitCallerOrDeadAir(generation)
+		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn})
+		s.awaitCallerOrDeadAir(marker.generation)
 	}
 }
 
