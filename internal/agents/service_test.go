@@ -415,3 +415,26 @@ func TestUnknownAgentIsRejected(t *testing.T) {
 		t.Errorf("Login() error = %v, want ErrUnknownAgent", err)
 	}
 }
+
+// A phone the switch already told us about must count the moment its agent
+// signs in. Live events describe changes only, so an agent signing in at a
+// phone that registered earlier would otherwise read as unreachable and be
+// treated as unroutable.
+func TestLoginAdoptsAlreadyKnownDeviceState(t *testing.T) {
+	svc, _, _, _, agentID := newTestService(t)
+	ctx := context.Background()
+
+	// The reconciliation on connect saw this phone before anyone signed in.
+	svc.ObserveDevice(ctx, "1001", true, true)
+
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Ready(ctx, agentID); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := svc.Presence(agentID).Availability(); got != AvailReady {
+		t.Errorf("availability = %s, want READY: the phone was known to be registered", got)
+	}
+}

@@ -1,7 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import { PRESENCE_KEY, ROSTER_KEY } from './agent'
 import { connectEvents, type AiccEvent, type EventType } from './events'
+
+/**
+ * Refreshes the caches an event invalidates.
+ *
+ * The event carries enough to render a change, but the roster's derived
+ * availability combines persisted presence with observed device state, so the
+ * authoritative answer is refetched rather than reconstructed in the browser.
+ */
+function applyToCache(queryClient: ReturnType<typeof useQueryClient>, event: AiccEvent) {
+  if (event.type.startsWith('AGENT_') || event.type.startsWith('DEVICE_')) {
+    void queryClient.invalidateQueries({ queryKey: ROSTER_KEY })
+    void queryClient.invalidateQueries({ queryKey: PRESENCE_KEY })
+  }
+}
 
 export type StreamStatus = 'connected' | 'reconnecting' | 'offline'
 
@@ -36,6 +51,7 @@ export function useEventStream(enabled: boolean) {
       onError: () => setStatus('reconnecting'),
       onReset: () => void queryClient.invalidateQueries(),
       onEvent: (event) => {
+        applyToCache(queryClient, event)
         for (const listener of listeners.current.get(event.type) ?? []) listener(event)
         for (const listener of listeners.current.get('*') ?? []) listener(event)
       },

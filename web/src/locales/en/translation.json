@@ -84,6 +84,48 @@
     "STORAGE_DOWN": "The database is unreachable.",
     "RATE_LIMITED": "Too many requests. Try again shortly.",
     "INTERNAL": "Something went wrong.",
-    "UNKNOWN": "Unexpected error."
+    "UNKNOWN": "Unexpected error.",
+    "EXTENSION_IN_USE": "Another agent is signed in at that extension.",
+    "AGENT_ALREADY_LOGGED_IN": "You are already signed in.",
+    "AGENT_NOT_LOGGED_IN": "You are not signed in."
+  },
+  "availability": {
+    "READY": "Ready",
+    "ON_CALL": "On call",
+    "WRAP_UP": "Wrap-up",
+    "NOT_READY": "Not ready",
+    "DEVICE_UNREACHABLE": "Phone unreachable",
+    "LOGGED_OUT": "Signed out"
+  },
+  "agent": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "signInPrompt": "Sign in at a phone to take calls.",
+    "extension": "Extension",
+    "goReady": "Go ready",
+    "goNotReady": "Go not ready",
+    "status": "Status",
+    "presence": "Presence",
+    "timeInState": "Time in state",
+    "activeCall": "Active call",
+    "noActiveCall": "No call in progress",
+    "myQueue": "My queue",
+    "queueEmpty": "Nobody waiting",
+    "contact": "Contact",
+    "noContact": "No caller identified yet.",
+    "transcript": "Live transcript",
+    "noTranscript": "The transcript appears once a bot call starts."
+  },
+  "supervisor": {
+    "agent": "Agent",
+    "status": "Status",
+    "timeInState": "Time in state",
+    "device": "Phone",
+    "deviceOk": "Reachable",
+    "deviceLost": "Not answering",
+    "actions": "Actions",
+    "forceLogout": "Force sign-out",
+    "forceLogoutConfirm": "Sign {{name}} out? Their phone stops receiving calls immediately.",
+    "noAgents": "No agents configured yet."
   }
 }

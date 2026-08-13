@@ -94,3 +94,65 @@ export const api = {
 
   health: () => request<{ sseClients: number; oldestSeq: number }>('/system/health'),
 }
+
+// --- Agents ---------------------------------------------------------------
+
+export type AgentState = 'LOGGED_OUT' | 'NOT_READY' | 'READY'
+
+export type NotReadyReason =
+  | 'LOGIN' | 'BREAK' | 'LUNCH' | 'TRAINING'
+  | 'AFTER_CALL_WORK' | 'SYSTEM' | 'SUPERVISOR'
+
+/** The single word that answers "could this agent take a call, and if not, why". */
+export type Availability =
+  | 'LOGGED_OUT' | 'ON_CALL' | 'WRAP_UP'
+  | 'NOT_READY' | 'DEVICE_UNREACHABLE' | 'READY'
+
+export interface Presence {
+  state: AgentState
+  reason?: NotReadyReason
+  availability: Availability
+  extensionNumber?: string
+  enteredAt: string
+  wrapUpEndsAt?: string
+}
+
+export interface RosterEntry {
+  agentId: string
+  userId: string
+  username: string
+  displayName: string
+  state: AgentState
+  reason?: NotReadyReason
+  availability: Availability
+  extensionNumber?: string
+  enteredAt: string
+  wrapUpEndsAt?: string
+  isOnCall: boolean
+  isRegistered: boolean
+}
+
+export const agentApi = {
+  presence: () => request<Presence>('/agent/presence'),
+
+  login: (extensionNumber: string) =>
+    request<Presence>('/agent/login', {
+      method: 'POST',
+      body: JSON.stringify({ extensionNumber }),
+    }),
+
+  logout: () => request<Presence>('/agent/logout', { method: 'POST' }),
+
+  ready: () => request<Presence>('/agent/ready', { method: 'POST' }),
+
+  notReady: (reason: NotReadyReason) =>
+    request<Presence>('/agent/not-ready', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    }),
+
+  roster: () => request<{ items: RosterEntry[] }>('/agents'),
+
+  forceLogout: (agentId: string) =>
+    request<Presence>(`/agents/${agentId}/force-logout`, { method: 'POST' }),
+}

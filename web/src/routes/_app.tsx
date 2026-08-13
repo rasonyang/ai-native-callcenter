@@ -48,9 +48,26 @@ function AppLayout() {
   )
 }
 
+/** Longest match wins, so a section's own page never borrows its parent's name. */
+const BREADCRUMBS: Array<[string, string]> = [
+  ['/supervisor/agents', 'nav.agents'],
+  ['/supervisor/queues', 'nav.queues'],
+  ['/supervisor/quality', 'nav.quality'],
+  ['/supervisor', 'nav.wallboard'],
+  ['/admin/users', 'nav.users'],
+  ['/admin/routing', 'nav.routing'],
+  ['/admin/bots', 'nav.bots'],
+  ['/admin/trunks', 'nav.trunks'],
+  ['/admin/cdr', 'nav.cdr'],
+  ['/admin/reports', 'nav.reports'],
+  ['/admin/audit', 'nav.audit'],
+  ['/admin', 'nav.overview'],
+  ['/agent', 'nav.dashboard'],
+]
+
 function breadcrumbKey(pathname: string): string {
-  if (pathname.startsWith('/agent')) return 'nav.dashboard'
-  if (pathname.startsWith('/supervisor')) return 'nav.wallboard'
-  if (pathname.startsWith('/admin')) return 'nav.overview'
+  for (const [prefix, key] of BREADCRUMBS) {
+    if (pathname.startsWith(prefix)) return key
+  }
   return 'app.name'
 }

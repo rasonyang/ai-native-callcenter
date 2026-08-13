@@ -131,6 +131,11 @@ func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber 
 		s.mu.Unlock()
 		return *p, err
 	}
+	// The switch already told us about this phone, either through a live
+	// registration event or through the reconciliation on connect. Without
+	// this an agent signing in at a perfectly good phone reads as
+	// unreachable until the phone happens to re-register.
+	s.applyDeviceLocked(p)
 	snapshot := *p
 	s.mu.Unlock()
 
@@ -324,6 +329,7 @@ func (s *Service) Restore(ctx context.Context) error {
 		if row.WrapUpEndsAt != nil {
 			p.WrapUpEndsAt = *row.WrapUpEndsAt
 		}
+		s.applyDeviceLocked(p)
 	}
 	return nil
 }
@@ -453,6 +459,16 @@ func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p
 		AgentID: &agentID,
 		Payload: payload,
 	}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
+}
+
+// applyDeviceLocked copies what the switch has told us about an agent's phone
+// onto their presence. The caller must hold the mutex.
+func (s *Service) applyDeviceLocked(p *Presence) {
+	dev, known := s.devices[p.ExtensionNumber]
+	if !known {
+		return
+	}
+	p.IsRegistered, p.IsDeviceInService = dev.isRegistered, dev.isInService
 }
 
 // presenceLocked returns the mutable presence for an agent, creating it on

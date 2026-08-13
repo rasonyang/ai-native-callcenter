@@ -8,7 +8,7 @@ import { api } from '@/lib/api'
  * Supervisor wallboard. M1 shows live server health so the event stream and
  * session plumbing are visible end to end; queue KPIs follow in M2.
  */
-export const Route = createFileRoute('/_app/supervisor')({ component: Wallboard })
+export const Route = createFileRoute('/_app/supervisor/')({ component: Wallboard })
 
 function Wallboard() {
   const { t } = useTranslation()

@@ -84,6 +84,48 @@
     "STORAGE_DOWN": "无法连接数据库。",
     "RATE_LIMITED": "请求过于频繁，请稍后再试。",
     "INTERNAL": "发生了错误。",
-    "UNKNOWN": "未知错误。"
+    "UNKNOWN": "未知错误。",
+    "EXTENSION_IN_USE": "该分机已被其他坐席签入。",
+    "AGENT_ALREADY_LOGGED_IN": "您已签入。",
+    "AGENT_NOT_LOGGED_IN": "您尚未签入。"
+  },
+  "availability": {
+    "READY": "示闲",
+    "ON_CALL": "通话中",
+    "WRAP_UP": "话后处理",
+    "NOT_READY": "示忙",
+    "DEVICE_UNREACHABLE": "话机不可达",
+    "LOGGED_OUT": "已签出"
+  },
+  "agent": {
+    "signIn": "签入",
+    "signOut": "签出",
+    "signInPrompt": "请签入话机后开始接听。",
+    "extension": "分机",
+    "goReady": "示闲",
+    "goNotReady": "示忙",
+    "status": "状态",
+    "presence": "状态",
+    "timeInState": "状态时长",
+    "activeCall": "当前通话",
+    "noActiveCall": "暂无通话",
+    "myQueue": "我的队列",
+    "queueEmpty": "暂无等待来电",
+    "contact": "客户",
+    "noContact": "尚未识别来电客户。",
+    "transcript": "实时转写",
+    "noTranscript": "机器人通话开始后显示转写内容。"
+  },
+  "supervisor": {
+    "agent": "坐席",
+    "status": "状态",
+    "timeInState": "状态时长",
+    "device": "话机",
+    "deviceOk": "正常",
+    "deviceLost": "无响应",
+    "actions": "操作",
+    "forceLogout": "强制签出",
+    "forceLogoutConfirm": "确认将 {{name}} 签出？其话机将立即停止接听来电。",
+    "noAgents": "尚未配置坐席。"
   }
 }
