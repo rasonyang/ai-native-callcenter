@@ -1,0 +1,89 @@
+{
+  "app": {
+    "name": "AICC",
+    "tagline": "AI Native Call Center"
+  },
+  "common": {
+    "signIn": "Sign in",
+    "signOut": "Sign out",
+    "language": "Language",
+    "loading": "Loading",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "search": "Search"
+  },
+  "auth": {
+    "signInTitle": "Sign in",
+    "signInSubtitle": "Use your operator account.",
+    "username": "Username",
+    "password": "Password",
+    "signingIn": "Signing in…"
+  },
+  "nav": {
+    "workspace": "Workspace",
+    "supervise": "Supervise",
+    "manage": "Manage",
+    "system": "System",
+    "dashboard": "Dashboard",
+    "wallboard": "Wallboard",
+    "agents": "Agents",
+    "queues": "Queues",
+    "quality": "Quality",
+    "overview": "Overview",
+    "users": "Users & Roles",
+    "routing": "Queues & Routing",
+    "bots": "Bot Flows",
+    "trunks": "Trunks & Numbers",
+    "cdr": "CDR",
+    "reports": "Reports",
+    "audit": "Audit Log"
+  },
+  "roles": {
+    "AGENT": "Agent",
+    "SUPERVISOR": "Supervisor",
+    "ADMIN": "Administrator"
+  },
+  "states": {
+    "READY": "Ready",
+    "NOT_READY": "Not ready",
+    "LOGGED_OUT": "Logged out",
+    "ON_CALL": "On call",
+    "WRAP_UP": "Wrap-up",
+    "DEVICE_UNREACHABLE": "Device unreachable"
+  },
+  "reasons": {
+    "LOGIN": "Login",
+    "BREAK": "Break",
+    "LUNCH": "Lunch",
+    "TRAINING": "Training",
+    "AFTER_CALL_WORK": "After-call work",
+    "SYSTEM": "System",
+    "SUPERVISOR": "Supervisor"
+  },
+  "callTypes": {
+    "INBOUND": "Inbound",
+    "OUTBOUND": "Outbound",
+    "CONSULT": "Consult",
+    "INTERNAL": "Internal"
+  },
+  "stream": {
+    "connected": "Live",
+    "reconnecting": "Reconnecting…",
+    "offline": "Offline"
+  },
+  "errors": {
+    "INVALID_CREDENTIALS": "Incorrect username or password.",
+    "SESSION_EXPIRED": "Your session has expired. Please sign in again.",
+    "FORBIDDEN": "You do not have permission to do that.",
+    "VALIDATION_FAILED": "Please check the highlighted fields.",
+    "NOT_FOUND": "Not found.",
+    "CONFLICT": "That change conflicts with the current state.",
+    "USER_SUSPENDED": "This account is suspended.",
+    "SWITCH_DOWN": "The telephony switch is unreachable.",
+    "STORAGE_DOWN": "The database is unreachable.",
+    "RATE_LIMITED": "Too many requests. Try again shortly.",
+    "INTERNAL": "Something went wrong.",
+    "UNKNOWN": "Unexpected error."
+  }
+}

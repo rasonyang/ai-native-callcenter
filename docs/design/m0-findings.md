@@ -47,6 +47,15 @@ Also observed (GA defaults on session.created): input/output default `audio/pcm`
 
 `freeswitch.Dbh("pgsql://hostaddr=127.0.0.1 dbname=aicc user=aicc password='aicc'")` from a mod_lua script returned `PostgreSQL 18.4 … user=aicc` via the api `lua` command. The directory/dialplan/queue-config path in design 01 §5 is executable exactly as written (mod_pgsql in-core, no ODBC layer).
 
+## M0.5 — Qwen-Audio 3.0 Realtime (added 2026-08-13, `ALIYUN_API_KEY`)
+
+Endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus` (the java-bot-proven form, not the workspace-scoped host in the public docs), auth `Authorization: Bearer $ALIYUN_API_KEY`. Connected first try.
+
+- **Session defaults** (`session.created`): `turn_detection = server_vad {silence_duration_ms: 800, threshold: 0.5}`, `voice: longanqian`, `modalities: [text, audio]`.
+- **Our contract is accepted verbatim**: `session.update` with instructions, `modalities`, `input/output_audio_format: pcm`, and an OpenAI-shaped `tools` array (`transfer_to_agent` with a JSON-schema `parameters`) → `session.updated` echoes the tool definition unchanged. The provider abstraction's tool path needs no Qwen-specific shaping.
+- **⚠ `smart_turn` forces a 2000 ms hold.** Selecting `smart_turn` rewrites `silence_duration_ms` to **2000**, and an explicit `silence_duration_ms: 500` is *ignored* (echoed back as 2000). `server_vad` accepts tuning normally (500 ms echoed as 500). **Design consequence (02 §5/§8 amended)**: the ≤1.2 s p50 budget is unreachable with `smart_turn`; the default for both languages is `server_vad @ 500 ms`, and `smart_turn` becomes an opt-in per-flow setting for backchannel-heavy scenarios, documented as costing ≈+1.5 s of turn latency.
+- **Validation is selective**: a bogus `turn_detection.type` returns a proper `error` (`invalid_request_error/invalid_value`, listing `server_vad, smart_turn, null`), but bogus *audio format* strings are silently accepted and never echoed. Therefore the `g711_ulaw` probe is **inconclusive, treated as unsupported** — the Qwen path keeps the documented 16 kHz-in / 24 kHz-out PCM16 conversion (02 §2 unchanged). Session audio-format fields are never echoed, so acceptance can only be confirmed with real audio (M3).
+
 ## Environment state after M0 (dev box)
 
 - PostgreSQL 18.4 runs via `deploy/dev/docker-compose.yml` (`aicc-postgres`, 127.0.0.1:5432, user/db `aicc` + callcenter db `aicc_fs`). **Never via brew** (owner directive; the transient brew install was reverted).

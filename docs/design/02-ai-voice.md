@@ -59,7 +59,7 @@ Events (closed set): `AudioDelta{PCM/G711 bytes}`, `InputTranscript{delta|final}
 
 ## 4. Provider clients
 
-One shared **OpenAI-protocol client** parameterized by a `Profile` (endpoint, model, auth header, event-name dialect GA/beta, session-field dialect, audio formats) — java-bot's proven shape — plus a thin **Qwen** subtype for DashScope quirks: strip-and-resend on rejected `session.update` fields, `turn_detection` immutable after first audio (config assembled fully before `Start` sends any frame), event-name folding into the internal enum.
+One shared **OpenAI-protocol client** parameterized by a `Profile` (endpoint, model, auth header, event-name dialect GA/beta, session-field dialect, audio formats) — java-bot's proven shape — plus a thin **Qwen** subtype for DashScope quirks: strip-and-resend on rejected `session.update` fields, `turn_detection` immutable after first audio (config assembled fully before `Start` sends any frame), event-name folding into the internal enum. M0-verified: endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=…`, `Authorization: Bearer` (env `ALIYUN_API_KEY`), OpenAI-shaped `tools` accepted verbatim — but audio-format fields are never echoed in `session.updated`, so the client must not treat the echo as confirmation.
 
 WS hygiene (mandatory, absent in golang-bot): ping/pong keepalive (15s), read deadlines (45s hard, reset on any frame), single-writer mutex, lazy nothing — connect at call start with a 3s deadline; **no mid-call reconnect** (provider session state is unrecoverable) — a fatal WS error surfaces as `Error{fatal}` → flow `on_error` route (transfer to queue / apology per flow config). Watchdogs: first-audio deadline per response (3s), delta-stall deadline (2s with audio already received → force-complete and play what arrived).
 
@@ -74,7 +74,7 @@ Session bring-up: `Start` = WS dial → `session.update` (instructions, voice, f
 | Flush local audio | — (client's job) | — (client's job) | **always ours**: `RTPSession.ClearTx()` drains the TX queue; ~2 frames remain in flight to FS → silence within ~40–60ms. Nothing needs sending to FreeSWITCH (we terminate RTP). Backstop: flush again on `Interrupted` even if `SpeechStarted` was missed (java-bot lesson). |
 | Played-time tracking | needed for `truncate` | not needed | RTP send loop counts frames per response → `audio_end_ms` |
 
-Turn-detection config mapping: `Semantic` → Qwen `smart_turn` (backchannel 嗯/啊 does not interrupt; known slow-onset tradeoff — evaluated vs `server_vad` in M3 with real calls) / OpenAI `semantic_vad`; `VAD` → `server_vad` with `SilenceMs` (Qwen default 800 lowered to 500 per latency budget; range-checked). DTMF always interrupts immediately (policy from golang-bot field data).
+Turn-detection config mapping: `VAD` → `server_vad` with `SilenceMs` (**the default for both languages**: Qwen's own default 800 ms is lowered to 500 ms — M0-verified as accepted and echoed; OpenAI's GA default is already 500 ms). `Semantic` → Qwen `smart_turn` / OpenAI `semantic_vad`, **opt-in per flow**: M0 found `smart_turn` forces `silence_duration_ms = 2000` and ignores attempts to lower it, i.e. ≈+1.5 s of turn latency — worth it only where backchannel immunity (嗯/啊 not interrupting) outweighs snappiness. Both modes are frozen after the first audio frame on Qwen, so the choice is made from flow config before `Start`. DTMF always interrupts immediately (policy from golang-bot field data).
 
 ## 6. Flow engine (DSL v1) over realtime sessions
 
@@ -102,7 +102,7 @@ Tracked per session from usage/turn counts: at **80% of budget** the engine inje
 
 | Hop | p50 est. | Knob |
 |---|---|---|
-| Turn detection hold | 400–600ms | `SilenceMs=500` (VAD; M0 confirmed 500ms is OpenAI's GA default) / smart_turn (measured) |
+| Turn detection hold | 400–600ms | `SilenceMs=500` — M0-verified accepted on both providers. **`smart_turn` is 2000 ms fixed** (M0) and therefore excluded from the budget: flows selecting it target ≈2.7 s p50 instead |
 | Provider first audio delta | 400–700ms | model tier; region proximity (Qwen Beijing; OpenAI intl route) |
 | aicc pipeline (decode+resample+b64+queue) | <5ms | pooled, measured per-frame |
 | RTP prebuffer | 60ms | 3 frames (jitter absorb) |

@@ -1,0 +1,99 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import '@fontsource-variable/inter';
+
+/*
+ * Design tokens. The visual system is fixed (docs/design/05-frontend.md):
+ * a 13px base scale, one 6px radius, a single accent, borders instead of
+ * shadows, and seven semantic state colors used only as dots, pills and thin
+ * bars — never as filled backgrounds.
+ */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+
+  --radius-sm: var(--radius);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius);
+  --radius-xl: var(--radius);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+}
+
+:root {
+  --radius: 6px;
+
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+  --destructive: #dc2626;
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #4f46e5;
+
+  /* Agent and call states. Referenced as var(--state-*) so one token drives
+     the dot, the pill and the chart series alike. */
+  --state-available: #16a34a;
+  --state-oncall: #4f46e5;
+  --state-ringing: #f59e0b;
+  --state-acw: #8b5cf6;
+  --state-aux: #71717a;
+  --state-offline: #d4d4d8;
+  --state-breach: #dc2626;
+
+  --chart-1: #4f46e5;
+  --chart-2: #16a34a;
+  --chart-3: #f59e0b;
+  --chart-4: #8b5cf6;
+  --chart-5: #dc2626;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Numbers are compared column-wise everywhere in this product: timers, KPIs,
+   extensions, phone numbers. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}

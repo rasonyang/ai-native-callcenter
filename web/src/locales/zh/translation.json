@@ -1,0 +1,89 @@
+{
+  "app": {
+    "name": "AICC",
+    "tagline": "AI 原生呼叫中心"
+  },
+  "common": {
+    "signIn": "登录",
+    "signOut": "退出登录",
+    "language": "语言",
+    "loading": "加载中",
+    "retry": "重试",
+    "cancel": "取消",
+    "save": "保存",
+    "search": "搜索"
+  },
+  "auth": {
+    "signInTitle": "登录",
+    "signInSubtitle": "请使用您的坐席账号。",
+    "username": "用户名",
+    "password": "密码",
+    "signingIn": "正在登录…"
+  },
+  "nav": {
+    "workspace": "工作台",
+    "supervise": "监控",
+    "manage": "管理",
+    "system": "系统",
+    "dashboard": "工作台",
+    "wallboard": "看板",
+    "agents": "坐席",
+    "queues": "队列",
+    "quality": "质检",
+    "overview": "概览",
+    "users": "用户与角色",
+    "routing": "队列与路由",
+    "bots": "机器人流程",
+    "trunks": "中继与号码",
+    "cdr": "通话记录",
+    "reports": "报表",
+    "audit": "审计日志"
+  },
+  "roles": {
+    "AGENT": "坐席",
+    "SUPERVISOR": "班长",
+    "ADMIN": "管理员"
+  },
+  "states": {
+    "READY": "示闲",
+    "NOT_READY": "示忙",
+    "LOGGED_OUT": "已签出",
+    "ON_CALL": "通话中",
+    "WRAP_UP": "话后处理",
+    "DEVICE_UNREACHABLE": "话机不可达"
+  },
+  "reasons": {
+    "LOGIN": "签入",
+    "BREAK": "休息",
+    "LUNCH": "用餐",
+    "TRAINING": "培训",
+    "AFTER_CALL_WORK": "话后处理",
+    "SYSTEM": "系统",
+    "SUPERVISOR": "班长设置"
+  },
+  "callTypes": {
+    "INBOUND": "呼入",
+    "OUTBOUND": "呼出",
+    "CONSULT": "咨询",
+    "INTERNAL": "内线"
+  },
+  "stream": {
+    "connected": "实时",
+    "reconnecting": "重连中…",
+    "offline": "已断开"
+  },
+  "errors": {
+    "INVALID_CREDENTIALS": "用户名或密码不正确。",
+    "SESSION_EXPIRED": "登录已过期，请重新登录。",
+    "FORBIDDEN": "您没有执行该操作的权限。",
+    "VALIDATION_FAILED": "请检查标红的字段。",
+    "NOT_FOUND": "未找到。",
+    "CONFLICT": "该操作与当前状态冲突。",
+    "USER_SUSPENDED": "该账号已被停用。",
+    "SWITCH_DOWN": "无法连接话务交换机。",
+    "STORAGE_DOWN": "无法连接数据库。",
+    "RATE_LIMITED": "请求过于频繁，请稍后再试。",
+    "INTERNAL": "发生了错误。",
+    "UNKNOWN": "未知错误。"
+  }
+}
