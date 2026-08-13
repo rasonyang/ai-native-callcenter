@@ -113,24 +113,25 @@ CREATE TABLE queue_agents (
 
 CREATE INDEX idx_queue_agents_agent_id ON queue_agents (agent_id);
 
+-- Every external number answers with a bot flow: this is an AI-native call
+-- center, so the model talks first and hands off to a queue by calling
+-- transfer_to_agent. A DID therefore has no alternative target, only a
+-- fallback for the case where the bot cannot run at all (provider outage, bot
+-- capacity exhausted), where the caller must still reach a human.
 CREATE TABLE dids (
-    id          uuid PRIMARY KEY,
-    number      text NOT NULL,
+    id                   uuid PRIMARY KEY,
+    number               text NOT NULL,
     -- BCP 47 language subtag, lowercase, consumed verbatim by the frontend.
-    language    varchar(8) NOT NULL DEFAULT 'en',
-    target_kind varchar(8) NOT NULL CHECK (target_kind IN ('FLOW', 'QUEUE')),
-    flow_id     uuid,
-    queue_id    uuid,
-    description text NOT NULL DEFAULT '',
-    is_enabled  bool NOT NULL DEFAULT true,
-    created_at  timestamptz NOT NULL DEFAULT now(),
+    language             varchar(8) NOT NULL DEFAULT 'en',
+    flow_id              uuid NOT NULL,
+    fallback_queue_id    uuid,
+    is_recording_enabled bool NOT NULL DEFAULT true,
+    description          text NOT NULL DEFAULT '',
+    is_enabled           bool NOT NULL DEFAULT true,
+    created_at           timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT uq_dids_number UNIQUE (number),
-    CONSTRAINT fk_dids_queues FOREIGN KEY (queue_id) REFERENCES queues (id) ON DELETE SET NULL,
-    -- A DID must point at exactly the target its kind names.
-    CONSTRAINT dids_target_matches_kind CHECK (
-        (target_kind = 'FLOW' AND flow_id IS NOT NULL) OR
-        (target_kind = 'QUEUE' AND queue_id IS NOT NULL)
-    )
+    CONSTRAINT fk_dids_queues FOREIGN KEY (fallback_queue_id)
+        REFERENCES queues (id) ON DELETE SET NULL
 );
 
 CREATE TABLE trunks (
@@ -163,17 +164,18 @@ FROM extensions e
 LEFT JOIN agents a ON a.default_extension_id = e.id
 WHERE e.is_enabled;
 
+-- The dialplan only needs to know that the number is ours, whether to record,
+-- and where to send the caller if the bot cannot take the call. Which flow
+-- runs is resolved by the application from the DID, so the flow catalogue
+-- never becomes part of the switch contract.
 CREATE VIEW luacc.dids AS
 SELECT d.number,
        d.language,
-       d.target_kind,
-       d.flow_id,
-       q.ext_number AS queue_ext_number,
-       COALESCE(q.is_recording_enabled, true) AS is_recording_enabled,
-       COALESCE(q.hours, '[]'::jsonb) AS hours,
+       d.is_recording_enabled,
+       q.ext_number AS fallback_queue_ext_number,
        d.is_enabled
 FROM dids d
-LEFT JOIN queues q ON q.id = d.queue_id
+LEFT JOIN queues q ON q.id = d.fallback_queue_id
 WHERE d.is_enabled;
 
 CREATE VIEW luacc.queues AS

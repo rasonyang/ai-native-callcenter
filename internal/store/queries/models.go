@@ -40,15 +40,15 @@ type AgentStateLog struct {
 }
 
 type Did struct {
-	ID          uuid.UUID          `json:"id"`
-	Number      string             `json:"number"`
-	Language    string             `json:"language"`
-	TargetKind  string             `json:"targetKind"`
-	FlowID      *uuid.UUID         `json:"flowId"`
-	QueueID     *uuid.UUID         `json:"queueId"`
-	Description string             `json:"description"`
-	IsEnabled   bool               `json:"isEnabled"`
-	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	ID                 uuid.UUID          `json:"id"`
+	Number             string             `json:"number"`
+	Language           string             `json:"language"`
+	FlowID             uuid.UUID          `json:"flowId"`
+	FallbackQueueID    *uuid.UUID         `json:"fallbackQueueId"`
+	IsRecordingEnabled bool               `json:"isRecordingEnabled"`
+	Description        string             `json:"description"`
+	IsEnabled          bool               `json:"isEnabled"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
 }
 
 type Extension struct {
@@ -63,14 +63,11 @@ type Extension struct {
 }
 
 type LuaccDid struct {
-	Number             string     `json:"number"`
-	Language           string     `json:"language"`
-	TargetKind         string     `json:"targetKind"`
-	FlowID             *uuid.UUID `json:"flowId"`
-	QueueExtNumber     *string    `json:"queueExtNumber"`
-	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
-	Hours              []byte     `json:"hours"`
-	IsEnabled          bool       `json:"isEnabled"`
+	Number                 string  `json:"number"`
+	Language               string  `json:"language"`
+	IsRecordingEnabled     bool    `json:"isRecordingEnabled"`
+	FallbackQueueExtNumber *string `json:"fallbackQueueExtNumber"`
+	IsEnabled              bool    `json:"isEnabled"`
 }
 
 type LuaccDirectory struct {

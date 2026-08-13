@@ -9,7 +9,7 @@ Date: 2026-08-13. Every item below was explicitly confirmed in the Phase 1 clari
 | P1 | **Core loop**: inbound AI answering (flow-driven) → function-call transfer to human queues → agent cockpit (live transcript, wrap-up) → recording → CDR explorer. |
 | P2 | **All extended features in MVP**: supervisor live-ops (wallboard, agent roster + force-logout, queue staffing, monitor/whisper/barge via `eavesdrop`), outbound AI calls (API/manually triggered; no campaign manager), quality review (playback + 5-criterion scoring), reports (queue/agent/disposition) + audit log. |
 | P3 | **Bot configuration = Flow DSL v1** (ui-test `flows/*.json` ≡ java-bot FlowSpec): bilingual persona/rules, nodes + allowed tools + declarative transitions, HTTP tool specs; Flow Designer UI; hint-steering engine in Go. |
-| P4 | **No traditional DTMF IVR** — AI is the IVR. DTMF still reaches the bot (RFC 2833) and flows may route on it. |
+| P4 | **No traditional DTMF IVR** — AI is the IVR. DTMF still reaches the bot (RFC 2833) and flows may route on it. **Amended 2026-08-13 (owner)**: every external number answers with a bot flow; a DID has no direct-to-queue alternative. Queues are reached only by the bot's `transfer_to_agent`, or by the DID's `fallbackQueue` when the bot cannot run at all (provider outage, capacity). |
 | P5 | **No-agent overflow is per-queue config**: AI takes a message → callback record (default) / announce + hangup / overflow to another queue or number. No voicemail boxes. |
 
 ## Telephony

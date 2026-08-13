@@ -12,20 +12,21 @@ import (
 )
 
 const createDID = `-- name: CreateDID :one
-INSERT INTO dids (id, number, language, target_kind, flow_id, queue_id, description, is_enabled)
+INSERT INTO dids (id, number, language, flow_id, fallback_queue_id,
+                  is_recording_enabled, description, is_enabled)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, number, language, target_kind, flow_id, queue_id, description, is_enabled, created_at
+RETURNING id, number, language, flow_id, fallback_queue_id, is_recording_enabled, description, is_enabled, created_at
 `
 
 type CreateDIDParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Number      string     `json:"number"`
-	Language    string     `json:"language"`
-	TargetKind  string     `json:"targetKind"`
-	FlowID      *uuid.UUID `json:"flowId"`
-	QueueID     *uuid.UUID `json:"queueId"`
-	Description string     `json:"description"`
-	IsEnabled   bool       `json:"isEnabled"`
+	ID                 uuid.UUID  `json:"id"`
+	Number             string     `json:"number"`
+	Language           string     `json:"language"`
+	FlowID             uuid.UUID  `json:"flowId"`
+	FallbackQueueID    *uuid.UUID `json:"fallbackQueueId"`
+	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
+	Description        string     `json:"description"`
+	IsEnabled          bool       `json:"isEnabled"`
 }
 
 func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, error) {
@@ -33,9 +34,9 @@ func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, erro
 		arg.ID,
 		arg.Number,
 		arg.Language,
-		arg.TargetKind,
 		arg.FlowID,
-		arg.QueueID,
+		arg.FallbackQueueID,
+		arg.IsRecordingEnabled,
 		arg.Description,
 		arg.IsEnabled,
 	)
@@ -44,9 +45,9 @@ func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, erro
 		&i.ID,
 		&i.Number,
 		&i.Language,
-		&i.TargetKind,
 		&i.FlowID,
-		&i.QueueID,
+		&i.FallbackQueueID,
+		&i.IsRecordingEnabled,
 		&i.Description,
 		&i.IsEnabled,
 		&i.CreatedAt,
@@ -252,7 +253,7 @@ func (q *Queries) DeleteTrunk(ctx context.Context, id uuid.UUID) error {
 }
 
 const getDIDByNumber = `-- name: GetDIDByNumber :one
-SELECT id, number, language, target_kind, flow_id, queue_id, description, is_enabled, created_at FROM dids WHERE number = $1
+SELECT id, number, language, flow_id, fallback_queue_id, is_recording_enabled, description, is_enabled, created_at FROM dids WHERE number = $1
 `
 
 func (q *Queries) GetDIDByNumber(ctx context.Context, number string) (Did, error) {
@@ -262,9 +263,9 @@ func (q *Queries) GetDIDByNumber(ctx context.Context, number string) (Did, error
 		&i.ID,
 		&i.Number,
 		&i.Language,
-		&i.TargetKind,
 		&i.FlowID,
-		&i.QueueID,
+		&i.FallbackQueueID,
+		&i.IsRecordingEnabled,
 		&i.Description,
 		&i.IsEnabled,
 		&i.CreatedAt,
@@ -379,7 +380,7 @@ func (q *Queries) GetQueueByName(ctx context.Context, name string) (Queue, error
 }
 
 const listDIDs = `-- name: ListDIDs :many
-SELECT id, number, language, target_kind, flow_id, queue_id, description, is_enabled, created_at FROM dids ORDER BY number
+SELECT id, number, language, flow_id, fallback_queue_id, is_recording_enabled, description, is_enabled, created_at FROM dids ORDER BY number
 `
 
 func (q *Queries) ListDIDs(ctx context.Context) ([]Did, error) {
@@ -395,9 +396,9 @@ func (q *Queries) ListDIDs(ctx context.Context) ([]Did, error) {
 			&i.ID,
 			&i.Number,
 			&i.Language,
-			&i.TargetKind,
 			&i.FlowID,
-			&i.QueueID,
+			&i.FallbackQueueID,
+			&i.IsRecordingEnabled,
 			&i.Description,
 			&i.IsEnabled,
 			&i.CreatedAt,
@@ -660,29 +661,29 @@ func (q *Queries) SetQueueAgent(ctx context.Context, arg SetQueueAgentParams) er
 
 const updateDID = `-- name: UpdateDID :one
 UPDATE dids
-SET language = $2, target_kind = $3, flow_id = $4, queue_id = $5,
-    description = $6, is_enabled = $7
+SET language = $2, flow_id = $3, fallback_queue_id = $4,
+    is_recording_enabled = $5, description = $6, is_enabled = $7
 WHERE id = $1
-RETURNING id, number, language, target_kind, flow_id, queue_id, description, is_enabled, created_at
+RETURNING id, number, language, flow_id, fallback_queue_id, is_recording_enabled, description, is_enabled, created_at
 `
 
 type UpdateDIDParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Language    string     `json:"language"`
-	TargetKind  string     `json:"targetKind"`
-	FlowID      *uuid.UUID `json:"flowId"`
-	QueueID     *uuid.UUID `json:"queueId"`
-	Description string     `json:"description"`
-	IsEnabled   bool       `json:"isEnabled"`
+	ID                 uuid.UUID  `json:"id"`
+	Language           string     `json:"language"`
+	FlowID             uuid.UUID  `json:"flowId"`
+	FallbackQueueID    *uuid.UUID `json:"fallbackQueueId"`
+	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
+	Description        string     `json:"description"`
+	IsEnabled          bool       `json:"isEnabled"`
 }
 
 func (q *Queries) UpdateDID(ctx context.Context, arg UpdateDIDParams) (Did, error) {
 	row := q.db.QueryRow(ctx, updateDID,
 		arg.ID,
 		arg.Language,
-		arg.TargetKind,
 		arg.FlowID,
-		arg.QueueID,
+		arg.FallbackQueueID,
+		arg.IsRecordingEnabled,
 		arg.Description,
 		arg.IsEnabled,
 	)
@@ -691,9 +692,9 @@ func (q *Queries) UpdateDID(ctx context.Context, arg UpdateDIDParams) (Did, erro
 		&i.ID,
 		&i.Number,
 		&i.Language,
-		&i.TargetKind,
 		&i.FlowID,
-		&i.QueueID,
+		&i.FallbackQueueID,
+		&i.IsRecordingEnabled,
 		&i.Description,
 		&i.IsEnabled,
 		&i.CreatedAt,

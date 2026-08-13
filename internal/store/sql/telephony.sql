@@ -86,7 +86,8 @@ WHERE qa.agent_id = $1
 ORDER BY q.name;
 
 -- name: CreateDID :one
-INSERT INTO dids (id, number, language, target_kind, flow_id, queue_id, description, is_enabled)
+INSERT INTO dids (id, number, language, flow_id, fallback_queue_id,
+                  is_recording_enabled, description, is_enabled)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
@@ -98,8 +99,8 @@ SELECT * FROM dids ORDER BY number;
 
 -- name: UpdateDID :one
 UPDATE dids
-SET language = $2, target_kind = $3, flow_id = $4, queue_id = $5,
-    description = $6, is_enabled = $7
+SET language = $2, flow_id = $3, fallback_queue_id = $4,
+    is_recording_enabled = $5, description = $6, is_enabled = $7
 WHERE id = $1
 RETURNING *;
 

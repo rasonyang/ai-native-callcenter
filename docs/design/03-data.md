@@ -43,8 +43,9 @@ queues(id uuid pk, ext_number text unique ★,                 -- dialable 7xxx
        rona_delay_sec int default 10, is_enabled bool ★)
 queue_agents(queue_id fk, agent_id fk, level int default 1, position int default 1, pk(queue_id,agent_id))
 dids(id uuid pk, number text unique ★, language varchar ★,   -- BCP 47 lowercase 'en'/'zh' (external standard, see 07 §7)
-     target_kind varchar check in ('FLOW','QUEUE') ★, flow_id uuid null ★, queue_id uuid null ★,
-     description text, is_enabled bool ★)
+     flow_id uuid NOT NULL,                                   -- every external number answers with a bot flow
+     fallback_queue_id uuid null ★,                           -- only for "the bot cannot run": provider outage, capacity
+     is_recording_enabled bool ★, description text, is_enabled bool ★)
 trunks(id uuid pk, name text unique,
        direction varchar check in ('INBOUND','OUTBOUND','BIDIRECTIONAL'),
        max_channels int, config jsonb,                        -- camelCase keys: proxy, isRegister, username, …
@@ -105,8 +106,11 @@ seq_blocks(name text pk, value bigint)                            -- SSE hi/lo b
 
 ```sql
 luacc.directory  (number, password, is_enabled, display_name, is_auto_answer)          -- from extensions ⋈ agents
-luacc.dids       (number, language, target_kind, flow_slug, queue_ext_number,
-                  is_recording_enabled, hours, is_enabled)
+luacc.dids       (number, language, is_recording_enabled, fallback_queue_ext_number, is_enabled)
+                 -- the dialplan needs only: is this number ours, record it?, and where to
+                 -- send the caller if the bot cannot take the call. Which flow runs is
+                 -- resolved by the application, so the flow catalogue never enters the
+                 -- switch contract.
 luacc.queues     (name, ext_number, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec,
                   announce_sound, announce_frequency_sec, tier_rules,
                   discard_abandoned_after_sec, is_abandoned_resume_allowed,
