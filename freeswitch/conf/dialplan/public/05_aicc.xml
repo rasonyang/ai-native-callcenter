@@ -1,0 +1,14 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  Inbound: every external number is handed to the application's Lua entry
+  point, which answers with a bot. Numbering plans live in the database, not
+  in this file, so adding a DID never touches FreeSWITCH configuration.
+-->
+<include>
+  <extension name="aicc_inbound">
+    <condition field="destination_number" expression="^(\d{3,})$">
+      <action application="lua" data="aicc_inbound.lua"/>
+    </condition>
+  </extension>
+</include>

@@ -178,6 +178,8 @@ FROM dids d
 LEFT JOIN queues q ON q.id = d.fallback_queue_id
 WHERE d.is_enabled;
 
+-- jsonb is flattened here on purpose: mod_lua ships no JSON parser, so the
+-- switch-side scripts must never have to decode a document.
 CREATE VIEW luacc.queues AS
 SELECT name,
        ext_number,
@@ -187,11 +189,14 @@ SELECT name,
        max_wait_no_agent_sec,
        announce_sound,
        announce_frequency_sec,
-       tier_rules,
+       COALESCE((tier_rules ->> 'isApplied')::bool, false) AS is_tier_rules_applied,
+       COALESCE((tier_rules ->> 'waitSec')::int, 300) AS tier_rule_wait_sec,
        discard_abandoned_after_sec,
        is_abandoned_resume_allowed,
        is_recording_enabled,
-       overflow,
+       COALESCE(overflow ->> 'type', 'ANNOUNCE_HANGUP') AS overflow_type,
+       overflow ->> 'target' AS overflow_target,
+       overflow ->> 'sound' AS overflow_sound,
        is_enabled
 FROM queues
 WHERE is_enabled;

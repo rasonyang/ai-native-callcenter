@@ -94,6 +94,8 @@ hangup:            { "isFarewellSpoken": "boolean" }                     // ends
 
 `transfer_to_agent` sequencing: tool call → engine replies with a result whose hint says "tell the caller you're connecting them" → on that response's `ResponseDone` (or 3s cap) → execute the transfer. Guarantees the bridge line is spoken before the BYE.
 
+**A transfer can be refused, and the bot handles it in conversation.** Before executing, the engine checks the target queue's business hours and staffing; when the queue is closed or unstaffed the tool returns `ok:0` with a hint naming the reason (`QUEUE_CLOSED`, `NO_AGENTS_STAFFED`) and the next node's instruction, so the model says something like "we're closed right now — I can take a message" and continues with `take_message`. This is why business hours live on the queue and not on the DID: an AI-native call center has no separate out-of-hours branch in the dialplan, because the bot has already answered and can simply explain (owner decision 2026-08-13).
+
 ## 7. Long-call policy (Qwen 50-turn/300s-audio; OpenAI 60-min)
 
 Tracked per session from usage/turn counts: at **80% of budget** the engine injects a wrap-up steer (via next tool hint or `UpdateInstructions`): summarize, resolve, or offer transfer. At **hard limit** (Qwen: history silently truncates — session survives but memory fades; OpenAI: session ends at 60min): if not terminal, execute `transfer_to_agent(queue=flow.fallback, reason="SESSION_LIMIT")` with the running summary. Fact durability: flow slots live in aicc (not provider history) and are re-pinned via `UpdateInstructions` at each node change, so Qwen's silent truncation never loses structured state. Per-flow `maxDurationSec` (default 900) as product-level cap → same wrap-up path.

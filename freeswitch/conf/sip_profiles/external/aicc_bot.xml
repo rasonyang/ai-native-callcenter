@@ -1,0 +1,19 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The in-application SIP endpoint that answers AI calls.
+
+  No registration: FreeSWITCH sends INVITEs straight to the application's UAS
+  on the LAN. The ping keeps the gateway's state honest, which the application
+  answers with a 200 to OPTIONS; the previous configuration set expire-seconds
+  instead, which does nothing without registration.
+-->
+<include>
+  <gateway name="aicc_bot">
+    <param name="proxy" value="$${aicc_bot_host}:$${aicc_bot_port}"/>
+    <param name="register" value="false"/>
+    <param name="ping" value="30"/>
+    <param name="ping-max" value="3"/>
+    <param name="context" value="default"/>
+  </gateway>
+</include>

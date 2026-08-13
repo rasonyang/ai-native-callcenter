@@ -130,6 +130,6 @@ Static directory users 1000–1019 remain as fallback during migration; removed 
 
 **D7 `autoload_configs/switch.conf.xml`**: `sessions-per-second 30` → `100` (outbound AI ramp headroom). `max-sessions 1000`, RTP range 16384–32768, `uuid-version 7` unchanged.
 
-**D8 deploy step (documented, not a diff)**: copy `freeswitch/scripts/*.lua` → `/usr/local/freeswitch/scripts/`, create `aicc_lua` PG role, `reloadxml` + `reload mod_lua`. ESL stays `127.0.0.1:18021` (documented; configurable in aicc).
+**D8 deploy step (documented, not a diff)**: copy `freeswitch/scripts/*.lua` → `/usr/local/freeswitch/scripts/`, create `aicc_lua` PG role, `reloadxml`, then **restart FreeSWITCH once**: binding an xml-handler requires mod_lua to load with the new config, and mod_lua is not unloadable, so `reload mod_lua` answers "Module is not unloadable" and leaves the binding inactive (verified on 1.11.1 — a database-only extension stays invisible to `user_exists` until the restart). Afterwards `reload mod_callcenter` picks up the database-rendered queues, and later script edits need no reload at all. ESL stays `127.0.0.1:18021` (documented; configurable in aicc).
 
 No changes to: sofia profile ports/WS bindings (already correct), ACLs, event_socket, directory XML (fallback until cleanup).

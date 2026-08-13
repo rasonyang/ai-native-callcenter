@@ -1,0 +1,14 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  Queue extensions. The bot transfers a caller here when it calls
+  transfer_to_agent, and aicc_inbound falls back here when the bot cannot take
+  a call at all. Which queue serves which extension is a database question.
+-->
+<include>
+  <extension name="aicc_queue">
+    <condition field="destination_number" expression="^(7\d{3})$">
+      <action application="lua" data="aicc_queue.lua $1"/>
+    </condition>
+  </extension>
+</include>
