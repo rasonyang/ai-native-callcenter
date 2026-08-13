@@ -11,6 +11,124 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Agent struct {
+	ID                 uuid.UUID          `json:"id"`
+	UserID             uuid.UUID          `json:"userId"`
+	CallcenterName     string             `json:"callcenterName"`
+	WrapUpTimeSec      int32              `json:"wrapUpTimeSec"`
+	IsAutoAnswer       bool               `json:"isAutoAnswer"`
+	DefaultExtensionID *uuid.UUID         `json:"defaultExtensionId"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+}
+
+type AgentState struct {
+	AgentID         uuid.UUID          `json:"agentId"`
+	State           string             `json:"state"`
+	Reason          *string            `json:"reason"`
+	ExtensionNumber *string            `json:"extensionNumber"`
+	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
+	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
+}
+
+type AgentStateLog struct {
+	ID        int64              `json:"id"`
+	AgentID   uuid.UUID          `json:"agentId"`
+	State     string             `json:"state"`
+	Reason    *string            `json:"reason"`
+	EnteredAt pgtype.Timestamptz `json:"enteredAt"`
+	ExitedAt  pgtype.Timestamptz `json:"exitedAt"`
+}
+
+type Did struct {
+	ID          uuid.UUID          `json:"id"`
+	Number      string             `json:"number"`
+	Language    string             `json:"language"`
+	TargetKind  string             `json:"targetKind"`
+	FlowID      *uuid.UUID         `json:"flowId"`
+	QueueID     *uuid.UUID         `json:"queueId"`
+	Description string             `json:"description"`
+	IsEnabled   bool               `json:"isEnabled"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+}
+
+type Extension struct {
+	ID          uuid.UUID          `json:"id"`
+	Number      string             `json:"number"`
+	Kind        string             `json:"kind"`
+	Password    string             `json:"password"`
+	DisplayName string             `json:"displayName"`
+	IsEnabled   bool               `json:"isEnabled"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type LuaccDid struct {
+	Number             string     `json:"number"`
+	Language           string     `json:"language"`
+	TargetKind         string     `json:"targetKind"`
+	FlowID             *uuid.UUID `json:"flowId"`
+	QueueExtNumber     *string    `json:"queueExtNumber"`
+	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
+	Hours              []byte     `json:"hours"`
+	IsEnabled          bool       `json:"isEnabled"`
+}
+
+type LuaccDirectory struct {
+	Number       string `json:"number"`
+	Password     string `json:"password"`
+	DisplayName  string `json:"displayName"`
+	IsEnabled    bool   `json:"isEnabled"`
+	IsAutoAnswer bool   `json:"isAutoAnswer"`
+}
+
+type LuaccQueue struct {
+	Name                     string  `json:"name"`
+	ExtNumber                string  `json:"extNumber"`
+	Strategy                 string  `json:"strategy"`
+	MohSound                 string  `json:"mohSound"`
+	MaxWaitSec               int32   `json:"maxWaitSec"`
+	MaxWaitNoAgentSec        int32   `json:"maxWaitNoAgentSec"`
+	AnnounceSound            *string `json:"announceSound"`
+	AnnounceFrequencySec     int32   `json:"announceFrequencySec"`
+	TierRules                []byte  `json:"tierRules"`
+	DiscardAbandonedAfterSec int32   `json:"discardAbandonedAfterSec"`
+	IsAbandonedResumeAllowed bool    `json:"isAbandonedResumeAllowed"`
+	IsRecordingEnabled       bool    `json:"isRecordingEnabled"`
+	Overflow                 []byte  `json:"overflow"`
+	IsEnabled                bool    `json:"isEnabled"`
+}
+
+type Queue struct {
+	ID                       uuid.UUID          `json:"id"`
+	Name                     string             `json:"name"`
+	ExtNumber                string             `json:"extNumber"`
+	DisplayName              string             `json:"displayName"`
+	Strategy                 string             `json:"strategy"`
+	MohSound                 string             `json:"mohSound"`
+	MaxWaitSec               int32              `json:"maxWaitSec"`
+	MaxWaitNoAgentSec        int32              `json:"maxWaitNoAgentSec"`
+	AnnounceSound            *string            `json:"announceSound"`
+	AnnounceFrequencySec     int32              `json:"announceFrequencySec"`
+	TierRules                []byte             `json:"tierRules"`
+	DiscardAbandonedAfterSec int32              `json:"discardAbandonedAfterSec"`
+	IsAbandonedResumeAllowed bool               `json:"isAbandonedResumeAllowed"`
+	RonaDelaySec             int32              `json:"ronaDelaySec"`
+	SlaThresholdSec          int32              `json:"slaThresholdSec"`
+	IsRecordingEnabled       bool               `json:"isRecordingEnabled"`
+	Hours                    []byte             `json:"hours"`
+	Overflow                 []byte             `json:"overflow"`
+	IsEnabled                bool               `json:"isEnabled"`
+	CreatedAt                pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt                pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type QueueAgent struct {
+	QueueID  uuid.UUID `json:"queueId"`
+	AgentID  uuid.UUID `json:"agentId"`
+	Level    int32     `json:"level"`
+	Position int32     `json:"position"`
+}
+
 type SeqBlock struct {
 	Name  string `json:"name"`
 	Value int64  `json:"value"`
@@ -30,6 +148,17 @@ type Setting struct {
 	Key       string             `json:"key"`
 	Value     []byte             `json:"value"`
 	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type Trunk struct {
+	ID          uuid.UUID          `json:"id"`
+	Name        string             `json:"name"`
+	Direction   string             `json:"direction"`
+	MaxChannels int32              `json:"maxChannels"`
+	Config      []byte             `json:"config"`
+	IsEnabled   bool               `json:"isEnabled"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type User struct {

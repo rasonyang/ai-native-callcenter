@@ -23,6 +23,8 @@ sql:
           - db_type: "uuid"
             nullable: true
             go_type:
-              type: "uuid.UUID"
+              # With an explicit import, type is the bare name: sqlc renders
+              # it as <package>.<type> itself.
+              type: "UUID"
               import: "github.com/google/uuid"
               pointer: true
