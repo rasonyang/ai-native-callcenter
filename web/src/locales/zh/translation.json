@@ -11,7 +11,11 @@
     "retry": "重试",
     "cancel": "取消",
     "save": "保存",
-    "search": "搜索"
+    "search": "搜索",
+    "yes": "是",
+    "no": "否",
+    "edit": "编辑",
+    "delete": "删除"
   },
   "auth": {
     "signInTitle": "登录",
@@ -172,5 +176,66 @@
     "consolesConnected": "事件流连接数",
     "agentStates": "坐席状态",
     "nobodySignedIn": "暂无坐席签入。"
+  },
+  "admin": {
+    "extensionsHint": "交换机允许注册的话机分机，坐席签入其中之一。",
+    "addExtension": "新增分机",
+    "editExtension": "编辑分机",
+    "noExtensions": "尚未配置分机。",
+    "deleteExtensionConfirm": "确认删除分机 {{number}}？该话机将无法注册。",
+    "number": "号码",
+    "displayName": "显示名称",
+    "kind": "类型",
+    "enabled": "启用",
+    "password": "密码",
+    "passwordUnchangedHint": "留空则保持原密码不变。",
+    "kinds": {
+      "AGENT": "坐席",
+      "BOT": "机器人",
+      "PLAIN": "普通"
+    },
+    "routingHint": "队列及其分配方式，修改后立即下发到交换机。",
+    "addQueue": "新增队列",
+    "editQueue": "编辑队列",
+    "noQueues": "尚未配置队列。",
+    "deleteQueueConfirm": "确认删除队列 {{name}}？将无法再转接到该队列。",
+    "queueName": "名称",
+    "queueNameHint": "交换机使用，不能含空格、@ 或引号。",
+    "queueExtension": "队列分机",
+    "queueExtensionHint": "机器人转接的目标号码，例如 7001。",
+    "strategy": "分配策略",
+    "maxWait": "最长等待",
+    "maxWaitHint": "秒；0 表示不限。",
+    "noLimit": "不限",
+    "overflow": "溢出处理",
+    "overflowTarget": "溢出目标",
+    "overflowTargetHint": "转接的分机号，或接入机器人的号码。",
+    "recording": "录音",
+    "strategies": {
+      "LONGEST_IDLE_AGENT": "最久空闲",
+      "ROUND_ROBIN": "轮询",
+      "TOP_DOWN": "顺序优先",
+      "AGENT_WITH_LEAST_TALK_TIME": "通话时长最少",
+      "AGENT_WITH_FEWEST_CALLS": "接听次数最少",
+      "RANDOM": "随机"
+    },
+    "overflowTypes": {
+      "ANNOUNCE_HANGUP": "播放提示并挂断",
+      "BOT_FLOW": "转回机器人",
+      "FORWARD": "转接"
+    },
+    "numbersHint": "每个号码都由机器人接听；队列仅用于机器人无法接听时的兜底。",
+    "addNumber": "新增号码",
+    "editNumber": "编辑号码",
+    "noNumbers": "尚未配置号码。",
+    "deleteNumberConfirm": "确认删除号码 {{number}}？呼入将被拒绝。",
+    "language": "语言",
+    "languageHint": "决定该号码使用的语音模型。",
+    "botFlow": "机器人流程",
+    "flowPending": "尚未配置",
+    "fallbackQueue": "兜底队列",
+    "noFallbackQueue": "无",
+    "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
+    "description": "说明"
   }
 }

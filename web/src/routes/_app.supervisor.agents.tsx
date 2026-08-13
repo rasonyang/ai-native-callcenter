@@ -5,6 +5,8 @@ import { LogOut, Search } from 'lucide-react'
 import { Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
+import { describeError } from '@/lib/errors'
+import { requireRole } from '@/lib/guards'
 import { StatusPill } from '@/components/status-pill'
 import {
   DataTable, TBody, THead, TableFooter, TableMessage, Td, Th, Tr,
@@ -16,11 +18,14 @@ import type { RosterEntry } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 
 /** Live agent roster: who could take a call, and if not, why. */
-export const Route = createFileRoute('/_app/supervisor/agents')({ component: AgentRoster })
+export const Route = createFileRoute('/_app/supervisor/agents')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
+  component: AgentRoster,
+})
 
 function AgentRoster() {
   const { t } = useTranslation()
-  const { data, isPending, isError } = useRoster(true)
+  const { data, isPending, isError, error } = useRoster(true)
   const [filter, setFilter] = useState('')
 
   const all = data?.items ?? []
@@ -63,7 +68,7 @@ function AgentRoster() {
         </THead>
         <TBody>
           {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={6}>{t('errors.STORAGE_DOWN')}</TableMessage>}
+          {isError && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
           {!isPending && rows.length === 0 && (
             <TableMessage colSpan={6}>{t('supervisor.noAgents')}</TableMessage>
           )}

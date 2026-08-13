@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
+import { requireRole } from '@/lib/guards'
 import { StatusDot } from '@/components/status-pill'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { AVAILABILITY_COLOR, useRoster } from '@/lib/agent'
@@ -16,7 +17,10 @@ import { api, type Availability } from '@/lib/api'
  * Queue depth, service level and abandon rate need the queue metrics that
  * arrive with the reporting work, so they are absent rather than invented.
  */
-export const Route = createFileRoute('/_app/supervisor/')({ component: Wallboard })
+export const Route = createFileRoute('/_app/supervisor/')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
+  component: Wallboard,
+})
 
 function Wallboard() {
   const { t } = useTranslation()

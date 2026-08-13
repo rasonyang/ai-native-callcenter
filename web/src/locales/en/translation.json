@@ -11,7 +11,11 @@
     "retry": "Retry",
     "cancel": "Cancel",
     "save": "Save",
-    "search": "Search"
+    "search": "Search",
+    "yes": "Yes",
+    "no": "No",
+    "edit": "Edit",
+    "delete": "Delete"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -172,5 +176,66 @@
     "consolesConnected": "event streams connected",
     "agentStates": "Agent states",
     "nobodySignedIn": "Nobody is signed in yet."
+  },
+  "admin": {
+    "extensionsHint": "Endpoints the switch accepts a registration for. Agents sign in at one of these.",
+    "addExtension": "Add extension",
+    "editExtension": "Edit extension",
+    "noExtensions": "No extensions yet.",
+    "deleteExtensionConfirm": "Delete extension {{number}}? Its phone stops registering.",
+    "number": "Number",
+    "displayName": "Display name",
+    "kind": "Kind",
+    "enabled": "Enabled",
+    "password": "Password",
+    "passwordUnchangedHint": "Leave blank to keep the current password.",
+    "kinds": {
+      "AGENT": "Agent",
+      "BOT": "Bot",
+      "PLAIN": "Plain"
+    },
+    "routingHint": "Queues and how they choose an agent. Changes reach the switch immediately.",
+    "addQueue": "Add queue",
+    "editQueue": "Edit queue",
+    "noQueues": "No queues yet.",
+    "deleteQueueConfirm": "Delete queue {{name}}? Callers can no longer be transferred to it.",
+    "queueName": "Name",
+    "queueNameHint": "Used by the switch; no spaces, @ or quotes.",
+    "queueExtension": "Extension",
+    "queueExtensionHint": "The number the bot transfers callers to, e.g. 7001.",
+    "strategy": "Strategy",
+    "maxWait": "Max wait",
+    "maxWaitHint": "Seconds; 0 means no limit.",
+    "noLimit": "No limit",
+    "overflow": "Overflow",
+    "overflowTarget": "Overflow target",
+    "overflowTargetHint": "An extension to forward to, or the number that reaches the bot.",
+    "recording": "Recording",
+    "strategies": {
+      "LONGEST_IDLE_AGENT": "Longest idle",
+      "ROUND_ROBIN": "Round robin",
+      "TOP_DOWN": "Top down",
+      "AGENT_WITH_LEAST_TALK_TIME": "Least talk time",
+      "AGENT_WITH_FEWEST_CALLS": "Fewest calls",
+      "RANDOM": "Random"
+    },
+    "overflowTypes": {
+      "ANNOUNCE_HANGUP": "Announce and hang up",
+      "BOT_FLOW": "Back to a bot",
+      "FORWARD": "Forward"
+    },
+    "numbersHint": "Every number answers with a bot. The queue is only where a caller goes if the bot cannot take the call.",
+    "addNumber": "Add number",
+    "editNumber": "Edit number",
+    "noNumbers": "No numbers yet.",
+    "deleteNumberConfirm": "Delete number {{number}}? Calls to it will be rejected.",
+    "language": "Language",
+    "languageHint": "Chooses the voice provider for this number.",
+    "botFlow": "Bot flow",
+    "flowPending": "Not configured yet",
+    "fallbackQueue": "Fallback queue",
+    "noFallbackQueue": "None",
+    "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
+    "description": "Description"
   }
 }

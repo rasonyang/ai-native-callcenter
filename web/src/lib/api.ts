@@ -53,7 +53,7 @@ const BASE = '/api/v1'
 /** Mutations must carry this header; see docs/design/04-api-sse.md §2. */
 const CSRF_HEADER = 'X-AICC-Csrf'
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const method = init.method ?? 'GET'
   const headers = new Headers(init.headers)
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
