@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -230,6 +231,7 @@ func (a *Adapter) ShowChannels() (string, error) { return a.cmd.API("show channe
 func (a *Adapter) exec(format string, args ...any) error {
 	cmd := fmt.Sprintf(format, args...)
 	reply, err := a.cmd.API(cmd)
+	slog.Debug("switch command", "command", cmd, "reply", strings.TrimSpace(reply), "error", err)
 	if err != nil {
 		return fmt.Errorf("%s: %w", cmd, err)
 	}

@@ -56,12 +56,21 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.offerToAgent(ctx, ev)
 	}
 
+	// Who owned a leg has to be read before the call is told it ended: the
+	// last hangup finishes the call and retires its actor, after which the
+	// channel is no longer attributed to anyone and the agent would stay
+	// marked on a call forever.
+	var freedAgent *uuid.UUID
+	if ev.Kind == KindChannelHangup {
+		freedAgent = c.agentOnChannel(ev.ChannelID)
+	}
+
 	// Everything, including the events above, still drives the state machines
 	// of whichever call owns the channel.
 	c.registry.Dispatch(ev)
 
-	if ev.Kind == KindChannelHangup {
-		c.releaseAgent(ctx, ev)
+	if freedAgent != nil {
+		c.agents.SetOnCall(ctx, *freedAgent, false)
 	}
 }
 
@@ -238,21 +247,19 @@ func (c *Coordinator) offerToAgent(ctx context.Context, ev SwitchEvent) {
 	}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
 }
 
-// releaseAgent frees an agent once their leg ends.
-func (c *Coordinator) releaseAgent(ctx context.Context, ev SwitchEvent) {
-	callID, ok := c.registry.CallForChannel(ev.ChannelID)
+// agentOnChannel reports which agent, if any, owns a leg.
+func (c *Coordinator) agentOnChannel(channelID string) *uuid.UUID {
+	callID, ok := c.registry.CallForChannel(channelID)
 	if !ok {
-		return
+		return nil
 	}
 	var agentID *uuid.UUID
 	_ = c.registry.Do(callID, func(call *Call) {
-		if p := call.PartyByChannel(ev.ChannelID); p != nil {
+		if p := call.PartyByChannel(channelID); p != nil {
 			agentID = p.AgentID
 		}
 	})
-	if agentID != nil {
-		c.agents.SetOnCall(ctx, *agentID, false)
-	}
+	return agentID
 }
 
 //
