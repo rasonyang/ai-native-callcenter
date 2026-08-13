@@ -22,7 +22,7 @@ type CreateDIDParams struct {
 	ID                 uuid.UUID  `json:"id"`
 	Number             string     `json:"number"`
 	Language           string     `json:"language"`
-	FlowID             uuid.UUID  `json:"flowId"`
+	FlowID             *uuid.UUID `json:"flowId"`
 	FallbackQueueID    *uuid.UUID `json:"fallbackQueueId"`
 	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
 	Description        string     `json:"description"`
@@ -670,7 +670,7 @@ RETURNING id, number, language, flow_id, fallback_queue_id, is_recording_enabled
 type UpdateDIDParams struct {
 	ID                 uuid.UUID  `json:"id"`
 	Language           string     `json:"language"`
-	FlowID             uuid.UUID  `json:"flowId"`
+	FlowID             *uuid.UUID `json:"flowId"`
 	FallbackQueueID    *uuid.UUID `json:"fallbackQueueId"`
 	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
 	Description        string     `json:"description"`

@@ -5,27 +5,26 @@ import type { Availability } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 /**
- * The one place colour carries meaning: a small dot, never a filled surface.
- * A pulse marks the states that demand attention rather than merely describe.
+ * Colour appears only as a dot or a pill, never as a filled surface
+ * (web/CLAUDE.md). The dot carries the state; the label names it.
  */
-export function StateDot({
+export function StatusDot({
   availability,
   className,
 }: {
   availability: Availability
   className?: string
 }) {
-  const pulses = availability === 'ON_CALL' || availability === 'DEVICE_UNREACHABLE'
   return (
     <span
-      className={cn('inline-block size-2 shrink-0 rounded-full', pulses && 'animate-pulse', className)}
+      className={cn('inline-block size-2 shrink-0 rounded-full', className)}
       style={{ backgroundColor: AVAILABILITY_COLOR[availability] }}
     />
   )
 }
 
-/** Dot plus label, for tables and the softphone bar. */
-export function StatePill({
+/** Dot plus label. A not-ready agent shows their reason, which is the useful part. */
+export function StatusPill({
   availability,
   reason,
   className,
@@ -35,15 +34,17 @@ export function StatePill({
   className?: string
 }) {
   const { t } = useTranslation()
-  // A not-ready agent's reason is more useful than the word "not ready".
   const label =
     availability === 'NOT_READY' && reason
       ? t(`reasons.${reason}`)
       : t(`availability.${availability}`)
 
   return (
-    <span className={cn('inline-flex items-center gap-1.5 text-xs', className)}>
-      <StateDot availability={availability} />
+    <span
+      className={cn('inline-flex items-center gap-1.5 whitespace-nowrap text-sm', className)}
+      style={{ color: AVAILABILITY_COLOR[availability] }}
+    >
+      <StatusDot availability={availability} />
       {label}
     </span>
   )

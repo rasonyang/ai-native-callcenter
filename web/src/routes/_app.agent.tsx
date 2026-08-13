@@ -1,115 +1,137 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { Headphones, Inbox } from 'lucide-react'
+import type { ReactNode } from 'react'
 
-import { ActiveCall } from '@/components/active-call'
-import { SoftphoneBar } from '@/components/softphone-bar'
-import { StatePill } from '@/components/state-dot'
-import { useElapsedSec, useMyCalls, usePresence } from '@/lib/agent'
+import { StatusPill } from '@/components/status-pill'
+import { myParty, useElapsedSec, useMyCalls, usePresence } from '@/lib/agent'
+import type { CallSnapshot } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 
 /**
- * Agent cockpit.
- *
- * The three-column shell is in place; the call panels fill in as call control
- * lands. Presence is live now, which is what decides whether anything is
- * routed here at all.
+ * Agent cockpit: the queue and the call on the left, the customer in the
+ * middle, wrap-up and today's numbers on the right. Call controls live in the
+ * topbar, where they stay reachable from anywhere.
  */
 export const Route = createFileRoute('/_app/agent')({ component: AgentCockpit })
 
 function AgentCockpit() {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
-  const { data: calls } = useMyCalls(Boolean(presence && presence.state !== 'LOGGED_OUT'))
-  const elapsedSec = useElapsedSec(presence?.enteredAt)
-  const activeCall = calls?.items?.[0]
-  // The agent's own leg is the one carrying an agent id on this call.
-  const myAgentId = activeCall?.parties.find((p) => p.agentId)?.agentId
+  const signedIn = Boolean(presence && presence.state !== 'LOGGED_OUT')
+  const { data: calls } = useMyCalls(signedIn)
+  const call = calls?.items?.[0]
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      <SoftphoneBar />
+    <div className="grid grid-cols-[320px_1fr_280px] items-start gap-4">
+      <div className="flex flex-col gap-4">
+        {call && <IncomingOrActive call={call} />}
+        <Card title={t('agent.myQueue')} aside={t('agent.waitingCount', { count: 0 })}>
+          {/* Queue depth arrives with the queue metrics; an honest empty row
+              beats a number nobody computed. */}
+          <Empty text={t('agent.queueEmpty')} />
+        </Card>
+      </div>
 
-      <div className="grid flex-1 grid-cols-[320px_1fr_280px] gap-4">
-        <div className="flex flex-col gap-4">
-          <Panel title={t('agent.activeCall')}>
-            {activeCall ? (
-              <ActiveCall call={activeCall} agentId={myAgentId} />
-            ) : (
-              <Empty icon={<Headphones className="size-4" />} text={t('agent.noActiveCall')} />
-            )}
-          </Panel>
-          <Panel title={t('agent.myQueue')}>
-            <Empty icon={<Inbox className="size-4" />} text={t('agent.queueEmpty')} />
-          </Panel>
-        </div>
+      <div className="flex flex-col gap-4">
+        <Card title={t('agent.contact')}>
+          {call ? (
+            <div>
+              <div className="tabular text-base font-medium">
+                {call.parties.find((p) => !p.agentId)?.number ?? t('call.unknownNumber')}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {t(`callTypes.${call.callType}`)}
+              </div>
+            </div>
+          ) : (
+            <Empty text={t('agent.noContact')} />
+          )}
+        </Card>
+        <Card title={t('agent.transcript')}>
+          <Empty text={t('agent.noTranscript')} />
+        </Card>
+      </div>
 
-        <div className="flex flex-col gap-4">
-          <Panel title={t('agent.contact')}>
-            <p className="text-xs text-muted-foreground">{t('agent.noContact')}</p>
-          </Panel>
-          <Panel title={t('agent.transcript')} className="flex-1">
-            <p className="text-xs text-muted-foreground">{t('agent.noTranscript')}</p>
-          </Panel>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          <Panel title={t('agent.presence')}>
-            {presence && presence.state !== 'LOGGED_OUT' ? (
-              <dl className="space-y-2 text-sm">
-                <Row label={t('agent.status')}>
-                  <StatePill availability={presence.availability} reason={presence.reason} />
-                </Row>
-                <Row label={t('agent.timeInState')}>
-                  <span className="tabular">{formatDuration(elapsedSec)}</span>
-                </Row>
-                <Row label={t('agent.extension')}>
-                  <span className="tabular">{presence.extensionNumber}</span>
-                </Row>
-              </dl>
-            ) : (
-              <p className="text-xs text-muted-foreground">{t('agent.signInPrompt')}</p>
-            )}
-          </Panel>
-        </div>
+      <div className="flex flex-col gap-4">
+        <Card title={t('agent.presence')}>
+          {presence && signedIn ? (
+            <dl className="space-y-2">
+              <Row label={t('agent.status')}>
+                <StatusPill availability={presence.availability} reason={presence.reason} />
+              </Row>
+              <Row label={t('agent.extension')}>
+                <span className="tabular">{presence.extensionNumber}</span>
+              </Row>
+            </dl>
+          ) : (
+            <Empty text={t('agent.signInPrompt')} />
+          )}
+        </Card>
+        <Card title={t('agent.today')}>
+          <Empty text={t('agent.statsLater')} />
+        </Card>
       </div>
     </div>
   )
 }
 
-function Panel({
+/** The call panel: ringing shows who is calling, talking shows the timer. */
+function IncomingOrActive({ call }: { call: CallSnapshot }) {
+  const { t } = useTranslation()
+  const agentId = call.parties.find((p) => p.agentId)?.agentId
+  const mine = myParty(call, agentId)
+  const other = call.parties.find((p) => !p.agentId)
+  const elapsedSec = useElapsedSec(mine?.answeredAt ?? mine?.createdAt)
+  const isRinging = mine?.state === 'RINGING' || mine?.state === 'DIALING'
+
+  return (
+    <Card title={isRinging ? t('call.incoming') : t('agent.activeCall')}>
+      <div className="tabular text-base font-medium">
+        {other?.number ?? t('call.unknownNumber')}
+      </div>
+      <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+        <span>{t(`callTypes.${call.callType}`)}</span>
+        <span>·</span>
+        <span>{t(`partyStates.${mine?.state ?? 'RINGING'}`)}</span>
+        <span>·</span>
+        <span className="tabular">{formatDuration(elapsedSec)}</span>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">{t('call.controlsInTopbar')}</p>
+    </Card>
+  )
+}
+
+function Card({
   title,
-  className,
+  aside,
   children,
 }: {
   title: string
-  className?: string
-  children: React.ReactNode
+  aside?: ReactNode
+  children: ReactNode
 }) {
   return (
-    <section className={`rounded-md border bg-card p-4 ${className ?? ''}`}>
-      <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h2>
+    <section className="rounded-md border bg-card p-4">
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h2>
+        {aside && <span className="text-xs text-muted-foreground">{aside}</span>}
+      </div>
       {children}
     </section>
   )
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-2">
       <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd>{children}</dd>
+      <dd className="text-sm">{children}</dd>
     </div>
   )
 }
 
-function Empty({ icon, text }: { icon: React.ReactNode; text: string }) {
-  return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      {icon}
-      {text}
-    </div>
-  )
+function Empty({ text }: { text: string }) {
+  return <p className="text-xs text-muted-foreground">{text}</p>
 }

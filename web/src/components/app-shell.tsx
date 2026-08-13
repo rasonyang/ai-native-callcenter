@@ -1,89 +1,35 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import {
-  Activity, BarChart3, Bot, FileClock, Headphones, LayoutDashboard,
-  ListChecks, LogOut, PhoneCall, Radio, ShieldCheck, Users,
-} from 'lucide-react'
+import { LogOut, Radio } from 'lucide-react'
+import { DropdownMenu } from 'radix-ui'
 import type { ReactNode } from 'react'
 
 import { LanguageSwitch } from '@/components/language-switch'
-import { Button } from '@/components/ui/button'
-import type { Identity, Role } from '@/lib/api'
+import type { Identity } from '@/lib/api'
+import { NAV, allowed, breadcrumbFor } from '@/lib/nav'
 import { useLogout } from '@/lib/session'
 import type { StreamStatus } from '@/lib/use-event-stream'
 import { cn } from '@/lib/utils'
 
-interface NavItem {
-  to: string
-  labelKey: string
-  icon: typeof LayoutDashboard
-  minRole: Role
-}
-
-interface NavGroup {
-  labelKey: string
-  items: NavItem[]
-}
-
-/** Navigation is role-scoped: an agent never sees supervisor or admin groups. */
-const NAV: NavGroup[] = [
-  {
-    labelKey: 'nav.workspace',
-    items: [{ to: '/agent', labelKey: 'nav.dashboard', icon: Headphones, minRole: 'AGENT' }],
-  },
-  {
-    labelKey: 'nav.supervise',
-    items: [
-      { to: '/supervisor', labelKey: 'nav.wallboard', icon: LayoutDashboard, minRole: 'SUPERVISOR' },
-      { to: '/supervisor/agents', labelKey: 'nav.agents', icon: Users, minRole: 'SUPERVISOR' },
-      { to: '/supervisor/queues', labelKey: 'nav.queues', icon: ListChecks, minRole: 'SUPERVISOR' },
-      { to: '/supervisor/quality', labelKey: 'nav.quality', icon: ShieldCheck, minRole: 'SUPERVISOR' },
-    ],
-  },
-  {
-    labelKey: 'nav.manage',
-    items: [
-      { to: '/admin', labelKey: 'nav.overview', icon: Activity, minRole: 'ADMIN' },
-      { to: '/admin/users', labelKey: 'nav.users', icon: Users, minRole: 'ADMIN' },
-      { to: '/admin/routing', labelKey: 'nav.routing', icon: ListChecks, minRole: 'ADMIN' },
-      { to: '/admin/bots', labelKey: 'nav.bots', icon: Bot, minRole: 'ADMIN' },
-      { to: '/admin/trunks', labelKey: 'nav.trunks', icon: PhoneCall, minRole: 'ADMIN' },
-    ],
-  },
-  {
-    labelKey: 'nav.system',
-    items: [
-      { to: '/admin/cdr', labelKey: 'nav.cdr', icon: FileClock, minRole: 'SUPERVISOR' },
-      { to: '/admin/reports', labelKey: 'nav.reports', icon: BarChart3, minRole: 'SUPERVISOR' },
-      { to: '/admin/audit', labelKey: 'nav.audit', icon: FileClock, minRole: 'ADMIN' },
-    ],
-  },
-]
-
-const ROLE_RANK: Record<Role, number> = { AGENT: 1, SUPERVISOR: 2, ADMIN: 3 }
-
-function allowed(role: Role, min: Role) {
-  return ROLE_RANK[role] >= ROLE_RANK[min]
-}
-
 /**
- * Application shell: a fixed 220px sidebar and a 48px breadcrumb topbar.
- * Breadcrumb links point at fixed targets — never browser history.
+ * Application shell: 220px sidebar, 48px topbar carrying the breadcrumb and,
+ * for an agent, their softphone controls.
  */
 export function AppShell({
   user,
   streamStatus,
-  breadcrumb,
+  pathname,
+  softphone,
   children,
 }: {
   user: Identity
   streamStatus: StreamStatus
-  breadcrumb: ReactNode
+  pathname: string
+  /** The agent's call controls, shown inline in the topbar. */
+  softphone?: ReactNode
   children: ReactNode
 }) {
   const { t } = useTranslation()
-  const navigate = useNavigate()
-  const logout = useLogout()
 
   return (
     <div className="flex min-h-screen">
@@ -91,10 +37,12 @@ export function AppShell({
         <div className="flex h-12 items-center px-4 text-sm font-semibold">{t('app.name')}</div>
         <nav className="px-2 pb-4">
           {NAV.map((group) => {
-            const items = group.items.filter((item) => allowed(user.role, item.minRole))
+            const items = group.items.filter(
+              (item) => allowed(user.role, item.minRole) && item.isReady,
+            )
             if (items.length === 0) return null
             return (
-              <div key={group.labelKey} className="mb-3">
+              <div key={group.labelKey + group.roleHome} className="mb-3">
                 <div className="px-2 py-1 text-xs uppercase tracking-wide text-muted-foreground">
                   {t(group.labelKey)}
                 </div>
@@ -103,6 +51,7 @@ export function AppShell({
                     key={item.to}
                     to={item.to}
                     className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-foreground hover:bg-muted"
+                    activeOptions={{ exact: item.to === '/agent' || item.to === '/supervisor' }}
                     activeProps={{ className: 'bg-primary/6 text-primary' }}
                   >
                     <item.icon className="size-4" />
@@ -116,25 +65,13 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 items-center justify-between border-b bg-card px-4">
-          <div className="flex items-center gap-2 text-sm">{breadcrumb}</div>
-          <div className="flex items-center gap-2">
+        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-4">
+          <Breadcrumb pathname={pathname} />
+          {softphone}
+          <div className="ml-auto flex items-center gap-2">
             <StreamIndicator status={streamStatus} />
             <LanguageSwitch />
-            <div className="text-xs text-muted-foreground">
-              {user.displayName} · {t(`roles.${user.role}`)}
-            </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              title={t('common.signOut')}
-              aria-label={t('common.signOut')}
-              onClick={() =>
-                logout.mutate(undefined, { onSuccess: () => void navigate({ to: '/login' }) })
-              }
-            >
-              <LogOut />
-            </Button>
+            <UserMenu user={user} />
           </div>
         </header>
 
@@ -145,19 +82,95 @@ export function AppShell({
 }
 
 /**
+ * Role / Section, derived from the nav config. Clickable segments are
+ * secondary and turn accent on hover; the current one is primary and inert.
+ */
+function Breadcrumb({ pathname }: { pathname: string }) {
+  const { t } = useTranslation()
+  const crumbs = breadcrumbFor(pathname)
+
+  return (
+    <div className="flex shrink-0 items-center gap-1.5 text-sm">
+      {crumbs.map((crumb, index) => (
+        <span key={crumb.labelKey + index} className="flex items-center gap-1.5">
+          {index > 0 && <span className="text-muted-foreground/50">/</span>}
+          {crumb.to ? (
+            <Link to={crumb.to} className="text-muted-foreground hover:text-primary">
+              {t(crumb.labelKey)}
+            </Link>
+          ) : (
+            <span className="font-medium">{t(crumb.labelKey)}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function UserMenu({ user }: { user: Identity }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const logout = useLogout()
+
+  const initials = user.displayName
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase()
+
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button className="flex h-8 items-center gap-2 rounded-md border px-2 text-xs hover:bg-muted">
+          <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+            {initials}
+          </span>
+          <span className="text-muted-foreground">{t(`roles.${user.role}`)}</span>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 min-w-44 rounded-md border bg-popover p-1 text-sm shadow-md"
+        >
+          <div className="px-2 py-1.5">
+            <div className="font-medium">{user.displayName}</div>
+            <div className="text-xs text-muted-foreground">{user.username}</div>
+          </div>
+          <div className="my-1 h-px bg-border" />
+          <DropdownMenu.Item
+            className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-muted"
+            onSelect={() =>
+              logout.mutate(undefined, { onSuccess: () => void navigate({ to: '/login' }) })
+            }
+          >
+            <LogOut className="size-4" />
+            {t('common.signOut')}
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}
+
+/**
  * Health of the data stream between this browser and the server.
  *
  * Deliberately not a green status dot: the softphone extension shows its own
- * registration dot in the same corner of the screen, and two adjacent green
- * dots meaning different things is worse than no indicator at all. This one
- * stays monochrome and names what it is, turning amber only when the stream is
- * actually degraded.
+ * registration dot in the same corner, and two adjacent green dots meaning
+ * different things is worse than no indicator. Monochrome at rest, amber only
+ * when the stream is degraded.
  */
 function StreamIndicator({ status }: { status: StreamStatus }) {
   const { t } = useTranslation()
   if (status === 'connected') {
     return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground" title={t('stream.connectedHint')}>
+      <div
+        className="flex items-center gap-1 text-xs text-muted-foreground"
+        title={t('stream.connectedHint')}
+      >
         <Radio className="size-3" />
         {t('stream.connected')}
       </div>

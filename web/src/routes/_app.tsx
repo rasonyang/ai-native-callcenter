@@ -1,13 +1,13 @@
-import { Outlet, createFileRoute, redirect, useMatches } from '@tanstack/react-router'
-import { useTranslation } from 'react-i18next'
+import { Outlet, createFileRoute, redirect, useRouterState } from '@tanstack/react-router'
 
 import { AppShell } from '@/components/app-shell'
+import { SoftphoneBar } from '@/components/softphone-bar'
 import { ApiError, api } from '@/lib/api'
 import { useSession } from '@/lib/session'
 import { useEventStream } from '@/lib/use-event-stream'
 
 /**
- * Authenticated layout. Everything below this route requires a session, so the
+ * Authenticated layout. Everything below this route needs a session, so the
  * check happens once here rather than in every page.
  */
 export const Route = createFileRoute('/_app')({
@@ -26,48 +26,21 @@ export const Route = createFileRoute('/_app')({
 })
 
 function AppLayout() {
-  const { t } = useTranslation()
   const { data: user } = useSession()
   const { status } = useEventStream(Boolean(user))
-  const matches = useMatches()
+  const pathname = useRouterState({ select: (state) => state.location.pathname })
 
   if (!user) return null
-
-  // The breadcrumb reflects the matched route chain, and its links are fixed
-  // targets so a click always lands on the same page.
-  const title = matches.at(-1)?.pathname ?? '/'
 
   return (
     <AppShell
       user={user}
       streamStatus={status}
-      breadcrumb={<span className="text-muted-foreground">{t(breadcrumbKey(title))}</span>}
+      pathname={pathname}
+      // An agent carries their call controls with them on every page.
+      softphone={user.role === 'AGENT' ? <SoftphoneBar /> : undefined}
     >
       <Outlet />
     </AppShell>
   )
-}
-
-/** Longest match wins, so a section's own page never borrows its parent's name. */
-const BREADCRUMBS: Array<[string, string]> = [
-  ['/supervisor/agents', 'nav.agents'],
-  ['/supervisor/queues', 'nav.queues'],
-  ['/supervisor/quality', 'nav.quality'],
-  ['/supervisor', 'nav.wallboard'],
-  ['/admin/users', 'nav.users'],
-  ['/admin/routing', 'nav.routing'],
-  ['/admin/bots', 'nav.bots'],
-  ['/admin/trunks', 'nav.trunks'],
-  ['/admin/cdr', 'nav.cdr'],
-  ['/admin/reports', 'nav.reports'],
-  ['/admin/audit', 'nav.audit'],
-  ['/admin', 'nav.overview'],
-  ['/agent', 'nav.dashboard'],
-]
-
-function breadcrumbKey(pathname: string): string {
-  for (const [prefix, key] of BREADCRUMBS) {
-    if (pathname.startsWith(prefix)) return key
-  }
-  return 'app.name'
 }

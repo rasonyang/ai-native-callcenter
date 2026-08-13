@@ -5,8 +5,11 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ErrorCode is the machine-readable, translatable failure identifier.
@@ -59,4 +62,11 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError writes the standard error envelope.
 func writeError(w http.ResponseWriter, status int, code ErrorCode, message string, params map[string]any) {
 	writeJSON(w, status, errorEnvelope{Error: APIError{Code: code, Message: message, Params: params}})
+}
+
+// isUniqueViolation reports a PostgreSQL unique-constraint failure, which
+// means the operator chose an identifier somebody already has.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

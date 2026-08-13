@@ -37,7 +37,9 @@
     "trunks": "Trunks & Numbers",
     "cdr": "CDR",
     "reports": "Reports",
-    "audit": "Audit Log"
+    "audit": "Audit Log",
+    "extensions": "Extensions",
+    "numbers": "Numbers"
   },
   "roles": {
     "AGENT": "Agent",
@@ -118,7 +120,11 @@
     "contact": "Contact",
     "noContact": "No caller identified yet.",
     "transcript": "Live transcript",
-    "noTranscript": "The transcript appears once a bot call starts."
+    "noTranscript": "The transcript appears once a bot call starts.",
+    "idle": "Idle",
+    "today": "Today",
+    "statsLater": "Handled counts arrive with reporting.",
+    "waitingCount": "{{count}} waiting"
   },
   "supervisor": {
     "agent": "Agent",
@@ -130,7 +136,11 @@
     "actions": "Actions",
     "forceLogout": "Force sign-out",
     "forceLogoutConfirm": "Sign {{name}} out? Their phone stops receiving calls immediately.",
-    "noAgents": "No agents configured yet."
+    "noAgents": "No agents configured yet.",
+    "name": "Name",
+    "ext": "Ext.",
+    "searchAgents": "Search agents…",
+    "onlineCount": "{{online}} of {{total}} agents signed in"
   },
   "partyStates": {
     "DIALING": "Dialling",
@@ -147,6 +157,20 @@
     "transfer": "Transfer",
     "transferTo": "Extension",
     "unknownNumber": "Unknown number",
-    "incoming": "Incoming call"
+    "incoming": "Incoming call",
+    "answering": "Answering…",
+    "controlsInTopbar": "Call controls are in the bar above."
+  },
+  "wallboard": {
+    "agentsAvailable": "Agents available",
+    "availableOfSignedIn": "available / signed in",
+    "onCall": "On call",
+    "rightNow": "right now",
+    "devicesUnreachable": "Phones unreachable",
+    "registeredButSilent": "registered but not answering",
+    "streamClients": "Consoles live",
+    "consolesConnected": "event streams connected",
+    "agentStates": "Agent states",
+    "nobodySignedIn": "Nobody is signed in yet."
   }
 }

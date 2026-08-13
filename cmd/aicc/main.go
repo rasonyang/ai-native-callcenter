@@ -19,6 +19,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
@@ -145,6 +146,7 @@ func run() error {
 			Agents:   agentSvc,
 			AgentDir: agentDirectory{st},
 			Calls:    coordinator,
+			Catalog:  catalog.NewService(st.Catalog(), adapter, st.Catalog()),
 			SPA:      spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

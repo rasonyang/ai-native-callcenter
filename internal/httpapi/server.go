@@ -36,6 +36,7 @@ type Server struct {
 	agents   AgentService
 	agentDir AgentDirectory
 	calls    CallService
+	catalog  CatalogService
 	spa      http.Handler
 }
 
@@ -46,6 +47,7 @@ type Deps struct {
 	Agents   AgentService
 	AgentDir AgentDirectory
 	Calls    CallService
+	Catalog  CatalogService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -60,6 +62,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		agents:   deps.Agents,
 		agentDir: deps.AgentDir,
 		calls:    deps.Calls,
+		catalog:  deps.Catalog,
 		spa:      deps.SPA,
 	}
 }
@@ -116,6 +119,39 @@ func (s *Server) Handler() http.Handler {
 						call.Post("/calls/{callId}/transfer", s.handleCallTransfer)
 					})
 					private.With(requireSupervisorRole).Get("/calls", s.handleAllCalls)
+				}
+
+				if s.catalog != nil {
+					// Configuration is administration: changing who can
+					// register, which queues exist and which numbers reach
+					// them is not a supervision task.
+					private.Group(func(admin chi.Router) {
+						admin.Use(requireRole(auth.RoleAdmin))
+
+						admin.Get("/extensions", s.handleListExtensions)
+						admin.Post("/extensions", s.handleCreateExtension)
+						admin.Put("/extensions/{extensionId}", s.handleUpdateExtension)
+						admin.Delete("/extensions/{extensionId}", s.handleDeleteExtension)
+
+						admin.Post("/queues", s.handleCreateQueue)
+						admin.Put("/queues/{queueId}", s.handleUpdateQueue)
+						admin.Delete("/queues/{queueId}", s.handleDeleteQueue)
+						admin.Put("/queues/{queueId}/agents", s.handleStaffQueue)
+						admin.Delete("/queues/{queueId}/agents/{agentId}", s.handleUnstaffQueue)
+
+						admin.Get("/dids", s.handleListDIDs)
+						admin.Post("/dids", s.handleCreateDID)
+						admin.Put("/dids/{didId}", s.handleUpdateDID)
+						admin.Delete("/dids/{didId}", s.handleDeleteDID)
+					})
+
+					// Reading the queues and their staffing is supervision:
+					// it answers who is covering what right now.
+					private.Group(func(sup chi.Router) {
+						sup.Use(requireSupervisorRole)
+						sup.Get("/queues", s.handleListQueues)
+						sup.Get("/queues/{queueId}/agents", s.handleListQueueAgents)
+					})
 				}
 
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)

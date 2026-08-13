@@ -37,7 +37,9 @@
     "trunks": "中继与号码",
     "cdr": "通话记录",
     "reports": "报表",
-    "audit": "审计日志"
+    "audit": "审计日志",
+    "extensions": "分机",
+    "numbers": "号码"
   },
   "roles": {
     "AGENT": "坐席",
@@ -118,7 +120,11 @@
     "contact": "客户",
     "noContact": "尚未识别来电客户。",
     "transcript": "实时转写",
-    "noTranscript": "机器人通话开始后显示转写内容。"
+    "noTranscript": "机器人通话开始后显示转写内容。",
+    "idle": "空闲",
+    "today": "今日",
+    "statsLater": "话务统计将随报表功能提供。",
+    "waitingCount": "{{count}} 个等待"
   },
   "supervisor": {
     "agent": "坐席",
@@ -130,7 +136,11 @@
     "actions": "操作",
     "forceLogout": "强制签出",
     "forceLogoutConfirm": "确认将 {{name}} 签出？其话机将立即停止接听来电。",
-    "noAgents": "尚未配置坐席。"
+    "noAgents": "尚未配置坐席。",
+    "name": "姓名",
+    "ext": "分机",
+    "searchAgents": "搜索坐席…",
+    "onlineCount": "{{total}} 位坐席中 {{online}} 位已签入"
   },
   "partyStates": {
     "DIALING": "外呼中",
@@ -147,6 +157,20 @@
     "transfer": "转接",
     "transferTo": "分机号",
     "unknownNumber": "未知号码",
-    "incoming": "来电"
+    "incoming": "来电",
+    "answering": "接听中…",
+    "controlsInTopbar": "通话控制在上方状态栏。"
+  },
+  "wallboard": {
+    "agentsAvailable": "可用坐席",
+    "availableOfSignedIn": "示闲 / 已签入",
+    "onCall": "通话中",
+    "rightNow": "当前",
+    "devicesUnreachable": "话机不可达",
+    "registeredButSilent": "已注册但无响应",
+    "streamClients": "在线控制台",
+    "consolesConnected": "事件流连接数",
+    "agentStates": "坐席状态",
+    "nobodySignedIn": "暂无坐席签入。"
   }
 }

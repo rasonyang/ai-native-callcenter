@@ -43,7 +43,7 @@ type Did struct {
 	ID                 uuid.UUID          `json:"id"`
 	Number             string             `json:"number"`
 	Language           string             `json:"language"`
-	FlowID             uuid.UUID          `json:"flowId"`
+	FlowID             *uuid.UUID         `json:"flowId"`
 	FallbackQueueID    *uuid.UUID         `json:"fallbackQueueId"`
 	IsRecordingEnabled bool               `json:"isRecordingEnabled"`
 	Description        string             `json:"description"`
@@ -79,20 +79,23 @@ type LuaccDirectory struct {
 }
 
 type LuaccQueue struct {
-	Name                     string  `json:"name"`
-	ExtNumber                string  `json:"extNumber"`
-	Strategy                 string  `json:"strategy"`
-	MohSound                 string  `json:"mohSound"`
-	MaxWaitSec               int32   `json:"maxWaitSec"`
-	MaxWaitNoAgentSec        int32   `json:"maxWaitNoAgentSec"`
-	AnnounceSound            *string `json:"announceSound"`
-	AnnounceFrequencySec     int32   `json:"announceFrequencySec"`
-	TierRules                []byte  `json:"tierRules"`
-	DiscardAbandonedAfterSec int32   `json:"discardAbandonedAfterSec"`
-	IsAbandonedResumeAllowed bool    `json:"isAbandonedResumeAllowed"`
-	IsRecordingEnabled       bool    `json:"isRecordingEnabled"`
-	Overflow                 []byte  `json:"overflow"`
-	IsEnabled                bool    `json:"isEnabled"`
+	Name                     string      `json:"name"`
+	ExtNumber                string      `json:"extNumber"`
+	Strategy                 string      `json:"strategy"`
+	MohSound                 string      `json:"mohSound"`
+	MaxWaitSec               int32       `json:"maxWaitSec"`
+	MaxWaitNoAgentSec        int32       `json:"maxWaitNoAgentSec"`
+	AnnounceSound            *string     `json:"announceSound"`
+	AnnounceFrequencySec     int32       `json:"announceFrequencySec"`
+	IsTierRulesApplied       interface{} `json:"isTierRulesApplied"`
+	TierRuleWaitSec          interface{} `json:"tierRuleWaitSec"`
+	DiscardAbandonedAfterSec int32       `json:"discardAbandonedAfterSec"`
+	IsAbandonedResumeAllowed bool        `json:"isAbandonedResumeAllowed"`
+	IsRecordingEnabled       bool        `json:"isRecordingEnabled"`
+	OverflowType             interface{} `json:"overflowType"`
+	OverflowTarget           interface{} `json:"overflowTarget"`
+	OverflowSound            interface{} `json:"overflowSound"`
+	IsEnabled                bool        `json:"isEnabled"`
 }
 
 type Queue struct {
