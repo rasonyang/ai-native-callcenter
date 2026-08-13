@@ -68,9 +68,11 @@
     "INTERNAL": "Internal"
   },
   "stream": {
-    "connected": "Live",
+    "connected": "Data stream",
     "reconnecting": "Reconnecting…",
-    "offline": "Offline"
+    "offline": "Offline",
+    "connectedHint": "Live updates from the server are connected. This is not your phone's registration.",
+    "degradedHint": "Live updates are interrupted; the page may be showing stale data."
   },
   "errors": {
     "INVALID_CREDENTIALS": "Incorrect username or password.",
@@ -87,7 +89,9 @@
     "UNKNOWN": "Unexpected error.",
     "EXTENSION_IN_USE": "Another agent is signed in at that extension.",
     "AGENT_ALREADY_LOGGED_IN": "You are already signed in.",
-    "AGENT_NOT_LOGGED_IN": "You are not signed in."
+    "AGENT_NOT_LOGGED_IN": "You are not signed in.",
+    "CALL_NOT_FOUND": "That call has already ended.",
+    "NOT_CALL_PARTY": "You are not on that call."
   },
   "availability": {
     "READY": "Ready",
@@ -127,5 +131,22 @@
     "forceLogout": "Force sign-out",
     "forceLogoutConfirm": "Sign {{name}} out? Their phone stops receiving calls immediately.",
     "noAgents": "No agents configured yet."
+  },
+  "partyStates": {
+    "DIALING": "Dialling",
+    "RINGING": "Ringing",
+    "TALKING": "Talking",
+    "HELD": "On hold",
+    "RELEASED": "Ended"
+  },
+  "call": {
+    "answer": "Answer",
+    "hold": "Hold",
+    "retrieve": "Resume",
+    "hangup": "Hang up",
+    "transfer": "Transfer",
+    "transferTo": "Extension",
+    "unknownNumber": "Unknown number",
+    "incoming": "Incoming call"
   }
 }

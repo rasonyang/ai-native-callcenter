@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
-import { ApiError, agentApi, type Availability, type NotReadyReason } from './api'
+import {
+  ApiError,
+  agentApi,
+  callApi,
+  type Availability,
+  type CallSnapshot,
+  type NotReadyReason,
+} from './api'
 
 export const PRESENCE_KEY = ['agent', 'presence'] as const
 export const ROSTER_KEY = ['agents', 'roster'] as const
@@ -89,4 +96,53 @@ export function useElapsedSec(since: string | undefined): number {
 
   if (!since) return 0
   return Math.max(0, Math.floor((now - new Date(since).getTime()) / 1000))
+}
+
+export const CALLS_KEY = ['calls', 'mine'] as const
+
+/** The calls this agent is currently a party to. */
+export function useMyCalls(enabled: boolean) {
+  return useQuery({
+    queryKey: CALLS_KEY,
+    enabled,
+    retry: false,
+    staleTime: 2_000,
+    queryFn: async () => {
+      try {
+        return await callApi.mine()
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) return { items: [] }
+        throw error
+      }
+    },
+  })
+}
+
+export function useCallActions() {
+  const queryClient = useQueryClient()
+  // Call state is authoritative on the switch, so an action refetches rather
+  // than guessing what the switch will do next.
+  const settle = () => void queryClient.invalidateQueries({ queryKey: CALLS_KEY })
+
+  return {
+    answer: useMutation({ mutationFn: callApi.answer, onSettled: settle }),
+    hold: useMutation({ mutationFn: callApi.hold, onSettled: settle }),
+    retrieve: useMutation({ mutationFn: callApi.retrieve, onSettled: settle }),
+    hangup: useMutation({ mutationFn: callApi.hangup, onSettled: settle }),
+    transfer: useMutation({
+      mutationFn: ({ callId, destination }: { callId: string; destination: string }) =>
+        callApi.transfer(callId, destination),
+      onSettled: settle,
+    }),
+  }
+}
+
+/** The agent's own leg of a call, which is the one they can control. */
+export function myParty(call: CallSnapshot, agentId: string | undefined) {
+  return call.parties.find((p) => p.agentId && p.agentId === agentId && p.state !== 'RELEASED')
+}
+
+/** The other side of the conversation, for display. */
+export function otherParty(call: CallSnapshot, agentId: string | undefined) {
+  return call.parties.find((p) => !p.agentId || p.agentId !== agentId)
 }

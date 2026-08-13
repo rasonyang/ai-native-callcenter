@@ -35,6 +35,7 @@ type Server struct {
 	hub      *events.Hub
 	agents   AgentService
 	agentDir AgentDirectory
+	calls    CallService
 	spa      http.Handler
 }
 
@@ -44,6 +45,7 @@ type Deps struct {
 	Hub      *events.Hub
 	Agents   AgentService
 	AgentDir AgentDirectory
+	Calls    CallService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -57,6 +59,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		hub:      deps.Hub,
 		agents:   deps.Agents,
 		agentDir: deps.AgentDir,
+		calls:    deps.Calls,
 		spa:      deps.SPA,
 	}
 }
@@ -97,6 +100,22 @@ func (s *Server) Handler() http.Handler {
 						sup.Get("/agents", s.handleAgentRoster)
 						sup.Post("/agents/{agentId}/force-logout", s.handleAgentForceLogout)
 					})
+				}
+
+				if s.calls != nil {
+					// Call control acts through the caller's own agent
+					// identity: a call id in the path is never authority on
+					// its own.
+					private.Group(func(call chi.Router) {
+						call.Use(requireAgentRole)
+						call.Get("/calls/mine", s.handleMyCalls)
+						call.Post("/calls/{callId}/answer", s.handleCallAnswer)
+						call.Post("/calls/{callId}/hold", s.handleCallHold)
+						call.Post("/calls/{callId}/retrieve", s.handleCallRetrieve)
+						call.Post("/calls/{callId}/hangup", s.handleCallHangup)
+						call.Post("/calls/{callId}/transfer", s.handleCallTransfer)
+					})
+					private.With(requireSupervisorRole).Get("/calls", s.handleAllCalls)
 				}
 
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)

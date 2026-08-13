@@ -68,9 +68,11 @@
     "INTERNAL": "内线"
   },
   "stream": {
-    "connected": "实时",
+    "connected": "数据流",
     "reconnecting": "重连中…",
-    "offline": "已断开"
+    "offline": "已断开",
+    "connectedHint": "与服务器的实时更新已连接。这不是话机注册状态。",
+    "degradedHint": "实时更新已中断，页面数据可能不是最新的。"
   },
   "errors": {
     "INVALID_CREDENTIALS": "用户名或密码不正确。",
@@ -87,7 +89,9 @@
     "UNKNOWN": "未知错误。",
     "EXTENSION_IN_USE": "该分机已被其他坐席签入。",
     "AGENT_ALREADY_LOGGED_IN": "您已签入。",
-    "AGENT_NOT_LOGGED_IN": "您尚未签入。"
+    "AGENT_NOT_LOGGED_IN": "您尚未签入。",
+    "CALL_NOT_FOUND": "该通话已结束。",
+    "NOT_CALL_PARTY": "您不在该通话中。"
   },
   "availability": {
     "READY": "示闲",
@@ -127,5 +131,22 @@
     "forceLogout": "强制签出",
     "forceLogoutConfirm": "确认将 {{name}} 签出？其话机将立即停止接听来电。",
     "noAgents": "尚未配置坐席。"
+  },
+  "partyStates": {
+    "DIALING": "外呼中",
+    "RINGING": "振铃",
+    "TALKING": "通话中",
+    "HELD": "保持",
+    "RELEASED": "已结束"
+  },
+  "call": {
+    "answer": "接听",
+    "hold": "保持",
+    "retrieve": "恢复",
+    "hangup": "挂断",
+    "transfer": "转接",
+    "transferTo": "分机号",
+    "unknownNumber": "未知号码",
+    "incoming": "来电"
   }
 }

@@ -124,8 +124,10 @@ func run() error {
 		slog.InfoContext(ctx, "registrations reconciled", "endpoints", len(regs))
 	})
 
+	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
+
 	go link.Run(ctx)
-	go dispatchSwitchEvents(ctx, link, registry, agentSvc)
+	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc)
 
 	var spa http.Handler
 	if dist, err := web.Dist(); err == nil {
@@ -142,6 +144,7 @@ func run() error {
 			Hub:      hub,
 			Agents:   agentSvc,
 			AgentDir: agentDirectory{st},
+			Calls:    coordinator,
 			SPA:      spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -204,7 +207,7 @@ func purgeSessions(ctx context.Context, svc *auth.Service) {
 // dispatchSwitchEvents is the single consumer of the switch event stream. It
 // normalizes each event once and hands it to whoever owns that fact: the call
 // registry for channel lifecycle, the agent service for device reachability.
-func dispatchSwitchEvents(ctx context.Context, link *esl.Link, registry *telephony.Registry, agentSvc *agents.Service) {
+func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *telephony.Coordinator, agentSvc *agents.Service) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -227,7 +230,7 @@ func dispatchSwitchEvents(ctx context.Context, link *esl.Link, registry *telepho
 				// crashed browser tab.
 				agentSvc.ObserveDevice(ctx, ev.Extension, true, ev.Registered)
 			default:
-				registry.Dispatch(ev)
+				coordinator.Handle(ctx, ev)
 			}
 		}
 	}

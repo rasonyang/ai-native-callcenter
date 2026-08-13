@@ -156,3 +156,44 @@ export const agentApi = {
   forceLogout: (agentId: string) =>
     request<Presence>(`/agents/${agentId}/force-logout`, { method: 'POST' }),
 }
+
+// --- Calls ----------------------------------------------------------------
+
+export type PartyState = 'DIALING' | 'RINGING' | 'TALKING' | 'HELD' | 'RELEASED'
+export type CallType = 'INBOUND' | 'OUTBOUND' | 'CONSULT' | 'INTERNAL'
+
+export interface PartySnapshot {
+  partyId: string
+  channelId: string
+  role: 'ORIGINATOR' | 'TARGET'
+  state: PartyState
+  number?: string
+  otherNumber?: string
+  agentId?: string
+  createdAt: string
+  answeredAt?: string
+  releasedAt?: string
+}
+
+export interface CallSnapshot {
+  callId: string
+  callType: CallType
+  state: 'CREATED' | 'RUNNING' | 'ENDING' | 'ENDED'
+  language?: string
+  parties: PartySnapshot[]
+  userData?: Record<string, unknown>
+  createdAt: string
+}
+
+export const callApi = {
+  mine: () => request<{ items: CallSnapshot[] }>('/calls/mine'),
+  answer: (callId: string) => request<void>(`/calls/${callId}/answer`, { method: 'POST' }),
+  hold: (callId: string) => request<void>(`/calls/${callId}/hold`, { method: 'POST' }),
+  retrieve: (callId: string) => request<void>(`/calls/${callId}/retrieve`, { method: 'POST' }),
+  hangup: (callId: string) => request<void>(`/calls/${callId}/hangup`, { method: 'POST' }),
+  transfer: (callId: string, destination: string) =>
+    request<void>(`/calls/${callId}/transfer`, {
+      method: 'POST',
+      body: JSON.stringify({ destination }),
+    }),
+}

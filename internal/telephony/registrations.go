@@ -47,7 +47,7 @@ func parseRegistrations(out string) []Registration {
 		current = nil
 	}
 
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(line, "Call-ID:"):

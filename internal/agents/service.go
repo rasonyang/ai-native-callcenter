@@ -491,3 +491,37 @@ func (s *Service) extensionHolderLocked(extensionNumber string) (uuid.UUID, bool
 	}
 	return uuid.Nil, false
 }
+
+// AgentAtExtension reports which agent is signed in at an extension, so a leg
+// being delivered there can be attributed to them.
+func (s *Service) AgentAtExtension(extensionNumber string) (uuid.UUID, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.extensionHolderLocked(extensionNumber)
+}
+
+// AgentByCallcenterName resolves the switch's own name for an agent.
+func (s *Service) AgentByCallcenterName(name string) (uuid.UUID, bool) {
+	s.mu.Lock()
+	ids := make([]uuid.UUID, 0, len(s.live))
+	for id := range s.live {
+		ids = append(ids, id)
+	}
+	s.mu.Unlock()
+
+	ctx := context.Background()
+	for _, id := range ids {
+		if profile, err := s.store.AgentProfile(ctx, id); err == nil && profile.CallcenterName == name {
+			return id, true
+		}
+	}
+	return uuid.Nil, false
+}
+
+// DeviceState reports what the switch has told us about an agent's phone.
+func (s *Service) DeviceState(agentID uuid.UUID) (isRegistered, isInService bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.presenceLocked(agentID)
+	return p.IsRegistered, p.IsDeviceInService
+}

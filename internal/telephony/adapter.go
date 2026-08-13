@@ -52,8 +52,15 @@ func (a *Adapter) Endpoint(extensionNumber string) string {
 
 // AddCallcenterAgent registers an agent. The callback type makes the switch
 // originate to the agent's contact when a call is offered.
+//
+// Registering an agent the switch already knows is the normal case on every
+// sign-in after the first, so the switch saying so is success, not a fault.
 func (a *Adapter) AddCallcenterAgent(name string) error {
-	return a.exec("callcenter_config agent add %s callback", name)
+	err := a.exec("callcenter_config agent add %s callback", name)
+	if err != nil && strings.Contains(err.Error(), "Agent already exist") {
+		return nil
+	}
+	return err
 }
 
 // DeleteCallcenterAgent removes an agent.

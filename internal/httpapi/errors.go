@@ -24,6 +24,8 @@ const (
 	CodeExtensionInUse       ErrorCode = "EXTENSION_IN_USE"
 	CodeAgentAlreadyLoggedIn ErrorCode = "AGENT_ALREADY_LOGGED_IN"
 	CodeAgentNotLoggedIn     ErrorCode = "AGENT_NOT_LOGGED_IN"
+	CodeCallNotFound         ErrorCode = "CALL_NOT_FOUND"
+	CodeNotCallParty         ErrorCode = "NOT_CALL_PARTY"
 	CodeUserSuspended        ErrorCode = "USER_SUSPENDED"
 	CodeSwitchDown           ErrorCode = "SWITCH_DOWN"
 	CodeStorageDown          ErrorCode = "STORAGE_DOWN"

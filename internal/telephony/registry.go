@@ -177,6 +177,36 @@ func (r *Registry) Do(callID uuid.UUID, fn func(*Call)) error {
 	return nil
 }
 
+// Owns reports whether a channel is already bound to a call.
+func (r *Registry) Owns(channelID string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.byChannel[channelID]
+	return ok
+}
+
+// CallForChannel returns the call a channel belongs to.
+func (r *Registry) CallForChannel(channelID string) (uuid.UUID, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	a, ok := r.byChannel[channelID]
+	if !ok {
+		return uuid.Nil, false
+	}
+	return a.call.CallID, true
+}
+
+// Retire stops a call's actor without waiting for its legs to end, used when
+// two calls turn out to be one conversation and the duplicate is absorbed.
+func (r *Registry) Retire(callID uuid.UUID) {
+	r.mu.RLock()
+	a, ok := r.byCall[callID]
+	r.mu.RUnlock()
+	if ok {
+		a.stop()
+	}
+}
+
 // Count reports how many calls are live.
 func (r *Registry) Count() int {
 	r.mu.RLock()

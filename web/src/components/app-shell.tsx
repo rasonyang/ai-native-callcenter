@@ -144,24 +144,33 @@ export function AppShell({
   )
 }
 
-/** Live-stream health: the dot is the only place color carries meaning here. */
+/**
+ * Health of the data stream between this browser and the server.
+ *
+ * Deliberately not a green status dot: the softphone extension shows its own
+ * registration dot in the same corner of the screen, and two adjacent green
+ * dots meaning different things is worse than no indicator at all. This one
+ * stays monochrome and names what it is, turning amber only when the stream is
+ * actually degraded.
+ */
 function StreamIndicator({ status }: { status: StreamStatus }) {
   const { t } = useTranslation()
-  const color =
-    status === 'connected'
-      ? 'var(--state-available)'
-      : status === 'reconnecting'
-        ? 'var(--state-ringing)'
-        : 'var(--state-offline)'
-
+  if (status === 'connected') {
+    return (
+      <div className="flex items-center gap-1 text-xs text-muted-foreground" title={t('stream.connectedHint')}>
+        <Radio className="size-3" />
+        {t('stream.connected')}
+      </div>
+    )
+  }
   return (
-    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-      <span
-        className={cn('size-2 rounded-full', status === 'reconnecting' && 'animate-pulse')}
-        style={{ backgroundColor: color }}
-      />
-      <Radio className="size-3" />
-      {t(`stream.${status === 'connected' ? 'connected' : status === 'reconnecting' ? 'reconnecting' : 'offline'}`)}
+    <div
+      className="flex items-center gap-1 text-xs"
+      style={{ color: 'var(--state-ringing)' }}
+      title={t('stream.degradedHint')}
+    >
+      <Radio className={cn('size-3', status === 'reconnecting' && 'animate-pulse')} />
+      {t(status === 'reconnecting' ? 'stream.reconnecting' : 'stream.offline')}
     </div>
   )
 }

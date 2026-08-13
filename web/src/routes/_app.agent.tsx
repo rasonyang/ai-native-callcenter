@@ -2,9 +2,10 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { Headphones, Inbox } from 'lucide-react'
 
+import { ActiveCall } from '@/components/active-call'
 import { SoftphoneBar } from '@/components/softphone-bar'
 import { StatePill } from '@/components/state-dot'
-import { useElapsedSec, usePresence } from '@/lib/agent'
+import { useElapsedSec, useMyCalls, usePresence } from '@/lib/agent'
 import { formatDuration } from '@/lib/utils'
 
 /**
@@ -19,7 +20,11 @@ export const Route = createFileRoute('/_app/agent')({ component: AgentCockpit })
 function AgentCockpit() {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
+  const { data: calls } = useMyCalls(Boolean(presence && presence.state !== 'LOGGED_OUT'))
   const elapsedSec = useElapsedSec(presence?.enteredAt)
+  const activeCall = calls?.items?.[0]
+  // The agent's own leg is the one carrying an agent id on this call.
+  const myAgentId = activeCall?.parties.find((p) => p.agentId)?.agentId
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -28,7 +33,11 @@ function AgentCockpit() {
       <div className="grid flex-1 grid-cols-[320px_1fr_280px] gap-4">
         <div className="flex flex-col gap-4">
           <Panel title={t('agent.activeCall')}>
-            <Empty icon={<Headphones className="size-4" />} text={t('agent.noActiveCall')} />
+            {activeCall ? (
+              <ActiveCall call={activeCall} agentId={myAgentId} />
+            ) : (
+              <Empty icon={<Headphones className="size-4" />} text={t('agent.noActiveCall')} />
+            )}
           </Panel>
           <Panel title={t('agent.myQueue')}>
             <Empty icon={<Inbox className="size-4" />} text={t('agent.queueEmpty')} />
