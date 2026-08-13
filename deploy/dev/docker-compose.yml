@@ -1,0 +1,25 @@
+# Dev infrastructure for ai-native-callcenter.
+# PostgreSQL runs here (never via host package managers); FreeSWITCH runs natively on the host.
+# The full demo environment (app + FreeSWITCH + seed) lives in deploy/demo/ (M5).
+services:
+  postgres:
+    image: postgres:18
+    container_name: aicc-postgres
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: aicc
+      POSTGRES_PASSWORD: aicc
+      POSTGRES_DB: aicc
+    volumes:
+      # postgres:18 images mount the volume at /var/lib/postgresql (PGDATA lives beneath it)
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aicc -d aicc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  postgres-data:
