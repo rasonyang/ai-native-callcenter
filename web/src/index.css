@@ -11,7 +11,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, sans-serif;
+  /* Inter carries no CJK glyphs, so Chinese would fall back to whatever the
+     OS picks. Naming the CJK families keeps zh rendering predictable across
+     macOS, Windows and Linux instead of platform-dependent. */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
+    sans-serif;
 
   --text-xs: 12px;
   --text-sm: 13px;
