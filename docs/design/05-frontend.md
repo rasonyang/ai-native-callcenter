@@ -22,4 +22,6 @@ TanStack Query owns all server state (queries keyed by resource; mutations inval
 
 ## 6. Build & embedding
 
-`web/` builds to `web/dist` → `go:embed` in `internal/httpapi` (SPA fallback serving, immutable asset caching). Dev: Vite on :5173 proxies `/api` → :8080 (same-origin cookies; SSE proxied with buffering off). The Caddy names from the reference dev setup sit in front unchanged.
+`web/` builds to `web/dist` → `go:embed` in `internal/httpapi` (SPA fallback serving, immutable asset caching). Dev: Vite on :5173 proxies `/api` → :8080, so the browser always sees one origin and the session cookie and event stream behave exactly as they do in the embedded build.
+
+**Dev topology behind the operator's Caddy** (`~/workspaces/github/proxy/Caddyfile`, outside this repo): `app.aicc.test` → Vite :5173, `api.aicc.test` → aicc :8080, `ws.aicc.test` → FreeSWITCH wss :7443 (the agent phone's registration path, 01 §3). The SPA keeps calling its own origin's `/api`, so no CORS or cross-origin cookie handling is needed — `api.aicc.test` exists for direct API access, not for the SPA. When the SPA is served over TLS, set `AICC_SECURE_COOKIES=true`. The extension's Allow Sites must include the SPA origin.
