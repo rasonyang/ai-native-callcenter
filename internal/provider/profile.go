@@ -49,6 +49,12 @@ type Profile struct {
 	// explicitly, and a missed cancel leaves the model talking over the caller.
 	CancelsResponseItself bool
 
+	// NeedsCueForFirstTurn means the provider refuses to speak into an empty
+	// conversation and must be given something to answer. Our bot answers the
+	// phone and greets first, so on those providers the opening turn has to be
+	// prompted with a synthetic cue.
+	NeedsCueForFirstTurn bool
+
 	// SemanticTurnType is this vendor's name for semantic turn detection.
 	SemanticTurnType string
 	// SemanticTurnSilenceMs is the hold the vendor forces in that mode,
@@ -97,7 +103,10 @@ func QwenProfile() Profile {
 		// This provider expects the client to cancel the response itself when
 		// the caller starts speaking.
 		CancelsResponseItself: false,
-		SemanticTurnType:      "smart_turn",
+		// Verified live: asking for a turn on an empty conversation is
+		// rejected with "conversation has no messages or no user message".
+		NeedsCueForFirstTurn: true,
+		SemanticTurnType:     "smart_turn",
 		// Selecting semantic turns here rewrites the silence hold to two
 		// seconds and ignores any attempt to lower it, which is why that mode
 		// is opt-in rather than the default.

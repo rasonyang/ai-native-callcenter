@@ -9,9 +9,15 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
+
+// FrameInterval is the cadence caller audio is fed at. It matches the
+// packetisation on the telephone leg, so audio moves at the rate it arrives
+// rather than in bursts.
+const FrameInterval = 20 * time.Millisecond
 
 // VoiceSession is one conversation with one speech model.
 //
@@ -69,6 +75,11 @@ type SessionConfig struct {
 	Language string
 	Turn     TurnDetection
 	Tools    []ToolSpec
+	// GreetingCue prompts the opening turn on providers that will not speak
+	// into an empty conversation. It is a stage direction, not something the
+	// caller said, and it is never recorded as caller speech. Empty uses a
+	// default in the session's language.
+	GreetingCue string
 	// InputFormat and OutputFormat are what this session's audio will be in.
 	// The caller converts to and from them.
 	InputFormat  media.AudioFormat

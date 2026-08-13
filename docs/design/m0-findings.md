@@ -56,6 +56,24 @@ Endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-r
 - **⚠ `smart_turn` forces a 2000 ms hold.** Selecting `smart_turn` rewrites `silence_duration_ms` to **2000**, and an explicit `silence_duration_ms: 500` is *ignored* (echoed back as 2000). `server_vad` accepts tuning normally (500 ms echoed as 500). **Design consequence (02 §5/§8 amended)**: the ≤1.2 s p50 budget is unreachable with `smart_turn`; the default for both languages is `server_vad @ 500 ms`, and `smart_turn` becomes an opt-in per-flow setting for backchannel-heavy scenarios, documented as costing ≈+1.5 s of turn latency.
 - **Validation is selective**: a bogus `turn_detection.type` returns a proper `error` (`invalid_request_error/invalid_value`, listing `server_vad, smart_turn, null`), but bogus *audio format* strings are silently accepted and never echoed. Therefore the `g711_ulaw` probe is **inconclusive, treated as unsupported** — the Qwen path keeps the documented 16 kHz-in / 24 kHz-out PCM16 conversion (02 §2 unchanged). Session audio-format fields are never echoed, so acceptance can only be confirmed with real audio (M3).
 
+## M3 addendum — both providers verified with real audio (2026-08-13)
+
+The open item from M0.5 was that Qwen never echoes audio-format fields, so acceptance could only be proven by real audio. Both legs have now been run end to end against the live vendors via `internal/provider`'s gated live tests (`AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider -run Live`).
+
+| | OpenAI `gpt-realtime-2.1` | Qwen `qwen-audio-3.0-realtime-plus` |
+|---|---|---|
+| Negotiated formats | `PCMU@8000` both ways (passthrough) | `PCM16@16000` in / `PCM16@24000` out |
+| `session.updated` after connect | 1.95 s | 0.24 s |
+| First audio delta after `Start` | 3.55 s | 1.04 s |
+| Greeting audio returned | 25 600 B = **3.20 s** at PCMU 8 kHz | 213 220 B = **4.44 s** at PCM16 24 kHz |
+| Transcript | "Hi, you've reached NovaNet—how can I help you today?" | "您好，欢迎致电 NovaNet 客服中心，请问有什么可以帮您？" |
+
+Both byte counts convert to a plausible one-sentence greeting under the declared format, which is the proof that was missing: **M0.3 confirmed with real audio (G.711 passthrough works, not merely accepted), and M0.5's inconclusive item closed — Qwen's documented 16 k/24 k PCM16 is what it actually speaks.**
+
+**New finding, design-affecting**: Qwen **rejects `response.create` on an empty conversation** — `invalid_value: Cannot create response: conversation has no messages or no user message`. Our bot answers the phone and greets first, so the opening turn must be prompted with a synthetic user text item. This is the same wall the java-bot reference hit. Implemented as a profile trait (`NeedsCueForFirstTurn`) with a language-appropriate cue overridable per flow (`SessionConfig.GreetingCue`), **not** as a vendor branch, and **not** sent to providers that greet unprompted — injecting a fake user turn there would put words in the caller's mouth and into the recorded transcript. Design 02 §4 amended.
+
+Latency note for 02 §8: OpenAI's ~1.95 s handshake is session setup, not per-turn, but it sits between answer and greeting. The Qwen route (Beijing) is an order of magnitude faster to set up. Neither figure is a turn-latency measurement; those come from the M3 gate.
+
 ## Environment state after M0 (dev box)
 
 - PostgreSQL 18.4 runs via `deploy/dev/docker-compose.yml` (`aicc-postgres`, 127.0.0.1:5432, user/db `aicc` + callcenter db `aicc_fs`). **Never via brew** (owner directive; the transient brew install was reverted).

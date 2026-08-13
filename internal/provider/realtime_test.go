@@ -208,6 +208,81 @@ func TestStartWaitsForConfirmationThenAsksForTheOpeningTurn(t *testing.T) {
 	}
 }
 
+// One provider refuses to speak into an empty conversation, so the greeting
+// has to be prompted. Verified live: without this the opening turn is rejected
+// with "conversation has no messages or no user message" and the caller is met
+// with silence.
+func TestOpeningTurnIsPromptedWhereTheProviderNeedsIt(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+
+	cfg := basicConfig()
+	cfg.Language = "zh"
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	item := nested(t, f.awaitMessage("conversation.item.create"), "item").(map[string]any)
+	if item["role"] != "user" {
+		t.Errorf("cue sent with role %v, want user", item["role"])
+	}
+	content := item["content"].([]any)[0].(map[string]any)
+	if content["type"] != "input_text" {
+		t.Errorf("cue content type = %v", content["type"])
+	}
+	if !strings.Contains(content["text"].(string), "问候") {
+		t.Errorf("cue is not in the session's language: %v", content["text"])
+	}
+
+	// The cue must precede the request, or it does not help.
+	sent := typesOf(f.messages())
+	cueAt, requestAt := indexOf(sent, "conversation.item.create"), indexOf(sent, "response.create")
+	if cueAt < 0 || requestAt < 0 || cueAt > requestAt {
+		t.Errorf("client sent %v, want the cue before the request", sent)
+	}
+}
+
+// Where the provider greets unprompted, injecting a fake user turn would put
+// words in the caller's mouth and into the transcript.
+func TestNoCueIsSentWhereTheProviderDoesNotNeedOne(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	f.awaitMessage("response.create")
+	f.refuteMessage("conversation.item.create")
+}
+
+func TestGreetingCueCanBeOverridden(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+
+	cfg := basicConfig()
+	cfg.GreetingCue = "(the caller is calling about an outage)"
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	item := nested(t, f.awaitMessage("conversation.item.create"), "item").(map[string]any)
+	content := item["content"].([]any)[0].(map[string]any)
+	if content["text"] != cfg.GreetingCue {
+		t.Errorf("cue = %v, want the configured one", content["text"])
+	}
+}
+
+func indexOf(values []string, want string) int {
+	for i, v := range values {
+		if v == want {
+			return i
+		}
+	}
+	return -1
+}
+
 func TestStartFailsWhenTheConfigurationIsRejected(t *testing.T) {
 	f := newFakeProvider(t, func(f *fakeProvider, message map[string]any) {
 		if message["type"] == "session.update" {

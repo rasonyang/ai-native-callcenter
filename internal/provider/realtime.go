@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -167,11 +168,34 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 
 	// The opening turn is the flow's first node speaking; the caller is
 	// already on the line waiting to be greeted.
+	if r.profile.NeedsCueForFirstTurn {
+		if err := r.conn.send(map[string]any{
+			"type": "conversation.item.create",
+			"item": map[string]any{
+				"type": "message", "role": "user",
+				"content": []map[string]any{{"type": "input_text", "text": greetingCue(cfg)}},
+			},
+		}); err != nil {
+			r.conn.close()
+			return fmt.Errorf("prompt opening turn: %w", err)
+		}
+	}
 	if err := r.conn.send(map[string]any{"type": "response.create"}); err != nil {
 		r.conn.close()
 		return fmt.Errorf("request opening turn: %w", err)
 	}
 	return nil
+}
+
+// greetingCue is the stage direction that gets a provider talking first.
+func greetingCue(cfg SessionConfig) string {
+	if cfg.GreetingCue != "" {
+		return cfg.GreetingCue
+	}
+	if strings.HasPrefix(strings.ToLower(cfg.Language), "zh") {
+		return "（电话已接通，请按照你的指示开始问候来电者。）"
+	}
+	return "(The call has connected. Greet the caller as instructed.)"
 }
 
 // SendAudio forwards one chunk of caller audio.
