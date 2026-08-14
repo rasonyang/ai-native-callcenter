@@ -153,8 +153,26 @@ type Call struct {
 	// transfers and lands in the CDR. Switch facts never live here.
 	UserData map[string]any
 
+	// Queue is what happened between joining a queue and reaching a person,
+	// recorded as the callcenter events arrive.
+	Queue QueueFacts
+	// Bot is the AI leg's share of the story, captured from the caller's
+	// channel when that leg hangs up.
+	Bot BotShare
+
 	CreatedAt time.Time
 	EndedAt   time.Time
+}
+
+// QueueFacts is a call's passage through a queue.
+type QueueFacts struct {
+	Name         string     `json:"name,omitempty"`
+	JoinedAt     time.Time  `json:"joinedAt,omitzero"`
+	BridgedAt    time.Time  `json:"bridgedAt,omitzero"`
+	LeftAt       time.Time  `json:"leftAt,omitzero"`
+	Cause        string     `json:"cause,omitempty"`
+	CancelReason string     `json:"cancelReason,omitempty"`
+	AgentID      *uuid.UUID `json:"agentId,omitempty"`
 }
 
 // NewCall creates a call in CREATED with its immutable type stamped.
@@ -270,6 +288,8 @@ type Snapshot struct {
 	QueueID   *uuid.UUID      `json:"queueId,omitempty"`
 	Parties   []PartySnapshot `json:"parties"`
 	UserData  map[string]any  `json:"userData,omitempty"`
+	Queue     QueueFacts      `json:"queue,omitzero"`
+	Bot       BotShare        `json:"-"`
 	CreatedAt time.Time       `json:"createdAt"`
 	EndedAt   *time.Time      `json:"endedAt,omitempty"`
 }
@@ -286,6 +306,8 @@ type PartySnapshot struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	AnsweredAt  *time.Time `json:"answeredAt,omitempty"`
 	ReleasedAt  *time.Time `json:"releasedAt,omitempty"`
+	// ReleaseCause is the switch's word for why the leg ended.
+	ReleaseCause string `json:"releaseCause,omitempty"`
 }
 
 // Snapshot copies the call into a value safe to hand outside the actor.
@@ -297,6 +319,8 @@ func (c *Call) Snapshot() Snapshot {
 		Language:  c.Language,
 		QueueID:   c.QueueID,
 		UserData:  maps.Clone(c.UserData),
+		Queue:     c.Queue,
+		Bot:       c.Bot,
 		CreatedAt: c.CreatedAt,
 		Parties:   make([]PartySnapshot, 0, len(c.Parties)),
 	}
@@ -306,14 +330,15 @@ func (c *Call) Snapshot() Snapshot {
 	}
 	for _, p := range c.Parties {
 		ps := PartySnapshot{
-			PartyID:     p.PartyID,
-			ChannelID:   p.ChannelID,
-			Role:        p.Role,
-			State:       p.State,
-			Number:      p.Number,
-			OtherNumber: p.OtherNumber,
-			AgentID:     p.AgentID,
-			CreatedAt:   p.CreatedAt,
+			PartyID:      p.PartyID,
+			ChannelID:    p.ChannelID,
+			Role:         p.Role,
+			State:        p.State,
+			Number:       p.Number,
+			OtherNumber:  p.OtherNumber,
+			AgentID:      p.AgentID,
+			CreatedAt:    p.CreatedAt,
+			ReleaseCause: p.ReleaseCause,
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

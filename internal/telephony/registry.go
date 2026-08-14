@@ -38,6 +38,11 @@ type Publisher interface {
 type Registry struct {
 	pub Publisher
 
+	// OnCallFinished fires once per call, from the call's own goroutine, with
+	// the final snapshot. Set it before the first call arrives; it must not
+	// block.
+	OnCallFinished func(Snapshot)
+
 	mu        sync.RWMutex
 	byCall    map[uuid.UUID]*actor
 	byChannel map[string]*actor
@@ -308,12 +313,22 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 	case KindChannelHangup:
 		party.ReleaseCause = ev.HangupCause
 		party.TransferredAway = ev.TransferredAway
+		// The AI leg's share arrives as channel variables on the caller's
+		// hangup; any leg of the call may carry them, the first wins.
+		if a.call.Bot.IsZero() && !ev.Bot.IsZero() {
+			a.call.Bot = ev.Bot
+		}
 		a.transition(party, TriggerRelease, ev, events.TypePartyReleased)
 		if a.call.Finish(ev.OccurredAt) {
 			a.publish(events.TypeCallCDR, nil, map[string]any{
 				"answeredAt": a.call.AnsweredAt(),
 				"endedAt":    a.call.EndedAt,
 			})
+			if a.registry.OnCallFinished != nil {
+				// The snapshot is taken inside the actor, so it is the final,
+				// consistent view; the handler must not block this goroutine.
+				a.registry.OnCallFinished(a.call.Snapshot())
+			}
 			a.stop()
 		}
 	case KindChannelBridge:
@@ -321,6 +336,25 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		if other := a.call.PartyByChannel(ev.OtherChannelID); other != nil {
 			party.OtherNumber = other.Number
 			other.OtherNumber = party.Number
+		}
+
+	// The queue's own view of the caller, recorded for the CDR's timings.
+	case KindQueueMemberJoined:
+		a.call.Queue.Name = ev.Queue
+		if !ev.JoinedAt.IsZero() {
+			a.call.Queue.JoinedAt = ev.JoinedAt
+		} else {
+			a.call.Queue.JoinedAt = ev.OccurredAt
+		}
+	case KindQueueBridgeStart:
+		a.call.Queue.BridgedAt = ev.OccurredAt
+	case KindQueueMemberLeft:
+		a.call.Queue.Cause = ev.Cause
+		a.call.Queue.CancelReason = ev.CancelReason
+		if !ev.LeftAt.IsZero() {
+			a.call.Queue.LeftAt = ev.LeftAt
+		} else {
+			a.call.Queue.LeftAt = ev.OccurredAt
 		}
 	case KindDTMF:
 		a.publish(events.TypePartyDTMF, party, map[string]any{

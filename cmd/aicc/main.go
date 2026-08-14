@@ -138,13 +138,14 @@ func run() error {
 	})
 
 	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
+	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
+	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, slog.Default()))
 
 	go link.Run(ctx)
 	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc)
 
 	// The AI voice leg: a SIP server the switch bridges bot calls to, and the
 	// orchestration that runs a conversation on each.
-	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
 	if cfg.IsBotEnabled {
 		orchestrator, err := aicall.NewOrchestrator(aicall.OrchestratorConfig{
 			UAS: voice.Config{

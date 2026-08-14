@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 )
 
@@ -52,6 +54,40 @@ const (
 	KindQueueMembersCount SwitchEventKind = "QUEUE_MEMBERS_COUNT"
 )
 
+// BotShare is what the AI leg stamped onto the caller's channel before
+// handing the call to a person: its part of the eventual CDR. The channel
+// variable names stop at this boundary.
+type BotShare struct {
+	Sec     int
+	FlowID  *uuid.UUID
+	DID     string
+	Queue   string
+	Summary string
+	Reason  string
+}
+
+// IsZero reports whether the call ever met a bot.
+func (b BotShare) IsZero() bool {
+	return b.Sec == 0 && b.FlowID == nil && b.DID == "" && b.Queue == ""
+}
+
+func botShare(ev *esl.Event) BotShare {
+	var out BotShare
+	if sec, ok := ev.GetInt("variable_aicc_bot_sec"); ok {
+		out.Sec = int(sec)
+	}
+	if raw := ev.Get("variable_aicc_flow_id"); raw != "" {
+		if parsed, err := uuid.Parse(raw); err == nil {
+			out.FlowID = &parsed
+		}
+	}
+	out.DID = ev.Get("variable_aicc_did")
+	out.Queue = ev.Get("variable_aicc_queue")
+	out.Summary = ev.Get("variable_aicc_bot_summary")
+	out.Reason = ev.Get("variable_aicc_bot_reason")
+	return out
+}
+
 // CallDirection is the switch's view of which side started the channel.
 type CallDirection string
 
@@ -85,6 +121,10 @@ type SwitchEvent struct {
 	// Hangup detail.
 	HangupCause     string
 	HangupCauseQ850 int
+	// Bot carries the AI leg's share of the story, read from channel
+	// variables when the caller's leg hangs up. Zero when the call never
+	// met a bot.
+	Bot BotShare
 	// TransferredAway reports that this leg ended because the call moved on
 	// (blind transfer or REFER), not because the caller dropped.
 	TransferredAway bool
@@ -193,6 +233,7 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 			out.HangupCauseQ850 = int(q850)
 		}
 		out.TransferredAway = transferredAway(ev)
+		out.Bot = botShare(ev)
 	case "DTMF":
 		out.Kind = KindDTMF
 		out.Digit = ev.Get("DTMF-Digit")

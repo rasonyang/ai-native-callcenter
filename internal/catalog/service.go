@@ -123,6 +123,21 @@ func (s *Service) DeleteExtension(ctx context.Context, id uuid.UUID) error {
 // Queues lists every queue.
 func (s *Service) Queues(ctx context.Context) ([]Queue, error) { return s.store.ListQueues(ctx) }
 
+// QueueIDByName resolves a queue name to its identity, for the ledger: the
+// switch speaks in names, the ledger in ids.
+func (s *Service) QueueIDByName(ctx context.Context, name string) (uuid.UUID, bool) {
+	queues, err := s.store.ListQueues(ctx)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	for _, q := range queues {
+		if q.Name == name {
+			return q.ID, true
+		}
+	}
+	return uuid.Nil, false
+}
+
 // CreateQueue adds a queue and tells the switch to read it.
 func (s *Service) CreateQueue(ctx context.Context, q Queue) (Queue, error) {
 	if err := q.validate(); err != nil {

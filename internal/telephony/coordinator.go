@@ -38,9 +38,16 @@ type Coordinator struct {
 	adapter  *Adapter
 	agents   AgentLookup
 	pub      Publisher
+	cdr      *CDRAssembler
 }
 
 // NewCoordinator builds a Coordinator.
+// AttachCDR points call retirement and queue movements at the ledger.
+func (c *Coordinator) AttachCDR(assembler *CDRAssembler) {
+	c.cdr = assembler
+	c.registry.OnCallFinished = assembler.CallFinished
+}
+
 func NewCoordinator(registry *Registry, adapter *Adapter, agents AgentLookup, pub Publisher) *Coordinator {
 	return &Coordinator{registry: registry, adapter: adapter, agents: agents, pub: pub}
 }
@@ -54,6 +61,26 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.join(ctx, ev)
 	case KindQueueAgentOffered:
 		c.offerToAgent(ctx, ev)
+	}
+
+	// Queue movements feed the ledger: service level and abandonment reporting
+	// read those rows, never the raw switch events.
+	if c.cdr != nil {
+		switch ev.Kind {
+		case KindQueueMemberJoined, KindQueueAgentOffered,
+			KindQueueBridgeStart, KindQueueMemberLeft:
+			var callID *uuid.UUID
+			if id, ok := c.registry.CallForChannel(ev.MemberChannelID); ok {
+				callID = &id
+			}
+			var agentID *uuid.UUID
+			if ev.AgentName != "" {
+				if id, ok := c.agents.AgentByCallcenterName(ev.AgentName); ok {
+					agentID = &id
+				}
+			}
+			c.cdr.QueueEvent(ctx, ev, callID, agentID)
+		}
 	}
 
 	// Who owned a leg has to be read before the call is told it ended: the
