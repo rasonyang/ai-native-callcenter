@@ -105,6 +105,26 @@ func (q *Queries) GetFlow(ctx context.Context, id uuid.UUID) (Flow, error) {
 	return i, err
 }
 
+const getFlowBySlug = `-- name: GetFlowBySlug :one
+SELECT id, slug, name, draft_spec, published_revision_id, published_at, created_at, updated_at FROM flows WHERE slug = $1
+`
+
+func (q *Queries) GetFlowBySlug(ctx context.Context, slug string) (Flow, error) {
+	row := q.db.QueryRow(ctx, getFlowBySlug, slug)
+	var i Flow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.DraftSpec,
+		&i.PublishedRevisionID,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getPublishedSpec = `-- name: GetPublishedSpec :one
 SELECT r.spec
 FROM flows f

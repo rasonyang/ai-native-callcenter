@@ -52,10 +52,24 @@ func runFlowAdd(args []string) error {
 	}
 
 	flows := st.Flows()
+	resolvedSlug := orFirst(*slug, specID(data))
+
 	// Create validates, so a broken file fails here with the loader's report.
-	id, err := flows.Create(ctx, orFirst(*slug, specID(data)), orFirst(*name, *slug, specID(data)), data)
+	// A slug that already exists means this is an update: replace the draft
+	// and publish a new revision, keeping the flow's identity — and every DID
+	// pointing at it — intact.
+	id, err := flows.Create(ctx, resolvedSlug, orFirst(*name, *slug, specID(data)), data)
 	if err != nil {
-		return err
+		existing, lookupErr := st.Queries.GetFlowBySlug(ctx, resolvedSlug)
+		if lookupErr != nil {
+			return err
+		}
+		if _, err := st.Queries.UpdateFlowDraft(ctx, queries.UpdateFlowDraftParams{
+			ID: existing.ID, Name: existing.Name, DraftSpec: data,
+		}); err != nil {
+			return fmt.Errorf("update flow %s: %w", resolvedSlug, err)
+		}
+		id = existing.ID
 	}
 	if err := flows.Publish(ctx, id, "flowadd"); err != nil {
 		return err

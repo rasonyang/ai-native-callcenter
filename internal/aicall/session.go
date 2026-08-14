@@ -144,10 +144,19 @@ type Session struct {
 	// what the barge-in guard window is measured from.
 	speakingSince time.Time
 
-	// watchGeneration invalidates timers that are already in flight. Stopping a
-	// timer races with it firing; letting a stale one fire and recognise itself
-	// as stale does not.
-	watchGeneration uint64
+	// Two generation counters invalidate watches already in flight. Stopping a
+	// timer races with it firing; letting a stale one fire and recognise
+	// itself as stale does not.
+	//
+	// They are separate because they answer different questions. The drain
+	// watch asks "is this turn's audio still on its way to the caller?" — only
+	// a new turn or a flush changes that. The idle watch asks "has the caller
+	// said anything?" — speech changes that. Sharing one counter was a live
+	// bug: the caller murmuring over the tail of a goodbye cancelled the
+	// drain watch, PLAYBACK_DONE never fired, and every call ended on the
+	// grace cap, five silent seconds late.
+	drainGeneration uint64
+	idleGeneration  uint64
 	// turnSeq numbers model turns, so events can say which turn they belong to.
 	turnSeq int
 	// playbackDone is signalled when a turn's audio has finished generating and
@@ -448,9 +457,15 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	s.mu.Lock()
 	isSpeaking := s.isBotSpeaking
 	speakingFor := time.Since(s.speakingSince)
+	// Generation ending is not the caller's experience ending: the tail of
+	// the utterance is still queued and playing after the model has finished
+	// producing it. Speech over that tail is as much an interruption as
+	// speech over the generation — the boundary is the last frame heard, not
+	// the last frame made.
+	isAudioInFlight := s.framesQueued > 0 && s.leg.Pending() > 0
 	s.mu.Unlock()
 
-	if !isSpeaking {
+	if !isSpeaking && !isAudioInFlight {
 		return
 	}
 
@@ -489,7 +504,8 @@ func (s *Session) stopPlayback() int {
 	s.isBotSpeaking = false
 	// Nothing is left to drain, and no dead-air timer should run: the caller is
 	// already talking.
-	s.watchGeneration++
+	s.drainGeneration++
+	s.idleGeneration++
 
 	return played * frameDurationMs
 }
@@ -499,7 +515,8 @@ func (s *Session) beginTurn() {
 	s.framesQueued = 0
 	s.turnSeq++
 	// Any pending drain or dead-air watch belongs to the previous turn.
-	s.watchGeneration++
+	s.drainGeneration++
+	s.idleGeneration++
 	s.mu.Unlock()
 }
 
@@ -516,8 +533,8 @@ func (s *Session) endTurn() {
 	// The tail of the last sentence is worth padding out rather than losing.
 	s.framer.flush(s.queueFrame)
 	s.isBotSpeaking = false
-	s.watchGeneration++
-	marker := playbackMarker{generation: s.watchGeneration, turn: s.turnSeq}
+	s.drainGeneration++
+	marker := playbackMarker{generation: s.drainGeneration, turn: s.turnSeq}
 	s.mu.Unlock()
 
 	select {
@@ -559,7 +576,10 @@ func (s *Session) watchPlayback() {
 			continue
 		}
 		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn})
-		s.awaitCallerOrDeadAir(marker.generation)
+		s.mu.Lock()
+		idleGeneration := s.idleGeneration
+		s.mu.Unlock()
+		s.awaitCallerOrDeadAir(idleGeneration)
 	}
 }
 
@@ -570,7 +590,7 @@ func (s *Session) awaitDrained(generation uint64) bool {
 	defer ticker.Stop()
 
 	for {
-		if !s.isCurrentGeneration(generation) {
+		if !s.isCurrentDrain(generation) {
 			return false
 		}
 		if s.leg.Pending() == 0 {
@@ -581,7 +601,7 @@ func (s *Session) awaitDrained(generation uint64) bool {
 				return false
 			case <-ticker.C:
 			}
-			return s.isCurrentGeneration(generation)
+			return s.isCurrentDrain(generation)
 		}
 		select {
 		case <-s.done:
@@ -606,7 +626,7 @@ func (s *Session) awaitCallerOrDeadAir(generation uint64) {
 	case <-timer.C:
 		// A stale timer recognises itself rather than being stopped, which
 		// removes the race between cancelling and firing entirely.
-		if !s.isCurrentGeneration(generation) {
+		if !s.isCurrentIdle(generation) {
 			return
 		}
 		s.log.Info("dead air", "afterMs", timeout.Milliseconds())
@@ -614,17 +634,25 @@ func (s *Session) awaitCallerOrDeadAir(generation uint64) {
 	}
 }
 
-// cancelDeadAirWatch invalidates any timer waiting on the caller.
+// cancelDeadAirWatch invalidates any timer waiting on the caller. It touches
+// only the idle counter: speech says the caller is there, not that a turn's
+// audio stopped being on its way to them.
 func (s *Session) cancelDeadAirWatch() {
 	s.mu.Lock()
-	s.watchGeneration++
+	s.idleGeneration++
 	s.mu.Unlock()
 }
 
-func (s *Session) isCurrentGeneration(generation uint64) bool {
+func (s *Session) isCurrentDrain(generation uint64) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.watchGeneration == generation
+	return s.drainGeneration == generation
+}
+
+func (s *Session) isCurrentIdle(generation uint64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.idleGeneration == generation
 }
 
 //

@@ -580,8 +580,14 @@ func TestAnInterruptedTurnReportsNoPlaybackCompletion(t *testing.T) {
 	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
 	awaitBridgeEvent(t, session, EventTypeTurnDone)
 
-	// The caller cuts in before the queue drains.
+	// The caller cuts in before the queue drains. Speech over the tail is an
+	// interruption even though generation has finished: the boundary is the
+	// last frame heard, not the last frame made.
 	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	awaitBridgeEvent(t, session, EventTypeBargeIn)
+	if leg.clears() == 0 {
+		t.Error("the tail of the interrupted turn was not flushed")
+	}
 	leg.holdFrames(0)
 
 	deadline := time.After(500 * time.Millisecond)

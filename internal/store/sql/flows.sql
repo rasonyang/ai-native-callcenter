@@ -36,3 +36,6 @@ FROM flows f
 JOIN flow_revisions r ON r.id = f.published_revision_id
 WHERE f.id = $1;
 
+
+-- name: GetFlowBySlug :one
+SELECT * FROM flows WHERE slug = $1;

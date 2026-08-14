@@ -28,18 +28,30 @@
     },
     "fallbackTarget": "handoff",
     "maxTurns": 30,
-    "alwaysAllowedTools": ["transfer_to_agent", "take_message", "hangup"],
+    "alwaysAllowedTools": [
+      "transfer_to_agent",
+      "take_message",
+      "hangup"
+    ],
     "transitions": [
       {
         "on": "TOOL_RESULT",
         "tool": "transfer_to_agent",
-        "condition": { "slot": "result.ok", "op": "EQ", "value": "1" },
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
         "target": "handoff"
       },
       {
         "on": "TOOL_RESULT",
         "tool": "hangup",
-        "condition": { "slot": "result.ok", "op": "EQ", "value": "1" },
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
         "target": "farewell"
       }
     ]
@@ -47,14 +59,18 @@
   "nodes": {
     "welcome": {
       "instruction": {
-        "en": "Open with: \"Thanks for calling NovaNet, how can I help you today?\" Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, transfer to the support queue. If no one can take the call, offer to take a message instead.",
-        "zh": "开场说：\"感谢致电 NovaNet，请问有什么可以帮您？\" 了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，转接 support 队列。如果无人接听，主动提出为用户留言。"
+        "en": "Open with: \"Thanks for calling NovaNet, how can I help you today?\" Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, call transfer_to_agent with queue \"support-en\". If the transfer is refused, explain why and offer to take a message instead.",
+        "zh": "开场说：“感谢致电 NovaNet，请问有什么可以帮您？” 了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，调用 transfer_to_agent，queue 参数用 “support-zh”。如果转接被拒绝，向用户说明原因并主动提出留言。"
       },
       "tools": [],
       "transitions": [
         {
           "on": "NO_INPUT",
-          "condition": { "slot": "noInput.count", "op": "GTE", "value": 3 },
+          "condition": {
+            "slot": "noInput.count",
+            "op": "GTE",
+            "value": 3
+          },
           "target": "farewell"
         }
       ]
