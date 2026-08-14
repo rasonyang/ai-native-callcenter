@@ -261,8 +261,10 @@ func TestNormalizeCallcenter(t *testing.T) {
 			},
 			want: KindQueueMemberJoined,
 			check: func(t *testing.T, got SwitchEvent) {
-				if got.Queue != "support@default" {
-					t.Errorf("Queue = %q", got.Queue)
+				// The switch domain is upstream vocabulary; it stops at the
+				// boundary so the rest of the system matches queues by name.
+				if got.Queue != "support" {
+					t.Errorf("Queue = %q, want the domain stripped", got.Queue)
 				}
 				if got.ChannelID != "019ff973-abcc-7349-bda2-b58e0e005324" {
 					t.Errorf("ChannelID = %q, want the member session uuid", got.ChannelID)

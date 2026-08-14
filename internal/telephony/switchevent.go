@@ -301,7 +301,9 @@ func normalizeCustom(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 // normalizeCallcenter maps mod_callcenter's CC-* headers. Its own vocabulary
 // ("Available", "member-queue-start") stops here.
 func normalizeCallcenter(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
-	out.Queue = ev.Get("CC-Queue")
+	// mod_callcenter names queues with the switch domain appended; the domain
+	// is upstream vocabulary and stops here.
+	out.Queue, _, _ = strings.Cut(ev.Get("CC-Queue"), "@")
 	out.AgentName = ev.Get("CC-Agent")
 	out.MemberChannelID = ev.Get("CC-Member-Session-UUID")
 	if out.ChannelID == "" {

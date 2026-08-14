@@ -142,6 +142,10 @@ type Call struct {
 	CallID   uuid.UUID
 	CallType events.CallType
 	State    CallState
+	// IsMintedID marks an identity minted by the dialplan before any leg
+	// existed. When two provisional calls turn out to be one conversation,
+	// the minted identity is the one every other record refers to.
+	IsMintedID bool
 
 	// Language and flow are the routing decisions taken at call setup.
 	Language string

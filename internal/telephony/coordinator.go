@@ -111,9 +111,11 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 	// caller arriving through it keeps one id across every transfer. A leg the
 	// switch created on its own gets a fresh one.
 	callID := uuid.Nil
+	isMinted := false
 	if raw := ev.Raw.Variable("aicc_call_id"); raw != "" {
 		if parsed, err := uuid.Parse(raw); err == nil {
 			callID = parsed
+			isMinted = true
 		}
 	}
 
@@ -130,7 +132,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		callID = uuid.Must(uuid.NewV7())
 	}
 
-	call, err := c.registry.CreateCall(ctx, callID, callTypeOf(ev), ev.Raw.Variable("aicc_language"))
+	call, err := c.registry.CreateCallMinted(ctx, callID, callTypeOf(ev), ev.Raw.Variable("aicc_language"), isMinted)
 	if err != nil {
 		// Another leg of the same call adopted it first, which is the normal
 		// race between two channels of one conversation.
@@ -205,16 +207,27 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 		return
 	}
 
-	// Keep the caller's call: it carries the identity minted at answer time
-	// and any business context collected since.
+	// Keep the identity everything else refers to. A minted id — chosen by
+	// the dialplan before any leg existed — outranks a provisional one: the
+	// bot's transcript and both halves of the CDR meet on it. An agent-only
+	// call is always the one absorbed.
 	keep, absorb := callID, otherID
-	if c.isAgentOnly(callID) {
+	switch {
+	case c.isAgentOnly(callID):
+		keep, absorb = otherID, callID
+	case c.isAgentOnly(otherID):
+		// keep as is
+	case c.isMintedID(otherID) && !c.isMintedID(callID):
 		keep, absorb = otherID, callID
 	}
 
 	var moved []*Party
+	var movedQueue QueueFacts
+	var movedBot BotShare
 	_ = c.registry.Do(absorb, func(call *Call) {
 		moved = append(moved, call.Parties...)
+		movedQueue = call.Queue
+		movedBot = call.Bot
 	})
 
 	err := c.registry.Do(keep, func(call *Call) {
@@ -224,6 +237,17 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 			}
 			call.Parties = append(call.Parties, p)
 		}
+		// Facts recorded on the absorbed half move with it.
+		if call.Queue.JoinedAt.IsZero() && !movedQueue.JoinedAt.IsZero() {
+			call.Queue = movedQueue
+		}
+		if call.Bot.IsZero() && !movedBot.IsZero() {
+			call.Bot = movedBot
+		}
+		// One conversation has one originator: the earliest inbound leg.
+		// Both provisional calls named their own first leg the originator,
+		// and keeping two makes the CDR's from-number a coin toss.
+		normalizeOriginator(call)
 	})
 	if err != nil {
 		return
@@ -415,6 +439,32 @@ func (c *Coordinator) agentForLeg(ev SwitchEvent) (uuid.UUID, bool) {
 		}
 	}
 	return uuid.Nil, false
+}
+
+// isMintedID reports whether a call's identity was minted by the dialplan.
+func (c *Coordinator) isMintedID(callID uuid.UUID) bool {
+	isMinted := false
+	_ = c.registry.Do(callID, func(call *Call) { isMinted = call.IsMintedID })
+	return isMinted
+}
+
+// normalizeOriginator leaves exactly one originator: the earliest leg that
+// holds the role. Later claimants become targets.
+func normalizeOriginator(call *Call) {
+	var earliest *Party
+	for _, p := range call.Parties {
+		if p.Role != RoleOriginator {
+			continue
+		}
+		if earliest == nil || p.CreatedAt.Before(earliest.CreatedAt) {
+			earliest = p
+		}
+	}
+	for _, p := range call.Parties {
+		if p.Role == RoleOriginator && p != earliest {
+			p.Role = RoleTarget
+		}
+	}
 }
 
 // isAgentOnly reports whether every leg of a call belongs to an agent, which
