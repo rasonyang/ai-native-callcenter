@@ -483,8 +483,14 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	}
 
 	playedMs := s.stopPlayback()
-	if err := s.model.Interrupt(reason, playedMs); err != nil {
-		s.log.Warn("could not tell the model it was interrupted", "error", err)
+	// The provider is only told when it is still producing: there is a
+	// response to cancel and a history to truncate. Speech over the tail of a
+	// finished turn needs the local flush alone — cancelling a response that
+	// no longer exists is an error on providers that take the cancel at all.
+	if isSpeaking {
+		if err := s.model.Interrupt(reason, playedMs); err != nil {
+			s.log.Warn("could not tell the model it was interrupted", "error", err)
+		}
 	}
 	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason)})
 }

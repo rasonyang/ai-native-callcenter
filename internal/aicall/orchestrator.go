@@ -31,7 +31,12 @@ const (
 // actionGraceCap bounds the wait between arming a transfer or hangup and the
 // bridge line finishing playback. If playback never completes — the provider
 // stalled mid-goodbye — the action runs anyway rather than holding the caller.
-const actionGraceCap = 5 * time.Second
+//
+// The clock starts at the tool call, before the closing line even begins to
+// generate, so the cap has to cover generation plus playback plus drain on the
+// slower provider. Five seconds proved too tight on real calls: the line was
+// still playing when the cap cut it off.
+const actionGraceCap = 10 * time.Second
 
 // Catalog is what the orchestrator needs to know about numbers and queues.
 type Catalog interface {
