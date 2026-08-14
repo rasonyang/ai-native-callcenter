@@ -48,3 +48,4 @@ web/src/routeTree.gen.ts
 # Local working brief (contains machine-specific paths)
 prompts.md
 web/tsconfig.tsbuildinfo
+logs/

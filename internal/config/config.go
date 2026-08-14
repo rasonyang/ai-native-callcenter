@@ -52,7 +52,10 @@ type Config struct {
 	SessionCookie string
 	SecureCookies bool
 
-	LogLevel     string
+	LogLevel string
+	// LogDir receives one log file per process start, named by start time,
+	// so any run can be analysed after the fact. Empty disables the file.
+	LogDir       string
 	OTLPEndpoint string // empty disables trace export
 	ServiceName  string
 
@@ -85,6 +88,7 @@ func Load() (Config, error) {
 		SessionCookie:    env("AICC_SESSION_COOKIE", "aicc_session"),
 		SecureCookies:    envBool("AICC_SECURE_COOKIES", false),
 		LogLevel:         env("AICC_LOG_LEVEL", "info"),
+		LogDir:           env("AICC_LOG_DIR", "logs"),
 		OTLPEndpoint:     env("AICC_OTLP_ENDPOINT", ""),
 		ServiceName:      env("AICC_SERVICE_NAME", "aicc"),
 		Seed:             env("AICC_SEED", ""),

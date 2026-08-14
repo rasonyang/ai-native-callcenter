@@ -263,6 +263,12 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 		case EventTypeNoInput:
 			o.handleDeadAir(session, runtime, actions, log)
 
+		case EventTypeTurnDone:
+			actions.onTurnDone(event.Turn)
+
+		case EventTypeBargeIn:
+			actions.onBargeIn()
+
 		case EventTypePlaybackDone:
 			actions.onPlaybackDone(event.Turn)
 

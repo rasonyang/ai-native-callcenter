@@ -40,6 +40,9 @@ type callActions struct {
 	// that carried the tool call may finish playing after arming — acting on
 	// that one would cut in before the line is spoken.
 	armedInTurn int
+	// isLineSpoken records that a later turn has finished generating — the
+	// closing line exists and is playing out or already played.
+	isLineSpoken bool
 	// armedGeneration lets the cap timer recognise the action it belongs to.
 	armedGeneration int
 }
@@ -108,6 +111,7 @@ func (a *callActions) arm(_ context.Context, action func()) {
 	a.mu.Lock()
 	a.armed = action
 	a.armedInTurn = a.session.currentTurn()
+	a.isLineSpoken = false
 	a.armedGeneration++
 	generation := a.armedGeneration
 	a.mu.Unlock()
@@ -139,6 +143,36 @@ func (a *callActions) onPlaybackDone(turn int) {
 	armed := a.armed
 	a.armed = nil
 	a.mu.Unlock()
+	armed()
+}
+
+// onTurnDone records that the closing line has finished generating.
+func (a *callActions) onTurnDone(turn int) {
+	a.mu.Lock()
+	if a.armed != nil && turn > a.armedInTurn {
+		a.isLineSpoken = true
+	}
+	a.mu.Unlock()
+}
+
+// onBargeIn fires the armed action when the caller talks over or after the
+// closing line.
+//
+// This exists because of what real calls showed: the caller answers the
+// goodbye — "bye now" — the detector reports speech, the playback watch is
+// superseded, and PLAYBACK_DONE never arrives; every call then ended on the
+// grace cap, five silent seconds late. A caller speaking after the closing
+// line is not a reason to wait longer; it is the moment to act.
+func (a *callActions) onBargeIn() {
+	a.mu.Lock()
+	if a.armed == nil || !a.isLineSpoken {
+		a.mu.Unlock()
+		return
+	}
+	armed := a.armed
+	a.armed = nil
+	a.mu.Unlock()
+	a.log.Info("caller spoke after the closing line; running the armed action now")
 	armed()
 }
 

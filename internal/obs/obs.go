@@ -9,9 +9,13 @@ package obs
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/otel"
@@ -39,7 +43,28 @@ type Providers struct {
 // otlpEndpoint may be empty, in which case no trace exporter is installed and
 // tracing becomes a no-op with negligible cost.
 func Setup(ctx context.Context, serviceName, logLevel, otlpEndpoint string, dev bool) (*Providers, error) {
-	slog.SetDefault(newLogger(logLevel, dev))
+	return SetupWithLogDir(ctx, serviceName, logLevel, otlpEndpoint, "", dev)
+}
+
+// SetupWithLogDir is Setup with logs additionally written to a file.
+//
+// The file lives in logDir and is named by start time, so each run of the
+// process leaves one self-contained record that can be read and analysed
+// after the fact — including by tooling — without having captured stdout.
+// An empty logDir keeps stderr only.
+func SetupWithLogDir(ctx context.Context, serviceName, logLevel, otlpEndpoint, logDir string, dev bool) (*Providers, error) {
+	logWriter := io.Writer(os.Stderr)
+	if logDir != "" {
+		file, err := openLogFile(logDir)
+		if err != nil {
+			// A log file is a convenience; refusing to start over it would
+			// trade the service for its own diagnostics.
+			fmt.Fprintf(os.Stderr, "cannot open a log file in %s: %v\n", logDir, err)
+		} else {
+			logWriter = io.MultiWriter(os.Stderr, file)
+		}
+	}
+	slog.SetDefault(newLogger(logWriter, logLevel, dev))
 
 	// NewSchemaless: merging a pinned semconv schema with the SDK's own
 	// default resource fails whenever the two schema versions differ.
@@ -91,15 +116,29 @@ func (p *Providers) Shutdown(ctx context.Context) error {
 
 // newLogger builds the process logger: JSON in production, text in dev, with
 // trace correlation applied to every record.
-func newLogger(level string, dev bool) *slog.Logger {
+func newLogger(w io.Writer, level string, dev bool) *slog.Logger {
 	opts := &slog.HandlerOptions{Level: parseLevel(level)}
 	var h slog.Handler
 	if dev {
-		h = slog.NewTextHandler(os.Stderr, opts)
+		h = slog.NewTextHandler(w, opts)
 	} else {
-		h = slog.NewJSONHandler(os.Stderr, opts)
+		h = slog.NewJSONHandler(w, opts)
 	}
 	return slog.New(&traceHandler{Handler: h})
+}
+
+// openLogFile creates logDir if needed and opens one file per process start.
+func openLogFile(logDir string) (*os.File, error) {
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
+		return nil, err
+	}
+	name := filepath.Join(logDir,
+		fmt.Sprintf("aicc-%s.log", time.Now().Format("20060102-150405")))
+	file, err := os.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
 }
 
 func parseLevel(s string) slog.Level {

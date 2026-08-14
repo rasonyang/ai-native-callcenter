@@ -218,6 +218,38 @@ func TestHangupEndsTheCallAfterTheFarewell(t *testing.T) {
 	}
 }
 
+// What both live test calls showed: the caller answers the goodbye, the
+// detector reports speech, the playback watch is superseded, and every call
+// ends on the grace cap five silent seconds late. Speech after the closing
+// line must fire the action, not delay it.
+func TestACallerAnsweringTheGoodbyeFiresTheArmedAction(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, session, _ := testActions(t, sw)
+
+	fired := make(chan struct{})
+	actions.arm(t.Context(), func() { close(fired) })
+
+	// Speech before the closing line exists must NOT fire: the tool call has
+	// only just happened and the line is still coming.
+	actions.onBargeIn()
+	select {
+	case <-fired:
+		t.Fatal("the action ran before the closing line was even generated")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// The closing line finishes generating in the next turn...
+	actions.onTurnDone(session.currentTurn() + 1)
+	// ...and the caller talks over the tail of it.
+	actions.onBargeIn()
+
+	select {
+	case <-fired:
+	case <-time.After(time.Second):
+		t.Fatal("speech after the closing line did not fire the armed action")
+	}
+}
+
 //
 // The cap.
 //
