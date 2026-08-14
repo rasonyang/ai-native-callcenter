@@ -110,15 +110,19 @@ func TestCommandStrings(t *testing.T) {
 			act: func(a *Adapter) error {
 				return a.BridgeToEndpoint("chan-1", partyID, "user/1001@aicc.test", nil)
 			},
-			want: "uuid_transfer chan-1 'bridge:{origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d}user/1001@aicc.test' inline",
+			want: "uuid_transfer chan-1 'm:^:bridge:{origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d}user/1001@aicc.test' inline",
 		},
 		{
+			// The m:^: delimiter prefix is what lets a comma-joined variable
+			// list survive the inline parser: with the default delimiter the
+			// action list splits inside {…} and bridge receives a truncated
+			// argument (found live).
 			name: "bridge variables are sorted so the command is reproducible",
 			act: func(a *Adapter) error {
 				return a.BridgeToEndpoint("chan-1", partyID, "sofia/gateway/aicc_bot/95011",
 					map[string]string{"sip_h_X-AICC-Call-ID": "abc", "absolute_codec_string": "PCMU"})
 			},
-			want: "uuid_transfer chan-1 'bridge:{absolute_codec_string=PCMU,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d,sip_h_X-AICC-Call-ID=abc}sofia/gateway/aicc_bot/95011' inline",
+			want: "uuid_transfer chan-1 'm:^:bridge:{absolute_codec_string=PCMU,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d,sip_h_X-AICC-Call-ID=abc}sofia/gateway/aicc_bot/95011' inline",
 		},
 		{
 			name: "hangup defaults to a normal cause",

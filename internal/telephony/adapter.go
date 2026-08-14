@@ -169,12 +169,17 @@ func (a *Adapter) TransferToExtension(channelID, extension, context string) erro
 // is not true of a caller hearing ringback, and the failure is silent - the
 // call simply sits there. The transfer form also clears the park state and
 // lets us name the new leg's uuid before it exists.
+//
+// The m:^: prefix changes the inline action delimiter: the default is the
+// comma, which would split the command inside the {var,var} block and hand
+// bridge a truncated argument (found live — the call died with
+// DESTINATION_OUT_OF_ORDER before the new leg ever routed).
 func (a *Adapter) BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error {
 	all := map[string]string{"origination_uuid": newPartyID.String()}
 	for k, v := range vars {
 		all[k] = v
 	}
-	return a.exec("uuid_transfer %s 'bridge:{%s}%s' inline", channelID, renderVars(all), endpoint)
+	return a.exec("uuid_transfer %s 'm:^:bridge:{%s}%s' inline", channelID, renderVars(all), endpoint)
 }
 
 // Originate creates a new outbound leg parked and waiting, so call control

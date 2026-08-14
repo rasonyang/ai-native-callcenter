@@ -1,10 +1,16 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { useMutation } from '@tanstack/react-query'
+import { PhoneOutgoing } from 'lucide-react'
 
 import { StatusPill } from '@/components/status-pill'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { describeError } from '@/lib/errors'
 import { myParty, useElapsedSec, useMyCalls, usePresence } from '@/lib/agent'
-import type { CallSnapshot } from '@/lib/api'
+import { callApi, type CallSnapshot } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 
 /**
@@ -25,6 +31,7 @@ function AgentCockpit() {
     <div className="grid grid-cols-[320px_1fr_280px] items-start gap-4">
       <div className="flex flex-col gap-4">
         {call && <IncomingOrActive call={call} />}
+        {signedIn && !call && <DialCard />}
         <Card title={t('agent.myQueue')} aside={t('agent.waitingCount', { count: 0 })}>
           {/* Queue depth arrives with the queue metrics; an honest empty row
               beats a number nobody computed. */}
@@ -72,6 +79,43 @@ function AgentCockpit() {
         </Card>
       </div>
     </div>
+  )
+}
+
+/** Click-to-dial: the agent's leg answers itself, then the customer rings. */
+function DialCard() {
+  const { t } = useTranslation()
+  const [destination, setDestination] = useState('')
+  const dial = useMutation({ mutationFn: callApi.dial })
+
+  const place = () => {
+    const number = destination.trim()
+    if (number) dial.mutate(number, { onSuccess: () => setDestination('') })
+  }
+
+  return (
+    <Card title={t('agent.dialOut')}>
+      <div className="flex gap-2">
+        <Input
+          className="h-8 tabular"
+          placeholder={t('agent.dialPlaceholder')}
+          value={destination}
+          inputMode="tel"
+          onChange={(e) => setDestination(e.target.value.replace(/[^0-9]/g, ''))}
+          onKeyDown={(e) => e.key === 'Enter' && place()}
+        />
+        <Button size="sm" disabled={!destination.trim() || dial.isPending} onClick={place}>
+          <PhoneOutgoing />
+          {t('agent.dial')}
+        </Button>
+      </div>
+      {dial.isError && (
+        <p className="mt-2 text-xs text-muted-foreground">{describeError(dial.error, t)}</p>
+      )}
+      {dial.isSuccess && (
+        <p className="mt-2 text-xs text-muted-foreground">{t('agent.dialPlaced')}</p>
+      )}
+    </Card>
   )
 }
 

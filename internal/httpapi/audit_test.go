@@ -18,6 +18,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
+	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -183,10 +184,11 @@ func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
 	server := New(config.Config{Env: "dev"}, Deps{
 		Auth: &auth.Service{},
 		// Non-nil markers so every conditional route group registers.
-		Agents:  stubAgents{},
-		Calls:   stubCalls{},
-		Catalog: stubCatalog{},
-		Ledger:  stubLedger(t),
+		Agents:   stubAgents{},
+		Calls:    stubCalls{},
+		Catalog:  stubCatalog{},
+		Ledger:   stubLedger(t),
+		Outbound: stubOutbound{},
 	})
 	router := server.router()
 
@@ -313,3 +315,12 @@ func (stubCatalog) UpdateDID(context.Context, catalog.DID) (catalog.DID, error) 
 	return catalog.DID{}, nil
 }
 func (stubCatalog) DeleteDID(context.Context, uuid.UUID) error { return nil }
+
+type stubOutbound struct{}
+
+func (stubOutbound) Dial(context.Context, string, string) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}

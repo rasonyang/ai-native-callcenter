@@ -131,7 +131,11 @@
     "idle": "空闲",
     "today": "今日",
     "statsLater": "话务统计将随报表功能提供。",
-    "waitingCount": "{{count}} 个等待"
+    "waitingCount": "{{count}} 个等待",
+    "dialOut": "外呼",
+    "dialPlaceholder": "客户号码…",
+    "dial": "拨打",
+    "dialPlaced": "正在外呼——将先接通您的话机。"
   },
   "supervisor": {
     "agent": "坐席",

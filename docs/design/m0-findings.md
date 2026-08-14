@@ -85,6 +85,15 @@ Captured with the M0 eslcap tool against a live AI call (`loopback/<did>/public`
 - **Loopback copies originate-time variables onto both halves**, so a scaffolding marker cannot distinguish them by itself; the `-a`/`-b` name suffix does (the `-a` half is always the originate side).
 - **A caller leg that sends no RTP is dropped by the UAS's RTP-dead watchdog in ~5 s** — scripted calls that should live to the farewell need `&playback(local_stream://moh)`, not `&park()`.
 
+## M4.7 addendum — inline transfer and codec-pin parsing (2026-08-14, live)
+
+Two parser facts cost three failed AI-outbound attempts (each died `DESTINATION_OUT_OF_ORDER` within 50 ms):
+
+- **The `uuid_transfer … inline` action list splits on commas** — including commas inside a `{var=v,var=v}` block. `bridge:{a=1,b=2}target` reaches bridge as the truncated `{a=1` and the originate is cancelled (`switch_ivr_originate.c: Parse Error!`). The fix is the alternate-delimiter prefix: `uuid_transfer <uuid> 'm:^:bridge:{…}target' inline`. The M3-era form without `m:^:` only ever worked because no call site passed more than one variable. `Adapter.BridgeToEndpoint` now always renders the `m:^:` form.
+- **`absolute_codec_string=PCMU,PCMA` cannot ride a shared inline var block anyway** (the value's own comma), and **a codec pin on a loopback leg kills it before routing** (loopback runs L16). Rule now encoded in `outbound.pinCodecs`: pin only endpoints that leave through `sofia/`, and pin a single codec (`PCMU`). The Lua dialplan bridges keep `PCMU,PCMA` — the dialplan `bridge` application parses its own argument and is not the inline parser.
+
+AI outbound itself (design F4, 689d09e reversed) verified live end to end: `POST /api/v1/calls {kind:AI_OUTBOUND, to:9664, did:95012}` → originate `loopback/9664/default` (answers into hold music) → on answer, inline bridge to `sofia/gateway/aicc_bot/95012` with the full X-AICC header set plus `X-AICC-Call-Type: OUTBOUND` → Qwen conversation → farewell → one CDR: OUTBOUND, contained, bot_sec=40, recording booked, under the client-minted call id. A retry with the same call id answers `isDuplicate` and never redials.
+
 ## Environment state after M0 (dev box)
 
 - PostgreSQL 18.4 runs via `deploy/dev/docker-compose.yml` (`aicc-postgres`, 127.0.0.1:5432, user/db `aicc` + callcenter db `aicc_fs`). **Never via brew** (owner directive; the transient brew install was reverted).

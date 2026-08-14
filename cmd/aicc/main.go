@@ -26,6 +26,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
+	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -167,8 +168,19 @@ func run() error {
 	}
 	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()))
 
+	// Outbound: click-to-dial and the AI outbound leg share one originator.
+	outboundSvc := outbound.New(outbound.Config{
+		EndpointFormat: cfg.OutboundEndpoint,
+		CallerID:       cfg.OutboundCallerID,
+	}, adapter, catalogSvc,
+		st.Ledger().HasCDR,
+		func(callID uuid.UUID) bool {
+			_, err := registry.Snapshot(callID)
+			return err == nil
+		}, slog.Default())
+
 	go link.Run(ctx)
-	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc)
+	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc, outboundSvc)
 
 	// The AI voice leg: a SIP server the switch bridges bot calls to, and the
 	// orchestration that runs a conversation on each.
@@ -230,6 +242,7 @@ func run() error {
 			Ledger:     st.Ledger(),
 			Recordings: recordings,
 			Auditor:    st.Ledger(),
+			Outbound:   outboundSvc,
 			SPA:        spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -292,7 +305,7 @@ func purgeSessions(ctx context.Context, svc *auth.Service) {
 // dispatchSwitchEvents is the single consumer of the switch event stream. It
 // normalizes each event once and hands it to whoever owns that fact: the call
 // registry for channel lifecycle, the agent service for device reachability.
-func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *telephony.Coordinator, agentSvc *agents.Service) {
+func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *telephony.Coordinator, agentSvc *agents.Service, outboundSvc *outbound.Service) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -317,6 +330,8 @@ func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *tele
 			default:
 				coordinator.Handle(ctx, ev)
 			}
+			// Outbound follows its originated legs on the same feed.
+			outboundSvc.HandleSwitchEvent(ev)
 		}
 	}
 }

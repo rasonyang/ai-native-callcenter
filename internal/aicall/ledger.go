@@ -198,7 +198,10 @@ type callFacts struct {
 // every test.
 type callType string
 
-const callTypeInbound callType = "INBOUND"
+const (
+	callTypeInbound  callType = "INBOUND"
+	callTypeOutbound callType = "OUTBOUND"
+)
 
 // stampBotShare writes the bot's part of the story onto the caller's channel,
 // so the CDR the human path writes after a transfer carries it.

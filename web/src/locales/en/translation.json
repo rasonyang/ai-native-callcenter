@@ -131,7 +131,11 @@
     "idle": "Idle",
     "today": "Today",
     "statsLater": "Handled counts arrive with reporting.",
-    "waitingCount": "{{count}} waiting"
+    "waitingCount": "{{count}} waiting",
+    "dialOut": "Dial out",
+    "dialPlaceholder": "Customer number…",
+    "dial": "Dial",
+    "dialPlaced": "Dialing — your phone will connect first."
   },
   "supervisor": {
     "agent": "Agent",

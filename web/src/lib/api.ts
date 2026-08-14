@@ -187,6 +187,11 @@ export interface CallSnapshot {
 
 export const callApi = {
   mine: () => request<{ items: CallSnapshot[] }>('/calls/mine'),
+  dial: (destination: string) =>
+    request<{ callId: string }>('/calls/dial', {
+      method: 'POST',
+      body: JSON.stringify({ destination }),
+    }),
   answer: (callId: string) => request<void>(`/calls/${callId}/answer`, { method: 'POST' }),
   hold: (callId: string) => request<void>(`/calls/${callId}/hold`, { method: 'POST' }),
   retrieve: (callId: string) => request<void>(`/calls/${callId}/retrieve`, { method: 'POST' }),

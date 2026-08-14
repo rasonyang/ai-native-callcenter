@@ -27,6 +27,7 @@ const (
 	headerLanguage  = "X-Aicc-Language"
 	headerANI       = "X-Aicc-Ani"
 	headerChannelID = "X-Aicc-Channel-Id"
+	headerCallType  = "X-Aicc-Call-Type"
 )
 
 // actionGraceCap bounds the wait between arming a transfer or hangup and the
@@ -215,8 +216,14 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 			"header", headers[headerCallID], "callId", ledgerCallID)
 	}
 	recorder := newCallRecorder(ledgerCallID, time.Now())
+	// An outbound conversation is the same machinery with the direction
+	// stamped by whoever originated it; the default is a caller dialing in.
+	direction := callTypeInbound
+	if headers[headerCallType] == "OUTBOUND" {
+		direction = callTypeOutbound
+	}
 	facts := &callFacts{
-		callType:           callTypeInbound,
+		callType:           direction,
 		language:           flow.Lang(language),
 		fromNumber:         headers[headerANI],
 		did:                didNumber,

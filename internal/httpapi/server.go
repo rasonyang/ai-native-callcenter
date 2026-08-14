@@ -41,6 +41,7 @@ type Server struct {
 	ledger     *store.LedgerStore
 	recordings RecordingStreamer
 	auditor    Auditor
+	outbound   OutboundService
 	spa        http.Handler
 }
 
@@ -58,6 +59,8 @@ type Deps struct {
 	Recordings RecordingStreamer
 	// Auditor records mutating requests; nil disables the trail.
 	Auditor Auditor
+	// Outbound places calls; nil hides the dial endpoints.
+	Outbound OutboundService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -76,6 +79,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		ledger:     deps.Ledger,
 		recordings: deps.Recordings,
 		auditor:    deps.Auditor,
+		outbound:   deps.Outbound,
 		spa:        deps.SPA,
 	}
 }
@@ -197,6 +201,13 @@ func (s *Server) router() chi.Router {
 						anyRole.Post("/callbacks/{callbackId}/claim", s.handleClaimCallback)
 						anyRole.Post("/callbacks/{callbackId}/complete", s.handleCompleteCallback)
 					})
+				}
+
+				if s.outbound != nil {
+					// An agent dials out as themselves; placing an AI call
+					// is an operations decision.
+					private.With(requireAgentRole).Post("/calls/dial", s.handleDial)
+					private.With(requireSupervisorRole).Post("/calls", s.handleCreateCall)
 				}
 
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)

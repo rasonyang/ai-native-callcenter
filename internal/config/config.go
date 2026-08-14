@@ -44,6 +44,12 @@ type Config struct {
 	BotMaxCalls    int
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
+	// OutboundEndpoint renders a destination number into a dial string
+	// (%s = the number). A trunked deployment sets sofia/gateway/<gw>/%s;
+	// the default loops back into the local dialplan.
+	OutboundEndpoint string
+	// OutboundCallerID is presented on click-to-dial customer legs.
+	OutboundCallerID string
 	// IsBotEnabled turns the whole AI leg off, for deployments that only
 	// route to people.
 	IsBotEnabled bool
@@ -94,6 +100,8 @@ func Load() (Config, error) {
 		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
+		OutboundEndpoint: env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
+		OutboundCallerID: env("AICC_OUTBOUND_CLID", ""),
 		RecordingBackend: env("AICC_RECORDING_BACKEND", "FS"),
 		RecordingDir:     env("AICC_RECORDING_DIR", ""),
 		S3Endpoint:       env("AICC_S3_ENDPOINT", ""),

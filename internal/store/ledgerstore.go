@@ -5,12 +5,13 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
-	"net/netip"
-
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -187,6 +188,19 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 		out = append(out, fromRow(row))
 	}
 	return out, total, nil
+}
+
+// HasCDR reports whether a call already finished into the ledger; outbound
+// idempotency reads it before ever redialing.
+func (l *LedgerStore) HasCDR(ctx context.Context, callID uuid.UUID) (bool, error) {
+	_, err := l.GetCDR(ctx, callID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetCDR reads one call.
