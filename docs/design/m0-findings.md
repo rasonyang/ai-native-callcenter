@@ -74,6 +74,17 @@ Both byte counts convert to a plausible one-sentence greeting under the declared
 
 Latency note for 02 §8: OpenAI's ~1.95 s handshake is session setup, not per-turn, but it sits between answer and greeting. The Qwen route (Beijing) is an order of magnitude faster to set up. Neither figure is a turn-latency measurement; those come from the M3 gate.
 
+## M4.5 addendum — channel-event timing facts (2026-08-14, raw ESL capture)
+
+Captured with the M0 eslcap tool against a live AI call (`loopback/<did>/public` → `aicc_inbound.lua` → bridge to `sofia/external/<did>`):
+
+- **The caller's `CHANNEL_CREATE` never carries `variable_aicc_call_id`** — channel creation precedes the dialplan. The minted id first appears on the caller's `CHANNEL_ANSWER` (set by Lua) and rides every event after. Any design that binds identity at CREATE must therefore re-bind later (implemented as the coordinator's *reidentify*, design 03 §6).
+- **`export_vars` does put the minted vars on the bot leg's `CHANNEL_CREATE`** (`variable_aicc_call_id` + `variable_aicc_did` present at create), so the exported leg binds correctly from its first event. The export fix (M4.4) and this finding together make the AI call one registry call from the bridge onward.
+- **`CHANNEL_BRIDGE` names an arbitrary side as `Unique-ID`** (the other in `Other-Leg-Unique-ID`). Merge preference must not depend on which side the event names first.
+- **The bot DIDs live in the `public` dialplan context** (`dialplan/public/05_aicc.xml`); `default` only has the queue extensions (`7xxx`). Scripted calls must originate `loopback/<did>/public` — `/default` lands on stock demo extensions (MOH).
+- **Loopback copies originate-time variables onto both halves**, so a scaffolding marker cannot distinguish them by itself; the `-a`/`-b` name suffix does (the `-a` half is always the originate side).
+- **A caller leg that sends no RTP is dropped by the UAS's RTP-dead watchdog in ~5 s** — scripted calls that should live to the farewell need `&playback(local_stream://moh)`, not `&park()`.
+
 ## Environment state after M0 (dev box)
 
 - PostgreSQL 18.4 runs via `deploy/dev/docker-compose.yml` (`aicc-postgres`, 127.0.0.1:5432, user/db `aicc` + callcenter db `aicc_fs`). **Never via brew** (owner directive; the transient brew install was reverted).

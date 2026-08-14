@@ -40,6 +40,7 @@ type Server struct {
 	catalog    CatalogService
 	ledger     *store.LedgerStore
 	recordings RecordingStreamer
+	auditor    Auditor
 	spa        http.Handler
 }
 
@@ -55,6 +56,8 @@ type Deps struct {
 	Ledger *store.LedgerStore
 	// Recordings streams stored call audio; nil disables playback.
 	Recordings RecordingStreamer
+	// Auditor records mutating requests; nil disables the trail.
+	Auditor Auditor
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -72,12 +75,19 @@ func New(cfg config.Config, deps Deps) *Server {
 		catalog:    deps.Catalog,
 		ledger:     deps.Ledger,
 		recordings: deps.Recordings,
+		auditor:    deps.Auditor,
 		spa:        deps.SPA,
 	}
 }
 
 // Handler builds the router.
 func (s *Server) Handler() http.Handler {
+	return otelhttp.NewHandler(s.router(), "aicc")
+}
+
+// router builds the routing table. It is split from Handler so tests can walk
+// the tree — the otel wrapper hides it from chi.Walk.
+func (s *Server) router() chi.Router {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
 	// middleware.RealIP is deliberately not used: it trusts client-supplied
@@ -93,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 
 			short.Group(func(private chi.Router) {
 				private.Use(s.requireSession)
+				private.Use(s.auditTrail)
 				private.Post("/auth/logout", s.handleLogout)
 				private.Get("/auth/me", s.handleMe)
 
@@ -168,10 +179,23 @@ func (s *Server) Handler() http.Handler {
 					// reviewing what happened is not an agent task.
 					private.Group(func(sup chi.Router) {
 						sup.Use(requireSupervisorRole)
+						sup.Get("/cdrs", s.handleListCDRs)
+						sup.Get("/cdrs/{callId}", s.handleGetCDR)
 						sup.Get("/calls/{callId}/recordings", s.handleCallRecordings)
 						sup.Get("/calls/{callId}/reviews", s.handleCallReviews)
 						sup.Get("/recordings/{recordingId}/audio", s.handleRecordingAudio)
 						sup.Post("/recordings/{recordingId}/reviews", s.handleCreateReview)
+						sup.Get("/reports/overview", s.handleReportOverview)
+						sup.Get("/reports/queues", s.handleReportQueues)
+						sup.Get("/reports/daily", s.handleReportDaily)
+					})
+
+					// Callbacks are agent work: any signed-in agent may claim
+					// and keep a promise; supervisors see the same queue.
+					private.Group(func(anyRole chi.Router) {
+						anyRole.Get("/callbacks", s.handleListCallbacks)
+						anyRole.Post("/callbacks/{callbackId}/claim", s.handleClaimCallback)
+						anyRole.Post("/callbacks/{callbackId}/complete", s.handleCompleteCallback)
 					})
 				}
 
@@ -187,7 +211,7 @@ func (s *Server) Handler() http.Handler {
 		r.NotFound(s.spa.ServeHTTP)
 	}
 
-	return otelhttp.NewHandler(r, "aicc")
+	return r
 }
 
 // MetricsHandler builds the unauthenticated ops listener: metrics, liveness

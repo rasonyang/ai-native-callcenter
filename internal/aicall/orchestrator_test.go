@@ -364,6 +364,49 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 }
 
 // driveFlow is the minimal flow the drive test runs.
+// A call the flow concludes — reaching a terminal phase by any route — is
+// contained, exactly as if the model had called the hangup tool. This path
+// forgot to say so once, and every farewell-ended call reported uncontained.
+func TestReachingATerminalPhaseIsContainment(t *testing.T) {
+	session, _, _ := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, &fakeSwitch{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	spec, err := flow.Load([]byte(`{
+		"id": "terminal-test",
+		"specVersion": "v2",
+		"initialNode": "welcome",
+		"global": {"persona": "You answer the phone."},
+		"nodes": {
+			"welcome": {"instruction": "Greet.", "tools": [],
+				"transitions": [{"on": "NO_INPUT", "target": "farewell"}]},
+			"farewell": {"instruction": "Say goodbye.", "tools": [], "isTerminal": true}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{orchestrator: o, session: session, log: log}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now())
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+
+	moved := engine.OnNoInput()
+	if moved == "" || !engine.IsTerminal() {
+		t.Fatalf("the test flow did not reach its terminal phase (moved=%q)", moved)
+	}
+	o.afterMove(moved, session, runtime, actions, log)
+
+	actions.recorder.mu.Lock()
+	endReason := actions.recorder.endReason
+	actions.recorder.mu.Unlock()
+	if endReason != "HANGUP" {
+		t.Errorf("endReason = %q, want HANGUP — a flow-concluded call must count as contained", endReason)
+	}
+}
+
 const driveFlow = `{
 	"id": "drive-test",
 	"specVersion": "v2",

@@ -115,6 +115,10 @@ type Party struct {
 	ReleaseCause string
 	// TransferredAway marks a leg that ended because the call moved on.
 	TransferredAway bool
+	// IsBotLeg marks the leg the switch dialed towards the AI gateway. A call
+	// that has one and was never handed to a person belongs to the bot's
+	// ledger, not this path's.
+	IsBotLeg bool
 }
 
 // apply moves the party, reporting an error for forbidden transitions.
@@ -312,6 +316,7 @@ type PartySnapshot struct {
 	ReleasedAt  *time.Time `json:"releasedAt,omitempty"`
 	// ReleaseCause is the switch's word for why the leg ended.
 	ReleaseCause string `json:"releaseCause,omitempty"`
+	IsBotLeg     bool   `json:"isBotLeg,omitempty"`
 }
 
 // Snapshot copies the call into a value safe to hand outside the actor.
@@ -343,6 +348,7 @@ func (c *Call) Snapshot() Snapshot {
 			AgentID:      p.AgentID,
 			CreatedAt:    p.CreatedAt,
 			ReleaseCause: p.ReleaseCause,
+			IsBotLeg:     p.IsBotLeg,
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

@@ -13,6 +13,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimCallback = `-- name: ClaimCallback :one
+UPDATE callbacks
+SET status = 'CLAIMED', handled_by = $2
+WHERE id = $1 AND status = 'OPEN'
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at
+`
+
+type ClaimCallbackParams struct {
+	ID        uuid.UUID  `json:"id"`
+	HandledBy *uuid.UUID `json:"handledBy"`
+}
+
+func (q *Queries) ClaimCallback(ctx context.Context, arg ClaimCallbackParams) (Callback, error) {
+	row := q.db.QueryRow(ctx, claimCallback, arg.ID, arg.HandledBy)
+	var i Callback
+	err := row.Scan(
+		&i.ID,
+		&i.CallID,
+		&i.QueueID,
+		&i.PhoneNumber,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.HandledBy,
+		&i.HandledAt,
+	)
+	return i, err
+}
+
 const countCDRs = `-- name: CountCDRs :one
 SELECT count(*) FROM cdrs
 WHERE ($1::timestamptz IS NULL OR started_at >= $1)
@@ -646,6 +675,174 @@ type PutSettingParams struct {
 func (q *Queries) PutSetting(ctx context.Context, arg PutSettingParams) error {
 	_, err := q.db.Exec(ctx, putSetting, arg.Key, arg.Value)
 	return err
+}
+
+const reportByQueue = `-- name: ReportByQueue :many
+SELECT
+    queue_id,
+    count(*)                                                           AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                        AS answered_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls,
+    count(*) FILTER (WHERE queue_wait_sec <= 20 AND status = 'ANSWERED') AS answered_within_sla,
+    coalesce(avg(queue_wait_sec), 0)::float8                           AS avg_wait_sec,
+    coalesce(max(queue_wait_sec), 0)::int                              AS max_wait_sec,
+    coalesce(avg(talk_sec) FILTER (WHERE talk_sec > 0), 0)::float8     AS avg_talk_sec
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2 AND queue_id IS NOT NULL
+GROUP BY queue_id
+ORDER BY total_calls DESC
+`
+
+type ReportByQueueParams struct {
+	StartedAt   pgtype.Timestamptz `json:"startedAt"`
+	StartedAt_2 pgtype.Timestamptz `json:"startedAt2"`
+}
+
+type ReportByQueueRow struct {
+	QueueID           *uuid.UUID `json:"queueId"`
+	TotalCalls        int64      `json:"totalCalls"`
+	AnsweredCalls     int64      `json:"answeredCalls"`
+	AbandonedCalls    int64      `json:"abandonedCalls"`
+	AnsweredWithinSla int64      `json:"answeredWithinSla"`
+	AvgWaitSec        float64    `json:"avgWaitSec"`
+	MaxWaitSec        int32      `json:"maxWaitSec"`
+	AvgTalkSec        float64    `json:"avgTalkSec"`
+}
+
+func (q *Queries) ReportByQueue(ctx context.Context, arg ReportByQueueParams) ([]ReportByQueueRow, error) {
+	rows, err := q.db.Query(ctx, reportByQueue, arg.StartedAt, arg.StartedAt_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportByQueueRow{}
+	for rows.Next() {
+		var i ReportByQueueRow
+		if err := rows.Scan(
+			&i.QueueID,
+			&i.TotalCalls,
+			&i.AnsweredCalls,
+			&i.AbandonedCalls,
+			&i.AnsweredWithinSla,
+			&i.AvgWaitSec,
+			&i.MaxWaitSec,
+			&i.AvgTalkSec,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportDaily = `-- name: ReportDaily :many
+SELECT
+    date_trunc('day', started_at)::date                               AS day,
+    count(*)                                                          AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                       AS answered_calls,
+    count(*) FILTER (WHERE is_contained)                              AS contained_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2
+GROUP BY 1
+ORDER BY 1
+`
+
+type ReportDailyParams struct {
+	StartedAt   pgtype.Timestamptz `json:"startedAt"`
+	StartedAt_2 pgtype.Timestamptz `json:"startedAt2"`
+}
+
+type ReportDailyRow struct {
+	Day            pgtype.Date `json:"day"`
+	TotalCalls     int64       `json:"totalCalls"`
+	AnsweredCalls  int64       `json:"answeredCalls"`
+	ContainedCalls int64       `json:"containedCalls"`
+	AbandonedCalls int64       `json:"abandonedCalls"`
+}
+
+func (q *Queries) ReportDaily(ctx context.Context, arg ReportDailyParams) ([]ReportDailyRow, error) {
+	rows, err := q.db.Query(ctx, reportDaily, arg.StartedAt, arg.StartedAt_2)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportDailyRow{}
+	for rows.Next() {
+		var i ReportDailyRow
+		if err := rows.Scan(
+			&i.Day,
+			&i.TotalCalls,
+			&i.AnsweredCalls,
+			&i.ContainedCalls,
+			&i.AbandonedCalls,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const reportOverview = `-- name: ReportOverview :one
+SELECT
+    count(*)                                                          AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                       AS answered_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls,
+    count(*) FILTER (WHERE is_contained)                              AS contained_calls,
+    count(*) FILTER (WHERE queue_wait_sec <= 20 AND status = 'ANSWERED'
+                     AND queue_id IS NOT NULL)                        AS answered_within_sla,
+    count(*) FILTER (WHERE queue_id IS NOT NULL)                      AS queue_calls,
+    coalesce(avg(queue_wait_sec) FILTER (WHERE queue_id IS NOT NULL), 0)::float8 AS avg_wait_sec,
+    coalesce(avg(talk_sec) FILTER (WHERE talk_sec > 0), 0)::float8    AS avg_talk_sec,
+    coalesce(avg(bot_sec)  FILTER (WHERE bot_sec  > 0), 0)::float8    AS avg_bot_sec
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2
+  AND ($3::uuid IS NULL OR queue_id = $3)
+`
+
+type ReportOverviewParams struct {
+	StartedAt   pgtype.Timestamptz `json:"startedAt"`
+	StartedAt_2 pgtype.Timestamptz `json:"startedAt2"`
+	QueueID     *uuid.UUID         `json:"queueId"`
+}
+
+type ReportOverviewRow struct {
+	TotalCalls        int64   `json:"totalCalls"`
+	AnsweredCalls     int64   `json:"answeredCalls"`
+	AbandonedCalls    int64   `json:"abandonedCalls"`
+	ContainedCalls    int64   `json:"containedCalls"`
+	AnsweredWithinSla int64   `json:"answeredWithinSla"`
+	QueueCalls        int64   `json:"queueCalls"`
+	AvgWaitSec        float64 `json:"avgWaitSec"`
+	AvgTalkSec        float64 `json:"avgTalkSec"`
+	AvgBotSec         float64 `json:"avgBotSec"`
+}
+
+func (q *Queries) ReportOverview(ctx context.Context, arg ReportOverviewParams) (ReportOverviewRow, error) {
+	row := q.db.QueryRow(ctx, reportOverview, arg.StartedAt, arg.StartedAt_2, arg.QueueID)
+	var i ReportOverviewRow
+	err := row.Scan(
+		&i.TotalCalls,
+		&i.AnsweredCalls,
+		&i.AbandonedCalls,
+		&i.ContainedCalls,
+		&i.AnsweredWithinSla,
+		&i.QueueCalls,
+		&i.AvgWaitSec,
+		&i.AvgTalkSec,
+		&i.AvgBotSec,
+	)
+	return i, err
 }
 
 const updateCDRHasRecording = `-- name: UpdateCDRHasRecording :exec

@@ -55,6 +55,51 @@ func newAssembler(ledger *memoryLedger, queues staticQueues) *CDRAssembler {
 	return NewCDRAssembler(ledger, queues, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
+// The bot writes the CDR for calls it finished; this path writes for calls a
+// person finished, including bot calls that were handed over (the bot-share
+// stamp marks the handover). Writing both sides doubled every contained call
+// in the reports.
+func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
+	contained := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "13800138000", AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+			{Role: RoleTarget, Number: "95012", IsBotLeg: true, AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+		},
+	}
+	transferred := contained
+	transferred.CallID = uuid.New()
+	transferred.Bot = BotShare{Sec: 20, DID: "95012"}
+
+	ledger := &memoryLedger{}
+	assembler := newAssembler(ledger, staticQueues{})
+	assembler.CallFinished(contained)
+	assembler.CallFinished(transferred)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ledger.mu.Lock()
+		n := len(ledger.cdrs)
+		ledger.mu.Unlock()
+		if n >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond) // let a wrong second write land before judging
+
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.cdrs) != 1 {
+		t.Fatalf("wrote %d cdrs, want only the transferred call's", len(ledger.cdrs))
+	}
+	if ledger.cdrs[0].CallID != transferred.CallID {
+		t.Errorf("wrote the contained call's cdr — that row belongs to the bot")
+	}
+}
+
 // at builds timestamps relative to one base so durations are legible.
 var base = time.Date(2026, 8, 14, 10, 0, 0, 0, time.UTC)
 

@@ -71,14 +71,31 @@ func NewCDRAssembler(ledger CDRLedger, queues QueueDirectory, storage RecordingS
 // CallFinished receives the final snapshot; safe to set as Registry.OnCallFinished.
 func (a *CDRAssembler) CallFinished(snap Snapshot) {
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
-			a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)
+		// The ledger follows the call. A call with a bot leg that was never
+		// handed to a person is the bot's story to write — its session holds
+		// the transcript, timings and containment this path cannot see. The
+		// bot-share stamp is what marks a handover, and only then does this
+		// path own the row.
+		if !hasBotLeg(snap) || !snap.Bot.IsZero() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
+				a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)
+			}
+			cancel()
 		}
-		cancel()
 		a.ingestRecording(snap)
 	}()
+}
+
+// hasBotLeg reports whether the switch dialed this call towards the AI
+// gateway at some point.
+func hasBotLeg(snap Snapshot) bool {
+	for _, p := range snap.Parties {
+		if p.IsBotLeg {
+			return true
+		}
+	}
+	return false
 }
 
 // ingestRecording books the call's audio into the ledger, if any was made.

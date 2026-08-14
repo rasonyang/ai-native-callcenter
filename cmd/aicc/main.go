@@ -191,6 +191,13 @@ func run() error {
 			Switch:      adapter,
 			Ledger:      st.Ledger(),
 			BackendBase: cfg.BotBackendBase,
+			AnnounceCallback: func(callback store.Callback) {
+				hub.Publish(ctx, events.Event{
+					Type:    events.TypeCallbackCreated,
+					CallID:  callback.CallID,
+					Payload: map[string]any{"callback": callback},
+				}, events.Scope{})
+			},
 		})
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)
@@ -222,6 +229,7 @@ func run() error {
 			Catalog:    catalogSvc,
 			Ledger:     st.Ledger(),
 			Recordings: recordings,
+			Auditor:    st.Ledger(),
 			SPA:        spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

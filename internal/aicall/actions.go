@@ -109,10 +109,14 @@ func (a *callActions) TakeMessage(ctx context.Context, request flow.MessageReque
 			phoneNumber = a.facts.fromNumber
 		}
 		callID := a.recorder.callID
-		if _, err := ledger.InsertCallback(ctx, &callID, a.fallbackQueue,
-			phoneNumber, request.Message); err != nil {
+		callback, err := ledger.InsertCallback(ctx, &callID, a.fallbackQueue,
+			phoneNumber, request.Message)
+		if err != nil {
 			a.log.Error("could not save the callback", "error", err)
 			return flow.Failed("SAVE_FAILED", a.refusalHint()), nil
+		}
+		if announce := a.orchestrator.cfg.AnnounceCallback; announce != nil {
+			announce(callback)
 		}
 	}
 	return flow.Succeeded(nil, ""), nil

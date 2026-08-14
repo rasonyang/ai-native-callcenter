@@ -54,6 +54,13 @@ func NewCoordinator(registry *Registry, adapter *Adapter, agents AgentLookup, pu
 
 // Handle consumes one normalized switch event.
 func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
+	// A harness leg is scaffolding around a scripted call — the loopback half
+	// that only exists to push audio at the system under test. It is not a
+	// party to any conversation and must never reach the ledger.
+	if isHarnessLeg(ev) {
+		return
+	}
+
 	switch ev.Kind {
 	case KindChannelCreate:
 		c.adopt(ctx, ev)
@@ -62,6 +69,11 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	case KindQueueAgentOffered:
 		c.offerToAgent(ctx, ev)
 	}
+
+	// The dialplan mints a call's identity after the channel already exists,
+	// so the first event arrives too early to carry it. The moment a later
+	// event does, the provisional call collapses into the minted one.
+	c.reidentify(ctx, ev)
 
 	// Queue movements feed the ledger: service level and abandonment reporting
 	// read those rows, never the raw switch events.
@@ -99,6 +111,58 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	if freedAgent != nil {
 		c.agents.SetOnCall(ctx, *freedAgent, false)
 	}
+}
+
+// isHarnessLeg recognizes scaffolding channels: scripted test calls originate
+// through loopback with {aicc_harness=true}. Loopback copies the variable to
+// both halves, so the name suffix picks out the -a half — the side that only
+// exists to push audio; the -b half plays the caller and is tracked normally.
+func isHarnessLeg(ev SwitchEvent) bool {
+	return ev.Raw.Variable("aicc_harness") == "true" &&
+		strings.HasSuffix(ev.ChannelName, "-a")
+}
+
+// isBotLeg recognizes the leg the switch dialed towards the AI gateway: an
+// outbound channel whose destination is the DID the dialplan stamped on it.
+// The caller's own leg carries the same variables but arrives inbound.
+func isBotLeg(ev SwitchEvent) bool {
+	did := ev.Raw.Variable("aicc_did")
+	return ev.Direction == DirectionOutbound && did != "" && ev.DestinationNumber == did
+}
+
+// reidentify moves a channel from a provisional call to its minted identity
+// once an event reveals it. The caller's CHANNEL_CREATE fires before the
+// dialplan runs, so the caller is always adopted provisionally first; the
+// minted id rides every event after the dialplan sets it.
+func (c *Coordinator) reidentify(ctx context.Context, ev SwitchEvent) {
+	if ev.ChannelID == "" {
+		return
+	}
+	raw := ev.Raw.Variable("aicc_call_id")
+	if raw == "" {
+		return
+	}
+	minted, err := uuid.Parse(raw)
+	if err != nil {
+		return
+	}
+	bound, ok := c.registry.CallForChannel(ev.ChannelID)
+	if !ok || bound == minted {
+		return
+	}
+	if c.isMintedID(bound) {
+		// The channel already lives on a minted call; a differing variable
+		// here would mean the dialplan reminted mid-call, which it never does.
+		return
+	}
+
+	// The minted call may not exist yet: this channel's event is the first
+	// place the id appears. Create it so the provisional facts have a home.
+	if _, err := c.registry.CreateCallMinted(ctx, minted, callTypeOf(ev),
+		ev.Raw.Variable("aicc_language"), true); err == nil {
+		slog.DebugContext(ctx, "minted call created on reidentify", "callId", minted)
+	}
+	c.merge(ctx, minted, bound)
 }
 
 // adopt creates a call for a channel we have not seen before.
@@ -168,6 +232,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			p.AgentID = &agentID
 			p.OtherNumber = ev.ANI
 		}
+		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
 	})
 	if err != nil || partyID == uuid.Nil {
@@ -220,7 +285,12 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	case c.isMintedID(otherID) && !c.isMintedID(callID):
 		keep, absorb = otherID, callID
 	}
+	c.merge(ctx, keep, absorb)
+}
 
+// merge folds one call into another: parties and facts move, channels rebind,
+// and the absorbed call retires without ever reaching the ledger.
+func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 	var moved []*Party
 	var movedQueue QueueFacts
 	var movedBot BotShare
@@ -258,7 +328,7 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 		}
 	}
 	c.registry.Retire(absorb)
-	slog.DebugContext(ctx, "bridged legs joined", "callId", keep, "absorbed", absorb)
+	slog.DebugContext(ctx, "calls merged", "callId", keep, "absorbed", absorb)
 }
 
 // offerToAgent announces a queued call on the chosen agent's screen, before

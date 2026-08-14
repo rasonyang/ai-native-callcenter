@@ -201,3 +201,28 @@ func TestTakeMessagePersistsACallback(t *testing.T) {
 		t.Errorf("callback = %+v", cb)
 	}
 }
+
+// A saved callback is announced to the event stream; a failed save is not.
+func TestTakeMessageAnnouncesTheCallback(t *testing.T) {
+	ledger := newFakeLedger()
+	sw := &fakeSwitch{}
+	actions, _, _ := testActions(t, sw)
+	actions.orchestrator.cfg.Ledger = ledger
+	actions.recorder = newCallRecorder(uuid.New(), time.Now())
+	actions.facts = testFacts()
+
+	var announced []store.Callback
+	actions.orchestrator.cfg.AnnounceCallback = func(cb store.Callback) {
+		announced = append(announced, cb)
+	}
+
+	if _, err := actions.TakeMessage(t.Context(), flow.MessageRequest{Message: "回电"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(announced) != 1 {
+		t.Fatalf("announced %d callbacks, want 1", len(announced))
+	}
+	if announced[0].Message != "回电" {
+		t.Errorf("announced the wrong row: %+v", announced[0])
+	}
+}

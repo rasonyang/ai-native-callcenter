@@ -101,3 +101,55 @@ RETURNING *;
 
 -- name: ListQualityReviewsByCall :many
 SELECT * FROM quality_reviews WHERE call_id = $1 ORDER BY created_at DESC;
+
+-- name: ClaimCallback :one
+UPDATE callbacks
+SET status = 'CLAIMED', handled_by = $2
+WHERE id = $1 AND status = 'OPEN'
+RETURNING *;
+
+-- name: ReportOverview :one
+SELECT
+    count(*)                                                          AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                       AS answered_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls,
+    count(*) FILTER (WHERE is_contained)                              AS contained_calls,
+    count(*) FILTER (WHERE queue_wait_sec <= 20 AND status = 'ANSWERED'
+                     AND queue_id IS NOT NULL)                        AS answered_within_sla,
+    count(*) FILTER (WHERE queue_id IS NOT NULL)                      AS queue_calls,
+    coalesce(avg(queue_wait_sec) FILTER (WHERE queue_id IS NOT NULL), 0)::float8 AS avg_wait_sec,
+    coalesce(avg(talk_sec) FILTER (WHERE talk_sec > 0), 0)::float8    AS avg_talk_sec,
+    coalesce(avg(bot_sec)  FILTER (WHERE bot_sec  > 0), 0)::float8    AS avg_bot_sec
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2
+  AND (sqlc.narg('queue_id')::uuid IS NULL OR queue_id = sqlc.narg('queue_id'));
+
+-- name: ReportByQueue :many
+SELECT
+    queue_id,
+    count(*)                                                           AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                        AS answered_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls,
+    count(*) FILTER (WHERE queue_wait_sec <= 20 AND status = 'ANSWERED') AS answered_within_sla,
+    coalesce(avg(queue_wait_sec), 0)::float8                           AS avg_wait_sec,
+    coalesce(max(queue_wait_sec), 0)::int                              AS max_wait_sec,
+    coalesce(avg(talk_sec) FILTER (WHERE talk_sec > 0), 0)::float8     AS avg_talk_sec
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2 AND queue_id IS NOT NULL
+GROUP BY queue_id
+ORDER BY total_calls DESC;
+
+-- name: ReportDaily :many
+SELECT
+    date_trunc('day', started_at)::date                               AS day,
+    count(*)                                                          AS total_calls,
+    count(*) FILTER (WHERE status = 'ANSWERED')                       AS answered_calls,
+    count(*) FILTER (WHERE is_contained)                              AS contained_calls,
+    count(*) FILTER (WHERE missed_reason IN
+        ('SHORT_ABANDONED', 'ABANDONED_RINGING', 'ABANDONED_WAITING')) AS abandoned_calls
+FROM cdrs
+WHERE started_at >= $1 AND started_at < $2
+GROUP BY 1
+ORDER BY 1;

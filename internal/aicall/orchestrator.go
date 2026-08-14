@@ -72,6 +72,9 @@ type OrchestratorConfig struct {
 	Sessions SessionFactory
 	// Ledger receives finished calls; nil disables writing.
 	Ledger Ledger
+	// AnnounceCallback tells the live event stream about a callback the bot
+	// just created; nil means nobody is watching.
+	AnnounceCallback func(callback store.Callback)
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
 	Logger      *slog.Logger
@@ -352,6 +355,11 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 	if runtime.Engine().IsTerminal() {
 		log.Info("flow reached a terminal phase; the call ends after the closing line",
 			"node", moved)
+		// The flow concluding the call is containment, exactly like the
+		// hangup tool concluding it — the ledger must not tell them apart.
+		if actions.recorder != nil {
+			actions.recorder.markHangup()
+		}
 		actions.arm(context.Background(), func() {
 			session.Close(context.Background())
 		})

@@ -360,6 +360,16 @@ func (l *LedgerStore) ListCallbacks(ctx context.Context, status string, limit, o
 	return out, nil
 }
 
+// ClaimCallback marks an OPEN callback as being worked by one agent. A second
+// claim loses: the row is only updated while still OPEN.
+func (l *LedgerStore) ClaimCallback(ctx context.Context, id, userID uuid.UUID) (Callback, error) {
+	row, err := l.q.ClaimCallback(ctx, queries.ClaimCallbackParams{ID: id, HandledBy: &userID})
+	if err != nil {
+		return Callback{}, err
+	}
+	return callbackFromRow(row), nil
+}
+
 // HandleCallback closes a callback as done or dismissed.
 func (l *LedgerStore) HandleCallback(ctx context.Context, id uuid.UUID, status string, handledBy uuid.UUID) (Callback, error) {
 	row, err := l.q.HandleCallback(ctx, queries.HandleCallbackParams{
@@ -557,6 +567,110 @@ func (l *LedgerStore) Audit(ctx context.Context, actorID *uuid.UUID,
 		TargetKind: targetKind, TargetID: targetID,
 		Detail: encoded, IP: addr,
 	})
+}
+
+//
+// Reports.
+//
+
+// Overview is the headline numbers for a period.
+type Overview struct {
+	TotalCalls        int     `json:"totalCalls"`
+	AnsweredCalls     int     `json:"answeredCalls"`
+	AbandonedCalls    int     `json:"abandonedCalls"`
+	ContainedCalls    int     `json:"containedCalls"`
+	QueueCalls        int     `json:"queueCalls"`
+	AnsweredWithinSLA int     `json:"answeredWithinSla"`
+	AvgWaitSec        float64 `json:"avgWaitSec"`
+	AvgTalkSec        float64 `json:"avgTalkSec"`
+	AvgBotSec         float64 `json:"avgBotSec"`
+}
+
+// QueueReport is one queue's period numbers.
+type QueueReport struct {
+	QueueID           *uuid.UUID `json:"queueId"`
+	TotalCalls        int        `json:"totalCalls"`
+	AnsweredCalls     int        `json:"answeredCalls"`
+	AbandonedCalls    int        `json:"abandonedCalls"`
+	AnsweredWithinSLA int        `json:"answeredWithinSla"`
+	AvgWaitSec        float64    `json:"avgWaitSec"`
+	MaxWaitSec        int        `json:"maxWaitSec"`
+	AvgTalkSec        float64    `json:"avgTalkSec"`
+}
+
+// DailyReport is one day's counts, for charts.
+type DailyReport struct {
+	Day            time.Time `json:"day"`
+	TotalCalls     int       `json:"totalCalls"`
+	AnsweredCalls  int       `json:"answeredCalls"`
+	ContainedCalls int       `json:"containedCalls"`
+	AbandonedCalls int       `json:"abandonedCalls"`
+}
+
+// ReportOverview aggregates the period's headline numbers.
+func (l *LedgerStore) ReportOverview(ctx context.Context, from, to time.Time, queueID *uuid.UUID) (Overview, error) {
+	row, err := l.q.ReportOverview(ctx, queries.ReportOverviewParams{
+		StartedAt: stamp(from), StartedAt_2: stamp(to), QueueID: queueID,
+	})
+	if err != nil {
+		return Overview{}, err
+	}
+	return Overview{
+		TotalCalls:        int(row.TotalCalls),
+		AnsweredCalls:     int(row.AnsweredCalls),
+		AbandonedCalls:    int(row.AbandonedCalls),
+		ContainedCalls:    int(row.ContainedCalls),
+		QueueCalls:        int(row.QueueCalls),
+		AnsweredWithinSLA: int(row.AnsweredWithinSla),
+		AvgWaitSec:        row.AvgWaitSec,
+		AvgTalkSec:        row.AvgTalkSec,
+		AvgBotSec:         row.AvgBotSec,
+	}, nil
+}
+
+// ReportByQueue aggregates per queue.
+func (l *LedgerStore) ReportByQueue(ctx context.Context, from, to time.Time) ([]QueueReport, error) {
+	rows, err := l.q.ReportByQueue(ctx, queries.ReportByQueueParams{
+		StartedAt: stamp(from), StartedAt_2: stamp(to),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QueueReport, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, QueueReport{
+			QueueID:           row.QueueID,
+			TotalCalls:        int(row.TotalCalls),
+			AnsweredCalls:     int(row.AnsweredCalls),
+			AbandonedCalls:    int(row.AbandonedCalls),
+			AnsweredWithinSLA: int(row.AnsweredWithinSla),
+			AvgWaitSec:        row.AvgWaitSec,
+			MaxWaitSec:        int(row.MaxWaitSec),
+			AvgTalkSec:        row.AvgTalkSec,
+		})
+	}
+	return out, nil
+}
+
+// ReportDaily aggregates per day.
+func (l *LedgerStore) ReportDaily(ctx context.Context, from, to time.Time) ([]DailyReport, error) {
+	rows, err := l.q.ReportDaily(ctx, queries.ReportDailyParams{
+		StartedAt: stamp(from), StartedAt_2: stamp(to),
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]DailyReport, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, DailyReport{
+			Day:            row.Day.Time,
+			TotalCalls:     int(row.TotalCalls),
+			AnsweredCalls:  int(row.AnsweredCalls),
+			ContainedCalls: int(row.ContainedCalls),
+			AbandonedCalls: int(row.AbandonedCalls),
+		})
+	}
+	return out, nil
 }
 
 //
