@@ -38,6 +38,12 @@ func (m *memoryLedger) InsertQueueEvent(_ context.Context, _ time.Time,
 	return nil
 }
 
+func (m *memoryLedger) InsertRecording(_ context.Context, r store.Recording) (store.Recording, error) {
+	return r, nil
+}
+
+func (m *memoryLedger) MarkRecorded(context.Context, uuid.UUID) error { return nil }
+
 type staticQueues map[string]uuid.UUID
 
 func (q staticQueues) QueueIDByName(_ context.Context, name string) (uuid.UUID, bool) {
@@ -46,7 +52,7 @@ func (q staticQueues) QueueIDByName(_ context.Context, name string) (uuid.UUID, 
 }
 
 func newAssembler(ledger *memoryLedger, queues staticQueues) *CDRAssembler {
-	return NewCDRAssembler(ledger, queues, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return NewCDRAssembler(ledger, queues, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 // at builds timestamps relative to one base so durations are legible.

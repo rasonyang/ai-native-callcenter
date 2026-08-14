@@ -462,6 +462,67 @@ func recordingFromRow(row queries.Recording) Recording {
 	}
 }
 
+// QualityReview is one reviewer's scoring of one recording.
+type QualityReview struct {
+	ID          uuid.UUID      `json:"id"`
+	RecordingID uuid.UUID      `json:"recordingId"`
+	CallID      uuid.UUID      `json:"callId"`
+	ReviewerID  uuid.UUID      `json:"reviewerId"`
+	Scores      map[string]int `json:"scores"`
+	TotalScore  int            `json:"totalScore"`
+	Notes       string         `json:"notes"`
+	CreatedAt   time.Time      `json:"createdAt"`
+}
+
+// InsertQualityReview records a scoring.
+func (l *LedgerStore) InsertQualityReview(ctx context.Context, review QualityReview) (QualityReview, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return QualityReview{}, err
+	}
+	scores, err := marshalOr(review.Scores, "{}")
+	if err != nil {
+		return QualityReview{}, err
+	}
+	row, err := l.q.InsertQualityReview(ctx, queries.InsertQualityReviewParams{
+		ID: id, RecordingID: review.RecordingID, CallID: review.CallID,
+		ReviewerID: review.ReviewerID, Scores: scores,
+		TotalScore: int16(review.TotalScore), Notes: review.Notes,
+	})
+	if err != nil {
+		return QualityReview{}, err
+	}
+	return reviewFromRow(row), nil
+}
+
+// ReviewsByCall lists a call's reviews, newest first.
+func (l *LedgerStore) ReviewsByCall(ctx context.Context, callID uuid.UUID) ([]QualityReview, error) {
+	rows, err := l.q.ListQualityReviewsByCall(ctx, callID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QualityReview, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, reviewFromRow(row))
+	}
+	return out, nil
+}
+
+func reviewFromRow(row queries.QualityReview) QualityReview {
+	review := QualityReview{
+		ID: row.ID, RecordingID: row.RecordingID, CallID: row.CallID,
+		ReviewerID: row.ReviewerID, TotalScore: int(row.TotalScore),
+		Notes: row.Notes, CreatedAt: row.CreatedAt.Time,
+	}
+	_ = json.Unmarshal(row.Scores, &review.Scores)
+	return review
+}
+
+// MarkRecorded flips the ledger row's recording flag once audio is stored.
+func (l *LedgerStore) MarkRecorded(ctx context.Context, callID uuid.UUID) error {
+	return l.q.UpdateCDRHasRecording(ctx, callID)
+}
+
 // Queue event names.
 const (
 	QueueEventJoined    = "JOINED"

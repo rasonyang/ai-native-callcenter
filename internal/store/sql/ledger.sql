@@ -90,3 +90,14 @@ VALUES ($1, $2, $3, $4, $5, $6);
 -- name: PutSetting :exec
 INSERT INTO settings (key, value) VALUES ($1, $2)
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
+-- name: UpdateCDRHasRecording :exec
+UPDATE cdrs SET has_recording = true WHERE call_id = $1;
+
+-- name: InsertQualityReview :one
+INSERT INTO quality_reviews (id, recording_id, call_id, reviewer_id, scores, total_score, notes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: ListQualityReviewsByCall :many
+SELECT * FROM quality_reviews WHERE call_id = $1 ORDER BY created_at DESC;

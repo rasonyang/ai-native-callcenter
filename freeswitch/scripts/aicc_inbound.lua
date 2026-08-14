@@ -58,6 +58,10 @@ local call_id = api:executeString("create_uuid")
 session:setVariable("aicc_call_id", call_id)
 session:setVariable("aicc_did", route.number)
 session:setVariable("aicc_language", route.language)
+-- Exported so every leg bridged from this one carries the same identity:
+-- without this the bot leg arrives without aicc_call_id and the application
+-- opens a second, provisional call for it.
+session:setVariable("export_vars", "aicc_call_id,aicc_did,aicc_language")
 
 -- The bot leg is G.711 only: it terminates RTP in the application, which
 -- speaks both laws and nothing else.

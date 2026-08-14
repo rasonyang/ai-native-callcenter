@@ -16,6 +16,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
 // AgentService is the agent presence surface used by the API.
@@ -30,14 +31,16 @@ type AgentService interface {
 
 // Server owns the HTTP surface: REST, SSE and the embedded SPA.
 type Server struct {
-	cfg      config.Config
-	auth     *auth.Service
-	hub      *events.Hub
-	agents   AgentService
-	agentDir AgentDirectory
-	calls    CallService
-	catalog  CatalogService
-	spa      http.Handler
+	cfg        config.Config
+	auth       *auth.Service
+	hub        *events.Hub
+	agents     AgentService
+	agentDir   AgentDirectory
+	calls      CallService
+	catalog    CatalogService
+	ledger     *store.LedgerStore
+	recordings RecordingStreamer
+	spa        http.Handler
 }
 
 // Deps are the services the API exposes.
@@ -48,6 +51,10 @@ type Deps struct {
 	AgentDir AgentDirectory
 	Calls    CallService
 	Catalog  CatalogService
+	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
+	Ledger *store.LedgerStore
+	// Recordings streams stored call audio; nil disables playback.
+	Recordings RecordingStreamer
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -56,14 +63,16 @@ type Deps struct {
 // New builds the server.
 func New(cfg config.Config, deps Deps) *Server {
 	return &Server{
-		cfg:      cfg,
-		auth:     deps.Auth,
-		hub:      deps.Hub,
-		agents:   deps.Agents,
-		agentDir: deps.AgentDir,
-		calls:    deps.Calls,
-		catalog:  deps.Catalog,
-		spa:      deps.SPA,
+		cfg:        cfg,
+		auth:       deps.Auth,
+		hub:        deps.Hub,
+		agents:     deps.Agents,
+		agentDir:   deps.AgentDir,
+		calls:      deps.Calls,
+		catalog:    deps.Catalog,
+		ledger:     deps.Ledger,
+		recordings: deps.Recordings,
+		spa:        deps.SPA,
 	}
 }
 
@@ -151,6 +160,18 @@ func (s *Server) Handler() http.Handler {
 						sup.Use(requireSupervisorRole)
 						sup.Get("/queues", s.handleListQueues)
 						sup.Get("/queues/{queueId}/agents", s.handleListQueueAgents)
+					})
+				}
+
+				if s.ledger != nil {
+					// Finished calls and their artifacts are supervision:
+					// reviewing what happened is not an agent task.
+					private.Group(func(sup chi.Router) {
+						sup.Use(requireSupervisorRole)
+						sup.Get("/calls/{callId}/recordings", s.handleCallRecordings)
+						sup.Get("/calls/{callId}/reviews", s.handleCallReviews)
+						sup.Get("/recordings/{recordingId}/audio", s.handleRecordingAudio)
+						sup.Post("/recordings/{recordingId}/reviews", s.handleCreateReview)
 					})
 				}
 

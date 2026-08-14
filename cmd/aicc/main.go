@@ -26,6 +26,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
+	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -139,7 +140,32 @@ func run() error {
 
 	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
 	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
-	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, slog.Default()))
+
+	// Recording storage: nil when no directory is configured, which disables
+	// ingestion without disabling anything else.
+	var recordings recording.Storage
+	if cfg.RecordingDir != "" {
+		recordings, err = recording.New(recording.Config{
+			Backend: cfg.RecordingBackend, Dir: cfg.RecordingDir,
+			S3Endpoint: cfg.S3Endpoint, S3AccessKey: cfg.S3AccessKey,
+			S3SecretKey: cfg.S3SecretKey, S3Bucket: cfg.S3Bucket, S3IsSSL: cfg.S3IsSSL,
+		})
+		if err != nil {
+			return fmt.Errorf("recording storage: %w", err)
+		}
+		if s3, ok := recordings.(interface{ EnsureBucket(context.Context) error }); ok {
+			if err := s3.EnsureBucket(ctx); err != nil {
+				return fmt.Errorf("recording storage: %w", err)
+			}
+		}
+		slog.Info("recording storage ready", "backend", recordings.Backend(), "dir", cfg.RecordingDir)
+	}
+
+	var recordingStorage telephony.RecordingStorage
+	if recordings != nil {
+		recordingStorage = recordings
+	}
+	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()))
 
 	go link.Run(ctx)
 	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc)
@@ -188,13 +214,15 @@ func run() error {
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.New(cfg, httpapi.Deps{
-			Auth:     authSvc,
-			Hub:      hub,
-			Agents:   agentSvc,
-			AgentDir: agentDirectory{st},
-			Calls:    coordinator,
-			Catalog:  catalogSvc,
-			SPA:      spa,
+			Auth:       authSvc,
+			Hub:        hub,
+			Agents:     agentSvc,
+			AgentDir:   agentDirectory{st},
+			Calls:      coordinator,
+			Catalog:    catalogSvc,
+			Ledger:     st.Ledger(),
+			Recordings: recordings,
+			SPA:        spa,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: the event stream is long-lived.

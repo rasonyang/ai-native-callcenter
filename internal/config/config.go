@@ -48,6 +48,16 @@ type Config struct {
 	// route to people.
 	IsBotEnabled bool
 
+	// Recordings. Backend FS keeps files where the switch wrote them;
+	// S3 uploads them to any S3-compatible store and clears the local spool.
+	RecordingBackend string
+	RecordingDir     string
+	S3Endpoint       string
+	S3AccessKey      string
+	S3SecretKey      string
+	S3Bucket         string
+	S3IsSSL          bool
+
 	SessionTTL    time.Duration
 	SessionCookie string
 	SecureCookies bool
@@ -84,6 +94,13 @@ func Load() (Config, error) {
 		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
+		RecordingBackend: env("AICC_RECORDING_BACKEND", "FS"),
+		RecordingDir:     env("AICC_RECORDING_DIR", ""),
+		S3Endpoint:       env("AICC_S3_ENDPOINT", ""),
+		S3AccessKey:      env("AICC_S3_ACCESS_KEY", ""),
+		S3SecretKey:      env("AICC_S3_SECRET_KEY", ""),
+		S3Bucket:         env("AICC_S3_BUCKET", "aicc-recordings"),
+		S3IsSSL:          envBool("AICC_S3_SSL", false),
 		SessionTTL:       envDuration("AICC_SESSION_TTL", 12*time.Hour),
 		SessionCookie:    env("AICC_SESSION_COOKIE", "aicc_session"),
 		SecureCookies:    envBool("AICC_SECURE_COOKIES", false),

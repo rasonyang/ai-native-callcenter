@@ -287,6 +287,46 @@ func (q *Queries) InsertCallback(ctx context.Context, arg InsertCallbackParams) 
 	return i, err
 }
 
+const insertQualityReview = `-- name: InsertQualityReview :one
+INSERT INTO quality_reviews (id, recording_id, call_id, reviewer_id, scores, total_score, notes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, recording_id, call_id, reviewer_id, scores, total_score, notes, created_at
+`
+
+type InsertQualityReviewParams struct {
+	ID          uuid.UUID `json:"id"`
+	RecordingID uuid.UUID `json:"recordingId"`
+	CallID      uuid.UUID `json:"callId"`
+	ReviewerID  uuid.UUID `json:"reviewerId"`
+	Scores      []byte    `json:"scores"`
+	TotalScore  int16     `json:"totalScore"`
+	Notes       string    `json:"notes"`
+}
+
+func (q *Queries) InsertQualityReview(ctx context.Context, arg InsertQualityReviewParams) (QualityReview, error) {
+	row := q.db.QueryRow(ctx, insertQualityReview,
+		arg.ID,
+		arg.RecordingID,
+		arg.CallID,
+		arg.ReviewerID,
+		arg.Scores,
+		arg.TotalScore,
+		arg.Notes,
+	)
+	var i QualityReview
+	err := row.Scan(
+		&i.ID,
+		&i.RecordingID,
+		&i.CallID,
+		&i.ReviewerID,
+		&i.Scores,
+		&i.TotalScore,
+		&i.Notes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertQueueEvent = `-- name: InsertQueueEvent :exec
 INSERT INTO queue_events (occurred_at, call_id, queue_id, event, agent_id, wait_ms)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -493,6 +533,39 @@ func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([
 	return items, nil
 }
 
+const listQualityReviewsByCall = `-- name: ListQualityReviewsByCall :many
+SELECT id, recording_id, call_id, reviewer_id, scores, total_score, notes, created_at FROM quality_reviews WHERE call_id = $1 ORDER BY created_at DESC
+`
+
+func (q *Queries) ListQualityReviewsByCall(ctx context.Context, callID uuid.UUID) ([]QualityReview, error) {
+	rows, err := q.db.Query(ctx, listQualityReviewsByCall, callID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QualityReview{}
+	for rows.Next() {
+		var i QualityReview
+		if err := rows.Scan(
+			&i.ID,
+			&i.RecordingID,
+			&i.CallID,
+			&i.ReviewerID,
+			&i.Scores,
+			&i.TotalScore,
+			&i.Notes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecordingsByCall = `-- name: ListRecordingsByCall :many
 SELECT id, call_id, backend, bucket, object_key, size_bytes, duration_sec, format, created_at, deleted_at FROM recordings WHERE call_id = $1 AND deleted_at IS NULL ORDER BY created_at
 `
@@ -572,5 +645,14 @@ type PutSettingParams struct {
 
 func (q *Queries) PutSetting(ctx context.Context, arg PutSettingParams) error {
 	_, err := q.db.Exec(ctx, putSetting, arg.Key, arg.Value)
+	return err
+}
+
+const updateCDRHasRecording = `-- name: UpdateCDRHasRecording :exec
+UPDATE cdrs SET has_recording = true WHERE call_id = $1
+`
+
+func (q *Queries) UpdateCDRHasRecording(ctx context.Context, callID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, updateCDRHasRecording, callID)
 	return err
 }

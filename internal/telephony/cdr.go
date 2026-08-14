@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -17,7 +18,21 @@ type CDRLedger interface {
 	InsertCDR(ctx context.Context, cdr store.CDR) error
 	InsertQueueEvent(ctx context.Context, occurredAt time.Time,
 		callID *uuid.UUID, queueID uuid.UUID, event string, agentID *uuid.UUID, waitMs int) error
+	InsertRecording(ctx context.Context, r store.Recording) (store.Recording, error)
+	MarkRecorded(ctx context.Context, callID uuid.UUID) error
 }
+
+// RecordingStorage is where call audio lives; nil disables recording ingestion.
+type RecordingStorage interface {
+	Backend() string
+	Bucket() string
+	Ingest(ctx context.Context, key string) (int64, error)
+}
+
+// recordingFlushWait gives the switch time to close the file after the last
+// leg hangs up. record_session flushes at hangup; a stat racing that flush
+// reads a half-written size.
+const recordingFlushWait = 2 * time.Second
 
 // QueueDirectory resolves a queue's name to its identity. The switch speaks in
 // names; the ledger speaks in ids.
@@ -35,17 +50,22 @@ const shortAbandonThreshold = 5 * time.Second
 // Writes happen on their own goroutine: the finish hook runs on the call's
 // actor, which must never wait on a database.
 type CDRAssembler struct {
-	ledger CDRLedger
-	queues QueueDirectory
-	log    *slog.Logger
+	ledger  CDRLedger
+	queues  QueueDirectory
+	storage RecordingStorage
+	log     *slog.Logger
+	// flushWait is how long ingestion waits for the switch to close the file;
+	// shortened in tests.
+	flushWait time.Duration
 }
 
-// NewCDRAssembler builds one.
-func NewCDRAssembler(ledger CDRLedger, queues QueueDirectory, log *slog.Logger) *CDRAssembler {
+// NewCDRAssembler builds one. storage may be nil when recordings are off.
+func NewCDRAssembler(ledger CDRLedger, queues QueueDirectory, storage RecordingStorage, log *slog.Logger) *CDRAssembler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &CDRAssembler{ledger: ledger, queues: queues, log: log}
+	return &CDRAssembler{ledger: ledger, queues: queues, storage: storage,
+		log: log, flushWait: recordingFlushWait}
 }
 
 // CallFinished receives the final snapshot; safe to set as Registry.OnCallFinished.
@@ -56,7 +76,57 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
 			a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)
 		}
+		cancel()
+		a.ingestRecording(snap)
 	}()
+}
+
+// ingestRecording books the call's audio into the ledger, if any was made.
+//
+// Absence is normal — recording is per number and per queue — so a missing
+// file is silence, not an error. This runs for every finished call, which is
+// what makes it the one place recordings are booked regardless of whether the
+// call was a bot's, a person's, or both in turn.
+func (a *CDRAssembler) ingestRecording(snap Snapshot) {
+	if a.storage == nil {
+		return
+	}
+	time.Sleep(a.flushWait)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	key := recordingKeyFor(snap)
+	size, err := a.storage.Ingest(ctx, key)
+	if err != nil {
+		// Absence is normal — recording is per number and per queue — but the
+		// reason must be visible: a silent skip here cost a live debugging
+		// session when every ingest was failing for a real cause.
+		a.log.Info("no recording ingested", "callId", snap.CallID, "key", key, "reason", err)
+		return
+	}
+
+	if _, err := a.ledger.InsertRecording(ctx, store.Recording{
+		CallID:      snap.CallID,
+		Backend:     a.storage.Backend(),
+		Bucket:      a.storage.Bucket(),
+		ObjectKey:   key,
+		SizeBytes:   size,
+		DurationSec: recording.DurationSec(size),
+	}); err != nil {
+		a.log.Error("could not book the recording", "callId", snap.CallID, "error", err)
+		return
+	}
+	if err := a.ledger.MarkRecorded(ctx, snap.CallID); err != nil {
+		a.log.Error("could not flag the cdr as recorded", "callId", snap.CallID, "error", err)
+	}
+	a.log.Info("recording booked", "callId", snap.CallID, "key", key, "sizeBytes", size)
+}
+
+// recordingKeyFor is the switch's naming contract: UTC date of call start,
+// then the call id — exactly what the Lua templates into record_session.
+func recordingKeyFor(snap Snapshot) string {
+	return recording.Key(snap.CreatedAt, snap.CallID.String())
 }
 
 // assemble derives the ledger row from recorded facts — never from parsing
