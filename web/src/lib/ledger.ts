@@ -14,7 +14,7 @@ export interface Leg {
   note?: string
 }
 
-export type CDRStatus = 'ANSWERED' | 'MISSED' | 'FAILED' | 'NO_ANSWER'
+export type CDRStatus = 'ANSWERED' | 'NO_ANSWER' | 'BUSY' | 'FAILED'
 
 export interface CDR {
   callId: string

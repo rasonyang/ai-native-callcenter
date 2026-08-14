@@ -28,6 +28,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
+	"github.com/rasonyang/ai-native-callcenter/internal/seed"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -101,6 +102,12 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	slog.Info("database ready")
+
+	if cfg.Seed == "demo" {
+		if err := seed.Demo(ctx, st, slog.Default()); err != nil {
+			return fmt.Errorf("seed demo data: %w", err)
+		}
+	}
 
 	authSvc := auth.NewService(st.Queries, cfg.SessionTTL)
 	hub := events.NewHub(events.NewSequence(seqReserver{st}, "events"))

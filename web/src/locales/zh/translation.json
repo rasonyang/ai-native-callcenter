@@ -259,9 +259,9 @@
     "allStatuses": "全部状态",
     "statuses": {
       "ANSWERED": "已接听",
-      "MISSED": "未接",
       "FAILED": "失败",
-      "NO_ANSWER": "无应答"
+      "NO_ANSWER": "无应答",
+      "BUSY": "忙"
     },
     "startedAt": "开始时间",
     "from": "主叫",

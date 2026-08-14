@@ -259,9 +259,9 @@
     "allStatuses": "All statuses",
     "statuses": {
       "ANSWERED": "Answered",
-      "MISSED": "Missed",
       "FAILED": "Failed",
-      "NO_ANSWER": "No answer"
+      "NO_ANSWER": "No answer",
+      "BUSY": "Busy"
     },
     "startedAt": "Started",
     "from": "From",

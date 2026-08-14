@@ -18,7 +18,7 @@ export const Route = createFileRoute('/_app/admin/cdr/')({
 })
 
 const PAGE_SIZE = 50
-const STATUSES: Array<CDRStatus | ''> = ['', 'ANSWERED', 'MISSED', 'FAILED', 'NO_ANSWER']
+const STATUSES: Array<CDRStatus | ''> = ['', 'ANSWERED', 'NO_ANSWER', 'BUSY', 'FAILED']
 
 function CDRExplorer() {
   const { t, i18n } = useTranslation()
@@ -144,8 +144,8 @@ function CDRExplorer() {
 
 const STATUS_COLOR: Record<string, string> = {
   ANSWERED: 'var(--state-available)',
-  MISSED: 'var(--state-breach)',
   FAILED: 'var(--state-breach)',
+  BUSY: 'var(--state-ringing)',
   NO_ANSWER: 'var(--state-aux)',
 }
 
