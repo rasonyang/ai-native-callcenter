@@ -78,11 +78,34 @@ local overflow = queue.overflow_type or "ANNOUNCE_HANGUP"
 
 if overflow == "BOT_FLOW" then
   -- Hand the caller back to a bot, typically to take a message. The DID the
-  -- bot leg dials selects the flow, exactly as on the inbound path.
+  -- bot leg dials selects the flow, exactly as on the inbound path — and the
+  -- bot leg needs the same correlation headers as the inbound path, or the
+  -- application cannot resolve the flow or transfer this caller again.
   local target = queue.overflow_target
   if target ~= nil and target ~= "" then
+    local language = "en"
+    local target_dbh = freeswitch.Dbh(dsn)
+    if target_dbh:connected() then
+      target_dbh:query("SELECT language FROM luacc.dids WHERE number = " .. quote(target),
+        function(row) language = row.language end)
+      target_dbh:release()
+    end
+
+    local call_id = session:getVariable("aicc_call_id")
+    if call_id == nil or call_id == "" then
+      -- The caller reached the queue without a bot leg, so no call identity
+      -- was minted; the channel uuid serves as one.
+      call_id = session:getVariable("uuid")
+    end
+
+    session:setVariable("sip_h_X-AICC-Call-ID", call_id)
+    session:setVariable("sip_h_X-AICC-DID", target)
+    session:setVariable("sip_h_X-AICC-Language", language)
+    session:setVariable("sip_h_X-AICC-ANI", session:getVariable("caller_id_number") or "")
+    session:setVariable("sip_h_X-AICC-Channel-ID", session:getVariable("uuid"))
     session:setVariable("sip_h_X-AICC-Overflow-Queue", queue.name)
-    session:execute("bridge", "sofia/gateway/aicc_bot/" .. target)
+    session:execute("bridge",
+      "{absolute_codec_string=PCMU,PCMA}sofia/gateway/aicc_bot/" .. target)
     if not session:ready() then return end
   end
   session:hangup("NORMAL_CLEARING")

@@ -121,6 +121,8 @@ type Session struct {
 	leg   Leg
 	model provider.VoiceSession
 	log   *slog.Logger
+	// providerName labels latency measurements.
+	providerName string
 
 	cfg      Config
 	uplink   *media.Converter
@@ -143,6 +145,8 @@ type Session struct {
 	// speakingSince is when the current turn's first audio was queued, which is
 	// what the barge-in guard window is measured from.
 	speakingSince time.Time
+	// timer measures caller-stopped to reply-on-the-wire, per turn.
+	timer turnTimer
 
 	// Two generation counters invalidate watches already in flight. Stopping a
 	// timer races with it firing; letting a stale one fire and recognise
@@ -200,6 +204,7 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 		leg:          leg,
 		model:        model,
 		log:          log.With("callId", leg.ID()),
+		providerName: profile.Name,
 		cfg:          cfg,
 		uplink:       uplink,
 		downlink:     downlink,
@@ -345,6 +350,7 @@ func (s *Session) playAudio(audio []byte) {
 		s.isBotSpeaking = true
 		s.speakingSince = time.Now()
 	}
+	s.timer.onFirstAudio()
 	s.playBuffer = s.downlink.Convert(s.playBuffer, audio)
 	s.framer.push(s.playBuffer, s.queueFrame)
 }
@@ -361,6 +367,9 @@ func (s *Session) queueFrame(frame []byte) {
 		return
 	}
 	s.framesQueued++
+	if totalMs, providerMs, ok := s.timer.onFirstFrame(); ok {
+		recordTurnLatency(s.log, s.providerName, totalMs, providerMs)
+	}
 }
 
 //
@@ -400,7 +409,15 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// The caller is talking, so there is no dead air to report whether or
 		// not this turns out to be a real interruption.
 		s.cancelDeadAirWatch()
+		s.mu.Lock()
+		s.timer.onSpeechStarted()
+		s.mu.Unlock()
 		s.bargeIn(provider.InterruptReasonSpeech)
+
+	case provider.EventTypeSpeechStopped:
+		s.mu.Lock()
+		s.timer.onSpeechStopped()
+		s.mu.Unlock()
 
 	case provider.EventTypeInterrupted:
 		// The provider confirming a turn was cut short. It may have decided

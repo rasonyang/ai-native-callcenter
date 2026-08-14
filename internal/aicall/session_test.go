@@ -700,6 +700,77 @@ func TestAKeypressInterruptsAndReachesTheModel(t *testing.T) {
 }
 
 //
+// Turn latency.
+//
+
+// The latency budget is measured per turn: caller stops → first reply frame on
+// the wire. Turns without caller speech — the greeting, dead-air prompts — are
+// not measurements of anything and must not pollute the histogram.
+func TestTurnLatencyIsMeasuredFromSpeechStoppedToFirstFrame(t *testing.T) {
+	session, leg, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	// The greeting arrives with no speech before it: no measurement.
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples),
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for len(leg.sentFrames()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	session.mu.Lock()
+	if !session.timer.speechStoppedAt.IsZero() {
+		t.Error("a measurement was in flight before any caller speech")
+	}
+	session.mu.Unlock()
+
+	// A real turn: the caller speaks, stops, and the reply reaches the wire.
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStopped}
+	time.Sleep(30 * time.Millisecond) // measurable latency
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples),
+	}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		isClosed := session.timer.speechStoppedAt.IsZero()
+		session.mu.Unlock()
+		if isClosed && len(leg.sentFrames()) >= 2 {
+			return // the measurement opened on speech and closed on the frame
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the turn measurement never closed")
+}
+
+// A caller who resumes talking before any reply abandons the measurement:
+// there is no answer latency to measure for a turn that never got an answer.
+func TestResumedSpeechAbandonsTheMeasurement(t *testing.T) {
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStopped}
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		isAbandoned := session.timer.speechStoppedAt.IsZero()
+		session.mu.Unlock()
+		if isAbandoned {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the measurement survived the caller resuming speech")
+}
+
+//
 // Transcripts and tools.
 //
 
