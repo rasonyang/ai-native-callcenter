@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { PRESENCE_KEY, ROSTER_KEY } from './agent'
+import { CALLBACKS_KEY, CDRS_KEY, REPORTS_KEY } from './ledger'
 import { connectEvents, type AiccEvent, type EventType } from './events'
 
 /**
@@ -15,6 +16,14 @@ function applyToCache(queryClient: ReturnType<typeof useQueryClient>, event: Aic
   if (event.type.startsWith('AGENT_') || event.type.startsWith('DEVICE_')) {
     void queryClient.invalidateQueries({ queryKey: ROSTER_KEY })
     void queryClient.invalidateQueries({ queryKey: PRESENCE_KEY })
+  }
+  if (event.type.startsWith('CALLBACK_')) {
+    void queryClient.invalidateQueries({ queryKey: CALLBACKS_KEY })
+  }
+  if (event.type === 'CALL_CDR') {
+    // A finished call moves every ledger-backed screen.
+    void queryClient.invalidateQueries({ queryKey: CDRS_KEY })
+    void queryClient.invalidateQueries({ queryKey: REPORTS_KEY })
   }
 }
 

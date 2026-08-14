@@ -1,6 +1,6 @@
 import {
   Activity, BarChart3, Bot, FileClock, Headphones, LayoutDashboard,
-  ListChecks, PhoneCall, ScrollText, ShieldCheck, Users,
+  ListChecks, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users,
 } from 'lucide-react'
 
 import type { Role } from './api'
@@ -34,6 +34,7 @@ export const NAV: NavGroup[] = [
     roleHome: '/agent',
     items: [
       { to: '/agent', labelKey: 'nav.dashboard', icon: Headphones, minRole: 'AGENT', isReady: true },
+      { to: '/agent/callbacks', labelKey: 'nav.callbacks', icon: PhoneForwarded, minRole: 'AGENT', isReady: true },
     ],
   },
   {
@@ -65,8 +66,8 @@ export const NAV: NavGroup[] = [
     roleKey: 'roles.ADMIN',
     roleHome: '/admin',
     items: [
-      { to: '/admin/cdr', labelKey: 'nav.cdr', icon: FileClock, minRole: 'SUPERVISOR', isReady: false },
-      { to: '/admin/reports', labelKey: 'nav.reports', icon: BarChart3, minRole: 'SUPERVISOR', isReady: false },
+      { to: '/admin/cdr', labelKey: 'nav.cdr', icon: FileClock, minRole: 'SUPERVISOR', isReady: true },
+      { to: '/admin/reports', labelKey: 'nav.reports', icon: BarChart3, minRole: 'SUPERVISOR', isReady: true },
       { to: '/admin/audit', labelKey: 'nav.audit', icon: ScrollText, minRole: 'ADMIN', isReady: false },
     ],
   },

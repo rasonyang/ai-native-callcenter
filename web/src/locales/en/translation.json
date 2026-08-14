@@ -15,7 +15,9 @@
     "yes": "Yes",
     "no": "No",
     "edit": "Edit",
-    "delete": "Delete"
+    "delete": "Delete",
+    "previous": "Previous",
+    "next": "Next"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -43,7 +45,8 @@
     "reports": "Reports",
     "audit": "Audit Log",
     "extensions": "Extensions",
-    "numbers": "Numbers"
+    "numbers": "Numbers",
+    "callbacks": "Callbacks"
   },
   "roles": {
     "AGENT": "Agent",
@@ -175,7 +178,15 @@
     "streamClients": "Consoles live",
     "consolesConnected": "event streams connected",
     "agentStates": "Agent states",
-    "nobodySignedIn": "Nobody is signed in yet."
+    "nobodySignedIn": "Nobody is signed in yet.",
+    "callsToday": "Calls today",
+    "answeredOf": "{{answered}} of {{total}} answered",
+    "abandonedToday": "Abandoned today",
+    "inQueues": "in queues",
+    "botContained": "Bot contained",
+    "containedOf": "{{count}} calls",
+    "avgWait": "Avg queue wait",
+    "acrossQueueCalls": "across {{count}} queue calls"
   },
   "admin": {
     "extensionsHint": "Endpoints the switch accepts a registration for. Agents sign in at one of these.",
@@ -237,5 +248,101 @@
     "noFallbackQueue": "None",
     "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
     "description": "Description"
+  },
+  "cdr": {
+    "hint": "Every finished call, newest first.",
+    "filterNumber": "Caller number…",
+    "allStatuses": "All statuses",
+    "statuses": {
+      "ANSWERED": "Answered",
+      "MISSED": "Missed",
+      "FAILED": "Failed",
+      "NO_ANSWER": "No answer"
+    },
+    "startedAt": "Started",
+    "from": "From",
+    "did": "Number dialed",
+    "journey": "Journey",
+    "status": "Status",
+    "duration": "Duration",
+    "noCalls": "No calls match.",
+    "pageOf": "Page {{page}} of {{pages}} · {{total}} calls",
+    "legs": {
+      "TRUNK": "Trunk",
+      "DIALING": "Dialing",
+      "BOT": "Bot",
+      "QUEUE": "Queue",
+      "AGENT": "Agent"
+    },
+    "missedReasons": {
+      "SHORT_ABANDONED": "Short abandoned",
+      "ABANDONED_RINGING": "Abandoned while ringing",
+      "ABANDONED_WAITING": "Abandoned in queue",
+      "NO_AVAILABLE_AGENT": "No agent available"
+    },
+    "contained": "contained",
+    "recorded": "recorded",
+    "unknownNumber": "Unknown",
+    "hangupCause": "Hangup cause",
+    "botTime": "Bot time",
+    "waitTime": "Queue wait",
+    "talkTime": "Talk time",
+    "userData": "Business data",
+    "recording": "Recording",
+    "noRecording": "No recording was made for this call.",
+    "transcript": "Transcript",
+    "noTranscript": "No transcript; the call never reached the bot.",
+    "toolCalled": "requested {{tool}}",
+    "toolAnswered": "{{tool}} answered",
+    "roles": {
+      "CALLER": "Caller",
+      "BOT": "Bot",
+      "AGENT": "Agent"
+    }
+  },
+  "callbacks": {
+    "hint": "Promises the bot made on the phone. Claim one before you ring.",
+    "all": "All",
+    "statuses": {
+      "OPEN": "Open",
+      "CLAIMED": "Claimed",
+      "DONE": "Done",
+      "DISMISSED": "Dismissed"
+    },
+    "requestedAt": "Requested",
+    "number": "Number",
+    "message": "Message",
+    "status": "Status",
+    "empty": "Nothing to call back. The bot will fill this list.",
+    "claim": "Claim",
+    "markDone": "Done",
+    "dismiss": "Dismiss",
+    "byYou": "by you"
+  },
+  "reports": {
+    "hint": "Aggregates over finished calls.",
+    "today": "Today",
+    "last7": "Last 7 days",
+    "last30": "Last 30 days",
+    "totalCalls": "Calls",
+    "inWindow": "in this window",
+    "answered": "Answered",
+    "abandonedNote": "{{count}} abandoned",
+    "contained": "Bot contained",
+    "containedNote": "{{count}} calls never needed a person",
+    "avgBot": "Avg bot time",
+    "avgTalkNote": "avg talk {{talk}}",
+    "queue": "Queue",
+    "calls": "Calls",
+    "answeredShort": "Answered",
+    "sla": "SLA",
+    "avgWait": "Avg wait",
+    "maxWait": "Max wait",
+    "noQueueCalls": "No queue calls in this window.",
+    "day": "Day",
+    "containedShort": "Contained",
+    "abandonedShort": "Abandoned",
+    "noCalls": "No calls in this window.",
+    "unknownQueue": "Removed queue"
   }
 }

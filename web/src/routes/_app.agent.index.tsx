@@ -12,7 +12,7 @@ import { formatDuration } from '@/lib/utils'
  * middle, wrap-up and today's numbers on the right. Call controls live in the
  * topbar, where they stay reachable from anywhere.
  */
-export const Route = createFileRoute('/_app/agent')({ component: AgentCockpit })
+export const Route = createFileRoute('/_app/agent/')({ component: AgentCockpit })
 
 function AgentCockpit() {
   const { t } = useTranslation()

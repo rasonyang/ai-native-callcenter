@@ -9,6 +9,7 @@ import { StatusDot } from '@/components/status-pill'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { AVAILABILITY_COLOR, useRoster } from '@/lib/agent'
 import { api, type Availability } from '@/lib/api'
+import { formatDuration, useOverview } from '@/lib/ledger'
 
 /**
  * Supervisor wallboard.
@@ -26,6 +27,8 @@ function Wallboard() {
   const { t } = useTranslation()
   const { data: roster, isPending } = useRoster(true)
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
+  // Today's ledger numbers; refreshed by CALL_CDR events on the stream.
+  const { data: today } = useOverview()
 
   const agents = roster?.items ?? []
   const byAvailability = agents.reduce<Record<string, number>>((acc, row) => {
@@ -59,6 +62,37 @@ function Wallboard() {
           label={t('wallboard.streamClients')}
           value={health.data?.sseClients ?? '—'}
           note={t('wallboard.consolesConnected')}
+        />
+      </div>
+
+      <div className="mb-4 grid grid-cols-4 gap-4">
+        <KpiCard
+          label={t('wallboard.callsToday')}
+          value={today?.totalCalls ?? '—'}
+          note={t('wallboard.answeredOf', {
+            answered: today?.answeredCalls ?? 0,
+            total: today?.totalCalls ?? 0,
+          })}
+        />
+        <KpiCard
+          label={t('wallboard.abandonedToday')}
+          value={today?.abandonedCalls ?? '—'}
+          note={t('wallboard.inQueues')}
+          tone={today && today.abandonedCalls > 0 ? '--state-breach' : undefined}
+        />
+        <KpiCard
+          label={t('wallboard.botContained')}
+          value={
+            today && today.totalCalls > 0
+              ? `${Math.round((today.containedCalls / today.totalCalls) * 100)}%`
+              : '—'
+          }
+          note={t('wallboard.containedOf', { count: today?.containedCalls ?? 0 })}
+        />
+        <KpiCard
+          label={t('wallboard.avgWait')}
+          value={today && today.queueCalls > 0 ? formatDuration(today.avgWaitSec) : '—'}
+          note={t('wallboard.acrossQueueCalls', { count: today?.queueCalls ?? 0 })}
         />
       </div>
 

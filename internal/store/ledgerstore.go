@@ -27,39 +27,39 @@ func (s *Store) Ledger() *LedgerStore { return &LedgerStore{q: s.Queries} }
 // CDR is one finished call. Field vocabulary follows the naming spec; the
 // enum values are byte-identical to what the API serves.
 type CDR struct {
-	CallID     uuid.UUID
-	StartedAt  time.Time
-	AnsweredAt time.Time // zero when never answered
-	EndedAt    time.Time
+	CallID     uuid.UUID `json:"callId"`
+	StartedAt  time.Time `json:"startedAt"`
+	AnsweredAt time.Time `json:"answeredAt,omitzero"` // zero when never answered
+	EndedAt    time.Time `json:"endedAt"`
 
-	CallType string
-	Language string
+	CallType string `json:"callType"`
+	Language string `json:"language,omitempty"`
 
-	FromNumber string
-	ToNumber   string
-	DID        string
-	FlowID     *uuid.UUID
-	QueueID    *uuid.UUID
+	FromNumber string     `json:"fromNumber"`
+	ToNumber   string     `json:"toNumber"`
+	DID        string     `json:"did,omitempty"`
+	FlowID     *uuid.UUID `json:"flowId,omitempty"`
+	QueueID    *uuid.UUID `json:"queueId,omitempty"`
 
-	AgentIDs       []uuid.UUID
-	PrimaryAgentID *uuid.UUID
+	AgentIDs       []uuid.UUID `json:"agentIds,omitempty"`
+	PrimaryAgentID *uuid.UUID  `json:"primaryAgentId,omitempty"`
 
-	RingSec      int
-	BotSec       int
-	QueueWaitSec int
-	TalkSec      int
-	TotalSec     int
+	RingSec      int `json:"ringSec"`
+	BotSec       int `json:"botSec"`
+	QueueWaitSec int `json:"queueWaitSec"`
+	TalkSec      int `json:"talkSec"`
+	TotalSec     int `json:"totalSec"`
 
-	Status       string
-	HangupCause  string
-	MissedReason string // empty when the call was not missed
-	Disposition  string
-	IsContained  bool
-	HasRecording bool
+	Status       string `json:"status"`
+	HangupCause  string `json:"hangupCause,omitempty"`
+	MissedReason string `json:"missedReason,omitempty"` // empty when the call was not missed
+	Disposition  string `json:"disposition,omitempty"`
+	IsContained  bool   `json:"isContained"`
+	HasRecording bool   `json:"hasRecording"`
 
-	UserData map[string]any
-	Tech     map[string]any
-	Legs     []Leg
+	UserData map[string]any `json:"userData,omitempty"`
+	Tech     map[string]any `json:"tech,omitempty"`
+	Legs     []Leg          `json:"legs"`
 }
 
 // Leg is one hop of a call's journey, in order, for the detail view.
