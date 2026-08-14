@@ -39,6 +39,59 @@ type AgentStateLog struct {
 	ExitedAt  pgtype.Timestamptz `json:"exitedAt"`
 }
 
+type AuditLog struct {
+	ID         int64              `json:"id"`
+	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
+	ActorID    *uuid.UUID         `json:"actorId"`
+	Action     string             `json:"action"`
+	TargetKind string             `json:"targetKind"`
+	TargetID   string             `json:"targetId"`
+	Detail     []byte             `json:"detail"`
+	IP         *netip.Addr        `json:"ip"`
+}
+
+type Callback struct {
+	ID          uuid.UUID          `json:"id"`
+	CallID      *uuid.UUID         `json:"callId"`
+	QueueID     *uuid.UUID         `json:"queueId"`
+	PhoneNumber string             `json:"phoneNumber"`
+	Message     string             `json:"message"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	HandledBy   *uuid.UUID         `json:"handledBy"`
+	HandledAt   pgtype.Timestamptz `json:"handledAt"`
+}
+
+type Cdr struct {
+	CallID         uuid.UUID          `json:"callId"`
+	StartedAt      pgtype.Timestamptz `json:"startedAt"`
+	AnsweredAt     pgtype.Timestamptz `json:"answeredAt"`
+	EndedAt        pgtype.Timestamptz `json:"endedAt"`
+	CallType       string             `json:"callType"`
+	Language       string             `json:"language"`
+	FromNumber     string             `json:"fromNumber"`
+	ToNumber       string             `json:"toNumber"`
+	Did            string             `json:"did"`
+	FlowID         *uuid.UUID         `json:"flowId"`
+	QueueID        *uuid.UUID         `json:"queueId"`
+	AgentIds       []uuid.UUID        `json:"agentIds"`
+	PrimaryAgentID *uuid.UUID         `json:"primaryAgentId"`
+	RingSec        int32              `json:"ringSec"`
+	BotSec         int32              `json:"botSec"`
+	QueueWaitSec   int32              `json:"queueWaitSec"`
+	TalkSec        int32              `json:"talkSec"`
+	TotalSec       int32              `json:"totalSec"`
+	Status         string             `json:"status"`
+	HangupCause    string             `json:"hangupCause"`
+	MissedReason   *string            `json:"missedReason"`
+	Disposition    string             `json:"disposition"`
+	IsContained    bool               `json:"isContained"`
+	HasRecording   bool               `json:"hasRecording"`
+	UserData       []byte             `json:"userData"`
+	Tech           []byte             `json:"tech"`
+	Legs           []byte             `json:"legs"`
+}
+
 type Did struct {
 	ID                 uuid.UUID          `json:"id"`
 	Number             string             `json:"number"`
@@ -117,6 +170,17 @@ type LuaccQueue struct {
 	IsEnabled                bool        `json:"isEnabled"`
 }
 
+type QualityReview struct {
+	ID          uuid.UUID          `json:"id"`
+	RecordingID uuid.UUID          `json:"recordingId"`
+	CallID      uuid.UUID          `json:"callId"`
+	ReviewerID  uuid.UUID          `json:"reviewerId"`
+	Scores      []byte             `json:"scores"`
+	TotalScore  int16              `json:"totalScore"`
+	Notes       string             `json:"notes"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+}
+
 type Queue struct {
 	ID                       uuid.UUID          `json:"id"`
 	Name                     string             `json:"name"`
@@ -148,6 +212,29 @@ type QueueAgent struct {
 	Position int32     `json:"position"`
 }
 
+type QueueEvent struct {
+	ID         int64              `json:"id"`
+	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
+	CallID     *uuid.UUID         `json:"callId"`
+	QueueID    uuid.UUID          `json:"queueId"`
+	Event      string             `json:"event"`
+	AgentID    *uuid.UUID         `json:"agentId"`
+	WaitMs     int32              `json:"waitMs"`
+}
+
+type Recording struct {
+	ID          uuid.UUID          `json:"id"`
+	CallID      uuid.UUID          `json:"callId"`
+	Backend     string             `json:"backend"`
+	Bucket      string             `json:"bucket"`
+	ObjectKey   string             `json:"objectKey"`
+	SizeBytes   int64              `json:"sizeBytes"`
+	DurationSec int32              `json:"durationSec"`
+	Format      string             `json:"format"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	DeletedAt   pgtype.Timestamptz `json:"deletedAt"`
+}
+
 type SeqBlock struct {
 	Name  string `json:"name"`
 	Value int64  `json:"value"`
@@ -167,6 +254,16 @@ type Setting struct {
 	Key       string             `json:"key"`
 	Value     []byte             `json:"value"`
 	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
+}
+
+type Transcript struct {
+	ID         int64              `json:"id"`
+	CallID     uuid.UUID          `json:"callId"`
+	Seq        int32              `json:"seq"`
+	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
+	Role       string             `json:"role"`
+	Kind       string             `json:"kind"`
+	Content    []byte             `json:"content"`
 }
 
 type Trunk struct {

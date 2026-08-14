@@ -31,6 +31,9 @@ type callActions struct {
 	// this conversation and goes on to a queue.
 	callerChannel string
 	fallbackQueue *uuid.UUID
+	// recorder and facts feed the ledger; both may be nil in tests.
+	recorder *callRecorder
+	facts    *callFacts
 
 	mu    sync.Mutex
 	armed func()
@@ -72,6 +75,14 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 			a.stampChannel("aicc_bot_slots", string(encoded))
 		}
 	}
+	// The ledger follows the call: after a transfer the human path writes the
+	// one CDR, and the bot's share of the story goes with the caller.
+	if a.recorder != nil {
+		a.recorder.markTransferred(queue.ID)
+		if a.facts != nil {
+			a.stampBotShare(a.recorder, a.facts)
+		}
+	}
 
 	a.arm(ctx, func() {
 		a.log.Info("transferring the caller", "queue", queue.Name, "ext", queue.ExtNumber)
@@ -86,18 +97,32 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 	return flow.Succeeded(map[string]any{"queue": queue.Name}, ""), nil
 }
 
-// TakeMessage records what the caller wants passed on.
-//
-// Durable storage for callbacks arrives with the CDR work; until then the
-// message is at least in the structured log rather than lost.
-func (a *callActions) TakeMessage(_ context.Context, request flow.MessageRequest) (flow.Result, error) {
+// TakeMessage records what the caller wants passed on as an OPEN callback,
+// which is the work queue an agent later rings through.
+func (a *callActions) TakeMessage(ctx context.Context, request flow.MessageRequest) (flow.Result, error) {
 	a.log.Info("message taken",
 		"message", request.Message, "callbackNumber", request.CallbackNumber)
+
+	if ledger := a.orchestrator.cfg.Ledger; ledger != nil && a.recorder != nil {
+		phoneNumber := request.CallbackNumber
+		if phoneNumber == "" && a.facts != nil {
+			phoneNumber = a.facts.fromNumber
+		}
+		callID := a.recorder.callID
+		if _, err := ledger.InsertCallback(ctx, &callID, a.fallbackQueue,
+			phoneNumber, request.Message); err != nil {
+			a.log.Error("could not save the callback", "error", err)
+			return flow.Failed("SAVE_FAILED", a.refusalHint()), nil
+		}
+	}
 	return flow.Succeeded(nil, ""), nil
 }
 
 // Hangup ends the call once the goodbye has been heard.
 func (a *callActions) Hangup(ctx context.Context, _ flow.HangupRequest) (flow.Result, error) {
+	if a.recorder != nil {
+		a.recorder.markHangup()
+	}
 	a.arm(ctx, func() {
 		a.log.Info("hanging up after the farewell")
 		a.session.Close(context.Background())

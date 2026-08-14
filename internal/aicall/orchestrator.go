@@ -15,6 +15,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
@@ -69,6 +70,8 @@ type OrchestratorConfig struct {
 	Flows    FlowSource
 	Switch   Switch
 	Sessions SessionFactory
+	// Ledger receives finished calls; nil disables writing.
+	Ledger Ledger
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
 	Logger      *slog.Logger
@@ -200,6 +203,31 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		return err
 	}
 
+	// The ledger identity is the call id minted before any leg existed, so the
+	// bot's rows and the human path's rows meet on the same key.
+	ledgerCallID, err := uuid.Parse(headers[headerCallID])
+	if err != nil {
+		ledgerCallID = uuid.New()
+		log.Warn("bot leg carried no parseable call id; minted one",
+			"header", headers[headerCallID], "callId", ledgerCallID)
+	}
+	recorder := newCallRecorder(ledgerCallID, time.Now())
+	facts := &callFacts{
+		callType:           callTypeInbound,
+		language:           flow.Lang(language),
+		fromNumber:         headers[headerANI],
+		did:                didNumber,
+		flowID:             did.FlowID,
+		flowSlug:           spec.ID,
+		isRecordingEnabled: did.IsRecordingEnabled,
+		tech: map[string]any{
+			"sipCallId":     dialog.CallID,
+			"codec":         dialog.RTP.Law().String(),
+			"remoteRtpAddr": dialog.RemoteRTPAddr.String(),
+		},
+	}
+	defer recorder.finish(o.cfg.Ledger, facts, log)
+
 	// The flow's phase machine, and the actions its tools perform on this call.
 	engine := flow.NewEngine(spec, language, map[string]any{
 		"caller": headers[headerANI],
@@ -211,6 +239,8 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		log:           log,
 		callerChannel: callerChannel,
 		fallbackQueue: did.FallbackQueueID,
+		recorder:      recorder,
+		facts:         facts,
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase), log)
 
@@ -246,18 +276,33 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	log.Info("ai conversation started", "flowId", spec.ID,
 		"provider", profile.Name, "language", language)
 
-	o.drive(ctx, session, runtime, actions, log)
+	o.drive(ctx, session, runtime, actions, recorder, log)
 	return nil
 }
 
 // drive consumes the bridge's events and lets the flow steer.
 func (o *Orchestrator) drive(ctx context.Context, session *Session,
-	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
+	runtime *flow.Runtime, actions *callActions, recorder *callRecorder, log *slog.Logger) {
 
 	for event := range session.Events() {
 		switch event.Type {
+		case EventTypeCallerSaid:
+			if event.IsFinal {
+				recorder.say(store.TranscriptRoleCaller, event.Text)
+			}
+
+		case EventTypeBotSaid:
+			if event.IsFinal {
+				recorder.say(store.TranscriptRoleBot, event.Text)
+			}
+
+		case EventTypeDigit:
+			recorder.say(store.TranscriptRoleCaller, "[keypad] "+event.Text)
+
 		case EventTypeToolCall:
+			recorder.toolCall(event.ToolName, event.ToolArgs)
 			output, moved := runtime.Dispatch(ctx, event.ToolName, event.ToolArgs)
+			recorder.toolResult(event.ToolName, output)
 			if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
 				log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
 			}
@@ -280,6 +325,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 		case EventTypeFailed:
 			// The conversation cannot continue; the caller still can.
 			log.Warn("conversation failed, rescuing the caller", "reason", event.Text)
+			recorder.markFailed("MEDIA_OR_PROVIDER_FAILURE")
 			actions.rescueCaller()
 			return
 

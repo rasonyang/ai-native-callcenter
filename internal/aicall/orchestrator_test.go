@@ -303,10 +303,13 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
 
+	recorder := newCallRecorder(uuid.New(), time.Now())
+	actions.recorder = recorder
+
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		o.drive(t.Context(), session, runtime, actions, log)
+		o.drive(t.Context(), session, runtime, actions, recorder, log)
 	}()
 
 	// The model asks for a transfer.

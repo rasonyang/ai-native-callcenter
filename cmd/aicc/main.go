@@ -162,6 +162,7 @@ func run() error {
 			Catalog:     catalogSvc,
 			Flows:       st.Flows(),
 			Switch:      adapter,
+			Ledger:      st.Ledger(),
 			BackendBase: cfg.BotBackendBase,
 		})
 		if err != nil {
