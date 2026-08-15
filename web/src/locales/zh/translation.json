@@ -17,7 +17,8 @@
     "edit": "编辑",
     "delete": "删除",
     "previous": "上一页",
-    "next": "下一页"
+    "next": "下一页",
+    "viewAll": "查看全部"
   },
   "auth": {
     "signInTitle": "登录",
@@ -46,7 +47,8 @@
     "audit": "审计日志",
     "extensions": "分机",
     "numbers": "号码",
-    "callbacks": "回访任务"
+    "callbacks": "回访任务",
+    "agentIdentities": "坐席与话机"
   },
   "roles": {
     "AGENT": "坐席",
@@ -135,7 +137,16 @@
     "dialOut": "外呼",
     "dialPlaceholder": "客户号码…",
     "dial": "拨打",
-    "dialPlaced": "正在外呼——将先接通您的话机。"
+    "dialPlaced": "正在外呼——将先接通您的话机。",
+    "keypad": "拨号键盘",
+    "journey": "通话分支",
+    "dialled": "拨入 {{number}}",
+    "started": "开始于",
+    "wrapUp": "话后处理",
+    "wrapUpIdle": "通话结束后进入话后处理。",
+    "completeWrapUp": "准备接下一通",
+    "openCount_other": "{{count}} 条待办",
+    "legCount_other": "{{count}} 条通话腿"
   },
   "supervisor": {
     "agent": "坐席",
@@ -151,7 +162,24 @@
     "name": "姓名",
     "ext": "分机",
     "searchAgents": "搜索坐席…",
-    "onlineCount": "{{total}} 位坐席中 {{online}} 位已签入"
+    "onlineCount": "{{total}} 位坐席中 {{online}} 位已签入",
+    "queue": "队列",
+    "queuesHint": "已配置的队列，以及各自的坐席配备。",
+    "queuesFailed": "无法读取队列。",
+    "queueCount": "{{count}} 个队列",
+    "staffed": "配备坐席",
+    "sla": "服务水平目标",
+    "serviceLevel": "服务水平",
+    "perQueue": "按队列",
+    "calls": "通话量",
+    "answered": "已接听",
+    "abandoned": "放弃",
+    "avgWait": "平均等待",
+    "longestWait": "最长等待",
+    "noQueueData": "此时间段内暂无通话。",
+    "lastDays": "最近 {{count}} 天",
+    "unassignedQueue": "未进队列",
+    "allStatuses": "全部状态"
   },
   "partyStates": {
     "DIALING": "外呼中",
@@ -170,7 +198,17 @@
     "unknownNumber": "未知号码",
     "incoming": "来电",
     "answering": "接听中…",
-    "controlsInTopbar": "通话控制在上方状态栏。"
+    "controlsInTopbar": "通话控制在上方状态栏。",
+    "accept": "接听",
+    "decline": "拒接",
+    "mute": "静音",
+    "conference": "会议",
+    "conferenceUnavailable": "暂不支持会议：平台没有可加入第三方的接口。",
+    "controls": "通话控制",
+    "unmute": "取消静音",
+    "dtmf": "按键音",
+    "dtmfHint": "每按一个键就立即发送给对方。",
+    "dtmfSent": "已发送 {{digits}}"
   },
   "wallboard": {
     "agentsAvailable": "可用坐席",
@@ -251,7 +289,35 @@
     "fallbackQueue": "兜底队列",
     "noFallbackQueue": "无",
     "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
-    "description": "说明"
+    "description": "说明",
+    "overviewHint": "平台已配置了哪些内容，以及看不见的部分是否正常。",
+    "agentExtensions": "{{count}} 个坐席分机",
+    "queuesNote": "{{count}} 个已启用",
+    "numbersNote": "{{enabled}} 个已启用 · {{withFlow}} 个已绑定流程",
+    "agentsNote": "{{count}} 人已签入",
+    "systemHealth": "系统健康",
+    "eventStream": "事件流",
+    "consolesLive": "{{count}} 个控制台在线",
+    "replayWindow": "最早可重放事件",
+    "healthHint": "落后于该序号的控制台会从快照重新同步。",
+    "shortcuts": "前往",
+    "agentsHint": "谁是坐席，以及绑定了哪部话机。坐席只能在该分机签入。",
+    "addAgent": "新增坐席",
+    "editAgent": "编辑坐席",
+    "deleteAgentConfirm": "取消 {{name}} 的坐席身份？账号保留，只是不再接听来电。",
+    "account": "账号",
+    "accountHint": "仅列出尚未绑定坐席身份的账号。",
+    "chooseAccount": "选择账号…",
+    "noFreeUsers": "所有账号都已绑定坐席身份。",
+    "callcenterName": "交换机名称",
+    "callcenterNameHint": "交换机识别该坐席的标识；不能包含空格、@ 或引号。",
+    "boundExtension": "话机",
+    "boundExtensionHint": "该坐席签入的分机。一个分机只能属于一个坐席。",
+    "noExtension": "未绑定话机",
+    "wrapUpTime": "话后处理",
+    "wrapUpTimeHint": "坐席重新就绪前的话后处理秒数。",
+    "autoAnswer": "自动应答",
+    "autoAnswerHint": "话机是否无需坐席点击即自动接听队列来电。"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",
@@ -302,7 +368,10 @@
       "CALLER": "客户",
       "BOT": "机器人",
       "AGENT": "坐席"
-    }
+    },
+    "playColumn": "试听",
+    "play": "播放录音",
+    "stop": "停止"
   },
   "callbacks": {
     "hint": "机器人在电话里承诺的回访。回拨前先认领。",
@@ -348,5 +417,13 @@
     "abandonedShort": "放弃",
     "noCalls": "窗口内没有通话。",
     "unknownQueue": "已删除队列"
+  },
+  "partyRoles": {
+    "ORIGINATOR": "主叫",
+    "TARGET": "接听方"
+  },
+  "device": {
+    "reachable": "话机已注册",
+    "unreachable": "话机不可达"
   }
 }

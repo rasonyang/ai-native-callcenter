@@ -3,66 +3,17 @@
  *
  * Scope is decided by the server from the session identity; the client only
  * ever narrows. Reconnection and Last-Event-ID resume are handled by the
- * browser's own EventSource implementation.
+ * browser's own EventSource implementation. The envelope and event-name
+ * vocabulary come from the generated contract; stable per-type payloads are
+ * the Sse*Payload schemas there.
  */
+import type { components } from '@/generated/api'
 
-export type CallType = 'INBOUND' | 'OUTBOUND' | 'CONSULT' | 'INTERNAL'
+export type CallType = components['schemas']['CallType']
 
-/** Party-scoped lifecycle: one event per call leg. */
-export type PartyEventType =
-  | 'PARTY_DIALING'
-  | 'PARTY_RINGING'
-  | 'PARTY_ESTABLISHED'
-  | 'PARTY_HELD'
-  | 'PARTY_RETRIEVED'
-  | 'PARTY_RELEASED'
-  | 'PARTY_CHANGED'
-  | 'PARTY_DTMF'
+export type EventType = components['schemas']['SseEventType']
 
-/** Call-scoped facts about the aggregate. */
-export type CallEventType =
-  | 'CALL_USER_DATA'
-  | 'CALL_RECORDING_STARTED'
-  | 'CALL_RECORDING_STOPPED'
-  | 'CALL_CDR'
-
-export type EventType =
-  | PartyEventType
-  | CallEventType
-  | 'QUEUE_JOINED'
-  | 'QUEUE_LEFT'
-  | 'QUEUE_COUNT'
-  | 'QUEUE_AGENT_OFFERED'
-  | 'AGENT_LOGGED_IN'
-  | 'AGENT_LOGGED_OUT'
-  | 'AGENT_READY'
-  | 'AGENT_NOT_READY'
-  | 'AGENT_AVAILABILITY'
-  | 'DEVICE_REGISTERED'
-  | 'DEVICE_UNREGISTERED'
-  | 'DEVICE_IN_SERVICE'
-  | 'BOT_SESSION_STARTED'
-  | 'BOT_TRANSCRIPT'
-  | 'BOT_INTERRUPTED'
-  | 'BOT_SESSION_ENDED'
-  | 'CALLBACK_CREATED'
-  | 'CALLBACK_UPDATED'
-  | 'SYSTEM_LINK'
-  | 'SYSTEM_RESET'
-
-export interface AiccEvent {
-  version: number
-  seq: number
-  type: EventType
-  occurredAt: string
-  callId?: string
-  callType?: CallType
-  partyId?: string
-  agentId?: string
-  queueId?: string
-  payload?: Record<string, unknown>
-  userData?: Record<string, unknown>
-}
+export type AiccEvent = components['schemas']['SseEvent']
 
 export type EventHandler = (event: AiccEvent) => void
 

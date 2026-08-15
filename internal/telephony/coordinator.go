@@ -25,6 +25,7 @@ type AgentLookup interface {
 var (
 	ErrNotCallParty = errors.New("not a party to this call")
 	ErrNoAgentLeg   = errors.New("no agent leg on this call")
+	ErrInvalidDTMF  = errors.New("not a DTMF sequence")
 )
 
 // Coordinator turns switch events into calls and carries out call control.
@@ -412,6 +413,103 @@ func (c *Coordinator) Retrieve(ctx context.Context, callID, agentID uuid.UUID) e
 		return err
 	}
 	return c.adapter.Retrieve(channelID)
+}
+
+// Mute and Unmute silence the agent's own microphone at the switch.
+//
+// The flag is recorded only after the switch accepts the command, so a failed
+// mute never leaves the cockpit claiming the agent is silent when they are
+// not. PARTY_CHANGED then carries the new state to every screen watching.
+func (c *Coordinator) Mute(ctx context.Context, callID, agentID uuid.UUID) error {
+	return c.setMuted(ctx, callID, agentID, true)
+}
+
+func (c *Coordinator) Unmute(ctx context.Context, callID, agentID uuid.UUID) error {
+	return c.setMuted(ctx, callID, agentID, false)
+}
+
+func (c *Coordinator) setMuted(ctx context.Context, callID, agentID uuid.UUID, muted bool) error {
+	channelID, err := c.agentChannel(callID, agentID)
+	if err != nil {
+		return err
+	}
+	if muted {
+		err = c.adapter.MuteLeg(channelID)
+	} else {
+		err = c.adapter.UnmuteLeg(channelID)
+	}
+	if err != nil {
+		return err
+	}
+
+	var changed *Party
+	if err := c.registry.Do(callID, func(call *Call) {
+		if p := call.PartyByChannel(channelID); p != nil {
+			p.IsMuted = muted
+			changed = p
+		}
+	}); err != nil {
+		return err
+	}
+	if changed != nil {
+		partyID := changed.PartyID
+		c.publish(ctx, events.Event{
+			Type:    events.TypePartyChanged,
+			CallID:  &callID,
+			PartyID: &partyID,
+			AgentID: &agentID,
+			Payload: map[string]any{"isMuted": muted},
+		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
+	}
+	return nil
+}
+
+// SendDTMF emits tones towards the far end of the conversation.
+//
+// The digits go to the other party's leg, not the agent's: the point is that
+// whatever the caller is connected to — an IVR, a bank's menu — hears them.
+// Sent at the agent's own leg they would only beep in the agent's ear.
+func (c *Coordinator) SendDTMF(ctx context.Context, callID, agentID uuid.UUID, digits string) error {
+	if !isDTMF(digits) {
+		return fmt.Errorf("%w: %q", ErrInvalidDTMF, digits)
+	}
+	// Being on the call at all is the permission check; without it any agent
+	// could push tones into any conversation.
+	if _, err := c.agentChannel(callID, agentID); err != nil {
+		return err
+	}
+
+	var farEnd string
+	if err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.IsActive() && (p.AgentID == nil || *p.AgentID != agentID) {
+				farEnd = p.ChannelID
+				return
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	if farEnd == "" {
+		return ErrNotCallParty
+	}
+	return c.adapter.SendDTMF(farEnd, digits)
+}
+
+// isDTMF reports whether every character is a tone the DTMF alphabet has.
+func isDTMF(digits string) bool {
+	if digits == "" || len(digits) > 32 {
+		return false
+	}
+	for _, r := range digits {
+		switch {
+		case r >= '0' && r <= '9', r == '*', r == '#',
+			r >= 'A' && r <= 'D', r >= 'a' && r <= 'd':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Hangup ends the agent's leg, which ends the conversation for them.

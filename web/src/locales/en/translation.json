@@ -17,7 +17,8 @@
     "edit": "Edit",
     "delete": "Delete",
     "previous": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "viewAll": "View all"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -46,7 +47,8 @@
     "audit": "Audit Log",
     "extensions": "Extensions",
     "numbers": "Numbers",
-    "callbacks": "Callbacks"
+    "callbacks": "Callbacks",
+    "agentIdentities": "Agents & Phones"
   },
   "roles": {
     "AGENT": "Agent",
@@ -135,7 +137,18 @@
     "dialOut": "Dial out",
     "dialPlaceholder": "Customer number…",
     "dial": "Dial",
-    "dialPlaced": "Dialing — your phone will connect first."
+    "dialPlaced": "Dialing — your phone will connect first.",
+    "keypad": "Keypad",
+    "journey": "Call legs",
+    "dialled": "Dialled {{number}}",
+    "started": "Started",
+    "wrapUp": "After-call work",
+    "wrapUpIdle": "Wrap-up starts when a call ends.",
+    "completeWrapUp": "Ready for the next call",
+    "openCount_one": "{{count}} open",
+    "openCount_other": "{{count}} open",
+    "legCount_one": "{{count}} leg",
+    "legCount_other": "{{count}} legs"
   },
   "supervisor": {
     "agent": "Agent",
@@ -151,7 +164,24 @@
     "name": "Name",
     "ext": "Ext.",
     "searchAgents": "Search agents…",
-    "onlineCount": "{{online}} of {{total}} agents signed in"
+    "onlineCount": "{{online}} of {{total}} agents signed in",
+    "queue": "Queue",
+    "queuesHint": "Queues as configured, and who staffs each one.",
+    "queuesFailed": "Cannot read the queues.",
+    "queueCount": "{{count}} queues",
+    "staffed": "Staffed",
+    "sla": "SLA",
+    "serviceLevel": "Service level",
+    "perQueue": "Per queue",
+    "calls": "Calls",
+    "answered": "Answered",
+    "abandoned": "Abandoned",
+    "avgWait": "Avg wait",
+    "longestWait": "Longest wait",
+    "noQueueData": "No calls in this window yet.",
+    "lastDays": "Last {{count}} days",
+    "unassignedQueue": "No queue",
+    "allStatuses": "All statuses"
   },
   "partyStates": {
     "DIALING": "Dialling",
@@ -170,7 +200,17 @@
     "unknownNumber": "Unknown number",
     "incoming": "Incoming call",
     "answering": "Answering…",
-    "controlsInTopbar": "Call controls are in the bar above."
+    "controlsInTopbar": "Call controls are in the bar above.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "mute": "Mute",
+    "conference": "Conference",
+    "conferenceUnavailable": "Conferencing is not available: the platform has no endpoint that adds a third party.",
+    "controls": "Call controls",
+    "unmute": "Unmute",
+    "dtmf": "Keypad tones",
+    "dtmfHint": "Each key is sent to the other party as you press it.",
+    "dtmfSent": "Sent {{digits}}"
   },
   "wallboard": {
     "agentsAvailable": "Agents available",
@@ -251,7 +291,35 @@
     "fallbackQueue": "Fallback queue",
     "noFallbackQueue": "None",
     "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
-    "description": "Description"
+    "description": "Description",
+    "overviewHint": "What is configured, and whether the parts you cannot see are alive.",
+    "agentExtensions": "{{count}} for agents",
+    "queuesNote": "{{count}} enabled",
+    "numbersNote": "{{enabled}} enabled · {{withFlow}} with a flow",
+    "agentsNote": "{{count}} signed in",
+    "systemHealth": "System health",
+    "eventStream": "Event stream",
+    "consolesLive": "{{count}} consoles live",
+    "replayWindow": "Oldest replayable event",
+    "healthHint": "A console that falls behind this sequence resynchronises from snapshots.",
+    "shortcuts": "Go to",
+    "agentsHint": "Who is an agent, and which phone they are bound to. An agent signs in at that extension and nowhere else.",
+    "addAgent": "Add agent",
+    "editAgent": "Edit agent",
+    "deleteAgentConfirm": "Remove {{name}} as an agent? The account remains; it simply stops taking calls.",
+    "account": "Account",
+    "accountHint": "Only accounts without an agent identity are listed.",
+    "chooseAccount": "Choose an account…",
+    "noFreeUsers": "Every account already has an agent identity.",
+    "callcenterName": "Switch name",
+    "callcenterNameHint": "The identifier the switch knows this agent by; no spaces, @ or quotes.",
+    "boundExtension": "Phone",
+    "boundExtensionHint": "The extension this agent signs in at. An extension belongs to one agent.",
+    "noExtension": "No phone",
+    "wrapUpTime": "Wrap-up",
+    "wrapUpTimeHint": "Seconds of after-call work before the agent goes ready again.",
+    "autoAnswer": "Auto answer",
+    "autoAnswerHint": "Whether the phone picks up queue calls without the agent clicking answer."
   },
   "cdr": {
     "hint": "Every finished call, newest first.",
@@ -302,7 +370,10 @@
       "CALLER": "Caller",
       "BOT": "Bot",
       "AGENT": "Agent"
-    }
+    },
+    "playColumn": "Listen",
+    "play": "Play the recording",
+    "stop": "Stop"
   },
   "callbacks": {
     "hint": "Promises the bot made on the phone. Claim one before you ring.",
@@ -348,5 +419,13 @@
     "abandonedShort": "Abandoned",
     "noCalls": "No calls in this window.",
     "unknownQueue": "Removed queue"
+  },
+  "partyRoles": {
+    "ORIGINATOR": "Caller",
+    "TARGET": "Answered by"
+  },
+  "device": {
+    "reachable": "Phone registered",
+    "unreachable": "Phone unreachable"
   }
 }

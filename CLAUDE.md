@@ -35,6 +35,26 @@ cd web && npm run build                       # emits web/dist for go:embed
 
 Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins) — see `internal/config/config.go` for the complete list. ESL is at `127.0.0.1:18021` (not stock 8021).
 
+## API contract — spec-first (mandatory)
+
+`docs/openapi.json` (OpenAPI 3.1) is the **single source of truth** for every HTTP endpoint. The order is always: edit the contract → generate → implement → test. Never the reverse.
+
+```sh
+make api-lint      # Redocly lint; zero errors/warnings (pinned exceptions: .redocly.lint-ignore.yaml)
+make api-generate  # regen internal/api/api.gen.go + web/src/generated/api.ts — commit them with the spec
+make api-check     # the CI gate: api-lint + regenerate + git diff must be empty
+make api-breaking BASE=main  # oasdiff: no undeclared breaking changes vs the base branch
+```
+
+- **Never** introduce code-first OpenAPI tooling (swaggo or any annotation/reflection generator), and never "sync" the contract from code. Generated files carry `DO NOT EDIT` and are committed; hand-editing them is forbidden — CI (`.github/workflows/api.yml`) regenerates and fails on any diff.
+- Tool versions are pinned: `go.mod` `tool` directives (oapi-codegen, oasdiff), `web/package.json` exact devDependencies (openapi-typescript, @redocly/cli). `scripts/api-generate.sh` is the only generation entry point (`go generate ./internal/api` calls it too).
+- `httpapi.Server` must implement the generated `api.ServerInterface` (compile-locked in `internal/httpapi/api_server.go`): a new spec operation breaks the build until the server grows its method — that is the point.
+- Naming: the contract follows 07-naming on the wire; Go initialisms (`CallID`, `ListCDRs`) come from `name-normalizer` + `additional-initialisms` in `oapi-codegen.yaml` — extend that list for a new initialism, don't scatter `x-go-name` (reserved for genuine one-offs like the Last-Event-ID header/query collision).
+- Frontend wire types come only from `web/src/generated/api.ts`, re-exported by `web/src/lib/*.ts` under their established names. No handwritten DTO interfaces.
+- sqlc models and `internal/store` types are never exposed as API types; handlers map explicitly to `api.*` types at the boundary.
+- SSE: OpenAPI cannot express per-event-type payloads. The envelope is `SseEvent`; stable payload shapes are components named `Sse*Payload` (linked by convention, lint-ignored as "unused" — keep them registered there, no AsyncAPI second system).
+- Migration state: call control + outbound run through the generated wrapper (`s.apiWrapper()`) on `api.*` DTOs; the remaining groups still hand-parse behind delegating shims in `api_server.go` — when touching a group, move it onto the wrapper and generated types as part of the change.
+
 ## Architecture
 
 Two telephony paths meet in one process:

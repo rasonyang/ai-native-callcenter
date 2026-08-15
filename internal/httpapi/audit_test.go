@@ -264,13 +264,25 @@ func (stubAgents) NotReady(context.Context, uuid.UUID, agents.Reason) (agents.Pr
 }
 func (stubAgents) Presence(uuid.UUID) agents.Presence                   { return agents.Presence{} }
 func (stubAgents) Roster(context.Context) ([]agents.RosterEntry, error) { return nil, nil }
+func (stubAgents) CreateAgent(context.Context, agents.AgentConfig) (agents.AgentConfig, error) {
+	return agents.AgentConfig{}, nil
+}
+func (stubAgents) UpdateAgent(context.Context, agents.AgentConfig) (agents.AgentConfig, error) {
+	return agents.AgentConfig{}, nil
+}
+func (stubAgents) DeleteAgent(context.Context, uuid.UUID) error { return nil }
 
 type stubCalls struct{}
 
 func (stubCalls) Answer(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
 func (stubCalls) Hold(context.Context, uuid.UUID, uuid.UUID) error     { return nil }
 func (stubCalls) Retrieve(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+func (stubCalls) Mute(context.Context, uuid.UUID, uuid.UUID) error     { return nil }
+func (stubCalls) Unmute(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
 func (stubCalls) Hangup(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
+func (stubCalls) SendDTMF(context.Context, uuid.UUID, uuid.UUID, string) error {
+	return nil
+}
 func (stubCalls) Transfer(context.Context, uuid.UUID, uuid.UUID, string) error {
 	return nil
 }

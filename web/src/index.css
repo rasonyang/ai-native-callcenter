@@ -18,16 +18,27 @@
     'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Source Han Sans SC',
     sans-serif;
 
+  /* Line heights are absolute, not ratios. Tailwind's defaults are ratios
+     tuned to a 14px `sm`; against a 13px base they land on 18.57px and every
+     row in the product ends up 1.5px short of the reference. Measured against
+     the reference implementation: 12→16, 13→20, 14→20, 16→24, 20→28. */
   --text-xs: 12px;
+  --text-xs--line-height: 16px;
   --text-sm: 13px;
+  --text-sm--line-height: 20px;
   --text-base: 14px;
+  --text-base--line-height: 20px;
   --text-lg: 16px;
+  --text-lg--line-height: 24px;
   --text-xl: 20px;
+  --text-xl--line-height: 28px;
 
   --radius-sm: var(--radius);
   --radius-md: var(--radius);
   --radius-lg: var(--radius);
   --radius-xl: var(--radius);
+  --radius-2xl: var(--radius);
+  --radius-3xl: var(--radius);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -58,9 +69,12 @@
   --popover-foreground: #18181b;
   --primary: #4f46e5;
   --primary-foreground: #ffffff;
-  --muted: #f4f4f5;
+  /* Measured against the reference implementation: the recessive surface is
+     the app background, not a darker grey, so a hover never reads as a filled
+     chip. */
+  --muted: #fafafa;
   --muted-foreground: #71717a;
-  --accent: #f4f4f5;
+  --accent: #fafafa;
   --accent-foreground: #18181b;
   --destructive: #dc2626;
   --border: #e5e7eb;
@@ -84,17 +98,26 @@
   --chart-5: #dc2626;
 }
 
-* {
-  border-color: var(--border);
-}
+/* The default border colour must sit in a layer. Unlayered rules beat every
+   layered one regardless of specificity, so as bare `*` this silently overrode
+   `border-transparent` (and every other border-colour utility) on every
+   element in the product. */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: var(--text-sm);
-  -webkit-font-smoothing: antialiased;
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--text-sm);
+    /* Preflight's 1.5 ratio would give 19.5px here and leave every plain
+       container half a pixel short of the 13/20 scale. */
+    line-height: 20px;
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
 /* Numbers are compared column-wise everywhere in this product: timers, KPIs,

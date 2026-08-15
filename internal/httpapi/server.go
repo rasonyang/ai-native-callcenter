@@ -27,6 +27,11 @@ type AgentService interface {
 	NotReady(ctx context.Context, agentID uuid.UUID, reason agents.Reason) (agents.Presence, error)
 	Presence(agentID uuid.UUID) agents.Presence
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
+
+	// Configuration, as administration edits it.
+	CreateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
+	UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
+	DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 }
 
 // Server owns the HTTP surface: REST, SSE and the embedded SPA.
@@ -127,22 +132,37 @@ func (s *Server) router() chi.Router {
 						sup.Get("/agents", s.handleAgentRoster)
 						sup.Post("/agents/{agentId}/force-logout", s.handleAgentForceLogout)
 					})
+					// Who is an agent, and which phone they are bound to, is
+					// configuration rather than supervision.
+					private.Group(func(admin chi.Router) {
+						admin.Use(requireRole(auth.RoleAdmin))
+						wrapper := s.apiWrapper()
+						admin.Post("/agents", wrapper.CreateAgent)
+						admin.Put("/agents/{agentId}", wrapper.UpdateAgent)
+						admin.Delete("/agents/{agentId}", wrapper.DeleteAgent)
+						admin.Get("/users", wrapper.ListUsers)
+					})
 				}
 
 				if s.calls != nil {
 					// Call control acts through the caller's own agent
 					// identity: a call id in the path is never authority on
-					// its own.
+					// its own. These routes run behind the generated
+					// contract wrapper, which parses the path parameters.
+					wrapper := s.apiWrapper()
 					private.Group(func(call chi.Router) {
 						call.Use(requireAgentRole)
-						call.Get("/calls/mine", s.handleMyCalls)
-						call.Post("/calls/{callId}/answer", s.handleCallAnswer)
-						call.Post("/calls/{callId}/hold", s.handleCallHold)
-						call.Post("/calls/{callId}/retrieve", s.handleCallRetrieve)
-						call.Post("/calls/{callId}/hangup", s.handleCallHangup)
-						call.Post("/calls/{callId}/transfer", s.handleCallTransfer)
+						call.Get("/calls/mine", wrapper.ListMyCalls)
+						call.Post("/calls/{callId}/answer", wrapper.AnswerCall)
+						call.Post("/calls/{callId}/hold", wrapper.HoldCall)
+						call.Post("/calls/{callId}/retrieve", wrapper.RetrieveCall)
+						call.Post("/calls/{callId}/mute", wrapper.MuteCall)
+						call.Post("/calls/{callId}/unmute", wrapper.UnmuteCall)
+						call.Post("/calls/{callId}/hangup", wrapper.HangupCall)
+						call.Post("/calls/{callId}/transfer", wrapper.TransferCall)
+						call.Post("/calls/{callId}/dtmf", wrapper.SendCallDTMF)
 					})
-					private.With(requireSupervisorRole).Get("/calls", s.handleAllCalls)
+					private.With(requireSupervisorRole).Get("/calls", wrapper.ListCalls)
 				}
 
 				if s.catalog != nil {
@@ -206,8 +226,9 @@ func (s *Server) router() chi.Router {
 				if s.outbound != nil {
 					// An agent dials out as themselves; placing an AI call
 					// is an operations decision.
-					private.With(requireAgentRole).Post("/calls/dial", s.handleDial)
-					private.With(requireSupervisorRole).Post("/calls", s.handleCreateCall)
+					wrapper := s.apiWrapper()
+					private.With(requireAgentRole).Post("/calls/dial", wrapper.DialCall)
+					private.With(requireSupervisorRole).Post("/calls", wrapper.CreateCall)
 				}
 
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)

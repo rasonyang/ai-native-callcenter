@@ -44,6 +44,8 @@ func main() {
 		switch os.Args[1] {
 		case "useradd":
 			handler = runUserAdd
+		case "passwd":
+			handler = runPasswd
 		case "flowadd":
 			handler = runFlowAdd
 		}
@@ -352,6 +354,18 @@ func (d agentDirectory) AgentIDForUser(r *http.Request, userID uuid.UUID) (uuid.
 		return uuid.Nil, err
 	}
 	return agent.ID, nil
+}
+
+func (d agentDirectory) QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := d.st.Queries.ListQueuesForAgent(r.Context(), agentID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, len(rows))
+	for i, row := range rows {
+		ids[i] = row.ID
+	}
+	return ids, nil
 }
 
 // seqReserver adapts the store to the events package's reserver interface.

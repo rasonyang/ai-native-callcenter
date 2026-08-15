@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
-import { useCatalogMutations, useDIDs, useQueues, type DID } from '@/lib/catalog'
+import { useCatalogMutations, useDIDs, useQueues, type DIDDraft } from '@/lib/catalog'
 
 /**
  * External numbers.
@@ -28,7 +28,7 @@ function NumbersPage() {
   const { data, isPending, isError, error } = useDIDs()
   const { data: queues } = useQueues()
   const { saveDID, deleteDID } = useCatalogMutations()
-  const [editing, setEditing] = useState<Partial<DID> | null>(null)
+  const [editing, setEditing] = useState<DIDDraft | null>(null)
 
   const rows = data?.items ?? []
   const queueOptions = [

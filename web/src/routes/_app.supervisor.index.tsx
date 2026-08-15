@@ -4,9 +4,10 @@ import { useQuery } from '@tanstack/react-query'
 
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
+import { QueuePerformance } from '@/components/queue-performance'
+import { VolumeTrend } from '@/components/volume-trend'
 import { requireRole } from '@/lib/guards'
 import { StatusDot } from '@/components/status-pill'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { AVAILABILITY_COLOR, useRoster } from '@/lib/agent'
 import { api, type Availability } from '@/lib/api'
 import { formatDuration, useOverview } from '@/lib/ledger'
@@ -15,8 +16,9 @@ import { formatDuration, useOverview } from '@/lib/ledger'
  * Supervisor wallboard.
  *
  * Every number here is computed from something the system actually knows.
- * Queue depth, service level and abandon rate need the queue metrics that
- * arrive with the reporting work, so they are absent rather than invented.
+ * Live queue depth and longest-wait need queue-count events the platform does
+ * not publish yet; the per-queue panel therefore reports the finished-call
+ * ledger for the window rather than inventing a live figure.
  */
 export const Route = createFileRoute('/_app/supervisor/')({
   beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
@@ -25,7 +27,7 @@ export const Route = createFileRoute('/_app/supervisor/')({
 
 function Wallboard() {
   const { t } = useTranslation()
-  const { data: roster, isPending } = useRoster(true)
+  const { data: roster } = useRoster(true)
   const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   // Today's ledger numbers; refreshed by CALL_CDR events on the stream.
   const { data: today } = useOverview()
@@ -96,7 +98,12 @@ function Wallboard() {
         />
       </div>
 
-      <div className="grid grid-cols-[1fr_360px] items-start gap-4">
+      <div className="mb-4 grid grid-cols-[1fr_520px] items-start gap-4">
+        <VolumeTrend days={7} />
+        <QueuePerformance />
+      </div>
+
+      <div className="grid grid-cols-1 items-start gap-4">
         <div className="rounded-md border bg-card p-4">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t('wallboard.agentStates')}
@@ -128,36 +135,6 @@ function Wallboard() {
             </>
           )}
         </div>
-
-        <DataTable>
-          <THead>
-            <Th>{t('supervisor.name')}</Th>
-            <Th>{t('supervisor.status')}</Th>
-            <Th align="right">{t('supervisor.ext')}</Th>
-          </THead>
-          <TBody>
-            {isPending && <TableMessage colSpan={3}>{t('common.loading')}</TableMessage>}
-            {!isPending && agents.length === 0 && (
-              <TableMessage colSpan={3}>{t('supervisor.noAgents')}</TableMessage>
-            )}
-            {agents.map((row) => (
-              <Tr key={row.agentId}>
-                <Td>{row.displayName}</Td>
-                <Td>
-                  <span className="flex items-center gap-1.5 text-xs">
-                    <StatusDot availability={row.availability} />
-                    {row.availability === 'NOT_READY' && row.reason
-                      ? t(`reasons.${row.reason}`)
-                      : t(`availability.${row.availability}`)}
-                  </span>
-                </Td>
-                <Td align="right" className="tabular">
-                  {row.extensionNumber ?? '—'}
-                </Td>
-              </Tr>
-            ))}
-          </TBody>
-        </DataTable>
       </div>
     </>
   )

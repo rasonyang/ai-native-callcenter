@@ -1,37 +1,18 @@
 /**
- * REST client. Property names match the JSON contract byte for byte
- * (docs/design/07-naming.md), so no case conversion happens anywhere.
+ * REST client. All wire types come from the generated contract
+ * (web/src/generated/api.ts, from docs/openapi.json); this module only
+ * re-exports them under their established names.
  */
+import type { components } from '@/generated/api'
 
 /** Machine-readable error codes; the UI renders errors.<CODE>. */
-export type ErrorCode =
-  | 'INVALID_CREDENTIALS'
-  | 'SESSION_EXPIRED'
-  | 'FORBIDDEN'
-  | 'VALIDATION_FAILED'
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'USER_SUSPENDED'
-  | 'SWITCH_DOWN'
-  | 'STORAGE_DOWN'
-  | 'RATE_LIMITED'
-  | 'INTERNAL'
+export type ErrorCode = components['schemas']['ErrorCode']
 
-export type Role = 'AGENT' | 'SUPERVISOR' | 'ADMIN'
+export type Role = components['schemas']['Role']
 
-export interface Identity {
-  userId: string
-  username: string
-  displayName: string
-  role: Role
-  locale: string | null
-}
+export type Identity = components['schemas']['Identity']
 
-export interface ApiErrorBody {
-  code: ErrorCode
-  message: string
-  params?: Record<string, unknown>
-}
+export type ApiErrorBody = components['schemas']['Error']
 
 /** Error carrying the translatable code and its interpolation params. */
 export class ApiError extends Error {
@@ -97,48 +78,28 @@ export const api = {
 
 // --- Agents ---------------------------------------------------------------
 
-export type AgentState = 'LOGGED_OUT' | 'NOT_READY' | 'READY'
+export type AgentState = components['schemas']['AgentState']
 
-export type NotReadyReason =
-  | 'LOGIN' | 'BREAK' | 'LUNCH' | 'TRAINING'
-  | 'AFTER_CALL_WORK' | 'SYSTEM' | 'SUPERVISOR'
+export type NotReadyReason = components['schemas']['NotReadyReason']
 
 /** The single word that answers "could this agent take a call, and if not, why". */
-export type Availability =
-  | 'LOGGED_OUT' | 'ON_CALL' | 'WRAP_UP'
-  | 'NOT_READY' | 'DEVICE_UNREACHABLE' | 'READY'
+export type Availability = components['schemas']['Availability']
 
-export interface Presence {
-  state: AgentState
-  reason?: NotReadyReason
-  availability: Availability
-  extensionNumber?: string
-  enteredAt: string
-  wrapUpEndsAt?: string
-}
+export type Presence = components['schemas']['Presence']
 
-export interface RosterEntry {
-  agentId: string
-  userId: string
-  username: string
-  displayName: string
-  state: AgentState
-  reason?: NotReadyReason
-  availability: Availability
-  extensionNumber?: string
-  enteredAt: string
-  wrapUpEndsAt?: string
-  isOnCall: boolean
-  isRegistered: boolean
-}
+export type RosterEntry = components['schemas']['RosterEntry']
 
 export const agentApi = {
   presence: () => request<Presence>('/agent/presence'),
 
-  login: (extensionNumber: string) =>
+  /**
+   * Signs in at the extension bound to this agent in configuration. The
+   * binding is static, so a number is only ever passed to override it.
+   */
+  login: (extensionNumber?: string) =>
     request<Presence>('/agent/login', {
       method: 'POST',
-      body: JSON.stringify({ extensionNumber }),
+      body: JSON.stringify(extensionNumber ? { extensionNumber } : {}),
     }),
 
   logout: () => request<Presence>('/agent/logout', { method: 'POST' }),
@@ -159,36 +120,17 @@ export const agentApi = {
 
 // --- Calls ----------------------------------------------------------------
 
-export type PartyState = 'DIALING' | 'RINGING' | 'TALKING' | 'HELD' | 'RELEASED'
-export type CallType = 'INBOUND' | 'OUTBOUND' | 'CONSULT' | 'INTERNAL'
+export type PartyState = components['schemas']['PartyState']
+export type CallType = components['schemas']['CallType']
 
-export interface PartySnapshot {
-  partyId: string
-  channelId: string
-  role: 'ORIGINATOR' | 'TARGET'
-  state: PartyState
-  number?: string
-  otherNumber?: string
-  agentId?: string
-  createdAt: string
-  answeredAt?: string
-  releasedAt?: string
-}
+export type PartySnapshot = components['schemas']['PartySnapshot']
 
-export interface CallSnapshot {
-  callId: string
-  callType: CallType
-  state: 'CREATED' | 'RUNNING' | 'ENDING' | 'ENDED'
-  language?: string
-  parties: PartySnapshot[]
-  userData?: Record<string, unknown>
-  createdAt: string
-}
+export type CallSnapshot = components['schemas']['CallSnapshot']
 
 export const callApi = {
-  mine: () => request<{ items: CallSnapshot[] }>('/calls/mine'),
+  mine: () => request<components['schemas']['CallList']>('/calls/mine'),
   dial: (destination: string) =>
-    request<{ callId: string }>('/calls/dial', {
+    request<components['schemas']['DialResponse']>('/calls/dial', {
       method: 'POST',
       body: JSON.stringify({ destination }),
     }),
@@ -200,5 +142,12 @@ export const callApi = {
     request<void>(`/calls/${callId}/transfer`, {
       method: 'POST',
       body: JSON.stringify({ destination }),
+    }),
+  mute: (callId: string) => request<void>(`/calls/${callId}/mute`, { method: 'POST' }),
+  unmute: (callId: string) => request<void>(`/calls/${callId}/unmute`, { method: 'POST' }),
+  sendDtmf: (callId: string, digits: string) =>
+    request<void>(`/calls/${callId}/dtmf`, {
+      method: 'POST',
+      body: JSON.stringify({ digits }),
     }),
 }

@@ -1,0 +1,7 @@
+# Redocly CLI configuration for the API contract lint (make api-lint).
+# Rules start from the recommended set; known exceptions live in
+# .redocly.lint-ignore.yaml (the SSE payload schemas, which are linked by
+# naming convention rather than $ref because OpenAPI cannot express
+# per-event-type SSE payloads).
+extends:
+  - recommended

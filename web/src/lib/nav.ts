@@ -3,6 +3,7 @@ import {
   ListChecks, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users,
 } from 'lucide-react'
 
+
 import type { Role } from './api'
 
 export interface NavItem {
@@ -53,8 +54,9 @@ export const NAV: NavGroup[] = [
     roleKey: 'roles.ADMIN',
     roleHome: '/admin',
     items: [
-      { to: '/admin', labelKey: 'nav.overview', icon: Activity, minRole: 'ADMIN', isReady: false },
+      { to: '/admin', labelKey: 'nav.overview', icon: Activity, minRole: 'ADMIN', isReady: true },
       { to: '/admin/users', labelKey: 'nav.users', icon: Users, minRole: 'ADMIN', isReady: false },
+      { to: '/admin/agents', labelKey: 'nav.agentIdentities', icon: Headphones, minRole: 'ADMIN', isReady: true },
       { to: '/admin/extensions', labelKey: 'nav.extensions', icon: PhoneCall, minRole: 'ADMIN', isReady: true },
       { to: '/admin/routing', labelKey: 'nav.routing', icon: ListChecks, minRole: 'ADMIN', isReady: true },
       { to: '/admin/numbers', labelKey: 'nav.numbers', icon: ScrollText, minRole: 'ADMIN', isReady: true },

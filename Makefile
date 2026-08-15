@@ -22,6 +22,35 @@ dev-down: ## Stop development PostgreSQL
 generate: ## Regenerate sqlc query code
 	sqlc generate
 
+REDOCLY := $(WEB)/node_modules/.bin/redocly
+
+.PHONY: api-lint
+api-lint: ## Lint the API contract (docs/openapi.json)
+	$(REDOCLY) lint docs/openapi.json
+
+.PHONY: api-generate
+api-generate: ## Regenerate Go + TS API code from the contract
+	scripts/api-generate.sh
+
+.PHONY: api-check
+api-check: api-lint ## CI gate: contract lints and committed generated code matches it
+	scripts/api-generate.sh
+	git diff --exit-code -- internal/api web/src/generated
+	@test -z "$$(git status --porcelain -- internal/api web/src/generated)" \
+		|| { git status --short -- internal/api web/src/generated; echo 'untracked generated files'; exit 1; }
+
+BASE ?= main
+
+.PHONY: api-breaking
+api-breaking: ## Fail on undeclared breaking API changes vs BASE (default main)
+	@base_spec=$$(mktemp); \
+	if git show $(BASE):docs/openapi.json > $$base_spec 2>/dev/null; then \
+		go tool oasdiff breaking --fail-on ERR $$base_spec docs/openapi.json; status=$$?; \
+	else \
+		echo "no contract on $(BASE); nothing to compare"; status=0; \
+	fi; \
+	rm -f $$base_spec; exit $$status
+
 .PHONY: build
 build: web-build ## Build the single executable with the SPA embedded
 	go build -o $(BIN) ./cmd/aicc

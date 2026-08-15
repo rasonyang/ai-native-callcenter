@@ -119,6 +119,12 @@ type Party struct {
 	// that has one and was never handed to a person belongs to the bot's
 	// ledger, not this path's.
 	IsBotLeg bool
+	// IsMuted tracks the switch-side mute on this leg. The switch reports no
+	// event for it and no channel variable survives a re-read, so this is the
+	// only record that the agent's microphone is off — which is precisely why
+	// it must live on the party rather than in a browser's memory: a reload,
+	// a second tab or a supervisor's view would each answer differently.
+	IsMuted bool
 }
 
 // apply moves the party, reporting an error for forbidden transitions.
@@ -317,6 +323,7 @@ type PartySnapshot struct {
 	// ReleaseCause is the switch's word for why the leg ended.
 	ReleaseCause string `json:"releaseCause,omitempty"`
 	IsBotLeg     bool   `json:"isBotLeg,omitempty"`
+	IsMuted      bool   `json:"isMuted,omitempty"`
 }
 
 // Snapshot copies the call into a value safe to hand outside the actor.
@@ -349,6 +356,7 @@ func (c *Call) Snapshot() Snapshot {
 			CreatedAt:    p.CreatedAt,
 			ReleaseCause: p.ReleaseCause,
 			IsBotLeg:     p.IsBotLeg,
+			IsMuted:      p.IsMuted,
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

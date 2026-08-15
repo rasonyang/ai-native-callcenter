@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
-  useCatalogMutations, useExtensions, type Extension, type ExtensionKind,
+  useCatalogMutations, useExtensions, type ExtensionDraft, type ExtensionKind,
 } from '@/lib/catalog'
 
 /** The SIP endpoints the switch will accept a registration for. */
@@ -26,7 +26,7 @@ function ExtensionsPage() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useExtensions()
   const { saveExtension, deleteExtension } = useCatalogMutations()
-  const [editing, setEditing] = useState<Partial<Extension> | null>(null)
+  const [editing, setEditing] = useState<ExtensionDraft | null>(null)
 
   const rows = data?.items ?? []
 

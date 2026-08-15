@@ -99,14 +99,73 @@ func (a *AgentStore) AgentProfile(ctx context.Context, agentID uuid.UUID) (agent
 	if err != nil {
 		return agents.Profile{}, fmt.Errorf("get agent user: %w", err)
 	}
-	return agents.Profile{
+	profile := agents.Profile{
 		AgentID:        row.ID,
 		UserID:         row.UserID,
 		CallcenterName: row.CallcenterName,
 		DisplayName:    user.DisplayName,
 		WrapUpTimeSec:  int(row.WrapUpTimeSec),
 		IsAutoAnswer:   row.IsAutoAnswer,
-	}, nil
+	}
+	// The bound phone is configuration, not a sign-in choice. A missing
+	// binding is not an error here: the caller reports it when the agent
+	// tries to sign in.
+	if row.DefaultExtensionID != nil {
+		if ext, err := a.q.GetExtension(ctx, *row.DefaultExtensionID); err == nil {
+			profile.ExtensionNumber = ext.Number
+		}
+	}
+	return profile, nil
+}
+
+// CreateAgent stores a new agent identity.
+func (a *AgentStore) CreateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error) {
+	row, err := a.q.CreateAgent(ctx, queries.CreateAgentParams{
+		ID:                 uuid.New(),
+		UserID:             cfg.UserID,
+		CallcenterName:     cfg.CallcenterName,
+		WrapUpTimeSec:      int32(cfg.WrapUpTimeSec),
+		IsAutoAnswer:       cfg.IsAutoAnswer,
+		DefaultExtensionID: cfg.DefaultExtensionID,
+	})
+	if err != nil {
+		return agents.AgentConfig{}, fmt.Errorf("create agent: %w", err)
+	}
+	return agentConfigOf(row), nil
+}
+
+// UpdateAgent rewrites one agent's configuration.
+func (a *AgentStore) UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error) {
+	row, err := a.q.UpdateAgent(ctx, queries.UpdateAgentParams{
+		ID:                 cfg.AgentID,
+		CallcenterName:     cfg.CallcenterName,
+		WrapUpTimeSec:      int32(cfg.WrapUpTimeSec),
+		IsAutoAnswer:       cfg.IsAutoAnswer,
+		DefaultExtensionID: cfg.DefaultExtensionID,
+	})
+	if err != nil {
+		return agents.AgentConfig{}, fmt.Errorf("update agent: %w", err)
+	}
+	return agentConfigOf(row), nil
+}
+
+// DeleteAgent removes an agent identity.
+func (a *AgentStore) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
+	if err := a.q.DeleteAgent(ctx, agentID); err != nil {
+		return fmt.Errorf("delete agent: %w", err)
+	}
+	return nil
+}
+
+func agentConfigOf(row queries.Agent) agents.AgentConfig {
+	return agents.AgentConfig{
+		AgentID:            row.ID,
+		UserID:             row.UserID,
+		CallcenterName:     row.CallcenterName,
+		WrapUpTimeSec:      int(row.WrapUpTimeSec),
+		IsAutoAnswer:       row.IsAutoAnswer,
+		DefaultExtensionID: row.DefaultExtensionID,
+	}
 }
 
 // Roster reads every agent with their persisted presence.
@@ -119,12 +178,19 @@ func (a *AgentStore) Roster(ctx context.Context) ([]agents.RosterEntry, error) {
 	out := make([]agents.RosterEntry, 0, len(rows))
 	for _, row := range rows {
 		entry := agents.RosterEntry{
-			AgentID:     row.AgentID,
-			UserID:      row.UserID,
-			Username:    row.Username,
-			DisplayName: row.DisplayName,
-			State:       agents.State(row.State),
-			EnteredAt:   row.EnteredAt.Time,
+			AgentID:            row.AgentID,
+			UserID:             row.UserID,
+			Username:           row.Username,
+			DisplayName:        row.DisplayName,
+			State:              agents.State(row.State),
+			EnteredAt:          row.EnteredAt.Time,
+			CallcenterName:     row.CallcenterName,
+			WrapUpTimeSec:      int(row.WrapUpTimeSec),
+			IsAutoAnswer:       row.IsAutoAnswer,
+			DefaultExtensionID: row.DefaultExtensionID,
+		}
+		if row.DefaultExtensionNumber != nil {
+			entry.DefaultExtensionNumber = *row.DefaultExtensionNumber
 		}
 		if row.Reason != nil {
 			entry.Reason = agents.Reason(*row.Reason)

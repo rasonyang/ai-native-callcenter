@@ -5,6 +5,7 @@ import { LogOut, Search } from 'lucide-react'
 import { Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
+import { Select } from '@/components/record-dialog'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { StatusPill } from '@/components/status-pill'
@@ -14,8 +15,18 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useElapsedSec, useForceLogout, useRoster } from '@/lib/agent'
-import type { RosterEntry } from '@/lib/api'
+import type { Availability, RosterEntry } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
+
+/** Filter options, in the order the wallboard stacks them. */
+const AVAILABILITIES: Availability[] = [
+  'READY',
+  'ON_CALL',
+  'WRAP_UP',
+  'NOT_READY',
+  'DEVICE_UNREACHABLE',
+  'LOGGED_OUT',
+]
 
 /** Live agent roster: who could take a call, and if not, why. */
 export const Route = createFileRoute('/_app/supervisor/agents')({
@@ -27,17 +38,19 @@ function AgentRoster() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useRoster(true)
   const [filter, setFilter] = useState('')
+  const [availability, setAvailability] = useState('')
 
   const all = data?.items ?? []
   const needle = filter.trim().toLowerCase()
-  const rows = needle
-    ? all.filter(
-        (row) =>
-          row.displayName.toLowerCase().includes(needle) ||
-          row.username.toLowerCase().includes(needle) ||
-          (row.extensionNumber ?? '').includes(needle),
-      )
-    : all
+  const rows = all.filter((row) => {
+    if (availability && row.availability !== availability) return false
+    if (!needle) return true
+    return (
+      row.displayName.toLowerCase().includes(needle) ||
+      row.username.toLowerCase().includes(needle) ||
+      (row.extensionNumber ?? '').includes(needle)
+    )
+  })
   const online = all.filter((row) => row.state !== 'LOGGED_OUT').length
 
   return (
@@ -45,15 +58,31 @@ function AgentRoster() {
       <PageHeader
         title={t('nav.agents')}
         actions={
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              className="w-56 pl-7"
-              placeholder={t('supervisor.searchAgents')}
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-            />
-          </div>
+          <>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                className="w-56 pl-7"
+                placeholder={t('supervisor.searchAgents')}
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+              />
+            </div>
+            <div className="w-40">
+              <Select
+                value={availability}
+                onChange={setAvailability}
+                ariaLabel={t('supervisor.status')}
+                options={[
+                  { value: '', label: t('supervisor.allStatuses') },
+                  ...AVAILABILITIES.map((value) => ({
+                    value,
+                    label: t(`availability.${value}`),
+                  })),
+                ]}
+              />
+            </div>
+          </>
         }
       />
 

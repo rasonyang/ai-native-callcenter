@@ -41,6 +41,21 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		IsSupervisor: id.Role.AtLeast(auth.RoleSupervisor),
 		Types:        parseTypes(r.URL.Query().Get("types")),
 	}
+	// An agent's own call and queue events are scoped to their agent identity;
+	// without resolving it here the cockpit would receive nothing at all. A
+	// supervisor or administrator has no agent profile and needs none — they
+	// already see everything.
+	if s.agentDir != nil {
+		if agentID, err := s.agentDir.AgentIDForUser(r, id.UserID); err == nil {
+			who.AgentID = &agentID
+			if queueIDs, err := s.agentDir.QueuesForAgent(r, agentID); err == nil {
+				who.QueueIDs = queueIDs
+			} else {
+				slog.WarnContext(r.Context(), "cannot resolve staffed queues",
+					"error", err, "agentId", agentID)
+			}
+		}
+	}
 
 	sub, replay, resetNeeded := s.hub.Subscribe(who, parseLastEventID(r))
 	defer sub.Close()

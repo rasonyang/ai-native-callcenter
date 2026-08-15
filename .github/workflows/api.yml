@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The contract gate. docs/openapi.json is the single source of truth for the
+# HTTP API: it must lint clean, the committed generated code must match it
+# byte for byte, and a pull request may not break it silently.
+name: api-contract
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend tooling
+        run: npm ci
+        working-directory: web
+
+      - name: Contract lints and generated code matches it
+        run: make api-check
+
+      - name: No undeclared breaking changes
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "$BASE_REF" --depth=1
+          make api-breaking BASE="origin/$BASE_REF"
+        env:
+          BASE_REF: ${{ github.base_ref }}

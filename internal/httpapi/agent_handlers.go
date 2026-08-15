@@ -10,14 +10,19 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 )
 
 // AgentDirectory resolves the agent behind a signed-in user.
 type AgentDirectory interface {
 	AgentIDForUser(r *http.Request, userID uuid.UUID) (uuid.UUID, error)
+	// QueuesForAgent lists the queues the agent staffs. The event stream needs
+	// it to decide which queue-scoped events reach this subscriber.
+	QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.UUID, error)
 }
 
 type presenceResponse struct {
@@ -64,14 +69,16 @@ func (s *Server) handleAgentLogin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// The body is optional: an agent signs in at the extension configuration
+	// bound to them, and only names one to override it.
 	var req struct {
 		ExtensionNumber string `json:"extensionNumber"`
 	}
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil ||
-		req.ExtensionNumber == "" {
-		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"extensionNumber is required", map[string]any{"field": "extensionNumber"})
-		return
+	if r.ContentLength > 0 {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
+			return
+		}
 	}
 
 	p, err := s.agents.Login(r.Context(), agentID, req.ExtensionNumber)
@@ -148,6 +155,118 @@ func (s *Server) handleAgentForceLogout(w http.ResponseWriter, r *http.Request) 
 	s.writePresence(w, r, p, err)
 }
 
+//
+// Agent configuration. Administration owns the agent↔extension binding: it is
+// static, so it is edited here rather than chosen at sign-in.
+//
+
+// handleCreateAgent gives an account an agent identity.
+func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+	var in api.AgentWrite
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.UserID == nil {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"userId is required", map[string]any{"field": "userId"})
+		return
+	}
+	cfg, err := s.agents.CreateAgent(r.Context(), agentConfigFrom(uuid.Nil, *in.UserID, in))
+	s.writeAgentConfig(w, r, cfg, err, http.StatusCreated)
+}
+
+// handleUpdateAgent rewrites one agent's configuration.
+func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
+	var in api.AgentWrite
+	if !decode(w, r, &in) {
+		return
+	}
+	// The account behind an agent identity never changes; only what the
+	// switch needs to reach them does.
+	cfg, err := s.agents.UpdateAgent(r.Context(), agentConfigFrom(agentID, uuid.Nil, in))
+	s.writeAgentConfig(w, r, cfg, err, http.StatusOK)
+}
+
+// handleDeleteAgent removes an agent identity, leaving the account alone.
+func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
+	if err := s.agents.DeleteAgent(r.Context(), agentID); err != nil {
+		s.writeAgentConfigError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func agentConfigFrom(agentID, userID uuid.UUID, in api.AgentWrite) agents.AgentConfig {
+	cfg := agents.AgentConfig{
+		AgentID:            agentID,
+		UserID:             userID,
+		CallcenterName:     in.CallcenterName,
+		DefaultExtensionID: in.DefaultExtensionID,
+	}
+	if in.WrapUpTimeSec != nil {
+		cfg.WrapUpTimeSec = *in.WrapUpTimeSec
+	}
+	if in.IsAutoAnswer != nil {
+		cfg.IsAutoAnswer = *in.IsAutoAnswer
+	}
+	return cfg
+}
+
+func (s *Server) writeAgentConfig(
+	w http.ResponseWriter, r *http.Request, cfg agents.AgentConfig, err error, status int,
+) {
+	if err != nil {
+		s.writeAgentConfigError(w, r, err)
+		return
+	}
+	writeJSON(w, status, api.Agent{
+		AgentID:            cfg.AgentID,
+		UserID:             cfg.UserID,
+		CallcenterName:     cfg.CallcenterName,
+		WrapUpTimeSec:      cfg.WrapUpTimeSec,
+		IsAutoAnswer:       cfg.IsAutoAnswer,
+		DefaultExtensionID: cfg.DefaultExtensionID,
+	})
+}
+
+// writeAgentConfigError maps configuration failures onto the API vocabulary. A
+// unique violation means the operator bound a phone somebody already has, or
+// gave an account a second agent identity.
+func (s *Server) writeAgentConfigError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, agents.ErrValidation):
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(), nil)
+	case errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusNotFound, CodeNotFound, "no such agent", nil)
+	case isUniqueViolation(err):
+		writeError(w, http.StatusConflict, CodeConflict,
+			"that extension or account already has an agent", nil)
+	default:
+		slog.ErrorContext(r.Context(), "agent configuration failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot save the agent", nil)
+	}
+}
+
+// handleListUsers lists accounts so an agent identity can be attached to one.
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+	users, err := s.auth.ListUsers(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "list users failed", "error", err)
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot list accounts", nil)
+		return
+	}
+	items := make([]api.User, 0, len(users))
+	for _, u := range users {
+		items = append(items, api.User{
+			UserID:      u.UserID,
+			Username:    u.Username,
+			DisplayName: u.DisplayName,
+			Role:        api.Role(u.Role),
+		})
+	}
+	writeJSON(w, http.StatusOK, api.UserList{Items: items})
+}
+
 // writePresence maps service errors onto the API error vocabulary.
 func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, p agents.Presence, err error) {
 	switch {
@@ -158,6 +277,9 @@ func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, p agents.
 	case errors.Is(err, agents.ErrExtensionInUse):
 		writeError(w, http.StatusConflict, CodeExtensionInUse,
 			"another agent is signed in at that extension", nil)
+	case errors.Is(err, agents.ErrNoExtensionBound):
+		writeError(w, http.StatusConflict, CodeConflict,
+			"no extension is bound to this agent", nil)
 	case errors.Is(err, agents.ErrAlreadyLoggedIn):
 		writeError(w, http.StatusConflict, CodeAgentAlreadyLoggedIn, "already signed in", nil)
 	case errors.Is(err, agents.ErrNotLoggedIn):

@@ -1,114 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import type { components } from '@/generated/api'
+
 import { request } from './api'
 
 /**
  * The finished-call ledger: CDRs, transcripts, recordings, callbacks and the
- * report aggregates. Property names match the JSON contract byte for byte.
+ * report aggregates. All wire types come from the generated contract; this
+ * module re-exports them under their established names.
  */
 
-export interface Leg {
-  kind: 'TRUNK' | 'DIALING' | 'BOT' | 'QUEUE' | 'AGENT'
-  label: string
-  durationSec: number
-  note?: string
-}
+export type Leg = components['schemas']['Leg']
 
-export type CDRStatus = 'ANSWERED' | 'NO_ANSWER' | 'BUSY' | 'FAILED'
+export type CDRStatus = components['schemas']['CDRStatus']
 
-export interface CDR {
-  callId: string
-  startedAt: string
-  answeredAt?: string
-  endedAt: string
-  callType: 'INBOUND' | 'OUTBOUND' | 'CONSULT' | 'INTERNAL'
-  language?: string
-  fromNumber: string
-  toNumber: string
-  did?: string
-  flowId?: string
-  queueId?: string
-  agentIds?: string[]
-  primaryAgentId?: string
-  ringSec: number
-  botSec: number
-  queueWaitSec: number
-  talkSec: number
-  totalSec: number
-  status: CDRStatus
-  hangupCause?: string
-  missedReason?: string
-  disposition?: string
-  isContained: boolean
-  hasRecording: boolean
-  userData?: Record<string, unknown>
-  legs: Leg[]
-}
+export type CDR = components['schemas']['CDR']
 
-export interface TranscriptEntry {
-  seq: number
-  occurredAt: string
-  role: 'CALLER' | 'BOT' | 'AGENT'
-  kind: string
-  content: Record<string, unknown>
-}
+export type TranscriptEntry = components['schemas']['TranscriptEntry']
 
-export interface RecordingRow {
-  id: string
-  callId: string
-  backend: string
-  bucket?: string
-  objectKey: string
-  sizeBytes: number
-  durationSec: number
-  format: string
-  createdAt: string
-}
+export type RecordingRow = components['schemas']['Recording']
 
-export type CallbackStatus = 'OPEN' | 'CLAIMED' | 'DONE' | 'DISMISSED'
+export type CallbackStatus = components['schemas']['CallbackStatus']
 
-export interface Callback {
-  id: string
-  callId?: string
-  queueId?: string
-  phoneNumber: string
-  message: string
-  status: CallbackStatus
-  createdAt: string
-  handledBy?: string
-  handledAt?: string
-}
+export type Callback = components['schemas']['Callback']
 
-export interface Overview {
-  totalCalls: number
-  answeredCalls: number
-  abandonedCalls: number
-  containedCalls: number
-  queueCalls: number
-  answeredWithinSla: number
-  avgWaitSec: number
-  avgTalkSec: number
-  avgBotSec: number
-}
+export type Overview = components['schemas']['Overview']
 
-export interface QueueReport {
-  queueId: string | null
-  totalCalls: number
-  answeredCalls: number
-  abandonedCalls: number
-  answeredWithinSla: number
-  avgWaitSec: number
-  maxWaitSec: number
-  avgTalkSec: number
-}
+export type QueueReport = components['schemas']['QueueReport']
 
-export interface DailyReport {
-  day: string
-  totalCalls: number
-  answeredCalls: number
-  containedCalls: number
-  abandonedCalls: number
-}
+export type DailyReport = components['schemas']['DailyReport']
 
 export interface CDRFilter {
   status?: string
@@ -137,6 +57,9 @@ export const ledgerApi = {
     request<{ cdr: CDR; transcript: TranscriptEntry[]; recordings: RecordingRow[] }>(
       `/cdrs/${callId}`,
     ),
+
+  recordingsByCall: (callId: string) =>
+    request<{ items: RecordingRow[] }>(`/calls/${callId}/recordings`),
 
   callbacks: (status?: string) =>
     request<{ items: Callback[] }>(`/callbacks${query({ status })}`),

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,11 @@ type Store interface {
 	LogStateChange(ctx context.Context, agentID uuid.UUID, p Presence) error
 	AgentProfile(ctx context.Context, agentID uuid.UUID) (Profile, error)
 	Roster(ctx context.Context) ([]RosterEntry, error)
+
+	// Configuration, as administration edits it.
+	CreateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig, error)
+	UpdateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig, error)
+	DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 }
 
 // SwitchControl is the switch-side mirror of agent presence.
@@ -47,6 +53,10 @@ type Profile struct {
 	DisplayName    string
 	WrapUpTimeSec  int
 	IsAutoAnswer   bool
+	// ExtensionNumber is the phone this agent is bound to in configuration.
+	// The binding is static: an agent signs in at their own extension and
+	// nowhere else, so sign-in never asks which phone they are at.
+	ExtensionNumber string
 }
 
 // RosterEntry is one row of the agent roster, with presence resolved.
@@ -63,6 +73,26 @@ type RosterEntry struct {
 	WrapUpEndsAt *time.Time   `json:"wrapUpEndsAt,omitempty"`
 	IsOnCall     bool         `json:"isOnCall"`
 	IsRegistered bool         `json:"isRegistered"`
+
+	// Configuration. Extension is the phone the agent is signed in at right
+	// now; DefaultExtension is the one bound to them, which survives sign-out
+	// and is what administration edits.
+	CallcenterName         string     `json:"callcenterName"`
+	WrapUpTimeSec          int        `json:"wrapUpTimeSec"`
+	IsAutoAnswer           bool       `json:"isAutoAnswer"`
+	DefaultExtensionID     *uuid.UUID `json:"defaultExtensionId,omitempty"`
+	DefaultExtensionNumber string     `json:"defaultExtensionNumber,omitempty"`
+}
+
+// AgentConfig is the configuration behind one agent, as administration edits
+// it. Presence lives on RosterEntry; this is what is stored.
+type AgentConfig struct {
+	AgentID            uuid.UUID  `json:"agentId"`
+	UserID             uuid.UUID  `json:"userId"`
+	CallcenterName     string     `json:"callcenterName"`
+	WrapUpTimeSec      int        `json:"wrapUpTimeSec"`
+	IsAutoAnswer       bool       `json:"isAutoAnswer"`
+	DefaultExtensionID *uuid.UUID `json:"defaultExtensionId,omitempty"`
 }
 
 // Errors returned by the service.
@@ -70,6 +100,11 @@ var (
 	ErrStorage        = errors.New("cannot record agent state")
 	ErrExtensionInUse = errors.New("extension is already in use")
 	ErrUnknownAgent   = errors.New("unknown agent")
+	// ErrNoExtensionBound means configuration never gave this agent a phone,
+	// so there is nothing for them to sign in at.
+	ErrNoExtensionBound = errors.New("no extension bound to this agent")
+	// ErrValidation is a rejected configuration change.
+	ErrValidation = errors.New("invalid agent configuration")
 )
 
 // Service owns agent presence.
@@ -119,6 +154,16 @@ func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber 
 	profile, err := s.store.AgentProfile(ctx, agentID)
 	if err != nil {
 		return Presence{}, fmt.Errorf("%w: %w", ErrUnknownAgent, err)
+	}
+
+	// The agent↔extension binding is static configuration. A caller may still
+	// name an extension explicitly, but the ordinary sign-in sends none and
+	// lands on the phone the agent is bound to.
+	if extensionNumber == "" {
+		extensionNumber = profile.ExtensionNumber
+	}
+	if extensionNumber == "" {
+		return Presence{}, ErrNoExtensionBound
 	}
 
 	s.mu.Lock()
@@ -290,6 +335,86 @@ func (s *Service) Presence(agentID uuid.UUID) Presence {
 }
 
 // Roster returns every agent with presence and derived availability resolved.
+// CreateAgent gives a user an agent identity: a callcenter name the switch
+// knows them by, and the phone they are bound to.
+func (s *Service) CreateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig, error) {
+	cfg, err := normalizeAgentConfig(cfg)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	out, err := s.store.CreateAgent(ctx, cfg)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	s.mirrorConfig(ctx, out.AgentID)
+	return out, nil
+}
+
+// UpdateAgent rewrites one agent's configuration, rebinding their phone.
+func (s *Service) UpdateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig, error) {
+	cfg, err := normalizeAgentConfig(cfg)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	out, err := s.store.UpdateAgent(ctx, cfg)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	s.mirrorConfig(ctx, out.AgentID)
+	return out, nil
+}
+
+// DeleteAgent removes the agent identity. Presence is dropped with it, so a
+// signed-in agent stops being addressable.
+func (s *Service) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
+	if err := s.store.DeleteAgent(ctx, agentID); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.live, agentID)
+	delete(s.wrapUpGen, agentID)
+	s.mu.Unlock()
+	return nil
+}
+
+// normalizeAgentConfig applies the defaults and rejects what the switch cannot
+// carry. The callcenter name reaches mod_callcenter as an identifier, so it
+// stays to characters that survive that trip.
+func normalizeAgentConfig(cfg AgentConfig) (AgentConfig, error) {
+	cfg.CallcenterName = strings.TrimSpace(cfg.CallcenterName)
+	if cfg.CallcenterName == "" {
+		return cfg, fmt.Errorf("%w: callcenterName is required", ErrValidation)
+	}
+	for _, r := range cfg.CallcenterName {
+		if r == '@' || r == ' ' || r == '\'' {
+			return cfg, fmt.Errorf("%w: callcenterName cannot contain spaces, @ or quotes", ErrValidation)
+		}
+	}
+	if cfg.WrapUpTimeSec < 0 {
+		return cfg, fmt.Errorf("%w: wrapUpTimeSec cannot be negative", ErrValidation)
+	}
+	if cfg.WrapUpTimeSec == 0 {
+		cfg.WrapUpTimeSec = 30
+	}
+	return cfg, nil
+}
+
+// mirrorConfig pushes a changed binding to the switch, so a rebound phone
+// takes calls without waiting for the agent to sign in again.
+func (s *Service) mirrorConfig(ctx context.Context, agentID uuid.UUID) {
+	profile, err := s.store.AgentProfile(ctx, agentID)
+	if err != nil {
+		return
+	}
+	s.mu.Lock()
+	p := *s.presenceLocked(agentID)
+	s.mu.Unlock()
+	if p.ExtensionNumber == "" {
+		p.ExtensionNumber = profile.ExtensionNumber
+	}
+	s.mirrorRegistration(profile, p)
+}
+
 func (s *Service) Roster(ctx context.Context) ([]RosterEntry, error) {
 	rows, err := s.store.Roster(ctx)
 	if err != nil {

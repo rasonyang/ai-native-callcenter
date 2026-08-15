@@ -1,0 +1,4911 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Native Call Center API",
+    "version": "1.0.0",
+    "summary": "REST and SSE surface of the AI-native call center.",
+    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
+    "license": {
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Same-origin API mount; the SPA is served by the same process."
+    }
+  ],
+  "security": [
+    {
+      "cookieSession": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "auth",
+      "description": "Sessions and the signed-in identity."
+    },
+    {
+      "name": "agents",
+      "description": "Agent presence and the supervisor roster."
+    },
+    {
+      "name": "calls",
+      "description": "Live calls: the agent's own, the supervisor's view, call control and dialing out."
+    },
+    {
+      "name": "catalog",
+      "description": "Configuration: extensions, queues, staffing and DIDs. Admin territory; queue reads are supervision."
+    },
+    {
+      "name": "cdrs",
+      "description": "The finished-call ledger: CDRs, transcripts and journeys."
+    },
+    {
+      "name": "recordings",
+      "description": "Stored call audio and quality reviews."
+    },
+    {
+      "name": "callbacks",
+      "description": "Promises to call back: taken by the bot, kept by agents."
+    },
+    {
+      "name": "reports",
+      "description": "Aggregates over the ledger."
+    },
+    {
+      "name": "events",
+      "description": "The ordered server-sent event stream."
+    },
+    {
+      "name": "system",
+      "description": "Operational introspection."
+    }
+  ],
+  "paths": {
+    "/auth/login": {
+      "post": {
+        "operationId": "login",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign in and receive the session cookie",
+        "description": "Verifies the credentials and sets the HttpOnly session cookie. The response also carries the identity so the SPA can render without a second round trip.",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signed in; Set-Cookie carries the session.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "operationId": "logout",
+        "tags": [
+          "auth"
+        ],
+        "summary": "Sign out",
+        "description": "Revokes the session and clears the cookie. Always succeeds for an authenticated caller.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Signed out."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "operationId": "getMe",
+        "tags": [
+          "auth"
+        ],
+        "summary": "The signed-in identity",
+        "responses": {
+          "200": {
+            "description": "The current identity.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentUser"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/agent/presence": {
+      "get": {
+        "operationId": "getAgentPresence",
+        "tags": [
+          "agents"
+        ],
+        "summary": "The caller's own presence",
+        "description": "Requires the AGENT role and an agent profile; a supervisor or administrator without one receives 403.",
+        "responses": {
+          "200": {
+            "description": "Current presence.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/agent/login": {
+      "post": {
+        "operationId": "agentLogin",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Sign in to a phone",
+        "description": "Binds the agent to an extension and enters NOT_READY (reason LOGIN). Requires the AGENT role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentLoginRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agent/logout": {
+      "post": {
+        "operationId": "agentLogout",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Sign out of the phone",
+        "description": "Requires the AGENT role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agent/ready": {
+      "post": {
+        "operationId": "agentReady",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Go ready",
+        "description": "Requires the AGENT role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agent/not-ready": {
+      "post": {
+        "operationId": "agentNotReady",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Go not-ready",
+        "description": "Requires the AGENT role. An omitted reason defaults to BREAK.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentNotReadyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agents": {
+      "get": {
+        "operationId": "listAgents",
+        "tags": [
+          "agents"
+        ],
+        "summary": "The live roster",
+        "description": "Every agent with their presence, device registration and on-call flag. Requires SUPERVISOR.",
+        "responses": {
+          "200": {
+            "description": "The roster.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RosterList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAgent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Give a user an agent identity",
+        "description": "Creates the agent identity behind an account and binds their phone. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agents/{agentId}": {
+      "put": {
+        "operationId": "updateAgent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Rewrite an agent's configuration",
+        "description": "Rebinds the phone, renames the switch identifier, or changes wrap-up. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgentWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored agent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Agent"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAgent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Remove an agent identity",
+        "description": "The account remains; it simply stops being an agent, and any presence is dropped. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "operationId": "listUsers",
+        "tags": [
+          "system"
+        ],
+        "summary": "Accounts",
+        "description": "Every account, so an agent identity can be attached to one. Read-only: accounts are created with the aicc useradd command. Requires ADMIN.",
+        "responses": {
+          "200": {
+            "description": "Every account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agents/{agentId}/force-logout": {
+      "post": {
+        "operationId": "forceLogoutAgent",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Sign somebody else out",
+        "description": "How an abandoned phone stops absorbing calls. Requires SUPERVISOR.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls": {
+      "get": {
+        "operationId": "listCalls",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Every live call",
+        "description": "The supervision view. Requires SUPERVISOR.",
+        "responses": {
+          "200": {
+            "description": "All live calls.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Place a platform call (AI outbound)",
+        "description": "Originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Idempotent by client-minted callId. Requires SUPERVISOR.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCallRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The callId was already placed; the response points at the existing call with isDuplicate true.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCallResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The call is being placed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateCallResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/calls/mine": {
+      "get": {
+        "operationId": "listMyCalls",
+        "tags": [
+          "calls"
+        ],
+        "summary": "The calls the caller is a party to",
+        "description": "Requires the AGENT role and an agent profile.",
+        "responses": {
+          "200": {
+            "description": "The caller's live calls.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/calls/dial": {
+      "post": {
+        "operationId": "dialCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Click-to-dial",
+        "description": "Rings the signed-in agent's own phone first; the destination is dialed when the agent answers. Requires the AGENT role, an agent profile and a signed-in phone.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DialRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The call is being placed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DialResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/answer": {
+      "post": {
+        "operationId": "answerCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Answer the caller's own ringing leg",
+        "description": "Call control acts through the caller's own agent identity: the call id in the path is never authority on its own. Requires the AGENT role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/hold": {
+      "post": {
+        "operationId": "holdCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Hold the caller's own leg",
+        "description": "Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/retrieve": {
+      "post": {
+        "operationId": "retrieveCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Retrieve the held leg",
+        "description": "Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/mute": {
+      "post": {
+        "operationId": "muteCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Mute the agent's own microphone",
+        "description": "Silences what the switch reads from the agent's leg, so the other party stops hearing them. The agent keeps hearing the call. Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/unmute": {
+      "post": {
+        "operationId": "unmuteCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Unmute the agent's own microphone",
+        "description": "Restores the audio the switch reads from the agent's leg. Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/hangup": {
+      "post": {
+        "operationId": "hangupCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Hang up the caller's own leg",
+        "description": "Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/transfer": {
+      "post": {
+        "operationId": "transferCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Transfer the other party away",
+        "description": "Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransferRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/dtmf": {
+      "post": {
+        "operationId": "sendCallDTMF",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Send DTMF tones to the other party",
+        "description": "Emits tones towards the far end, which is what reaches an IVR the caller was transferred to. Requires the AGENT role and being a party to the call.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DTMFRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the outcome arrives on the event stream."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/recordings": {
+      "get": {
+        "operationId": "listCallRecordings",
+        "tags": [
+          "recordings"
+        ],
+        "summary": "A call's audio artifacts",
+        "description": "Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The call's recordings, possibly empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecordingList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/calls/{callId}/reviews": {
+      "get": {
+        "operationId": "listCallReviews",
+        "tags": [
+          "recordings"
+        ],
+        "summary": "A call's quality reviews",
+        "description": "Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The call's reviews, possibly empty.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReviewList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/extensions": {
+      "get": {
+        "operationId": "listExtensions",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "All extensions",
+        "description": "Requires ADMIN.",
+        "responses": {
+          "200": {
+            "description": "Every extension.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createExtension",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Create an extension",
+        "description": "Password is required here and never returned. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored extension.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/extensions/{extensionId}": {
+      "put": {
+        "operationId": "updateExtension",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Update an extension",
+        "description": "An empty password keeps the current one. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "extensionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExtensionWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored extension.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Extension"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteExtension",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Delete an extension",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "extensionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/queues": {
+      "get": {
+        "operationId": "listQueues",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "All queues",
+        "description": "Reading the queues is supervision: it answers who is covering what right now. Requires SUPERVISOR.",
+        "responses": {
+          "200": {
+            "description": "Every queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createQueue",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Create a queue",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/queues/{queueId}": {
+      "put": {
+        "operationId": "updateQueue",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Update a queue",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "queueId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueueWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteQueue",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Delete a queue",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "queueId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/queues/{queueId}/agents": {
+      "get": {
+        "operationId": "listQueueAgents",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "A queue's staffing",
+        "description": "Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "queueId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agents staffing the queue.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueAgentList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "staffQueue",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Put an agent on the queue",
+        "description": "Idempotent: staffing an already-staffed agent updates level and position. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "queueId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffQueueRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "Staffed."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/queues/{queueId}/agents/{agentId}": {
+      "delete": {
+        "operationId": "unstaffQueue",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Take an agent off the queue",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "queueId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "agentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Unstaffed."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/dids": {
+      "get": {
+        "operationId": "listDIDs",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "All DIDs",
+        "description": "Requires ADMIN.",
+        "responses": {
+          "200": {
+            "description": "Every DID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DIDList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createDID",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Create a DID",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DIDWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored DID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DID"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/dids/{didId}": {
+      "put": {
+        "operationId": "updateDID",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Update a DID",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "didId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DIDWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored DID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DID"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteDID",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Delete a DID",
+        "description": "Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "didId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/cdrs": {
+      "get": {
+        "operationId": "listCDRs",
+        "tags": [
+          "cdrs"
+        ],
+        "summary": "Page the ledger",
+        "description": "Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected. Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CDRStatus"
+            }
+          },
+          {
+            "name": "did",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "fromNumber",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339 window start.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339 window end.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "agentId",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page plus the total for the filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CDRList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/cdrs/{callId}": {
+      "get": {
+        "operationId": "getCDR",
+        "tags": [
+          "cdrs"
+        ],
+        "summary": "One finished call, with everything it left behind",
+        "description": "CDR, transcript and recordings in one round trip. Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The whole story of the call.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CDRDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/recordings/{recordingId}/audio": {
+      "get": {
+        "operationId": "getRecordingAudio",
+        "tags": [
+          "recordings"
+        ],
+        "summary": "Stream one recording",
+        "description": "Serves the audio with HTTP range support, so players can seek. Conditional requests are honoured. Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "recordingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The full audio.",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "The requested byte range of the audio.",
+            "content": {
+              "audio/wav": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/recordings/{recordingId}/reviews": {
+      "post": {
+        "operationId": "createRecordingReview",
+        "tags": [
+          "recordings"
+        ],
+        "summary": "Score a recording",
+        "description": "Records a quality review against the recording, attributed to the signed-in reviewer. Requires SUPERVISOR.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "recordingId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored review.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityReview"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/reports/overview": {
+      "get": {
+        "operationId": "getReportOverview",
+        "tags": [
+          "reports"
+        ],
+        "summary": "KPI aggregates",
+        "description": "The window defaults to today (local midnight to midnight). Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "queueId",
+            "in": "query",
+            "description": "Narrow the aggregates to one queue.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The aggregates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Overview"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/reports/queues": {
+      "get": {
+        "operationId": "getReportQueues",
+        "tags": [
+          "reports"
+        ],
+        "summary": "Per-queue aggregates",
+        "description": "The window defaults to today. Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One row per queue, plus a null-queue row for calls that never queued.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueReportList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/reports/daily": {
+      "get": {
+        "operationId": "getReportDaily",
+        "tags": [
+          "reports"
+        ],
+        "summary": "Per-day aggregates",
+        "description": "The window defaults to today. Requires SUPERVISOR.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One row per day in the window.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyReportList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/callbacks": {
+      "get": {
+        "operationId": "listCallbacks",
+        "tags": [
+          "callbacks"
+        ],
+        "summary": "Page the promise queue",
+        "description": "Any signed-in role sees the same queue.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Omitted or empty returns every status.",
+            "schema": {
+              "$ref": "#/components/schemas/CallbackStatus"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of callbacks, newest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallbackList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/callbacks/{callbackId}/claim": {
+      "post": {
+        "operationId": "claimCallback",
+        "tags": [
+          "callbacks"
+        ],
+        "summary": "Claim an open callback",
+        "description": "Marks the callback CLAIMED by the caller. Whether it does not exist or somebody claimed it first, the answer is the same conflict: it is not theirs to work. Publishes CALLBACK_UPDATED on the event stream.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callbackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The claimed callback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Callback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/callbacks/{callbackId}/complete": {
+      "post": {
+        "operationId": "completeCallback",
+        "tags": [
+          "callbacks"
+        ],
+        "summary": "Close a callback",
+        "description": "Closes the callback as DONE or DISMISSED. Publishes CALLBACK_UPDATED on the event stream.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callbackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteCallbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The closed callback.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Callback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/system/health": {
+      "get": {
+        "operationId": "getSystemHealth",
+        "tags": [
+          "system"
+        ],
+        "summary": "Stream introspection",
+        "description": "Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.",
+        "responses": {
+          "200": {
+            "description": "Stream counters.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemHealth"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/events": {
+      "get": {
+        "operationId": "streamEvents",
+        "tags": [
+          "events"
+        ],
+        "summary": "The ordered event stream",
+        "description": "Server-sent events, one SseEvent envelope per data: line, the type mirrored on the event: line and the global seq on the id: line. Scope comes from the authenticated identity; ?types= may only narrow what that identity would already receive. Reconnection resumes from Last-Event-ID (or ?lastEventId=); a resume point older than the replay ring triggers a SYSTEM_RESET event telling the client to refetch snapshots. A comment heartbeat (\": hb\") flows every 15 seconds. The connection has no timeout; it ends with the client.",
+        "parameters": [
+          {
+            "name": "types",
+            "in": "query",
+            "description": "Comma-separated SseEventType names to narrow the stream.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lastEventId",
+            "in": "query",
+            "description": "Resume point for clients that cannot set the Last-Event-ID header.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "x-go-name": "LastEventIDHeader",
+            "description": "The browser's own resume point, echoed from the id: line.",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseCallbackEventPayload, SseSystemResetPayload).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/SseEvent"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieSession": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "aicc_session",
+        "description": "Opaque session token issued by POST /auth/login. The cookie name is configurable (AICC_SESSION_COOKIE); aicc_session is the default. HttpOnly, SameSite=Lax."
+      },
+      "csrfHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AICC-Csrf",
+        "description": "Anti-CSRF header required on every mutating request (any method other than GET, HEAD, OPTIONS). Any non-empty value passes; requiring a custom header forces a CORS preflight on cross-origin callers. Missing header: 403 FORBIDDEN."
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "The request is malformed: unparseable body or an invalid identifier. Code VALIDATION_FAILED.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No session or the session expired. Codes SESSION_EXPIRED, INVALID_CREDENTIALS.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The identity lacks the role, the CSRF header is missing, the account is suspended, or the account is not an agent. Codes FORBIDDEN, USER_SUSPENDED, NOT_CALL_PARTY.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "The target does not exist. Codes NOT_FOUND, CALL_NOT_FOUND.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "An unexpected failure. Code INTERNAL.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "The switch did not take the call. Code SWITCH_DOWN.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "A dependency is unreachable. Codes STORAGE_DOWN, SWITCH_DOWN.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "ErrorCode": {
+        "type": "string",
+        "description": "Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.",
+        "enum": [
+          "INVALID_CREDENTIALS",
+          "SESSION_EXPIRED",
+          "FORBIDDEN",
+          "VALIDATION_FAILED",
+          "NOT_FOUND",
+          "CONFLICT",
+          "EXTENSION_IN_USE",
+          "AGENT_ALREADY_LOGGED_IN",
+          "AGENT_NOT_LOGGED_IN",
+          "CALL_NOT_FOUND",
+          "NOT_CALL_PARTY",
+          "USER_SUSPENDED",
+          "SWITCH_DOWN",
+          "STORAGE_DOWN",
+          "RATE_LIMITED",
+          "INTERNAL"
+        ]
+      },
+      "Error": {
+        "type": "object",
+        "description": "The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users.",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string"
+          },
+          "params": {
+            "type": "object",
+            "description": "Interpolation parameters for the localized message, e.g. {\"field\": \"extensionNumber\"}.",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/Error"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Role": {
+        "type": "string",
+        "description": "Ranked roles; a higher role passes every lower gate (ADMIN > SUPERVISOR > AGENT).",
+        "enum": [
+          "AGENT",
+          "SUPERVISOR",
+          "ADMIN"
+        ]
+      },
+      "Identity": {
+        "type": "object",
+        "description": "The authenticated user.",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "locale": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Preferred UI locale (lowercase BCP 47 subtag) or null when the user has not chosen one."
+          }
+        },
+        "required": [
+          "userId",
+          "username",
+          "displayName",
+          "role",
+          "locale"
+        ]
+      },
+      "LoginRequest": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "CurrentUser": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/Identity"
+          }
+        },
+        "required": [
+          "user"
+        ]
+      },
+      "AgentState": {
+        "type": "string",
+        "description": "Presence FSM state.",
+        "enum": [
+          "LOGGED_OUT",
+          "NOT_READY",
+          "READY"
+        ]
+      },
+      "NotReadyReason": {
+        "type": "string",
+        "description": "Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.",
+        "enum": [
+          "LOGIN",
+          "BREAK",
+          "LUNCH",
+          "TRAINING",
+          "AFTER_CALL_WORK",
+          "SYSTEM",
+          "SUPERVISOR"
+        ]
+      },
+      "Availability": {
+        "type": "string",
+        "description": "The single word that answers: could this agent take a call, and if not, why.",
+        "enum": [
+          "LOGGED_OUT",
+          "ON_CALL",
+          "WRAP_UP",
+          "NOT_READY",
+          "DEVICE_UNREACHABLE",
+          "READY"
+        ]
+      },
+      "Presence": {
+        "type": "object",
+        "description": "One agent's presence.",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/AgentState"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NotReadyReason"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "extensionNumber": {
+            "type": "string"
+          },
+          "enteredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "wrapUpEndsAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "state",
+          "availability",
+          "enteredAt"
+        ]
+      },
+      "AgentLoginRequest": {
+        "type": "object",
+        "description": "Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to.",
+        "properties": {
+          "extensionNumber": {
+            "type": "string",
+            "description": "Overrides the bound extension. Omit it to use the agent's configured phone; an agent with no binding is refused with CONFLICT."
+          }
+        }
+      },
+      "AgentNotReadyRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "$ref": "#/components/schemas/NotReadyReason",
+            "description": "Omitted or empty defaults to BREAK."
+          }
+        }
+      },
+      "RosterEntry": {
+        "type": "object",
+        "description": "One agent on the supervisor roster.",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/AgentState"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NotReadyReason"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "extensionNumber": {
+            "type": "string",
+            "description": "The phone the agent is signed in at right now; absent when signed out."
+          },
+          "enteredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "wrapUpEndsAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isOnCall": {
+            "type": "boolean"
+          },
+          "isRegistered": {
+            "type": "boolean"
+          },
+          "callcenterName": {
+            "type": "string",
+            "description": "The identifier the switch knows this agent by."
+          },
+          "wrapUpTimeSec": {
+            "type": "integer"
+          },
+          "isAutoAnswer": {
+            "type": "boolean"
+          },
+          "defaultExtensionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The extension bound to this agent in configuration. Unlike extensionNumber it survives sign-out, and it is what administration edits."
+          },
+          "defaultExtensionNumber": {
+            "type": "string",
+            "description": "The bound extension's number, resolved for display."
+          }
+        },
+        "required": [
+          "agentId",
+          "userId",
+          "username",
+          "displayName",
+          "state",
+          "availability",
+          "enteredAt",
+          "isOnCall",
+          "isRegistered",
+          "callcenterName",
+          "wrapUpTimeSec",
+          "isAutoAnswer"
+        ]
+      },
+      "Agent": {
+        "type": "object",
+        "description": "One agent's configuration, as administration stores it. Presence is not part of it — the roster carries that.",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account this agent identity belongs to. One user has at most one agent identity."
+          },
+          "callcenterName": {
+            "type": "string"
+          },
+          "wrapUpTimeSec": {
+            "type": "integer"
+          },
+          "isAutoAnswer": {
+            "type": "boolean"
+          },
+          "defaultExtensionId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "agentId",
+          "userId",
+          "callcenterName",
+          "wrapUpTimeSec",
+          "isAutoAnswer"
+        ]
+      },
+      "AgentWrite": {
+        "type": "object",
+        "description": "Create or update an agent identity. An extension may be bound to at most one agent; binding one that is taken is refused with CONFLICT.",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Required on create and ignored on update: an agent identity never moves between accounts."
+          },
+          "callcenterName": {
+            "type": "string",
+            "description": "Reaches the switch as an identifier: no spaces, @ or quotes."
+          },
+          "wrapUpTimeSec": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Seconds of after-call work. 0 takes the default of 30."
+          },
+          "isAutoAnswer": {
+            "type": "boolean"
+          },
+          "defaultExtensionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The phone this agent signs in at. Null unbinds them, after which they cannot sign in."
+          }
+        },
+        "required": [
+          "callcenterName"
+        ]
+      },
+      "User": {
+        "type": "object",
+        "description": "An account, as the agent editor needs to name it.",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          }
+        },
+        "required": [
+          "userId",
+          "username",
+          "displayName",
+          "role"
+        ]
+      },
+      "UserList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/User"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "RosterList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RosterEntry"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CallType": {
+        "type": "string",
+        "description": "Caller-perspective call type, stamped at creation and immutable across transfers.",
+        "enum": [
+          "INBOUND",
+          "OUTBOUND",
+          "CONSULT",
+          "INTERNAL"
+        ]
+      },
+      "CallState": {
+        "type": "string",
+        "enum": [
+          "CREATED",
+          "RUNNING",
+          "ENDING",
+          "ENDED"
+        ]
+      },
+      "PartyRole": {
+        "type": "string",
+        "enum": [
+          "ORIGINATOR",
+          "TARGET"
+        ]
+      },
+      "PartyState": {
+        "type": "string",
+        "enum": [
+          "DIALING",
+          "RINGING",
+          "TALKING",
+          "HELD",
+          "RELEASED"
+        ]
+      },
+      "PartySnapshot": {
+        "type": "object",
+        "description": "Immutable view of one call leg.",
+        "properties": {
+          "partyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "channelId": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/PartyRole"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PartyState"
+          },
+          "number": {
+            "type": "string"
+          },
+          "otherNumber": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isMuted": {
+            "type": "boolean",
+            "description": "True while the switch is silencing this leg's microphone."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "releasedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "partyId",
+          "channelId",
+          "role",
+          "state",
+          "createdAt"
+        ]
+      },
+      "QueueFacts": {
+        "type": "object",
+        "description": "A call's passage through a queue.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bridgedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "leftAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "cancelReason": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "CallSnapshot": {
+        "type": "object",
+        "description": "Immutable view of a live call: the aggregate plus its parties.",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callType": {
+            "$ref": "#/components/schemas/CallType"
+          },
+          "state": {
+            "$ref": "#/components/schemas/CallState"
+          },
+          "language": {
+            "type": "string"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "parties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PartySnapshot"
+            }
+          },
+          "userData": {
+            "type": "object",
+            "description": "Business data attached to the call; merge-patched, survives transfers.",
+            "additionalProperties": true
+          },
+          "queue": {
+            "$ref": "#/components/schemas/QueueFacts"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "callId",
+          "callType",
+          "state",
+          "parties",
+          "createdAt"
+        ]
+      },
+      "CallList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CallSnapshot"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "TransferRequest": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "Queue extension or dialable number."
+          }
+        },
+        "required": [
+          "destination"
+        ]
+      },
+      "DTMFRequest": {
+        "type": "object",
+        "properties": {
+          "digits": {
+            "type": "string",
+            "pattern": "^[0-9A-Da-d*#]{1,32}$",
+            "minLength": 1,
+            "maxLength": 32,
+            "description": "The tones to emit, in order. 0-9, A-D, * and # are the only DTMF symbols there are."
+          }
+        },
+        "required": [
+          "digits"
+        ]
+      },
+      "DialRequest": {
+        "type": "object",
+        "properties": {
+          "destination": {
+            "type": "string",
+            "description": "The number to call once the agent's own leg answers."
+          }
+        },
+        "required": [
+          "destination"
+        ]
+      },
+      "DialResponse": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "required": [
+          "callId"
+        ]
+      },
+      "CreateCallRequest": {
+        "type": "object",
+        "description": "Ask the platform to place a call. AI_OUTBOUND is the only kind so far.",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "AI_OUTBOUND"
+            ]
+          },
+          "to": {
+            "type": "string",
+            "description": "The number to dial."
+          },
+          "did": {
+            "type": "string",
+            "description": "The DID whose flow and caller id the call uses."
+          },
+          "language": {
+            "type": "string",
+            "description": "Overrides the DID's language when set."
+          }
+        },
+        "required": [
+          "kind",
+          "to"
+        ]
+      },
+      "CreateCallResponse": {
+        "type": "object",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isDuplicate": {
+            "type": "boolean",
+            "description": "Present and true when the client-minted callId was already placed; the response points at the existing call."
+          }
+        },
+        "required": [
+          "callId"
+        ]
+      },
+      "ExtensionKind": {
+        "type": "string",
+        "enum": [
+          "AGENT",
+          "BOT",
+          "PLAIN"
+        ]
+      },
+      "Extension": {
+        "type": "object",
+        "description": "A SIP endpoint the switch will accept a registration for.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExtensionKind"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "kind",
+          "displayName",
+          "isEnabled",
+          "createdAt"
+        ]
+      },
+      "ExtensionWrite": {
+        "type": "object",
+        "description": "Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName \"Extension <number>\").",
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ExtensionKind"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 6,
+            "description": "Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch."
+          }
+        },
+        "required": [
+          "number"
+        ]
+      },
+      "ExtensionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Extension"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "Strategy": {
+        "type": "string",
+        "description": "How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.",
+        "enum": [
+          "LONGEST_IDLE_AGENT",
+          "ROUND_ROBIN",
+          "TOP_DOWN",
+          "AGENT_WITH_LEAST_TALK_TIME",
+          "AGENT_WITH_FEWEST_CALLS",
+          "RANDOM"
+        ]
+      },
+      "OverflowType": {
+        "type": "string",
+        "enum": [
+          "ANNOUNCE_HANGUP",
+          "BOT_FLOW",
+          "FORWARD"
+        ]
+      },
+      "Overflow": {
+        "type": "object",
+        "description": "Where an unserved caller goes. BOT_FLOW and FORWARD need a target.",
+        "properties": {
+          "type": {
+            "$ref": "#/components/schemas/OverflowType"
+          },
+          "target": {
+            "type": "string"
+          },
+          "sound": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ]
+      },
+      "TierRules": {
+        "type": "object",
+        "description": "How a queue widens its agent search over time.",
+        "properties": {
+          "isApplied": {
+            "type": "boolean"
+          },
+          "waitSec": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "isApplied",
+          "waitSec"
+        ]
+      },
+      "BusinessHours": {
+        "type": "object",
+        "description": "One day's opening window.",
+        "properties": {
+          "weekday": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 6,
+            "description": "0 is Sunday."
+          },
+          "open": {
+            "type": "string",
+            "description": "HH:MM"
+          },
+          "close": {
+            "type": "string",
+            "description": "HH:MM"
+          }
+        },
+        "required": [
+          "weekday",
+          "open",
+          "close"
+        ]
+      },
+      "Queue": {
+        "type": "object",
+        "description": "A waiting line served by agents.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Switch-safe identifier: no spaces, @ or quotes."
+          },
+          "extNumber": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/Strategy"
+          },
+          "mohSound": {
+            "type": "string"
+          },
+          "maxWaitSec": {
+            "type": "integer"
+          },
+          "maxWaitNoAgentSec": {
+            "type": "integer"
+          },
+          "announceSound": {
+            "type": "string"
+          },
+          "announceFrequencySec": {
+            "type": "integer"
+          },
+          "tierRules": {
+            "$ref": "#/components/schemas/TierRules"
+          },
+          "discardAbandonedAfterSec": {
+            "type": "integer"
+          },
+          "isAbandonedResumeAllowed": {
+            "type": "boolean"
+          },
+          "ronaDelaySec": {
+            "type": "integer"
+          },
+          "slaThresholdSec": {
+            "type": "integer"
+          },
+          "isRecordingEnabled": {
+            "type": "boolean"
+          },
+          "hours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessHours"
+            }
+          },
+          "overflow": {
+            "$ref": "#/components/schemas/Overflow"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "extNumber",
+          "displayName",
+          "strategy",
+          "mohSound",
+          "maxWaitSec",
+          "maxWaitNoAgentSec",
+          "announceFrequencySec",
+          "tierRules",
+          "discardAbandonedAfterSec",
+          "isAbandonedResumeAllowed",
+          "ronaDelaySec",
+          "slaThresholdSec",
+          "isRecordingEnabled",
+          "hours",
+          "overflow",
+          "isEnabled"
+        ]
+      },
+      "QueueWrite": {
+        "type": "object",
+        "description": "Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300).",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Switch-safe identifier: no spaces, @ or quotes."
+          },
+          "extNumber": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "strategy": {
+            "$ref": "#/components/schemas/Strategy"
+          },
+          "mohSound": {
+            "type": "string"
+          },
+          "maxWaitSec": {
+            "type": "integer"
+          },
+          "maxWaitNoAgentSec": {
+            "type": "integer"
+          },
+          "announceSound": {
+            "type": "string"
+          },
+          "announceFrequencySec": {
+            "type": "integer"
+          },
+          "tierRules": {
+            "$ref": "#/components/schemas/TierRules"
+          },
+          "discardAbandonedAfterSec": {
+            "type": "integer"
+          },
+          "isAbandonedResumeAllowed": {
+            "type": "boolean"
+          },
+          "ronaDelaySec": {
+            "type": "integer"
+          },
+          "slaThresholdSec": {
+            "type": "integer"
+          },
+          "isRecordingEnabled": {
+            "type": "boolean"
+          },
+          "hours": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BusinessHours"
+            }
+          },
+          "overflow": {
+            "$ref": "#/components/schemas/Overflow"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "extNumber"
+        ]
+      },
+      "QueueList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Queue"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "QueueAgent": {
+        "type": "object",
+        "description": "One agent's place on a queue.",
+        "properties": {
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer"
+          },
+          "position": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queueId",
+          "agentId",
+          "displayName",
+          "level",
+          "position"
+        ]
+      },
+      "QueueAgentList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueAgent"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "StaffQueueRequest": {
+        "type": "object",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "level": {
+            "type": "integer",
+            "default": 1,
+            "description": "0 defaults to 1."
+          },
+          "position": {
+            "type": "integer",
+            "default": 1,
+            "description": "0 defaults to 1."
+          }
+        },
+        "required": [
+          "agentId"
+        ]
+      },
+      "DID": {
+        "type": "object",
+        "description": "An external number that reaches this call centre. Every number is meant to answer with a bot flow; the fallback queue takes the caller when the bot cannot.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "language": {
+            "type": "string",
+            "description": "Lowercase BCP 47 subtag, at most 8 characters; picks the voice provider."
+          },
+          "flowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fallbackQueueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isRecordingEnabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "language",
+          "isRecordingEnabled",
+          "description",
+          "isEnabled"
+        ]
+      },
+      "DIDWrite": {
+        "type": "object",
+        "description": "Create or update a DID. Omitted language defaults to en.",
+        "properties": {
+          "number": {
+            "type": "string",
+            "pattern": "^[0-9]+$"
+          },
+          "language": {
+            "type": "string",
+            "maxLength": 8
+          },
+          "flowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "fallbackQueueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "isRecordingEnabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "isEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "number"
+        ]
+      },
+      "DIDList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DID"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CDRStatus": {
+        "type": "string",
+        "description": "How the call concluded. There is no MISSED status: abandonment is a missedReason on an ANSWERED row, because the bot answered first.",
+        "enum": [
+          "ANSWERED",
+          "NO_ANSWER",
+          "BUSY",
+          "FAILED"
+        ]
+      },
+      "LegKind": {
+        "type": "string",
+        "enum": [
+          "TRUNK",
+          "DIALING",
+          "BOT",
+          "QUEUE",
+          "AGENT"
+        ]
+      },
+      "Leg": {
+        "type": "object",
+        "description": "One hop of the call's journey, for the journey summary.",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/LegKind"
+          },
+          "label": {
+            "type": "string"
+          },
+          "durationSec": {
+            "type": "integer"
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label",
+          "durationSec"
+        ]
+      },
+      "CDR": {
+        "type": "object",
+        "description": "One finished call. totalSec always equals the sum of its parts.",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "startedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answeredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Absent when the call was never answered."
+          },
+          "endedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "callType": {
+            "$ref": "#/components/schemas/CallType"
+          },
+          "language": {
+            "type": "string"
+          },
+          "fromNumber": {
+            "type": "string"
+          },
+          "toNumber": {
+            "type": "string"
+          },
+          "did": {
+            "type": "string"
+          },
+          "flowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "primaryAgentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ringSec": {
+            "type": "integer"
+          },
+          "botSec": {
+            "type": "integer"
+          },
+          "queueWaitSec": {
+            "type": "integer"
+          },
+          "talkSec": {
+            "type": "integer"
+          },
+          "totalSec": {
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CDRStatus"
+          },
+          "hangupCause": {
+            "type": "string"
+          },
+          "missedReason": {
+            "type": "string",
+            "description": "Why the caller went unserved; empty when the call was not missed."
+          },
+          "disposition": {
+            "type": "string"
+          },
+          "isContained": {
+            "type": "boolean",
+            "description": "True when the bot finished the conversation without a human."
+          },
+          "hasRecording": {
+            "type": "boolean"
+          },
+          "userData": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "tech": {
+            "type": "object",
+            "description": "Technical residue (switch causes and the like); never business data.",
+            "additionalProperties": true
+          },
+          "legs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Leg"
+            }
+          }
+        },
+        "required": [
+          "callId",
+          "startedAt",
+          "endedAt",
+          "callType",
+          "fromNumber",
+          "toNumber",
+          "ringSec",
+          "botSec",
+          "queueWaitSec",
+          "talkSec",
+          "totalSec",
+          "status",
+          "isContained",
+          "hasRecording",
+          "legs"
+        ]
+      },
+      "CDRList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CDR"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total rows matching the filter, for paging."
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
+      },
+      "TranscriptRole": {
+        "type": "string",
+        "description": "Who acted on the AI leg. Only the bot and the caller write transcripts today.",
+        "enum": [
+          "CALLER",
+          "BOT"
+        ]
+      },
+      "TranscriptKind": {
+        "type": "string",
+        "enum": [
+          "TEXT",
+          "TOOL_CALL",
+          "TOOL_RESULT"
+        ]
+      },
+      "TranscriptEntry": {
+        "type": "object",
+        "description": "One thing said or done on an AI leg.",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "role": {
+            "$ref": "#/components/schemas/TranscriptRole"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TranscriptKind"
+          },
+          "content": {
+            "type": "object",
+            "description": "TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "seq",
+          "occurredAt",
+          "role",
+          "kind",
+          "content"
+        ]
+      },
+      "Recording": {
+        "type": "object",
+        "description": "One stored audio artifact of a call.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "backend": {
+            "type": "string",
+            "description": "Storage backend, e.g. fs or s3."
+          },
+          "bucket": {
+            "type": "string"
+          },
+          "objectKey": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "durationSec": {
+            "type": "integer"
+          },
+          "format": {
+            "type": "string",
+            "description": "Audio container, e.g. wav."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "callId",
+          "backend",
+          "objectKey",
+          "sizeBytes",
+          "durationSec",
+          "format",
+          "createdAt"
+        ]
+      },
+      "RecordingList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CDRDetail": {
+        "type": "object",
+        "description": "One finished call with everything it left behind, in one round trip.",
+        "properties": {
+          "cdr": {
+            "$ref": "#/components/schemas/CDR"
+          },
+          "transcript": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TranscriptEntry"
+            }
+          },
+          "recordings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Recording"
+            }
+          }
+        },
+        "required": [
+          "cdr",
+          "transcript",
+          "recordings"
+        ]
+      },
+      "CallbackStatus": {
+        "type": "string",
+        "enum": [
+          "OPEN",
+          "CLAIMED",
+          "DONE",
+          "DISMISSED"
+        ]
+      },
+      "Callback": {
+        "type": "object",
+        "description": "A promise to call somebody back, taken by the bot and kept by an agent.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phoneNumber": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CallbackStatus"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "handledBy": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The user working or having closed the callback."
+          },
+          "handledAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "phoneNumber",
+          "message",
+          "status",
+          "createdAt"
+        ]
+      },
+      "CallbackList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Callback"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CompleteCallbackRequest": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "DONE",
+              "DISMISSED"
+            ],
+            "description": "DONE means the promise was kept; DISMISSED means it no longer needs keeping."
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "QualityReview": {
+        "type": "object",
+        "description": "A reviewer's scoring of one recording.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "recordingId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reviewerId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "scores": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Per-criterion scores; null when the reviewer submitted none.",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "totalScore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "notes": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "recordingId",
+          "callId",
+          "reviewerId",
+          "scores",
+          "totalScore",
+          "notes",
+          "createdAt"
+        ]
+      },
+      "QualityReviewList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QualityReview"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "CreateReviewRequest": {
+        "type": "object",
+        "properties": {
+          "scores": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "totalScore": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      },
+      "Overview": {
+        "type": "object",
+        "description": "KPI aggregates over the report window.",
+        "properties": {
+          "totalCalls": {
+            "type": "integer"
+          },
+          "answeredCalls": {
+            "type": "integer"
+          },
+          "abandonedCalls": {
+            "type": "integer"
+          },
+          "containedCalls": {
+            "type": "integer"
+          },
+          "queueCalls": {
+            "type": "integer"
+          },
+          "answeredWithinSla": {
+            "type": "integer"
+          },
+          "avgWaitSec": {
+            "type": "number"
+          },
+          "avgTalkSec": {
+            "type": "number"
+          },
+          "avgBotSec": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "totalCalls",
+          "answeredCalls",
+          "abandonedCalls",
+          "containedCalls",
+          "queueCalls",
+          "answeredWithinSla",
+          "avgWaitSec",
+          "avgTalkSec",
+          "avgBotSec"
+        ]
+      },
+      "QueueReport": {
+        "type": "object",
+        "properties": {
+          "queueId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Null aggregates the calls that never entered a queue."
+          },
+          "totalCalls": {
+            "type": "integer"
+          },
+          "answeredCalls": {
+            "type": "integer"
+          },
+          "abandonedCalls": {
+            "type": "integer"
+          },
+          "answeredWithinSla": {
+            "type": "integer"
+          },
+          "avgWaitSec": {
+            "type": "number"
+          },
+          "maxWaitSec": {
+            "type": "integer"
+          },
+          "avgTalkSec": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "queueId",
+          "totalCalls",
+          "answeredCalls",
+          "abandonedCalls",
+          "answeredWithinSla",
+          "avgWaitSec",
+          "maxWaitSec",
+          "avgTalkSec"
+        ]
+      },
+      "QueueReportList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueReport"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "DailyReport": {
+        "type": "object",
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "totalCalls": {
+            "type": "integer"
+          },
+          "answeredCalls": {
+            "type": "integer"
+          },
+          "containedCalls": {
+            "type": "integer"
+          },
+          "abandonedCalls": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "day",
+          "totalCalls",
+          "answeredCalls",
+          "containedCalls",
+          "abandonedCalls"
+        ]
+      },
+      "DailyReportList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DailyReport"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "SystemHealth": {
+        "type": "object",
+        "properties": {
+          "sseClients": {
+            "type": "integer",
+            "description": "Live event-stream subscribers."
+          },
+          "oldestSeq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Oldest sequence still in the replay ring; a client behind it must resync."
+          }
+        },
+        "required": [
+          "sseClients",
+          "oldestSeq"
+        ]
+      },
+      "SseEventType": {
+        "type": "string",
+        "description": "Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.",
+        "enum": [
+          "PARTY_DIALING",
+          "PARTY_RINGING",
+          "PARTY_ESTABLISHED",
+          "PARTY_HELD",
+          "PARTY_RETRIEVED",
+          "PARTY_RELEASED",
+          "PARTY_CHANGED",
+          "PARTY_DTMF",
+          "CALL_USER_DATA",
+          "CALL_RECORDING_STARTED",
+          "CALL_RECORDING_STOPPED",
+          "CALL_CDR",
+          "QUEUE_JOINED",
+          "QUEUE_LEFT",
+          "QUEUE_COUNT",
+          "QUEUE_AGENT_OFFERED",
+          "AGENT_LOGGED_IN",
+          "AGENT_LOGGED_OUT",
+          "AGENT_READY",
+          "AGENT_NOT_READY",
+          "AGENT_AVAILABILITY",
+          "DEVICE_REGISTERED",
+          "DEVICE_UNREGISTERED",
+          "DEVICE_IN_SERVICE",
+          "BOT_SESSION_STARTED",
+          "BOT_TRANSCRIPT",
+          "BOT_INTERRUPTED",
+          "BOT_SESSION_ENDED",
+          "CALLBACK_CREATED",
+          "CALLBACK_UPDATED",
+          "SYSTEM_LINK",
+          "SYSTEM_RESET"
+        ]
+      },
+      "SseEvent": {
+        "type": "object",
+        "description": "One envelope on the event stream. Call events repeat enough context (callType, userData) for a screen-pop without further requests. In SSE framing the envelope is the data: line, the event: line carries type, and the id: line carries seq.",
+        "properties": {
+          "version": {
+            "type": "integer"
+          },
+          "seq": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Global order. Echo the last seen value as Last-Event-ID to resume."
+          },
+          "type": {
+            "$ref": "#/components/schemas/SseEventType"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callType": {
+            "$ref": "#/components/schemas/CallType"
+          },
+          "partyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "payload": {
+            "type": "object",
+            "description": "Type-specific body. Stable shapes are named Sse*Payload in this document; the rest are registered as they harden.",
+            "additionalProperties": true
+          },
+          "userData": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "version",
+          "seq",
+          "type",
+          "occurredAt"
+        ]
+      },
+      "SseCallbackEventPayload": {
+        "type": "object",
+        "description": "Payload of CALLBACK_CREATED and CALLBACK_UPDATED.",
+        "properties": {
+          "callback": {
+            "$ref": "#/components/schemas/Callback"
+          }
+        },
+        "required": [
+          "callback"
+        ]
+      },
+      "SseSystemResetPayload": {
+        "type": "object",
+        "description": "Payload of SYSTEM_RESET: the resume point aged out of the ring; refetch snapshots before tailing again.",
+        "properties": {
+          "oldestSeq": {
+            "type": "integer",
+            "format": "int64"
+          }
+        },
+        "required": [
+          "oldestSeq"
+        ]
+      }
+    }
+  }
+}

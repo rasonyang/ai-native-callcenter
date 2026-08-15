@@ -69,6 +69,42 @@ func (f *fakeStore) AgentProfile(_ context.Context, id uuid.UUID) (Profile, erro
 	return p, nil
 }
 
+func (f *fakeStore) CreateAgent(_ context.Context, cfg AgentConfig) (AgentConfig, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cfg.AgentID = uuid.New()
+	f.profiles[cfg.AgentID] = Profile{
+		AgentID:        cfg.AgentID,
+		UserID:         cfg.UserID,
+		CallcenterName: cfg.CallcenterName,
+		WrapUpTimeSec:  cfg.WrapUpTimeSec,
+		IsAutoAnswer:   cfg.IsAutoAnswer,
+	}
+	return cfg, nil
+}
+
+func (f *fakeStore) UpdateAgent(_ context.Context, cfg AgentConfig) (AgentConfig, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	prof, ok := f.profiles[cfg.AgentID]
+	if !ok {
+		return AgentConfig{}, errors.New("no such agent")
+	}
+	prof.CallcenterName = cfg.CallcenterName
+	prof.WrapUpTimeSec = cfg.WrapUpTimeSec
+	prof.IsAutoAnswer = cfg.IsAutoAnswer
+	f.profiles[cfg.AgentID] = prof
+	return cfg, nil
+}
+
+func (f *fakeStore) DeleteAgent(_ context.Context, agentID uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.profiles, agentID)
+	delete(f.presence, agentID)
+	return nil
+}
+
 func (f *fakeStore) Roster(context.Context) ([]RosterEntry, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

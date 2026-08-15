@@ -1,6 +1,7 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Loader2, Play, Square } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
@@ -9,7 +10,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
-import { formatDuration, useCDRs, type CDRStatus } from '@/lib/ledger'
+import {
+  formatDuration, ledgerApi, recordingAudioUrl, useCDRs, type CDRStatus,
+} from '@/lib/ledger'
 
 /** The finished-call ledger, filterable, newest first. */
 export const Route = createFileRoute('/_app/admin/cdr/')({
@@ -36,6 +39,7 @@ function CDRExplorer() {
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const player = useRowPlayer()
   const timeFormat = new Intl.DateTimeFormat(i18n.language, {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
   })
@@ -79,12 +83,13 @@ function CDRExplorer() {
           <Th>{t('cdr.journey')}</Th>
           <Th>{t('cdr.status')}</Th>
           <Th align="right">{t('cdr.duration')}</Th>
+          <Th align="right">{t('cdr.playColumn')}</Th>
         </THead>
         <TBody>
-          {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
+          {isPending && <TableMessage colSpan={7}>{t('common.loading')}</TableMessage>}
+          {isError && <TableMessage colSpan={7}>{describeError(error, t)}</TableMessage>}
           {!isPending && rows.length === 0 && (
-            <TableMessage colSpan={6}>{t('cdr.noCalls')}</TableMessage>
+            <TableMessage colSpan={7}>{t('cdr.noCalls')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.callId}>
@@ -113,6 +118,9 @@ function CDRExplorer() {
               <Td align="right" className="tabular">
                 {formatDuration(row.totalSec)}
               </Td>
+              <Td align="right">
+                {row.hasRecording && <PlayCell callId={row.callId} player={player} />}
+              </Td>
             </Tr>
           ))}
         </TBody>
@@ -139,6 +147,87 @@ function CDRExplorer() {
         </div>
       )}
     </>
+  )
+}
+
+type RowPlayer = {
+  playingCallId: string | null
+  loadingCallId: string | null
+  toggle: (callId: string) => void
+}
+
+/**
+ * One shared audio element behind every row's play button: starting a row
+ * stops whichever other row was playing, and the recording id is looked up
+ * on first use — the list itself only knows hasRecording.
+ */
+function useRowPlayer(): RowPlayer {
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [playingCallId, setPlayingCallId] = useState<string | null>(null)
+  const [loadingCallId, setLoadingCallId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const audio = new Audio()
+    audio.addEventListener('ended', () => setPlayingCallId(null))
+    audio.addEventListener('error', () => setPlayingCallId(null))
+    audioRef.current = audio
+    return () => {
+      audio.pause()
+      audioRef.current = null
+    }
+  }, [])
+
+  const toggle = (callId: string) => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (playingCallId === callId) {
+      audio.pause()
+      setPlayingCallId(null)
+      return
+    }
+    setLoadingCallId(callId)
+    ledgerApi
+      .recordingsByCall(callId)
+      .then(({ items }) => {
+        if (audioRef.current !== audio) return
+        const recording = items[0]
+        if (!recording) {
+          setPlayingCallId(null)
+          return
+        }
+        audio.src = recordingAudioUrl(recording.id)
+        setPlayingCallId(callId)
+        return audio.play()
+      })
+      .catch(() => setPlayingCallId(null))
+      .finally(() => setLoadingCallId((current) => (current === callId ? null : current)))
+  }
+
+  return { playingCallId, loadingCallId, toggle }
+}
+
+function PlayCell({ callId, player }: { callId: string; player: RowPlayer }) {
+  const { t } = useTranslation()
+  const isPlaying = player.playingCallId === callId
+  const isLoading = player.loadingCallId === callId
+
+  return (
+    <Button
+      size="sm"
+      variant="ghost"
+      className="size-8 p-0"
+      title={isPlaying ? t('cdr.stop') : t('cdr.play')}
+      aria-label={isPlaying ? t('cdr.stop') : t('cdr.play')}
+      onClick={() => player.toggle(callId)}
+    >
+      {isLoading ? (
+        <Loader2 className="animate-spin" />
+      ) : isPlaying ? (
+        <Square className="fill-current" />
+      ) : (
+        <Play />
+      )}
+    </Button>
   )
 }
 

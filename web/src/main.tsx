@@ -5,6 +5,7 @@ import { RouterProvider, createRouter } from '@tanstack/react-router'
 
 import '@/lib/i18n'
 import '@/index.css'
+import { installDevFixture } from '@/lib/dev-fixture'
 import { routeTree } from './routeTree.gen'
 
 const queryClient = new QueryClient({
@@ -17,6 +18,8 @@ const queryClient = new QueryClient({
     },
   },
 })
+
+installDevFixture(queryClient)
 
 const router = createRouter({
   routeTree,

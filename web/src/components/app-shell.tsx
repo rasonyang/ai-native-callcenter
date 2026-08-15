@@ -1,10 +1,11 @@
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { LogOut, Radio } from 'lucide-react'
+import { ChevronDown, LogOut, Radio } from 'lucide-react'
 import { DropdownMenu } from 'radix-ui'
 import type { ReactNode } from 'react'
 
 import { LanguageSwitch } from '@/components/language-switch'
+import { Button } from '@/components/ui/button'
 import type { Identity } from '@/lib/api'
 import { NAV, allowed, breadcrumbFor } from '@/lib/nav'
 import { useLogout } from '@/lib/session'
@@ -20,6 +21,7 @@ export function AppShell({
   streamStatus,
   pathname,
   softphone,
+  deviceState,
   children,
 }: {
   user: Identity
@@ -27,15 +29,22 @@ export function AppShell({
   pathname: string
   /** The agent's call controls, shown inline in the topbar. */
   softphone?: ReactNode
+  /**
+   * Whether this account's phone is reachable, shown as a dot on the avatar.
+   * Only an agent has a phone, so it is absent for everyone else.
+   */
+  deviceState?: DeviceState
   children: ReactNode
 }) {
   const { t } = useTranslation()
 
   return (
-    <div className="flex min-h-screen">
-      <aside className="w-[220px] shrink-0 border-r bg-card">
-        <div className="flex h-12 items-center px-4 text-sm font-semibold">{t('app.name')}</div>
-        <nav className="px-2 pb-4">
+    <div className="flex h-screen">
+      <aside className="flex w-[220px] shrink-0 flex-col border-r bg-card">
+        <div className="flex h-12 shrink-0 items-center px-4 text-sm font-semibold">
+          {t('app.name')}
+        </div>
+        <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {NAV.map((group) => {
             const items = group.items.filter(
               (item) => allowed(user.role, item.minRole) && item.isReady,
@@ -51,7 +60,9 @@ export function AppShell({
                     key={item.to}
                     to={item.to}
                     className="flex h-8 items-center gap-2 rounded-md px-2 text-sm text-foreground hover:bg-muted"
-                    activeOptions={{ exact: item.to === '/agent' || item.to === '/supervisor' }}
+                    // A role index (/agent, /supervisor, /admin) is a prefix of
+                    // every page under it, so it only lights up on itself.
+                    activeOptions={{ exact: item.to === group.roleHome }}
                     activeProps={{ className: 'bg-primary/6 text-primary' }}
                   >
                     <item.icon className="size-4" />
@@ -65,17 +76,17 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-4">
+        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-6">
           <Breadcrumb pathname={pathname} />
           {softphone}
           <div className="ml-auto flex items-center gap-2">
             <StreamIndicator status={streamStatus} />
             <LanguageSwitch />
-            <UserMenu user={user} />
+            <UserMenu user={user} deviceState={deviceState} />
           </div>
         </header>
 
-        <main className="min-w-0 flex-1 p-6">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   )
@@ -107,7 +118,15 @@ function Breadcrumb({ pathname }: { pathname: string }) {
   )
 }
 
-function UserMenu({ user }: { user: Identity }) {
+/** Reachable phone, unreachable phone, or no phone at all. */
+export type DeviceState = 'reachable' | 'unreachable'
+
+const DEVICE_DOT_COLOR: Record<DeviceState, string> = {
+  reachable: 'var(--state-available)',
+  unreachable: 'var(--state-offline)',
+}
+
+function UserMenu({ user, deviceState }: { user: Identity; deviceState?: DeviceState }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const logout = useLogout()
@@ -122,12 +141,21 @@ function UserMenu({ user }: { user: Identity }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button className="flex h-8 items-center gap-2 rounded-md border px-2 text-xs hover:bg-muted">
-          <span className="flex size-5 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
-            {initials}
+        <Button variant="ghost" className="px-1.5">
+          <span className="relative">
+            <span className="flex size-6 items-center justify-center rounded-full bg-primary/8 text-xs font-medium text-primary">
+              {initials}
+            </span>
+            {deviceState && (
+              <span
+                className="absolute -right-0.5 -top-0.5 size-2 rounded-full border border-card"
+                style={{ backgroundColor: DEVICE_DOT_COLOR[deviceState] }}
+                title={t(`device.${deviceState}`)}
+              />
+            )}
           </span>
-          <span className="text-muted-foreground">{t(`roles.${user.role}`)}</span>
-        </button>
+          <ChevronDown className="size-4 text-muted-foreground" />
+        </Button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content

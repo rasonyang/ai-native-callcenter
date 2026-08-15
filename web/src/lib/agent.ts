@@ -134,6 +134,14 @@ export function useCallActions() {
         callApi.transfer(callId, destination),
       onSettled: settle,
     }),
+    mute: useMutation({ mutationFn: callApi.mute, onSettled: settle }),
+    unmute: useMutation({ mutationFn: callApi.unmute, onSettled: settle }),
+    // Tones change nothing about the call, so this one does not resettle the
+    // snapshot — a refetch per keypress would be noise.
+    sendDtmf: useMutation({
+      mutationFn: ({ callId, digits }: { callId: string; digits: string }) =>
+        callApi.sendDtmf(callId, digits),
+    }),
   }
 }
 

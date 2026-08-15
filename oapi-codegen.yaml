@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# oapi-codegen configuration: Go types + chi ServerInterface from the contract.
+# Invoked by scripts/api-generate.sh (make api-generate) — never run the tool
+# bare, the script also stamps the SPDX header on the output.
+package: api
+generate:
+  models: true
+  chi-server: true
+output: internal/api/api.gen.go
+output-options:
+  # 07-naming: Go exported names keep initialisms fully capitalized
+  # (JSON callId -> Go CallID). The additional entries cover this domain's
+  # vocabulary; MOH and RONA stay ordinary words (MohSound, RonaDelaySec),
+  # matching the hand-written domain types.
+  name-normalizer: ToCamelCaseWithInitialisms
+  additional-initialisms:
+    - AI
+    - CDR
+    - CDRs
+    - DID
+    - DIDs
+    - DTMF
+    - IDs
+    - SSE
+compatibility:
+  # LOGGED_OUT and NOT_READY exist in two enums each; uniform type-prefixed
+  # constants (AgentStateLoggedOut, AvailabilityLoggedOut) keep additions from
+  # ever colliding.
+  always-prefix-enum-values: true

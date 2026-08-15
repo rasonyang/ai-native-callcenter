@@ -1,65 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
+import type { components } from '@/generated/api'
+
 import { request } from './api'
 
-export type ExtensionKind = 'AGENT' | 'BOT' | 'PLAIN'
+export type ExtensionKind = components['schemas']['ExtensionKind']
 
-export interface Extension {
-  id: string
-  number: string
-  kind: ExtensionKind
-  displayName: string
-  isEnabled: boolean
-  /** Write-only: accepted on save, never returned. */
-  password?: string
-}
+export type Extension = components['schemas']['Extension']
+/** The write shape: what create and update accept (password lives only here). */
+export type ExtensionWrite = components['schemas']['ExtensionWrite']
+/** Form state: a partially filled write, plus the id when editing. */
+export type ExtensionDraft = Partial<Extension & ExtensionWrite>
 
-export type Strategy =
-  | 'LONGEST_IDLE_AGENT' | 'ROUND_ROBIN' | 'TOP_DOWN'
-  | 'AGENT_WITH_LEAST_TALK_TIME' | 'AGENT_WITH_FEWEST_CALLS' | 'RANDOM'
+export type Strategy = components['schemas']['Strategy']
 
-export type OverflowType = 'ANNOUNCE_HANGUP' | 'BOT_FLOW' | 'FORWARD'
+export type OverflowType = components['schemas']['OverflowType']
 
-export interface Queue {
-  id: string
-  name: string
-  extNumber: string
-  displayName: string
-  strategy: Strategy
-  mohSound: string
-  maxWaitSec: number
-  maxWaitNoAgentSec: number
-  announceSound?: string
-  announceFrequencySec: number
-  tierRules: { isApplied: boolean; waitSec: number }
-  discardAbandonedAfterSec: number
-  isAbandonedResumeAllowed: boolean
-  ronaDelaySec: number
-  slaThresholdSec: number
-  isRecordingEnabled: boolean
-  hours: Array<{ weekday: number; open: string; close: string }>
-  overflow: { type: OverflowType; target?: string; sound?: string }
-  isEnabled: boolean
-}
+export type Queue = components['schemas']['Queue']
+export type QueueWrite = components['schemas']['QueueWrite']
+export type QueueDraft = Partial<Queue & QueueWrite>
 
-export interface DID {
-  id: string
-  number: string
-  language: string
-  flowId?: string
-  fallbackQueueId?: string
-  isRecordingEnabled: boolean
-  description: string
-  isEnabled: boolean
-}
+export type DID = components['schemas']['DID']
+export type DIDWrite = components['schemas']['DIDWrite']
+export type DIDDraft = Partial<DID & DIDWrite>
 
-export interface QueueAgent {
-  queueId: string
-  agentId: string
-  displayName: string
-  level: number
-  position: number
-}
+export type QueueAgent = components['schemas']['QueueAgent']
 
 export const EXTENSIONS_KEY = ['catalog', 'extensions'] as const
 export const QUEUES_KEY = ['catalog', 'queues'] as const
@@ -74,16 +39,16 @@ export const OVERFLOW_TYPES: OverflowType[] = ['ANNOUNCE_HANGUP', 'BOT_FLOW', 'F
 
 export const catalogApi = {
   extensions: () => request<{ items: Extension[] }>('/extensions'),
-  createExtension: (body: Partial<Extension>) =>
+  createExtension: (body: Partial<ExtensionWrite>) =>
     request<Extension>('/extensions', { method: 'POST', body: JSON.stringify(body) }),
-  updateExtension: (id: string, body: Partial<Extension>) =>
+  updateExtension: (id: string, body: Partial<ExtensionWrite>) =>
     request<Extension>(`/extensions/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteExtension: (id: string) => request<void>(`/extensions/${id}`, { method: 'DELETE' }),
 
   queues: () => request<{ items: Queue[] }>('/queues'),
-  createQueue: (body: Partial<Queue>) =>
+  createQueue: (body: Partial<QueueWrite>) =>
     request<Queue>('/queues', { method: 'POST', body: JSON.stringify(body) }),
-  updateQueue: (id: string, body: Partial<Queue>) =>
+  updateQueue: (id: string, body: Partial<QueueWrite>) =>
     request<Queue>(`/queues/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteQueue: (id: string) => request<void>(`/queues/${id}`, { method: 'DELETE' }),
   queueAgents: (id: string) => request<{ items: QueueAgent[] }>(`/queues/${id}/agents`),
@@ -96,9 +61,9 @@ export const catalogApi = {
     request<void>(`/queues/${id}/agents/${agentId}`, { method: 'DELETE' }),
 
   dids: () => request<{ items: DID[] }>('/dids'),
-  createDID: (body: Partial<DID>) =>
+  createDID: (body: Partial<DIDWrite>) =>
     request<DID>('/dids', { method: 'POST', body: JSON.stringify(body) }),
-  updateDID: (id: string, body: Partial<DID>) =>
+  updateDID: (id: string, body: Partial<DIDWrite>) =>
     request<DID>(`/dids/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteDID: (id: string) => request<void>(`/dids/${id}`, { method: 'DELETE' }),
 }
@@ -123,7 +88,7 @@ export function useCatalogMutations() {
 
   return {
     saveExtension: useMutation({
-      mutationFn: ({ id, ...body }: Partial<Extension> & { id?: string }) =>
+      mutationFn: ({ id, ...body }: ExtensionDraft) =>
         id ? catalogApi.updateExtension(id, body) : catalogApi.createExtension(body),
       onSuccess: after(EXTENSIONS_KEY),
     }),
@@ -132,7 +97,7 @@ export function useCatalogMutations() {
       onSuccess: after(EXTENSIONS_KEY),
     }),
     saveQueue: useMutation({
-      mutationFn: ({ id, ...body }: Partial<Queue> & { id?: string }) =>
+      mutationFn: ({ id, ...body }: QueueDraft) =>
         id ? catalogApi.updateQueue(id, body) : catalogApi.createQueue(body),
       onSuccess: after(QUEUES_KEY),
     }),
@@ -141,7 +106,7 @@ export function useCatalogMutations() {
       onSuccess: after(QUEUES_KEY),
     }),
     saveDID: useMutation({
-      mutationFn: ({ id, ...body }: Partial<DID> & { id?: string }) =>
+      mutationFn: ({ id, ...body }: DIDDraft) =>
         id ? catalogApi.updateDID(id, body) : catalogApi.createDID(body),
       onSuccess: after(DIDS_KEY),
     }),

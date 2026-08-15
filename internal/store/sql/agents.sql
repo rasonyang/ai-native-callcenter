@@ -27,6 +27,8 @@ SELECT a.id AS agent_id,
        a.callcenter_name,
        a.wrap_up_time_sec,
        a.is_auto_answer,
+       a.default_extension_id,
+       e.number AS default_extension_number,
        u.id AS user_id,
        u.username,
        u.display_name,
@@ -39,6 +41,7 @@ SELECT a.id AS agent_id,
 FROM agents a
 JOIN users u ON u.id = a.user_id
 LEFT JOIN agent_states s ON s.agent_id = a.id
+LEFT JOIN extensions e ON e.id = a.default_extension_id
 ORDER BY u.display_name;
 
 -- name: GetAgentState :one

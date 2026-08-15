@@ -159,6 +159,8 @@ SELECT a.id AS agent_id,
        a.callcenter_name,
        a.wrap_up_time_sec,
        a.is_auto_answer,
+       a.default_extension_id,
+       e.number AS default_extension_number,
        u.id AS user_id,
        u.username,
        u.display_name,
@@ -171,23 +173,26 @@ SELECT a.id AS agent_id,
 FROM agents a
 JOIN users u ON u.id = a.user_id
 LEFT JOIN agent_states s ON s.agent_id = a.id
+LEFT JOIN extensions e ON e.id = a.default_extension_id
 ORDER BY u.display_name
 `
 
 type ListAgentRosterRow struct {
-	AgentID         uuid.UUID          `json:"agentId"`
-	CallcenterName  string             `json:"callcenterName"`
-	WrapUpTimeSec   int32              `json:"wrapUpTimeSec"`
-	IsAutoAnswer    bool               `json:"isAutoAnswer"`
-	UserID          uuid.UUID          `json:"userId"`
-	Username        string             `json:"username"`
-	DisplayName     string             `json:"displayName"`
-	UserStatus      string             `json:"userStatus"`
-	State           string             `json:"state"`
-	Reason          *string            `json:"reason"`
-	ExtensionNumber *string            `json:"extensionNumber"`
-	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
-	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
+	AgentID                uuid.UUID          `json:"agentId"`
+	CallcenterName         string             `json:"callcenterName"`
+	WrapUpTimeSec          int32              `json:"wrapUpTimeSec"`
+	IsAutoAnswer           bool               `json:"isAutoAnswer"`
+	DefaultExtensionID     *uuid.UUID         `json:"defaultExtensionId"`
+	DefaultExtensionNumber *string            `json:"defaultExtensionNumber"`
+	UserID                 uuid.UUID          `json:"userId"`
+	Username               string             `json:"username"`
+	DisplayName            string             `json:"displayName"`
+	UserStatus             string             `json:"userStatus"`
+	State                  string             `json:"state"`
+	Reason                 *string            `json:"reason"`
+	ExtensionNumber        *string            `json:"extensionNumber"`
+	EnteredAt              pgtype.Timestamptz `json:"enteredAt"`
+	WrapUpEndsAt           pgtype.Timestamptz `json:"wrapUpEndsAt"`
 }
 
 // The roster: one row per agent with everything a wallboard needs, so the
@@ -206,6 +211,8 @@ func (q *Queries) ListAgentRoster(ctx context.Context) ([]ListAgentRosterRow, er
 			&i.CallcenterName,
 			&i.WrapUpTimeSec,
 			&i.IsAutoAnswer,
+			&i.DefaultExtensionID,
+			&i.DefaultExtensionNumber,
 			&i.UserID,
 			&i.Username,
 			&i.DisplayName,

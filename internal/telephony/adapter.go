@@ -145,6 +145,33 @@ func (a *Adapter) Answer(channelID string) error { return a.PhoneEvent(channelID
 func (a *Adapter) Hold(channelID string) error     { return a.PhoneEvent(channelID, "hold") }
 func (a *Adapter) Retrieve(channelID string) error { return a.PhoneEvent(channelID, "talk") }
 
+// MuteLeg and UnmuteLeg silence one leg's microphone at the switch.
+//
+// "read" is the direction the switch reads *from* the channel, i.e. what that
+// party says; muting it leaves them still hearing the call. Muting in the
+// browser instead would only work while the extension has focus and would be
+// invisible to the rest of the platform, so the switch owns it.
+//
+// uuid_audio's stop takes no direction — it tears down the whole audio bug,
+// which is exactly the undo of the start above.
+func (a *Adapter) MuteLeg(channelID string) error {
+	return a.exec("uuid_audio %s start read mute", channelID)
+}
+
+func (a *Adapter) UnmuteLeg(channelID string) error {
+	return a.exec("uuid_audio %s stop", channelID)
+}
+
+// SendDTMF emits tones towards one leg's endpoint.
+//
+// Note this is uuid_send_dtmf, not uuid_recv_dtmf, and note which channel the
+// caller passes: send emits *out* to that endpoint, so the leg to target is
+// the far end — the one whose IVR should hear the digits. Aiming it at the
+// agent's own leg would only beep in the agent's ear.
+func (a *Adapter) SendDTMF(channelID, digits string) error {
+	return a.exec("uuid_send_dtmf %s %s", channelID, digits)
+}
+
 // Hangup ends one leg with an explicit cause.
 func (a *Adapter) Hangup(channelID, cause string) error {
 	if cause == "" {

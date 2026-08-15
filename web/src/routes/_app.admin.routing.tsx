@@ -12,7 +12,7 @@ import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
   OVERFLOW_TYPES, STRATEGIES, useCatalogMutations, useQueues,
-  type OverflowType, type Queue, type Strategy,
+  type OverflowType, type QueueDraft, type Strategy,
 } from '@/lib/catalog'
 import { formatDuration } from '@/lib/utils'
 
@@ -30,7 +30,7 @@ function RoutingPage() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useQueues()
   const { saveQueue, deleteQueue } = useCatalogMutations()
-  const [editing, setEditing] = useState<Partial<Queue> | null>(null)
+  const [editing, setEditing] = useState<QueueDraft | null>(null)
 
   const rows = data?.items ?? []
 
