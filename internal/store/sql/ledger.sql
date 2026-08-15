@@ -87,10 +87,6 @@ VALUES ($1, $2, $3, $4, $5, $6);
 INSERT INTO audit_logs (actor_id, action, target_kind, target_id, detail, ip)
 VALUES ($1, $2, $3, $4, $5, $6);
 
--- name: PutSetting :exec
-INSERT INTO settings (key, value) VALUES ($1, $2)
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
-
 -- name: UpdateCDRHasRecording :exec
 UPDATE cdrs SET has_recording = true WHERE call_id = $1;
 

@@ -8,9 +8,6 @@ RETURNING *;
 -- name: GetExtension :one
 SELECT * FROM extensions WHERE id = $1;
 
--- name: GetExtensionByNumber :one
-SELECT * FROM extensions WHERE number = $1;
-
 -- name: ListExtensions :many
 SELECT * FROM extensions ORDER BY number;
 
@@ -39,9 +36,6 @@ RETURNING *;
 
 -- name: GetQueue :one
 SELECT * FROM queues WHERE id = $1;
-
--- name: GetQueueByName :one
-SELECT * FROM queues WHERE name = $1;
 
 -- name: ListQueues :many
 SELECT * FROM queues ORDER BY name;
@@ -106,20 +100,3 @@ RETURNING *;
 
 -- name: DeleteDID :exec
 DELETE FROM dids WHERE id = $1;
-
--- name: ListTrunks :many
-SELECT * FROM trunks ORDER BY name;
-
--- name: CreateTrunk :one
-INSERT INTO trunks (id, name, direction, max_channels, config, is_enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING *;
-
--- name: UpdateTrunk :one
-UPDATE trunks
-SET direction = $2, max_channels = $3, config = $4, is_enabled = $5, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: DeleteTrunk :exec
-DELETE FROM trunks WHERE id = $1;

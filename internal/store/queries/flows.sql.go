@@ -76,15 +76,6 @@ func (q *Queries) CreateFlowRevision(ctx context.Context, arg CreateFlowRevision
 	return i, err
 }
 
-const deleteFlow = `-- name: DeleteFlow :exec
-DELETE FROM flows WHERE id = $1
-`
-
-func (q *Queries) DeleteFlow(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteFlow, id)
-	return err
-}
-
 const getFlow = `-- name: GetFlow :one
 SELECT id, slug, name, draft_spec, published_revision_id, published_at, created_at, updated_at FROM flows WHERE id = $1
 `

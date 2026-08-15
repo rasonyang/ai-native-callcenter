@@ -9,17 +9,6 @@ import (
 	"context"
 )
 
-const getSetting = `-- name: GetSetting :one
-SELECT key, value, updated_at FROM settings WHERE key = $1
-`
-
-func (q *Queries) GetSetting(ctx context.Context, key string) (Setting, error) {
-	row := q.db.QueryRow(ctx, getSetting, key)
-	var i Setting
-	err := row.Scan(&i.Key, &i.Value, &i.UpdatedAt)
-	return i, err
-}
-
 const reserveSeqBlock = `-- name: ReserveSeqBlock :one
 
 UPDATE seq_blocks
@@ -39,23 +28,4 @@ func (q *Queries) ReserveSeqBlock(ctx context.Context, arg ReserveSeqBlockParams
 	var value int64
 	err := row.Scan(&value)
 	return value, err
-}
-
-const upsertSetting = `-- name: UpsertSetting :one
-INSERT INTO settings (key, value, updated_at)
-VALUES ($1, $2, now())
-ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()
-RETURNING key, value, updated_at
-`
-
-type UpsertSettingParams struct {
-	Key   string `json:"key"`
-	Value []byte `json:"value"`
-}
-
-func (q *Queries) UpsertSetting(ctx context.Context, arg UpsertSettingParams) (Setting, error) {
-	row := q.db.QueryRow(ctx, upsertSetting, arg.Key, arg.Value)
-	var i Setting
-	err := row.Scan(&i.Key, &i.Value, &i.UpdatedAt)
-	return i, err
 }

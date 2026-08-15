@@ -76,28 +76,6 @@ func (q *Queries) DeleteAgent(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
-const findAgentByExtension = `-- name: FindAgentByExtension :one
-SELECT a.id, a.user_id, a.callcenter_name, a.wrap_up_time_sec, a.is_auto_answer, a.default_extension_id, a.created_at
-FROM agents a
-JOIN agent_states s ON s.agent_id = a.id
-WHERE s.extension_number = $1 AND s.state <> 'LOGGED_OUT'
-`
-
-func (q *Queries) FindAgentByExtension(ctx context.Context, extensionNumber *string) (Agent, error) {
-	row := q.db.QueryRow(ctx, findAgentByExtension, extensionNumber)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.UserID,
-		&i.CallcenterName,
-		&i.WrapUpTimeSec,
-		&i.IsAutoAnswer,
-		&i.DefaultExtensionID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getAgent = `-- name: GetAgent :one
 SELECT id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id, created_at FROM agents WHERE id = $1
 `
@@ -217,37 +195,6 @@ func (q *Queries) ListAgentRoster(ctx context.Context) ([]ListAgentRosterRow, er
 			&i.Username,
 			&i.DisplayName,
 			&i.UserStatus,
-			&i.State,
-			&i.Reason,
-			&i.ExtensionNumber,
-			&i.EnteredAt,
-			&i.WrapUpEndsAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAgentStates = `-- name: ListAgentStates :many
-SELECT agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at FROM agent_states
-`
-
-func (q *Queries) ListAgentStates(ctx context.Context) ([]AgentState, error) {
-	rows, err := q.db.Query(ctx, listAgentStates)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []AgentState{}
-	for rows.Next() {
-		var i AgentState
-		if err := rows.Scan(
-			&i.AgentID,
 			&i.State,
 			&i.Reason,
 			&i.ExtensionNumber,

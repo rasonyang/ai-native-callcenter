@@ -178,44 +178,6 @@ func (q *Queries) CreateQueue(ctx context.Context, arg CreateQueueParams) (Queue
 	return i, err
 }
 
-const createTrunk = `-- name: CreateTrunk :one
-INSERT INTO trunks (id, name, direction, max_channels, config, is_enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, name, direction, max_channels, config, is_enabled, created_at, updated_at
-`
-
-type CreateTrunkParams struct {
-	ID          uuid.UUID `json:"id"`
-	Name        string    `json:"name"`
-	Direction   string    `json:"direction"`
-	MaxChannels int32     `json:"maxChannels"`
-	Config      []byte    `json:"config"`
-	IsEnabled   bool      `json:"isEnabled"`
-}
-
-func (q *Queries) CreateTrunk(ctx context.Context, arg CreateTrunkParams) (Trunk, error) {
-	row := q.db.QueryRow(ctx, createTrunk,
-		arg.ID,
-		arg.Name,
-		arg.Direction,
-		arg.MaxChannels,
-		arg.Config,
-		arg.IsEnabled,
-	)
-	var i Trunk
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Direction,
-		&i.MaxChannels,
-		&i.Config,
-		&i.IsEnabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const deleteDID = `-- name: DeleteDID :exec
 DELETE FROM dids WHERE id = $1
 `
@@ -240,15 +202,6 @@ DELETE FROM queues WHERE id = $1
 
 func (q *Queries) DeleteQueue(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, deleteQueue, id)
-	return err
-}
-
-const deleteTrunk = `-- name: DeleteTrunk :exec
-DELETE FROM trunks WHERE id = $1
-`
-
-func (q *Queries) DeleteTrunk(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteTrunk, id)
 	return err
 }
 
@@ -293,65 +246,12 @@ func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, er
 	return i, err
 }
 
-const getExtensionByNumber = `-- name: GetExtensionByNumber :one
-SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at FROM extensions WHERE number = $1
-`
-
-func (q *Queries) GetExtensionByNumber(ctx context.Context, number string) (Extension, error) {
-	row := q.db.QueryRow(ctx, getExtensionByNumber, number)
-	var i Extension
-	err := row.Scan(
-		&i.ID,
-		&i.Number,
-		&i.Kind,
-		&i.Password,
-		&i.DisplayName,
-		&i.IsEnabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const getQueue = `-- name: GetQueue :one
 SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues WHERE id = $1
 `
 
 func (q *Queries) GetQueue(ctx context.Context, id uuid.UUID) (Queue, error) {
 	row := q.db.QueryRow(ctx, getQueue, id)
-	var i Queue
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.ExtNumber,
-		&i.DisplayName,
-		&i.Strategy,
-		&i.MohSound,
-		&i.MaxWaitSec,
-		&i.MaxWaitNoAgentSec,
-		&i.AnnounceSound,
-		&i.AnnounceFrequencySec,
-		&i.TierRules,
-		&i.DiscardAbandonedAfterSec,
-		&i.IsAbandonedResumeAllowed,
-		&i.RonaDelaySec,
-		&i.SlaThresholdSec,
-		&i.IsRecordingEnabled,
-		&i.Hours,
-		&i.Overflow,
-		&i.IsEnabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getQueueByName = `-- name: GetQueueByName :one
-SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues WHERE name = $1
-`
-
-func (q *Queries) GetQueueByName(ctx context.Context, name string) (Queue, error) {
-	row := q.db.QueryRow(ctx, getQueueByName, name)
 	var i Queue
 	err := row.Scan(
 		&i.ID,
@@ -588,39 +488,6 @@ func (q *Queries) ListQueuesForAgent(ctx context.Context, agentID uuid.UUID) ([]
 	return items, nil
 }
 
-const listTrunks = `-- name: ListTrunks :many
-SELECT id, name, direction, max_channels, config, is_enabled, created_at, updated_at FROM trunks ORDER BY name
-`
-
-func (q *Queries) ListTrunks(ctx context.Context) ([]Trunk, error) {
-	rows, err := q.db.Query(ctx, listTrunks)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Trunk{}
-	for rows.Next() {
-		var i Trunk
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Direction,
-			&i.MaxChannels,
-			&i.Config,
-			&i.IsEnabled,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const removeQueueAgent = `-- name: RemoveQueueAgent :exec
 DELETE FROM queue_agents WHERE queue_id = $1 AND agent_id = $2
 `
@@ -823,43 +690,6 @@ func (q *Queries) UpdateQueue(ctx context.Context, arg UpdateQueueParams) (Queue
 		&i.IsRecordingEnabled,
 		&i.Hours,
 		&i.Overflow,
-		&i.IsEnabled,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const updateTrunk = `-- name: UpdateTrunk :one
-UPDATE trunks
-SET direction = $2, max_channels = $3, config = $4, is_enabled = $5, updated_at = now()
-WHERE id = $1
-RETURNING id, name, direction, max_channels, config, is_enabled, created_at, updated_at
-`
-
-type UpdateTrunkParams struct {
-	ID          uuid.UUID `json:"id"`
-	Direction   string    `json:"direction"`
-	MaxChannels int32     `json:"maxChannels"`
-	Config      []byte    `json:"config"`
-	IsEnabled   bool      `json:"isEnabled"`
-}
-
-func (q *Queries) UpdateTrunk(ctx context.Context, arg UpdateTrunkParams) (Trunk, error) {
-	row := q.db.QueryRow(ctx, updateTrunk,
-		arg.ID,
-		arg.Direction,
-		arg.MaxChannels,
-		arg.Config,
-		arg.IsEnabled,
-	)
-	var i Trunk
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Direction,
-		&i.MaxChannels,
-		&i.Config,
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,

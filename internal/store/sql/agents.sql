@@ -58,15 +58,6 @@ SET state            = excluded.state,
     wrap_up_ends_at  = excluded.wrap_up_ends_at
 RETURNING *;
 
--- name: ListAgentStates :many
-SELECT * FROM agent_states;
-
--- name: FindAgentByExtension :one
-SELECT a.*
-FROM agents a
-JOIN agent_states s ON s.agent_id = a.id
-WHERE s.extension_number = $1 AND s.state <> 'LOGGED_OUT';
-
 -- name: OpenAgentStateLog :one
 INSERT INTO agent_state_logs (agent_id, state, reason, entered_at)
 VALUES ($1, $2, $3, $4)

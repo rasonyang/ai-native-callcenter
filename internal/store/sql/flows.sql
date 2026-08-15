@@ -17,9 +17,6 @@ SET name = $2, draft_spec = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteFlow :exec
-DELETE FROM flows WHERE id = $1;
-
 -- name: CreateFlowRevision :one
 INSERT INTO flow_revisions (id, flow_id, spec, note)
 VALUES ($1, $2, $3, $4)
@@ -35,7 +32,6 @@ SELECT r.spec
 FROM flows f
 JOIN flow_revisions r ON r.id = f.published_revision_id
 WHERE f.id = $1;
-
 
 -- name: GetFlowBySlug :one
 SELECT * FROM flows WHERE slug = $1;

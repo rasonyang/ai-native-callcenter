@@ -662,21 +662,6 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 	return items, nil
 }
 
-const putSetting = `-- name: PutSetting :exec
-INSERT INTO settings (key, value) VALUES ($1, $2)
-ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-`
-
-type PutSettingParams struct {
-	Key   string `json:"key"`
-	Value []byte `json:"value"`
-}
-
-func (q *Queries) PutSetting(ctx context.Context, arg PutSettingParams) error {
-	_, err := q.db.Exec(ctx, putSetting, arg.Key, arg.Value)
-	return err
-}
-
 const reportByQueue = `-- name: ReportByQueue :many
 SELECT
     queue_id,

@@ -55,15 +55,6 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
-const deleteUser = `-- name: DeleteUser :exec
-DELETE FROM users WHERE id = $1
-`
-
-func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteUser, id)
-	return err
-}
-
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, password_hash, display_name, role, status, locale, created_at, updated_at, last_login_at FROM users WHERE id = $1
 `
@@ -164,47 +155,4 @@ type UpdateUserPasswordParams struct {
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err
-}
-
-const updateUserProfile = `-- name: UpdateUserProfile :one
-UPDATE users
-SET display_name = $2,
-    role         = $3,
-    status       = $4,
-    locale       = $5,
-    updated_at   = now()
-WHERE id = $1
-RETURNING id, username, password_hash, display_name, role, status, locale, created_at, updated_at, last_login_at
-`
-
-type UpdateUserProfileParams struct {
-	ID          uuid.UUID `json:"id"`
-	DisplayName string    `json:"displayName"`
-	Role        string    `json:"role"`
-	Status      string    `json:"status"`
-	Locale      *string   `json:"locale"`
-}
-
-func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error) {
-	row := q.db.QueryRow(ctx, updateUserProfile,
-		arg.ID,
-		arg.DisplayName,
-		arg.Role,
-		arg.Status,
-		arg.Locale,
-	)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Username,
-		&i.PasswordHash,
-		&i.DisplayName,
-		&i.Role,
-		&i.Status,
-		&i.Locale,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.LastLoginAt,
-	)
-	return i, err
 }
