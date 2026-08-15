@@ -53,7 +53,8 @@ make api-breaking BASE=main  # oasdiff: no undeclared breaking changes vs the ba
 - Frontend wire types come only from `web/src/generated/api.ts`, re-exported by `web/src/lib/*.ts` under their established names. No handwritten DTO interfaces.
 - sqlc models and `internal/store` types are never exposed as API types; handlers map explicitly to `api.*` types at the boundary.
 - SSE: OpenAPI cannot express per-event-type payloads. The envelope is `SseEvent`; stable payload shapes are components named `Sse*Payload` (linked by convention, lint-ignored as "unused" — keep them registered there, no AsyncAPI second system).
-- Migration state: call control + outbound run through the generated wrapper (`s.apiWrapper()`) on `api.*` DTOs; the remaining groups still hand-parse behind delegating shims in `api_server.go` — when touching a group, move it onto the wrapper and generated types as part of the change.
+- Every route is mounted through the generated wrapper (`s.apiWrapper()`), and **the contract operation is the handler**, living in the file that owns its subject (`UpdateExtension` in `catalog_handlers.go`, `GetCDR` in `ledger_handlers.go`). Path/query/header parameters arrive parsed — never re-read a raw parameter, never add a delegating shim. `api_server.go` holds only the interface assertion, the wrapper and `writeParamError`. One deliberate exception: `StreamEvents` parses its own `Last-Event-ID`, because an EventSource retries a rejected request forever and a mangled resume point must degrade to a fresh stream, not a reconnect loop.
+- Bodies/responses are `api.*` types wherever a group has been migrated; the ledger group still writes `store.*` types straight out (shapes are identical and guarded by `TestLedgerTypesMarshalPerTheNamingSpec`) — move it onto `api.*` when it next changes.
 
 ## Architecture
 

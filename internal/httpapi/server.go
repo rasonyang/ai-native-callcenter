@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
@@ -237,7 +238,15 @@ func (s *Server) router() chi.Router {
 		})
 
 		// Long-lived stream: no timeout, it ends with the client connection.
-		v1.With(s.requireSession).Get("/events", op.StreamEvents)
+		//
+		// The one route that does not go through the wrapper. Binding the
+		// contract's parameters here would reject a resume point it cannot
+		// parse, and an EventSource retries a rejected request forever with
+		// the same header — see StreamEvents for why that must degrade to a
+		// fresh stream instead.
+		v1.With(s.requireSession).Get("/events", func(w http.ResponseWriter, r *http.Request) {
+			s.StreamEvents(w, r, api.StreamEventsParams{})
+		})
 	})
 
 	if s.spa != nil {
