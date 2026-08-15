@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
-	"testing/fstest"
 )
 
 // testFlow is a small but complete flow: identify the caller, look their
@@ -155,16 +154,6 @@ func TestLoadRejectsBrokenFlows(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err, tt.want)
 			}
 		})
-	}
-}
-
-func TestLoadDirRejectsDuplicateIDs(t *testing.T) {
-	fsys := fstest.MapFS{
-		"flows/a.json": {Data: []byte(testFlow)},
-		"flows/b.json": {Data: []byte(testFlow)},
-	}
-	if _, err := LoadDir(fsys, "flows"); err == nil || !strings.Contains(err.Error(), "twice") {
-		t.Errorf("duplicate flow ids loaded without complaint: %v", err)
 	}
 }
 

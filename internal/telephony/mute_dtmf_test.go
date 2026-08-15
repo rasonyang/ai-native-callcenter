@@ -21,7 +21,7 @@ func onACallWithAnAgent(t *testing.T) (*Coordinator, *fakeCommander, uuid.UUID, 
 	ctx := t.Context()
 	callID := uuid.New()
 	agentID := uuid.New()
-	if _, err := registry.CreateCallMinted(ctx, callID, "INBOUND", "en", true); err != nil {
+	if _, err := registry.CreateCall(ctx, callID, "INBOUND", "en", true); err != nil {
 		t.Fatalf("create call: %v", err)
 	}
 	for _, ch := range []string{"caller-chan", "agent-chan"} {

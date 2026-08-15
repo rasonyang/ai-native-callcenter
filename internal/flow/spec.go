@@ -154,8 +154,6 @@ type Condition struct {
 	Any   []Condition `json:"any,omitempty"`
 }
 
-func (c Condition) isLeaf() bool { return len(c.All) == 0 && len(c.Any) == 0 }
-
 // Transition moves the conversation to another node.
 //
 // Rules are evaluated in ascending priority, and equal priorities keep their

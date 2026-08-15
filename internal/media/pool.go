@@ -9,29 +9,7 @@ import "sync"
 // direction. Reusing buffers keeps that traffic off the allocator and the
 // collector, which is what the capacity budget assumes.
 
-var (
-	samplePool = sync.Pool{New: func() any { s := make([]int16, 0, 4096); return &s }}
-	bytePool   = sync.Pool{New: func() any { b := make([]byte, 0, 8192); return &b }}
-)
-
-// GetSamples borrows a sample buffer with at least the given capacity.
-func GetSamples(capacity int) []int16 {
-	p := samplePool.Get().(*[]int16)
-	s := *p
-	if cap(s) < capacity {
-		s = make([]int16, 0, capacity)
-	}
-	return s[:0]
-}
-
-// PutSamples returns a sample buffer.
-func PutSamples(s []int16) {
-	if cap(s) == 0 {
-		return
-	}
-	s = s[:0]
-	samplePool.Put(&s)
-}
+var bytePool = sync.Pool{New: func() any { b := make([]byte, 0, 8192); return &b }}
 
 // GetBytes borrows a byte buffer with at least the given capacity.
 func GetBytes(capacity int) []byte {

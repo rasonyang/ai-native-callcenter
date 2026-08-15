@@ -73,7 +73,7 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	providers, err := obs.SetupWithLogDir(ctx, cfg.ServiceName, cfg.LogLevel,
+	providers, err := obs.Setup(ctx, cfg.ServiceName, cfg.LogLevel,
 		cfg.OTLPEndpoint, cfg.LogDir, cfg.IsDev())
 	if err != nil {
 		return fmt.Errorf("setup observability: %w", err)

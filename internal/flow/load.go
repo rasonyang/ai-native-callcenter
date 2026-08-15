@@ -5,8 +5,6 @@ package flow
 import (
 	"encoding/json"
 	"fmt"
-	"io/fs"
-	"path"
 	"slices"
 	"strings"
 )
@@ -34,36 +32,6 @@ func Load(data []byte) (*Spec, error) {
 		return nil, err
 	}
 	return &spec, nil
-}
-
-// LoadDir reads every .json flow in a directory, keyed by flow id.
-func LoadDir(fsys fs.FS, dir string) (map[string]*Spec, error) {
-	entries, err := fs.ReadDir(fsys, dir)
-	if err != nil {
-		return nil, fmt.Errorf("flow: cannot read %s: %w", dir, err)
-	}
-
-	flows := map[string]*Spec{}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
-			continue
-		}
-		name := path.Join(dir, entry.Name())
-		data, err := fs.ReadFile(fsys, name)
-		if err != nil {
-			return nil, fmt.Errorf("flow: cannot read %s: %w", name, err)
-		}
-		spec, err := Load(data)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", entry.Name(), err)
-		}
-		if existing, isDuplicate := flows[spec.ID]; isDuplicate {
-			return nil, fmt.Errorf("flow: id %q is defined twice (%s and %s)",
-				spec.ID, existing.Entry, entry.Name())
-		}
-		flows[spec.ID] = spec
-	}
-	return flows, nil
 }
 
 // validate rejects anything that would fail mid-call.

@@ -3,7 +3,6 @@
 package provider
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
@@ -111,18 +110,6 @@ func QwenProfile() Profile {
 		// seconds and ignores any attempt to lower it, which is why that mode
 		// is opt-in rather than the default.
 		SemanticTurnSilenceMs: 2000,
-	}
-}
-
-// ProfileFor returns the profile for a provider name.
-func ProfileFor(name string) (Profile, error) {
-	switch strings.ToLower(name) {
-	case "openai":
-		return OpenAIProfile(), nil
-	case "qwen":
-		return QwenProfile(), nil
-	default:
-		return Profile{}, fmt.Errorf("provider: unknown provider %q (openai, qwen)", name)
 	}
 }
 

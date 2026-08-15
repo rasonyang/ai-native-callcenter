@@ -42,9 +42,6 @@ func TestProfileSelection(t *testing.T) {
 	if got := ProfileForLanguage("en").Name; got != "openai" {
 		t.Errorf("English routed to %q", got)
 	}
-	if _, err := ProfileFor("nonesuch"); err == nil {
-		t.Error("an unknown provider name was accepted")
-	}
 }
 
 // The whole point of the passthrough path: where the provider takes G.711, the

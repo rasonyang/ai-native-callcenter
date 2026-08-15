@@ -42,17 +42,12 @@ type Providers struct {
 //
 // otlpEndpoint may be empty, in which case no trace exporter is installed and
 // tracing becomes a no-op with negligible cost.
-func Setup(ctx context.Context, serviceName, logLevel, otlpEndpoint string, dev bool) (*Providers, error) {
-	return SetupWithLogDir(ctx, serviceName, logLevel, otlpEndpoint, "", dev)
-}
-
-// SetupWithLogDir is Setup with logs additionally written to a file.
 //
-// The file lives in logDir and is named by start time, so each run of the
-// process leaves one self-contained record that can be read and analysed
-// after the fact — including by tooling — without having captured stdout.
-// An empty logDir keeps stderr only.
-func SetupWithLogDir(ctx context.Context, serviceName, logLevel, otlpEndpoint, logDir string, dev bool) (*Providers, error) {
+// Logs go to stderr, and additionally to a file in logDir when it is set. That
+// file is named by start time, so each run of the process leaves one
+// self-contained record that can be read and analysed after the fact —
+// including by tooling — without having captured stdout.
+func Setup(ctx context.Context, serviceName, logLevel, otlpEndpoint, logDir string, dev bool) (*Providers, error) {
 	logWriter := io.Writer(os.Stderr)
 	if logDir != "" {
 		file, err := openLogFile(logDir)

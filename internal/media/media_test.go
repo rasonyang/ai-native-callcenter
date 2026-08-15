@@ -285,22 +285,16 @@ func TestSilenceFrameIsPrebuilt(t *testing.T) {
 }
 
 func TestBufferPoolHandsBackUsableBuffers(t *testing.T) {
-	s := GetSamples(160)
-	if len(s) != 0 || cap(s) < 160 {
-		t.Fatalf("borrowed sample buffer has len %d cap %d", len(s), cap(s))
-	}
-	s = append(s, 1, 2, 3)
-	PutSamples(s)
-
 	b := GetBytes(160)
 	if len(b) != 0 || cap(b) < 160 {
 		t.Fatalf("borrowed byte buffer has len %d cap %d", len(b), cap(b))
 	}
+	b = append(b, 1, 2, 3)
 	PutBytes(b)
 
 	// A buffer smaller than asked for is replaced rather than returned short.
-	if big := GetSamples(100000); cap(big) < 100000 {
-		t.Errorf("asked for 100000 samples, got capacity %d", cap(big))
+	if big := GetBytes(100000); cap(big) < 100000 {
+		t.Errorf("asked for 100000 bytes, got capacity %d", cap(big))
 	}
 }
 

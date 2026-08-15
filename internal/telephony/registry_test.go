@@ -68,7 +68,7 @@ func TestRegistryRoutesEventsToTheOwningCall(t *testing.T) {
 	reg, rec := newTestRegistry(t)
 	callID := uuid.New()
 
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh")
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh", false)
 	if err != nil {
 		t.Fatalf("CreateCall() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestCallEndsWhenEveryLegReleases(t *testing.T) {
 	reg, rec := newTestRegistry(t)
 	callID := uuid.New()
 
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en")
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestReleasedLegCarriesTransferFlag(t *testing.T) {
 	reg, rec := newTestRegistry(t)
 	callID := uuid.New()
 
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh")
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInternal, "en")
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInternal, "en", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestSnapshotsAreSerializedWithMutations(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en")
+	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,10 +253,10 @@ func TestDuplicateCallIDIsRejected(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
-	if _, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en"); err != nil {
+	if _, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en"); err == nil {
+	if _, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false); err == nil {
 		t.Error("CreateCall() accepted a duplicate call id")
 	}
 }

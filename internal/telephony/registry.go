@@ -76,13 +76,10 @@ type actor struct {
 
 // CreateCall registers a new call and starts its actor. The caller mints the
 // call id so an origination request can be retried without redialling.
-func (r *Registry) CreateCall(ctx context.Context, callID uuid.UUID, callType events.CallType, language string) (*Call, error) {
-	return r.CreateCallMinted(ctx, callID, callType, language, false)
-}
-
-// CreateCallMinted is CreateCall with the identity's provenance: minted means
-// the dialplan chose this id before any leg existed, and a merge keeps it.
-func (r *Registry) CreateCallMinted(ctx context.Context, callID uuid.UUID, callType events.CallType, language string, isMinted bool) (*Call, error) {
+//
+// isMinted records the identity's provenance: minted means the dialplan chose
+// this id before any leg existed, and a merge keeps it.
+func (r *Registry) CreateCall(ctx context.Context, callID uuid.UUID, callType events.CallType, language string, isMinted bool) (*Call, error) {
 	r.mu.Lock()
 	if _, exists := r.byCall[callID]; exists {
 		r.mu.Unlock()
