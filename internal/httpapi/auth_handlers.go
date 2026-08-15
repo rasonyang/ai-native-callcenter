@@ -22,7 +22,7 @@ type loginResponse struct {
 	User auth.Identity `json:"user"`
 }
 
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
@@ -54,7 +54,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, loginResponse{User: id})
 }
 
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	if cookie, err := r.Cookie(s.cfg.SessionCookie); err == nil {
 		if err := s.auth.Logout(r.Context(), cookie.Value); err != nil {
 			slog.ErrorContext(r.Context(), "logout failed", "error", err)
@@ -64,7 +64,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 	id, ok := identityFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
@@ -73,7 +73,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, loginResponse{User: id})
 }
 
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) GetSystemHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sseClients": s.hub.SubscriberCount(),
 		"oldestSeq":  s.hub.OldestSeq(),

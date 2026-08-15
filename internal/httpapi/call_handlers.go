@@ -4,12 +4,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -29,8 +31,8 @@ type CallService interface {
 	AllCalls() []telephony.Snapshot
 }
 
-// handleMyCalls lists the calls the caller is currently a party to.
-func (s *Server) handleMyCalls(w http.ResponseWriter, r *http.Request) {
+// ListMyCalls lists the calls the caller is currently a party to.
+func (s *Server) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -38,9 +40,64 @@ func (s *Server) handleMyCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.CallsForAgent(agentID)})
 }
 
-// handleAllCalls lists every live call, for supervision.
-func (s *Server) handleAllCalls(w http.ResponseWriter, r *http.Request) {
+// ListCalls lists every live call, for supervision.
+func (s *Server) ListCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.AllCalls()})
+}
+
+//
+// The control operations themselves. Each one is the contract operation, and
+// each acts on the call id the wrapper already parsed.
+//
+
+func (s *Server) AnswerCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Answer)
+}
+
+func (s *Server) HoldCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Hold)
+}
+
+func (s *Server) RetrieveCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Retrieve)
+}
+
+func (s *Server) MuteCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Mute)
+}
+
+func (s *Server) UnmuteCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Unmute)
+}
+
+func (s *Server) HangupCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	s.callOp(w, r, callID, s.calls.Hangup)
+}
+
+func (s *Server) SendCallDTMF(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	var req api.DTMFRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil ||
+		req.Digits == "" {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"digits are required", map[string]any{"field": "digits"})
+		return
+	}
+	s.callOp(w, r, callID, func(ctx context.Context, callID, agentID uuid.UUID) error {
+		return s.calls.SendDTMF(ctx, callID, agentID, req.Digits)
+	})
+}
+
+func (s *Server) TransferCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	var req api.TransferRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil ||
+		req.Destination == "" {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"destination is required", map[string]any{"field": "destination"})
+		return
+	}
+	s.callOp(w, r, callID, func(ctx context.Context, callID, agentID uuid.UUID) error {
+		return s.calls.Transfer(ctx, callID, agentID, req.Destination)
+	})
 }
 
 // callOp runs one call operation on behalf of the calling agent. The call id

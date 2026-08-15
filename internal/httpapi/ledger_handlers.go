@@ -10,31 +10,27 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
-// handleListCDRs pages the ledger with filters.
-func (s *Server) handleListCDRs(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
+// ListCDRs pages the ledger with filters.
+func (s *Server) ListCDRs(w http.ResponseWriter, r *http.Request, params api.ListCDRsParams) {
 	filter := store.CDRFilter{
-		Status:     q.Get("status"),
-		DID:        q.Get("did"),
-		FromNumber: q.Get("fromNumber"),
-		Limit:      intParam(q.Get("limit"), 50),
-		Offset:     intParam(q.Get("offset"), 0),
+		Status:     stringOr(params.Status),
+		DID:        stringOr(params.DID),
+		FromNumber: stringOr(params.FromNumber),
+		QueueID:    params.QueueID,
+		AgentID:    params.AgentID,
+		Limit:      intOr(params.Limit, 50),
+		Offset:     intOr(params.Offset, 0),
 	}
-	if from, err := time.Parse(time.RFC3339, q.Get("from")); err == nil {
-		filter.From = from
+	if params.From != nil {
+		filter.From = *params.From
 	}
-	if to, err := time.Parse(time.RFC3339, q.Get("to")); err == nil {
-		filter.To = to
-	}
-	if id, err := uuid.Parse(q.Get("queueId")); err == nil {
-		filter.QueueID = &id
-	}
-	if id, err := uuid.Parse(q.Get("agentId")); err == nil {
-		filter.AgentID = &id
+	if params.To != nil {
+		filter.To = *params.To
 	}
 
 	items, total, err := s.ledger.ListCDRs(r.Context(), filter)
@@ -45,12 +41,8 @@ func (s *Server) handleListCDRs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
 }
 
-// handleGetCDR returns one finished call with everything it left behind.
-func (s *Server) handleGetCDR(w http.ResponseWriter, r *http.Request) {
-	callID, ok := pathID(w, r, "callId")
-	if !ok {
-		return
-	}
+// GetCDR returns one finished call with everything it left behind.
+func (s *Server) GetCDR(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
 	cdr, err := s.ledger.GetCDR(r.Context(), callID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -83,11 +75,14 @@ func (s *Server) handleGetCDR(w http.ResponseWriter, r *http.Request) {
 // Callbacks: the loop from a promise to its keeping.
 //
 
-// handleListCallbacks pages the work queue.
-func (s *Server) handleListCallbacks(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	items, err := s.ledger.ListCallbacks(r.Context(), q.Get("status"),
-		intParam(q.Get("limit"), 50), intParam(q.Get("offset"), 0))
+// ListCallbacks pages the work queue.
+func (s *Server) ListCallbacks(w http.ResponseWriter, r *http.Request, params api.ListCallbacksParams) {
+	status := ""
+	if params.Status != nil {
+		status = string(*params.Status)
+	}
+	items, err := s.ledger.ListCallbacks(r.Context(), status,
+		intOr(params.Limit, 50), intOr(params.Offset, 0))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list callbacks", nil)
 		return
@@ -95,12 +90,8 @@ func (s *Server) handleListCallbacks(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-// handleClaimCallback marks a callback as being worked by the caller.
-func (s *Server) handleClaimCallback(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "callbackId")
-	if !ok {
-		return
-	}
+// ClaimCallback marks a callback as being worked by the caller.
+func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	identity, _ := identityFrom(r.Context())
 
 	callback, err := s.ledger.ClaimCallback(r.Context(), id, identity.UserID)
@@ -124,12 +115,8 @@ type completeCallbackRequest struct {
 	Status string `json:"status"`
 }
 
-// handleCompleteCallback closes a callback as kept or dismissed.
-func (s *Server) handleCompleteCallback(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "callbackId")
-	if !ok {
-		return
-	}
+// CompleteCallback closes a callback as kept or dismissed.
+func (s *Server) CompleteCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	var req completeCallbackRequest
 	if !decode(w, r, &req) {
 		return
@@ -170,29 +157,23 @@ func (s *Server) publishCallback(r *http.Request, eventType events.Type, callbac
 // Reports.
 //
 
-// reportPeriod reads the from/to window, defaulting to today.
-func reportPeriod(r *http.Request) (time.Time, time.Time) {
+// reportPeriod resolves the from/to window, defaulting to today.
+func reportPeriod(from, to *time.Time) (time.Time, time.Time) {
 	now := time.Now()
-	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	to := from.AddDate(0, 0, 1)
-
-	q := r.URL.Query()
-	if parsed, err := time.Parse(time.RFC3339, q.Get("from")); err == nil {
-		from = parsed
+	start := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 0, 1)
+	if from != nil {
+		start = *from
 	}
-	if parsed, err := time.Parse(time.RFC3339, q.Get("to")); err == nil {
-		to = parsed
+	if to != nil {
+		end = *to
 	}
-	return from, to
+	return start, end
 }
 
-func (s *Server) handleReportOverview(w http.ResponseWriter, r *http.Request) {
-	from, to := reportPeriod(r)
-	var queueID *uuid.UUID
-	if id, err := uuid.Parse(r.URL.Query().Get("queueId")); err == nil {
-		queueID = &id
-	}
-	overview, err := s.ledger.ReportOverview(r.Context(), from, to, queueID)
+func (s *Server) GetReportOverview(w http.ResponseWriter, r *http.Request, params api.GetReportOverviewParams) {
+	from, to := reportPeriod(params.From, params.To)
+	overview, err := s.ledger.ReportOverview(r.Context(), from, to, params.QueueID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot aggregate", nil)
 		return
@@ -200,8 +181,8 @@ func (s *Server) handleReportOverview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, overview)
 }
 
-func (s *Server) handleReportQueues(w http.ResponseWriter, r *http.Request) {
-	from, to := reportPeriod(r)
+func (s *Server) GetReportQueues(w http.ResponseWriter, r *http.Request, params api.GetReportQueuesParams) {
+	from, to := reportPeriod(params.From, params.To)
 	items, err := s.ledger.ReportByQueue(r.Context(), from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot aggregate", nil)
@@ -210,8 +191,8 @@ func (s *Server) handleReportQueues(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func (s *Server) handleReportDaily(w http.ResponseWriter, r *http.Request) {
-	from, to := reportPeriod(r)
+func (s *Server) GetReportDaily(w http.ResponseWriter, r *http.Request, params api.GetReportDailyParams) {
+	from, to := reportPeriod(params.From, params.To)
 	items, err := s.ledger.ReportDaily(r.Context(), from, to)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot aggregate", nil)
@@ -220,19 +201,19 @@ func (s *Server) handleReportDaily(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
 
-func intParam(raw string, def int) int {
-	if raw == "" {
+// intOr bounds an optional count. A missing, negative or absurd value falls
+// back to the default, which is what a page size is for.
+func intOr(value *int, def int) int {
+	if value == nil || *value < 0 || *value > 1_000_000 {
 		return def
 	}
-	n := 0
-	for _, ch := range raw {
-		if ch < '0' || ch > '9' {
-			return def
-		}
-		n = n*10 + int(ch-'0')
-		if n > 1_000_000 {
-			return def
-		}
+	return *value
+}
+
+// stringOr reads an optional filter, where absent and empty mean the same.
+func stringOr[T ~string](value *T) string {
+	if value == nil {
+		return ""
 	}
-	return n
+	return string(*value)
 }

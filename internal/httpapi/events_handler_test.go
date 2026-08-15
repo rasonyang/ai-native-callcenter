@@ -25,7 +25,8 @@ func (s *stubReserver) ReserveSeqBlock(context.Context, string, int64) (int64, e
 	return s.n, nil
 }
 
-// serveEvents runs handleEvents until the stream produces the wanted number of
+// serveEvents runs the stream through the generated wrapper until it produces
+// the wanted number of
 // data frames or the deadline passes, and returns the raw response body.
 func serveEvents(t *testing.T, hub *events.Hub, id auth.Identity, lastEventID string, publish func()) string {
 	t.Helper()
@@ -42,7 +43,7 @@ func serveEvents(t *testing.T, hub *events.Hub, id auth.Identity, lastEventID st
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		srv.handleEvents(w, r)
+		srv.apiWrapper().StreamEvents(w, r)
 	}()
 
 	// Give the handler time to subscribe before publishing, then to write.
@@ -56,7 +57,7 @@ func serveEvents(t *testing.T, hub *events.Hub, id auth.Identity, lastEventID st
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("handleEvents did not return after the request context was cancelled")
+		t.Fatal("the stream did not return after the request context was cancelled")
 	}
 	return w.Body.String()
 }

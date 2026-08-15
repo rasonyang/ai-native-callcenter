@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -18,12 +19,8 @@ type RecordingStreamer interface {
 	Open(ctx context.Context, key string) (io.ReadSeekCloser, int64, error)
 }
 
-// handleCallRecordings lists a call's audio artifacts.
-func (s *Server) handleCallRecordings(w http.ResponseWriter, r *http.Request) {
-	callID, ok := pathID(w, r, "callId")
-	if !ok {
-		return
-	}
+// ListCallRecordings lists a call's audio artifacts.
+func (s *Server) ListCallRecordings(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
 	recordings, err := s.ledger.RecordingsByCall(r.Context(), callID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list recordings", nil)
@@ -32,16 +29,12 @@ func (s *Server) handleCallRecordings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": recordings})
 }
 
-// handleRecordingAudio streams one recording.
+// GetRecordingAudio streams one recording.
 //
 // ServeContent does the heavy lifting: range requests for scrubbing, and
 // conditional responses. The reader seeks, which is what makes that possible
 // on both backends.
-func (s *Server) handleRecordingAudio(w http.ResponseWriter, r *http.Request) {
-	recordingID, ok := pathID(w, r, "recordingId")
-	if !ok {
-		return
-	}
+func (s *Server) GetRecordingAudio(w http.ResponseWriter, r *http.Request, recordingID uuid.UUID) {
 	rec, err := s.ledger.GetRecording(r.Context(), recordingID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -74,12 +67,8 @@ type reviewRequest struct {
 	Notes      string         `json:"notes"`
 }
 
-// handleCreateReview records a quality review against a recording.
-func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
-	recordingID, ok := pathID(w, r, "recordingId")
-	if !ok {
-		return
-	}
+// CreateRecordingReview records a quality review against a recording.
+func (s *Server) CreateRecordingReview(w http.ResponseWriter, r *http.Request, recordingID uuid.UUID) {
 	var req reviewRequest
 	if !decode(w, r, &req) {
 		return
@@ -112,12 +101,8 @@ func (s *Server) handleCreateReview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, review)
 }
 
-// handleCallReviews lists a call's reviews.
-func (s *Server) handleCallReviews(w http.ResponseWriter, r *http.Request) {
-	callID, ok := pathID(w, r, "callId")
-	if !ok {
-		return
-	}
+// ListCallReviews lists a call's reviews.
+func (s *Server) ListCallReviews(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
 	reviews, err := s.ledger.ReviewsByCall(r.Context(), callID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list reviews", nil)

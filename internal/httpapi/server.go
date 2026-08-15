@@ -103,66 +103,68 @@ func (s *Server) router() chi.Router {
 	// forwarding headers. Deployments behind a proxy configure it there.
 	r.Use(middleware.Recoverer)
 
-	r.Route("/api/v1", func(api chi.Router) {
+	// Every operation is mounted through the generated wrapper, which binds
+	// and validates the contract's path, query and header parameters before
+	// the handler sees them. Nothing parses a parameter twice.
+	op := s.apiWrapper()
+
+	r.Route("/api/v1", func(v1 chi.Router) {
 		// Request-scoped routes carry a timeout; the event stream must not.
-		api.Group(func(short chi.Router) {
+		v1.Group(func(short chi.Router) {
 			short.Use(middleware.Timeout(30 * time.Second))
 
-			short.Post("/auth/login", s.handleLogin)
+			short.Post("/auth/login", op.Login)
 
 			short.Group(func(private chi.Router) {
 				private.Use(s.requireSession)
 				private.Use(s.auditTrail)
-				private.Post("/auth/logout", s.handleLogout)
-				private.Get("/auth/me", s.handleMe)
+				private.Post("/auth/logout", op.Logout)
+				private.Get("/auth/me", op.GetMe)
 
 				if s.agents != nil {
 					// An agent drives only their own presence.
 					private.Group(func(agent chi.Router) {
 						agent.Use(requireAgentRole)
-						agent.Get("/agent/presence", s.handleAgentPresence)
-						agent.Post("/agent/login", s.handleAgentLogin)
-						agent.Post("/agent/logout", s.handleAgentLogout)
-						agent.Post("/agent/ready", s.handleAgentReady)
-						agent.Post("/agent/not-ready", s.handleAgentNotReady)
+						agent.Get("/agent/presence", op.GetAgentPresence)
+						agent.Post("/agent/login", op.AgentLogin)
+						agent.Post("/agent/logout", op.AgentLogout)
+						agent.Post("/agent/ready", op.AgentReady)
+						agent.Post("/agent/not-ready", op.AgentNotReady)
 					})
 					// The roster and force-logout belong to supervision.
 					private.Group(func(sup chi.Router) {
-						sup.Use(requireRole(auth.RoleSupervisor))
-						sup.Get("/agents", s.handleAgentRoster)
-						sup.Post("/agents/{agentId}/force-logout", s.handleAgentForceLogout)
+						sup.Use(requireSupervisorRole)
+						sup.Get("/agents", op.ListAgents)
+						sup.Post("/agents/{agentId}/force-logout", op.ForceLogoutAgent)
 					})
 					// Who is an agent, and which phone they are bound to, is
 					// configuration rather than supervision.
 					private.Group(func(admin chi.Router) {
 						admin.Use(requireRole(auth.RoleAdmin))
-						wrapper := s.apiWrapper()
-						admin.Post("/agents", wrapper.CreateAgent)
-						admin.Put("/agents/{agentId}", wrapper.UpdateAgent)
-						admin.Delete("/agents/{agentId}", wrapper.DeleteAgent)
-						admin.Get("/users", wrapper.ListUsers)
+						admin.Post("/agents", op.CreateAgent)
+						admin.Put("/agents/{agentId}", op.UpdateAgent)
+						admin.Delete("/agents/{agentId}", op.DeleteAgent)
+						admin.Get("/users", op.ListUsers)
 					})
 				}
 
 				if s.calls != nil {
 					// Call control acts through the caller's own agent
 					// identity: a call id in the path is never authority on
-					// its own. These routes run behind the generated
-					// contract wrapper, which parses the path parameters.
-					wrapper := s.apiWrapper()
+					// its own.
 					private.Group(func(call chi.Router) {
 						call.Use(requireAgentRole)
-						call.Get("/calls/mine", wrapper.ListMyCalls)
-						call.Post("/calls/{callId}/answer", wrapper.AnswerCall)
-						call.Post("/calls/{callId}/hold", wrapper.HoldCall)
-						call.Post("/calls/{callId}/retrieve", wrapper.RetrieveCall)
-						call.Post("/calls/{callId}/mute", wrapper.MuteCall)
-						call.Post("/calls/{callId}/unmute", wrapper.UnmuteCall)
-						call.Post("/calls/{callId}/hangup", wrapper.HangupCall)
-						call.Post("/calls/{callId}/transfer", wrapper.TransferCall)
-						call.Post("/calls/{callId}/dtmf", wrapper.SendCallDTMF)
+						call.Get("/calls/mine", op.ListMyCalls)
+						call.Post("/calls/{callId}/answer", op.AnswerCall)
+						call.Post("/calls/{callId}/hold", op.HoldCall)
+						call.Post("/calls/{callId}/retrieve", op.RetrieveCall)
+						call.Post("/calls/{callId}/mute", op.MuteCall)
+						call.Post("/calls/{callId}/unmute", op.UnmuteCall)
+						call.Post("/calls/{callId}/hangup", op.HangupCall)
+						call.Post("/calls/{callId}/transfer", op.TransferCall)
+						call.Post("/calls/{callId}/dtmf", op.SendCallDTMF)
 					})
-					private.With(requireSupervisorRole).Get("/calls", wrapper.ListCalls)
+					private.With(requireSupervisorRole).Get("/calls", op.ListCalls)
 				}
 
 				if s.catalog != nil {
@@ -172,29 +174,29 @@ func (s *Server) router() chi.Router {
 					private.Group(func(admin chi.Router) {
 						admin.Use(requireRole(auth.RoleAdmin))
 
-						admin.Get("/extensions", s.handleListExtensions)
-						admin.Post("/extensions", s.handleCreateExtension)
-						admin.Put("/extensions/{extensionId}", s.handleUpdateExtension)
-						admin.Delete("/extensions/{extensionId}", s.handleDeleteExtension)
+						admin.Get("/extensions", op.ListExtensions)
+						admin.Post("/extensions", op.CreateExtension)
+						admin.Put("/extensions/{extensionId}", op.UpdateExtension)
+						admin.Delete("/extensions/{extensionId}", op.DeleteExtension)
 
-						admin.Post("/queues", s.handleCreateQueue)
-						admin.Put("/queues/{queueId}", s.handleUpdateQueue)
-						admin.Delete("/queues/{queueId}", s.handleDeleteQueue)
-						admin.Put("/queues/{queueId}/agents", s.handleStaffQueue)
-						admin.Delete("/queues/{queueId}/agents/{agentId}", s.handleUnstaffQueue)
+						admin.Post("/queues", op.CreateQueue)
+						admin.Put("/queues/{queueId}", op.UpdateQueue)
+						admin.Delete("/queues/{queueId}", op.DeleteQueue)
+						admin.Put("/queues/{queueId}/agents", op.StaffQueue)
+						admin.Delete("/queues/{queueId}/agents/{agentId}", op.UnstaffQueue)
 
-						admin.Get("/dids", s.handleListDIDs)
-						admin.Post("/dids", s.handleCreateDID)
-						admin.Put("/dids/{didId}", s.handleUpdateDID)
-						admin.Delete("/dids/{didId}", s.handleDeleteDID)
+						admin.Get("/dids", op.ListDIDs)
+						admin.Post("/dids", op.CreateDID)
+						admin.Put("/dids/{didId}", op.UpdateDID)
+						admin.Delete("/dids/{didId}", op.DeleteDID)
 					})
 
 					// Reading the queues and their staffing is supervision:
 					// it answers who is covering what right now.
 					private.Group(func(sup chi.Router) {
 						sup.Use(requireSupervisorRole)
-						sup.Get("/queues", s.handleListQueues)
-						sup.Get("/queues/{queueId}/agents", s.handleListQueueAgents)
+						sup.Get("/queues", op.ListQueues)
+						sup.Get("/queues/{queueId}/agents", op.ListQueueAgents)
 					})
 				}
 
@@ -203,40 +205,39 @@ func (s *Server) router() chi.Router {
 					// reviewing what happened is not an agent task.
 					private.Group(func(sup chi.Router) {
 						sup.Use(requireSupervisorRole)
-						sup.Get("/cdrs", s.handleListCDRs)
-						sup.Get("/cdrs/{callId}", s.handleGetCDR)
-						sup.Get("/calls/{callId}/recordings", s.handleCallRecordings)
-						sup.Get("/calls/{callId}/reviews", s.handleCallReviews)
-						sup.Get("/recordings/{recordingId}/audio", s.handleRecordingAudio)
-						sup.Post("/recordings/{recordingId}/reviews", s.handleCreateReview)
-						sup.Get("/reports/overview", s.handleReportOverview)
-						sup.Get("/reports/queues", s.handleReportQueues)
-						sup.Get("/reports/daily", s.handleReportDaily)
+						sup.Get("/cdrs", op.ListCDRs)
+						sup.Get("/cdrs/{callId}", op.GetCDR)
+						sup.Get("/calls/{callId}/recordings", op.ListCallRecordings)
+						sup.Get("/calls/{callId}/reviews", op.ListCallReviews)
+						sup.Get("/recordings/{recordingId}/audio", op.GetRecordingAudio)
+						sup.Post("/recordings/{recordingId}/reviews", op.CreateRecordingReview)
+						sup.Get("/reports/overview", op.GetReportOverview)
+						sup.Get("/reports/queues", op.GetReportQueues)
+						sup.Get("/reports/daily", op.GetReportDaily)
 					})
 
 					// Callbacks are agent work: any signed-in agent may claim
 					// and keep a promise; supervisors see the same queue.
 					private.Group(func(anyRole chi.Router) {
-						anyRole.Get("/callbacks", s.handleListCallbacks)
-						anyRole.Post("/callbacks/{callbackId}/claim", s.handleClaimCallback)
-						anyRole.Post("/callbacks/{callbackId}/complete", s.handleCompleteCallback)
+						anyRole.Get("/callbacks", op.ListCallbacks)
+						anyRole.Post("/callbacks/{callbackId}/claim", op.ClaimCallback)
+						anyRole.Post("/callbacks/{callbackId}/complete", op.CompleteCallback)
 					})
 				}
 
 				if s.outbound != nil {
 					// An agent dials out as themselves; placing an AI call
 					// is an operations decision.
-					wrapper := s.apiWrapper()
-					private.With(requireAgentRole).Post("/calls/dial", wrapper.DialCall)
-					private.With(requireSupervisorRole).Post("/calls", wrapper.CreateCall)
+					private.With(requireAgentRole).Post("/calls/dial", op.DialCall)
+					private.With(requireSupervisorRole).Post("/calls", op.CreateCall)
 				}
 
-				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", s.handleHealth)
+				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", op.GetSystemHealth)
 			})
 		})
 
 		// Long-lived stream: no timeout, it ends with the client connection.
-		api.With(s.requireSession).Get("/events", s.handleEvents)
+		v1.With(s.requireSession).Get("/events", op.StreamEvents)
 	})
 
 	if s.spa != nil {

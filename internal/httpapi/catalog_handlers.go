@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
@@ -41,12 +40,12 @@ type CatalogService interface {
 // Extensions.
 //
 
-func (s *Server) handleListExtensions(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListExtensions(w http.ResponseWriter, r *http.Request) {
 	items, err := s.catalog.Extensions(r.Context())
 	s.writeList(w, r, items, err)
 }
 
-func (s *Server) handleCreateExtension(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateExtension(w http.ResponseWriter, r *http.Request) {
 	var in catalog.Extension
 	if !decode(w, r, &in) {
 		return
@@ -55,11 +54,7 @@ func (s *Server) handleCreateExtension(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusCreated)
 }
 
-func (s *Server) handleUpdateExtension(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "extensionId")
-	if !ok {
-		return
-	}
+func (s *Server) UpdateExtension(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	var in catalog.Extension
 	if !decode(w, r, &in) {
 		return
@@ -69,11 +64,7 @@ func (s *Server) handleUpdateExtension(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusOK)
 }
 
-func (s *Server) handleDeleteExtension(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "extensionId")
-	if !ok {
-		return
-	}
+func (s *Server) DeleteExtension(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	s.writeDeleted(w, r, s.catalog.DeleteExtension(r.Context(), id))
 }
 
@@ -81,12 +72,12 @@ func (s *Server) handleDeleteExtension(w http.ResponseWriter, r *http.Request) {
 // Queues.
 //
 
-func (s *Server) handleListQueues(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListQueues(w http.ResponseWriter, r *http.Request) {
 	items, err := s.catalog.Queues(r.Context())
 	s.writeList(w, r, items, err)
 }
 
-func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request) {
 	var in catalog.Queue
 	if !decode(w, r, &in) {
 		return
@@ -95,11 +86,7 @@ func (s *Server) handleCreateQueue(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusCreated)
 }
 
-func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "queueId")
-	if !ok {
-		return
-	}
+func (s *Server) UpdateQueue(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	var in catalog.Queue
 	if !decode(w, r, &in) {
 		return
@@ -109,28 +96,16 @@ func (s *Server) handleUpdateQueue(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusOK)
 }
 
-func (s *Server) handleDeleteQueue(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "queueId")
-	if !ok {
-		return
-	}
+func (s *Server) DeleteQueue(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	s.writeDeleted(w, r, s.catalog.DeleteQueue(r.Context(), id))
 }
 
-func (s *Server) handleListQueueAgents(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "queueId")
-	if !ok {
-		return
-	}
+func (s *Server) ListQueueAgents(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	items, err := s.catalog.QueueAgents(r.Context(), id)
 	s.writeList(w, r, items, err)
 }
 
-func (s *Server) handleStaffQueue(w http.ResponseWriter, r *http.Request) {
-	queueID, ok := pathID(w, r, "queueId")
-	if !ok {
-		return
-	}
+func (s *Server) StaffQueue(w http.ResponseWriter, r *http.Request, queueID uuid.UUID) {
 	var in struct {
 		AgentID  uuid.UUID `json:"agentId"`
 		Level    int       `json:"level"`
@@ -148,15 +123,7 @@ func (s *Server) handleStaffQueue(w http.ResponseWriter, r *http.Request) {
 	s.writeDeleted(w, r, s.catalog.StaffQueue(r.Context(), queueID, in.AgentID, in.Level, in.Position))
 }
 
-func (s *Server) handleUnstaffQueue(w http.ResponseWriter, r *http.Request) {
-	queueID, ok := pathID(w, r, "queueId")
-	if !ok {
-		return
-	}
-	agentID, ok := pathID(w, r, "agentId")
-	if !ok {
-		return
-	}
+func (s *Server) UnstaffQueue(w http.ResponseWriter, r *http.Request, queueID, agentID uuid.UUID) {
 	s.writeDeleted(w, r, s.catalog.UnstaffQueue(r.Context(), queueID, agentID))
 }
 
@@ -164,12 +131,12 @@ func (s *Server) handleUnstaffQueue(w http.ResponseWriter, r *http.Request) {
 // Numbers.
 //
 
-func (s *Server) handleListDIDs(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListDIDs(w http.ResponseWriter, r *http.Request) {
 	items, err := s.catalog.DIDs(r.Context())
 	s.writeList(w, r, items, err)
 }
 
-func (s *Server) handleCreateDID(w http.ResponseWriter, r *http.Request) {
+func (s *Server) CreateDID(w http.ResponseWriter, r *http.Request) {
 	var in catalog.DID
 	if !decode(w, r, &in) {
 		return
@@ -178,11 +145,7 @@ func (s *Server) handleCreateDID(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusCreated)
 }
 
-func (s *Server) handleUpdateDID(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "didId")
-	if !ok {
-		return
-	}
+func (s *Server) UpdateDID(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	var in catalog.DID
 	if !decode(w, r, &in) {
 		return
@@ -192,11 +155,7 @@ func (s *Server) handleUpdateDID(w http.ResponseWriter, r *http.Request) {
 	s.writeCatalog(w, r, out, err, http.StatusOK)
 }
 
-func (s *Server) handleDeleteDID(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r, "didId")
-	if !ok {
-		return
-	}
+func (s *Server) DeleteDID(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	s.writeDeleted(w, r, s.catalog.DeleteDID(r.Context(), id))
 }
 
@@ -210,16 +169,6 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 		return false
 	}
 	return true
-}
-
-func pathID(w http.ResponseWriter, r *http.Request, param string) (uuid.UUID, bool) {
-	id, err := uuid.Parse(chi.URLParam(r, param))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, CodeValidationFailed, "invalid identifier",
-			map[string]any{"field": param})
-		return uuid.Nil, false
-	}
-	return id, true
 }
 
 func (s *Server) writeList(w http.ResponseWriter, r *http.Request, items any, err error) {

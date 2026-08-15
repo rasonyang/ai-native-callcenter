@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 )
@@ -19,11 +20,18 @@ import (
 // stream, and lets the browser notice a dead connection.
 const heartbeatInterval = 15 * time.Second
 
-// handleEvents serves the ordered event stream for one browser session.
+// StreamEvents serves the ordered event stream for one browser session.
 //
 // Scope comes from the authenticated identity, never from client parameters;
 // ?types= may only narrow what that identity would already receive.
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+//
+// This is the one operation that reads its own parameters rather than taking
+// them from the generated wrapper. The wrapper rejects a resume point it
+// cannot parse, and an EventSource retries a failed request forever with the
+// same header: a mangled Last-Event-ID would become a reconnect loop instead
+// of a stream that simply starts fresh. Degrading is the safer failure here,
+// so the leniency below is deliberate.
+func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request, _ api.StreamEventsParams) {
 	id, ok := identityFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
@@ -124,6 +132,10 @@ func writeEvent(w http.ResponseWriter, ev events.Event) {
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Type, data)
 }
 
+// parseLastEventID is where the client wants the stream to continue. The
+// browser echoes the id: line back in the Last-Event-ID header; the query
+// parameter exists for clients that cannot set one. Anything unreadable means
+// "from now" rather than an error, for the reason StreamEvents gives.
 func parseLastEventID(r *http.Request) int64 {
 	raw := r.Header.Get("Last-Event-ID")
 	if raw == "" {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 )
 
@@ -18,8 +19,69 @@ type OutboundService interface {
 	DialAI(ctx context.Context, req outbound.AIDialRequest) (uuid.UUID, error)
 }
 
-// The dial and create-call operations themselves live in api_server.go
-// (DialCall, CreateCall), on the generated contract types.
+// DialCall places a click-to-dial call: the agent's own phone rings first, and
+// the destination is dialled only once they pick up.
+func (s *Server) DialCall(w http.ResponseWriter, r *http.Request) {
+	identity, _ := identityFrom(r.Context())
+	agentID, err := s.agentDir.AgentIDForUser(r, identity.UserID)
+	if err != nil {
+		writeError(w, http.StatusForbidden, CodeForbidden, "no agent profile", nil)
+		return
+	}
+	presence := s.agents.Presence(agentID)
+	if presence.ExtensionNumber == "" {
+		writeError(w, http.StatusConflict, CodeConflict, "sign in to a phone first", nil)
+		return
+	}
+
+	var req api.DialRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination)
+	if err != nil {
+		writeOutboundError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, api.DialResponse{CallID: callID})
+}
+
+// CreateCall places an AI outbound call.
+func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
+	var req api.CreateCallRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	if req.Kind != api.CreateCallRequestKindAIOUTBOUND {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "kind must be AI_OUTBOUND",
+			map[string]any{"allowed": []string{string(api.CreateCallRequestKindAIOUTBOUND)}})
+		return
+	}
+
+	dial := outbound.AIDialRequest{To: req.To}
+	if req.DID != nil {
+		dial.DIDNumber = *req.DID
+	}
+	if req.Language != nil {
+		dial.Language = *req.Language
+	}
+	if req.CallID != nil {
+		dial.CallID = *req.CallID
+	}
+
+	callID, err := s.outbound.DialAI(r.Context(), dial)
+	if err != nil {
+		if errors.Is(err, outbound.ErrAlreadyPlaced) {
+			// The retry did its job: the call exists. Point at it.
+			isDuplicate := true
+			writeJSON(w, http.StatusOK, api.CreateCallResponse{CallID: callID, IsDuplicate: &isDuplicate})
+			return
+		}
+		writeOutboundError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
+}
 
 func writeOutboundError(w http.ResponseWriter, err error) {
 	switch {

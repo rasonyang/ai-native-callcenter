@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
@@ -64,7 +63,7 @@ func (s *Server) agentIDFor(w http.ResponseWriter, r *http.Request) (uuid.UUID, 
 	return agentID, true
 }
 
-func (s *Server) handleAgentLogin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) AgentLogin(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -85,7 +84,7 @@ func (s *Server) handleAgentLogin(w http.ResponseWriter, r *http.Request) {
 	s.writePresence(w, r, p, err)
 }
 
-func (s *Server) handleAgentLogout(w http.ResponseWriter, r *http.Request) {
+func (s *Server) AgentLogout(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -94,7 +93,7 @@ func (s *Server) handleAgentLogout(w http.ResponseWriter, r *http.Request) {
 	s.writePresence(w, r, p, err)
 }
 
-func (s *Server) handleAgentReady(w http.ResponseWriter, r *http.Request) {
+func (s *Server) AgentReady(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -103,7 +102,7 @@ func (s *Server) handleAgentReady(w http.ResponseWriter, r *http.Request) {
 	s.writePresence(w, r, p, err)
 }
 
-func (s *Server) handleAgentNotReady(w http.ResponseWriter, r *http.Request) {
+func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -124,7 +123,7 @@ func (s *Server) handleAgentNotReady(w http.ResponseWriter, r *http.Request) {
 	s.writePresence(w, r, p, err)
 }
 
-func (s *Server) handleAgentPresence(w http.ResponseWriter, r *http.Request) {
+func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
@@ -132,7 +131,7 @@ func (s *Server) handleAgentPresence(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, presenceOf(s.agents.Presence(agentID)))
 }
 
-func (s *Server) handleAgentRoster(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.agents.Roster(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "roster failed", "error", err)
@@ -142,15 +141,9 @@ func (s *Server) handleAgentRoster(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": rows})
 }
 
-// handleAgentForceLogout lets a supervisor sign somebody else out, which is
-// how an abandoned phone stops absorbing calls.
-func (s *Server) handleAgentForceLogout(w http.ResponseWriter, r *http.Request) {
-	agentID, err := uuid.Parse(chi.URLParam(r, "agentId"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, CodeValidationFailed, "invalid agent id",
-			map[string]any{"field": "agentId"})
-		return
-	}
+// ForceLogoutAgent lets a supervisor sign somebody else out, which is how an
+// abandoned phone stops absorbing calls.
+func (s *Server) ForceLogoutAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
 	p, err := s.agents.Logout(r.Context(), agentID)
 	s.writePresence(w, r, p, err)
 }
@@ -160,8 +153,8 @@ func (s *Server) handleAgentForceLogout(w http.ResponseWriter, r *http.Request) 
 // static, so it is edited here rather than chosen at sign-in.
 //
 
-// handleCreateAgent gives an account an agent identity.
-func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
+// CreateAgent gives an account an agent identity.
+func (s *Server) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	var in api.AgentWrite
 	if !decode(w, r, &in) {
 		return
@@ -175,8 +168,8 @@ func (s *Server) handleCreateAgent(w http.ResponseWriter, r *http.Request) {
 	s.writeAgentConfig(w, r, cfg, err, http.StatusCreated)
 }
 
-// handleUpdateAgent rewrites one agent's configuration.
-func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
+// UpdateAgent rewrites one agent's configuration.
+func (s *Server) UpdateAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
 	var in api.AgentWrite
 	if !decode(w, r, &in) {
 		return
@@ -187,8 +180,8 @@ func (s *Server) handleUpdateAgent(w http.ResponseWriter, r *http.Request, agent
 	s.writeAgentConfig(w, r, cfg, err, http.StatusOK)
 }
 
-// handleDeleteAgent removes an agent identity, leaving the account alone.
-func (s *Server) handleDeleteAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
+// DeleteAgent removes an agent identity, leaving the account alone.
+func (s *Server) DeleteAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
 	if err := s.agents.DeleteAgent(r.Context(), agentID); err != nil {
 		s.writeAgentConfigError(w, r, err)
 		return
@@ -248,7 +241,7 @@ func (s *Server) writeAgentConfigError(w http.ResponseWriter, r *http.Request, e
 }
 
 // handleListUsers lists accounts so an agent identity can be attached to one.
-func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
+func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.auth.ListUsers(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "list users failed", "error", err)
