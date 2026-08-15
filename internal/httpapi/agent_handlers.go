@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -24,25 +25,26 @@ type AgentDirectory interface {
 	QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.UUID, error)
 }
 
-type presenceResponse struct {
-	State           agents.State        `json:"state"`
-	Reason          agents.Reason       `json:"reason,omitempty"`
-	Availability    agents.Availability `json:"availability"`
-	ExtensionNumber string              `json:"extensionNumber,omitempty"`
-	EnteredAt       string              `json:"enteredAt"`
-	WrapUpEndsAt    *string             `json:"wrapUpEndsAt,omitempty"`
-}
-
-func presenceOf(p agents.Presence) presenceResponse {
-	out := presenceResponse{
-		State:           p.CurrentState(),
-		Reason:          p.Reason,
-		Availability:    p.Availability(),
-		ExtensionNumber: p.ExtensionNumber,
-		EnteredAt:       p.EnteredAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+// presenceOf renders presence on the contract type.
+//
+// Timestamps are truncated to the second: presence moves in whole seconds and
+// a screen renders it that way, so the sub-second digits would be noise on
+// every event.
+func presenceOf(p agents.Presence) api.Presence {
+	out := api.Presence{
+		State:        api.AgentState(p.CurrentState()),
+		Availability: api.Availability(p.Availability()),
+		EnteredAt:    p.EnteredAt.UTC().Truncate(time.Second),
+	}
+	if p.Reason != "" {
+		reason := api.NotReadyReason(p.Reason)
+		out.Reason = &reason
+	}
+	if p.ExtensionNumber != "" {
+		out.ExtensionNumber = &p.ExtensionNumber
 	}
 	if !p.WrapUpEndsAt.IsZero() {
-		ends := p.WrapUpEndsAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+		ends := p.WrapUpEndsAt.UTC().Truncate(time.Second)
 		out.WrapUpEndsAt = &ends
 	}
 	return out
