@@ -54,6 +54,15 @@ type Config struct {
 	// route to people.
 	IsBotEnabled bool
 
+	// Voice providers. The vendor's own address and model are defaults, not
+	// facts: a deployment may reach a provider through a gateway, on a
+	// regional host, or at a server that only speaks the same protocol.
+	// Empty keeps the built-in value.
+	OpenAIEndpoint string
+	OpenAIModel    string
+	QwenEndpoint   string
+	QwenModel      string
+
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
 	RecordingBackend string
@@ -100,6 +109,10 @@ func Load() (Config, error) {
 		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
+		OpenAIEndpoint:   env("AICC_OPENAI_ENDPOINT", ""),
+		OpenAIModel:      env("AICC_OPENAI_MODEL", ""),
+		QwenEndpoint:     env("AICC_QWEN_ENDPOINT", ""),
+		QwenModel:        env("AICC_QWEN_MODEL", ""),
 		OutboundEndpoint: env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
 		OutboundCallerID: env("AICC_OUTBOUND_CLID", ""),
 		RecordingBackend: env("AICC_RECORDING_BACKEND", "FS"),

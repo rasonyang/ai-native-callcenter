@@ -113,12 +113,33 @@ func QwenProfile() Profile {
 	}
 }
 
-// ProfileForLanguage picks the provider that speaks a language best.
-func ProfileForLanguage(language string) Profile {
+// Override replaces where a provider is reached and which model answers.
+//
+// The vendor's own address is a default, not a fact: a deployment may sit
+// behind a gateway, in a region with its own host, or in front of a server
+// that merely speaks the same protocol, and none of those can be reached
+// without saying so. An empty field keeps the profile's own value.
+type Override struct {
+	Endpoint string
+	Model    string
+}
+
+// ProfileForLanguage picks the provider that speaks a language best and
+// applies the deployment's override for it, keyed by provider name.
+func ProfileForLanguage(language string, overrides map[string]Override) Profile {
+	profile := OpenAIProfile()
 	if strings.HasPrefix(strings.ToLower(language), "zh") {
-		return QwenProfile()
+		profile = QwenProfile()
 	}
-	return OpenAIProfile()
+	if override, ok := overrides[profile.Name]; ok {
+		if override.Endpoint != "" {
+			profile.Endpoint = override.Endpoint
+		}
+		if override.Model != "" {
+			profile.Model = override.Model
+		}
+	}
+	return profile
 }
 
 // FormatsFor decides what audio this profile will exchange for a call whose

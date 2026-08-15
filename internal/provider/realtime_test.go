@@ -33,14 +33,44 @@ func basicConfig() SessionConfig {
 //
 
 func TestProfileSelection(t *testing.T) {
-	if got := ProfileForLanguage("zh").Name; got != "qwen" {
+	if got := ProfileForLanguage("zh", nil).Name; got != "qwen" {
 		t.Errorf("Chinese routed to %q", got)
 	}
-	if got := ProfileForLanguage("zh-CN").Name; got != "qwen" {
+	if got := ProfileForLanguage("zh-CN", nil).Name; got != "qwen" {
 		t.Errorf("zh-CN routed to %q", got)
 	}
-	if got := ProfileForLanguage("en").Name; got != "openai" {
+	if got := ProfileForLanguage("en", nil).Name; got != "openai" {
 		t.Errorf("English routed to %q", got)
+	}
+}
+
+// A deployment that cannot reach the vendor directly — a gateway, a regional
+// host, a server that merely speaks the protocol — has to be able to say so.
+func TestConnectionDetailsCanBeOverridden(t *testing.T) {
+	overrides := map[string]Override{
+		"openai": {Endpoint: "wss://gateway.internal/realtime"},
+		"qwen":   {Model: "qwen-audio-3.0-realtime-flash"},
+	}
+
+	openai := ProfileForLanguage("en", overrides)
+	if openai.Endpoint != "wss://gateway.internal/realtime" {
+		t.Errorf("endpoint = %q, want the override", openai.Endpoint)
+	}
+	if openai.Model != OpenAIProfile().Model {
+		t.Errorf("an empty field replaced the model with %q", openai.Model)
+	}
+
+	qwen := ProfileForLanguage("zh", overrides)
+	if qwen.Model != "qwen-audio-3.0-realtime-flash" {
+		t.Errorf("model = %q, want the override", qwen.Model)
+	}
+	if qwen.Endpoint != QwenProfile().Endpoint {
+		t.Errorf("an empty field replaced the endpoint with %q", qwen.Endpoint)
+	}
+
+	// The model still selects on the connection address, wherever it points.
+	if url := qwen.endpointURL(); !strings.Contains(url, "model=qwen-audio-3.0-realtime-flash") {
+		t.Errorf("connection url %q does not carry the overridden model", url)
 	}
 }
 

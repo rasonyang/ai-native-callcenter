@@ -78,7 +78,10 @@ type OrchestratorConfig struct {
 	AnnounceCallback func(callback store.Callback)
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
-	Logger      *slog.Logger
+	// ProviderOverrides replaces a provider's endpoint or model, keyed by
+	// provider name. Empty everywhere keeps the vendors' own.
+	ProviderOverrides map[string]provider.Override
+	Logger            *slog.Logger
 }
 
 // Orchestrator answers bot legs and runs a conversation on each.
@@ -254,7 +257,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase), log)
 
-	profile := provider.ProfileForLanguage(language)
+	profile := provider.ProfileForLanguage(language, o.cfg.ProviderOverrides)
 	model, err := o.cfg.Sessions(profile, log)
 	if err != nil {
 		return fmt.Errorf("no %s provider: %w", profile.Name, err)

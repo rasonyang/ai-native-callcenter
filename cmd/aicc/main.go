@@ -27,6 +27,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/seed"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -212,6 +213,10 @@ func run() error {
 			Switch:      adapter,
 			Ledger:      st.Ledger(),
 			BackendBase: cfg.BotBackendBase,
+			ProviderOverrides: map[string]provider.Override{
+				"openai": {Endpoint: cfg.OpenAIEndpoint, Model: cfg.OpenAIModel},
+				"qwen":   {Endpoint: cfg.QwenEndpoint, Model: cfg.QwenModel},
+			},
 			AnnounceCallback: func(callback store.Callback) {
 				hub.Publish(ctx, events.Event{
 					Type:    events.TypeCallbackCreated,
