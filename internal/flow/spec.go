@@ -230,6 +230,16 @@ type Global struct {
 	// Persona and Rules become the model's standing instructions.
 	Persona Text     `json:"persona"`
 	Rules   TextList `json:"rules,omitempty"`
+	// Voice is the bot's timbre — part of its character, so it is published
+	// with the flow rather than set per deployment.
+	//
+	// Voice names belong to the provider that answers, and a deployment runs
+	// one of those (phase1-decisions A1), so a flow names a voice its own
+	// deployment offers. It is deliberately not per language: both providers
+	// offer voices that carry Chinese and English equally well, and one bot
+	// should not change its voice mid-catalogue. Empty uses the provider's
+	// default.
+	Voice string `json:"voice,omitempty"`
 	// FallbackTarget is where a conversation goes when it has run too long or
 	// lost its way.
 	FallbackTarget string `json:"fallbackTarget,omitempty"`

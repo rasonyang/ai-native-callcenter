@@ -912,3 +912,34 @@ func TestMissingCredentialFailsBeforeAnyCall(t *testing.T) {
 		t.Error("a session was built with no credential")
 	}
 }
+
+// A bot names its own voice; the profile's is only the fallback. Both dialects
+// carry it, because the deployment that runs either one has bots of its own.
+func TestTheSessionsVoiceOverridesTheProfiles(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		profile Profile
+		path    []string
+	}{
+		{"GA dialect", OpenAIProfile(), []string{"session", "audio", "output", "voice"}},
+		{"older dialect", QwenProfile(), []string{"session", "voice"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := basicConfig()
+			cfg.Voice = "cherry"
+			client := &Realtime{profile: tt.profile}
+
+			update := client.buildSessionUpdate(cfg, false)
+			if got := nested(t, update, tt.path...); got != "cherry" {
+				t.Errorf("voice = %v, want the bot's own", got)
+			}
+
+			// Naming none leaves the provider's default in place.
+			cfg.Voice = ""
+			update = client.buildSessionUpdate(cfg, false)
+			if got := nested(t, update, tt.path...); got != tt.profile.Voice {
+				t.Errorf("voice = %v, want the profile's %q", got, tt.profile.Voice)
+			}
+		})
+	}
+}

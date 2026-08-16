@@ -270,8 +270,11 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		Session: provider.SessionConfig{
 			Instructions: runtime.Instructions(),
 			Language:     language,
-			Turn:         provider.DefaultTurnDetection(),
-			Tools:        runtime.Tools(),
+			// The bot's own voice, published with the flow. Empty falls back
+			// to the provider profile's default.
+			Voice: spec.Global.Voice,
+			Turn:  provider.DefaultTurnDetection(),
+			Tools: runtime.Tools(),
 		},
 		Logger: log,
 	})

@@ -405,3 +405,24 @@ func TestChineseCallsGetChineseInstructions(t *testing.T) {
 		t.Errorf("instruction = %q, want the Chinese text", got)
 	}
 }
+
+// The bot's voice is part of its character, so it travels with the published
+// flow rather than with the deployment.
+func TestTheFlowCarriesTheBotsVoice(t *testing.T) {
+	spec := loadTestFlow(t)
+	if spec.Global.Voice != "" {
+		t.Errorf("a flow that names no voice reported %q, want the provider's default",
+			spec.Global.Voice)
+	}
+
+	withVoice := strings.Replace(testFlow,
+		`"fallbackTarget": "handoff"`,
+		`"voice": "cherry", "fallbackTarget": "handoff"`, 1)
+	loaded, err := Load([]byte(withVoice))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if loaded.Global.Voice != "cherry" {
+		t.Errorf("global.voice = %q, want cherry", loaded.Global.Voice)
+	}
+}
