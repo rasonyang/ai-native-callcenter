@@ -122,10 +122,12 @@ Never the other way round.
 
 ## Status
 
-The human path, the AI path and the product surface are built and verified
-against live FreeSWITCH and live providers; packaging is landing now, and load
-validation at the 200-call target is the last thing outstanding
-([design 06 §7](docs/design/06-capacity.md)).
+The human path, the AI path, the product surface and the packaging are built
+and verified against live FreeSWITCH and live providers. The capacity target is
+measured rather than asserted: 200 concurrent AI calls for thirty minutes cost
+0.51 cores and 356 MB, with 0.009% of frames arriving late — see
+[the load tests](docs/load-tests.md), which are equally clear about the stages
+that have not been run.
 
 What is deliberately *not* here, and will not be: any cascaded
 ASR + LLM + TTS pipeline inside this process. That composition belongs in a
