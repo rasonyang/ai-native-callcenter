@@ -54,14 +54,17 @@ type Config struct {
 	// route to people.
 	IsBotEnabled bool
 
-	// Voice providers. The vendor's own address and model are defaults, not
-	// facts: a deployment may reach a provider through a gateway, on a
-	// regional host, or at a server that only speaks the same protocol.
-	// Empty keeps the built-in value.
-	OpenAIEndpoint string
-	OpenAIModel    string
-	QwenEndpoint   string
-	QwenModel      string
+	// Provider is the speech model this deployment runs, resolved once at
+	// startup: qwen inside mainland China, openai elsewhere. A call's
+	// language never selects it.
+	Provider string
+	// ProviderEndpoint and ProviderModel replace the built-in address and
+	// model of that provider. The vendor's own values are defaults, not
+	// facts: a deployment may reach it through a proxy, on a regional host,
+	// or at a server that only speaks the same protocol. Empty keeps the
+	// built-in value.
+	ProviderEndpoint string
+	ProviderModel    string
 
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
@@ -109,10 +112,9 @@ func Load() (Config, error) {
 		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
-		OpenAIEndpoint:   env("AICC_OPENAI_ENDPOINT", ""),
-		OpenAIModel:      env("AICC_OPENAI_MODEL", ""),
-		QwenEndpoint:     env("AICC_QWEN_ENDPOINT", ""),
-		QwenModel:        env("AICC_QWEN_MODEL", ""),
+		Provider:         env("AICC_PROVIDER", "openai"),
+		ProviderEndpoint: env("AICC_PROVIDER_ENDPOINT", ""),
+		ProviderModel:    env("AICC_PROVIDER_MODEL", ""),
 		OutboundEndpoint: env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
 		OutboundCallerID: env("AICC_OUTBOUND_CLID", ""),
 		RecordingBackend: env("AICC_RECORDING_BACKEND", "FS"),

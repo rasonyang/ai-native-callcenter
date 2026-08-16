@@ -196,7 +196,8 @@ type DID struct {
 	ID     uuid.UUID `json:"id"`
 	Number string    `json:"number"`
 	// Language is a lowercase BCP 47 subtag, consumed verbatim by the
-	// frontend and used to pick a voice provider.
+	// frontend. It sets the greeting, the prompt language and the voice; the
+	// provider is a deployment-wide setting and this never selects it.
 	Language string `json:"language"`
 	// FlowID is the conversation the bot runs. Every number is meant to answer
 	// with a bot; the flow catalogue arrives with the AI voice leg, so a

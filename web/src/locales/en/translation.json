@@ -273,7 +273,7 @@
     "noNumbers": "No numbers yet.",
     "deleteNumberConfirm": "Delete number {{number}}? Calls to it will be rejected.",
     "language": "Language",
-    "languageHint": "Chooses the voice provider for this number.",
+    "languageHint": "Sets the greeting, prompt language and voice for this number.",
     "botFlow": "Bot flow",
     "flowPending": "Not configured yet",
     "fallbackQueue": "Fallback queue",

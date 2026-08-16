@@ -32,44 +32,57 @@ func basicConfig() SessionConfig {
 // Profiles.
 //
 
-func TestProfileSelection(t *testing.T) {
-	if got := ProfileForLanguage("zh", nil).Name; got != "qwen" {
-		t.Errorf("Chinese routed to %q", got)
+// Which provider answers is a deployment setting. Nothing about a call — its
+// language least of all — may reach into this choice.
+func TestProfileIsChosenByNameNotLanguage(t *testing.T) {
+	openai, err := ProfileFor(NameOpenAI, Override{})
+	if err != nil || openai.Name != NameOpenAI {
+		t.Fatalf("ProfileFor(openai) = %q, %v", openai.Name, err)
 	}
-	if got := ProfileForLanguage("zh-CN", nil).Name; got != "qwen" {
-		t.Errorf("zh-CN routed to %q", got)
+	qwen, err := ProfileFor(NameQwen, Override{})
+	if err != nil || qwen.Name != NameQwen {
+		t.Fatalf("ProfileFor(qwen) = %q, %v", qwen.Name, err)
 	}
-	if got := ProfileForLanguage("en", nil).Name; got != "openai" {
-		t.Errorf("English routed to %q", got)
+	// Spelling is an operator's input, so it is forgiving about case and space.
+	if got, err := ProfileFor("  QWEN ", Override{}); err != nil || got.Name != NameQwen {
+		t.Errorf("ProfileFor(\"  QWEN \") = %q, %v", got.Name, err)
+	}
+	// An unknown name fails at startup rather than on the first call.
+	if _, err := ProfileFor("nonesuch", Override{}); err == nil {
+		t.Error("an unknown provider name was accepted")
+	}
+	if _, err := ProfileFor("", Override{}); err == nil {
+		t.Error("an empty provider name was accepted")
 	}
 }
 
-// A deployment that cannot reach the vendor directly — a gateway, a regional
-// host, a server that merely speaks the protocol — has to be able to say so.
+// A deployment that cannot reach the vendor directly — a proxy, a regional
+// host, or a gateway that merely speaks the protocol — has to be able to say so.
 func TestConnectionDetailsCanBeOverridden(t *testing.T) {
-	overrides := map[string]Override{
-		"openai": {Endpoint: "wss://gateway.internal/realtime"},
-		"qwen":   {Model: "qwen-audio-3.0-realtime-flash"},
+	endpoint, err := ProfileFor(NameOpenAI, Override{Endpoint: "wss://gateway.internal/realtime"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint.Endpoint != "wss://gateway.internal/realtime" {
+		t.Errorf("endpoint = %q, want the override", endpoint.Endpoint)
+	}
+	if endpoint.Model != OpenAIProfile().Model {
+		t.Errorf("an empty field replaced the model with %q", endpoint.Model)
 	}
 
-	openai := ProfileForLanguage("en", overrides)
-	if openai.Endpoint != "wss://gateway.internal/realtime" {
-		t.Errorf("endpoint = %q, want the override", openai.Endpoint)
+	model, err := ProfileFor(NameQwen, Override{Model: "qwen-audio-3.0-realtime-flash"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if openai.Model != OpenAIProfile().Model {
-		t.Errorf("an empty field replaced the model with %q", openai.Model)
+	if model.Model != "qwen-audio-3.0-realtime-flash" {
+		t.Errorf("model = %q, want the override", model.Model)
 	}
-
-	qwen := ProfileForLanguage("zh", overrides)
-	if qwen.Model != "qwen-audio-3.0-realtime-flash" {
-		t.Errorf("model = %q, want the override", qwen.Model)
-	}
-	if qwen.Endpoint != QwenProfile().Endpoint {
-		t.Errorf("an empty field replaced the endpoint with %q", qwen.Endpoint)
+	if model.Endpoint != QwenProfile().Endpoint {
+		t.Errorf("an empty field replaced the endpoint with %q", model.Endpoint)
 	}
 
 	// The model still selects on the connection address, wherever it points.
-	if url := qwen.endpointURL(); !strings.Contains(url, "model=qwen-audio-3.0-realtime-flash") {
+	if url := model.endpointURL(); !strings.Contains(url, "model=qwen-audio-3.0-realtime-flash") {
 		t.Errorf("connection url %q does not carry the overridden model", url)
 	}
 }

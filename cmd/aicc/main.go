@@ -195,6 +195,18 @@ func run() error {
 	// The AI voice leg: a SIP server the switch bridges bot calls to, and the
 	// orchestration that runs a conversation on each.
 	if cfg.IsBotEnabled {
+		// One provider answers every call in this deployment; an unknown name
+		// is a startup failure, not a surprise on the first call.
+		profile, err := provider.ProfileFor(cfg.Provider, provider.Override{
+			Endpoint: cfg.ProviderEndpoint,
+			Model:    cfg.ProviderModel,
+		})
+		if err != nil {
+			return fmt.Errorf("AICC_PROVIDER: %w", err)
+		}
+		slog.Info("voice provider selected",
+			"provider", profile.Name, "model", profile.Model, "endpoint", profile.Endpoint)
+
 		orchestrator, err := aicall.NewOrchestrator(aicall.OrchestratorConfig{
 			UAS: voice.Config{
 				SIPHost:          cfg.BotSIPHost,
@@ -213,10 +225,7 @@ func run() error {
 			Switch:      adapter,
 			Ledger:      st.Ledger(),
 			BackendBase: cfg.BotBackendBase,
-			ProviderOverrides: map[string]provider.Override{
-				"openai": {Endpoint: cfg.OpenAIEndpoint, Model: cfg.OpenAIModel},
-				"qwen":   {Endpoint: cfg.QwenEndpoint, Model: cfg.QwenModel},
-			},
+			Profile:     profile,
 			AnnounceCallback: func(callback store.Callback) {
 				hub.Publish(ctx, events.Event{
 					Type:    events.TypeCallbackCreated,

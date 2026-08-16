@@ -271,7 +271,7 @@
     "noNumbers": "尚未配置号码。",
     "deleteNumberConfirm": "确认删除号码 {{number}}？呼入将被拒绝。",
     "language": "语言",
-    "languageHint": "决定该号码使用的语音模型。",
+    "languageHint": "设置该号码的问候语、提示词语言与音色。",
     "botFlow": "机器人流程",
     "flowPending": "尚未配置",
     "fallbackQueue": "兜底队列",

@@ -81,6 +81,7 @@ func testOrchestrator(t *testing.T, sw *fakeSwitch) *Orchestrator {
 		Catalog: &fakeCatalog{queues: []catalog.Queue{supportQueue, closedQueue}},
 		Flows:   fakeFlows{},
 		Switch:  sw,
+		Profile: provider.OpenAIProfile(),
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {
@@ -425,3 +426,21 @@ const driveFlow = `{
 		"handoff": {"instruction": "Announce the transfer.", "tools": []}
 	}
 }`
+
+// A deployment must not start the AI leg without having chosen a provider:
+// the choice is made once, at startup, so a missing one is a configuration
+// error rather than a call that fails when the phone rings.
+func TestAnOrchestratorWithoutAProviderIsRejected(t *testing.T) {
+	_, err := NewOrchestrator(OrchestratorConfig{
+		Catalog: &fakeCatalog{},
+		Flows:   fakeFlows{},
+		Switch:  &fakeSwitch{},
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err == nil {
+		t.Fatal("an orchestrator with no provider profile was accepted")
+	}
+	if !strings.Contains(err.Error(), "provider") {
+		t.Errorf("error %q does not say what is missing", err)
+	}
+}

@@ -78,16 +78,16 @@ type OrchestratorConfig struct {
 	AnnounceCallback func(callback store.Callback)
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
-	// ProviderOverrides replaces a provider's endpoint or model, keyed by
-	// provider name. Empty everywhere keeps the vendors' own.
-	ProviderOverrides map[string]provider.Override
-	Logger            *slog.Logger
+	// Profile is the provider this deployment runs, resolved at startup. The
+	// same one answers every call, whatever language it is in.
+	Profile provider.Profile
+	Logger  *slog.Logger
 }
 
 // Orchestrator answers bot legs and runs a conversation on each.
 //
 // It is the composition root of the AI side: the UAS accepts the call, a flow
-// is chosen by the number dialled, a provider by the call's language, and the
+// is chosen by the number dialled, the provider is the deployment's, and the
 // bridge moves audio while the flow steers. Nothing below it knows the whole
 // shape; nothing above it needs to.
 type Orchestrator struct {
@@ -108,6 +108,9 @@ type activeCall struct {
 func NewOrchestrator(cfg OrchestratorConfig) (*Orchestrator, error) {
 	if cfg.Catalog == nil || cfg.Flows == nil || cfg.Switch == nil {
 		return nil, errors.New("aicall: the orchestrator needs a catalog, flows and a switch")
+	}
+	if cfg.Profile.Name == "" {
+		return nil, errors.New("aicall: the orchestrator needs a provider profile")
 	}
 	if cfg.Sessions == nil {
 		cfg.Sessions = func(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
@@ -257,7 +260,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase), log)
 
-	profile := provider.ProfileForLanguage(language, o.cfg.ProviderOverrides)
+	profile := o.cfg.Profile
 	model, err := o.cfg.Sessions(profile, log)
 	if err != nil {
 		return fmt.Errorf("no %s provider: %w", profile.Name, err)

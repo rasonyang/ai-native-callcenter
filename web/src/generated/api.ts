@@ -1336,7 +1336,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             number: string;
-            /** @description Lowercase BCP 47 subtag, at most 8 characters; picks the voice provider. */
+            /** @description Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting, the prompt language and the voice; it does not select a provider, which is a deployment-wide setting. */
             language: string;
             /** Format: uuid */
             flowId?: string;

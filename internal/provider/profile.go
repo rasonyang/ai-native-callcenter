@@ -3,6 +3,7 @@
 package provider
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
@@ -61,7 +62,7 @@ type Profile struct {
 	SemanticTurnSilenceMs int
 }
 
-// OpenAIProfile is the English-language provider.
+// OpenAIProfile is the provider used outside mainland China.
 //
 // Both companding laws were verified accepted and stored in each direction,
 // which makes this leg a pure byte passthrough: no decode, no resample, no law
@@ -82,7 +83,7 @@ func OpenAIProfile() Profile {
 	}
 }
 
-// QwenProfile is the Chinese-language provider.
+// QwenProfile is the provider used inside mainland China.
 //
 // Its audio-format fields are never echoed back, so acceptance of anything
 // other than the documented rates cannot be confirmed from the handshake. The
@@ -113,35 +114,50 @@ func QwenProfile() Profile {
 	}
 }
 
-// Override replaces where a provider is reached and which model answers.
+// Provider names this build can run. A deployment runs exactly one of them,
+// chosen at startup: Qwen inside mainland China, OpenAI elsewhere.
+const (
+	NameOpenAI = "openai"
+	NameQwen   = "qwen"
+)
+
+// Override replaces where the deployment's provider is reached and which model
+// answers there.
 //
 // The vendor's own address is a default, not a fact: a deployment may sit
 // behind a proxy, in a region with its own host, or in front of a Realtime
-// gateway that composes its own pipeline behind the same protocol — and none
-// of those can be reached without saying so. This is the whole extension
-// mechanism: a new engine is a new endpoint, never a new client. An empty
+// gateway that composes its own pipeline behind the same protocol. An empty
 // field keeps the profile's own value.
 type Override struct {
 	Endpoint string
 	Model    string
 }
 
-// ProfileForLanguage picks the provider that speaks a language best and
-// applies the deployment's override for it, keyed by provider name.
-func ProfileForLanguage(language string, overrides map[string]Override) Profile {
-	profile := OpenAIProfile()
-	if strings.HasPrefix(strings.ToLower(language), "zh") {
+// ProfileFor returns the profile of the provider this deployment runs, with
+// its connection details applied.
+//
+// Which provider answers is a property of the deployment, not of the call: it
+// is resolved once at startup and every conversation uses it. A call's
+// language chooses what the model is told to speak, never who it speaks to
+// (phase1-decisions A1).
+func ProfileFor(name string, override Override) (Profile, error) {
+	var profile Profile
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case NameOpenAI:
+		profile = OpenAIProfile()
+	case NameQwen:
 		profile = QwenProfile()
+	default:
+		return Profile{}, fmt.Errorf("provider: unknown provider %q (%s, %s)",
+			name, NameOpenAI, NameQwen)
 	}
-	if override, ok := overrides[profile.Name]; ok {
-		if override.Endpoint != "" {
-			profile.Endpoint = override.Endpoint
-		}
-		if override.Model != "" {
-			profile.Model = override.Model
-		}
+	if override.Endpoint != "" {
+		profile.Endpoint = override.Endpoint
 	}
-	return profile
+	if override.Model != "" {
+		profile.Model = override.Model
+	}
+	return profile, nil
 }
 
 // FormatsFor decides what audio this profile will exchange for a call whose
