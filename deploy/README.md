@@ -13,7 +13,7 @@ everything below is about a deployment that carries real calls.
 
 | | |
 |---|---|
-| CPU / memory | 8 cores, 16 GB carries the design target of 200 concurrent AI calls plus 50 agents (design 06). A few dozen calls is comfortable on 2 cores. |
+| CPU / memory | Not yet characterised. Nothing here has been benchmarked, so size from your own traffic, watch `AICC_METRICS_ADDR`, and grow from what you see. |
 | PostgreSQL | 18. The application migrates its own schema at startup. |
 | FreeSWITCH | 1.10.13 or newer with `mod_lua`, `mod_pgsql` and `mod_callcenter`. |
 | Network | The AI leg terminates its own SIP and RTP: one UDP port for signalling (6060) and a range for media (40000–40999 by default), reachable from the switch. |

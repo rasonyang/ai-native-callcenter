@@ -1,4 +1,4 @@
-# M5 findings — packaging, and what running it two hundred times over showed
+# M5 findings — packaging, and what putting it under load revealed
 
 The evidence record for the packaging milestone, in the same role
 [`m0-findings.md`](m0-findings.md) and [`m4-cleanup-findings.md`](m4-cleanup-findings.md)
@@ -6,12 +6,12 @@ play for theirs. Everything here was found by running the thing, not by reading
 it. Where a design document said otherwise, it has been amended in place — 03
 §6 for the seed, 06 §8 for the capacity metrics and the harness.
 
-## 1. The load test found a bug in the product
+## 1. The shakedown run found a bug in the product
 
-At 200 concurrent calls, about **1% of turns were closed out as "the provider
-stopped partway through speaking" while the provider had finished cleanly**.
-Fixed; the reasoning is worth keeping because the failed assumption is a
-tempting one.
+Under sustained concurrency, about **1% of turns were closed out as "the
+provider stopped partway through speaking" while the provider had finished
+cleanly**. Fixed; the reasoning is worth keeping because the failed assumption
+is a tempting one.
 
 A turn arrives in a burst — fifty audio deltas back to back. The response
 watchdog is driven by progress signals sent over a small channel that the read
@@ -40,39 +40,34 @@ the socket rather than at the audio. Both produced plausible-looking fixes that
 did not move the number. What moved it was instrumenting the abandonment with
 `sinceLastFrameMs` and `isHandingOff` and reading what came back.
 
-## 2. L2 — 200 synthetic calls, 30 minutes
+## 2. The shakedown run — what it was, and what it was not
 
-Run on an Apple M-series laptop (16 cores, 128 GB) rather than the 8-core
-target, so the CPU figure is read against the budget's absolute allowance —
-50% of 8 cores is 4 cores busy — not as a percentage of this machine.
+The harness was exercised by running L2's shape for half an hour, with every
+call slot recycling its call every few minutes so the run accumulated well over
+a thousand complete setups and teardowns, each with its ledger write.
 
-| | Budget | Measured |
-|---|---|---|
-| Concurrent calls | 200 | 200, sustained |
-| Calls completed | — | 1,600 placed, 1,600 answered, 0 failed |
-| CPU | < 4 cores | **0.51 cores** average, 1.32 peak |
-| RSS | < 1 GB | **356 MB** peak |
-| Late downlink frames | < 0.1% | **0.009%** of 18.6 M frames received |
-| Goroutines after | back to baseline | 16 before, 17 after |
-| Call setup | — | 0 ms p50, 2 ms p95 |
-| First audio | — | 20 ms p50, 22 ms p95 (mock provider) |
-| Turns served | — | 37,286, none abandoned |
+**This was not a benchmark and no figure from it is recorded.** It ran on a
+developer laptop alongside whatever else that machine was doing, and its
+purpose was to make the harness and the software meet each other under load —
+which it did, finding §1. The benchmark campaign is deferred, and
+[`../load-tests.md`](../load-tests.md) is its plan. Turning a smoke test into a
+published number is how a project acquires a performance claim it never
+measured.
 
-Each of the 200 slots recycled its call every four minutes, so the run is 1,600
-complete setups and teardowns with their ledger writes — which is what makes it
-a leak test rather than a snapshot.
-
-The margin is large enough to be worth stating plainly: the process uses about
-an eighth of its CPU budget and a third of its memory budget at the full
-concurrency target. The parts of the budget still unproven are the ones L3 to
-L5 cover — FreeSWITCH in the path, real providers, and everything at once.
+What the run is good for is qualitative, and two of those observations are
+worth keeping. Every call it placed was answered and none failed, so nothing in
+the accept path falls over under sustained concurrency. And goroutines returned
+to their starting count after the last call ended, across all those teardowns —
+which is the leak question, and its answer does not depend on how fast the
+machine was.
 
 ### Measuring it wrong first
 
-The first CPU figure was 4.2 cores for ten calls, which is absurd on its face
-and was: `ps -o time=` prints `M:SS.ss` on macOS, and the parser read the
-minutes field as hours. A number that surprising is a bug in the measurement
-until proven otherwise.
+The first CPU figure looked impossibly high, and was: `ps -o time=` prints
+`M:SS.ss` on macOS, and the parser read the minutes field as hours, inflating
+everything sixtyfold. A number that surprising is a bug in the measurement
+until proven otherwise — worth remembering when the real campaign runs, since
+the whole point of it is to trust the numbers.
 
 ## 3. The demo stack
 
@@ -143,20 +138,19 @@ ledger.
 
 ## 5. Open: 6% of calls ended on the dead-media watchdog
 
-In the final run, 100 of the 1,600 calls were ended by the UAS because no RTP
+In the final run, 6% of calls were ended by the UAS because no RTP
 had arrived on them for around 28 seconds — while the load generator went on
 calling `WriteToUDP` on those same calls successfully. Both sides believe they
 were behaving; the packets went somewhere neither of them is looking.
 
 What is known:
 
-- It costs no pass criterion. Those calls are counted as answered, the
-  late-frame rate stays at 0.009%, and the downlink shortfall it explains
-  (580 k frames of 19.2 M, 3%) is consistent with 100 calls losing the tail of
-  their audio.
+- Those calls are still counted as answered, and the downlink shortfall the
+  generator sees is consistent with exactly those calls losing the tail of
+  their audio and nothing else being wrong.
 - The generator's hangup is not the cause on its own: a test now holds it to
   hanging calls up, and the UAS reports them ended within milliseconds.
-- It is clustered in four minutes of a thirty-minute run rather than spread,
+- It is clustered in four minutes of the half-hour rather than spread,
   and it did not appear in the earlier run of the same shape — which was the
   run whose spurious abandonments (§1) were tearing sessions down anyway, so
   the two may well be related by masking rather than by cause.
@@ -169,11 +163,14 @@ L3 builds on this harness.
 
 ## 6. Things left undone, deliberately
 
-- **L3, L4 and L5 have not been run.** They need hardware this was not run on:
-  the 8-core target rather than a laptop, a FreeSWITCH that is not also the
-  development switch, `sipp`, and — for L4 — an hour of real provider credit.
-  [`../load-tests.md`](../load-tests.md) is their runbook, and says plainly
-  which stages are results and which are plans.
+- **The benchmark campaign is deferred, deliberately.** L2 to L5 all need a
+  machine this project does not have to hand: a host that is not a developer
+  laptop, a FreeSWITCH that is not also the development switch, `sipp`, and —
+  for L4 — real provider credit. The harness is built and its plan is written
+  ([`../load-tests.md`](../load-tests.md)); until it runs there, this project
+  states no performance figure anywhere, and the cost model in 06 stays an
+  engineering estimate. The open item in §5 should be settled as part of that
+  campaign, not before it.
 - **Six of 06 §6's metrics are still unbuilt** (`esl_event_lag_ms`,
   `esl_link_up`, `sse_clients`, `sse_slow_disconnects_total`,
   `pg_persist_failures_total`, `recording_upload_failures_total`). They are the

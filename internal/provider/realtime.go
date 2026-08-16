@@ -687,8 +687,8 @@ func (r *Realtime) watchdog() {
 			// deltas can overflow the channel and take the completion with
 			// them, leaving this timer armed on a response that finished
 			// cleanly. The state cannot be lost the way a signal can, so it
-			// is what decides. Found at 200 concurrent calls, where about 1%
-			// of turns were reported abandoned while the model was fine.
+			// is what decides. Found under sustained load, where about 1% of
+			// turns were reported abandoned while the model was fine.
 			if !r.isResponseOpen.Load() {
 				continue
 			}

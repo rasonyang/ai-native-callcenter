@@ -947,8 +947,8 @@ func TestTheSessionsVoiceOverridesTheProfiles(t *testing.T) {
 // A turn arrives in a burst — fifty deltas back to back — and the watchdog's
 // progress signals are deliberately droppable so the read loop never blocks on
 // them. The completion signal rides in that same burst and can be dropped with
-// the rest, which at 200 concurrent calls had about 1% of perfectly healthy
-// turns reported as abandoned mid-sentence.
+// the rest, which under sustained load had about 1% of perfectly healthy turns
+// reported as abandoned mid-sentence.
 func TestACompletedResponseIsNotAbandonedWhenItsSignalIsLost(t *testing.T) {
 	fake := newFakeProvider(t, acceptSession)
 	session := testSession(t, fake, OpenAIProfile())

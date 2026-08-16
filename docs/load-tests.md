@@ -1,9 +1,19 @@
 # Load tests
 
-The capacity budget claims 200 concurrent AI calls and 50 agents on 8 cores and
-16 GB ([design 06](design/06-capacity.md)). These are the runs that check it,
-in the order they are worth running: each one adds a component and keeps the
-previous one's criteria.
+How this project intends to find out what it costs to run. The stages are in
+the order they are worth running: each adds a component and keeps the previous
+one's criteria.
+
+**Status: nothing here has been run as a benchmark, and this project publishes
+no performance figure.** What exists today is the harness and this plan. A
+shakedown run was done while building the harness — it is what found the bug in
+[m5-findings §1](design/m5-findings.md) — but it was aimed at exercising the
+code, not at measuring it, and its numbers are not results and are not quoted
+as any.
+
+Thresholds are deliberately absent below. Deciding what "good" is belongs to
+the campaign, against the machine it actually runs on, and a number written
+down beforehand has a way of becoming a claim before anything has measured it.
 
 ## The harness
 
@@ -45,12 +55,12 @@ OPENAI_API_KEY=not-a-key \
 
 ## What to watch while it runs
 
-`AICC_METRICS_ADDR` exposes the capacity budget's own numbers (design 06 §6):
+`AICC_METRICS_ADDR` exposes what the process knows about itself (design 06 §6):
 
 | Metric | Reads on |
 |---|---|
 | `aicc_calls_active{kind}` | `SWITCH` is every call the switch carries, `BOT` the subset the model answers; they overlap |
-| `aicc_rtp_late_ticks_total` / `aicc_rtp_frames_sent_total` | The ratio is the late-tick rate the budget bounds at 0.1% |
+| `aicc_rtp_late_ticks_total` / `aicc_rtp_frames_sent_total` | The ratio is the late-tick rate — send ticks the caller would hear as a stutter |
 | `aicc_jitter_lost_total` / `_dropped_total` / `_filled_total` | Inbound media health |
 | `aicc_turn_latency_ms{provider}` | Caller stopped speaking to first reply frame |
 | `aicc_provider_first_audio_ms{provider}` | The provider's share of that |
@@ -64,54 +74,31 @@ baseline within a minute of the last call ending.
 
 | Stage | Setup | Pass criteria | State |
 |---|---|---|---|
-| **L1 micro** | `go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/` | 0 allocs/op on every frame path | **Passing**, and enforced by CI on every change |
-| **L2 synthetic 200** | loadgen ×200 → aicc + mock, 30 min | CPU < 50% of 8 cores; RSS < 1 GB; late ticks < 0.1%; goroutines return to baseline | **Passing** — see below |
-| **L3 FreeSWITCH interop** | FS `originate` loop → gateway → aicc ×200 + mock | L2's criteria, plus no ESL event lag > 250 ms and the switch inside design 06 §5 | Not yet run |
-| **L4 real providers** | 20 real OpenAI or Qwen calls, 1 h soak | Turn latency ≤ 1.2 s p50 and ≤ 2 s p95; no unexplained WebSocket drops | Not yet run at soak length; the latency gate itself was measured live in M3 (p50 ≈ 1.23 s) |
-| **L5 acceptance** | 200 AI (mock) + 50 sipp agent calls + 60 SSE clients + report queries, 2 h | Everything above, plus no slow-consumer disconnects and CDR/report p95 < 500 ms | Not yet run |
+| Stage | Setup | What it establishes | State |
+|---|---|---|---|
+| **L1 micro** | `go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/` | Frame paths allocate nothing per frame | The one stage that runs continuously: CI holds it on every change |
+| **L2 synthetic** | loadgen → aicc + mock provider, 30 min | What the process alone costs per call, and whether it lets go of anything | Harness ready, not run |
+| **L3 FreeSWITCH interop** | FS `originate` loop → gateway → aicc + mock | The same with the switch in the path: dialplan, gateway, correlation headers, CDRs, recording | Not run |
+| **L4 real providers** | Real OpenAI or Qwen calls, 1 h soak | Turn latency against a real vendor, and whether it holds a socket for an hour | Not run |
+| **L5 acceptance** | AI calls + `sipp` agent calls + event-stream clients + report queries | Everything at once, which is the only configuration a deployment is ever in | Not run |
 
-L3 to L5 need hardware this was not run on — L3 and L5 in particular want the
-8-core target machine rather than a developer laptop, and L5 needs `sipp` and a
-FreeSWITCH that is not also the development switch. They are runbooks below,
-not results.
+Each needs a machine this project does not have to hand: a host that is not a
+developer laptop, a FreeSWITCH that is not also the development switch, `sipp`,
+and for L4 real provider credit. Running them anywhere else and publishing the
+numbers would produce a figure that flatters or maligns the software for
+reasons that have nothing to do with it.
 
-## L2 — 200 synthetic calls
+## L2 — the process on its own
 
-**Result (2026-08-16, Apple M-series, 16 cores / 128 GB, macOS): passing.**
+Concurrent calls against the application and the mock provider, no switch in
+the path. It bounds the cost of the process itself, and because each slot
+recycles its call it is a leak test as much as a load test: half an hour at
+four-minute calls is over a thousand complete setups and teardowns, each with
+its ledger write.
 
-Read the CPU figure against the budget's *absolute* allowance rather than as a
-percentage: 50% of 8 cores is 4 cores busy, and that is the number to beat on
-any machine.
-
-| | Budget | Measured |
-|---|---|---|
-| Concurrent calls | 200 | 200, sustained for 30 minutes |
-| Calls completed | — | 1,600 placed, 1,600 answered, 0 failed |
-| CPU | < 4 cores | **0.51 cores** average, 1.32 peak |
-| RSS | < 1 GB | **356 MB** peak |
-| Late downlink frames | < 0.1% | **0.009%** of 18.6 M frames received |
-| Goroutines after | back to baseline | 16 before, 17 after |
-| Call setup | — | 0 ms p50, 2 ms p95 |
-| First audio | — | 20 ms p50, 22 ms p95 (against the mock) |
-| Turns served | — | 37,286, none abandoned |
-
-Each of the 200 slots recycled its call every four minutes, so the run is 1,600
-complete setups and teardowns with their ledger writes — which is what makes
-this a leak test and not a snapshot. The process uses about an eighth of its
-CPU budget and a third of its memory budget at the full concurrency target.
-
-Two things this run produced beyond the numbers:
-
-* **It found a real bug.** About 1% of turns were being reported as abandoned
-  mid-sentence while the model had finished cleanly — a dropped completion
-  signal inside a burst of audio deltas. Fixed, and the numbers above are from
-  the fixed build. [m5-findings §1](design/m5-findings.md).
-* **An open item.** 100 of the 1,600 calls (6%) were ended by the UAS's
-  dead-media watchdog after ~28 s of silence, while the generator went on
-  sending uplink successfully. It costs no pass criterion — the calls are
-  counted, the late-frame rate is inside budget — but the two sides disagree
-  about where the audio went, and that is worth resolving before L3 builds on
-  this harness. [m5-findings §5](design/m5-findings.md).
+What to record: CPU as *cores busy* rather than as a percentage of whatever
+machine it ran on, peak RSS, the late-frame rate the generator reports, and
+goroutines before and after. Report the machine alongside them, always.
 
 ### Running it
 
@@ -134,9 +121,9 @@ Two things to get right or the run measures the wrong thing:
   30 turns; at a turn every 10 seconds a 240-second call uses 24 of them. A
   longer call ends on the flow rather than on the load generator, and the run
   quietly becomes a test of something else.
-* **`-total` longer than `-duration` recycles calls.** That is what makes L2 a
-  leak test: 200 slots turning over every four minutes for half an hour is
-  about 1,500 complete setups and teardowns, each with its ledger write.
+* **`-total` longer than `-duration` recycles calls.** That is what makes this
+  a leak test rather than a snapshot: every slot turns over repeatedly, each
+  turnover a complete setup and teardown with its ledger write.
 
 ## L3 — through FreeSWITCH
 
@@ -147,12 +134,12 @@ Same mock provider, but the calls arrive the way real ones do.
 fs_cli -x "originate {aicc_harness=true}loopback/95001/public &playback(silence_stream://240000)"
 ```
 
-Adds to L2's criteria:
+Adds to what L2 records:
 
-* ESL event lag under 250 ms — the application logs it, and a growing lag means
-  the event loop is behind the switch.
-* The switch itself inside design 06 §5: no transcoding on bot legs (they are
-  PCMU-pinned), and `max-sessions` / `sessions-per-second` not reached.
+* ESL event lag — the application logs it, and a growing lag means the event
+  loop is falling behind the switch.
+* The switch's own cost: whether bot legs stay PCMU-pinned and untranscoded,
+  and how close `max-sessions` / `sessions-per-second` come to their limits.
 
 What this stage catches that L2 cannot: the dialplan, the gateway, the
 correlation headers, the CDR assembler's ownership rule, and recording — none
@@ -160,28 +147,24 @@ of which the load generator exercises.
 
 ## L4 — real providers
 
-Twenty concurrent calls, one hour, against the real endpoint. Not two hundred:
-the point is fidelity, not volume, and the account's concurrency quota is an
-external limit that no amount of local capacity substitutes for.
+A modest number of calls for an hour against the real endpoint. The point is
+fidelity, not volume — and the account's concurrency quota is an external limit
+that no amount of local capacity substitutes for.
 
-* `aicc_turn_latency_ms` p50 ≤ 1.2 s and p95 ≤ 2 s (A3). Note what the
-  histogram measures: it starts at `speech_stopped`, *after* the VAD's silence
-  hold, so a 500 ms hold means ≤ 700 ms on the histogram.
-* `aicc_provider_ws_errors_total` flat. A vendor dropping sockets under
-  sustained load is exactly what an hour finds and ten minutes does not.
-
-M3 measured the latency gate live at p50 ≈ 1.23 s end to end against Qwen, on
-the line with the budget and inside it with the silence hold at 400 ms. The
-soak has not been run.
+* `aicc_turn_latency_ms`, with the caveat about what it measures: the window
+  starts at `speech_stopped`, *after* the VAD's silence hold, so the hold has
+  to be added back before comparing it to what a caller experiences.
+* `aicc_provider_ws_errors_total`. A vendor dropping sockets under sustained
+  load is exactly what an hour finds and ten minutes does not.
 
 ## L5 — acceptance
 
-Everything at once, for two hours: 200 AI calls on the mock, 50 agent calls
-driven by `sipp` against real extensions, 60 browser sessions on the event
-stream, and the reports being queried throughout.
+Everything at once, for hours: AI calls on the mock, agent calls driven by
+`sipp` against real extensions, browser sessions on the event stream, and the
+reports being queried throughout.
 
-* Every L2 and L3 criterion.
-* No slow-consumer disconnects on the event stream. The hub drops a subscriber
-  that cannot keep up, which is correct behaviour and a failure of this stage.
-* CDR and report queries p95 under 500 ms while the ledger is being written to
-  at full rate.
+* Everything L2 and L3 record.
+* Slow-consumer disconnects on the event stream. The hub drops a subscriber
+  that cannot keep up, which is correct behaviour and a signal that this
+  configuration has found a limit.
+* CDR and report latency while the ledger is being written to at full rate.

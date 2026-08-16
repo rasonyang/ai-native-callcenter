@@ -34,8 +34,7 @@ phone. [More about the demo](deploy/demo/README.md).
 **Answers with a model, not a menu.** The AI leg is a SIP endpoint inside the
 application: FreeSWITCH bridges the caller to it and audio goes straight to the
 provider — G.711 passed through byte for byte where the provider accepts it, so
-nothing decodes or resamples on the way. Measured conversational latency is
-around 1.2s end to end.
+nothing decodes or resamples on the way.
 
 **Steers without scripting the conversation.** The model owns the dialogue; the
 flow owns the phase. A phase carries instructions and a list of tools the model
@@ -123,11 +122,14 @@ Never the other way round.
 ## Status
 
 The human path, the AI path, the product surface and the packaging are built
-and verified against live FreeSWITCH and live providers. The capacity target is
-measured rather than asserted: 200 concurrent AI calls for thirty minutes cost
-0.51 cores and 356 MB, with 0.009% of frames arriving late — see
-[the load tests](docs/load-tests.md), which are equally clear about the stages
-that have not been run.
+and verified against live FreeSWITCH and live providers.
+
+Performance is not yet a claim this project makes. The design has a capacity
+budget and a latency target ([design 06](docs/design/06-capacity.md)), and the
+harness to test them against is in the repository
+([docs/load-tests.md](docs/load-tests.md)) — but the benchmark campaign itself
+is still to come, so treat the budget as an intention rather than a
+measurement.
 
 What is deliberately *not* here, and will not be: any cascaded
 ASR + LLM + TTS pipeline inside this process. That composition belongs in a

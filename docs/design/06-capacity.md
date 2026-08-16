@@ -1,6 +1,8 @@
-# Design 06 — Capacity Budget (200 AI calls + 50 agents on 8c/16GB) & Load Test Plan
+# Design 06 — Capacity Estimates & Load Test Plan
 
-Scope: the single `aicc` Go process. PostgreSQL and FreeSWITCH are external (their impact noted in §5). Numbers are engineering estimates to be **validated by the load tests in §7**; anything that misses its budget is a design bug.
+Scope: the single `aicc` Go process. PostgreSQL and FreeSWITCH are external (their impact noted in §5).
+
+**Everything below is an unvalidated engineering estimate.** It exists to size the design and to give the load tests something to aim at — not to describe what the software does. None of it has been measured, none of it is published outside this design set, and no figure from it belongs in a README, a deployment guide or a release note until the campaign in §7 has actually run. Anything that then misses its estimate is a design bug.
 
 ## 1. Per-AI-call cost model
 
@@ -70,4 +72,4 @@ M0 spike (precedes all): live ESL event-shape verification, mod_callcenter odbc-
 
 **The UAC generator carries the dialplan's headers.** `internal/loadgen` places calls straight at the SIP UAS, so it must supply the `X-AICC-*` correlation headers FreeSWITCH would have added; without them the orchestrator has no number to resolve a flow from. It measures pacing from the caller's side — the gap between arriving downlink frames — which is the property a caller actually hears, and it counts a gap of two frame intervals or more as late.
 
-The stages, what each one showed, and how to run them are in [../load-tests.md](../load-tests.md).
+**The campaign itself is deferred.** The harness is built and the plan is written ([../load-tests.md](../load-tests.md)), but L2–L5 need the target machine, a switch that is not the development one, `sipp` and real provider credit. A shakedown run of L2's shape on a laptop is what surfaced the watchdog bug recorded in [m5-findings §1](m5-findings.md); its numbers are not results and this document's budget stays an estimate until the campaign runs.
