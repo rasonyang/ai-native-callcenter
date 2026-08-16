@@ -33,7 +33,7 @@ cd web && npm run dev                         # Vite dev server on 5173
 cd web && npm run build                       # emits web/dist for go:embed
 ```
 
-Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins) — see `internal/config/config.go` for the complete list. ESL is at `127.0.0.1:18021` (not stock 8021).
+Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins). **`.env.example` is the registry** — every setting with its real default, kept in step with `internal/config/config.go` (`cp .env.example .env`, then uncomment what changes). Two non-`AICC_` credentials matter: `OPENAI_API_KEY` / `ALIYUN_API_KEY`. Note the loader's semantics: an empty value means *unset* (the default wins, so a non-empty default cannot be blanked), and there is no inline-comment syntax — everything after the first `=` is the value. ESL is at `127.0.0.1:18021` (not stock 8021).
 
 ## API contract — spec-first (mandatory)
 
