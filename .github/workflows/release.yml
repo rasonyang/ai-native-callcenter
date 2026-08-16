@@ -81,7 +81,7 @@ jobs:
         run: |
           name="aicc_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
           mkdir -p "dist/$name"
-          cp aicc LICENSE README.md ".env.example" "dist/$name/"
+          cp aicc LICENSE NOTICE README.md ".env.example" "dist/$name/"
           tar -czf "dist/$name.tar.gz" -C dist "$name"
           (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
 
