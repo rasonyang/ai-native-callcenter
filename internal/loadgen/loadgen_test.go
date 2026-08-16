@@ -162,3 +162,34 @@ func freePort(t *testing.T) int {
 	conn.Close()
 	return port
 }
+
+// A call the generator finishes must be finished on the switch's side too.
+// Left half-open, the leg lingers until the UAS's dead-media watchdog notices,
+// and a load run slowly fills with calls nobody is on — which reads as a leak
+// in the product rather than a defect in the harness.
+func TestFinishedCallsAreHungUp(t *testing.T) {
+	cfg := voice.DefaultConfig()
+	cfg.SIPHost, cfg.SIPPort, cfg.AdvertiseIP = "127.0.0.1", 0, "127.0.0.1"
+	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	uas := voice.NewUAS(cfg)
+	ended := make(chan *voice.Dialog, 4)
+	uas.OnCallEnded = func(d *voice.Dialog) { ended <- d }
+	if err := uas.Start(); err != nil {
+		t.Fatalf("start uas: %v", err)
+	}
+	t.Cleanup(uas.Stop)
+
+	result := loadgen.PlaceCall(t.Context(), loadgen.CallConfig{
+		Target:   "127.0.0.1:" + strconv.Itoa(uas.LocalPort()),
+		Duration: 200 * time.Millisecond,
+	})
+	if result.Err != nil {
+		t.Fatalf("place call: %v", result.Err)
+	}
+
+	select {
+	case <-ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the call was still up two seconds after the generator hung up")
+	}
+}

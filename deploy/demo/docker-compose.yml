@@ -133,6 +133,16 @@ services:
       # needs none of them; queue music does.
       SOUND_RATES: ${FS_SOUND_RATES:-}
       SOUND_TYPES: ${FS_SOUND_TYPES:-}
+    # The image's own check calls fs_cli with stock settings and fails against
+    # our event socket, which then reports a perfectly healthy switch as
+    # unhealthy for as long as the demo runs.
+    healthcheck:
+      test: ["CMD-SHELL",
+             "fs_cli -H 127.0.0.1 -P 18021 -p $$AICC_ESL_PASSWORD -x status | grep -q ^UP"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     volumes:
       # Our half of the switch's configuration, applied over the stock one at
       # every boot by the entrypoint hook.
