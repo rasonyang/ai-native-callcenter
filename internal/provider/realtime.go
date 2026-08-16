@@ -14,6 +14,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	syncatomic "sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -49,6 +50,11 @@ type Realtime struct {
 	readyOnce sync.Once
 	// startErr records why the handshake failed, if it did.
 	startErr atomic[error]
+	// isResponseOpen is true between a response starting and its completion
+	// being handled. The watchdog consults it before abandoning anything,
+	// because its own progress signals are droppable and the completion is
+	// the one that must never be missed.
+	isResponseOpen syncatomic.Bool
 
 	closeOnce sync.Once
 
@@ -481,6 +487,7 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.emit(Event{Type: EventTypeSpeechStopped})
 
 	case "response.created":
+		r.isResponseOpen.Store(true)
 		r.signal(watchResponseStarted)
 		r.emit(Event{Type: EventTypeResponseStarted})
 
@@ -535,6 +542,7 @@ func (r *Realtime) handle(event *wireEvent) {
 }
 
 func (r *Realtime) handleResponseDone(event *wireEvent) {
+	r.isResponseOpen.Store(false)
 	r.signal(watchResponseEnded)
 
 	out := Event{Type: EventTypeResponseDone}
@@ -675,10 +683,20 @@ func (r *Realtime) watchdog() {
 
 		case <-timer.C:
 			isWaiting = false
+			// Signals are droppable and a turn arrives in a burst: fifty
+			// deltas can overflow the channel and take the completion with
+			// them, leaving this timer armed on a response that finished
+			// cleanly. The state cannot be lost the way a signal can, so it
+			// is what decides. Found at 200 concurrent calls, where about 1%
+			// of turns were reported abandoned while the model was fine.
+			if !r.isResponseOpen.Load() {
+				continue
+			}
 			reason := "the provider never started speaking"
 			if hasAudioArrived {
 				reason = "the provider stopped partway through speaking"
 			}
+			r.isResponseOpen.Store(false)
 			r.log.Warn("response abandoned", "reason", reason,
 				"hasAudioArrived", hasAudioArrived)
 			// Not fatal: the session is still usable, and the caller has heard
@@ -696,8 +714,9 @@ func (r *Realtime) signal(s watchSignal) {
 	case r.watch <- s:
 	case <-r.conn.done:
 	default:
-		// The watchdog is momentarily behind; a missed progress signal only
-		// costs a spurious timeout, never a wrong one.
+		// The watchdog is momentarily behind. A missed signal costs at worst
+		// a late re-arm: whether a response is still open is read from state,
+		// not inferred from having seen every signal.
 	}
 }
 

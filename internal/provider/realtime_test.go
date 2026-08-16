@@ -943,3 +943,83 @@ func TestTheSessionsVoiceOverridesTheProfiles(t *testing.T) {
 		})
 	}
 }
+
+// A turn arrives in a burst — fifty deltas back to back — and the watchdog's
+// progress signals are deliberately droppable so the read loop never blocks on
+// them. The completion signal rides in that same burst and can be dropped with
+// the rest, which at 200 concurrent calls had about 1% of perfectly healthy
+// turns reported as abandoned mid-sentence.
+func TestACompletedResponseIsNotAbandonedWhenItsSignalIsLost(t *testing.T) {
+	fake := newFakeProvider(t, acceptSession)
+	session := testSession(t, fake, OpenAIProfile())
+	session.deltaStallDeadline = 100 * time.Millisecond
+
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	fake.send(map[string]any{"type": "response.created"})
+	fake.send(map[string]any{"type": "response.output_audio.delta",
+		"delta": base64.StdEncoding.EncodeToString(make([]byte, media.FrameSamples))})
+	awaitEvent(t, session, EventTypeAudioDelta)
+
+	// Fill the signal channel so the completion's own signal is dropped, which
+	// is exactly what a burst does to it.
+	for range cap(session.watch) {
+		session.watch <- watchAudioArrived
+	}
+	fake.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case event := <-session.Events():
+			switch {
+			case event.Type == EventTypeResponseDone && event.Status == StatusStalled:
+				t.Fatal("a response that completed cleanly was reported as abandoned")
+			case event.Type == EventTypeResponseDone:
+				// The real completion arrived. Give the timer its chance to
+				// fire behind it before declaring the test won.
+				time.Sleep(3 * session.deltaStallDeadline)
+				select {
+				case late := <-session.Events():
+					if late.Status == StatusStalled {
+						t.Fatal("the turn was abandoned after it had already completed")
+					}
+				default:
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("the response never completed")
+		}
+	}
+}
+
+// The watchdog still has to fire when the provider really does stop.
+func TestARealStallIsStillCaught(t *testing.T) {
+	fake := newFakeProvider(t, acceptSession)
+	session := testSession(t, fake, OpenAIProfile())
+	session.deltaStallDeadline = 100 * time.Millisecond
+
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	fake.send(map[string]any{"type": "response.created"})
+	fake.send(map[string]any{"type": "response.output_audio.delta",
+		"delta": base64.StdEncoding.EncodeToString(make([]byte, media.FrameSamples))})
+	// ...and then nothing.
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case event := <-session.Events():
+			if event.Type == EventTypeResponseDone && event.Status == StatusStalled {
+				return
+			}
+		case <-deadline:
+			t.Fatal("a genuinely stalled turn was never closed out")
+		}
+	}
+}
