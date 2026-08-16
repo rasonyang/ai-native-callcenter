@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
 
@@ -450,6 +451,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 
 	case provider.EventTypeError:
 		if event.IsFatal {
+			obs.RecordProviderError(s.providerName)
 			s.fail(event.Text, event.Err)
 			return
 		}

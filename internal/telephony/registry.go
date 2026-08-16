@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
 
 // mailboxSize bounds one call's pending work. A call that falls this far
@@ -97,6 +98,7 @@ func (r *Registry) CreateCall(ctx context.Context, callID uuid.UUID, callType ev
 	}
 	r.byCall[callID] = a
 	r.mu.Unlock()
+	obs.CallStarted(obs.CallKindSwitch)
 
 	r.wg.Add(1)
 	go func() {
@@ -240,6 +242,8 @@ func (r *Registry) Shutdown() {
 
 // remove unregisters a finished call.
 func (r *Registry) remove(a *actor) {
+	obs.CallEnded(obs.CallKindSwitch)
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.byCall, a.call.CallID)

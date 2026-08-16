@@ -57,3 +57,17 @@ Harness pieces (repo deliverables, also used in CI smoke): **mock provider** (in
 | L5 acceptance | 200 AI (mock) + 50 sipp agent calls + 60 SSE clients + report queries, 2h | all L2/L3 criteria + SSE zero slow-consumer disconnects + CDR/report p95 <500ms |
 
 M0 spike (precedes all): live ESL event-shape verification, mod_callcenter odbc-dsn pgsql check, OpenAI `audio/pcmu`/`audio/pcma` bidirectional verification (drives the codec-path table in 02 §2).
+
+## 8. M5 amendments (the plan met the machine)
+
+**The metrics of §6 now exist.** They were designed in M0 and never built; L2's own pass criteria depend on them, so M5 implemented the ones the budget makes claims about, in `internal/obs/callmetrics.go`: `aicc_calls_active{kind}`, `aicc_rtp_frames_sent_total`, `aicc_rtp_late_ticks_total`, `aicc_jitter_{lost,dropped,filled}_total`, `aicc_provider_first_audio_ms{provider}`, `aicc_provider_ws_errors_total`, beside the `aicc_turn_latency_ms{provider}` M3 already had. Every name carries the `aicc_` prefix (§6 wrote several of them as bare shorthand). Three departures from the list worth knowing:
+
+- **`kind` is `SWITCH` or `BOT`, and they overlap** rather than partition. A bot-answered call is on the switch too, so it appears under both; `SWITCH` is what the machine carries, `BOT` what the model answers.
+- **`rtp_tx_underruns_total` is not implemented.** The RTP session tracks underruns only as a local grace counter deciding whether an utterance is still playing; it is not a persisted count, and exposing it would mean adding an atomic to the send loop for a number the late-tick rate already covers. `aicc_rtp_frames_sent_total` ships instead, because the late-tick count is meaningless without a denominator.
+- The remaining §6 names (`esl_event_lag_ms`, `esl_link_up`, `sse_clients`, `sse_slow_disconnects_total`, `pg_persist_failures_total`, `recording_upload_failures_total`) are still unbuilt. They belong to L3 and L5, which have not been run.
+
+**The mock provider is a server, not a fake.** §7 specified an in-process `VoiceSession`. That seam sits above the WebSocket, the JSON and the base64 audio path — the layers a load test exists to stress — and `AICC_PROVIDER_ENDPOINT` is already the supported way to reach anything speaking the protocol. `internal/mockprovider` is therefore a Realtime server the real client connects to, and its tests drive it with that client rather than with one written for it.
+
+**The UAC generator carries the dialplan's headers.** `internal/loadgen` places calls straight at the SIP UAS, so it must supply the `X-AICC-*` correlation headers FreeSWITCH would have added; without them the orchestrator has no number to resolve a flow from. It measures pacing from the caller's side — the gap between arriving downlink frames — which is the property a caller actually hears, and it counts a gap of two frame intervals or more as late.
+
+The stages, what each one showed, and how to run them are in [../load-tests.md](../load-tests.md).

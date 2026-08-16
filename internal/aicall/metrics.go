@@ -10,6 +10,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
 
 // The latency budget lives or dies on one number: how long the caller waits
@@ -86,6 +88,7 @@ func recordTurnLatency(log *slog.Logger, providerName string, totalMs, providerM
 		turnLatency.Record(context.Background(), totalMs,
 			metric.WithAttributes(attribute.String("provider", providerName)))
 	}
+	obs.RecordProviderFirstAudio(providerName, providerMs)
 	log.Info("turn latency",
 		"totalMs", totalMs, "providerMs", providerMs, "provider", providerName)
 }

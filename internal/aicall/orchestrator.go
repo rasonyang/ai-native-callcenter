@@ -14,6 +14,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
@@ -168,6 +169,7 @@ func (o *Orchestrator) onCallStarted(dialog *voice.Dialog) {
 	o.mu.Lock()
 	o.calls[dialog.CallID] = &activeCall{cancel: cancel}
 	o.mu.Unlock()
+	obs.CallStarted(obs.CallKindBot)
 
 	go func() {
 		defer cancel()
@@ -185,6 +187,15 @@ func (o *Orchestrator) onCallEnded(dialog *voice.Dialog) {
 	o.mu.Unlock()
 	if call != nil {
 		call.cancel()
+	}
+
+	obs.CallEnded(obs.CallKindBot)
+	// The media counters are atomics the session kept all along; teardown is
+	// where reading them costs nothing and where they are finally complete.
+	if dialog.RTP != nil {
+		sent, _, late := dialog.RTP.Health()
+		lost, dropped, filled := dialog.RTP.JitterStats()
+		obs.RecordRTPHealth(sent, late, lost, dropped, filled)
 	}
 }
 

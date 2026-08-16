@@ -31,6 +31,15 @@ AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider/ -run Live -v
 # frontend
 cd web && npm run dev                         # Vite dev server on 5173
 cd web && npm run build                       # emits web/dist for go:embed
+
+# the whole product in containers (app + FreeSWITCH + PostgreSQL, seeded)
+make demo-up                                  # deploy/demo/README.md; screens on 127.0.0.1:8080
+make image VERSION=v0.1.0                     # the release image, SPA embedded
+
+# load testing (docs/load-tests.md) — the mock provider is a Realtime *server*,
+# reached through the same endpoint override a real deployment would use
+go run ./cmd/aicc-mockprovider -addr 127.0.0.1:9099
+go run ./cmd/aicc-loadgen -target 127.0.0.1:6060 -calls 200 -ramp 60s -duration 240s -total 30m
 ```
 
 Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins). **`.env.example` is the registry** — every setting with its real default, kept in step with `internal/config/config.go` (`cp .env.example .env`, then uncomment what changes). Two non-`AICC_` credentials matter: `OPENAI_API_KEY` / `ALIYUN_API_KEY`. Note the loader's semantics: an empty value means *unset* (the default wins, so a non-empty default cannot be blanked), and there is no inline-comment syntax — everything after the first `=` is the value. ESL is at `127.0.0.1:18021` (not stock 8021).
@@ -88,6 +97,12 @@ Flow DSL v2 (`internal/flow`): the model owns the conversation, the flow owns th
 ## Frontend
 
 `web/CLAUDE.md` is a **binding design system** (13px base, single accent #4F46E5, borders not shadows, 6px radius, tabular-nums for all numbers, nav config drives breadcrumbs) — read it before any UI work. i18n via react-i18next, en (default) / zh, no hardcoded user-facing strings. Routes live under `web/src/routes/` (TanStack Router file conventions; a parent route needs `<Outlet/>` or use `_app.section.index.tsx`). Role guards via `requireRole` in `beforeLoad`.
+
+## Packaging (M5)
+
+`deploy/demo/` is the one-command stack: PostgreSQL + a stock FreeSWITCH image turned into ours by `entrypoint.d/10-aicc.sh` (design 01 §7's diffs, applied at every boot) + the application, all on a compose network so an AI call never leaves the host. `AICC_SEED=demo` seeds it complete — accounts, queues, a published bilingual flow behind 95001/95002, a week of history — and `AICC_SEED=fresh` removes exactly that again. The audience-facing docs are `README.md` / `README.zh-CN.md`, `deploy/README.md` (deployment), `docs/provider-extension.md` (a provider is a profile, never a second client) and `docs/load-tests.md` (L1–L5, what has run and what has not).
+
+Capacity metrics live in `internal/obs/callmetrics.go` — one place for every instrument name, fed from the call paths (see 06 §8 for what is implemented and what is deliberately not).
 
 ## Reference repos (read for lineage, never import)
 
