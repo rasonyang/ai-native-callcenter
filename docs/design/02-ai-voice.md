@@ -11,7 +11,8 @@ FreeSWITCH ──INVITE/RTP──► internal/voice (UAS + RTPSession)
                         aicall session actor ◄── internal/flow (engine, tools)
                                 │ VoiceSession events/audio
                                 ▼
-                        internal/provider (openai | qwen | mock)
+                        internal/provider — one OpenAI-Realtime client × Profile
+                        (openai | qwen | any endpoint speaking the protocol)
 ```
 
 `internal/voice` is the golang-bot port (custom UAS; pion/rtp wire format). Port fixes applied during the port (T4): 200-OK retransmission until ACK (timer G-ish, 500ms×2 backoff, cap 3s), idempotent re-200 on INVITE retransmission, correct `487` CSeq method on CANCEL, no BYE after remote BYE, `a=ptime:20` in SDP answers, `MaxCalls` configurable (default 220), DTMF payload type taken from SDP offer (not hardcoded 101), RFC 3550 §5.1 checklist retained (random SSRC/seq/ts, SSRC collision regen, regen on remote addr change, unknown PT ignored).
@@ -31,7 +32,7 @@ FreeSWITCH ──INVITE/RTP──► internal/voice (UAS + RTPSession)
 
 Rules: all-or-nothing codec wiring per PR#3859's lesson (negotiation → SDP → PT → tables, both laws, with tests); one pre-encoded 20ms silence frame per law (no per-tick zero-encoding); `sync.Pool` for frame buffers, resampler scratch, and base64 buffers (golang-bot's ~5–8 allocs/frame/direction eliminated — the 8c16g requirement's main GC lever); resamplers are fixed-integer-factor (×2, ×3) — linear for upsampling, windowed-sinc for downsampling (java-bot's "muffled TTS" lesson).
 
-## 3. `VoiceSession` — the provider abstraction (phase-1 surface, cascade-proof)
+## 3. `VoiceSession` — the seam between the call actor and the client
 
 ```go
 type VoiceSession interface {
@@ -47,19 +48,19 @@ type VoiceSession interface {
 type SessionConfig struct {
     Instructions string; Voice string
     Language string                            // "en"|"zh" (informs prompts, not routing)
-    Turn TurnDetection                         // {Mode: Semantic|VAD|None, SilenceMs int}
+    Turn TurnDetection                         // {Mode: Semantic|VAD, SilenceMs int}
     Tools []ToolSpec                           // JSON-schema tools from the flow
     InputFormat, OutputFormat media.AudioFormat
 }
 ```
 
-Events (closed set): `AudioDelta{PCM/G711 bytes}`, `InputTranscript{delta|final}`, `OutputTranscript{delta|final}`, `SpeechStarted`, `SpeechStopped{reason}`, `Interrupted{by}`, `ToolCall{call_id,name,args}`, `ResponseDone{usage}`, `SessionWarning{budget}`, `Error{fatal bool}`, `Closed`.
+Events (closed set): `SessionReady`, `AudioDelta{PCM/G711 bytes}`, `InputTranscript{delta|final}`, `OutputTranscript{delta|final}`, `SpeechStarted`, `SpeechStopped`, `ResponseStarted`, `Interrupted{by}`, `ToolCall{call_id,name,args}`, `ResponseDone{status,usage}`, `Error{fatal bool}`, `Closed`.
 
-**Why cascade fits later without interface change** (mandated argument): the surface speaks only in audio frames, transcripts, turn boundaries, tool calls, interruption, and instructions — no ASR/TTS concepts leak (no phoneme/voice-clone/partial-hypothesis types; transcripts are already deltas+finals; `TurnDetection` is declarative). A cascade implementation composes VAD→ASR→LLM→TTS behind the same channel: `SendAudio` feeds VAD/ASR, `ToolCall` comes from the LLM, `AudioDelta` from TTS, `Interrupt` cancels TTS + LLM. The one asymmetry — cascade emits `InputTranscript` before the LLM turn rather than after — is already permitted by the event ordering contract (transcript events are unordered relative to `AudioDelta`). **No cascade code, interfaces, or stubs ship in phase 1.**
+**What this interface is, and is not** (phase1-decisions A6). It is the seam between `aicall`'s per-call actor and the one provider client, and the place a test stands a fake model. It is **not** the extension point for other kinds of engine. That job belongs one layer down, to the wire protocol: `internal/provider` speaks OpenAI Realtime and nothing else, parameterised by a `Profile` per vendor dialect, and anything that speaks the same protocol — a vendor, a regional host, a proxy, or the phase-2 **OpenAI Realtime Gateway** that composes ASR + LLM + TTS behind the same events — is reached by pointing the endpoint at it (`AICC_OPENAI_ENDPOINT` / `AICC_QWEN_ENDPOINT`, `provider.Override`). The gateway is a separate service; this application does not know what is behind an endpoint and must never learn. **Consequently no recognition, synthesis or cascade concept — type, interface, adapter, placeholder or TODO — ever enters this repo**, in phase 1 or after; a second Go client would be the wrong shape of change.
 
 ## 4. Provider clients
 
-One shared **OpenAI-protocol client** parameterized by a `Profile` (endpoint, model, auth header, event-name dialect GA/beta, session-field dialect, audio formats) — java-bot's proven shape — plus a thin **Qwen** subtype for DashScope quirks: strip-and-resend on rejected `session.update` fields, `turn_detection` immutable after first audio (config assembled fully before `Start` sends any frame), event-name folding into the internal enum. M0-verified: endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=…`, `Authorization: Bearer` (env `ALIYUN_API_KEY`), OpenAI-shaped `tools` accepted verbatim — but audio-format fields are never echoed in `session.updated`, so the client must not treat the echo as confirmation.
+One shared **OpenAI-protocol client** parameterized by a `Profile` (endpoint, model, auth header, event-name dialect GA/beta, session-field dialect, audio formats) — java-bot's proven shape — plus a thin **Qwen** subtype for DashScope quirks. Endpoint and model are defaults on the profile and overridable per deployment (`provider.Override`, `AICC_{OPENAI,QWEN}_{ENDPOINT,MODEL}`); that override is how any protocol-compatible server, including the phase-2 gateway, is attached. Qwen quirks: strip-and-resend on rejected `session.update` fields, `turn_detection` immutable after first audio (config assembled fully before `Start` sends any frame), event-name folding into the internal enum. M0-verified: endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=…`, `Authorization: Bearer` (env `ALIYUN_API_KEY`), OpenAI-shaped `tools` accepted verbatim — but audio-format fields are never echoed in `session.updated`, so the client must not treat the echo as confirmation.
 
 WS hygiene (mandatory, absent in golang-bot): ping/pong keepalive (15s), read deadlines (45s hard, reset on any frame), single-writer mutex, lazy nothing — connect at call start with a 3s deadline; **no mid-call reconnect** (provider session state is unrecoverable) — a fatal WS error surfaces as `Error{fatal}` → flow `on_error` route (transfer to queue / apology per flow config). Watchdogs: first-audio deadline per response (3s), delta-stall deadline (2s with audio already received → force-complete and play what arrived).
 

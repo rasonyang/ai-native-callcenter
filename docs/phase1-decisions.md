@@ -33,6 +33,7 @@ Date: 2026-08-13. Every item below was explicitly confirmed in the Phase 1 clari
 | A3 | **Latency budget: ≤1.2 s p50 / ≤2 s p95** caller-stops-speaking → bot-audio-at-caller, with per-hop allocation in the design. |
 | A4 | **transfer_to_agent = rich contract**: target queue, reason category, conversation summary, collected slots → written to call `user_data` → agent screen-pop + CDR; bot speaks a bridge line during transfer. |
 | A5 | Turn detection: Qwen `smart_turn` preferred (evaluated vs `server_vad` in Phase 3), OpenAI `semantic_vad`/`server_vad`; semantics normalized at the VoiceSession interface. |
+| A6 | **Phase-2 extension strategy (open/closed): the cascaded pipeline (ASR + LLM + TTS) never enters this application.** Cascade is delivered by a separate **OpenAI Realtime Gateway** service that exposes the OpenAI Realtime protocol outward (WebSocket + the same event set) and orchestrates ASR/LLM/TTS inside. This app treats it as one more Realtime endpoint: `internal/provider` has one client for one wire protocol, and the extension point is that protocol — reached via the endpoint/model overrides (`AICC_OPENAI_ENDPOINT` etc.), never via a second Go client. Consequences that bind this repo permanently: no ASR/LLM/TTS types, interfaces, adapters, placeholders or TODOs; `VoiceSession` is a seam for the call actor and its test double, not a plug-in point for other engine kinds; a "cascade-shaped" symbol anywhere in the tree is drift by definition. (Owner directive, 2026-08-16.) |
 
 ## Agent side & auth
 
@@ -69,4 +70,4 @@ Date: 2026-08-13. Every item below was explicitly confirmed in the Phase 1 clari
 
 ## Standing constraints carried from prompts.md (not re-asked)
 
-Single tenant; Go 1.26 / PG 18 / chi / pgx / sqlc / slog / OTel; React 19 / TS / Vite / TanStack Router+Query / Tailwind 4 / shadcn; REST + SSE only (no app WebSocket); no extra middleware (no Redis/MQ); go:embed SPA; ESL inbound mode; speech-to-speech only in phase 1 with VoiceSession-level abstraction (no cascade code); FS config changes only via approved diffs; dev is HTTP-only; capacity target 200 AI calls + 50 agents on 8c16GB for the Go process.
+Single tenant; Go 1.26 / PG 18 / chi / pgx / sqlc / slog / OTel; React 19 / TS / Vite / TanStack Router+Query / Tailwind 4 / shadcn; REST + SSE only (no app WebSocket); no extra middleware (no Redis/MQ); go:embed SPA; ESL inbound mode; speech-to-speech only, and cascade never in this repo (A6 — a Realtime Gateway service is the phase-2 path); FS config changes only via approved diffs; dev is HTTP-only; capacity target 200 AI calls + 50 agents on 8c16GB for the Go process.

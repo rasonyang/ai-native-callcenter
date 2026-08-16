@@ -394,8 +394,6 @@ func audioFormatPayload(name string, rateHz int) map[string]any {
 // buildTurnDetection maps the declarative setting onto the vendor's names.
 func (r *Realtime) buildTurnDetection(turn TurnDetection) any {
 	switch turn.Mode {
-	case TurnModeNone:
-		return nil
 	case TurnModeSemantic:
 		detection := map[string]any{"type": r.profile.SemanticTurnType}
 		// Where the vendor forces its own hold, sending a different one would

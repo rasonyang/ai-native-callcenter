@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package provider is the speech-to-speech abstraction the rest of the
-// application talks to. It speaks only in audio frames, transcripts, turn
-// boundaries, tool calls, interruption and instructions — nothing about
-// recognition, synthesis or any particular vendor's protocol.
+// Package provider is the speech-to-speech client the rest of the application
+// talks to. It speaks only in audio frames, transcripts, turn boundaries, tool
+// calls, interruption and instructions — nothing about recognition, synthesis
+// or any particular vendor's protocol.
+//
+// There is one wire protocol here, OpenAI Realtime, and one client for it,
+// parameterised by a Profile for each vendor's dialect. That protocol is the
+// extension point: anything that speaks it — a vendor, a regional host, a
+// gateway that composes recognition, a language model and synthesis behind the
+// same events — is reached by pointing the endpoint at it (Override), and this
+// package does not know or care what is on the other end. Cascaded pipelines
+// are built as such a gateway, in their own service; no recognition or
+// synthesis concept ever enters this one.
 package provider
 
 import (
@@ -21,11 +30,10 @@ const FrameInterval = 20 * time.Millisecond
 
 // VoiceSession is one conversation with one speech model.
 //
-// The surface deliberately mentions no recognition or synthesis concepts. A
-// pipeline built from separate components would implement the same methods:
-// SendAudio feeds detection and recognition, ToolCall comes from the language
-// model, AudioDelta from synthesis, and Interrupt cancels both. Nothing here
-// would have to change to accommodate that.
+// It is the seam between the call actor and the client: aicall drives a
+// conversation through these methods and nothing else, and tests stand a fake
+// model behind them. It is not a plug-in point for other kinds of engine —
+// that job belongs to the wire protocol, see the package comment.
 type VoiceSession interface {
 	// Start connects and negotiates the session, then asks for the opening
 	// turn. It returns once the model is ready to be spoken to.
@@ -103,8 +111,6 @@ const (
 	// backchannels, at a cost of well over a second of added turn latency on
 	// at least one provider, so it is opt-in per flow.
 	TurnModeSemantic TurnMode = "SEMANTIC"
-	// TurnModeNone leaves turn-taking to the application.
-	TurnModeNone TurnMode = "NONE"
 )
 
 // TurnDetection configures turn taking.
@@ -158,7 +164,6 @@ const (
 	EventTypeInterrupted      EventType = "INTERRUPTED"
 	EventTypeToolCall         EventType = "TOOL_CALL"
 	EventTypeResponseDone     EventType = "RESPONSE_DONE"
-	EventTypeSessionWarning   EventType = "SESSION_WARNING"
 	EventTypeError            EventType = "ERROR"
 	EventTypeClosed           EventType = "CLOSED"
 )
@@ -177,8 +182,7 @@ type Event struct {
 	Audio []byte
 
 	// Text is transcript text (EventTypeInputTranscript,
-	// EventTypeOutputTranscript) or a message (EventTypeError,
-	// EventTypeSessionWarning).
+	// EventTypeOutputTranscript) or a message (EventTypeError).
 	Text string
 	// IsFinal distinguishes a completed transcript from a partial one.
 	IsFinal bool

@@ -20,16 +20,22 @@ Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 0
         PostgreSQL 18 ◄────────────────────────┤ │ RTP 40000-999│  │
         (schema owned by Go migrations;        │ └──────┬───────┘  │
          mod_lua reads views read-only)        └────────┼──────────┘
-                                                        │ WSS (PCM/G.711 + JSON events)
+                                                        │ WSS — OpenAI Realtime protocol
+                                                        │ (PCM/G.711 + JSON events)
                                         ┌───────────────┴───────────────┐
                                         │ OpenAI Realtime   Qwen-Audio  │
                                         │ (en, gpt-realtime-2.1)  3.0   │
+                                        │ … or any endpoint speaking    │
+                                        │ the same protocol (phase 2:   │
+                                        │ Realtime Gateway = ASR+LLM+TTS│
+                                        │ behind it, outside this repo) │
                                         └───────────────────────────────┘
 ```
 
 - **FreeSWITCH owns**: SIP registration (agents), trunks, bridging, mod_callcenter queues (waiting/MOH/distribution), recording capture, transcoding on non-bot legs.
 - **aicc (Go) owns**: call control (ESL), agent/queue/flow/user configuration, the AI voice leg (SIP UAS + RTP + provider bridge), flow engine, SSE fan-out, CDR/transcripts/reports, recording storage/lifecycle, SPA.
 - **PostgreSQL owns**: all durable state. mod_lua reads dedicated `luacc.*` views (contract, see 03).
+- **Outside this repo, by design (phase1-decisions A6)**: any cascaded speech pipeline. ASR + LLM + TTS compose inside a separate *OpenAI Realtime Gateway* service that exposes the Realtime protocol; aicc reaches it exactly as it reaches OpenAI — an endpoint override — and carries no cascade code, interface, stub or TODO.
 
 ## 2. Runtime topologies
 

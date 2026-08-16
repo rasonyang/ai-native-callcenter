@@ -116,9 +116,11 @@ func QwenProfile() Profile {
 // Override replaces where a provider is reached and which model answers.
 //
 // The vendor's own address is a default, not a fact: a deployment may sit
-// behind a gateway, in a region with its own host, or in front of a server
-// that merely speaks the same protocol, and none of those can be reached
-// without saying so. An empty field keeps the profile's own value.
+// behind a proxy, in a region with its own host, or in front of a Realtime
+// gateway that composes its own pipeline behind the same protocol — and none
+// of those can be reached without saying so. This is the whole extension
+// mechanism: a new engine is a new endpoint, never a new client. An empty
+// field keeps the profile's own value.
 type Override struct {
 	Endpoint string
 	Model    string
