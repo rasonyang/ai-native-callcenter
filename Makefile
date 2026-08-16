@@ -18,6 +18,24 @@ dev-up: ## Start development PostgreSQL
 dev-down: ## Stop development PostgreSQL
 	docker-compose -f $(COMPOSE) down
 
+DEMO := deploy/demo/docker-compose.yml
+
+.PHONY: demo-up
+demo-up: ## Start the full demo stack (app + FreeSWITCH + PostgreSQL, seeded)
+	docker-compose -f $(DEMO) up -d
+
+.PHONY: demo-down
+demo-down: ## Stop the demo stack (add ARGS=-v to discard its data)
+	docker-compose -f $(DEMO) down $(ARGS)
+
+.PHONY: demo-logs
+demo-logs: ## Follow the demo application log
+	docker-compose -f $(DEMO) logs -f aicc
+
+.PHONY: image
+image: ## Build the container image (VERSION=v0.1.0 stamps `aicc version`)
+	docker build --build-arg VERSION=$(VERSION) -t aicc:$(if $(VERSION),$(VERSION),dev) .
+
 .PHONY: generate
 generate: ## Regenerate sqlc query code
 	sqlc generate

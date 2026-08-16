@@ -49,6 +49,8 @@ func main() {
 			handler = runPasswd
 		case "flowadd":
 			handler = runFlowAdd
+		case "version", "-version", "--version":
+			handler = runVersion
 		}
 		if handler != nil {
 			if err := handler(os.Args[2:]); err != nil {
@@ -106,9 +108,14 @@ func run() error {
 	}
 	slog.Info("database ready")
 
-	if cfg.Seed == "demo" {
+	switch cfg.Seed {
+	case "demo":
 		if err := seed.Demo(ctx, st, slog.Default()); err != nil {
 			return fmt.Errorf("seed demo data: %w", err)
+		}
+	case "fresh":
+		if err := seed.Fresh(ctx, st, slog.Default()); err != nil {
+			return fmt.Errorf("reset demo data: %w", err)
 		}
 	}
 

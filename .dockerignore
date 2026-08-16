@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Everything the image build does not read. The build compiles the frontend and
+# the Go binary from source, so build output, dependencies and local state are
+# all noise that would only invalidate layer caches.
+
+.git
+.github
+bin/
+dist/
+logs/
+recordings/
+
+# The image builds the SPA itself; a host build must not leak in.
+web/node_modules/
+web/dist/
+web/tsconfig.tsbuildinfo
+web/src/routeTree.gen.ts
+
+# Local configuration and scratch state.
+.env
+*.log
+.DS_Store
+
+# Documentation and deployment material are not inputs to the binary.
+docs/
+deploy/
+freeswitch/
+prompts.md

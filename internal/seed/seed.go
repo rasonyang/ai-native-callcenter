@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Package seed fills an empty installation with a deterministic demo:
-// a small team, two queues, and seven days of synthetic history so the
-// wallboard, the CDR explorer and the reports render alive on first sight.
+// Package seed fills an empty installation with a deterministic demo: a small
+// team, two queues, a published bilingual flow behind two numbers, and seven
+// days of synthetic history so the wallboard, the CDR explorer and the reports
+// render alive on first sight.
 package seed
 
 import (
 	"context"
+	"embed"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -18,8 +21,47 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
+// flowFiles carries the demo flows into the binary, so a container with
+// nothing mounted still answers a call. The same files are the ones an
+// operator edits and reloads with `aicc flowadd -file …`.
+//
+//go:embed flows/*.json
+var flowFiles embed.FS
+
 // prngSeed pins the whole history: same seed, same rows, every install.
 const prngSeed = 20260814
+
+// demoPassword is the documented password of every seeded account and of the
+// SIP extensions behind them — a softphone that cannot register is not a demo.
+// The dataset only exists where AICC_SEED=demo was set deliberately, and the
+// deployment doc says in as many words that it must not be a public host.
+const demoPassword = "demo1234"
+
+// demoFlowFile is the flow both demo numbers answer with. It carries English
+// and Chinese personas, so one flow serves both — the number's language picks
+// the strings (phase1-decisions A1: language never selects a provider).
+const demoFlowFile = "flows/novanet_support.json"
+
+// demoPeople is the cast of the demo. An account with no extension is not an
+// agent and gets no presence: the administrator and the supervisor watch.
+var demoPeople = []struct {
+	username, display, role, ext string
+}{
+	{"admin", "Ada Ops", "ADMIN", ""},
+	{"sam", "Sam Reyes", "SUPERVISOR", ""},
+	{"amy", "Amy Zhang", "AGENT", "1000"},
+	{"ben", "Ben Liu", "AGENT", "1001"},
+	{"cara", "Cara Wu", "AGENT", "1002"},
+}
+
+// demoNumbers are the DIDs the demo answers on. Both run the same flow in
+// different languages and fall back to the queue of that language.
+var demoNumbers = []struct {
+	number, language, queue, description string
+}{
+	{"95001", "en", "support-en", "Demo hotline (English)"},
+	{"95002", "zh", "support-zh", "Demo hotline (Chinese)"},
+}
 
 // Demo seeds the demo dataset. Existing data always wins: entities are
 // inserted with on-conflict-do-nothing on their natural keys, and the
@@ -28,6 +70,9 @@ func Demo(ctx context.Context, st *store.Store, log *slog.Logger) error {
 	agents, queues, err := ensureEntities(ctx, st, log)
 	if err != nil {
 		return fmt.Errorf("seed entities: %w", err)
+	}
+	if err := ensureFlowAndNumbers(ctx, st, log); err != nil {
+		return fmt.Errorf("seed flow: %w", err)
 	}
 
 	var cdrCount int64
@@ -80,26 +125,26 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 		return nil, nil, err
 	}
 
-	type person struct{ username, display, ext string }
-	team := []person{
-		{"amy", "Amy Zhang", "1000"},
-		{"ben", "Ben Liu", "1001"},
-		{"cara", "Cara Wu", "1002"},
-	}
-	for _, p := range team {
+	// Three agents to fill the wallboard, plus the two accounts a visitor
+	// needs to see the whole product: administration and supervision are
+	// role-gated, so a demo with agents only hides most of the screens.
+	for _, p := range demoPeople {
 		userID := uuid.New()
 		if _, err := st.Pool.Exec(ctx, `
 			INSERT INTO users (id, username, password_hash, display_name, role)
-			VALUES ($1, $2, $3, $4, 'AGENT')
+			VALUES ($1, $2, $3, $4, $5)
 			ON CONFLICT (username) DO NOTHING`,
-			userID, p.username, demoHash, p.display); err != nil {
+			userID, p.username, demoHash, p.display, p.role); err != nil {
 			return nil, nil, err
+		}
+		if p.ext == "" {
+			continue
 		}
 		if _, err := st.Pool.Exec(ctx, `
 			INSERT INTO extensions (id, number, kind, password, display_name)
 			VALUES ($1, $2, 'AGENT', $3, $4)
 			ON CONFLICT (number) DO NOTHING`,
-			uuid.New(), p.ext, uuid.NewString(), p.display); err != nil {
+			uuid.New(), p.ext, demoPassword, p.display); err != nil {
 			return nil, nil, err
 		}
 		if _, err := st.Pool.Exec(ctx, `
@@ -156,4 +201,55 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 
 	log.Info("seed: entities ensured", "agents", len(agents), "queues", len(queues))
 	return agents, queues, nil
+}
+
+// ensureFlowAndNumbers publishes the bundled demo flow and points the demo
+// numbers at it. Without this a seeded install looks complete and still cannot
+// take a call: dids.flow_id is NOT NULL, so a number exists only once a flow
+// does.
+//
+// Existing data wins here too — an operator who has already published a flow
+// under this slug, or who owns these numbers, keeps what they have.
+func ensureFlowAndNumbers(ctx context.Context, st *store.Store, log *slog.Logger) error {
+	spec, err := flowFiles.ReadFile(demoFlowFile)
+	if err != nil {
+		return err
+	}
+	slug := specID(spec)
+
+	flows := st.Flows()
+	flowID, err := flows.Create(ctx, slug, "NovaNet support", spec)
+	if err != nil {
+		existing, lookupErr := st.Queries.GetFlowBySlug(ctx, slug)
+		if lookupErr != nil {
+			return fmt.Errorf("create flow %s: %w", slug, err)
+		}
+		log.Info("seed: demo flow already present", "slug", slug)
+		flowID = existing.ID
+	} else if err := flows.Publish(ctx, flowID, "seed"); err != nil {
+		return fmt.Errorf("publish flow %s: %w", slug, err)
+	}
+
+	for _, n := range demoNumbers {
+		if _, err := st.Pool.Exec(ctx, `
+			INSERT INTO dids (id, number, language, flow_id, fallback_queue_id, description)
+			SELECT $1, $2, $3, $4, q.id, $6 FROM queues q WHERE q.name = $5
+			ON CONFLICT (number) DO NOTHING`,
+			uuid.New(), n.number, n.language, flowID, n.queue, n.description); err != nil {
+			return fmt.Errorf("seed number %s: %w", n.number, err)
+		}
+	}
+	log.Info("seed: demo flow published", "slug", slug, "numbers", len(demoNumbers))
+	return nil
+}
+
+// specID reads a flow spec's own identifier, which is also its slug.
+func specID(spec []byte) string {
+	var head struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(spec, &head); err != nil || head.ID == "" {
+		return "demo"
+	}
+	return head.ID
 }

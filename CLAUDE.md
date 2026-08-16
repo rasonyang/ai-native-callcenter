@@ -23,7 +23,7 @@ sqlc generate                                 # after editing internal/store/sql
 # dev server (PostgreSQL 18 must be up: deploy/dev/docker-compose.yml — never brew)
 go build -o /tmp/aicc ./cmd/aicc && /tmp/aicc # logs also land in logs/aicc-<starttime>.log (read these to analyze runs)
 /tmp/aicc useradd -username admin -password … -role ADMIN   # bootstrap first user
-/tmp/aicc flowadd -file deploy/seed/flows/x.json -did 95011 # load/publish a flow; same slug = update+republish
+/tmp/aicc flowadd -file internal/seed/flows/x.json -did 95001 # load/publish a flow; same slug = update+republish
 
 # live provider verification (spends real API money; OPENAI_API_KEY / ALIYUN_API_KEY)
 AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider/ -run Live -v
