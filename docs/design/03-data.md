@@ -44,7 +44,7 @@ queues(id uuid pk, ext_number text unique ★,                 -- dialable 7xxx
 queue_agents(queue_id fk, agent_id fk, level int default 1, position int default 1, pk(queue_id,agent_id))
 dids(id uuid pk, number text unique ★, language varchar ★,   -- BCP 47 lowercase 'en'/'zh' (external standard, see 07 §7)
      flow_id uuid null → flows ON DELETE RESTRICT,            -- every external number answers with a bot flow; null only between `POST /dids` and `flowadd -did` (00003, 00008)
-                                                              -- target: NOT NULL; blocked on a /flows read endpoint + DID form picker (see cleanup-20260815.md)
+                                                              -- target: NOT NULL; blocked on a /flows read endpoint + DID form picker (see m4-cleanup-findings.md)
      fallback_queue_id uuid null ★,                           -- only for "the bot cannot run": provider outage, capacity
      is_recording_enabled bool ★, description text, is_enabled bool ★)
 trunks(id uuid pk, name text unique,

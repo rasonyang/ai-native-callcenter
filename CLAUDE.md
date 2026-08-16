@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 An open-source AI-native call center: one Go binary (chi/pgx/sqlc/slog/OTel) serving a REST API + SSE stream + embedded React SPA, driving FreeSWITCH over ESL for human agents (50 WebRTC agents via the web-sip-phone Chrome extension, queues via mod_callcenter) and terminating its own SIP/RTP for AI calls (target: 200 concurrent on 8c/16GB). Single tenant — no `tenant_id` anywhere. Apache-2.0; every source file carries `// SPDX-License-Identifier: Apache-2.0`.
 
-The build is strictly phased. Requirements live in `docs/phase1-decisions.md`, the approved design in `docs/design/00-…07` (07 is the **mandatory naming spec** — 4-layer mapping Go `CallID` ↔ JSON `callId` ↔ TS `callId` ↔ DB `call_id`, SCREAMING_SNAKE enum values byte-identical across JSON/TS/DB, `xxxAt`/`xxxMs`/`xxxSec`, `is_`/`has_` booleans, no upstream FreeSWITCH/Genesys tokens outside boundary layers). Live-verified findings that amended the design are recorded in `docs/design/m0-findings.md` — check it before trusting a doc's original claim.
+The build is strictly phased. Requirements live in `docs/phase1-decisions.md`, the approved design in `docs/design/00-…07` (07 is the **mandatory naming spec** — 4-layer mapping Go `CallID` ↔ JSON `callId` ↔ TS `callId` ↔ DB `call_id`, SCREAMING_SNAKE enum values byte-identical across JSON/TS/DB, `xxxAt`/`xxxMs`/`xxxSec`, `is_`/`has_` booleans, no upstream FreeSWITCH/Genesys tokens outside boundary layers). Live-verified findings that amended the design are recorded in `docs/design/m0-findings.md` (M0 spike) and `docs/design/m4-cleanup-findings.md` (M4 drift audit + the A1/A6/A7 provider directives) — check both before trusting a doc's original claim.
 
 ## Commands
 

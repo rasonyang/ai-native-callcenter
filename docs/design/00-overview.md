@@ -1,6 +1,6 @@
 # Design 00 — System Overview & Module Map
 
-Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 01 (telephony) → 02 (AI voice) → 03 (data) → 04 (API/SSE) → 05 (frontend) → 06 (capacity) → 07 (naming — mandatory for every layer).
+Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 01 (telephony) → 02 (AI voice) → 03 (data) → 04 (API/SSE) → 05 (frontend) → 06 (capacity) → 07 (naming — mandatory for every layer). Two evidence records sit alongside and **outrank the originals where they differ**: [m0-findings.md](m0-findings.md) (M0 live verification) and [m4-cleanup-findings.md](m4-cleanup-findings.md) (the M4 drift audit, and the A1/A6/A7 directives that landed with it).
 
 ## 1. System context
 
