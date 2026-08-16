@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The build gate. Everything that must hold for any change, on both halves of
+# the product. The API contract has a gate of its own (api.yml); this one never
+# duplicates it.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The SPA is embedded with `go:embed all:dist`, and the placeholder in
+      # web/dist keeps that compilable without a frontend build. Nothing here
+      # needs the real one.
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l cmd internal web)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt would change:"; echo "$unformatted"; exit 1
+          fi
+
+      # Always -race. It has caught real bugs in this codebase, in the actor
+      # and jitter paths that only misbehave under load.
+      - name: Test
+        run: go test -race ./...
+
+      # The per-frame paths must not allocate. A regression here is invisible
+      # at one call and fatal at two hundred.
+      - name: Allocation benchmarks
+        run: |
+          go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/ \
+            | tee /tmp/bench.txt
+          if grep -E '^Benchmark' /tmp/bench.txt | grep -vE '[[:space:]]0 allocs/op'; then
+            echo "a hot-path benchmark allocates; see 06 §7 L1"; exit 1
+          fi
+
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npx oxlint .
+
+      - name: Test
+        run: npm run test
+
+      # `npm run build` runs tsc --noEmit after vite, so this is the type check
+      # as well as the artifact the release will embed.
+      - name: Build
+        run: npm run build
+
+  image:
+    name: image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Proves the whole product still assembles into the thing we ship. Not
+      # pushed — release.yml owns publishing.
+      - name: Build the container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          build-args: VERSION=ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
