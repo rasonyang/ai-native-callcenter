@@ -45,7 +45,7 @@ Author: agent session
 >
 > | # | Question | Answer |
 > |---|---|---|
-> | 1 | Does `mod_audio_stream` build and load on this switch? | **Yes** — arm64/macOS, three portability fixes needed (§B.1) |
+> | 1 | Does `mod_audio_stream` build and load on this switch? | **Yes** — arm64/macOS. The three portability fixes it once needed are now upstream; a clean `Release` build installs and passes the SpeexDSP assertion (§B.1) |
 > | 2 | What is `stereo`? | **left = READ (far end), right = WRITE (what this party hears)** — measured with a two-tone call |
 > | 3 | Does the stream stop when the channel ends? | **Yes** — clean WS close 1000, from source and observed |
 > | 3b | Does it survive `uuid_transfer` of its own channel? | **Yes**, and the write stream follows the new bridge |
@@ -2204,20 +2204,47 @@ marked otherwise.
 
 ### B.1 `mod_audio_stream` — https://github.com/amigniter/mod_audio_stream
 
-**Build and install — done, with three portability fixes.** The repository at
-`~/workspaces/github/mod_audio_stream` builds on this machine after:
+**Build and install — done.** ~~with three portability fixes~~ → **superseded 2026-08-17:
+all three are fixed upstream and the hand-patched build is retired.** From a clean tree,
+with no environment variables and no local flags:
 
-1. `git submodule update --init` (`libs/libwsc` ships empty).
-2. **`-DCMAKE_BUILD_TYPE=RelWithDebInfo`, not `Release`.** libwsc's Release path runs
+```
+git submodule update --init --recursive
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+make -C build -j8 && make -C build install
+```
+
+`[MEASURED]` The installed object is Mach-O **arm64** and
+`freeswitch/assert-audio-stream.sh` passes against it. What changed matters beyond this
+platform:
+
+- **SpeexDSP is genuinely linked now, not resolved by accident.** It had been
+  `find_package`d and then never used. `[INFERENCE]` That fixes Debian as well as Homebrew:
+  there the symbols were resolving from FreeSWITCH's own copy, so the silent wrong-rate
+  build this document's assertion exists to catch was reachable on Linux too, not only here.
+- `Release` is the supported path again — `CMAKE_STRIP` is cleared on Apple before libwsc's
+  `strip --strip-unneeded` runs, so `RelWithDebInfo` is no longer a workaround.
+- The output is forced to `.so` on Apple. CMake's default `.dylib` is a file FreeSWITCH
+  simply will not load, which presents as a broken module rather than a wrong filename.
+- `make install` no longer needs root, and the Homebrew prefix is detected rather than
+  assumed.
+
+The three fixes below are kept as the record of what was wrong, because the assertion in
+§B.5 exists because of the third one:
+
+1. ~~`git submodule update --init`~~ (`libs/libwsc` ships empty) — still required, now
+   documented upstream.
+2. ~~`-DCMAKE_BUILD_TYPE=RelWithDebInfo`, not `Release`~~ — libwsc's Release path ran
    `strip --strip-unneeded` (`libs/libwsc/CMakeLists.txt:100-105`), a GNU flag macOS's
-   `strip` rejects, which fails the link.
-3. **SpeexDSP must be added by hand.** `CMakeLists.txt:38-43` links
-   `PkgConfig::FreeSWITCH pthread libwsc` and *never* links SpeexDSP, though
-   `mod_audio_stream.h:5` includes `speex/speex_resampler.h`. On Debian this works by
-   accident (default include path, symbols pulled in transitively); on Homebrew it fails
-   twice — missing header, then five undefined `speex_resampler_*` symbols. Fixed with
-   `-DCMAKE_C_FLAGS=-I/opt/homebrew/include -DCMAKE_CXX_FLAGS=-I/opt/homebrew/include`
-   and `-DCMAKE_SHARED_LINKER_FLAGS="-L/opt/homebrew/lib -lspeexdsp"`.
+   `strip` rejects.
+3. ~~SpeexDSP must be added by hand~~ — `CMakeLists.txt` linked
+   `PkgConfig::FreeSWITCH pthread libwsc` and never SpeexDSP, though `mod_audio_stream.h:5`
+   includes `speex/speex_resampler.h`. **This is the one that mattered**: on Debian it
+   worked by accident, which is precisely a build that loads and does not resample.
+
+✗ **The running switch still holds the previous image in memory.** The new file is on disk
+and unloaded; reloading would drop any live `uuid_audio_stream` tap, so the timing is the
+owner's rather than a side effect of a build.
 
 The artifact is `mod_audio_stream.dylib`; FreeSWITCH's module directory holds `.so`
 names, so it is installed as `/usr/local/freeswitch/mod/mod_audio_stream.so`.
