@@ -1444,6 +1444,38 @@ Using `web/src/test/harness.tsx` (`installBackend():98`, `renderPage():139`):
 
 ### Layer 4 — live-call verification (Chrome with the web-sip-phone extension)
 
+**The environment this needs now exists** (2026-08-17, from the FreeSWITCH conf session,
+verified there rather than assumed):
+
+- A simulated PSTN trunk to a peer at `:5080` is configured. Inbound `95XXX` DIDs land in
+  `public` and reach `aicc_inbound.lua` unchanged, with the real caller id preserved end to
+  end (`X-AICC-ANI` carried the originating number on a live call). Outbound dials out the
+  trunk. All of it is additive — `default.xml`, `public.xml` and `modules.conf.xml` were not
+  edited.
+- `mod_audio_stream` is intact at all three levels: the `<load>` line, the `.so`, and
+  `module_exists` true at runtime with the `uuid_audio_stream` API registered.
+- `[FACT]` Migration 00009 is a **no-op for the switch**, independently confirmed from the
+  Lua side: the contract touches `luacc.dids`, `luacc.queues` and `luacc.directory` only,
+  and no script reads `transcripts`, `role` or `speaker`. §9's claim from the SQL side and
+  this one from the Lua side agree.
+
+**The step that reorders this checklist.** `[FACT]` The queue fallback works with **no AICC
+process running** — `mod_callcenter` is native, so `95001 → 7001 → support-en` delivers to a
+logged-in agent while the bot leg fails `GATEWAY_DOWN`. That means **checks B, C and the
+`CHANNEL_BRIDGE` attach-survival question (D4) can be exercised on a real agent leg before
+the UAS is up**, and they are the checks the whole design rests on. Do them first; the bot
+phase and the backfill (check A) need the application and come second.
+
+Two environment facts that will otherwise cost an afternoon:
+
+- **Pin the codec when originating to the gateway yourself:**
+  `{absolute_codec_string=PCMU,PCMA}`, or the peer answers `488 Not Acceptable Here` —
+  `global_codec_prefs` opens with OPUS. The dialplan route already pins it; code that
+  originates directly does not inherit that.
+- **The simulator does not send `BYE`** when the far end hangs up an answered call, so such
+  a call stays up until `media_timeout` (300 s). A test that appears to hang with dead audio
+  is this, not a fault in the transcript path — hang up the FreeSWITCH-side leg.
+
 Script, run against the dev switch with a real provider:
 
 1. Dial 95001. Bot answers. Say three things; confirm each appears as `Customer`, and
