@@ -1502,6 +1502,56 @@ Two more environment facts that will otherwise cost an afternoon:
   a call stays up until `media_timeout` (300 s). A test that appears to hang with dead audio
   is this, not a fault in the transcript path — hang up the FreeSWITCH-side leg.
 
+**`[MEASURED 2026-08-17]` End to end, twice, on real calls.** PSTN in from the simulator
+to 95001, Qwen answering as the bot, `transfer_to_agent`, the queue delivering to a WebRTC
+agent on 1001, and the tap recognising both speakers. Asserted from the ledger rather than
+the panel, because a silent split renders as a perfectly plausible transcript.
+
+```
+seq | speaker     | source | kind        | offset_ms | text
+----+-------------+--------+-------------+-----------+------------------------------------
+  1 | BOT         | MODEL  | TEXT        |      1406 | Thanks for calling NovaNet, how can…
+  2 | CUSTOMER    | MODEL  | TEXT        |      8642 | transfer to home agent.
+  3 | BOT         | MODEL  | TOOL_CALL   |      9203 | transfer_to_agent
+  4 | BOT         | MODEL  | TOOL_RESULT |      9212 | transfer_to_agent
+  5 | BOT         | MODEL  | TEXT        |     10502 | I'm connecting you to the support t…
+  6 | CUSTOMER    | ASR    | TEXT        |     24017 | hello can you kill me.
+  7 | HUMAN_AGENT | ASR    | TEXT        |     24293 | Hello, can you.
+  8 | CUSTOMER    | ASR    | TEXT        |     31580 | Em, see you later.
+```
+
+**`seq` is dense across the handoff.** One unbroken run 1→8, with the producer changing at
+the seam — `MODEL` through 5, `ASR` from 6 — and no restart at 1. The second call reads the
+same way, 1→10 with the change at 10. That is the check a unit test could not make: it
+proves both producers resolved to the *same* actor. Two actors would have produced two
+sequences each starting at 1, colliding on nothing, erroring nowhere, and rendering as a
+transcript that looked entirely reasonable.
+
+**Attribution survives the seam.** `CUSTOMER` is the same person on both sides of it —
+`MODEL`-sourced at seq 2, `ASR`-sourced at seq 6 and 8 — while `BOT` appears only before the
+transfer and `HUMAN_AGENT` only after. `source` makes the hybrid auditable, which is the
+whole reason that column exists.
+
+**The gap at the seam is real and correct:** 10502 ms to 24017 ms is the queue, the ring and
+the answer. Offsets increase monotonically across a producer change.
+
+*What this run does **not** establish.* ✗ Recognition quality here is visibly worse than
+B.3c's clean sample — "transfer to home agent" for *human agent*, "can you kill me" for *can
+you hear me*, a spurious `拖。` on an English call. That is conversational speech over a
+transcoded path, not the failure of any component, but it means accuracy on real calls is
+uncharacterised and should not be quoted from B.3c. ✗ Seq 6 and 7 are 276 ms apart with
+near-identical words on opposite channels: with both ends of a test call in one room, each
+microphone hears the other's speaker, and no channel split can undo acoustic bleed. On a
+real call the two parties are not in the same room; on a *test* call this will keep
+happening and should not be read as a de-interleaving fault. ✗ `[FACT]` 1001 registered
+`WSS-NAT`, so the tapped leg is a transcoded WebRTC leg. A plain-UDP SIP agent phone is a
+different media path and this run says nothing about it — the same argument that retired the
+parked-leg result.
+
+*No audio was dropped on either call:* the queue never overflowed and
+`aicc_transcribe_frames_dropped_total` stayed at zero, which is the reading that makes the
+transcript above trustworthy rather than merely present.
+
 Script, run against the dev switch with a real provider:
 
 1. Dial 95001. Bot answers. Say three things; confirm each appears as `Customer`, and
