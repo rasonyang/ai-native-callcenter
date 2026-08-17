@@ -1698,7 +1698,43 @@ assumption.
    `KindChannelHold`, which is the right instinct; what this adds is that the failure is
    invisible if it is not paused, so the pause is load-bearing rather than an optimisation.
 
-*Residual risk — narrowed by measurement, not yet closed.*
+**`[MEASURED 2026-08-17]` The last unproven assumption is closed: a bug attached at
+`CHANNEL_BRIDGE` survives.** Three real PSTN calls from the simulator to 95001, queued to
+`agent-wei`, delivered to the WebRTC softphone on 1001 and answered by a person. An ESL
+listener attached on the `CHANNEL_BRIDGE` event itself — **+2 ms, +19 ms, +2 ms** after the
+event — to a leg `mod_callcenter` had originated moments earlier.
+
+Every attach returned `+OK Success`, audio flowed **immediately and for the whole call**
+(464 / 225 / 183 frames, unbroken), and the bug stayed controllable — `pause` and `resume`
+both logged by the module — until the channel ended.
+
+The teardown is the switch's, not the bug's, and the log says so in the right order:
+
+```
+18:23:25.033  start …stereo 16000   →  adding bug.
+18:23:27.043  pause                 →  mod_audio_stream: pause     (bug alive, +2s)
+18:23:27.043  resume                →  mod_audio_stream: resume
+18:23:29.143                        →  Got SWITCH_ABC_TYPE_CLOSE   (caller hung up)
+18:23:33.043  pause                 →  Error locating session      (the session is gone)
+```
+
+`[FACT]` `Error locating session` names the **session**, and it appears only after
+`SWITCH_ABC_TYPE_CLOSE`. The `-ERR` at the later probes is a call that ended, not a bug that
+died — a distinction worth stating because "pause failed" reads like the failure this test
+was looking for.
+
+*So §8.1 stands as written:* attach on the agent leg at the bridge. The fallback it named —
+attach at `CHANNEL_ANSWER` and discard until the bridge — is **not needed** and should not be
+built.
+
+`[FACT]` **`cc_agent` identifies the agent leg at bridge time**, on all three calls. It is
+the switch's own answer to "which of these two legs is the agent's", available in the
+`CHANNEL_BRIDGE` moment without consulting our state — a useful cross-check against the
+`Party.AgentID` the coordinator will use, and the thing to assert on if the two ever
+disagree.
+
+*~~Residual risk — narrowed by measurement, not yet closed.~~ Closed. Kept below for the
+record of how it was narrowed.*
 
 `[MEASURED 2026-08-17]` **A bug survives a bridge.** Attached to a parked, answered leg,
 then `uuid_bridge`d to a second leg, the stream ran unbroken across the bridge — 398 frames
