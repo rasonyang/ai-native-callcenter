@@ -33,8 +33,7 @@ type session struct {
 	// frame size rather than once per frame.
 	mono [2][]byte
 
-	sawMetadata bool
-	once        sync.Once
+	once sync.Once
 }
 
 func (s *session) run() {
@@ -64,7 +63,6 @@ func (s *session) run() {
 					"callId", s.claim.CallID, "error", err)
 				return
 			}
-			s.sawMetadata = true
 			continue
 		}
 		s.split(data)
@@ -77,7 +75,9 @@ func (s *session) startPumps() error {
 		if err != nil {
 			return err
 		}
-		cfg := transcribe.Config{}
+		// The call's language, not the deployment's: a bilingual queue answers
+		// in whichever language the number was dialled in.
+		cfg := transcribe.Config{Language: s.claim.Language}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		err = client.Start(ctx, cfg)
 		cancel()

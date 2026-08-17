@@ -190,22 +190,24 @@ func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)     {}
 
 // recordingTapper captures what the coordinator asked of the media tap.
 type recordingTapper struct {
-	mu       sync.Mutex
-	attached []string
-	paused   []string
-	resumed  []string
-	detached []string
-	agents   map[string]uuid.UUID
+	mu        sync.Mutex
+	attached  []string
+	paused    []string
+	resumed   []string
+	detached  []string
+	agents    map[string]uuid.UUID
+	languages map[string]string
 }
 
 func newRecordingTapper() *recordingTapper {
-	return &recordingTapper{agents: map[string]uuid.UUID{}}
+	return &recordingTapper{agents: map[string]uuid.UUID{}, languages: map[string]string{}}
 }
 
-func (r *recordingTapper) Attach(_ uuid.UUID, agentID, _ *uuid.UUID, channelID string) {
+func (r *recordingTapper) Attach(_ uuid.UUID, agentID, _ *uuid.UUID, channelID, language string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attached = append(r.attached, channelID)
+	r.languages[channelID] = language
 	if agentID != nil {
 		r.agents[channelID] = *agentID
 	}
@@ -242,7 +244,8 @@ func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
 	ctx := t.Context()
 	minted := uuid.New().String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
-	vars := map[string]string{"variable_aicc_call_id": minted}
+	// The dialplan stamps the language alongside the call id, as it does live.
+	vars := map[string]string{"variable_aicc_call_id": minted, "variable_aicc_language": "zh"}
 
 	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
@@ -270,6 +273,13 @@ func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
 	}
 	if taps.agents[agentChan] != testAgentID {
 		t.Errorf("the tap carries agent %s, want %s", taps.agents[agentChan], testAgentID)
+	}
+	// A recogniser given no language hint still works and is quietly worse, so
+	// the call's own language has to reach it.
+	if taps.languages[agentChan] != "zh" {
+		t.Errorf("the tap carries language %q, want zh — the call's own, not the "+
+			"deployment's; a recogniser left to guess is quietly worse, not broken",
+			taps.languages[agentChan])
 	}
 }
 

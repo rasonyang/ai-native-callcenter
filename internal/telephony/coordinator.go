@@ -53,7 +53,7 @@ type Coordinator struct {
 // rather than a "who is bridged right now" lookup that a second transfer would
 // invalidate.
 type Tapper interface {
-	Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID string)
+	Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, language string)
 	Detach(channelID string)
 	Pause(channelID string)
 	Resume(channelID string)
@@ -351,7 +351,7 @@ func (c *Coordinator) tapAgentLeg(callID uuid.UUID, channels ...string) {
 					continue
 				}
 				agentID, partyID := *p.AgentID, p.PartyID
-				c.taps.Attach(callID, &agentID, &partyID, channelID)
+				c.taps.Attach(callID, &agentID, &partyID, channelID, call.Language)
 			}
 		}
 	})

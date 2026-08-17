@@ -53,7 +53,7 @@ func NewTap(srv *Server, sw SwitchTap, publicURL string, rateHz int, ttl time.Du
 }
 
 // Attach taps one agent leg.
-func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID string) {
+func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, language string) {
 	if t == nil || t.sw == nil || !t.sw.IsUp() || t.publicURL == "" {
 		return
 	}
@@ -66,9 +66,10 @@ func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID st
 	t.mu.Unlock()
 
 	claim := Claim{
-		CallID:  callID,
-		Channel: channelID,
-		Expires: time.Now().Add(t.ttl),
+		CallID:   callID,
+		Channel:  channelID,
+		Language: language,
+		Expires:  time.Now().Add(t.ttl),
 	}
 	if agentID != nil {
 		claim.AgentID = *agentID

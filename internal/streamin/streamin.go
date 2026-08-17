@@ -91,7 +91,11 @@ type Claim struct {
 	PartyID uuid.UUID
 	AgentID uuid.UUID
 	Channel string
-	Expires time.Time
+	// Language is the call's own, so the recogniser is told what to expect.
+	// It rides in the signed token because it must be known before the first
+	// frame: the module's metadata arrives after the session has to start.
+	Language string
+	Expires  time.Time
 }
 
 var upgrader = websocket.Upgrader{
@@ -132,8 +136,8 @@ func New(cfg Config) (*Server, error) {
 // metadata arrives as the first frame, which is *after* the handshake, so it
 // can confirm an identity but cannot authenticate one.
 func (s *Server) Token(c Claim) string {
-	payload := fmt.Sprintf("%s|%s|%s|%s|%d",
-		c.CallID, c.PartyID, c.AgentID, c.Channel, c.Expires.Unix())
+	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%d",
+		c.CallID, c.PartyID, c.AgentID, c.Channel, c.Language, c.Expires.Unix())
 	mac := hmac.New(sha256.New, s.cfg.Secret)
 	mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
@@ -161,7 +165,7 @@ func (s *Server) verify(token string) (Claim, error) {
 	}
 
 	parts := strings.Split(string(raw), "|")
-	if len(parts) != 5 {
+	if len(parts) != 6 {
 		return Claim{}, errors.New("malformed claim")
 	}
 	var c Claim
@@ -171,7 +175,8 @@ func (s *Server) verify(token string) (Claim, error) {
 	c.PartyID, _ = uuid.Parse(parts[1])
 	c.AgentID, _ = uuid.Parse(parts[2])
 	c.Channel = parts[3]
-	unix, err := strconv.ParseInt(parts[4], 10, 64)
+	c.Language = parts[4]
+	unix, err := strconv.ParseInt(parts[5], 10, 64)
 	if err != nil {
 		return Claim{}, errors.New("bad expiry")
 	}
