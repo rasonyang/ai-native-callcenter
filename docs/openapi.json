@@ -4804,6 +4804,8 @@
           "CALL_RECORDING_STARTED",
           "CALL_RECORDING_STOPPED",
           "CALL_CDR",
+          "CALL_TRANSCRIPT",
+          "CALL_TRANSCRIPTION_STATE",
           "QUEUE_JOINED",
           "QUEUE_LEFT",
           "QUEUE_COUNT",
@@ -4817,7 +4819,6 @@
           "DEVICE_UNREGISTERED",
           "DEVICE_IN_SERVICE",
           "BOT_SESSION_STARTED",
-          "BOT_TRANSCRIPT",
           "BOT_INTERRUPTED",
           "BOT_SESSION_ENDED",
           "CALLBACK_CREATED",
@@ -4904,6 +4905,108 @@
         },
         "required": [
           "oldestSeq"
+        ]
+      },
+      "Speaker": {
+        "type": "string",
+        "description": "Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent. Distinct from TranscriptRole, which describes the stored AI-leg ledger and is retired when the transcript table gains the human phase.",
+        "enum": [
+          "CUSTOMER",
+          "BOT",
+          "HUMAN_AGENT"
+        ]
+      },
+      "TranscriptSource": {
+        "type": "string",
+        "description": "Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.",
+        "enum": [
+          "MODEL",
+          "ASR"
+        ]
+      },
+      "TranscriptionState": {
+        "type": "string",
+        "description": "Health of live transcription for a call, as the agent should see it.",
+        "enum": [
+          "IDLE",
+          "CONNECTING",
+          "LIVE",
+          "DEGRADED",
+          "ERROR",
+          "STOPPED",
+          "ENDED"
+        ]
+      },
+      "SseTranscriptPayload": {
+        "type": "object",
+        "description": "Payload of CALL_TRANSCRIPT: one line of the conversation, from either phase of the call. seq orders the transcript within the call and is unrelated to the envelope's transport seq. A partial carries isFinal false and no seq, because it has no place in the order until it is final.",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "utteranceId": {
+            "type": "string"
+          },
+          "speaker": {
+            "$ref": "#/components/schemas/Speaker"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "partyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TranscriptKind"
+          },
+          "isFinal": {
+            "type": "boolean"
+          },
+          "text": {
+            "type": "string"
+          },
+          "offsetMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TranscriptSource"
+          }
+        },
+        "required": [
+          "utteranceId",
+          "speaker",
+          "kind",
+          "isFinal",
+          "text",
+          "source"
+        ]
+      },
+      "SseTranscriptionStatePayload": {
+        "type": "object",
+        "description": "Payload of CALL_TRANSCRIPTION_STATE: whether the agent is seeing everything that is being said, and if not, which side is missing. reason is a stable code, never display text.",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/TranscriptionState"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "degradedSpeakers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Speaker"
+            }
+          }
+        },
+        "required": [
+          "state"
         ]
       }
     }

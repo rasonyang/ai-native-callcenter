@@ -35,10 +35,12 @@ const (
 
 // Call-scoped facts about the aggregate.
 const (
-	TypeCallUserData         Type = "CALL_USER_DATA"
-	TypeCallRecordingStarted Type = "CALL_RECORDING_STARTED"
-	TypeCallRecordingStopped Type = "CALL_RECORDING_STOPPED"
-	TypeCallCDR              Type = "CALL_CDR"
+	TypeCallUserData           Type = "CALL_USER_DATA"
+	TypeCallRecordingStarted   Type = "CALL_RECORDING_STARTED"
+	TypeCallRecordingStopped   Type = "CALL_RECORDING_STOPPED"
+	TypeCallCDR                Type = "CALL_CDR"
+	TypeCallTranscript         Type = "CALL_TRANSCRIPT"
+	TypeCallTranscriptionState Type = "CALL_TRANSCRIPTION_STATE"
 )
 
 // Queue, agent, device, bot and callback scopes.
@@ -56,7 +58,6 @@ const (
 	TypeDeviceUnregistered Type = "DEVICE_UNREGISTERED"
 	TypeDeviceInService    Type = "DEVICE_IN_SERVICE"
 	TypeBotSessionStarted  Type = "BOT_SESSION_STARTED"
-	TypeBotTranscript      Type = "BOT_TRANSCRIPT"
 	TypeBotInterrupted     Type = "BOT_INTERRUPTED"
 	TypeBotSessionEnded    Type = "BOT_SESSION_ENDED"
 	TypeCallbackCreated    Type = "CALLBACK_CREATED"

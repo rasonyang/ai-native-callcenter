@@ -1588,7 +1588,7 @@ export interface components {
          * @description Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.
          * @enum {string}
          */
-        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_IN_SERVICE" | "BOT_SESSION_STARTED" | "BOT_TRANSCRIPT" | "BOT_INTERRUPTED" | "BOT_SESSION_ENDED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
+        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "CALL_TRANSCRIPT" | "CALL_TRANSCRIPTION_STATE" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_IN_SERVICE" | "BOT_SESSION_STARTED" | "BOT_INTERRUPTED" | "BOT_SESSION_ENDED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
         /** @description One envelope on the event stream. Call events repeat enough context (callType, userData) for a screen-pop without further requests. In SSE framing the envelope is the data: line, the event: line carries type, and the id: line carries seq. */
         SseEvent: {
             version: number;
@@ -1625,6 +1625,45 @@ export interface components {
         SseSystemResetPayload: {
             /** Format: int64 */
             oldestSeq: number;
+        };
+        /**
+         * @description Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent. Distinct from TranscriptRole, which describes the stored AI-leg ledger and is retired when the transcript table gains the human phase.
+         * @enum {string}
+         */
+        Speaker: "CUSTOMER" | "BOT" | "HUMAN_AGENT";
+        /**
+         * @description Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.
+         * @enum {string}
+         */
+        TranscriptSource: "MODEL" | "ASR";
+        /**
+         * @description Health of live transcription for a call, as the agent should see it.
+         * @enum {string}
+         */
+        TranscriptionState: "IDLE" | "CONNECTING" | "LIVE" | "DEGRADED" | "ERROR" | "STOPPED" | "ENDED";
+        /** @description Payload of CALL_TRANSCRIPT: one line of the conversation, from either phase of the call. seq orders the transcript within the call and is unrelated to the envelope's transport seq. A partial carries isFinal false and no seq, because it has no place in the order until it is final. */
+        SseTranscriptPayload: {
+            /** Format: int64 */
+            seq?: number;
+            utteranceId: string;
+            speaker: components["schemas"]["Speaker"];
+            /** Format: uuid */
+            agentId?: string;
+            /** Format: uuid */
+            partyId?: string;
+            kind: components["schemas"]["TranscriptKind"];
+            isFinal: boolean;
+            text: string;
+            /** Format: int64 */
+            offsetMs?: number;
+            language?: string;
+            source: components["schemas"]["TranscriptSource"];
+        };
+        /** @description Payload of CALL_TRANSCRIPTION_STATE: whether the agent is seeing everything that is being said, and if not, which side is missing. reason is a stable code, never display text. */
+        SseTranscriptionStatePayload: {
+            state: components["schemas"]["TranscriptionState"];
+            reason?: string;
+            degradedSpeakers?: components["schemas"]["Speaker"][];
         };
     };
     responses: {
