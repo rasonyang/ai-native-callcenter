@@ -5,7 +5,7 @@ import { SoftphoneBar } from '@/components/softphone-bar'
 import { usePresence } from '@/lib/agent'
 import { ApiError, api } from '@/lib/api'
 import { useSession } from '@/lib/session'
-import { useEventStream } from '@/lib/use-event-stream'
+import { EventStreamProvider, useEventStream } from '@/lib/use-event-stream'
 
 /**
  * Authenticated layout. Everything below this route needs a session, so the
@@ -28,7 +28,7 @@ export const Route = createFileRoute('/_app')({
 
 function AppLayout() {
   const { data: user } = useSession()
-  const { status } = useEventStream(Boolean(user))
+  const { status, listeners } = useEventStream(Boolean(user))
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const isAgent = user?.role === 'AGENT'
   const { data: presence } = usePresence(Boolean(isAgent))
@@ -44,15 +44,19 @@ function AppLayout() {
       : undefined
 
   return (
-    <AppShell
-      user={user}
-      streamStatus={status}
-      pathname={pathname}
-      deviceState={deviceState}
-      // An agent carries their call controls with them on every page.
-      softphone={isAgent ? <SoftphoneBar /> : undefined}
-    >
-      <Outlet />
-    </AppShell>
+    // One EventSource feeds the whole application; this makes its tail and its
+    // health reachable from any panel below, without a second connection.
+    <EventStreamProvider value={{ status, listeners }}>
+      <AppShell
+        user={user}
+        streamStatus={status}
+        pathname={pathname}
+        deviceState={deviceState}
+        // An agent carries their call controls with them on every page.
+        softphone={isAgent ? <SoftphoneBar /> : undefined}
+      >
+        <Outlet />
+      </AppShell>
+    </EventStreamProvider>
   )
 }

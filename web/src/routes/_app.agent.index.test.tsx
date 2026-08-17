@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 
@@ -243,5 +244,41 @@ describe('the rest of the cockpit', () => {
     await renderCockpit({ presence: presenceFixture({ extensionNumber: '1001' }) })
     // Once in the card's title slot, once in the detail row.
     expect(await screen.findAllByText('1001')).toHaveLength(2)
+  })
+})
+
+/**
+ * The cockpit lost its softphone once to an agentic whole-file rewrite. These
+ * assert that adding the transcript panel took nothing with it: the control
+ * grid is intact and still issues the same request.
+ */
+describe('the transcript panel does not disturb the cockpit', () => {
+  it('keeps all six controls and the transcript on the same screen', async () => {
+    await renderCockpit(onCall)
+
+    expect(await screen.findByText('Live transcript')).toBeInTheDocument()
+
+    const grid = await screen.findByRole('group', { name: /call controls/i })
+    expect(within(grid).getAllByRole('button')).toHaveLength(6)
+    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^conference$/i, /^keypad$/i, /hang up/i]) {
+      expect(within(grid).getByRole('button', { name })).toBeVisible()
+    }
+  })
+
+  it('still hangs up through the same endpoint with the panel mounted', async () => {
+    const { api } = await renderCockpit(onCall)
+    const grid = await screen.findByRole('group', { name: /call controls/i })
+
+    await userEvent.click(within(grid).getByRole('button', { name: /hang up/i }))
+    await waitFor(() =>
+      expect(api.commands.map((c) => c.path)).toContain(`/calls/${CALL_ID}/hangup`),
+    )
+  })
+
+  it('asks for no transcript when there is no call', async () => {
+    const { api } = await renderCockpit({ calls: [] })
+
+    await screen.findByText('Live transcript')
+    expect(api.requests.filter((r) => r.path.includes('/transcript'))).toHaveLength(0)
   })
 })

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 import { CALLS_KEY, PRESENCE_KEY, ROSTER_KEY } from './agent'
@@ -36,6 +36,15 @@ export type StreamStatus = 'connected' | 'reconnecting' | 'offline'
 
 type Listener = (event: AiccEvent) => void
 
+/** Runs one listener without letting its failure reach the others. */
+function notify(listener: Listener, event: AiccEvent) {
+  try {
+    listener(event)
+  } catch (error) {
+    console.error('event listener failed', event.type, error)
+  }
+}
+
 /**
  * Opens the one application-wide event stream and reports its status.
  *
@@ -46,7 +55,7 @@ type Listener = (event: AiccEvent) => void
 export function useEventStream(enabled: boolean) {
   const queryClient = useQueryClient()
   const [status, setStatus] = useState<StreamStatus>('offline')
-  const listeners = useRef(new Map<EventType | '*', Set<Listener>>())
+  const listeners = useRef(new Map<EventType | '*', Listener[]>())
 
   useEffect(() => {
     if (!enabled) {
@@ -66,8 +75,12 @@ export function useEventStream(enabled: boolean) {
       onReset: () => void queryClient.invalidateQueries(),
       onEvent: (event) => {
         applyToCache(queryClient, event)
-        for (const listener of listeners.current.get(event.type) ?? []) listener(event)
-        for (const listener of listeners.current.get('*') ?? []) listener(event)
+        // Each listener is isolated. Without this a listener that throws takes
+        // the rest of the listeners for that event with it, so a fault in a
+        // secondary panel could starve the softphone's cache updates — the
+        // one thing on this screen that must never stop.
+        for (const listener of listeners.current.get(event.type) ?? []) notify(listener, event)
+        for (const listener of listeners.current.get('*') ?? []) notify(listener, event)
       },
     })
 
@@ -78,4 +91,48 @@ export function useEventStream(enabled: boolean) {
   }, [enabled, queryClient])
 
   return { status, listeners: listeners.current }
+}
+
+/**
+ * Makes the stream's listener registry reachable from anywhere below the app
+ * shell, so a panel can tail events without opening a second EventSource —
+ * the application has exactly one, by design.
+ */
+interface EventStreamValue {
+  status: StreamStatus
+  listeners: Map<EventType | '*', Listener[]>
+}
+
+const EventStreamContext = createContext<EventStreamValue | null>(null)
+
+export const EventStreamProvider = EventStreamContext.Provider
+
+/**
+ * The stream's health, for panels that must be honest about not hearing it.
+ * Defaults to offline outside the provider, which is the safe reading.
+ */
+export function useStreamStatus(): StreamStatus {
+  return useContext(EventStreamContext)?.status ?? 'offline'
+}
+
+/**
+ * Subscribes to one event type for the lifetime of the component.
+ *
+ * The handler is held in a ref so a caller may pass an inline closure without
+ * re-subscribing on every render, which would drop events in the gap.
+ */
+export function useEventListener(type: EventType, handler: Listener) {
+  const registry = useContext(EventStreamContext)?.listeners
+  const ref = useRef(handler)
+  ref.current = handler
+
+  useEffect(() => {
+    if (!registry) return
+    const listener: Listener = (event) => ref.current(event)
+    const existing = registry.get(type) ?? []
+    registry.set(type, [...existing, listener])
+    return () => {
+      registry.set(type, (registry.get(type) ?? []).filter((l) => l !== listener))
+    }
+  }, [registry, type])
 }

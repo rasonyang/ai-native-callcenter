@@ -413,5 +413,28 @@
   "device": {
     "reachable": "话机已注册",
     "unreachable": "话机不可达"
+  },
+  "transcript": {
+    "title": "实时转写",
+    "empty": "暂无对话内容。",
+    "loading": "加载中…",
+    "unavailable": "转写不可用。",
+    "jumpToLatest": "跳到最新",
+    "loadEarlier": "加载更早内容",
+    "speakers": {
+      "BOT": "机器人",
+      "CUSTOMER": "客户",
+      "HUMAN_AGENT": "坐席",
+      "YOU": "我"
+    },
+    "status": {
+      "IDLE": "未转写",
+      "CONNECTING": "连接中…",
+      "LIVE": "转写中…",
+      "DEGRADED": "仅转写单方",
+      "ERROR": "转写不可用",
+      "STOPPED": "转写已结束",
+      "ENDED": "通话已结束"
+    }
   }
 }

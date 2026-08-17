@@ -415,5 +415,28 @@
   "device": {
     "reachable": "Phone registered",
     "unreachable": "Phone unreachable"
+  },
+  "transcript": {
+    "title": "Live transcript",
+    "empty": "Nothing said yet.",
+    "loading": "Loading…",
+    "unavailable": "Transcript unavailable.",
+    "jumpToLatest": "Jump to latest",
+    "loadEarlier": "Load earlier",
+    "speakers": {
+      "BOT": "Bot",
+      "CUSTOMER": "Customer",
+      "HUMAN_AGENT": "Agent",
+      "YOU": "You"
+    },
+    "status": {
+      "IDLE": "Not transcribing",
+      "CONNECTING": "Connecting…",
+      "LIVE": "Transcribing…",
+      "DEGRADED": "Transcribing one side",
+      "ERROR": "Transcription unavailable",
+      "STOPPED": "Transcription ended",
+      "ENDED": "Call ended"
+    }
   }
 }

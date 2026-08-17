@@ -10,6 +10,7 @@ import {
 import { Popover } from 'radix-ui'
 
 import { Keypad } from '@/components/keypad'
+import { LiveTranscriptBoundary } from '@/components/live-transcript'
 import { StatusPill } from '@/components/status-pill'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,21 +22,24 @@ import {
 } from '@/lib/agent'
 import { callApi, type CallSnapshot, type PartySnapshot } from '@/lib/api'
 import { useCallbacks } from '@/lib/ledger'
+import { useStreamStatus } from '@/lib/use-event-stream'
 import { cn, formatDuration } from '@/lib/utils'
 
 /**
  * Agent cockpit: the call and the work waiting on the left, the caller in the
  * middle, presence and wrap-up on the right.
  *
- * Every panel is fed by an endpoint that exists. The reference design also
- * carries a live queue list, a live transcript and CRM tabs (orders, notes,
- * interaction history); the platform publishes no queue-depth or transcript
- * events and has no contact store, so those panels are deliberately absent
- * rather than faked.
+ * Every panel is fed by an endpoint that exists. The live transcript is the
+ * centre column's third card: it carries both phases of one conversation,
+ * because to the agent reading it that is what it is. The reference design
+ * also carries a live queue list and CRM tabs (orders, notes, interaction
+ * history); the platform publishes no queue-depth events and has no contact
+ * store, so those panels are deliberately absent rather than faked.
  */
 export const Route = createFileRoute('/_app/agent/')({ component: AgentCockpit })
 
 function AgentCockpit() {
+  const streamStatus = useStreamStatus()
   const { data: presence } = usePresence(true)
   const signedIn = Boolean(presence && presence.state !== 'LOGGED_OUT')
   const { data: calls } = useMyCalls(signedIn)
@@ -50,6 +54,12 @@ function AgentCockpit() {
 
       <div className="flex min-w-0 flex-1 flex-col gap-4">
         <CallerCard call={call} />
+        <LiveTranscriptBoundary
+          callId={call?.callId}
+          myAgentId={call?.parties.find((p) => p.agentId)?.agentId}
+          streamStatus={streamStatus}
+          className="min-h-0 flex-1"
+        />
         <JourneyCard call={call} />
       </div>
 
@@ -476,8 +486,7 @@ function JourneyCard({ call }: { call?: CallSnapshot }) {
           <span className="tabular">{t('agent.legCount', { count: call.parties.length })}</span>
         ) : undefined
       }
-      className="min-h-0 flex-1"
-      bodyClassName="min-h-0 flex-1 overflow-y-auto"
+      bodyClassName="max-h-56 overflow-y-auto"
     >
       {!call ? (
         <Empty text={t('agent.noActiveCall')} />
