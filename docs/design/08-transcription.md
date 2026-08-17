@@ -1381,6 +1381,16 @@ rather than at the first call:
 - `internal/transcribe/dashscope`: `heartbeat:true` / `sentence_id:0` results are dropped
   before the seam; `task-failed` surfaces as `ERROR` **and** marks the connection unusable
   rather than retrying on it.
+- `internal/transcribe/dashscope`: **an empty final is dropped at the client, and the
+  assertion is that no `seq` was allocated** — not merely that no row was written.
+  `[MEASURED, B.3c]` leading silence produces a real `sentence_end:true` carrying
+  `text:""`. **Why the stronger assertion:** `seq` is the ordering base (D2) *and* the
+  cursor the `?sinceSeq=` backfill contract keys off (D8). A `seq` burned on silence
+  leaves a permanent hole between the snapshot and the tail, and **nothing errors** — the
+  panel just loses or duplicates a line at the seam, which is the exact failure §12.3 is
+  built to prevent. A test that only checks the row count would pass while the defect
+  ships. So: assert the actor's counter is unchanged, and place the drop **before** the
+  transcript actor, since the actor is what allocates.
 - `internal/events`: **G-09 regression** — an event published with
   `Scope{AgentIDs:[a]}` is not replayed to agent `b` on resume. This test would fail
   today.
@@ -2169,9 +2179,61 @@ Contract, from the client-events and server-events pages:
 
 The test audio was macOS `say -v Tingting` at 16 kHz mono LE16 — synthetic, not captured
 through the media path, so it tests the **protocol**, not recognition quality on telephony
-audio. B.2/B.3's measurements used real media-path audio; this one deliberately did not,
-because the open question here was the wire contract. ✗ — recognition quality on
-8 kHz-originated, G.711-transcoded speech is unmeasured for this model.
+audio. ~~✗ recognition quality on 8 kHz-originated, G.711-transcoded speech is unmeasured
+for this model.~~ → **measured, B.3c.**
+
+### B.3c Telephony-path recognition quality (M6.0.3)
+
+**Measured 2026-08-17.** The last value risk in the plan: the protocol was proven, the
+accuracy on real telephony audio was not. `[FACT]` The 5.82 s sample from B.2/B.3 no longer
+existed — the scratch directory is cleared between sessions — so an equivalent was captured
+fresh rather than substituted with something weaker.
+
+*The rig, so it reproduces.* A SIP call **to the switch itself** over PCMU, so the audio is
+genuinely G.711 companded rather than merely 8 kHz: `originate
+{absolute_codec_string=PCMU}sofia/internal/<ext>@<lan-ip> &playback(silence_stream://30000)`,
+with `mod_audio_stream` attached to that leg as `stereo 16000`. The **left/READ** channel is
+then audio that has crossed a real RTP leg and been decoded from μ-law. `[FACT]` The switch
+confirms it: `Channel-Read-Codec-Name: PCMU`, `Channel-Read-Codec-Rate: 8000`.
+
+Two rig details cost time and are worth writing down:
+
+- `[MEASURED]` **The leg must be running an app that pumps media.** With `&park()` the tap
+  received **zero** frames; with `&echo()` it received 6.84 s and then stopped mid-playback,
+  silently and with no module error. `&playback(silence_stream://…)` streamed the whole
+  call. A truncated capture looks exactly like a model that stopped transcribing — the
+  envelope plot is what distinguished them.
+- `[MEASURED]` **The module does not cap a stream.** A 30 s control capture on a
+  continuously-pumping call delivered **1487 frames = 29.74 s**, unbroken. This is what
+  proved the truncation above was the rig and not the tap.
+
+| | |
+|---|---|
+| **Ground truth** (three stock Callie prompts, 6.66 s total) | "Please state your name and the reason for your call. Speak to a customer service representative. Please hold while your party is being contacted." |
+| **Qwen returned** | "Please state your name and the reason for your call. Speak to a customer service representative. Please hold while your party is being contacted." |
+| **Verdict** | **Exact**, word for word, including sentence punctuation |
+
+Because this deployment is mainland and the model is Chinese-first, English alone would have
+left the primary case untested. The same rig, same PCMU leg, with a Mandarin utterance:
+
+| | |
+|---|---|
+| **Ground truth** | 您好，我这边的订单还没有收到，麻烦帮我查一下物流信息，谢谢。 |
+| **Qwen returned** | 您好，我这边的订单还没有收到，麻烦帮我查一下物流信息，谢谢。 |
+| **Verdict** | **Exact**, character for character |
+
+`[INFERENCE]` G.711 companding costs this model nothing measurable on clean speech. What
+this does **not** establish, and should not be read as establishing: accuracy on real
+callers — accents, overlap, background noise, and the agent's WebRTC uplink rather than a
+played file. Those belong to M6.4 with live calls. What it does close is the question that
+was blocking: the engine understands telephony-band audio arriving through this exact path.
+
+**One implementation consequence, and it would have been a defect.** `[MEASURED]` Both
+captures opened with a spurious final over the leading silence —
+`FINAL id=1 begin=0 end=780 text=""`. An empty final is still `sentence_end:true`, so a
+client that trusts the flag writes an **empty transcript row** and allocates a `seq` for
+it. The `dashscope` client must drop finals whose text is empty after trimming, before the
+seam (§8.3). Add it to the unit suite in §16.
 
 ### B.4 Things nobody has measured
 
@@ -2183,8 +2245,13 @@ unmeasured until the trigger in D5 fires: **the first deployment that separates 
 from the app.** Do not quietly cite the module's TLS support as available on the strength
 of its README; nobody here has run it.
 
-Also unmeasured, and each already noted where it matters: recognition quality on real
-G.711-originated audio for `qwen-audio-3.0-asr-flash-streaming` (B.3b), the module's
+~~Recognition quality on real G.711-originated audio for
+`qwen-audio-3.0-asr-flash-streaming`~~ → **measured, B.3c: exact in both English and
+Mandarin.** A related one is also gone: the module was seen streaming 29.74 s unbroken, so
+"does the tap survive a normal call length" is no longer open — only true *backpressure*,
+under a consumer that stalls, still is.
+
+Also unmeasured, and each already noted where it matters: the module's
 backpressure behaviour under a stalled consumer (§14), whether a bug attached at
 `CHANNEL_BRIDGE` survives the bridge's own set-up (D4), **16000→24000 resampling
 specifically** (D15 — 8000→16000 and 8000→24000 are measured; a `loopback/` channel cannot
