@@ -52,9 +52,13 @@ type Subscription struct {
 type Hub struct {
 	seq *Sequence
 
-	mu     sync.RWMutex
-	subs   map[*Subscription]struct{}
-	ring   []Event
+	mu   sync.RWMutex
+	subs map[*Subscription]struct{}
+	// ring holds each event with the scope it was published under. Replay has
+	// to answer the same question delivery did — may this subscriber see it? —
+	// and the scope is the only thing that answers it, so the ring cannot hold
+	// the envelope alone.
+	ring   []ringEntry
 	ringAt int   // next write position
 	oldest int64 // oldest seq still replayable, 0 when the ring is empty
 
@@ -67,7 +71,7 @@ func NewHub(seq *Sequence) *Hub {
 	return &Hub{
 		seq:  seq,
 		subs: make(map[*Subscription]struct{}),
-		ring: make([]Event, 0, ringCapacity),
+		ring: make([]ringEntry, 0, ringCapacity),
 	}
 }
 
@@ -82,7 +86,7 @@ func (h *Hub) Publish(ctx context.Context, ev Event, scope Scope) Event {
 	}
 
 	h.mu.Lock()
-	h.appendRing(ev)
+	h.appendRing(ev, scope)
 	var dropped []*Subscription
 	for sub := range h.subs {
 		if !sub.who.wants(ev, scope) {
@@ -128,9 +132,13 @@ func (h *Hub) Subscribe(who Subscriber, lastEventID int64) (sub *Subscription, r
 	if h.oldest == 0 || lastEventID+1 < h.oldest {
 		return sub, nil, true
 	}
-	for _, ev := range h.snapshotLocked() {
-		if ev.Seq > lastEventID && who.wants(ev, Scope{}) {
-			replay = append(replay, ev)
+	for _, entry := range h.snapshotLocked() {
+		// The scope is the one the event was published under, not an empty
+		// one: a resuming subscriber must be told exactly what a connected
+		// subscriber would have been told, or reconnecting becomes a way to
+		// read other people's calls.
+		if entry.ev.Seq > lastEventID && who.wants(entry.ev, entry.scope) {
+			replay = append(replay, entry.ev)
 		}
 	}
 	return sub, replay, false
@@ -169,26 +177,33 @@ func (h *Hub) removeLocked(sub *Subscription) {
 	close(sub.ch)
 }
 
-func (h *Hub) appendRing(ev Event) {
+// ringEntry is a published event and the scope that decided who received it.
+type ringEntry struct {
+	ev    Event
+	scope Scope
+}
+
+func (h *Hub) appendRing(ev Event, scope Scope) {
+	entry := ringEntry{ev: ev, scope: scope}
 	if len(h.ring) < ringCapacity {
-		h.ring = append(h.ring, ev)
+		h.ring = append(h.ring, entry)
 	} else {
-		h.ring[h.ringAt] = ev
+		h.ring[h.ringAt] = entry
 		h.ringAt = (h.ringAt + 1) % ringCapacity
 	}
 	if len(h.ring) < ringCapacity {
-		h.oldest = h.ring[0].Seq
+		h.oldest = h.ring[0].ev.Seq
 	} else {
-		h.oldest = h.ring[h.ringAt].Seq
+		h.oldest = h.ring[h.ringAt].ev.Seq
 	}
 }
 
 // snapshotLocked returns ring contents in sequence order.
-func (h *Hub) snapshotLocked() []Event {
+func (h *Hub) snapshotLocked() []ringEntry {
 	if len(h.ring) < ringCapacity {
 		return h.ring
 	}
-	out := make([]Event, 0, ringCapacity)
+	out := make([]ringEntry, 0, ringCapacity)
 	out = append(out, h.ring[h.ringAt:]...)
 	out = append(out, h.ring[:h.ringAt]...)
 	return out

@@ -241,3 +241,63 @@ func TestCloseIsIdempotent(t *testing.T) {
 		t.Errorf("SubscriberCount = %d, want 0", h.SubscriberCount())
 	}
 }
+
+// G-09: replay must apply the scope the event was published under. Before this,
+// Subscribe evaluated every ring entry against an empty Scope, so an agent who
+// reconnected was replayed events addressed to other agents — a tidiness bug
+// while the stream carried only call control, and a disclosure bug the moment
+// it began carrying what people said to each other.
+func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
+	h, _ := newTestHub()
+	ctx := context.Background()
+	alice, bob := uuid.New(), uuid.New()
+
+	// Prime the sequence: seq 1 minus one is 0, which Subscribe reads as a
+	// fresh stream rather than a resume point.
+	h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
+
+	hers := h.Publish(ctx, Event{Type: TypeCallTranscript,
+		Payload: map[string]any{"text": "my card number is"}}, Scope{AgentIDs: []uuid.UUID{alice}})
+	his := h.Publish(ctx, Event{Type: TypeCallTranscript,
+		Payload: map[string]any{"text": "his own call"}}, Scope{AgentIDs: []uuid.UUID{bob}})
+	everyones := h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
+
+	// Bob reconnects from before all three.
+	sub, replay, reset := h.Subscribe(Subscriber{AgentID: &bob}, hers.Seq-1)
+	defer sub.Close()
+	if reset {
+		t.Fatal("resume point should be inside the ring")
+	}
+
+	got := map[int64]bool{}
+	for _, ev := range replay {
+		got[ev.Seq] = true
+	}
+	if got[hers.Seq] {
+		t.Error("replayed another agent's transcript line to bob")
+	}
+	if !got[his.Seq] {
+		t.Error("bob did not get his own line back")
+	}
+	if !got[everyones.Seq] {
+		t.Error("an unscoped event was withheld on replay")
+	}
+}
+
+// A supervisor still sees everything on replay, exactly as they do live.
+func TestReplayStillGivesSupervisorsEverything(t *testing.T) {
+	h, _ := newTestHub()
+	ctx := context.Background()
+	agent := uuid.New()
+
+	h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
+
+	first := h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{agent}})
+	h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{uuid.New()}})
+
+	sub, replay, _ := h.Subscribe(Subscriber{IsSupervisor: true}, first.Seq-1)
+	defer sub.Close()
+	if len(replay) != 2 {
+		t.Errorf("supervisor replay = %d events, want 2", len(replay))
+	}
+}
