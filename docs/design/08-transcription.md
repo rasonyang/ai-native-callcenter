@@ -1663,6 +1663,41 @@ optional, because the module tears the bug down itself when the channel closes. 
 no audio — between two agent legs the caller is in the queue on MOH — and it opens
 nothing at all for a RONA leg that is never answered, because the trigger is the bridge,
 not the ring.
+**`[MEASURED 2026-08-17]` The stereo assignment is confirmed on a real agent leg.** The
+earlier proof was a loopback pair; this one is the actual shape — an inbound call to 95001,
+`mod_callcenter` delivering to `agent-wei`, originating a fresh leg to a **WebRTC softphone
+registered over WSS**, with a person answering it. A steady 440 Hz tone was played to the
+customer side while the agent spoke:
+
+| Channel | Content | Reading |
+|---|---|---|
+| **left (READ)** | silence at median rms 8, with speech bursts to 1418 | **the agent's microphone** |
+| **right (WRITE)** | continuous 440.0 Hz at rms 7203 | **the customer** |
+
+588 frames, 11.76 s unbroken. `left = the agent's microphone, right = the customer` — which
+is what D4 asserts and what every attribution in this design rests on. It is no longer an
+assumption.
+
+**Two things the real leg taught that the loopback could not.**
+
+1. `[FACT]` **The agent leg cannot be found by matching the extension number.** A phone
+   registered over WSS appears as `sofia/internal/2pkv8ff8@9knab3e5soro.invalid` with
+   `dest=2pkv8ff8` — a per-registration token, nowhere near `1001`. `mod_callcenter`
+   resolves `user/1001@…` to that contact, and the channel keeps the contact, not the
+   extension. Anything that identifies the agent leg by digit-matching works for a UDP
+   desk phone and silently fails for every WebRTC agent — which is all 50 of them in this
+   design. The leg must come from `Party.AgentID` via the coordinator, which §8.1 already
+   requires; this is the measurement showing why that is not merely tidier.
+2. `[MEASURED]` **Stereo starves if one direction has no frames.** With the caller parked,
+   the bug on the bridged agent leg delivered **zero** frames for 12 s despite `+OK` on
+   attach and a healthy WebSocket. Playing audio to the customer side made 588 frames
+   appear immediately. `[INFERENCE]` `SMBF_STEREO` pairs a read frame with a write frame,
+   so a silent-by-absence direction yields nothing at all rather than silence. This is the
+   same signature as B.3c's rig failure and it has an operational edge: a caller on hold or
+   parked produces no transcript *and no error*. §14 already pauses the stream on
+   `KindChannelHold`, which is the right instinct; what this adds is that the failure is
+   invisible if it is not paused, so the pause is load-bearing rather than an optimisation.
+
 *Residual risk — narrowed by measurement, not yet closed.*
 
 `[MEASURED 2026-08-17]` **A bug survives a bridge.** Attached to a parked, answered leg,
