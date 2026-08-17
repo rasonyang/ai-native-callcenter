@@ -52,7 +52,16 @@ go run ./cmd/aicc-loadgen -target 127.0.0.1:6060 -calls 200 -ramp 60s -duration 
 
 If `docker info` fails, the VM is stopped — the fix is `colima start`, never `open -a Docker` (there is no `Docker.app`) and never `brew services`. Ask before starting or stopping it: it is the owner's machine-wide VM, not a per-project container, and it costs minutes and memory.
 
-Anything needing PostgreSQL — the dev server, `make demo-up`, and **any check that a migration actually applies** — needs this VM up first. There is no test in the tree that runs migrations against a real database (`internal/store`'s only test is a pure marshalling check), so a migration is unverified until someone boots one.
+Anything needing PostgreSQL — the dev server, `make demo-up`, and the migration tests — needs this VM up first.
+
+```sh
+docker compose -f deploy/dev/docker-compose.yml up -d   # PostgreSQL 18 on 127.0.0.1:5432
+# migrations run for real against it; without the env var these tests SKIP
+AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable' \
+  go test ./internal/store/ -run TestMigrations -v
+```
+
+**A migration is not reviewed until it has run** (`internal/store/migrate_test.go`): the tests apply every migration from zero, roll them all back and re-apply them, and — the case a fresh database cannot detect — migrate a database that already holds rows. A migration that narrows a CHECK must rewrite existing rows *before* installing the constraint, or PostgreSQL rejects it with "is violated by some row" on every deployment that has history. Add a fixture there for any migration that changes an enum's allowed values.
 
 Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins). **`.env.example` is the registry** — every setting with its real default, kept in step with `internal/config/config.go` (`cp .env.example .env`, then uncomment what changes). Two non-`AICC_` credentials matter: `OPENAI_API_KEY` / `ALIYUN_API_KEY`. Note the loader's semantics: an empty value means *unset* (the default wins, so a non-empty default cannot be blanked), and there is no inline-comment syntax — everything after the first `=` is the value. ESL is at `127.0.0.1:18021` (not stock 8021).
 

@@ -1,0 +1,235 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package store
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/pressly/goose/v3"
+
+	_ "github.com/jackc/pgx/v5/stdlib"
+)
+
+// Migrations run at server startup, so a mistake in one is a boot failure for
+// every deployment — and until this file existed nothing in the tree ran them
+// at all. They were reviewed by reading, which cannot catch a constraint that
+// PostgreSQL rejects or a Down block that does not reverse its Up.
+//
+// These tests need a real PostgreSQL: goose speaks to a server, and the whole
+// point is to find what only a server can tell us. Set AICC_TEST_DATABASE_URL
+// to a superuser-capable DSN — the dev stack's is
+// postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable — and they run.
+// Without it they skip, so `go test ./...` stays green on a machine with no
+// database, at the cost of saying so loudly.
+const testDSNEnv = "AICC_TEST_DATABASE_URL"
+
+// scratchDB creates a throwaway database and returns a DSN for it. Each test
+// gets its own, because migrating is a whole-database act and a shared one
+// would make the tests order-dependent.
+func scratchDB(t *testing.T) string {
+	t.Helper()
+	admin := os.Getenv(testDSNEnv)
+	if admin == "" {
+		t.Skipf("set %s to run the migration tests (see internal/store/migrate_test.go)", testDSNEnv)
+	}
+
+	u, err := url.Parse(admin)
+	if err != nil {
+		t.Fatalf("%s is not a URL: %v", testDSNEnv, err)
+	}
+	name := fmt.Sprintf("aicc_migtest_%d", time.Now().UnixNano())
+
+	db, err := sql.Open("pgx", admin)
+	if err != nil {
+		t.Fatalf("open admin connection: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec("CREATE DATABASE " + name); err != nil {
+		t.Fatalf("create scratch database: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanup, err := sql.Open("pgx", admin)
+		if err != nil {
+			return
+		}
+		defer cleanup.Close()
+		_, _ = cleanup.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
+	})
+
+	u.Path = "/" + name
+	return u.String()
+}
+
+func openScratch(t *testing.T, dsn string) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open scratch database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+// gooseFor points goose at the same embedded migrations the server runs, so
+// this exercises the production path rather than a copy of it.
+func gooseFor(t *testing.T) {
+	t.Helper()
+	goose.SetBaseFS(migrationFS)
+	goose.SetLogger(goose.NopLogger())
+	if err := goose.SetDialect("postgres"); err != nil {
+		t.Fatalf("set goose dialect: %v", err)
+	}
+}
+
+// The DDL executes against a real server, from nothing. This is the check that
+// a migration reviewed only by reading has never had.
+func TestMigrationsApplyFromZero(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+
+	ctx := context.Background()
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a fresh database failed: %v", err)
+	}
+
+	version, err := goose.GetDBVersionContext(ctx, db)
+	if err != nil {
+		t.Fatalf("read version: %v", err)
+	}
+	if version == 0 {
+		t.Fatal("migrations reported success but the database is still at version 0")
+	}
+
+	// Applying again must be a no-op, because every server start does it.
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("re-applying migrations failed: %v", err)
+	}
+}
+
+// Every Down block reverses its Up. A Down that does not is only discovered
+// when someone needs it, which is the worst moment to discover it.
+func TestMigrationsRollBackAndReapply(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+
+	ctx := context.Background()
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("initial migration failed: %v", err)
+	}
+	if err := goose.DownToContext(ctx, db, "migrations", 0); err != nil {
+		t.Fatalf("rolling every migration back failed: %v", err)
+	}
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("re-applying after a full rollback failed: %v", err)
+	}
+}
+
+// A data migration has to run against data. A fresh database cannot detect the
+// failure this guards: 00009 both narrows transcripts.speaker's CHECK and
+// rewrites CALLER to CUSTOMER, and if the constraint were added before the
+// rewrite — or the rewrite forgotten — PostgreSQL rejects the migration with
+// "is violated by some row", but only on a database that already holds rows.
+//
+// The shape generalises: a migration that changes an enum's allowed values
+// belongs here with a fixture of the old values, because inspection cannot
+// tell you whether the statements are in the right order.
+func TestMigrationsRewriteExistingRowsBeforeConstrainingThem(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	// Stop one short of the migration under test, so the fixture can be written
+	// in the shape that migration expects to find.
+	if err := goose.UpToContext(ctx, db, "migrations", 8); err != nil {
+		t.Fatalf("migrating to 8 failed: %v", err)
+	}
+
+	const callID = "11111111-1111-1111-1111-111111111111"
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO transcripts (call_id, seq, occurred_at, role, kind, content) VALUES
+		($1, 1, now(), 'BOT',    'TEXT', '{"text":"thanks for calling"}'),
+		($1, 2, now(), 'CALLER', 'TEXT', '{"text":"I need help"}'),
+		($1, 3, now(), 'CALLER', 'TEXT', '{"text":"order 4471"}')`, callID)
+	if err != nil {
+		t.Fatalf("seed pre-migration rows: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with history failed: %v", err)
+	}
+
+	rows, err := db.QueryContext(ctx,
+		`SELECT speaker, count(*) FROM transcripts GROUP BY speaker ORDER BY speaker`)
+	if err != nil {
+		t.Fatalf("read migrated rows: %v", err)
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var speaker string
+		var n int
+		if err := rows.Scan(&speaker, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		counts[speaker] = n
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+
+	if counts["CUSTOMER"] != 2 {
+		t.Errorf("CUSTOMER rows = %d, want 2 — the CALLER rows were not rewritten", counts["CUSTOMER"])
+	}
+	if counts["BOT"] != 1 {
+		t.Errorf("BOT rows = %d, want 1", counts["BOT"])
+	}
+	if n, ok := counts["CALLER"]; ok {
+		t.Errorf("%d rows still say CALLER, which the enum can no longer express", n)
+	}
+	if total := counts["CUSTOMER"] + counts["BOT"]; total != 3 {
+		t.Errorf("%d rows survived the migration, want 3", total)
+	}
+}
+
+// The constraint the migration installs is the one the Go constants and the
+// contract agree on. Read from the server rather than from the file, so a
+// migration that silently failed to replace the CHECK is caught.
+func TestSpeakerConstraintMatchesTheGoConstants(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migration failed: %v", err)
+	}
+
+	var clause string
+	err := db.QueryRowContext(ctx, `
+		SELECT pg_get_constraintdef(oid) FROM pg_constraint
+		WHERE conrelid = 'transcripts'::regclass AND conname = 'transcripts_speaker_check'`).
+		Scan(&clause)
+	if err != nil {
+		t.Fatalf("read the speaker constraint: %v", err)
+	}
+
+	for _, want := range []string{SpeakerCustomer, SpeakerBot, SpeakerHumanAgent} {
+		if !strings.Contains(clause, "'"+want+"'") {
+			t.Errorf("the database CHECK does not allow %s: %s", want, clause)
+		}
+	}
+	if strings.Contains(clause, "'CALLER'") {
+		t.Errorf("the database still allows CALLER: %s", clause)
+	}
+}
