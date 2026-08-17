@@ -28,6 +28,9 @@ var (
 	jitterFilled     metric.Int64Counter
 	providerFirstAud metric.Int64Histogram
 	providerErrors   metric.Int64Counter
+
+	transcribeFramesDropped metric.Int64Counter
+	transcribeFramesSent    metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -64,6 +67,12 @@ func init() {
 		metric.WithExplicitBucketBoundaries(100, 200, 300, 400, 500, 700, 900, 1200, 1600, 2000, 3000))
 	providerErrors, _ = meter.Int64Counter("aicc_provider_ws_errors_total",
 		metric.WithDescription("Provider sessions that ended on an error rather than a hangup."))
+	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
+		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
+	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
+		metric.WithDescription("Audio frames discarded because a recognition session could "+
+			"not keep up. Dropped audio is otherwise invisible: a missing transcript line "+
+			"looks the same whether the engine failed to hear it or we never sent it."))
 }
 
 // CallStarted and CallEnded move the live-call gauge. They must be paired:
@@ -117,4 +126,28 @@ func RecordProviderError(provider string) {
 	}
 	providerErrors.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("provider", provider)))
+}
+
+// RecordTranscribeAudio publishes one recognition session's frame accounting
+// when it ends, in the same shape and for the same reason as RecordRTPHealth:
+// these are counters the session already keeps, and reading them once at
+// teardown costs nothing on a path that runs fifty times a second.
+//
+// The dropped count is the one that matters. A bounded queue that discards the
+// oldest frame is right for a media path — stalling the switch to keep audio
+// is a worse failure — but a drop leaves no other trace, and a transcript with
+// a hole in it looks identical whether the engine mis-heard the words or we
+// never sent them. This is what tells those two apart afterwards.
+func RecordTranscribeAudio(provider, speaker string, sent, dropped int64) {
+	ctx := context.Background()
+	attrs := metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.String("speaker", speaker),
+	)
+	if transcribeFramesSent != nil && sent > 0 {
+		transcribeFramesSent.Add(ctx, sent, attrs)
+	}
+	if transcribeFramesDropped != nil && dropped > 0 {
+		transcribeFramesDropped.Add(ctx, dropped, attrs)
+	}
 }
