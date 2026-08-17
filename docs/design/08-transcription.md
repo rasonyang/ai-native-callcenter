@@ -1466,7 +1466,33 @@ logged-in agent while the bot leg fails `GATEWAY_DOWN`. That means **checks B, C
 the UAS is up**, and they are the checks the whole design rests on. Do them first; the bot
 phase and the backfill (check A) need the application and come second.
 
-Two environment facts that will otherwise cost an afternoon:
+**Three prerequisites the switch needs before a queue can deliver at all**, each found the
+hard way on 2026-08-17:
+
+1. `[FACT]` **A tier, not just an agent.** `mod_callcenter` holds both as runtime state and
+   forgets both on restart. An agent with no tier is not eligible for the queue's calls, so
+   callers wait out `max_wait_time` and abandon while our database still says the queue is
+   staffed. Restored on reconnect as of `catalog.Service.SyncTiers`; before that the dev
+   switch showed `calls_answered=0 calls_abandoned=4` against two staffed agents.
+2. `[FACT]` **`AICC_SWITCH_DOMAIN` must equal the switch's own domain.** It defaults to
+   `127.0.0.1`, and the dev switch's queue is `support-en@192.168.31.176`, so every
+   queue-named callcenter command fails with `-ERR Queue not found!` — into a `WARN`, not an
+   error. The same mismatch breaks registration: a softphone must register to the LAN
+   address, which is the realm the switch authenticates against.
+3. ✗ **An agent staffed while logged out never gets its tier**, and logging in later adds
+   the agent without adding the tier — `mirrorRegistration` restores presence, and nothing
+   restores staffing at that moment. Recorded, not yet fixed; it needs `agents` to learn
+   about queue staffing on sign-in, which is a cross-service dependency worth deciding
+   deliberately rather than improvising.
+
+`[FACT]` **The directory is served from the database, not from the XML.** `lua.conf.xml`
+binds `aicc_xml.lua` with `xml-handler-bindings="directory|configuration"`, so
+`luacc.directory` is authoritative and `conf/directory/default/<ext>.xml` is bypassed at
+lookup time. On this switch both sources happen to agree, which is exactly what makes the
+trap quiet: **editing the XML to change an agent's password does nothing**, and the change
+must go to `luacc.directory`.
+
+Two more environment facts that will otherwise cost an afternoon:
 
 - **Pin the codec when originating to the gateway yourself:**
   `{absolute_codec_string=PCMU,PCMA}`, or the peer answers `488 Not Acceptable Here` —
@@ -1637,12 +1663,24 @@ optional, because the module tears the bug down itself when the channel closes. 
 no audio — between two agent legs the caller is in the queue on MOH — and it opens
 nothing at all for a RONA leg that is never answered, because the trigger is the bridge,
 not the ring.
-*Residual risk, still unverified:* that a bug attached at `CHANNEL_BRIDGE` survives the
-bridge's own set-up rather than being torn down with it. `[MEASURED]` mitigates this
-considerably — a bug *does* survive a `uuid_transfer` of its own channel and its write
-stream follows the new bridge — but attaching during bridge set-up is a different moment
-and stays on the Layer 4 checklist. If it turns out not to survive, attach on the agent
-leg's `CHANNEL_ANSWER` and discard output until the bridge.
+*Residual risk — narrowed by measurement, not yet closed.*
+
+`[MEASURED 2026-08-17]` **A bug survives a bridge.** Attached to a parked, answered leg,
+then `uuid_bridge`d to a second leg, the stream ran unbroken across the bridge — 398 frames
+spanning both sides — and `uuid_audio_stream … pause` still returned `+OK` afterwards, so
+the bug was genuinely still attached rather than merely still connected. Together with the
+earlier `uuid_transfer` result, the failure mode this design most feared — bridge set-up
+tearing down an existing bug — does not occur.
+
+✗ **What that does not prove, and the distinction is real.** In the parked-leg test the bug
+was attached to a channel that had existed for seconds. `[FACT]` A `mod_callcenter` callback
+agent is different in kind: the agent leg is a **fresh outbound originate**, created at
+delivery time and bridged to the waiting caller, so at `CHANNEL_BRIDGE` it is milliseconds
+old. That is a materially different race, and a result from a parked leg does not transfer
+to it. The check stays on the Layer 4 list and needs a real queue delivery to a registered
+phone.
+*Fallback if it does not survive:* attach on the agent leg's `CHANNEL_ANSWER` and discard
+output until the bridge.
 *Cost to overturn:* moving to the caller's leg buys UUID stability the design no longer
 needs (D1 already bounds the stream to the bridge) and pays for it in attribution — every
 utterance would need a "who is bridged now" lookup, and an agent-to-agent transfer would
