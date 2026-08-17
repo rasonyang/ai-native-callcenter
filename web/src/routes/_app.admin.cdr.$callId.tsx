@@ -6,7 +6,7 @@ import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
   formatDuration, recordingAudioUrl, useCDR,
-  type CDR, type TranscriptEntry,
+  type CDR, type TranscriptLine,
 } from '@/lib/ledger'
 
 /** One finished call: its facts, its recording, and the words spoken. */
@@ -111,7 +111,7 @@ function CallDetail() {
         ) : (
           <ol className="space-y-2">
             {transcript.map((entry) => (
-              <TranscriptLine key={entry.seq} entry={entry} startedAt={cdr.startedAt} />
+              <TranscriptRow key={entry.seq} entry={entry} startedAt={cdr.startedAt} />
             ))}
           </ol>
         )}
@@ -158,9 +158,9 @@ function offsetLabel(occurredAt: string, startedAt: string): string {
   return formatDuration(offset)
 }
 
-function TranscriptLine({ entry, startedAt }: { entry: TranscriptEntry; startedAt: string }) {
+function TranscriptRow({ entry, startedAt }: { entry: TranscriptLine; startedAt: string }) {
   const { t } = useTranslation()
-  const isCaller = entry.role === 'CALLER'
+  const isCustomer = entry.speaker === 'CUSTOMER'
 
   let body: React.ReactNode
   if (entry.kind === 'TEXT') {
@@ -188,10 +188,10 @@ function TranscriptLine({ entry, startedAt }: { entry: TranscriptEntry; startedA
       </span>
       <span
         className={`w-14 shrink-0 pt-px text-xs font-medium ${
-          isCaller ? 'text-foreground' : 'text-primary'
+          isCustomer ? 'text-foreground' : 'text-primary'
         }`}
       >
-        {t(`cdr.roles.${entry.role}`)}
+        {t(`cdr.speakers.${entry.speaker}`)}
       </span>
       <span className="min-w-0 flex-1">{body}</span>
     </li>

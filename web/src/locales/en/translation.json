@@ -354,14 +354,14 @@
     "noTranscript": "No transcript; the call never reached the bot.",
     "toolCalled": "requested {{tool}}",
     "toolAnswered": "{{tool}} answered",
-    "roles": {
-      "CALLER": "Caller",
-      "BOT": "Bot",
-      "AGENT": "Agent"
-    },
     "playColumn": "Listen",
     "play": "Play the recording",
-    "stop": "Stop"
+    "stop": "Stop",
+    "speakers": {
+      "CUSTOMER": "Customer",
+      "BOT": "Bot",
+      "HUMAN_AGENT": "Agent"
+    }
   },
   "callbacks": {
     "hint": "Promises the bot made on the phone. Claim one before you ring.",

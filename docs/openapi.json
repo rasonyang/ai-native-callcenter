@@ -1321,6 +1321,77 @@
         }
       }
     },
+    "/calls/{callId}/transcript": {
+      "get": {
+        "operationId": "getCallTranscript",
+        "tags": [
+          "calls"
+        ],
+        "summary": "A call's transcript, from a cursor",
+        "description": "Requires AGENT and involvement in the call; SUPERVISOR and ADMIN pass unconditionally. Subscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "sinceSeq",
+            "in": "query",
+            "required": false,
+            "description": "Return lines after this transcript seq. 0, the default, is the whole call.",
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "default": 0,
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 500,
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of the transcript, oldest first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallTranscript"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/calls/{callId}/reviews": {
       "get": {
         "operationId": "listCallReviews",
@@ -4317,14 +4388,6 @@
           "total"
         ]
       },
-      "TranscriptRole": {
-        "type": "string",
-        "description": "Who acted on the AI leg. Only the bot and the caller write transcripts today.",
-        "enum": [
-          "CALLER",
-          "BOT"
-        ]
-      },
       "TranscriptKind": {
         "type": "string",
         "enum": [
@@ -4333,9 +4396,9 @@
           "TOOL_RESULT"
         ]
       },
-      "TranscriptEntry": {
+      "TranscriptLine": {
         "type": "object",
-        "description": "One thing said or done on an AI leg.",
+        "description": "One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor.",
         "properties": {
           "seq": {
             "type": "integer"
@@ -4344,8 +4407,8 @@
             "type": "string",
             "format": "date-time"
           },
-          "role": {
-            "$ref": "#/components/schemas/TranscriptRole"
+          "speaker": {
+            "$ref": "#/components/schemas/Speaker"
           },
           "kind": {
             "$ref": "#/components/schemas/TranscriptKind"
@@ -4354,14 +4417,40 @@
             "type": "object",
             "description": "TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.",
             "additionalProperties": true
+          },
+          "partyId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "offsetMs": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TranscriptSource"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "utteranceId": {
+            "type": "string"
           }
         },
         "required": [
           "seq",
           "occurredAt",
-          "role",
+          "speaker",
           "kind",
-          "content"
+          "content",
+          "offsetMs",
+          "source"
         ]
       },
       "Recording": {
@@ -4437,7 +4526,7 @@
           "transcript": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/TranscriptEntry"
+              "$ref": "#/components/schemas/TranscriptLine"
             }
           },
           "recordings": {
@@ -4909,7 +4998,7 @@
       },
       "Speaker": {
         "type": "string",
-        "description": "Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent. Distinct from TranscriptRole, which describes the stored AI-leg ledger and is retired when the transcript table gains the human phase.",
+        "description": "Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.",
         "enum": [
           "CUSTOMER",
           "BOT",
@@ -5006,6 +5095,34 @@
           }
         },
         "required": [
+          "state"
+        ]
+      },
+      "CallTranscript": {
+        "type": "object",
+        "description": "A page of a call's transcript, plus where to resume. isLive says whether more is still coming, so a client knows to tail rather than poll.",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TranscriptLine"
+            }
+          },
+          "nextSinceSeq": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "isLive": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TranscriptionState"
+          }
+        },
+        "required": [
+          "items",
+          "nextSinceSeq",
+          "isLive",
           "state"
         ]
       }

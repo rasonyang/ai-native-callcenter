@@ -781,7 +781,7 @@ func TestTranscriptsAndToolCallsAreReported(t *testing.T) {
 	model.events <- provider.Event{
 		Type: provider.EventTypeInputTranscript, Text: "check my bill", IsFinal: true,
 	}
-	caller := awaitBridgeEvent(t, session, EventTypeCallerSaid)
+	caller := awaitBridgeEvent(t, session, EventTypeCustomerSaid)
 	if caller.Text != "check my bill" || !caller.IsFinal {
 		t.Errorf("caller transcript = %q final=%v", caller.Text, caller.IsFinal)
 	}

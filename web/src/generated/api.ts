@@ -493,6 +493,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calls/{callId}/transcript": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A call's transcript, from a cursor
+         * @description Requires AGENT and involvement in the call; SUPERVISOR and ADMIN pass unconditionally. Subscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.
+         */
+        get: operations["getCallTranscript"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/calls/{callId}/reviews": {
         parameters: {
             query?: never;
@@ -1427,24 +1447,29 @@ export interface components {
             /** @description Total rows matching the filter, for paging. */
             total: number;
         };
-        /**
-         * @description Who acted on the AI leg. Only the bot and the caller write transcripts today.
-         * @enum {string}
-         */
-        TranscriptRole: "CALLER" | "BOT";
         /** @enum {string} */
         TranscriptKind: "TEXT" | "TOOL_CALL" | "TOOL_RESULT";
-        /** @description One thing said or done on an AI leg. */
-        TranscriptEntry: {
+        /** @description One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor. */
+        TranscriptLine: {
             seq: number;
             /** Format: date-time */
             occurredAt: string;
-            role: components["schemas"]["TranscriptRole"];
+            speaker: components["schemas"]["Speaker"];
             kind: components["schemas"]["TranscriptKind"];
             /** @description TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result. */
             content: {
                 [key: string]: unknown;
             };
+            /** Format: uuid */
+            partyId?: string;
+            /** Format: uuid */
+            agentId?: string;
+            /** Format: int64 */
+            offsetMs: number;
+            language?: string;
+            source: components["schemas"]["TranscriptSource"];
+            provider?: string;
+            utteranceId?: string;
         };
         /** @description One stored audio artifact of a call. */
         Recording: {
@@ -1470,7 +1495,7 @@ export interface components {
         /** @description One finished call with everything it left behind, in one round trip. */
         CDRDetail: {
             cdr: components["schemas"]["CDR"];
-            transcript: components["schemas"]["TranscriptEntry"][];
+            transcript: components["schemas"]["TranscriptLine"][];
             recordings: components["schemas"]["Recording"][];
         };
         /** @enum {string} */
@@ -1627,7 +1652,7 @@ export interface components {
             oldestSeq: number;
         };
         /**
-         * @description Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent. Distinct from TranscriptRole, which describes the stored AI-leg ledger and is retired when the transcript table gains the human phase.
+         * @description Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
          * @enum {string}
          */
         Speaker: "CUSTOMER" | "BOT" | "HUMAN_AGENT";
@@ -1664,6 +1689,14 @@ export interface components {
             state: components["schemas"]["TranscriptionState"];
             reason?: string;
             degradedSpeakers?: components["schemas"]["Speaker"][];
+        };
+        /** @description A page of a call's transcript, plus where to resume. isLive says whether more is still coming, so a client knows to tail rather than poll. */
+        CallTranscript: {
+            items: components["schemas"]["TranscriptLine"][];
+            /** Format: int64 */
+            nextSinceSeq: number;
+            isLive: boolean;
+            state: components["schemas"]["TranscriptionState"];
         };
     };
     responses: {
@@ -2473,6 +2506,37 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getCallTranscript: {
+        parameters: {
+            query?: {
+                /** @description Return lines after this transcript seq. 0, the default, is the whole call. */
+                sinceSeq?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                callId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of the transcript, oldest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallTranscript"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             500: components["responses"]["InternalError"];
         };
     };

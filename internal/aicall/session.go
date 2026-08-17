@@ -29,9 +29,9 @@ type EventType string
 const (
 	// EventTypeReady means the model is configured and the greeting is coming.
 	EventTypeReady EventType = "READY"
-	// EventTypeCallerSaid and EventTypeBotSaid are transcript events.
-	EventTypeCallerSaid EventType = "CALLER_SAID"
-	EventTypeBotSaid    EventType = "BOT_SAID"
+	// EventTypeCustomerSaid and EventTypeBotSaid are transcript events.
+	EventTypeCustomerSaid EventType = "CUSTOMER_SAID"
+	EventTypeBotSaid      EventType = "BOT_SAID"
 	// EventTypeToolCall is the model asking for something to be done.
 	EventTypeToolCall EventType = "TOOL_CALL"
 	// EventTypeTurnDone closes a turn, whether it completed or was cut short.
@@ -437,7 +437,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			Usage: event.Usage, Turn: s.currentTurn()})
 
 	case provider.EventTypeInputTranscript:
-		s.emit(Event{Type: EventTypeCallerSaid, Text: event.Text, IsFinal: event.IsFinal})
+		s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: event.IsFinal})
 
 	case provider.EventTypeOutputTranscript:
 		s.emit(Event{Type: EventTypeBotSaid, Text: event.Text, IsFinal: event.IsFinal})

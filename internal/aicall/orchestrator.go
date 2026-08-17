@@ -320,7 +320,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 	for event := range session.Events() {
 		switch event.Type {
-		case EventTypeCallerSaid:
+		case EventTypeCustomerSaid:
 			if event.IsFinal {
 				recorder.say(store.SpeakerCustomer, event.Text)
 			}

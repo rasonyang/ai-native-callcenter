@@ -185,6 +185,11 @@ FreeSWITCH, PostgreSQL or any provider API.
 
 ## 4. Current transcript pipeline (bot phase, end to end)
 
+> **Reading note.** This section records the tree **as the gap analysis found it**, before
+> M6.2. Its code quotes therefore name `store.TranscriptRoleCaller`/`…Bot` and the
+> `role` column, which no longer exist — see §17 D13 for what replaced them. They are kept
+> verbatim as the evidence the analysis rested on; nothing here describes current code.
+
 ### 4.1 Where it is produced
 
 `[FACT]` Two provider wire events become transcript text, in the one client:
@@ -436,7 +441,7 @@ identity silently underneath it.
 | G-16 | `docs/design/06-capacity.md:32` records "SIP/RTP in-process (**no mod_audio_fork/stream**) … Confirmed choice" | **MAJOR** (design conflict) | `docs/design/06-capacity.md` | Amend: the decision was about the *bot* leg's media path and stays; the human leg has no in-process alternative |
 | G-17 | No `live_calls` table, so nothing survives a restart mid-call (`rg live_calls .`) | **MINOR** | — | Accept; a restart loses the in-flight tail, exactly as it loses the bot transcript today |
 | G-18 | Quality-review UI absent (`web/src/lib/nav.ts:49` `isReady:false`) though the API exists (`server.go:212-214`) | **MINOR** | `web` | Out of scope; §12.9 |
-| G-19 | `role` is overloaded three ways in the contract: `Role`(AGENT/SUPERVISOR/ADMIN), `PartyRole`(ORIGINATOR/TARGET), `TranscriptRole`(CALLER/BOT) | **MINOR** (naming, 07 §5/§6) | contract, DB, TS | Rename the transcript one to `speaker` (§9, D-ENUM) |
+| G-19 | ~~`role` is overloaded three ways~~ → **CLOSED M6.2.** The transcript one is now `speaker`; `Role`(AGENT/SUPERVISOR/ADMIN) and `PartyRole`(ORIGINATOR/TARGET) are distinct concepts and keep the name legitimately | **MINOR** (naming, 07 §5/§6) | contract, DB, TS | Done (§17 D13) |
 
 ---
 
@@ -934,7 +939,7 @@ they do everywhere else (`internal/events/hub.go:203`).
 
 | Schema | Change | Breaking? |
 |---|---|---|
-| `TranscriptRole` → `Speaker` | rename; values `CUSTOMER \| BOT \| HUMAN_AGENT` (was `CALLER \| BOT`) | **yes** — declare it |
+| ~~`TranscriptRole`~~ → `Speaker` | **landed M6.2.** `TranscriptRole` is gone, not deprecated; values `CUSTOMER \| BOT \| HUMAN_AGENT` | **yes** — declared |
 | `TranscriptEntry` → `TranscriptLine` | `role` → `speaker`; add `partyId?`, `agentId?`, `offsetMs`, `language?`, `source`, `provider?`, `utteranceId`, `isFinal` | **yes** |
 | `CDRDetail.transcript` | items become `TranscriptLine` | no (additive at the array level, breaking at the item level) |
 | `SseEventType` | add `CALL_TRANSCRIPT`, `CALL_TRANSCRIPTION_STATE`; remove `BOT_TRANSCRIPT` | removal is **breaking** |
@@ -1249,8 +1254,9 @@ New keys: `transcript.title`, `transcript.empty`, `transcript.loading`,
 `transcript.unavailable`, `transcript.jumpToLatest`, `transcript.loadEarlier`,
 `transcript.speakers.{BOT,CUSTOMER,HUMAN_AGENT,YOU}`,
 `transcript.status.{IDLE,CONNECTING,LIVE,DEGRADED,ERROR,STOPPED,ENDED}`.
-Renamed: `cdr.roles.CALLER` → `cdr.roles.CUSTOMER` (both locales); `cdr.roles.AGENT`
-already exists and is reused for `HUMAN_AGENT` in non-agent viewpoints.
+Renamed: the whole `cdr.roles.*` block became `cdr.speakers.{CUSTOMER,BOT,HUMAN_AGENT}`
+in both locales (landed M6.2). The old `cdr.roles.CALLER`/`.AGENT` keys are deleted rather
+than aliased — a stale key is how a synonym survives a rename.
 
 **Transcript body is never translated.** It is what was said. A bilingual call renders
 mixed lines in reading order; the per-line `language` field (§9) is available if a
@@ -1772,6 +1778,40 @@ ways in this contract (G-19).
 land in **migration 00009 together**, so the breaking contract change is declared once to
 `make api-breaking` and the `transcripts` table is rewritten once. Deferring the rename
 would have meant two migrations and two breaking changes.
+
+**Closed in M6.2 (2026-08-17). One enum exists; there is no coexistence period.** The
+owner's directive was that D13 closes *all* of it in one slice, not the schema alone, so
+the sweep covered five layers and was verified by executing a check rather than by
+reading:
+
+| Layer | Value set | Where |
+|---|---|---|
+| Contract (source of truth) | `CUSTOMER, BOT, HUMAN_AGENT` | `docs/openapi.json` `Speaker` |
+| Generated TypeScript | same | `web/src/generated/api.ts` |
+| Generated Go | same | `internal/api/api.gen.go` |
+| Hand-written Go | same, as `SpeakerCustomer`/`SpeakerBot`/`SpeakerHumanAgent` | `internal/store/ledgerstore.go` |
+| Database `CHECK` | same | `00009_transcript_speakers.sql` |
+
+`[MEASURED]` A script parsed all five and asserted set equality — they agree — and
+asserted that `UPDATE transcripts SET speaker='CUSTOMER' WHERE speaker='CALLER'` appears
+**before** the new `CHECK` in the Up block. That ordering is the part worth stating: a
+constraint change without the data migration, or after it, leaves old rows holding a value
+the enum can no longer express, and the migration fails at boot on any database with
+history.
+
+`TranscriptRole` no longer exists in the contract, in Go, or in TypeScript. The frontend
+followed: `TranscriptEntry` → `TranscriptLine`, `entry.role` → `entry.speaker`, and the
+locale key `cdr.roles.*` → `cdr.speakers.*` with `HUMAN_AGENT` added in both languages.
+`EventTypeCallerSaid`/`"CALLER_SAID"` was renamed to `EventTypeCustomerSaid`/
+`"CUSTOMER_SAID"` — it is internal to `internal/aicall` and never on the wire, but it named
+the same person the enum names, and 07 §6 forbids that synonym.
+
+*Deliberately left, and why:* `web/src/test/harness.tsx` and `web/src/lib/dev-fixture.ts`
+define a constant `CALLER` holding a **phone number**. That is not the speaker enum under
+an old name — it is a fixture naming the party who dialled — so renaming it would be
+churn, not unification. Prose in `docs/design/03-data.md`, `m4-cleanup-findings.md` and
+§4/§9 of this document quotes the pre-M6.2 schema and code as historical evidence; those
+are records of the before-state, not claims that two enums coexist.
 
 ---
 

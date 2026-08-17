@@ -424,6 +424,27 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for Speaker.
+const (
+	SpeakerBOT        Speaker = "BOT"
+	SpeakerCUSTOMER   Speaker = "CUSTOMER"
+	SpeakerHUMANAGENT Speaker = "HUMAN_AGENT"
+)
+
+// Valid indicates whether the value is a known member of the Speaker enum.
+func (e Speaker) Valid() bool {
+	switch e {
+	case SpeakerBOT:
+		return true
+	case SpeakerCUSTOMER:
+		return true
+	case SpeakerHUMANAGENT:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SSEEventType.
 const (
 	SSEEventTypeAGENTAVAILABILITY      SSEEventType = "AGENT_AVAILABILITY"
@@ -586,18 +607,51 @@ func (e TranscriptKind) Valid() bool {
 	}
 }
 
-// Defines values for TranscriptRole.
+// Defines values for TranscriptSource.
 const (
-	TranscriptRoleBOT    TranscriptRole = "BOT"
-	TranscriptRoleCALLER TranscriptRole = "CALLER"
+	TranscriptSourceASR   TranscriptSource = "ASR"
+	TranscriptSourceMODEL TranscriptSource = "MODEL"
 )
 
-// Valid indicates whether the value is a known member of the TranscriptRole enum.
-func (e TranscriptRole) Valid() bool {
+// Valid indicates whether the value is a known member of the TranscriptSource enum.
+func (e TranscriptSource) Valid() bool {
 	switch e {
-	case TranscriptRoleBOT:
+	case TranscriptSourceASR:
 		return true
-	case TranscriptRoleCALLER:
+	case TranscriptSourceMODEL:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TranscriptionState.
+const (
+	TranscriptionStateCONNECTING TranscriptionState = "CONNECTING"
+	TranscriptionStateDEGRADED   TranscriptionState = "DEGRADED"
+	TranscriptionStateENDED      TranscriptionState = "ENDED"
+	TranscriptionStateERROR      TranscriptionState = "ERROR"
+	TranscriptionStateIDLE       TranscriptionState = "IDLE"
+	TranscriptionStateLIVE       TranscriptionState = "LIVE"
+	TranscriptionStateSTOPPED    TranscriptionState = "STOPPED"
+)
+
+// Valid indicates whether the value is a known member of the TranscriptionState enum.
+func (e TranscriptionState) Valid() bool {
+	switch e {
+	case TranscriptionStateCONNECTING:
+		return true
+	case TranscriptionStateDEGRADED:
+		return true
+	case TranscriptionStateENDED:
+		return true
+	case TranscriptionStateERROR:
+		return true
+	case TranscriptionStateIDLE:
+		return true
+	case TranscriptionStateLIVE:
+		return true
+	case TranscriptionStateSTOPPED:
 		return true
 	default:
 		return false
@@ -708,9 +762,9 @@ type CDR struct {
 // CDRDetail One finished call with everything it left behind, in one round trip.
 type CDRDetail struct {
 	// CDR One finished call. totalSec always equals the sum of its parts.
-	CDR        CDR               `json:"cdr"`
-	Recordings []Recording       `json:"recordings"`
-	Transcript []TranscriptEntry `json:"transcript"`
+	CDR        CDR              `json:"cdr"`
+	Recordings []Recording      `json:"recordings"`
+	Transcript []TranscriptLine `json:"transcript"`
 }
 
 // CDRList defines model for CDRList.
@@ -751,6 +805,16 @@ type CallSnapshot struct {
 
 // CallState defines model for CallState.
 type CallState string
+
+// CallTranscript A page of a call's transcript, plus where to resume. isLive says whether more is still coming, so a client knows to tail rather than poll.
+type CallTranscript struct {
+	IsLive       bool             `json:"isLive"`
+	Items        []TranscriptLine `json:"items"`
+	NextSinceSeq int64            `json:"nextSinceSeq"`
+
+	// State Health of live transcription for a call, as the agent should see it.
+	State TranscriptionState `json:"state"`
+}
 
 // CallType Caller-perspective call type, stamped at creation and immutable across transfers.
 type CallType string
@@ -1223,6 +1287,9 @@ type RosterList struct {
 	Items []RosterEntry `json:"items"`
 }
 
+// Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
+type Speaker string
+
 // SSEEvent One envelope on the event stream. Call events repeat enough context (callType, userData) for a screen-pop without further requests. In SSE framing the envelope is the data: line, the event: line carries type, and the id: line carries seq.
 type SSEEvent struct {
 	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
@@ -1278,23 +1345,36 @@ type TierRules struct {
 	WaitSec   int  `json:"waitSec"`
 }
 
-// TranscriptEntry One thing said or done on an AI leg.
-type TranscriptEntry struct {
-	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.
-	Content    map[string]interface{} `json:"content"`
-	Kind       TranscriptKind         `json:"kind"`
-	OccurredAt time.Time              `json:"occurredAt"`
-
-	// Role Who acted on the AI leg. Only the bot and the caller write transcripts today.
-	Role TranscriptRole `json:"role"`
-	Seq  int            `json:"seq"`
-}
-
 // TranscriptKind defines model for TranscriptKind.
 type TranscriptKind string
 
-// TranscriptRole Who acted on the AI leg. Only the bot and the caller write transcripts today.
-type TranscriptRole string
+// TranscriptLine One thing said or done on a call, in either phase. seq is dense per call and is both the sort key and the backfill cursor.
+type TranscriptLine struct {
+	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
+
+	// Content TEXT carries {text}; TOOL_CALL and TOOL_RESULT carry the tool name and arguments or result.
+	Content    map[string]interface{} `json:"content"`
+	Kind       TranscriptKind         `json:"kind"`
+	Language   *string                `json:"language,omitempty"`
+	OccurredAt time.Time              `json:"occurredAt"`
+	OffsetMs   int64                  `json:"offsetMs"`
+	PartyID    *openapi_types.UUID    `json:"partyId,omitempty"`
+	Provider   *string                `json:"provider,omitempty"`
+	Seq        int                    `json:"seq"`
+
+	// Source Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.
+	Source TranscriptSource `json:"source"`
+
+	// Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
+	Speaker     Speaker `json:"speaker"`
+	UtteranceID *string `json:"utteranceId,omitempty"`
+}
+
+// TranscriptSource Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.
+type TranscriptSource string
+
+// TranscriptionState Health of live transcription for a call, as the agent should see it.
+type TranscriptionState string
 
 // TransferRequest defines model for TransferRequest.
 type TransferRequest struct {
@@ -1350,6 +1430,13 @@ type ListCallbacksParams struct {
 	Status *CallbackStatus `form:"status,omitempty" json:"status,omitempty"`
 	Limit  *int            `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *int            `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetCallTranscriptParams defines parameters for GetCallTranscript.
+type GetCallTranscriptParams struct {
+	// SinceSeq Return lines after this transcript seq. 0, the default, is the whole call.
+	SinceSeq *int64 `form:"sinceSeq,omitempty" json:"sinceSeq,omitempty"`
+	Limit    *int   `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ListCDRsParams defines parameters for ListCDRs.
@@ -1542,6 +1629,9 @@ type ServerInterface interface {
 	// ListCallReviews A call's quality reviews
 	// (GET /calls/{callId}/reviews)
 	ListCallReviews(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// GetCallTranscript A call's transcript, from a cursor
+	// (GET /calls/{callId}/transcript)
+	GetCallTranscript(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID, params GetCallTranscriptParams)
 	// TransferCall Transfer the other party away
 	// (POST /calls/{callId}/transfer)
 	TransferCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
@@ -1794,6 +1884,12 @@ func (_ Unimplemented) RetrieveCall(w http.ResponseWriter, r *http.Request, call
 // ListCallReviews A call's quality reviews
 // (GET /calls/{callId}/reviews)
 func (_ Unimplemented) ListCallReviews(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCallTranscript A call's transcript, from a cursor
+// (GET /calls/{callId}/transcript)
+func (_ Unimplemented) GetCallTranscript(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID, params GetCallTranscriptParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2552,6 +2648,61 @@ func (siw *ServerInterfaceWrapper) ListCallReviews(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListCallReviews(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCallTranscript operation middleware
+func (siw *ServerInterfaceWrapper) GetCallTranscript(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callId" -------------
+	var callID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callId", chi.URLParam(r, "callId"), &callID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetCallTranscriptParams
+
+	// ------------- Optional query parameter "sinceSeq" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "sinceSeq", r.URL.Query(), &params.SinceSeq, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "sinceSeq"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sinceSeq", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCallTranscript(w, r, callID, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3597,6 +3748,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/calls/{callId}/reviews", wrapper.ListCallReviews)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/calls/{callId}/transcript", wrapper.GetCallTranscript)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/transfer", wrapper.TransferCall)

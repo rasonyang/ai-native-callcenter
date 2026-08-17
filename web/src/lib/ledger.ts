@@ -16,7 +16,7 @@ export type CDRStatus = components['schemas']['CDRStatus']
 
 export type CDR = components['schemas']['CDR']
 
-export type TranscriptEntry = components['schemas']['TranscriptEntry']
+export type TranscriptLine = components['schemas']['TranscriptLine']
 
 export type RecordingRow = components['schemas']['Recording']
 
@@ -54,7 +54,7 @@ export const ledgerApi = {
     request<{ items: CDR[]; total: number }>(`/cdrs${query({ ...filter })}`),
 
   cdr: (callId: string) =>
-    request<{ cdr: CDR; transcript: TranscriptEntry[]; recordings: RecordingRow[] }>(
+    request<{ cdr: CDR; transcript: TranscriptLine[]; recordings: RecordingRow[] }>(
       `/cdrs/${callId}`,
     ),
 

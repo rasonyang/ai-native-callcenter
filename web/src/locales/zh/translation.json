@@ -352,14 +352,14 @@
     "noTranscript": "没有转写；该通话未经过机器人。",
     "toolCalled": "调用 {{tool}}",
     "toolAnswered": "{{tool}} 返回结果",
-    "roles": {
-      "CALLER": "客户",
-      "BOT": "机器人",
-      "AGENT": "坐席"
-    },
     "playColumn": "试听",
     "play": "播放录音",
-    "stop": "停止"
+    "stop": "停止",
+    "speakers": {
+      "CUSTOMER": "客户",
+      "BOT": "机器人",
+      "HUMAN_AGENT": "坐席"
+    }
   },
   "callbacks": {
     "hint": "机器人在电话里承诺的回访。回拨前先认领。",
