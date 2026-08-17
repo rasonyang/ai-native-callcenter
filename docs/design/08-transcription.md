@@ -1743,9 +1743,23 @@ better one.
 value **plus a note explaining why there are two** — residue that is deleted rather than
 softened. Removal is cheapest now, while there is provably no consumer.
 *Mechanics, in the spec-first order (`CLAUDE.md`):* remove it from `docs/openapi.json`
-first, then `make api-generate`, then delete the Go constant — never the reverse. `[FACT]`
-`make api-breaking BASE=main` is expected to flag this; it is declared, not suppressed, and
-the declaration lives in the release notes, not in `.redocly.lint-ignore.yaml`.
+first, then `make api-generate`, then delete the Go constant — never the reverse. Landed
+that way in M6.1a.
+
+*Correction, `[MEASURED 2026-08-17]`:* this entry predicted that
+`make api-breaking BASE=main` would flag the removal. **It does not.** The run reports
+`0 error, 2 warning`, and both warnings are for the *added* values
+(`response-property-enum-value-added` for `CALL_TRANSCRIPT` and
+`CALL_TRANSCRIPTION_STATE`); the removal is not mentioned and the gate exits 0.
+`[INFERENCE]` oasdiff models a **response** enum by what a client can *receive*: dropping a
+value only means the server sends it no longer, which cannot break a reader, while adding
+one can surprise an exhaustive reader. That reasoning holds for a tolerant JSON client and
+**not** for this project's own frontend, where the generated TypeScript union is exhaustive
+and referencing a removed member is a compile error — which is exactly what
+`web/src/lib/events.ts` did, and why that file changed in the same commit.
+*The lesson worth keeping:* `make api-breaking` is a floor, not a verdict. A removal that
+it passes in silence can still break a typed consumer, so a removal is declared in the
+release notes on its own merits rather than because a tool demanded it.
 *Cost to overturn:* keep both names, emit only the new one, and carry a dead enum value
 forever.
 
