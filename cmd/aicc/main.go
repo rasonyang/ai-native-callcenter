@@ -142,6 +142,9 @@ func run() error {
 		slog.Warn("could not restore agent presence", "error", err)
 	}
 
+	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
+	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
+
 	// The switch forgets its agents when it restarts, and we are the source of
 	// truth, so every reconnect rebuilds its view. In the other direction the
 	// switch knows which phones are registered, which live events alone never
@@ -149,6 +152,10 @@ func run() error {
 	// otherwise look missing and its agent unroutable.
 	link.OnConnect(func(ctx context.Context) {
 		agentSvc.SyncSwitch(ctx)
+		// An agent the switch knows but has no tier for is not routable: the
+		// queue has nobody to offer to and the caller abandons. Presence and
+		// staffing are both ours, so both are rebuilt here.
+		catalogSvc.SyncTiers(ctx)
 
 		regs, err := adapter.Registrations(cfg.SIPProfile)
 		if err != nil {
@@ -160,9 +167,6 @@ func run() error {
 		}
 		slog.InfoContext(ctx, "registrations reconciled", "endpoints", len(regs))
 	})
-
-	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
-	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
 
 	// Recording storage: nil when no directory is configured, which disables
 	// ingestion without disabling anything else.

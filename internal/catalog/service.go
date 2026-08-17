@@ -194,6 +194,49 @@ func (s *Service) QueueAgents(ctx context.Context, queueID uuid.UUID) ([]QueueAg
 	return s.store.ListQueueAgents(ctx, queueID)
 }
 
+// SyncTiers re-applies every queue's staffing to the switch.
+//
+// mod_callcenter holds agents and tiers as runtime state, so a switch restart
+// forgets both. Agent presence is already rebuilt on reconnect, but a tier is
+// what actually makes an agent eligible for a queue's calls: without one the
+// queue has no one to offer to, and callers wait out max_wait_time and abandon
+// with the queue reporting calls_answered=0. That failure is silent from the
+// application's side — our database still says the agent staffs the queue —
+// which is why this runs on every reconnect rather than only when someone
+// notices.
+func (s *Service) SyncTiers(ctx context.Context) {
+	if s.switchCtl == nil || !s.switchCtl.IsUp() {
+		return
+	}
+	queues, err := s.store.ListQueues(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read queues to restore tiers", "error", err)
+		return
+	}
+
+	restored := 0
+	for _, queue := range queues {
+		staffing, err := s.store.ListQueueAgents(ctx, queue.ID)
+		if err != nil {
+			slog.WarnContext(ctx, "could not read queue staffing", "queue", queue.Name, "error", err)
+			continue
+		}
+		for _, member := range staffing {
+			name, err := s.agents.CallcenterName(ctx, member.AgentID)
+			if err != nil {
+				continue // the agent is gone; its tier goes with it
+			}
+			if err := s.switchCtl.AddCallcenterTier(queue.Name, name, member.Level, member.Position); err != nil {
+				slog.WarnContext(ctx, "tier not restored on the switch",
+					"queue", queue.Name, "agent", name, "error", err)
+				continue
+			}
+			restored++
+		}
+	}
+	slog.InfoContext(ctx, "queue tiers mirrored to the switch", "tiers", restored)
+}
+
 // StaffQueue puts an agent on a queue, in the database and on the switch.
 func (s *Service) StaffQueue(ctx context.Context, queueID, agentID uuid.UUID, level, position int) error {
 	if level < 1 || position < 1 {
