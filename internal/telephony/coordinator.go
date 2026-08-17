@@ -40,7 +40,27 @@ type Coordinator struct {
 	agents   AgentLookup
 	pub      Publisher
 	cdr      *CDRAssembler
+	taps     Tapper
 }
+
+// Tapper starts and stops the media tap that feeds live transcription. Nil
+// disables transcription without disabling anything else.
+//
+// It takes the agent's own leg, never the caller's. The leg's lifetime is
+// exactly the human phase, so "never tap the bot, the queue or hold music"
+// stops being a timing rule the code has to keep and becomes a property of the
+// object; and the leg carries one agent, so every line has a known speaker
+// rather than a "who is bridged right now" lookup that a second transfer would
+// invalidate.
+type Tapper interface {
+	Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID string)
+	Detach(channelID string)
+	Pause(channelID string)
+	Resume(channelID string)
+}
+
+// AttachTaps points bridge and hold transitions at the transcription tap.
+func (c *Coordinator) AttachTaps(t Tapper) { c.taps = t }
 
 // NewCoordinator builds a Coordinator.
 // AttachCDR points call retirement and queue movements at the ledger.
@@ -69,6 +89,21 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.join(ctx, ev)
 	case KindQueueAgentOffered:
 		c.offerToAgent(ctx, ev)
+	}
+
+	// The tap follows the conversation rather than the channel. On hold the
+	// agent's leg carries a private side-call and music, neither of which is
+	// this conversation; when the bridge ends or the channel does, the tap
+	// ends with it.
+	if c.taps != nil && ev.ChannelID != "" {
+		switch ev.Kind {
+		case KindChannelHold:
+			c.taps.Pause(ev.ChannelID)
+		case KindChannelUnhold:
+			c.taps.Resume(ev.ChannelID)
+		case KindChannelUnbridge, KindChannelHangup:
+			c.taps.Detach(ev.ChannelID)
+		}
 	}
 
 	// The dialplan mints a call's identity after the channel already exists,
@@ -287,6 +322,39 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 		keep, absorb = otherID, callID
 	}
 	c.merge(ctx, keep, absorb)
+
+	// The tap goes on now, at the bridge, on a leg that may be milliseconds
+	// old — measured to survive, so there is no attach-on-answer-and-discard
+	// fallback to maintain.
+	c.tapAgentLeg(keep, ev.ChannelID, ev.OtherChannelID)
+}
+
+// tapAgentLeg starts transcription on whichever of the bridged channels is an
+// agent's.
+//
+// The leg is found through the call's parties, never by matching an extension
+// number against the channel: an agent registered over WebRTC appears as a
+// per-registration token bearing no resemblance to their extension, so digit
+// matching works for a desk phone and fails silently for every browser agent —
+// which is all of them in this design.
+func (c *Coordinator) tapAgentLeg(callID uuid.UUID, channels ...string) {
+	if c.taps == nil {
+		return
+	}
+	_ = c.registry.Do(callID, func(call *Call) {
+		for _, channelID := range channels {
+			if channelID == "" {
+				continue
+			}
+			for _, p := range call.Parties {
+				if p.ChannelID != channelID || p.AgentID == nil {
+					continue
+				}
+				agentID, partyID := *p.AgentID, p.PartyID
+				c.taps.Attach(callID, &agentID, &partyID, channelID)
+			}
+		}
+	})
 }
 
 // merge folds one call into another: parties and facts move, channels rebind,

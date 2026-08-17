@@ -66,6 +66,31 @@ type Config struct {
 	ProviderEndpoint string
 	ProviderModel    string
 
+	// IsTranscriptionEnabled turns live transcription of the human phase off
+	// entirely. Off by default: it is a new external dependency, a new
+	// listener and new spend, and doing nothing must keep today's behaviour.
+	IsTranscriptionEnabled bool
+	// StreamAddr is where the tapped audio arrives. Loopback by default,
+	// following AICC_METRICS_ADDR: the traffic is unencrypted call audio, and
+	// a default that bound every interface would be the mistake nobody
+	// notices.
+	StreamAddr string
+	// StreamPublicURL is what the *switch* dials, which in a container is not
+	// what we bind. It carries its own scheme; nothing composes one.
+	StreamPublicURL string
+	// StreamSecret signs the single-use attach token that is the whole of the
+	// authentication on that listener.
+	StreamSecret string
+	// TranscribeProvider selects the recognition *client*, not merely a
+	// profile: the two engines speak different wire protocols. Empty follows
+	// AICC_PROVIDER, since one vendor is reachable per deployment.
+	TranscribeProvider string
+	// TranscribeEndpoint and TranscribeModel override the client's defaults.
+	// On qwen the endpoint is effectively required: the workspace id is part
+	// of the hostname, so there is no useful default to fall back on.
+	TranscribeEndpoint string
+	TranscribeModel    string
+
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
 	RecordingBackend string
@@ -112,26 +137,34 @@ func Load() (Config, error) {
 		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
-		Provider:         env("AICC_PROVIDER", "openai"),
-		ProviderEndpoint: env("AICC_PROVIDER_ENDPOINT", ""),
-		ProviderModel:    env("AICC_PROVIDER_MODEL", ""),
-		OutboundEndpoint: env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
-		OutboundCallerID: env("AICC_OUTBOUND_CLID", ""),
-		RecordingBackend: env("AICC_RECORDING_BACKEND", "FS"),
-		RecordingDir:     env("AICC_RECORDING_DIR", ""),
-		S3Endpoint:       env("AICC_S3_ENDPOINT", ""),
-		S3AccessKey:      env("AICC_S3_ACCESS_KEY", ""),
-		S3SecretKey:      env("AICC_S3_SECRET_KEY", ""),
-		S3Bucket:         env("AICC_S3_BUCKET", "aicc-recordings"),
-		S3IsSSL:          envBool("AICC_S3_SSL", false),
-		SessionTTL:       envDuration("AICC_SESSION_TTL", 12*time.Hour),
-		SessionCookie:    env("AICC_SESSION_COOKIE", "aicc_session"),
-		SecureCookies:    envBool("AICC_SECURE_COOKIES", false),
-		LogLevel:         env("AICC_LOG_LEVEL", "info"),
-		LogDir:           env("AICC_LOG_DIR", "logs"),
-		OTLPEndpoint:     env("AICC_OTLP_ENDPOINT", ""),
-		ServiceName:      env("AICC_SERVICE_NAME", "aicc"),
-		Seed:             env("AICC_SEED", ""),
+
+		IsTranscriptionEnabled: envBool("AICC_TRANSCRIPTION_ENABLED", false),
+		StreamAddr:             env("AICC_STREAM_ADDR", "127.0.0.1:8090"),
+		StreamPublicURL:        env("AICC_STREAM_PUBLIC_URL", ""),
+		StreamSecret:           env("AICC_STREAM_SECRET", ""),
+		TranscribeProvider:     env("AICC_TRANSCRIBE_PROVIDER", ""),
+		TranscribeEndpoint:     env("AICC_TRANSCRIBE_ENDPOINT", ""),
+		TranscribeModel:        env("AICC_TRANSCRIBE_MODEL", ""),
+		Provider:               env("AICC_PROVIDER", "openai"),
+		ProviderEndpoint:       env("AICC_PROVIDER_ENDPOINT", ""),
+		ProviderModel:          env("AICC_PROVIDER_MODEL", ""),
+		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
+		OutboundCallerID:       env("AICC_OUTBOUND_CLID", ""),
+		RecordingBackend:       env("AICC_RECORDING_BACKEND", "FS"),
+		RecordingDir:           env("AICC_RECORDING_DIR", ""),
+		S3Endpoint:             env("AICC_S3_ENDPOINT", ""),
+		S3AccessKey:            env("AICC_S3_ACCESS_KEY", ""),
+		S3SecretKey:            env("AICC_S3_SECRET_KEY", ""),
+		S3Bucket:               env("AICC_S3_BUCKET", "aicc-recordings"),
+		S3IsSSL:                envBool("AICC_S3_SSL", false),
+		SessionTTL:             envDuration("AICC_SESSION_TTL", 12*time.Hour),
+		SessionCookie:          env("AICC_SESSION_COOKIE", "aicc_session"),
+		SecureCookies:          envBool("AICC_SECURE_COOKIES", false),
+		LogLevel:               env("AICC_LOG_LEVEL", "info"),
+		LogDir:                 env("AICC_LOG_DIR", "logs"),
+		OTLPEndpoint:           env("AICC_OTLP_ENDPOINT", ""),
+		ServiceName:            env("AICC_SERVICE_NAME", "aicc"),
+		Seed:                   env("AICC_SEED", ""),
 	}
 
 	return c, c.validate()
@@ -150,6 +183,29 @@ func (c Config) validate() error {
 	}
 	if c.SessionTTL < time.Minute {
 		errs = append(errs, fmt.Errorf("AICC_SESSION_TTL must be >= 1m, got %s", c.SessionTTL))
+	}
+	if c.IsTranscriptionEnabled {
+		if c.StreamPublicURL == "" {
+			errs = append(errs, errors.New(
+				"AICC_STREAM_PUBLIC_URL must be set when transcription is enabled: "+
+					"it is what the switch dials back, and it is not what we bind"))
+		} else if !strings.HasPrefix(c.StreamPublicURL, "ws://") &&
+			!strings.HasPrefix(c.StreamPublicURL, "wss://") {
+			// Caught here rather than at the first call, where it would present
+			// as a tap that silently never connects.
+			errs = append(errs, fmt.Errorf(
+				"AICC_STREAM_PUBLIC_URL must be ws:// or wss://, got %q", c.StreamPublicURL))
+		}
+		if c.StreamSecret == "" {
+			errs = append(errs, errors.New(
+				"AICC_STREAM_SECRET must be set when transcription is enabled: "+
+					"the token it signs is the only authentication on that listener"))
+		}
+		if c.TranscribeProviderName() == "qwen" && c.TranscribeEndpoint == "" {
+			errs = append(errs, errors.New(
+				"AICC_TRANSCRIBE_ENDPOINT must be set for qwen: the workspace id is "+
+					"part of the hostname, so there is no default that could work"))
+		}
 	}
 	switch c.Seed {
 	case "", "demo", "fresh":
@@ -221,4 +277,15 @@ func loadDotEnv(path string) {
 			os.Setenv(key, value)
 		}
 	}
+}
+
+// TranscribeProviderName is the recognition client this deployment runs.
+// Empty follows the conversational provider, because one vendor is reachable
+// per deployment — but the two are separate settings, because a deployment may
+// legitimately transcribe with one and converse with the other.
+func (c Config) TranscribeProviderName() string {
+	if c.TranscribeProvider != "" {
+		return c.TranscribeProvider
+	}
+	return c.Provider
 }

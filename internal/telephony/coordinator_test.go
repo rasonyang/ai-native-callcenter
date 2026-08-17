@@ -170,3 +170,148 @@ func waitFor(t *testing.T, cond func() bool) {
 	}
 	t.Fatal("condition not reached in time")
 }
+
+// oneAgent is a directory with a single signed-in agent, so a leg dialed at
+// their extension is recognised as a delivery rather than a new call.
+var testAgentID = uuid.New()
+
+const agentExtension = "1001"
+
+type oneAgent struct{}
+
+func (oneAgent) AgentAtExtension(ext string) (uuid.UUID, bool) {
+	if ext == agentExtension {
+		return testAgentID, true
+	}
+	return uuid.Nil, false
+}
+func (oneAgent) AgentByCallcenterName(string) (uuid.UUID, bool) { return uuid.Nil, false }
+func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)     {}
+
+// recordingTapper captures what the coordinator asked of the media tap.
+type recordingTapper struct {
+	mu       sync.Mutex
+	attached []string
+	paused   []string
+	resumed  []string
+	detached []string
+	agents   map[string]uuid.UUID
+}
+
+func newRecordingTapper() *recordingTapper {
+	return &recordingTapper{agents: map[string]uuid.UUID{}}
+}
+
+func (r *recordingTapper) Attach(_ uuid.UUID, agentID, _ *uuid.UUID, channelID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.attached = append(r.attached, channelID)
+	if agentID != nil {
+		r.agents[channelID] = *agentID
+	}
+}
+func (r *recordingTapper) Pause(c string) { r.mu.Lock(); r.paused = append(r.paused, c); r.mu.Unlock() }
+func (r *recordingTapper) Resume(c string) {
+	r.mu.Lock()
+	r.resumed = append(r.resumed, c)
+	r.mu.Unlock()
+}
+func (r *recordingTapper) Detach(c string) {
+	r.mu.Lock()
+	r.detached = append(r.detached, c)
+	r.mu.Unlock()
+}
+
+func (r *recordingTapper) snapshot() ([]string, []string, []string, []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.attached...), append([]string(nil), r.paused...),
+		append([]string(nil), r.resumed...), append([]string(nil), r.detached...)
+}
+
+// The tap goes on the agent's leg and never the caller's. That is the whole
+// attribution model: the agent leg's lifetime is exactly the human phase, and
+// it carries one known agent, so a line's speaker is structural rather than
+// inferred from whoever happens to be bridged.
+func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	taps := newRecordingTapper()
+	c.AttachTaps(taps)
+
+	ctx := t.Context()
+	minted := uuid.New().String()
+	callerChan, agentChan := "caller-chan", "agent-chan"
+	vars := map[string]string{"variable_aicc_call_id": minted}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
+
+	// The agent's leg arrives the way a queue delivery does: its own channel,
+	// dialed at the agent's extension, with no call id of its own.
+	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
+
+	waitFor(t, func() bool {
+		attached, _, _, _ := taps.snapshot()
+		return len(attached) > 0
+	})
+	attached, _, _, _ := taps.snapshot()
+	for _, ch := range attached {
+		if ch == callerChan {
+			t.Errorf("the tap went on the caller's leg (%s); every line would then need a "+
+				"who-is-bridged-now lookup", ch)
+		}
+	}
+	if len(attached) != 1 || attached[0] != agentChan {
+		t.Fatalf("attached to %v, want only the agent's leg %s", attached, agentChan)
+	}
+	if taps.agents[agentChan] != testAgentID {
+		t.Errorf("the tap carries agent %s, want %s", taps.agents[agentChan], testAgentID)
+	}
+}
+
+// Hold is a private side-conversation and music, neither of which belongs in a
+// transcript of this call. It is also the case where a stereo stream delivers
+// nothing at all rather than silence, so pausing is what makes the gap
+// deliberate instead of mysterious.
+func TestHoldPausesTheTapAndUnholdResumesIt(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
+	taps := newRecordingTapper()
+	c.AttachTaps(taps)
+
+	ctx := t.Context()
+	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_HOLD", "agent-chan", "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_UNHOLD", "agent-chan", "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_UNBRIDGE", "agent-chan", "outbound", vars))
+
+	_, paused, resumed, detached := taps.snapshot()
+	if len(paused) != 1 || paused[0] != "agent-chan" {
+		t.Errorf("paused = %v, want the agent's channel once", paused)
+	}
+	if len(resumed) != 1 || resumed[0] != "agent-chan" {
+		t.Errorf("resumed = %v, want the agent's channel once", resumed)
+	}
+	if len(detached) != 1 || detached[0] != "agent-chan" {
+		t.Errorf("detached = %v, want the agent's channel once", detached)
+	}
+}
+
+// Transcription off must leave the telephony path byte-identical.
+func TestNoTapperMeansNoTranscriptionPath(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
+
+	ctx := t.Context()
+	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	c.Handle(ctx, raw("CHANNEL_CREATE", "a", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_HOLD", "a", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", "a", "inbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": "b"})))
+	// Reaching here without a nil dereference is the assertion.
+}

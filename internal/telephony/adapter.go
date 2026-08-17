@@ -288,3 +288,47 @@ func renderVars(vars map[string]string) string {
 	}
 	return strings.Join(parts, ",")
 }
+
+//
+// mod_audio_stream: the media tap that feeds live transcription.
+//
+
+// StartAudioStream taps a channel and streams it to a websocket.
+//
+// The rate is an integer and not a word. Only "8k" and "16k" have word forms;
+// anything else goes through atoi and fails a modulo check, so "24k" is
+// rejected with a bare -ERR whose real reason appears only in the switch log.
+// Building the command from an int is what makes that unrepresentable.
+//
+// stereo, always: left is the tapped channel's read stream and right its write
+// stream, which on an agent's own leg is the agent's microphone and the
+// customer respectively.
+func (a *Adapter) StartAudioStream(channelID, wsURL string, rateHz int, metadata string) error {
+	if metadata != "" {
+		return a.exec("uuid_audio_stream %s start %s stereo %d %s",
+			channelID, wsURL, rateHz, metadata)
+	}
+	return a.exec("uuid_audio_stream %s start %s stereo %d", channelID, wsURL, rateHz)
+}
+
+// StopAudioStream detaches the tap.
+//
+// Optional in principle — the module tears its own bug down when the channel
+// closes — but issued anyway where we end the stream before the call, such as
+// an agent leaving a bridge.
+func (a *Adapter) StopAudioStream(channelID string) error {
+	return a.exec("uuid_audio_stream %s stop", channelID)
+}
+
+// PauseAudioStream and ResumeAudioStream bracket the periods that are not the
+// conversation. On hold the agent's two channels carry a private side-call and
+// music, neither of which belongs in a transcript of this one — and a stereo
+// stream whose far side has fallen silent delivers nothing anyway, silently,
+// so pausing is what makes that gap deliberate rather than mysterious.
+func (a *Adapter) PauseAudioStream(channelID string) error {
+	return a.exec("uuid_audio_stream %s pause", channelID)
+}
+
+func (a *Adapter) ResumeAudioStream(channelID string) error {
+	return a.exec("uuid_audio_stream %s resume", channelID)
+}

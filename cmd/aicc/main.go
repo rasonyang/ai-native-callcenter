@@ -32,7 +32,9 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/seed"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
+	"github.com/rasonyang/ai-native-callcenter/internal/streamin"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 	"github.com/rasonyang/ai-native-callcenter/web"
@@ -167,6 +169,54 @@ func run() error {
 		}
 		slog.InfoContext(ctx, "registrations reconciled", "endpoints", len(regs))
 	})
+
+	// Live transcription of the human phase. The tap goes on the agent's own
+	// leg at the bridge, so it exists for exactly as long as the human part of
+	// the conversation does.
+	if cfg.IsTranscriptionEnabled {
+		profile, err := transcribe.ProfileFor(cfg.TranscribeProviderName(), transcribe.Override{
+			Endpoint: cfg.TranscribeEndpoint,
+			Model:    cfg.TranscribeModel,
+		})
+		if err != nil {
+			return fmt.Errorf("transcription: %w", err)
+		}
+		apiKey := os.Getenv(profile.APIKeyEnv)
+		if apiKey == "" {
+			return fmt.Errorf("transcription: %s is required for the %s recogniser",
+				profile.APIKeyEnv, profile.Name)
+		}
+
+		ingest, err := streamin.New(streamin.Config{
+			Addr:    cfg.StreamAddr,
+			Secret:  []byte(cfg.StreamSecret),
+			Profile: profile,
+			NewSession: func() (transcribe.Session, error) {
+				return transcribe.New(profile, apiKey, slog.Default())
+			},
+			Transcripts: transcripts,
+			Logger:      slog.Default(),
+		})
+		if err != nil {
+			return fmt.Errorf("transcription ingest: %w", err)
+		}
+		if err := ingest.Start(); err != nil {
+			return err
+		}
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = ingest.Stop(shutdownCtx)
+		}()
+
+		// The rate is the recogniser's, and the switch resamples to it. That
+		// is why no resampler exists in this process.
+		coordinator.AttachTaps(streamin.NewTap(ingest, adapter,
+			streamin.NormalizePublicURL(cfg.StreamPublicURL),
+			profile.SampleRate, 60*time.Second, slog.Default()))
+		slog.Info("live transcription enabled",
+			"provider", profile.Name, "model", profile.Model, "rateHz", profile.SampleRate)
+	}
 
 	// Recording storage: nil when no directory is configured, which disables
 	// ingestion without disabling anything else.
