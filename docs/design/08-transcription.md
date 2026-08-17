@@ -437,7 +437,7 @@ identity silently underneath it.
 | G-12 | The callId flips from provisional to minted at `CHANNEL_BRIDGE` (`coordinator.go:196-217` then `:280-289`) | **MAJOR** | `web`, backend event scoping | Re-run backfill when `callId` changes; §14 |
 | G-13 | A second writer would collide with `uq_transcripts_call_id_seq` (`00005_call_ledger.sql:64`), since the bot allocates `seq` in its own process-local counter (`ledger.go:82`) | **MAJOR** | `internal/aicall`, new sequencer | One per-call allocator owns `seq` for both producers (§8.4, D2) |
 | G-14 | A listener that throws stops the remaining listeners for that event (`web/src/lib/use-event-stream.ts:69-70`) | **MAJOR** (failure isolation, Q22) | `web/src/lib/use-event-stream.ts` | Wrap each listener call in try/catch |
-| G-15 | Neither switch has the module: the dev build is slim without audio_fork (`docs/phase0-research.md:17,144`); the demo entrypoint enables only `mod_callcenter`, `mod_lua`, `mod_pgsql` (`10-aicc.sh:59`) | **BLOCKER** (environment) | `freeswitch/README.md`, `deploy/demo/` | Build/install step + a demo image that carries it |
+| ~~G-15~~ | **Guarded, not yet closed** — see §B.5. Neither switch has the module: the dev build is slim without audio_fork (`docs/phase0-research.md:17,144`); the demo entrypoint enables only `mod_callcenter`, `mod_lua`, `mod_pgsql` (`10-aicc.sh:59`) | **BLOCKER** (environment) | `freeswitch/README.md`, `deploy/demo/` | Build/install step + a demo image that carries it |
 | G-16 | `docs/design/06-capacity.md:32` records "SIP/RTP in-process (**no mod_audio_fork/stream**) … Confirmed choice" | **MAJOR** (design conflict) | `docs/design/06-capacity.md` | Amend: the decision was about the *bot* leg's media path and stays; the human leg has no in-process alternative |
 | G-17 | No `live_calls` table, so nothing survives a restart mid-call (`rg live_calls .`) | **MINOR** | — | Accept; a restart loses the in-flight tail, exactly as it loses the bot transcript today |
 | G-18 | Quality-review UI absent (`web/src/lib/nav.ts:49` `isReady:false`) though the API exists (`server.go:212-214`) | **MINOR** | `web` | Out of scope; §12.9 |
@@ -2516,3 +2516,83 @@ campaign in `docs/load-tests.md`, and until that runs the estimate in
 
 **End of gap analysis. No source file, migration, contract or configuration was modified
 in producing it.**
+
+
+---
+
+## Appendix B.5 — G-15: the demo stack cannot silently lack the module
+
+`[MEASURED 2026-08-17]` The guarantee implemented is deliberately not "the module is in the
+image". That is a property of whoever built the image, and a future image can drop it
+silently. The guarantee is **a stack configured to transcribe cannot start without it**,
+which survives changes to the image because it is checked at every boot.
+
+`deploy/demo/freeswitch/entrypoint.d/10-aicc.sh` now refuses to start when
+`AICC_TRANSCRIPTION_ENABLED` is true and no `mod_audio_stream.so` is present, enables the
+load line when it is, and says out loud when transcription is off — so a stack that is not
+transcribing is never a silent surprise. All three paths were exercised:
+
+| Configuration | Result |
+|---|---|
+| enabled, module absent | **refuses to start**, exit 1, naming what would otherwise happen |
+| disabled, module absent | starts, exit 0, logs "live transcription disabled" |
+| enabled, module present | starts, exit 0, and `<load module="mod_audio_stream"/>` appears |
+
+Without this the failure is the worst kind available here: the application healthy, the
+switch healthy, calls connecting, agents answering, and the transcript panel saying
+"Connecting…" for the life of every call, with nothing anywhere reporting a fault — because
+from each component's own point of view there is not one.
+
+### The SpeexDSP link is asserted, not assumed
+
+`freeswitch/assert-audio-stream.sh` fails a build whose module does not **declare**
+libspeexdsp. `[FACT]` The distinction is the whole point: undefined `speex_resampler_*`
+symbols are normal for a dynamically linked module, and they resolve at load from
+FreeSWITCH's own copy already in the process. A build that never linked the library is
+therefore indistinguishable at load time — `module_exists` true, the API registered, an
+attach returning `+OK` — and goes wrong later and quietly: the resampler is absent, frames
+are forwarded at the channel's own rate, and a stream requested at 24000 arrives as 8000
+wearing a 24000 label. The recogniser then transcribes chipmunk speech into confident,
+wrong words.
+
+`[MEASURED]` The check was proved against a real bad build rather than reasoned about. The
+module was rebuilt exactly as Debian succeeds by accident — header found, library never
+linked, undefined symbols tolerated — and it **compiled**, carried the same five undefined
+`speex_resampler_*` symbols as the good one, and declared no libspeexdsp. The assertion
+passes the good module and refuses that one.
+
+### ✗ The pinned base image is amd64-only, and this host is arm64
+
+`[MEASURED]` `dheaps/freeswitch@sha256:06798d…` has a single manifest whose config reports
+`architecture: amd64, os: linux`. There is no arm64 variant behind that digest. The
+development host is arm64 (Colima), so **`make demo-up` has been running the switch under
+emulation** — it works, and nobody had reason to notice.
+
+That is now a decision rather than a discovery, and it is not mine to take unilaterally:
+
+- **Keep the pin and accept emulation.** The demo runs; media under QEMU is the part worth
+  measuring before trusting, and no one has.
+- **Find or build an arm64 / multi-arch base.** Native on this host, but it changes the
+  third-party image the demo depends on.
+
+`[INFERENCE]` It also constrains how the module gets built into the image: the pinned image
+is a distroless-style root — its history is a single `COPY /tmp/newroot /` — with no package
+manager and no FreeSWITCH development headers, so the module cannot be compiled *in* it. A
+multi-stage build needs a builder whose FreeSWITCH headers match the image's build, which is
+the real work G-15 still contains.
+
+**So G-15 is guarded but not closed.** A demo stack told to transcribe now fails loudly
+instead of lying; a demo stack that actually transcribes still needs the module built for
+that image, and that needs the base-image decision first.
+
+### ✗ Real-call recognition accuracy remains uncharacterised
+
+Recorded here as well as in Layer 4 because this is where someone sizing a deployment will
+look. B.3c's exact, word-for-word result covers **played audio over a telephony path**: a
+known file, one speaker at a time, no overlap. The end-to-end run covers **conversational
+speech over a transcoded path** and was visibly worse — "transfer to home agent" for *human
+agent*, "can you kill me" for *can you hear me*, a spurious `拖。` on an English call.
+
+Neither figure may be quoted for the other, and neither is a capacity or quality claim. What
+would characterise this is a set of real calls scored against a human transcript, which has
+not been done.

@@ -130,6 +130,58 @@ grep -q 'xml-handler-script' "$CONF/autoload_configs/lua.conf.xml" || {
     echo "aicc: the XML handler is not bound" >&2; exit 1
 }
 
+# --- Live transcription needs mod_audio_stream, and must not run without it -
+#
+# The stock image does not carry this module. A stack that comes up anyway is
+# the worst outcome available: the application is healthy, the switch is
+# healthy, calls connect, agents answer, and the transcript panel simply says
+# "Connecting..." for ever. Nothing anywhere reports a fault, because from each
+# component's own point of view there isn't one.
+#
+# So the guarantee here is not "the module is present" — that is a property of
+# whatever built the image, and future images may drop it. The guarantee is
+# that a stack configured to transcribe cannot start without it.
+# The module directory differs between FreeSWITCH builds, so the standard two
+# are searched and a differently-built image can name its own.
+MOD_DIRS=${AICC_FS_MOD_DIR:-/usr/lib/freeswitch/mod /usr/local/freeswitch/mod}
+AUDIO_STREAM_SO=""
+for dir in $MOD_DIRS; do
+    [ -f "$dir/mod_audio_stream.so" ] && { AUDIO_STREAM_SO="$dir/mod_audio_stream.so"; break; }
+done
+
+case "${AICC_TRANSCRIPTION_ENABLED:-false}" in
+[Tt]rue|1|[Yy]es)
+    [ -n "$AUDIO_STREAM_SO" ] || {
+        cat >&2 <<'MISSING'
+aicc: transcription is enabled but mod_audio_stream is not in this image.
+
+Refusing to start. Without it the switch cannot tap an agent's leg, so the
+stack would come up entirely healthy and transcribe nothing at all: the
+application would be fine, the switch would be fine, calls would connect, and
+the agent's transcript panel would say "Connecting..." until the call ended.
+
+Either build the module into the image (see freeswitch/README.md, and run
+freeswitch/assert-audio-stream.sh against the result — it must declare
+libspeexdsp or it will tap at the wrong rate), or set
+AICC_TRANSCRIPTION_ENABLED=false for a stack that honestly does not transcribe.
+MISSING
+        exit 1
+    }
+    grep -q '<load module="mod_audio_stream"/>' "$CONF/autoload_configs/modules.conf.xml" || sed -i \
+        -e 's|<load module="mod_callcenter"/>|<load module="mod_callcenter"/>\n    <load module="mod_audio_stream"/>|' \
+        "$CONF/autoload_configs/modules.conf.xml"
+    grep -q '<load module="mod_audio_stream"/>' "$CONF/autoload_configs/modules.conf.xml" || {
+        echo "aicc: could not enable mod_audio_stream" >&2; exit 1
+    }
+    echo "aicc: live transcription enabled, mod_audio_stream at $AUDIO_STREAM_SO"
+    ;;
+*)
+    # Transcription off: say so once, so that a stack which is not
+    # transcribing is never a surprise to whoever reads the log.
+    echo "aicc: live transcription disabled (AICC_TRANSCRIPTION_ENABLED is not true)"
+    ;;
+esac
+
 echo "aicc: switch configuration applied"
 )
 

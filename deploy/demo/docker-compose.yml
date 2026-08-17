@@ -52,6 +52,12 @@ services:
       # The switch is a container away, not a socket away.
       AICC_ESL_ADDR: freeswitch:18021
       AICC_ESL_PASSWORD: ${ESL_PASSWORD:-ClueCon}
+      # Live transcription of the human phase. Off by default: it needs
+      # mod_audio_stream in the switch image and a recogniser credential, and
+      # the demo must work with neither. Turning it on also requires
+      # AICC_STREAM_PUBLIC_URL, AICC_STREAM_SECRET and the transcribe settings
+      # — see .env.example.
+      AICC_TRANSCRIPTION_ENABLED: ${AICC_TRANSCRIPTION_ENABLED:-false}
       # Must equal FreeSWITCH's own $${domain}: queue names are rendered with
       # it on both sides and mod_callcenter matches them literally.
       AICC_SWITCH_DOMAIN: ${SWITCH_DOMAIN:-aicc.demo}
@@ -126,6 +132,10 @@ services:
       AICC_BOT_PORT: "6060"
       AICC_DOMAIN: ${SWITCH_DOMAIN:-aicc.demo}
       AICC_ESL_PASSWORD: ${ESL_PASSWORD:-ClueCon}
+      # The guard in entrypoint.d reads this: a switch told to transcribe
+      # refuses to start without mod_audio_stream, rather than coming up
+      # perfectly healthy and tapping nothing at all.
+      AICC_TRANSCRIPTION_ENABLED: ${AICC_TRANSCRIPTION_ENABLED:-false}
       # Set to the host's LAN address to let a softphone outside this machine
       # register and hear audio; empty keeps the demo self-contained.
       AICC_EXTERNAL_IP: ${FS_EXTERNAL_IP:-}
