@@ -20,7 +20,8 @@ go vet ./... && gofmt -l internal/ cmd/       # lint gate
 sqlc generate                                 # after editing internal/store/sql/*.sql (schema comes from migrations/)
 # migrations: add internal/store/migrations/NNNNN_name.sql (goose format); they run at server startup
 
-# dev server (PostgreSQL 18 must be up: deploy/dev/docker-compose.yml — never brew)
+# dev server (PostgreSQL 18 must be up: deploy/dev/docker-compose.yml — never brew;
+# the container runtime is Colima, see "Container runtime" below)
 go build -o /tmp/aicc ./cmd/aicc && /tmp/aicc # logs also land in logs/aicc-<starttime>.log (read these to analyze runs)
 /tmp/aicc useradd -username admin -password … -role ADMIN   # bootstrap first user
 /tmp/aicc flowadd -file internal/seed/flows/x.json -did 95001 # load/publish a flow; same slug = update+republish
@@ -41,6 +42,17 @@ make image VERSION=v0.1.0                     # the release image, SPA embedded
 go run ./cmd/aicc-mockprovider -addr 127.0.0.1:9099
 go run ./cmd/aicc-loadgen -target 127.0.0.1:6060 -calls 200 -ramp 60s -duration 240s -total 30m
 ```
+
+## Container runtime
+
+**Docker Desktop is not installed.** The local runtime is **Colima** (macOS Virtualization.Framework, aarch64, virtiofs). `docker` and `docker-compose` are on `PATH` and talk to it.
+
+- Docker socket: `unix://$HOME/.colima/default/docker.sock`
+- containerd socket: `unix://$HOME/.colima/default/containerd.sock`
+
+If `docker info` fails, the VM is stopped — the fix is `colima start`, never `open -a Docker` (there is no `Docker.app`) and never `brew services`. Ask before starting or stopping it: it is the owner's machine-wide VM, not a per-project container, and it costs minutes and memory.
+
+Anything needing PostgreSQL — the dev server, `make demo-up`, and **any check that a migration actually applies** — needs this VM up first. There is no test in the tree that runs migrations against a real database (`internal/store`'s only test is a pure marshalling check), so a migration is unverified until someone boots one.
 
 Config is `AICC_*` env vars (`.env` in cwd is loaded; real env wins). **`.env.example` is the registry** — every setting with its real default, kept in step with `internal/config/config.go` (`cp .env.example .env`, then uncomment what changes). Two non-`AICC_` credentials matter: `OPENAI_API_KEY` / `ALIYUN_API_KEY`. Note the loader's semantics: an empty value means *unset* (the default wins, so a non-empty default cannot be blanked), and there is no inline-comment syntax — everything after the first `=` is the value. ESL is at `127.0.0.1:18021` (not stock 8021).
 

@@ -13,15 +13,15 @@ import (
 // struct once shipped without tags and leaked CallID/StartedAt to browsers.
 func TestLedgerTypesMarshalPerTheNamingSpec(t *testing.T) {
 	for name, value := range map[string]any{
-		"CDR":             CDR{},
-		"Leg":             Leg{},
-		"TranscriptEntry": TranscriptEntry{},
-		"Callback":        Callback{},
-		"Recording":       Recording{},
-		"QualityReview":   QualityReview{},
-		"Overview":        Overview{},
-		"QueueReport":     QueueReport{},
-		"DailyReport":     DailyReport{},
+		"CDR":            CDR{},
+		"Leg":            Leg{},
+		"TranscriptLine": TranscriptLine{},
+		"Callback":       Callback{},
+		"Recording":      Recording{},
+		"QualityReview":  QualityReview{},
+		"Overview":       Overview{},
+		"QueueReport":    QueueReport{},
+		"DailyReport":    DailyReport{},
 	} {
 		raw, err := json.Marshal(value)
 		if err != nil {

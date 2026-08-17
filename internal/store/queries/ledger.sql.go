@@ -426,13 +426,49 @@ func (q *Queries) InsertRecording(ctx context.Context, arg InsertRecordingParams
 	return i, err
 }
 
-type InsertTranscriptParams struct {
-	CallID     uuid.UUID          `json:"callId"`
-	Seq        int32              `json:"seq"`
-	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
-	Role       string             `json:"role"`
-	Kind       string             `json:"kind"`
-	Content    []byte             `json:"content"`
+const insertTranscriptLine = `-- name: InsertTranscriptLine :exec
+INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content,
+                         party_id, agent_id, offset_ms, language, source, provider, utterance_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT DO NOTHING
+`
+
+type InsertTranscriptLineParams struct {
+	CallID      uuid.UUID          `json:"callId"`
+	Seq         int32              `json:"seq"`
+	OccurredAt  pgtype.Timestamptz `json:"occurredAt"`
+	Speaker     string             `json:"speaker"`
+	Kind        string             `json:"kind"`
+	Content     []byte             `json:"content"`
+	PartyID     *uuid.UUID         `json:"partyId"`
+	AgentID     *uuid.UUID         `json:"agentId"`
+	OffsetMs    int32              `json:"offsetMs"`
+	Language    string             `json:"language"`
+	Source      string             `json:"source"`
+	Provider    string             `json:"provider"`
+	UtteranceID string             `json:"utteranceId"`
+}
+
+// InsertTranscriptLine writes one line as it is spoken. The conflict target is
+// the partial idempotency index, so a redelivered final is dropped rather than
+// duplicated; DO NOTHING is correct because a final is never revised (D3).
+func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscriptLineParams) error {
+	_, err := q.db.Exec(ctx, insertTranscriptLine,
+		arg.CallID,
+		arg.Seq,
+		arg.OccurredAt,
+		arg.Speaker,
+		arg.Kind,
+		arg.Content,
+		arg.PartyID,
+		arg.AgentID,
+		arg.OffsetMs,
+		arg.Language,
+		arg.Source,
+		arg.Provider,
+		arg.UtteranceID,
+	)
+	return err
 }
 
 const listCDRs = `-- name: ListCDRs :many
@@ -630,8 +666,58 @@ func (q *Queries) ListRecordingsByCall(ctx context.Context, callID uuid.UUID) ([
 	return items, nil
 }
 
+const listTranscriptSince = `-- name: ListTranscriptSince :many
+SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id FROM transcripts
+WHERE call_id = $1 AND seq > $2
+ORDER BY seq
+LIMIT $3
+`
+
+type ListTranscriptSinceParams struct {
+	CallID uuid.UUID `json:"callId"`
+	Seq    int32     `json:"seq"`
+	Limit  int32     `json:"limit"`
+}
+
+// ListTranscriptSince serves the backfill cursor. seq is dense per call, so
+// "everything after what I have" is a range scan on uq_transcripts_call_id_seq.
+func (q *Queries) ListTranscriptSince(ctx context.Context, arg ListTranscriptSinceParams) ([]Transcript, error) {
+	rows, err := q.db.Query(ctx, listTranscriptSince, arg.CallID, arg.Seq, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Transcript{}
+	for rows.Next() {
+		var i Transcript
+		if err := rows.Scan(
+			&i.ID,
+			&i.CallID,
+			&i.Seq,
+			&i.OccurredAt,
+			&i.Speaker,
+			&i.Kind,
+			&i.Content,
+			&i.PartyID,
+			&i.AgentID,
+			&i.OffsetMs,
+			&i.Language,
+			&i.Source,
+			&i.Provider,
+			&i.UtteranceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTranscripts = `-- name: ListTranscripts :many
-SELECT id, call_id, seq, occurred_at, role, kind, content FROM transcripts WHERE call_id = $1 ORDER BY seq
+SELECT id, call_id, seq, occurred_at, speaker, kind, content, party_id, agent_id, offset_ms, language, source, provider, utterance_id FROM transcripts WHERE call_id = $1 ORDER BY seq
 `
 
 func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Transcript, error) {
@@ -648,9 +734,16 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 			&i.CallID,
 			&i.Seq,
 			&i.OccurredAt,
-			&i.Role,
+			&i.Speaker,
 			&i.Kind,
 			&i.Content,
+			&i.PartyID,
+			&i.AgentID,
+			&i.OffsetMs,
+			&i.Language,
+			&i.Source,
+			&i.Provider,
+			&i.UtteranceID,
 		); err != nil {
 			return nil, err
 		}

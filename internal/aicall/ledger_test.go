@@ -14,30 +14,21 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
 
 type fakeLedger struct {
-	mu          sync.Mutex
-	cdrs        []store.CDR
-	transcripts map[uuid.UUID][]store.TranscriptEntry
-	callbacks   []store.Callback
+	mu        sync.Mutex
+	cdrs      []store.CDR
+	callbacks []store.Callback
 }
 
-func newFakeLedger() *fakeLedger {
-	return &fakeLedger{transcripts: map[uuid.UUID][]store.TranscriptEntry{}}
-}
+func newFakeLedger() *fakeLedger { return &fakeLedger{} }
 
 func (f *fakeLedger) InsertCDR(_ context.Context, cdr store.CDR) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cdrs = append(f.cdrs, cdr)
-	return nil
-}
-
-func (f *fakeLedger) InsertTranscript(_ context.Context, callID uuid.UUID, entries []store.TranscriptEntry) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.transcripts[callID] = entries
 	return nil
 }
 
@@ -59,16 +50,53 @@ func testFacts() *callFacts {
 	}
 }
 
+// fakeTranscripts captures what the transcript actor writes, which is where
+// the transcript lives now that the recorder posts rather than accumulates.
+type fakeTranscripts struct {
+	mu    sync.Mutex
+	lines map[uuid.UUID][]store.TranscriptLine
+}
+
+func newFakeTranscripts() *fakeTranscripts {
+	return &fakeTranscripts{lines: map[uuid.UUID][]store.TranscriptLine{}}
+}
+
+func (f *fakeTranscripts) InsertTranscriptLine(_ context.Context, callID uuid.UUID, line store.TranscriptLine) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lines[callID] = append(f.lines[callID], line)
+	return nil
+}
+
+func (f *fakeTranscripts) get(callID uuid.UUID) []store.TranscriptLine {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.TranscriptLine(nil), f.lines[callID]...)
+}
+
+// recorderWithTranscript builds a recorder over a real actor, so tests exercise
+// the ordering the actor owns rather than a stand-in for it.
+func recorderWithTranscript(t *testing.T, callID uuid.UUID, startedAt time.Time) (*callRecorder, *fakeTranscripts, func()) {
+	t.Helper()
+	lines := newFakeTranscripts()
+	reg := transcript.NewRegistry(lines, nil, discard())
+	actor := reg.For(callID, "INBOUND", startedAt)
+	var once sync.Once
+	flush := func() { once.Do(func() { reg.Close(callID) }) }
+	t.Cleanup(flush)
+	return newCallRecorder(callID, startedAt, actor), lines, flush
+}
+
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // A call the bot finished itself is contained, and the ledger says so.
 func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 	ledger := newFakeLedger()
 	callID := uuid.New()
-	recorder := newCallRecorder(callID, time.Now().Add(-30*time.Second))
+	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now().Add(-30*time.Second))
 
-	recorder.say(store.TranscriptRoleBot, "感谢致电 NovaNet")
-	recorder.say(store.TranscriptRoleCaller, "帮我查个问题")
+	recorder.say(store.SpeakerBot, "感谢致电 NovaNet")
+	recorder.say(store.SpeakerCustomer, "帮我查个问题")
 	recorder.toolCall("hangup", "{}")
 	recorder.toolResult("hangup", `{"ok":"1"}`)
 	recorder.markHangup()
@@ -95,7 +123,8 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 		t.Errorf("legs = %+v", cdr.Legs)
 	}
 
-	entries := ledger.transcripts[callID]
+	flushTranscript()
+	entries := transcripts.get(callID)
 	if len(entries) != 4 {
 		t.Fatalf("transcript has %d entries, want 4", len(entries))
 	}
@@ -105,7 +134,7 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 			t.Errorf("entry %d has seq %d", i, e.Seq)
 		}
 	}
-	if entries[0].Role != store.TranscriptRoleBot || entries[0].Kind != store.TranscriptKindText {
+	if entries[0].Speaker != store.SpeakerBot || entries[0].Kind != store.TranscriptKindText {
 		t.Errorf("first entry = %+v", entries[0])
 	}
 	if entries[2].Kind != store.TranscriptKindToolCall {
@@ -118,9 +147,9 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 func TestATransferredCallWritesTheTranscriptButNoCDR(t *testing.T) {
 	ledger := newFakeLedger()
 	callID := uuid.New()
-	recorder := newCallRecorder(callID, time.Now())
+	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
 
-	recorder.say(store.TranscriptRoleCaller, "转人工")
+	recorder.say(store.SpeakerCustomer, "转人工")
 	recorder.markTransferred(uuid.New())
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -128,7 +157,8 @@ func TestATransferredCallWritesTheTranscriptButNoCDR(t *testing.T) {
 	if len(ledger.cdrs) != 0 {
 		t.Fatalf("the bot wrote a CDR for a call it handed away: %+v", ledger.cdrs)
 	}
-	if len(ledger.transcripts[callID]) != 1 {
+	flushTranscript()
+	if len(transcripts.get(callID)) != 1 {
 		t.Error("the transcript was lost with the transfer")
 	}
 }
@@ -136,8 +166,8 @@ func TestATransferredCallWritesTheTranscriptButNoCDR(t *testing.T) {
 // A caller who hangs up mid-conversation is answered but not contained.
 func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now())
-	recorder.say(store.TranscriptRoleBot, "你好")
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder.say(store.SpeakerBot, "你好")
 
 	recorder.finish(ledger, testFacts(), discard()) // no end reason: caller left
 
@@ -155,7 +185,7 @@ func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 // A failed conversation is a FAILED row with its cause.
 func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now())
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 	recorder.markFailed("MEDIA_OR_PROVIDER_FAILURE")
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -171,8 +201,8 @@ func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 
 // A nil ledger writes nothing and panics nowhere.
 func TestANilLedgerIsANoOp(t *testing.T) {
-	recorder := newCallRecorder(uuid.New(), time.Now())
-	recorder.say(store.TranscriptRoleBot, "hello")
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder.say(store.SpeakerBot, "hello")
 	recorder.finish(nil, testFacts(), discard())
 }
 
@@ -182,7 +212,7 @@ func TestTakeMessagePersistsACallback(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.orchestrator.cfg.Ledger = ledger
-	actions.recorder = newCallRecorder(uuid.New(), time.Now())
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.facts = testFacts()
 
 	result, err := actions.TakeMessage(t.Context(), flow.MessageRequest{Message: "请明天回电"})
@@ -208,7 +238,7 @@ func TestTakeMessageAnnouncesTheCallback(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.orchestrator.cfg.Ledger = ledger
-	actions.recorder = newCallRecorder(uuid.New(), time.Now())
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.facts = testFacts()
 
 	var announced []store.Callback

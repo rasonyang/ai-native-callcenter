@@ -44,12 +44,25 @@ WHERE (sqlc.narg('from_at')::timestamptz IS NULL OR started_at >= sqlc.narg('fro
   AND (sqlc.arg('did')::text = '' OR did = sqlc.arg('did'))
   AND (sqlc.arg('from_number')::text = '' OR from_number LIKE '%' || sqlc.arg('from_number') || '%');
 
--- name: InsertTranscript :copyfrom
-INSERT INTO transcripts (call_id, seq, occurred_at, role, kind, content)
-VALUES ($1, $2, $3, $4, $5, $6);
+-- InsertTranscriptLine writes one line as it is spoken. The conflict target is
+-- the partial idempotency index, so a redelivered final is dropped rather than
+-- duplicated; DO NOTHING is correct because a final is never revised (D3).
+-- name: InsertTranscriptLine :exec
+INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content,
+                         party_id, agent_id, offset_ms, language, source, provider, utterance_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT DO NOTHING;
 
 -- name: ListTranscripts :many
 SELECT * FROM transcripts WHERE call_id = $1 ORDER BY seq;
+
+-- ListTranscriptSince serves the backfill cursor. seq is dense per call, so
+-- "everything after what I have" is a range scan on uq_transcripts_call_id_seq.
+-- name: ListTranscriptSince :many
+SELECT * FROM transcripts
+WHERE call_id = $1 AND seq > $2
+ORDER BY seq
+LIMIT $3;
 
 -- name: InsertRecording :one
 INSERT INTO recordings (id, call_id, backend, bucket, object_key, size_bytes, duration_sec, format)

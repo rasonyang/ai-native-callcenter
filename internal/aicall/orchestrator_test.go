@@ -304,7 +304,7 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
 
-	recorder := newCallRecorder(uuid.New(), time.Now())
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.recorder = recorder
 
 	done := make(chan struct{})
@@ -391,7 +391,7 @@ func TestReachingATerminalPhaseIsContainment(t *testing.T) {
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
-	actions.recorder = newCallRecorder(uuid.New(), time.Now())
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
 
 	moved := engine.OnNoInput()

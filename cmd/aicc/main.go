@@ -33,6 +33,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 	"github.com/rasonyang/ai-native-callcenter/web"
 )
@@ -124,6 +125,10 @@ func run() error {
 	hub.OnDropped = func(sub events.Subscriber) {
 		slog.Warn("sse subscriber dropped", "userId", sub.UserID)
 	}
+	// One transcript actor per call owns the order of what was said, whichever
+	// phase said it, so the bot and the human path cannot allocate a colliding
+	// seq for one conversation.
+	transcripts := transcript.NewRegistry(st.Ledger(), hub, slog.Default())
 
 	// Telephony: one link to the switch, a command adapter over it, the live
 	// call registry, and the agent presence service.
@@ -231,6 +236,7 @@ func run() error {
 			Flows:       st.Flows(),
 			Switch:      adapter,
 			Ledger:      st.Ledger(),
+			Transcripts: transcripts,
 			BackendBase: cfg.BotBackendBase,
 			Profile:     profile,
 			AnnounceCallback: func(callback store.Callback) {

@@ -11,14 +11,15 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
 
 // Ledger is where finished AI calls are written down. Nil disables writing,
 // which is what tests want.
 type Ledger interface {
 	InsertCDR(ctx context.Context, cdr store.CDR) error
-	InsertTranscript(ctx context.Context, callID uuid.UUID, entries []store.TranscriptEntry) error
 	InsertCallback(ctx context.Context, callID, queueID *uuid.UUID, phoneNumber, message string) (store.Callback, error)
 }
 
@@ -35,9 +36,12 @@ type callRecorder struct {
 	startedAt  time.Time
 	answeredAt time.Time
 
-	mu      sync.Mutex
-	entries []store.TranscriptEntry
-	seq     int
+	// transcript is the call's sole seq allocator and transcript writer. The
+	// recorder posts to it rather than accumulating, so the bot phase is
+	// readable while it happens instead of only after hangup.
+	transcript *transcript.Actor
+
+	mu sync.Mutex
 
 	isTransferred bool
 	transferQueue *uuid.UUID
@@ -48,44 +52,49 @@ type callRecorder struct {
 	hangupCause string
 }
 
-func newCallRecorder(callID uuid.UUID, startedAt time.Time) *callRecorder {
+func newCallRecorder(callID uuid.UUID, startedAt time.Time, actor *transcript.Actor) *callRecorder {
 	return &callRecorder{
 		callID:     callID,
 		startedAt:  startedAt,
 		answeredAt: startedAt, // a bot answers the moment the leg is up
+		transcript: actor,
 	}
 }
 
 // say records one line of conversation.
-func (r *callRecorder) say(role, text string) {
+func (r *callRecorder) say(speaker, text string) {
 	if text == "" {
 		return
 	}
-	r.add(role, store.TranscriptKindText, map[string]any{"text": text})
+	r.add(speaker, store.TranscriptKindText, text, nil)
 }
 
 // toolCall records the model asking for something.
 func (r *callRecorder) toolCall(name, args string) {
-	r.add(store.TranscriptRoleBot, store.TranscriptKindToolCall,
+	r.add(store.SpeakerBot, store.TranscriptKindToolCall, "",
 		map[string]any{"name": name, "args": args})
 }
 
 // toolResult records what the tool answered.
 func (r *callRecorder) toolResult(name, output string) {
-	r.add(store.TranscriptRoleBot, store.TranscriptKindToolResult,
+	r.add(store.SpeakerBot, store.TranscriptKindToolResult, "",
 		map[string]any{"name": name, "output": output})
 }
 
-func (r *callRecorder) add(role, kind string, content map[string]any) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.seq++
-	r.entries = append(r.entries, store.TranscriptEntry{
-		Seq:        r.seq,
-		OccurredAt: time.Now(),
-		Role:       role,
-		Kind:       kind,
-		Content:    content,
+// add hands the line to the call's transcript actor. The bot's transcript is
+// the model's own, not recognition of audio, so every line it writes is a
+// final from a MODEL source.
+func (r *callRecorder) add(speaker, kind, text string, content map[string]any) {
+	if r.transcript == nil {
+		return
+	}
+	r.transcript.Post(transcript.Line{
+		Speaker: speaker,
+		Kind:    kind,
+		Text:    text,
+		Content: content,
+		Source:  store.TranscriptSourceModel,
+		IsFinal: true,
 	})
 }
 
@@ -126,16 +135,12 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	defer cancel()
 
 	r.mu.Lock()
-	entries := r.entries
 	isTransferred := r.isTransferred
 	endReason := r.endReason
 	hangupCause := r.hangupCause
 	transferQueue := r.transferQueue
 	r.mu.Unlock()
 
-	if err := ledger.InsertTranscript(ctx, r.callID, entries); err != nil {
-		log.Error("could not write the transcript", "error", err)
-	}
 	if isTransferred {
 		return
 	}
@@ -179,6 +184,16 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	if err := ledger.InsertCDR(ctx, cdr); err != nil {
 		log.Error("could not write the cdr", "error", err)
 	}
+}
+
+// transcriptActor returns the actor that owns this call's transcript order, or
+// nil when transcripts are switched off. A bot answers the moment its leg is
+// up, so the actor's offsets are anchored there.
+func (o *Orchestrator) transcriptActor(callID uuid.UUID, direction callType) *transcript.Actor {
+	if o.cfg.Transcripts == nil {
+		return nil
+	}
+	return o.cfg.Transcripts.For(callID, events.CallType(direction), time.Now().UTC())
 }
 
 // callFacts is what the orchestrator knows about the call that the recorder

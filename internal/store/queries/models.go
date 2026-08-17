@@ -257,13 +257,20 @@ type Setting struct {
 }
 
 type Transcript struct {
-	ID         int64              `json:"id"`
-	CallID     uuid.UUID          `json:"callId"`
-	Seq        int32              `json:"seq"`
-	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
-	Role       string             `json:"role"`
-	Kind       string             `json:"kind"`
-	Content    []byte             `json:"content"`
+	ID          int64              `json:"id"`
+	CallID      uuid.UUID          `json:"callId"`
+	Seq         int32              `json:"seq"`
+	OccurredAt  pgtype.Timestamptz `json:"occurredAt"`
+	Speaker     string             `json:"speaker"`
+	Kind        string             `json:"kind"`
+	Content     []byte             `json:"content"`
+	PartyID     *uuid.UUID         `json:"partyId"`
+	AgentID     *uuid.UUID         `json:"agentId"`
+	OffsetMs    int32              `json:"offsetMs"`
+	Language    string             `json:"language"`
+	Source      string             `json:"source"`
+	Provider    string             `json:"provider"`
+	UtteranceID string             `json:"utteranceId"`
 }
 
 type Trunk struct {

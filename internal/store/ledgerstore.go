@@ -253,67 +253,118 @@ func fromRow(row queries.Cdr) CDR {
 // Transcripts.
 //
 
-// Transcript roles and kinds, byte-identical across the stack.
+// Speakers, kinds and sources, byte-identical across the stack.
 const (
-	TranscriptRoleBot    = "BOT"
-	TranscriptRoleCaller = "CALLER"
+	SpeakerCustomer   = "CUSTOMER"
+	SpeakerBot        = "BOT"
+	SpeakerHumanAgent = "HUMAN_AGENT"
 
 	TranscriptKindText       = "TEXT"
 	TranscriptKindToolCall   = "TOOL_CALL"
 	TranscriptKindToolResult = "TOOL_RESULT"
+
+	// TranscriptSourceModel is the conversational engine's own transcript of
+	// the AI leg; TranscriptSourceASR is a separate recognition of streamed
+	// audio. The hybrid of the two is only auditable if the line says which.
+	TranscriptSourceModel = "MODEL"
+	TranscriptSourceASR   = "ASR"
 )
 
-// TranscriptEntry is one thing said or done on an AI leg.
-type TranscriptEntry struct {
-	Seq        int            `json:"seq"`
-	OccurredAt time.Time      `json:"occurredAt"`
-	Role       string         `json:"role"`
-	Kind       string         `json:"kind"`
-	Content    map[string]any `json:"content"`
+// TranscriptLine is one thing said or done on a call, in either phase.
+type TranscriptLine struct {
+	Seq         int            `json:"seq"`
+	OccurredAt  time.Time      `json:"occurredAt"`
+	Speaker     string         `json:"speaker"`
+	Kind        string         `json:"kind"`
+	Content     map[string]any `json:"content"`
+	PartyID     *uuid.UUID     `json:"partyId,omitempty"`
+	AgentID     *uuid.UUID     `json:"agentId,omitempty"`
+	OffsetMs    int            `json:"offsetMs"`
+	Language    string         `json:"language,omitempty"`
+	Source      string         `json:"source"`
+	Provider    string         `json:"provider,omitempty"`
+	UtteranceID string         `json:"utteranceId,omitempty"`
 }
 
-// InsertTranscript writes a call's transcript in one batch at call end.
-func (l *LedgerStore) InsertTranscript(ctx context.Context, callID uuid.UUID, entries []TranscriptEntry) error {
-	if len(entries) == 0 {
-		return nil
+func (l *TranscriptLine) params(callID uuid.UUID) (queries.InsertTranscriptLineParams, error) {
+	content, err := marshalOr(l.Content, "{}")
+	if err != nil {
+		return queries.InsertTranscriptLineParams{}, fmt.Errorf("encode transcript %d: %w", l.Seq, err)
 	}
-	rows := make([]queries.InsertTranscriptParams, 0, len(entries))
-	for _, e := range entries {
-		content, err := marshalOr(e.Content, "{}")
-		if err != nil {
-			return fmt.Errorf("encode transcript %d: %w", e.Seq, err)
-		}
-		rows = append(rows, queries.InsertTranscriptParams{
-			CallID:     callID,
-			Seq:        int32(e.Seq),
-			OccurredAt: stamp(e.OccurredAt),
-			Role:       e.Role,
-			Kind:       e.Kind,
-			Content:    content,
-		})
+	source := l.Source
+	if source == "" {
+		source = TranscriptSourceModel
 	}
-	_, err := l.q.InsertTranscript(ctx, rows)
-	return err
+	return queries.InsertTranscriptLineParams{
+		CallID:      callID,
+		Seq:         int32(l.Seq),
+		OccurredAt:  stamp(l.OccurredAt),
+		Speaker:     l.Speaker,
+		Kind:        l.Kind,
+		Content:     content,
+		PartyID:     l.PartyID,
+		AgentID:     l.AgentID,
+		OffsetMs:    int32(l.OffsetMs),
+		Language:    l.Language,
+		Source:      source,
+		Provider:    l.Provider,
+		UtteranceID: l.UtteranceID,
+	}, nil
+}
+
+// InsertTranscriptLine writes one line as it is spoken. A redelivered final is
+// dropped by the idempotency index rather than duplicated.
+func (l *LedgerStore) InsertTranscriptLine(ctx context.Context, callID uuid.UUID, line TranscriptLine) error {
+	arg, err := line.params(callID)
+	if err != nil {
+		return err
+	}
+	return l.q.InsertTranscriptLine(ctx, arg)
 }
 
 // ListTranscript reads a call's transcript in order.
-func (l *LedgerStore) ListTranscript(ctx context.Context, callID uuid.UUID) ([]TranscriptEntry, error) {
+func (l *LedgerStore) ListTranscript(ctx context.Context, callID uuid.UUID) ([]TranscriptLine, error) {
 	rows, err := l.q.ListTranscripts(ctx, callID)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]TranscriptEntry, 0, len(rows))
-	for _, row := range rows {
-		entry := TranscriptEntry{
-			Seq:        int(row.Seq),
-			OccurredAt: row.OccurredAt.Time,
-			Role:       row.Role,
-			Kind:       row.Kind,
-		}
-		_ = json.Unmarshal(row.Content, &entry.Content)
-		out = append(out, entry)
+	return transcriptLines(rows), nil
+}
+
+// ListTranscriptSince reads the lines after a cursor, for the backfill that
+// closes the gap between an agent's snapshot and their live tail.
+func (l *LedgerStore) ListTranscriptSince(ctx context.Context, callID uuid.UUID, sinceSeq, limit int) ([]TranscriptLine, error) {
+	rows, err := l.q.ListTranscriptSince(ctx, queries.ListTranscriptSinceParams{
+		CallID: callID,
+		Seq:    int32(sinceSeq),
+		Limit:  int32(limit),
+	})
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	return transcriptLines(rows), nil
+}
+
+func transcriptLines(rows []queries.Transcript) []TranscriptLine {
+	out := make([]TranscriptLine, 0, len(rows))
+	for _, row := range rows {
+		line := TranscriptLine{
+			Seq:         int(row.Seq),
+			OccurredAt:  row.OccurredAt.Time,
+			Speaker:     row.Speaker,
+			Kind:        row.Kind,
+			PartyID:     row.PartyID,
+			AgentID:     row.AgentID,
+			OffsetMs:    int(row.OffsetMs),
+			Language:    row.Language,
+			Source:      row.Source,
+			Provider:    row.Provider,
+			UtteranceID: row.UtteranceID,
+		}
+		_ = json.Unmarshal(row.Content, &line.Content)
+		out = append(out, line)
+	}
+	return out
 }
 
 //

@@ -17,6 +17,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
@@ -74,6 +75,9 @@ type OrchestratorConfig struct {
 	Sessions SessionFactory
 	// Ledger receives finished calls; nil disables writing.
 	Ledger Ledger
+	// Transcripts hands out the per-call actor that owns transcript order for
+	// both phases of a call; nil disables transcripts entirely.
+	Transcripts *transcript.Registry
 	// AnnounceCallback tells the live event stream about a callback the bot
 	// just created; nil means nobody is watching.
 	AnnounceCallback func(callback store.Callback)
@@ -232,13 +236,13 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		log.Warn("bot leg carried no parseable call id; minted one",
 			"header", headers[headerCallID], "callId", ledgerCallID)
 	}
-	recorder := newCallRecorder(ledgerCallID, time.Now())
 	// An outbound conversation is the same machinery with the direction
 	// stamped by whoever originated it; the default is a caller dialing in.
 	direction := callTypeInbound
 	if headers[headerCallType] == "OUTBOUND" {
 		direction = callTypeOutbound
 	}
+	recorder := newCallRecorder(ledgerCallID, time.Now(), o.transcriptActor(ledgerCallID, direction))
 	facts := &callFacts{
 		callType:           direction,
 		language:           flow.Lang(language),
@@ -318,16 +322,16 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 		switch event.Type {
 		case EventTypeCallerSaid:
 			if event.IsFinal {
-				recorder.say(store.TranscriptRoleCaller, event.Text)
+				recorder.say(store.SpeakerCustomer, event.Text)
 			}
 
 		case EventTypeBotSaid:
 			if event.IsFinal {
-				recorder.say(store.TranscriptRoleBot, event.Text)
+				recorder.say(store.SpeakerBot, event.Text)
 			}
 
 		case EventTypeDigit:
-			recorder.say(store.TranscriptRoleCaller, "[keypad] "+event.Text)
+			recorder.say(store.SpeakerCustomer, "[keypad] "+event.Text)
 
 		case EventTypeToolCall:
 			recorder.toolCall(event.ToolName, event.ToolArgs)
