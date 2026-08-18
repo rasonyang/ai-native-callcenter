@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -35,12 +36,24 @@ var (
 // rejected, which is also what makes the application safe to restart while
 // calls are up.
 type Coordinator struct {
-	registry *Registry
-	adapter  *Adapter
-	agents   AgentLookup
-	pub      Publisher
-	cdr      *CDRAssembler
-	taps     Tapper
+	registry  *Registry
+	adapter   *Adapter
+	agents    AgentLookup
+	pub       Publisher
+	cdr       *CDRAssembler
+	taps      Tapper
+	audiences Audiences
+}
+
+// Audiences records who may see a call's live transcript. Nil leaves every
+// transcript addressed to supervisors and administrators only, which is what
+// the transcript actor decides when nobody has told it otherwise.
+//
+// It is a port for the same reason Tapper is: this package owns which agents
+// are on a call and nothing else, and the transcript's ordering, storage and
+// delivery are not its business.
+type Audiences interface {
+	SetAudience(callID uuid.UUID, agentIDs []uuid.UUID)
 }
 
 // Tapper starts and stops the media tap that feeds live transcription. Nil
@@ -74,6 +87,41 @@ var ErrNoTap = errors.New("telephony: no live tap on this channel")
 
 // AttachTaps points bridge and hold transitions at the transcription tap.
 func (c *Coordinator) AttachTaps(t Tapper) { c.taps = t }
+
+// AttachAudiences points party changes at the live transcript's addressing.
+func (c *Coordinator) AttachAudiences(a Audiences) { c.audiences = a }
+
+// announceAudience tells the transcript who is on this call.
+//
+// Every agent with a party on the call, which is a superset of whoever is
+// bridged at this instant: a consulting agent and the agent they consulted
+// were both on the conversation, and a transcript that flickered out of an
+// agent's panel when a bridge moved would be worse than one that stays.
+//
+// Called at the bridge, which is the moment an agent's leg becomes part of
+// this conversation. Not when that leg is created: a leg the switch dialled
+// carries no call id of its own, so it is adopted onto a provisional call that
+// has no transcript and is absorbed moments later. Addressing that one would
+// look like coverage and reach nobody.
+func (c *Coordinator) announceAudience(callID uuid.UUID) {
+	if c.audiences == nil {
+		return
+	}
+	var agentIDs []uuid.UUID
+	if err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.AgentID != nil && !slices.Contains(agentIDs, *p.AgentID) {
+				agentIDs = append(agentIDs, *p.AgentID)
+			}
+		}
+	}); err != nil {
+		// A call we can no longer read is not evidence that its audience
+		// shrank, and clearing one on a failed read would take a live
+		// transcript off an agent's screen.
+		return
+	}
+	c.audiences.SetAudience(callID, agentIDs)
+}
 
 // reportTap classifies what the tap said about a command it did not carry out.
 //
@@ -356,6 +404,8 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	// old — measured to survive, so there is no attach-on-answer-and-discard
 	// fallback to maintain.
 	c.tapAgentLeg(keep, ev.ChannelID, ev.OtherChannelID)
+	// Parties moved between calls, so who is on this one has changed.
+	c.announceAudience(keep)
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an

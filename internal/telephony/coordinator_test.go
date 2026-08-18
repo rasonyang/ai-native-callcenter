@@ -411,3 +411,79 @@ func TestNoTapperMeansNoTranscriptionPath(t *testing.T) {
 		merged(vars, map[string]string{"Other-Leg-Unique-ID": "b"})))
 	// Reaching here without a nil dereference is the assertion.
 }
+
+// recordingAudiences captures who the coordinator said may see a transcript.
+type recordingAudiences struct {
+	mu  sync.Mutex
+	set map[uuid.UUID][]uuid.UUID
+}
+
+func newRecordingAudiences() *recordingAudiences {
+	return &recordingAudiences{set: map[uuid.UUID][]uuid.UUID{}}
+}
+
+func (r *recordingAudiences) SetAudience(callID uuid.UUID, agentIDs []uuid.UUID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.set[callID] = append([]uuid.UUID(nil), agentIDs...)
+}
+
+func (r *recordingAudiences) forCall(callID uuid.UUID) ([]uuid.UUID, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	got, ok := r.set[callID]
+	return got, ok
+}
+
+// Who may see a call's live transcript comes from who is on the call, and only
+// this side knows that. The alternative is what shipped: nobody ever said, the
+// transcript actor's scope stayed empty, and the hub reads an empty scope as an
+// unscoped system notice bound for every subscriber.
+func TestAnAgentLegAddressesTheTranscriptToThatAgent(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	audiences := newRecordingAudiences()
+	c.AttachAudiences(audiences)
+
+	ctx := t.Context()
+	minted := uuid.New()
+	vars := map[string]string{"variable_aicc_call_id": minted.String()}
+
+	// The bot phase: a caller and nobody else.
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", "caller-chan", "inbound", vars))
+	if got, ok := audiences.forCall(minted); ok && len(got) != 0 {
+		t.Fatalf("the bot phase was addressed to %v, want nobody", got)
+	}
+
+	// The agent's leg arrives the way a queue delivery does — its own channel,
+	// no call id of its own — and becomes part of this conversation at the
+	// bridge, which is also where the two calls are folded into one.
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": "caller-chan"})))
+
+	waitFor(t, func() bool {
+		got, ok := audiences.forCall(minted)
+		return ok && len(got) == 1
+	})
+	got, _ := audiences.forCall(minted)
+	if len(got) != 1 || got[0] != testAgentID {
+		t.Fatalf("addressed to %v, want the agent on the call (%s)", got, testAgentID)
+	}
+}
+
+// Nothing attached is nothing driven: transcription off must leave this path
+// as absent as the tap's.
+func TestNoAudiencesMeansNoAddressing(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	ctx := t.Context()
+	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	// Reaching here without a nil dereference is the assertion.
+}

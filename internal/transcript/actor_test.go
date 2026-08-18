@@ -176,8 +176,9 @@ func TestAPartialIsPublishedButNeverStoredAndTakesNoSeq(t *testing.T) {
 	}
 }
 
-// During the bot phase there is no agent party, so the events are not
-// agent-scoped — which is exactly why an agent joining later must backfill.
+// During the bot phase there is no agent party, so the events reach
+// supervisors and administrators only — which is exactly why an agent joining
+// later must backfill.
 func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 	actor, _, pub, flush := newFixture(t)
 
@@ -190,8 +191,7 @@ func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 	waitForEvents(t, pub, 1)
 
 	agentID := uuid.New()
-	queueID := uuid.New()
-	actor.SetAudience([]uuid.UUID{agentID}, &queueID)
+	actor.SetAudience([]uuid.UUID{agentID})
 	actor.Post(final(store.SpeakerHumanAgent, "how can I help"))
 	flush()
 
@@ -200,11 +200,22 @@ func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 	if len(pub.scopes) != 2 {
 		t.Fatalf("published %d events, want 2", len(pub.scopes))
 	}
+	// The decisive part: the bot phase is addressed to supervisors, not left
+	// unaddressed. An events.Scope with nothing set is delivered to every
+	// subscriber, so "no agent is on this call yet" and "everyone may see
+	// this" were the same value, and the second is what the hub acted on.
+	if !pub.scopes[0].SupervisorOnly {
+		t.Errorf("the bot phase was published with scope %+v, which the hub "+
+			"delivers to every agent in the building", pub.scopes[0])
+	}
 	if len(pub.scopes[0].AgentIDs) != 0 {
 		t.Errorf("the bot phase was scoped to %v", pub.scopes[0].AgentIDs)
 	}
 	if len(pub.scopes[1].AgentIDs) != 1 || pub.scopes[1].AgentIDs[0] != agentID {
 		t.Errorf("the human phase was scoped to %v", pub.scopes[1].AgentIDs)
+	}
+	if pub.scopes[1].SupervisorOnly {
+		t.Error("the human phase was withheld from the agent on the call")
 	}
 }
 

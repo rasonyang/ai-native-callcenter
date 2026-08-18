@@ -7,13 +7,23 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
+	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
 
 // Fakes that record what they were handed. None of them re-implements the
@@ -21,8 +31,9 @@ import (
 // with a broken run() as readily as a correct one.
 
 type fakeCoordinator struct {
-	taps telephony.Tapper
-	cdr  *telephony.CDRAssembler
+	taps      telephony.Tapper
+	audiences telephony.Audiences
+	cdr       *telephony.CDRAssembler
 	// hookWhenCDRAttached is what the registry's finish hook did at the moment
 	// AttachCDR was called. The real coordinator *sets* that hook, so a
 	// composition that wrapped it first would have its wrapper thrown away —
@@ -32,6 +43,8 @@ type fakeCoordinator struct {
 }
 
 func (f *fakeCoordinator) AttachTaps(t telephony.Tapper) { f.taps = t }
+
+func (f *fakeCoordinator) AttachAudiences(a telephony.Audiences) { f.audiences = a }
 
 func (f *fakeCoordinator) AttachCDR(a *telephony.CDRAssembler) {
 	f.cdr = a
@@ -66,6 +79,17 @@ func (f *fakeCatalog) ReconcileAgentTiers(_ context.Context, agentID uuid.UUID) 
 	f.reconciled = append(f.reconciled, agentID)
 }
 
+type fakeAudiences struct {
+	set map[uuid.UUID][]uuid.UUID
+}
+
+func (f *fakeAudiences) SetAudience(callID uuid.UUID, agentIDs []uuid.UUID) {
+	if f.set == nil {
+		f.set = map[uuid.UUID][]uuid.UUID{}
+	}
+	f.set[callID] = agentIDs
+}
+
 type fakeLink struct{ onConnect func(context.Context) }
 
 func (f *fakeLink) OnConnect(fn func(context.Context)) { f.onConnect = fn }
@@ -88,6 +112,7 @@ type wiringFixture struct {
 	catalog     *fakeCatalog
 	link        *fakeLink
 	taps        *fakeTapper
+	audiences   *fakeAudiences
 	transcripts *retirer
 	cdr         *telephony.CDRAssembler
 	regs        []telephony.Registration
@@ -107,6 +132,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		catalog:     &fakeCatalog{},
 		link:        &fakeLink{},
 		taps:        &fakeTapper{},
+		audiences:   &fakeAudiences{},
 		transcripts: &retirer{},
 		cdr:         &telephony.CDRAssembler{},
 		regs: []telephony.Registration{
@@ -127,6 +153,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		Link:          f.link,
 		CDR:           f.cdr,
 		Transcripts:   f.transcripts,
+		Audiences:     f.audiences,
 		Taps:          f.taps,
 		Registrations: func() ([]telephony.Registration, error) { f.regsCalls++; return f.regs, f.regsErr },
 		Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -164,6 +191,14 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	t.Run("the coordinator has the cdr assembler", func(t *testing.T) {
 		if f.coordinator.cdr != f.cdr {
 			t.Fatalf("cdr = %p, want %p", f.coordinator.cdr, f.cdr)
+		}
+	})
+
+	t.Run("the coordinator addresses transcripts", func(t *testing.T) {
+		if f.coordinator.audiences != telephony.Audiences(f.audiences) {
+			t.Fatalf("audiences = %#v, want the transcript registry — without it "+
+				"every transcript event is an unscoped system notice",
+				f.coordinator.audiences)
 		}
 	})
 
@@ -231,7 +266,8 @@ func TestNoTapMeansNoTapConnections(t *testing.T) {
 		t.Errorf("detached %v with no tap configured", f.taps.detachedCalls)
 	}
 	// The unconditional half is still wired.
-	if f.agents.staffing == nil || f.link.onConnect == nil || f.coordinator.cdr == nil {
+	if f.agents.staffing == nil || f.link.onConnect == nil ||
+		f.coordinator.cdr == nil || f.coordinator.audiences == nil {
 		t.Error("turning transcription off dropped a connection that is not its own")
 	}
 }
@@ -283,5 +319,91 @@ func TestReconnectStillSyncsWhenRegistrationsCannotBeRead(t *testing.T) {
 	}
 	if len(f.agents.observed) != 0 {
 		t.Errorf("observed %v from a failed read", f.agents.observed)
+	}
+}
+
+// --- the two struct literals -------------------------------------------------
+
+type fakeStreamer struct{}
+
+func (fakeStreamer) Open(context.Context, string) (io.ReadSeekCloser, int64, error) {
+	return nil, 0, errors.New("not used")
+}
+
+// zeroFields names the fields of v that are still the zero value.
+//
+// Reflection rather than a written-out list of names because the list is what
+// goes stale: a field added to httpapi.Deps or aicall.OrchestratorConfig and
+// never plumbed is precisely the failure this is for, and a hand-maintained
+// list would be updated by the same commit that forgot to plumb it.
+func zeroFields(v any, allowed ...string) []string {
+	rv := reflect.ValueOf(v)
+	rt := rv.Type()
+	var missing []string
+	for i := range rt.NumField() {
+		if slices.Contains(allowed, rt.Field(i).Name) {
+			continue
+		}
+		if rv.Field(i).IsZero() {
+			missing = append(missing, rt.Field(i).Name)
+		}
+	}
+	return missing
+}
+
+// Every dependency the HTTP server has is populated.
+//
+// The literal this replaced could drop any of its twelve lines and still
+// compile: Deps.Transcripts is how the transcript snapshot learns what state
+// transcription is in, and losing it degrades the panel rather than failing
+// anything. Parameters cannot be dropped — that is a compile error — and this
+// covers the other direction, a field added to Deps and never plumbed.
+func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
+	deps := apiDeps(
+		&auth.Service{},
+		&events.Hub{},
+		&agents.Service{},
+		agentDirectory{},
+		&telephony.Coordinator{},
+		&transcript.Registry{},
+		&catalog.Service{},
+		&store.LedgerStore{},
+		fakeStreamer{},
+		&store.LedgerStore{},
+		&outbound.Service{},
+		http.NewServeMux(),
+	)
+
+	if missing := zeroFields(deps); len(missing) > 0 {
+		t.Errorf("httpapi.Deps fields left unset: %v — each one silently disables "+
+			"the feature it serves", missing)
+	}
+}
+
+// Same for the AI voice leg. Sessions and Logger are the orchestrator's own
+// defaults and are named here so that the exemption is a decision on the
+// record rather than a gap.
+func TestEveryBotDependencyIsPlumbed(t *testing.T) {
+	cfg := botConfig(
+		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
+			BotAdvertiseIP: "127.0.0.1", BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
+			BotMaxCalls: 10}),
+		&catalog.Service{},
+		&store.FlowStore{},
+		&telephony.Adapter{},
+		&store.LedgerStore{},
+		&transcript.Registry{},
+		"http://127.0.0.1:8080",
+		provider.Profile{Name: "openai"},
+		func(store.Callback) {},
+	)
+
+	if missing := zeroFields(cfg, "Sessions", "Logger"); len(missing) > 0 {
+		t.Errorf("aicall.OrchestratorConfig fields left unset: %v", missing)
+	}
+	if missing := zeroFields(cfg.UAS, "Logger"); len(missing) > 0 {
+		t.Errorf("voice.Config fields left unset: %v — RTPDeadTimeout at zero "+
+			"disables the dead-media check and RTCPInterval at zero disables "+
+			"reporting, both without a word", missing)
 	}
 }

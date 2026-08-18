@@ -87,7 +87,6 @@ type Actor struct {
 	// that an agent joined, so it is guarded rather than owned.
 	mu       sync.RWMutex
 	agentIDs []uuid.UUID
-	queueID  *uuid.UUID
 
 	// seq is owned by the actor goroutine alone. No lock, by construction.
 	seq int
@@ -124,25 +123,38 @@ func (a *Actor) CurrentState() string {
 	return a.state
 }
 
-// SetAudience records who may see this call's transcript. During the bot phase
-// there is no agent party, so the events reach supervisors and admins only —
-// which is exactly why an agent joining mid-call must backfill over REST
-// rather than expect the stream to have carried the bot phase to them.
-func (a *Actor) SetAudience(agentIDs []uuid.UUID, queueID *uuid.UUID) {
+// SetAudience records who may see this call's transcript: the agents who are
+// on it. During the bot phase there is nobody, which is exactly why an agent
+// joining mid-call must backfill over REST rather than expect the stream to
+// have carried the bot phase to them.
+//
+// It takes agents and not a queue. A queue-scoped transcript reaches every
+// agent staffed on that queue, whether or not they are on the call — see
+// events.Subscriber.wants, where a queue match is an alternative to an agent
+// match, not an additional restriction. The same conversation served over REST
+// is guarded by "you are on this call" (httpapi.mayReadTranscript), and two
+// different answers to who may see a conversation is the defect this closes,
+// not a feature to keep one side of.
+func (a *Actor) SetAudience(agentIDs []uuid.UUID) {
 	a.mu.Lock()
 	a.agentIDs = append(a.agentIDs[:0], agentIDs...)
-	a.queueID = queueID
 	a.mu.Unlock()
 }
 
+// scope decides who a transcript event is addressed to, and always decides.
+//
+// An events.Scope with nothing set is not "nobody in particular" — the hub
+// reads it as an unscoped system notice and delivers it to every subscriber
+// (events.Subscriber.wants, final return). So the bot phase, which has no
+// agent party by construction, is stated as what it is: there is no agent to
+// show it to, and supervisors and administrators already see everything.
 func (a *Actor) scope() events.Scope {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
-	scope := events.Scope{QueueID: a.queueID}
-	if len(a.agentIDs) > 0 {
-		scope.AgentIDs = append([]uuid.UUID(nil), a.agentIDs...)
+	if len(a.agentIDs) == 0 {
+		return events.Scope{SupervisorOnly: true}
 	}
-	return scope
+	return events.Scope{AgentIDs: append([]uuid.UUID(nil), a.agentIDs...)}
 }
 
 // Post hands a line to the actor. It never blocks the caller: a producer is
@@ -336,6 +348,18 @@ func (r *Registry) Lookup(callID uuid.UUID) (*Actor, bool) {
 	defer r.mu.Unlock()
 	a, ok := r.actors[callID]
 	return a, ok
+}
+
+// SetAudience records who may see a call's transcript, if the call has an
+// actor. A call with none is not an error: the bot phase creates the actor and
+// a switch-only call never has one.
+func (r *Registry) SetAudience(callID uuid.UUID, agentIDs []uuid.UUID) {
+	r.mu.Lock()
+	a, ok := r.actors[callID]
+	r.mu.Unlock()
+	if ok {
+		a.SetAudience(agentIDs)
+	}
 }
 
 // Close drains and retires the call's actor.

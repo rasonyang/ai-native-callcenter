@@ -36,7 +36,6 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
-	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 	"github.com/rasonyang/ai-native-callcenter/web"
 )
 
@@ -232,6 +231,7 @@ func run() error {
 		Link:        link,
 		CDR:         telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()),
 		Transcripts: transcripts,
+		Audiences:   transcripts,
 		Taps:        tap,
 		Registrations: func() ([]telephony.Registration, error) {
 			return adapter.Registrations(cfg.SIPProfile)
@@ -268,34 +268,23 @@ func run() error {
 		slog.Info("voice provider selected",
 			"provider", profile.Name, "model", profile.Model, "endpoint", profile.Endpoint)
 
-		orchestrator, err := aicall.NewOrchestrator(aicall.OrchestratorConfig{
-			UAS: voice.Config{
-				SIPHost:          cfg.BotSIPHost,
-				SIPPort:          cfg.BotSIPPort,
-				AdvertiseIP:      cfg.BotAdvertiseIP,
-				RTPPortRange:     [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh},
-				CodecPreferences: voice.DefaultConfig().CodecPreferences,
-				RTPDeadTimeout:   voice.DefaultConfig().RTPDeadTimeout,
-				AckTimeout:       voice.DefaultConfig().AckTimeout,
-				MaxCalls:         cfg.BotMaxCalls,
-				IsDTMFEnabled:    true,
-				RTCPInterval:     voice.DefaultConfig().RTCPInterval,
-			},
-			Catalog:     catalogSvc,
-			Flows:       st.Flows(),
-			Switch:      adapter,
-			Ledger:      st.Ledger(),
-			Transcripts: transcripts,
-			BackendBase: cfg.BotBackendBase,
-			Profile:     profile,
-			AnnounceCallback: func(callback store.Callback) {
+		orchestrator, err := aicall.NewOrchestrator(botConfig(
+			botUAS(cfg),
+			catalogSvc,
+			st.Flows(),
+			adapter,
+			st.Ledger(),
+			transcripts,
+			cfg.BotBackendBase,
+			profile,
+			func(callback store.Callback) {
 				hub.Publish(ctx, events.Event{
 					Type:    events.TypeCallbackCreated,
 					CallID:  callback.CallID,
 					Payload: map[string]any{"callback": callback},
 				}, events.Scope{})
 			},
-		})
+		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)
 		}
@@ -317,20 +306,20 @@ func run() error {
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
-		Handler: httpapi.New(cfg, httpapi.Deps{
-			Auth:        authSvc,
-			Hub:         hub,
-			Agents:      agentSvc,
-			AgentDir:    agentDirectory{st},
-			Calls:       coordinator,
-			Transcripts: transcripts,
-			Catalog:     catalogSvc,
-			Ledger:      st.Ledger(),
-			Recordings:  recordings,
-			Auditor:     st.Ledger(),
-			Outbound:    outboundSvc,
-			SPA:         spa,
-		}).Handler(),
+		Handler: httpapi.New(cfg, apiDeps(
+			authSvc,
+			hub,
+			agentSvc,
+			agentDirectory{st},
+			coordinator,
+			transcripts,
+			catalogSvc,
+			st.Ledger(),
+			recordings,
+			st.Ledger(),
+			outboundSvc,
+			spa,
+		)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// No WriteTimeout: the event stream is long-lived.
 		IdleTimeout: 120 * time.Second,

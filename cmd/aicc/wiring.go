@@ -5,11 +5,21 @@ package main
 import (
 	"context"
 	"log/slog"
+	"net/http"
 
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/aicall"
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/config"
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
+	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
 // The parts of the running system, as the composition uses them.
@@ -25,6 +35,7 @@ import (
 type switchWiring interface {
 	AttachTaps(telephony.Tapper)
 	AttachCDR(*telephony.CDRAssembler)
+	AttachAudiences(telephony.Audiences)
 }
 
 type presenceWiring interface {
@@ -58,6 +69,7 @@ type composition struct {
 	Link          connectHook
 	CDR           *telephony.CDRAssembler
 	Transcripts   transcriptRetirer
+	Audiences     telephony.Audiences
 	Taps          telephony.Tapper
 	Registrations func() ([]telephony.Registration, error)
 	Log           *slog.Logger
@@ -75,6 +87,11 @@ func (c composition) connect() {
 	// The switch forgets its agents when it restarts, and we are the source of
 	// truth, so every reconnect rebuilds its view.
 	c.Link.OnConnect(c.onSwitchConnected)
+
+	// Who may see a call's live transcript is decided from who is on the call,
+	// which only this side knows. Without it every transcript event falls
+	// through the hub's scope check as an unscoped system notice.
+	c.Coordinator.AttachAudiences(c.Audiences)
 
 	c.Coordinator.AttachCDR(c.CDR)
 	// After AttachCDR, because that is what sets OnCallFinished: this composes
@@ -166,5 +183,95 @@ func detachTapsWithCall(prior func(uuid.UUID), taps callTapper) func(uuid.UUID) 
 			prior(callID)
 		}
 		taps.DetachCall(callID)
+	}
+}
+
+// The two struct literals that assemble a whole subsystem's dependencies are
+// assembled here instead, through parameters.
+//
+// A keyed struct literal may omit any field and still compile, so dropping one
+// line disables a dependency silently — httpapi.Deps.Transcripts is how the
+// snapshot learns what state transcription is in, and it is one line in a
+// twelve-line literal. Parameters cannot be omitted: leaving one out is a
+// compile error, which is a stronger guarantee than any test. The reflection
+// tests beside these cover the other half, that every field of the result is
+// populated, so a field added to either config fails until it is plumbed.
+
+// apiDeps assembles what the HTTP server is given.
+func apiDeps(
+	authSvc *auth.Service,
+	hub *events.Hub,
+	agentSvc httpapi.AgentService,
+	agentDir httpapi.AgentDirectory,
+	calls httpapi.CallService,
+	transcripts httpapi.TranscriptStates,
+	catalogSvc httpapi.CatalogService,
+	ledger *store.LedgerStore,
+	recordings httpapi.RecordingStreamer,
+	auditor httpapi.Auditor,
+	outboundSvc httpapi.OutboundService,
+	spa http.Handler,
+) httpapi.Deps {
+	return httpapi.Deps{
+		Auth:        authSvc,
+		Hub:         hub,
+		Agents:      agentSvc,
+		AgentDir:    agentDir,
+		Calls:       calls,
+		Transcripts: transcripts,
+		Catalog:     catalogSvc,
+		Ledger:      ledger,
+		Recordings:  recordings,
+		Auditor:     auditor,
+		Outbound:    outboundSvc,
+		SPA:         spa,
+	}
+}
+
+// botUAS is the AI leg's SIP listener, which starts from the deployment's
+// defaults and overrides only what configuration supplies.
+//
+// It used to be a literal that copied four fields out of voice.DefaultConfig()
+// by hand. A field added to that default reaches this process only if somebody
+// remembers to copy it too, and a field dropped from the copy silently becomes
+// the zero value — which for RTPDeadTimeout means the dead-media check is off
+// and for RTCPInterval means no reporting at all. Overriding a default cannot
+// fail that way.
+func botUAS(cfg config.Config) voice.Config {
+	uas := voice.DefaultConfig()
+	uas.SIPHost = cfg.BotSIPHost
+	uas.SIPPort = cfg.BotSIPPort
+	uas.AdvertiseIP = cfg.BotAdvertiseIP
+	uas.RTPPortRange = [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh}
+	uas.MaxCalls = cfg.BotMaxCalls
+	return uas
+}
+
+// botConfig assembles what the AI voice leg is given.
+//
+// Sessions and Logger are deliberately not parameters: the orchestrator fills
+// both with its own defaults, and passing them from here would mean this
+// process could disagree with every test that builds one.
+func botConfig(
+	uas voice.Config,
+	catalogSvc aicall.Catalog,
+	flows aicall.FlowSource,
+	sw aicall.Switch,
+	ledger aicall.Ledger,
+	transcripts *transcript.Registry,
+	backendBase string,
+	profile provider.Profile,
+	announce func(store.Callback),
+) aicall.OrchestratorConfig {
+	return aicall.OrchestratorConfig{
+		UAS:              uas,
+		Catalog:          catalogSvc,
+		Flows:            flows,
+		Switch:           sw,
+		Ledger:           ledger,
+		Transcripts:      transcripts,
+		BackendBase:      backendBase,
+		Profile:          profile,
+		AnnounceCallback: announce,
 	}
 }
