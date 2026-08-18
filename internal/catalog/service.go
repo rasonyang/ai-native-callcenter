@@ -311,21 +311,9 @@ func (s *Service) actualQueues(name string) (map[string]struct{}, error) {
 	}
 	out := map[string]struct{}{}
 	for _, q := range queues {
-		// The switch reports a queue qualified by its domain while the commands
-		// that change one take it bare, so both sides of this comparison are
-		// held in the bare form the database uses.
-		out[bareQueue(q)] = struct{}{}
+		out[q] = struct{}{}
 	}
 	return out, nil
-}
-
-// bareQueue strips the domain the switch qualifies queue names with. A queue
-// name cannot contain an @, so the first one is always the separator.
-func bareQueue(name string) string {
-	if at := strings.IndexByte(name, '@'); at >= 0 {
-		return name[:at]
-	}
-	return name
 }
 
 // SyncTiers re-applies every queue's staffing to the switch.

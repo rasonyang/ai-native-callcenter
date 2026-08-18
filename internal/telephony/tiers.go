@@ -44,10 +44,26 @@ func (a *Adapter) CallcenterQueuesForAgent(agent string) ([]string, error) {
 	var queues []string
 	for _, t := range tiers {
 		if t.Agent == agent {
-			queues = append(queues, t.Queue)
+			queues = append(queues, a.bareQueueName(t.Queue))
 		}
 	}
 	return queues, nil
+}
+
+// bareQueueName is QueueName's inverse.
+//
+// The domain suffix is ours, not mod_callcenter's: aicc_xml.lua names every
+// queue "<name>@<domain>" when it renders the configuration (aicc_xml.lua:156),
+// aicc_queue.lua dials the same form (aicc_queue.lua:66), and QueueName applies
+// it to every tier command. The switch appends nothing — it stores and reports
+// literally what it was told. So the adapter owns the qualification in both
+// directions and no caller above it needs to know queue names carry a domain.
+//
+// TrimSuffix rather than cutting at the first "@": a queue qualified by some
+// other domain is not ours, and collapsing it to a bare name would let it
+// masquerade as one.
+func (a *Adapter) bareQueueName(qualified string) string {
+	return strings.TrimSuffix(qualified, "@"+a.domain)
 }
 
 // parseTiers reads mod_callcenter's pipe-separated listing. The header line and

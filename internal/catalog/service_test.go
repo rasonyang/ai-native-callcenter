@@ -18,7 +18,9 @@ type tierCall struct {
 
 type fakeSwitch struct {
 	isUp bool
-	// onSwitch is what the switch already believes, keyed by agent.
+	// onSwitch is what the switch already believes, keyed by agent. Bare names:
+	// the adapter owns the domain suffix in both directions, so this interface
+	// only ever sees queues named the way the database names them.
 	onSwitch map[string][]string
 	added    []tierCall
 	removed  []tierCall
@@ -173,7 +175,7 @@ func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {}},
 	}
 	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
-		"agent-" + agentID.String()[:4]: {"support-en@aicc.demo"},
+		"agent-" + agentID.String()[:4]: {"support-en"},
 	}}
 	svc := NewService(store, sw, fakeNames{})
 
@@ -214,7 +216,7 @@ func TestAMatchingSwitchIsNotTouched(t *testing.T) {
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 1}}},
 	}
-	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{name: {"support-en@aicc.demo"}}}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{name: {"support-en"}}}
 	NewService(store, sw, fakeNames{}).ReconcileAgentTiers(context.Background(), agentID)
 
 	if len(sw.added) != 0 || len(sw.removed) != 0 {
