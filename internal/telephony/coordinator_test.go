@@ -487,3 +487,79 @@ func TestNoAudiencesMeansNoAddressing(t *testing.T) {
 		map[string]string{"variable_dialed_user": agentExtension}))
 	// Reaching here without a nil dereference is the assertion.
 }
+
+// An agent whose leg is folded into another call must be told, or their client
+// keeps a call id that no longer exists.
+//
+// Observed live on 2026-08-18. The agent's leg was adopted as its own OUTBOUND
+// call, the bridge merged it into the INBOUND one, and every CALL_TRANSCRIPT
+// afterwards carried the kept id while the cockpit was still holding the
+// absorbed one — so the panel dropped every line as belonging to another call.
+// The transcript was published correctly and shown to nobody. The merge was
+// silent: the absorbed call is retired without a word and nothing is published
+// for the kept call after it.
+func TestAMergeTellsTheMovedAgentTheCallHasANewIdentity(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	ctx := t.Context()
+	minted := uuid.New()
+	vars := map[string]string{"variable_aicc_call_id": minted.String()}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", "caller-chan", "inbound", vars))
+	// The agent's leg arrives with no call id of its own and is adopted onto a
+	// provisional call, exactly as a queue delivery does.
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": "caller-chan"})))
+
+	waitFor(t, func() bool { return pub.has(events.TypePartyChanged) })
+
+	ev, scope, ok := pub.find(events.TypePartyChanged)
+	if !ok {
+		t.Fatal("the merge was silent; the agent still holds the absorbed call id")
+	}
+	if ev.CallID == nil || *ev.CallID != minted {
+		t.Errorf("announced call %v, want the surviving call %s", ev.CallID, minted)
+	}
+	if len(scope.AgentIDs) != 1 || scope.AgentIDs[0] != testAgentID {
+		t.Errorf("addressed to %v, want the agent whose leg moved", scope.AgentIDs)
+	}
+	if ev.Payload["reason"] != "CALL_MERGED" {
+		t.Errorf("reason = %v, want CALL_MERGED", ev.Payload["reason"])
+	}
+}
+
+// capturingPublisher keeps what was published and under which scope.
+type capturingPublisher struct {
+	mu     sync.Mutex
+	events []events.Event
+	scopes []events.Scope
+}
+
+func (p *capturingPublisher) Publish(_ context.Context, ev events.Event, sc events.Scope) events.Event {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events = append(p.events, ev)
+	p.scopes = append(p.scopes, sc)
+	return ev
+}
+
+func (p *capturingPublisher) has(t events.Type) bool {
+	_, _, ok := p.find(t)
+	return ok
+}
+
+func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, ev := range p.events {
+		if ev.Type == t {
+			return ev, p.scopes[i], true
+		}
+	}
+	return events.Event{}, events.Scope{}, false
+}

@@ -486,7 +486,44 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 		}
 	}
 	c.registry.Retire(absorb)
+	c.announceMerge(ctx, keep, moved)
 	slog.DebugContext(ctx, "calls merged", "callId", keep, "absorbed", absorb)
+}
+
+// announceMerge tells the agents whose legs just moved that their call has a
+// different identity now.
+//
+// A merge is the one thing that changes a live call's id under a client that
+// is already holding it. The absorbed call is retired without a word, and
+// nothing is published for the kept call afterwards, so an agent's cockpit
+// keeps the id it last read — which is the dead one. Observed live
+// (2026-08-18): PARTY_ESTABLISHED carried the pre-merge id, the client
+// refetched on it and raced the merge, and every CALL_TRANSCRIPT after that
+// arrived under the kept id and was dropped by the panel as belonging to
+// another call. The transcript was published perfectly and shown to nobody.
+//
+// PARTY_CHANGED because that is what happened: the party is the same, the call
+// it belongs to is not. Scoped to the agent on the moved leg, who is the only
+// one holding a stale id.
+func (c *Coordinator) announceMerge(ctx context.Context, keep uuid.UUID, moved []*Party) {
+	var callType events.CallType
+	if err := c.registry.Do(keep, func(call *Call) { callType = call.CallType }); err != nil {
+		return
+	}
+	for _, p := range moved {
+		if p.AgentID == nil {
+			continue
+		}
+		partyID, agentID := p.PartyID, *p.AgentID
+		c.publish(ctx, events.Event{
+			Type:     events.TypePartyChanged,
+			CallID:   &keep,
+			CallType: callType,
+			PartyID:  &partyID,
+			AgentID:  &agentID,
+			Payload:  map[string]any{"reason": "CALL_MERGED"},
+		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
+	}
 }
 
 // offerToAgent announces a queued call on the chosen agent's screen, before
