@@ -97,14 +97,20 @@ export function mergeLine(lines: Line[], incoming: Line): Line[] {
 export function statusFor(
   hasCall: boolean,
   streamStatus: StreamStatus,
-  reported: TranscriptionState | null,
+  reported: TranscriptionState,
   hadCall: boolean,
 ): TranscriptionState {
   if (!hasCall) return hadCall ? 'ENDED' : 'IDLE'
   // A stream we cannot hear is indistinguishable from transcription that has
   // stopped, and saying "transcribing" while offline would be a lie.
   if (streamStatus !== 'connected') return 'ERROR'
-  return reported ?? 'CONNECTING'
+  // Whatever the server last said, and nothing invented in its place. This used
+  // to fall back to CONNECTING, which made a call nobody is transcribing
+  // indistinguishable from one whose stream is on its way — and the panel would
+  // sit at "Connecting…" for the life of a call that was never going to
+  // connect. The server says CONNECTING when a tap is attached; before that it
+  // says IDLE, and IDLE is the truth.
+  return reported
 }
 
 /**
@@ -118,7 +124,9 @@ export function statusFor(
  */
 export function useCallTranscript(callId: string | undefined, streamStatus: StreamStatus) {
   const [lines, setLines] = useState<Line[]>([])
-  const [reported, setReported] = useState<TranscriptionState | null>(null)
+  // Seeded from the snapshot the server returns and then updated by the
+  // stream, so the panel never has to invent a state of its own.
+  const [reported, setReported] = useState<TranscriptionState>('IDLE')
   const hadCall = useRef(false)
 
   // Lines that arrive before the snapshot resolves wait here rather than
@@ -130,7 +138,7 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
     buffer.current = []
     isSnapshotted.current = false
     setLines([])
-    setReported(null)
+    setReported('IDLE')
     if (callId) hadCall.current = true
   }, [callId])
 
@@ -173,6 +181,7 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
     buffer.current = []
     isSnapshotted.current = true
     setLines(merged)
+    setReported(snapshot.data.state)
   }, [snapshot.data])
 
   const loadEarlier = useCallback(async () => {

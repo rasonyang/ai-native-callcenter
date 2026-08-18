@@ -91,6 +91,37 @@ type Actor struct {
 
 	// seq is owned by the actor goroutine alone. No lock, by construction.
 	seq int
+
+	// state is the last transcription state published for this call. Held here
+	// because this is the only thing that publishes one, so a reader asking
+	// anything else would be asking a second source — and two sources of a
+	// health indicator disagree exactly when it matters.
+	stateMu sync.RWMutex
+	state   string
+}
+
+// TranscriptionState values, byte-identical with the contract enum.
+const (
+	StateIdle       = "IDLE"
+	StateConnecting = "CONNECTING"
+	StateLive       = "LIVE"
+	StateDegraded   = "DEGRADED"
+	StateError      = "ERROR"
+	StateStopped    = "STOPPED"
+	StateEnded      = "ENDED"
+)
+
+// CurrentState reports the last state published for this call, so a client
+// fetching a snapshot is told the same thing the stream would have told it.
+// IDLE until something says otherwise: a call nobody is transcribing is not
+// connecting, and saying so would be an invention.
+func (a *Actor) CurrentState() string {
+	a.stateMu.RLock()
+	defer a.stateMu.RUnlock()
+	if a.state == "" {
+		return StateIdle
+	}
+	return a.state
 }
 
 // SetAudience records who may see this call's transcript. During the bot phase
@@ -129,6 +160,10 @@ func (a *Actor) Post(line Line) {
 // State publishes how live transcription is faring, so the panel can say so
 // rather than silently show nothing.
 func (a *Actor) State(state, reason string, degraded []string) {
+	a.stateMu.Lock()
+	a.state = state
+	a.stateMu.Unlock()
+
 	payload := map[string]any{"state": state}
 	if reason != "" {
 		payload["reason"] = reason

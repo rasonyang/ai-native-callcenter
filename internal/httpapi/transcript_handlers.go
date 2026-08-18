@@ -10,6 +10,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
 
 // Defaults for the backfill cursor, matching the contract.
@@ -59,10 +60,19 @@ func (s *Server) GetCallTranscript(w http.ResponseWriter, r *http.Request, callI
 		next = int64(line.Seq)
 	}
 
+	// The state comes from the thing that publishes it, so a snapshot and the
+	// stream cannot disagree. Deriving it from call liveness — as this did —
+	// reported LIVE for any call that was up, transcribing or not, which is the
+	// one moment a health indicator must not be reassuring.
 	isLive := s.isCallLive(callID)
 	state := api.TranscriptionStateENDED
 	if isLive {
-		state = api.TranscriptionStateLIVE
+		state = api.TranscriptionStateIDLE
+	}
+	if s.transcripts != nil {
+		if actor, ok := s.transcripts.Lookup(callID); ok {
+			state = api.TranscriptionState(actor.CurrentState())
+		}
 	}
 	writeJSON(w, http.StatusOK, api.CallTranscript{
 		Items:        items,
@@ -143,4 +153,13 @@ func transcriptLineToAPI(line store.TranscriptLine) api.TranscriptLine {
 		out.UtteranceID = &line.UtteranceID
 	}
 	return out
+}
+
+// TranscriptStates reports the transcription state of a live call.
+//
+// Narrow on purpose: the snapshot needs exactly the answer the stream would
+// have given, and nothing else about the transcript actor is the API's
+// business.
+type TranscriptStates interface {
+	Lookup(callID uuid.UUID) (*transcript.Actor, bool)
 }

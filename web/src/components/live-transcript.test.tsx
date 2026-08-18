@@ -117,9 +117,19 @@ describe('statusFor', () => {
     expect(statusFor(true, 'offline', 'LIVE', true)).toBe('ERROR')
   })
 
+  it('reports exactly what the server said, inventing nothing', () => {
+    // It used to fall back to CONNECTING when the server had said nothing,
+    // which made a call nobody is transcribing indistinguishable from one whose
+    // stream is on its way — and left the panel at "Connecting…" for the life
+    // of a call that was never going to connect.
+    expect(statusFor(true, 'connected', 'IDLE', true)).toBe('IDLE')
+    expect(statusFor(true, 'connected', 'CONNECTING', true)).toBe('CONNECTING')
+    expect(statusFor(true, 'connected', 'DEGRADED', true)).toBe('DEGRADED')
+  })
+
   it('freezes at ENDED after a call rather than falling back to IDLE', () => {
     expect(statusFor(false, 'connected', 'LIVE', true)).toBe('ENDED')
-    expect(statusFor(false, 'connected', null, false)).toBe('IDLE')
+    expect(statusFor(false, 'connected', 'IDLE', false)).toBe('IDLE')
   })
 })
 
@@ -222,5 +232,38 @@ describe('LiveTranscript', () => {
     const jump = await screen.findByRole('button', { name: 'Jump to latest' })
     await userEvent.click(jump)
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Jump to latest' })).toBeNull())
+  })
+})
+
+// Every state the server can publish must actually reach the screen.
+//
+// Each was reachable in code and none had ever been seen rendered, which is the
+// same standard of evidence as "it compiles". A status line that silently shows
+// nothing for DEGRADED is worse than none: the agent reads the absence as fine.
+describe('every transcription state renders', () => {
+  const cases: Array<[string, string]> = [
+    ['IDLE', 'Not transcribing'],
+    ['CONNECTING', 'Connecting…'],
+    ['LIVE', 'Transcribing…'],
+    ['DEGRADED', 'Transcribing one side'],
+    ['ERROR', 'Transcription unavailable'],
+    ['STOPPED', 'Transcription ended'],
+  ]
+
+  for (const [state, label] of cases) {
+    it(`shows ${label} for ${state}`, async () => {
+      const { emit } = renderPanel()
+      emit({ state }, 'CALL_TRANSCRIPTION_STATE')
+      expect(await screen.findByText(label)).toBeInTheDocument()
+    })
+  }
+
+  // The reason a state carries is a stable code, never display text: the panel
+  // renders the state, and the code is for whoever reads the event.
+  it('renders the state and not the reason code', async () => {
+    const { emit } = renderPanel()
+    emit({ state: 'ERROR', reason: 'STREAM_NEVER_CONNECTED' }, 'CALL_TRANSCRIPTION_STATE')
+    expect(await screen.findByText('Transcription unavailable')).toBeInTheDocument()
+    expect(screen.queryByText(/STREAM_NEVER_CONNECTED/)).toBeNull()
   })
 })

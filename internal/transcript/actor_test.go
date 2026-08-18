@@ -257,3 +257,25 @@ func TestTheRegistryReturnsOneActorPerCall(t *testing.T) {
 		t.Error("an unknown call produced an actor")
 	}
 }
+
+// A snapshot must be told the same thing the stream would have told it, so the
+// state lives where it is published. IDLE until something says otherwise: a
+// call nobody is transcribing is not connecting, and the panel used to invent
+// CONNECTING in exactly this gap.
+func TestCurrentStateIsIdleUntilSomethingSaysOtherwise(t *testing.T) {
+	actor, _, _, flush := newFixture(t)
+	if got := actor.CurrentState(); got != StateIdle {
+		t.Errorf("CurrentState = %q before anything was published, want IDLE", got)
+	}
+
+	actor.State(StateConnecting, "", nil)
+	if got := actor.CurrentState(); got != StateConnecting {
+		t.Errorf("CurrentState = %q, want CONNECTING", got)
+	}
+
+	actor.State(StateDegraded, "ASR_SESSION_FAILED", []string{"CUSTOMER"})
+	if got := actor.CurrentState(); got != StateDegraded {
+		t.Errorf("CurrentState = %q, want DEGRADED", got)
+	}
+	flush()
+}

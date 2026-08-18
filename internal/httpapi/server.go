@@ -37,18 +37,19 @@ type AgentService interface {
 
 // Server owns the HTTP surface: REST, SSE and the embedded SPA.
 type Server struct {
-	cfg        config.Config
-	auth       *auth.Service
-	hub        *events.Hub
-	agents     AgentService
-	agentDir   AgentDirectory
-	calls      CallService
-	catalog    CatalogService
-	ledger     *store.LedgerStore
-	recordings RecordingStreamer
-	auditor    Auditor
-	outbound   OutboundService
-	spa        http.Handler
+	cfg         config.Config
+	auth        *auth.Service
+	hub         *events.Hub
+	agents      AgentService
+	agentDir    AgentDirectory
+	calls       CallService
+	transcripts TranscriptStates
+	catalog     CatalogService
+	ledger      *store.LedgerStore
+	recordings  RecordingStreamer
+	auditor     Auditor
+	outbound    OutboundService
+	spa         http.Handler
 }
 
 // Deps are the services the API exposes.
@@ -58,7 +59,10 @@ type Deps struct {
 	Agents   AgentService
 	AgentDir AgentDirectory
 	Calls    CallService
-	Catalog  CatalogService
+	// Transcripts answers what state a call's transcription is in. Nil means
+	// the snapshot cannot say, which is honest rather than invented.
+	Transcripts TranscriptStates
+	Catalog     CatalogService
 	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
 	Ledger *store.LedgerStore
 	// Recordings streams stored call audio; nil disables playback.
@@ -75,18 +79,19 @@ type Deps struct {
 // New builds the server.
 func New(cfg config.Config, deps Deps) *Server {
 	return &Server{
-		cfg:        cfg,
-		auth:       deps.Auth,
-		hub:        deps.Hub,
-		agents:     deps.Agents,
-		agentDir:   deps.AgentDir,
-		calls:      deps.Calls,
-		catalog:    deps.Catalog,
-		ledger:     deps.Ledger,
-		recordings: deps.Recordings,
-		auditor:    deps.Auditor,
-		outbound:   deps.Outbound,
-		spa:        deps.SPA,
+		cfg:         cfg,
+		auth:        deps.Auth,
+		hub:         deps.Hub,
+		agents:      deps.Agents,
+		agentDir:    deps.AgentDir,
+		calls:       deps.Calls,
+		transcripts: deps.Transcripts,
+		catalog:     deps.Catalog,
+		ledger:      deps.Ledger,
+		recordings:  deps.Recordings,
+		auditor:     deps.Auditor,
+		outbound:    deps.Outbound,
+		spa:         deps.SPA,
 	}
 }
 

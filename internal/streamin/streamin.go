@@ -361,6 +361,14 @@ const connectGrace = 12 * time.Second
 // Expect records that a tap was attached and should connect shortly. The Tap
 // calls this after the switch accepts the command.
 func (s *Server) Expect(c Claim) {
+	// Said here rather than inferred anywhere: the switch has accepted the
+	// attach and a stream is expected, which is precisely "connecting". A
+	// client that has to guess this from the absence of a state cannot tell it
+	// from a call nobody is transcribing at all.
+	if actor, ok := s.cfg.Transcripts.Lookup(c.CallID); ok {
+		actor.State(transcript.StateConnecting, "", nil)
+	}
+
 	key := c.CallID.String() + "|" + c.Channel
 	timer := time.AfterFunc(connectGrace, func() { s.giveUpOn(key, c) })
 
