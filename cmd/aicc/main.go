@@ -147,38 +147,12 @@ func run() error {
 	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
 	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
 
-	// An agent becoming addressable is the first moment a tier for them can
-	// succeed, so registration reconciles their staffing. Without this, an
-	// agent staffed while signed out stays unroutable until the next reconnect
-	// — Available, in a queue, offered nothing.
-	agentSvc.AttachStaffing(catalogSvc)
-
-	// The switch forgets its agents when it restarts, and we are the source of
-	// truth, so every reconnect rebuilds its view. In the other direction the
-	// switch knows which phones are registered, which live events alone never
-	// tell us: a phone that registered before this process started would
-	// otherwise look missing and its agent unroutable.
-	link.OnConnect(func(ctx context.Context) {
-		agentSvc.SyncSwitch(ctx)
-		// An agent the switch knows but has no tier for is not routable: the
-		// queue has nobody to offer to and the caller abandons. Presence and
-		// staffing are both ours, so both are rebuilt here.
-		catalogSvc.SyncTiers(ctx)
-
-		regs, err := adapter.Registrations(cfg.SIPProfile)
-		if err != nil {
-			slog.WarnContext(ctx, "could not read registrations", "error", err)
-			return
-		}
-		for _, reg := range regs {
-			agentSvc.ObserveDevice(ctx, reg.Extension, true, reg.IsReachable)
-		}
-		slog.InfoContext(ctx, "registrations reconciled", "endpoints", len(regs))
-	})
-
 	// Live transcription of the human phase. The tap goes on the agent's own
 	// leg at the bridge, so it exists for exactly as long as the human part of
 	// the conversation does.
+	// tap stays nil when transcription is disabled, which is the one
+	// conditional connection the composition has.
+	var tap telephony.Tapper
 	if cfg.IsTranscriptionEnabled {
 		profile, err := transcribe.ProfileFor(cfg.TranscribeProviderName(), transcribe.Override{
 			Endpoint: cfg.TranscribeEndpoint,
@@ -217,13 +191,9 @@ func run() error {
 
 		// The rate is the recogniser's, and the switch resamples to it. That
 		// is why no resampler exists in this process.
-		tap := streamin.NewTap(ingest, adapter,
+		tap = streamin.NewTap(ingest, adapter,
 			streamin.NormalizePublicURL(cfg.StreamPublicURL),
 			profile.SampleRate, 60*time.Second, slog.Default())
-		coordinator.AttachTaps(tap)
-		// Switch events start and stop the tap in the ordinary case; the
-		// call's own retirement is what makes it converge in every other one.
-		registry.OnCallRetired = detachTapsWithCall(registry.OnCallRetired, tap)
 		slog.Info("live transcription enabled",
 			"provider", profile.Name, "model", profile.Model, "rateHz", profile.SampleRate)
 	}
@@ -252,9 +222,22 @@ func run() error {
 	if recordings != nil {
 		recordingStorage = recordings
 	}
-	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()))
-
-	registry.OnCallFinished = retireTranscriptWithCall(registry.OnCallFinished, transcripts)
+	// Every connection between the parts, in one place that a test can drive
+	// with fakes. Nothing above this line joins two services together.
+	composition{
+		Registry:    registry,
+		Coordinator: coordinator,
+		Agents:      agentSvc,
+		Catalog:     catalogSvc,
+		Link:        link,
+		CDR:         telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()),
+		Transcripts: transcripts,
+		Taps:        tap,
+		Registrations: func() ([]telephony.Registration, error) {
+			return adapter.Registrations(cfg.SIPProfile)
+		},
+		Log: slog.Default(),
+	}.connect()
 
 	// Outbound: click-to-dial and the AI outbound leg share one originator.
 	outboundSvc := outbound.New(outbound.Config{
