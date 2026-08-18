@@ -173,6 +173,13 @@ func (s *Server) router() chi.Router {
 					private.With(requireSupervisorRole).Get("/calls", op.ListCalls)
 				}
 
+				// A transcript is readable by both roles, so it is mounted
+				// without a role guard and the handler decides: a supervisor
+				// or administrator may read any call, an agent only the ones
+				// they are on. That is mayReadTranscript, and it is the same
+				// rule the event stream applies through the hub's scope.
+				private.Get("/calls/{callId}/transcript", op.GetCallTranscript)
+
 				if s.catalog != nil {
 					// Configuration is administration: changing who can
 					// register, which queues exist and which numbers reach
