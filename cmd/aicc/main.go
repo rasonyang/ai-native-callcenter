@@ -250,18 +250,7 @@ func run() error {
 	}
 	coordinator.AttachCDR(telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()))
 
-	// A transcript actor outlives both of its producers: the bot's leg ends at
-	// the transfer while the human phase keeps writing to the same actor. So it
-	// is retired with the *call*, and nowhere earlier — and it must be retired,
-	// or every call leaves a goroutine and its mailbox behind for the life of
-	// the process.
-	finished := registry.OnCallFinished
-	registry.OnCallFinished = func(snap telephony.Snapshot) {
-		if finished != nil {
-			finished(snap)
-		}
-		transcripts.Close(snap.CallID)
-	}
+	registry.OnCallFinished = retireTranscriptWithCall(registry.OnCallFinished, transcripts)
 
 	// Outbound: click-to-dial and the AI outbound leg share one originator.
 	outboundSvc := outbound.New(outbound.Config{
