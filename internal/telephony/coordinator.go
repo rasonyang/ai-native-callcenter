@@ -163,6 +163,21 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.offerToAgent(ctx, ev)
 	}
 
+	// What the media tap says about itself. It is not a state change to any
+	// call — the tap's own health is the transcription path's business — but
+	// it is the only account we get from the module, and until it was
+	// subscribed to, a stream that never connected and one that errored were
+	// indistinguishable from a working one.
+	switch ev.Kind {
+	case KindAudioStreamConnected:
+		slog.InfoContext(ctx, "the media tap connected", "channelId", ev.ChannelID)
+	case KindAudioStreamDisconnected:
+		slog.InfoContext(ctx, "the media tap disconnected", "channelId", ev.ChannelID)
+	case KindAudioStreamError:
+		slog.ErrorContext(ctx, "the media tap reported an error",
+			"channelId", ev.ChannelID, "error", ev.Cause)
+	}
+
 	// The tap follows the conversation rather than the channel. On hold the
 	// agent's leg carries a private side-call and music, neither of which is
 	// this conversation; when the bridge ends or the channel does, the tap

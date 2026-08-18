@@ -86,6 +86,10 @@ type Server struct {
 	used map[string]time.Time
 	// pending holds taps the switch accepted but that have not dialled back.
 	pending map[string]*time.Timer
+
+	// onStreamEnded is told when a stream ends gracefully, so the tap can stop
+	// tracking an attachment the switch has already finished with.
+	onStreamEnded func(callID uuid.UUID, channelID string)
 }
 
 // Claim is what a token asserts and the metadata frame must agree with.
@@ -321,7 +325,20 @@ func (s *Server) serve(conn *websocket.Conn, claim Claim) {
 		s.mu.Unlock()
 	}()
 
-	sess.run()
+	if sess.run() && s.onStreamEnded != nil {
+		// The module closed the stream itself, which it does when the channel
+		// goes away. Telling the tap now is what keeps the teardown quiet: the
+		// Detach that follows a hangup would otherwise issue a stop against a
+		// channel FreeSWITCH has already destroyed, and mod_audio_stream logs
+		// that at ERR — once per tapped call, which buries a real one.
+		s.onStreamEnded(claim.CallID, claim.Channel)
+	}
+}
+
+// AttachStreamEndHandler registers who to tell when a tapped stream ends of its
+// own accord. The Tap sets this on itself; nothing else has a use for it.
+func (s *Server) AttachStreamEndHandler(fn func(callID uuid.UUID, channelID string)) {
+	s.onStreamEnded = fn
 }
 
 // checkMetadata reports whether the frame agrees with what the token claimed.

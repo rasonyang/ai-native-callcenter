@@ -3,6 +3,7 @@
 package telephony
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
@@ -399,5 +400,55 @@ func TestNormalizeHandlesNilAndUnknown(t *testing.T) {
 		"Event-Subclass": "conference::maintenance",
 	})); ok {
 		t.Error("unknown custom subclass was accepted")
+	}
+}
+
+// The media tap's own account of itself. Until these were subscribed to, the
+// module was something this application commanded and never heard from: a
+// stream that never connected, one the far end dropped, and one that errored
+// were indistinguishable from a working one — which is how a whole call's
+// audio went nowhere with nothing anywhere reporting a fault.
+func TestTheMediaTapsOwnEventsAreUnderstood(t *testing.T) {
+	for _, tc := range []struct {
+		subclass string
+		want     SwitchEventKind
+	}{
+		{"mod_audio_stream::connect", KindAudioStreamConnected},
+		{"mod_audio_stream::disconnect", KindAudioStreamDisconnected},
+		{"mod_audio_stream::error", KindAudioStreamError},
+	} {
+		t.Run(tc.subclass, func(t *testing.T) {
+			ev, ok := Normalize(event(map[string]string{
+				"Event-Name":     "CUSTOM",
+				"Event-Subclass": tc.subclass,
+				"Unique-ID":      "chan-a",
+				"Error":          "connection refused",
+			}))
+			if !ok {
+				t.Fatalf("%s was not understood", tc.subclass)
+			}
+			if ev.Kind != tc.want {
+				t.Errorf("kind = %s, want %s", ev.Kind, tc.want)
+			}
+			if ev.ChannelID != "chan-a" {
+				t.Errorf("channelId = %q, want the tapped channel", ev.ChannelID)
+			}
+			if tc.want == KindAudioStreamError && ev.Cause != "connection refused" {
+				t.Errorf("cause = %q, want the module's complaint", ev.Cause)
+			}
+		})
+	}
+}
+
+// Subscribing is half of it: an event we understand but never asked for never
+// arrives.
+func TestTheMediaTapsEventsAreSubscribedTo(t *testing.T) {
+	for _, want := range []string{
+		"mod_audio_stream::connect", "mod_audio_stream::disconnect",
+		"mod_audio_stream::error",
+	} {
+		if !slices.Contains(Subscriptions, want) {
+			t.Errorf("%s is understood by Normalize and never subscribed to", want)
+		}
 	}
 }

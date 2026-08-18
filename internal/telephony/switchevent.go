@@ -41,6 +41,13 @@ const (
 	KindDeviceState        SwitchEventKind = "DEVICE_STATE"
 )
 
+// The media tap's own account of itself, from mod_audio_stream.
+const (
+	KindAudioStreamConnected    SwitchEventKind = "AUDIO_STREAM_CONNECTED"
+	KindAudioStreamDisconnected SwitchEventKind = "AUDIO_STREAM_DISCONNECTED"
+	KindAudioStreamError        SwitchEventKind = "AUDIO_STREAM_ERROR"
+)
+
 // Queue activity, observed from mod_callcenter.
 const (
 	KindQueueMemberJoined SwitchEventKind = "QUEUE_MEMBER_JOINED"
@@ -166,6 +173,14 @@ var Subscriptions = []string{
 	"CHANNEL_HANGUP_COMPLETE", "DTMF", "RECORD_START", "RECORD_STOP",
 	"CUSTOM", "sofia::register", "sofia::unregister", "sofia::sip_user_state",
 	"callcenter::info",
+	// mod_audio_stream reports on the media tap it runs for us. Without these
+	// the module is a thing we command and never hear from: a stream that
+	// never connected, one the far end dropped, and one that errored all look
+	// identical from here, which is how a whole call's audio can go nowhere
+	// with nothing anywhere reporting a fault.
+	"mod_audio_stream::connect", "mod_audio_stream::disconnect",
+	"mod_audio_stream::error", "mod_audio_stream::json",
+	"mod_audio_stream::play",
 }
 
 // Normalize converts a raw event, reporting false for events this application
@@ -290,6 +305,21 @@ func normalizeCustom(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		// FreeSWITCH reports reachability from its OPTIONS ping.
 		out.Registered = !strings.EqualFold(ev.Get("ping-status"), "DOWN")
 		out.ChannelID = ""
+		return out, true
+
+	case "mod_audio_stream::connect":
+		out.Kind = KindAudioStreamConnected
+		return out, true
+
+	case "mod_audio_stream::disconnect":
+		out.Kind = KindAudioStreamDisconnected
+		return out, true
+
+	case "mod_audio_stream::error":
+		out.Kind = KindAudioStreamError
+		// The module puts its complaint in the body; the header carries only
+		// which channel it was about.
+		out.Cause = ev.GetFirst("Error", "error", "Reply-Text")
 		return out, true
 
 	case "callcenter::info":

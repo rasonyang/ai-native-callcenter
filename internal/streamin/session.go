@@ -38,7 +38,10 @@ type session struct {
 	once sync.Once
 }
 
-func (s *session) run() {
+// run reads the tapped stream until it ends, and reports whether it ended
+// gracefully — a normal websocket closure, which is what the module sends when
+// it stops the stream itself because the channel went away.
+func (s *session) run() (graceful bool) {
 	defer s.close(context.Background())
 
 	if err := s.startPumps(); err != nil {
@@ -63,7 +66,7 @@ func (s *session) run() {
 		mt, data, err := s.conn.ReadMessage()
 		if err != nil {
 			s.log.Info("tapped stream ended", "callId", s.claim.CallID, "error", err)
-			return
+			return websocket.IsCloseError(err, websocket.CloseNormalClosure)
 		}
 		_ = s.conn.SetReadDeadline(time.Now().Add(readTimeout))
 

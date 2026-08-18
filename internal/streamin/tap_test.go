@@ -351,3 +351,66 @@ func TestAStaleAttachmentCannotEvictItsSuccessor(t *testing.T) {
 		t.Errorf("the live tap answered %v after a stale key was forgotten", err)
 	}
 }
+
+// A stream the module ended is a stream we must not then ask it to stop.
+//
+// Observed on every tapped call (2026-08-18): the channel goes away, the module
+// closes the socket, and ~20ms later our Detach issues
+// `uuid_audio_stream <uuid> stop` for a channel FreeSWITCH has already
+// destroyed — which mod_audio_stream logs at ERR. One per tapped call. A log
+// where teardown is always an error is a log where a real error is invisible.
+func TestAStreamTheModuleEndedIsNotStoppedAgain(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	// The module closes the stream because the channel went away.
+	tap.streamEnded(callID, "chan-a")
+
+	// Both teardown paths now find nothing to do.
+	tap.Detach("chan-a")
+	tap.DetachCall(callID)
+
+	if _, stopped, _, _ := sw.snapshot(); len(stopped) != 0 {
+		t.Errorf("stopped %v after the module had already ended the stream", stopped)
+	}
+}
+
+// A stream that dropped without the module ending it is a different case: the
+// channel may well be alive and still streaming, so the stop must still go.
+func TestAnAbnormalStreamEndStillStopsTheTap(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	// Nothing calls streamEnded: the socket dropped, the module did not close
+	// it, and for all we know the channel is still up.
+	tap.Detach("chan-a")
+
+	_, stopped, _, _ := sw.snapshot()
+	if len(stopped) != 1 || stopped[0] != "chan-a" {
+		t.Fatalf("stopped %v, want the tap stopped — a dropped socket is not "+
+			"evidence the channel ended", stopped)
+	}
+}
+
+// A stream ending cannot retire an attachment that belongs to a later call on
+// the same channel, which is the whole reason the key carries the call.
+func TestAStreamEndingCannotRetireALaterCallsTap(t *testing.T) {
+	tap, sw, absorbed := tapFixture(t)
+	kept := uuid.New()
+	tap.Attach(absorbed, nil, nil, "chan-a", "en")
+	tap.Attach(kept, nil, nil, "chan-a", "en") // the leg was folded into another call
+
+	// The first stream's socket closes, late.
+	tap.streamEnded(absorbed, "chan-a")
+
+	// The live tap is untouched.
+	if err := tap.Pause("chan-a"); err != nil {
+		t.Errorf("the live tap answered %v after a stale stream ended", err)
+	}
+	tap.Detach("chan-a")
+	_, stopped, _, _ := sw.snapshot()
+	if len(stopped) != 2 {
+		t.Errorf("stopped %v, want the absorbed call's stream and then the kept "+
+			"call's", stopped)
+	}
+}

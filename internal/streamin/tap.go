@@ -80,12 +80,37 @@ func NewTap(srv *Server, sw SwitchTap, publicURL string, rateHz int, ttl time.Du
 	if ttl <= 0 {
 		ttl = 60 * time.Second
 	}
-	return &Tap{
+	t := &Tap{
 		srv: srv, sw: sw, publicURL: publicURL, rateHz: rateHz,
 		ttl: ttl, log: log,
 		active:  map[tapKey]struct{}{},
 		current: map[string]tapKey{},
 	}
+	if srv != nil {
+		srv.AttachStreamEndHandler(t.streamEnded)
+	}
+	return t
+}
+
+// streamEnded drops an attachment the module has already finished with.
+//
+// It stops tracking; it does not command anything. The stream is over either
+// way — what this prevents is the *next* Detach, on the hangup that follows,
+// sending a stop for a channel FreeSWITCH has already destroyed. The module
+// logs that at ERR, once for every tapped call, and a log where teardown is
+// always an error is a log where a real error is invisible.
+//
+// Keyed on call and channel together, so a stream ending cannot retire an
+// attachment that belongs to a later call on the same channel.
+func (t *Tap) streamEnded(callID uuid.UUID, channelID string) {
+	if t == nil {
+		return
+	}
+	key, ok := t.currentKey(channelID)
+	if !ok || key.callID != callID {
+		return
+	}
+	t.forget(key)
 }
 
 // Attach taps one agent leg.
