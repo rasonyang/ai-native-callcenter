@@ -5,9 +5,11 @@ package transcribe
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -417,5 +419,108 @@ func dsResult(sentenceID int, text string, final bool) map[string]any {
 	return map[string]any{
 		"header":  map[string]any{"event": "result-generated"},
 		"payload": map[string]any{"output": map[string]any{"sentence": sentence}},
+	}
+}
+
+// No audio may reach the service before it says the task exists.
+//
+// Measured on a live call (2026-08-18): Start returned as soon as run-task was
+// written, so 245 frames — 4.9 seconds of a real conversation — were streamed
+// into a task that did not exist yet. DashScope discards them and says nothing:
+// the socket stays open, no error arrives, no result ever comes back, and the
+// session reads healthy the whole time. Nothing above this could tell.
+func TestStartWaitsForTheTaskToExistBeforeAnyAudio(t *testing.T) {
+	var mu sync.Mutex
+	var binaryBeforeStart int
+	started := make(chan struct{})
+
+	f := newFakeEngine(t, func(c *websocket.Conn) {
+		// The service takes its time, as the Beijing host measurably does.
+		time.Sleep(150 * time.Millisecond)
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
+		close(started)
+	})
+	go func() {
+		for n := range f.binary {
+			mu.Lock()
+			select {
+			case <-started:
+			default:
+				binaryBeforeStart += n
+			}
+			mu.Unlock()
+		}
+	}()
+
+	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
+		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+	if err := client.Start(t.Context(), Config{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+
+	// Start returned, so by contract the task exists.
+	select {
+	case <-started:
+	default:
+		t.Fatal("Start returned before task-started arrived")
+	}
+	if err := client.SendAudio(make([]byte, 640)); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if binaryBeforeStart != 0 {
+		t.Errorf("%d bytes of audio were sent before the task started", binaryBeforeStart)
+	}
+}
+
+// A task that never starts is a failure with its own name, not a healthy
+// session. This is the state that read LIVE through a total outage.
+func TestATaskThatNeverStartsIsAnError(t *testing.T) {
+	// The service accepts the socket and then says nothing at all.
+	f := newFakeEngine(t, func(*websocket.Conn) { time.Sleep(2 * time.Second) })
+
+	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
+		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+	err := client.Start(ctx, Config{})
+	if err == nil {
+		t.Fatal("Start reported success on a task that never started")
+	}
+	// Either the caller's deadline or our own bound may win the race; both are
+	// failures, and neither is LIVE.
+	if !errors.Is(err, ErrTaskNeverStarted) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Start failed with %v, want a never-started or deadline error", err)
+	}
+}
+
+// A task-failed that beats task-started must release Start with the service's
+// own reason rather than leaving it to time out.
+func TestATaskFailedDuringStartupIsReportedImmediately(t *testing.T) {
+	f := newFakeEngine(t, func(c *websocket.Conn) {
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{
+			"event": "task-failed", "error_code": "InvalidParameter",
+			"error_message": "model not found"}})
+	})
+
+	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
+		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+
+	done := make(chan error, 1)
+	go func() { done <- client.Start(context.Background(), Config{}) }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Start reported success on a task the service refused")
+		}
+		if !strings.Contains(err.Error(), "InvalidParameter") {
+			t.Errorf("Start failed with %v, want the service's own reason", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Start did not return on task-failed; it waited for the timeout")
 	}
 }

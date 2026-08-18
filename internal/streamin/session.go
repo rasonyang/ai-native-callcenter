@@ -4,6 +4,8 @@ package streamin
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -41,7 +43,15 @@ func (s *session) run() {
 
 	if err := s.startPumps(); err != nil {
 		s.log.Error("transcription could not start", "callId", s.claim.CallID, "error", err)
-		s.actor.State("ERROR", "ASR_START_FAILED", nil)
+		// A recogniser that accepted the connection and never started its task
+		// is its own failure, and it is the one that used to be invisible: the
+		// socket is open, nothing errors, and every frame is discarded. It gets
+		// its own code so the panel is not told the generic thing.
+		reason := "ASR_START_FAILED"
+		if errors.Is(err, transcribe.ErrTaskNeverStarted) {
+			reason = "ASR_NEVER_STARTED"
+		}
+		s.actor.State("ERROR", reason, nil)
 		return
 	}
 	s.actor.State("LIVE", "", nil)
@@ -71,21 +81,61 @@ func (s *session) run() {
 	}
 }
 
+// startSessionTimeout bounds one recogniser handshake from this side. It sits
+// above the client's own start timeout on purpose, so a task that never starts
+// is reported as that rather than as a context deadline — the specific failure
+// is the one worth telling the agent about.
+const startSessionTimeout = 25 * time.Second
+
+// startPumps opens both recognisers, concurrently.
+//
+// Concurrently because Start now blocks until the service says the task
+// exists, and that handshake was measured at ~5s against the Beijing MaaS host
+// (2026-08-18). Sequentially that is ten seconds of a live conversation before
+// the first frame is recognised; in parallel it is one handshake for both
+// speakers. Neither is free, and the alternative — not waiting — is what threw
+// away five seconds of audio per call and reported LIVE while doing it.
 func (s *session) startPumps() error {
+	clients := make([]transcribe.Session, len(s.pumps))
+	errs := make([]error, len(s.pumps))
+
+	var wg sync.WaitGroup
 	for i := range s.pumps {
-		client, err := s.cfg.NewSession()
-		if err != nil {
-			return err
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			client, err := s.cfg.NewSession()
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			clients[i] = client
+			// The call's language, not the deployment's: a bilingual queue
+			// answers in whichever language the number was dialled in.
+			ctx, cancel := context.WithTimeout(context.Background(), startSessionTimeout)
+			defer cancel()
+			errs[i] = client.Start(ctx, transcribe.Config{Language: s.claim.Language})
+		}()
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err == nil {
+			continue
 		}
-		// The call's language, not the deployment's: a bilingual queue answers
-		// in whichever language the number was dialled in.
-		cfg := transcribe.Config{Language: s.claim.Language}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err = client.Start(ctx, cfg)
-		cancel()
-		if err != nil {
-			return err
+		// One recogniser is no better than none for a two-sided conversation,
+		// so whichever did start is closed rather than left running.
+		for _, c := range clients {
+			if c != nil {
+				closeCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				_ = c.Close(closeCtx)
+				cancel()
+			}
 		}
+		return fmt.Errorf("%s: %w", speakerFor(i), err)
+	}
+
+	for i, client := range clients {
 		speaker := speakerFor(i)
 		s.pumps[i] = newPump(speaker, s.cfg.Profile.Name, client,
 			s.cfg.Profile.OwnsEndpointing, s.log)

@@ -31,6 +31,14 @@ const (
 	dsReadTimeout = 45 * time.Second
 	dsWriteWait   = 5 * time.Second
 	dsDialTimeout = 5 * time.Second
+	// dsStartTimeout bounds the wait for task-started.
+	//
+	// Measured at ~5s against the Beijing MaaS host on 2026-08-18, which is
+	// most of this budget — it is a bound on a service that is slow, not on
+	// one that is broken, so it is generous rather than tight. A task that
+	// never starts is an error state, and the alternative to waiting is what
+	// this replaced: streaming audio into a task that does not exist yet.
+	dsStartTimeout = 20 * time.Second
 	// dsSentenceSilence is how long a pause must be before the server closes a
 	// sentence. The documented default is 1300ms; a call transcript wants to
 	// keep up with the conversation rather than lag a beat behind it.
@@ -98,6 +106,13 @@ type dashscope struct {
 	failed bool
 	mu     sync.Mutex
 
+	// started closes when task-started arrives; startFail carries a task-failed
+	// that beat it. Start blocks on one or the other, because audio sent
+	// before the task exists is discarded by the service and nothing says so.
+	started   chan struct{}
+	startOnce sync.Once
+	startFail error
+
 	// wire is a raw frame log for diagnosis; nil unless AICC_TRANSCRIBE_WIRE
 	// names a directory. Every text frame in both directions is written
 	// verbatim, because a summary of a protocol you are debugging is a summary
@@ -113,6 +128,7 @@ func newDashscope(p Profile, apiKey string, log Logger) *dashscope {
 		log:     log,
 		events:  make(chan Event, 32),
 		done:    make(chan struct{}),
+		started: make(chan struct{}),
 	}
 }
 
@@ -123,6 +139,20 @@ func newTaskID() string {
 }
 
 func (d *dashscope) Events() <-chan Event { return d.events }
+
+// ErrTaskNeverStarted reports that the recogniser accepted the connection and
+// never started the task. Distinct from a dial or a protocol failure: the
+// socket is fine and the service simply has not answered, which is the case
+// that used to be indistinguishable from a healthy session.
+var ErrTaskNeverStarted = errors.New("transcribe: the recognition task never started")
+
+// markStarted releases Start. err non-nil means the task failed instead.
+func (d *dashscope) markStarted(err error) {
+	d.startOnce.Do(func() {
+		d.startFail = err
+		close(d.started)
+	})
+}
 
 func (d *dashscope) Start(ctx context.Context, cfg Config) error {
 	dialCtx, cancel := context.WithTimeout(ctx, dsDialTimeout)
@@ -180,6 +210,28 @@ func (d *dashscope) Start(ctx context.Context, cfg Config) error {
 
 	go d.readLoop()
 	go d.keepalive()
+
+	// Block until the service says the task exists. Audio written before
+	// task-started is discarded by DashScope, and nothing reports it: the
+	// socket stays open, no error arrives, and the session looks healthy while
+	// every frame is thrown away. Measured live on 2026-08-18 — 245 frames,
+	// 4.9 seconds, no result ever returned.
+	//
+	// This is also what makes LIVE mean the recogniser is running rather than
+	// "we wrote run-task", which is why a total failure read green.
+	select {
+	case <-d.started:
+		if d.startFail != nil {
+			_ = d.Close(ctx)
+			return d.startFail
+		}
+	case <-time.After(dsStartTimeout):
+		_ = d.Close(ctx)
+		return fmt.Errorf("%w after %s", ErrTaskNeverStarted, dsStartTimeout)
+	case <-ctx.Done():
+		_ = d.Close(ctx)
+		return ctx.Err()
+	}
 	return nil
 }
 
@@ -264,6 +316,9 @@ func (d *dashscope) keepalive() {
 }
 
 func (d *dashscope) readLoop() {
+	// A read loop that ends without task-started releases Start with the
+	// reason rather than leaving it to time out on a socket that is gone.
+	defer d.markStarted(ErrTaskNeverStarted)
 	defer d.finish(nil)
 	for {
 		mt, data, err := d.conn.ReadMessage()
@@ -291,6 +346,7 @@ func (d *dashscope) readLoop() {
 		switch env.Header.Event {
 		case "task-started":
 			d.log.Debug("transcribe: task started", "provider", d.profile.Name)
+			d.markStarted(nil)
 		case "result-generated":
 			d.onSentence(env.Payload.Output.Sentence)
 		case "task-finished":
@@ -299,8 +355,12 @@ func (d *dashscope) readLoop() {
 			d.mu.Lock()
 			d.failed = true
 			d.mu.Unlock()
-			d.emit(Event{Type: EventError, Err: fmt.Errorf("transcribe: %s: %s",
-				env.Header.ErrorCode, env.Header.ErrorMessage)})
+			failure := fmt.Errorf("transcribe: %s: %s",
+				env.Header.ErrorCode, env.Header.ErrorMessage)
+			// Releases Start when the failure beat task-started; a no-op
+			// afterwards, when the task had already begun.
+			d.markStarted(failure)
+			d.emit(Event{Type: EventError, Err: failure})
 			return
 		}
 	}
