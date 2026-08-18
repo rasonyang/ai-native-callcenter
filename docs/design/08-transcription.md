@@ -2229,6 +2229,15 @@ platform:
 - `make install` no longer needs root, and the Homebrew prefix is detected rather than
   assumed.
 
+✗ **That build path is not committed anywhere yet.** `[FACT]` As of 2026-08-18 the module
+repository has `CMakeLists.txt`, `build-mod-audio-stream.sh` and `README.md` modified in the
+working tree and nothing committed, on top of upstream `ec2a781`. So the clean `Release`
+build this section now documents exists only on this machine. Until those changes are
+committed — and ideally offered upstream, since the SpeexDSP fix is not macOS-specific —
+this document describes a build nobody else can reproduce, and a `git checkout` in that
+repository silently returns us to the accidental-link build. **Whose commit that is, and
+whether it goes upstream, is the owner's call.**
+
 The three fixes below are kept as the record of what was wrong, because the assertion in
 §B.5 exists because of the third one:
 
