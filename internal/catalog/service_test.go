@@ -17,8 +17,11 @@ type tierCall struct {
 }
 
 type fakeSwitch struct {
-	isUp  bool
-	added []tierCall
+	isUp bool
+	// onSwitch is what the switch already believes, keyed by agent.
+	onSwitch map[string][]string
+	added    []tierCall
+	removed  []tierCall
 }
 
 func (f *fakeSwitch) ReloadQueue(string) error { return nil }
@@ -27,7 +30,14 @@ func (f *fakeSwitch) AddCallcenterTier(queue, agent string, level, position int)
 	f.added = append(f.added, tierCall{queue, agent, level, position})
 	return nil
 }
-func (f *fakeSwitch) DeleteCallcenterTier(string, string) error { return nil }
+func (f *fakeSwitch) DeleteCallcenterTier(queue, agent string) error {
+	f.removed = append(f.removed, tierCall{queue: queue, agent: agent})
+	return nil
+}
+
+func (f *fakeSwitch) CallcenterQueuesForAgent(agent string) ([]string, error) {
+	return f.onSwitch[agent], nil
+}
 
 // fakeStore carries only what SyncTiers reads.
 type fakeStore struct {
@@ -121,5 +131,93 @@ func TestSyncTiersSkipsAMissingAgentAndKeepsGoing(t *testing.T) {
 	}
 	if sw.added[0].position != 2 {
 		t.Errorf("restored the wrong tier: %+v", sw.added[0])
+	}
+}
+
+// The case this exists for: an agent staffed while signed out. mod_callcenter
+// refuses a tier for an agent it does not know, so the staffing never reached
+// the switch and nothing retried it. Signing in registers the agent, and the
+// tier has to follow — otherwise they are Available, in a queue, and offered
+// nothing, with our own database insisting they are staffed.
+func TestSigningInAddsTheTierThatCouldNotBeAddedWhileSignedOut(t *testing.T) {
+	queueID, agentID := uuid.New(), uuid.New()
+	store := &fakeStore{
+		queues:   []Queue{{ID: queueID, Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 2}}},
+	}
+	// The switch knows the agent now, but holds no tier for them.
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
+	svc := NewService(store, sw, fakeNames{})
+
+	svc.ReconcileAgentTiers(context.Background(), agentID)
+
+	if len(sw.added) != 1 {
+		t.Fatalf("added %d tiers, want 1: %+v", len(sw.added), sw.added)
+	}
+	if sw.added[0].queue != "support-en" || sw.added[0].level != 1 || sw.added[0].position != 2 {
+		t.Errorf("tier = %+v, want support-en at level 1 position 2 — the level and "+
+			"position are the queue's search order, not defaults", sw.added[0])
+	}
+	if len(sw.removed) != 0 {
+		t.Errorf("removed %+v while adding a missing tier", sw.removed)
+	}
+}
+
+// The mirror case, and the worse of the two: a queue unstaffed while the agent
+// was signed out leaves the switch still offering them its calls.
+func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
+	queueID, agentID := uuid.New(), uuid.New()
+	store := &fakeStore{
+		queues: []Queue{{ID: queueID, Name: "support-en"}},
+		// Nobody staffs it any more.
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {}},
+	}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
+		"agent-" + agentID.String()[:4]: {"support-en@aicc.demo"},
+	}}
+	svc := NewService(store, sw, fakeNames{})
+
+	svc.ReconcileAgentTiers(context.Background(), agentID)
+
+	if len(sw.removed) != 1 || sw.removed[0].queue != "support-en" {
+		t.Fatalf("removed %+v, want the stale support-en tier — an agent taking "+
+			"calls for a queue they were removed from is the worse failure", sw.removed)
+	}
+	if len(sw.added) != 0 {
+		t.Errorf("added %+v while removing a stale tier", sw.added)
+	}
+}
+
+// Staffing nothing is a normal state, not a fault. The invariant is desired
+// against actual, and zero against zero satisfies it.
+func TestAnAgentWhoStaffsNothingStaysAtZero(t *testing.T) {
+	agentID := uuid.New()
+	store := &fakeStore{
+		queues:   []Queue{{ID: uuid.New(), Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{},
+	}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
+	NewService(store, sw, fakeNames{}).ReconcileAgentTiers(context.Background(), agentID)
+
+	if len(sw.added) != 0 || len(sw.removed) != 0 {
+		t.Errorf("added %+v removed %+v; staffing nothing is a legitimate state",
+			sw.added, sw.removed)
+	}
+}
+
+// A switch that already agrees is left alone — the reconcile must be idempotent,
+// because it runs on every registration.
+func TestAMatchingSwitchIsNotTouched(t *testing.T) {
+	queueID, agentID := uuid.New(), uuid.New()
+	name := "agent-" + agentID.String()[:4]
+	store := &fakeStore{
+		queues:   []Queue{{ID: queueID, Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 1}}},
+	}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{name: {"support-en@aicc.demo"}}}
+	NewService(store, sw, fakeNames{}).ReconcileAgentTiers(context.Background(), agentID)
+
+	if len(sw.added) != 0 || len(sw.removed) != 0 {
+		t.Errorf("a matching switch was changed: added %+v removed %+v", sw.added, sw.removed)
 	}
 }

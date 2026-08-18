@@ -47,6 +47,14 @@ type SwitchControl interface {
 	ReloadQueue(name string) error
 	AddCallcenterTier(queue, agent string, level, position int) error
 	DeleteCallcenterTier(queue, agent string) error
+	// CallcenterQueuesForAgent reports the queues the switch currently believes
+	// this agent staffs. Staffing is reconciled rather than applied, and a tier
+	// the switch still holds cannot be discovered any other way.
+	//
+	// Names only: level and position are always the database's answer, never
+	// the switch's, so there is nothing to learn from the switch's copy of them
+	// and no shared type either side has to know about.
+	CallcenterQueuesForAgent(agent string) ([]string, error)
 	IsUp() bool
 }
 
@@ -192,6 +200,132 @@ func (s *Service) refreshQueue(ctx context.Context, name string) {
 // QueueAgents lists who staffs a queue.
 func (s *Service) QueueAgents(ctx context.Context, queueID uuid.UUID) ([]QueueAgent, error) {
 	return s.store.ListQueueAgents(ctx, queueID)
+}
+
+// ReconcileAgentTiers converges the switch's view of one agent's staffing to
+// this system's.
+//
+// It runs when an agent becomes addressable, because that is the first moment
+// a tier for them can succeed: mod_callcenter refuses a tier for an agent it
+// does not know, so staffing somebody who was signed out fails at the time and
+// nothing retries it. The agent then signs in, is registered, shows Available,
+// sits in a queue and is offered nothing.
+//
+// Bidirectional on purpose. Adding what is missing fixes the case above;
+// removing what is stale fixes its mirror, where a queue was unstaffed while
+// the agent was signed out and the switch kept the tier — an agent receiving
+// calls for a queue they were taken off is the worse of the two failures.
+//
+// Zero queues is a legitimate answer, not a fault: plenty of agents staff
+// nothing. The invariant is desired against actual, not desired above zero.
+func (s *Service) ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID) {
+	if s.switchCtl == nil || !s.switchCtl.IsUp() {
+		return
+	}
+	name, err := s.agents.CallcenterName(ctx, agentID)
+	if err != nil {
+		return // the agent is gone; its tiers go with it
+	}
+
+	desired, err := s.desiredTiers(ctx, agentID)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read desired staffing",
+			"agent", name, "error", err)
+		return
+	}
+	actual, err := s.actualQueues(name)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the switch's staffing",
+			"agent", name, "error", err)
+		return
+	}
+
+	var added, removed, failed int
+	for queue, tier := range desired {
+		if _, ok := actual[queue]; ok {
+			continue
+		}
+		if err := s.switchCtl.AddCallcenterTier(queue, name, tier.Level, tier.Position); err != nil {
+			slog.WarnContext(ctx, "tier not added", "queue", queue, "agent", name, "error", err)
+			failed++
+			continue
+		}
+		added++
+	}
+	for queue := range actual {
+		if _, ok := desired[queue]; ok {
+			continue
+		}
+		if err := s.switchCtl.DeleteCallcenterTier(queue, name); err != nil {
+			slog.WarnContext(ctx, "stale tier not removed", "queue", queue, "agent", name, "error", err)
+			failed++
+			continue
+		}
+		removed++
+	}
+
+	// Logged every time, zeros included. "This agent staffs nothing" and "this
+	// agent staffs two queues the switch never heard about" are different
+	// answers, and telling them apart afterwards must not require reproducing
+	// the call that went nowhere.
+	attrs := []any{"agent", name, "desired", len(desired), "actual", len(actual),
+		"added", added, "removed", removed}
+	if added+removed+failed > 0 {
+		// The switch had drifted from this system. That is the condition this
+		// exists to correct, so it is said at a level someone will see.
+		slog.WarnContext(ctx, "agent staffing reconciled", append(attrs, "failed", failed)...)
+		return
+	}
+	slog.InfoContext(ctx, "agent staffing already matched", attrs...)
+}
+
+// desiredTiers is what this system says the agent staffs, keyed by the queue's
+// switch-side name. Assembled from the queries that already exist rather than
+// a new one: sign-in is not a hot path and a handful of queues is a handful of
+// reads.
+func (s *Service) desiredTiers(ctx context.Context, agentID uuid.UUID) (map[string]QueueAgent, error) {
+	queues, err := s.store.ListQueues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]QueueAgent{}
+	for _, queue := range queues {
+		staffing, err := s.store.ListQueueAgents(ctx, queue.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, member := range staffing {
+			if member.AgentID == agentID {
+				out[queue.Name] = member
+			}
+		}
+	}
+	return out, nil
+}
+
+// actualQueues is what the switch holds for this agent.
+func (s *Service) actualQueues(name string) (map[string]struct{}, error) {
+	queues, err := s.switchCtl.CallcenterQueuesForAgent(name)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]struct{}{}
+	for _, q := range queues {
+		// The switch reports a queue qualified by its domain while the commands
+		// that change one take it bare, so both sides of this comparison are
+		// held in the bare form the database uses.
+		out[bareQueue(q)] = struct{}{}
+	}
+	return out, nil
+}
+
+// bareQueue strips the domain the switch qualifies queue names with. A queue
+// name cannot contain an @, so the first one is always the separator.
+func bareQueue(name string) string {
+	if at := strings.IndexByte(name, '@'); at >= 0 {
+		return name[:at]
+	}
+	return name
 }
 
 // SyncTiers re-applies every queue's staffing to the switch.

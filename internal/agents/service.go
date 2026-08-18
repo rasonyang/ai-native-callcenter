@@ -109,6 +109,15 @@ var (
 
 // Service owns agent presence.
 //
+// Staffing reconciles an agent's queue membership on the switch.
+//
+// Declared here rather than imported because the two packages are siblings:
+// presence knows when an agent becomes addressable, staffing knows which
+// queues they belong to, and neither needs the other's types to say so.
+type Staffing interface {
+	ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID)
+}
+
 // Presence is written to the database inside the request that changes it:
 // acknowledging a state change we could not record would tell an agent they
 // are ready when nothing would route to them. The switch mirror is best
@@ -129,7 +138,15 @@ type Service struct {
 	wrapUpGen map[uuid.UUID]uint64
 
 	now func() time.Time
+
+	// staffing is optional: without it presence still mirrors, and an agent
+	// staffed while signed out simply stays unroutable until the next
+	// reconnect — which is the behaviour this field exists to remove.
+	staffing Staffing
 }
+
+// AttachStaffing points agent registration at queue reconciliation.
+func (s *Service) AttachStaffing(st Staffing) { s.staffing = st }
 
 type deviceState struct {
 	isRegistered bool
@@ -549,6 +566,19 @@ func (s *Service) mirrorRegistration(profile Profile, p Presence) {
 		}
 	}
 	s.mirrorStatus(profile, p)
+
+	// Now, and not before: mod_callcenter refuses a tier for an agent it does
+	// not know, so this is the first moment one can succeed. An agent staffed
+	// while signed out has no tier until here, and without a tier they are
+	// Available, in a queue, and offered nothing.
+	//
+	// The caller's lock is already released at every site that reaches this,
+	// which matters because reconciliation reads the database and the switch:
+	// holding presence while doing either would serialise every sign-in behind
+	// them.
+	if s.staffing != nil {
+		s.staffing.ReconcileAgentTiers(context.Background(), profile.AgentID)
+	}
 }
 
 func (s *Service) mirrorStatus(profile Profile, p Presence) {

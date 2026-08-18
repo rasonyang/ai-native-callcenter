@@ -147,6 +147,12 @@ func run() error {
 	coordinator := telephony.NewCoordinator(registry, adapter, agentSvc, hub)
 	catalogSvc := catalog.NewService(st.Catalog(), adapter, st.Catalog())
 
+	// An agent becoming addressable is the first moment a tier for them can
+	// succeed, so registration reconciles their staffing. Without this, an
+	// agent staffed while signed out stays unroutable until the next reconnect
+	// — Available, in a queue, offered nothing.
+	agentSvc.AttachStaffing(catalogSvc)
+
 	// The switch forgets its agents when it restarts, and we are the source of
 	// truth, so every reconnect rebuilds its view. In the other direction the
 	// switch knows which phones are registered, which live events alone never
