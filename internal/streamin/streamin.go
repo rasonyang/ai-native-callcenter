@@ -75,9 +75,10 @@ type Config struct {
 
 // Server accepts tapped audio and turns it into transcript lines.
 type Server struct {
-	cfg Config
-	log Logger
-	srv *http.Server
+	cfg  Config
+	log  Logger
+	srv  *http.Server
+	addr string // what was actually bound, which a :0 port only knows afterwards
 
 	mu       sync.Mutex
 	sessions map[string]*session
@@ -200,6 +201,7 @@ func (s *Server) Start() error {
 	if err != nil {
 		return fmt.Errorf("streamin: listen %s: %w", s.cfg.Addr, err)
 	}
+	s.addr = ln.Addr().String()
 	s.log.Info("transcription ingest listening", "addr", s.cfg.Addr)
 	go func() {
 		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -208,6 +210,10 @@ func (s *Server) Start() error {
 	}()
 	return nil
 }
+
+// Addr reports the bound address. With a :0 port this is the only way to learn
+// which one, so it is what a caller dials back.
+func (s *Server) Addr() string { return s.addr }
 
 // Stop closes the listener and every session on it.
 func (s *Server) Stop(ctx context.Context) error {
