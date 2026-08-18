@@ -390,3 +390,56 @@ func TestAConnectedStreamIsNotReportedMissing(t *testing.T) {
 		}
 	}
 }
+
+// rejectingSession accepts nothing, the way a recogniser does when its session
+// has soured. It still counts commits, because that is the thing that must
+// keep happening.
+type rejectingSession struct {
+	stallSession
+	err error
+}
+
+func (r *rejectingSession) SendAudio([]byte) error { return r.err }
+
+// The utterance boundary belongs to the audio, not to the recogniser's
+// throughput.
+//
+// Before this, silence was observed only after a *successful* send, so a
+// session that was rejecting or merely slow stopped the level tracking dead —
+// and on an engine that will not end an utterance itself, that means no commit
+// is ever sent and no final ever arrives. The transcript simply stops, with the
+// audio still flowing and nothing reporting a fault.
+func TestSilenceStillEndsAnUtteranceWhenTheRecogniserIsRejectingAudio(t *testing.T) {
+	client := &rejectingSession{stallSession: *newStallSession(), err: errRejected}
+	close(client.release) // irrelevant here: SendAudio never reaches the queue
+	p := newPump("CUSTOMER", "openai", client, true, nopLogger{})
+	t.Cleanup(func() { p.close(context.Background()) })
+
+	for i := 0; i < 5; i++ {
+		p.write(frame(160, 8000)) // speech
+	}
+	for i := 0; i < 5; i++ {
+		p.write(frame(160, 5)) // then quiet
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if client.commitCount() > 0 {
+			// And nothing was sent, which is the point: the boundary was found
+			// from the audio alone.
+			if sent, _ := p.stats(); sent != 0 {
+				t.Errorf("sent %d frames to a session that rejects everything", sent)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("no commit: a rejecting recogniser stopped the utterance boundary being found, " +
+		"so no final would ever arrive on this engine")
+}
+
+var errRejected = errorString("recogniser rejected the audio")
+
+type errorString string
+
+func (e errorString) Error() string { return string(e) }

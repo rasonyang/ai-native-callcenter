@@ -52,8 +52,13 @@ type pump struct {
 	// ownsEndpointing drives the silence detector. Where the engine segments
 	// for itself, this stays false and no commit is ever sent.
 	ownsEndpointing bool
-	quietSince      time.Time
-	isSpeaking      bool
+
+	// speech is guarded because it is written where audio arrives and read
+	// where the utterance is ended, and those are deliberately different
+	// goroutines.
+	speech     sync.Mutex
+	quietSince time.Time
+	isSpeaking bool
 }
 
 func newPump(speaker, provider string, s transcribe.Session, ownsEndpointing bool, log Logger) *pump {
@@ -67,6 +72,12 @@ func newPump(speaker, provider string, s transcribe.Session, ownsEndpointing boo
 		ownsEndpointing: ownsEndpointing,
 	}
 	go p.run()
+	if ownsEndpointing {
+		// Only where the engine refuses to end an utterance. Elsewhere there is
+		// nothing for this to do and a ticker that never fires anything is just
+		// a goroutine to explain later.
+		go p.watchSilence()
+	}
 	return p
 }
 
@@ -82,6 +93,13 @@ func (p *pump) write(frame []byte) {
 		return
 	default:
 	}
+	// Observed here rather than after the send, because the boundary belongs to
+	// the audio and not to the recogniser's throughput. A session that is
+	// rejecting or merely slow would otherwise stop the level tracking dead,
+	// and on an engine that will not end an utterance itself that means no
+	// commit is ever sent and no final ever arrives.
+	p.observe(frame)
+
 	for {
 		select {
 		case p.frames <- frame:
@@ -100,11 +118,6 @@ func (p *pump) write(frame []byte) {
 }
 
 func (p *pump) run() {
-	// The silence check runs on its own tick rather than on frame arrival, so
-	// an utterance still ends when the audio stops entirely.
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
 	for {
 		select {
 		case <-p.done:
@@ -116,7 +129,22 @@ func (p *pump) run() {
 				continue
 			}
 			p.sent.Add(1)
-			p.observe(frame)
+		}
+	}
+}
+
+// watchSilence ends an utterance on its own goroutine.
+//
+// Not in the send loop's select: SendAudio blocks for as long as its write
+// deadline allows, and a check sharing that select would be delayed by exactly
+// the recogniser trouble it most needs to survive.
+func (p *pump) watchSilence() {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.done:
+			return
 		case <-ticker.C:
 			p.checkSilence()
 		}
@@ -129,7 +157,11 @@ func (p *pump) observe(frame []byte) {
 	if !p.ownsEndpointing {
 		return
 	}
-	if meanSquare(frame) >= silenceRMS*silenceRMS {
+	loud := meanSquare(frame) >= silenceRMS*silenceRMS
+
+	p.speech.Lock()
+	defer p.speech.Unlock()
+	if loud {
 		p.isSpeaking = true
 		p.quietSince = time.Time{}
 		return
@@ -143,14 +175,19 @@ func (p *pump) observe(frame []byte) {
 // final never arrives at all on that path — six seconds of trailing silence
 // produced nothing until a commit was sent.
 func (p *pump) checkSilence() {
-	if !p.ownsEndpointing || !p.isSpeaking || p.quietSince.IsZero() {
+	if !p.ownsEndpointing {
 		return
 	}
-	if time.Since(p.quietSince) < silenceRun {
+	p.speech.Lock()
+	quiet := p.isSpeaking && !p.quietSince.IsZero() && time.Since(p.quietSince) >= silenceRun
+	if quiet {
+		p.isSpeaking = false
+		p.quietSince = time.Time{}
+	}
+	p.speech.Unlock()
+	if !quiet {
 		return
 	}
-	p.isSpeaking = false
-	p.quietSince = time.Time{}
 	if c, ok := p.session.(committer); ok {
 		if err := c.Commit(); err != nil {
 			p.log.Warn("transcribe: commit failed",
