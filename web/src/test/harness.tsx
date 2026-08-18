@@ -5,7 +5,9 @@ import {
 import { render, type RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
-import type { ReactElement } from 'react'
+
+import { EventStreamProvider } from '@/lib/use-event-stream'
+import type { ComponentProps, ReactElement } from 'react'
 import { vi } from 'vitest'
 
 import i18n from '@/lib/i18n'
@@ -32,6 +34,11 @@ export interface Backend {
   commands: RecordedRequest[]
   presence: Presence
   calls: CallSnapshot[]
+  /** Rows the transcript snapshot serves, and the state it reports. */
+  transcript: unknown[]
+  transcriptState?: string
+  /** Delays the transcript snapshot, so a test can land it after an event. */
+  slowSnapshotMs?: number
 }
 
 const BASE = '/api/v1'
@@ -106,6 +113,9 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     },
     presence: initial.presence ?? presenceFixture(),
     calls: initial.calls ?? [],
+    transcript: initial.transcript ?? [],
+    transcriptState: initial.transcriptState,
+    slowSnapshotMs: initial.slowSnapshotMs,
   } as Backend
 
   vi.stubGlobal(
@@ -120,6 +130,13 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
         body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
       })
 
+      if (path.includes('/transcript')) {
+        if (backend.slowSnapshotMs) {
+          await new Promise((resolve) => setTimeout(resolve, backend.slowSnapshotMs))
+        }
+        return json({ items: backend.transcript ?? [], nextSinceSeq: 0, isLive: true,
+          state: backend.transcriptState ?? 'LIVE' })
+      }
       if (path === '/agent/presence') return json(backend.presence)
       if (path === '/calls/mine') return json({ items: backend.calls })
       if (path === '/callbacks') return json({ items: [] })
@@ -138,6 +155,18 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
  * The cockpit links to `/agent/callbacks`, and a `Link` needs a router that
  * knows the target, so the test tree registers it as a stub.
  */
+/** The listener registry the app shell would provide, exposed so a test can
+ * push an event the way the EventSource does. */
+type EventStreamListeners = NonNullable<
+  ComponentProps<typeof EventStreamProvider>['value']
+>['listeners']
+
+export const testListeners = new Map<string, ((event: unknown) => void)[]>()
+
+export function emitEvent(type: string, event: unknown) {
+  for (const listener of testListeners.get(type) ?? []) listener(event)
+}
+
 export function renderPage(Component: () => ReactElement | null) {
   const root = createRootRoute({ component: Outlet })
   const tree = root.addChildren([
@@ -148,8 +177,16 @@ export function renderPage(Component: () => ReactElement | null) {
     routeTree: tree,
     history: createMemoryHistory({ initialEntries: ['/agent'] }),
   })
+  testListeners.clear()
   return renderWithProviders(
-    <RouterProvider router={router as unknown as Parameters<typeof RouterProvider>[0]['router']} />,
+    <EventStreamProvider
+      value={{
+        status: 'connected',
+        listeners: testListeners as unknown as EventStreamListeners,
+      }}
+    >
+      <RouterProvider router={router as unknown as Parameters<typeof RouterProvider>[0]['router']} />
+    </EventStreamProvider>,
   )
 }
 

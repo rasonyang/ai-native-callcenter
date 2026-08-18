@@ -11,6 +11,7 @@ import {
   installBackend,
   presenceFixture,
   renderPage,
+  emitEvent,
   type Backend,
 } from '@/test/harness'
 
@@ -280,5 +281,84 @@ describe('the transcript panel does not disturb the cockpit', () => {
 
     await screen.findByText('Live transcript')
     expect(api.requests.filter((r) => r.path.includes('/transcript'))).toHaveLength(0)
+  })
+})
+
+/**
+ * The live transcript, from the cockpit rather than from the panel in
+ * isolation.
+ *
+ * live-transcript.test.tsx renders LiveTranscript with a call id handed to it.
+ * That proves the panel works; it cannot prove the cockpit gives it the right
+ * call id, or that the app shell's event stream reaches it. Every other defect
+ * this week lived in exactly that gap — a component that worked, wired to
+ * nothing, with no test naming the connection.
+ */
+describe('live transcript', () => {
+  it('shows the call transcript the agent is on', async () => {
+    await renderCockpit({
+      ...onCall,
+      transcript: [
+        {
+          seq: 1, occurredAt: new Date().toISOString(), speaker: 'BOT', kind: 'TEXT',
+          content: { text: 'Thanks for calling NovaNet' }, offsetMs: 1000, source: 'MODEL',
+          utteranceId: 'u-1',
+        },
+      ],
+    })
+    expect(await screen.findByText(/thanks for calling novanet/i)).toBeInTheDocument()
+  })
+
+  it('renders a line that arrives on the event stream', async () => {
+    await renderCockpit(onCall)
+    // Wait until the cockpit actually has the call, not merely the panel
+    // title: the panel renders before /calls/mine resolves.
+    await screen.findByRole('group', { name: /call controls/i })
+
+    emitEvent('CALL_TRANSCRIPT', {
+      type: 'CALL_TRANSCRIPT',
+      callId: CALL_ID,
+      payload: {
+        utteranceId: 'u-9', speaker: 'CUSTOMER', kind: 'TEXT', isFinal: true,
+        seq: 9, text: 'my account number is 4471', source: 'ASR',
+      },
+    })
+
+    expect(await screen.findByText(/my account number is 4471/i)).toBeInTheDocument()
+  })
+
+  it('shows the state the server reports, not one it invents', async () => {
+    await renderCockpit({ ...onCall, transcriptState: 'LIVE' })
+    expect(await screen.findByText(/transcribing…/i)).toBeInTheDocument()
+
+    emitEvent('CALL_TRANSCRIPTION_STATE', {
+      type: 'CALL_TRANSCRIPTION_STATE',
+      callId: CALL_ID,
+      payload: { state: 'DEGRADED', reason: 'ASR_SESSION_FAILED' },
+    })
+    expect(await screen.findByText(/transcribing one side/i)).toBeInTheDocument()
+  })
+
+  it('keeps the state the stream reported when a staler snapshot arrives', async () => {
+    // The snapshot is a past answer: it is requested when the call id appears
+    // and lands a round trip later. On a live call the server published
+    // CONNECTING at tap attach and LIVE 199ms after; the snapshot was taken
+    // inside that window and, on arrival, overwrote LIVE. The panel then sat
+    // on "Connecting…" for the whole call with the transcript running fine
+    // underneath it — which is exactly what the agent reported seeing.
+    await renderCockpit({ ...onCall, transcriptState: 'CONNECTING', slowSnapshotMs: 150 })
+    await screen.findByRole('group', { name: /call controls/i })
+
+    emitEvent('CALL_TRANSCRIPTION_STATE', {
+      type: 'CALL_TRANSCRIPTION_STATE',
+      callId: CALL_ID,
+      payload: { state: 'LIVE' },
+    })
+    expect(await screen.findByText(/transcribing…/i)).toBeInTheDocument()
+
+    // The stale snapshot lands after the event and must not move it back.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    expect(screen.getByText(/transcribing…/i)).toBeInTheDocument()
+    expect(screen.queryByText(/connecting…/i)).not.toBeInTheDocument()
   })
 })

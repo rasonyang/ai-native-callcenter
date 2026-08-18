@@ -127,6 +127,15 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
   // Seeded from the snapshot the server returns and then updated by the
   // stream, so the panel never has to invent a state of its own.
   const [reported, setReported] = useState<TranscriptionState>('IDLE')
+  // Whether the stream has reported a state since this call was selected. The
+  // snapshot is a *past* answer — it is requested when the call id appears and
+  // arrives a round trip later — so seeding from it after the stream has
+  // already spoken moves the panel backwards. Observed on a live call: the
+  // server published CONNECTING at tap attach and LIVE 199ms later, the
+  // snapshot was taken inside that window, and it overwrote LIVE on arrival.
+  // The panel then sat on "Connecting…" for the rest of the call while the
+  // transcript ran normally underneath it.
+  const isStateFromStream = useRef(false)
   const hadCall = useRef(false)
 
   // Lines that arrive before the snapshot resolves wait here rather than
@@ -137,6 +146,7 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
   useEffect(() => {
     buffer.current = []
     isSnapshotted.current = false
+    isStateFromStream.current = false
     setLines([])
     setReported('IDLE')
     if (callId) hadCall.current = true
@@ -156,7 +166,9 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
   useEventListener('CALL_TRANSCRIPTION_STATE', (event) => {
     if (!callId || event.callId !== callId) return
     const state = (event.payload as Record<string, unknown> | undefined)?.state
-    if (typeof state === 'string') setReported(state as TranscriptionState)
+    if (typeof state !== 'string') return
+    isStateFromStream.current = true
+    setReported(state as TranscriptionState)
   })
 
   const snapshot = useQuery({
@@ -181,7 +193,8 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
     buffer.current = []
     isSnapshotted.current = true
     setLines(merged)
-    setReported(snapshot.data.state)
+    // Only if the stream has not already said something newer.
+    if (!isStateFromStream.current) setReported(snapshot.data.state)
   }, [snapshot.data])
 
   const loadEarlier = useCallback(async () => {
