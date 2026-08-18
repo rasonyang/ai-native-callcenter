@@ -39,6 +39,20 @@ const (
 	// never starts is an error state, and the alternative to waiting is what
 	// this replaced: streaming audio into a task that does not exist yet.
 	dsStartTimeout = 20 * time.Second
+	// dsFinishTimeout bounds the wait for task-finished after finish-task.
+	//
+	// finish-task asks the service to flush whatever it is still holding — the
+	// last sentence of a call is usually mid-utterance when the caller hangs
+	// up, and it arrives *after* the request. Closing the socket immediately
+	// throws it away, which is what this replaced.
+	//
+	// Two seconds, and on expiry the socket is closed anyway: this runs on the
+	// call teardown path, and a recogniser that will not say goodbye must not
+	// hold a call's cleanup open. What is lost when it expires is at most the
+	// trailing utterance, which is the same thing that was lost unconditionally
+	// before — so the timeout degrades to the old behaviour rather than to
+	// something worse.
+	dsFinishTimeout = 2 * time.Second
 	// dsSentenceSilence is how long a pause must be before the server closes a
 	// sentence. The documented default is 1300ms; a call transcript wants to
 	// keep up with the conversation rather than lag a beat behind it.
@@ -113,6 +127,11 @@ type dashscope struct {
 	startOnce sync.Once
 	startFail error
 
+	// finished closes on task-finished, which is what Close waits for so the
+	// service's last flushed sentence is not thrown away with the socket.
+	finished   chan struct{}
+	finishOnce sync.Once
+
 	// wire is a raw frame log for diagnosis; nil unless AICC_TRANSCRIBE_WIRE
 	// names a directory. Every text frame in both directions is written
 	// verbatim, because a summary of a protocol you are debugging is a summary
@@ -123,12 +142,13 @@ type dashscope struct {
 
 func newDashscope(p Profile, apiKey string, log Logger) *dashscope {
 	return &dashscope{
-		profile: p,
-		apiKey:  apiKey,
-		log:     log,
-		events:  make(chan Event, 32),
-		done:    make(chan struct{}),
-		started: make(chan struct{}),
+		profile:  p,
+		apiKey:   apiKey,
+		log:      log,
+		events:   make(chan Event, 32),
+		done:     make(chan struct{}),
+		started:  make(chan struct{}),
+		finished: make(chan struct{}),
 	}
 }
 
@@ -319,6 +339,9 @@ func (d *dashscope) readLoop() {
 	// A read loop that ends without task-started releases Start with the
 	// reason rather than leaving it to time out on a socket that is gone.
 	defer d.markStarted(ErrTaskNeverStarted)
+	// A read loop that ends any other way releases a Close still waiting for
+	// task-finished: the socket is gone, so nothing more is coming.
+	defer func() { d.finishOnce.Do(func() { close(d.finished) }) }()
 	defer d.finish(nil)
 	for {
 		mt, data, err := d.conn.ReadMessage()
@@ -350,6 +373,7 @@ func (d *dashscope) readLoop() {
 		case "result-generated":
 			d.onSentence(env.Payload.Output.Sentence)
 		case "task-finished":
+			d.finishOnce.Do(func() { close(d.finished) })
 			return
 		case "task-failed":
 			d.mu.Lock()
@@ -426,10 +450,12 @@ func (d *dashscope) Close(ctx context.Context) error {
 		// finish-task asks the server for any last result. A failed task
 		// documents its connection as unusable, so nothing is sent on it.
 		if !failed && d.conn != nil {
-			_ = d.writeJSON(map[string]any{
+			if werr := d.writeJSON(map[string]any{
 				"header":  dsHeader{Action: "finish-task", TaskID: d.taskID, Streaming: "duplex"},
 				"payload": map[string]any{"input": map[string]any{}},
-			})
+			}); werr == nil {
+				d.awaitFinish(ctx)
+			}
 		}
 		close(d.done)
 		if d.conn != nil {
@@ -441,6 +467,23 @@ func (d *dashscope) Close(ctx context.Context) error {
 
 // finish closes the event channel exactly once, so a consumer ranging over it
 // terminates however the session ended.
+// awaitFinish gives the service its bounded chance to flush.
+//
+// The read loop is still running and still emitting, so a result that arrives
+// in this window reaches the transcript the same way every other one does.
+// This only holds the socket open long enough for it to arrive.
+func (d *dashscope) awaitFinish(ctx context.Context) {
+	timer := time.NewTimer(dsFinishTimeout)
+	defer timer.Stop()
+	select {
+	case <-d.finished:
+	case <-timer.C:
+		d.log.Debug("transcribe: no task-finished before the socket closed",
+			"provider", d.profile.Name, "after", dsFinishTimeout)
+	case <-ctx.Done():
+	}
+}
+
 func (d *dashscope) finish(err error) {
 	if err != nil {
 		d.emit(Event{Type: EventError, Err: err})

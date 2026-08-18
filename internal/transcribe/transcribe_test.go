@@ -30,6 +30,17 @@ var upgrader = websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return
 type fakeEngine struct {
 	srv    *httptest.Server
 	script func(c *websocket.Conn)
+	// onFinish runs when the client sends finish-task, so a test can model a
+	// service that flushes a trailing result — which is the only place a
+	// trailing result can come from. It runs on the handler goroutine, not the
+	// reader: a websocket permits one writer, and the script writes too.
+	onFinish   func(c *websocket.Conn)
+	finishSeen chan struct{}
+	// hold is how long the socket stays open after the script runs. Long
+	// enough that a scripted run does not race the client's teardown; a test
+	// about the client waiting must set it beyond whatever it waits for, or
+	// the socket closing releases the wait and the test proves nothing.
+	hold time.Duration
 	// received records what the client sent, so the tests can assert on the
 	// wire rather than on the client's internals.
 	received chan string
@@ -38,7 +49,9 @@ type fakeEngine struct {
 
 func newFakeEngine(t *testing.T, script func(*websocket.Conn)) *fakeEngine {
 	t.Helper()
-	f := &fakeEngine{script: script, received: make(chan string, 32), binary: make(chan int, 32)}
+	f := &fakeEngine{script: script, hold: 200 * time.Millisecond,
+		received: make(chan string, 32), binary: make(chan int, 32),
+		finishSeen: make(chan struct{}, 1)}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -58,16 +71,29 @@ func newFakeEngine(t *testing.T, script func(*websocket.Conn)) *fakeEngine {
 					}
 					continue
 				}
+				if strings.Contains(string(data), "finish-task") {
+					select {
+					case f.finishSeen <- struct{}{}:
+					default:
+					}
+				}
 				select {
 				case f.received <- string(data):
 				default:
 				}
 			}
 		}()
-		f.script(c)
-		// Hold the socket open until the client closes it, so a scripted run
-		// does not race the client's own teardown.
-		time.Sleep(200 * time.Millisecond)
+		if f.script != nil {
+			f.script(c)
+		}
+		if f.onFinish != nil {
+			select {
+			case <-f.finishSeen:
+				f.onFinish(c)
+			case <-time.After(5 * time.Second):
+			}
+		}
+		time.Sleep(f.hold)
 	}))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -522,5 +548,75 @@ func TestATaskFailedDuringStartupIsReportedImmediately(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Start did not return on task-failed; it waited for the timeout")
+	}
+}
+
+// The last sentence of a call arrives after finish-task, not before it.
+//
+// A caller hangs up mid-utterance; finish-task asks the service to flush what
+// it is still holding, and the answer comes back on the same socket. Closing
+// immediately after the request — which is what the live capture showed — puts
+// the final line of every call in the bin.
+func TestCloseWaitsForTheServiceToFlushItsLastResult(t *testing.T) {
+	f := newFakeEngine(t, nil)
+	f.script = func(c *websocket.Conn) {
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
+	}
+	// The service answers finish-task with a trailing final, then task-finished.
+	f.onFinish = func(c *websocket.Conn) {
+		_ = c.WriteJSON(dsResult(7, "and my account number is 4471.", true))
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-finished"}})
+	}
+
+	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
+		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+	if err := client.Start(t.Context(), Config{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	got := make(chan Event, 8)
+	go func() {
+		for ev := range client.Events() {
+			got <- ev
+		}
+	}()
+
+	_ = client.Close(context.Background())
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev := <-got:
+			if ev.Type == EventFinal && strings.Contains(ev.Text, "4471") {
+				return // the trailing sentence survived the close
+			}
+		case <-deadline:
+			t.Fatal("the service's last result was thrown away with the socket")
+		}
+	}
+}
+
+// A recogniser that will not say goodbye must not hold a call's teardown open.
+func TestCloseGivesUpOnAServiceThatNeverFinishes(t *testing.T) {
+	f := newFakeEngine(t, func(c *websocket.Conn) {
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
+	})
+	// onFinish is nil: finish-task is received and never answered. The socket
+	// must outlive the client's wait, or it is the close that releases Close
+	// and the timeout is never exercised.
+	f.hold = dsFinishTimeout + 5*time.Second
+
+	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
+		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+	if err := client.Start(t.Context(), Config{}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() { _ = client.Close(context.Background()); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(dsFinishTimeout + 3*time.Second):
+		t.Fatalf("Close did not give up within %s", dsFinishTimeout)
 	}
 }
