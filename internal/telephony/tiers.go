@@ -18,12 +18,12 @@ type Tier struct {
 	Position int
 }
 
-// CallcenterTiers asks the switch which agents staff which queues right now.
+// callcenterTierRows asks the switch which agents staff which queues right now.
 //
 // Needed because staffing is reconciled rather than merely applied: a tier the
 // switch still holds for a queue this system no longer staffs has to be
 // removed, and there is no way to learn of it without asking.
-func (a *Adapter) CallcenterTiers() ([]Tier, error) {
+func (a *Adapter) callcenterTierRows() ([]Tier, error) {
 	out, err := a.cmd.API("callcenter_config tier list")
 	if err != nil {
 		return nil, fmt.Errorf("list tiers: %w", err)
@@ -31,23 +31,22 @@ func (a *Adapter) CallcenterTiers() ([]Tier, error) {
 	return parseTiers(out), nil
 }
 
-// CallcenterQueuesForAgent reports the queues the switch believes one agent
-// staffs. The caller wants names to compare against its own record, so the
-// level and position the switch also holds are deliberately not returned:
-// those are always the database's answer, and offering a second copy invites
-// somebody to reconcile against the wrong one.
-func (a *Adapter) CallcenterQueuesForAgent(agent string) ([]string, error) {
-	tiers, err := a.CallcenterTiers()
+// CallcenterTiers reports what the switch believes, as agent to the queues
+// they staff, named as this system names them.
+//
+// Names only: the level and position the switch also holds are deliberately
+// dropped. Those are always the database's answer, and offering a second copy
+// invites somebody to reconcile against the wrong one.
+func (a *Adapter) CallcenterTiers() (map[string][]string, error) {
+	tiers, err := a.callcenterTierRows()
 	if err != nil {
 		return nil, err
 	}
-	var queues []string
+	out := map[string][]string{}
 	for _, t := range tiers {
-		if t.Agent == agent {
-			queues = append(queues, a.bareQueueName(t.Queue))
-		}
+		out[t.Agent] = append(out[t.Agent], a.bareQueueName(t.Queue))
 	}
-	return queues, nil
+	return out, nil
 }
 
 // bareQueueName is QueueName's inverse.

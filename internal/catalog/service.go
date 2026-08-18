@@ -47,14 +47,19 @@ type SwitchControl interface {
 	ReloadQueue(name string) error
 	AddCallcenterTier(queue, agent string, level, position int) error
 	DeleteCallcenterTier(queue, agent string) error
-	// CallcenterQueuesForAgent reports the queues the switch currently believes
-	// this agent staffs. Staffing is reconciled rather than applied, and a tier
-	// the switch still holds cannot be discovered any other way.
+	// CallcenterTiers reports what the switch currently believes, as agent name
+	// to the queues they staff, named as this system names them. Staffing is
+	// reconciled rather than applied, and a tier the switch still holds cannot
+	// be discovered any other way.
+	//
+	// Whole picture rather than one agent's: reconciling everything needs the
+	// agents the switch knows about that this system does not, and those cannot
+	// be asked for by name.
 	//
 	// Names only: level and position are always the database's answer, never
 	// the switch's, so there is nothing to learn from the switch's copy of them
 	// and no shared type either side has to know about.
-	CallcenterQueuesForAgent(agent string) ([]string, error)
+	CallcenterTiers() (map[string][]string, error)
 	IsUp() bool
 }
 
@@ -229,16 +234,24 @@ func (s *Service) ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID) {
 
 	desired, err := s.desiredTiers(ctx, agentID)
 	if err != nil {
-		slog.WarnContext(ctx, "could not read desired staffing",
-			"agent", name, "error", err)
+		slog.WarnContext(ctx, "could not read desired staffing", "agent", name, "error", err)
 		return
 	}
-	actual, err := s.actualQueues(name)
+	onSwitch, err := s.switchCtl.CallcenterTiers()
 	if err != nil {
-		slog.WarnContext(ctx, "could not read the switch's staffing",
-			"agent", name, "error", err)
+		slog.WarnContext(ctx, "could not read the switch's staffing", "agent", name, "error", err)
 		return
 	}
+	s.converge(ctx, name, desired, setOf(onSwitch[name]))
+}
+
+// converge makes the switch agree with desired for one agent, and reports what
+// it had to change.
+//
+// Zero queues is a legitimate answer, not a fault: plenty of agents staff
+// nothing. The invariant is desired against actual, not desired above zero.
+func (s *Service) converge(ctx context.Context, name string,
+	desired map[string]QueueAgent, actual map[string]struct{}) {
 
 	var added, removed, failed int
 	for queue, tier := range desired {
@@ -279,6 +292,14 @@ func (s *Service) ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID) {
 	slog.InfoContext(ctx, "agent staffing already matched", attrs...)
 }
 
+func setOf(items []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(items))
+	for _, i := range items {
+		out[i] = struct{}{}
+	}
+	return out
+}
+
 // desiredTiers is what this system says the agent staffs, keyed by the queue's
 // switch-side name. Assembled from the queries that already exist rather than
 // a new one: sign-in is not a hot path and a handful of queues is a handful of
@@ -303,60 +324,72 @@ func (s *Service) desiredTiers(ctx context.Context, agentID uuid.UUID) (map[stri
 	return out, nil
 }
 
-// actualQueues is what the switch holds for this agent.
-func (s *Service) actualQueues(name string) (map[string]struct{}, error) {
-	queues, err := s.switchCtl.CallcenterQueuesForAgent(name)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]struct{}{}
-	for _, q := range queues {
-		out[q] = struct{}{}
-	}
-	return out, nil
-}
-
-// SyncTiers re-applies every queue's staffing to the switch.
+// SyncTiers reconciles every agent's staffing after the switch reconnects.
 //
-// mod_callcenter holds agents and tiers as runtime state, so a switch restart
-// forgets both. Agent presence is already rebuilt on reconnect, but a tier is
-// what actually makes an agent eligible for a queue's calls: without one the
-// queue has no one to offer to, and callers wait out max_wait_time and abandon
-// with the queue reporting calls_answered=0. That failure is silent from the
-// application's side — our database still says the agent staffs the queue —
-// which is why this runs on every reconnect rather than only when someone
-// notices.
+// mod_callcenter holds agents and tiers as runtime state, so a restart forgets
+// both. Presence is already rebuilt on reconnect; a tier is what actually makes
+// an agent eligible for a queue's calls, and without one the queue has nobody
+// to offer to while our database still insists the agent staffs it.
+//
+// It is the same convergence sign-in performs, over every agent either side
+// knows about — including agents the switch holds tiers for and this system
+// does not, which is the only place those can be found. Before this it added
+// and never removed, so it could not correct that half at all.
 func (s *Service) SyncTiers(ctx context.Context) {
 	if s.switchCtl == nil || !s.switchCtl.IsUp() {
 		return
 	}
-	queues, err := s.store.ListQueues(ctx)
+	desired, err := s.desiredByAgent(ctx)
 	if err != nil {
-		slog.WarnContext(ctx, "could not read queues to restore tiers", "error", err)
+		slog.WarnContext(ctx, "could not read staffing to reconcile", "error", err)
+		return
+	}
+	onSwitch, err := s.switchCtl.CallcenterTiers()
+	if err != nil {
+		slog.WarnContext(ctx, "could not read the switch's staffing", "error", err)
 		return
 	}
 
-	restored := 0
+	// The union: an agent this system staffs, an agent only the switch still
+	// believes in, or both.
+	names := map[string]struct{}{}
+	for name := range desired {
+		names[name] = struct{}{}
+	}
+	for name := range onSwitch {
+		names[name] = struct{}{}
+	}
+	for name := range names {
+		s.converge(ctx, name, desired[name], setOf(onSwitch[name]))
+	}
+	slog.InfoContext(ctx, "queue staffing reconciled", "agents", len(names))
+}
+
+// desiredByAgent is what this system says everyone staffs, keyed by the agent's
+// switch-side name.
+func (s *Service) desiredByAgent(ctx context.Context) (map[string]map[string]QueueAgent, error) {
+	queues, err := s.store.ListQueues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]map[string]QueueAgent{}
 	for _, queue := range queues {
 		staffing, err := s.store.ListQueueAgents(ctx, queue.ID)
 		if err != nil {
-			slog.WarnContext(ctx, "could not read queue staffing", "queue", queue.Name, "error", err)
-			continue
+			return nil, err
 		}
 		for _, member := range staffing {
 			name, err := s.agents.CallcenterName(ctx, member.AgentID)
 			if err != nil {
-				continue // the agent is gone; its tier goes with it
+				continue // the agent is gone; its tiers go with it
 			}
-			if err := s.switchCtl.AddCallcenterTier(queue.Name, name, member.Level, member.Position); err != nil {
-				slog.WarnContext(ctx, "tier not restored on the switch",
-					"queue", queue.Name, "agent", name, "error", err)
-				continue
+			if out[name] == nil {
+				out[name] = map[string]QueueAgent{}
 			}
-			restored++
+			out[name][queue.Name] = member
 		}
 	}
-	slog.InfoContext(ctx, "queue tiers mirrored to the switch", "tiers", restored)
+	return out, nil
 }
 
 // StaffQueue puts an agent on a queue, in the database and on the switch.

@@ -37,8 +37,8 @@ func (f *fakeSwitch) DeleteCallcenterTier(queue, agent string) error {
 	return nil
 }
 
-func (f *fakeSwitch) CallcenterQueuesForAgent(agent string) ([]string, error) {
-	return f.onSwitch[agent], nil
+func (f *fakeSwitch) CallcenterTiers() (map[string][]string, error) {
+	return f.onSwitch, nil
 }
 
 // fakeStore carries only what SyncTiers reads.
@@ -221,5 +221,50 @@ func TestAMatchingSwitchIsNotTouched(t *testing.T) {
 
 	if len(sw.added) != 0 || len(sw.removed) != 0 {
 		t.Errorf("a matching switch was changed: added %+v removed %+v", sw.added, sw.removed)
+	}
+}
+
+// Reconnect converges every agent either side knows about, not only the ones
+// this system staffs. An agent the switch still holds a tier for and this
+// system does not is the case the add-only version could not reach at all —
+// and it is the one that leaves the switch offering calls on behalf of nobody.
+func TestReconnectRemovesATierForAnAgentThisSystemDoesNotStaff(t *testing.T) {
+	queueID, staffed := uuid.New(), uuid.New()
+	store := &fakeStore{
+		queues:   []Queue{{ID: queueID, Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: staffed, Level: 1, Position: 1}}},
+	}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
+		// Staffed here and known to the switch: nothing to do.
+		"agent-" + staffed.String()[:4]: {"support-en"},
+		// Known only to the switch. There is no agent id to look up, and none
+		// is needed: the tier is deleted by the name the switch reported.
+		"agent-ghost": {"support-en"},
+	}}
+
+	NewService(store, sw, fakeNames{}).SyncTiers(context.Background())
+
+	if len(sw.added) != 0 {
+		t.Errorf("added %+v; both sides already agreed on the staffed agent", sw.added)
+	}
+	if len(sw.removed) != 1 || sw.removed[0].agent != "agent-ghost" {
+		t.Fatalf("removed %+v, want only the ghost's tier", sw.removed)
+	}
+}
+
+// Reconnect is the same convergence sign-in performs, so it must still add what
+// is missing — the half it always covered.
+func TestReconnectStillAddsMissingTiers(t *testing.T) {
+	queueID, agentID := uuid.New(), uuid.New()
+	store := &fakeStore{
+		queues:   []Queue{{ID: queueID, Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 2, Position: 3}}},
+	}
+	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
+
+	NewService(store, sw, fakeNames{}).SyncTiers(context.Background())
+
+	if len(sw.added) != 1 || sw.added[0].level != 2 || sw.added[0].position != 3 {
+		t.Fatalf("added %+v, want support-en at level 2 position 3", sw.added)
 	}
 }
