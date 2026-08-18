@@ -200,22 +200,20 @@ func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 	if len(pub.scopes) != 2 {
 		t.Fatalf("published %d events, want 2", len(pub.scopes))
 	}
-	// The decisive part: the bot phase is addressed to supervisors, not left
-	// unaddressed. An events.Scope with nothing set is delivered to every
-	// subscriber, so "no agent is on this call yet" and "everyone may see
-	// this" were the same value, and the second is what the hub acted on.
-	if !pub.scopes[0].SupervisorOnly {
-		t.Errorf("the bot phase was published with scope %+v, which the hub "+
-			"delivers to every agent in the building", pub.scopes[0])
-	}
+	// The only fact stored is which agents are on the call. During the bot
+	// phase there are none, and the hub is default-deny, so that empty scope
+	// reaches supervisors and no agent — the same answer REST gives.
 	if len(pub.scopes[0].AgentIDs) != 0 {
 		t.Errorf("the bot phase was scoped to %v", pub.scopes[0].AgentIDs)
+	}
+	if pub.scopes[0].IsBroadcast {
+		t.Error("the bot phase was published as a broadcast")
 	}
 	if len(pub.scopes[1].AgentIDs) != 1 || pub.scopes[1].AgentIDs[0] != agentID {
 		t.Errorf("the human phase was scoped to %v", pub.scopes[1].AgentIDs)
 	}
-	if pub.scopes[1].SupervisorOnly {
-		t.Error("the human phase was withheld from the agent on the call")
+	if pub.scopes[1].IsBroadcast {
+		t.Error("the human phase was published as a broadcast")
 	}
 }
 

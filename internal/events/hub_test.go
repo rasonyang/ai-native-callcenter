@@ -102,7 +102,7 @@ func TestScopingByIdentity(t *testing.T) {
 		{
 			name: "supervisor sees everything",
 			who:  Subscriber{IsSupervisor: true},
-			sc:   Scope{AgentIDs: []uuid.UUID{agentA}, SupervisorOnly: true},
+			sc:   Scope{AgentIDs: []uuid.UUID{agentA}},
 			want: true,
 		},
 		{
@@ -130,17 +130,32 @@ func TestScopingByIdentity(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "agent never sees supervisor-only events",
+			// The defect this replaced: an empty scope fell through to every
+			// subscriber, so an event whose audience nobody decided reached
+			// everyone. Supervisors still see it; an agent has to be named.
+			name: "agent does not see an event with no audience set",
 			who:  Subscriber{AgentID: &agentA},
-			sc:   Scope{SupervisorOnly: true},
+			sc:   Scope{},
 			want: false,
 		},
 		{
-			name: "unscoped system events reach agents",
-			who:  Subscriber{AgentID: &agentA},
-			ev:   Event{Type: TypeSystemLink},
+			name: "supervisor sees an event with no audience set",
+			who:  Subscriber{IsSupervisor: true},
 			sc:   Scope{},
 			want: true,
+		},
+		{
+			name: "a broadcast is stated, and then it reaches agents",
+			who:  Subscriber{AgentID: &agentA},
+			ev:   Event{Type: TypeSystemLink},
+			sc:   Scope{IsBroadcast: true},
+			want: true,
+		},
+		{
+			name: "a user with no agent profile is not an agent audience",
+			who:  Subscriber{},
+			sc:   Scope{AgentIDs: []uuid.UUID{agentA}},
+			want: false,
 		},
 		{
 			name: "client type filter narrows further",
@@ -260,7 +275,7 @@ func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
 		Payload: map[string]any{"text": "my card number is"}}, Scope{AgentIDs: []uuid.UUID{alice}})
 	his := h.Publish(ctx, Event{Type: TypeCallTranscript,
 		Payload: map[string]any{"text": "his own call"}}, Scope{AgentIDs: []uuid.UUID{bob}})
-	everyones := h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
+	everyones := h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{IsBroadcast: true})
 
 	// Bob reconnects from before all three.
 	sub, replay, reset := h.Subscribe(Subscriber{AgentID: &bob}, hers.Seq-1)
@@ -280,7 +295,7 @@ func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
 		t.Error("bob did not get his own line back")
 	}
 	if !got[everyones.Seq] {
-		t.Error("an unscoped event was withheld on replay")
+		t.Error("a broadcast was withheld on replay")
 	}
 }
 

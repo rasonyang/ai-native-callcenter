@@ -277,13 +277,7 @@ func run() error {
 			transcripts,
 			cfg.BotBackendBase,
 			profile,
-			func(callback store.Callback) {
-				hub.Publish(ctx, events.Event{
-					Type:    events.TypeCallbackCreated,
-					CallID:  callback.CallID,
-					Payload: map[string]any{"callback": callback},
-				}, events.Scope{})
-			},
+			announceCallback(ctx, hub),
 		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)

@@ -150,7 +150,8 @@ func (s *Server) publishCallback(r *http.Request, eventType events.Type, callbac
 		Type:    eventType,
 		CallID:  callback.CallID,
 		Payload: map[string]any{"callback": callback},
-	}, events.Scope{})
+		// A callback belongs on every screen that can act on one.
+	}, events.Scope{IsBroadcast: true})
 }
 
 //

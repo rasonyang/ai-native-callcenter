@@ -1926,6 +1926,23 @@ redaction across recording *and* transcript together.
 the hub — mechanically easy, and it should stay easy, which is another reason the actor
 is a single choke point.
 
+**Deferred — supervisor live-monitor of a call's transcript. Not scheduled.**
+
+Raised while correcting D-scoping (2026-08-18). A supervisor and an administrator
+already receive every transcript event, because the hub exempts them before it reads
+the scope (`internal/events/hub.go`, `Subscriber.wants`) — the same rule
+`httpapi.mayReadTranscript` applies over REST. So the *data* reaches them today.
+
+What does not exist is a screen: nothing in `web/src/routes/` opens a transcript for a
+call the viewer is not a party to. `[FACT]` `LiveTranscript` is mounted once, in
+`web/src/routes/_app.agent.index.tsx`, against the agent's own current call.
+
+Written down here rather than anywhere in the code. There is no placeholder enum value,
+no commented-out branch and no unused prop waiting for it — a half-built feature reads
+as a bug to the next person and as a promise to the one after that. When it is taken up
+it needs a supervisor-side call picker and a decision about whether monitoring is
+announced to the agent, neither of which is a UI detail.
+
 **D12 — retire `BOT_TRANSCRIPT` rather than keep it beside `CALL_TRANSCRIPT`.
 ~~`PROVISIONAL`~~ → SETTLED by owner directive (2026-08-17): remove it. Let
 `make api-breaking` flag it, and record it in the release notes as an intentional

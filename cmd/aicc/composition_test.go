@@ -407,3 +407,37 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 			"reporting, both without a word", missing)
 	}
 }
+
+type recordingPublisher struct {
+	events []events.Event
+	scopes []events.Scope
+}
+
+func (r *recordingPublisher) Publish(_ context.Context, ev events.Event, sc events.Scope) events.Event {
+	r.events = append(r.events, ev)
+	r.scopes = append(r.scopes, sc)
+	return ev
+}
+
+// The bot's callback announcement is a broadcast, said rather than inferred.
+//
+// Under the old hub an empty scope reached everyone, so this worked by
+// accident and would have stopped working silently the moment the hub became
+// default-deny. It is stated now, and this is what holds it stated.
+func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
+	pub := &recordingPublisher{}
+	callID := uuid.New()
+
+	announceCallback(t.Context(), pub)(store.Callback{CallID: &callID})
+
+	if len(pub.events) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.events))
+	}
+	if pub.events[0].Type != events.TypeCallbackCreated {
+		t.Errorf("published %s, want CALLBACK_CREATED", pub.events[0].Type)
+	}
+	if !pub.scopes[0].IsBroadcast {
+		t.Errorf("scope = %+v, want a broadcast — a default-deny hub delivers "+
+			"an unaddressed callback to nobody but supervisors", pub.scopes[0])
+	}
+}

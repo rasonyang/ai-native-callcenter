@@ -424,6 +424,9 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 		Payload:  payload,
 		UserData: a.call.UserData,
 	}
+	// Empty means supervisors and administrators only, which is what a call
+	// with no agent party is: the bot phase, or a caller still in a queue. An
+	// agent whose leg is not on this call has nothing to render from it.
 	scope := events.Scope{}
 	if p != nil {
 		partyID := p.PartyID

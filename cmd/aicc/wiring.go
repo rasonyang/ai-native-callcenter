@@ -275,3 +275,26 @@ func botConfig(
 		AnnounceCallback: announce,
 	}
 }
+
+// callbackPublisher is the slice of the event hub the bot's announcement uses.
+type callbackPublisher interface {
+	Publish(ctx context.Context, ev events.Event, scope events.Scope) events.Event
+}
+
+// announceCallback tells the live event stream about a callback the bot just
+// created.
+//
+// A callback is one of the few things that is genuinely everybody's — it
+// appears on every screen that can act on one — and under a default-deny hub
+// that has to be said rather than left to an empty scope. It is a named
+// function so the saying of it is something a test can observe; as a closure
+// in run() it was neither reachable nor asserted.
+func announceCallback(ctx context.Context, pub callbackPublisher) func(store.Callback) {
+	return func(callback store.Callback) {
+		pub.Publish(ctx, events.Event{
+			Type:    events.TypeCallbackCreated,
+			CallID:  callback.CallID,
+			Payload: map[string]any{"callback": callback},
+		}, events.Scope{IsBroadcast: true})
+	}
+}

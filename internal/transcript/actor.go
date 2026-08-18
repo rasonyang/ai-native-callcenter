@@ -141,18 +141,22 @@ func (a *Actor) SetAudience(agentIDs []uuid.UUID) {
 	a.mu.Unlock()
 }
 
-// scope decides who a transcript event is addressed to, and always decides.
+// scope addresses a transcript event to the agents on the call, and to nobody
+// else.
 //
-// An events.Scope with nothing set is not "nobody in particular" — the hub
-// reads it as an unscoped system notice and delivers it to every subscriber
-// (events.Subscriber.wants, final return). So the bot phase, which has no
-// agent party by construction, is stated as what it is: there is no agent to
-// show it to, and supervisors and administrators already see everything.
+// The only fact stored is which agents those are. During the bot phase there
+// are none, and the empty scope that produces is not a second state needing a
+// name: the hub is default-deny, so it reaches supervisors and administrators
+// and no agent — the same answer httpapi.mayReadTranscript gives over REST.
+//
+// The customer is a speaker in this transcript and never a member of its
+// audience. There is no customer subscriber; a caller is on the phone, not on
+// the event stream.
 func (a *Actor) scope() events.Scope {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if len(a.agentIDs) == 0 {
-		return events.Scope{SupervisorOnly: true}
+		return events.Scope{}
 	}
 	return events.Scope{AgentIDs: append([]uuid.UUID(nil), a.agentIDs...)}
 }

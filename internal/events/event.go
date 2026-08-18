@@ -100,12 +100,24 @@ type Event struct {
 
 // Scope classifies who should receive an event. The hub applies it against a
 // subscriber's identity; clients cannot widen their own scope.
+//
+// The zero value delivers to supervisors and administrators only. That is the
+// deliberate default: an event whose scope nobody set is an event nobody
+// decided the audience of, and the safe reading of an undecided audience is
+// the one that already sees everything. It used to be the opposite — an empty
+// scope fell through to every subscriber — which meant "nobody is on this call
+// yet" and "everyone may see this" were the same value.
 type Scope struct {
 	// AgentIDs receive the event because they are a party to it or it is
-	// about them. Empty means "not agent-specific".
+	// about them. Empty means no agent in particular, not every agent.
 	AgentIDs []uuid.UUID
-	// QueueID restricts delivery to agents staffing that queue.
+	// QueueID also admits agents staffing that queue. It widens AgentIDs
+	// rather than restricting it, so an event that must reach only the agents
+	// on a call leaves it nil.
 	QueueID *uuid.UUID
-	// SupervisorOnly marks events that agents never receive.
-	SupervisorOnly bool
+	// IsBroadcast marks the few events that are genuinely everybody's — a
+	// callback appearing on every screen, a system notice. Stated rather than
+	// inferred from an empty scope, because those two used to be the same
+	// value and one of them was a mistake.
+	IsBroadcast bool
 }

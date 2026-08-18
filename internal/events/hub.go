@@ -210,30 +210,31 @@ func (h *Hub) snapshotLocked() []ringEntry {
 }
 
 // wants reports whether this subscriber should receive ev.
+//
+// Default-deny. Every branch below is a reason to deliver; falling off the end
+// means nobody named this subscriber and the answer is no. The previous
+// version ended in `return true` for an event with no scope set, which made an
+// undecided audience indistinguishable from a deliberate broadcast — and an
+// undecided audience is exactly what a caller who forgot to set one produces.
 func (s Subscriber) wants(ev Event, scope Scope) bool {
 	if len(s.Types) > 0 && !containsType(s.Types, ev.Type) {
 		return false
 	}
+	// A supervisor or administrator sees everything, which is the same rule
+	// the REST handlers apply.
 	if s.IsSupervisor {
 		return true
 	}
-	if scope.SupervisorOnly {
-		return false
-	}
-	if len(scope.AgentIDs) > 0 {
-		if s.AgentID == nil || !containsID(scope.AgentIDs, *s.AgentID) {
-			// Not addressed to this agent; a queue match may still apply.
-			if scope.QueueID == nil || !containsID(s.QueueIDs, *scope.QueueID) {
-				return false
-			}
-		}
+	if scope.IsBroadcast {
 		return true
 	}
-	if scope.QueueID != nil {
-		return containsID(s.QueueIDs, *scope.QueueID)
+	if s.AgentID != nil && containsID(scope.AgentIDs, *s.AgentID) {
+		return true
 	}
-	// Unscoped events (system notices) reach everyone.
-	return true
+	if scope.QueueID != nil && containsID(s.QueueIDs, *scope.QueueID) {
+		return true
+	}
+	return false
 }
 
 func containsType(list []Type, v Type) bool { return slices.Contains(list, v) }
