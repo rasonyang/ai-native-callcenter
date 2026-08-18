@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -46,6 +46,7 @@ function renderPanel(options: { items?: unknown[]; failSnapshot?: boolean } = {}
   )
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  queryClientRef.current = client
   const view = render(
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
@@ -60,8 +61,23 @@ function renderPanel(options: { items?: unknown[]; failSnapshot?: boolean } = {}
     const event = { type, callId: CALL_ID, payload } as unknown as AiccEvent
     for (const listener of listeners.get(type) ?? []) listener(event)
   }
-  return { ...view, emit }
+  return { ...view, emit, options }
 }
+
+/** Holds the harness's query client so a test can force a refetch. */
+const queryClientRef: { current: QueryClient | null } = { current: null }
+
+/** One persisted row, as the snapshot serves it. */
+const row = (seq: number, text: string) => ({
+  seq,
+  occurredAt: new Date().toISOString(),
+  speaker: 'CUSTOMER',
+  kind: 'TEXT',
+  content: { text },
+  offsetMs: seq * 1000,
+  source: 'ASR',
+  utteranceId: `u-${seq}`,
+})
 
 const final = (seq: number, text: string, extra: Record<string, unknown> = {}) => ({
   utteranceId: `u-${seq}`,
@@ -265,5 +281,34 @@ describe('every transcription state renders', () => {
     emit({ state: 'ERROR', reason: 'STREAM_NEVER_CONNECTED' }, 'CALL_TRANSCRIPTION_STATE')
     expect(await screen.findByText('Transcription unavailable')).toBeInTheDocument()
     expect(screen.queryByText(/STREAM_NEVER_CONNECTED/)).toBeNull()
+  })
+})
+
+// The snapshot may seed and may never overwrite. It is a past answer, and the
+// shell refetches every query on each stream reconnect, so a mid-call refetch
+// landing on top of streamed lines is the ordinary path rather than an edge
+// case. Before this, that refetch dropped every partial and every final the
+// server had not yet persisted.
+describe('a refetched snapshot', () => {
+  it('merges into what the stream delivered instead of replacing it', async () => {
+    const { emit, options } = renderPanel({ items: [row(1, 'from the bot phase')] })
+    expect(await screen.findByText(/from the bot phase/i)).toBeInTheDocument()
+
+    emit(final(2, 'said live on the stream'))
+    expect(await screen.findByText(/said live on the stream/i)).toBeInTheDocument()
+
+    // The stream reconnects, the shell invalidates every query, and the server
+    // answers with a page that has since grown a row — and that does not yet
+    // carry the streamed line, because it was not persisted when the page was
+    // taken. Replacing the store with it would drop the line the agent is
+    // reading.
+    options.items = [row(1, 'from the bot phase'), row(3, 'persisted later')]
+    await act(async () => {
+      await queryClientRef.current?.invalidateQueries()
+    })
+    expect(await screen.findByText(/persisted later/i)).toBeInTheDocument()
+
+    expect(screen.getByText(/said live on the stream/i)).toBeInTheDocument()
+    expect(screen.getByText(/from the bot phase/i)).toBeInTheDocument()
   })
 })

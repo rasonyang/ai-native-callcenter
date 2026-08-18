@@ -182,7 +182,21 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
 
   useEffect(() => {
     if (!snapshot.data) return
-    let merged = snapshot.data.items.map(lineFromRow)
+    const rows = snapshot.data.items.map(lineFromRow)
+
+    // A refetch, not the first read. The stream has been delivering into this
+    // store ever since, and the snapshot is a *past* answer: replacing the
+    // store with it drops every partial and every final the server had not
+    // persisted when the page was taken. Refetches are routine — the shell
+    // invalidates every query on each stream reconnect — so this is the
+    // ordinary path, not an edge case. Merge in, never overwrite.
+    if (isSnapshotted.current) {
+      setLines((current) => rows.reduce((acc, line) => mergeLine(acc, line), current))
+      if (!isStateFromStream.current) setReported(snapshot.data.state)
+      return
+    }
+
+    let merged = rows
     const highest = merged.reduce((max, l) => Math.max(max, l.seq ?? 0), 0)
     for (const line of buffer.current) {
       // Anything the snapshot already carries is dropped by seq; a partial has
