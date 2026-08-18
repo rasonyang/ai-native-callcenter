@@ -2229,14 +2229,19 @@ platform:
 - `make install` no longer needs root, and the Homebrew prefix is detected rather than
   assumed.
 
-✗ **That build path is not committed anywhere yet.** `[FACT]` As of 2026-08-18 the module
-repository has `CMakeLists.txt`, `build-mod-audio-stream.sh` and `README.md` modified in the
-working tree and nothing committed, on top of upstream `ec2a781`. So the clean `Release`
-build this section now documents exists only on this machine. Until those changes are
-committed — and ideally offered upstream, since the SpeexDSP fix is not macOS-specific —
-this document describes a build nobody else can reproduce, and a `git checkout` in that
-repository silently returns us to the accidental-link build. **Whose commit that is, and
-whether it goes upstream, is the owner's call.**
+✗ **That build path exists on this machine only.** `[MEASURED 2026-08-18]` The fixes are
+committed — `4130508 Add macOS/Apple Silicon support and link SpeexDSP` and `442a571` on top
+of upstream `ec2a781` — so a `git checkout` no longer reverts this box to the accidental-link
+build. But the remote has been repointed to a fork (`rasonyang/mod_audio_stream`) and
+`git status` reports **`ahead 2`**: nothing has been pushed. Two commits that exist on one
+disk are not a build path anyone else can follow, and this document should not be read as
+describing one.
+
+`[INFERENCE]` The SpeexDSP link is separable from the macOS-specific parts (output suffix,
+strip, prefix detection, install rules) and is not a macOS fix at all — it closes a silent
+wrong-rate path on Debian, where the symbols were resolving from FreeSWITCH's own copy. That
+is an argument for offering it upstream as its own commit. Pushing, forking and upstreaming
+are all the owner's calls.
 
 The three fixes below are kept as the record of what was wrong, because the assertion in
 §B.5 exists because of the third one:
@@ -2284,10 +2289,18 @@ because something else was doing the work.
 | Attach | Frames | Measured |
 |---|---|---|
 | `mono 24000` | 301 × **960 B** (20 ms @ 24 kHz mono) | 1004.1 Hz; Goertzel @1004 = 5078.0, @3012 = 0.2 |
-| `stereo 24000` | 300 × **1920 B** (20 ms @ 24 kHz stereo) | L and R both 1004.0 Hz, same ratio |
+| `stereo 24000` | 300 × **1920 B** (20 ms @ 24 kHz stereo) | L and R both 1004.0 Hz, identical magnitudes — see the caveat below |
 
 25000:1 in favour of 1004 Hz over 3012 Hz. Had the resampler been absent, 8 kHz samples
 decoded as 24 kHz would have read ≈3012 Hz.
+
+✗ **That stereo row does not prove channel identity, and is worth reading carefully because
+it looks as though it does.** Both channels carrying 1004.0 Hz with identical magnitudes is
+exactly what a left/right transposition would also produce — a single tone on both sides
+cannot distinguish them. It establishes 24 kHz framing and two-direction flow, nothing more.
+Channel identity rests solely on the two-tone rig (§B.1, and the live agent leg in Layer 4),
+and it has to, because every speaker label in the transcript depends on it: transposed, every
+line would carry the wrong name and nothing would look broken.
 
 **`[MEASURED 2026-08-18]` `+OK` on attach does not mean the socket came up.** An attach to a
 port with *nothing listening* still returns `+OK Success`, because the connect is
