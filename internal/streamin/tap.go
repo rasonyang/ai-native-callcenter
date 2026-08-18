@@ -92,6 +92,11 @@ func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, l
 			"callId", callID, "channelId", channelID, "error", err)
 		return
 	}
+	// +OK means the switch accepted the command, not that the socket came up:
+	// the connect is asynchronous, and an attach to a port with nothing
+	// listening succeeds just as loudly. So the ingest is told to expect this
+	// stream, and to say so if it never arrives.
+	t.srv.Expect(claim)
 	t.log.Info("transcription tap attached",
 		"callId", callID, "channelId", channelID, "rateHz", t.rateHz)
 }

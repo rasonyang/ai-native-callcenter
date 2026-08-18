@@ -2242,9 +2242,57 @@ The three fixes below are kept as the record of what was wrong, because the asse
    includes `speex/speex_resampler.h`. **This is the one that mattered**: on Debian it
    worked by accident, which is precisely a build that loads and does not resample.
 
-✗ **The running switch still holds the previous image in memory.** The new file is on disk
-and unloaded; reloading would drop any live `uuid_audio_stream` tap, so the timing is the
-owner's rather than a side effect of a build.
+**`[MEASURED 2026-08-18]` On macOS, `reload` does not load a replaced module. A restart is
+required, and the reload reports success.**
+
+`reload mod_audio_stream` returned `+OK unloaded / +OK loaded`, and the log agreed:
+`mod_audio_stream unloaded.` … `Successfully Loaded [mod_audio_stream]`. The process was
+still executing the old code. `lsof`/`vmmap` on the pid:
+
+```
+mapped:  inode 89528622  size 232488   <- the previous, now-unlinked image
+on disk: inode 89641025  size 220144   <- the new build
+```
+
+`[INFERENCE]` dyld does not unmap on `dlclose`, and the subsequent `dlopen` of the same path
+returns the image already in memory without re-reading the replaced file. FreeSWITCH reports
+honestly what it did; it simply is not what the operator meant. After a restart the mapped
+image matched the file exactly.
+
+**The trap inside the trap, and it is the more instructive half.** Had the tone test been run
+straight after the reload, it would have *passed* — because the image still in memory was the
+previous hand-built one, which does link SpeexDSP. A validated-looking result would have
+certified a build that was never loaded. That is the same shape as the accidental Debian
+build this document's assertion exists to refuse, one level up: the evidence looked right
+because something else was doing the work.
+
+*So the rule is:* on macOS, installing a module means restarting FreeSWITCH. `module_exists`,
+`Successfully Loaded` and even a correct tone measurement can all be true of the wrong image.
+
+**`[MEASURED 2026-08-18]` The rate is real on the clean upstream build.** Channel native rate
+8000, so a resampler is genuinely required:
+
+| Attach | Frames | Measured |
+|---|---|---|
+| `mono 24000` | 301 × **960 B** (20 ms @ 24 kHz mono) | 1004.1 Hz; Goertzel @1004 = 5078.0, @3012 = 0.2 |
+| `stereo 24000` | 300 × **1920 B** (20 ms @ 24 kHz stereo) | L and R both 1004.0 Hz, same ratio |
+
+25000:1 in favour of 1004 Hz over 3012 Hz. Had the resampler been absent, 8 kHz samples
+decoded as 24 kHz would have read ≈3012 Hz.
+
+**`[MEASURED 2026-08-18]` `+OK` on attach does not mean the socket came up.** An attach to a
+port with *nothing listening* still returns `+OK Success`, because the connect is
+asynchronous. `[FACT]` The ingest therefore treats an accepted attach as an expectation
+rather than a fact: if no stream dials back within `connectGrace`, it publishes
+`ERROR / STREAM_NEVER_CONNECTED` and logs it. Without that the panel sits at "Connecting…"
+for the life of the call, which is indistinguishable from a call nobody is transcribing.
+
+**The starvation edge was reproduced independently**, by accident, which is the best kind of
+confirmation: a `stereo` tap on a `&park()`ed leg gave `+OK`, a completed websocket
+handshake, a healthy connection and **0 frames, 0 bytes** until the capture timed out, with
+nothing in the log. Switching the leg to `&echo()` produced frames immediately. This is why
+§14 pauses the tap on hold rather than leaving it running and quiet.
+
 
 The artifact is `mod_audio_stream.dylib`; FreeSWITCH's module directory holds `.so`
 names, so it is installed as `/usr/local/freeswitch/mod/mod_audio_stream.so`.

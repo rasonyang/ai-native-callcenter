@@ -5,12 +5,17 @@ package streamin
 import (
 	"context"
 	"encoding/binary"
+	"fmt"
+	"io"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -277,5 +282,111 @@ func TestNewRefusesAnUnusableConfiguration(t *testing.T) {
 				t.Error("an unusable configuration was accepted")
 			}
 		})
+	}
+}
+
+// recordingTranscripts hands out a real actor so state changes can be observed.
+type recordingTranscripts struct {
+	reg    *transcript.Registry
+	callID uuid.UUID
+}
+
+func (r recordingTranscripts) Lookup(id uuid.UUID) (*transcript.Actor, bool) {
+	if id != r.callID {
+		return nil, false
+	}
+	a, ok := r.reg.Lookup(id)
+	return a, ok
+}
+
+type statePub struct {
+	mu     sync.Mutex
+	states []string
+}
+
+func (p *statePub) Publish(_ context.Context, ev events.Event, _ events.Scope) events.Event {
+	if ev.Type == events.TypeCallTranscriptionState {
+		p.mu.Lock()
+		p.states = append(p.states, fmt.Sprint(ev.Payload["state"], "/", ev.Payload["reason"]))
+		p.mu.Unlock()
+	}
+	return ev
+}
+
+func (p *statePub) all() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.states...)
+}
+
+// `uuid_audio_stream … start` returns +OK before the socket exists — an attach
+// to a port with nothing listening succeeds just as loudly. Without this the
+// panel would sit at "Connecting…" for the whole call, which reads exactly
+// like a call nobody is transcribing.
+func TestAnAttachThatNeverConnectsSaysSo(t *testing.T) {
+	pub := &statePub{}
+	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	callID := uuid.New()
+	reg.For(callID, "INBOUND", time.Now())
+	t.Cleanup(func() { reg.Close(callID) })
+
+	s, err := New(Config{
+		Addr: "127.0.0.1:0", Secret: []byte("k"),
+		NewSession:  func() (transcribe.Session, error) { return newStallSession(), nil },
+		Transcripts: recordingTranscripts{reg: reg, callID: callID},
+		Logger:      nopLogger{},
+	})
+	if err != nil {
+		t.Fatalf("new: %v", err)
+	}
+
+	claim := Claim{CallID: callID, Channel: "chan-1", Expires: time.Now().Add(time.Minute)}
+	key := claim.CallID.String() + "|" + claim.Channel
+
+	// Expect, then let the grace expire by firing the check directly rather
+	// than sleeping twelve seconds for it.
+	s.Expect(claim)
+	s.giveUpOn(key, claim)
+
+	found := false
+	for _, st := range pub.all() {
+		if strings.Contains(st, "ERROR") && strings.Contains(st, "STREAM_NEVER_CONNECTED") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("states = %v, want an ERROR naming the stream that never arrived", pub.all())
+	}
+}
+
+// A stream that did connect must not then be reported as missing.
+func TestAConnectedStreamIsNotReportedMissing(t *testing.T) {
+	pub := &statePub{}
+	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	callID := uuid.New()
+	reg.For(callID, "INBOUND", time.Now())
+	t.Cleanup(func() { reg.Close(callID) })
+
+	s, _ := New(Config{
+		Addr: "127.0.0.1:0", Secret: []byte("k"),
+		NewSession:  func() (transcribe.Session, error) { return newStallSession(), nil },
+		Transcripts: recordingTranscripts{reg: reg, callID: callID},
+		Logger:      nopLogger{},
+	})
+	claim := Claim{CallID: callID, Channel: "chan-1", Expires: time.Now().Add(time.Minute)}
+	key := claim.CallID.String() + "|" + claim.Channel
+
+	s.Expect(claim)
+	// The stream arrives.
+	s.mu.Lock()
+	s.sessions[key] = &session{}
+	s.mu.Unlock()
+	s.arrived(key)
+	s.giveUpOn(key, claim)
+
+	for _, st := range pub.all() {
+		if strings.Contains(st, "STREAM_NEVER_CONNECTED") {
+			t.Errorf("a connected stream was reported as never arriving: %v", pub.all())
+		}
 	}
 }

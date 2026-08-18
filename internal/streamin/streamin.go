@@ -83,6 +83,8 @@ type Server struct {
 	sessions map[string]*session
 	// used records spent tokens: one token, one connection.
 	used map[string]time.Time
+	// pending holds taps the switch accepted but that have not dialled back.
+	pending map[string]*time.Timer
 }
 
 // Claim is what a token asserts and the metadata frame must agree with.
@@ -127,6 +129,7 @@ func New(cfg Config) (*Server, error) {
 		log:      cfg.Logger,
 		sessions: map[string]*session{},
 		used:     map[string]time.Time{},
+		pending:  map[string]*time.Timer{},
 	}, nil
 }
 
@@ -299,6 +302,7 @@ func (s *Server) serve(conn *websocket.Conn, claim Claim) {
 	}
 	s.sessions[key] = sess
 	s.mu.Unlock()
+	s.arrived(key)
 
 	defer func() {
 		s.mu.Lock()
@@ -336,4 +340,56 @@ func speakerFor(channel int) string {
 		return store.SpeakerHumanAgent
 	}
 	return store.SpeakerCustomer
+}
+
+// connectGrace is how long a tap has to actually connect before we stop
+// believing it will.
+//
+// `uuid_audio_stream … start` returns +OK before the socket exists — the
+// connect is asynchronous — so a successful attach is not evidence that audio
+// is coming. Without this the panel sits at "Connecting…" for the life of a
+// call whose stream never arrived, which is the same silence as a call nobody
+// is transcribing and is reported no differently.
+const connectGrace = 12 * time.Second
+
+// Expect records that a tap was attached and should connect shortly. The Tap
+// calls this after the switch accepts the command.
+func (s *Server) Expect(c Claim) {
+	key := c.CallID.String() + "|" + c.Channel
+	timer := time.AfterFunc(connectGrace, func() { s.giveUpOn(key, c) })
+
+	s.mu.Lock()
+	if prev := s.pending[key]; prev != nil {
+		prev.Stop()
+	}
+	s.pending[key] = timer
+	s.mu.Unlock()
+}
+
+// arrived cancels the expectation: the stream connected.
+func (s *Server) arrived(key string) {
+	s.mu.Lock()
+	if timer := s.pending[key]; timer != nil {
+		timer.Stop()
+		delete(s.pending, key)
+	}
+	s.mu.Unlock()
+}
+
+// giveUpOn reports a tap that was accepted by the switch and never dialled
+// back. Silence is the one thing this must not do.
+func (s *Server) giveUpOn(key string, c Claim) {
+	s.mu.Lock()
+	_, connected := s.sessions[key]
+	delete(s.pending, key)
+	s.mu.Unlock()
+	if connected {
+		return
+	}
+
+	s.log.Error("a tap was attached but never connected",
+		"callId", c.CallID, "channelId", c.Channel, "after", connectGrace)
+	if actor, ok := s.cfg.Transcripts.Lookup(c.CallID); ok {
+		actor.State("ERROR", "STREAM_NEVER_CONNECTED", nil)
+	}
 }
