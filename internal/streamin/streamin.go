@@ -309,6 +309,11 @@ func (s *Server) serve(conn *websocket.Conn, claim Claim) {
 	s.sessions[key] = sess
 	s.mu.Unlock()
 	s.arrived(key)
+	// The switch dialling back is the only observable moment between "the
+	// switch accepted the attach" and "audio is being recognised", and without
+	// it attach-to-LIVE is a latency stage with no measurement anywhere.
+	s.log.Info("tapped stream connected",
+		"callId", claim.CallID, "channelId", claim.Channel)
 
 	defer func() {
 		s.mu.Lock()

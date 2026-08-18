@@ -424,17 +424,24 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 		Payload:  payload,
 		UserData: a.call.UserData,
 	}
-	// Empty means supervisors and administrators only, which is what a call
-	// with no agent party is: the bot phase, or a caller still in a queue. An
-	// agent whose leg is not on this call has nothing to render from it.
-	scope := events.Scope{}
+	// Addressed to every agent on the call, not to the agent whose leg this
+	// event is about. The event still names that leg — ev.AgentID below — but
+	// the audience is the conversation's.
+	//
+	// The caller's leg has no agent of its own, so scoping by the party's own
+	// agent addressed a caller's release to nobody. Under the old
+	// fall-through-to-everyone hub that reached the bridged agent anyway, by
+	// accident; under a default-deny hub it reaches no one, and the agent's
+	// softphone sits on a call the customer has already hung up.
+	//
+	// Empty is still possible and still correct: a call with no agent party at
+	// all is the bot phase or a caller alone in a queue, and that goes to
+	// supervisors and administrators.
+	scope := events.Scope{AgentIDs: a.call.AgentIDs()}
 	if p != nil {
 		partyID := p.PartyID
 		ev.PartyID = &partyID
 		ev.AgentID = p.AgentID
-		if p.AgentID != nil {
-			scope.AgentIDs = []uuid.UUID{*p.AgentID}
-		}
 	}
 	if a.call.QueueID != nil {
 		scope.QueueID = a.call.QueueID

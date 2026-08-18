@@ -367,3 +367,84 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 		})
 	}
 }
+
+// The customer hangs up and the agent's softphone clears.
+//
+// Observed failing on a live call (2026-08-18): the caller released, both legs
+// ended on the switch, and the agent's bar stayed on the call. The caller's
+// leg has no agent of its own, so scoping a party event by that party's agent
+// addressed the release to nobody — which under a fall-through-to-everyone hub
+// still reached the bridged agent, and under a default-deny hub reaches no one.
+//
+// The audience of anything that happens on a call is every agent on the call.
+func TestACallerReleaseReachesTheBridgedAgent(t *testing.T) {
+	agentID := uuid.New()
+	for _, tc := range []struct {
+		name    string
+		who     events.Subscriber
+		wantSaw bool
+	}{
+		{name: "the agent bridged to the caller", wantSaw: true,
+			who: events.Subscriber{AgentID: &agentID}},
+		{name: "an agent on another call", wantSaw: false,
+			who: events.Subscriber{AgentID: ptr(uuid.New())}},
+		{name: "a supervisor", wantSaw: true,
+			who: events.Subscriber{IsSupervisor: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := events.NewHub(events.NewSequence(seqStub{}, "events"))
+			reg := NewRegistry(hub)
+			t.Cleanup(reg.Shutdown)
+
+			sub, _, _ := hub.Subscribe(tc.who, 0)
+			defer sub.Close()
+
+			callID := uuid.New()
+			call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The caller, with no agent of their own, and the agent's leg.
+			call.AddParty("caller-chan", "+8613800138000", testTime)
+			agentParty := call.AddParty("agent-chan", "1001", testTime)
+			agentParty.AgentID = &agentID
+			for _, ch := range []string{"caller-chan", "agent-chan"} {
+				if err := reg.BindChannel(ch, callID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "caller-chan", OccurredAt: testTime})
+			reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "agent-chan", OccurredAt: testTime})
+
+			// The customer hangs up.
+			reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "caller-chan",
+				HangupCause: "NORMAL_CLEARING", OccurredAt: testTime.Add(time.Minute)})
+
+			saw := false
+			deadline := time.After(2 * time.Second)
+		collect:
+			for {
+				select {
+				case ev := <-sub.C:
+					if ev.Type == events.TypePartyReleased {
+						saw = true
+						break collect
+					}
+				case <-deadline:
+					break collect
+				}
+			}
+			if saw != tc.wantSaw {
+				t.Errorf("saw the caller's release = %v, want %v — an agent whose "+
+					"customer hung up must be told, or their softphone stays on a "+
+					"call that ended", saw, tc.wantSaw)
+			}
+		})
+	}
+}
+
+func ptr(id uuid.UUID) *uuid.UUID { return &id }
+
+type seqStub struct{}
+
+func (seqStub) ReserveSeqBlock(context.Context, string, int64) (int64, error) { return 1, nil }

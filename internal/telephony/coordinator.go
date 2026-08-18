@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -109,11 +108,7 @@ func (c *Coordinator) announceAudience(callID uuid.UUID) {
 	}
 	var agentIDs []uuid.UUID
 	if err := c.registry.Do(callID, func(call *Call) {
-		for _, p := range call.Parties {
-			if p.AgentID != nil && !slices.Contains(agentIDs, *p.AgentID) {
-				agentIDs = append(agentIDs, *p.AgentID)
-			}
-		}
+		agentIDs = call.AgentIDs()
 	}); err != nil {
 		// A call we can no longer read is not evidence that its audience
 		// shrank, and clearing one on a failed read would take a live

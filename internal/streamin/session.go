@@ -45,6 +45,8 @@ func (s *session) run() {
 		return
 	}
 	s.actor.State("LIVE", "", nil)
+	s.log.Info("transcription live",
+		"callId", s.claim.CallID, "channelId", s.claim.Channel)
 
 	_ = s.conn.SetReadDeadline(time.Now().Add(readTimeout))
 	for {

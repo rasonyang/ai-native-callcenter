@@ -10,6 +10,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -95,6 +97,13 @@ type dashscope struct {
 	// closed and not reusable — so nothing else is attempted on it.
 	failed bool
 	mu     sync.Mutex
+
+	// wire is a raw frame log for diagnosis; nil unless AICC_TRANSCRIBE_WIRE
+	// names a directory. Every text frame in both directions is written
+	// verbatim, because a summary of a protocol you are debugging is a summary
+	// written by the assumption you are testing.
+	wire   *os.File
+	audioN int
 }
 
 func newDashscope(p Profile, apiKey string, log Logger) *dashscope {
@@ -131,6 +140,7 @@ func (d *dashscope) Start(ctx context.Context, cfg Config) error {
 	}
 	d.conn = conn
 	d.taskID = newTaskID()
+	d.openWire()
 	_ = conn.SetReadDeadline(time.Now().Add(dsReadTimeout))
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(dsReadTimeout))
@@ -173,7 +183,33 @@ func (d *dashscope) Start(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+// openWire starts a raw frame log when AICC_TRANSCRIBE_WIRE names a directory.
+func (d *dashscope) openWire() {
+	dir := os.Getenv("AICC_TRANSCRIBE_WIRE")
+	if dir == "" {
+		return
+	}
+	f, err := os.Create(filepath.Join(dir, "ds-"+d.taskID[:8]+".log"))
+	if err != nil {
+		d.log.Warn("transcribe: cannot open the wire log", "error", err)
+		return
+	}
+	d.wire = f
+}
+
+func (d *dashscope) traceWire(dir string, b []byte) {
+	if d.wire == nil {
+		return
+	}
+	fmt.Fprintf(d.wire, "%s %s %s\n", time.Now().Format("15:04:05.000"), dir, b)
+}
+
 func (d *dashscope) writeJSON(v any) error {
+	if d.wire != nil {
+		if b, err := json.Marshal(v); err == nil {
+			d.traceWire("OUT", b)
+		}
+	}
 	d.writes.Lock()
 	defer d.writes.Unlock()
 	_ = d.conn.SetWriteDeadline(time.Now().Add(dsWriteWait))
@@ -198,6 +234,12 @@ func (d *dashscope) SendAudio(pcm16 []byte) error {
 
 	d.writes.Lock()
 	defer d.writes.Unlock()
+	if d.wire != nil {
+		d.audioN++
+		if d.audioN%50 == 1 {
+			d.traceWire("OUT", []byte(fmt.Sprintf("<audio frame #%d, %d bytes>", d.audioN, len(pcm16))))
+		}
+	}
 	_ = d.conn.SetWriteDeadline(time.Now().Add(dsWriteWait))
 	return d.conn.WriteMessage(websocket.BinaryMessage, pcm16)
 }
@@ -235,8 +277,10 @@ func (d *dashscope) readLoop() {
 		}
 		_ = d.conn.SetReadDeadline(time.Now().Add(dsReadTimeout))
 		if mt != websocket.TextMessage {
+			d.traceWire("IN", []byte(fmt.Sprintf("<binary frame, %d bytes>", len(data))))
 			continue
 		}
+		d.traceWire("IN", data)
 
 		var env dsEnvelope
 		if err := json.Unmarshal(data, &env); err != nil {

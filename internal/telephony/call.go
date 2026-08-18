@@ -5,6 +5,7 @@ package telephony
 import (
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -255,6 +256,28 @@ func (c *Call) ActiveParties() []*Party {
 
 // AnsweredAt reports when the call was first answered by anybody, including
 // the bot; the human/AI split comes from per-party timestamps.
+// AgentIDs is every agent with a party on this call, which is the audience for
+// anything that happens on it.
+//
+// Every agent, not the agent whose leg the event is about. A call is one
+// conversation and both sides of it are on one screen: the moment that matters
+// most is the *caller* releasing, and telling only the caller's own agent —
+// of which there is none — leaves the agent's softphone showing a call that
+// ended. It is also a superset of whoever is bridged at this instant, so a
+// consult does not make the other agent's panel flicker.
+//
+// Released parties still count. An agent who was on the call is entitled to
+// see it end.
+func (c *Call) AgentIDs() []uuid.UUID {
+	var out []uuid.UUID
+	for _, p := range c.Parties {
+		if p.AgentID != nil && !slices.Contains(out, *p.AgentID) {
+			out = append(out, *p.AgentID)
+		}
+	}
+	return out
+}
+
 func (c *Call) AnsweredAt() time.Time {
 	var first time.Time
 	for _, p := range c.Parties {
