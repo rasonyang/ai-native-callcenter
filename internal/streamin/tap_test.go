@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -168,8 +169,12 @@ func TestPauseAndResumeReachTheSwitchWhileTapped(t *testing.T) {
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
-	tap.Pause("chan-a")
-	tap.Resume("chan-a")
+	if err := tap.Pause("chan-a"); err != nil {
+		t.Fatalf("pause: %v", err)
+	}
+	if err := tap.Resume("chan-a"); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
 
 	_, _, paused, resumed := sw.snapshot()
 	if len(paused) != 1 || paused[0] != "chan-a" {
@@ -203,5 +208,146 @@ func TestWithTokenPreservesExistingQuery(t *testing.T) {
 	}
 	if !strings.Contains(got, "x=1") || !strings.Contains(got, "t=tok") {
 		t.Errorf("url = %s, want both parameters", got)
+	}
+}
+
+// --- B2: an attachment is not a channel -------------------------------------
+
+// The convergence guarantee. CHANNEL_UNBRIDGE and CHANNEL_HANGUP are not owed
+// to us — a leg transferred away, an ESL link that reconnected across the
+// hangup — and without this the module keeps pumping a finished call's audio
+// for the life of the process, with nothing reporting a fault.
+func TestDetachCallStopsATapNoSwitchEventEverEnded(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	tap.DetachCall(callID) // no UNBRIDGE, no HANGUP: the call simply ended
+
+	_, stopped, _, _ := sw.snapshot()
+	if len(stopped) != 1 || stopped[0] != "chan-a" {
+		t.Fatalf("stopped %v, want the tap stopped by the call's own retirement", stopped)
+	}
+}
+
+// It will usually run second, after the switch event already stopped the tap.
+func TestDetachCallIsIdempotent(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	tap.Detach("chan-a")
+	tap.DetachCall(callID)
+	tap.DetachCall(callID)
+
+	if _, stopped, _, _ := sw.snapshot(); len(stopped) != 1 {
+		t.Fatalf("stopped %v, want exactly one stop for one tap", stopped)
+	}
+}
+
+// A call's taps are its own. Retiring one call must not touch another's, which
+// is only expressible because the key carries the call.
+func TestDetachCallLeavesAnotherCallsTapAlone(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	other := uuid.New()
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+	tap.Attach(other, nil, nil, "chan-b", "en")
+
+	tap.DetachCall(other)
+
+	_, stopped, _, _ := sw.snapshot()
+	if len(stopped) != 1 || stopped[0] != "chan-b" {
+		t.Fatalf("stopped %v, want only the retired call's tap", stopped)
+	}
+	if err := tap.Pause("chan-a"); err != nil {
+		t.Errorf("the surviving tap answered %v, want it still live", err)
+	}
+}
+
+// No silent action on a dead tap: the command was not carried out and the
+// caller is told which kind of nothing happened.
+func TestPauseAndResumeReportAChannelWithNoTap(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+	tap.Detach("chan-a")
+
+	if err := tap.Pause("chan-a"); !errors.Is(err, telephony.ErrNoTap) {
+		t.Errorf("pause on a retired tap = %v, want ErrNoTap", err)
+	}
+	if err := tap.Resume("chan-a"); !errors.Is(err, telephony.ErrNoTap) {
+		t.Errorf("resume on a retired tap = %v, want ErrNoTap", err)
+	}
+	if err := tap.Pause("never-tapped"); !errors.Is(err, telephony.ErrNoTap) {
+		t.Errorf("pause on an untapped channel = %v, want ErrNoTap", err)
+	}
+	if _, _, paused, resumed := sw.snapshot(); len(paused) != 0 || len(resumed) != 0 {
+		t.Errorf("paused %v resumed %v, want no command against a tap that is gone",
+			paused, resumed)
+	}
+}
+
+// A tap that exists but cannot be commanded is a different answer from one
+// that does not exist, and the two must not collapse into each other.
+func TestPauseReportsTheSwitchBeingDownSeparately(t *testing.T) {
+	tap, sw, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+	sw.mu.Lock()
+	sw.down = true
+	sw.mu.Unlock()
+
+	err := tap.Pause("chan-a")
+	if errors.Is(err, telephony.ErrNoTap) || !errors.Is(err, ErrSwitchDown) {
+		t.Errorf("pause with the link down = %v, want ErrSwitchDown", err)
+	}
+}
+
+// Two calls turning out to be one conversation renames a leg's call under it.
+// The old stream reports into the absorbed call's transcript actor, which is
+// retired without ever finishing, so it has to be stopped and re-attached
+// under the call the leg now belongs to.
+func TestReattachingUnderANewCallStopsTheOldStream(t *testing.T) {
+	tap, sw, absorbed := tapFixture(t)
+	kept := uuid.New()
+
+	tap.Attach(absorbed, nil, nil, "chan-a", "en")
+	tap.Attach(kept, nil, nil, "chan-a", "en")
+
+	started, stopped, _, _ := sw.snapshot()
+	if len(started) != 2 {
+		t.Fatalf("started %v, want the leg re-tapped under the kept call", started)
+	}
+	if len(stopped) != 1 || stopped[0] != "chan-a" {
+		t.Fatalf("stopped %v, want the absorbed call's stream ended first", stopped)
+	}
+	// And the absorbed call retiring must not now take the live tap with it.
+	tap.DetachCall(absorbed)
+	if err := tap.Pause("chan-a"); err != nil {
+		t.Errorf("the re-attached tap answered %v after the absorbed call retired", err)
+	}
+}
+
+// The reason the key carries an epoch, half one: a continuation from an
+// attachment that has already been retired — a failed start racing a re-attach
+// on the same channel and the same call — finds nothing to retire. Keyed by
+// channel alone the two attachments are the same entry and the first one's
+// failure path takes the second one down with it.
+//
+// The other half, that such a continuation cannot evict its successor from the
+// channel index, is what TestReattachingUnderANewCallStopsTheOldStream drives:
+// there the replaced attachment is still live when its stream is stopped.
+func TestAStaleAttachmentCannotEvictItsSuccessor(t *testing.T) {
+	tap, _, callID := tapFixture(t)
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	stale, ok := tap.currentKey("chan-a")
+	if !ok {
+		t.Fatal("no tap after attach")
+	}
+	tap.Detach("chan-a")
+	tap.Attach(callID, nil, nil, "chan-a", "en")
+
+	if tap.forget(stale) {
+		t.Error("a replaced attachment was still considered live")
+	}
+	if err := tap.Pause("chan-a"); err != nil {
+		t.Errorf("the live tap answered %v after a stale key was forgotten", err)
 	}
 }

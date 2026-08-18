@@ -55,12 +55,41 @@ type Coordinator struct {
 type Tapper interface {
 	Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, language string)
 	Detach(channelID string)
-	Pause(channelID string)
-	Resume(channelID string)
+	// DetachCall retires every tap a call has, driven from the call's own
+	// termination rather than from a switch event, so transcription converges
+	// whether or not CHANNEL_UNBRIDGE or CHANNEL_HANGUP ever arrives for the
+	// tapped leg. It must be idempotent: it will usually run second.
+	DetachCall(callID uuid.UUID)
+	Pause(channelID string) error
+	Resume(channelID string) error
 }
+
+// ErrNoTap reports that a channel has no live tap, so the command was not
+// carried out. It lives here rather than in the implementation because it is
+// part of the Tapper contract: the caller has to be able to tell "nothing was
+// tapped here" — ordinary, since the caller's own leg never is — from a switch
+// that refused the command, and a nil return for both makes a tap that died
+// under us look exactly like one that was never there.
+var ErrNoTap = errors.New("telephony: no live tap on this channel")
 
 // AttachTaps points bridge and hold transitions at the transcription tap.
 func (c *Coordinator) AttachTaps(t Tapper) { c.taps = t }
+
+// reportTap classifies what the tap said about a command it did not carry out.
+//
+// Most holds are on a channel that was never tapped — the caller's own leg is
+// not — so ErrNoTap is the ordinary case and says nothing. Anything else is
+// the switch refusing a command against a stream we believe is live, which is
+// the case that used to be swallowed whole.
+func (c *Coordinator) reportTap(what, channelID string, err error) {
+	switch {
+	case err == nil, errors.Is(err, ErrNoTap):
+		return
+	default:
+		slog.Warn("transcription tap refused a command",
+			"command", what, "channelId", channelID, "error", err)
+	}
+}
 
 // NewCoordinator builds a Coordinator.
 // AttachCDR points call retirement and queue movements at the ledger.
@@ -98,9 +127,9 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	if c.taps != nil && ev.ChannelID != "" {
 		switch ev.Kind {
 		case KindChannelHold:
-			c.taps.Pause(ev.ChannelID)
+			c.reportTap("pause", ev.ChannelID, c.taps.Pause(ev.ChannelID))
 		case KindChannelUnhold:
-			c.taps.Resume(ev.ChannelID)
+			c.reportTap("resume", ev.ChannelID, c.taps.Resume(ev.ChannelID))
 		case KindChannelUnbridge, KindChannelHangup:
 			c.taps.Detach(ev.ChannelID)
 		}

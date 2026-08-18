@@ -48,3 +48,41 @@ func TestRetiringATranscriptWorksWithNoPredecessor(t *testing.T) {
 		t.Errorf("retired %v, want the finished call", transcripts.closed)
 	}
 }
+
+type detacher struct{ calls []uuid.UUID }
+
+func (d *detacher) DetachCall(id uuid.UUID) { d.calls = append(d.calls, id) }
+
+// Same two silent failures as the transcript hook, on the other resource.
+//
+// Drop the detach and mod_audio_stream keeps pumping a finished call's audio
+// at an ingest whose transcript actor has been closed, for the life of the
+// process. Drop the predecessor and whatever was already listening on call
+// retirement stops running.
+func TestDetachingTapsDoesNotDisplaceWhatAlreadyListens(t *testing.T) {
+	var priorSaw []uuid.UUID
+	prior := func(id uuid.UUID) { priorSaw = append(priorSaw, id) }
+	taps := &detacher{}
+
+	callID := uuid.New()
+	detachTapsWithCall(prior, taps)(callID)
+
+	if len(priorSaw) != 1 || priorSaw[0] != callID {
+		t.Errorf("the existing hook saw %v, want the retired call", priorSaw)
+	}
+	if len(taps.calls) != 1 || taps.calls[0] != callID {
+		t.Errorf("detached %v, want the retired call", taps.calls)
+	}
+}
+
+// Nothing has to be listening first — and nothing is, today.
+func TestDetachingTapsWorksWithNoPredecessor(t *testing.T) {
+	taps := &detacher{}
+	callID := uuid.New()
+
+	detachTapsWithCall(nil, taps)(callID)
+
+	if len(taps.calls) != 1 || taps.calls[0] != callID {
+		t.Errorf("detached %v, want the retired call", taps.calls)
+	}
+}

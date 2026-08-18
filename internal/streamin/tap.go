@@ -3,12 +3,15 @@
 package streamin
 
 import (
+	"errors"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 // SwitchTap is the slice of the switch adapter this package needs. Command
@@ -22,6 +25,31 @@ type SwitchTap interface {
 	IsUp() bool
 }
 
+// tapKey identifies one attachment rather than one channel: the call it
+// belongs to, the channel it runs on, and which attempt it is.
+//
+// A bare channel id is not an identity. It is the *place* a tap lives, and the
+// same place is occupied by different taps over a call's life — a leg whose
+// call id changes under it when two calls turn out to be one conversation, a
+// re-attach after a stream that never connected. Keyed by channel alone, a
+// late continuation from the first attachment retires the second, and the
+// stop command lands on a stream somebody else owns.
+//
+// callID + channel is the same composite the ingest already keys its sessions
+// and expectations on (Server.sessions, Server.pending); epoch distinguishes
+// two attachments of the same pair, which is the case those two never see
+// because the switch dials back only once per attach.
+type tapKey struct {
+	callID  uuid.UUID
+	channel string
+	epoch   uint64
+}
+
+// ErrSwitchDown reports that the tap could not be commanded because the ESL
+// link is not up. Distinct from telephony.ErrNoTap: there is a tap, and we
+// could not reach it.
+var ErrSwitchDown = errors.New("streamin: the switch link is down")
+
 // Tap starts and stops the media tap. It implements telephony.Tapper, which is
 // how the coordinator drives transcription without knowing anything about it.
 type Tap struct {
@@ -32,8 +60,14 @@ type Tap struct {
 	ttl       time.Duration
 	log       Logger
 
-	mu     sync.Mutex
-	active map[string]bool
+	mu    sync.Mutex
+	epoch uint64
+	// active holds every live attachment, so a call can retire all of its own
+	// without knowing which channels they were on.
+	active map[tapKey]struct{}
+	// current is the channel's live attachment, which is what a switch event
+	// naming only a channel resolves through.
+	current map[string]tapKey
 }
 
 // NewTap builds the coordinator's handle on the ingest.
@@ -48,22 +82,45 @@ func NewTap(srv *Server, sw SwitchTap, publicURL string, rateHz int, ttl time.Du
 	}
 	return &Tap{
 		srv: srv, sw: sw, publicURL: publicURL, rateHz: rateHz,
-		ttl: ttl, log: log, active: map[string]bool{},
+		ttl: ttl, log: log,
+		active:  map[tapKey]struct{}{},
+		current: map[string]tapKey{},
 	}
 }
 
 // Attach taps one agent leg.
+//
+// A channel already tapped for this call is left alone: one bug per channel,
+// which the module enforces too. A channel tapped for a *different* call has
+// had its conversation renamed under it — two calls turned out to be one — and
+// the old stream is reporting into a transcript that is no longer this
+// conversation's, so it is stopped before the new one starts.
 func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, language string) {
 	if t == nil || t.sw == nil || !t.sw.IsUp() || t.publicURL == "" {
 		return
 	}
+	// The channel's attachment is replaced under one lock acquisition, so two
+	// attaches racing for the same channel have exactly one winner in the
+	// index. The loser's stream is still stopped below — it is just no longer
+	// the thing the index points at, which is why forget refuses to clear an
+	// index entry that has moved on.
 	t.mu.Lock()
-	if t.active[channelID] {
+	prev, replaced := t.current[channelID]
+	if replaced && prev.callID == callID {
 		t.mu.Unlock()
-		return // one bug per channel; the module enforces it too
+		return
 	}
-	t.active[channelID] = true
+	t.epoch++
+	key := tapKey{callID: callID, channel: channelID, epoch: t.epoch}
+	t.active[key] = struct{}{}
+	t.current[channelID] = key
 	t.mu.Unlock()
+
+	if replaced {
+		t.log.Info("transcription tap follows the call its leg was folded into",
+			"channelId", channelID, "from", prev.callID, "to", callID)
+		_ = t.detach(prev)
+	}
 
 	claim := Claim{
 		CallID:   callID,
@@ -80,14 +137,14 @@ func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, l
 
 	dialURL, err := withToken(t.publicURL, t.srv.Token(claim))
 	if err != nil {
-		t.forget(channelID)
+		t.forget(key)
 		t.log.Error("transcription tap has an unusable stream url",
 			"url", t.publicURL, "error", err)
 		return
 	}
 
 	if err := t.sw.StartAudioStream(channelID, dialURL, t.rateHz, ""); err != nil {
-		t.forget(channelID)
+		t.forget(key)
 		t.log.Warn("transcription tap could not attach",
 			"callId", callID, "channelId", channelID, "error", err)
 		return
@@ -101,52 +158,118 @@ func (t *Tap) Attach(callID uuid.UUID, agentID, partyID *uuid.UUID, channelID, l
 		"callId", callID, "channelId", channelID, "rateHz", t.rateHz)
 }
 
-// Detach stops a tap. Harmless when there is none: a channel that closes takes
-// its own bug with it, and this is the case where we end the stream first.
+// Detach stops the tap on a channel the switch has just told us about.
+// Harmless when there is none: a hangup arrives for every leg of every call
+// and most of them were never tapped.
 func (t *Tap) Detach(channelID string) {
-	if t == nil || !t.was(channelID) {
+	if t == nil {
 		return
 	}
-	t.forget(channelID)
+	key, ok := t.currentKey(channelID)
+	if !ok {
+		return
+	}
+	_ = t.detach(key)
+}
+
+// DetachCall stops every tap this call has, whatever the switch did or did not
+// say about the individual legs.
+//
+// This is the convergence guarantee. Detach is driven by CHANNEL_UNBRIDGE and
+// CHANNEL_HANGUP, and neither is owed to us: a leg transferred away, an ESL
+// link that reconnected across the hangup, an event this application filtered
+// before the tap ever saw it. Any of those leaves the module pumping audio at
+// an ingest whose transcript actor has been closed, for the life of the
+// process. So the call's own termination path drives this unconditionally, and
+// it is idempotent because it will usually run second.
+func (t *Tap) DetachCall(callID uuid.UUID) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	keys := make([]tapKey, 0, 2)
+	for key := range t.active {
+		if key.callID == callID {
+			keys = append(keys, key)
+		}
+	}
+	t.mu.Unlock()
+	for _, key := range keys {
+		_ = t.detach(key)
+	}
+}
+
+// Pause and Resume bracket hold, which is a private side-call and music,
+// neither of which is this conversation.
+//
+// They report rather than shrug. A hold on a channel with no live tap is
+// ordinary — the caller's own leg is never tapped — but it is the *caller's*
+// business to decide that, and silently doing nothing makes a tap that died
+// under us indistinguishable from one that was never there.
+func (t *Tap) Pause(channelID string) error {
+	return t.command(channelID, SwitchTap.PauseAudioStream)
+}
+
+func (t *Tap) Resume(channelID string) error {
+	return t.command(channelID, SwitchTap.ResumeAudioStream)
+}
+
+// command is written over a method expression rather than a bound method so
+// that a nil Tap or a nil switch is a returned error and not a panic in the
+// argument list.
+func (t *Tap) command(channelID string, send func(SwitchTap, string) error) error {
+	if t == nil {
+		return telephony.ErrNoTap
+	}
+	key, ok := t.currentKey(channelID)
+	if !ok {
+		return telephony.ErrNoTap
+	}
 	if t.sw == nil || !t.sw.IsUp() {
-		return
+		return ErrSwitchDown
 	}
-	if err := t.sw.StopAudioStream(channelID); err != nil {
+	return send(t.sw, key.channel)
+}
+
+// detach stops one attachment, and only if it is still the live one.
+func (t *Tap) detach(key tapKey) error {
+	if !t.forget(key) {
+		return telephony.ErrNoTap
+	}
+	if t.sw == nil || !t.sw.IsUp() {
+		return ErrSwitchDown
+	}
+	if err := t.sw.StopAudioStream(key.channel); err != nil {
 		// Expected whenever the channel ended first, which is most of the
 		// time, so this is not a warning.
 		t.log.Debug("transcription tap was already gone",
-			"channelId", channelID, "error", err)
+			"channelId", key.channel, "error", err)
 	}
+	return nil
 }
 
-func (t *Tap) Pause(channelID string) {
-	if t == nil || !t.was(channelID) || t.sw == nil || !t.sw.IsUp() {
-		return
-	}
-	if err := t.sw.PauseAudioStream(channelID); err != nil {
-		t.log.Debug("transcription tap could not pause", "channelId", channelID, "error", err)
-	}
-}
-
-func (t *Tap) Resume(channelID string) {
-	if t == nil || !t.was(channelID) || t.sw == nil || !t.sw.IsUp() {
-		return
-	}
-	if err := t.sw.ResumeAudioStream(channelID); err != nil {
-		t.log.Debug("transcription tap could not resume", "channelId", channelID, "error", err)
-	}
-}
-
-func (t *Tap) was(channelID string) bool {
+func (t *Tap) currentKey(channelID string) (tapKey, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.active[channelID]
+	key, ok := t.current[channelID]
+	return key, ok
 }
 
-func (t *Tap) forget(channelID string) {
+// forget drops one attachment and reports whether it was still live. The
+// channel index is cleared only when it still points at this attachment: a
+// continuation from an attachment that has already been replaced must not
+// evict its successor.
+func (t *Tap) forget(key tapKey) bool {
 	t.mu.Lock()
-	delete(t.active, channelID)
-	t.mu.Unlock()
+	defer t.mu.Unlock()
+	if _, live := t.active[key]; !live {
+		return false
+	}
+	delete(t.active, key)
+	if cur, ok := t.current[key.channel]; ok && cur == key {
+		delete(t.current, key.channel)
+	}
+	return true
 }
 
 // withToken appends the credential to the stream URL, preserving whatever the

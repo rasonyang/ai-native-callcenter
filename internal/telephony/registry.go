@@ -44,6 +44,18 @@ type Registry struct {
 	// block.
 	OnCallFinished func(Snapshot)
 
+	// OnCallRetired fires exactly once per call actor, from the actor's own
+	// goroutine as it exits, whatever ended it.
+	//
+	// It is not OnCallFinished. That one fires when the last party releases,
+	// which is the *expected* ending and not the only one: a call absorbed
+	// into another is retired mid-life and never finishes, a shutdown stops
+	// every actor where it stands, and a hangup this application never
+	// received leaves the call to end some other way. Anything holding a
+	// switch-side resource on a call's behalf has to be released on the path
+	// that always runs, not the one that usually does.
+	OnCallRetired func(callID uuid.UUID)
+
 	mu        sync.RWMutex
 	byCall    map[uuid.UUID]*actor
 	byChannel map[string]*actor
@@ -240,17 +252,25 @@ func (r *Registry) Shutdown() {
 	r.wg.Wait()
 }
 
-// remove unregisters a finished call.
+// remove unregisters a finished call. This is the one exit every call actor
+// takes, so it is where per-call resources outside this package are released.
 func (r *Registry) remove(a *actor) {
 	obs.CallEnded(obs.CallKindSwitch)
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	delete(r.byCall, a.call.CallID)
 	for channelID, owner := range r.byChannel {
 		if owner == a {
 			delete(r.byChannel, channelID)
 		}
+	}
+	retired := r.OnCallRetired
+	r.mu.Unlock()
+
+	// Outside the lock: the handler reaches the switch, and holding the
+	// registry across an ESL round trip would stall every other call.
+	if retired != nil {
+		retired(a.call.CallID)
 	}
 }
 

@@ -275,3 +275,95 @@ func TestOperationsOnUnknownCalls(t *testing.T) {
 		t.Errorf("BindChannel() error = %v, want ErrCallNotFound", err)
 	}
 }
+
+// OnCallRetired is the hook that always runs, which is the whole reason it
+// exists next to OnCallFinished. A call absorbed into another is retired
+// mid-life and never finishes, so anything released on the finish path — a
+// media tap on a leg, in this design — is simply never released for it.
+func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		end        func(reg *Registry, callID uuid.UUID)
+		wantFinish bool
+	}{
+		{
+			name: "every leg releases",
+			end: func(reg *Registry, callID uuid.UUID) {
+				reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "chan-a",
+					HangupCause: "NORMAL_CLEARING", OccurredAt: testTime.Add(time.Minute)})
+			},
+			wantFinish: true,
+		},
+		{
+			name: "absorbed into another call",
+			end: func(reg *Registry, callID uuid.UUID) {
+				reg.Retire(callID)
+			},
+			wantFinish: false,
+		},
+		{
+			name: "the process shuts down with the call still up",
+			end: func(reg *Registry, _ uuid.UUID) {
+				reg.Shutdown()
+			},
+			wantFinish: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg, _ := newTestRegistry(t)
+			var mu sync.Mutex
+			var retired []uuid.UUID
+			var finished int
+			reg.OnCallRetired = func(id uuid.UUID) {
+				mu.Lock()
+				retired = append(retired, id)
+				mu.Unlock()
+			}
+			reg.OnCallFinished = func(Snapshot) {
+				mu.Lock()
+				finished++
+				mu.Unlock()
+			}
+
+			callID := uuid.New()
+			call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			call.AddParty("chan-a", "+8613800138000", testTime)
+			if err := reg.BindChannel("chan-a", callID); err != nil {
+				t.Fatal(err)
+			}
+			reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "chan-a", OccurredAt: testTime})
+
+			tc.end(reg, callID)
+
+			deadline := time.After(2 * time.Second)
+			for {
+				mu.Lock()
+				got := len(retired)
+				mu.Unlock()
+				if got == 1 {
+					break
+				}
+				select {
+				case <-deadline:
+					t.Fatalf("the call was retired %d times, want exactly once", got)
+				case <-time.After(2 * time.Millisecond):
+				}
+			}
+
+			mu.Lock()
+			defer mu.Unlock()
+			if retired[0] != callID {
+				t.Errorf("retired %s, want %s", retired[0], callID)
+			}
+			if tc.wantFinish && finished != 1 {
+				t.Errorf("finished %d times, want 1", finished)
+			}
+			if !tc.wantFinish && finished != 0 {
+				t.Errorf("finished %d times on an ending that is not a finish", finished)
+			}
+		})
+	}
+}

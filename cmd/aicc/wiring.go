@@ -33,3 +33,32 @@ func retireTranscriptWithCall(prior func(telephony.Snapshot), transcripts transc
 		transcripts.Close(snap.CallID)
 	}
 }
+
+// callTapper is the part of the transcription tap this file needs.
+type callTapper interface {
+	DetachCall(callID uuid.UUID)
+}
+
+// detachTapsWithCall composes the call-retired hook so that a call's media
+// taps stop when the call's actor does, without displacing whatever already
+// listens.
+//
+// It is here, and named, for the same reason retireTranscriptWithCall is: it
+// is a connection that nothing else would notice was missing. The tap is
+// otherwise driven entirely by CHANNEL_UNBRIDGE and CHANNEL_HANGUP, and
+// neither event is owed to us — a leg transferred away, an ESL link that
+// reconnected across the hangup, a call absorbed into another and retired
+// mid-life. Every one of those leaves mod_audio_stream pumping a call's audio
+// at an ingest whose transcript actor has been closed, for the life of the
+// process, with nothing anywhere reporting a fault.
+//
+// The hook runs on the call actor's own goroutine as it exits, so the ESL
+// round trip delays only that actor's teardown.
+func detachTapsWithCall(prior func(uuid.UUID), taps callTapper) func(uuid.UUID) {
+	return func(callID uuid.UUID) {
+		if prior != nil {
+			prior(callID)
+		}
+		taps.DetachCall(callID)
+	}
+}

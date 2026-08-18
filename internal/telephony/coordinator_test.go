@@ -190,38 +190,74 @@ func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)     {}
 
 // recordingTapper captures what the coordinator asked of the media tap.
 type recordingTapper struct {
-	mu        sync.Mutex
-	attached  []string
-	paused    []string
-	resumed   []string
-	detached  []string
-	agents    map[string]uuid.UUID
-	languages map[string]string
+	mu           sync.Mutex
+	attached     []string
+	paused       []string
+	resumed      []string
+	detached     []string
+	detachedCall []uuid.UUID
+	agents       map[string]uuid.UUID
+	languages    map[string]string
+	// tapped is the set of channels this fake believes it has a tap on, so it
+	// can answer ErrNoTap the way the real one does.
+	tapped map[string]bool
 }
 
 func newRecordingTapper() *recordingTapper {
-	return &recordingTapper{agents: map[string]uuid.UUID{}, languages: map[string]string{}}
+	return &recordingTapper{agents: map[string]uuid.UUID{}, languages: map[string]string{},
+		tapped: map[string]bool{}}
 }
 
 func (r *recordingTapper) Attach(_ uuid.UUID, agentID, _ *uuid.UUID, channelID, language string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.attached = append(r.attached, channelID)
+	r.tapped[channelID] = true
 	r.languages[channelID] = language
 	if agentID != nil {
 		r.agents[channelID] = *agentID
 	}
 }
-func (r *recordingTapper) Pause(c string) { r.mu.Lock(); r.paused = append(r.paused, c); r.mu.Unlock() }
-func (r *recordingTapper) Resume(c string) {
+func (r *recordingTapper) Pause(c string) error {
 	r.mu.Lock()
-	r.resumed = append(r.resumed, c)
-	r.mu.Unlock()
+	defer r.mu.Unlock()
+	if !r.tapped[c] {
+		return ErrNoTap
+	}
+	r.paused = append(r.paused, c)
+	return nil
 }
+
+func (r *recordingTapper) Resume(c string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.tapped[c] {
+		return ErrNoTap
+	}
+	r.resumed = append(r.resumed, c)
+	return nil
+}
+
 func (r *recordingTapper) Detach(c string) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.tapped[c] {
+		return
+	}
+	delete(r.tapped, c)
 	r.detached = append(r.detached, c)
-	r.mu.Unlock()
+}
+
+func (r *recordingTapper) DetachCall(callID uuid.UUID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.detachedCall = append(r.detachedCall, callID)
+}
+
+func (r *recordingTapper) callsDetached() []uuid.UUID {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]uuid.UUID(nil), r.detachedCall...)
 }
 
 func (r *recordingTapper) snapshot() ([]string, []string, []string, []string) {
@@ -283,22 +319,72 @@ func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
 	}
 }
 
+// bridgeAnAgentLeg drives the coordinator through a queue delivery until the
+// agent's own leg is tapped, and returns that channel.
+func bridgeAnAgentLeg(t *testing.T, c *Coordinator, taps *recordingTapper) string {
+	t.Helper()
+	ctx := t.Context()
+	minted := uuid.New().String()
+	callerChan, agentChan := "caller-chan", "agent-chan"
+	vars := map[string]string{"variable_aicc_call_id": minted}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
+
+	waitFor(t, func() bool {
+		attached, _, _, _ := taps.snapshot()
+		return len(attached) > 0
+	})
+	return agentChan
+}
+
+// Hold on a leg nobody is transcribing — the caller's own, every time — is
+// ordinary, and must not turn into a command against a stream that is not
+// there. This is the half of "no silent action on a dead tap" that stays
+// silent: the tap says ErrNoTap and the coordinator, which knows that the
+// caller's leg is never tapped, says nothing further.
+func TestHoldOnAnUntappedLegCommandsNothing(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	taps := newRecordingTapper()
+	c.AttachTaps(taps)
+
+	ctx := t.Context()
+	_ = bridgeAnAgentLeg(t, c, taps)
+	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	c.Handle(ctx, raw("CHANNEL_HOLD", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_UNHOLD", "caller-chan", "inbound", vars))
+
+	_, paused, resumed, _ := taps.snapshot()
+	if len(paused) != 0 || len(resumed) != 0 {
+		t.Errorf("paused = %v, resumed = %v, want neither on a leg with no tap", paused, resumed)
+	}
+}
+
 // Hold is a private side-conversation and music, neither of which belongs in a
 // transcript of this call. It is also the case where a stereo stream delivers
 // nothing at all rather than silence, so pausing is what makes the gap
 // deliberate instead of mysterious.
 func TestHoldPausesTheTapAndUnholdResumesIt(t *testing.T) {
 	registry := NewRegistry(nullPublisher{})
-	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
 	c.AttachTaps(taps)
 
 	ctx := t.Context()
+	// The tap has to exist before hold means anything. This used to run
+	// against a coordinator that had never attached one, and passed, because
+	// the tap swallowed a pause on a channel it did not hold — the swallow was
+	// the whole of what the test proved.
+	agentChan := bridgeAnAgentLeg(t, c, taps)
 	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
-	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound", vars))
-	c.Handle(ctx, raw("CHANNEL_HOLD", "agent-chan", "outbound", vars))
-	c.Handle(ctx, raw("CHANNEL_UNHOLD", "agent-chan", "outbound", vars))
-	c.Handle(ctx, raw("CHANNEL_UNBRIDGE", "agent-chan", "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_HOLD", agentChan, "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_UNHOLD", agentChan, "outbound", vars))
+	c.Handle(ctx, raw("CHANNEL_UNBRIDGE", agentChan, "outbound", vars))
 
 	_, paused, resumed, detached := taps.snapshot()
 	if len(paused) != 1 || paused[0] != "agent-chan" {

@@ -217,9 +217,13 @@ func run() error {
 
 		// The rate is the recogniser's, and the switch resamples to it. That
 		// is why no resampler exists in this process.
-		coordinator.AttachTaps(streamin.NewTap(ingest, adapter,
+		tap := streamin.NewTap(ingest, adapter,
 			streamin.NormalizePublicURL(cfg.StreamPublicURL),
-			profile.SampleRate, 60*time.Second, slog.Default()))
+			profile.SampleRate, 60*time.Second, slog.Default())
+		coordinator.AttachTaps(tap)
+		// Switch events start and stop the tap in the ordinary case; the
+		// call's own retirement is what makes it converge in every other one.
+		registry.OnCallRetired = detachTapsWithCall(registry.OnCallRetired, tap)
 		slog.Info("live transcription enabled",
 			"provider", profile.Name, "model", profile.Model, "rateHz", profile.SampleRate)
 	}
