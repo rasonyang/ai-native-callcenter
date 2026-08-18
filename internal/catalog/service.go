@@ -251,19 +251,27 @@ func (s *Service) ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID) {
 // Zero queues is a legitimate answer, not a fault: plenty of agents staff
 // nothing. The invariant is desired against actual, not desired above zero.
 func (s *Service) converge(ctx context.Context, name string,
-	desired map[string]QueueAgent, actual map[string]struct{}) {
+	desired map[string]QueueAgent, actual map[string]struct{}) reconcileResult {
 
-	var added, removed, failed int
+	var added, removed, failed, deferred int
 	for queue, tier := range desired {
 		if _, ok := actual[queue]; ok {
 			continue
 		}
-		if err := s.switchCtl.AddCallcenterTier(queue, name, tier.Level, tier.Position); err != nil {
+		err := s.switchCtl.AddCallcenterTier(queue, name, tier.Level, tier.Position)
+		switch {
+		case err == nil:
+			added++
+		case isDeferred(err):
+			// The switch does not know this agent yet, which is the ordinary
+			// state of anyone staffed while signed out. Their sign-in applies
+			// it; counting this as a failure would report drift on every
+			// reconnect that nothing could have fixed.
+			deferred++
+		default:
 			slog.WarnContext(ctx, "tier not added", "queue", queue, "agent", name, "error", err)
 			failed++
-			continue
 		}
-		added++
 	}
 	for queue := range actual {
 		if _, ok := desired[queue]; ok {
@@ -283,13 +291,34 @@ func (s *Service) converge(ctx context.Context, name string,
 	// the call that went nowhere.
 	attrs := []any{"agent", name, "desired", len(desired), "actual", len(actual),
 		"added", added, "removed", removed}
+	if deferred > 0 {
+		attrs = append(attrs, "deferredUntilSignIn", deferred)
+	}
 	if added+removed+failed > 0 {
 		// The switch had drifted from this system. That is the condition this
 		// exists to correct, so it is said at a level someone will see.
 		slog.WarnContext(ctx, "agent staffing reconciled", append(attrs, "failed", failed)...)
-		return
+		return reconcileResult{added, removed, failed, deferred}
 	}
 	slog.InfoContext(ctx, "agent staffing already matched", attrs...)
+	return reconcileResult{added, removed, failed, deferred}
+}
+
+// reconcileResult is what one agent's convergence did.
+//
+// Returned as well as logged because the difference between "deferred" and
+// "failed" is the whole point of telling them apart, and an outcome that exists
+// only in a log line is one no test can hold to account.
+type reconcileResult struct {
+	added, removed, failed, deferred int
+}
+
+// isDeferred reports an error the switch will stop returning once the agent
+// signs in. Recognised by behaviour so this package need not import the one
+// that speaks to the switch.
+func isDeferred(err error) bool {
+	var d interface{ AgentNotOnSwitch() bool }
+	return errors.As(err, &d) && d.AgentNotOnSwitch()
 }
 
 func setOf(items []string) map[string]struct{} {

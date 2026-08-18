@@ -268,3 +268,53 @@ func TestReconnectStillAddsMissingTiers(t *testing.T) {
 		t.Fatalf("added %+v, want support-en at level 2 position 3", sw.added)
 	}
 }
+
+// notOnSwitchError mimics what the adapter returns for an agent the switch has
+// not met yet.
+type notOnSwitchError struct{}
+
+func (notOnSwitchError) Error() string          { return "the switch does not know this agent yet" }
+func (notOnSwitchError) AgentNotOnSwitch() bool { return true }
+
+type deferringSwitch struct{ *fakeSwitch }
+
+func (d deferringSwitch) AddCallcenterTier(string, string, int, int) error {
+	return notOnSwitchError{}
+}
+
+// mod_callcenter only knows agents who are signed in, so a tier for anyone
+// staffed while signed out cannot be held yet. That is the ordinary state, not
+// drift: their sign-in applies it. Counting it as a failure would have every
+// reconnect report a problem nothing could have fixed, which is how a warning
+// becomes background noise and then becomes unread.
+func TestATierForAnAgentTheSwitchHasNotMetIsDeferredNotFailed(t *testing.T) {
+	queueID, agentID := uuid.New(), uuid.New()
+	store := &fakeStore{
+		queues:   []Queue{{ID: queueID, Name: "support-en"}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 1}}},
+	}
+	base := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
+	svc := NewService(store, deferringSwitch{base}, fakeNames{})
+
+	got := svc.converge(context.Background(), "agent-wei",
+		map[string]QueueAgent{"support-en": {Level: 1, Position: 1}}, map[string]struct{}{})
+
+	if got.deferred != 1 {
+		t.Errorf("deferred = %d, want 1", got.deferred)
+	}
+	if got.failed != 0 {
+		t.Errorf("failed = %d, want 0 — a tier the switch cannot hold yet is not "+
+			"drift, and counting it as such reports a problem on every reconnect "+
+			"that nothing could have fixed", got.failed)
+	}
+	if got.added != 0 || got.removed != 0 {
+		t.Errorf("changed something: %+v", got)
+	}
+
+	// And through the public path, nothing reaches the switch.
+	svc.ReconcileAgentTiers(context.Background(), agentID)
+	if len(base.added) != 0 || len(base.removed) != 0 {
+		t.Errorf("added %+v removed %+v; neither should have happened", base.added, base.removed)
+	}
+	_ = queueID
+}

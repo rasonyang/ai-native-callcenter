@@ -105,9 +105,40 @@ func (a *Adapter) SetCallcenterAgentWrapUp(name string, sec int) error {
 	return a.exec("callcenter_config agent set wrap_up_time %s %d", name, sec)
 }
 
+// AgentNotOnSwitchError reports a tier the switch cannot hold yet because it
+// does not know the agent.
+//
+// Not a failure: mod_callcenter only knows agents who are signed in, so this is
+// the ordinary answer for anyone staffed while signed out. Their staffing is
+// applied when they sign in and the switch learns who they are. Distinguished
+// from a real failure because otherwise every reconnect reports drift it did
+// not find and could not have fixed.
+//
+// Carried as behaviour rather than a sentinel value so a caller in another
+// package can recognise it without importing this one.
+type AgentNotOnSwitchError struct{ Agent string }
+
+func (e *AgentNotOnSwitchError) Error() string {
+	return "the switch does not know agent " + e.Agent + " yet"
+}
+
+// AgentNotOnSwitch marks this as deferred rather than failed.
+func (e *AgentNotOnSwitchError) AgentNotOnSwitch() bool { return true }
+
 // AddCallcenterTier staffs an agent on a queue.
 func (a *Adapter) AddCallcenterTier(queue, agent string, level, position int) error {
-	return a.exec("callcenter_config tier add %s %s %d %d", a.QueueName(queue), agent, level, position)
+	err := a.exec("callcenter_config tier add %s %s %d %d", a.QueueName(queue), agent, level, position)
+	switch {
+	case err == nil:
+		return nil
+	case strings.Contains(err.Error(), "Agent not found"):
+		return &AgentNotOnSwitchError{Agent: agent}
+	case strings.Contains(err.Error(), "Tier already exist"):
+		// Reconciliation is idempotent by design and runs on every
+		// registration, so the switch agreeing already is success.
+		return nil
+	}
+	return err
 }
 
 // DeleteCallcenterTier unstaffs an agent.
