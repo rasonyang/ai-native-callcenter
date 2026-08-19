@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { CALLS_KEY, PRESENCE_KEY, ROSTER_KEY } from './agent'
+import { CALLS_KEY, PRESENCE_KEY, ROSTER_KEY, WAITING_KEY } from './agent'
 import { CALLBACKS_KEY, CDRS_KEY, REPORTS_KEY } from './ledger'
 import { connectEvents, type AiccEvent, type EventType } from './events'
 
@@ -21,6 +21,12 @@ function applyToCache(queryClient: ReturnType<typeof useQueryClient>, event: Aic
     // A leg moved: the cockpit and the supervisor's live view both read the
     // call snapshot, which is authoritative on the switch.
     void queryClient.invalidateQueries({ queryKey: CALLS_KEY })
+  }
+  if (event.type.startsWith('QUEUE_')) {
+    // Somebody joined a queue, was answered or gave up: the agent's waiting
+    // list moved. The event carries the queue's new depth, but the list is the
+    // authoritative order and it is one small request.
+    void queryClient.invalidateQueries({ queryKey: WAITING_KEY })
   }
   if (event.type.startsWith('CALLBACK_')) {
     void queryClient.invalidateQueries({ queryKey: CALLBACKS_KEY })

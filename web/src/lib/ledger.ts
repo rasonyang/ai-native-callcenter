@@ -24,6 +24,13 @@ export type CallbackStatus = components['schemas']['CallbackStatus']
 
 export type Callback = components['schemas']['Callback']
 
+/** The after-call work filed against a call. */
+export type WrapUp = components['schemas']['WrapUp']
+
+export type Disposition = components['schemas']['Disposition']
+
+export type DispositionCategory = components['schemas']['DispositionCategory']
+
 export type Overview = components['schemas']['Overview']
 
 export type QueueReport = components['schemas']['QueueReport']
@@ -52,6 +59,13 @@ function query(params: Record<string, string | number | undefined>): string {
 export const ledgerApi = {
   cdrs: (filter: CDRFilter) =>
     request<{ items: CDR[]; total: number }>(`/cdrs${query({ ...filter })}`),
+
+  /** The caller's own finished calls. The agent is the session, not a filter. */
+  myCDRs: (filter: CDRFilter) =>
+    request<{ items: CDR[]; total: number }>(`/cdrs/mine${query({ ...filter })}`),
+
+  dispositions: () =>
+    request<{ categories: DispositionCategory[] }>('/dispositions'),
 
   cdr: (callId: string) =>
     request<{ cdr: CDR; transcript: TranscriptLine[]; recordings: RecordingRow[] }>(
@@ -97,6 +111,28 @@ export function useCDRs(filter: CDRFilter) {
     queryKey: [...CDRS_KEY, filter],
     queryFn: () => ledgerApi.cdrs(filter),
     placeholderData: (previous) => previous,
+  })
+}
+
+/** The signed-in agent's own calls. */
+export function useMyCDRs(filter: CDRFilter) {
+  return useQuery({
+    queryKey: [...CDRS_KEY, 'mine', filter],
+    queryFn: () => ledgerApi.myCDRs(filter),
+    placeholderData: (previous) => previous,
+  })
+}
+
+/**
+ * The wrap-up vocabulary. It is configuration, not call state, so it is held
+ * for the session rather than refetched behind every call.
+ */
+export function useDispositions(enabled = true) {
+  return useQuery({
+    queryKey: ['dispositions'],
+    enabled,
+    staleTime: 5 * 60_000,
+    queryFn: ledgerApi.dispositions,
   })
 }
 

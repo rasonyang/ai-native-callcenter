@@ -1,5 +1,6 @@
 import { Dialog } from 'radix-ui'
 import { useTranslation } from 'react-i18next'
+import { cloneElement, isValidElement, useId } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -65,7 +66,14 @@ export function RecordDialog({
   )
 }
 
-/** A labelled field, so every form lines up the same way. */
+/**
+ * A labelled field, so every form lines up the same way.
+ *
+ * The label is bound to the control it names: it was previously rendered
+ * beside one, which reads the same on screen and leaves a screen reader — and
+ * a click on the label — with nothing to act on. The control keeps its own id
+ * when it has one.
+ */
 export function Field({
   label,
   hint,
@@ -75,10 +83,14 @@ export function Field({
   hint?: string
   children: ReactNode
 }) {
+  const generatedID = useId()
+  const child = isValidElement<{ id?: string }>(children) ? children : undefined
+  const controlID = child?.props.id ?? generatedID
+
   return (
     <div className="space-y-1">
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={child ? controlID : undefined}>{label}</Label>
+      {child ? cloneElement(child, { id: controlID }) : children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
   )

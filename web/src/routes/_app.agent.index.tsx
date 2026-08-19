@@ -11,6 +11,7 @@ import { Popover } from 'radix-ui'
 
 import { Keypad } from '@/components/keypad'
 import { LiveTranscriptBoundary } from '@/components/live-transcript'
+import { Select } from '@/components/record-dialog'
 import { StatusPill } from '@/components/status-pill'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,10 +19,11 @@ import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
 import {
   myParty, otherParty, useCallActions, useElapsedSec, useMyCalls, usePresence,
-  usePresenceActions,
+  usePresenceActions, useWaitingCalls,
 } from '@/lib/agent'
-import { callApi, type CallSnapshot, type PartySnapshot } from '@/lib/api'
-import { useCallbacks } from '@/lib/ledger'
+import { callApi, type CallSnapshot, type PartySnapshot, type WaitingCall } from '@/lib/api'
+import { useContactFor } from '@/lib/contacts'
+import { useCallbacks, useDispositions } from '@/lib/ledger'
 import { useStreamStatus } from '@/lib/use-event-stream'
 import { cn, formatDuration } from '@/lib/utils'
 
@@ -49,6 +51,7 @@ function AgentCockpit() {
     <div className="flex h-full min-h-0 gap-4">
       <div className="flex w-[320px] shrink-0 flex-col gap-4">
         {call ? <CallPanel call={call} /> : signedIn ? <DialCard /> : null}
+        <QueueCard signedIn={signedIn} />
         <CallbacksCard />
       </div>
 
@@ -371,6 +374,63 @@ function KeypadButton({ onDigit }: { onDigit: (digit: string) => void }) {
   )
 }
 
+/**
+ * The line the agent is working: who is waiting in their queues, longest wait
+ * first, which is the order the switch will serve them in.
+ *
+ * The wait turns red past the queue's own SLA threshold rather than past a
+ * number invented here — a queue that promises twenty seconds and one that
+ * promises two minutes are not breached at the same moment.
+ */
+function QueueCard({ signedIn }: { signedIn: boolean }) {
+  const { t } = useTranslation()
+  const { data, isPending } = useWaitingCalls(signedIn)
+  const items = data?.items ?? []
+
+  return (
+    <Card
+      title={t('agent.myQueue')}
+      aside={<span className="tabular">{t('agent.waitingCount', { count: items.length })}</span>}
+      className="min-h-0 flex-1"
+      bodyClassName="min-h-0 flex-1 overflow-y-auto"
+    >
+      {!signedIn ? (
+        <Empty text={t('agent.signInPrompt')} />
+      ) : isPending ? (
+        <Empty text={t('common.loading')} />
+      ) : items.length === 0 ? (
+        <Empty text={t('agent.queueEmpty')} />
+      ) : (
+        <ul aria-label={t('agent.myQueue')} className="-mx-4 divide-y">
+          {items.map((waiting) => (
+            <WaitingRow key={waiting.callId} waiting={waiting} />
+          ))}
+        </ul>
+      )}
+    </Card>
+  )
+}
+
+function WaitingRow({ waiting }: { waiting: WaitingCall }) {
+  const waitedSec = useElapsedSec(waiting.joinedAt)
+  const isBreached = waiting.slaThresholdSec > 0 && waitedSec > waiting.slaThresholdSec
+
+  return (
+    <li className="flex h-9 items-center gap-2 px-4">
+      <span className="tabular min-w-0 flex-1 truncate text-sm">{waiting.fromNumber}</span>
+      <span className="truncate text-xs text-muted-foreground">
+        {waiting.queueDisplayName || waiting.queueName}
+      </span>
+      <span
+        className="tabular w-12 shrink-0 text-right text-sm"
+        style={isBreached ? { color: 'var(--state-breach)' } : undefined}
+      >
+        {formatDuration(waitedSec, { padMinutes: true })}
+      </span>
+    </li>
+  )
+}
+
 /** The promises waiting to be kept: the agent's real inbound work list. */
 function CallbacksCard() {
   const { t } = useTranslation()
@@ -413,9 +473,19 @@ function CallbacksCard() {
 
 // --- Centre column ---------------------------------------------------------
 
-/** What the platform knows about the caller: the number, and the flow's data. */
+/**
+ * Who is on the phone: the contact behind the number where one is known, the
+ * number itself where it is not, plus whatever the flow collected.
+ *
+ * The lookup is by exact number. A near match would put somebody else's name
+ * on the card, and an agent greeting a customer by the wrong name is worse
+ * than an agent greeting an unknown number.
+ */
 function CallerCard({ call }: { call?: CallSnapshot }) {
   const { t } = useTranslation()
+  const other = call ? otherParty(call, call.parties.find((p) => p.agentId)?.agentId) : undefined
+  const { contact } = useContactFor(other?.number)
+
   if (!call) {
     return (
       <Card title={t('agent.contact')}>
@@ -424,22 +494,29 @@ function CallerCard({ call }: { call?: CallSnapshot }) {
     )
   }
 
-  const other = otherParty(call, call.parties.find((p) => p.agentId)?.agentId)
   const userData = Object.entries(call.userData ?? {})
+  // The heading carries the name where there is one, so everything else the
+  // agent might read out loud lines up beneath it.
+  const subline = [
+    contact ? other?.number : undefined,
+    contact?.company || undefined,
+    other?.otherNumber ? t('agent.dialled', { number: other.otherNumber }) : undefined,
+  ].filter((part): part is string => Boolean(part))
 
   return (
     <section className="rounded-md border bg-card p-4">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <span className="tabular text-lg font-semibold">
-              {other?.number ?? t('call.unknownNumber')}
+            <span className={cn('text-lg font-semibold', !contact && 'tabular')}>
+              {contact?.name || other?.number || t('call.unknownNumber')}
             </span>
+            {contact?.tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}
             <CallBadges call={call} />
           </div>
-          {other?.otherNumber && (
+          {subline.length > 0 && (
             <div className="tabular mt-0.5 text-sm text-muted-foreground">
-              {t('agent.dialled', { number: other.otherNumber })}
+              {subline.join(' · ')}
             </div>
           )}
         </div>
@@ -448,6 +525,10 @@ function CallerCard({ call }: { call?: CallSnapshot }) {
           <div className="tabular text-sm">{formatClock(call.createdAt)}</div>
         </div>
       </div>
+
+      {contact?.notes && (
+        <p className="mt-3 border-t pt-3 text-sm text-muted-foreground">{contact.notes}</p>
+      )}
 
       {userData.length > 0 && (
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t pt-3">
@@ -558,15 +639,46 @@ function PresenceCard() {
 }
 
 /**
- * After-call work. The countdown and the release are real; a disposition code
- * would need a endpoint that does not exist yet, so none is offered.
+ * After-call work: the countdown, what the call was about, and the release.
+ *
+ * The call being filed against is the platform's answer, never the browser's —
+ * the agent files for the call they just finished, and a client that named one
+ * could write a disposition onto anybody's call. The form stays open after the
+ * timer has expired for exactly one reason: an agent still typing when the
+ * window closed has not lost what they typed, and the server still accepts it
+ * until the next call is wrapped.
  */
 function WrapUpCard() {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
-  const { ready } = usePresenceActions()
+  const { wrapUp } = usePresenceActions()
+  const { data: vocabulary } = useDispositions()
+  const [categoryCode, setCategoryCode] = useState('')
+  const [dispositionCode, setDispositionCode] = useState('')
+  const [note, setNote] = useState('')
+
   const inWrapUp = presence?.availability === 'WRAP_UP'
   const remainingSec = useRemainingSec(presence?.wrapUpEndsAt)
+  const categories = vocabulary?.categories ?? []
+  const category = categories.find((c) => c.code === categoryCode)
+
+  // The card is offered while the window is open and for as long as there is
+  // still a call to file against; the server is the judge of the latter and
+  // answers a conflict if there is not.
+  const canFile = inWrapUp || Boolean(presence?.wrapUpCallId)
+
+  const complete = () => {
+    wrapUp.mutate(
+      { dispositionCode: dispositionCode || undefined, note: note.trim() || undefined },
+      {
+        onSuccess: () => {
+          setCategoryCode('')
+          setDispositionCode('')
+          setNote('')
+        },
+      },
+    )
+  }
 
   return (
     <Card
@@ -580,12 +692,48 @@ function WrapUpCard() {
         ) : undefined
       }
     >
-      {inWrapUp ? (
-        <Button className="w-full" disabled={ready.isPending} onClick={() => ready.mutate()}>
-          {t('agent.completeWrapUp')}
-        </Button>
-      ) : (
+      {!canFile ? (
         <Empty text={t('agent.wrapUpIdle')} />
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Select
+            ariaLabel={t('agent.dispositionCategory')}
+            value={categoryCode}
+            onChange={(next) => {
+              setCategoryCode(next)
+              setDispositionCode('')
+            }}
+            options={[
+              { value: '', label: t('agent.chooseCategory') },
+              ...categories.map((c) => ({ value: c.code, label: c.label })),
+            ]}
+          />
+          <Select
+            ariaLabel={t('agent.disposition')}
+            value={dispositionCode}
+            onChange={setDispositionCode}
+            options={[
+              { value: '', label: t('agent.chooseDisposition') },
+              ...(category?.dispositions ?? []).map((d) => ({ value: d.code, label: d.label })),
+            ]}
+          />
+          <textarea
+            className="min-h-16 w-full rounded-md border bg-card p-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+            placeholder={t('agent.wrapUpNote')}
+            aria-label={t('agent.wrapUpNote')}
+            value={note}
+            maxLength={4000}
+            onChange={(event) => setNote(event.target.value)}
+          />
+          <Button className="w-full" disabled={wrapUp.isPending} onClick={complete}>
+            {t('agent.completeWrapUp')}
+          </Button>
+          {wrapUp.isError && (
+            <p className="text-xs" style={{ color: 'var(--state-breach)' }}>
+              {describeError(wrapUp.error, t)}
+            </p>
+          )}
+        </div>
       )}
     </Card>
   )

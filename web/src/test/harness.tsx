@@ -11,7 +11,10 @@ import type { ComponentProps, ReactElement } from 'react'
 import { vi } from 'vitest'
 
 import i18n from '@/lib/i18n'
-import type { CallSnapshot, Presence } from '@/lib/api'
+import type { CallSnapshot, Presence, WaitingCall } from '@/lib/api'
+import type { Contact } from '@/lib/contacts'
+import type { CDR } from '@/lib/ledger'
+import type { DispositionCategory } from '@/lib/ledger'
 
 /**
  * Component-test harness for the agent cockpit.
@@ -34,6 +37,14 @@ export interface Backend {
   commands: RecordedRequest[]
   presence: Presence
   calls: CallSnapshot[]
+  /** Callers queued in the agent's own queues. */
+  waiting: WaitingCall[]
+  /** The wrap-up vocabulary the server offers. */
+  dispositions: DispositionCategory[]
+  /** The contact book, matched by exact number the way the server does. */
+  contacts: Contact[]
+  /** The agent's own finished calls. */
+  myCDRs: CDR[]
   /** Rows the transcript snapshot serves, and the state it reports. */
   transcript: unknown[]
   transcriptState?: string
@@ -64,6 +75,79 @@ export function presenceFixture(overrides: Partial<Presence> = {}): Presence {
 }
 
 /** A two-leg inbound call with the agent's own leg in the given state. */
+/** A caller queued in support-zh, waiting since `agoSec` ago. */
+export function waitingFixture(overrides: Partial<WaitingCall> = {}): WaitingCall {
+  return {
+    callId: '00000000-0000-4000-8000-0000000000w1',
+    callType: 'INBOUND',
+    fromNumber: '+8613700990011',
+    queueId: '00000000-0000-4000-8000-0000000000q1',
+    queueName: 'support-zh',
+    queueDisplayName: 'Billing',
+    slaThresholdSec: 20,
+    joinedAt: new Date(Date.now() - 12_000).toISOString(),
+    ...overrides,
+  }
+}
+
+/** The vocabulary an installation ships with, trimmed to two codes. */
+export function dispositionsFixture(): DispositionCategory[] {
+  return [
+    {
+      code: 'RESOLVED',
+      label: 'Resolved',
+      dispositions: [
+        { code: 'ISSUE_FIXED', label: 'Issue fixed' },
+        { code: 'ANSWERED_QUESTION', label: 'Answered question' },
+      ],
+    },
+    {
+      code: 'FOLLOW_UP',
+      label: 'Follow-up',
+      dispositions: [{ code: 'ESCALATED', label: 'Escalated' }],
+    },
+  ]
+}
+
+/** One finished call as the agent's own list receives it. */
+export function cdrFixture(overrides: Partial<CDR> = {}): CDR {
+  const startedAt = new Date(Date.now() - 600_000)
+  return {
+    callId: '00000000-0000-4000-8000-0000000000d1',
+    startedAt: startedAt.toISOString(),
+    endedAt: new Date(startedAt.getTime() + 300_000).toISOString(),
+    callType: 'INBOUND',
+    fromNumber: CALLER,
+    toNumber: '95001',
+    ringSec: 3,
+    botSec: 40,
+    queueWaitSec: 12,
+    talkSec: 245,
+    totalSec: 300,
+    status: 'ANSWERED',
+    isContained: false,
+    hasRecording: false,
+    legs: [{ kind: 'QUEUE', label: 'support-zh', durationSec: 12 }],
+    ...overrides,
+  }
+}
+
+export function contactFixture(overrides: Partial<Contact> = {}): Contact {
+  const at = new Date().toISOString()
+  return {
+    id: '00000000-0000-4000-8000-0000000000e1',
+    phoneNumber: CALLER,
+    name: 'Zhang Wei',
+    company: 'NovaNet',
+    email: '',
+    tags: ['VIP'],
+    notes: 'Prefers callbacks after 16:00.',
+    createdAt: at,
+    updatedAt: at,
+    ...overrides,
+  }
+}
+
 export function callFixture(state: CallSnapshot['parties'][number]['state']): CallSnapshot {
   const at = new Date().toISOString()
   const answered = state === 'TALKING' || state === 'HELD'
@@ -113,6 +197,10 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     },
     presence: initial.presence ?? presenceFixture(),
     calls: initial.calls ?? [],
+    waiting: initial.waiting ?? [],
+    dispositions: initial.dispositions ?? [],
+    contacts: initial.contacts ?? [],
+    myCDRs: initial.myCDRs ?? [],
     transcript: initial.transcript ?? [],
     transcriptState: initial.transcriptState,
     slowSnapshotMs: initial.slowSnapshotMs,
@@ -139,6 +227,18 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
       }
       if (path === '/agent/presence') return json(backend.presence)
       if (path === '/calls/mine') return json({ items: backend.calls })
+      if (path === '/calls/waiting') return json({ items: backend.waiting })
+      if (path.startsWith('/cdrs/mine')) {
+        return json({ items: backend.myCDRs, total: backend.myCDRs.length })
+      }
+      if (path === '/dispositions') return json({ categories: backend.dispositions })
+      if (path.startsWith('/contacts')) {
+        const number = new URLSearchParams(path.split('?')[1] ?? '').get('phoneNumber')
+        const items = number
+          ? backend.contacts.filter((c) => c.phoneNumber === number)
+          : backend.contacts
+        return json({ items, total: items.length })
+      }
       if (path === '/callbacks') return json({ items: [] })
       if (path === '/calls/dial') return json({ callId: CALL_ID })
       if (path.startsWith('/agent/')) return json(backend.presence)

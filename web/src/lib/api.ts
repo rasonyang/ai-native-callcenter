@@ -89,6 +89,9 @@ export type Presence = components['schemas']['Presence']
 
 export type RosterEntry = components['schemas']['RosterEntry']
 
+/** What an agent files for the call they just finished. */
+export type WrapUpRequest = components['schemas']['WrapUpRequest']
+
 export const agentApi = {
   presence: () => request<Presence>('/agent/presence'),
 
@@ -112,6 +115,14 @@ export const agentApi = {
       body: JSON.stringify({ reason }),
     }),
 
+  /**
+   * Completes after-call work, filing the disposition and note against the
+   * call the server says it was for. The call is never named here: the
+   * platform knows which one the agent just finished.
+   */
+  wrapUp: (body: WrapUpRequest) =>
+    request<Presence>('/agent/wrap-up', { method: 'POST', body: JSON.stringify(body) }),
+
   roster: () => request<{ items: RosterEntry[] }>('/agents'),
 
   forceLogout: (agentId: string) =>
@@ -127,8 +138,12 @@ export type PartySnapshot = components['schemas']['PartySnapshot']
 
 export type CallSnapshot = components['schemas']['CallSnapshot']
 
+/** A caller waiting in a queue this agent staffs. */
+export type WaitingCall = components['schemas']['WaitingCall']
+
 export const callApi = {
   mine: () => request<components['schemas']['CallList']>('/calls/mine'),
+  waiting: () => request<components['schemas']['WaitingCallList']>('/calls/waiting'),
   dial: (destination: string) =>
     request<components['schemas']['DialResponse']>('/calls/dial', {
       method: 'POST',

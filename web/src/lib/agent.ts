@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
 
+import { CDRS_KEY } from './ledger'
 import {
   ApiError,
   agentApi,
@@ -8,6 +9,7 @@ import {
   type Availability,
   type CallSnapshot,
   type NotReadyReason,
+  type WrapUpRequest,
 } from './api'
 
 export const PRESENCE_KEY = ['agent', 'presence'] as const
@@ -59,6 +61,17 @@ export function usePresenceActions() {
     signOut: useMutation({ mutationFn: agentApi.logout, onSuccess }),
     ready: useMutation({ mutationFn: agentApi.ready, onSuccess }),
     notReady: useMutation({ mutationFn: agentApi.notReady, onSuccess }),
+    /**
+     * Completing after-call work also writes to the ledger, so the agent's own
+     * call list shows the disposition they just filed.
+     */
+    wrapUp: useMutation({
+      mutationFn: (body: WrapUpRequest) => agentApi.wrapUp(body),
+      onSuccess: (presence) => {
+        onSuccess(presence)
+        void queryClient.invalidateQueries({ queryKey: CDRS_KEY })
+      },
+    }),
   }
 }
 
@@ -110,6 +123,31 @@ export function useMyCalls(enabled: boolean) {
     queryFn: async () => {
       try {
         return await callApi.mine()
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) return { items: [] }
+        throw error
+      }
+    },
+  })
+}
+
+export const WAITING_KEY = ['calls', 'waiting'] as const
+
+/**
+ * The callers waiting in the queues this agent staffs.
+ *
+ * Refetched on the queue events rather than polled: the list moves whenever
+ * somebody joins, is answered or gives up, and nothing else moves it.
+ */
+export function useWaitingCalls(enabled: boolean) {
+  return useQuery({
+    queryKey: WAITING_KEY,
+    enabled,
+    retry: false,
+    staleTime: 2_000,
+    queryFn: async () => {
+      try {
+        return await callApi.waiting()
       } catch (error) {
         if (error instanceof ApiError && error.status === 403) return { items: [] }
         throw error

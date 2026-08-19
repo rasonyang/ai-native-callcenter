@@ -31,6 +31,8 @@
     "manage": "管理",
     "system": "系统",
     "dashboard": "工作台",
+    "myCalls": "我的通话",
+    "contacts": "客户",
     "wallboard": "看板",
     "agents": "坐席",
     "queues": "队列",
@@ -99,7 +101,8 @@
     "AGENT_ALREADY_LOGGED_IN": "您已签入。",
     "AGENT_NOT_LOGGED_IN": "您尚未签入。",
     "CALL_NOT_FOUND": "该通话已结束。",
-    "NOT_CALL_PARTY": "您不在该通话中。"
+    "NOT_CALL_PARTY": "您不在该通话中。",
+    "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。"
   },
   "availability": {
     "READY": "示闲",
@@ -130,11 +133,19 @@
     "dialPlaced": "正在外呼——将先接通您的话机。",
     "keypad": "拨号键盘",
     "journey": "通话分支",
+    "myQueue": "我的队列",
+    "waitingCount_other": "{{count}} 人等待",
+    "queueEmpty": "所属队列暂无人等待。",
     "dialled": "拨入 {{number}}",
     "started": "开始于",
     "wrapUp": "话后处理",
     "wrapUpIdle": "通话结束后进入话后处理。",
-    "completeWrapUp": "准备接下一通",
+    "completeWrapUp": "完成话后处理",
+    "dispositionCategory": "分类",
+    "chooseCategory": "选择分类…",
+    "disposition": "小结",
+    "chooseDisposition": "选择小结…",
+    "wrapUpNote": "话后备注…",
     "openCount_other": "{{count}} 条待办",
     "legCount_other": "{{count}} 条通话腿"
   },
@@ -436,5 +447,36 @@
       "STOPPED": "转写已结束",
       "ENDED": "通话已结束"
     }
+  },
+  "myCalls": {
+    "hint": "您处理过的通话，最新在前。",
+    "customer": "客户",
+    "queue": "队列",
+    "disposition": "小结",
+    "note": "备注",
+    "talkTime": "通话时长",
+    "notFiled": "未填写",
+    "empty": "暂无通话，处理完的通话会出现在这里。"
+  },
+  "contacts": {
+    "hint": "号码背后是谁，以及上一位坐席记下了什么。",
+    "search": "搜索姓名、公司或号码…",
+    "add": "新增客户",
+    "edit": "编辑客户",
+    "name": "姓名",
+    "number": "号码",
+    "numberHint": "来电靠号码识别，一个号码只对应一位客户。",
+    "company": "公司",
+    "email": "邮箱",
+    "tags": "标签",
+    "tagsHint": "用逗号分隔。",
+    "notes": "备注",
+    "notesHint": "通话时会显示在客户卡片上。",
+    "lastCall": "最近通话",
+    "never": "无",
+    "empty": "暂无客户记录。",
+    "noMatches": "没有匹配的客户。",
+    "deleteConfirm": "删除 {{name}}？其通话记录仍会保留。",
+    "pageOf": "第 {{page}} / {{pages}} 页 · 共 {{total}} 位"
   }
 }

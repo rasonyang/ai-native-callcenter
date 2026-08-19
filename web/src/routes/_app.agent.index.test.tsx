@@ -8,10 +8,13 @@ import {
   CALL_ID,
   CALLER,
   callFixture,
+  contactFixture,
+  dispositionsFixture,
   installBackend,
   presenceFixture,
   renderPage,
   emitEvent,
+  waitingFixture,
   type Backend,
 } from '@/test/harness'
 
@@ -225,18 +228,11 @@ describe('the rest of the cockpit', () => {
   })
 
   it('completes wrap-up', async () => {
-    const { api, user } = await renderCockpit({
-      presence: presenceFixture({
-        state: 'NOT_READY',
-        availability: 'WRAP_UP',
-        reason: 'AFTER_CALL_WORK',
-        wrapUpEndsAt: new Date(Date.now() + 30_000).toISOString(),
-      }),
-    })
-    await user.click(await screen.findByRole('button', { name: /ready for the next call/i }))
+    const { api, user } = await renderCockpit({ presence: inWrapUp() })
+    await user.click(await screen.findByRole('button', { name: /complete wrap-up/i }))
     await waitFor(() =>
       expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: '/agent/ready' }),
+        expect.objectContaining({ method: 'POST', path: '/agent/wrap-up' }),
       ),
     )
   })
@@ -245,6 +241,160 @@ describe('the rest of the cockpit', () => {
     await renderCockpit({ presence: presenceFixture({ extensionNumber: '1001' }) })
     // Once in the card's title slot, once in the detail row.
     expect(await screen.findAllByText('1001')).toHaveLength(2)
+  })
+})
+
+/** An agent in after-call work for the call they just finished. */
+function inWrapUp() {
+  return presenceFixture({
+    state: 'NOT_READY',
+    availability: 'WRAP_UP',
+    reason: 'AFTER_CALL_WORK',
+    wrapUpEndsAt: new Date(Date.now() + 30_000).toISOString(),
+    wrapUpCallId: CALL_ID,
+  })
+}
+
+/**
+ * After-call work is where a call becomes reportable. The form files against
+ * the call the *server* says it was for — nothing in the request names one —
+ * and it stays available after the timer has run out, because an agent still
+ * typing has not forfeited what they typed.
+ */
+describe('after-call work', () => {
+  it('files the disposition and the note, naming no call', async () => {
+    const { api, user } = await renderCockpit({
+      presence: inWrapUp(),
+      dispositions: dispositionsFixture(),
+    })
+
+    await user.selectOptions(await screen.findByLabelText(/^category$/i), 'RESOLVED')
+    await user.selectOptions(screen.getByLabelText(/^disposition$/i), 'ISSUE_FIXED')
+    await user.type(screen.getByLabelText(/wrap-up note/i), 'replaced the router')
+    await user.click(screen.getByRole('button', { name: /complete wrap-up/i }))
+
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/agent/wrap-up',
+          body: { dispositionCode: 'ISSUE_FIXED', note: 'replaced the router' },
+        }),
+      ),
+    )
+  })
+
+  it('offers only the chosen category’s codes', async () => {
+    const { user } = await renderCockpit({
+      presence: inWrapUp(),
+      dispositions: dispositionsFixture(),
+    })
+
+    const codes = await screen.findByLabelText(/^disposition$/i)
+    expect(within(codes).queryByRole('option', { name: 'Issue fixed' })).toBeNull()
+
+    await user.selectOptions(screen.getByLabelText(/^category$/i), 'RESOLVED')
+    expect(within(codes).getByRole('option', { name: 'Issue fixed' })).toBeInTheDocument()
+    expect(within(codes).queryByRole('option', { name: 'Escalated' })).toBeNull()
+  })
+
+  it('still accepts a filing after the timer has returned the agent to ready', async () => {
+    // The window closed while the agent was typing. The call is still theirs
+    // to file against until the next one is wrapped, and the server is the
+    // judge of that — so the form is offered rather than withdrawn.
+    const { api, user } = await renderCockpit({
+      presence: presenceFixture({ availability: 'READY', wrapUpCallId: CALL_ID }),
+      dispositions: dispositionsFixture(),
+    })
+
+    await user.type(await screen.findByLabelText(/wrap-up note/i), 'late but written')
+    await user.click(screen.getByRole('button', { name: /complete wrap-up/i }))
+
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/agent/wrap-up',
+          body: { note: 'late but written' },
+        }),
+      ),
+    )
+  })
+
+  it('offers nothing to file when no call has been handled', async () => {
+    await renderCockpit({ presence: presenceFixture({ availability: 'READY' }) })
+    expect(await screen.findByText(/wrap-up starts when a call ends/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /complete wrap-up/i })).toBeNull()
+  })
+})
+
+/**
+ * My queue: the line this agent is working. The platform decides which queues
+ * those are — the request carries none — and the wait turns red against the
+ * queue's own promise rather than a number invented in the browser.
+ */
+describe('my queue', () => {
+  it('lists who is waiting, longest wait first, with their queue', async () => {
+    await renderCockpit({
+      waiting: [
+        waitingFixture({ fromNumber: '+8613700990011', queueDisplayName: 'Billing' }),
+        waitingFixture({
+          callId: '00000000-0000-4000-8000-0000000000w2',
+          fromNumber: '+14085550166',
+          queueDisplayName: 'Support EN',
+          joinedAt: new Date(Date.now() - 47_000).toISOString(),
+        }),
+      ],
+    })
+
+    const list = await screen.findByRole('list', { name: /my queue/i })
+    const rows = within(list).getAllByRole('listitem')
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('+8613700990011')
+    expect(rows[0]).toHaveTextContent('Billing')
+    expect(screen.getByText('2 waiting')).toBeInTheDocument()
+  })
+
+  it('marks a wait past the queue’s own target', async () => {
+    await renderCockpit({
+      waiting: [
+        waitingFixture({
+          slaThresholdSec: 20,
+          joinedAt: new Date(Date.now() - 137_000).toISOString(),
+        }),
+      ],
+    })
+    const list = await screen.findByRole('list', { name: /my queue/i })
+    const wait = within(list).getByText('02:17')
+    expect(wait).toHaveStyle({ color: 'var(--state-breach)' })
+  })
+
+  it('says so when nobody is waiting', async () => {
+    await renderCockpit({ waiting: [] })
+    expect(await screen.findByText(/nobody is waiting in your queues/i)).toBeInTheDocument()
+  })
+})
+
+/**
+ * The caller card names the person where the book knows them. The lookup is by
+ * exact number: greeting a customer by somebody else's name is worse than
+ * greeting an unknown number.
+ */
+describe('the caller card', () => {
+  it('shows the contact behind the number', async () => {
+    await renderCockpit({ ...onCall, contacts: [contactFixture()] })
+
+    expect(await screen.findByText('Zhang Wei')).toBeInTheDocument()
+    expect(screen.getByText(/novanet/i)).toBeInTheDocument()
+    expect(screen.getByText('VIP')).toBeInTheDocument()
+    expect(screen.getByText(/prefers callbacks after 16:00/i)).toBeInTheDocument()
+  })
+
+  it('falls back to the number for a caller nobody has recorded', async () => {
+    await renderCockpit({ ...onCall, contacts: [contactFixture({ phoneNumber: '+10000000000' })] })
+
+    expect(await screen.findAllByText(CALLER)).not.toHaveLength(0)
+    expect(screen.queryByText('Zhang Wei')).toBeNull()
   })
 })
 

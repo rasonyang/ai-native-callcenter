@@ -45,7 +45,9 @@
     "extensions": "Extensions",
     "numbers": "Numbers",
     "callbacks": "Callbacks",
-    "agentIdentities": "Agents & Phones"
+    "agentIdentities": "Agents & Phones",
+    "myCalls": "My Calls",
+    "contacts": "Contacts"
   },
   "roles": {
     "AGENT": "Agent",
@@ -99,7 +101,8 @@
     "AGENT_ALREADY_LOGGED_IN": "You are already signed in.",
     "AGENT_NOT_LOGGED_IN": "You are not signed in.",
     "CALL_NOT_FOUND": "That call has already ended.",
-    "NOT_CALL_PARTY": "You are not on that call."
+    "NOT_CALL_PARTY": "You are not on that call.",
+    "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against."
   },
   "availability": {
     "READY": "Ready",
@@ -130,11 +133,20 @@
     "dialPlaced": "Dialing — your phone will connect first.",
     "keypad": "Keypad",
     "journey": "Call legs",
+    "myQueue": "My queue",
+    "waitingCount_one": "{{count}} waiting",
+    "waitingCount_other": "{{count}} waiting",
+    "queueEmpty": "Nobody is waiting in your queues.",
     "dialled": "Dialled {{number}}",
     "started": "Started",
     "wrapUp": "After-call work",
     "wrapUpIdle": "Wrap-up starts when a call ends.",
-    "completeWrapUp": "Ready for the next call",
+    "completeWrapUp": "Complete wrap-up",
+    "dispositionCategory": "Category",
+    "chooseCategory": "Category…",
+    "disposition": "Disposition",
+    "chooseDisposition": "Disposition…",
+    "wrapUpNote": "Wrap-up note…",
     "openCount_one": "{{count}} open",
     "openCount_other": "{{count}} open",
     "legCount_one": "{{count}} leg",
@@ -438,5 +450,36 @@
       "STOPPED": "Transcription ended",
       "ENDED": "Call ended"
     }
+  },
+  "myCalls": {
+    "hint": "Every call you have finished, newest first.",
+    "customer": "Customer",
+    "queue": "Queue",
+    "disposition": "Disposition",
+    "note": "Note",
+    "talkTime": "Talk time",
+    "notFiled": "Not filed",
+    "empty": "No calls yet. Yours will appear here as you finish them."
+  },
+  "contacts": {
+    "hint": "Who a number belongs to, and what the last person who spoke to them noted.",
+    "search": "Search name, company or number…",
+    "add": "Add contact",
+    "edit": "Edit contact",
+    "name": "Name",
+    "number": "Number",
+    "numberHint": "How a caller is identified, so one number has one contact.",
+    "company": "Company",
+    "email": "Email",
+    "tags": "Tags",
+    "tagsHint": "Separated by commas.",
+    "notes": "Notes",
+    "notesHint": "Shown on the caller card during a call.",
+    "lastCall": "Last call",
+    "never": "Never",
+    "empty": "No contacts yet.",
+    "noMatches": "No contact matches that search.",
+    "deleteConfirm": "Delete {{name}}? Their calls stay in the ledger.",
+    "pageOf": "Page {{page}} of {{pages}} · {{total}} contacts"
   }
 }
