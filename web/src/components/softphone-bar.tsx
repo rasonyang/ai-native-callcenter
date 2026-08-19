@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   SELECTABLE_REASONS, myParty, otherParty, useCallActions, useElapsedSec,
-  useMyCalls, usePresence, usePresenceActions,
+  useIsWrapUpPending, useMyCalls, usePresence, usePresenceActions,
 } from '@/lib/agent'
 import { callApi, type CallSnapshot, type NotReadyReason, type PartyState } from '@/lib/api'
 import { describeError } from '@/lib/errors'
@@ -116,6 +116,11 @@ function PresenceControl({
   const { t } = useTranslation()
   const { signOut, ready, notReady } = usePresenceActions()
   const elapsedSec = useElapsedSec(enteredAt)
+  // After-call work the agent has not confirmed keeps them out of the queue on
+  // purpose: going ready with the last call unwritten is how a call becomes
+  // unreportable. It is guidance, not a lock — lunch and signing out are still
+  // theirs to choose.
+  const isWrapUpPending = useIsWrapUpPending()
 
   const label =
     availability === 'NOT_READY' && reason
@@ -147,12 +152,17 @@ function PresenceControl({
         >
           {state !== 'READY' && (
             <DropdownMenu.Item
-              className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-muted"
+              className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-muted data-disabled:opacity-50"
+              disabled={isWrapUpPending}
+              title={isWrapUpPending ? t('agent.wrapUpBlocks') : undefined}
               onSelect={() => ready.mutate()}
             >
               <StatusDot availability="READY" />
               {t('agent.goReady')}
             </DropdownMenu.Item>
+          )}
+          {isWrapUpPending && (
+            <p className="px-2 py-1 text-xs text-muted-foreground">{t('agent.wrapUpBlocks')}</p>
           )}
           {SELECTABLE_REASONS.map((r) => (
             <DropdownMenu.Item
@@ -324,6 +334,11 @@ function DialPadPopover({ call }: { call?: CallSnapshot }) {
   const dial = useMutation({ mutationFn: callApi.dial })
   const { sendDtmf } = useCallActions()
   const hasCall = Boolean(call)
+  // Dialling out with the last call still unwritten is the same problem as
+  // going ready: the record would be left standing on its defaults while the
+  // agent starts another conversation. Tones into a live call are unaffected —
+  // that is this pad's other job, and it belongs to the call in progress.
+  const isWrapUpPending = useIsWrapUpPending()
 
   const place = () => {
     const destination = number.trim()
@@ -338,7 +353,13 @@ function DialPadPopover({ call }: { call?: CallSnapshot }) {
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button variant="ghost" size="icon" title={t('agent.keypad')} aria-label={t('agent.keypad')}>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={!hasCall && isWrapUpPending}
+          title={!hasCall && isWrapUpPending ? t('agent.wrapUpBlocks') : t('agent.keypad')}
+          aria-label={t('agent.keypad')}
+        >
           <Grid3x3 />
         </Button>
       </Popover.Trigger>

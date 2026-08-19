@@ -69,6 +69,7 @@ export function usePresenceActions() {
       mutationFn: (body: WrapUpRequest) => agentApi.wrapUp(body),
       onSuccess: (presence) => {
         onSuccess(presence)
+        void queryClient.invalidateQueries({ queryKey: WRAP_UP_KEY })
         void queryClient.invalidateQueries({ queryKey: CDRS_KEY })
       },
     }),
@@ -129,6 +130,42 @@ export function useMyCalls(enabled: boolean) {
       }
     },
   })
+}
+
+export const WRAP_UP_KEY = ['agent', 'wrapUp'] as const
+
+/**
+ * The after-call record waiting on this agent, read from the server so that
+ * reloading the page does not lose it — the work is the platform's fact, not
+ * the browser's.
+ */
+export function useCurrentWrapUp(enabled: boolean) {
+  return useQuery({
+    queryKey: WRAP_UP_KEY,
+    enabled,
+    retry: false,
+    staleTime: 2_000,
+    queryFn: async () => {
+      try {
+        return (await agentApi.currentWrapUp()) ?? null
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 403) return null
+        throw error
+      }
+    },
+  })
+}
+
+/**
+ * Whether after-call work is waiting on this agent — the last call's record
+ * still standing on the defaults nobody confirmed.
+ *
+ * Read from the server rather than kept in a screen, so a reload does not lose
+ * it and the cockpit and the softphone bar cannot disagree about it.
+ */
+export function useIsWrapUpPending(): boolean {
+  const { data } = useCurrentWrapUp(true)
+  return Boolean(data && !data.isConfirmed)
 }
 
 export const WAITING_KEY = ['calls', 'waiting'] as const

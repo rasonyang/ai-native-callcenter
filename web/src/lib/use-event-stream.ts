@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { CALLS_KEY, PRESENCE_KEY, ROSTER_KEY, WAITING_KEY } from './agent'
+import { CALLS_KEY, PRESENCE_KEY, ROSTER_KEY, WAITING_KEY, WRAP_UP_KEY } from './agent'
 import { CALLBACKS_KEY, CDRS_KEY, REPORTS_KEY } from './ledger'
 import { connectEvents, type AiccEvent, type EventType } from './events'
 
@@ -17,8 +17,10 @@ function applyToCache(queryClient: ReturnType<typeof useQueryClient>, event: Aic
     void queryClient.invalidateQueries({ queryKey: ROSTER_KEY })
     void queryClient.invalidateQueries({ queryKey: PRESENCE_KEY })
     // Signing in, going ready, entering after-call work: each of them moves
-    // what the agent's own day is made of.
+    // what the agent's own day is made of — and after-call work beginning is
+    // what opens the record the cockpit asks them to confirm.
     void queryClient.invalidateQueries({ queryKey: REPORTS_KEY })
+    void queryClient.invalidateQueries({ queryKey: WRAP_UP_KEY })
   }
   if (event.type.startsWith('PARTY_') || event.type === 'CALL_USER_DATA') {
     // A leg moved: the cockpit and the supervisor's live view both read the

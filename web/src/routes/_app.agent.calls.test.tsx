@@ -42,6 +42,7 @@ it('shows what the agent filed about each call', async () => {
           dispositionCode: 'RESOLVED',
           dispositionLabel: 'Resolved',
           note: 'replaced the router',
+          isConfirmed: true,
           createdAt: new Date().toISOString(),
         },
       }),

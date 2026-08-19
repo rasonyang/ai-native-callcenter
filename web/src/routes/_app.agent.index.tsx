@@ -17,8 +17,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
 import {
-  myParty, otherParty, useCallActions, useElapsedSec, useMyCalls, usePresence,
-  usePresenceActions, useWaitingCalls,
+  myParty, otherParty, useCallActions, useCurrentWrapUp, useElapsedSec,
+  useIsWrapUpPending, useMyCalls, usePresence, usePresenceActions, useWaitingCalls,
 } from '@/lib/agent'
 import { callApi, type CallSnapshot, type WaitingCall } from '@/lib/api'
 import { useContactFor } from '@/lib/contacts'
@@ -360,6 +360,10 @@ function DialCard() {
   const { t } = useTranslation()
   const [destination, setDestination] = useState('')
   const dial = useMutation({ mutationFn: callApi.dial })
+  // Starting another conversation with the last one unwritten is how a call
+  // ends up recorded as whatever the platform guessed. Guidance rather than a
+  // lock: the way past it is to press Done, which takes one click.
+  const isWrapUpPending = useIsWrapUpPending()
 
   const place = () => {
     const number = destination.trim()
@@ -374,15 +378,26 @@ function DialCard() {
           placeholder={t('agent.dialPlaceholder')}
           value={destination}
           inputMode="tel"
+          disabled={isWrapUpPending}
           onChange={(event) => setDestination(event.target.value.replace(/[^0-9*#+]/g, ''))}
           onKeyDown={(event) => event.key === 'Enter' && place()}
         />
-        <KeypadButton onDigit={(digit) => setDestination((current) => current + digit)} />
-        <Button disabled={!destination.trim() || dial.isPending} onClick={place}>
+        <KeypadButton
+          disabled={isWrapUpPending}
+          onDigit={(digit) => setDestination((current) => current + digit)}
+        />
+        <Button
+          disabled={isWrapUpPending || !destination.trim() || dial.isPending}
+          title={isWrapUpPending ? t('agent.wrapUpBlocks') : undefined}
+          onClick={place}
+        >
           <PhoneOutgoing />
           {t('agent.dial')}
         </Button>
       </div>
+      {isWrapUpPending && (
+        <p className="mt-2 text-xs text-muted-foreground">{t('agent.wrapUpBlocks')}</p>
+      )}
       {dial.isError && (
         <p className="mt-2 text-xs" style={{ color: 'var(--state-breach)' }}>
           {describeError(dial.error, t)}
@@ -399,12 +414,24 @@ function DialCard() {
  * The keypad composes a number before dialling. It does not send DTMF into a
  * live call: no endpoint carries digits to the switch.
  */
-function KeypadButton({ onDigit }: { onDigit: (digit: string) => void }) {
+function KeypadButton({
+  onDigit,
+  disabled,
+}: {
+  onDigit: (digit: string) => void
+  disabled?: boolean
+}) {
   const { t } = useTranslation()
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button variant="outline" size="icon" title={t('agent.keypad')} aria-label={t('agent.keypad')}>
+        <Button
+          variant="outline"
+          size="icon"
+          disabled={disabled}
+          title={t('agent.keypad')}
+          aria-label={t('agent.keypad')}
+        >
           <Grid3x3 />
         </Button>
       </Popover.Trigger>
@@ -624,81 +651,70 @@ function CallBadges({ call }: { call: CallSnapshot }) {
 // --- Right column ----------------------------------------------------------
 
 /**
- * After-call work: what the call was about, and the button that ends it.
+ * After-call work: what the platform filed on the agent's behalf, and the
+ * button that says they looked at it.
  *
- * The note follows the call rather than the state. An agent types it while
- * they are still talking — that is when they know what to write — and it is
- * the same note when the call ends, because it is about the same conversation.
- * The disposition waits for the hangup: it is the outcome, and a call in
- * progress does not have one yet.
+ * The record exists before this card renders — opened the moment the call
+ * ended, with the ordinary disposition already chosen — so the common call is
+ * one press. Anything else the agent has to say, they say by changing it. It
+ * lives on the server, which is why reloading the page does not lose the note
+ * or let anybody past the confirmation.
  *
- * After Done the card shows what was filed, read-only. The work is finished
- * and the record is the record; the next call gives the agent a fresh sheet.
- *
- * While after-call work runs the switch keeps the agent out of routing, the
- * timer counts up — nothing is going to take the decision off them — and the
- * call being filed against is the platform's answer, never the browser's.
+ * The note follows the call rather than the state: an agent types it while
+ * they are still talking, because that is when they know what to write. The
+ * disposition waits for the hangup — it is the outcome, and a call in progress
+ * does not have one yet. After Done the card shows what was filed, read-only.
  */
 function WrapUpCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCall }) {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
+  const signedIn = Boolean(presence && presence.state !== 'LOGGED_OUT')
   const { wrapUp } = usePresenceActions()
   const { data: vocabulary } = useDispositions()
-  const [draft, setDraft] = useState<{ callId?: string; note: string; dispositionCode: string }>({
-    note: '',
-    dispositionCode: '',
-  })
-  const [justFiled, setJustFiled] = useState<{ dispositionLabel: string; note: string }>()
+  const { data: open } = useCurrentWrapUp(signedIn)
+  const [draft, setDraft] = useState<{ callId?: string; note?: string; dispositionCode?: string }>({})
 
   const inWrapUp = presence?.availability === 'WRAP_UP'
   const elapsedSec = useElapsedSec(presence?.enteredAt)
   const dispositions = vocabulary?.items ?? []
 
-  // Which call the form is for: the one in progress, then the one still open
-  // for filing. The server is the judge of the second and answers a conflict
-  // when there is none.
   const activeCallID = call?.callId ?? presence?.wrapUpCallId
   // Fileable means *this* sheet's call is finished, not that some call is.
-  // An agent can be on a new call while the last one is still unfiled — a
-  // direct call reaches them in after-call work — and filing then would put
-  // this conversation's note on the previous conversation.
+  // An agent can be on a new call while the last one is still unconfirmed — a
+  // direct call reaches them in after-call work — and confirming then would
+  // put this conversation's note on the previous conversation.
   const isFileable = !call && Boolean(presence?.wrapUpCallId)
 
-  // The sheet stays in front of the agent until they file it. Between the
+  // The sheet stays in front of the agent until they confirm it. Between the
   // caller hanging up and presence saying "after-call work" there is a moment
   // where the platform names no call at all — a live gap of about a second —
-  // and a form that emptied itself in it would take the note the agent was
+  // and a form that emptied itself in it would take the note they were
   // halfway through writing.
-  const isDraftOpen = Boolean(draft.callId) && !justFiled
-  const showForm = Boolean(activeCallID) || isDraftOpen
+  const isDraftOpen = Boolean(draft.callId)
+  const isPending = Boolean(open && !open.isConfirmed)
+  const showForm = Boolean(activeCallID) || isDraftOpen || isPending
 
-  // What was filed for the last call: this session's own answer first, then
-  // the ledger's, which is what survives a reload.
-  const filed = justFiled ?? (showForm ? undefined : lastCall.wrapUp)
+  // What was filed: the confirmed record for this call if there is one, then
+  // the ledger's answer for the last one, which is what survives a reload.
+  const filed = !showForm ? (open?.isConfirmed ? open : lastCall.wrapUp) : undefined
+
+  // The record is the starting point; the draft is only what the agent has
+  // changed since. That way a reload shows the disposition already chosen and
+  // whatever note was saved, and nothing here has to remember it.
+  const dispositionCode = draft.dispositionCode ?? open?.dispositionCode ?? ''
+  const note = draft.note ?? open?.note ?? ''
 
   // A new call is a new sheet: a note written about the last customer must
   // never ride along into the next conversation.
   useEffect(() => {
     if (!activeCallID) return
-    setDraft((current) => {
-      if (current.callId === activeCallID) return current
-      setJustFiled(undefined)
-      return { callId: activeCallID, note: '', dispositionCode: '' }
-    })
+    setDraft((current) => (current.callId === activeCallID ? current : { callId: activeCallID }))
   }, [activeCallID])
 
   const complete = () => {
-    const note = draft.note.trim()
-    const disposition = dispositions.find((d) => d.code === draft.dispositionCode)
-    wrapUp.mutate(
-      { dispositionCode: draft.dispositionCode, note: note || undefined },
-      {
-        // Read the filing back at once rather than waiting for the ledger:
-        // the round trip through the CDR takes a moment, and a card that
-        // blanked in between would look like the work was lost.
-        onSuccess: () => setJustFiled({ dispositionLabel: disposition?.label ?? '', note }),
-      },
-    )
+    // The sheet stops being the agent's the moment the server takes it: what
+    // they changed is now on the record, and the card reads that back.
+    wrapUp.mutate({ dispositionCode, note }, { onSuccess: () => setDraft({}) })
   }
 
   return (
@@ -721,13 +737,16 @@ function WrapUpCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
         <div className="flex flex-col gap-2">
           <Select
             ariaLabel={t('agent.disposition')}
-            value={draft.dispositionCode}
+            value={dispositionCode}
             // The outcome belongs to a finished call. Offering it mid-call
             // would be asking how something ended while it is still going.
             disabled={!isFileable}
-            onChange={(dispositionCode) => setDraft((current) => ({ ...current, dispositionCode }))}
+            onChange={(next) => setDraft((current) => ({ ...current, dispositionCode: next }))}
             options={[
-              { value: '', label: t('agent.chooseDisposition') },
+              // Only where the platform has not chosen for us: with a record
+              // open there is always a disposition, and an empty first option
+              // would invite the agent to unset it.
+              ...(dispositionCode ? [] : [{ value: '', label: t('agent.chooseDisposition') }]),
               ...dispositions.map((d) => ({ value: d.code, label: d.label })),
             ]}
           />
@@ -735,18 +754,18 @@ function WrapUpCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
             className="min-h-16 w-full rounded-md border bg-card p-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             placeholder={t('agent.wrapUpNote')}
             aria-label={t('agent.wrapUpNote')}
-            value={draft.note}
+            value={note}
             maxLength={4000}
             onChange={(event) => {
-              const note = event.target.value
-              setDraft((current) => ({ ...current, note }))
+              const next = event.target.value
+              setDraft((current) => ({ ...current, note: next }))
             }}
           />
-          {/* Nothing chosen means nothing to press: the disposition is what
-              makes the call reportable, and the server refuses without one. */}
+          {/* Nothing is required: the record already carries a disposition,
+              and pressing Done on it is the agent saying so. */}
           <Button
             className="w-full"
-            disabled={!isFileable || !draft.dispositionCode || wrapUp.isPending}
+            disabled={!isFileable || wrapUp.isPending}
             onClick={complete}
           >
             {t('agent.done')}
@@ -818,6 +837,17 @@ function TodayCard() {
           </Row>
           <Row label={t('agent.occupancy')}>
             <span className="tabular font-semibold">{today.occupancyPct}%</span>
+          </Row>
+          {/* How much of the day's after-call work somebody actually looked
+              at. The platform files a record for every finished call, so the
+              denominator is the calls, not the agent's diligence. */}
+          <Row label={t('agent.wrapUpsConfirmed')}>
+            <span className="tabular font-semibold">
+              {today.confirmedPct}%
+              <span className="ml-1 font-normal text-muted-foreground">
+                {t('agent.ofOpened', { confirmed: today.wrapUpsConfirmed, opened: today.wrapUpsOpened })}
+              </span>
+            </span>
           </Row>
         </dl>
       )}

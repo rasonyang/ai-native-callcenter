@@ -89,8 +89,16 @@ export type Presence = components['schemas']['Presence']
 
 export type RosterEntry = components['schemas']['RosterEntry']
 
-/** What an agent files for the call they just finished. */
+/** What an agent confirms for the call they just finished. */
 export type WrapUpRequest = components['schemas']['WrapUpRequest']
+
+/**
+ * The after-call record waiting on this agent. The platform opened it when the
+ * call ended, so it exists before the agent has touched anything — and it
+ * survives a page reload, which is how a reopened cockpit knows there is still
+ * work to confirm.
+ */
+export type CurrentWrapUp = components['schemas']['CurrentWrapUp']
 
 export const agentApi = {
   presence: () => request<Presence>('/agent/presence'),
@@ -116,7 +124,13 @@ export const agentApi = {
     }),
 
   /**
-   * Completes after-call work, filing the disposition and note against the
+   * The record waiting to be confirmed, or undefined when there is none (the
+   * server answers 204).
+   */
+  currentWrapUp: () => request<CurrentWrapUp | undefined>('/agent/wrap-up'),
+
+  /**
+   * Confirms after-call work, applying whatever the agent changed against the
    * call the server says it was for. The call is never named here: the
    * platform knows which one the agent just finished.
    */

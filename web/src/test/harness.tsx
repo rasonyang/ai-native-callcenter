@@ -11,7 +11,7 @@ import type { ComponentProps, ReactElement } from 'react'
 import { vi } from 'vitest'
 
 import i18n from '@/lib/i18n'
-import type { CallSnapshot, Presence, WaitingCall } from '@/lib/api'
+import type { CallSnapshot, CurrentWrapUp, Presence, WaitingCall } from '@/lib/api'
 import type { Contact } from '@/lib/contacts'
 import type { CDR } from '@/lib/ledger'
 import type { AgentToday, Disposition } from '@/lib/ledger'
@@ -43,6 +43,8 @@ export interface Backend {
   dispositions: Disposition[]
   /** The agent's own numbers for the day. */
   today: AgentToday
+  /** The after-call record waiting to be confirmed, if any. */
+  currentWrapUp: CurrentWrapUp | null
   /** The contact book, matched by exact number the way the server does. */
   contacts: Contact[]
   /** The agent's own finished calls. */
@@ -102,6 +104,22 @@ export function dispositionsFixture(): Disposition[] {
   ]
 }
 
+/**
+ * The record the platform opened when the call ended: a default disposition,
+ * no note, nobody's confirmation.
+ */
+export function openWrapUpFixture(overrides: Partial<CurrentWrapUp> = {}): CurrentWrapUp {
+  return {
+    callId: CALL_ID,
+    dispositionCode: 'RESOLVED',
+    dispositionLabel: 'Resolved',
+    note: '',
+    isConfirmed: false,
+    createdAt: new Date().toISOString(),
+    ...overrides,
+  }
+}
+
 /** One agent's day, as the Today card receives it. */
 export function todayFixture(overrides: Partial<AgentToday> = {}): AgentToday {
   return {
@@ -112,6 +130,9 @@ export function todayFixture(overrides: Partial<AgentToday> = {}): AgentToday {
     avgHandleSec: 276,
     avgWrapUpSec: 42,
     occupancyPct: 78,
+    wrapUpsOpened: 23,
+    wrapUpsConfirmed: 21,
+    confirmedPct: 91,
     ...overrides,
   }
 }
@@ -207,6 +228,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     waiting: initial.waiting ?? [],
     dispositions: initial.dispositions ?? [],
     today: initial.today ?? todayFixture(),
+    currentWrapUp: initial.currentWrapUp ?? null,
     contacts: initial.contacts ?? [],
     myCDRs: initial.myCDRs ?? [],
     transcript: initial.transcript ?? [],
@@ -234,6 +256,41 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
           state: backend.transcriptState ?? 'LIVE' })
       }
       if (path === '/agent/presence') return json(backend.presence)
+      if (path === '/agent/wrap-up' && method === 'GET') {
+        // 204 is how the server says there is nothing to confirm.
+        return backend.currentWrapUp
+          ? json(backend.currentWrapUp)
+          : new Response(null, { status: 204 })
+      }
+      if (path === '/agent/wrap-up' && method === 'POST') {
+        // Confirming applies what was sent and marks the record looked at,
+        // which is what the next read returns — the screen has no other
+        // source for it.
+        const body = (typeof init.body === 'string' ? JSON.parse(init.body) : {}) as {
+          dispositionCode?: string
+          note?: string
+        }
+        if (backend.currentWrapUp) {
+          backend.currentWrapUp = {
+            ...backend.currentWrapUp,
+            dispositionCode: body.dispositionCode || backend.currentWrapUp.dispositionCode,
+            dispositionLabel:
+              (backend.dispositions.find((d) => d.code === body.dispositionCode) ?? {}).label ??
+              backend.currentWrapUp.dispositionLabel,
+            note: body.note ?? backend.currentWrapUp.note,
+            isConfirmed: true,
+          }
+        }
+        // Confirming ends after-call work, exactly as the server does.
+        backend.presence = {
+          ...backend.presence,
+          state: 'READY',
+          availability: 'READY',
+          reason: undefined,
+          wrapUpCallId: undefined,
+        }
+        return json(backend.presence)
+      }
       if (path === '/calls/mine') return json({ items: backend.calls })
       if (path === '/calls/waiting') return json({ items: backend.waiting })
       if (path.startsWith('/cdrs/mine')) {

@@ -144,7 +144,10 @@
     "occupancy": "工作占比",
     "lastContact": "最近联系",
     "wrapUpDuringCall": "现在就可以写小结；处理结果在通话结束后选择。",
-    "wrapUpNoNote": "没有小结。"
+    "wrapUpNoNote": "没有小结。",
+    "wrapUpBlocks": "请先完成话后处理。",
+    "wrapUpsConfirmed": "手动填写率",
+    "ofOpened": "{{confirmed}}/{{opened}}"
   },
   "supervisor": {
     "agent": "坐席",

@@ -11,6 +11,7 @@ import {
   cdrFixture,
   contactFixture,
   dispositionsFixture,
+  openWrapUpFixture,
   todayFixture,
   installBackend,
   presenceFixture,
@@ -227,9 +228,9 @@ describe('the rest of the cockpit', () => {
     const { api, user } = await renderCockpit({
       presence: inWrapUp(),
       dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
     })
-    await user.selectOptions(await screen.findByLabelText(/^disposition$/i), 'RESOLVED')
-    await user.click(screen.getByRole('button', { name: /^done$/i }))
+    await user.click(await screen.findByRole('button', { name: /^done$/i }))
     await waitFor(() =>
       expect(api.commands).toContainEqual(
         expect.objectContaining({ method: 'POST', path: '/agent/wrap-up' }),
@@ -245,6 +246,8 @@ describe('the rest of the cockpit', () => {
     expect(await screen.findByText('23')).toBeInTheDocument()
     // Durations read as a supervisor's report would write them, unpadded.
     expect(screen.getByText('4:36')).toBeInTheDocument()
+    expect(screen.getByText('91%')).toBeInTheDocument()
+    expect(screen.getByText('21/23')).toBeInTheDocument()
     expect(screen.getByText('0:42')).toBeInTheDocument()
     expect(screen.getByText('78%')).toBeInTheDocument()
   })
@@ -272,6 +275,7 @@ describe('after-call work', () => {
     const { api, user } = await renderCockpit({
       presence: inWrapUp(),
       dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
     })
 
     await user.selectOptions(await screen.findByLabelText(/^disposition$/i), 'FOLLOW_UP_REQUIRED')
@@ -291,38 +295,61 @@ describe('after-call work', () => {
 
   // The four the platform offers, in its order, with nothing invented here.
   it('offers the vocabulary the server serves', async () => {
-    await renderCockpit({ presence: inWrapUp(), dispositions: dispositionsFixture() })
+    await renderCockpit({
+      presence: inWrapUp(),
+      dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
+    })
 
     const codes = await screen.findByLabelText(/^disposition$/i)
     const labels = within(codes)
       .getAllByRole('option')
       .map((option) => option.textContent)
-    expect(labels).toEqual([
-      expect.stringMatching(/disposition…/i),
-      'Resolved',
-      'Follow-up Required',
-      'No Answer',
-      'Other',
-    ])
+    // No empty first option: the record already carries a disposition, and
+    // offering one would invite the agent to unset it.
+    expect(labels).toEqual(['Resolved', 'Follow-up Required', 'No Answer', 'Other'])
   })
 
-  // The disposition is required, so there is nothing to press until one is
-  // chosen — the server refuses without it either way.
-  it('will not finish until a disposition is chosen', async () => {
+  // The record is opened for the agent with the ordinary outcome already
+  // chosen, so the common call is one press. Nothing is required of them.
+  it('arrives already filled in and takes one press', async () => {
     const { api, user } = await renderCockpit({
       presence: inWrapUp(),
       dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
     })
 
-    const done = await screen.findByRole('button', { name: /^done$/i })
-    expect(done).toBeDisabled()
+    expect(await screen.findByLabelText(/^disposition$/i)).toHaveValue('RESOLVED')
+    const done = screen.getByRole('button', { name: /^done$/i })
+    expect(done).toBeEnabled()
 
-    await user.type(screen.getByLabelText(/wrap-up note/i), 'a note alone is not a filing')
-    expect(screen.getByRole('button', { name: /^done$/i })).toBeDisabled()
-    expect(api.commands).toHaveLength(0)
+    await user.click(done)
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/agent/wrap-up',
+          body: { dispositionCode: 'RESOLVED', note: '' },
+        }),
+      ),
+    )
+  })
 
-    await user.selectOptions(screen.getByLabelText(/^disposition$/i), 'OTHER')
-    expect(screen.getByRole('button', { name: /^done$/i })).toBeEnabled()
+  // The record is the server's, so a reopened cockpit finds the work waiting
+  // with whatever was already written on it.
+  it('restores the open record after a reload', async () => {
+    await renderCockpit({
+      presence: inWrapUp(),
+      dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture({
+        dispositionCode: 'NO_ANSWER',
+        dispositionLabel: 'No Answer',
+        note: 'typed before the page was refreshed',
+      }),
+    })
+
+    expect(await screen.findByLabelText(/^disposition$/i)).toHaveValue('NO_ANSWER')
+    expect(screen.getByLabelText(/wrap-up note/i)).toHaveValue('typed before the page was refreshed')
   })
 
   // The timer counts up from when the call ended, because nothing is going to
@@ -342,6 +369,7 @@ describe('after-call work', () => {
     const { api, user } = await renderCockpit({
       presence: presenceFixture({ availability: 'READY', wrapUpCallId: CALL_ID }),
       dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
     })
 
     await user.selectOptions(await screen.findByLabelText(/^disposition$/i), 'RESOLVED')
@@ -352,10 +380,40 @@ describe('after-call work', () => {
         expect.objectContaining({
           method: 'POST',
           path: '/agent/wrap-up',
-          body: { dispositionCode: 'RESOLVED' },
+          body: { dispositionCode: 'RESOLVED', note: '' },
         }),
       ),
     )
+  })
+
+  // The block is guidance, and it lives on the server's answer rather than on
+  // a screen's memory: reloading the page is not a way past it.
+  it('holds the agent out of the next call until the record is confirmed', async () => {
+    const { user } = await renderCockpit({
+      presence: presenceFixture({ availability: 'READY', wrapUpCallId: CALL_ID }),
+      dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
+    })
+
+    // Dialling out would start another conversation with this one unwritten.
+    const number = await screen.findByPlaceholderText(/customer number/i)
+    expect(number).toBeDisabled()
+    expect(screen.getAllByText(/finish the wrap-up first/i).length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: /^done$/i }))
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText(/customer number/i)).toBeEnabled(),
+    )
+    expect(screen.queryByText(/finish the wrap-up first/i)).toBeNull()
+  })
+
+  it('leaves the dialler alone when nothing is waiting', async () => {
+    await renderCockpit({
+      presence: presenceFixture({ availability: 'READY' }),
+      currentWrapUp: null,
+    })
+    expect(await screen.findByPlaceholderText(/customer number/i)).toBeEnabled()
+    expect(screen.queryByText(/finish the wrap-up first/i)).toBeNull()
   })
 
   it('offers nothing to file when no call has been handled', async () => {
@@ -424,12 +482,12 @@ describe('after-call work', () => {
     expect(screen.getByRole('button', { name: /^done$/i })).toBeDisabled()
   })
 
-  // The filing is read back at once. Waiting for the ledger would blank the
-  // card for a moment, which reads as work lost.
-  it('shows what was just filed without waiting for the ledger', async () => {
+  // Once confirmed, the record itself says so, and the card reads it back.
+  it('shows what was confirmed as soon as the record says so', async () => {
     const { user } = await renderCockpit({
       presence: inWrapUp(),
       dispositions: dispositionsFixture(),
+      currentWrapUp: openWrapUpFixture(),
       myCDRs: [],
     })
 
@@ -454,6 +512,7 @@ describe('after-call work', () => {
             dispositionCode: 'FOLLOW_UP_REQUIRED',
             dispositionLabel: 'Follow-up Required',
             note: 'calling them back tomorrow',
+            isConfirmed: true,
             createdAt: new Date().toISOString(),
           },
         }),
