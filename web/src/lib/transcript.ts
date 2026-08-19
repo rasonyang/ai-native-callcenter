@@ -142,14 +142,21 @@ export function useCallTranscript(callId: string | undefined, streamStatus: Stre
   // rendering, so the merge can drop the ones the snapshot also carries.
   const buffer = useRef<Line[]>([])
   const isSnapshotted = useRef(false)
+  // The callId this transcript was last built for. Ending a call clears it
+  // from the roster and callId goes to undefined, but the agent still wants
+  // to read what was just said — so that transition must not clear the
+  // panel. Only a new call, with a callId of its own, replaces it.
+  const builtFor = useRef<string | undefined>(undefined)
 
   useEffect(() => {
+    if (!callId || callId === builtFor.current) return
     buffer.current = []
     isSnapshotted.current = false
     isStateFromStream.current = false
     setLines([])
     setReported('IDLE')
-    if (callId) hadCall.current = true
+    hadCall.current = true
+    builtFor.current = callId
   }, [callId])
 
   useEventListener('CALL_TRANSCRIPT', (event) => {

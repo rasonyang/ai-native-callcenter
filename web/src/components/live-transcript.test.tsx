@@ -284,6 +284,88 @@ describe('every transcription state renders', () => {
   })
 })
 
+// A call ending clears it from the agent's roster, so callId goes to
+// undefined — but the agent still wants to read what was just said. Only a
+// new call, with a callId of its own, may take the panel away from them.
+describe('a call ending', () => {
+  const SECOND_CALL_ID = '00000000-0000-4000-8000-0000000000c2'
+
+  it('keeps the transcript on screen until the next call replaces it', async () => {
+    const listeners = new Map<EventType | '*', Listener[]>()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes(`/calls/${CALL_ID}/transcript`)) {
+          return new Response(
+            JSON.stringify({
+              items: [
+                { seq: 1, occurredAt: new Date().toISOString(), speaker: 'CUSTOMER',
+                  kind: 'TEXT', content: { text: 'the last thing said' }, offsetMs: 0,
+                  source: 'ASR', utteranceId: 'u-1' },
+              ],
+              nextSinceSeq: 0, isLive: true, state: 'STOPPED',
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          )
+        }
+        return new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      }),
+    )
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(
+      <QueryClientProvider client={client}>
+        <I18nextProvider i18n={i18n}>
+          <EventStreamProvider value={{ status: 'connected', listeners }}>
+            <LiveTranscript
+              callId={CALL_ID}
+              myAgentId={AGENT_ID}
+              streamStatus="connected"
+            />
+          </EventStreamProvider>
+        </I18nextProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('the last thing said')).toBeInTheDocument()
+
+    // The call ends: the cockpit drops it from calls/mine and passes no callId.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <I18nextProvider i18n={i18n}>
+          <EventStreamProvider value={{ status: 'connected', listeners }}>
+            <LiveTranscript callId={undefined} myAgentId={AGENT_ID} streamStatus="connected" />
+          </EventStreamProvider>
+        </I18nextProvider>
+      </QueryClientProvider>,
+    )
+
+    expect(await screen.findByText('Call ended')).toBeInTheDocument()
+    expect(screen.getByText('the last thing said')).toBeInTheDocument()
+
+    // A new call rings in with its own callId — only now does the panel reset.
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <I18nextProvider i18n={i18n}>
+          <EventStreamProvider value={{ status: 'connected', listeners }}>
+            <LiveTranscript
+              callId={SECOND_CALL_ID}
+              myAgentId={AGENT_ID}
+              streamStatus="connected"
+            />
+          </EventStreamProvider>
+        </I18nextProvider>
+      </QueryClientProvider>,
+    )
+
+    await waitFor(() => expect(screen.queryByText('the last thing said')).toBeNull())
+  })
+})
+
 // The snapshot may seed and may never overwrite. It is a past answer, and the
 // shell refetches every query on each stream reconnect, so a mid-call refetch
 // landing on top of streamed lines is the ordinary path rather than an edge
