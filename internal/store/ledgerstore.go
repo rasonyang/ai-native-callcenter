@@ -69,15 +69,13 @@ type CDR struct {
 	WrapUp *WrapUp `json:"wrapUp,omitempty"`
 }
 
-// WrapUp is one agent's after-call work for one call. Labels are captured at
+// WrapUp is one agent's after-call work for one call. The label is captured at
 // filing time so the record survives later edits to the vocabulary.
 type WrapUp struct {
 	CallID           uuid.UUID `json:"-"`
 	AgentID          uuid.UUID `json:"agentId"`
 	DispositionCode  string    `json:"dispositionCode"`
 	DispositionLabel string    `json:"dispositionLabel"`
-	CategoryCode     string    `json:"categoryCode"`
-	CategoryLabel    string    `json:"categoryLabel"`
 	Note             string    `json:"note"`
 	CreatedAt        time.Time `json:"createdAt"`
 }
@@ -451,40 +449,23 @@ func transcriptLines(rows []queries.Transcript) []TranscriptLine {
 // After-call work: the vocabulary, and what agents file against calls.
 //
 
-// Disposition is one code an agent can file a call under.
+// Disposition is one word an agent can file a call under.
 type Disposition struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
 }
 
-// DispositionCategory is a group of dispositions, in display order.
-type DispositionCategory struct {
-	Code         string        `json:"code"`
-	Label        string        `json:"label"`
-	Dispositions []Disposition `json:"dispositions"`
-}
-
-// ListDispositions reads the enabled vocabulary grouped by category, in the
-// order agents see it. Categories with nothing enabled are omitted.
-func (l *LedgerStore) ListDispositions(ctx context.Context) ([]DispositionCategory, error) {
-	categories, err := l.q.ListDispositionCategories(ctx)
+// ListDispositions reads the enabled vocabulary in the order agents see it.
+// One flat list: with a handful of words there is nothing to group, and a
+// grouping is one more thing to navigate before reaching the word they want.
+func (l *LedgerStore) ListDispositions(ctx context.Context) ([]Disposition, error) {
+	rows, err := l.q.ListEnabledDispositions(ctx)
 	if err != nil {
 		return nil, err
 	}
-	dispositions, err := l.q.ListEnabledDispositions(ctx)
-	if err != nil {
-		return nil, err
-	}
-	byCategory := make(map[string][]Disposition, len(categories))
-	for _, d := range dispositions {
-		byCategory[d.CategoryCode] = append(byCategory[d.CategoryCode], Disposition{Code: d.Code, Label: d.Label})
-	}
-	out := make([]DispositionCategory, 0, len(categories))
-	for _, c := range categories {
-		if len(byCategory[c.Code]) == 0 {
-			continue
-		}
-		out = append(out, DispositionCategory{Code: c.Code, Label: c.Label, Dispositions: byCategory[c.Code]})
+	out := make([]Disposition, 0, len(rows))
+	for _, d := range rows {
+		out = append(out, Disposition{Code: d.Code, Label: d.Label})
 	}
 	return out, nil
 }
@@ -493,23 +474,21 @@ func (l *LedgerStore) ListDispositions(ctx context.Context) ([]DispositionCatego
 // disabled: an agent cannot file under a word that is not on the list.
 var ErrUnknownDisposition = errors.New("unknown disposition")
 
-// FileWrapUp records one agent's after-call work for one call. An empty code
-// files a note alone; a code is resolved against the vocabulary and its labels
-// captured with the row. Filing twice replaces.
+// FileWrapUp records one agent's after-call work for one call. The code is
+// resolved against the vocabulary and its label captured with the row, so the
+// record keeps the word it was filed under. Filing twice replaces.
 func (l *LedgerStore) FileWrapUp(ctx context.Context, callID, agentID uuid.UUID, dispositionCode, note string) (WrapUp, error) {
-	arg := queries.UpsertWrapUpParams{CallID: callID, AgentID: agentID, Note: note}
-	if dispositionCode != "" {
-		d, err := l.q.GetDisposition(ctx, dispositionCode)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return WrapUp{}, fmt.Errorf("%w: %q", ErrUnknownDisposition, dispositionCode)
-		}
-		if err != nil {
-			return WrapUp{}, err
-		}
-		arg.DispositionCode, arg.DispositionLabel = d.Code, d.Label
-		arg.CategoryCode, arg.CategoryLabel = d.CategoryCode, d.CategoryLabel
+	d, err := l.q.GetDisposition(ctx, dispositionCode)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return WrapUp{}, fmt.Errorf("%w: %q", ErrUnknownDisposition, dispositionCode)
 	}
-	row, err := l.q.UpsertWrapUp(ctx, arg)
+	if err != nil {
+		return WrapUp{}, err
+	}
+	row, err := l.q.UpsertWrapUp(ctx, queries.UpsertWrapUpParams{
+		CallID: callID, AgentID: agentID, Note: note,
+		DispositionCode: d.Code, DispositionLabel: d.Label,
+	})
 	if err != nil {
 		return WrapUp{}, err
 	}
@@ -520,7 +499,6 @@ func wrapUpFromRow(row queries.WrapUp) WrapUp {
 	return WrapUp{
 		CallID: row.CallID, AgentID: row.AgentID,
 		DispositionCode: row.DispositionCode, DispositionLabel: row.DispositionLabel,
-		CategoryCode: row.CategoryCode, CategoryLabel: row.CategoryLabel,
 		Note: row.Note, CreatedAt: row.CreatedAt.Time,
 	}
 }
@@ -873,6 +851,60 @@ func (l *LedgerStore) ReportByQueue(ctx context.Context, from, to time.Time) ([]
 		})
 	}
 	return out, nil
+}
+
+// AgentDay is one agent's own day: what they handled, and what the time went
+// on. The totals ride along with the averages so every number on the screen
+// can be checked against them rather than believed.
+type AgentDay struct {
+	CallsHandled int `json:"callsHandled"`
+	TalkSec      int `json:"talkSec"`
+	WrapUpSec    int `json:"wrapUpSec"`
+	SignedInSec  int `json:"signedInSec"`
+	AvgHandleSec int `json:"avgHandleSec"`
+	AvgWrapUpSec int `json:"avgWrapUpSec"`
+	OccupancyPct int `json:"occupancyPct"`
+}
+
+// ReportAgentDay aggregates one agent's window from the ledger and their
+// presence history.
+//
+// Handle time is talk plus after-call work, which is what the agent was busy
+// with; occupancy is that against the time they were signed in at all. The
+// averages are derived here rather than in SQL so the arithmetic — including
+// what happens on a day with no calls — is testable without a database.
+func (l *LedgerStore) ReportAgentDay(ctx context.Context, agentID uuid.UUID, from, to time.Time) (AgentDay, error) {
+	row, err := l.q.ReportAgentToday(ctx, queries.ReportAgentTodayParams{
+		FromAt: stamp(from), ToAt: stamp(to), AgentID: &agentID,
+	})
+	if err != nil {
+		return AgentDay{}, err
+	}
+	return agentDay(int(row.CallsHandled), int(row.TalkSec), int(row.WrapUpSec),
+		int(row.WrapUps), int(row.SignedInSec)), nil
+}
+
+// agentDay derives the averages. Separated from the query because every
+// interesting case is a division by something that can be zero.
+func agentDay(callsHandled, talkSec, wrapUpSec, wrapUps, signedInSec int) AgentDay {
+	day := AgentDay{
+		CallsHandled: callsHandled, TalkSec: talkSec,
+		WrapUpSec: wrapUpSec, SignedInSec: signedInSec,
+	}
+	busy := talkSec + wrapUpSec
+	if callsHandled > 0 {
+		day.AvgHandleSec = busy / callsHandled
+	}
+	if wrapUps > 0 {
+		day.AvgWrapUpSec = wrapUpSec / wrapUps
+	}
+	if signedInSec > 0 {
+		// Busy can exceed signed-in time by a second or two at the edges of
+		// the window — a call that started before it, a rounded interval — and
+		// an occupancy over 100% reads as a bug rather than as rounding.
+		day.OccupancyPct = min(100, busy*100/signedInSec)
+	}
+	return day
 }
 
 // ReportDaily aggregates per day.

@@ -669,8 +669,7 @@ type Agent struct {
 	IsAutoAnswer       bool                `json:"isAutoAnswer"`
 
 	// UserID The account this agent identity belongs to. One user has at most one agent identity.
-	UserID        openapi_types.UUID `json:"userId"`
-	WrapUpTimeSec int                `json:"wrapUpTimeSec"`
+	UserID openapi_types.UUID `json:"userId"`
 }
 
 // AgentLoginRequest Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to.
@@ -688,6 +687,30 @@ type AgentNotReadyRequest struct {
 // AgentState Presence FSM state.
 type AgentState string
 
+// AgentToday One agent's own day, over the window (default: local midnight to now). The totals are served beside the averages so every number on the screen can be checked against them.
+type AgentToday struct {
+	// AvgHandleSec (talkSec + wrapUpSec) / callsHandled — the average handle time. 0 when no call was handled.
+	AvgHandleSec int `json:"avgHandleSec"`
+
+	// AvgWrapUpSec wrapUpSec / the number of wrap-ups begun in the window. 0 when there were none.
+	AvgWrapUpSec int `json:"avgWrapUpSec"`
+
+	// CallsHandled Calls this agent answered, counted from the ledger's primary agent.
+	CallsHandled int `json:"callsHandled"`
+
+	// OccupancyPct (talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window.
+	OccupancyPct int `json:"occupancyPct"`
+
+	// SignedInSec Total time signed in, whatever the state; the denominator of occupancy.
+	SignedInSec int `json:"signedInSec"`
+
+	// TalkSec Total talk time on those calls.
+	TalkSec int `json:"talkSec"`
+
+	// WrapUpSec Total after-call work, from the presence history; an open wrap-up counts up to now.
+	WrapUpSec int `json:"wrapUpSec"`
+}
+
 // AgentWrite Create or update an agent identity. An extension may be bound to at most one agent; binding one that is taken is refused with CONFLICT.
 type AgentWrite struct {
 	// CallcenterName Reaches the switch as an identifier: no spaces, @ or quotes.
@@ -699,9 +722,6 @@ type AgentWrite struct {
 
 	// UserID Required on create and ignored on update: an agent identity never moves between accounts.
 	UserID *openapi_types.UUID `json:"userId,omitempty"`
-
-	// WrapUpTimeSec Seconds of after-call work. 0 takes the default of 30.
-	WrapUpTimeSec *int `json:"wrapUpTimeSec,omitempty"`
 }
 
 // Availability The single word that answers: could this agent take a call, and if not, why.
@@ -992,22 +1012,15 @@ type DialResponse struct {
 	CallID openapi_types.UUID `json:"callId"`
 }
 
-// Disposition One code an agent can file a call under.
+// Disposition One word an agent can file a call under. The code is stable; the label is what agents read and is the operator's to change.
 type Disposition struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
 }
 
-// DispositionCatalog The whole vocabulary, grouped. Empty categories are omitted.
+// DispositionCatalog The wrap-up vocabulary: every enabled disposition, in display order.
 type DispositionCatalog struct {
-	Categories []DispositionCategory `json:"categories"`
-}
-
-// DispositionCategory A group of dispositions, in the order agents see them.
-type DispositionCategory struct {
-	Code         string        `json:"code"`
-	Dispositions []Disposition `json:"dispositions"`
-	Label        string        `json:"label"`
+	Items []Disposition `json:"items"`
 }
 
 // Error The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users.
@@ -1137,7 +1150,7 @@ type PartySnapshot struct {
 // PartyState defines model for PartyState.
 type PartyState string
 
-// Presence One agent's presence.
+// Presence One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.
 type Presence struct {
 	// Availability The single word that answers: could this agent take a call, and if not, why.
 	Availability    Availability `json:"availability"`
@@ -1150,9 +1163,8 @@ type Presence struct {
 	// State Presence FSM state.
 	State AgentState `json:"state"`
 
-	// WrapUpCallID The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR.
+	// WrapUpCallID The call the agent is doing after-call work for. Set while availability is WRAP_UP and kept until the next call is wrapped, so a filing made after the agent has moved on still lands on the right call.
 	WrapUpCallID *openapi_types.UUID `json:"wrapUpCallId,omitempty"`
-	WrapUpEndsAt *time.Time          `json:"wrapUpEndsAt,omitempty"`
 }
 
 // QualityReview A reviewer's scoring of one recording.
@@ -1336,11 +1348,9 @@ type RosterEntry struct {
 	Reason *NotReadyReason `json:"reason,omitempty"`
 
 	// State Presence FSM state.
-	State         AgentState         `json:"state"`
-	UserID        openapi_types.UUID `json:"userId"`
-	Username      string             `json:"username"`
-	WrapUpEndsAt  *time.Time         `json:"wrapUpEndsAt,omitempty"`
-	WrapUpTimeSec int                `json:"wrapUpTimeSec"`
+	State    AgentState         `json:"state"`
+	UserID   openapi_types.UUID `json:"userId"`
+	Username string             `json:"username"`
 }
 
 // RosterList defines model for RosterList.
@@ -1484,18 +1494,16 @@ type WaitingCallList struct {
 // WrapUp One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary.
 type WrapUp struct {
 	AgentID          openapi_types.UUID `json:"agentId"`
-	CategoryCode     string             `json:"categoryCode"`
-	CategoryLabel    string             `json:"categoryLabel"`
 	CreatedAt        time.Time          `json:"createdAt"`
 	DispositionCode  string             `json:"dispositionCode"`
 	DispositionLabel string             `json:"dispositionLabel"`
 	Note             string             `json:"note"`
 }
 
-// WrapUpRequest What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work.
+// WrapUpRequest What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave.
 type WrapUpRequest struct {
 	// DispositionCode A code from GET /dispositions.
-	DispositionCode *string `json:"dispositionCode,omitempty"`
+	DispositionCode string  `json:"dispositionCode"`
 	Note            *string `json:"note,omitempty"`
 }
 
@@ -1600,6 +1608,15 @@ type StreamEventsParams struct {
 type GetReportDailyParams struct {
 	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
 	To   *time.Time `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetMyDayParams defines parameters for GetMyDay.
+type GetMyDayParams struct {
+	// From RFC 3339 window start; defaults to local midnight.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To RFC 3339 window end; defaults to now.
+	To *time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
 // GetReportOverviewParams defines parameters for GetReportOverview.
@@ -1862,6 +1879,9 @@ type ServerInterface interface {
 	// GetReportDaily Per-day aggregates
 	// (GET /reports/daily)
 	GetReportDaily(w http.ResponseWriter, r *http.Request, params GetReportDailyParams)
+	// GetMyDay The caller's own day
+	// (GET /reports/me)
+	GetMyDay(w http.ResponseWriter, r *http.Request, params GetMyDayParams)
 	// GetReportOverview KPI aggregates
 	// (GET /reports/overview)
 	GetReportOverview(w http.ResponseWriter, r *http.Request, params GetReportOverviewParams)
@@ -2237,6 +2257,12 @@ func (_ Unimplemented) CreateRecordingReview(w http.ResponseWriter, r *http.Requ
 // GetReportDaily Per-day aggregates
 // (GET /reports/daily)
 func (_ Unimplemented) GetReportDaily(w http.ResponseWriter, r *http.Request, params GetReportDailyParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetMyDay The caller's own day
+// (GET /reports/me)
+func (_ Unimplemented) GetMyDay(w http.ResponseWriter, r *http.Request, params GetMyDayParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3906,6 +3932,52 @@ func (siw *ServerInterfaceWrapper) GetReportDaily(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetMyDay operation middleware
+func (siw *ServerInterfaceWrapper) GetMyDay(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMyDayParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMyDay(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetReportOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetReportOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -4331,6 +4403,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/reports/daily", wrapper.GetReportDaily)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/reports/me", wrapper.GetMyDay)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/reports/overview", wrapper.GetReportOverview)

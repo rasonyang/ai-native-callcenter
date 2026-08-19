@@ -24,7 +24,7 @@ func fixedPlan() Plan {
 
 // The vocabulary a real installation has; the plan only ever files codes it
 // was handed.
-var demoDispositions = []string{"ANSWERED_QUESTION", "ISSUE_FIXED", "ESCALATED"}
+var demoDispositions = []string{"RESOLVED", "FOLLOW_UP_REQUIRED", "OTHER"}
 
 // A demo whose agent screens are empty demos nothing: every call an agent
 // handled carries a wrap-up, and the callers who ring most have names.

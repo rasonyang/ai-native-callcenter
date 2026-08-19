@@ -237,6 +237,9 @@ func (s *Server) router() chi.Router {
 					// The wrap-up vocabulary is readable by anyone who might
 					// have to file one or read what was filed.
 					private.Get("/dispositions", op.ListDispositions)
+					// An agent's own day. Everything under /reports is
+					// supervision; this one is theirs.
+					private.With(requireAgentRole).Get("/reports/me", op.GetMyDay)
 
 					// Finished calls and their artifacts are supervision:
 					// reviewing what happened is not an agent task.

@@ -79,20 +79,30 @@ func agentRequest(method, target, body string) *http.Request {
 		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}))
 }
 
-// An empty wrap-up is a legitimate completion: the agent had nothing to file
-// and simply wants the next call.
-func TestCompletingAnEmptyWrapUpJustGoesReady(t *testing.T) {
-	svc := &recordingAgents{}
+// The disposition is required, and the server is where that is true. A screen
+// can disable its own button; an endpoint that accepted the filing without one
+// would let after-call work end with nothing said about the call.
+func TestAWrapUpWithNoDispositionIsRefused(t *testing.T) {
+	svc := &recordingAgents{wrapUpCall: uuid.New(), hasWrapUp: true}
 	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 
-	w := httptest.NewRecorder()
-	srv.AgentWrapUp(w, agentRequest(http.MethodPost, "/api/v1/agent/wrap-up", `{}`))
+	for _, body := range []string{`{}`, `{"dispositionCode":"  "}`, `{"note":"just a note"}`} {
+		w := httptest.NewRecorder()
+		srv.AgentWrapUp(w, agentRequest(http.MethodPost, "/api/v1/agent/wrap-up", body))
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("%s: status = %d, want 422: %s", body, w.Code, w.Body)
+		}
+		var parsed struct{ Error APIError }
+		if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		if parsed.Error.Params["field"] != "dispositionCode" {
+			t.Errorf("%s: params = %v, want the offending field named", body, parsed.Error.Params)
+		}
 	}
-	if svc.endedWrapUp != 1 {
-		t.Errorf("after-call work ended %d times, want once", svc.endedWrapUp)
+	if svc.endedWrapUp != 0 {
+		t.Error("after-call work ended although nothing was filed")
 	}
 }
 
@@ -155,6 +165,47 @@ func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
 	if len(body.Items) != 1 || body.Items[0].QueueName != "support-en" ||
 		body.Items[0].FromNumber != "13800138000" {
 		t.Errorf("items = %+v, want the waiting caller with their queue", body.Items)
+	}
+}
+
+// The agent's own day is theirs: the endpoint takes no agent, so there is
+// nothing to point at a colleague, and the aggregates over somebody else's day
+// stay behind the supervisor guard on /reports.
+func TestTheDayIsTheCallersOwn(t *testing.T) {
+	srv := New(config.Config{Env: "dev"}, Deps{
+		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
+		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{},
+		Outbound: stubOutbound{},
+	})
+
+	guard := reflect.ValueOf(requireAgentRole).Pointer()
+	supervisor := reflect.ValueOf(requireSupervisorRole).Pointer()
+	var guarded, supervised bool
+	err := chi.Walk(srv.router(), func(method, route string, _ http.Handler,
+		middlewares ...func(http.Handler) http.Handler) error {
+		if method+" "+route != "GET /api/v1/reports/me" {
+			return nil
+		}
+		for _, mw := range middlewares {
+			switch reflect.ValueOf(mw).Pointer() {
+			case guard:
+				guarded = true
+			case supervisor:
+				supervised = true
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !guarded {
+		t.Error("GET /reports/me is not behind the agent guard, yet it answers from " +
+			"the session's agent identity")
+	}
+	if supervised {
+		t.Error("GET /reports/me is behind the supervisor guard; an agent could not " +
+			"read their own day")
 	}
 }
 

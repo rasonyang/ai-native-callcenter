@@ -51,7 +51,6 @@ type Profile struct {
 	UserID         uuid.UUID
 	CallcenterName string
 	DisplayName    string
-	WrapUpTimeSec  int
 	IsAutoAnswer   bool
 	// ExtensionNumber is the phone this agent is bound to in configuration.
 	// The binding is static: an agent signs in at their own extension and
@@ -70,7 +69,6 @@ type RosterEntry struct {
 	Availability Availability `json:"availability"`
 	Extension    string       `json:"extensionNumber,omitempty"`
 	EnteredAt    time.Time    `json:"enteredAt"`
-	WrapUpEndsAt *time.Time   `json:"wrapUpEndsAt,omitempty"`
 	WrapUpCallID *uuid.UUID   `json:"wrapUpCallId,omitempty"`
 	IsOnCall     bool         `json:"isOnCall"`
 	IsRegistered bool         `json:"isRegistered"`
@@ -79,7 +77,6 @@ type RosterEntry struct {
 	// now; DefaultExtension is the one bound to them, which survives sign-out
 	// and is what administration edits.
 	CallcenterName         string     `json:"callcenterName"`
-	WrapUpTimeSec          int        `json:"wrapUpTimeSec"`
 	IsAutoAnswer           bool       `json:"isAutoAnswer"`
 	DefaultExtensionID     *uuid.UUID `json:"defaultExtensionId,omitempty"`
 	DefaultExtensionNumber string     `json:"defaultExtensionNumber,omitempty"`
@@ -91,7 +88,6 @@ type AgentConfig struct {
 	AgentID            uuid.UUID  `json:"agentId"`
 	UserID             uuid.UUID  `json:"userId"`
 	CallcenterName     string     `json:"callcenterName"`
-	WrapUpTimeSec      int        `json:"wrapUpTimeSec"`
 	IsAutoAnswer       bool       `json:"isAutoAnswer"`
 	DefaultExtensionID *uuid.UUID `json:"defaultExtensionId,omitempty"`
 }
@@ -134,9 +130,6 @@ type Service struct {
 	live map[uuid.UUID]*Presence
 	// devices maps extension number to its observed reachability.
 	devices map[string]deviceState
-	// wrapUpGen guards against a wrap-up timer that fires after the agent has
-	// already chosen something else.
-	wrapUpGen map[uuid.UUID]uint64
 	// lastWrapUpCall is the call each agent most recently began after-call
 	// work for. It outlives the wrap-up window on purpose: an agent whose
 	// timer ran out while they were still typing the note has not lost the
@@ -168,7 +161,6 @@ func NewService(store Store, switchCtl SwitchControl, pub Publisher) *Service {
 		pub:            pub,
 		live:           make(map[uuid.UUID]*Presence),
 		devices:        make(map[string]deviceState),
-		wrapUpGen:      make(map[uuid.UUID]uint64),
 		lastWrapUpCall: make(map[uuid.UUID]uuid.UUID),
 		now:            func() time.Time { return time.Now().UTC() },
 	}
@@ -248,46 +240,23 @@ func (s *Service) NotReady(ctx context.Context, agentID uuid.UUID, reason Reason
 	})
 }
 
-// StartWrapUp begins after-call work for a call the agent just finished and
-// schedules its expiry.
+// StartWrapUp begins after-call work for a call the agent just finished.
 //
-// The call is remembered whether or not the window is longer than zero: an
-// agent configured with no wrap-up time still handled the call, and may still
-// file a disposition for it from the cockpit.
+// It ends when the agent files it and at no other time. Nothing here schedules
+// a release: the switch mirror takes them out of routing for as long as they
+// are in it, which is what "do not deliver new calls during after-call work"
+// means, and a timer that let go early would deliver one to somebody still
+// writing up the last.
 func (s *Service) StartWrapUp(ctx context.Context, agentID, callID uuid.UUID) (Presence, error) {
-	profile, err := s.store.AgentProfile(ctx, agentID)
-	if err != nil {
-		return Presence{}, fmt.Errorf("%w: %w", ErrUnknownAgent, err)
-	}
-	wrapUp := time.Duration(profile.WrapUpTimeSec) * time.Second
-
 	if callID != uuid.Nil {
 		s.mu.Lock()
 		s.lastWrapUpCall[agentID] = callID
 		s.mu.Unlock()
 	}
 
-	// A wrap-up of zero length is a READY transition, and that is the event
-	// it publishes: a screen told NOT_READY for a state that never existed
-	// would sit on it.
-	eventType := events.TypeAgentNotReady
-	if wrapUp <= 0 {
-		eventType = events.TypeAgentReady
-	}
-	p, err := s.change(ctx, agentID, eventType, func(p *Presence) error {
-		return p.StartWrapUp(callID, wrapUp, s.now())
+	return s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
+		return p.StartWrapUp(callID, s.now())
 	})
-	if err != nil || wrapUp <= 0 {
-		return p, err
-	}
-
-	s.mu.Lock()
-	s.wrapUpGen[agentID]++
-	generation := s.wrapUpGen[agentID]
-	s.mu.Unlock()
-
-	time.AfterFunc(wrapUp, func() { s.expireWrapUp(agentID, generation) })
-	return p, nil
 }
 
 // BeginAfterCallWork starts an agent's wrap-up for a call whose agent leg has
@@ -304,38 +273,8 @@ func (s *Service) BeginAfterCallWork(ctx context.Context, agentID, callID uuid.U
 	}
 }
 
-// expireWrapUp returns an agent to ready when their wrap-up window ends. A
-// timer whose generation is stale belongs to a superseded wrap-up and is
-// ignored, so an agent who chose lunch mid-wrap-up is never dragged back.
-func (s *Service) expireWrapUp(agentID uuid.UUID, generation uint64) {
-	ctx := context.Background()
-
-	s.mu.Lock()
-	if s.wrapUpGen[agentID] != generation {
-		s.mu.Unlock()
-		return
-	}
-	p := s.presenceLocked(agentID)
-	if !p.ExpireWrapUp(s.now()) {
-		s.mu.Unlock()
-		return
-	}
-	snapshot := *p
-	s.mu.Unlock()
-
-	if err := s.persist(ctx, agentID, snapshot); err != nil {
-		// A timer cannot fail a request, so the in-memory state stands and
-		// the discrepancy is logged rather than lost.
-		slog.ErrorContext(ctx, "wrap-up expiry not recorded", "agentId", agentID, "error", err)
-	}
-	if profile, err := s.store.AgentProfile(ctx, agentID); err == nil {
-		s.mirrorStatus(profile, snapshot)
-		s.publish(ctx, events.TypeAgentReady, profile, snapshot)
-	}
-}
-
 // WrapUpCall reports the call the agent most recently began after-call work
-// for. It stays addressable after the window has closed, so a late filing
+// for. It stays addressable after they have moved on, so a filing made late
 // still lands on the right call; it is forgotten at sign-out.
 func (s *Service) WrapUpCall(agentID uuid.UUID) (uuid.UUID, bool) {
 	s.mu.Lock()
@@ -467,7 +406,6 @@ func (s *Service) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
 	}
 	s.mu.Lock()
 	delete(s.live, agentID)
-	delete(s.wrapUpGen, agentID)
 	delete(s.lastWrapUpCall, agentID)
 	s.mu.Unlock()
 	return nil
@@ -485,12 +423,6 @@ func normalizeAgentConfig(cfg AgentConfig) (AgentConfig, error) {
 		if r == '@' || r == ' ' || r == '\'' {
 			return cfg, fmt.Errorf("%w: callcenterName cannot contain spaces, @ or quotes", ErrValidation)
 		}
-	}
-	if cfg.WrapUpTimeSec < 0 {
-		return cfg, fmt.Errorf("%w: wrapUpTimeSec cannot be negative", ErrValidation)
-	}
-	if cfg.WrapUpTimeSec == 0 {
-		cfg.WrapUpTimeSec = 30
 	}
 	return cfg, nil
 }
@@ -547,9 +479,6 @@ func (s *Service) Restore(ctx context.Context) error {
 	for _, row := range rows {
 		p := s.presenceLocked(row.AgentID)
 		p.State, p.Reason, p.ExtensionNumber, p.EnteredAt = row.State, row.Reason, row.Extension, row.EnteredAt
-		if row.WrapUpEndsAt != nil {
-			p.WrapUpEndsAt = *row.WrapUpEndsAt
-		}
 		if row.WrapUpCallID != nil {
 			id := *row.WrapUpCallID
 			p.WrapUpCallID = &id
@@ -600,8 +529,6 @@ func (s *Service) change(ctx context.Context, agentID uuid.UUID, eventType event
 		s.mu.Unlock()
 		return before, err
 	}
-	// Any explicit change supersedes a running wrap-up timer.
-	s.wrapUpGen[agentID]++
 	snapshot := *p
 	s.mu.Unlock()
 
@@ -688,9 +615,6 @@ func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p
 	}
 	if p.ExtensionNumber != "" {
 		payload["extensionNumber"] = p.ExtensionNumber
-	}
-	if !p.WrapUpEndsAt.IsZero() {
-		payload["wrapUpEndsAt"] = p.WrapUpEndsAt
 	}
 	if p.WrapUpCallID != nil {
 		payload["wrapUpCallId"] = *p.WrapUpCallID

@@ -78,13 +78,44 @@ func (s *Server) ListMyCDRs(w http.ResponseWriter, r *http.Request, params api.L
 
 // ListDispositions serves the after-call-work vocabulary.
 func (s *Server) ListDispositions(w http.ResponseWriter, r *http.Request) {
-	categories, err := s.ledger.ListDispositions(r.Context())
+	items, err := s.ledger.ListDispositions(r.Context())
 	if err != nil {
 		slog.ErrorContext(r.Context(), "cannot read the disposition vocabulary", "error", err)
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list dispositions", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
+// GetMyDay serves the caller's own numbers for the day.
+//
+// The agent is the session. Somebody else's day is supervision, and the
+// aggregates for that live under /reports with a supervisor's guard on them.
+func (s *Server) GetMyDay(w http.ResponseWriter, r *http.Request, params api.GetMyDayParams) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	// Today, unless asked otherwise: from local midnight to now rather than to
+	// midnight, because occupancy over a day that has not happened yet is not
+	// a number anybody wants to read.
+	now := time.Now()
+	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	to := now
+	if params.From != nil {
+		from = *params.From
+	}
+	if params.To != nil {
+		to = *params.To
+	}
+
+	day, err := s.ledger.ReportAgentDay(r.Context(), agentID, from, to)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot aggregate an agent's day", "error", err, "agentId", agentID)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot aggregate", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, day)
 }
 
 // GetCDR returns one finished call with everything it left behind.

@@ -167,29 +167,20 @@ ORDER BY 1;
 -- After-call work: the vocabulary, and what agents file against calls.
 --
 
--- name: ListDispositionCategories :many
-SELECT * FROM disposition_categories ORDER BY position, code;
-
 -- name: ListEnabledDispositions :many
-SELECT * FROM dispositions WHERE is_enabled ORDER BY category_code, position, code;
+SELECT * FROM dispositions WHERE is_enabled ORDER BY position, code;
 
 -- name: GetDisposition :one
-SELECT d.code, d.category_code, d.label, c.label AS category_label
-FROM dispositions d
-JOIN disposition_categories c ON c.code = d.category_code
-WHERE d.code = $1 AND d.is_enabled;
+SELECT code, label FROM dispositions WHERE code = $1 AND is_enabled;
 
 -- UpsertWrapUp files one agent's after-call work for one call. Filing twice
 -- replaces: the agent changed their mind, and the last word is the record.
 -- name: UpsertWrapUp :one
-INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label,
-                      category_code, category_label, note)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (call_id, agent_id) DO UPDATE
 SET disposition_code  = excluded.disposition_code,
     disposition_label = excluded.disposition_label,
-    category_code     = excluded.category_code,
-    category_label    = excluded.category_label,
     note              = excluded.note,
     created_at        = now()
 RETURNING *;
@@ -201,3 +192,43 @@ RETURNING *;
 SELECT * FROM wrap_ups
 WHERE call_id = ANY(sqlc.arg('call_ids')::uuid[])
 ORDER BY created_at DESC;
+
+-- ReportAgentToday is one agent's own day.
+--
+-- Two sources, because no single one knows it all: the ledger says what the
+-- agent handled and for how long they talked, and the presence history says
+-- how long they were signed in and how much of it went on after-call work.
+-- Intervals are clipped to the window, and an interval still open — the shift
+-- they are in, the wrap-up they are typing — counts up to its end.
+-- name: ReportAgentToday :one
+WITH bounds AS (
+    SELECT sqlc.arg('from_at')::timestamptz AS from_at, sqlc.arg('to_at')::timestamptz AS to_at
+),
+handled AS (
+    SELECT count(*)::bigint AS calls_handled,
+           COALESCE(sum(talk_sec), 0)::bigint AS talk_sec
+    FROM cdrs, bounds
+    WHERE primary_agent_id = sqlc.arg('agent_id')
+      AND started_at >= bounds.from_at AND started_at < bounds.to_at
+),
+intervals AS (
+    SELECT l.state, l.reason,
+           GREATEST(l.entered_at, bounds.from_at) AS started_at,
+           LEAST(COALESCE(l.exited_at, bounds.to_at), bounds.to_at) AS ended_at
+    FROM agent_state_logs l, bounds
+    WHERE l.agent_id = sqlc.arg('agent_id')
+      AND l.entered_at < bounds.to_at
+      AND COALESCE(l.exited_at, bounds.to_at) > bounds.from_at
+),
+presence AS (
+    SELECT
+        COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
+                 FILTER (WHERE reason = 'AFTER_CALL_WORK'), 0)::bigint AS wrap_up_sec,
+        count(*) FILTER (WHERE reason = 'AFTER_CALL_WORK')::bigint AS wrap_ups,
+        COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
+                 FILTER (WHERE state <> 'LOGGED_OUT'), 0)::bigint AS signed_in_sec
+    FROM intervals
+)
+SELECT handled.calls_handled, handled.talk_sec,
+       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec
+FROM handled, presence;

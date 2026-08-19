@@ -68,8 +68,6 @@ type Presence struct {
 	// free-seating, so the desk is whichever phone they signed in on.
 	ExtensionNumber string
 	EnteredAt       time.Time
-	// WrapUpEndsAt is when after-call work expires by itself.
-	WrapUpEndsAt time.Time
 	// WrapUpCallID is the call the after-call work is for, so what the agent
 	// files lands on that call and not on whichever one they take next.
 	WrapUpCallID *uuid.UUID
@@ -153,20 +151,20 @@ func (p *Presence) NotReady(reason Reason, at time.Time) error {
 	return nil
 }
 
-// StartWrapUp begins after-call work for the configured duration, for the
-// call that just ended. A zero or negative duration means the agent returns to
-// READY immediately.
-func (p *Presence) StartWrapUp(callID uuid.UUID, duration time.Duration, at time.Time) error {
+// StartWrapUp begins after-call work for the call that just ended.
+//
+// It has no deadline. After-call work ends when the agent files it, which is
+// the only thing that can end it: a clock that released them would make the
+// disposition optional in practice, and the routing they are kept out of is
+// the point — an agent still writing up the last call is not ready for the
+// next one. EnteredAt is when the call ended, so the screen counts up.
+func (p *Presence) StartWrapUp(callID uuid.UUID, at time.Time) error {
 	if p.IsLoggedOut() {
 		return ErrNotLoggedIn
-	}
-	if duration <= 0 {
-		return p.Ready(at)
 	}
 	p.State = StateNotReady
 	p.Reason = ReasonAfterCallWork
 	p.EnteredAt = at
-	p.WrapUpEndsAt = at.Add(duration)
 	p.WrapUpCallID = nil
 	if callID != uuid.Nil {
 		id := callID
@@ -180,25 +178,10 @@ func (p Presence) IsInWrapUp() bool {
 	return p.State == StateNotReady && p.Reason == ReasonAfterCallWork
 }
 
-// clearWrapUp forgets the wrap-up window and its call: every transition out
-// of after-call work, chosen or expired, ends both.
+// clearWrapUp forgets which call the after-call work was for: every transition
+// out of it ends it.
 func (p *Presence) clearWrapUp() {
-	p.WrapUpEndsAt = time.Time{}
 	p.WrapUpCallID = nil
-}
-
-// ExpireWrapUp returns the agent to READY when their wrap-up window has run
-// out. It reports whether anything changed, so a timer firing late or after an
-// explicit request cannot override the agent's own choice.
-func (p *Presence) ExpireWrapUp(at time.Time) bool {
-	if !p.IsInWrapUp() {
-		return false
-	}
-	if p.WrapUpEndsAt.IsZero() || at.Before(p.WrapUpEndsAt) {
-		return false
-	}
-	_ = p.Ready(at)
-	return true
 }
 
 // RingNoAnswer takes an agent out of routing after they ignored a delivered

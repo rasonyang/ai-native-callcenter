@@ -77,7 +77,6 @@ func (f *fakeStore) CreateAgent(_ context.Context, cfg AgentConfig) (AgentConfig
 		AgentID:        cfg.AgentID,
 		UserID:         cfg.UserID,
 		CallcenterName: cfg.CallcenterName,
-		WrapUpTimeSec:  cfg.WrapUpTimeSec,
 		IsAutoAnswer:   cfg.IsAutoAnswer,
 	}
 	return cfg, nil
@@ -91,7 +90,6 @@ func (f *fakeStore) UpdateAgent(_ context.Context, cfg AgentConfig) (AgentConfig
 		return AgentConfig{}, errors.New("no such agent")
 	}
 	prof.CallcenterName = cfg.CallcenterName
-	prof.WrapUpTimeSec = cfg.WrapUpTimeSec
 	prof.IsAutoAnswer = cfg.IsAutoAnswer
 	f.profiles[cfg.AgentID] = prof
 	return cfg, nil
@@ -118,10 +116,6 @@ func (f *fakeStore) Roster(context.Context) ([]RosterEntry, error) {
 			AgentID: id, UserID: prof.UserID, DisplayName: prof.DisplayName,
 			State: p.CurrentState(), Reason: p.Reason, Extension: p.ExtensionNumber,
 			EnteredAt: p.EnteredAt, WrapUpCallID: p.WrapUpCallID,
-		}
-		if !p.WrapUpEndsAt.IsZero() {
-			ends := p.WrapUpEndsAt
-			entry.WrapUpEndsAt = &ends
 		}
 		out = append(out, entry)
 	}
@@ -201,7 +195,7 @@ func newTestService(t *testing.T) (*Service, *fakeStore, *fakeSwitch, *fakePubli
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{
 		AgentID: agentID, UserID: uuid.New(), CallcenterName: "agent-1001",
-		DisplayName: "Wei", WrapUpTimeSec: 30,
+		DisplayName: "Wei",
 	}
 	return NewService(store, sw, pub), store, sw, pub, agentID
 }
@@ -306,16 +300,17 @@ func TestOneExtensionOneAgent(t *testing.T) {
 	}
 }
 
-func TestWrapUpExpiresBackToReady(t *testing.T) {
+// After-call work does not let go by itself. The agent files it, and until
+// they do the switch keeps them out of routing — an agent released by a clock
+// would be handed the next call while still writing up the last.
+func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	store := newFakeStore()
 	sw := &fakeSwitch{up: true}
-	pub := &fakePublisher{}
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{
 		AgentID: agentID, CallcenterName: "agent-1001", DisplayName: "Wei",
-		WrapUpTimeSec: 1,
 	}
-	svc := NewService(store, sw, pub)
+	svc := NewService(store, sw, &fakePublisher{})
 	ctx := context.Background()
 
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
@@ -327,44 +322,25 @@ func TestWrapUpExpiresBackToReady(t *testing.T) {
 	if got := svc.Presence(agentID); got.Reason != ReasonAfterCallWork {
 		t.Fatalf("reason = %s, want AFTER_CALL_WORK", got.Reason)
 	}
-
-	deadline := time.After(3 * time.Second)
-	for {
-		if svc.Presence(agentID).State == StateReady {
-			return
-		}
-		select {
-		case <-deadline:
-			t.Fatal("wrap-up never expired back to ready")
-		case <-time.After(20 * time.Millisecond):
-		}
+	// The switch is told at once: "no new calls during after-call work" is the
+	// mirror's job, not the browser's.
+	if !sw.seen("status agent-1001 On Break") {
+		t.Errorf("the switch was told %v, want the agent taken out of routing", sw.commands)
 	}
-}
 
-func TestExplicitChangeCancelsTheWrapUpTimer(t *testing.T) {
-	store := newFakeStore()
-	agentID := uuid.New()
-	store.profiles[agentID] = Profile{
-		AgentID: agentID, CallcenterName: "agent-1001", WrapUpTimeSec: 1,
+	time.Sleep(300 * time.Millisecond)
+	if got := svc.Presence(agentID); got.State != StateNotReady || got.Reason != ReasonAfterCallWork {
+		t.Fatalf("presence = %s(%s) without anybody filing anything", got.State, got.Reason)
 	}
-	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
-	ctx := context.Background()
 
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.EndWrapUp(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
-		t.Fatal(err)
+	if got := svc.Presence(agentID); got.State != StateReady {
+		t.Errorf("state = %s after filing, want READY", got.State)
 	}
-	// The agent goes to lunch before wrap-up ends.
-	if _, err := svc.NotReady(ctx, agentID, ReasonLunch); err != nil {
-		t.Fatal(err)
-	}
-
-	time.Sleep(1500 * time.Millisecond)
-	if got := svc.Presence(agentID); got.State != StateNotReady || got.Reason != ReasonLunch {
-		t.Errorf("presence = %s(%s), want the agent's own choice to survive the timer",
-			got.State, got.Reason)
+	if !sw.seen("status agent-1001 Available") {
+		t.Errorf("the switch was told %v, want the agent routable again", sw.commands)
 	}
 }
 

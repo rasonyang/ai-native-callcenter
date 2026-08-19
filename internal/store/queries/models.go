@@ -15,7 +15,6 @@ type Agent struct {
 	ID                 uuid.UUID          `json:"id"`
 	UserID             uuid.UUID          `json:"userId"`
 	CallcenterName     string             `json:"callcenterName"`
-	WrapUpTimeSec      int32              `json:"wrapUpTimeSec"`
 	IsAutoAnswer       bool               `json:"isAutoAnswer"`
 	DefaultExtensionID *uuid.UUID         `json:"defaultExtensionId"`
 	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
@@ -27,7 +26,6 @@ type AgentState struct {
 	Reason          *string            `json:"reason"`
 	ExtensionNumber *string            `json:"extensionNumber"`
 	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
-	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
 	WrapUpCallID    *uuid.UUID         `json:"wrapUpCallId"`
 }
 
@@ -119,17 +117,10 @@ type Did struct {
 }
 
 type Disposition struct {
-	Code         string `json:"code"`
-	CategoryCode string `json:"categoryCode"`
-	Label        string `json:"label"`
-	Position     int32  `json:"position"`
-	IsEnabled    bool   `json:"isEnabled"`
-}
-
-type DispositionCategory struct {
-	Code     string `json:"code"`
-	Label    string `json:"label"`
-	Position int32  `json:"position"`
+	Code      string `json:"code"`
+	Label     string `json:"label"`
+	Position  int32  `json:"position"`
+	IsEnabled bool   `json:"isEnabled"`
 }
 
 type Extension struct {
@@ -330,8 +321,6 @@ type WrapUp struct {
 	AgentID          uuid.UUID          `json:"agentId"`
 	DispositionCode  string             `json:"dispositionCode"`
 	DispositionLabel string             `json:"dispositionLabel"`
-	CategoryCode     string             `json:"categoryCode"`
-	CategoryLabel    string             `json:"categoryLabel"`
 	Note             string             `json:"note"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 }

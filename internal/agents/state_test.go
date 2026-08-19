@@ -120,55 +120,53 @@ func TestTransitions(t *testing.T) {
 	}
 }
 
-func TestWrapUp(t *testing.T) {
+func TestWrapUpHoldsUntilItIsFiled(t *testing.T) {
 	var p Presence
 	if err := p.Login("1001", now); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.StartWrapUp(uuid.New(), 30*time.Second, now); err != nil {
+	callID := uuid.New()
+	if err := p.StartWrapUp(callID, now); err != nil {
 		t.Fatal(err)
 	}
 	if p.State != StateNotReady || p.Reason != ReasonAfterCallWork {
 		t.Fatalf("state = %s(%s), want NOT_READY(AFTER_CALL_WORK)", p.State, p.Reason)
 	}
+	if !p.IsInWrapUp() {
+		t.Error("IsInWrapUp() is false during after-call work")
+	}
+	// EnteredAt is when the call ended, which is what the screen counts up
+	// from; nothing here says when it should stop.
+	if !p.EnteredAt.Equal(now) {
+		t.Errorf("enteredAt = %v, want the moment the call ended (%v)", p.EnteredAt, now)
+	}
+	if p.WrapUpCallID == nil || *p.WrapUpCallID != callID {
+		t.Errorf("wrapUpCallId = %v, want the call just finished", p.WrapUpCallID)
+	}
 
-	if p.ExpireWrapUp(now.Add(29 * time.Second)) {
-		t.Error("wrap-up expired early")
+	if err := p.Ready(now.Add(90 * time.Second)); err != nil {
+		t.Fatal(err)
 	}
-	if !p.ExpireWrapUp(now.Add(30 * time.Second)) {
-		t.Error("wrap-up did not expire at its deadline")
-	}
-	if p.State != StateReady {
-		t.Errorf("state = %s, want READY after wrap-up", p.State)
+	if p.State != StateReady || p.WrapUpCallID != nil {
+		t.Errorf("presence = %+v, want READY with the wrap-up cleared", p)
 	}
 }
 
-func TestExplicitRequestBeatsTheWrapUpTimer(t *testing.T) {
+// After-call work is a state the agent can leave for a reason of their own;
+// what they had not filed stays unfiled, which is honest.
+func TestAnAgentMayChooseSomethingElseDuringWrapUp(t *testing.T) {
 	var p Presence
 	_ = p.Login("1001", now)
-	_ = p.StartWrapUp(uuid.New(), 30*time.Second, now)
+	_ = p.StartWrapUp(uuid.New(), now)
 
-	// The agent chooses lunch before wrap-up runs out.
 	if err := p.NotReady(ReasonLunch, now.Add(5*time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	// A timer firing afterwards must not drag them back into routing.
-	if p.ExpireWrapUp(now.Add(30 * time.Second)) {
-		t.Error("a late wrap-up timer overrode the agent's own choice")
-	}
 	if p.State != StateNotReady || p.Reason != ReasonLunch {
-		t.Errorf("state = %s(%s), want NOT_READY(LUNCH) to survive", p.State, p.Reason)
+		t.Errorf("state = %s(%s), want NOT_READY(LUNCH)", p.State, p.Reason)
 	}
-}
-
-func TestZeroWrapUpGoesStraightToReady(t *testing.T) {
-	var p Presence
-	_ = p.Login("1001", now)
-	if err := p.StartWrapUp(uuid.New(), 0, now); err != nil {
-		t.Fatal(err)
-	}
-	if p.State != StateReady {
-		t.Errorf("state = %s, want READY when wrap-up is disabled", p.State)
+	if p.WrapUpCallID != nil {
+		t.Error("the wrap-up call survived a state the agent chose instead")
 	}
 }
 

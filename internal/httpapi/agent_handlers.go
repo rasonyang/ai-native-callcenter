@@ -45,10 +45,6 @@ func presenceOf(p agents.Presence) api.Presence {
 	if p.ExtensionNumber != "" {
 		out.ExtensionNumber = &p.ExtensionNumber
 	}
-	if !p.WrapUpEndsAt.IsZero() {
-		ends := p.WrapUpEndsAt.UTC().Truncate(time.Second)
-		out.WrapUpEndsAt = &ends
-	}
 	out.WrapUpCallID = p.WrapUpCallID
 	return out
 }
@@ -133,60 +129,58 @@ func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
 //
 // The call comes from the platform, never from the request: an agent files
 // against the call they were on, and letting a client name one would let any
-// agent write a disposition onto any call. It is also allowed *after* the
-// window has closed — the timer returning somebody to READY while they were
-// still typing is not a reason to lose what they typed — so the last wrapped
+// agent write a disposition onto any call. The filing is also accepted after
+// they have moved on — an agent still typing when something else took them out
+// of after-call work has not forfeited what they typed — so the last wrapped
 // call stays addressable until the next one begins.
+//
+// The disposition is required, and this is where that is enforced: it is what
+// makes a call reportable, and a screen is not a place to keep a rule.
 func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
 	}
 	var req api.WrapUpRequest
-	if r.ContentLength > 0 {
-		if !decode(w, r, &req) {
-			return
-		}
+	if !decode(w, r, &req) {
+		return
+	}
+	code := strings.TrimSpace(req.DispositionCode)
+	if code == "" {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"a disposition is required", map[string]any{"field": "dispositionCode"})
+		return
 	}
 
 	callID, hasCall := s.agents.WrapUpCall(agentID)
-	code, note := strOr(req.DispositionCode), strOr(req.Note)
+	if !hasCall {
+		writeError(w, http.StatusConflict, CodeAgentNotInWrapUp,
+			"there is no finished call to file this against", nil)
+		return
+	}
+	if s.ledger == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
+		return
+	}
 
-	// Filing needs a call; ending after-call work does not. An agent who
-	// completes an empty wrap-up simply goes ready.
-	if code != "" || note != "" {
-		if !hasCall {
-			writeError(w, http.StatusConflict, CodeAgentNotInWrapUp,
-				"there is no finished call to file this against", nil)
+	note := ""
+	if req.Note != nil {
+		note = strings.TrimSpace(*req.Note)
+	}
+	if _, err := s.ledger.FileWrapUp(r.Context(), callID, agentID, code, note); err != nil {
+		if errors.Is(err, store.ErrUnknownDisposition) {
+			writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+				"no such disposition", map[string]any{"field": "dispositionCode"})
 			return
 		}
-		if s.ledger == nil {
-			writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
-			return
-		}
-		if _, err := s.ledger.FileWrapUp(r.Context(), callID, agentID, code, note); err != nil {
-			if errors.Is(err, store.ErrUnknownDisposition) {
-				writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-					"no such disposition", map[string]any{"field": "dispositionCode"})
-				return
-			}
-			slog.ErrorContext(r.Context(), "wrap-up not recorded",
-				"error", err, "callId", callID, "agentId", agentID)
-			writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
-			return
-		}
+		slog.ErrorContext(r.Context(), "wrap-up not recorded",
+			"error", err, "callId", callID, "agentId", agentID)
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
+		return
 	}
 
 	p, err := s.agents.EndWrapUp(r.Context(), agentID)
 	s.writePresence(w, r, p, err)
-}
-
-// strOr reads an optional string field, where absent and empty are the same.
-func strOr(v *string) string {
-	if v == nil {
-		return ""
-	}
-	return strings.TrimSpace(*v)
 }
 
 func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {
@@ -262,9 +256,6 @@ func agentConfigFrom(agentID, userID uuid.UUID, in api.AgentWrite) agents.AgentC
 		CallcenterName:     in.CallcenterName,
 		DefaultExtensionID: in.DefaultExtensionID,
 	}
-	if in.WrapUpTimeSec != nil {
-		cfg.WrapUpTimeSec = *in.WrapUpTimeSec
-	}
 	if in.IsAutoAnswer != nil {
 		cfg.IsAutoAnswer = *in.IsAutoAnswer
 	}
@@ -282,7 +273,6 @@ func (s *Server) writeAgentConfig(
 		AgentID:            cfg.AgentID,
 		UserID:             cfg.UserID,
 		CallcenterName:     cfg.CallcenterName,
-		WrapUpTimeSec:      cfg.WrapUpTimeSec,
 		IsAutoAnswer:       cfg.IsAutoAnswer,
 		DefaultExtensionID: cfg.DefaultExtensionID,
 	})

@@ -407,7 +407,7 @@
           "agents"
         ],
         "summary": "Complete after-call work",
-        "description": "Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. The wrap-up may also be filed after the timer has already returned the agent to READY: the last wrapped call stays addressable until the next one starts. dispositionCode must be a code from GET /dispositions when given. Requires the AGENT role.",
+        "description": "Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. After-call work has no deadline: it begins when the call ends and ends here. The filing is still accepted once the agent has moved on — the last wrapped call stays addressable until the next one starts — and answers 409 AGENT_NOT_IN_WRAP_UP when there is no finished call to file against. dispositionCode must be a code from GET /dispositions. Requires the AGENT role.",
         "security": [
           {
             "cookieSession": [],
@@ -2825,6 +2825,57 @@
         }
       }
     },
+    "/reports/me": {
+      "get": {
+        "operationId": "getMyDay",
+        "tags": [
+          "reports"
+        ],
+        "summary": "The caller's own day",
+        "description": "What this agent has handled today: calls, average handle time, average after-call work, occupancy. The agent comes from the session — the aggregates over somebody else's day are supervision, and live under /reports. Requires the AGENT role.",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339 window start; defaults to local midnight.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339 window end; defaults to now.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The agent's own numbers.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentToday"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/callbacks": {
       "get": {
         "operationId": "listCallbacks",
@@ -3613,7 +3664,7 @@
       },
       "Presence": {
         "type": "object",
-        "description": "One agent's presence.",
+        "description": "One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.",
         "properties": {
           "state": {
             "$ref": "#/components/schemas/AgentState"
@@ -3631,14 +3682,10 @@
             "type": "string",
             "format": "date-time"
           },
-          "wrapUpEndsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
           "wrapUpCallId": {
             "type": "string",
             "format": "uuid",
-            "description": "The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR."
+            "description": "The call the agent is doing after-call work for. Set while availability is WRAP_UP and kept until the next call is wrapped, so a filing made after the agent has moved on still lands on the right call."
           }
         },
         "required": [
@@ -3649,7 +3696,7 @@
       },
       "WrapUpRequest": {
         "type": "object",
-        "description": "What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work.",
+        "description": "What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave.",
         "properties": {
           "dispositionCode": {
             "type": "string",
@@ -3659,7 +3706,10 @@
             "type": "string",
             "maxLength": 4000
           }
-        }
+        },
+        "required": [
+          "dispositionCode"
+        ]
       },
       "AgentLoginRequest": {
         "type": "object",
@@ -3715,10 +3765,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "wrapUpEndsAt": {
-            "type": "string",
-            "format": "date-time"
-          },
           "isOnCall": {
             "type": "boolean"
           },
@@ -3728,9 +3774,6 @@
           "callcenterName": {
             "type": "string",
             "description": "The identifier the switch knows this agent by."
-          },
-          "wrapUpTimeSec": {
-            "type": "integer"
           },
           "isAutoAnswer": {
             "type": "boolean"
@@ -3756,7 +3799,6 @@
           "isOnCall",
           "isRegistered",
           "callcenterName",
-          "wrapUpTimeSec",
           "isAutoAnswer"
         ]
       },
@@ -3776,9 +3818,6 @@
           "callcenterName": {
             "type": "string"
           },
-          "wrapUpTimeSec": {
-            "type": "integer"
-          },
           "isAutoAnswer": {
             "type": "boolean"
           },
@@ -3791,7 +3830,6 @@
           "agentId",
           "userId",
           "callcenterName",
-          "wrapUpTimeSec",
           "isAutoAnswer"
         ]
       },
@@ -3807,11 +3845,6 @@
           "callcenterName": {
             "type": "string",
             "description": "Reaches the switch as an identifier: no spaces, @ or quotes."
-          },
-          "wrapUpTimeSec": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Seconds of after-call work. 0 takes the default of 30."
           },
           "isAutoAnswer": {
             "type": "boolean"
@@ -4906,12 +4939,6 @@
           "dispositionLabel": {
             "type": "string"
           },
-          "categoryCode": {
-            "type": "string"
-          },
-          "categoryLabel": {
-            "type": "string"
-          },
           "note": {
             "type": "string"
           },
@@ -4924,8 +4951,6 @@
           "agentId",
           "dispositionCode",
           "dispositionLabel",
-          "categoryCode",
-          "categoryLabel",
           "note",
           "createdAt"
         ]
@@ -5303,7 +5328,7 @@
       },
       "Disposition": {
         "type": "object",
-        "description": "One code an agent can file a call under.",
+        "description": "One word an agent can file a call under. The code is stable; the label is what agents read and is the operator's to change.",
         "properties": {
           "code": {
             "type": "string"
@@ -5317,17 +5342,11 @@
           "label"
         ]
       },
-      "DispositionCategory": {
+      "DispositionCatalog": {
         "type": "object",
-        "description": "A group of dispositions, in the order agents see them.",
+        "description": "The wrap-up vocabulary: every enabled disposition, in display order.",
         "properties": {
-          "code": {
-            "type": "string"
-          },
-          "label": {
-            "type": "string"
-          },
-          "dispositions": {
+          "items": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Disposition"
@@ -5335,24 +5354,7 @@
           }
         },
         "required": [
-          "code",
-          "label",
-          "dispositions"
-        ]
-      },
-      "DispositionCatalog": {
-        "type": "object",
-        "description": "The whole vocabulary, grouped. Empty categories are omitted.",
-        "properties": {
-          "categories": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DispositionCategory"
-            }
-          }
-        },
-        "required": [
-          "categories"
+          "items"
         ]
       },
       "QualityReview": {
@@ -5484,6 +5486,49 @@
           "avgWaitSec",
           "avgTalkSec",
           "avgBotSec"
+        ]
+      },
+      "AgentToday": {
+        "type": "object",
+        "description": "One agent's own day, over the window (default: local midnight to now). The totals are served beside the averages so every number on the screen can be checked against them.",
+        "properties": {
+          "callsHandled": {
+            "type": "integer",
+            "description": "Calls this agent answered, counted from the ledger's primary agent."
+          },
+          "talkSec": {
+            "type": "integer",
+            "description": "Total talk time on those calls."
+          },
+          "wrapUpSec": {
+            "type": "integer",
+            "description": "Total after-call work, from the presence history; an open wrap-up counts up to now."
+          },
+          "signedInSec": {
+            "type": "integer",
+            "description": "Total time signed in, whatever the state; the denominator of occupancy."
+          },
+          "avgHandleSec": {
+            "type": "integer",
+            "description": "(talkSec + wrapUpSec) / callsHandled — the average handle time. 0 when no call was handled."
+          },
+          "avgWrapUpSec": {
+            "type": "integer",
+            "description": "wrapUpSec / the number of wrap-ups begun in the window. 0 when there were none."
+          },
+          "occupancyPct": {
+            "type": "integer",
+            "description": "(talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window."
+          }
+        },
+        "required": [
+          "callsHandled",
+          "talkSec",
+          "wrapUpSec",
+          "signedInSec",
+          "avgHandleSec",
+          "avgWrapUpSec",
+          "occupancyPct"
         ]
       },
       "QueueReport": {

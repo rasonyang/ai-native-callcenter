@@ -1,8 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- name: CreateAgent :one
-INSERT INTO agents (id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agents (id, user_id, callcenter_name, is_auto_answer, default_extension_id)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetAgent :one
@@ -13,7 +13,7 @@ SELECT * FROM agents WHERE user_id = $1;
 
 -- name: UpdateAgent :one
 UPDATE agents
-SET callcenter_name = $2, wrap_up_time_sec = $3, is_auto_answer = $4, default_extension_id = $5
+SET callcenter_name = $2, is_auto_answer = $3, default_extension_id = $4
 WHERE id = $1
 RETURNING *;
 
@@ -25,7 +25,6 @@ DELETE FROM agents WHERE id = $1;
 -- name: ListAgentRoster :many
 SELECT a.id AS agent_id,
        a.callcenter_name,
-       a.wrap_up_time_sec,
        a.is_auto_answer,
        a.default_extension_id,
        e.number AS default_extension_number,
@@ -37,7 +36,6 @@ SELECT a.id AS agent_id,
        s.reason,
        s.extension_number,
        COALESCE(s.entered_at, a.created_at) AS entered_at,
-       s.wrap_up_ends_at,
        s.wrap_up_call_id
 FROM agents a
 JOIN users u ON u.id = a.user_id
@@ -49,14 +47,13 @@ ORDER BY u.display_name;
 SELECT * FROM agent_states WHERE agent_id = $1;
 
 -- name: UpsertAgentState :one
-INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_call_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (agent_id) DO UPDATE
 SET state            = excluded.state,
     reason           = excluded.reason,
     extension_number = excluded.extension_number,
     entered_at       = excluded.entered_at,
-    wrap_up_ends_at  = excluded.wrap_up_ends_at,
     wrap_up_call_id  = excluded.wrap_up_call_id
 RETURNING *;
 

@@ -30,16 +30,15 @@ func (q *Queries) CloseAgentStateLog(ctx context.Context, arg CloseAgentStateLog
 
 const createAgent = `-- name: CreateAgent :one
 
-INSERT INTO agents (id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id, created_at
+INSERT INTO agents (id, user_id, callcenter_name, is_auto_answer, default_extension_id)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, user_id, callcenter_name, is_auto_answer, default_extension_id, created_at
 `
 
 type CreateAgentParams struct {
 	ID                 uuid.UUID  `json:"id"`
 	UserID             uuid.UUID  `json:"userId"`
 	CallcenterName     string     `json:"callcenterName"`
-	WrapUpTimeSec      int32      `json:"wrapUpTimeSec"`
 	IsAutoAnswer       bool       `json:"isAutoAnswer"`
 	DefaultExtensionID *uuid.UUID `json:"defaultExtensionId"`
 }
@@ -50,7 +49,6 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.ID,
 		arg.UserID,
 		arg.CallcenterName,
-		arg.WrapUpTimeSec,
 		arg.IsAutoAnswer,
 		arg.DefaultExtensionID,
 	)
@@ -59,7 +57,6 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.ID,
 		&i.UserID,
 		&i.CallcenterName,
-		&i.WrapUpTimeSec,
 		&i.IsAutoAnswer,
 		&i.DefaultExtensionID,
 		&i.CreatedAt,
@@ -77,7 +74,7 @@ func (q *Queries) DeleteAgent(ctx context.Context, id uuid.UUID) error {
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id, created_at FROM agents WHERE id = $1
+SELECT id, user_id, callcenter_name, is_auto_answer, default_extension_id, created_at FROM agents WHERE id = $1
 `
 
 func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
@@ -87,7 +84,6 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 		&i.ID,
 		&i.UserID,
 		&i.CallcenterName,
-		&i.WrapUpTimeSec,
 		&i.IsAutoAnswer,
 		&i.DefaultExtensionID,
 		&i.CreatedAt,
@@ -96,7 +92,7 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 }
 
 const getAgentByUserID = `-- name: GetAgentByUserID :one
-SELECT id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id, created_at FROM agents WHERE user_id = $1
+SELECT id, user_id, callcenter_name, is_auto_answer, default_extension_id, created_at FROM agents WHERE user_id = $1
 `
 
 func (q *Queries) GetAgentByUserID(ctx context.Context, userID uuid.UUID) (Agent, error) {
@@ -106,7 +102,6 @@ func (q *Queries) GetAgentByUserID(ctx context.Context, userID uuid.UUID) (Agent
 		&i.ID,
 		&i.UserID,
 		&i.CallcenterName,
-		&i.WrapUpTimeSec,
 		&i.IsAutoAnswer,
 		&i.DefaultExtensionID,
 		&i.CreatedAt,
@@ -115,7 +110,7 @@ func (q *Queries) GetAgentByUserID(ctx context.Context, userID uuid.UUID) (Agent
 }
 
 const getAgentState = `-- name: GetAgentState :one
-SELECT agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id FROM agent_states WHERE agent_id = $1
+SELECT agent_id, state, reason, extension_number, entered_at, wrap_up_call_id FROM agent_states WHERE agent_id = $1
 `
 
 func (q *Queries) GetAgentState(ctx context.Context, agentID uuid.UUID) (AgentState, error) {
@@ -127,7 +122,6 @@ func (q *Queries) GetAgentState(ctx context.Context, agentID uuid.UUID) (AgentSt
 		&i.Reason,
 		&i.ExtensionNumber,
 		&i.EnteredAt,
-		&i.WrapUpEndsAt,
 		&i.WrapUpCallID,
 	)
 	return i, err
@@ -136,7 +130,6 @@ func (q *Queries) GetAgentState(ctx context.Context, agentID uuid.UUID) (AgentSt
 const listAgentRoster = `-- name: ListAgentRoster :many
 SELECT a.id AS agent_id,
        a.callcenter_name,
-       a.wrap_up_time_sec,
        a.is_auto_answer,
        a.default_extension_id,
        e.number AS default_extension_number,
@@ -148,7 +141,6 @@ SELECT a.id AS agent_id,
        s.reason,
        s.extension_number,
        COALESCE(s.entered_at, a.created_at) AS entered_at,
-       s.wrap_up_ends_at,
        s.wrap_up_call_id
 FROM agents a
 JOIN users u ON u.id = a.user_id
@@ -160,7 +152,6 @@ ORDER BY u.display_name
 type ListAgentRosterRow struct {
 	AgentID                uuid.UUID          `json:"agentId"`
 	CallcenterName         string             `json:"callcenterName"`
-	WrapUpTimeSec          int32              `json:"wrapUpTimeSec"`
 	IsAutoAnswer           bool               `json:"isAutoAnswer"`
 	DefaultExtensionID     *uuid.UUID         `json:"defaultExtensionId"`
 	DefaultExtensionNumber *string            `json:"defaultExtensionNumber"`
@@ -172,7 +163,6 @@ type ListAgentRosterRow struct {
 	Reason                 *string            `json:"reason"`
 	ExtensionNumber        *string            `json:"extensionNumber"`
 	EnteredAt              pgtype.Timestamptz `json:"enteredAt"`
-	WrapUpEndsAt           pgtype.Timestamptz `json:"wrapUpEndsAt"`
 	WrapUpCallID           *uuid.UUID         `json:"wrapUpCallId"`
 }
 
@@ -190,7 +180,6 @@ func (q *Queries) ListAgentRoster(ctx context.Context) ([]ListAgentRosterRow, er
 		if err := rows.Scan(
 			&i.AgentID,
 			&i.CallcenterName,
-			&i.WrapUpTimeSec,
 			&i.IsAutoAnswer,
 			&i.DefaultExtensionID,
 			&i.DefaultExtensionNumber,
@@ -202,7 +191,6 @@ func (q *Queries) ListAgentRoster(ctx context.Context) ([]ListAgentRosterRow, er
 			&i.Reason,
 			&i.ExtensionNumber,
 			&i.EnteredAt,
-			&i.WrapUpEndsAt,
 			&i.WrapUpCallID,
 		); err != nil {
 			return nil, err
@@ -249,15 +237,14 @@ func (q *Queries) OpenAgentStateLog(ctx context.Context, arg OpenAgentStateLogPa
 
 const updateAgent = `-- name: UpdateAgent :one
 UPDATE agents
-SET callcenter_name = $2, wrap_up_time_sec = $3, is_auto_answer = $4, default_extension_id = $5
+SET callcenter_name = $2, is_auto_answer = $3, default_extension_id = $4
 WHERE id = $1
-RETURNING id, user_id, callcenter_name, wrap_up_time_sec, is_auto_answer, default_extension_id, created_at
+RETURNING id, user_id, callcenter_name, is_auto_answer, default_extension_id, created_at
 `
 
 type UpdateAgentParams struct {
 	ID                 uuid.UUID  `json:"id"`
 	CallcenterName     string     `json:"callcenterName"`
-	WrapUpTimeSec      int32      `json:"wrapUpTimeSec"`
 	IsAutoAnswer       bool       `json:"isAutoAnswer"`
 	DefaultExtensionID *uuid.UUID `json:"defaultExtensionId"`
 }
@@ -266,7 +253,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 	row := q.db.QueryRow(ctx, updateAgent,
 		arg.ID,
 		arg.CallcenterName,
-		arg.WrapUpTimeSec,
 		arg.IsAutoAnswer,
 		arg.DefaultExtensionID,
 	)
@@ -275,7 +261,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.ID,
 		&i.UserID,
 		&i.CallcenterName,
-		&i.WrapUpTimeSec,
 		&i.IsAutoAnswer,
 		&i.DefaultExtensionID,
 		&i.CreatedAt,
@@ -284,16 +269,15 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 }
 
 const upsertAgentState = `-- name: UpsertAgentState :one
-INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_call_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (agent_id) DO UPDATE
 SET state            = excluded.state,
     reason           = excluded.reason,
     extension_number = excluded.extension_number,
     entered_at       = excluded.entered_at,
-    wrap_up_ends_at  = excluded.wrap_up_ends_at,
     wrap_up_call_id  = excluded.wrap_up_call_id
-RETURNING agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id
+RETURNING agent_id, state, reason, extension_number, entered_at, wrap_up_call_id
 `
 
 type UpsertAgentStateParams struct {
@@ -302,7 +286,6 @@ type UpsertAgentStateParams struct {
 	Reason          *string            `json:"reason"`
 	ExtensionNumber *string            `json:"extensionNumber"`
 	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
-	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
 	WrapUpCallID    *uuid.UUID         `json:"wrapUpCallId"`
 }
 
@@ -313,7 +296,6 @@ func (q *Queries) UpsertAgentState(ctx context.Context, arg UpsertAgentStatePara
 		arg.Reason,
 		arg.ExtensionNumber,
 		arg.EnteredAt,
-		arg.WrapUpEndsAt,
 		arg.WrapUpCallID,
 	)
 	var i AgentState
@@ -323,7 +305,6 @@ func (q *Queries) UpsertAgentState(ctx context.Context, arg UpsertAgentStatePara
 		&i.Reason,
 		&i.ExtensionNumber,
 		&i.EnteredAt,
-		&i.WrapUpEndsAt,
 		&i.WrapUpCallID,
 	)
 	return i, err

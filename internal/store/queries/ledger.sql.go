@@ -119,28 +119,18 @@ func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
 }
 
 const getDisposition = `-- name: GetDisposition :one
-SELECT d.code, d.category_code, d.label, c.label AS category_label
-FROM dispositions d
-JOIN disposition_categories c ON c.code = d.category_code
-WHERE d.code = $1 AND d.is_enabled
+SELECT code, label FROM dispositions WHERE code = $1 AND is_enabled
 `
 
 type GetDispositionRow struct {
-	Code          string `json:"code"`
-	CategoryCode  string `json:"categoryCode"`
-	Label         string `json:"label"`
-	CategoryLabel string `json:"categoryLabel"`
+	Code  string `json:"code"`
+	Label string `json:"label"`
 }
 
 func (q *Queries) GetDisposition(ctx context.Context, code string) (GetDispositionRow, error) {
 	row := q.db.QueryRow(ctx, getDisposition, code)
 	var i GetDispositionRow
-	err := row.Scan(
-		&i.Code,
-		&i.CategoryCode,
-		&i.Label,
-		&i.CategoryLabel,
-	)
+	err := row.Scan(&i.Code, &i.Label)
 	return i, err
 }
 
@@ -624,36 +614,12 @@ func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([
 	return items, nil
 }
 
-const listDispositionCategories = `-- name: ListDispositionCategories :many
+const listEnabledDispositions = `-- name: ListEnabledDispositions :many
 
-SELECT code, label, position FROM disposition_categories ORDER BY position, code
+SELECT code, label, position, is_enabled FROM dispositions WHERE is_enabled ORDER BY position, code
 `
 
 // After-call work: the vocabulary, and what agents file against calls.
-func (q *Queries) ListDispositionCategories(ctx context.Context) ([]DispositionCategory, error) {
-	rows, err := q.db.Query(ctx, listDispositionCategories)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []DispositionCategory{}
-	for rows.Next() {
-		var i DispositionCategory
-		if err := rows.Scan(&i.Code, &i.Label, &i.Position); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listEnabledDispositions = `-- name: ListEnabledDispositions :many
-SELECT code, category_code, label, position, is_enabled FROM dispositions WHERE is_enabled ORDER BY category_code, position, code
-`
-
 func (q *Queries) ListEnabledDispositions(ctx context.Context) ([]Disposition, error) {
 	rows, err := q.db.Query(ctx, listEnabledDispositions)
 	if err != nil {
@@ -665,7 +631,6 @@ func (q *Queries) ListEnabledDispositions(ctx context.Context) ([]Disposition, e
 		var i Disposition
 		if err := rows.Scan(
 			&i.Code,
-			&i.CategoryCode,
 			&i.Label,
 			&i.Position,
 			&i.IsEnabled,
@@ -838,7 +803,7 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 }
 
 const listWrapUpsForCalls = `-- name: ListWrapUpsForCalls :many
-SELECT call_id, agent_id, disposition_code, disposition_label, category_code, category_label, note, created_at FROM wrap_ups
+SELECT call_id, agent_id, disposition_code, disposition_label, note, created_at FROM wrap_ups
 WHERE call_id = ANY($1::uuid[])
 ORDER BY created_at DESC
 `
@@ -860,8 +825,6 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 			&i.AgentID,
 			&i.DispositionCode,
 			&i.DispositionLabel,
-			&i.CategoryCode,
-			&i.CategoryLabel,
 			&i.Note,
 			&i.CreatedAt,
 		); err != nil {
@@ -873,6 +836,74 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const reportAgentToday = `-- name: ReportAgentToday :one
+WITH bounds AS (
+    SELECT $1::timestamptz AS from_at, $2::timestamptz AS to_at
+),
+handled AS (
+    SELECT count(*)::bigint AS calls_handled,
+           COALESCE(sum(talk_sec), 0)::bigint AS talk_sec
+    FROM cdrs, bounds
+    WHERE primary_agent_id = $3
+      AND started_at >= bounds.from_at AND started_at < bounds.to_at
+),
+intervals AS (
+    SELECT l.state, l.reason,
+           GREATEST(l.entered_at, bounds.from_at) AS started_at,
+           LEAST(COALESCE(l.exited_at, bounds.to_at), bounds.to_at) AS ended_at
+    FROM agent_state_logs l, bounds
+    WHERE l.agent_id = $3
+      AND l.entered_at < bounds.to_at
+      AND COALESCE(l.exited_at, bounds.to_at) > bounds.from_at
+),
+presence AS (
+    SELECT
+        COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
+                 FILTER (WHERE reason = 'AFTER_CALL_WORK'), 0)::bigint AS wrap_up_sec,
+        count(*) FILTER (WHERE reason = 'AFTER_CALL_WORK')::bigint AS wrap_ups,
+        COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
+                 FILTER (WHERE state <> 'LOGGED_OUT'), 0)::bigint AS signed_in_sec
+    FROM intervals
+)
+SELECT handled.calls_handled, handled.talk_sec,
+       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec
+FROM handled, presence
+`
+
+type ReportAgentTodayParams struct {
+	FromAt  pgtype.Timestamptz `json:"fromAt"`
+	ToAt    pgtype.Timestamptz `json:"toAt"`
+	AgentID *uuid.UUID         `json:"agentId"`
+}
+
+type ReportAgentTodayRow struct {
+	CallsHandled int64 `json:"callsHandled"`
+	TalkSec      int64 `json:"talkSec"`
+	WrapUpSec    int64 `json:"wrapUpSec"`
+	WrapUps      int64 `json:"wrapUps"`
+	SignedInSec  int64 `json:"signedInSec"`
+}
+
+// ReportAgentToday is one agent's own day.
+//
+// Two sources, because no single one knows it all: the ledger says what the
+// agent handled and for how long they talked, and the presence history says
+// how long they were signed in and how much of it went on after-call work.
+// Intervals are clipped to the window, and an interval still open — the shift
+// they are in, the wrap-up they are typing — counts up to its end.
+func (q *Queries) ReportAgentToday(ctx context.Context, arg ReportAgentTodayParams) (ReportAgentTodayRow, error) {
+	row := q.db.QueryRow(ctx, reportAgentToday, arg.FromAt, arg.ToAt, arg.AgentID)
+	var i ReportAgentTodayRow
+	err := row.Scan(
+		&i.CallsHandled,
+		&i.TalkSec,
+		&i.WrapUpSec,
+		&i.WrapUps,
+		&i.SignedInSec,
+	)
+	return i, err
 }
 
 const reportByQueue = `-- name: ReportByQueue :many
@@ -1053,17 +1084,14 @@ func (q *Queries) UpdateCDRHasRecording(ctx context.Context, callID uuid.UUID) e
 }
 
 const upsertWrapUp = `-- name: UpsertWrapUp :one
-INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label,
-                      category_code, category_label, note)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note)
+VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (call_id, agent_id) DO UPDATE
 SET disposition_code  = excluded.disposition_code,
     disposition_label = excluded.disposition_label,
-    category_code     = excluded.category_code,
-    category_label    = excluded.category_label,
     note              = excluded.note,
     created_at        = now()
-RETURNING call_id, agent_id, disposition_code, disposition_label, category_code, category_label, note, created_at
+RETURNING call_id, agent_id, disposition_code, disposition_label, note, created_at
 `
 
 type UpsertWrapUpParams struct {
@@ -1071,8 +1099,6 @@ type UpsertWrapUpParams struct {
 	AgentID          uuid.UUID `json:"agentId"`
 	DispositionCode  string    `json:"dispositionCode"`
 	DispositionLabel string    `json:"dispositionLabel"`
-	CategoryCode     string    `json:"categoryCode"`
-	CategoryLabel    string    `json:"categoryLabel"`
 	Note             string    `json:"note"`
 }
 
@@ -1084,8 +1110,6 @@ func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (Wra
 		arg.AgentID,
 		arg.DispositionCode,
 		arg.DispositionLabel,
-		arg.CategoryCode,
-		arg.CategoryLabel,
 		arg.Note,
 	)
 	var i WrapUp
@@ -1094,8 +1118,6 @@ func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (Wra
 		&i.AgentID,
 		&i.DispositionCode,
 		&i.DispositionLabel,
-		&i.CategoryCode,
-		&i.CategoryLabel,
 		&i.Note,
 		&i.CreatedAt,
 	)

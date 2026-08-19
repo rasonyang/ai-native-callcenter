@@ -172,7 +172,7 @@ export interface paths {
         put?: never;
         /**
          * Complete after-call work
-         * @description Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. The wrap-up may also be filed after the timer has already returned the agent to READY: the last wrapped call stays addressable until the next one starts. dispositionCode must be a code from GET /dispositions when given. Requires the AGENT role.
+         * @description Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. After-call work has no deadline: it begins when the call ends and ends here. The filing is still accepted once the agent has moved on — the last wrapped call stays addressable until the next one starts — and answers 409 AGENT_NOT_IN_WRAP_UP when there is no finished call to file against. dispositionCode must be a code from GET /dispositions. Requires the AGENT role.
          */
         post: operations["agentWrapUp"];
         delete?: never;
@@ -921,6 +921,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's own day
+         * @description What this agent has handled today: calls, average handle time, average after-call work, occupancy. The agent comes from the session — the aggregates over somebody else's day are supervision, and live under /reports. Requires the AGENT role.
+         */
+        get: operations["getMyDay"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/callbacks": {
         parameters: {
             query?: never;
@@ -1147,7 +1167,7 @@ export interface components {
          * @enum {string}
          */
         Availability: "LOGGED_OUT" | "ON_CALL" | "WRAP_UP" | "NOT_READY" | "DEVICE_UNREACHABLE" | "READY";
-        /** @description One agent's presence. */
+        /** @description One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it. */
         Presence: {
             state: components["schemas"]["AgentState"];
             reason?: components["schemas"]["NotReadyReason"];
@@ -1155,18 +1175,16 @@ export interface components {
             extensionNumber?: string;
             /** Format: date-time */
             enteredAt: string;
-            /** Format: date-time */
-            wrapUpEndsAt?: string;
             /**
              * Format: uuid
-             * @description The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR.
+             * @description The call the agent is doing after-call work for. Set while availability is WRAP_UP and kept until the next call is wrapped, so a filing made after the agent has moved on still lands on the right call.
              */
             wrapUpCallId?: string;
         };
-        /** @description What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work. */
+        /** @description What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave. */
         WrapUpRequest: {
             /** @description A code from GET /dispositions. */
-            dispositionCode?: string;
+            dispositionCode: string;
             note?: string;
         };
         /** @description Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. */
@@ -1193,13 +1211,10 @@ export interface components {
             extensionNumber?: string;
             /** Format: date-time */
             enteredAt: string;
-            /** Format: date-time */
-            wrapUpEndsAt?: string;
             isOnCall: boolean;
             isRegistered: boolean;
             /** @description The identifier the switch knows this agent by. */
             callcenterName: string;
-            wrapUpTimeSec: number;
             isAutoAnswer: boolean;
             /**
              * Format: uuid
@@ -1219,7 +1234,6 @@ export interface components {
              */
             userId: string;
             callcenterName: string;
-            wrapUpTimeSec: number;
             isAutoAnswer: boolean;
             /** Format: uuid */
             defaultExtensionId?: string;
@@ -1233,8 +1247,6 @@ export interface components {
             userId?: string;
             /** @description Reaches the switch as an identifier: no spaces, @ or quotes. */
             callcenterName: string;
-            /** @description Seconds of after-call work. 0 takes the default of 30. */
-            wrapUpTimeSec?: number;
             isAutoAnswer?: boolean;
             /**
              * Format: uuid
@@ -1611,8 +1623,6 @@ export interface components {
             agentId: string;
             dispositionCode: string;
             dispositionLabel: string;
-            categoryCode: string;
-            categoryLabel: string;
             note: string;
             /** Format: date-time */
             createdAt: string;
@@ -1740,20 +1750,14 @@ export interface components {
             /** @description Total rows matching the filter, for paging. */
             total: number;
         };
-        /** @description One code an agent can file a call under. */
+        /** @description One word an agent can file a call under. The code is stable; the label is what agents read and is the operator's to change. */
         Disposition: {
             code: string;
             label: string;
         };
-        /** @description A group of dispositions, in the order agents see them. */
-        DispositionCategory: {
-            code: string;
-            label: string;
-            dispositions: components["schemas"]["Disposition"][];
-        };
-        /** @description The whole vocabulary, grouped. Empty categories are omitted. */
+        /** @description The wrap-up vocabulary: every enabled disposition, in display order. */
         DispositionCatalog: {
-            categories: components["schemas"]["DispositionCategory"][];
+            items: components["schemas"]["Disposition"][];
         };
         /** @description A reviewer's scoring of one recording. */
         QualityReview: {
@@ -1795,6 +1799,23 @@ export interface components {
             avgWaitSec: number;
             avgTalkSec: number;
             avgBotSec: number;
+        };
+        /** @description One agent's own day, over the window (default: local midnight to now). The totals are served beside the averages so every number on the screen can be checked against them. */
+        AgentToday: {
+            /** @description Calls this agent answered, counted from the ledger's primary agent. */
+            callsHandled: number;
+            /** @description Total talk time on those calls. */
+            talkSec: number;
+            /** @description Total after-call work, from the presence history; an open wrap-up counts up to now. */
+            wrapUpSec: number;
+            /** @description Total time signed in, whatever the state; the denominator of occupancy. */
+            signedInSec: number;
+            /** @description (talkSec + wrapUpSec) / callsHandled — the average handle time. 0 when no call was handled. */
+            avgHandleSec: number;
+            /** @description wrapUpSec / the number of wrap-ups begun in the window. 0 when there were none. */
+            avgWrapUpSec: number;
+            /** @description (talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window. */
+            occupancyPct: number;
         };
         QueueReport: {
             /**
@@ -3522,6 +3543,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyReportList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getMyDay: {
+        parameters: {
+            query?: {
+                /** @description RFC 3339 window start; defaults to local midnight. */
+                from?: string;
+                /** @description RFC 3339 window end; defaults to now. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The agent's own numbers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentToday"];
                 };
             };
             401: components["responses"]["Unauthorized"];

@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,30 +42,27 @@ func workspaceStore(t *testing.T) (*LedgerStore, *ContactStore, *pgxpool.Pool) {
 }
 
 // A deployment that cannot name a single disposition cannot complete a
-// wrap-up, so the vocabulary ships with the schema rather than waiting for
-// somebody to configure one.
+// wrap-up, and the disposition is required — so the vocabulary ships with the
+// schema rather than waiting for somebody to configure one.
 func TestTheWrapUpVocabularyShipsWithTheSchema(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 
-	categories, err := ledger.ListDispositions(context.Background())
+	items, err := ledger.ListDispositions(context.Background())
 	if err != nil {
 		t.Fatalf("ListDispositions() error = %v", err)
 	}
-	if len(categories) == 0 {
-		t.Fatal("no disposition categories — an agent cannot file anything")
+	var labels []string
+	for _, d := range items {
+		if d.Code == "" || d.Label == "" {
+			t.Errorf("disposition %+v is missing a code or a label", d)
+		}
+		labels = append(labels, d.Label)
 	}
-	for _, c := range categories {
-		if c.Code == "" || c.Label == "" {
-			t.Errorf("category %+v is missing a code or a label", c)
-		}
-		if len(c.Dispositions) == 0 {
-			t.Errorf("category %s has no dispositions; empty categories are not offered", c.Code)
-		}
-		for _, d := range c.Dispositions {
-			if d.Code == "" || d.Label == "" {
-				t.Errorf("disposition %+v is missing a code or a label", d)
-			}
-		}
+	// The four the directive names, in the order it names them: an agent
+	// reaches the word they want without navigating to it.
+	want := []string{"Resolved", "Follow-up Required", "No Answer", "Other"}
+	if !slices.Equal(labels, want) {
+		t.Errorf("vocabulary = %v, want %v", labels, want)
 	}
 }
 
@@ -75,17 +73,17 @@ func TestAWrapUpKeepsTheWordsItWasFiledUnder(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	filed, err := ledger.FileWrapUp(ctx, callID, agentID, "ISSUE_FIXED", "replaced the router")
+	filed, err := ledger.FileWrapUp(ctx, callID, agentID, "RESOLVED", "replaced the router")
 	if err != nil {
 		t.Fatalf("FileWrapUp() error = %v", err)
 	}
-	if filed.DispositionLabel == "" || filed.CategoryCode == "" || filed.CategoryLabel == "" {
-		t.Errorf("filed = %+v, want the vocabulary's labels captured with it", filed)
+	if filed.DispositionLabel != "Resolved" {
+		t.Errorf("filed = %+v, want the vocabulary's label captured with it", filed)
 	}
 
 	// The vocabulary is edited; the record is history and does not move.
 	if _, err := pool.Exec(ctx,
-		`UPDATE dispositions SET label = 'Fixed it' WHERE code = 'ISSUE_FIXED'`); err != nil {
+		`UPDATE dispositions SET label = 'Sorted' WHERE code = 'RESOLVED'`); err != nil {
 		t.Fatalf("rename the disposition: %v", err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
@@ -121,7 +119,7 @@ func TestAWrapUpFiledBeforeTheCallEndsStillLandsOnIt(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "CALLBACK_SCHEDULED", ""); err != nil {
+	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "FOLLOW_UP_REQUIRED", ""); err != nil {
 		t.Fatalf("FileWrapUp() before the CDR error = %v", err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
@@ -136,7 +134,7 @@ func TestAWrapUpFiledBeforeTheCallEndsStillLandsOnIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCDR() error = %v", err)
 	}
-	if cdr.WrapUp == nil || cdr.WrapUp.DispositionCode != "CALLBACK_SCHEDULED" {
+	if cdr.WrapUp == nil || cdr.WrapUp.DispositionCode != "FOLLOW_UP_REQUIRED" {
 		t.Errorf("wrapUp = %+v, want the filing that preceded the row", cdr.WrapUp)
 	}
 }
@@ -147,14 +145,14 @@ func TestFilingTwiceReplaces(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "SPAM_CALL", "first thought"); err != nil {
+	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "OTHER", "first thought"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ledger.FileWrapUp(ctx, callID, agentID, "WRONG_NUMBER", "on reflection")
+	second, err := ledger.FileWrapUp(ctx, callID, agentID, "NO_ANSWER", "on reflection")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.DispositionCode != "WRONG_NUMBER" || second.Note != "on reflection" {
+	if second.DispositionCode != "NO_ANSWER" || second.Note != "on reflection" {
 		t.Errorf("second filing = %+v, want the later word to stand", second)
 	}
 
@@ -186,10 +184,10 @@ func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 	callID := uuid.New()
 	first, second := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, first, "ESCALATED", "handed to L2"); err != nil {
+	if _, err := ledger.FileWrapUp(ctx, callID, first, "FOLLOW_UP_REQUIRED", "handed to L2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ledger.FileWrapUp(ctx, callID, second, "ISSUE_FIXED", "sorted it"); err != nil {
+	if _, err := ledger.FileWrapUp(ctx, callID, second, "RESOLVED", "sorted it"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
@@ -205,8 +203,8 @@ func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 		agentID uuid.UUID
 		want    string
 	}{
-		{"the first agent", first, "ESCALATED"},
-		{"the agent who finished it", second, "ISSUE_FIXED"},
+		{"the first agent", first, "FOLLOW_UP_REQUIRED"},
+		{"the agent who finished it", second, "RESOLVED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			items, _, err := ledger.ListCDRs(ctx, CDRFilter{AgentID: &tc.agentID})
@@ -227,7 +225,7 @@ func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cdr.WrapUp == nil || cdr.WrapUp.DispositionCode != "ISSUE_FIXED" {
+	if cdr.WrapUp == nil || cdr.WrapUp.DispositionCode != "RESOLVED" {
 		t.Errorf("wrapUp = %+v, want the primary agent's filing", cdr.WrapUp)
 	}
 }
@@ -394,4 +392,170 @@ func TestAContactWithoutANumberIsRefused(t *testing.T) {
 	if !errors.Is(err, ErrContactInvalid) {
 		t.Errorf("Create() error = %v, want ErrContactInvalid", err)
 	}
+}
+
+//
+// The agent's own day.
+//
+
+// Every number on the Today card is a division by something that can be zero:
+// a day with no calls, a shift that has not started, a wrap-up nobody filed.
+func TestTheAgentsDayDividesSafely(t *testing.T) {
+	for _, tc := range []struct {
+		name                                   string
+		calls, talk, wrapUp, wrapUps, signedIn int
+		wantHandle, wantWrapUp, wantOccupancy  int
+	}{
+		{name: "an ordinary morning", calls: 10, talk: 2400, wrapUp: 600, wrapUps: 10, signedIn: 4000,
+			wantHandle: 300, wantWrapUp: 60, wantOccupancy: 75},
+		{name: "signed in, nothing yet", signedIn: 1800},
+		{name: "handled calls, wrapped none", calls: 4, talk: 400, signedIn: 1000,
+			wantHandle: 100, wantOccupancy: 40},
+		{name: "not signed in at all"},
+		{name: "busier than the window can explain", calls: 1, talk: 900, wrapUp: 300, wrapUps: 1, signedIn: 600,
+			wantHandle: 1200, wantWrapUp: 300, wantOccupancy: 100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := agentDay(tc.calls, tc.talk, tc.wrapUp, tc.wrapUps, tc.signedIn)
+			if got.AvgHandleSec != tc.wantHandle {
+				t.Errorf("avgHandleSec = %d, want %d", got.AvgHandleSec, tc.wantHandle)
+			}
+			if got.AvgWrapUpSec != tc.wantWrapUp {
+				t.Errorf("avgWrapUpSec = %d, want %d", got.AvgWrapUpSec, tc.wantWrapUp)
+			}
+			if got.OccupancyPct != tc.wantOccupancy {
+				t.Errorf("occupancyPct = %d, want %d — an occupancy above 100 reads "+
+					"as a bug rather than as a window edge", got.OccupancyPct, tc.wantOccupancy)
+			}
+			if got.CallsHandled != tc.calls || got.TalkSec != tc.talk ||
+				got.WrapUpSec != tc.wrapUp || got.SignedInSec != tc.signedIn {
+				t.Errorf("the totals were not carried through: %+v", got)
+			}
+		})
+	}
+}
+
+// The day is read from two places at once — the ledger for calls, the presence
+// history for time — and both have to be clipped to the window. This is the
+// query doing that against a real server.
+func TestTheAgentsDayReadsTheLedgerAndThePresenceHistory(t *testing.T) {
+	ledger, _, pool := workspaceStore(t)
+	ctx := context.Background()
+	// The presence history is foreign-keyed to a real agent, so the day needs
+	// one to belong to.
+	me, somebodyElse := insertAgent(t, pool, "wei"), uuid.New()
+
+	// The window is a fixed hour, so nothing depends on when the test runs.
+	from := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+	to := from.Add(time.Hour)
+
+	// Two calls in the window, one before it, one somebody else's.
+	for _, c := range []struct {
+		at      time.Time
+		agent   uuid.UUID
+		talkSec int
+	}{
+		{from.Add(5 * time.Minute), me, 300},
+		{from.Add(20 * time.Minute), me, 180},
+		{from.Add(-2 * time.Hour), me, 999},
+		{from.Add(30 * time.Minute), somebodyElse, 999},
+	} {
+		agent := c.agent
+		if err := ledger.InsertCDR(ctx, CDR{
+			CallID: uuid.New(), StartedAt: c.at, EndedAt: c.at.Add(time.Minute),
+			CallType: "INBOUND", Status: CDRStatusAnswered,
+			PrimaryAgentID: &agent, AgentIDs: []uuid.UUID{agent}, TalkSec: c.talkSec,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A shift that started before the window and is still open, with two
+	// wrap-ups inside it — one of them still running.
+	for _, i := range []struct {
+		state, reason string
+		entered       time.Time
+		exited        *time.Time
+	}{
+		{"READY", "", from.Add(-30 * time.Minute), timePtr(from.Add(10 * time.Minute))},
+		{"NOT_READY", "AFTER_CALL_WORK", from.Add(10 * time.Minute), timePtr(from.Add(12 * time.Minute))},
+		{"READY", "", from.Add(12 * time.Minute), timePtr(from.Add(25 * time.Minute))},
+		{"NOT_READY", "AFTER_CALL_WORK", from.Add(25 * time.Minute), nil},
+	} {
+		var reason *string
+		if i.reason != "" {
+			r := i.reason
+			reason = &r
+		}
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO agent_state_logs (agent_id, state, reason, entered_at, exited_at)
+			VALUES ($1, $2, $3, $4, $5)`, me, i.state, reason, i.entered, i.exited); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	day, err := ledger.ReportAgentDay(ctx, me, from, to)
+	if err != nil {
+		t.Fatalf("ReportAgentDay() error = %v", err)
+	}
+
+	if day.CallsHandled != 2 {
+		t.Errorf("callsHandled = %d, want 2 — the earlier call and somebody else's "+
+			"are not this agent's day", day.CallsHandled)
+	}
+	if day.TalkSec != 480 {
+		t.Errorf("talkSec = %d, want 480", day.TalkSec)
+	}
+	// 2 minutes closed + 35 minutes still open at the window's end.
+	if day.WrapUpSec != 2220 {
+		t.Errorf("wrapUpSec = %d, want 2220: an open wrap-up counts up to the "+
+			"window's end, not to zero", day.WrapUpSec)
+	}
+	if day.AvgWrapUpSec != 1110 {
+		t.Errorf("avgWrapUpSec = %d, want 1110 across the two wrap-ups", day.AvgWrapUpSec)
+	}
+	// The shift began half an hour before the window; only the hour inside it
+	// counts.
+	if day.SignedInSec != 3600 {
+		t.Errorf("signedInSec = %d, want 3600 — the window, not the shift", day.SignedInSec)
+	}
+	if day.OccupancyPct != 75 {
+		t.Errorf("occupancyPct = %d, want 75", day.OccupancyPct)
+	}
+}
+
+// A signed-out agent's day is empty rather than an error or a division by
+// zero: the card renders zeroes, which is the truth.
+func TestAnAgentWhoDidNothingHasAnEmptyDay(t *testing.T) {
+	ledger, _, _ := workspaceStore(t)
+	from := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+
+	day, err := ledger.ReportAgentDay(context.Background(), uuid.New(), from, from.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("ReportAgentDay() error = %v", err)
+	}
+	if day != (AgentDay{}) {
+		t.Errorf("day = %+v, want every number zero", day)
+	}
+}
+
+func timePtr(t time.Time) *time.Time { return &t }
+
+// insertAgent creates the account and agent identity a presence history hangs
+// off, which is the only reason these tests need one.
+func insertAgent(t *testing.T, pool *pgxpool.Pool, username string) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	userID, agentID := uuid.New(), uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO users (id, username, password_hash, display_name, role)
+		VALUES ($1, $2::text, 'x', $2::text, 'AGENT')`, userID, username); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO agents (id, user_id, callcenter_name) VALUES ($1, $2, $3)`,
+		agentID, userID, "agent-"+username); err != nil {
+		t.Fatal(err)
+	}
+	return agentID
 }

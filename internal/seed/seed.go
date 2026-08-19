@@ -143,16 +143,14 @@ func Demo(ctx context.Context, st *store.Store, log *slog.Logger) error {
 // dispositionCodes reads the installation's wrap-up vocabulary. An empty list
 // is not a failure — the demo simply files no dispositions.
 func dispositionCodes(ctx context.Context, ledger *store.LedgerStore, log *slog.Logger) []string {
-	categories, err := ledger.ListDispositions(ctx)
+	dispositions, err := ledger.ListDispositions(ctx)
 	if err != nil {
 		log.Warn("seed: no disposition vocabulary; history will carry no wrap-ups", "error", err)
 		return nil
 	}
-	var codes []string
-	for _, c := range categories {
-		for _, d := range c.Dispositions {
-			codes = append(codes, d.Code)
-		}
+	codes := make([]string, 0, len(dispositions))
+	for _, d := range dispositions {
+		codes = append(codes, d.Code)
 	}
 	return codes
 }

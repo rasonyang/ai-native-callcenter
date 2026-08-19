@@ -55,7 +55,6 @@ func (a *AgentStore) SavePresence(ctx context.Context, agentID uuid.UUID, p agen
 		Reason:          reason,
 		ExtensionNumber: extension,
 		EnteredAt:       timestamp(p.EnteredAt),
-		WrapUpEndsAt:    timestamp(p.WrapUpEndsAt),
 		WrapUpCallID:    p.WrapUpCallID,
 	})
 	if err != nil {
@@ -105,7 +104,6 @@ func (a *AgentStore) AgentProfile(ctx context.Context, agentID uuid.UUID) (agent
 		UserID:         row.UserID,
 		CallcenterName: row.CallcenterName,
 		DisplayName:    user.DisplayName,
-		WrapUpTimeSec:  int(row.WrapUpTimeSec),
 		IsAutoAnswer:   row.IsAutoAnswer,
 	}
 	// The bound phone is configuration, not a sign-in choice. A missing
@@ -125,7 +123,6 @@ func (a *AgentStore) CreateAgent(ctx context.Context, cfg agents.AgentConfig) (a
 		ID:                 uuid.New(),
 		UserID:             cfg.UserID,
 		CallcenterName:     cfg.CallcenterName,
-		WrapUpTimeSec:      int32(cfg.WrapUpTimeSec),
 		IsAutoAnswer:       cfg.IsAutoAnswer,
 		DefaultExtensionID: cfg.DefaultExtensionID,
 	})
@@ -140,7 +137,6 @@ func (a *AgentStore) UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (a
 	row, err := a.q.UpdateAgent(ctx, queries.UpdateAgentParams{
 		ID:                 cfg.AgentID,
 		CallcenterName:     cfg.CallcenterName,
-		WrapUpTimeSec:      int32(cfg.WrapUpTimeSec),
 		IsAutoAnswer:       cfg.IsAutoAnswer,
 		DefaultExtensionID: cfg.DefaultExtensionID,
 	})
@@ -163,7 +159,6 @@ func agentConfigOf(row queries.Agent) agents.AgentConfig {
 		AgentID:            row.ID,
 		UserID:             row.UserID,
 		CallcenterName:     row.CallcenterName,
-		WrapUpTimeSec:      int(row.WrapUpTimeSec),
 		IsAutoAnswer:       row.IsAutoAnswer,
 		DefaultExtensionID: row.DefaultExtensionID,
 	}
@@ -186,7 +181,6 @@ func (a *AgentStore) Roster(ctx context.Context) ([]agents.RosterEntry, error) {
 			State:              agents.State(row.State),
 			EnteredAt:          row.EnteredAt.Time,
 			CallcenterName:     row.CallcenterName,
-			WrapUpTimeSec:      int(row.WrapUpTimeSec),
 			IsAutoAnswer:       row.IsAutoAnswer,
 			DefaultExtensionID: row.DefaultExtensionID,
 		}
@@ -198,10 +192,6 @@ func (a *AgentStore) Roster(ctx context.Context) ([]agents.RosterEntry, error) {
 		}
 		if row.ExtensionNumber != nil {
 			entry.Extension = *row.ExtensionNumber
-		}
-		if row.WrapUpEndsAt.Valid {
-			ends := row.WrapUpEndsAt.Time
-			entry.WrapUpEndsAt = &ends
 		}
 		entry.WrapUpCallID = row.WrapUpCallID
 		out = append(out, entry)
@@ -219,9 +209,6 @@ func presenceFromRow(row queries.AgentState) agents.Presence {
 	}
 	if row.ExtensionNumber != nil {
 		p.ExtensionNumber = *row.ExtensionNumber
-	}
-	if row.WrapUpEndsAt.Valid {
-		p.WrapUpEndsAt = row.WrapUpEndsAt.Time
 	}
 	p.WrapUpCallID = row.WrapUpCallID
 	return p

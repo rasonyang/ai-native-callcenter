@@ -125,33 +125,24 @@ func (p *Plan) seedContactsAndWrapUps(dispositions []string, rng *rand.Rand) {
 // does not know simply gets no notes, which is the honest default for an
 // installation that renamed its own.
 var demoNotes = map[string][]string{
-	"ANSWERED_QUESTION": {
-		"Explained the billing cycle; nothing further needed.",
-		"Sent the setup guide by email while we were on the call.",
-	},
-	"ISSUE_FIXED": {
+	"RESOLVED": {
 		"Walked them through the reset; confirmed the line came back.",
-		"Re-provisioned the handset and tested a call together.",
-	},
-	"REFUND_PROCESSED": {
+		"Explained the billing cycle; nothing further needed.",
 		"Refund raised, reference sent by SMS.",
-		"Duplicate charge credited; 3–5 working days.",
 	},
-	"CALLBACK_SCHEDULED": {
+	"FOLLOW_UP_REQUIRED": {
 		"Calling back tomorrow after 16:00 as agreed.",
-		"Wants the account holder present; callback booked.",
-	},
-	"ESCALATED": {
 		"Escalated to L2 — hardware fault suspected.",
-		"Passed to billing; the charge predates the account.",
-	},
-	"PENDING_CUSTOMER": {
 		"Waiting on the photo of the meter before we can proceed.",
-		"Customer will confirm the address with their office.",
 	},
-	"WRONG_NUMBER": {"Reached the wrong department; redirected them."},
-	"NO_AUDIO":     {"No audio either way; asked them to redial."},
-	"SPAM_CALL":    {"Silent call, no response to greeting."},
+	"NO_ANSWER": {
+		"No audio either way; asked them to redial.",
+		"Line dropped before they said anything.",
+	},
+	"OTHER": {
+		"Reached the wrong department; redirected them.",
+		"Silent call, no response to greeting.",
+	},
 }
 
 // The demo numbering plan. DIDs are plain text on a CDR, so the history can
@@ -335,20 +326,47 @@ func oneCall(startedAt time.Time, agents []uuid.UUID, queues map[string]QueueRef
 	}
 }
 
-// shift is one agent's plausible weekday: sign in, work, lunch, work, leave.
+// shift is one agent's plausible weekday: sign in, work, wrap up what they
+// took, lunch, work, leave.
+//
+// The after-call intervals are what the agent's own Today card divides by, so
+// a seeded day without them shows an occupancy of pure talk and an average
+// wrap-up of zero — numbers that look like a broken screen rather than a quiet
+// morning.
 func shift(dayStart time.Time, agentID uuid.UUID, rng *rand.Rand) []StateLogRow {
 	login := dayStart.Add(8*time.Hour + 50*time.Minute + secs(rng.Intn(900)))
 	lunch := dayStart.Add(12 * time.Hour).Add(secs(rng.Intn(1800)))
 	back := lunch.Add(45 * time.Minute).Add(secs(rng.Intn(600)))
 	logout := dayStart.Add(18 * time.Hour).Add(secs(rng.Intn(1200)))
-	lunchReason := "LUNCH"
+	lunchReason, acwReason := "LUNCH", "AFTER_CALL_WORK"
 
-	return []StateLogRow{
-		{AgentID: agentID, State: "READY", EnteredAt: login, ExitedAt: &lunch},
-		{AgentID: agentID, State: "NOT_READY", Reason: &lunchReason, EnteredAt: lunch, ExitedAt: &back},
-		{AgentID: agentID, State: "READY", EnteredAt: back, ExitedAt: &logout},
-		{AgentID: agentID, State: "LOGGED_OUT", EnteredAt: logout, ExitedAt: nil},
+	rows := []StateLogRow{{AgentID: agentID, State: "READY", EnteredAt: login, ExitedAt: nil}}
+	// A handful of wrap-ups through the morning, each cutting the ready
+	// interval before it in two.
+	at := login
+	for i := 0; i < 3+rng.Intn(4); i++ {
+		at = at.Add(secs(600 + rng.Intn(1800)))
+		if !at.Before(lunch) {
+			break
+		}
+		ends := at.Add(secs(25 + rng.Intn(90)))
+		if !ends.Before(lunch) {
+			break
+		}
+		wrapUpAt, wrapUpEnds := at, ends
+		rows[len(rows)-1].ExitedAt = &wrapUpAt
+		rows = append(rows,
+			StateLogRow{AgentID: agentID, State: "NOT_READY", Reason: &acwReason,
+				EnteredAt: wrapUpAt, ExitedAt: &wrapUpEnds},
+			StateLogRow{AgentID: agentID, State: "READY", EnteredAt: wrapUpEnds, ExitedAt: nil})
+		at = ends
 	}
+	rows[len(rows)-1].ExitedAt = &lunch
+
+	return append(rows,
+		StateLogRow{AgentID: agentID, State: "NOT_READY", Reason: &lunchReason, EnteredAt: lunch, ExitedAt: &back},
+		StateLogRow{AgentID: agentID, State: "READY", EnteredAt: back, ExitedAt: &logout},
+		StateLogRow{AgentID: agentID, State: "LOGGED_OUT", EnteredAt: logout, ExitedAt: nil})
 }
 
 func secs(n int) time.Duration { return time.Duration(n) * time.Second }
