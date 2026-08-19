@@ -28,7 +28,7 @@ One ESL **inbound-mode** connection (default `127.0.0.1:18021`, password from en
 | NOT_READY(r) | ready request | READY |
 | READY | not-ready request (reason) | NOT_READY(r) |
 | READY/NOT_READY | logout / force-logout | LOGGED_OUT |
-| (on queue call end, agent talked) | ACW timer start (`wrap_up_time_sec`) | NOT_READY(AFTER_CALL_WORK) → auto READY on expiry; explicit request wins over timer |
+| (on queue call end, agent talked) | after-call work starts | NOT_READY(AFTER_CALL_WORK) until the agent files it — **no timer** (owner directive 2026-08-19; see below) |
 | READY | RONA (mod_callcenter marks agent On Break after max-no-answer) | NOT_READY(SYSTEM) |
 
 Reasons: `LOGIN, BREAK, LUNCH, TRAINING, AFTER_CALL_WORK, SYSTEM, SUPERVISOR`. Agent state rows are written **synchronously in-request** (fail `503 storage_down` rather than acknowledge unrecorded state); timer transitions apply in memory and persist best-effort. Derived `availability` (snapshot-only, wallboard vocabulary): `logged_out → on_call → wrap_up → not_ready → device_unreachable → ready`.
@@ -44,6 +44,8 @@ Reasons: `LOGIN, BREAK, LUNCH, TRAINING, AFTER_CALL_WORK, SYSTEM, SUPERVISOR`. A
 | LOGGED_OUT | `Logged Out` |
 
 Sync direction Go→FS via `callcenter_config agent set status '<agent_uuid>' '<status>'`; FS→Go only for RONA (observe `agent-state-change` → mirror as NOT_READY(SYSTEM)). ACW is owned by aicc (richer reasons/UI), so callcenter agents are configured `wrap-up-time=0`.
+
+**Amendment — after-call work ends when the agent files it (owner directive 2026-08-19).** The original design gave ACW a per-agent countdown (`agents.wrap_up_time_sec`) that returned the agent to READY by itself. The directive is: enter ACW automatically when the call ends, show the *elapsed* time, require a disposition, offer a note, and end it with Done. A deadline contradicts a required disposition — an agent who waits it out files nothing — so the countdown, its column and `agent_states.wrap_up_ends_at` are gone (migration 00012). What keeps the queue safe is unchanged and is the switch's job: NOT_READY mirrors as `On Break`, so no call is delivered for as long as the agent is writing up the last one. An agent may still leave ACW by choosing another state, or be signed out by a supervisor; the call they were writing up stays theirs to file against until the next one is wrapped.
 
 ## 3. Call flows
 

@@ -13,7 +13,9 @@ React 19 + TypeScript, Vite, TanStack Router (file-based, code-split) + TanStack
 - **`/agent/calls` — My Calls.** `GET /cdrs/mine`, the agent resolved from the session and never from a parameter. Each row carries the agent's *own* wrap-up; the ledger listing (`GET /cdrs`) stays supervision.
 - **`/agent/contacts` — Contacts.** A deliberately small customer record (number, name, company, email, tags, notes, last call), keyed by phone number so the cockpit's caller card can answer "who is this" with an exact-match lookup. Not a CRM: the interaction-history / orders / notes tabs of the reference stay out, and a deployment that needs them integrates one.
 - **Cockpit "My queue".** `GET /calls/waiting` plus live `QUEUE_JOINED` / `QUEUE_LEFT` / `QUEUE_COUNT`, scoped to the queues the agent staffs — the same staffing rule the event stream already applied. A wait turns red against *the queue's own* `slaThresholdSec`, never a constant in the browser.
-- **Cockpit after-call work.** Category + disposition + note + Complete, filed through `POST /agent/wrap-up`. The call being filed against comes from presence (`wrapUpCallId`), never from the request.
+- **Cockpit after-call work.** One required disposition, an optional note and a Done button, filed through `POST /agent/wrap-up`. The call being filed against comes from presence (`wrapUpCallId`), never from the request. It starts when the call ends, counts *up* — there is no deadline to count down to (01 §3's amendment) — and while it runs the switch keeps the agent out of routing.
+- **Cockpit "Today"** replaces the Presence card, which repeated what the softphone bar already shows. Calls handled, AHT, ACW average and occupancy from `GET /reports/me`.
+- **The "Call legs" card is gone.** Contact answers who is on the phone and the live transcript answers what is being said; a list of legs beside them was the switch's view of a call rather than the agent's.
 
 ## 3. Data layer
 

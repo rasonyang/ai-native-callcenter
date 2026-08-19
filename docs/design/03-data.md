@@ -15,11 +15,12 @@ users(id uuid pk, username citext unique, password_hash text, display_name text,
       status varchar check in ('ACTIVE','SUSPENDED') default 'ACTIVE',
       created_at, last_login_at)
 sessions(id uuid pk, user_id fk, token_hash bytea, ip inet, created_at, expires_at)   -- revocable cookie sessions
-agents(id uuid pk, user_id uuid unique fk, wrap_up_time_sec int default 30,
-       is_auto_answer bool default false, default_extension_id uuid null fk)
+agents(id uuid pk, user_id uuid unique fk,
+       is_auto_answer bool default false, default_extension_id uuid null fk)   -- wrap_up_time_sec dropped in 00012: after-call work has no deadline
 agent_states(agent_id pk fk, state varchar check in ('LOGGED_OUT','NOT_READY','READY'),
              reason varchar null,          -- 'LOGIN','BREAK','LUNCH','TRAINING','AFTER_CALL_WORK','SYSTEM','SUPERVISOR'
-             extension_number text null, entered_at timestamptz, wrap_up_ends_at timestamptz null)  -- THE row, written in-request
+             extension_number text null, entered_at timestamptz,
+             wrap_up_call_id uuid null)   -- THE row, written in-request; entered_at is what the cockpit counts up from
 agent_state_logs(id bigserial, agent_id, state, reason, entered_at, exited_at)        -- occupancy/reports
 ```
 
@@ -95,17 +96,20 @@ queue_events(id bigserial, occurred_at, call_id, queue_id,
              agent_id uuid, wait_ms int)                          -- SL/abandon source
 audit_logs(id bigserial, occurred_at, actor_id, action varchar,   -- 'QUEUE_UPDATED','FLOW_PUBLISHED','AGENT_FORCE_LOGOUT',…
            target_kind text, target_id text, detail jsonb, ip inet)
--- Agent workspace (00010, 2026-08-19)
-disposition_categories(code varchar pk, label text, position int)  -- seeded by the migration: an
-dispositions(code varchar pk, category_code fk, label text,        -- installation with no vocabulary
-             position int, is_enabled bool)                        -- cannot complete a wrap-up at all
+-- Agent workspace (00010–00012, 2026-08-19)
+dispositions(code varchar pk, label text, position int, is_enabled bool)
+                                   -- seeded by the migration with the four the directive names
+                                   -- (RESOLVED, FOLLOW_UP_REQUIRED, NO_ANSWER, OTHER): an
+                                   -- installation with no vocabulary cannot complete a wrap-up at
+                                   -- all, and the disposition is required. One flat list — with a
+                                   -- handful of words there is nothing to group.
 wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
-         category_code text, category_label text, note text, created_at,
-         pk(call_id, agent_id))    -- its own table, not columns on cdrs: an agent finishes their part
+         note text, created_at, pk(call_id, agent_id))
+                                   -- its own table, not columns on cdrs: an agent finishes their part
                                    -- of a call before the call ends (a transfer hands the caller on),
-                                   -- so the filing regularly precedes the ledger row. Labels are
+                                   -- so the filing regularly precedes the ledger row. The label is
                                    -- captured at filing time — history does not change meaning when
-                                   -- somebody renames a category.
+                                   -- somebody renames a word.
 contacts(id uuid pk, phone_number text unique, name text, company text, email text,
          tags text[], notes text, created_at, updated_at, updated_by)
                                    -- uq_contacts_phone_number: the number is how a caller is
