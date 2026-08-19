@@ -73,7 +73,7 @@ func TestAWrapUpKeepsTheWordsItWasFiledUnder(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	filed, err := ledger.FileWrapUp(ctx, callID, agentID, "RESOLVED", "replaced the router")
+	filed, err := confirm(t, ledger, callID, agentID, "RESOLVED", "replaced the router")
 	if err != nil {
 		t.Fatalf("FileWrapUp() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAWrapUpFiledBeforeTheCallEndsStillLandsOnIt(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "FOLLOW_UP_REQUIRED", ""); err != nil {
+	if _, err := confirm(t, ledger, callID, agentID, "FOLLOW_UP_REQUIRED", ""); err != nil {
 		t.Fatalf("FileWrapUp() before the CDR error = %v", err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
@@ -145,10 +145,10 @@ func TestFilingTwiceReplaces(t *testing.T) {
 	ctx := context.Background()
 	callID, agentID := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, agentID, "OTHER", "first thought"); err != nil {
+	if _, err := confirm(t, ledger, callID, agentID, "OTHER", "first thought"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := ledger.FileWrapUp(ctx, callID, agentID, "NO_ANSWER", "on reflection")
+	second, err := confirm(t, ledger, callID, agentID, "NO_ANSWER", "on reflection")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +170,9 @@ func TestFilingTwiceReplaces(t *testing.T) {
 func TestAnUnknownDispositionIsRefused(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 
-	_, err := ledger.FileWrapUp(context.Background(), uuid.New(), uuid.New(), "NOT_A_CODE", "")
+	_, err := confirm(t, ledger, uuid.New(), uuid.New(), "NOT_A_CODE", "")
 	if !errors.Is(err, ErrUnknownDisposition) {
-		t.Errorf("FileWrapUp() error = %v, want ErrUnknownDisposition", err)
+		t.Errorf("ConfirmWrapUp() error = %v, want ErrUnknownDisposition", err)
 	}
 }
 
@@ -184,10 +184,10 @@ func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 	callID := uuid.New()
 	first, second := uuid.New(), uuid.New()
 
-	if _, err := ledger.FileWrapUp(ctx, callID, first, "FOLLOW_UP_REQUIRED", "handed to L2"); err != nil {
+	if _, err := confirm(t, ledger, callID, first, "FOLLOW_UP_REQUIRED", "handed to L2"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ledger.FileWrapUp(ctx, callID, second, "RESOLVED", "sorted it"); err != nil {
+	if _, err := confirm(t, ledger, callID, second, "RESOLVED", "sorted it"); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
@@ -404,19 +404,27 @@ func TestTheAgentsDayDividesSafely(t *testing.T) {
 	for _, tc := range []struct {
 		name                                   string
 		calls, talk, wrapUp, wrapUps, signedIn int
+		opened, confirmed                      int
 		wantHandle, wantWrapUp, wantOccupancy  int
+		wantConfirmedPct                       int
 	}{
 		{name: "an ordinary morning", calls: 10, talk: 2400, wrapUp: 600, wrapUps: 10, signedIn: 4000,
-			wantHandle: 300, wantWrapUp: 60, wantOccupancy: 75},
+			opened: 10, confirmed: 9,
+			wantHandle: 300, wantWrapUp: 60, wantOccupancy: 75, wantConfirmedPct: 90},
 		{name: "signed in, nothing yet", signedIn: 1800},
 		{name: "handled calls, wrapped none", calls: 4, talk: 400, signedIn: 1000,
-			wantHandle: 100, wantOccupancy: 40},
+			opened: 4, wantHandle: 100, wantOccupancy: 40},
 		{name: "not signed in at all"},
 		{name: "busier than the window can explain", calls: 1, talk: 900, wrapUp: 300, wrapUps: 1, signedIn: 600,
-			wantHandle: 1200, wantWrapUp: 300, wantOccupancy: 100},
+			opened: 1, confirmed: 1,
+			wantHandle: 1200, wantWrapUp: 300, wantOccupancy: 100, wantConfirmedPct: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := agentDay(tc.calls, tc.talk, tc.wrapUp, tc.wrapUps, tc.signedIn)
+			got := agentDay(tc.calls, tc.talk, tc.wrapUp, tc.wrapUps, tc.signedIn,
+				tc.opened, tc.confirmed)
+			if got.ConfirmedPct != tc.wantConfirmedPct {
+				t.Errorf("confirmedPct = %d, want %d", got.ConfirmedPct, tc.wantConfirmedPct)
+			}
 			if got.AvgHandleSec != tc.wantHandle {
 				t.Errorf("avgHandleSec = %d, want %d", got.AvgHandleSec, tc.wantHandle)
 			}
@@ -540,6 +548,14 @@ func TestAnAgentWhoDidNothingHasAnEmptyDay(t *testing.T) {
 }
 
 func timePtr(t time.Time) *time.Time { return &t }
+
+// confirm is an agent pressing Done with both fields filled in, which is what
+// most of these tests are about.
+func confirm(t *testing.T, ledger *LedgerStore, callID, agentID uuid.UUID,
+	dispositionCode, note string) (WrapUp, error) {
+	t.Helper()
+	return ledger.ConfirmWrapUp(context.Background(), callID, agentID, &dispositionCode, &note)
+}
 
 // insertAgent creates the account and agent identity a presence history hangs
 // off, which is the only reason these tests need one.

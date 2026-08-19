@@ -122,7 +122,16 @@ func Demo(ctx context.Context, st *store.Store, log *slog.Logger) error {
 	// After the calls: a wrap-up is filed against a call, and a contact is
 	// worth having because a call from that number exists.
 	for _, row := range plan.WrapUps {
-		if _, err := ledger.FileWrapUp(ctx, row.CallID, row.AgentID, row.DispositionCode, row.Note); err != nil {
+		if err := ledger.OpenWrapUp(ctx, row.CallID, row.AgentID); err != nil {
+			return fmt.Errorf("seed wrap-up: %w", err)
+		}
+		// Not every call gets confirmed on a real day, and a demo where the
+		// completion rate reads 100% teaches nobody what the number is for.
+		if !row.IsConfirmed {
+			continue
+		}
+		code, note := row.DispositionCode, row.Note
+		if _, err := ledger.ConfirmWrapUp(ctx, row.CallID, row.AgentID, &code, &note); err != nil {
 			return fmt.Errorf("seed wrap-up: %w", err)
 		}
 	}

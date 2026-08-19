@@ -401,13 +401,45 @@
       }
     },
     "/agent/wrap-up": {
+      "get": {
+        "operationId": "getAgentWrapUp",
+        "tags": [
+          "agents"
+        ],
+        "summary": "The after-call work waiting on the caller",
+        "description": "The record opened for the call this agent just finished, whether or not they have confirmed it. 204 when there is nothing to confirm. Requires the AGENT role.",
+        "responses": {
+          "200": {
+            "description": "The open record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentWrapUp"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "Nothing to confirm."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
       "post": {
         "operationId": "agentWrapUp",
         "tags": [
           "agents"
         ],
-        "summary": "Complete after-call work",
-        "description": "Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. After-call work has no deadline: it begins when the call ends and ends here. The filing is still accepted once the agent has moved on — the last wrapped call stays addressable until the next one starts — and answers 409 AGENT_NOT_IN_WRAP_UP when there is no finished call to file against. dispositionCode must be a code from GET /dispositions. Requires the AGENT role.",
+        "summary": "Confirm after-call work",
+        "description": "Confirms the record the platform opened when the call ended, applying whatever the agent changed, and returns them to READY. Both fields are optional — the disposition already has a value, and confirming the defaults is a legitimate answer. The filing is still accepted once the agent has moved on: the last wrapped call stays addressable until the next one starts, and 409 AGENT_NOT_IN_WRAP_UP says when there is none. Requires the AGENT role.",
         "security": [
           {
             "cookieSession": [],
@@ -415,7 +447,7 @@
           }
         ],
         "requestBody": {
-          "required": true,
+          "required": false,
           "content": {
             "application/json": {
               "schema": {
@@ -443,9 +475,6 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/UnprocessableEntity"
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
@@ -3696,19 +3725,52 @@
       },
       "WrapUpRequest": {
         "type": "object",
-        "description": "What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave.",
+        "description": "What the agent confirms for the call they just finished. Both fields are optional: the record already exists with a default disposition, and pressing Done with neither is an agent saying the defaults are right.",
         "properties": {
           "dispositionCode": {
             "type": "string",
-            "description": "A code from GET /dispositions."
+            "description": "A code from GET /dispositions; omitted keeps the one on the record."
           },
           "note": {
             "type": "string",
-            "maxLength": 4000
+            "maxLength": 4000,
+            "description": "Omitted keeps the note on the record."
+          }
+        }
+      },
+      "CurrentWrapUp": {
+        "type": "object",
+        "description": "The after-call work waiting on this agent: the record the platform opened for the call they just finished, as it stands. It survives a page reload, which is how a cockpit knows to keep asking.",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispositionCode": {
+            "type": "string"
+          },
+          "dispositionLabel": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "isConfirmed": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When after-call work began for this call."
           }
         },
         "required": [
-          "dispositionCode"
+          "callId",
+          "dispositionCode",
+          "dispositionLabel",
+          "note",
+          "isConfirmed",
+          "createdAt"
         ]
       },
       "AgentLoginRequest": {
@@ -4927,7 +4989,7 @@
       },
       "WrapUp": {
         "type": "object",
-        "description": "One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary.",
+        "description": "One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary.",
         "properties": {
           "agentId": {
             "type": "string",
@@ -4945,6 +5007,10 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "isConfirmed": {
+            "type": "boolean",
+            "description": "True once the agent pressed Done. False means the defaults are still standing."
           }
         },
         "required": [
@@ -4952,7 +5018,8 @@
           "dispositionCode",
           "dispositionLabel",
           "note",
-          "createdAt"
+          "createdAt",
+          "isConfirmed"
         ]
       },
       "CDRList": {
@@ -5519,6 +5586,18 @@
           "occupancyPct": {
             "type": "integer",
             "description": "(talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window."
+          },
+          "wrapUpsOpened": {
+            "type": "integer",
+            "description": "After-call records opened in the window — one per call this agent finished."
+          },
+          "wrapUpsConfirmed": {
+            "type": "integer",
+            "description": "How many of them the agent confirmed."
+          },
+          "confirmedPct": {
+            "type": "integer",
+            "description": "wrapUpsConfirmed / wrapUpsOpened as a percentage — how much of the day's after-call work somebody actually looked at. 0 when nothing was opened."
           }
         },
         "required": [
@@ -5528,7 +5607,10 @@
           "signedInSec",
           "avgHandleSec",
           "avgWrapUpSec",
-          "occupancyPct"
+          "occupancyPct",
+          "wrapUpsOpened",
+          "wrapUpsConfirmed",
+          "confirmedPct"
         ]
       },
       "QueueReport": {

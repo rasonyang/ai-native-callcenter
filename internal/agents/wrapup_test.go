@@ -4,6 +4,8 @@ package agents
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -168,5 +170,78 @@ func TestRestoreRecoversTheWrapUpCall(t *testing.T) {
 	}
 	if got, ok := svc.WrapUpCall(agentID); !ok || got != callID {
 		t.Errorf("WrapUpCall() after restore = %s, %v; want %s", got, ok, callID)
+	}
+}
+
+// openedWrapUps records the after-call records the service asked the ledger to
+// open, which is the invariant this model rests on.
+type openedWrapUps struct {
+	mu     sync.Mutex
+	opened [][2]uuid.UUID
+	err    error
+}
+
+func (o *openedWrapUps) OpenWrapUp(_ context.Context, callID, agentID uuid.UUID) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.err != nil {
+		return o.err
+	}
+	o.opened = append(o.opened, [2]uuid.UUID{callID, agentID})
+	return nil
+}
+
+func (o *openedWrapUps) all() [][2]uuid.UUID {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return append([][2]uuid.UUID(nil), o.opened...)
+}
+
+// A finished call always has an after-call record, opened when the work
+// begins rather than when somebody remembers to file one. Without it, "nobody
+// wrote this call up" and "the agent is still typing" are the same absence,
+// and no report can tell them apart.
+func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
+	store := newFakeStore()
+	agentID := uuid.New()
+	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
+	ledger := &openedWrapUps{}
+	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
+	svc.AttachWrapUps(ledger)
+	ctx := context.Background()
+
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	callID := uuid.New()
+	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
+		t.Fatal(err)
+	}
+
+	opened := ledger.all()
+	if len(opened) != 1 || opened[0] != [2]uuid.UUID{callID, agentID} {
+		t.Fatalf("opened %v, want one record for the call that just ended (%s)", opened, callID)
+	}
+}
+
+// A ledger that refuses does not leave the agent taking calls: after-call work
+// has begun either way, and the confirmation will create the record.
+func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
+	store := newFakeStore()
+	agentID := uuid.New()
+	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
+	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
+	svc.AttachWrapUps(&openedWrapUps{err: errors.New("the database is down")})
+	ctx := context.Background()
+
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := svc.StartWrapUp(ctx, agentID, uuid.New())
+	if err != nil {
+		t.Fatalf("StartWrapUp() error = %v, want the presence change to stand", err)
+	}
+	if !p.IsInWrapUp() {
+		t.Errorf("presence = %s(%s), want after-call work regardless of the ledger", p.State, p.Reason)
 	}
 }

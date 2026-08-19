@@ -143,10 +143,27 @@ type Service struct {
 	// staffed while signed out simply stays unroutable until the next
 	// reconnect — which is the behaviour this field exists to remove.
 	staffing Staffing
+	// wrapUps is where the record of after-call work is opened.
+	wrapUps WrapUpLedger
 }
 
 // AttachStaffing points agent registration at queue reconciliation.
 func (s *Service) AttachStaffing(st Staffing) { s.staffing = st }
+
+// WrapUpLedger opens the record an agent's after-call work fills in.
+//
+// A port rather than the ledger itself, and for the same reason Staffing is
+// one: this service knows when after-call work begins and nothing about how a
+// call is recorded. Nil leaves the record unopened, which is honest — a
+// deployment with no ledger has nowhere to put it.
+type WrapUpLedger interface {
+	OpenWrapUp(ctx context.Context, callID, agentID uuid.UUID) error
+}
+
+// AttachWrapUps points the beginning of after-call work at the ledger, so a
+// finished call always has a record — with the defaults the platform would
+// file on the agent's behalf — before the agent has touched anything.
+func (s *Service) AttachWrapUps(l WrapUpLedger) { s.wrapUps = l }
 
 type deviceState struct {
 	isRegistered bool
@@ -254,9 +271,26 @@ func (s *Service) StartWrapUp(ctx context.Context, agentID, callID uuid.UUID) (P
 		s.mu.Unlock()
 	}
 
-	return s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
+	p, err := s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
 		return p.StartWrapUp(callID, s.now())
 	})
+	if err != nil || callID == uuid.Nil || s.wrapUps == nil {
+		return p, err
+	}
+
+	// The record is opened here rather than when the agent presses Done, so a
+	// finished call always has one: a call nobody wrapped up is then a record
+	// standing on its defaults, which is a fact a report can read, instead of
+	// an absence that means both that and "still being typed".
+	//
+	// A failure does not fail the presence change: after-call work has begun
+	// either way, and an agent held out of routing with no row is recoverable
+	// — the confirmation creates one.
+	if err := s.wrapUps.OpenWrapUp(ctx, callID, agentID); err != nil {
+		slog.ErrorContext(ctx, "after-call record not opened",
+			"agentId", agentID, "callId", callID, "error", err)
+	}
+	return p, nil
 }
 
 // BeginAfterCallWork starts an agent's wrap-up for a call whose agent leg has

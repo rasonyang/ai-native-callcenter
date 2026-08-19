@@ -698,6 +698,9 @@ type AgentToday struct {
 	// CallsHandled Calls this agent answered, counted from the ledger's primary agent.
 	CallsHandled int `json:"callsHandled"`
 
+	// ConfirmedPct wrapUpsConfirmed / wrapUpsOpened as a percentage — how much of the day's after-call work somebody actually looked at. 0 when nothing was opened.
+	ConfirmedPct int `json:"confirmedPct"`
+
 	// OccupancyPct (talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window.
 	OccupancyPct int `json:"occupancyPct"`
 
@@ -709,6 +712,12 @@ type AgentToday struct {
 
 	// WrapUpSec Total after-call work, from the presence history; an open wrap-up counts up to now.
 	WrapUpSec int `json:"wrapUpSec"`
+
+	// WrapUpsConfirmed How many of them the agent confirmed.
+	WrapUpsConfirmed int `json:"wrapUpsConfirmed"`
+
+	// WrapUpsOpened After-call records opened in the window — one per call this agent finished.
+	WrapUpsOpened int `json:"wrapUpsOpened"`
 }
 
 // AgentWrite Create or update an agent identity. An extension may be bound to at most one agent; binding one that is taken is refused with CONFLICT.
@@ -949,6 +958,18 @@ type CreateReviewRequest struct {
 type CurrentUser struct {
 	// User The authenticated user.
 	User Identity `json:"user"`
+}
+
+// CurrentWrapUp The after-call work waiting on this agent: the record the platform opened for the call they just finished, as it stands. It survives a page reload, which is how a cockpit knows to keep asking.
+type CurrentWrapUp struct {
+	CallID openapi_types.UUID `json:"callId"`
+
+	// CreatedAt When after-call work began for this call.
+	CreatedAt        time.Time `json:"createdAt"`
+	DispositionCode  string    `json:"dispositionCode"`
+	DispositionLabel string    `json:"dispositionLabel"`
+	IsConfirmed      bool      `json:"isConfirmed"`
+	Note             string    `json:"note"`
 }
 
 // DID An external number that reaches this call centre. Every number is meant to answer with a bot flow; the fallback queue takes the caller when the bot cannot.
@@ -1491,20 +1512,25 @@ type WaitingCallList struct {
 	Items []WaitingCall `json:"items"`
 }
 
-// WrapUp One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary.
+// WrapUp One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary.
 type WrapUp struct {
 	AgentID          openapi_types.UUID `json:"agentId"`
 	CreatedAt        time.Time          `json:"createdAt"`
 	DispositionCode  string             `json:"dispositionCode"`
 	DispositionLabel string             `json:"dispositionLabel"`
-	Note             string             `json:"note"`
+
+	// IsConfirmed True once the agent pressed Done. False means the defaults are still standing.
+	IsConfirmed bool   `json:"isConfirmed"`
+	Note        string `json:"note"`
 }
 
-// WrapUpRequest What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave.
+// WrapUpRequest What the agent confirms for the call they just finished. Both fields are optional: the record already exists with a default disposition, and pressing Done with neither is an agent saying the defaults are right.
 type WrapUpRequest struct {
-	// DispositionCode A code from GET /dispositions.
-	DispositionCode string  `json:"dispositionCode"`
-	Note            *string `json:"note,omitempty"`
+	// DispositionCode A code from GET /dispositions; omitted keeps the one on the record.
+	DispositionCode *string `json:"dispositionCode,omitempty"`
+
+	// Note Omitted keeps the note on the record.
+	Note *string `json:"note,omitempty"`
 }
 
 // BadGateway defines model for BadGateway.
@@ -1714,7 +1740,10 @@ type ServerInterface interface {
 	// AgentReady Go ready
 	// (POST /agent/ready)
 	AgentReady(w http.ResponseWriter, r *http.Request)
-	// AgentWrapUp Complete after-call work
+	// GetAgentWrapUp The after-call work waiting on the caller
+	// (GET /agent/wrap-up)
+	GetAgentWrapUp(w http.ResponseWriter, r *http.Request)
+	// AgentWrapUp Confirm after-call work
 	// (POST /agent/wrap-up)
 	AgentWrapUp(w http.ResponseWriter, r *http.Request)
 	// ListAgents The live roster
@@ -1930,7 +1959,13 @@ func (_ Unimplemented) AgentReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// AgentWrapUp Complete after-call work
+// GetAgentWrapUp The after-call work waiting on the caller
+// (GET /agent/wrap-up)
+func (_ Unimplemented) GetAgentWrapUp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AgentWrapUp Confirm after-call work
 // (POST /agent/wrap-up)
 func (_ Unimplemented) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2360,6 +2395,20 @@ func (siw *ServerInterfaceWrapper) AgentReady(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AgentReady(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAgentWrapUp operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentWrapUp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentWrapUp(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4238,6 +4287,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agent/ready", wrapper.AgentReady)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/agent/wrap-up", wrapper.GetAgentWrapUp)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agent/wrap-up", wrapper.AgentWrapUp)

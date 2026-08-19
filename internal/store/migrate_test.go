@@ -202,6 +202,60 @@ func TestMigrationsRewriteExistingRowsBeforeConstrainingThem(t *testing.T) {
 	}
 }
 
+// A column with a default answers for rows that already exist, and the answer
+// is wrong here: every wrap-up written before 00013 was an agent pressing the
+// button, so it is confirmed by definition. Left to the default they would all
+// read unconfirmed, and the day's completion rate would say nobody had ever
+// filled one in.
+//
+// A fresh database cannot detect this. It needs rows from before.
+func TestMigrationsBackfillConfirmedWrapUps(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 12); err != nil {
+		t.Fatalf("migrating to 12 failed: %v", err)
+	}
+	const callID = "22222222-2222-2222-2222-222222222222"
+	const agentID = "33333333-3333-3333-3333-333333333333"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note)
+		VALUES ($1, $2, 'RESOLVED', 'Resolved', 'filed the old way')`, callID, agentID); err != nil {
+		t.Fatalf("seed a pre-migration wrap-up: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with history failed: %v", err)
+	}
+
+	var confirmed bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT is_confirmed FROM wrap_ups WHERE call_id = $1`, callID).Scan(&confirmed); err != nil {
+		t.Fatalf("read the migrated row: %v", err)
+	}
+	if !confirmed {
+		t.Error("a wrap-up an agent filed reads as unconfirmed after the migration, " +
+			"which makes every day before it look like nobody ever filled one in")
+	}
+
+	// And a row written afterwards starts unconfirmed, which is the point.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label)
+		VALUES ('44444444-4444-4444-4444-444444444444', $1, 'RESOLVED', 'Resolved')`, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT is_confirmed FROM wrap_ups WHERE call_id = '44444444-4444-4444-4444-444444444444'`).
+		Scan(&confirmed); err != nil {
+		t.Fatal(err)
+	}
+	if confirmed {
+		t.Error("a record the platform opened reads as confirmed; nobody has looked at it yet")
+	}
+}
+
 // The constraint the migration installs is the one the Go constants and the
 // contract agree on. Read from the server rather than from the file, so a
 // migration that silently failed to replace the CHECK is caught.

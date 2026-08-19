@@ -173,17 +173,29 @@ SELECT * FROM dispositions WHERE is_enabled ORDER BY position, code;
 -- name: GetDisposition :one
 SELECT code, label FROM dispositions WHERE code = $1 AND is_enabled;
 
--- UpsertWrapUp files one agent's after-call work for one call. Filing twice
--- replaces: the agent changed their mind, and the last word is the record.
+-- OpenWrapUp starts the record the agent will confirm, with the defaults the
+-- platform would file on their behalf. Doing it twice for one call is not a
+-- second record: the first one may already carry what the agent typed.
+-- name: OpenWrapUp :exec
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note, is_confirmed)
+VALUES ($1, $2, $3, $4, '', false)
+ON CONFLICT (call_id, agent_id) DO NOTHING;
+
+-- UpsertWrapUp writes the record whole. created_at is left as it was on an
+-- existing row: it is when after-call work began, not when it was last
+-- touched, and the day's numbers are grouped by it.
 -- name: UpsertWrapUp :one
-INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note, is_confirmed)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (call_id, agent_id) DO UPDATE
 SET disposition_code  = excluded.disposition_code,
     disposition_label = excluded.disposition_label,
     note              = excluded.note,
-    created_at        = now()
+    is_confirmed      = excluded.is_confirmed
 RETURNING *;
+
+-- name: GetWrapUp :one
+SELECT * FROM wrap_ups WHERE call_id = $1 AND agent_id = $2;
 
 -- ListWrapUpsForCalls reads every wrap-up filed against a page of calls, so a
 -- ledger listing can attach them without a join whose nullability sqlc would
@@ -220,6 +232,15 @@ intervals AS (
       AND l.entered_at < bounds.to_at
       AND COALESCE(l.exited_at, bounds.to_at) > bounds.from_at
 ),
+filings AS (
+    -- The day's after-call records, counted where they were opened: one per
+    -- call the agent finished, and how many of them somebody confirmed.
+    SELECT count(*)::bigint AS wrap_ups_opened,
+           count(*) FILTER (WHERE is_confirmed)::bigint AS wrap_ups_confirmed
+    FROM wrap_ups, bounds
+    WHERE agent_id = sqlc.arg('agent_id')
+      AND created_at >= bounds.from_at AND created_at < bounds.to_at
+),
 presence AS (
     SELECT
         COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
@@ -230,5 +251,6 @@ presence AS (
     FROM intervals
 )
 SELECT handled.calls_handled, handled.talk_sec,
-       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec
-FROM handled, presence;
+       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec,
+       filings.wrap_ups_opened, filings.wrap_ups_confirmed
+FROM handled, presence, filings;

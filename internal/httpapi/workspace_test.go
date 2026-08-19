@@ -79,43 +79,16 @@ func agentRequest(method, target, body string) *http.Request {
 		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}))
 }
 
-// The disposition is required, and the server is where that is true. A screen
-// can disable its own button; an endpoint that accepted the filing without one
-// would let after-call work end with nothing said about the call.
-func TestAWrapUpWithNoDispositionIsRefused(t *testing.T) {
-	svc := &recordingAgents{wrapUpCall: uuid.New(), hasWrapUp: true}
-	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
-
-	for _, body := range []string{`{}`, `{"dispositionCode":"  "}`, `{"note":"just a note"}`} {
-		w := httptest.NewRecorder()
-		srv.AgentWrapUp(w, agentRequest(http.MethodPost, "/api/v1/agent/wrap-up", body))
-
-		if w.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("%s: status = %d, want 422: %s", body, w.Code, w.Body)
-		}
-		var parsed struct{ Error APIError }
-		if err := json.Unmarshal(w.Body.Bytes(), &parsed); err != nil {
-			t.Fatal(err)
-		}
-		if parsed.Error.Params["field"] != "dispositionCode" {
-			t.Errorf("%s: params = %v, want the offending field named", body, parsed.Error.Params)
-		}
-	}
-	if svc.endedWrapUp != 0 {
-		t.Error("after-call work ended although nothing was filed")
-	}
-}
-
-// Filing needs a call, and the platform is the only thing that may name it.
-// Without a call there is nothing to write the disposition onto, and the
-// request has to say so rather than quietly dropping what the agent typed.
-func TestFilingWithNoFinishedCallIsRefusedAndChangesNothing(t *testing.T) {
+// Nothing is required any more: the record already exists with a disposition
+// the platform filed, and pressing Done without touching anything is an agent
+// saying the defaults are right. What must still hold is that there is a call
+// to confirm against.
+func TestConfirmingWithNoFinishedCallIsRefusedAndChangesNothing(t *testing.T) {
 	svc := &recordingAgents{hasWrapUp: false}
 	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 
 	w := httptest.NewRecorder()
-	srv.AgentWrapUp(w, agentRequest(http.MethodPost, "/api/v1/agent/wrap-up",
-		`{"dispositionCode":"ISSUE_FIXED","note":"replaced the router"}`))
+	srv.AgentWrapUp(w, agentRequest(http.MethodPost, "/api/v1/agent/wrap-up", `{}`))
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body)
@@ -128,8 +101,24 @@ func TestFilingWithNoFinishedCallIsRefusedAndChangesNothing(t *testing.T) {
 		t.Errorf("code = %s, want AGENT_NOT_IN_WRAP_UP", body.Error.Code)
 	}
 	if svc.endedWrapUp != 0 {
-		t.Error("presence was changed although the filing was refused; the agent " +
-			"would be sent back to ready with their note lost")
+		t.Error("presence was changed although there was nothing to confirm")
+	}
+}
+
+// A cockpit that reloads must find the work still waiting: the state is the
+// server's, so refreshing the page is not a way past it.
+func TestTheOpenRecordSurvivesAReload(t *testing.T) {
+	svc := &recordingAgents{hasWrapUp: false}
+	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
+
+	w := httptest.NewRecorder()
+	srv.GetAgentWrapUp(w, agentRequest(http.MethodGet, "/api/v1/agent/wrap-up", ""))
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204 when there is nothing to confirm: %s", w.Code, w.Body)
+	}
+	if w.Body.Len() != 0 {
+		t.Errorf("204 carried a body: %s", w.Body)
 	}
 }
 

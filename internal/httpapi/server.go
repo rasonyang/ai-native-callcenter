@@ -147,6 +147,7 @@ func (s *Server) router() chi.Router {
 						agent.Post("/agent/logout", op.AgentLogout)
 						agent.Post("/agent/ready", op.AgentReady)
 						agent.Post("/agent/not-ready", op.AgentNotReady)
+						agent.Get("/agent/wrap-up", op.GetAgentWrapUp)
 						agent.Post("/agent/wrap-up", op.AgentWrapUp)
 					})
 					// The roster and force-logout belong to supervision.

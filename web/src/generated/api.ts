@@ -168,11 +168,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * The after-call work waiting on the caller
+         * @description The record opened for the call this agent just finished, whether or not they have confirmed it. 204 when there is nothing to confirm. Requires the AGENT role.
+         */
+        get: operations["getAgentWrapUp"];
         put?: never;
         /**
-         * Complete after-call work
-         * @description Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. After-call work has no deadline: it begins when the call ends and ends here. The filing is still accepted once the agent has moved on — the last wrapped call stays addressable until the next one starts — and answers 409 AGENT_NOT_IN_WRAP_UP when there is no finished call to file against. dispositionCode must be a code from GET /dispositions. Requires the AGENT role.
+         * Confirm after-call work
+         * @description Confirms the record the platform opened when the call ended, applying whatever the agent changed, and returns them to READY. Both fields are optional — the disposition already has a value, and confirming the defaults is a legitimate answer. The filing is still accepted once the agent has moved on: the last wrapped call stays addressable until the next one starts, and 409 AGENT_NOT_IN_WRAP_UP says when there is none. Requires the AGENT role.
          */
         post: operations["agentWrapUp"];
         delete?: never;
@@ -1181,11 +1185,26 @@ export interface components {
              */
             wrapUpCallId?: string;
         };
-        /** @description What the agent files for the call they just finished. The disposition is required — that is what makes a call reportable; the note is theirs to add or leave. */
+        /** @description What the agent confirms for the call they just finished. Both fields are optional: the record already exists with a default disposition, and pressing Done with neither is an agent saying the defaults are right. */
         WrapUpRequest: {
-            /** @description A code from GET /dispositions. */
-            dispositionCode: string;
+            /** @description A code from GET /dispositions; omitted keeps the one on the record. */
+            dispositionCode?: string;
+            /** @description Omitted keeps the note on the record. */
             note?: string;
+        };
+        /** @description The after-call work waiting on this agent: the record the platform opened for the call they just finished, as it stands. It survives a page reload, which is how a cockpit knows to keep asking. */
+        CurrentWrapUp: {
+            /** Format: uuid */
+            callId: string;
+            dispositionCode: string;
+            dispositionLabel: string;
+            note: string;
+            isConfirmed: boolean;
+            /**
+             * Format: date-time
+             * @description When after-call work began for this call.
+             */
+            createdAt: string;
         };
         /** @description Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. */
         AgentLoginRequest: {
@@ -1617,7 +1636,7 @@ export interface components {
             /** @description The after-call work filed for this call: the requesting agent's own on GET /cdrs/mine, the primary agent's (else the latest) elsewhere. Absent when nobody filed one. */
             wrapUp?: components["schemas"]["WrapUp"];
         };
-        /** @description One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary. */
+        /** @description One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary. */
         WrapUp: {
             /** Format: uuid */
             agentId: string;
@@ -1626,6 +1645,8 @@ export interface components {
             note: string;
             /** Format: date-time */
             createdAt: string;
+            /** @description True once the agent pressed Done. False means the defaults are still standing. */
+            isConfirmed: boolean;
         };
         CDRList: {
             items: components["schemas"]["CDR"][];
@@ -1816,6 +1837,12 @@ export interface components {
             avgWrapUpSec: number;
             /** @description (talkSec + wrapUpSec) / signedInSec as a percentage, 0 when signed out all window. */
             occupancyPct: number;
+            /** @description After-call records opened in the window — one per call this agent finished. */
+            wrapUpsOpened: number;
+            /** @description How many of them the agent confirmed. */
+            wrapUpsConfirmed: number;
+            /** @description wrapUpsConfirmed / wrapUpsOpened as a percentage — how much of the day's after-call work somebody actually looked at. 0 when nothing was opened. */
+            confirmedPct: number;
         };
         QueueReport: {
             /**
@@ -2262,6 +2289,36 @@ export interface operations {
             503: components["responses"]["ServiceUnavailable"];
         };
     };
+    getAgentWrapUp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The open record. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurrentWrapUp"];
+                };
+            };
+            /** @description Nothing to confirm. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     agentWrapUp: {
         parameters: {
             query?: never;
@@ -2269,7 +2326,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["WrapUpRequest"];
             };
@@ -2287,7 +2344,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
-            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };

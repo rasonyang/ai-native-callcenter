@@ -69,14 +69,20 @@ type CDR struct {
 	WrapUp *WrapUp `json:"wrapUp,omitempty"`
 }
 
-// WrapUp is one agent's after-call work for one call. The label is captured at
-// filing time so the record survives later edits to the vocabulary.
+// WrapUp is one agent's after-call work for one call.
+//
+// The platform opens it when the call ends and the agent confirms it, so a
+// finished call always has one and IsConfirmed is what separates a record
+// somebody looked at from one still standing on its defaults. The label is
+// captured at filing time, so the record survives later edits to the
+// vocabulary.
 type WrapUp struct {
-	CallID           uuid.UUID `json:"-"`
+	CallID           uuid.UUID `json:"callId"`
 	AgentID          uuid.UUID `json:"agentId"`
 	DispositionCode  string    `json:"dispositionCode"`
 	DispositionLabel string    `json:"dispositionLabel"`
 	Note             string    `json:"note"`
+	IsConfirmed      bool      `json:"isConfirmed"`
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
@@ -474,20 +480,78 @@ func (l *LedgerStore) ListDispositions(ctx context.Context) ([]Disposition, erro
 // disabled: an agent cannot file under a word that is not on the list.
 var ErrUnknownDisposition = errors.New("unknown disposition")
 
-// FileWrapUp records one agent's after-call work for one call. The code is
-// resolved against the vocabulary and its label captured with the row, so the
-// record keeps the word it was filed under. Filing twice replaces.
-func (l *LedgerStore) FileWrapUp(ctx context.Context, callID, agentID uuid.UUID, dispositionCode, note string) (WrapUp, error) {
-	d, err := l.q.GetDisposition(ctx, dispositionCode)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return WrapUp{}, fmt.Errorf("%w: %q", ErrUnknownDisposition, dispositionCode)
+// DefaultDispositionCode is what the platform files on an agent's behalf when
+// after-call work begins. It is the ordinary outcome, so confirming it is one
+// press for the ordinary call; anything else the agent has to say, they say by
+// changing it.
+const DefaultDispositionCode = "RESOLVED"
+
+// OpenWrapUp starts the record for a call whose after-call work has just
+// begun: the default disposition, no note, unconfirmed.
+//
+// This is what makes "a finished call always has a wrap-up" true. It is not an
+// overwrite — a record that already exists may carry what the agent typed, and
+// a second opening must not take that from them.
+func (l *LedgerStore) OpenWrapUp(ctx context.Context, callID, agentID uuid.UUID) error {
+	code, label, err := l.defaultDisposition(ctx)
+	if err != nil {
+		return err
 	}
+	return l.q.OpenWrapUp(ctx, queries.OpenWrapUpParams{
+		CallID: callID, AgentID: agentID,
+		DispositionCode: code, DispositionLabel: label,
+	})
+}
+
+// GetWrapUp reads one agent's record for one call.
+func (l *LedgerStore) GetWrapUp(ctx context.Context, callID, agentID uuid.UUID) (WrapUp, error) {
+	row, err := l.q.GetWrapUp(ctx, queries.GetWrapUpParams{CallID: callID, AgentID: agentID})
 	if err != nil {
 		return WrapUp{}, err
 	}
+	return wrapUpFromRow(row), nil
+}
+
+// ConfirmWrapUp records the agent's confirmation, changing only what they sent.
+//
+// A nil field means "leave it": the record already carries a disposition, and
+// pressing Done without touching anything is an agent saying the defaults are
+// right. The record is created here too, for the case where after-call work
+// never opened one — a restart between the call ending and the agent
+// answering — so a confirmation is never refused for want of a row.
+func (l *LedgerStore) ConfirmWrapUp(ctx context.Context, callID, agentID uuid.UUID,
+	dispositionCode, note *string) (WrapUp, error) {
+	code, label, err := l.defaultDisposition(ctx)
+	if err != nil {
+		return WrapUp{}, err
+	}
+	noteValue := ""
+
+	current, err := l.GetWrapUp(ctx, callID, agentID)
+	switch {
+	case err == nil:
+		code, label, noteValue = current.DispositionCode, current.DispositionLabel, current.Note
+	case !errors.Is(err, pgx.ErrNoRows):
+		return WrapUp{}, err
+	}
+
+	if dispositionCode != nil && *dispositionCode != "" {
+		d, err := l.q.GetDisposition(ctx, *dispositionCode)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WrapUp{}, fmt.Errorf("%w: %q", ErrUnknownDisposition, *dispositionCode)
+		}
+		if err != nil {
+			return WrapUp{}, err
+		}
+		code, label = d.Code, d.Label
+	}
+	if note != nil {
+		noteValue = *note
+	}
+
 	row, err := l.q.UpsertWrapUp(ctx, queries.UpsertWrapUpParams{
-		CallID: callID, AgentID: agentID, Note: note,
-		DispositionCode: d.Code, DispositionLabel: d.Label,
+		CallID: callID, AgentID: agentID, Note: noteValue,
+		DispositionCode: code, DispositionLabel: label, IsConfirmed: true,
 	})
 	if err != nil {
 		return WrapUp{}, err
@@ -495,11 +559,33 @@ func (l *LedgerStore) FileWrapUp(ctx context.Context, callID, agentID uuid.UUID,
 	return wrapUpFromRow(row), nil
 }
 
+// defaultDisposition is what a record is opened with: the configured default
+// where the installation still has it, otherwise the first word on its own
+// list. A vocabulary somebody emptied leaves the code blank rather than
+// blocking the call from being recorded at all.
+func (l *LedgerStore) defaultDisposition(ctx context.Context) (code, label string, err error) {
+	d, err := l.q.GetDisposition(ctx, DefaultDispositionCode)
+	if err == nil {
+		return d.Code, d.Label, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return "", "", err
+	}
+	items, err := l.q.ListEnabledDispositions(ctx)
+	if err != nil {
+		return "", "", err
+	}
+	if len(items) == 0 {
+		return "", "", nil
+	}
+	return items[0].Code, items[0].Label, nil
+}
+
 func wrapUpFromRow(row queries.WrapUp) WrapUp {
 	return WrapUp{
 		CallID: row.CallID, AgentID: row.AgentID,
 		DispositionCode: row.DispositionCode, DispositionLabel: row.DispositionLabel,
-		Note: row.Note, CreatedAt: row.CreatedAt.Time,
+		Note: row.Note, IsConfirmed: row.IsConfirmed, CreatedAt: row.CreatedAt.Time,
 	}
 }
 
@@ -864,6 +950,13 @@ type AgentDay struct {
 	AvgHandleSec int `json:"avgHandleSec"`
 	AvgWrapUpSec int `json:"avgWrapUpSec"`
 	OccupancyPct int `json:"occupancyPct"`
+
+	// The after-call records opened for this agent, and how many of them they
+	// confirmed. Since the platform opens one per finished call, the share is
+	// how much of the day's after-call work somebody actually looked at.
+	WrapUpsOpened    int `json:"wrapUpsOpened"`
+	WrapUpsConfirmed int `json:"wrapUpsConfirmed"`
+	ConfirmedPct     int `json:"confirmedPct"`
 }
 
 // ReportAgentDay aggregates one agent's window from the ledger and their
@@ -881,15 +974,21 @@ func (l *LedgerStore) ReportAgentDay(ctx context.Context, agentID uuid.UUID, fro
 		return AgentDay{}, err
 	}
 	return agentDay(int(row.CallsHandled), int(row.TalkSec), int(row.WrapUpSec),
-		int(row.WrapUps), int(row.SignedInSec)), nil
+		int(row.WrapUps), int(row.SignedInSec),
+		int(row.WrapUpsOpened), int(row.WrapUpsConfirmed)), nil
 }
 
 // agentDay derives the averages. Separated from the query because every
 // interesting case is a division by something that can be zero.
-func agentDay(callsHandled, talkSec, wrapUpSec, wrapUps, signedInSec int) AgentDay {
+func agentDay(callsHandled, talkSec, wrapUpSec, wrapUps, signedInSec,
+	wrapUpsOpened, wrapUpsConfirmed int) AgentDay {
 	day := AgentDay{
 		CallsHandled: callsHandled, TalkSec: talkSec,
 		WrapUpSec: wrapUpSec, SignedInSec: signedInSec,
+		WrapUpsOpened: wrapUpsOpened, WrapUpsConfirmed: wrapUpsConfirmed,
+	}
+	if wrapUpsOpened > 0 {
+		day.ConfirmedPct = wrapUpsConfirmed * 100 / wrapUpsOpened
 	}
 	busy := talkSec + wrapUpSec
 	if callsHandled > 0 {

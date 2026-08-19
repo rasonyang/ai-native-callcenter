@@ -45,6 +45,10 @@ type WrapUpRow struct {
 	AgentID         uuid.UUID
 	DispositionCode string
 	Note            string
+	// IsConfirmed marks the ones an agent actually looked at. The rest stand
+	// on the defaults the platform filed, which is what the day's completion
+	// rate is measuring.
+	IsConfirmed bool
 }
 
 // Plan is the whole seven-day history, generation separated from insertion
@@ -109,6 +113,10 @@ func (p *Plan) seedContactsAndWrapUps(dispositions []string, rng *rand.Rand) {
 			CallID:          cdr.CallID,
 			AgentID:         *cdr.PrimaryAgentID,
 			DispositionCode: dispositions[rng.Intn(len(dispositions))],
+			// About one call in seven goes unconfirmed, which is what a real
+			// week looks like and what makes the completion rate a number
+			// worth showing.
+			IsConfirmed: rng.Intn(7) > 0,
 		}
 		// Only some calls get a note, and only one that fits what was filed:
 		// a demo whose note contradicts its own disposition teaches the

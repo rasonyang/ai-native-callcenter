@@ -231,6 +231,7 @@ func run() error {
 		Link:        link,
 		CDR:         telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()),
 		Queues:      queueCatalog{catalogSvc},
+		WrapUps:     st.Ledger(),
 		Transcripts: transcripts,
 		Audiences:   transcripts,
 		Taps:        tap,

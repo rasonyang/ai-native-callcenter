@@ -156,6 +156,30 @@ func (q *Queries) GetRecording(ctx context.Context, id uuid.UUID) (Recording, er
 	return i, err
 }
 
+const getWrapUp = `-- name: GetWrapUp :one
+SELECT call_id, agent_id, disposition_code, disposition_label, note, created_at, is_confirmed FROM wrap_ups WHERE call_id = $1 AND agent_id = $2
+`
+
+type GetWrapUpParams struct {
+	CallID  uuid.UUID `json:"callId"`
+	AgentID uuid.UUID `json:"agentId"`
+}
+
+func (q *Queries) GetWrapUp(ctx context.Context, arg GetWrapUpParams) (WrapUp, error) {
+	row := q.db.QueryRow(ctx, getWrapUp, arg.CallID, arg.AgentID)
+	var i WrapUp
+	err := row.Scan(
+		&i.CallID,
+		&i.AgentID,
+		&i.DispositionCode,
+		&i.DispositionLabel,
+		&i.Note,
+		&i.CreatedAt,
+		&i.IsConfirmed,
+	)
+	return i, err
+}
+
 const handleCallback = `-- name: HandleCallback :one
 UPDATE callbacks
 SET status = $2, handled_by = $3, handled_at = now()
@@ -803,7 +827,7 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 }
 
 const listWrapUpsForCalls = `-- name: ListWrapUpsForCalls :many
-SELECT call_id, agent_id, disposition_code, disposition_label, note, created_at FROM wrap_ups
+SELECT call_id, agent_id, disposition_code, disposition_label, note, created_at, is_confirmed FROM wrap_ups
 WHERE call_id = ANY($1::uuid[])
 ORDER BY created_at DESC
 `
@@ -827,6 +851,7 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 			&i.DispositionLabel,
 			&i.Note,
 			&i.CreatedAt,
+			&i.IsConfirmed,
 		); err != nil {
 			return nil, err
 		}
@@ -836,6 +861,32 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const openWrapUp = `-- name: OpenWrapUp :exec
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note, is_confirmed)
+VALUES ($1, $2, $3, $4, '', false)
+ON CONFLICT (call_id, agent_id) DO NOTHING
+`
+
+type OpenWrapUpParams struct {
+	CallID           uuid.UUID `json:"callId"`
+	AgentID          uuid.UUID `json:"agentId"`
+	DispositionCode  string    `json:"dispositionCode"`
+	DispositionLabel string    `json:"dispositionLabel"`
+}
+
+// OpenWrapUp starts the record the agent will confirm, with the defaults the
+// platform would file on their behalf. Doing it twice for one call is not a
+// second record: the first one may already carry what the agent typed.
+func (q *Queries) OpenWrapUp(ctx context.Context, arg OpenWrapUpParams) error {
+	_, err := q.db.Exec(ctx, openWrapUp,
+		arg.CallID,
+		arg.AgentID,
+		arg.DispositionCode,
+		arg.DispositionLabel,
+	)
+	return err
 }
 
 const reportAgentToday = `-- name: ReportAgentToday :one
@@ -858,6 +909,15 @@ intervals AS (
       AND l.entered_at < bounds.to_at
       AND COALESCE(l.exited_at, bounds.to_at) > bounds.from_at
 ),
+filings AS (
+    -- The day's after-call records, counted where they were opened: one per
+    -- call the agent finished, and how many of them somebody confirmed.
+    SELECT count(*)::bigint AS wrap_ups_opened,
+           count(*) FILTER (WHERE is_confirmed)::bigint AS wrap_ups_confirmed
+    FROM wrap_ups, bounds
+    WHERE agent_id = $3
+      AND created_at >= bounds.from_at AND created_at < bounds.to_at
+),
 presence AS (
     SELECT
         COALESCE(sum(EXTRACT(EPOCH FROM (ended_at - started_at)))
@@ -868,8 +928,9 @@ presence AS (
     FROM intervals
 )
 SELECT handled.calls_handled, handled.talk_sec,
-       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec
-FROM handled, presence
+       presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec,
+       filings.wrap_ups_opened, filings.wrap_ups_confirmed
+FROM handled, presence, filings
 `
 
 type ReportAgentTodayParams struct {
@@ -879,11 +940,13 @@ type ReportAgentTodayParams struct {
 }
 
 type ReportAgentTodayRow struct {
-	CallsHandled int64 `json:"callsHandled"`
-	TalkSec      int64 `json:"talkSec"`
-	WrapUpSec    int64 `json:"wrapUpSec"`
-	WrapUps      int64 `json:"wrapUps"`
-	SignedInSec  int64 `json:"signedInSec"`
+	CallsHandled     int64 `json:"callsHandled"`
+	TalkSec          int64 `json:"talkSec"`
+	WrapUpSec        int64 `json:"wrapUpSec"`
+	WrapUps          int64 `json:"wrapUps"`
+	SignedInSec      int64 `json:"signedInSec"`
+	WrapUpsOpened    int64 `json:"wrapUpsOpened"`
+	WrapUpsConfirmed int64 `json:"wrapUpsConfirmed"`
 }
 
 // ReportAgentToday is one agent's own day.
@@ -902,6 +965,8 @@ func (q *Queries) ReportAgentToday(ctx context.Context, arg ReportAgentTodayPara
 		&i.WrapUpSec,
 		&i.WrapUps,
 		&i.SignedInSec,
+		&i.WrapUpsOpened,
+		&i.WrapUpsConfirmed,
 	)
 	return i, err
 }
@@ -1084,14 +1149,14 @@ func (q *Queries) UpdateCDRHasRecording(ctx context.Context, callID uuid.UUID) e
 }
 
 const upsertWrapUp = `-- name: UpsertWrapUp :one
-INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label, note, is_confirmed)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (call_id, agent_id) DO UPDATE
 SET disposition_code  = excluded.disposition_code,
     disposition_label = excluded.disposition_label,
     note              = excluded.note,
-    created_at        = now()
-RETURNING call_id, agent_id, disposition_code, disposition_label, note, created_at
+    is_confirmed      = excluded.is_confirmed
+RETURNING call_id, agent_id, disposition_code, disposition_label, note, created_at, is_confirmed
 `
 
 type UpsertWrapUpParams struct {
@@ -1100,10 +1165,12 @@ type UpsertWrapUpParams struct {
 	DispositionCode  string    `json:"dispositionCode"`
 	DispositionLabel string    `json:"dispositionLabel"`
 	Note             string    `json:"note"`
+	IsConfirmed      bool      `json:"isConfirmed"`
 }
 
-// UpsertWrapUp files one agent's after-call work for one call. Filing twice
-// replaces: the agent changed their mind, and the last word is the record.
+// UpsertWrapUp writes the record whole. created_at is left as it was on an
+// existing row: it is when after-call work began, not when it was last
+// touched, and the day's numbers are grouped by it.
 func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (WrapUp, error) {
 	row := q.db.QueryRow(ctx, upsertWrapUp,
 		arg.CallID,
@@ -1111,6 +1178,7 @@ func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (Wra
 		arg.DispositionCode,
 		arg.DispositionLabel,
 		arg.Note,
+		arg.IsConfirmed,
 	)
 	var i WrapUp
 	err := row.Scan(
@@ -1120,6 +1188,7 @@ func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (Wra
 		&i.DispositionLabel,
 		&i.Note,
 		&i.CreatedAt,
+		&i.IsConfirmed,
 	)
 	return i, err
 }

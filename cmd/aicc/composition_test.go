@@ -59,12 +59,14 @@ func (f *fakeCoordinator) AttachCDR(a *telephony.CDRAssembler) {
 
 type fakeAgents struct {
 	staffing agents.Staffing
+	wrapUps  agents.WrapUpLedger
 	synced   int
 	observed []telephony.Registration
 }
 
-func (f *fakeAgents) AttachStaffing(s agents.Staffing) { f.staffing = s }
-func (f *fakeAgents) SyncSwitch(context.Context)       { f.synced++ }
+func (f *fakeAgents) AttachStaffing(s agents.Staffing)    { f.staffing = s }
+func (f *fakeAgents) AttachWrapUps(l agents.WrapUpLedger) { f.wrapUps = l }
+func (f *fakeAgents) SyncSwitch(context.Context)          { f.synced++ }
 func (f *fakeAgents) ObserveDevice(_ context.Context, ext string, isRegistered, isInService bool) {
 	if !isRegistered {
 		return
@@ -97,6 +99,12 @@ type fakeLink struct{ onConnect func(context.Context) }
 
 func (f *fakeLink) OnConnect(fn func(context.Context)) { f.onConnect = fn }
 
+// fakeWrapUps stands in for the ledger the beginning of after-call work opens
+// a record in.
+type fakeWrapUps struct{}
+
+func (fakeWrapUps) OpenWrapUp(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+
 // fakeQueues stands in for the queue configuration the waiting line reads.
 type fakeQueues struct{}
 
@@ -124,6 +132,7 @@ type wiringFixture struct {
 	taps        *fakeTapper
 	audiences   *fakeAudiences
 	queues      fakeQueues
+	wrapUps     fakeWrapUps
 	transcripts *retirer
 	cdr         *telephony.CDRAssembler
 	regs        []telephony.Registration
@@ -164,6 +173,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		Link:          f.link,
 		CDR:           f.cdr,
 		Queues:        f.queues,
+		WrapUps:       f.wrapUps,
 		Transcripts:   f.transcripts,
 		Audiences:     f.audiences,
 		Taps:          f.taps,
@@ -203,6 +213,15 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	t.Run("the coordinator has the cdr assembler", func(t *testing.T) {
 		if f.coordinator.cdr != f.cdr {
 			t.Fatalf("cdr = %p, want %p", f.coordinator.cdr, f.cdr)
+		}
+	})
+
+	t.Run("after-call work opens a record in the ledger", func(t *testing.T) {
+		if f.agents.wrapUps != agents.WrapUpLedger(f.wrapUps) {
+			t.Fatalf("wrapUps = %#v, want the ledger — without it a finished call "+
+				"has a record only when somebody remembered to file one, and "+
+				"\"nobody filed\" is indistinguishable from \"still typing\"",
+				f.agents.wrapUps)
 		}
 	})
 

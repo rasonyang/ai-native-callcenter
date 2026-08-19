@@ -124,31 +124,58 @@ func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
 	s.writePresence(w, r, p, err)
 }
 
-// AgentWrapUp files the after-call work for the call the agent just finished
-// and returns them to ready.
+// GetAgentWrapUp serves the record waiting on this agent.
 //
-// The call comes from the platform, never from the request: an agent files
-// against the call they were on, and letting a client name one would let any
-// agent write a disposition onto any call. The filing is also accepted after
-// they have moved on — an agent still typing when something else took them out
-// of after-call work has not forfeited what they typed — so the last wrapped
-// call stays addressable until the next one begins.
+// It is what a reloaded cockpit reads to know there is still after-call work
+// to confirm: the state lives on the server, so refreshing the page is not a
+// way past it. 204 when there is nothing.
+func (s *Server) GetAgentWrapUp(w http.ResponseWriter, r *http.Request) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	callID, hasCall := s.agents.WrapUpCall(agentID)
+	if !hasCall || s.ledger == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	wrapUp, err := s.ledger.GetWrapUp(r.Context(), callID, agentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The call is known and the record is not: after-call work began
+			// before this was written, or the open failed. Either way there is
+			// nothing to show yet, and confirming will create one.
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		slog.ErrorContext(r.Context(), "cannot read the after-call record",
+			"error", err, "callId", callID, "agentId", agentID)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the wrap-up", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, wrapUp)
+}
+
+// AgentWrapUp confirms the after-call work for the call the agent just
+// finished and returns them to ready.
 //
-// The disposition is required, and this is where that is enforced: it is what
-// makes a call reportable, and a screen is not a place to keep a rule.
+// The record already exists — the platform opened it when the call ended, with
+// the disposition it would file on the agent's behalf — so this changes only
+// what the agent sent and marks it confirmed. Nothing is required: pressing
+// Done without touching anything is an agent saying the defaults are right,
+// and that is a different fact from never having looked, which is what
+// isConfirmed keeps.
+//
+// The call comes from the platform, never from the request: letting a client
+// name one would let any agent write a disposition onto any call.
 func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return
 	}
 	var req api.WrapUpRequest
-	if !decode(w, r, &req) {
-		return
-	}
-	code := strings.TrimSpace(req.DispositionCode)
-	if code == "" {
-		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a disposition is required", map[string]any{"field": "dispositionCode"})
+	if r.ContentLength > 0 && !decode(w, r, &req) {
 		return
 	}
 
@@ -163,11 +190,8 @@ func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	note := ""
-	if req.Note != nil {
-		note = strings.TrimSpace(*req.Note)
-	}
-	if _, err := s.ledger.FileWrapUp(r.Context(), callID, agentID, code, note); err != nil {
+	if _, err := s.ledger.ConfirmWrapUp(r.Context(), callID, agentID,
+		trimmed(req.DispositionCode), trimmed(req.Note)); err != nil {
 		if errors.Is(err, store.ErrUnknownDisposition) {
 			writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 				"no such disposition", map[string]any{"field": "dispositionCode"})
@@ -181,6 +205,17 @@ func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 
 	p, err := s.agents.EndWrapUp(r.Context(), agentID)
 	s.writePresence(w, r, p, err)
+}
+
+// trimmed passes an optional field through, keeping the difference between
+// "not sent" and "sent empty": the first leaves the record alone, the second
+// is an agent clearing what was there.
+func trimmed(v *string) *string {
+	if v == nil {
+		return nil
+	}
+	out := strings.TrimSpace(*v)
+	return &out
 }
 
 func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {

@@ -323,4 +323,5 @@ type WrapUp struct {
 	DispositionLabel string             `json:"dispositionLabel"`
 	Note             string             `json:"note"`
 	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
+	IsConfirmed      bool               `json:"isConfirmed"`
 }

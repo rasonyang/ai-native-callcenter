@@ -41,6 +41,7 @@ type switchWiring interface {
 
 type presenceWiring interface {
 	AttachStaffing(agents.Staffing)
+	AttachWrapUps(agents.WrapUpLedger)
 	SyncSwitch(ctx context.Context)
 	ObserveDevice(ctx context.Context, extensionNumber string, isRegistered, isInService bool)
 }
@@ -70,6 +71,7 @@ type composition struct {
 	Link          connectHook
 	CDR           *telephony.CDRAssembler
 	Queues        telephony.QueueCatalog
+	WrapUps       agents.WrapUpLedger
 	Transcripts   transcriptRetirer
 	Audiences     telephony.Audiences
 	Taps          telephony.Tapper
@@ -85,6 +87,12 @@ func (c composition) connect() {
 	// agent staffed while signed out stays unroutable until the next reconnect
 	// — Available, in a queue, offered nothing.
 	c.Agents.AttachStaffing(c.Catalog)
+
+	// After-call work opens a record the moment it begins, so a finished call
+	// always has one. Without this the ledger only ever hears about the calls
+	// somebody remembered to write up, and "nobody filed this" and "nobody
+	// finished typing" are the same absence.
+	c.Agents.AttachWrapUps(c.WrapUps)
 
 	// The switch forgets its agents when it restarts, and we are the source of
 	// truth, so every reconnect rebuilds its view.
