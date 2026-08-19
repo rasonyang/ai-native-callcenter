@@ -3,15 +3,18 @@
 package streamin
 
 import (
+	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
@@ -412,5 +415,91 @@ func TestAStreamEndingCannotRetireALaterCallsTap(t *testing.T) {
 	if len(stopped) != 2 {
 		t.Errorf("stopped %v, want the absorbed call's stream and then the kept "+
 			"call's", stopped)
+	}
+}
+
+// The tap registers itself with the ingest, or none of the above happens.
+//
+// streamEnded is only reachable because NewTap hands it to the Server. Nothing
+// else calls it, so without this line every test above passes against a build
+// where the module's stream end is never noticed — which is precisely the
+// class of defect this file keeps finding elsewhere.
+func TestNewTapRegistersItselfForStreamEnds(t *testing.T) {
+	tap, _, _ := tapFixture(t)
+	if tap.srv.onStreamEnded == nil {
+		t.Fatal("the ingest has no stream-end handler; the tap never registered one")
+	}
+}
+
+// Only a close the module initiated means the channel is gone. A socket that
+// simply dropped is not evidence of anything — the channel may still be up and
+// still streaming — so the stop must still be issued.
+func TestOnlyAGracefulCloseRetiresTheAttachment(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		closeNicely bool
+		wantStops   int
+	}{
+		{name: "the module ends the stream", closeNicely: true, wantStops: 0},
+		{name: "the socket just drops", closeNicely: false, wantStops: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := transcript.NewRegistry(nil, &statePub{},
+				slog.New(slog.NewTextHandler(io.Discard, nil)))
+			callID := uuid.New()
+			reg.For(callID, "INBOUND", time.Now())
+			t.Cleanup(func() { reg.Close(callID) })
+
+			srv, err := New(Config{
+				Addr: "127.0.0.1:0", Secret: []byte("k"),
+				NewSession:  func() (transcribe.Session, error) { return newStallSession(), nil },
+				Transcripts: recordingTranscripts{reg: reg, callID: callID},
+				Logger:      nopLogger{},
+			})
+			if err != nil {
+				t.Fatalf("new: %v", err)
+			}
+			if err := srv.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			t.Cleanup(func() { _ = srv.Stop(context.Background()) })
+
+			sw := &fakeSwitch{}
+			tap := NewTap(srv, sw, "ws://"+srv.Addr()+StreamPath, 24000, time.Minute, nopLogger{})
+			tap.Attach(callID, nil, nil, "chan-a", "en")
+
+			// The module dials back, as it does after +OK.
+			claim := Claim{CallID: callID, Channel: "chan-a", Language: "en",
+				Expires: time.Now().Add(time.Minute)}
+			dial := "ws://" + srv.Addr() + StreamPath + "?t=" + url.QueryEscape(srv.Token(claim))
+			conn, _, err := websocket.DefaultDialer.Dial(dial, nil)
+			if err != nil {
+				t.Fatalf("the tap could not connect: %v", err)
+			}
+
+			if tc.closeNicely {
+				_ = conn.WriteMessage(websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			}
+			_ = conn.Close()
+
+			// Let the ingest observe the close before the hangup arrives —
+			// which is the real order: the module closes the socket ~20ms
+			// before CHANNEL_HANGUP reaches us.
+			waitUntil(t, func() bool {
+				_, live := tap.currentKey("chan-a")
+				return live != tc.closeNicely
+			}, "the ingest to notice the stream ended")
+
+			// The channel then hangs up and the coordinator detaches. Once.
+			tap.Detach("chan-a")
+
+			_, stopped, _, _ := sw.snapshot()
+			if len(stopped) != tc.wantStops {
+				t.Errorf("issued %d stops, want %d — a stop for a channel the "+
+					"switch has already destroyed is an ERR in every call's log",
+					len(stopped), tc.wantStops)
+			}
+		})
 	}
 }

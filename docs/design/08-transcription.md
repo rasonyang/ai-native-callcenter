@@ -1475,7 +1475,7 @@ hard way on 2026-08-17:
    staffed. Restored on reconnect as of `catalog.Service.SyncTiers`; before that the dev
    switch showed `calls_answered=0 calls_abandoned=4` against two staffed agents.
 2. `[FACT]` **`AICC_SWITCH_DOMAIN` must equal the switch's own domain.** It defaults to
-   `127.0.0.1`, and the dev switch's queue is `support-en@192.168.31.176`, so every
+   `127.0.0.1`, and the dev switch's queue is `support-en@192.168.31.55`, so every
    queue-named callcenter command fails with `-ERR Queue not found!` — into a `WARN`, not an
    error. The same mismatch breaks registration: a softphone must register to the LAN
    address, which is the realm the switch authenticates against.
