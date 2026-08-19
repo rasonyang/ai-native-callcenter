@@ -201,6 +201,24 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 			uuid.New(), p.username); err != nil {
 			return nil, nil, err
 		}
+		// Bind the agent to their phone. Without this the demo creates
+		// agents and extensions that have never heard of each other, and
+		// every seeded agent is refused at sign-in ("no extension is bound
+		// to this agent") — a demo nobody can answer a call on.
+		//
+		// Only a binding that is missing is filled in, and only with a phone
+		// nobody else holds: existing data wins here as everywhere in the
+		// seeder, and the database refuses two agents on one extension.
+		if _, err := st.Pool.Exec(ctx, `
+			UPDATE agents a
+			SET default_extension_id = e.id
+			FROM users u, extensions e
+			WHERE a.user_id = u.id AND u.username = $1 AND e.number = $2
+			  AND a.default_extension_id IS NULL
+			  AND NOT EXISTS (SELECT 1 FROM agents b WHERE b.default_extension_id = e.id)`,
+			p.username, p.ext); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	for _, q := range []struct{ name, ext, display string }{
