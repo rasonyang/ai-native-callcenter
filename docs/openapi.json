@@ -51,6 +51,14 @@
       "description": "Promises to call back: taken by the bot, kept by agents."
     },
     {
+      "name": "contacts",
+      "description": "Simple customer records, keyed by phone number: who is calling, and what the last agent noted."
+    },
+    {
+      "name": "dispositions",
+      "description": "The after-call-work vocabulary: the categories and codes an agent files a call under."
+    },
+    {
       "name": "reports",
       "description": "Aggregates over the ledger."
     },
@@ -356,6 +364,62 @@
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AgentNotReadyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The presence after the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Presence"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agent/wrap-up": {
+      "post": {
+        "operationId": "agentWrapUp",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Complete after-call work",
+        "description": "Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. The wrap-up may also be filed after the timer has already returned the agent to READY: the last wrapped call stays addressable until the next one starts. dispositionCode must be a code from GET /dispositions when given. Requires the AGENT role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WrapUpRequest"
               }
             }
           }
@@ -793,6 +857,37 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          }
+        }
+      }
+    },
+    "/calls/waiting": {
+      "get": {
+        "operationId": "listWaitingCalls",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Callers waiting in the queues the caller staffs",
+        "description": "The live waiting line of every queue this agent is staffed on, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. Requires the AGENT role and an agent profile.",
+        "responses": {
+          "200": {
+            "description": "Who is waiting, and since when.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WaitingCallList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
           }
         }
       }
@@ -2316,6 +2411,92 @@
         }
       }
     },
+    "/cdrs/mine": {
+      "get": {
+        "operationId": "listMyCDRs",
+        "tags": [
+          "cdrs"
+        ],
+        "summary": "The caller's own finished calls",
+        "description": "Every finished call the requesting agent was a party to, newest first, with the same filters as GET /cdrs minus the ones that name other people. Requires the AGENT role and an agent profile.",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/CDRStatus"
+            }
+          },
+          {
+            "name": "fromNumber",
+            "in": "query",
+            "description": "Substring of the caller's number.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "description": "RFC 3339 window start.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "description": "RFC 3339 window end.",
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page plus the total for the filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CDRList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/cdrs/{callId}": {
       "get": {
         "operationId": "getCDR",
@@ -2823,6 +3004,259 @@
         }
       }
     },
+    "/contacts": {
+      "get": {
+        "operationId": "listContacts",
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Search contacts",
+        "description": "Newest first. q matches the phone number, name and company as a substring; phoneNumber matches exactly, which is how the cockpit identifies a caller. Any signed-in role.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "phoneNumber",
+            "in": "query",
+            "description": "Exact match.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page plus the total for the filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContactList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createContact",
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Create a contact",
+        "description": "Any signed-in role. A phone number that already has a contact is a conflict.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Contact"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/contacts/{contactId}": {
+      "put": {
+        "operationId": "updateContact",
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Update a contact",
+        "description": "Any signed-in role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored contact.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Contact"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteContact",
+        "tags": [
+          "contacts"
+        ],
+        "summary": "Delete a contact",
+        "description": "Any signed-in role.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Deleted."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/dispositions": {
+      "get": {
+        "operationId": "listDispositions",
+        "tags": [
+          "dispositions"
+        ],
+        "summary": "The wrap-up vocabulary",
+        "description": "Categories and their enabled dispositions, in display order. Any signed-in role.",
+        "responses": {
+          "200": {
+            "description": "The vocabulary, grouped by category.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DispositionCatalog"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/system/health": {
       "get": {
         "operationId": "getSystemHealth",
@@ -2969,7 +3403,7 @@
         }
       },
       "Conflict": {
-        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN.",
+        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
         "content": {
           "application/json": {
             "schema": {
@@ -3033,6 +3467,7 @@
           "EXTENSION_IN_USE",
           "AGENT_ALREADY_LOGGED_IN",
           "AGENT_NOT_LOGGED_IN",
+          "AGENT_NOT_IN_WRAP_UP",
           "CALL_NOT_FOUND",
           "NOT_CALL_PARTY",
           "USER_SUSPENDED",
@@ -3199,6 +3634,11 @@
           "wrapUpEndsAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "wrapUpCallId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR."
           }
         },
         "required": [
@@ -3206,6 +3646,20 @@
           "availability",
           "enteredAt"
         ]
+      },
+      "WrapUpRequest": {
+        "type": "object",
+        "description": "What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work.",
+        "properties": {
+          "dispositionCode": {
+            "type": "string",
+            "description": "A code from GET /dispositions."
+          },
+          "note": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        }
       },
       "AgentLoginRequest": {
         "type": "object",
@@ -3603,6 +4057,71 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/CallSnapshot"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "WaitingCall": {
+        "type": "object",
+        "description": "A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next.",
+        "properties": {
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "callType": {
+            "$ref": "#/components/schemas/CallType"
+          },
+          "fromNumber": {
+            "type": "string"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "queueName": {
+            "type": "string"
+          },
+          "queueDisplayName": {
+            "type": "string"
+          },
+          "slaThresholdSec": {
+            "type": "integer",
+            "description": "The queue's answer target; a wait past it is a breach. 0 means none is configured."
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "language": {
+            "type": "string"
+          },
+          "userData": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "callId",
+          "callType",
+          "fromNumber",
+          "queueId",
+          "queueName",
+          "queueDisplayName",
+          "slaThresholdSec",
+          "joinedAt"
+        ]
+      },
+      "WaitingCallList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WaitingCall"
             }
           }
         },
@@ -4349,6 +4868,10 @@
             "items": {
               "$ref": "#/components/schemas/Leg"
             }
+          },
+          "wrapUp": {
+            "$ref": "#/components/schemas/WrapUp",
+            "description": "The after-call work filed for this call: the requesting agent's own on GET /cdrs/mine, the primary agent's (else the latest) elsewhere. Absent when nobody filed one."
           }
         },
         "required": [
@@ -4367,6 +4890,44 @@
           "isContained",
           "hasRecording",
           "legs"
+        ]
+      },
+      "WrapUp": {
+        "type": "object",
+        "description": "One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary.",
+        "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "dispositionCode": {
+            "type": "string"
+          },
+          "dispositionLabel": {
+            "type": "string"
+          },
+          "categoryCode": {
+            "type": "string"
+          },
+          "categoryLabel": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "agentId",
+          "dispositionCode",
+          "dispositionLabel",
+          "categoryCode",
+          "categoryLabel",
+          "note",
+          "createdAt"
         ]
       },
       "CDRList": {
@@ -4626,6 +5187,172 @@
         },
         "required": [
           "status"
+        ]
+      },
+      "Contact": {
+        "type": "object",
+        "description": "A customer record. The phone number is the key the cockpit looks a caller up by, so it is unique.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "phoneNumber": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "company": {
+            "type": "string"
+          },
+          "email": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "lastCallAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this number last appeared on a finished call, either side. Absent when it never has."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "phoneNumber",
+          "name",
+          "company",
+          "email",
+          "tags",
+          "notes",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "ContactWrite": {
+        "type": "object",
+        "description": "Create or update a contact. Omitted fields are stored empty on create and left unchanged on update.",
+        "properties": {
+          "phoneNumber": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "company": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "email": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 40
+            },
+            "maxItems": 20
+          },
+          "notes": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        },
+        "required": [
+          "phoneNumber"
+        ]
+      },
+      "ContactList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Contact"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total rows matching the filter, for paging."
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
+      },
+      "Disposition": {
+        "type": "object",
+        "description": "One code an agent can file a call under.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ]
+      },
+      "DispositionCategory": {
+        "type": "object",
+        "description": "A group of dispositions, in the order agents see them.",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "dispositions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Disposition"
+            }
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "dispositions"
+        ]
+      },
+      "DispositionCatalog": {
+        "type": "object",
+        "description": "The whole vocabulary, grouped. Empty categories are omitted.",
+        "properties": {
+          "categories": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DispositionCategory"
+            }
+          }
+        },
+        "required": [
+          "categories"
         ]
       },
       "QualityReview": {
@@ -4981,6 +5708,71 @@
         },
         "required": [
           "callback"
+        ]
+      },
+      "SseQueueJoinedPayload": {
+        "type": "object",
+        "description": "Payload of QUEUE_JOINED: a caller entered the queue named on the envelope's queueId.",
+        "properties": {
+          "queueName": {
+            "type": "string"
+          },
+          "fromNumber": {
+            "type": "string"
+          },
+          "joinedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "queueName",
+          "joinedAt"
+        ]
+      },
+      "SseQueueLeftPayload": {
+        "type": "object",
+        "description": "Payload of QUEUE_LEFT: the caller left the queue, whether answered, abandoned or timed out. cause and cancelReason are the queue's own words, stable codes rather than display text.",
+        "properties": {
+          "queueName": {
+            "type": "string"
+          },
+          "fromNumber": {
+            "type": "string"
+          },
+          "cause": {
+            "type": "string"
+          },
+          "cancelReason": {
+            "type": "string"
+          },
+          "waitSec": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "queueName"
+        ]
+      },
+      "SseQueueCountPayload": {
+        "type": "object",
+        "description": "Payload of QUEUE_COUNT: how many callers are waiting in the queue named on the envelope's queueId, published whenever that number moves.",
+        "properties": {
+          "queueName": {
+            "type": "string"
+          },
+          "waiting": {
+            "type": "integer"
+          },
+          "longestWaitAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the longest-waiting caller joined; absent when nobody is waiting."
+          }
+        },
+        "required": [
+          "queueName",
+          "waiting"
         ]
       },
       "SseSystemResetPayload": {

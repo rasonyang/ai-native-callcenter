@@ -259,9 +259,17 @@ func TestNormalizeCallcenter(t *testing.T) {
 				"CC-Queue":               "support@default",
 				"CC-Member-Session-UUID": "019ff973-abcc-7349-bda2-b58e0e005324",
 				"CC-Member-Joined-Time":  "1786596535",
+				"CC-Member-CID-Number":   "13800138000",
+				"CC-Member-CID-Name":     "Wei",
 			},
 			want: KindQueueMemberJoined,
 			check: func(t *testing.T, got SwitchEvent) {
+				// The queue's own copy of the caller: a member the call
+				// registry has never seen has no other source of a number.
+				if got.ANI != "13800138000" || got.CallerIDName != "Wei" {
+					t.Errorf("caller = %q/%q, want the member CID the queue carries",
+						got.ANI, got.CallerIDName)
+				}
 				// The switch domain is upstream vocabulary; it stops at the
 				// boundary so the rest of the system matches queues by name.
 				if got.Queue != "support" {

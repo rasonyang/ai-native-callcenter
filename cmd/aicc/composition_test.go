@@ -33,6 +33,7 @@ import (
 type fakeCoordinator struct {
 	taps      telephony.Tapper
 	audiences telephony.Audiences
+	queues    telephony.QueueCatalog
 	cdr       *telephony.CDRAssembler
 	// hookWhenCDRAttached is what the registry's finish hook did at the moment
 	// AttachCDR was called. The real coordinator *sets* that hook, so a
@@ -45,6 +46,8 @@ type fakeCoordinator struct {
 func (f *fakeCoordinator) AttachTaps(t telephony.Tapper) { f.taps = t }
 
 func (f *fakeCoordinator) AttachAudiences(a telephony.Audiences) { f.audiences = a }
+
+func (f *fakeCoordinator) AttachQueues(q telephony.QueueCatalog) { f.queues = q }
 
 func (f *fakeCoordinator) AttachCDR(a *telephony.CDRAssembler) {
 	f.cdr = a
@@ -94,6 +97,13 @@ type fakeLink struct{ onConnect func(context.Context) }
 
 func (f *fakeLink) OnConnect(fn func(context.Context)) { f.onConnect = fn }
 
+// fakeQueues stands in for the queue configuration the waiting line reads.
+type fakeQueues struct{}
+
+func (fakeQueues) QueueByName(context.Context, string) (telephony.QueueSummary, bool) {
+	return telephony.QueueSummary{}, false
+}
+
 type fakeTapper struct {
 	detachedCalls []uuid.UUID
 }
@@ -113,6 +123,7 @@ type wiringFixture struct {
 	link        *fakeLink
 	taps        *fakeTapper
 	audiences   *fakeAudiences
+	queues      fakeQueues
 	transcripts *retirer
 	cdr         *telephony.CDRAssembler
 	regs        []telephony.Registration
@@ -152,6 +163,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		Catalog:       f.catalog,
 		Link:          f.link,
 		CDR:           f.cdr,
+		Queues:        f.queues,
 		Transcripts:   f.transcripts,
 		Audiences:     f.audiences,
 		Taps:          f.taps,
@@ -191,6 +203,14 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	t.Run("the coordinator has the cdr assembler", func(t *testing.T) {
 		if f.coordinator.cdr != f.cdr {
 			t.Fatalf("cdr = %p, want %p", f.coordinator.cdr, f.cdr)
+		}
+	})
+
+	t.Run("the coordinator can name a queue", func(t *testing.T) {
+		if f.coordinator.queues != telephony.QueueCatalog(f.queues) {
+			t.Fatalf("queues = %#v, want the queue configuration — without it "+
+				"no caller is ever recorded as waiting and the agent's queue "+
+				"panel is empty on a busy queue", f.coordinator.queues)
 		}
 	})
 
@@ -367,6 +387,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&telephony.Coordinator{},
 		&transcript.Registry{},
 		&catalog.Service{},
+		&store.ContactStore{},
 		&store.LedgerStore{},
 		fakeStreamer{},
 		&store.LedgerStore{},

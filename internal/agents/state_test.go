@@ -5,6 +5,8 @@ package agents
 import (
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 var now = time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
@@ -123,7 +125,7 @@ func TestWrapUp(t *testing.T) {
 	if err := p.Login("1001", now); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.StartWrapUp(30*time.Second, now); err != nil {
+	if err := p.StartWrapUp(uuid.New(), 30*time.Second, now); err != nil {
 		t.Fatal(err)
 	}
 	if p.State != StateNotReady || p.Reason != ReasonAfterCallWork {
@@ -144,7 +146,7 @@ func TestWrapUp(t *testing.T) {
 func TestExplicitRequestBeatsTheWrapUpTimer(t *testing.T) {
 	var p Presence
 	_ = p.Login("1001", now)
-	_ = p.StartWrapUp(30*time.Second, now)
+	_ = p.StartWrapUp(uuid.New(), 30*time.Second, now)
 
 	// The agent chooses lunch before wrap-up runs out.
 	if err := p.NotReady(ReasonLunch, now.Add(5*time.Second)); err != nil {
@@ -162,7 +164,7 @@ func TestExplicitRequestBeatsTheWrapUpTimer(t *testing.T) {
 func TestZeroWrapUpGoesStraightToReady(t *testing.T) {
 	var p Presence
 	_ = p.Login("1001", now)
-	if err := p.StartWrapUp(0, now); err != nil {
+	if err := p.StartWrapUp(uuid.New(), 0, now); err != nil {
 		t.Fatal(err)
 	}
 	if p.State != StateReady {

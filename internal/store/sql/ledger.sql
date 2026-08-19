@@ -162,3 +162,42 @@ FROM cdrs
 WHERE started_at >= $1 AND started_at < $2
 GROUP BY 1
 ORDER BY 1;
+
+--
+-- After-call work: the vocabulary, and what agents file against calls.
+--
+
+-- name: ListDispositionCategories :many
+SELECT * FROM disposition_categories ORDER BY position, code;
+
+-- name: ListEnabledDispositions :many
+SELECT * FROM dispositions WHERE is_enabled ORDER BY category_code, position, code;
+
+-- name: GetDisposition :one
+SELECT d.code, d.category_code, d.label, c.label AS category_label
+FROM dispositions d
+JOIN disposition_categories c ON c.code = d.category_code
+WHERE d.code = $1 AND d.is_enabled;
+
+-- UpsertWrapUp files one agent's after-call work for one call. Filing twice
+-- replaces: the agent changed their mind, and the last word is the record.
+-- name: UpsertWrapUp :one
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label,
+                      category_code, category_label, note)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (call_id, agent_id) DO UPDATE
+SET disposition_code  = excluded.disposition_code,
+    disposition_label = excluded.disposition_label,
+    category_code     = excluded.category_code,
+    category_label    = excluded.category_label,
+    note              = excluded.note,
+    created_at        = now()
+RETURNING *;
+
+-- ListWrapUpsForCalls reads every wrap-up filed against a page of calls, so a
+-- ledger listing can attach them without a join whose nullability sqlc would
+-- have to guess at.
+-- name: ListWrapUpsForCalls :many
+SELECT * FROM wrap_ups
+WHERE call_id = ANY(sqlc.arg('call_ids')::uuid[])
+ORDER BY created_at DESC;

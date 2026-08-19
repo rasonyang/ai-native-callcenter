@@ -4,6 +4,7 @@ package httpapi
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -39,6 +40,51 @@ func (s *Server) ListCDRs(w http.ResponseWriter, r *http.Request, params api.Lis
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+}
+
+// ListMyCDRs pages the caller's own finished calls.
+//
+// The agent identity comes from the session, never from a parameter: "my
+// calls" that took an agentId would be every agent's calls to anyone who can
+// type a UUID. The wrap-up attached to each row is the caller's own filing for
+// that call, not whatever a colleague wrote.
+func (s *Server) ListMyCDRs(w http.ResponseWriter, r *http.Request, params api.ListMyCDRsParams) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	filter := store.CDRFilter{
+		AgentID:    &agentID,
+		Status:     stringOr(params.Status),
+		FromNumber: stringOr(params.FromNumber),
+		Limit:      intOr(params.Limit, 50),
+		Offset:     intOr(params.Offset, 0),
+	}
+	if params.From != nil {
+		filter.From = *params.From
+	}
+	if params.To != nil {
+		filter.To = *params.To
+	}
+
+	items, total, err := s.ledger.ListCDRs(r.Context(), filter)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot list an agent's calls", "error", err, "agentId", agentID)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list calls", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total})
+}
+
+// ListDispositions serves the after-call-work vocabulary.
+func (s *Server) ListDispositions(w http.ResponseWriter, r *http.Request) {
+	categories, err := s.ledger.ListDispositions(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot read the disposition vocabulary", "error", err)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list dispositions", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
 }
 
 // GetCDR returns one finished call with everything it left behind.

@@ -29,6 +29,10 @@ type CallService interface {
 	SendDTMF(ctx context.Context, callID, agentID uuid.UUID, digits string) error
 	CallsForAgent(agentID uuid.UUID) []telephony.Snapshot
 	AllCalls() []telephony.Snapshot
+	// WaitingCalls is the queue's own view: who has joined and not yet
+	// reached anybody. It cannot be derived from the calls above — a caller
+	// on hold music in a queue looks like any other live call.
+	WaitingCalls(queueIDs []uuid.UUID) []telephony.WaitingCall
 }
 
 // ListMyCalls lists the calls the caller is currently a party to.
@@ -38,6 +42,25 @@ func (s *Server) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.CallsForAgent(agentID)})
+}
+
+// ListWaitingCalls lists the callers waiting in the queues this agent staffs.
+//
+// The queues come from the agent's staffing, not from the request: an agent
+// works the line they are on, and the same rule already decides which queue
+// events reach their event stream.
+func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	queueIDs, err := s.agentDir.QueuesForAgent(r, agentID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot resolve staffed queues", "error", err, "agentId", agentID)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read your queues", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.WaitingCalls(queueIDs)})
 }
 
 // ListCalls lists every live call, for supervision.

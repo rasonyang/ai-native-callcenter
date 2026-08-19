@@ -188,6 +188,7 @@ func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
 		Calls:    stubCalls{},
 		Catalog:  stubCatalog{},
 		Ledger:   stubLedger(t),
+		Contacts: stubContacts{},
 		Outbound: stubOutbound{},
 	})
 	router := server.router()
@@ -271,6 +272,10 @@ func (stubAgents) UpdateAgent(context.Context, agents.AgentConfig) (agents.Agent
 	return agents.AgentConfig{}, nil
 }
 func (stubAgents) DeleteAgent(context.Context, uuid.UUID) error { return nil }
+func (stubAgents) EndWrapUp(context.Context, uuid.UUID) (agents.Presence, error) {
+	return agents.Presence{}, nil
+}
+func (stubAgents) WrapUpCall(uuid.UUID) (uuid.UUID, bool) { return uuid.Nil, false }
 
 type stubCalls struct{}
 
@@ -288,6 +293,9 @@ func (stubCalls) Transfer(context.Context, uuid.UUID, uuid.UUID, string) error {
 }
 func (stubCalls) CallsForAgent(uuid.UUID) []telephony.Snapshot { return nil }
 func (stubCalls) AllCalls() []telephony.Snapshot               { return nil }
+func (stubCalls) WaitingCalls([]uuid.UUID) []telephony.WaitingCall {
+	return nil
+}
 
 type stubCatalog struct{}
 
@@ -327,6 +335,19 @@ func (stubCatalog) UpdateDID(context.Context, catalog.DID) (catalog.DID, error) 
 	return catalog.DID{}, nil
 }
 func (stubCatalog) DeleteDID(context.Context, uuid.UUID) error { return nil }
+
+type stubContacts struct{}
+
+func (stubContacts) List(context.Context, store.ContactFilter) ([]store.Contact, int64, error) {
+	return nil, 0, nil
+}
+func (stubContacts) Create(context.Context, store.ContactWrite, *uuid.UUID) (store.Contact, error) {
+	return store.Contact{}, nil
+}
+func (stubContacts) Update(context.Context, uuid.UUID, store.ContactWrite, *uuid.UUID) (store.Contact, error) {
+	return store.Contact{}, nil
+}
+func (stubContacts) Delete(context.Context, uuid.UUID) error { return nil }
 
 type stubOutbound struct{}
 

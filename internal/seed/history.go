@@ -30,12 +30,128 @@ type StateLogRow struct {
 	ExitedAt  *time.Time
 }
 
+// ContactRow is one customer record to insert.
+type ContactRow struct {
+	PhoneNumber string
+	Name        string
+	Company     string
+	Tags        []string
+	Notes       string
+}
+
+// WrapUpRow is one agent's after-call work on a seeded call.
+type WrapUpRow struct {
+	CallID          uuid.UUID
+	AgentID         uuid.UUID
+	DispositionCode string
+	Note            string
+}
+
 // Plan is the whole seven-day history, generation separated from insertion
 // so determinism is testable without a database.
 type Plan struct {
 	CDRs        []store.CDR
 	QueueEvents []QueueEventRow
 	StateLogs   []StateLogRow
+	Contacts    []ContactRow
+	WrapUps     []WrapUpRow
+}
+
+// demoContacts is the cast behind the numbers that called. The names are
+// attached to whichever seeded callers turn up, so a contact always has real
+// history behind it and the cockpit's caller card is never empty on a demo.
+var demoContacts = []struct{ name, company, tag, note string }{
+	{"Zhang Wei", "NovaNet", "VIP", "Prefers callbacks after 16:00."},
+	{"Emily Carter", "Harbor Foods", "Enterprise", "Two lines on the same account."},
+	{"Li Na", "Kestrel Design", "", "Billing questions only; technical goes to her colleague."},
+	{"Sofia Reyes", "Blue Ridge Ltd", "Enterprise", ""},
+	{"Huang Lei", "NovaNet", "", "Asked to be called on the mobile, not the office line."},
+	{"Grace Lin", "Meridian Travel", "VIP", "Renewal due next quarter."},
+	{"Sun Qiang", "Yuhua Logistics", "", ""},
+	{"Wang Fang", "Pine Street Clinic", "", "Hard of hearing; speak slowly."},
+}
+
+// seedContactsAndWrapUps gives the history the two things an agent's own
+// screens read: who the callers are, and what the agent wrote up afterwards.
+//
+// It runs after the calls are laid out and draws from the same stream, so the
+// calls themselves are byte-identical to what this generator produced before
+// either existed.
+func (p *Plan) seedContactsAndWrapUps(dispositions []string, rng *rand.Rand) {
+	seen := map[string]bool{}
+	for _, cdr := range p.CDRs {
+		if len(p.Contacts) >= len(demoContacts) {
+			break
+		}
+		if cdr.CallType != "INBOUND" || cdr.FromNumber == "" || seen[cdr.FromNumber] {
+			continue
+		}
+		seen[cdr.FromNumber] = true
+		person := demoContacts[len(p.Contacts)]
+		contact := ContactRow{
+			PhoneNumber: cdr.FromNumber, Name: person.name,
+			Company: person.company, Notes: person.note,
+		}
+		if person.tag != "" {
+			contact.Tags = []string{person.tag}
+		}
+		p.Contacts = append(p.Contacts, contact)
+	}
+
+	if len(dispositions) == 0 {
+		return
+	}
+	for _, cdr := range p.CDRs {
+		if cdr.PrimaryAgentID == nil {
+			continue
+		}
+		row := WrapUpRow{
+			CallID:          cdr.CallID,
+			AgentID:         *cdr.PrimaryAgentID,
+			DispositionCode: dispositions[rng.Intn(len(dispositions))],
+		}
+		// Only some calls get a note, and only one that fits what was filed:
+		// a demo whose note contradicts its own disposition teaches the
+		// screen to be ignored.
+		if notes := demoNotes[row.DispositionCode]; len(notes) > 0 && rng.Intn(3) == 0 {
+			row.Note = notes[rng.Intn(len(notes))]
+		}
+		p.WrapUps = append(p.WrapUps, row)
+	}
+}
+
+// demoNotes are the kind of thing an agent actually types, per disposition —
+// keyed by code so the note agrees with what was filed. A vocabulary this map
+// does not know simply gets no notes, which is the honest default for an
+// installation that renamed its own.
+var demoNotes = map[string][]string{
+	"ANSWERED_QUESTION": {
+		"Explained the billing cycle; nothing further needed.",
+		"Sent the setup guide by email while we were on the call.",
+	},
+	"ISSUE_FIXED": {
+		"Walked them through the reset; confirmed the line came back.",
+		"Re-provisioned the handset and tested a call together.",
+	},
+	"REFUND_PROCESSED": {
+		"Refund raised, reference sent by SMS.",
+		"Duplicate charge credited; 3–5 working days.",
+	},
+	"CALLBACK_SCHEDULED": {
+		"Calling back tomorrow after 16:00 as agreed.",
+		"Wants the account holder present; callback booked.",
+	},
+	"ESCALATED": {
+		"Escalated to L2 — hardware fault suspected.",
+		"Passed to billing; the charge predates the account.",
+	},
+	"PENDING_CUSTOMER": {
+		"Waiting on the photo of the meter before we can proceed.",
+		"Customer will confirm the address with their office.",
+	},
+	"WRONG_NUMBER": {"Reached the wrong department; redirected them."},
+	"NO_AUDIO":     {"No audio either way; asked them to redial."},
+	"SPAM_CALL":    {"Silent call, no response to greeting."},
 }
 
 // The demo numbering plan. DIDs are plain text on a CDR, so the history can
@@ -51,7 +167,8 @@ var demoDIDs = []struct {
 
 // planHistory lays out the last seven days. Everything derives from the
 // passed rng and the day grid, so one seed always tells the same story.
-func planHistory(now time.Time, agents []uuid.UUID, queues []QueueRef, rng *rand.Rand) Plan {
+func planHistory(now time.Time, agents []uuid.UUID, queues []QueueRef,
+	dispositions []string, rng *rand.Rand) Plan {
 	var plan Plan
 	queueByName := map[string]QueueRef{}
 	for _, q := range queues {
@@ -82,6 +199,7 @@ func planHistory(now time.Time, agents []uuid.UUID, queues []QueueRef, rng *rand
 			plan.StateLogs = append(plan.StateLogs, shift(dayStart, agentID, rng)...)
 		}
 	}
+	plan.seedContactsAndWrapUps(dispositions, rng)
 	return plan
 }
 

@@ -114,11 +114,16 @@ func (f *fakeStore) Roster(context.Context) ([]RosterEntry, error) {
 	out := make([]RosterEntry, 0, len(f.profiles))
 	for id, prof := range f.profiles {
 		p := f.presence[id]
-		out = append(out, RosterEntry{
+		entry := RosterEntry{
 			AgentID: id, UserID: prof.UserID, DisplayName: prof.DisplayName,
 			State: p.CurrentState(), Reason: p.Reason, Extension: p.ExtensionNumber,
-			EnteredAt: p.EnteredAt,
-		})
+			EnteredAt: p.EnteredAt, WrapUpCallID: p.WrapUpCallID,
+		}
+		if !p.WrapUpEndsAt.IsZero() {
+			ends := p.WrapUpEndsAt
+			entry.WrapUpEndsAt = &ends
+		}
+		out = append(out, entry)
 	}
 	return out, nil
 }
@@ -316,7 +321,7 @@ func TestWrapUpExpiresBackToReady(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
 		t.Fatalf("StartWrapUp() error = %v", err)
 	}
 	if got := svc.Presence(agentID); got.Reason != ReasonAfterCallWork {
@@ -348,7 +353,7 @@ func TestExplicitChangeCancelsTheWrapUpTimer(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
 		t.Fatal(err)
 	}
 	// The agent goes to lunch before wrap-up ends.

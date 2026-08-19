@@ -7,6 +7,8 @@ package agents
 import (
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // State is an agent's routing intention. It never describes call media: a
@@ -68,6 +70,9 @@ type Presence struct {
 	EnteredAt       time.Time
 	// WrapUpEndsAt is when after-call work expires by itself.
 	WrapUpEndsAt time.Time
+	// WrapUpCallID is the call the after-call work is for, so what the agent
+	// files lands on that call and not on whichever one they take next.
+	WrapUpCallID *uuid.UUID
 
 	// Observed facts, not intentions.
 	IsOnCall          bool
@@ -104,7 +109,7 @@ func (p *Presence) Login(extensionNumber string, at time.Time) error {
 	p.Reason = ReasonLogin
 	p.ExtensionNumber = extensionNumber
 	p.EnteredAt = at
-	p.WrapUpEndsAt = time.Time{}
+	p.clearWrapUp()
 	return nil
 }
 
@@ -117,7 +122,7 @@ func (p *Presence) Logout(at time.Time) error {
 	p.Reason = ""
 	p.ExtensionNumber = ""
 	p.EnteredAt = at
-	p.WrapUpEndsAt = time.Time{}
+	p.clearWrapUp()
 	return nil
 }
 
@@ -129,7 +134,7 @@ func (p *Presence) Ready(at time.Time) error {
 	p.State = StateReady
 	p.Reason = ""
 	p.EnteredAt = at
-	p.WrapUpEndsAt = time.Time{}
+	p.clearWrapUp()
 	return nil
 }
 
@@ -144,13 +149,14 @@ func (p *Presence) NotReady(reason Reason, at time.Time) error {
 	p.State = StateNotReady
 	p.Reason = reason
 	p.EnteredAt = at
-	p.WrapUpEndsAt = time.Time{}
+	p.clearWrapUp()
 	return nil
 }
 
-// StartWrapUp begins after-call work for the configured duration. A zero or
-// negative duration means the agent returns to READY immediately.
-func (p *Presence) StartWrapUp(duration time.Duration, at time.Time) error {
+// StartWrapUp begins after-call work for the configured duration, for the
+// call that just ended. A zero or negative duration means the agent returns to
+// READY immediately.
+func (p *Presence) StartWrapUp(callID uuid.UUID, duration time.Duration, at time.Time) error {
 	if p.IsLoggedOut() {
 		return ErrNotLoggedIn
 	}
@@ -161,14 +167,31 @@ func (p *Presence) StartWrapUp(duration time.Duration, at time.Time) error {
 	p.Reason = ReasonAfterCallWork
 	p.EnteredAt = at
 	p.WrapUpEndsAt = at.Add(duration)
+	p.WrapUpCallID = nil
+	if callID != uuid.Nil {
+		id := callID
+		p.WrapUpCallID = &id
+	}
 	return nil
+}
+
+// IsInWrapUp reports whether the agent is doing after-call work right now.
+func (p Presence) IsInWrapUp() bool {
+	return p.State == StateNotReady && p.Reason == ReasonAfterCallWork
+}
+
+// clearWrapUp forgets the wrap-up window and its call: every transition out
+// of after-call work, chosen or expired, ends both.
+func (p *Presence) clearWrapUp() {
+	p.WrapUpEndsAt = time.Time{}
+	p.WrapUpCallID = nil
 }
 
 // ExpireWrapUp returns the agent to READY when their wrap-up window has run
 // out. It reports whether anything changed, so a timer firing late or after an
 // explicit request cannot override the agent's own choice.
 func (p *Presence) ExpireWrapUp(at time.Time) bool {
-	if p.State != StateNotReady || p.Reason != ReasonAfterCallWork {
+	if !p.IsInWrapUp() {
 		return false
 	}
 	if p.WrapUpEndsAt.IsZero() || at.Before(p.WrapUpEndsAt) {

@@ -16,9 +16,10 @@ import (
 
 type noAgents struct{}
 
-func (noAgents) AgentAtExtension(string) (uuid.UUID, bool)      { return uuid.Nil, false }
-func (noAgents) AgentByCallcenterName(string) (uuid.UUID, bool) { return uuid.Nil, false }
-func (noAgents) SetOnCall(context.Context, uuid.UUID, bool)     {}
+func (noAgents) AgentAtExtension(string) (uuid.UUID, bool)                { return uuid.Nil, false }
+func (noAgents) AgentByCallcenterName(string) (uuid.UUID, bool)           { return uuid.Nil, false }
+func (noAgents) SetOnCall(context.Context, uuid.UUID, bool)               {}
+func (noAgents) BeginAfterCallWork(context.Context, uuid.UUID, uuid.UUID) {}
 
 type nullPublisher struct{}
 
@@ -185,8 +186,9 @@ func (oneAgent) AgentAtExtension(ext string) (uuid.UUID, bool) {
 	}
 	return uuid.Nil, false
 }
-func (oneAgent) AgentByCallcenterName(string) (uuid.UUID, bool) { return uuid.Nil, false }
-func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)     {}
+func (oneAgent) AgentByCallcenterName(string) (uuid.UUID, bool)           { return uuid.Nil, false }
+func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)               {}
+func (oneAgent) BeginAfterCallWork(context.Context, uuid.UUID, uuid.UUID) {}
 
 // recordingTapper captures what the coordinator asked of the media tap.
 type recordingTapper struct {

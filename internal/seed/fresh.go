@@ -53,6 +53,12 @@ func Fresh(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		args []any
 	}{
 		{"transcripts", `DELETE FROM transcripts WHERE call_id IN (` + seededCDRs + `)`, nil},
+		{"wrap-ups", `DELETE FROM wrap_ups WHERE call_id IN (` + seededCDRs + `)`, nil},
+		// The demo contacts are the people behind the seeded calls, so the
+		// history is what identifies them — and it has to be read before the
+		// calls themselves go.
+		{"contacts", `DELETE FROM contacts WHERE phone_number IN (
+			SELECT from_number FROM cdrs WHERE tech->>'isSeeded' = 'true')`, nil},
 		{"recordings", `DELETE FROM recordings WHERE call_id IN (` + seededCDRs + `)`, nil},
 		{"queue events", `DELETE FROM queue_events WHERE call_id IN (` + seededCDRs + `)`, nil},
 		{"calls", `DELETE FROM cdrs WHERE tech->>'isSeeded' = 'true'`, nil},

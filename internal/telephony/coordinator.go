@@ -14,11 +14,17 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 )
 
-// AgentLookup resolves which agent, if any, is signed in at an extension.
+// AgentLookup is the agent service as call control needs it: who is at which
+// phone, and the two facts about an agent that only a call can report — that
+// they are on one, and that their part of one has ended.
 type AgentLookup interface {
 	AgentAtExtension(extensionNumber string) (uuid.UUID, bool)
 	AgentByCallcenterName(name string) (uuid.UUID, bool)
 	SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
+	// BeginAfterCallWork starts an agent's wrap-up for the call whose agent
+	// leg just ended. Fire and forget: a call is over whether or not presence
+	// could be recorded, so this reports nothing back to the switch path.
+	BeginAfterCallWork(ctx context.Context, agentID, callID uuid.UUID)
 }
 
 // Errors returned by call operations.
@@ -42,6 +48,14 @@ type Coordinator struct {
 	cdr       *CDRAssembler
 	taps      Tapper
 	audiences Audiences
+	// queues resolves the switch's queue names; nil leaves the waiting line
+	// empty, which is honest — a queue we cannot name is one no screen can
+	// render.
+	queues QueueCatalog
+	// waiting is who is queued right now, which no other part of the system
+	// knows: the switch reports a count, and a call in a queue looks like any
+	// other call from the registry's side.
+	waiting *WaitingLine
 }
 
 // Audiences records who may see a call's live transcript. Nil leaves every
@@ -142,7 +156,8 @@ func (c *Coordinator) AttachCDR(assembler *CDRAssembler) {
 }
 
 func NewCoordinator(registry *Registry, adapter *Adapter, agents AgentLookup, pub Publisher) *Coordinator {
-	return &Coordinator{registry: registry, adapter: adapter, agents: agents, pub: pub}
+	return &Coordinator{registry: registry, adapter: adapter, agents: agents, pub: pub,
+		waiting: NewWaitingLine()}
 }
 
 // Handle consumes one normalized switch event.
@@ -198,6 +213,11 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	// event does, the provisional call collapses into the minted one.
 	c.reidentify(ctx, ev)
 
+	// Who is waiting, for the agents staffing the queue. This runs before the
+	// dispatch below so that a hangup still finds its entry: the last leg's
+	// hangup retires the call, and with it the channel binding this reads.
+	c.trackQueue(ctx, ev)
+
 	// Queue movements feed the ledger: service level and abandonment reporting
 	// read those rows, never the raw switch events.
 	if c.cdr != nil {
@@ -222,18 +242,35 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	// last hangup finishes the call and retires its actor, after which the
 	// channel is no longer attributed to anyone and the agent would stay
 	// marked on a call forever.
-	var freedAgent *uuid.UUID
+	var ended *endedLeg
 	if ev.Kind == KindChannelHangup {
-		freedAgent = c.agentOnChannel(ev.ChannelID)
+		ended = c.agentLegEnded(ev.ChannelID)
 	}
 
 	// Everything, including the events above, still drives the state machines
 	// of whichever call owns the channel.
 	c.registry.Dispatch(ev)
 
-	if freedAgent != nil {
-		c.agents.SetOnCall(ctx, *freedAgent, false)
+	if ended != nil {
+		// Off the call first: being on one outranks wrap-up when availability
+		// is derived, so the other order would show the agent as still
+		// talking to somebody who has hung up.
+		c.agents.SetOnCall(ctx, ended.agentID, false)
+		// After-call work is for a conversation that happened. A leg that
+		// rang and was never answered — a decline, a phone nobody picked up —
+		// left the agent nothing to write up.
+		if ended.wasAnswered {
+			c.agents.BeginAfterCallWork(ctx, ended.agentID, ended.callID)
+		}
 	}
+}
+
+// endedLeg is what an agent's hangup means for that agent: which call it was,
+// and whether they ever spoke on it.
+type endedLeg struct {
+	agentID     uuid.UUID
+	callID      uuid.UUID
+	wasAnswered bool
 }
 
 // isHarnessLeg recognizes scaffolding channels: scripted test calls originate
@@ -563,19 +600,26 @@ func (c *Coordinator) offerToAgent(ctx context.Context, ev SwitchEvent) {
 	}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
 }
 
-// agentOnChannel reports which agent, if any, owns a leg.
-func (c *Coordinator) agentOnChannel(channelID string) *uuid.UUID {
+// agentLegEnded reports which agent, if any, owned a leg, and what became of
+// it. Nil when the leg was nobody's.
+func (c *Coordinator) agentLegEnded(channelID string) *endedLeg {
 	callID, ok := c.registry.CallForChannel(channelID)
 	if !ok {
 		return nil
 	}
-	var agentID *uuid.UUID
+	var ended *endedLeg
 	_ = c.registry.Do(callID, func(call *Call) {
-		if p := call.PartyByChannel(channelID); p != nil {
-			agentID = p.AgentID
+		p := call.PartyByChannel(channelID)
+		if p == nil || p.AgentID == nil {
+			return
+		}
+		ended = &endedLeg{
+			agentID:     *p.AgentID,
+			callID:      call.CallID,
+			wasAnswered: !p.AnsweredAt.IsZero(),
 		}
 	})
-	return agentID
+	return ended
 }
 
 //

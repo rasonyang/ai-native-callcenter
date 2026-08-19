@@ -118,6 +118,32 @@ func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
 	return i, err
 }
 
+const getDisposition = `-- name: GetDisposition :one
+SELECT d.code, d.category_code, d.label, c.label AS category_label
+FROM dispositions d
+JOIN disposition_categories c ON c.code = d.category_code
+WHERE d.code = $1 AND d.is_enabled
+`
+
+type GetDispositionRow struct {
+	Code          string `json:"code"`
+	CategoryCode  string `json:"categoryCode"`
+	Label         string `json:"label"`
+	CategoryLabel string `json:"categoryLabel"`
+}
+
+func (q *Queries) GetDisposition(ctx context.Context, code string) (GetDispositionRow, error) {
+	row := q.db.QueryRow(ctx, getDisposition, code)
+	var i GetDispositionRow
+	err := row.Scan(
+		&i.Code,
+		&i.CategoryCode,
+		&i.Label,
+		&i.CategoryLabel,
+	)
+	return i, err
+}
+
 const getRecording = `-- name: GetRecording :one
 SELECT id, call_id, backend, bucket, object_key, size_bytes, duration_sec, format, created_at, deleted_at FROM recordings WHERE id = $1 AND deleted_at IS NULL
 `
@@ -598,6 +624,62 @@ func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([
 	return items, nil
 }
 
+const listDispositionCategories = `-- name: ListDispositionCategories :many
+
+SELECT code, label, position FROM disposition_categories ORDER BY position, code
+`
+
+// After-call work: the vocabulary, and what agents file against calls.
+func (q *Queries) ListDispositionCategories(ctx context.Context) ([]DispositionCategory, error) {
+	rows, err := q.db.Query(ctx, listDispositionCategories)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DispositionCategory{}
+	for rows.Next() {
+		var i DispositionCategory
+		if err := rows.Scan(&i.Code, &i.Label, &i.Position); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledDispositions = `-- name: ListEnabledDispositions :many
+SELECT code, category_code, label, position, is_enabled FROM dispositions WHERE is_enabled ORDER BY category_code, position, code
+`
+
+func (q *Queries) ListEnabledDispositions(ctx context.Context) ([]Disposition, error) {
+	rows, err := q.db.Query(ctx, listEnabledDispositions)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Disposition{}
+	for rows.Next() {
+		var i Disposition
+		if err := rows.Scan(
+			&i.Code,
+			&i.CategoryCode,
+			&i.Label,
+			&i.Position,
+			&i.IsEnabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQualityReviewsByCall = `-- name: ListQualityReviewsByCall :many
 SELECT id, recording_id, call_id, reviewer_id, scores, total_score, notes, created_at FROM quality_reviews WHERE call_id = $1 ORDER BY created_at DESC
 `
@@ -744,6 +826,44 @@ func (q *Queries) ListTranscripts(ctx context.Context, callID uuid.UUID) ([]Tran
 			&i.Source,
 			&i.Provider,
 			&i.UtteranceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWrapUpsForCalls = `-- name: ListWrapUpsForCalls :many
+SELECT call_id, agent_id, disposition_code, disposition_label, category_code, category_label, note, created_at FROM wrap_ups
+WHERE call_id = ANY($1::uuid[])
+ORDER BY created_at DESC
+`
+
+// ListWrapUpsForCalls reads every wrap-up filed against a page of calls, so a
+// ledger listing can attach them without a join whose nullability sqlc would
+// have to guess at.
+func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) ([]WrapUp, error) {
+	rows, err := q.db.Query(ctx, listWrapUpsForCalls, callIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []WrapUp{}
+	for rows.Next() {
+		var i WrapUp
+		if err := rows.Scan(
+			&i.CallID,
+			&i.AgentID,
+			&i.DispositionCode,
+			&i.DispositionLabel,
+			&i.CategoryCode,
+			&i.CategoryLabel,
+			&i.Note,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -930,4 +1050,54 @@ UPDATE cdrs SET has_recording = true WHERE call_id = $1
 func (q *Queries) UpdateCDRHasRecording(ctx context.Context, callID uuid.UUID) error {
 	_, err := q.db.Exec(ctx, updateCDRHasRecording, callID)
 	return err
+}
+
+const upsertWrapUp = `-- name: UpsertWrapUp :one
+INSERT INTO wrap_ups (call_id, agent_id, disposition_code, disposition_label,
+                      category_code, category_label, note)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (call_id, agent_id) DO UPDATE
+SET disposition_code  = excluded.disposition_code,
+    disposition_label = excluded.disposition_label,
+    category_code     = excluded.category_code,
+    category_label    = excluded.category_label,
+    note              = excluded.note,
+    created_at        = now()
+RETURNING call_id, agent_id, disposition_code, disposition_label, category_code, category_label, note, created_at
+`
+
+type UpsertWrapUpParams struct {
+	CallID           uuid.UUID `json:"callId"`
+	AgentID          uuid.UUID `json:"agentId"`
+	DispositionCode  string    `json:"dispositionCode"`
+	DispositionLabel string    `json:"dispositionLabel"`
+	CategoryCode     string    `json:"categoryCode"`
+	CategoryLabel    string    `json:"categoryLabel"`
+	Note             string    `json:"note"`
+}
+
+// UpsertWrapUp files one agent's after-call work for one call. Filing twice
+// replaces: the agent changed their mind, and the last word is the record.
+func (q *Queries) UpsertWrapUp(ctx context.Context, arg UpsertWrapUpParams) (WrapUp, error) {
+	row := q.db.QueryRow(ctx, upsertWrapUp,
+		arg.CallID,
+		arg.AgentID,
+		arg.DispositionCode,
+		arg.DispositionLabel,
+		arg.CategoryCode,
+		arg.CategoryLabel,
+		arg.Note,
+	)
+	var i WrapUp
+	err := row.Scan(
+		&i.CallID,
+		&i.AgentID,
+		&i.DispositionCode,
+		&i.DispositionLabel,
+		&i.CategoryCode,
+		&i.CategoryLabel,
+		&i.Note,
+		&i.CreatedAt,
+	)
+	return i, err
 }

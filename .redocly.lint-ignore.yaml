@@ -6,3 +6,6 @@ docs/openapi.json:
     - '#/components/schemas/SseSystemResetPayload'
     - '#/components/schemas/SseTranscriptPayload'
     - '#/components/schemas/SseTranscriptionStatePayload'
+    - '#/components/schemas/SseQueueJoinedPayload'
+    - '#/components/schemas/SseQueueLeftPayload'
+    - '#/components/schemas/SseQueueCountPayload'

@@ -28,6 +28,7 @@ type AgentState struct {
 	ExtensionNumber *string            `json:"extensionNumber"`
 	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
 	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
+	WrapUpCallID    *uuid.UUID         `json:"wrapUpCallId"`
 }
 
 type AgentStateLog struct {
@@ -92,6 +93,19 @@ type Cdr struct {
 	Legs           []byte             `json:"legs"`
 }
 
+type Contact struct {
+	ID          uuid.UUID          `json:"id"`
+	PhoneNumber string             `json:"phoneNumber"`
+	Name        string             `json:"name"`
+	Company     string             `json:"company"`
+	Email       string             `json:"email"`
+	Tags        []string           `json:"tags"`
+	Notes       string             `json:"notes"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+	UpdatedBy   *uuid.UUID         `json:"updatedBy"`
+}
+
 type Did struct {
 	ID                 uuid.UUID          `json:"id"`
 	Number             string             `json:"number"`
@@ -102,6 +116,20 @@ type Did struct {
 	Description        string             `json:"description"`
 	IsEnabled          bool               `json:"isEnabled"`
 	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+}
+
+type Disposition struct {
+	Code         string `json:"code"`
+	CategoryCode string `json:"categoryCode"`
+	Label        string `json:"label"`
+	Position     int32  `json:"position"`
+	IsEnabled    bool   `json:"isEnabled"`
+}
+
+type DispositionCategory struct {
+	Code     string `json:"code"`
+	Label    string `json:"label"`
+	Position int32  `json:"position"`
 }
 
 type Extension struct {
@@ -295,4 +323,15 @@ type User struct {
 	CreatedAt    pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt    pgtype.Timestamptz `json:"updatedAt"`
 	LastLoginAt  pgtype.Timestamptz `json:"lastLoginAt"`
+}
+
+type WrapUp struct {
+	CallID           uuid.UUID          `json:"callId"`
+	AgentID          uuid.UUID          `json:"agentId"`
+	DispositionCode  string             `json:"dispositionCode"`
+	DispositionLabel string             `json:"dispositionLabel"`
+	CategoryCode     string             `json:"categoryCode"`
+	CategoryLabel    string             `json:"categoryLabel"`
+	Note             string             `json:"note"`
+	CreatedAt        pgtype.Timestamptz `json:"createdAt"`
 }

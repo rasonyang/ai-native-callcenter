@@ -230,6 +230,7 @@ func run() error {
 		Catalog:     catalogSvc,
 		Link:        link,
 		CDR:         telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default()),
+		Queues:      queueCatalog{catalogSvc},
 		Transcripts: transcripts,
 		Audiences:   transcripts,
 		Taps:        tap,
@@ -308,6 +309,7 @@ func run() error {
 			coordinator,
 			transcripts,
 			catalogSvc,
+			st.Contacts(),
 			st.Ledger(),
 			recordings,
 			st.Ledger(),
@@ -426,6 +428,23 @@ func (d agentDirectory) QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uu
 		ids[i] = row.ID
 	}
 	return ids, nil
+}
+
+// queueCatalog turns a configured queue into what the waiting line needs, so
+// call control can render a queue without depending on the catalog's types.
+type queueCatalog struct{ catalog *catalog.Service }
+
+func (q queueCatalog) QueueByName(ctx context.Context, name string) (telephony.QueueSummary, bool) {
+	queue, ok := q.catalog.QueueByName(ctx, name)
+	if !ok {
+		return telephony.QueueSummary{}, false
+	}
+	return telephony.QueueSummary{
+		ID:              queue.ID,
+		Name:            queue.Name,
+		DisplayName:     queue.DisplayName,
+		SLAThresholdSec: queue.SLAThresholdSec,
+	}, true
 }
 
 // seqReserver adapts the store to the events package's reserver interface.

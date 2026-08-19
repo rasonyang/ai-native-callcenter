@@ -61,6 +61,25 @@ type CDR struct {
 	UserData map[string]any `json:"userData,omitempty"`
 	Tech     map[string]any `json:"tech,omitempty"`
 	Legs     []Leg          `json:"legs"`
+
+	// WrapUp is the after-call work filed against this call: the requesting
+	// agent's own on an agent's listing, the primary agent's (else the latest)
+	// on everyone else's. Nil when nobody filed one. It is attached on read,
+	// not written with the row, because it can be filed before the row exists.
+	WrapUp *WrapUp `json:"wrapUp,omitempty"`
+}
+
+// WrapUp is one agent's after-call work for one call. Labels are captured at
+// filing time so the record survives later edits to the vocabulary.
+type WrapUp struct {
+	CallID           uuid.UUID `json:"-"`
+	AgentID          uuid.UUID `json:"agentId"`
+	DispositionCode  string    `json:"dispositionCode"`
+	DispositionLabel string    `json:"dispositionLabel"`
+	CategoryCode     string    `json:"categoryCode"`
+	CategoryLabel    string    `json:"categoryLabel"`
+	Note             string    `json:"note"`
+	CreatedAt        time.Time `json:"createdAt"`
 }
 
 // Leg is one hop of a call's journey, in order, for the detail view.
@@ -141,6 +160,9 @@ type CDRFilter struct {
 	From    time.Time
 	To      time.Time
 	QueueID *uuid.UUID
+	// AgentID keeps the calls this agent was a party to. It also decides
+	// whose wrap-up rides on each row: an agent's own listing shows what
+	// they filed, everyone else's shows the primary agent's.
 	AgentID *uuid.UUID
 	Status  string
 	DID     string
@@ -187,13 +209,67 @@ func (l *LedgerStore) ListCDRs(ctx context.Context, filter CDRFilter) ([]CDR, in
 	for _, row := range rows {
 		out = append(out, fromRow(row))
 	}
+	if err := l.attachWrapUps(ctx, out, filter.AgentID); err != nil {
+		return nil, 0, err
+	}
 	return out, total, nil
+}
+
+// attachWrapUps puts the wrap-up filed against each call on its row: the
+// named agent's own when one is asked for, otherwise the primary agent's,
+// otherwise the most recent. One query for the page, matched in memory.
+func (l *LedgerStore) attachWrapUps(ctx context.Context, cdrs []CDR, forAgent *uuid.UUID) error {
+	if len(cdrs) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(cdrs))
+	for _, cdr := range cdrs {
+		ids = append(ids, cdr.CallID)
+	}
+	rows, err := l.q.ListWrapUpsForCalls(ctx, ids)
+	if err != nil {
+		return err
+	}
+	byCall := make(map[uuid.UUID][]WrapUp, len(rows))
+	for _, row := range rows {
+		byCall[row.CallID] = append(byCall[row.CallID], wrapUpFromRow(row))
+	}
+	for i := range cdrs {
+		cdrs[i].WrapUp = pickWrapUp(byCall[cdrs[i].CallID], forAgent, cdrs[i].PrimaryAgentID)
+	}
+	return nil
+}
+
+// pickWrapUp chooses which agent's filing represents a call. Candidates
+// arrive newest first, so the fallback is the latest one.
+func pickWrapUp(candidates []WrapUp, forAgent, primaryAgent *uuid.UUID) *WrapUp {
+	if len(candidates) == 0 {
+		return nil
+	}
+	if forAgent != nil {
+		for i := range candidates {
+			if candidates[i].AgentID == *forAgent {
+				return &candidates[i]
+			}
+		}
+		// An agent's own listing shows their own filing or none: somebody
+		// else's disposition is not what they said about the call.
+		return nil
+	}
+	if primaryAgent != nil {
+		for i := range candidates {
+			if candidates[i].AgentID == *primaryAgent {
+				return &candidates[i]
+			}
+		}
+	}
+	return &candidates[0]
 }
 
 // HasCDR reports whether a call already finished into the ledger; outbound
 // idempotency reads it before ever redialing.
 func (l *LedgerStore) HasCDR(ctx context.Context, callID uuid.UUID) (bool, error) {
-	_, err := l.GetCDR(ctx, callID)
+	_, err := l.q.GetCDR(ctx, callID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -203,13 +279,17 @@ func (l *LedgerStore) HasCDR(ctx context.Context, callID uuid.UUID) (bool, error
 	return true, nil
 }
 
-// GetCDR reads one call.
+// GetCDR reads one call, with the primary agent's wrap-up on it.
 func (l *LedgerStore) GetCDR(ctx context.Context, callID uuid.UUID) (CDR, error) {
 	row, err := l.q.GetCDR(ctx, callID)
 	if err != nil {
 		return CDR{}, err
 	}
-	return fromRow(row), nil
+	out := []CDR{fromRow(row)}
+	if err := l.attachWrapUps(ctx, out, nil); err != nil {
+		return CDR{}, err
+	}
+	return out[0], nil
 }
 
 func fromRow(row queries.Cdr) CDR {
@@ -365,6 +445,84 @@ func transcriptLines(rows []queries.Transcript) []TranscriptLine {
 		out = append(out, line)
 	}
 	return out
+}
+
+//
+// After-call work: the vocabulary, and what agents file against calls.
+//
+
+// Disposition is one code an agent can file a call under.
+type Disposition struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
+}
+
+// DispositionCategory is a group of dispositions, in display order.
+type DispositionCategory struct {
+	Code         string        `json:"code"`
+	Label        string        `json:"label"`
+	Dispositions []Disposition `json:"dispositions"`
+}
+
+// ListDispositions reads the enabled vocabulary grouped by category, in the
+// order agents see it. Categories with nothing enabled are omitted.
+func (l *LedgerStore) ListDispositions(ctx context.Context) ([]DispositionCategory, error) {
+	categories, err := l.q.ListDispositionCategories(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dispositions, err := l.q.ListEnabledDispositions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byCategory := make(map[string][]Disposition, len(categories))
+	for _, d := range dispositions {
+		byCategory[d.CategoryCode] = append(byCategory[d.CategoryCode], Disposition{Code: d.Code, Label: d.Label})
+	}
+	out := make([]DispositionCategory, 0, len(categories))
+	for _, c := range categories {
+		if len(byCategory[c.Code]) == 0 {
+			continue
+		}
+		out = append(out, DispositionCategory{Code: c.Code, Label: c.Label, Dispositions: byCategory[c.Code]})
+	}
+	return out, nil
+}
+
+// ErrUnknownDisposition reports a code the vocabulary does not have, or has
+// disabled: an agent cannot file under a word that is not on the list.
+var ErrUnknownDisposition = errors.New("unknown disposition")
+
+// FileWrapUp records one agent's after-call work for one call. An empty code
+// files a note alone; a code is resolved against the vocabulary and its labels
+// captured with the row. Filing twice replaces.
+func (l *LedgerStore) FileWrapUp(ctx context.Context, callID, agentID uuid.UUID, dispositionCode, note string) (WrapUp, error) {
+	arg := queries.UpsertWrapUpParams{CallID: callID, AgentID: agentID, Note: note}
+	if dispositionCode != "" {
+		d, err := l.q.GetDisposition(ctx, dispositionCode)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return WrapUp{}, fmt.Errorf("%w: %q", ErrUnknownDisposition, dispositionCode)
+		}
+		if err != nil {
+			return WrapUp{}, err
+		}
+		arg.DispositionCode, arg.DispositionLabel = d.Code, d.Label
+		arg.CategoryCode, arg.CategoryLabel = d.CategoryCode, d.CategoryLabel
+	}
+	row, err := l.q.UpsertWrapUp(ctx, arg)
+	if err != nil {
+		return WrapUp{}, err
+	}
+	return wrapUpFromRow(row), nil
+}
+
+func wrapUpFromRow(row queries.WrapUp) WrapUp {
+	return WrapUp{
+		CallID: row.CallID, AgentID: row.AgentID,
+		DispositionCode: row.DispositionCode, DispositionLabel: row.DispositionLabel,
+		CategoryCode: row.CategoryCode, CategoryLabel: row.CategoryLabel,
+		Note: row.Note, CreatedAt: row.CreatedAt.Time,
+	}
 }
 
 //

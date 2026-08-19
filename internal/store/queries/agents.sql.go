@@ -115,7 +115,7 @@ func (q *Queries) GetAgentByUserID(ctx context.Context, userID uuid.UUID) (Agent
 }
 
 const getAgentState = `-- name: GetAgentState :one
-SELECT agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at FROM agent_states WHERE agent_id = $1
+SELECT agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id FROM agent_states WHERE agent_id = $1
 `
 
 func (q *Queries) GetAgentState(ctx context.Context, agentID uuid.UUID) (AgentState, error) {
@@ -128,6 +128,7 @@ func (q *Queries) GetAgentState(ctx context.Context, agentID uuid.UUID) (AgentSt
 		&i.ExtensionNumber,
 		&i.EnteredAt,
 		&i.WrapUpEndsAt,
+		&i.WrapUpCallID,
 	)
 	return i, err
 }
@@ -147,7 +148,8 @@ SELECT a.id AS agent_id,
        s.reason,
        s.extension_number,
        COALESCE(s.entered_at, a.created_at) AS entered_at,
-       s.wrap_up_ends_at
+       s.wrap_up_ends_at,
+       s.wrap_up_call_id
 FROM agents a
 JOIN users u ON u.id = a.user_id
 LEFT JOIN agent_states s ON s.agent_id = a.id
@@ -171,6 +173,7 @@ type ListAgentRosterRow struct {
 	ExtensionNumber        *string            `json:"extensionNumber"`
 	EnteredAt              pgtype.Timestamptz `json:"enteredAt"`
 	WrapUpEndsAt           pgtype.Timestamptz `json:"wrapUpEndsAt"`
+	WrapUpCallID           *uuid.UUID         `json:"wrapUpCallId"`
 }
 
 // The roster: one row per agent with everything a wallboard needs, so the
@@ -200,6 +203,7 @@ func (q *Queries) ListAgentRoster(ctx context.Context) ([]ListAgentRosterRow, er
 			&i.ExtensionNumber,
 			&i.EnteredAt,
 			&i.WrapUpEndsAt,
+			&i.WrapUpCallID,
 		); err != nil {
 			return nil, err
 		}
@@ -280,15 +284,16 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 }
 
 const upsertAgentState = `-- name: UpsertAgentState :one
-INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (agent_id) DO UPDATE
 SET state            = excluded.state,
     reason           = excluded.reason,
     extension_number = excluded.extension_number,
     entered_at       = excluded.entered_at,
-    wrap_up_ends_at  = excluded.wrap_up_ends_at
-RETURNING agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at
+    wrap_up_ends_at  = excluded.wrap_up_ends_at,
+    wrap_up_call_id  = excluded.wrap_up_call_id
+RETURNING agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id
 `
 
 type UpsertAgentStateParams struct {
@@ -298,6 +303,7 @@ type UpsertAgentStateParams struct {
 	ExtensionNumber *string            `json:"extensionNumber"`
 	EnteredAt       pgtype.Timestamptz `json:"enteredAt"`
 	WrapUpEndsAt    pgtype.Timestamptz `json:"wrapUpEndsAt"`
+	WrapUpCallID    *uuid.UUID         `json:"wrapUpCallId"`
 }
 
 func (q *Queries) UpsertAgentState(ctx context.Context, arg UpsertAgentStateParams) (AgentState, error) {
@@ -308,6 +314,7 @@ func (q *Queries) UpsertAgentState(ctx context.Context, arg UpsertAgentStatePara
 		arg.ExtensionNumber,
 		arg.EnteredAt,
 		arg.WrapUpEndsAt,
+		arg.WrapUpCallID,
 	)
 	var i AgentState
 	err := row.Scan(
@@ -317,6 +324,7 @@ func (q *Queries) UpsertAgentState(ctx context.Context, arg UpsertAgentStatePara
 		&i.ExtensionNumber,
 		&i.EnteredAt,
 		&i.WrapUpEndsAt,
+		&i.WrapUpCallID,
 	)
 	return i, err
 }

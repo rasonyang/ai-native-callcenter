@@ -71,6 +71,7 @@ type RosterEntry struct {
 	Extension    string       `json:"extensionNumber,omitempty"`
 	EnteredAt    time.Time    `json:"enteredAt"`
 	WrapUpEndsAt *time.Time   `json:"wrapUpEndsAt,omitempty"`
+	WrapUpCallID *uuid.UUID   `json:"wrapUpCallId,omitempty"`
 	IsOnCall     bool         `json:"isOnCall"`
 	IsRegistered bool         `json:"isRegistered"`
 
@@ -136,6 +137,12 @@ type Service struct {
 	// wrapUpGen guards against a wrap-up timer that fires after the agent has
 	// already chosen something else.
 	wrapUpGen map[uuid.UUID]uint64
+	// lastWrapUpCall is the call each agent most recently began after-call
+	// work for. It outlives the wrap-up window on purpose: an agent whose
+	// timer ran out while they were still typing the note has not lost the
+	// right to file it, and the call it belongs to is this one until the
+	// next wrap-up begins.
+	lastWrapUpCall map[uuid.UUID]uuid.UUID
 
 	now func() time.Time
 
@@ -156,13 +163,14 @@ type deviceState struct {
 // NewService builds a Service.
 func NewService(store Store, switchCtl SwitchControl, pub Publisher) *Service {
 	return &Service{
-		store:     store,
-		switchCtl: switchCtl,
-		pub:       pub,
-		live:      make(map[uuid.UUID]*Presence),
-		devices:   make(map[string]deviceState),
-		wrapUpGen: make(map[uuid.UUID]uint64),
-		now:       func() time.Time { return time.Now().UTC() },
+		store:          store,
+		switchCtl:      switchCtl,
+		pub:            pub,
+		live:           make(map[uuid.UUID]*Presence),
+		devices:        make(map[string]deviceState),
+		wrapUpGen:      make(map[uuid.UUID]uint64),
+		lastWrapUpCall: make(map[uuid.UUID]uuid.UUID),
+		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -212,11 +220,18 @@ func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber 
 	return snapshot, nil
 }
 
-// Logout signs an agent out.
+// Logout signs an agent out. Whatever call they last wrapped up is forgotten
+// with the session: the next sign-in starts with nothing to file.
 func (s *Service) Logout(ctx context.Context, agentID uuid.UUID) (Presence, error) {
-	return s.change(ctx, agentID, events.TypeAgentLoggedOut, func(p *Presence) error {
+	p, err := s.change(ctx, agentID, events.TypeAgentLoggedOut, func(p *Presence) error {
 		return p.Logout(s.now())
 	})
+	if err == nil {
+		s.mu.Lock()
+		delete(s.lastWrapUpCall, agentID)
+		s.mu.Unlock()
+	}
+	return p, err
 }
 
 // Ready makes an agent routable.
@@ -233,16 +248,34 @@ func (s *Service) NotReady(ctx context.Context, agentID uuid.UUID, reason Reason
 	})
 }
 
-// StartWrapUp begins after-call work and schedules its expiry.
-func (s *Service) StartWrapUp(ctx context.Context, agentID uuid.UUID) (Presence, error) {
+// StartWrapUp begins after-call work for a call the agent just finished and
+// schedules its expiry.
+//
+// The call is remembered whether or not the window is longer than zero: an
+// agent configured with no wrap-up time still handled the call, and may still
+// file a disposition for it from the cockpit.
+func (s *Service) StartWrapUp(ctx context.Context, agentID, callID uuid.UUID) (Presence, error) {
 	profile, err := s.store.AgentProfile(ctx, agentID)
 	if err != nil {
 		return Presence{}, fmt.Errorf("%w: %w", ErrUnknownAgent, err)
 	}
 	wrapUp := time.Duration(profile.WrapUpTimeSec) * time.Second
 
-	p, err := s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
-		return p.StartWrapUp(wrapUp, s.now())
+	if callID != uuid.Nil {
+		s.mu.Lock()
+		s.lastWrapUpCall[agentID] = callID
+		s.mu.Unlock()
+	}
+
+	// A wrap-up of zero length is a READY transition, and that is the event
+	// it publishes: a screen told NOT_READY for a state that never existed
+	// would sit on it.
+	eventType := events.TypeAgentNotReady
+	if wrapUp <= 0 {
+		eventType = events.TypeAgentReady
+	}
+	p, err := s.change(ctx, agentID, eventType, func(p *Presence) error {
+		return p.StartWrapUp(callID, wrapUp, s.now())
 	})
 	if err != nil || wrapUp <= 0 {
 		return p, err
@@ -255,6 +288,20 @@ func (s *Service) StartWrapUp(ctx context.Context, agentID uuid.UUID) (Presence,
 
 	time.AfterFunc(wrapUp, func() { s.expireWrapUp(agentID, generation) })
 	return p, nil
+}
+
+// BeginAfterCallWork starts an agent's wrap-up for a call whose agent leg has
+// just ended.
+//
+// The fire-and-forget form of StartWrapUp, for the switch path: a call is over
+// whether or not presence could be recorded, and there is nobody on that path
+// to hand a failure to. An agent who is not signed in — the leg outlived their
+// session — is not an error either, which is why this reports nothing.
+func (s *Service) BeginAfterCallWork(ctx context.Context, agentID, callID uuid.UUID) {
+	if _, err := s.StartWrapUp(ctx, agentID, callID); err != nil {
+		slog.WarnContext(ctx, "after-call work not started",
+			"agentId", agentID, "callId", callID, "error", err)
+	}
 }
 
 // expireWrapUp returns an agent to ready when their wrap-up window ends. A
@@ -285,6 +332,37 @@ func (s *Service) expireWrapUp(agentID uuid.UUID, generation uint64) {
 		s.mirrorStatus(profile, snapshot)
 		s.publish(ctx, events.TypeAgentReady, profile, snapshot)
 	}
+}
+
+// WrapUpCall reports the call the agent most recently began after-call work
+// for. It stays addressable after the window has closed, so a late filing
+// still lands on the right call; it is forgotten at sign-out.
+func (s *Service) WrapUpCall(agentID uuid.UUID) (uuid.UUID, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id, ok := s.lastWrapUpCall[agentID]; ok {
+		return id, true
+	}
+	// After a restart the memory is empty, but a wrap-up that was under way
+	// was persisted with its call.
+	if p := s.presenceLocked(agentID); p.WrapUpCallID != nil {
+		return *p.WrapUpCallID, true
+	}
+	return uuid.Nil, false
+}
+
+// EndWrapUp returns an agent to READY if they are still in after-call work.
+// An agent whose window already expired, or who chose something else in the
+// meantime, is left exactly where they are: the filing they just made is what
+// mattered, and their presence is not to be second-guessed by it.
+func (s *Service) EndWrapUp(ctx context.Context, agentID uuid.UUID) (Presence, error) {
+	s.mu.Lock()
+	inWrapUp := s.presenceLocked(agentID).IsInWrapUp()
+	s.mu.Unlock()
+	if !inWrapUp {
+		return s.Presence(agentID), nil
+	}
+	return s.Ready(ctx, agentID)
 }
 
 // RingNoAnswer takes an agent out of routing after they ignored a call.
@@ -390,6 +468,7 @@ func (s *Service) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
 	s.mu.Lock()
 	delete(s.live, agentID)
 	delete(s.wrapUpGen, agentID)
+	delete(s.lastWrapUpCall, agentID)
 	s.mu.Unlock()
 	return nil
 }
@@ -470,6 +549,10 @@ func (s *Service) Restore(ctx context.Context) error {
 		p.State, p.Reason, p.ExtensionNumber, p.EnteredAt = row.State, row.Reason, row.Extension, row.EnteredAt
 		if row.WrapUpEndsAt != nil {
 			p.WrapUpEndsAt = *row.WrapUpEndsAt
+		}
+		if row.WrapUpCallID != nil {
+			id := *row.WrapUpCallID
+			p.WrapUpCallID = &id
 		}
 		s.applyDeviceLocked(p)
 	}
@@ -608,6 +691,9 @@ func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p
 	}
 	if !p.WrapUpEndsAt.IsZero() {
 		payload["wrapUpEndsAt"] = p.WrapUpEndsAt
+	}
+	if p.WrapUpCallID != nil {
+		payload["wrapUpCallId"] = *p.WrapUpCallID
 	}
 	s.pub.Publish(ctx, events.Event{
 		Type:    t,

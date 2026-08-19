@@ -36,6 +36,7 @@ type switchWiring interface {
 	AttachTaps(telephony.Tapper)
 	AttachCDR(*telephony.CDRAssembler)
 	AttachAudiences(telephony.Audiences)
+	AttachQueues(telephony.QueueCatalog)
 }
 
 type presenceWiring interface {
@@ -68,6 +69,7 @@ type composition struct {
 	Catalog       staffingWiring
 	Link          connectHook
 	CDR           *telephony.CDRAssembler
+	Queues        telephony.QueueCatalog
 	Transcripts   transcriptRetirer
 	Audiences     telephony.Audiences
 	Taps          telephony.Tapper
@@ -92,6 +94,11 @@ func (c composition) connect() {
 	// which only this side knows. Without it every transcript event falls
 	// through the hub's scope check as an unscoped system notice.
 	c.Coordinator.AttachAudiences(c.Audiences)
+
+	// The switch names a queue; every screen names an id, a display name and
+	// a target to measure a wait against. Without this the waiting line stays
+	// empty and the agent's queue panel has nothing to show.
+	c.Coordinator.AttachQueues(c.Queues)
 
 	c.Coordinator.AttachCDR(c.CDR)
 	// After AttachCDR, because that is what sets OnCallFinished: this composes
@@ -206,6 +213,7 @@ func apiDeps(
 	calls httpapi.CallService,
 	transcripts httpapi.TranscriptStates,
 	catalogSvc httpapi.CatalogService,
+	contacts httpapi.ContactService,
 	ledger *store.LedgerStore,
 	recordings httpapi.RecordingStreamer,
 	auditor httpapi.Auditor,
@@ -220,6 +228,7 @@ func apiDeps(
 		Calls:       calls,
 		Transcripts: transcripts,
 		Catalog:     catalogSvc,
+		Contacts:    contacts,
 		Ledger:      ledger,
 		Recordings:  recordings,
 		Auditor:     auditor,

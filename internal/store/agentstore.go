@@ -56,6 +56,7 @@ func (a *AgentStore) SavePresence(ctx context.Context, agentID uuid.UUID, p agen
 		ExtensionNumber: extension,
 		EnteredAt:       timestamp(p.EnteredAt),
 		WrapUpEndsAt:    timestamp(p.WrapUpEndsAt),
+		WrapUpCallID:    p.WrapUpCallID,
 	})
 	if err != nil {
 		return fmt.Errorf("upsert agent state: %w", err)
@@ -202,6 +203,7 @@ func (a *AgentStore) Roster(ctx context.Context) ([]agents.RosterEntry, error) {
 			ends := row.WrapUpEndsAt.Time
 			entry.WrapUpEndsAt = &ends
 		}
+		entry.WrapUpCallID = row.WrapUpCallID
 		out = append(out, entry)
 	}
 	return out, nil
@@ -221,6 +223,7 @@ func presenceFromRow(row queries.AgentState) agents.Presence {
 	if row.WrapUpEndsAt.Valid {
 		p.WrapUpEndsAt = row.WrapUpEndsAt.Time
 	}
+	p.WrapUpCallID = row.WrapUpCallID
 	return p
 }
 

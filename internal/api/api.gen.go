@@ -199,6 +199,7 @@ func (e CreateCallRequestKind) Valid() bool {
 // Defines values for ErrorCode.
 const (
 	ErrorCodeAGENTALREADYLOGGEDIN ErrorCode = "AGENT_ALREADY_LOGGED_IN"
+	ErrorCodeAGENTNOTINWRAPUP     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
 	ErrorCodeAGENTNOTLOGGEDIN     ErrorCode = "AGENT_NOT_LOGGED_IN"
 	ErrorCodeCALLNOTFOUND         ErrorCode = "CALL_NOT_FOUND"
 	ErrorCodeCONFLICT             ErrorCode = "CONFLICT"
@@ -220,6 +221,8 @@ const (
 func (e ErrorCode) Valid() bool {
 	switch e {
 	case ErrorCodeAGENTALREADYLOGGEDIN:
+		return true
+	case ErrorCodeAGENTNOTINWRAPUP:
 		return true
 	case ErrorCodeAGENTNOTLOGGEDIN:
 		return true
@@ -757,6 +760,9 @@ type CDR struct {
 	ToNumber string                  `json:"toNumber"`
 	TotalSec int                     `json:"totalSec"`
 	UserData *map[string]interface{} `json:"userData,omitempty"`
+
+	// WrapUp The after-call work filed for this call: the requesting agent's own on GET /cdrs/mine, the primary agent's (else the latest) elsewhere. Absent when nobody filed one.
+	WrapUp *WrapUp `json:"wrapUp,omitempty"`
 }
 
 // CDRDetail One finished call with everything it left behind, in one round trip.
@@ -850,6 +856,40 @@ type CompleteCallbackRequest struct {
 
 // CompleteCallbackRequestStatus DONE means the promise was kept; DISMISSED means it no longer needs keeping.
 type CompleteCallbackRequestStatus string
+
+// Contact A customer record. The phone number is the key the cockpit looks a caller up by, so it is unique.
+type Contact struct {
+	Company   string             `json:"company"`
+	CreatedAt time.Time          `json:"createdAt"`
+	Email     string             `json:"email"`
+	ID        openapi_types.UUID `json:"id"`
+
+	// LastCallAt When this number last appeared on a finished call, either side. Absent when it never has.
+	LastCallAt  *time.Time `json:"lastCallAt,omitempty"`
+	Name        string     `json:"name"`
+	Notes       string     `json:"notes"`
+	PhoneNumber string     `json:"phoneNumber"`
+	Tags        []string   `json:"tags"`
+	UpdatedAt   time.Time  `json:"updatedAt"`
+}
+
+// ContactList defines model for ContactList.
+type ContactList struct {
+	Items []Contact `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
+// ContactWrite Create or update a contact. Omitted fields are stored empty on create and left unchanged on update.
+type ContactWrite struct {
+	Company     *string   `json:"company,omitempty"`
+	Email       *string   `json:"email,omitempty"`
+	Name        *string   `json:"name,omitempty"`
+	Notes       *string   `json:"notes,omitempty"`
+	PhoneNumber string    `json:"phoneNumber"`
+	Tags        *[]string `json:"tags,omitempty"`
+}
 
 // CreateCallRequest Ask the platform to place a call. AI_OUTBOUND is the only kind so far.
 type CreateCallRequest struct {
@@ -950,6 +990,24 @@ type DialRequest struct {
 // DialResponse defines model for DialResponse.
 type DialResponse struct {
 	CallID openapi_types.UUID `json:"callId"`
+}
+
+// Disposition One code an agent can file a call under.
+type Disposition struct {
+	Code  string `json:"code"`
+	Label string `json:"label"`
+}
+
+// DispositionCatalog The whole vocabulary, grouped. Empty categories are omitted.
+type DispositionCatalog struct {
+	Categories []DispositionCategory `json:"categories"`
+}
+
+// DispositionCategory A group of dispositions, in the order agents see them.
+type DispositionCategory struct {
+	Code         string        `json:"code"`
+	Dispositions []Disposition `json:"dispositions"`
+	Label        string        `json:"label"`
 }
 
 // Error The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users.
@@ -1090,8 +1148,11 @@ type Presence struct {
 	Reason *NotReadyReason `json:"reason,omitempty"`
 
 	// State Presence FSM state.
-	State        AgentState `json:"state"`
-	WrapUpEndsAt *time.Time `json:"wrapUpEndsAt,omitempty"`
+	State AgentState `json:"state"`
+
+	// WrapUpCallID The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR.
+	WrapUpCallID *openapi_types.UUID `json:"wrapUpCallId,omitempty"`
+	WrapUpEndsAt *time.Time          `json:"wrapUpEndsAt,omitempty"`
 }
 
 // QualityReview A reviewer's scoring of one recording.
@@ -1397,6 +1458,47 @@ type UserList struct {
 	Items []User `json:"items"`
 }
 
+// WaitingCall A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next.
+type WaitingCall struct {
+	CallID openapi_types.UUID `json:"callId"`
+
+	// CallType Caller-perspective call type, stamped at creation and immutable across transfers.
+	CallType         CallType           `json:"callType"`
+	FromNumber       string             `json:"fromNumber"`
+	JoinedAt         time.Time          `json:"joinedAt"`
+	Language         *string            `json:"language,omitempty"`
+	QueueDisplayName string             `json:"queueDisplayName"`
+	QueueID          openapi_types.UUID `json:"queueId"`
+	QueueName        string             `json:"queueName"`
+
+	// SLAThresholdSec The queue's answer target; a wait past it is a breach. 0 means none is configured.
+	SLAThresholdSec int                     `json:"slaThresholdSec"`
+	UserData        *map[string]interface{} `json:"userData,omitempty"`
+}
+
+// WaitingCallList defines model for WaitingCallList.
+type WaitingCallList struct {
+	Items []WaitingCall `json:"items"`
+}
+
+// WrapUp One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary.
+type WrapUp struct {
+	AgentID          openapi_types.UUID `json:"agentId"`
+	CategoryCode     string             `json:"categoryCode"`
+	CategoryLabel    string             `json:"categoryLabel"`
+	CreatedAt        time.Time          `json:"createdAt"`
+	DispositionCode  string             `json:"dispositionCode"`
+	DispositionLabel string             `json:"dispositionLabel"`
+	Note             string             `json:"note"`
+}
+
+// WrapUpRequest What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work.
+type WrapUpRequest struct {
+	// DispositionCode A code from GET /dispositions.
+	DispositionCode *string `json:"dispositionCode,omitempty"`
+	Note            *string `json:"note,omitempty"`
+}
+
 // BadGateway defines model for BadGateway.
 type BadGateway = ErrorResponse
 
@@ -1456,6 +1558,32 @@ type ListCDRsParams struct {
 	Offset  *int                `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListMyCDRsParams defines parameters for ListMyCDRs.
+type ListMyCDRsParams struct {
+	Status *CDRStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// FromNumber Substring of the caller's number.
+	FromNumber *string `form:"fromNumber,omitempty" json:"fromNumber,omitempty"`
+
+	// From RFC 3339 window start.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To RFC 3339 window end.
+	To     *time.Time `form:"to,omitempty" json:"to,omitempty"`
+	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int       `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListContactsParams defines parameters for ListContacts.
+type ListContactsParams struct {
+	Q *string `form:"q,omitempty" json:"q,omitempty"`
+
+	// PhoneNumber Exact match.
+	PhoneNumber *string `form:"phoneNumber,omitempty" json:"phoneNumber,omitempty"`
+	Limit       *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset      *int    `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // StreamEventsParams defines parameters for StreamEvents.
 type StreamEventsParams struct {
 	// Types Comma-separated SseEventType names to narrow the stream.
@@ -1495,6 +1623,9 @@ type AgentLoginJSONRequestBody = AgentLoginRequest
 // AgentNotReadyJSONRequestBody defines body for AgentNotReady for application/json ContentType.
 type AgentNotReadyJSONRequestBody = AgentNotReadyRequest
 
+// AgentWrapUpJSONRequestBody defines body for AgentWrapUp for application/json ContentType.
+type AgentWrapUpJSONRequestBody = WrapUpRequest
+
 // CreateAgentJSONRequestBody defines body for CreateAgent for application/json ContentType.
 type CreateAgentJSONRequestBody = AgentWrite
 
@@ -1518,6 +1649,12 @@ type SendCallDTMFJSONRequestBody = DTMFRequest
 
 // TransferCallJSONRequestBody defines body for TransferCall for application/json ContentType.
 type TransferCallJSONRequestBody = TransferRequest
+
+// CreateContactJSONRequestBody defines body for CreateContact for application/json ContentType.
+type CreateContactJSONRequestBody = ContactWrite
+
+// UpdateContactJSONRequestBody defines body for UpdateContact for application/json ContentType.
+type UpdateContactJSONRequestBody = ContactWrite
 
 // CreateDIDJSONRequestBody defines body for CreateDID for application/json ContentType.
 type CreateDIDJSONRequestBody = DIDWrite
@@ -1560,6 +1697,9 @@ type ServerInterface interface {
 	// AgentReady Go ready
 	// (POST /agent/ready)
 	AgentReady(w http.ResponseWriter, r *http.Request)
+	// AgentWrapUp Complete after-call work
+	// (POST /agent/wrap-up)
+	AgentWrapUp(w http.ResponseWriter, r *http.Request)
 	// ListAgents The live roster
 	// (GET /agents)
 	ListAgents(w http.ResponseWriter, r *http.Request)
@@ -1605,6 +1745,9 @@ type ServerInterface interface {
 	// ListMyCalls The calls the caller is a party to
 	// (GET /calls/mine)
 	ListMyCalls(w http.ResponseWriter, r *http.Request)
+	// ListWaitingCalls Callers waiting in the queues the caller staffs
+	// (GET /calls/waiting)
+	ListWaitingCalls(w http.ResponseWriter, r *http.Request)
 	// AnswerCall Answer the caller's own ringing leg
 	// (POST /calls/{callId}/answer)
 	AnswerCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
@@ -1641,9 +1784,24 @@ type ServerInterface interface {
 	// ListCDRs Page the ledger
 	// (GET /cdrs)
 	ListCDRs(w http.ResponseWriter, r *http.Request, params ListCDRsParams)
+	// ListMyCDRs The caller's own finished calls
+	// (GET /cdrs/mine)
+	ListMyCDRs(w http.ResponseWriter, r *http.Request, params ListMyCDRsParams)
 	// GetCDR One finished call, with everything it left behind
 	// (GET /cdrs/{callId})
 	GetCDR(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// ListContacts Search contacts
+	// (GET /contacts)
+	ListContacts(w http.ResponseWriter, r *http.Request, params ListContactsParams)
+	// CreateContact Create a contact
+	// (POST /contacts)
+	CreateContact(w http.ResponseWriter, r *http.Request)
+	// DeleteContact Delete a contact
+	// (DELETE /contacts/{contactId})
+	DeleteContact(w http.ResponseWriter, r *http.Request, contactID openapi_types.UUID)
+	// UpdateContact Update a contact
+	// (PUT /contacts/{contactId})
+	UpdateContact(w http.ResponseWriter, r *http.Request, contactID openapi_types.UUID)
 	// ListDIDs All DIDs
 	// (GET /dids)
 	ListDIDs(w http.ResponseWriter, r *http.Request)
@@ -1656,6 +1814,9 @@ type ServerInterface interface {
 	// UpdateDID Update a DID
 	// (PUT /dids/{didId})
 	UpdateDID(w http.ResponseWriter, r *http.Request, didid openapi_types.UUID)
+	// ListDispositions The wrap-up vocabulary
+	// (GET /dispositions)
+	ListDispositions(w http.ResponseWriter, r *http.Request)
 	// StreamEvents The ordered event stream
 	// (GET /events)
 	StreamEvents(w http.ResponseWriter, r *http.Request, params StreamEventsParams)
@@ -1749,6 +1910,12 @@ func (_ Unimplemented) AgentReady(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// AgentWrapUp Complete after-call work
+// (POST /agent/wrap-up)
+func (_ Unimplemented) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListAgents The live roster
 // (GET /agents)
 func (_ Unimplemented) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -1839,6 +2006,12 @@ func (_ Unimplemented) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListWaitingCalls Callers waiting in the queues the caller staffs
+// (GET /calls/waiting)
+func (_ Unimplemented) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // AnswerCall Answer the caller's own ringing leg
 // (POST /calls/{callId}/answer)
 func (_ Unimplemented) AnswerCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
@@ -1911,9 +2084,39 @@ func (_ Unimplemented) ListCDRs(w http.ResponseWriter, r *http.Request, params L
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListMyCDRs The caller's own finished calls
+// (GET /cdrs/mine)
+func (_ Unimplemented) ListMyCDRs(w http.ResponseWriter, r *http.Request, params ListMyCDRsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetCDR One finished call, with everything it left behind
 // (GET /cdrs/{callId})
 func (_ Unimplemented) GetCDR(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListContacts Search contacts
+// (GET /contacts)
+func (_ Unimplemented) ListContacts(w http.ResponseWriter, r *http.Request, params ListContactsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateContact Create a contact
+// (POST /contacts)
+func (_ Unimplemented) CreateContact(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteContact Delete a contact
+// (DELETE /contacts/{contactId})
+func (_ Unimplemented) DeleteContact(w http.ResponseWriter, r *http.Request, contactID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateContact Update a contact
+// (PUT /contacts/{contactId})
+func (_ Unimplemented) UpdateContact(w http.ResponseWriter, r *http.Request, contactID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1938,6 +2141,12 @@ func (_ Unimplemented) DeleteDID(w http.ResponseWriter, r *http.Request, didid o
 // UpdateDID Update a DID
 // (PUT /dids/{didId})
 func (_ Unimplemented) UpdateDID(w http.ResponseWriter, r *http.Request, didid openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDispositions The wrap-up vocabulary
+// (GET /dispositions)
+func (_ Unimplemented) ListDispositions(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2125,6 +2334,20 @@ func (siw *ServerInterfaceWrapper) AgentReady(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AgentReady(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AgentWrapUp operation middleware
+func (siw *ServerInterfaceWrapper) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AgentWrapUp(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2440,6 +2663,20 @@ func (siw *ServerInterfaceWrapper) ListMyCalls(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListMyCalls(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWaitingCalls operation middleware
+func (siw *ServerInterfaceWrapper) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWaitingCalls(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2901,6 +3138,104 @@ func (siw *ServerInterfaceWrapper) ListCDRs(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// ListMyCDRs operation middleware
+func (siw *ServerInterfaceWrapper) ListMyCDRs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListMyCDRsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "fromNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "fromNumber", r.URL.Query(), &params.FromNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "fromNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fromNumber", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMyCDRs(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetCDR operation middleware
 func (siw *ServerInterfaceWrapper) GetCDR(w http.ResponseWriter, r *http.Request) {
 
@@ -2918,6 +3253,144 @@ func (siw *ServerInterfaceWrapper) GetCDR(w http.ResponseWriter, r *http.Request
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCDR(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListContacts operation middleware
+func (siw *ServerInterfaceWrapper) ListContacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListContactsParams
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "phoneNumber" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "phoneNumber", r.URL.Query(), &params.PhoneNumber, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "phoneNumber"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "phoneNumber", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListContacts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateContact operation middleware
+func (siw *ServerInterfaceWrapper) CreateContact(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateContact(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteContact operation middleware
+func (siw *ServerInterfaceWrapper) DeleteContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "contactId" -------------
+	var contactID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "contactId", chi.URLParam(r, "contactId"), &contactID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "contactId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteContact(w, r, contactID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateContact operation middleware
+func (siw *ServerInterfaceWrapper) UpdateContact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "contactId" -------------
+	var contactID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "contactId", chi.URLParam(r, "contactId"), &contactID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "contactId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateContact(w, r, contactID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2998,6 +3471,20 @@ func (siw *ServerInterfaceWrapper) UpdateDID(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateDID(w, r, didid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDispositions operation middleware
+func (siw *ServerInterfaceWrapper) ListDispositions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDispositions(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3681,6 +4168,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/agent/ready", wrapper.AgentReady)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent/wrap-up", wrapper.AgentWrapUp)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/agents", wrapper.ListAgents)
 	})
 	r.Group(func(r chi.Router) {
@@ -3726,6 +4216,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/calls/mine", wrapper.ListMyCalls)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/calls/waiting", wrapper.ListWaitingCalls)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/answer", wrapper.AnswerCall)
 	})
 	r.Group(func(r chi.Router) {
@@ -3762,7 +4255,22 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/cdrs", wrapper.ListCDRs)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cdrs/mine", wrapper.ListMyCDRs)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cdrs/{callId}", wrapper.GetCDR)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/contacts", wrapper.ListContacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/contacts", wrapper.CreateContact)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/contacts/{contactId}", wrapper.DeleteContact)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/contacts/{contactId}", wrapper.UpdateContact)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/dids", wrapper.ListDIDs)
@@ -3775,6 +4283,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/dids/{didId}", wrapper.UpdateDID)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/dispositions", wrapper.ListDispositions)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/events", wrapper.StreamEvents)

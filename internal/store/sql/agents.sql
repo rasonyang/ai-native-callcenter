@@ -37,7 +37,8 @@ SELECT a.id AS agent_id,
        s.reason,
        s.extension_number,
        COALESCE(s.entered_at, a.created_at) AS entered_at,
-       s.wrap_up_ends_at
+       s.wrap_up_ends_at,
+       s.wrap_up_call_id
 FROM agents a
 JOIN users u ON u.id = a.user_id
 LEFT JOIN agent_states s ON s.agent_id = a.id
@@ -48,14 +49,15 @@ ORDER BY u.display_name;
 SELECT * FROM agent_states WHERE agent_id = $1;
 
 -- name: UpsertAgentState :one
-INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_states (agent_id, state, reason, extension_number, entered_at, wrap_up_ends_at, wrap_up_call_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (agent_id) DO UPDATE
 SET state            = excluded.state,
     reason           = excluded.reason,
     extension_number = excluded.extension_number,
     entered_at       = excluded.entered_at,
-    wrap_up_ends_at  = excluded.wrap_up_ends_at
+    wrap_up_ends_at  = excluded.wrap_up_ends_at,
+    wrap_up_call_id  = excluded.wrap_up_call_id
 RETURNING *;
 
 -- name: OpenAgentStateLog :one

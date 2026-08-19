@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
 // AgentDirectory resolves the agent behind a signed-in user.
@@ -47,6 +49,7 @@ func presenceOf(p agents.Presence) api.Presence {
 		ends := p.WrapUpEndsAt.UTC().Truncate(time.Second)
 		out.WrapUpEndsAt = &ends
 	}
+	out.WrapUpCallID = p.WrapUpCallID
 	return out
 }
 
@@ -123,6 +126,67 @@ func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
 
 	p, err := s.agents.NotReady(r.Context(), agentID, req.Reason)
 	s.writePresence(w, r, p, err)
+}
+
+// AgentWrapUp files the after-call work for the call the agent just finished
+// and returns them to ready.
+//
+// The call comes from the platform, never from the request: an agent files
+// against the call they were on, and letting a client name one would let any
+// agent write a disposition onto any call. It is also allowed *after* the
+// window has closed — the timer returning somebody to READY while they were
+// still typing is not a reason to lose what they typed — so the last wrapped
+// call stays addressable until the next one begins.
+func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	var req api.WrapUpRequest
+	if r.ContentLength > 0 {
+		if !decode(w, r, &req) {
+			return
+		}
+	}
+
+	callID, hasCall := s.agents.WrapUpCall(agentID)
+	code, note := strOr(req.DispositionCode), strOr(req.Note)
+
+	// Filing needs a call; ending after-call work does not. An agent who
+	// completes an empty wrap-up simply goes ready.
+	if code != "" || note != "" {
+		if !hasCall {
+			writeError(w, http.StatusConflict, CodeAgentNotInWrapUp,
+				"there is no finished call to file this against", nil)
+			return
+		}
+		if s.ledger == nil {
+			writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
+			return
+		}
+		if _, err := s.ledger.FileWrapUp(r.Context(), callID, agentID, code, note); err != nil {
+			if errors.Is(err, store.ErrUnknownDisposition) {
+				writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+					"no such disposition", map[string]any{"field": "dispositionCode"})
+				return
+			}
+			slog.ErrorContext(r.Context(), "wrap-up not recorded",
+				"error", err, "callId", callID, "agentId", agentID)
+			writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot file the wrap-up", nil)
+			return
+		}
+	}
+
+	p, err := s.agents.EndWrapUp(r.Context(), agentID)
+	s.writePresence(w, r, p, err)
+}
+
+// strOr reads an optional string field, where absent and empty are the same.
+func strOr(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
 }
 
 func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {

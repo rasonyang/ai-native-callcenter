@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent/wrap-up": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Complete after-call work
+         * @description Files the disposition and note for the call the agent just finished (Presence.wrapUpCallId) and returns them to READY. The wrap-up may also be filed after the timer has already returned the agent to READY: the last wrapped call stays addressable until the next one starts. dispositionCode must be a code from GET /dispositions when given. Requires the AGENT role.
+         */
+        post: operations["agentWrapUp"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents": {
         parameters: {
             query?: never;
@@ -285,6 +305,26 @@ export interface paths {
          * @description Requires the AGENT role and an agent profile.
          */
         get: operations["listMyCalls"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/calls/waiting": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Callers waiting in the queues the caller staffs
+         * @description The live waiting line of every queue this agent is staffed on, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. Requires the AGENT role and an agent profile.
+         */
+        get: operations["listWaitingCalls"];
         put?: never;
         post?: never;
         delete?: never;
@@ -741,6 +781,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cdrs/mine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The caller's own finished calls
+         * @description Every finished call the requesting agent was a party to, newest first, with the same filters as GET /cdrs minus the ones that name other people. Requires the AGENT role and an agent profile.
+         */
+        get: operations["listMyCDRs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cdrs/{callId}": {
         parameters: {
             query?: never;
@@ -921,6 +981,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search contacts
+         * @description Newest first. q matches the phone number, name and company as a substring; phoneNumber matches exactly, which is how the cockpit identifies a caller. Any signed-in role.
+         */
+        get: operations["listContacts"];
+        put?: never;
+        /**
+         * Create a contact
+         * @description Any signed-in role. A phone number that already has a contact is a conflict.
+         */
+        post: operations["createContact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/contacts/{contactId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a contact
+         * @description Any signed-in role.
+         */
+        put: operations["updateContact"];
+        post?: never;
+        /**
+         * Delete a contact
+         * @description Any signed-in role.
+         */
+        delete: operations["deleteContact"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dispositions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The wrap-up vocabulary
+         * @description Categories and their enabled dispositions, in display order. Any signed-in role.
+         */
+        get: operations["listDispositions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/health": {
         parameters: {
             query?: never;
@@ -969,7 +1097,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1029,6 +1157,17 @@ export interface components {
             enteredAt: string;
             /** Format: date-time */
             wrapUpEndsAt?: string;
+            /**
+             * Format: uuid
+             * @description The call the agent is doing after-call work for. Set while availability is WRAP_UP; a wrap-up filed against it lands on that call's CDR.
+             */
+            wrapUpCallId?: string;
+        };
+        /** @description What the agent files for the call they just finished. Both fields are optional: completing with neither simply ends after-call work. */
+        WrapUpRequest: {
+            /** @description A code from GET /dispositions. */
+            dispositionCode?: string;
+            note?: string;
         };
         /** @description Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. */
         AgentLoginRequest: {
@@ -1184,6 +1323,28 @@ export interface components {
         };
         CallList: {
             items: components["schemas"]["CallSnapshot"][];
+        };
+        /** @description A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next. */
+        WaitingCall: {
+            /** Format: uuid */
+            callId: string;
+            callType: components["schemas"]["CallType"];
+            fromNumber: string;
+            /** Format: uuid */
+            queueId: string;
+            queueName: string;
+            queueDisplayName: string;
+            /** @description The queue's answer target; a wait past it is a breach. 0 means none is configured. */
+            slaThresholdSec: number;
+            /** Format: date-time */
+            joinedAt: string;
+            language?: string;
+            userData?: {
+                [key: string]: unknown;
+            };
+        };
+        WaitingCallList: {
+            items: components["schemas"]["WaitingCall"][];
         };
         TransferRequest: {
             /** @description Queue extension or dialable number. */
@@ -1441,6 +1602,20 @@ export interface components {
                 [key: string]: unknown;
             };
             legs: components["schemas"]["Leg"][];
+            /** @description The after-call work filed for this call: the requesting agent's own on GET /cdrs/mine, the primary agent's (else the latest) elsewhere. Absent when nobody filed one. */
+            wrapUp?: components["schemas"]["WrapUp"];
+        };
+        /** @description One agent's after-call work for one call. Labels are captured at filing time so the record survives later edits to the vocabulary. */
+        WrapUp: {
+            /** Format: uuid */
+            agentId: string;
+            dispositionCode: string;
+            dispositionLabel: string;
+            categoryCode: string;
+            categoryLabel: string;
+            note: string;
+            /** Format: date-time */
+            createdAt: string;
         };
         CDRList: {
             items: components["schemas"]["CDR"][];
@@ -1530,6 +1705,55 @@ export interface components {
              * @enum {string}
              */
             status: "DONE" | "DISMISSED";
+        };
+        /** @description A customer record. The phone number is the key the cockpit looks a caller up by, so it is unique. */
+        Contact: {
+            /** Format: uuid */
+            id: string;
+            phoneNumber: string;
+            name: string;
+            company: string;
+            email: string;
+            tags: string[];
+            notes: string;
+            /**
+             * Format: date-time
+             * @description When this number last appeared on a finished call, either side. Absent when it never has.
+             */
+            lastCallAt?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description Create or update a contact. Omitted fields are stored empty on create and left unchanged on update. */
+        ContactWrite: {
+            phoneNumber: string;
+            name?: string;
+            company?: string;
+            email?: string;
+            tags?: string[];
+            notes?: string;
+        };
+        ContactList: {
+            items: components["schemas"]["Contact"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
+        };
+        /** @description One code an agent can file a call under. */
+        Disposition: {
+            code: string;
+            label: string;
+        };
+        /** @description A group of dispositions, in the order agents see them. */
+        DispositionCategory: {
+            code: string;
+            label: string;
+            dispositions: components["schemas"]["Disposition"][];
+        };
+        /** @description The whole vocabulary, grouped. Empty categories are omitted. */
+        DispositionCatalog: {
+            categories: components["schemas"]["DispositionCategory"][];
         };
         /** @description A reviewer's scoring of one recording. */
         QualityReview: {
@@ -1646,6 +1870,31 @@ export interface components {
         SseCallbackEventPayload: {
             callback: components["schemas"]["Callback"];
         };
+        /** @description Payload of QUEUE_JOINED: a caller entered the queue named on the envelope's queueId. */
+        SseQueueJoinedPayload: {
+            queueName: string;
+            fromNumber?: string;
+            /** Format: date-time */
+            joinedAt: string;
+        };
+        /** @description Payload of QUEUE_LEFT: the caller left the queue, whether answered, abandoned or timed out. cause and cancelReason are the queue's own words, stable codes rather than display text. */
+        SseQueueLeftPayload: {
+            queueName: string;
+            fromNumber?: string;
+            cause?: string;
+            cancelReason?: string;
+            waitSec?: number;
+        };
+        /** @description Payload of QUEUE_COUNT: how many callers are waiting in the queue named on the envelope's queueId, published whenever that number moves. */
+        SseQueueCountPayload: {
+            queueName: string;
+            waiting: number;
+            /**
+             * Format: date-time
+             * @description When the longest-waiting caller joined; absent when nobody is waiting.
+             */
+            longestWaitAt?: string;
+        };
         /** @description Payload of SYSTEM_RESET: the resume point aged out of the ring; refetch snapshots before tailing again. */
         SseSystemResetPayload: {
             /** Format: int64 */
@@ -1736,7 +1985,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -1972,6 +2221,36 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AgentNotReadyRequest"];
+            };
+        };
+        responses: {
+            /** @description The presence after the change. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Presence"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    agentWrapUp: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WrapUpRequest"];
             };
         };
         responses: {
@@ -2234,6 +2513,29 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listWaitingCalls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Who is waiting, and since when. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WaitingCallList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
         };
     };
     dialCall: {
@@ -3020,6 +3322,39 @@ export interface operations {
             500: components["responses"]["InternalError"];
         };
     };
+    listMyCDRs: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CDRStatus"];
+                /** @description Substring of the caller's number. */
+                fromNumber?: string;
+                /** @description RFC 3339 window start. */
+                from?: string;
+                /** @description RFC 3339 window end. */
+                to?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CDRList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
     getCDR: {
         parameters: {
             query?: never;
@@ -3277,6 +3612,141 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listContacts: {
+        parameters: {
+            query?: {
+                q?: string;
+                /** @description Exact match. */
+                phoneNumber?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContactList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactWrite"];
+            };
+        };
+        responses: {
+            /** @description The stored contact. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Contact"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contactId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ContactWrite"];
+            };
+        };
+        responses: {
+            /** @description The stored contact. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Contact"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteContact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                contactId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listDispositions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The vocabulary, grouped by category. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DispositionCatalog"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
             500: components["responses"]["InternalError"];
         };
     };

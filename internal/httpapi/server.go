@@ -29,6 +29,13 @@ type AgentService interface {
 	Presence(agentID uuid.UUID) agents.Presence
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 
+	// EndWrapUp completes after-call work; WrapUpCall names the call it was
+	// for, which is what a filing is recorded against.
+	EndWrapUp(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
+	WrapUpCall(agentID uuid.UUID) (uuid.UUID, bool)
+
+	// EndWrapUp completes after-call work; WrapUpCall names the call it was
+	// for, which is what a filing is recorded against.
 	// Configuration, as administration edits it.
 	CreateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
 	UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
@@ -45,6 +52,7 @@ type Server struct {
 	calls       CallService
 	transcripts TranscriptStates
 	catalog     CatalogService
+	contacts    ContactService
 	ledger      *store.LedgerStore
 	recordings  RecordingStreamer
 	auditor     Auditor
@@ -63,6 +71,8 @@ type Deps struct {
 	// the snapshot cannot say, which is honest rather than invented.
 	Transcripts TranscriptStates
 	Catalog     CatalogService
+	// Contacts is the customer record book; nil hides the contact endpoints.
+	Contacts ContactService
 	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
 	Ledger *store.LedgerStore
 	// Recordings streams stored call audio; nil disables playback.
@@ -87,6 +97,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		calls:       deps.Calls,
 		transcripts: deps.Transcripts,
 		catalog:     deps.Catalog,
+		contacts:    deps.Contacts,
 		ledger:      deps.Ledger,
 		recordings:  deps.Recordings,
 		auditor:     deps.Auditor,
@@ -136,6 +147,7 @@ func (s *Server) router() chi.Router {
 						agent.Post("/agent/logout", op.AgentLogout)
 						agent.Post("/agent/ready", op.AgentReady)
 						agent.Post("/agent/not-ready", op.AgentNotReady)
+						agent.Post("/agent/wrap-up", op.AgentWrapUp)
 					})
 					// The roster and force-logout belong to supervision.
 					private.Group(func(sup chi.Router) {
@@ -161,6 +173,10 @@ func (s *Server) router() chi.Router {
 					private.Group(func(call chi.Router) {
 						call.Use(requireAgentRole)
 						call.Get("/calls/mine", op.ListMyCalls)
+						// Who is waiting in the queues this agent staffs.
+						// An agent needs the line they are working, which is
+						// not the supervisor's view of every live call.
+						call.Get("/calls/waiting", op.ListWaitingCalls)
 						call.Post("/calls/{callId}/answer", op.AnswerCall)
 						call.Post("/calls/{callId}/hold", op.HoldCall)
 						call.Post("/calls/{callId}/retrieve", op.RetrieveCall)
@@ -214,6 +230,14 @@ func (s *Server) router() chi.Router {
 				}
 
 				if s.ledger != nil {
+					// An agent's own history is theirs. The ledger listing is
+					// supervision, but the calls an agent was on are not
+					// somebody else's to grant them.
+					private.With(requireAgentRole).Get("/cdrs/mine", op.ListMyCDRs)
+					// The wrap-up vocabulary is readable by anyone who might
+					// have to file one or read what was filed.
+					private.Get("/dispositions", op.ListDispositions)
+
 					// Finished calls and their artifacts are supervision:
 					// reviewing what happened is not an agent task.
 					private.Group(func(sup chi.Router) {
@@ -236,6 +260,15 @@ func (s *Server) router() chi.Router {
 						anyRole.Post("/callbacks/{callbackId}/claim", op.ClaimCallback)
 						anyRole.Post("/callbacks/{callbackId}/complete", op.CompleteCallback)
 					})
+				}
+
+				if s.contacts != nil {
+					// A contact is call context, so every role that takes or
+					// reviews a call may read and edit one.
+					private.Get("/contacts", op.ListContacts)
+					private.Post("/contacts", op.CreateContact)
+					private.Put("/contacts/{contactId}", op.UpdateContact)
+					private.Delete("/contacts/{contactId}", op.DeleteContact)
 				}
 
 				if s.outbound != nil {

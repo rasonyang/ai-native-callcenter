@@ -336,6 +336,12 @@ func normalizeCallcenter(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	out.Queue, _, _ = strings.Cut(ev.Get("CC-Queue"), "@")
 	out.AgentName = ev.Get("CC-Agent")
 	out.MemberChannelID = ev.Get("CC-Member-Session-UUID")
+	// The queue's own copy of who is waiting. It is the only account of the
+	// caller a queue event carries: the channel-event caller profile is
+	// absent here, and a member who has not been adopted as a call has no
+	// other source of a number at all.
+	out.ANI = ev.Get("CC-Member-CID-Number")
+	out.CallerIDName = ev.Get("CC-Member-CID-Name")
 	if out.ChannelID == "" {
 		out.ChannelID = out.MemberChannelID
 	}

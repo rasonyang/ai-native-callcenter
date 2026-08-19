@@ -10,6 +10,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -84,8 +85,12 @@ func Demo(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		return nil
 	}
 
-	plan := planHistory(time.Now(), agents, queues, rand.New(rand.NewSource(prngSeed)))
 	ledger := st.Ledger()
+	// The wrap-ups are filed under whatever vocabulary the installation has,
+	// read rather than assumed: a demo that files a code the deployment does
+	// not offer would show dispositions nobody can choose again.
+	plan := planHistory(time.Now(), agents, queues,
+		dispositionCodes(ctx, ledger, log), rand.New(rand.NewSource(prngSeed)))
 	for _, cdr := range plan.CDRs {
 		if err := ledger.InsertCDR(ctx, cdr); err != nil {
 			return fmt.Errorf("seed cdr: %w", err)
@@ -106,9 +111,50 @@ func Demo(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		}
 	}
 
+	// After the calls: a wrap-up is filed against a call, and a contact is
+	// worth having because a call from that number exists.
+	for _, row := range plan.WrapUps {
+		if _, err := ledger.FileWrapUp(ctx, row.CallID, row.AgentID, row.DispositionCode, row.Note); err != nil {
+			return fmt.Errorf("seed wrap-up: %w", err)
+		}
+	}
+	contacts := st.Contacts()
+	for _, row := range plan.Contacts {
+		name, company, notes := row.Name, row.Company, row.Notes
+		tags := row.Tags
+		if tags == nil {
+			tags = []string{}
+		}
+		if _, err := contacts.Create(ctx, store.ContactWrite{
+			PhoneNumber: row.PhoneNumber, Name: &name, Company: &company,
+			Tags: &tags, Notes: &notes,
+		}, nil); err != nil && !errors.Is(err, store.ErrContactExists) {
+			return fmt.Errorf("seed contact: %w", err)
+		}
+	}
+
 	log.Info("seed: demo history written",
-		"cdrs", len(plan.CDRs), "queueEvents", len(plan.QueueEvents), "stateLogs", len(plan.StateLogs))
+		"cdrs", len(plan.CDRs), "queueEvents", len(plan.QueueEvents),
+		"stateLogs", len(plan.StateLogs), "wrapUps", len(plan.WrapUps),
+		"contacts", len(plan.Contacts))
 	return nil
+}
+
+// dispositionCodes reads the installation's wrap-up vocabulary. An empty list
+// is not a failure — the demo simply files no dispositions.
+func dispositionCodes(ctx context.Context, ledger *store.LedgerStore, log *slog.Logger) []string {
+	categories, err := ledger.ListDispositions(ctx)
+	if err != nil {
+		log.Warn("seed: no disposition vocabulary; history will carry no wrap-ups", "error", err)
+		return nil
+	}
+	var codes []string
+	for _, c := range categories {
+		for _, d := range c.Dispositions {
+			codes = append(codes, d.Code)
+		}
+	}
+	return codes
 }
 
 // QueueRef is a queue the history can reference.
