@@ -1,6 +1,6 @@
 import {
-  Activity, BarChart3, Bot, FileClock, Headphones, LayoutDashboard,
-  ListChecks, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users,
+  Activity, BarChart3, Bot, BookUser, FileClock, Headphones, LayoutDashboard,
+  ListChecks, Phone, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users,
 } from 'lucide-react'
 
 
@@ -35,6 +35,8 @@ export const NAV: NavGroup[] = [
     roleHome: '/agent',
     items: [
       { to: '/agent', labelKey: 'nav.dashboard', icon: Headphones, minRole: 'AGENT', isReady: true },
+      { to: '/agent/calls', labelKey: 'nav.myCalls', icon: Phone, minRole: 'AGENT', isReady: true },
+      { to: '/agent/contacts', labelKey: 'nav.contacts', icon: BookUser, minRole: 'AGENT', isReady: true },
       { to: '/agent/callbacks', labelKey: 'nav.callbacks', icon: PhoneForwarded, minRole: 'AGENT', isReady: true },
     ],
   },
