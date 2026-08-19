@@ -16,6 +16,9 @@ function applyToCache(queryClient: ReturnType<typeof useQueryClient>, event: Aic
   if (event.type.startsWith('AGENT_') || event.type.startsWith('DEVICE_')) {
     void queryClient.invalidateQueries({ queryKey: ROSTER_KEY })
     void queryClient.invalidateQueries({ queryKey: PRESENCE_KEY })
+    // Signing in, going ready, entering after-call work: each of them moves
+    // what the agent's own day is made of.
+    void queryClient.invalidateQueries({ queryKey: REPORTS_KEY })
   }
   if (event.type.startsWith('PARTY_') || event.type === 'CALL_USER_DATA') {
     // A leg moved: the cockpit and the supervisor's live view both read the

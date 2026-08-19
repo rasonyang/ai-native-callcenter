@@ -102,10 +102,7 @@ function MyCallsPage() {
               </Td>
               <Td>
                 {row.wrapUp?.dispositionLabel ? (
-                  <span className="flex items-center gap-1.5 text-xs">
-                    <Badge>{row.wrapUp.categoryLabel}</Badge>
-                    {row.wrapUp.dispositionLabel}
-                  </span>
+                  <Badge>{row.wrapUp.dispositionLabel}</Badge>
                 ) : (
                   <span className="text-xs text-muted-foreground">{t('myCalls.notFiled')}</span>
                 )}

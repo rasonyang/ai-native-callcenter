@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
@@ -12,7 +12,6 @@ import { Popover } from 'radix-ui'
 import { Keypad } from '@/components/keypad'
 import { LiveTranscriptBoundary } from '@/components/live-transcript'
 import { Select } from '@/components/record-dialog'
-import { StatusPill } from '@/components/status-pill'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,9 +20,9 @@ import {
   myParty, otherParty, useCallActions, useElapsedSec, useMyCalls, usePresence,
   usePresenceActions, useWaitingCalls,
 } from '@/lib/agent'
-import { callApi, type CallSnapshot, type PartySnapshot, type WaitingCall } from '@/lib/api'
+import { callApi, type CallSnapshot, type WaitingCall } from '@/lib/api'
 import { useContactFor } from '@/lib/contacts'
-import { useCallbacks, useDispositions } from '@/lib/ledger'
+import { useCallbacks, useDispositions, useMyDay } from '@/lib/ledger'
 import { useStreamStatus } from '@/lib/use-event-stream'
 import { cn, formatDuration } from '@/lib/utils'
 
@@ -63,12 +62,11 @@ function AgentCockpit() {
           streamStatus={streamStatus}
           className="min-h-0 flex-1"
         />
-        <JourneyCard call={call} />
       </div>
 
       <div className="flex w-[280px] shrink-0 flex-col gap-4">
         <WrapUpCard />
-        <PresenceCard />
+        <TodayCard />
       </div>
     </div>
   )
@@ -556,123 +554,41 @@ function CallBadges({ call }: { call: CallSnapshot }) {
   )
 }
 
-/** Every leg of the call as the switch reports it, newest state included. */
-function JourneyCard({ call }: { call?: CallSnapshot }) {
-  const { t } = useTranslation()
-  return (
-    <Card
-      title={t('agent.journey')}
-      aside={
-        call ? (
-          <span className="tabular">{t('agent.legCount', { count: call.parties.length })}</span>
-        ) : undefined
-      }
-      bodyClassName="max-h-56 overflow-y-auto"
-    >
-      {!call ? (
-        <Empty text={t('agent.noActiveCall')} />
-      ) : (
-        <ul aria-label={t('agent.journey')} className="-mx-4 divide-y">
-          {call.parties.map((party) => (
-            <PartyRow key={party.partyId} party={party} />
-          ))}
-        </ul>
-      )}
-    </Card>
-  )
-}
-
-function PartyRow({ party }: { party: PartySnapshot }) {
-  const { t } = useTranslation()
-  const elapsedSec = useElapsedSec(party.answeredAt ?? party.createdAt)
-  const isLive = party.state !== 'RELEASED'
-
-  return (
-    <li className="flex h-9 items-center gap-3 px-4">
-      <span className="w-24 shrink-0 text-xs text-muted-foreground">
-        {t(`partyRoles.${party.role}`)}
-      </span>
-      <span className="tabular min-w-0 flex-1 truncate text-sm">
-        {party.number || t('call.unknownNumber')}
-      </span>
-      <span className="text-xs text-muted-foreground">{t(`partyStates.${party.state}`)}</span>
-      <span className="tabular w-12 text-right text-sm text-muted-foreground">
-        {isLive ? formatDuration(elapsedSec, { padMinutes: true }) : '—'}
-      </span>
-    </li>
-  )
-}
-
 // --- Right column ----------------------------------------------------------
 
-function PresenceCard() {
-  const { t } = useTranslation()
-  const { data: presence } = usePresence(true)
-  const elapsedSec = useElapsedSec(presence?.enteredAt)
-
-  if (!presence || presence.state === 'LOGGED_OUT') {
-    return (
-      <Card title={t('agent.presence')}>
-        <Empty text={t('agent.signInPrompt')} />
-      </Card>
-    )
-  }
-
-  return (
-    <Card
-      title={t('agent.presence')}
-      aside={<span className="tabular">{presence.extensionNumber ?? '—'}</span>}
-    >
-      <dl className="divide-y">
-        <Row label={t('agent.status')}>
-          <StatusPill availability={presence.availability} reason={presence.reason} />
-        </Row>
-        <Row label={t('agent.extension')}>
-          <span className="tabular">{presence.extensionNumber ?? '—'}</span>
-        </Row>
-        <Row label={t('agent.timeInState')}>
-          <span className="tabular">{formatDuration(elapsedSec, { padMinutes: true })}</span>
-        </Row>
-      </dl>
-    </Card>
-  )
-}
-
 /**
- * After-call work: the countdown, what the call was about, and the release.
+ * After-call work: what the call was about, and the button that ends it.
  *
- * The call being filed against is the platform's answer, never the browser's —
- * the agent files for the call they just finished, and a client that named one
- * could write a disposition onto anybody's call. The form stays open after the
- * timer has expired for exactly one reason: an agent still typing when the
- * window closed has not lost what they typed, and the server still accepts it
- * until the next call is wrapped.
+ * It begins when the call ends and lasts until the agent files it — the timer
+ * counts up, because nothing is going to take the decision off them. While it
+ * runs the switch keeps them out of routing, so the next caller does not reach
+ * somebody still writing up the last one.
+ *
+ * The disposition is required and the call being filed against is the
+ * platform's answer, never the browser's: a client that named a call could
+ * write a disposition onto anybody's.
  */
 function WrapUpCard() {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
   const { wrapUp } = usePresenceActions()
   const { data: vocabulary } = useDispositions()
-  const [categoryCode, setCategoryCode] = useState('')
   const [dispositionCode, setDispositionCode] = useState('')
   const [note, setNote] = useState('')
 
   const inWrapUp = presence?.availability === 'WRAP_UP'
-  const remainingSec = useRemainingSec(presence?.wrapUpEndsAt)
-  const categories = vocabulary?.categories ?? []
-  const category = categories.find((c) => c.code === categoryCode)
+  const elapsedSec = useElapsedSec(presence?.enteredAt)
+  const dispositions = vocabulary?.items ?? []
 
-  // The card is offered while the window is open and for as long as there is
-  // still a call to file against; the server is the judge of the latter and
-  // answers a conflict if there is not.
+  // The form is offered while there is still a call to file against. The
+  // server is the judge of that and answers a conflict when there is not.
   const canFile = inWrapUp || Boolean(presence?.wrapUpCallId)
 
   const complete = () => {
     wrapUp.mutate(
-      { dispositionCode: dispositionCode || undefined, note: note.trim() || undefined },
+      { dispositionCode, note: note.trim() || undefined },
       {
         onSuccess: () => {
-          setCategoryCode('')
           setDispositionCode('')
           setNote('')
         },
@@ -687,7 +603,7 @@ function WrapUpCard() {
         inWrapUp ? (
           <span className="tabular flex items-center gap-1 text-sm">
             <Timer className="size-3.5" style={{ color: 'var(--state-acw)' }} />
-            {formatDuration(remainingSec, { padMinutes: true })}
+            {formatDuration(elapsedSec, { padMinutes: true })}
           </span>
         ) : undefined
       }
@@ -697,24 +613,12 @@ function WrapUpCard() {
       ) : (
         <div className="flex flex-col gap-2">
           <Select
-            ariaLabel={t('agent.dispositionCategory')}
-            value={categoryCode}
-            onChange={(next) => {
-              setCategoryCode(next)
-              setDispositionCode('')
-            }}
-            options={[
-              { value: '', label: t('agent.chooseCategory') },
-              ...categories.map((c) => ({ value: c.code, label: c.label })),
-            ]}
-          />
-          <Select
             ariaLabel={t('agent.disposition')}
             value={dispositionCode}
             onChange={setDispositionCode}
             options={[
               { value: '', label: t('agent.chooseDisposition') },
-              ...(category?.dispositions ?? []).map((d) => ({ value: d.code, label: d.label })),
+              ...dispositions.map((d) => ({ value: d.code, label: d.label })),
             ]}
           />
           <textarea
@@ -725,8 +629,14 @@ function WrapUpCard() {
             maxLength={4000}
             onChange={(event) => setNote(event.target.value)}
           />
-          <Button className="w-full" disabled={wrapUp.isPending} onClick={complete}>
-            {t('agent.completeWrapUp')}
+          {/* Nothing chosen means nothing to press: the disposition is what
+              makes the call reportable, and the server refuses without one. */}
+          <Button
+            className="w-full"
+            disabled={!dispositionCode || wrapUp.isPending}
+            onClick={complete}
+          >
+            {t('agent.done')}
           </Button>
           {wrapUp.isError && (
             <p className="text-xs" style={{ color: 'var(--state-breach)' }}>
@@ -739,18 +649,51 @@ function WrapUpCard() {
   )
 }
 
-/** Seconds left on a deadline, ticking down, floored at zero. */
-function useRemainingSec(until: string | undefined): number {
-  const [now, setNow] = useState(() => Date.now())
+/**
+ * The agent's own day. Presence used to sit here and said what the softphone
+ * bar already says — the status, the extension, the time in state — so this is
+ * the question the corner was not answering: how has the day gone.
+ *
+ * Handle time is talk plus after-call work; occupancy is that against the time
+ * signed in. Both come from the server, which has the ledger and the presence
+ * history to derive them from.
+ */
+function TodayCard() {
+  const { t } = useTranslation()
+  const { data: presence } = usePresence(true)
+  const signedIn = Boolean(presence && presence.state !== 'LOGGED_OUT')
+  const { data: today, isPending } = useMyDay(signedIn)
 
-  useEffect(() => {
-    if (!until) return
-    const id = setInterval(() => setNow(Date.now()), 1_000)
-    return () => clearInterval(id)
-  }, [until])
+  if (!signedIn) {
+    return (
+      <Card title={t('agent.today')}>
+        <Empty text={t('agent.signInPrompt')} />
+      </Card>
+    )
+  }
 
-  if (!until) return 0
-  return Math.max(0, Math.floor((new Date(until).getTime() - now) / 1000))
+  return (
+    <Card title={t('agent.today')}>
+      {isPending || !today ? (
+        <Empty text={t('common.loading')} />
+      ) : (
+        <dl className="divide-y">
+          <Row label={t('agent.callsHandled')}>
+            <span className="tabular font-semibold">{today.callsHandled}</span>
+          </Row>
+          <Row label={t('agent.aht')}>
+            <span className="tabular font-semibold">{formatDuration(today.avgHandleSec)}</span>
+          </Row>
+          <Row label={t('agent.acwAvg')}>
+            <span className="tabular font-semibold">{formatDuration(today.avgWrapUpSec)}</span>
+          </Row>
+          <Row label={t('agent.occupancy')}>
+            <span className="tabular font-semibold">{today.occupancyPct}%</span>
+          </Row>
+        </dl>
+      )}
+    </Card>
+  )
 }
 
 // --- Shared ----------------------------------------------------------------

@@ -116,23 +116,16 @@
     "signIn": "签入",
     "signOut": "签出",
     "signInPrompt": "请签入话机后开始接听。",
-    "extension": "分机",
     "goReady": "示闲",
-    "status": "状态",
-    "presence": "状态",
-    "timeInState": "状态时长",
     "activeCall": "当前通话",
-    "noActiveCall": "暂无通话",
     "contact": "客户",
     "noContact": "尚未识别来电客户。",
-    "idle": "空闲",
     "today": "今日",
     "dialOut": "外呼",
     "dialPlaceholder": "客户号码…",
     "dial": "拨打",
     "dialPlaced": "正在外呼——将先接通您的话机。",
     "keypad": "拨号键盘",
-    "journey": "通话分支",
     "myQueue": "我的队列",
     "waitingCount_other": "{{count}} 人等待",
     "queueEmpty": "所属队列暂无人等待。",
@@ -140,14 +133,15 @@
     "started": "开始于",
     "wrapUp": "话后处理",
     "wrapUpIdle": "通话结束后进入话后处理。",
-    "completeWrapUp": "完成话后处理",
-    "dispositionCategory": "分类",
-    "chooseCategory": "选择分类…",
     "disposition": "小结",
     "chooseDisposition": "选择小结…",
     "wrapUpNote": "话后备注…",
     "openCount_other": "{{count}} 条待办",
-    "legCount_other": "{{count}} 条通话腿"
+    "done": "完成",
+    "callsHandled": "接听通话",
+    "aht": "平均处理时长",
+    "acwAvg": "平均话后处理",
+    "occupancy": "工作占比"
   },
   "supervisor": {
     "agent": "坐席",
@@ -313,8 +307,6 @@
     "boundExtension": "话机",
     "boundExtensionHint": "该坐席签入的分机。一个分机只能属于一个坐席。",
     "noExtension": "未绑定话机",
-    "wrapUpTime": "话后处理",
-    "wrapUpTimeHint": "坐席重新就绪前的话后处理秒数。",
     "autoAnswer": "自动应答",
     "autoAnswerHint": "话机是否无需坐席点击即自动接听队列来电。"
   },
@@ -416,10 +408,6 @@
     "abandonedShort": "放弃",
     "noCalls": "窗口内没有通话。",
     "unknownQueue": "已删除队列"
-  },
-  "partyRoles": {
-    "ORIGINATOR": "主叫",
-    "TARGET": "接听方"
   },
   "device": {
     "reachable": "话机已注册",

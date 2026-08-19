@@ -14,7 +14,7 @@ import i18n from '@/lib/i18n'
 import type { CallSnapshot, Presence, WaitingCall } from '@/lib/api'
 import type { Contact } from '@/lib/contacts'
 import type { CDR } from '@/lib/ledger'
-import type { DispositionCategory } from '@/lib/ledger'
+import type { AgentToday, Disposition } from '@/lib/ledger'
 
 /**
  * Component-test harness for the agent cockpit.
@@ -40,7 +40,9 @@ export interface Backend {
   /** Callers queued in the agent's own queues. */
   waiting: WaitingCall[]
   /** The wrap-up vocabulary the server offers. */
-  dispositions: DispositionCategory[]
+  dispositions: Disposition[]
+  /** The agent's own numbers for the day. */
+  today: AgentToday
   /** The contact book, matched by exact number the way the server does. */
   contacts: Contact[]
   /** The agent's own finished calls. */
@@ -90,23 +92,28 @@ export function waitingFixture(overrides: Partial<WaitingCall> = {}): WaitingCal
   }
 }
 
-/** The vocabulary an installation ships with, trimmed to two codes. */
-export function dispositionsFixture(): DispositionCategory[] {
+/** The vocabulary an installation ships with. */
+export function dispositionsFixture(): Disposition[] {
   return [
-    {
-      code: 'RESOLVED',
-      label: 'Resolved',
-      dispositions: [
-        { code: 'ISSUE_FIXED', label: 'Issue fixed' },
-        { code: 'ANSWERED_QUESTION', label: 'Answered question' },
-      ],
-    },
-    {
-      code: 'FOLLOW_UP',
-      label: 'Follow-up',
-      dispositions: [{ code: 'ESCALATED', label: 'Escalated' }],
-    },
+    { code: 'RESOLVED', label: 'Resolved' },
+    { code: 'FOLLOW_UP_REQUIRED', label: 'Follow-up Required' },
+    { code: 'NO_ANSWER', label: 'No Answer' },
+    { code: 'OTHER', label: 'Other' },
   ]
+}
+
+/** One agent's day, as the Today card receives it. */
+export function todayFixture(overrides: Partial<AgentToday> = {}): AgentToday {
+  return {
+    callsHandled: 23,
+    talkSec: 5980,
+    wrapUpSec: 966,
+    signedInSec: 8900,
+    avgHandleSec: 276,
+    avgWrapUpSec: 42,
+    occupancyPct: 78,
+    ...overrides,
+  }
 }
 
 /** One finished call as the agent's own list receives it. */
@@ -199,6 +206,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     calls: initial.calls ?? [],
     waiting: initial.waiting ?? [],
     dispositions: initial.dispositions ?? [],
+    today: initial.today ?? todayFixture(),
     contacts: initial.contacts ?? [],
     myCDRs: initial.myCDRs ?? [],
     transcript: initial.transcript ?? [],
@@ -231,7 +239,8 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
       if (path.startsWith('/cdrs/mine')) {
         return json({ items: backend.myCDRs, total: backend.myCDRs.length })
       }
-      if (path === '/dispositions') return json({ categories: backend.dispositions })
+      if (path === '/dispositions') return json({ items: backend.dispositions })
+      if (path === '/reports/me') return json(backend.today)
       if (path.startsWith('/contacts')) {
         const number = new URLSearchParams(path.split('?')[1] ?? '').get('phoneNumber')
         const items = number

@@ -39,10 +39,8 @@ it('shows what the agent filed about each call', async () => {
       cdrFixture({
         wrapUp: {
           agentId: '00000000-0000-4000-8000-0000000000a1',
-          dispositionCode: 'ISSUE_FIXED',
-          dispositionLabel: 'Issue fixed',
-          categoryCode: 'RESOLVED',
-          categoryLabel: 'Resolved',
+          dispositionCode: 'RESOLVED',
+          dispositionLabel: 'Resolved',
           note: 'replaced the router',
           createdAt: new Date().toISOString(),
         },
@@ -50,9 +48,7 @@ it('shows what the agent filed about each call', async () => {
     ],
   })
 
-  const row = await screen.findByText('Issue fixed')
-  expect(row).toBeInTheDocument()
-  expect(screen.getByText('Resolved')).toBeInTheDocument()
+  expect(await screen.findByText('Resolved')).toBeInTheDocument()
   expect(screen.getByText('replaced the router')).toBeInTheDocument()
   expect(screen.getByText('support-zh')).toBeInTheDocument()
 })

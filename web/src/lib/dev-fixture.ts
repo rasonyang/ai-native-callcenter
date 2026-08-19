@@ -30,7 +30,7 @@ function presenceFor(state: FixtureState, now: number): Presence {
       availability: 'WRAP_UP',
       extensionNumber: '1005',
       enteredAt,
-      wrapUpEndsAt: new Date(now + 30_000).toISOString(),
+      wrapUpCallId: CALL_ID,
     }
   }
   return {

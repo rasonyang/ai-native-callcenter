@@ -29,7 +29,8 @@ export type WrapUp = components['schemas']['WrapUp']
 
 export type Disposition = components['schemas']['Disposition']
 
-export type DispositionCategory = components['schemas']['DispositionCategory']
+/** One agent's own day, for the cockpit's Today card. */
+export type AgentToday = components['schemas']['AgentToday']
 
 export type Overview = components['schemas']['Overview']
 
@@ -64,8 +65,10 @@ export const ledgerApi = {
   myCDRs: (filter: CDRFilter) =>
     request<{ items: CDR[]; total: number }>(`/cdrs/mine${query({ ...filter })}`),
 
-  dispositions: () =>
-    request<{ categories: DispositionCategory[] }>('/dispositions'),
+  dispositions: () => request<{ items: Disposition[] }>('/dispositions'),
+
+  /** The caller's own numbers for today; the agent is the session. */
+  myDay: () => request<AgentToday>('/reports/me'),
 
   cdr: (callId: string) =>
     request<{ cdr: CDR; transcript: TranscriptLine[]; recordings: RecordingRow[] }>(
@@ -133,6 +136,19 @@ export function useDispositions(enabled = true) {
     enabled,
     staleTime: 5 * 60_000,
     queryFn: ledgerApi.dispositions,
+  })
+}
+
+/**
+ * The agent's own day, refreshed on the events that move it: a finished call
+ * changes what they handled, a presence change changes what the time went on.
+ */
+export function useMyDay(enabled: boolean) {
+  return useQuery({
+    queryKey: [...REPORTS_KEY, 'me'],
+    enabled,
+    staleTime: 10_000,
+    queryFn: ledgerApi.myDay,
   })
 }
 

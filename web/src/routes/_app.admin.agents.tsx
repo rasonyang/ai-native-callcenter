@@ -61,7 +61,7 @@ function AgentsAdmin() {
             size="lg"
             disabled={freeUsers.length === 0}
             title={freeUsers.length === 0 ? t('admin.noFreeUsers') : undefined}
-            onClick={() => setEditing({ wrapUpTimeSec: 30, isAutoAnswer: false })}
+            onClick={() => setEditing({ isAutoAnswer: false })}
           >
             <Plus />
             {t('admin.addAgent')}
@@ -74,7 +74,6 @@ function AgentsAdmin() {
           <Th>{t('supervisor.name')}</Th>
           <Th>{t('admin.callcenterName')}</Th>
           <Th>{t('admin.boundExtension')}</Th>
-          <Th align="right">{t('admin.wrapUpTime')}</Th>
           <Th>{t('admin.autoAnswer')}</Th>
           <Th align="right">{t('supervisor.actions')}</Th>
         </THead>
@@ -92,7 +91,6 @@ function AgentsAdmin() {
                   agentId: agent.agentId,
                   userId: agent.userId,
                   callcenterName: agent.callcenterName,
-                  wrapUpTimeSec: agent.wrapUpTimeSec,
                   isAutoAnswer: agent.isAutoAnswer,
                   defaultExtensionId: agent.defaultExtensionId,
                 })
@@ -152,16 +150,6 @@ function AgentsAdmin() {
               ]}
             />
           </Field>
-          <Field label={t('admin.wrapUpTime')} hint={t('admin.wrapUpTimeHint')}>
-            <Input
-              type="number"
-              min={0}
-              value={editing.wrapUpTimeSec ?? 30}
-              onChange={(e) =>
-                setEditing({ ...editing, wrapUpTimeSec: Number(e.target.value) })
-              }
-            />
-          </Field>
           <Field label={t('admin.autoAnswer')} hint={t('admin.autoAnswerHint')}>
             <Select
               value={editing.isAutoAnswer ? 'yes' : 'no'}
@@ -202,9 +190,6 @@ function AgentRow({
           // rather than left as an empty cell.
           <span style={{ color: 'var(--state-breach)' }}>{t('admin.noExtension')}</span>
         )}
-      </Td>
-      <Td align="right" className="tabular">
-        {agent.wrapUpTimeSec}s
       </Td>
       <Td>{agent.isAutoAnswer ? t('common.yes') : t('common.no')}</Td>
       <Td align="right">
