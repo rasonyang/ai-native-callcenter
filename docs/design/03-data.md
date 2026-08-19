@@ -104,7 +104,13 @@ dispositions(code varchar pk, label text, position int, is_enabled bool)
                                    -- all, and the disposition is required. One flat list — with a
                                    -- handful of words there is nothing to group.
 wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
-         note text, created_at, pk(call_id, agent_id))
+         note text, is_confirmed bool, created_at, pk(call_id, agent_id))
+                                   -- opened by the platform when after-call work begins (default
+                                   -- disposition, empty note, is_confirmed false) and confirmed by
+                                   -- the agent, so a finished call always has one and "nobody
+                                   -- looked at this" is a row rather than an absence. created_at is
+                                   -- when the work began, not when it was last touched: the day's
+                                   -- numbers group by it.
                                    -- its own table, not columns on cdrs: an agent finishes their part
                                    -- of a call before the call ends (a transfer hands the caller on),
                                    -- so the filing regularly precedes the ledger row. The label is

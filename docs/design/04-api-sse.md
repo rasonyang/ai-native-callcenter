@@ -33,9 +33,10 @@ Base `/api/v1`, JSON only. Cursor pagination (`?cursor=&limit=`, response `{item
 |---|---|---|
 | GET `/cdrs/mine` | agent | The caller's own finished calls, same filters as `/cdrs` minus the ones that name other people. Each row carries *their* wrap-up. |
 | GET `/calls/waiting` | agent | Who is queued in the queues this agent staffs, longest wait first, with the queue's `slaThresholdSec` so a breach is the queue's own promise. |
-| POST `/agent/wrap-up` `{dispositionCode, note?}` | agent | Files after-call work for the call presence names (`wrapUpCallId`) and returns the agent to READY. The disposition is **required** (`422 VALIDATION_FAILED` without one); the note is optional. Accepted after the agent has moved on — the last wrapped call stays addressable until the next one starts — and `409 AGENT_NOT_IN_WRAP_UP` when there is no call to file against. |
+| GET `/agent/wrap-up` | agent | The record waiting on this agent — opened when the call ended, with the default disposition — or `204` when there is nothing. This is what a reloaded cockpit reads: the state is the server's, so refreshing is not a way past the confirmation. |
+| POST `/agent/wrap-up` `{dispositionCode?, note?}` | agent | Confirms that record, applying whatever the agent changed, and returns them to READY. **Nothing is required**: the disposition already has a value, and confirming the defaults is a legitimate answer. Accepted after the agent has moved on — the last wrapped call stays addressable until the next one starts — and `409 AGENT_NOT_IN_WRAP_UP` when there is no call to confirm against. |
 | GET `/dispositions` | any | The wrap-up vocabulary: one flat list of enabled codes, in display order. |
-| GET `/reports/me` | agent | The caller's own day — calls handled, average handle time, average after-call work, occupancy — from the ledger and their presence history. Everything else under `/reports` is supervision. |
+| GET `/reports/me` | agent | The caller's own day — calls handled, average handle time, average after-call work, occupancy, and how much of the day's after-call work was confirmed rather than left on its defaults — from the ledger and their presence history. Everything else under `/reports` is supervision. |
 | GET/POST `/contacts`, PUT/DELETE `/contacts/{contactId}` | any | The customer record book, unique by phone number (`?phoneNumber=` is the cockpit's exact-match lookup). |
 
 ## 4. SSE — `GET /api/v1/events`
