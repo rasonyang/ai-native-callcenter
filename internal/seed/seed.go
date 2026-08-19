@@ -33,26 +33,34 @@ var flowFiles embed.FS
 const prngSeed = 20260814
 
 // demoPassword is the documented password of every seeded account and of the
-// SIP extensions behind them — a softphone that cannot register is not a demo.
+// SIP extensions behind them — a softphone that cannot register is not a demo,
+// and neither is an account nobody can sign in to. One password for both, so
+// there is one thing to remember and one thing to change.
+//
 // The dataset only exists where AICC_SEED=demo was set deliberately, and the
 // deployment doc says in as many words that it must not be a public host.
-const demoPassword = "demo1234"
+const demoPassword = "aicc@12345"
 
 // demoFlowFile is the flow both demo numbers answer with. It carries English
 // and Chinese personas, so one flow serves both — the number's language picks
 // the strings (phase1-decisions A1: language never selects a provider).
 const demoFlowFile = "flows/novanet_support.json"
 
-// demoPeople is the cast of the demo. An account with no extension is not an
-// agent and gets no presence: the administrator and the supervisor watch.
+// demoPeople is the cast of the demo: one account per role that a visitor
+// needs, plus the agents who make the wallboard worth looking at. An account
+// with no extension is not an agent and gets no presence — the administrator
+// and the supervisor watch.
+//
+// The usernames are the roles, because the first thing anybody does with this
+// dataset is sign in as each of them in turn (owner directive 2026-08-19).
 var demoPeople = []struct {
-	username, display, role, ext string
+	username, display, role, ext, queue string
 }{
-	{"admin", "Ada Ops", "ADMIN", ""},
-	{"sam", "Sam Reyes", "SUPERVISOR", ""},
-	{"amy", "Amy Zhang", "AGENT", "1000"},
-	{"ben", "Ben Liu", "AGENT", "1001"},
-	{"cara", "Cara Wu", "AGENT", "1002"},
+	{"admin", "Ada Ops", "ADMIN", "", ""},
+	{"supervisor", "Sam Reyes", "SUPERVISOR", "", ""},
+	{"wei", "Wei Chen", "AGENT", "1001", "support-en"},
+	{"amy", "Amy Zhang", "AGENT", "1000", "support-en"},
+	{"ben", "Ben Liu", "AGENT", "1002", "support-zh"},
 }
 
 // demoNumbers are the DIDs the demo answers on. Both run the same flow in
@@ -164,7 +172,7 @@ type QueueRef struct {
 // ensureEntities creates the demo team and queues where they do not already
 // exist, and returns whatever agents and queues the database ends up with.
 func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]uuid.UUID, []QueueRef, error) {
-	demoHash, err := auth.HashPassword("demo1234")
+	demoHash, err := auth.HashPassword(demoPassword)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -174,10 +182,18 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 	// role-gated, so a demo with agents only hides most of the screens.
 	for _, p := range demoPeople {
 		userID := uuid.New()
+		// The password and the role are *reset* on every seed, which is the
+		// one place this seeder overrules existing data (owner directive
+		// 2026-08-19). A demo account whose password drifted is a demo
+		// nobody can open, and "run the seed" is the answer an operator
+		// should get. The display name is left alone: it is theirs.
 		if _, err := st.Pool.Exec(ctx, `
 			INSERT INTO users (id, username, password_hash, display_name, role)
 			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (username) DO NOTHING`,
+			ON CONFLICT (username) DO UPDATE
+			SET password_hash = excluded.password_hash,
+			    role          = excluded.role,
+			    updated_at    = now()`,
 			userID, p.username, demoHash, p.display, p.role); err != nil {
 			return nil, nil, err
 		}
@@ -228,6 +244,29 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 			VALUES ($1, $2, $3, $4, 20)
 			ON CONFLICT (name) DO NOTHING`,
 			uuid.New(), q.name, q.ext, q.display); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	// Staff the queues. An agent with a phone and no tier is Available, in no
+	// queue, and offered nothing: the caller waits out the timeout and
+	// abandons while somebody sits ready. Nothing in the demo said which
+	// queue anybody worked, so nothing routed — the other half of "the seed
+	// leaves an agent who cannot take a call".
+	//
+	// The switch learns of it when the agent signs in (presence reconciles
+	// tiers), so this is a database fact only.
+	for i, p := range demoPeople {
+		if p.queue == "" {
+			continue
+		}
+		if _, err := st.Pool.Exec(ctx, `
+			INSERT INTO queue_agents (queue_id, agent_id, level, position)
+			SELECT q.id, a.id, 1, $3 FROM queues q, agents a
+			JOIN users u ON u.id = a.user_id
+			WHERE q.name = $1 AND u.username = $2
+			ON CONFLICT (queue_id, agent_id) DO NOTHING`,
+			p.queue, p.username, i+1); err != nil {
 			return nil, nil, err
 		}
 	}

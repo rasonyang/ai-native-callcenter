@@ -21,7 +21,7 @@ cd ai-native-callcenter/deploy/demo
 docker-compose up -d
 ```
 
-打开 <http://127.0.0.1:8080>，用 `admin` / `demo1234` 登录。数据库、交换机和应用会
+打开 <http://127.0.0.1:8080>，用 `admin` / `aicc@12345` 登录。数据库、交换机和应用会
 一起启动，并预置一支坐席团队、两个队列、一条已发布的中英双语流程（挂在两个号码
 上），以及一周的历史数据，这样看板不会是空的。在 `.env` 里填上 `OPENAI_API_KEY`，
 它就能真正接听电话了。[关于演示环境](deploy/demo/README.md)

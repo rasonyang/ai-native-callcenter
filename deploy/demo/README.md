@@ -9,7 +9,7 @@ cp .env.example .env        # optional; every default is already the one used
 docker-compose up -d        # builds the application image on first run
 ```
 
-Then open <http://127.0.0.1:8080> and sign in as `admin` / `demo1234`.
+Then open <http://127.0.0.1:8080> and sign in as `admin` / `aicc@12345`.
 
 The first boot builds the frontend and the Go binary, which takes a few
 minutes. Afterwards the stack starts in seconds.
@@ -29,13 +29,17 @@ inside the compose network, so the demo needs nothing from the host but Docker.
 
 ## What is seeded
 
-`AICC_SEED=demo` fills an empty database (design 03 §6). Existing data always
-wins: a second boot changes nothing.
+`AICC_SEED=demo` fills an empty database (design 03 §6). Existing data wins
+everywhere but one: the seeded accounts have their password and role **reset**
+on every boot, so "run the seed" is always the answer to "I cannot sign in".
+Everything else — queues, numbers, an agent's phone, their staffing, the
+history — is left exactly as it is.
 
 | | |
 |---|---|
-| Accounts | `admin` (administrator), `sam` (supervisor), `amy` / `ben` / `cara` (agents) — password `demo1234` |
-| Extensions | 1000, 1001, 1002, SIP password `demo1234` |
+| Accounts | `admin` (administrator), `supervisor` (supervisor), `wei` / `amy` / `ben` (agents) — password `aicc@12345` |
+| Extensions | `wei` 1001, `amy` 1000, `ben` 1002 — SIP password `aicc@12345` |
+| Staffing | `wei` and `amy` on `support-en`, `ben` on `support-zh`, so a queued call actually reaches somebody |
 | Queues | `support-en` on 7001, `support-zh` on 7002 |
 | Flow | `novanet_support`, published, bilingual |
 | Numbers | 95001 answers in English, 95002 in Chinese; both fall back to the queue of their language |
@@ -75,7 +79,7 @@ From a real softphone, which needs media to reach off this machine:
 1. Set `FS_EXTERNAL_IP` in `.env` to the host's LAN address.
 2. Uncomment the RTP port range in `docker-compose.yml`.
 3. Set `SIP_BIND=0.0.0.0` if the phone is on another machine.
-4. Register extension 1000 with password `demo1234` against the host, then
+4. Register extension 1000 with password `aicc@12345` against the host, then
    dial 95001.
 
 ## Reaching into it
