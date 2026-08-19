@@ -8,6 +8,7 @@ import {
   CALL_ID,
   CALLER,
   callFixture,
+  cdrFixture,
   contactFixture,
   dispositionsFixture,
   todayFixture,
@@ -362,6 +363,108 @@ describe('after-call work', () => {
     expect(await screen.findByText(/wrap-up starts when a call ends/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^done$/i })).toBeNull()
   })
+
+  // The note is written while the agent is still talking — that is when they
+  // know what to write — and it is the same note when the call ends, because
+  // it is about the same conversation.
+  it('takes the note during the call and keeps it when the call ends', async () => {
+    const { api, user, refetch } = await renderCockpit({
+      ...onCall,
+      dispositions: dispositionsFixture(),
+    })
+
+    const note = await screen.findByLabelText(/wrap-up note/i)
+    await user.type(note, 'promised to email the invoice')
+    // The outcome belongs to a finished call, so it is not offered yet.
+    expect(screen.getByLabelText(/^disposition$/i)).toBeDisabled()
+    expect(screen.getByRole('button', { name: /^done$/i })).toBeDisabled()
+
+    // The caller hangs up. The two facts do not land together on a live
+    // system: for about a second the call is gone and presence has not yet
+    // said "after-call work", and the note must survive that gap.
+    api.calls = []
+    await refetch()
+    expect(screen.getByLabelText(/wrap-up note/i)).toHaveValue('promised to email the invoice')
+
+    api.presence = inWrapUp()
+    await refetch()
+
+    await waitFor(() => expect(screen.getByLabelText(/^disposition$/i)).toBeEnabled())
+    expect(screen.getByLabelText(/wrap-up note/i)).toHaveValue('promised to email the invoice')
+
+    await user.selectOptions(screen.getByLabelText(/^disposition$/i), 'RESOLVED')
+    await user.click(screen.getByRole('button', { name: /^done$/i }))
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({
+          method: 'POST',
+          path: '/agent/wrap-up',
+          body: { dispositionCode: 'RESOLVED', note: 'promised to email the invoice' },
+        }),
+      ),
+    )
+  })
+
+  // An agent can be on a new call while the last one is still unfiled: a
+  // direct call reaches them in after-call work. Filing then would put this
+  // conversation's note on the previous conversation.
+  it('will not file the previous call while a new one is in progress', async () => {
+    await renderCockpit({
+      calls: [callFixture('TALKING')],
+      presence: presenceFixture({
+        availability: 'ON_CALL',
+        wrapUpCallId: '00000000-0000-4000-8000-0000000000c9',
+      }),
+      dispositions: dispositionsFixture(),
+    })
+
+    // The snapshots do not land together: presence knows about the unfiled
+    // call before /calls/mine reports the live one.
+    await waitFor(() => expect(screen.getByLabelText(/^disposition$/i)).toBeDisabled())
+    expect(screen.getByRole('button', { name: /^done$/i })).toBeDisabled()
+  })
+
+  // The filing is read back at once. Waiting for the ledger would blank the
+  // card for a moment, which reads as work lost.
+  it('shows what was just filed without waiting for the ledger', async () => {
+    const { user } = await renderCockpit({
+      presence: inWrapUp(),
+      dispositions: dispositionsFixture(),
+      myCDRs: [],
+    })
+
+    await user.selectOptions(await screen.findByLabelText(/^disposition$/i), 'NO_ANSWER')
+    await user.type(screen.getByLabelText(/wrap-up note/i), 'nobody there')
+    await user.click(screen.getByRole('button', { name: /^done$/i }))
+
+    expect(await screen.findByText('No Answer')).toBeInTheDocument()
+    expect(screen.getByText('nobody there')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/wrap-up note/i)).toBeNull()
+  })
+
+  // Finished work is a record, not a form: what was filed is shown back and
+  // the next call gives the agent a fresh sheet.
+  it('shows the last filing read-only once the work is done', async () => {
+    await renderCockpit({
+      presence: presenceFixture({ availability: 'READY' }),
+      myCDRs: [
+        cdrFixture({
+          wrapUp: {
+            agentId: '00000000-0000-4000-8000-0000000000a1',
+            dispositionCode: 'FOLLOW_UP_REQUIRED',
+            dispositionLabel: 'Follow-up Required',
+            note: 'calling them back tomorrow',
+            createdAt: new Date().toISOString(),
+          },
+        }),
+      ],
+    })
+
+    expect(await screen.findByText('Follow-up Required')).toBeInTheDocument()
+    expect(screen.getByText('calling them back tomorrow')).toBeInTheDocument()
+    expect(screen.queryByLabelText(/wrap-up note/i)).toBeNull()
+    expect(screen.queryByRole('button', { name: /^done$/i })).toBeNull()
+  })
 })
 
 /**
@@ -417,6 +520,31 @@ describe('my queue', () => {
  * greeting an unknown number.
  */
 describe('the caller card', () => {
+  // The customer stays on the card after they hang up: the agent is still
+  // working that call, and a card that emptied itself at the hangup would take
+  // the person away mid-sentence.
+  it('keeps the caller after the call ends, with when they were last spoken to', async () => {
+    const contact = contactFixture({
+      phoneNumber: '+8613700990011',
+      lastCallAt: new Date('2026-07-30T09:12:00Z').toISOString(),
+    })
+    await renderCockpit({
+      calls: [],
+      contacts: [contact],
+      myCDRs: [cdrFixture({ fromNumber: '+8613700990011' })],
+    })
+
+    expect(await screen.findByText('Zhang Wei')).toBeInTheDocument()
+    expect(screen.getByText(/last contact/i)).toBeInTheDocument()
+    expect(screen.getByText(/jul 30, 2026/i)).toBeInTheDocument()
+  })
+
+  it('says so when there is nobody to show at all', async () => {
+    await renderCockpit({ calls: [], contacts: [], myCDRs: [] })
+    expect(await screen.findByText(/no caller identified yet/i)).toBeInTheDocument()
+  })
+
+
   it('shows the contact behind the number', async () => {
     await renderCockpit({ ...onCall, contacts: [contactFixture()] })
 

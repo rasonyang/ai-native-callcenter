@@ -1,6 +1,6 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
@@ -22,7 +22,9 @@ import {
 } from '@/lib/agent'
 import { callApi, type CallSnapshot, type WaitingCall } from '@/lib/api'
 import { useContactFor } from '@/lib/contacts'
-import { useCallbacks, useDispositions, useMyDay } from '@/lib/ledger'
+import {
+  useCallbacks, useDispositions, useMyCDRs, useMyDay, type WrapUp,
+} from '@/lib/ledger'
 import { useStreamStatus } from '@/lib/use-event-stream'
 import { cn, formatDuration } from '@/lib/utils'
 
@@ -45,6 +47,7 @@ function AgentCockpit() {
   const signedIn = Boolean(presence && presence.state !== 'LOGGED_OUT')
   const { data: calls } = useMyCalls(signedIn)
   const call = calls?.items?.[0]
+  const lastCall = useLastCall(signedIn, call)
 
   return (
     <div className="flex h-full min-h-0 gap-4">
@@ -55,7 +58,7 @@ function AgentCockpit() {
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col gap-4">
-        <CallerCard call={call} />
+        <CallerCard call={call} lastCall={lastCall} />
         <LiveTranscriptBoundary
           callId={call?.callId}
           myAgentId={call?.parties.find((p) => p.agentId)?.agentId}
@@ -65,11 +68,57 @@ function AgentCockpit() {
       </div>
 
       <div className="flex w-[280px] shrink-0 flex-col gap-4">
-        <WrapUpCard />
+        <WrapUpCard call={call} lastCall={lastCall} />
         <TodayCard />
       </div>
     </div>
   )
+}
+
+/**
+ * The call this cockpit is about when no call is live: the one that just
+ * ended. The agent is still working it — reading the customer back, writing
+ * the note — and a screen that emptied itself the moment the caller hung up
+ * would take that away mid-sentence.
+ *
+ * Two sources, because neither alone covers it. The number is remembered here
+ * the instant the live call disappears, so nothing flickers in the second
+ * before the ledger row exists; the ledger is what survives a reload, and what
+ * carries the disposition already filed.
+ */
+function useLastCall(signedIn: boolean, call?: CallSnapshot): LastCall {
+  const { data } = useMyCDRs({ limit: 1 })
+  const [remembered, setRemembered] = useState<{ callId: string; number: string }>()
+
+  const liveNumber = call
+    ? otherParty(call, call.parties.find((p) => p.agentId)?.agentId)?.number
+    : undefined
+
+  useEffect(() => {
+    if (call && liveNumber) setRemembered({ callId: call.callId, number: liveNumber })
+  }, [call, liveNumber])
+
+  if (!signedIn) return {}
+
+  const finished = data?.items?.[0]
+  // The remembered call wins only while it is the newer of the two: once the
+  // ledger has caught up it knows more — the wrap-up filed against it.
+  if (remembered && remembered.callId !== finished?.callId) {
+    return { callId: remembered.callId, number: remembered.number }
+  }
+  if (!finished) return {}
+  return {
+    callId: finished.callId,
+    number: finished.callType === 'OUTBOUND' ? finished.toNumber : finished.fromNumber,
+    wrapUp: finished.wrapUp,
+  }
+}
+
+/** The call the cockpit falls back to, and whatever is known about it. */
+interface LastCall {
+  callId?: string
+  number?: string
+  wrapUp?: WrapUp
 }
 
 // --- Left column -----------------------------------------------------------
@@ -479,12 +528,16 @@ function CallbacksCard() {
  * on the card, and an agent greeting a customer by the wrong name is worse
  * than an agent greeting an unknown number.
  */
-function CallerCard({ call }: { call?: CallSnapshot }) {
-  const { t } = useTranslation()
+function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCall }) {
+  const { t, i18n } = useTranslation()
   const other = call ? otherParty(call, call.parties.find((p) => p.agentId)?.agentId) : undefined
-  const { contact } = useContactFor(other?.number)
+  // The caller stays on the card after they hang up: the agent is still
+  // working that call — writing it up, calling the customer back — and a card
+  // that emptied itself at the hangup would take the person away mid-sentence.
+  const number = other?.number ?? lastCall.number
+  const { contact } = useContactFor(number)
 
-  if (!call) {
+  if (!call && !number) {
     return (
       <Card title={t('agent.contact')}>
         <Empty text={t('agent.noContact')} />
@@ -492,11 +545,15 @@ function CallerCard({ call }: { call?: CallSnapshot }) {
     )
   }
 
-  const userData = Object.entries(call.userData ?? {})
+  const userData = Object.entries(call?.userData ?? {})
+  const lastContactAt = contact?.lastCallAt
+  const dateFormat = new Intl.DateTimeFormat(i18n.language, {
+    year: 'numeric', month: 'short', day: 'numeric',
+  })
   // The heading carries the name where there is one, so everything else the
   // agent might read out loud lines up beneath it.
   const subline = [
-    contact ? other?.number : undefined,
+    contact ? number : undefined,
     contact?.company || undefined,
     other?.otherNumber ? t('agent.dialled', { number: other.otherNumber }) : undefined,
   ].filter((part): part is string => Boolean(part))
@@ -507,10 +564,10 @@ function CallerCard({ call }: { call?: CallSnapshot }) {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className={cn('text-lg font-semibold', !contact && 'tabular')}>
-              {contact?.name || other?.number || t('call.unknownNumber')}
+              {contact?.name || number || t('call.unknownNumber')}
             </span>
             {contact?.tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}
-            <CallBadges call={call} />
+            {call && <CallBadges call={call} />}
           </div>
           {subline.length > 0 && (
             <div className="tabular mt-0.5 text-sm text-muted-foreground">
@@ -518,10 +575,20 @@ function CallerCard({ call }: { call?: CallSnapshot }) {
             </div>
           )}
         </div>
-        <div className="shrink-0 text-right">
-          <div className="text-xs text-muted-foreground">{t('agent.started')}</div>
-          <div className="tabular text-sm">{formatClock(call.createdAt)}</div>
-        </div>
+        {/* On a call the useful clock is when it started; afterwards it is
+            when this customer was last spoken to, which is the number an
+            agent reads before ringing them back. */}
+        {call ? (
+          <div className="shrink-0 text-right">
+            <div className="text-xs text-muted-foreground">{t('agent.started')}</div>
+            <div className="tabular text-sm">{formatClock(call.createdAt)}</div>
+          </div>
+        ) : lastContactAt ? (
+          <div className="shrink-0 text-right">
+            <div className="text-xs text-muted-foreground">{t('agent.lastContact')}</div>
+            <div className="tabular text-sm">{dateFormat.format(new Date(lastContactAt))}</div>
+          </div>
+        ) : null}
       </div>
 
       {contact?.notes && (
@@ -559,39 +626,77 @@ function CallBadges({ call }: { call: CallSnapshot }) {
 /**
  * After-call work: what the call was about, and the button that ends it.
  *
- * It begins when the call ends and lasts until the agent files it — the timer
- * counts up, because nothing is going to take the decision off them. While it
- * runs the switch keeps them out of routing, so the next caller does not reach
- * somebody still writing up the last one.
+ * The note follows the call rather than the state. An agent types it while
+ * they are still talking — that is when they know what to write — and it is
+ * the same note when the call ends, because it is about the same conversation.
+ * The disposition waits for the hangup: it is the outcome, and a call in
+ * progress does not have one yet.
  *
- * The disposition is required and the call being filed against is the
- * platform's answer, never the browser's: a client that named a call could
- * write a disposition onto anybody's.
+ * After Done the card shows what was filed, read-only. The work is finished
+ * and the record is the record; the next call gives the agent a fresh sheet.
+ *
+ * While after-call work runs the switch keeps the agent out of routing, the
+ * timer counts up — nothing is going to take the decision off them — and the
+ * call being filed against is the platform's answer, never the browser's.
  */
-function WrapUpCard() {
+function WrapUpCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCall }) {
   const { t } = useTranslation()
   const { data: presence } = usePresence(true)
   const { wrapUp } = usePresenceActions()
   const { data: vocabulary } = useDispositions()
-  const [dispositionCode, setDispositionCode] = useState('')
-  const [note, setNote] = useState('')
+  const [draft, setDraft] = useState<{ callId?: string; note: string; dispositionCode: string }>({
+    note: '',
+    dispositionCode: '',
+  })
+  const [justFiled, setJustFiled] = useState<{ dispositionLabel: string; note: string }>()
 
   const inWrapUp = presence?.availability === 'WRAP_UP'
   const elapsedSec = useElapsedSec(presence?.enteredAt)
   const dispositions = vocabulary?.items ?? []
 
-  // The form is offered while there is still a call to file against. The
-  // server is the judge of that and answers a conflict when there is not.
-  const canFile = inWrapUp || Boolean(presence?.wrapUpCallId)
+  // Which call the form is for: the one in progress, then the one still open
+  // for filing. The server is the judge of the second and answers a conflict
+  // when there is none.
+  const activeCallID = call?.callId ?? presence?.wrapUpCallId
+  // Fileable means *this* sheet's call is finished, not that some call is.
+  // An agent can be on a new call while the last one is still unfiled — a
+  // direct call reaches them in after-call work — and filing then would put
+  // this conversation's note on the previous conversation.
+  const isFileable = !call && Boolean(presence?.wrapUpCallId)
+
+  // The sheet stays in front of the agent until they file it. Between the
+  // caller hanging up and presence saying "after-call work" there is a moment
+  // where the platform names no call at all — a live gap of about a second —
+  // and a form that emptied itself in it would take the note the agent was
+  // halfway through writing.
+  const isDraftOpen = Boolean(draft.callId) && !justFiled
+  const showForm = Boolean(activeCallID) || isDraftOpen
+
+  // What was filed for the last call: this session's own answer first, then
+  // the ledger's, which is what survives a reload.
+  const filed = justFiled ?? (showForm ? undefined : lastCall.wrapUp)
+
+  // A new call is a new sheet: a note written about the last customer must
+  // never ride along into the next conversation.
+  useEffect(() => {
+    if (!activeCallID) return
+    setDraft((current) => {
+      if (current.callId === activeCallID) return current
+      setJustFiled(undefined)
+      return { callId: activeCallID, note: '', dispositionCode: '' }
+    })
+  }, [activeCallID])
 
   const complete = () => {
+    const note = draft.note.trim()
+    const disposition = dispositions.find((d) => d.code === draft.dispositionCode)
     wrapUp.mutate(
-      { dispositionCode, note: note.trim() || undefined },
+      { dispositionCode: draft.dispositionCode, note: note || undefined },
       {
-        onSuccess: () => {
-          setDispositionCode('')
-          setNote('')
-        },
+        // Read the filing back at once rather than waiting for the ledger:
+        // the round trip through the CDR takes a moment, and a card that
+        // blanked in between would look like the work was lost.
+        onSuccess: () => setJustFiled({ dispositionLabel: disposition?.label ?? '', note }),
       },
     )
   }
@@ -608,14 +713,19 @@ function WrapUpCard() {
         ) : undefined
       }
     >
-      {!canFile ? (
+      {filed ? (
+        <FiledWrapUp wrapUp={filed} />
+      ) : !showForm ? (
         <Empty text={t('agent.wrapUpIdle')} />
       ) : (
         <div className="flex flex-col gap-2">
           <Select
             ariaLabel={t('agent.disposition')}
-            value={dispositionCode}
-            onChange={setDispositionCode}
+            value={draft.dispositionCode}
+            // The outcome belongs to a finished call. Offering it mid-call
+            // would be asking how something ended while it is still going.
+            disabled={!isFileable}
+            onChange={(dispositionCode) => setDraft((current) => ({ ...current, dispositionCode }))}
             options={[
               { value: '', label: t('agent.chooseDisposition') },
               ...dispositions.map((d) => ({ value: d.code, label: d.label })),
@@ -625,19 +735,23 @@ function WrapUpCard() {
             className="min-h-16 w-full rounded-md border bg-card p-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
             placeholder={t('agent.wrapUpNote')}
             aria-label={t('agent.wrapUpNote')}
-            value={note}
+            value={draft.note}
             maxLength={4000}
-            onChange={(event) => setNote(event.target.value)}
+            onChange={(event) => {
+              const note = event.target.value
+              setDraft((current) => ({ ...current, note }))
+            }}
           />
           {/* Nothing chosen means nothing to press: the disposition is what
               makes the call reportable, and the server refuses without one. */}
           <Button
             className="w-full"
-            disabled={!dispositionCode || wrapUp.isPending}
+            disabled={!isFileable || !draft.dispositionCode || wrapUp.isPending}
             onClick={complete}
           >
             {t('agent.done')}
           </Button>
+          {!isFileable && <p className="text-xs text-muted-foreground">{t('agent.wrapUpDuringCall')}</p>}
           {wrapUp.isError && (
             <p className="text-xs" style={{ color: 'var(--state-breach)' }}>
               {describeError(wrapUp.error, t)}
@@ -646,6 +760,21 @@ function WrapUpCard() {
         </div>
       )}
     </Card>
+  )
+}
+
+/** What the agent filed for the last call. Finished work, so it is read. */
+function FiledWrapUp({ wrapUp }: { wrapUp: { dispositionLabel: string; note: string } }) {
+  const { t } = useTranslation()
+  return (
+    <div className="flex flex-col gap-2">
+      <Row label={t('agent.disposition')}>
+        <Badge>{wrapUp.dispositionLabel}</Badge>
+      </Row>
+      <p className="text-sm text-muted-foreground">
+        {wrapUp.note || t('agent.wrapUpNoNote')}
+      </p>
+    </div>
   )
 }
 

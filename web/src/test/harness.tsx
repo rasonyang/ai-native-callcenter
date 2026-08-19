@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import {
   Outlet, RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter,
 } from '@tanstack/react-router'
-import { render, type RenderResult } from '@testing-library/react'
+import { act, render, type RenderResult } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { I18nextProvider } from 'react-i18next'
 
@@ -301,6 +301,13 @@ export function renderPage(Component: () => ReactElement | null) {
 
 export function renderWithProviders(ui: ReactElement): RenderResult & {
   user: ReturnType<typeof userEvent.setup>
+  /**
+   * Refetches every query, which is what the event stream does in production
+   * when the switch reports a change (`applyToCache`). A test that moves the
+   * backend on — a call ending, presence changing — asks for this rather than
+   * waiting for a poll that does not exist.
+   */
+  refetch: () => Promise<void>
 } {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -310,5 +317,9 @@ export function renderWithProviders(ui: ReactElement): RenderResult & {
       <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>
     </I18nextProvider>,
   )
-  return { ...result, user: userEvent.setup() }
+  return {
+    ...result,
+    user: userEvent.setup(),
+    refetch: () => act(async () => void (await queryClient.invalidateQueries())),
+  }
 }

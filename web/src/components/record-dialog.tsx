@@ -102,16 +102,22 @@ export function Select({
   onChange,
   options,
   ariaLabel,
+  disabled,
+  id,
 }: {
   value: string
   onChange: (next: string) => void
   options: Array<{ value: string; label: string }>
   ariaLabel?: string
+  disabled?: boolean
+  id?: string
 }) {
   return (
     <select
+      id={id}
       aria-label={ariaLabel}
-      className="h-8 w-full rounded-md border bg-card px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30"
+      disabled={disabled}
+      className="h-8 w-full rounded-md border bg-card px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 disabled:cursor-not-allowed disabled:opacity-50"
       value={value}
       onChange={(event) => onChange(event.target.value)}
     >

@@ -133,15 +133,18 @@
     "started": "开始于",
     "wrapUp": "话后处理",
     "wrapUpIdle": "通话结束后进入话后处理。",
-    "disposition": "小结",
-    "chooseDisposition": "选择小结…",
-    "wrapUpNote": "话后备注…",
+    "disposition": "处理结果",
+    "chooseDisposition": "选择处理结果…",
+    "wrapUpNote": "小结…",
     "openCount_other": "{{count}} 条待办",
     "done": "完成",
     "callsHandled": "接听通话",
     "aht": "平均处理时长",
     "acwAvg": "平均话后处理",
-    "occupancy": "工作占比"
+    "occupancy": "工作占比",
+    "lastContact": "最近联系",
+    "wrapUpDuringCall": "现在就可以写小结；处理结果在通话结束后选择。",
+    "wrapUpNoNote": "没有小结。"
   },
   "supervisor": {
     "agent": "坐席",
@@ -440,8 +443,8 @@
     "hint": "您处理过的通话，最新在前。",
     "customer": "客户",
     "queue": "队列",
-    "disposition": "小结",
-    "note": "备注",
+    "disposition": "处理结果",
+    "note": "小结",
     "talkTime": "通话时长",
     "notFiled": "未填写",
     "empty": "暂无通话，处理完的通话会出现在这里。"

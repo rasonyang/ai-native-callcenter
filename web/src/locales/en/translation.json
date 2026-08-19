@@ -143,7 +143,10 @@
     "callsHandled": "Calls handled",
     "aht": "AHT",
     "acwAvg": "ACW avg",
-    "occupancy": "Occupancy"
+    "occupancy": "Occupancy",
+    "lastContact": "Last contact",
+    "wrapUpDuringCall": "You can start the note now; the disposition waits for the call to end.",
+    "wrapUpNoNote": "No note."
   },
   "supervisor": {
     "agent": "Agent",
