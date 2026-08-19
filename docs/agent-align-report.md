@@ -209,13 +209,13 @@ them. That is bookkeeping, not a blocker.
 
 **(d) Reference UI with no data source here.**
 
-| Element | What it would need | Recommendation |
-|---|---|---|
-| "My queue" (waiting callers + live wait, red past 120s) | `GET /calls` is SUPERVISOR-only; `QUEUE_COUNT` / `QUEUE_JOINED` are declared in the contract but never published by the platform | Publish `QUEUE_COUNT` from `telephony`, then add an agent-scoped queue view. Highest value of the four. |
-| Live transcript | `BOT_TRANSCRIPT` is declared but never published; and it would only exist for bot calls, not agent calls | Publish it for bot legs and show the transcript on a bot-to-agent transfer — that is the AI-native differentiator. |
-| Interaction history / Orders / Notes | no contact, order or note store exists; this is a CRM, not a call centre, concern | Do not build. Leave the centre column to call context, or integrate an external CRM later. |
-| Disposition codes on wrap-up | no disposition vocabulary or endpoint | Worth adding (`POST /agent/wrap-up` with a code) — it is what makes the CDR useful for reporting. |
-| Agent "Today" stats | `GET /reports/*` are SUPERVISOR-scoped | Add an agent-scoped `GET /reports/me`. Low effort, good for morale. |
+| Element | What it would need | Recommendation | Outcome |
+|---|---|---|---|
+| "My queue" (waiting callers + live wait, red past 120s) | `GET /calls` is SUPERVISOR-only; `QUEUE_COUNT` / `QUEUE_JOINED` are declared in the contract but never published by the platform | Publish `QUEUE_COUNT` from `telephony`, then add an agent-scoped queue view. Highest value of the four. | **built 2026-08-19** — `GET /calls/waiting` + the three `QUEUE_*` events, queue-scoped. The red threshold is the queue's own `slaThresholdSec`, not the reference's hardcoded 120s |
+| Live transcript | `BOT_TRANSCRIPT` is declared but never published; and it would only exist for bot calls, not agent calls | Publish it for bot legs and show the transcript on a bot-to-agent transfer — that is the AI-native differentiator. | **built** — one transcript per conversation across both phases (`docs/design/08-transcription.md`) |
+| Interaction history / Orders / Notes | no contact, order or note store exists; this is a CRM, not a call centre, concern | Do not build. Leave the centre column to call context, or integrate an external CRM later. | **not built, and the recommendation stands.** A contact record *was* added — number, name, company, tags, notes, last call — because "who is calling" is call context; orders and interaction tabs are not |
+| Disposition codes on wrap-up | no disposition vocabulary or endpoint | Worth adding (`POST /agent/wrap-up` with a code) — it is what makes the CDR useful for reporting. | **built 2026-08-19** — a seeded vocabulary, `POST /agent/wrap-up`, and the filing on the CDR |
+| Agent "Today" stats | `GET /reports/*` are SUPERVISOR-scoped | Add an agent-scoped `GET /reports/me`. Low effort, good for morale. | still open |
 
 **(e) Shared-file changes — pinned by a guard, verified per page as touched.**
 

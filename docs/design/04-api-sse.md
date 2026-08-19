@@ -27,6 +27,16 @@ Base `/api/v1`, JSON only. Cursor pagination (`?cursor=&limit=`, response `{item
 **Reports**: GET `/reports/queues?from&to`, `/reports/agents?…`, `/reports/dispositions?…` (aggregates from `cdrs`+`queue_events`+`agent_state_logs`) — supervisor.
 **Ops**: GET `/wallboard` (KPI snapshot) — supervisor; GET `/system/health` (ESL link, PG, provider preflights, registration count) — admin; GET `/audit` — admin. `/healthz` `/readyz` `/metrics` (unauth, separate listener).
 
+**Agent workspace (added 2026-08-19)** — the four endpoints behind My Calls, Contacts, My queue and after-call work. Every one of them answers about *the caller*, resolved from the session: none takes an agent id, because an endpoint that did would hand any agent anybody's calls, queues or dispositions.
+
+| Method · path | Min role | What it answers |
+|---|---|---|
+| GET `/cdrs/mine` | agent | The caller's own finished calls, same filters as `/cdrs` minus the ones that name other people. Each row carries *their* wrap-up. |
+| GET `/calls/waiting` | agent | Who is queued in the queues this agent staffs, longest wait first, with the queue's `slaThresholdSec` so a breach is the queue's own promise. |
+| POST `/agent/wrap-up` `{dispositionCode?, note?}` | agent | Files after-call work for the call presence names (`wrapUpCallId`) and returns the agent to READY. Accepted after the window has expired — the last wrapped call stays addressable until the next one starts — and `409 AGENT_NOT_IN_WRAP_UP` when there is no call to file against. |
+| GET `/dispositions` | any | The wrap-up vocabulary, categories with their enabled codes, in display order. |
+| GET/POST `/contacts`, PUT/DELETE `/contacts/{contactId}` | any | The customer record book, unique by phone number (`?phoneNumber=` is the cockpit's exact-match lookup). |
+
 ## 4. SSE — `GET /api/v1/events`
 
 One stream per browser session. Envelope (cti-server lineage, renamed per convention):
@@ -54,7 +64,7 @@ Mechanics: 15s `: hb` heartbeat; `Last-Event-ID` resume from the in-memory ring 
 | `PARTY_DIALING / PARTY_RINGING / PARTY_ESTABLISHED / PARTY_HELD / PARTY_RETRIEVED / PARTY_RELEASED` (cause, party role) | party lifecycle — one event per leg (a bridged call emits e.g. two `PARTY_ESTABLISHED`); `PARTY_RINGING` to an agent carries the full screen-pop payload (ANI/DNIS, queue, userData) — zero follow-up GETs |
 | `PARTY_CHANGED` (replacedPartyId, to, reason: `TRANSFER`\|`NO_ANSWER` — a new party replaces an old one within the same call, `callId` stable) · `PARTY_DTMF` · `CALL_USER_DATA` (full map, call-scoped) | in-call |
 | `CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED` · `CALL_CDR` (full CDR) | facts |
-| `QUEUE_JOINED / QUEUE_LEFT` (cause) · `QUEUE_COUNT` (waiting, longestWaitAt) · `QUEUE_AGENT_OFFERED` | mod_callcenter events normalized |
+| `QUEUE_JOINED / QUEUE_LEFT` (cause) · `QUEUE_COUNT` (waiting, longestWaitAt) · `QUEUE_AGENT_OFFERED` | mod_callcenter events normalized. **Published since 2026-08-19** (the first three were declared and never emitted): scoped to the queue, so the agents staffing it and supervision receive them and nobody else does. A caller stops being "waiting" at the *bridge*, not at `member-queue-end` — the queue only announces that once the conversation is over — and a hangup removes them whether or not the queue ever says so. |
 | `AGENT_LOGGED_IN / AGENT_LOGGED_OUT / AGENT_READY / AGENT_NOT_READY` (reason) · `AGENT_AVAILABILITY` (derived word) | agent FSM |
 | `DEVICE_REGISTERED / DEVICE_UNREGISTERED / DEVICE_IN_SERVICE` (isInService, reason) | sofia + OPTIONS ping |
 | `BOT_SESSION_STARTED` (flowSlug, provider, model) · `BOT_TRANSCRIPT` (role, kind, isFinal, text/tool) · `BOT_INTERRUPTED` · `BOT_SESSION_ENDED` (reason, usage) | AI leg; finals mirror `transcripts` rows; agents receive them live during/after transfer (cockpit transcript view) |

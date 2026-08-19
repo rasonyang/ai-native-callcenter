@@ -6,7 +6,14 @@ React 19 + TypeScript, Vite, TanStack Router (file-based, code-split) + TanStack
 
 ## 2. Routes (mirror ui-test; deltas noted)
 
-`/login` (new — ui-test lacked auth; role comes from the session, the role `<Select>` is dropped). Agent: `/agent` cockpit (3-column, built to ui-test's spec incl. conditional RingingBanner/Transcript/WrapUp cards), `/agent/calls` (own CDR list — was placeholder), `/agent/callbacks` (new, replaces voicemail placeholder). Supervisor: `/supervisor` wallboard, `/supervisor/agents`, `/supervisor/queues` (staffing drawer), `/supervisor/quality`. Admin: `/admin` overview+health, `/admin/users`, `/admin/routing` (queues), `/admin/bots` + `/admin/bots/$flowId` designer (JSON editor + SVG graph + inspector + Validate/Publish), `/admin/trunks`, `/admin/dids` (new — ui-test folded numbers into trunks), `/admin/cdr`, `/admin/reports`, `/admin/audit`. Root `/` → role-appropriate default. ui-test's remaining agent placeholders (contacts/schedule/preferences) stay out of MVP.
+`/login` (new — ui-test lacked auth; role comes from the session, the role `<Select>` is dropped). Agent: `/agent` cockpit (3-column, built to ui-test's spec incl. conditional RingingBanner/Transcript/WrapUp cards), `/agent/calls` (own CDR list — was placeholder), `/agent/contacts`, `/agent/callbacks` (new, replaces voicemail placeholder). Supervisor: `/supervisor` wallboard, `/supervisor/agents`, `/supervisor/queues` (staffing drawer), `/supervisor/quality`. Admin: `/admin` overview+health, `/admin/users`, `/admin/routing` (queues), `/admin/bots` + `/admin/bots/$flowId` designer (JSON editor + SVG graph + inspector + Validate/Publish), `/admin/trunks`, `/admin/dids` (new — ui-test folded numbers into trunks), `/admin/cdr`, `/admin/reports`, `/admin/audit`. Root `/` → role-appropriate default. ui-test's remaining agent placeholders (schedule/preferences) stay out of MVP.
+
+**Amendment (agent workspace, 2026-08-19).** Four agent-facing panels that shipped as "no data source" now have one, and the platform grew what they read:
+
+- **`/agent/calls` — My Calls.** `GET /cdrs/mine`, the agent resolved from the session and never from a parameter. Each row carries the agent's *own* wrap-up; the ledger listing (`GET /cdrs`) stays supervision.
+- **`/agent/contacts` — Contacts.** A deliberately small customer record (number, name, company, email, tags, notes, last call), keyed by phone number so the cockpit's caller card can answer "who is this" with an exact-match lookup. Not a CRM: the interaction-history / orders / notes tabs of the reference stay out, and a deployment that needs them integrates one.
+- **Cockpit "My queue".** `GET /calls/waiting` plus live `QUEUE_JOINED` / `QUEUE_LEFT` / `QUEUE_COUNT`, scoped to the queues the agent staffs — the same staffing rule the event stream already applied. A wait turns red against *the queue's own* `slaThresholdSec`, never a constant in the browser.
+- **Cockpit after-call work.** Category + disposition + note + Complete, filed through `POST /agent/wrap-up`. The call being filed against comes from presence (`wrapUpCallId`), never from the request.
 
 ## 3. Data layer
 

@@ -95,6 +95,25 @@ queue_events(id bigserial, occurred_at, call_id, queue_id,
              agent_id uuid, wait_ms int)                          -- SL/abandon source
 audit_logs(id bigserial, occurred_at, actor_id, action varchar,   -- 'QUEUE_UPDATED','FLOW_PUBLISHED','AGENT_FORCE_LOGOUT',…
            target_kind text, target_id text, detail jsonb, ip inet)
+-- Agent workspace (00010, 2026-08-19)
+disposition_categories(code varchar pk, label text, position int)  -- seeded by the migration: an
+dispositions(code varchar pk, category_code fk, label text,        -- installation with no vocabulary
+             position int, is_enabled bool)                        -- cannot complete a wrap-up at all
+wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
+         category_code text, category_label text, note text, created_at,
+         pk(call_id, agent_id))    -- its own table, not columns on cdrs: an agent finishes their part
+                                   -- of a call before the call ends (a transfer hands the caller on),
+                                   -- so the filing regularly precedes the ledger row. Labels are
+                                   -- captured at filing time — history does not change meaning when
+                                   -- somebody renames a category.
+contacts(id uuid pk, phone_number text unique, name text, company text, email text,
+         tags text[], notes text, created_at, updated_at, updated_by)
+                                   -- uq_contacts_phone_number: the number is how a caller is
+                                   -- identified, so two records for one number would make the
+                                   -- cockpit's lookup a coin toss. last_call_at is read from cdrs
+                                   -- (either side), never stored.
+agent_states.wrap_up_call_id uuid  -- which call the after-call work is for, so what an agent files
+                                   -- lands on that call and not on whichever one they take next
 settings(key text pk, value jsonb, updated_at)                    -- org, locale default, retentionDays, …
 seq_blocks(name text pk, value bigint)                            -- SSE hi/lo blocks (100k)
 ```

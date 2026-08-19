@@ -125,3 +125,19 @@ listed here as having no backend, were built end to end (contract → switch
 adapter → UI) and are wired. Conference remains present-and-disabled: it needs
 a consult-then-merge design, not one endpoint. Five reference panels stay
 absent for want of a data source.
+
+## 5. Round 3 — the agent workspace (2026-08-19)
+
+Four of those five now have a data source, because the platform grew one. The
+row "no data source" was never a property of the design; it was a list of
+things nobody had built yet.
+
+| Capability | Then | Now |
+|---|---|---|
+| My queue (waiting callers, live wait, red past the target) | `GET /calls` is SUPERVISOR-only; `QUEUE_COUNT`/`QUEUE_JOINED` declared and never published | `GET /calls/waiting` scoped to the agent's staffing + `QUEUE_JOINED`/`QUEUE_LEFT`/`QUEUE_COUNT` published from `telephony`. Red is the queue's own `slaThresholdSec`, not 120s in the browser |
+| Disposition codes on wrap-up | no vocabulary, no endpoint | `dispositions` + `disposition_categories` (seeded by the migration), `GET /dispositions`, `POST /agent/wrap-up`, `wrap_ups` in the ledger, and the filing on the agent's own CDR rows |
+| Contact card (name, tags, company, last contact) | number/DID/badges only; no contact store | `contacts` + full CRUD; the cockpit looks the caller up by exact number, and `/agent/contacts` is the book |
+| Agent history ("My Calls", a placeholder in the reference) | `GET /cdrs` is SUPERVISOR-scoped | `GET /cdrs/mine`, the agent taken from the session and never from a parameter |
+| Interaction history / Orders / Notes tabs | no store | **still deliberately absent** — that is a CRM, and the recommendation in the report's §6(d) stands |
+| Agent "Today" stats | SUPERVISOR-scoped reports | still absent; `GET /reports/me` remains the suggestion |
+| Live transcript | declared, never published | built in the transcription milestone; the cockpit's centre column carries both phases |
