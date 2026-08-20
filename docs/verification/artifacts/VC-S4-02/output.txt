@@ -1,0 +1,15 @@
+baseline_rejects=0
+=== S4-02 collect#2 agent_states (18:22:28) ===
+NOT_READY|AFTER_CALL_WORK|t
+=== collect#3 wrap_ups latest ===
+RESOLVED|f
+=== collect#4 GET /agent/wrap-up ===
+{
+  "callId": "01a01eae-4020-743d-8486-4bda976ac009",
+  "isConfirmed": false,
+  "dispositionCode": "RESOLVED"
+}
+=== collect#5 rejects delta ===
+rejects_now=0
+=== collect#6 switch status ===
+On Break

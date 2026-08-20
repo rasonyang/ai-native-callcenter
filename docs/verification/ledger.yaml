@@ -189,7 +189,7 @@ cases:
       但 GET /calls/waiting 为空 —— QueueCatalog 未接上或队列名不匹配(waiting.go:199-205
       直接 return),坐席屏幕永远看不到这个等待者,且两侧都不报错。
     evidence_dir: docs/verification/artifacts/VC-S3-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:members Trying/waiting 1项/SSE三连全中;发现 /calls/waiting 拒绝sup(C12),以wei jar代采;F1已闭(verdict)
     refs: ["internal/aicall/actions.go:55", "internal/telephony/waiting.go:198", "internal/telephony/coordinator.go:568", "freeswitch/scripts/aicc_queue.lua:66"]
 
   - id: VC-S3-02
@@ -249,7 +249,7 @@ cases:
       bot 份额通道变量没盖上(stampBotShare 未执行或 uuid_transfer 丢变量),
       报表从此把这通"bot→人"呼叫当纯人工呼叫统计,无任何报错。
     evidence_dir: docs/verification/artifacts/VC-S3-03/
-    status: TODO
+    status: FAIL  # 2026-08-20 执行:探针证明四戳在通道上而CDR丢bot份额+flow→漂移在读回/快照侧;queue_wait_sec含通话时长(C11);collect#4应为.cdr.legs(verdict)
     refs: ["internal/aicall/actions.go:71", "internal/aicall/ledger.go:223", "internal/telephony/switchevent.go:81", "internal/telephony/cdr.go:151"]
 
   - id: VC-S3-04
@@ -313,7 +313,7 @@ cases:
       (agentForLeg 三个候选变量都没命中,coordinator.go:831-848),
       屏幕不弹、事件按"主管可见"发,坐席端安静得像没来过电话。
     evidence_dir: docs/verification/artifacts/VC-S4-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:事件链/三腿/ON_CALL全中(SSE经ring回放补采);extensionNumber携WS注册标识而非分机→C13立案(verdict)
     refs: ["internal/telephony/coordinator.go:404", "internal/telephony/coordinator.go:831", "internal/telephony/registry.go:336", "internal/agents/service.go:350"]
 
   - id: VC-S4-02
@@ -345,7 +345,7 @@ cases:
       镜像失败被 slog.Warn 吞掉(service.go:632-634),mod_callcenter 会在 ACW 期间
       继续把下一通派给还在写小结的 wei。
     evidence_dir: docs/verification/artifacts/VC-S4-02/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:ACW自动开单(默认词RESOLVED未确认)/switch On Break/rejects差分0
     refs: ["internal/telephony/coordinator.go:246", "internal/telephony/coordinator.go:262", "internal/agents/service.go:267", "internal/agents/service.go:289", "internal/agents/state.go:161"]
 
   - id: VC-S4-03
@@ -372,7 +372,7 @@ cases:
       确认写库失败而 presence 变更成功,完成率报表把这通永远算作"未确认",
       坐席认为已办结,无人再看。
     evidence_dir: docs/verification/artifacts/VC-S4-03/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:确认落库+回READY+Available+4词表全中
     refs: ["internal/httpapi/agent_handlers.go:172", "internal/store/sql/ledger.sql:188", "internal/agents/service.go:331", "internal/store/migrations/00013_wrap_up_is_confirmed.sql:17"]
 
   - id: VC-S4-04
@@ -402,7 +402,7 @@ cases:
       (mod_http_cache PUT 成功)但 key 约定(UTC 日期/call_id)与 ingest 侧不一致,
       音频存在于 SeaweedFS 里却永远无人能听;呼叫流程全程无错。
     evidence_dir: docs/verification/artifacts/VC-S4-04/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:S3/aicc-recordings/58s/下载200 audio-wav字节一致/recording booked
     refs: ["internal/telephony/cdr.go:107", "internal/telephony/cdr.go:145", "freeswitch/scripts/aicc_inbound.lua:84", "internal/httpapi/recording_handlers.go:81"]
     note: "补 tables.md recordings / quality_reviews 场景缺口的前半;评审(POST /recordings/{id}/reviews)可在本用例后直接追加"
 
@@ -669,7 +669,7 @@ cases:
       12 秒后才有 ERROR(STREAM_NEVER_CONNECTED);若连这个都没有,面板停在 Connecting…,
       整通电话音频无声无息地去了 nowhere(switchevent.go:176-183 所述的历史故障形态)。
     evidence_dir: docs/verification/artifacts/VC-S9-01/
-    status: TODO
+    status: FAIL  # 2026-08-20 执行:链路/归户/共序全通,但双侧丢帧(4%/7.2%)致fox句识别崩坏→C14立案(verdict)
     refs: ["internal/streamin/tap.go:123", "internal/streamin/streamin.go:289", "internal/streamin/session.go:60", "internal/transcript/actor.go:261", "internal/streamin/pump.go:90"]
 
   - id: VC-S9-02
@@ -690,7 +690,7 @@ cases:
       SSE 曾出现 LIVE,但通话结束后 REST 快照仍报 CONNECTING —— 快照与流各有一份状态源
       (actor.go:96-99 立此存照要防的正是双源分歧);面板刷新后把一场成功转写显示成"连接中"。
     evidence_dir: docs/verification/artifacts/VC-S9-02/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:CONNECTING→LIVE→STOPPED(sup视角)/items=DB;发现ENDED是REST收官合成值(handlers:69)→D7③前提推翻待重议;expect两处勘误(verdict)
     refs: ["internal/transcript/actor.go:117", "internal/streamin/session.go:232", "internal/httpapi/transcript_handlers.go:29"]
 
   # ───────────────────────── S10 SSE 断线重连 / replay ─────────────────────────

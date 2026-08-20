@@ -1,0 +1,22 @@
+=== S3-03 collect#1 F6 probe (18:12:08) ===
+CH=01a01ea6-76af-79f9-8b28-8d3449c2c059
+bot_sec=10
+flow_id=019ffd60-d8db-736b-a1eb-b005dda34d28
+lang=en
+did=95001
+=== SSE grep (S3-01 collect#7) ===
+event: QUEUE_JOINED
+data: {"version":1,"seq":6900142,"type":"QUEUE_JOINED","occurredAt":"2026-08-20T10:10:40.003457Z","callId":"01a01ea6-76d1-7e36-b915-3d76c2d92a77","callType":"INBOUND","queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","payload":{"fromNumber":"18688886669","joinedAt":"2026-08-20T10:10:39.99173Z","queueName":"support-en"}}
+event: QUEUE_COUNT
+data: {"version":1,"seq":6900143,"type":"QUEUE_COUNT","occurredAt":"2026-08-20T10:10:40.003459Z","queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","payload":{"longestWaitAt":"2026-08-20T10:10:39.99173Z","queueName":"support-en","waiting":1}}
+event: QUEUE_AGENT_OFFERED
+data: {"version":1,"seq":6900144,"type":"QUEUE_AGENT_OFFERED","occurredAt":"2026-08-20T10:10:40.088629Z","callId":"01a01ea6-76d1-7e36-b915-3d76c2d92a77","callType":"INBOUND","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"fromNumber":"18688886669","queue":"support-en"}}
+=== S3-03 collect#2 cdr (18:12:56) ===
+01a01ea6-76d1-7e36-b915-3d76c2d92a77|ANSWERED|0|120|63|95001|f|1
+=== S3-03 collect#3 queue_events ===
+JOINED|f|0
+OFFERED|t|0
+BRIDGED|t|58151
+LEFT|t|121000
+=== S3-03 collect#4 legs ===
+null

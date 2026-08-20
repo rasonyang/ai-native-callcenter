@@ -74,7 +74,7 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 
 | # | 事实问题 | 归属 | 状态/落实方式 |
 |---|---|---|---|
-| F1 | mod_callcenter `queue list members` 列名与 state 词表 | VC-S3-01 | 首跑抄录实测表头进 evidence |
+| F1 | ~~members 列名与 state 词表~~ | VC-S3-01 | **已闭(2026-08-20)**:实测表头 17 列,state=Trying 实见(VC-S3-01/verdict) |
 | F2 | `uuid_send_dtmf` 是否在目标通道产生 DTMF 事件 | VC-S7-04 | 首跑;无事件则按审计建议以 digit=5 判定 |
 | F3 | max_no_answer=0 下的重派节奏 | VC-S5-01 | 首跑抄录(留证半) |
 | F4 | app 重启窗内 member-queue-start 是否丢失 | VC-S12-01 | 已补 members 旁证 collect;两侧皆空=重跑 |
@@ -201,6 +201,24 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   fsm-edges.md/enums.md 对应行、VC-S9-02 expect 括注随之更新
 - **C7** queue_events 读路径 or 修正 cdr.go:112 注释
 - **C10** 202 契约核对(SYS-2 源头)——**defer 第二期(§补充 S5,第二期需要)**;本期账本 expect 维持 202
+- **C11(new,2026-08-20 T3.1 执行发现,FAIL 立案)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
+  通话中探针证明 aicc_bot_sec/aicc_flow_id/aicc_language/aicc_did 四戳都在主叫通道上,挂断后 CDR 仍
+  bot_sec=0/flow 空 → 丢失在读回/快照侧(botShare switchevent.go:81 / registry.go:346 / 合并路径);
+  同时 queue_wait_sec=joined→left(把通话时长计入等待,真实等待应为 joined→bridged;queue_events 的
+  BRIDGED wait_ms 反而正确)——疑似 Queue.BridgedAt 与 Bot 同因丢失。在野样本:上午 95002 三行 +
+  本次 01a01ea6-76d1。修复后重跑 VC-S3-03。
+- **C13(new,2026-08-20 T3.2 执行发现)** PARTY_RINGING payload 的 extensionNumber/toNumber 携带
+  浏览器话机的 WS 注册标识(实测 "g7bih4lv")而非坐席分机号:coordinator.go:412-416 直取
+  ev.DestinationNumber,而 :829-848 的 agentForLeg 早已把腿正确归户——归户成功后应以坐席绑定分机
+  回填屏显字段。修复后 S4-01 的该条款转正。
+- **C14(new,2026-08-20 T3.4 执行发现,FAIL 立案)** ASR tap 摄取路径丢帧:一通 ~23s 的转写
+  HUMAN_AGENT 丢 46/1146(4.0%)、CUSTOMER 丢 78/1084(7.2%)("transcribe: audio was dropped",
+  pump.go:226),识别文本随之崩坏(fox 句 → "Butro focus jobs owing the lazy workin")。pump 计数器
+  证明是"没送到"而非"听错"。候选:pump 背压/缓冲、双流并发写。修复后重跑 VC-S9-01。
+- **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
+  not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
+  决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;
+  账本 S6-01/S12-01/S12-02 的该行 collect 先改用 wei jar(下轮修订批)。
 
 ### 排序总则
 0. 追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。

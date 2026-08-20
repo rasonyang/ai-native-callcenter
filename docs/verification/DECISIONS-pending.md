@@ -43,8 +43,11 @@ settings/trunks 两张死表的处置不在本决议内(仍开放,归 D6 同席�
 - ② `Presence.RingNoAnswer` 全链(state.go:189-194、service.go:342-346)——
   **【决议 2026-08-20】实现,含 missed_reason 条件互斥修复**(cdr.go:255-258 的 ABANDONED_RINGING
   需 BridgedAt≠0 与语义矛盾)。落 TASKS W2;S5-01 在实现合入前先按旧行为执行留证,合入后改写重跑。
-- ③ 转写状态 `ENDED`(actor.go:110,无发布方)——**【决议 2026-08-20】先删除**。
-  TranscriptionState 枚举同步删,breaking;落 TASKS C4;VC-S9-02 expect 中"不出现 ENDED"的括注随删除转为历史注记。
+- ③ 转写状态 `ENDED`——**【决议 2026-08-20:先删除】→【2026-08-20 晚 T3.4 执行推翻前提,待重议】**:
+  "无发布方"只对 SSE 成立;GetCallTranscript 对已收官呼叫**合成 state=ENDED**(transcript_handlers.go:69),
+  是在用的收官快照语义(VC-S9-02 实测)。重议选项:A. 保留 ENDED 为收官快照值(撤销删除,契约留值,
+  文档注明"快照专用、不经 SSE");B. 仍删除,handler 收官改返回 STOPPED(行为变化,UI 判断需核)。
+  C4 中的此项挂起,等裁决。
 - ④ `Profile.TranscribeModel` 恒空(profile.go:37,realtime.go:367 分支不可达——SYS-8 的根)——
   **【决议 2026-08-20】实现:端对端模型本身自带 transcript,stock profile 默认开。** 落 TASKS W1;
   合入后 S1-02/S8-01 的留证条款转正式断言(CUSTOMER|MODEL ≥1)并重跑。

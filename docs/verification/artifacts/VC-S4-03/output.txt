@@ -1,0 +1,11 @@
+=== S4-03 collect#1 wrap_ups (18:24:18) ===
+RESOLVED|Resolved|t|t
+=== collect#2 agent_states ===
+READY|
+=== collect#3 switch status ===
+Available
+=== collect#4 dispositions ===
+RESOLVED
+FOLLOW_UP_REQUIRED
+NO_ANSWER
+OTHER

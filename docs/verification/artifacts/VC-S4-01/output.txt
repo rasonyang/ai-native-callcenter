@@ -1,0 +1,56 @@
+=== S4-01 collect#2 SSE type counts (18:19:41) ===
+=== PARTY_RINGING payload ===
+=== S4-01 collect#3 /calls/mine parties ===
+[
+  {
+    "partyId": "01a01eae-401d-72ea-8b37-dccdec732f23",
+    "channelId": "01a01eae-4018-7793-8f49-dc055b7f93f2",
+    "role": "ORIGINATOR",
+    "state": "TALKING",
+    "number": "18688886669",
+    "otherNumber": "1008",
+    "createdAt": "2026-08-20T10:18:51.281732Z",
+    "answeredAt": "2026-08-20T10:18:51.301733Z"
+  },
+  {
+    "partyId": "01a01eae-4047-7376-8336-e87528c58638",
+    "channelId": "01a01eae-4036-727d-b42b-53d33af528ad",
+    "role": "TARGET",
+    "state": "RELEASED",
+    "number": "95001",
+    "otherNumber": "18688886669",
+    "createdAt": "2026-08-20T10:18:51.311735Z",
+    "answeredAt": "2026-08-20T10:18:51.32169Z",
+    "releasedAt": "2026-08-20T10:19:12.971767Z",
+    "releaseCause": "NORMAL_CLEARING",
+    "isBotLeg": true
+  },
+  {
+    "partyId": "01a01eae-ad74-7a50-8c8b-601fbe4bbc5e",
+    "channelId": "01a01eae-ad5c-765a-990d-a8bfc12f1ad6",
+    "role": "TARGET",
+    "state": "TALKING",
+    "number": "1008",
+    "otherNumber": "18688886669",
+    "agentId": "807b2164-bd6b-47e9-9286-39a1ca831cea",
+    "createdAt": "2026-08-20T10:19:19.261746Z",
+    "answeredAt": "2026-08-20T10:19:21.791743Z"
+  }
+]
+=== S4-01 collect#4 roster ===
+{
+  "availability": "ON_CALL",
+  "isOnCall": true
+}
+=== S4-01 collect#2(经 ring 回放补采) ===
+=== PARTY_RINGING payload ===
+=== S4-01 collect#2(ring 回放自 6900144) ===
+id: 6900145
+event: PARTY_RINGING
+   3 "type":"AGENT_AVAILABILITY"
+   2 "type":"PARTY_ESTABLISHED"
+   2 "type":"PARTY_RINGING"
+   1 "type":"QUEUE_AGENT_OFFERED"
+=== PARTY_RINGING payload ===
+"type":"PARTY_RINGING","occurredAt":"2026-08-20T10:10:40.090191Z","callId":"01a01ea6-c15a-7284-9a80-99e994b4e7f0","callType":"OUTBOUND","partyId":"01a01ea6-c15a-72c6-aa74-30c2cffe3eac","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"extensionNumber":"g7bih4lv","fromNumber":"18688886669","toNumber":"g7bih4lv"}}
+"type":"PARTY_RINGING","occurredAt":"2026-08-20T10:19:19.28469Z","callId":"

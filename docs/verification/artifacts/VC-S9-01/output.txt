@@ -1,0 +1,24 @@
+=== collect#1 transcription enabled (18:36:50) ===
+time=2026-08-20T12:51:46.804+08:00 level=INFO msg="live transcription enabled" provider=openai model=gpt-live-transcribe rateHz=24000
+=== collect#3 tap log chain (18:38:21) ===
+time=2026-08-20T18:19:21.853+08:00 level=INFO msg="transcription tap attached" callId=01a01eae-4020-743d-8486-4bda976ac009 channelId=01a01eae-ad5c-765a-990d-a8bfc12f1ad6 rateHz=24000
+time=2026-08-20T18:19:21.854+08:00 level=INFO msg="tapped stream connected" callId=01a01eae-4020-743d-8486-4bda976ac009 channelId=01a01eae-ad5c-765a-990d-a8bfc12f1ad6
+time=2026-08-20T18:19:22.894+08:00 level=INFO msg="transcription live" callId=01a01eae-4020-743d-8486-4bda976ac009 channelId=01a01eae-ad5c-765a-990d-a8bfc12f1ad6
+time=2026-08-20T18:37:34.647+08:00 level=INFO msg="tapped stream connected" callId=01a01ebe-ce9e-7ca1-9174-e8af633b6d16 channelId=01a01ebf-2cf0-7b70-85ac-e1e2c5cd5a59
+time=2026-08-20T18:37:34.647+08:00 level=INFO msg="transcription tap attached" callId=01a01ebe-ce9e-7ca1-9174-e8af633b6d16 channelId=01a01ebf-2cf0-7b70-85ac-e1e2c5cd5a59 rateHz=24000
+time=2026-08-20T18:37:35.622+08:00 level=INFO msg="transcription live" callId=01a01ebe-ce9e-7ca1-9174-e8af633b6d16 channelId=01a01ebf-2cf0-7b70-85ac-e1e2c5cd5a59
+=== collect#4 SSE CALL_TRANSCRIPT ===
+data: {"version":1,"seq":6900248,"type":"CALL_TRANSCRIPT","occurredAt":"2026-08-20T10:37:43.557785Z","callId":"01a01ebe-ce9e-7ca1-9174-e8af633b6d16","callType":"INBOUND","payload":{"agentId":"807b2164
+data: {"version":1,"seq":6900249,"type":"CALL_TRANSCRIPT","occurredAt":"2026-08-20T10:37:43.570887Z","callId":"01a01ebe-ce9e-7ca1-9174-e8af633b6d16","callType":"INBOUND","payload":{"agentId":"807b2164
+=== collect#5 DB ASR rows ===
+CALL_ID=01a01ebe-ce9e-7ca1-9174-e8af633b6d16
+5|HUMAN_AGENT|ASR|openai|t|Sí.
+6|CUSTOMER|ASR|openai|f|Day
+7|HUMAN_AGENT|ASR|openai|t|Quick.
+8|CUSTOMER|ASR|openai|f|Repeat it.
+9|CUSTOMER|ASR|openai|f|Brew forcement
+10|CUSTOMER|ASR|openai|f|Joss Are the 多
+11|HUMAN_AGENT|ASR|openai|t|Butro focus  jobs  owing the lazy workin
+=== collect#6 dropped ===
+time=2026-08-20T18:38:01.455+08:00 level=WARN msg="transcribe: audio was dropped for this speaker" speaker=HUMAN_AGENT provider=openai sent=1146 dropped=46
+time=2026-08-20T18:38:01.455+08:00 level=WARN msg="transcribe: audio was dropped for this speaker" speaker=CUSTOMER provider=openai sent=1084 dropped=78

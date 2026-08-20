@@ -1,0 +1,10 @@
+=== S9-02 collect#1 state sequence ===
+"state":"LIVE"
+"state":"STOPPED"
+=== S9-02 collect#2 REST snapshot ===
+{
+  "state": "ENDED",
+  "n": 11
+}
+=== DB row count for compare ===
+11
