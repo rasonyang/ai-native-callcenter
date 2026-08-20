@@ -44,7 +44,11 @@ type Config struct {
 	BotMaxCalls    int
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
-	// OutboundEndpoint renders a destination number into a dial string
+	// OutboundEndpoint renders a destination number into a dial string for
+	// the AI outbound leg. The loopback form pins the dialplan (/XML)
+	// because a loopback b-leg inherits the a-leg's, and an inherited
+	// "inline" reads the number as an application name (found live:
+	// "Invalid Application 1007").
 	// (%s = the number). A trunked deployment sets sofia/gateway/<gw>/%s;
 	// the default loops back into the local dialplan.
 	OutboundEndpoint string
@@ -148,7 +152,7 @@ func Load() (Config, error) {
 		Provider:               env("AICC_PROVIDER", "openai"),
 		ProviderEndpoint:       env("AICC_PROVIDER_ENDPOINT", ""),
 		ProviderModel:          env("AICC_PROVIDER_MODEL", ""),
-		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default"),
+		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default/XML"),
 		OutboundCallerID:       env("AICC_OUTBOUND_CLID", ""),
 		RecordingBackend:       env("AICC_RECORDING_BACKEND", "FS"),
 		RecordingDir:           env("AICC_RECORDING_DIR", ""),

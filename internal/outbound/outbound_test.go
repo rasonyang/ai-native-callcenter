@@ -104,10 +104,36 @@ type bridged struct {
 	vars      map[string]string
 }
 
+type transferred struct {
+	channelID string
+	extension string
+	context   string
+}
+
 type fakeSwitch struct {
 	mu         sync.Mutex
 	originates []originated
 	bridges    []bridged
+	transfers  []transferred
+}
+
+func (f *fakeSwitch) TransferToExtension(channelID, extension, context string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.transfers = append(f.transfers, transferred{channelID, extension, context})
+	return nil
+}
+
+func (f *fakeSwitch) transferCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.transfers)
+}
+
+func (f *fakeSwitch) lastTransfer() transferred {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.transfers[len(f.transfers)-1]
 }
 
 func (f *fakeSwitch) Originate(partyID uuid.UUID, endpoint string, vars map[string]string) (string, error) {
@@ -164,6 +190,18 @@ func answer(s *Service, channelID string) {
 	})
 }
 
+func waitTransfers(t *testing.T, sw *fakeSwitch, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if sw.transferCount() >= want {
+			return
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("transfer count never reached %d", want)
+}
+
 func waitBridges(t *testing.T, sw *fakeSwitch, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -197,21 +235,27 @@ func TestDialIsAgentFirst(t *testing.T) {
 	if first.vars["sip_auto_answer"] != "true" {
 		t.Error("the agent clicked; their leg should auto-answer")
 	}
-	if sw.bridgeCount() != 0 {
+	if sw.transferCount() != 0 {
 		t.Fatal("the customer was dialed before the agent answered")
 	}
 
 	answer(s, first.partyID.String())
-	waitBridges(t, sw, 1)
-	bridge := sw.lastBridge()
-	if bridge.channelID != first.partyID.String() {
-		t.Error("the bridge did not ride the agent's channel")
+	waitTransfers(t, sw, 1)
+	move := sw.lastTransfer()
+	if move.channelID != first.partyID.String() {
+		t.Error("the transfer did not ride the agent's channel")
 	}
-	if !strings.Contains(bridge.endpoint, "13912345678") {
-		t.Errorf("bridge endpoint %q does not dial the customer", bridge.endpoint)
+	if move.extension != "13912345678" {
+		t.Errorf("transferred to %q, want the destination itself", move.extension)
 	}
-	if bridge.vars["aicc_call_id"] != callID.String() {
-		t.Error("the customer leg would start a second call: no shared call id")
+	// The dialplan owns routing: an extension stays internal, a carrier
+	// number leaves through its gateway. Naming an endpoint here would be a
+	// second copy of that decision.
+	if move.context != "default" {
+		t.Errorf("context = %q, want the dialplan's own", move.context)
+	}
+	if sw.bridgeCount() != 0 {
+		t.Error("click-to-dial built a bridge instead of using the dialplan")
 	}
 }
 
@@ -230,7 +274,7 @@ func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
 	answer(s, leg) // a late answer event for the same channel
 	time.Sleep(20 * time.Millisecond)
 
-	if sw.bridgeCount() != 0 {
+	if sw.transferCount() != 0 {
 		t.Error("a declined dial still rang the customer")
 	}
 	if s.PendingCount() != 0 {

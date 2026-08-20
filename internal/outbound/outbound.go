@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package outbound originates calls: an agent's click-to-dial and the AI
-// outbound leg. Both follow the same shape — originate a parked leg, and only
-// when a human actually answers spend the next resource (the agent's time,
-// the AI session) by transferring the answered leg into an inline bridge.
+// outbound leg. Both originate a parked leg first and act only when a human
+// actually answers. Click-to-dial then transfers the answered agent leg into
+// the dialplan, which owns all routing (an extension stays internal, a
+// carrier number leaves through its gateway); the AI leg is bridged inline
+// to the bot gateway, because its target is fixed and carries headers.
 package outbound
 
 import (
@@ -24,6 +26,7 @@ import (
 type Switch interface {
 	Originate(partyID uuid.UUID, endpoint string, vars map[string]string) (string, error)
 	BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error
+	TransferToExtension(channelID, extension, context string) error
 	Endpoint(extensionNumber string) string
 }
 
@@ -34,9 +37,13 @@ type DIDSource interface {
 
 // Config shapes how the outside world is dialed.
 type Config struct {
-	// EndpointFormat renders a destination number into a dial string, e.g.
-	// "sofia/gateway/pstn/%s". The default loops back into the local
-	// dialplan, which is what a dev box without a trunk can actually reach.
+	// EndpointFormat renders a destination number into a dial string for the
+	// AI outbound leg, e.g. "sofia/gateway/pstn/%s". Only that path needs it:
+	// click-to-dial hands the destination to the dialplan instead. The
+	// default loops back into the local dialplan — pinned to XML, because a
+	// loopback leg inherits the a-leg's dialplan and would otherwise read the
+	// number as an application name — which is what a dev box without a trunk
+	// can reach.
 	EndpointFormat string
 	// BotGateway is the gateway name the switch bridges AI legs through.
 	BotGateway string
@@ -53,7 +60,7 @@ type Config struct {
 
 func (c Config) withDefaults() Config {
 	if c.EndpointFormat == "" {
-		c.EndpointFormat = "loopback/%s/default"
+		c.EndpointFormat = "loopback/%s/default/XML"
 	}
 	if c.BotGateway == "" {
 		c.BotGateway = "aicc_bot"
@@ -143,9 +150,11 @@ func isDialable(number string) bool {
 	return true
 }
 
-// Dial is click-to-dial: ring the agent first, and only bridge out to the
-// customer once the agent leg is up. The agent clicked, so their leg
-// auto-answers into the ringing customer leg.
+// Dial is click-to-dial: ring the agent first, and only dial out once the
+// agent leg is up. The agent clicked, so their leg auto-answers; the answered
+// leg is then transferred into the dialplan at the destination, which routes
+// it the same way a phone dialling that number would be routed — no second
+// copy of the routing rules here, and no loopback legs to trace.
 func (s *Service) Dial(ctx context.Context, agentExtension, destination string) (uuid.UUID, error) {
 	if !isDialable(destination) || !isDialable(agentExtension) {
 		return uuid.Nil, ErrBadNumber
@@ -161,24 +170,22 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 		"aicc_call_id":                 callID.String(),
 		"sip_auto_answer":              "true",
 		"origination_caller_id_number": destination,
-		"origination_caller_id_name":   "Dial " + destination,
+		// No space in the name: it travels inside an originate {…} block,
+		// where a space ends the block and kills the call before it routes.
+		"origination_caller_id_name": "Dial-" + destination,
+	}
+	if s.cfg.CallerID != "" {
+		// Presented onward when the dialplan bridges out; the agent's own
+		// display above is the origination_* pair.
+		vars["effective_caller_id_number"] = s.cfg.CallerID
 	}
 	if _, err := s.sw.Originate(agentLeg, s.sw.Endpoint(agentExtension), vars); err != nil {
 		return uuid.Nil, err
 	}
 
-	customerLeg := uuid.New()
 	s.arm(agentLeg.String(), func() {
-		bridgeVars := map[string]string{
-			"aicc_call_id": callID.String(),
-		}
-		if s.cfg.CallerID != "" {
-			bridgeVars["origination_caller_id_number"] = s.cfg.CallerID
-		}
-		endpoint := fmt.Sprintf(s.cfg.EndpointFormat, destination)
-		pinCodecs(bridgeVars, endpoint)
-		if err := s.sw.BridgeToEndpoint(agentLeg.String(), customerLeg, endpoint, bridgeVars); err != nil {
-			s.log.Error("click-to-dial bridge failed",
+		if err := s.sw.TransferToExtension(agentLeg.String(), destination, "default"); err != nil {
+			s.log.Error("click-to-dial transfer failed",
 				"callId", callID, "destination", destination, "error", err)
 		}
 	})

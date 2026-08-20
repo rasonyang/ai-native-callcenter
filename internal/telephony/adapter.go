@@ -315,6 +315,12 @@ func renderVars(vars map[string]string) string {
 
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
+		// Values are joined bare because this block rides in two different
+		// grammars: a raw originate line, where a quoted value would be
+		// legal, and the single-quoted inline transfer of BridgeToEndpoint,
+		// where an embedded quote ends the outer quoting and the remainder
+		// is executed as an inline application (both failure shapes found
+		// live). Callers keep values free of spaces, commas and quotes.
 		parts = append(parts, k+"="+vars[k])
 	}
 	return strings.Join(parts, ",")

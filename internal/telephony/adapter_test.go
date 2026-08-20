@@ -214,3 +214,15 @@ func TestTransportErrorsPropagate(t *testing.T) {
 		t.Fatal("a transport failure was reported as success")
 	}
 }
+
+// renderVars joins values bare: quoting is not an option here, because the
+// same block rides both raw originate lines and the single-quoted inline
+// transfer, where an embedded quote hands the leftovers to the inline parser
+// as an application ("Invalid Application 1007", found live). The contract is
+// that callers supply token-clean values.
+func TestRenderVarsJoinsBare(t *testing.T) {
+	got := renderVars(map[string]string{"b": "2", "a": "1"})
+	if got != "a=1,b=2" {
+		t.Fatalf("renderVars = %q, want %q", got, "a=1,b=2")
+	}
+}

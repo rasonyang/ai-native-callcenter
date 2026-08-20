@@ -1,0 +1,5 @@
+202
+=== PARTY_DTMF events (18:44:46) ===
+"digit":"5","durationMs":600
+--- raw first/last ---
+data: {"version":1,"seq":6900315,"type":"PARTY_DTMF","occurredAt":"2026-08-20T10:44:28.406269Z","callId":"01a01ec4-4e9f-776b-aac2-bfb19e3b4438","callType":"INBOUND","partyId":"01a01ec4-4e81-73eb-93df-a5ae223363c3","payload":{"digit":"5","durationMs":600}}
