@@ -13,7 +13,7 @@ import { vi } from 'vitest'
 import i18n from '@/lib/i18n'
 import type { CallSnapshot, CurrentWrapUp, Presence, WaitingCall } from '@/lib/api'
 import type { Contact } from '@/lib/contacts'
-import type { CDR } from '@/lib/ledger'
+import type { CDR, RecordingRow } from '@/lib/ledger'
 import type { AgentToday, Disposition } from '@/lib/ledger'
 
 /**
@@ -49,6 +49,8 @@ export interface Backend {
   contacts: Contact[]
   /** The agent's own finished calls. */
   myCDRs: CDR[]
+  /** The audio artifacts behind any call, served for every callId asked. */
+  recordings: RecordingRow[]
   /** Rows the transcript snapshot serves, and the state it reports. */
   transcript: unknown[]
   transcriptState?: string
@@ -231,6 +233,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     currentWrapUp: initial.currentWrapUp ?? null,
     contacts: initial.contacts ?? [],
     myCDRs: initial.myCDRs ?? [],
+    recordings: initial.recordings ?? [],
     transcript: initial.transcript ?? [],
     transcriptState: initial.transcriptState,
     slowSnapshotMs: initial.slowSnapshotMs,
@@ -290,6 +293,9 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
           wrapUpCallId: undefined,
         }
         return json(backend.presence)
+      }
+      if (/^\/calls\/[^/]+\/recordings$/.test(path)) {
+        return json({ items: backend.recordings })
       }
       if (path === '/calls/mine') return json({ items: backend.calls })
       if (path === '/calls/waiting') return json({ items: backend.waiting })

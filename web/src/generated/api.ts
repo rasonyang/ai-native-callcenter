@@ -526,7 +526,7 @@ export interface paths {
         };
         /**
          * A call's audio artifacts
-         * @description Requires SUPERVISOR.
+         * @description Requires a signed-in user: supervisors may list any call's recordings, an agent only those of a call they were on.
          */
         get: operations["listCallRecordings"];
         put?: never;
@@ -834,7 +834,7 @@ export interface paths {
         };
         /**
          * Stream one recording
-         * @description Serves the audio with HTTP range support, so players can seek. Conditional requests are honoured. Requires SUPERVISOR.
+         * @description Serves the audio with HTTP range support, so players can seek. Conditional requests are honoured. Requires a signed-in user: supervisors may hear any recording, an agent only the calls they were on.
          */
         get: operations["getRecordingAudio"];
         put?: never;

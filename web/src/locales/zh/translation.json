@@ -450,7 +450,8 @@
     "note": "小结",
     "talkTime": "通话时长",
     "notFiled": "未填写",
-    "empty": "暂无通话，处理完的通话会出现在这里。"
+    "empty": "暂无通话，处理完的通话会出现在这里。",
+    "listen": "试听录音"
   },
   "contacts": {
     "hint": "号码背后是谁，以及上一位坐席记下了什么。",
@@ -472,5 +473,13 @@
     "noMatches": "没有匹配的客户。",
     "deleteConfirm": "删除 {{name}}？其通话记录仍会保留。",
     "pageOf": "第 {{page}} / {{pages}} 页 · 共 {{total}} 位"
+  },
+  "player": {
+    "play": "播放",
+    "pause": "暂停",
+    "back10": "后退 10 秒",
+    "forward10": "前进 10 秒",
+    "seek": "在录音中定位",
+    "failed": "录音加载失败。"
   }
 }

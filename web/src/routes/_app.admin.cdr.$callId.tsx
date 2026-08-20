@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 
 import { PageHeader } from '@/components/page-header'
+import { RecordingPlayer } from '@/components/recording-player'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
@@ -90,8 +91,7 @@ function CallDetail() {
           ) : (
             recordings.map((recording) => (
               <div key={recording.id} className="mb-2 last:mb-0">
-                {/* The browser handles range requests against the audio endpoint. */}
-                <audio controls preload="none" className="h-9 w-full" src={recordingAudioUrl(recording.id)} />
+                <RecordingPlayer src={recordingAudioUrl(recording.id)} durationSec={recording.durationSec} />
                 <p className="mt-1 text-xs text-muted-foreground tabular">
                   {formatDuration(recording.durationSec)} ·{' '}
                   {(recording.sizeBytes / 1024 / 1024).toFixed(1)} MB · {recording.backend}

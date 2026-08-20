@@ -1,15 +1,20 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { Headphones } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
+import { RecordingPlayer } from '@/components/recording-player'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
-import { formatDuration, useMyCDRs, type CDR, type CDRStatus } from '@/lib/ledger'
+import {
+  formatDuration, ledgerApi, recordingAudioUrl, useMyCDRs,
+  type CDR, type CDRStatus, type RecordingRow,
+} from '@/lib/ledger'
 
 /**
  * My calls: every finished call this agent was on, newest first, with what
@@ -17,7 +22,8 @@ import { formatDuration, useMyCDRs, type CDR, type CDRStatus } from '@/lib/ledge
  *
  * The agent is the session, never a filter — there is no way to ask this page
  * for somebody else's calls. It is deliberately not the CDR explorer: no
- * recordings, no transcripts, no other people's work.
+ * transcripts, no other people's work. Recordings appear exactly as far as
+ * the calls do — the agent replays their own, nobody else's.
  */
 export const Route = createFileRoute('/_app/agent/calls')({
   component: MyCallsPage,
@@ -39,6 +45,7 @@ function MyCallsPage() {
     offset: page * PAGE_SIZE,
   })
 
+  const [openCallId, setOpenCallId] = useState<string | null>(null)
   const rows = data?.items ?? []
   const total = data?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE))
@@ -86,15 +93,17 @@ function MyCallsPage() {
           <Th>{t('myCalls.disposition')}</Th>
           <Th>{t('myCalls.note')}</Th>
           <Th align="right">{t('myCalls.talkTime')}</Th>
+          <Th align="right">{t('cdr.playColumn')}</Th>
         </THead>
         <TBody>
-          {isPending && <TableMessage colSpan={6}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={6}>{describeError(error, t)}</TableMessage>}
+          {isPending && <TableMessage colSpan={7}>{t('common.loading')}</TableMessage>}
+          {isError && <TableMessage colSpan={7}>{describeError(error, t)}</TableMessage>}
           {!isPending && !isError && rows.length === 0 && (
-            <TableMessage colSpan={6}>{t('myCalls.empty')}</TableMessage>
+            <TableMessage colSpan={7}>{t('myCalls.empty')}</TableMessage>
           )}
           {rows.map((row) => (
-            <Tr key={row.callId}>
+            <Fragment key={row.callId}>
+            <Tr>
               <Td className="tabular">{timeFormat.format(new Date(row.startedAt))}</Td>
               <Td className="tabular">{customerOf(row) || '—'}</Td>
               <Td className="text-xs text-muted-foreground">
@@ -115,7 +124,32 @@ function MyCallsPage() {
               <Td align="right" className="tabular">
                 {formatDuration(row.talkSec)}
               </Td>
+              <Td align="right">
+                {row.hasRecording && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="size-8 p-0"
+                    title={t('myCalls.listen')}
+                    aria-label={t('myCalls.listen')}
+                    aria-expanded={openCallId === row.callId}
+                    onClick={() =>
+                      setOpenCallId((current) => (current === row.callId ? null : row.callId))
+                    }
+                  >
+                    <Headphones className={openCallId === row.callId ? 'text-primary' : ''} />
+                  </Button>
+                )}
+              </Td>
             </Tr>
+            {openCallId === row.callId && (
+              <Tr>
+                <Td colSpan={7}>
+                  <MyRecording callId={row.callId} />
+                </Td>
+              </Tr>
+            )}
+            </Fragment>
           ))}
         </TBody>
       </DataTable>
@@ -139,6 +173,48 @@ function MyCallsPage() {
         </div>
       )}
     </>
+  )
+}
+
+/**
+ * The recording behind one of the agent's own rows, looked up on first
+ * listen — the list itself only knows hasRecording.
+ */
+function MyRecording({ callId }: { callId: string }) {
+  const { t } = useTranslation()
+  const [recordings, setRecordings] = useState<RecordingRow[] | null>(null)
+  const [isFailed, setFailed] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    ledgerApi
+      .recordingsByCall(callId)
+      .then(({ items }) => alive && setRecordings(items))
+      .catch(() => alive && setFailed(true))
+    return () => {
+      alive = false
+    }
+  }, [callId])
+
+  if (isFailed) {
+    return <p className="py-1 text-xs text-muted-foreground">{t('player.failed')}</p>
+  }
+  if (recordings === null) {
+    return <p className="py-1 text-xs text-muted-foreground">{t('common.loading')}</p>
+  }
+  if (recordings.length === 0) {
+    return <p className="py-1 text-xs text-muted-foreground">{t('cdr.noRecording')}</p>
+  }
+  return (
+    <div className="max-w-xl py-1">
+      {recordings.map((recording) => (
+        <RecordingPlayer
+          key={recording.id}
+          src={recordingAudioUrl(recording.id)}
+          durationSec={recording.durationSec}
+        />
+      ))}
+    </div>
   )
 }
 

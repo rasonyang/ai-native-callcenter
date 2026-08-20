@@ -7,10 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -19,8 +21,50 @@ type RecordingStreamer interface {
 	Open(ctx context.Context, key string) (io.ReadSeekCloser, int64, error)
 }
 
+// mayHearCall authorizes access to a call's audio, writing the refusal
+// itself. Supervisors review anyone's calls; an agent replays only the calls
+// they were on, which is the same line /cdrs/mine draws.
+func (s *Server) mayHearCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) bool {
+	id, ok := identityFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return false
+	}
+	if id.Role.AtLeast(auth.RoleSupervisor) {
+		return true
+	}
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return false
+	}
+	cdr, err := s.ledger.GetCDR(r.Context(), callID)
+	if err != nil {
+		// A call the ledger has not written is nobody's yet; the reason makes
+		// no difference to the caller.
+		writeError(w, http.StatusForbidden, CodeForbidden, "not one of your calls", nil)
+		return false
+	}
+	if agentWasOnCall(cdr, agentID) {
+		return true
+	}
+	writeError(w, http.StatusForbidden, CodeForbidden, "not one of your calls", nil)
+	return false
+}
+
+// agentWasOnCall is the ownership rule itself: the same line /cdrs/mine
+// draws, primary or anywhere in the call's agent list.
+func agentWasOnCall(cdr store.CDR, agentID uuid.UUID) bool {
+	if cdr.PrimaryAgentID != nil && *cdr.PrimaryAgentID == agentID {
+		return true
+	}
+	return slices.Contains(cdr.AgentIDs, agentID)
+}
+
 // ListCallRecordings lists a call's audio artifacts.
 func (s *Server) ListCallRecordings(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	if !s.mayHearCall(w, r, callID) {
+		return
+	}
 	recordings, err := s.ledger.RecordingsByCall(r.Context(), callID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list recordings", nil)
@@ -42,6 +86,9 @@ func (s *Server) GetRecordingAudio(w http.ResponseWriter, r *http.Request, recor
 			return
 		}
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the recording", nil)
+		return
+	}
+	if !s.mayHearCall(w, r, rec.CallID) {
 		return
 	}
 	if s.recordings == nil {

@@ -84,3 +84,43 @@ describe('empty', () => {
     expect(await screen.findByText(/no calls yet/i)).toBeInTheDocument()
   })
 })
+
+describe('recordings', () => {
+  it('offers no listen control on a call that was not recorded', async () => {
+    await renderMyCalls({ myCDRs: [cdrFixture({ hasRecording: false })] })
+    await screen.findByText(/not filed/i)
+    expect(screen.queryByLabelText(/listen to the recording/i)).not.toBeInTheDocument()
+  })
+
+  it('fetches the call’s own recording on first listen and plays it inline', async () => {
+    // jsdom has no object URLs; the player only needs the name to exist.
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: () => 'blob:recording',
+      revokeObjectURL: () => {},
+    }))
+
+    const { api, user } = await renderMyCalls({
+      myCDRs: [cdrFixture({ hasRecording: true })],
+      recordings: [{
+        id: '00000000-0000-4000-8000-0000000000f1',
+        callId: '00000000-0000-4000-8000-0000000000d1',
+        backend: 'S3',
+        bucket: 'aicc-recordings',
+        objectKey: '2026/08/20/call.wav',
+        sizeBytes: 320044,
+        durationSec: 10,
+        format: 'WAV',
+        createdAt: new Date().toISOString(),
+      }],
+    })
+
+    await user.click(await screen.findByLabelText(/listen to the recording/i))
+
+    // The lookup names the call; the audio is then fetched by recording id.
+    await waitFor(() =>
+      expect(api.requests.some((r) =>
+        r.path === '/calls/00000000-0000-4000-8000-0000000000d1/recordings')).toBe(true),
+    )
+    expect(await screen.findByLabelText(/seek within the recording/i)).toBeInTheDocument()
+  })
+})

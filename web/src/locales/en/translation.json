@@ -452,7 +452,8 @@
     "note": "Note",
     "talkTime": "Talk time",
     "notFiled": "Not filed",
-    "empty": "No calls yet. Yours will appear here as you finish them."
+    "empty": "No calls yet. Yours will appear here as you finish them.",
+    "listen": "Listen to the recording"
   },
   "contacts": {
     "hint": "Who a number belongs to, and what the last person who spoke to them noted.",
@@ -474,5 +475,13 @@
     "noMatches": "No contact matches that search.",
     "deleteConfirm": "Delete {{name}}? Their calls stay in the ledger.",
     "pageOf": "Page {{page}} of {{pages}} · {{total}} contacts"
+  },
+  "player": {
+    "play": "Play",
+    "pause": "Pause",
+    "back10": "Back 10 seconds",
+    "forward10": "Forward 10 seconds",
+    "seek": "Seek within the recording",
+    "failed": "The recording could not be loaded."
   }
 }

@@ -56,13 +56,15 @@ export function Td({
   children,
   align = 'left',
   className,
+  colSpan,
 }: {
   children?: ReactNode
   align?: 'left' | 'right'
   className?: string
+  colSpan?: number
 }) {
   return (
-    <td className={cn('px-4', align === 'right' ? 'text-right' : 'text-left', className)}>
+    <td colSpan={colSpan} className={cn('px-4', align === 'right' ? 'text-right' : 'text-left', className)}>
       {children}
     </td>
   )

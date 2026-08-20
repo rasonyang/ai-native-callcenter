@@ -242,15 +242,20 @@ func (s *Server) router() chi.Router {
 					// supervision; this one is theirs.
 					private.With(requireAgentRole).Get("/reports/me", op.GetMyDay)
 
+					// A recording is heard by whoever may hear the call:
+					// supervisors review anyone's, an agent replays their
+					// own. The handlers draw that line against the call's
+					// agent list, so the routes carry no role guard here.
+					private.Get("/calls/{callId}/recordings", op.ListCallRecordings)
+					private.Get("/recordings/{recordingId}/audio", op.GetRecordingAudio)
+
 					// Finished calls and their artifacts are supervision:
 					// reviewing what happened is not an agent task.
 					private.Group(func(sup chi.Router) {
 						sup.Use(requireSupervisorRole)
 						sup.Get("/cdrs", op.ListCDRs)
 						sup.Get("/cdrs/{callId}", op.GetCDR)
-						sup.Get("/calls/{callId}/recordings", op.ListCallRecordings)
 						sup.Get("/calls/{callId}/reviews", op.ListCallReviews)
-						sup.Get("/recordings/{recordingId}/audio", op.GetRecordingAudio)
 						sup.Post("/recordings/{recordingId}/reviews", op.CreateRecordingReview)
 						sup.Get("/reports/overview", op.GetReportOverview)
 						sup.Get("/reports/queues", op.GetReportQueues)
