@@ -67,7 +67,8 @@ type Config struct {
 	Backend string
 	// Dir is the filesystem root — the same directory the switch records
 	// into. On the S3 backend it is the spool the switch writes before
-	// upload.
+	// upload; empty means the switch uploads directly (mod_http_cache) and
+	// there is nothing local to spool.
 	Dir string
 
 	// S3 settings; endpoint host:port, credentials, bucket.

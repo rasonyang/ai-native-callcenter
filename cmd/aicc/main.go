@@ -200,7 +200,10 @@ func run() error {
 	// Recording storage: nil when no directory is configured, which disables
 	// ingestion without disabling anything else.
 	var recordings recording.Storage
-	if cfg.RecordingDir != "" {
+	// The filesystem backend needs the directory the switch records into; the
+	// S3 backend works with the endpoint alone when the switch uploads
+	// directly (mod_http_cache), the spool directory being optional.
+	if cfg.RecordingDir != "" || (cfg.RecordingBackend == "S3" && cfg.S3Endpoint != "") {
 		recordings, err = recording.New(recording.Config{
 			Backend: cfg.RecordingBackend, Dir: cfg.RecordingDir,
 			S3Endpoint: cfg.S3Endpoint, S3AccessKey: cfg.S3AccessKey,
@@ -214,7 +217,8 @@ func run() error {
 				return fmt.Errorf("recording storage: %w", err)
 			}
 		}
-		slog.Info("recording storage ready", "backend", recordings.Backend(), "dir", cfg.RecordingDir)
+		slog.Info("recording storage ready", "backend", recordings.Backend(),
+			"dir", cfg.RecordingDir, "endpoint", cfg.S3Endpoint)
 	}
 
 	var recordingStorage telephony.RecordingStorage

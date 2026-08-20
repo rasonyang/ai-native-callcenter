@@ -3,6 +3,7 @@
 package recording
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +12,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/minio/minio-go/v7"
 )
 
 func writeSpoolFile(t *testing.T, root, key string, size int) string {
@@ -223,6 +226,37 @@ func TestS3RoundTrip(t *testing.T) {
 	}
 	if got := DurationSec(size); got != 1 {
 		t.Errorf("duration = %d", got)
+	}
+
+	// Direct upload: the switch PUTs the file into the store itself
+	// (mod_http_cache), so there is no spool and ingestion only confirms the
+	// object. A spool-less backend is legal, and ingesting a key the switch
+	// never uploaded reports the absence instead of inventing a recording.
+	direct, err := New(Config{
+		Backend:    "S3",
+		S3Endpoint: endpoint, S3Bucket: "aicc-recordings",
+		S3AccessKey: "aicc-test-key", S3SecretKey: "aicc-test-secret",
+	})
+	if err != nil {
+		t.Fatalf("spool-less S3 backend: %v", err)
+	}
+	directKey := Key(time.Now(), "call-direct")
+	uploaded := writeSpoolFile(t, t.TempDir(), directKey, wavHeaderSize+16000)
+	if _, err := direct.(*s3Storage).client.FPutObject(t.Context(), "aicc-recordings",
+		directKey, uploaded, minio.PutObjectOptions{ContentType: "audio/wav"}); err != nil {
+		t.Fatalf("simulate the switch's PUT: %v", err)
+	}
+	directSize, err := direct.Ingest(t.Context(), directKey)
+	if err != nil {
+		t.Fatalf("direct ingest: %v", err)
+	}
+	if directSize != wavHeaderSize+16000 {
+		t.Errorf("direct size = %d", directSize)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err := direct.Ingest(ctx, Key(time.Now(), "never-recorded")); err == nil {
+		t.Error("ingested a recording the switch never made")
 	}
 }
 

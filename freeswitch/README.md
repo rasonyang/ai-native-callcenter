@@ -19,7 +19,8 @@ never edited again.
 ## Prerequisites
 
 * FreeSWITCH 1.10.13 or newer with `mod_lua`, `mod_pgsql` and `mod_callcenter`
-  loaded, and `uuid-version` set to 7 in `switch.conf.xml`.
+  loaded, and `uuid-version` set to 7 in `switch.conf.xml`. `mod_http_cache`
+  as well when recordings go straight to an object store (see below).
 * The application's migrations applied, so the `luacc` views exist.
 * The read-only database role created:
   `psql "$AICC_DATABASE_URL" -v lua_password="'…'" -f deploy/sql/lua_role.sql`
@@ -38,6 +39,23 @@ Add to `vars.xml`, so no credential is ever committed here:
 <X-PRE-PROCESS cmd="set" data="aicc_bot_port=6060"/>
 <X-PRE-PROCESS cmd="set" data="aicc_recordings_dir=$${base_dir}/recordings"/>
 ```
+
+`aicc_recordings_dir` is where `record_session` writes, and it takes a URL as
+readily as a directory. With `mod_http_cache` loaded and its
+`enable-file-formats` param set to `true`, pointing it at an HTTP store makes
+the switch upload each finished recording itself — no shared volume, no spool:
+
+```xml
+<X-PRE-PROCESS cmd="set" data="aicc_recordings_dir=http://127.0.0.1:8888/buckets/aicc-recordings"/>
+```
+
+That address is the SeaweedFS filer from `deploy/dev/docker-compose.yml`; the
+application reads the same files back over the S3 port
+(`AICC_RECORDING_BACKEND=S3`, `AICC_S3_ENDPOINT=127.0.0.1:8333`, no
+`AICC_RECORDING_DIR`). The same mechanism plays files *from* the store —
+`playback http://…/prompt.wav` — so prompts can live there too. mod_http_cache
+speaks plain HTTP(S); front the store with a TLS proxy if the network between
+the switch and the store is not trusted.
 
 Bind the handler in `autoload_configs/lua.conf.xml`:
 

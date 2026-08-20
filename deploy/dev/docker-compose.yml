@@ -21,5 +21,28 @@ services:
       timeout: 3s
       retries: 20
 
+  # Object storage for recordings: one SeaweedFS process (master, volume,
+  # filer, S3 gateway). The native FreeSWITCH writes recordings straight into
+  # it through mod_http_cache (HTTP PUT against the filer, port 8888), and the
+  # application reads them back over the S3 API (port 8333). The filer path
+  # /buckets/aicc-recordings and the S3 bucket aicc-recordings are the same
+  # files seen through two doors.
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: aicc-seaweedfs
+    restart: unless-stopped
+    command: mini -dir=/data -bucket=aicc-recordings
+    ports:
+      - "127.0.0.1:8888:8888"   # filer — mod_http_cache PUTs/GETs here
+      - "127.0.0.1:8333:8333"   # S3 — the application reads here
+    volumes:
+      - seaweedfs-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8888/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
 volumes:
   postgres-data:
+  seaweedfs-data:

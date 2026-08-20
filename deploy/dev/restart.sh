@@ -17,8 +17,9 @@ touch "$marker"
 attempt=0
 while [ $attempt -lt 15 ]; do
   attempt=$((attempt + 1))
-  AICC_RECORDING_DIR="${AICC_RECORDING_DIR:-/usr/local/freeswitch/recordings}" \
-    nohup /tmp/aicc >/dev/null 2>&1 &
+  # Recording settings come from .env: dev records through mod_http_cache
+  # straight into SeaweedFS (deploy/dev/docker-compose.yml), no local spool.
+  nohup /tmp/aicc >/dev/null 2>&1 &
   sleep 3
 
   latest=$(find logs -name 'aicc-*.log' -newer "$marker" | sort | tail -1)
