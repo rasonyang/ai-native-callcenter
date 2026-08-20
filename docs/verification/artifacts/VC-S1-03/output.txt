@@ -1,0 +1,11 @@
+=== collect#1 95999 absent (17:28:10) ===
+0
+=== collect#2 baselines ===
+baseline_rejects=0
+baseline_cdrs=6107
+=== collect#3 post-call deltas (17:30:00) ===
+rejects_now=0
+cdrs_now=6113
+=== collect#4 latest cdr ===
+NO_ANSWER|UNALLOCATED_NUMBER|t
+=== collect#5 fs console ===

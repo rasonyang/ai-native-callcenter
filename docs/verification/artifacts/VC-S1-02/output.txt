@@ -1,0 +1,19 @@
+=== collect#1 cdrs latest (17:27:46) ===
+01a01e7d-3d48-7419-a4f2-898fa97da1cb|INBOUND|ANSWERED|f|125|125|95001|en|NORMAL_CLEARING
+=== collect#2 transcripts (call 01a01e7d-3d48-7419-a4f2-898fa97da1cb) ===
+1|BOT|TEXT|MODEL|Thanks for calling NovaNet, how can I he
+2|BOT|TEXT|MODEL|Are you still there? How can I help you 
+3|BOT|TEXT|MODEL|No problem, take your time. I’m here whe
+4|BOT|TEXT|MODEL|Okay, I’ll pause for a moment. Just let 
+5|BOT|TEXT|MODEL|You’re welcome. Do you need anything els
+6|BOT|TEXT|MODEL|Sure,
+7|BOT|TEXT|MODEL|Alright, I’ll keep this short and clear.
+8|BOT|TEXT|MODEL|Tell me what you’d like help with, like 
+9|BOT|TEXT|MODEL|Our hours can vary by service and locati
+10|BOT|TEXT|MODEL|They vary by service and location, so I 
+=== collect#3 watchLeg log count ===
+1
+=== collect#4 cdrs rows for this call_id ===
+1
+=== 留证: CUSTOMER 行数 ===
+0

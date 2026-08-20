@@ -1,0 +1,45 @@
+=== collect#1 show channels (17:25:56) ===
+uuid,direction,created,created_epoch,name,state,cid_name,cid_num,ip_addr,dest,application,application_data,dialplan,context,read_codec,read_rate,read_bit_rate,write_codec,write_rate,write_bit_rate,secure,hostname,presence_id,presence_data,accountcode,callstate,callee_name,callee_num,callee_direction,call_uuid,sent_callee_name,sent_callee_num,initial_cid_name,initial_cid_num,initial_ip_addr,initial_dest,initial_dialplan,initial_context
+01a01e7d-3d3f-7844-9369-7859ffc3389a,inbound,2026-08-20 17:25:19,1787217919,sofia/external/18688886669@192.168.31.5,CS_EXECUTE,18688886669,18688886669,192.168.31.5,95001,bridge,{absolute_codec_string=PCMU,PCMA}sofia/gateway/aicc_bot/95001,XML,public,PCMU,8000,64000,PCMU,8000,64000,,RasonYangs-MacBook-Pro.local,,,,ACTIVE,Outbound Call,95001,SEND,01a01e7d-3d3f-7844-9369-7859ffc3389a,Outbound Call,95001,18688886669,18688886669,192.168.31.5,95001,XML,public
+01a01e7d-3d5c-7629-9dca-f93f42223fb4,outbound,2026-08-20 17:25:19,1787217919,sofia/external/95001,CS_EXCHANGE_MEDIA,18688886669,18688886669,192.168.31.5,95001,,,XML,public,PCMU,8000,64000,PCMU,8000,64000,,RasonYangs-MacBook-Pro.local,,,,ACTIVE,Outbound Call,95001,SEND,01a01e7d-3d3f-7844-9369-7859ffc3389a,18688886669,18688886669,18688886669,18688886669,192.168.31.5,95001,XML,public
+
+2 total.
+
+=== collect#2 GET /calls ===
+{
+  "items": [
+    {
+      "callId": "01a01e7d-3d48-7419-a4f2-898fa97da1cb",
+      "callType": "INBOUND",
+      "state": "RUNNING",
+      "language": "en",
+      "parties": [
+        {
+          "partyId": "01a01e7d-3d52-7c54-b0c1-2fbeeec229db",
+          "channelId": "01a01e7d-3d3f-7844-9369-7859ffc3389a",
+          "role": "ORIGINATOR",
+          "state": "TALKING",
+          "number": "18688886669",
+          "otherNumber": "95001",
+          "createdAt": "2026-08-20T09:25:19.291778Z",
+          "answeredAt": "2026-08-20T09:25:19.30175Z"
+        },
+        {
+          "partyId": "01a01e7d-3d68-7b62-b50a-66a722623e1f",
+          "channelId": "01a01e7d-3d5c-7629-9dca-f93f42223fb4",
+          "role": "TARGET",
+          "state": "TALKING",
+          "number": "95001",
+          "otherNumber": "18688886669",
+          "createdAt": "2026-08-20T09:25:19.321776Z",
+          "answeredAt": "2026-08-20T09:25:19.331737Z",
+          "isBotLeg": true
+        }
+      ],
+      "createdAt": "2026-08-20T09:25:19.314895Z"
+    }
+  ]
+}
+=== collect#3 log lines ===
+time=2026-08-20T17:25:20.655+08:00 level=INFO msg="ai call bridged" callId=e70cbf13-171b-1240-1fb5-d5ddf59eab04 aiccCallId=01a01e7d-3d48-7419-a4f2-898fa97da1cb did=95001 callId=e70cbf13-171b-1240-1fb5-d5ddf59eab04 law=PCMU toProvider=PCMU@8000 fromProvider=PCMU@8000 isPassthrough=true
+time=2026-08-20T17:25:20.655+08:00 level=INFO msg="ai conversation started" callId=e70cbf13-171b-1240-1fb5-d5ddf59eab04 aiccCallId=01a01e7d-3d48-7419-a4f2-898fa97da1cb did=95001 flowId=novanet_support provider=openai language=en

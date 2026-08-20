@@ -61,7 +61,7 @@ cases:
       show channels 有 2 个通道、caller 能听到 bot(一切"正常"),但 GET /calls 出现 2 个呼叫
       (minted 与 provisional 未合并,reidentify 失效)—— 界面与账本随后都按两通电话记,且无任何报错。
     evidence_dir: docs/verification/artifacts/VC-S1-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:2通道/单呼叫RUNNING/isBotLeg/两日志行全中;A腿CS_EXECUTE为桥内常态(verdict)
     refs: ["internal/telephony/coordinator.go:329", "internal/telephony/coordinator.go:297", "internal/aicall/orchestrator.go:207", "freeswitch/scripts/aicc_inbound.lua:56"]
 
   - id: VC-S1-02
@@ -89,7 +89,7 @@ cases:
       cdrs 出现同一通话的 2 行(bot 侧与人侧都写了)—— 归属规则 cdr.go:79 被绕过;
       或 transcripts 的 seq 有洞(空 final 烧号回归,actor.go:222 防线失效)。两者对呼叫者都不可见。
     evidence_dir: docs/verification/artifacts/VC-S1-02/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:单行CDR(bot_sec=125)/BOT行seq1-10连续/留证CUSTOMER=0与SYS-8一致
     refs: ["internal/aicall/ledger.go:130", "internal/telephony/cdr.go:79", "internal/transcript/actor.go:222", "internal/aicall/session.go:728"]
 
   - id: VC-S1-03
@@ -120,7 +120,7 @@ cases:
       在 Finish 后没走 InsertCDR,漏记了被拒话务;或者出现 "rejected party transition"
       (状态机把合法的未接释放当非法迁移吞掉)。
     evidence_dir: docs/verification/artifacts/VC-S1-03/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:链路重试6次↔6行CDR全部UNALLOCATED_NUMBER入账;rejects差分0;console缓冲不可靠改查日志文件(verdict)
     refs: ["freeswitch/scripts/aicc_inbound.lua:47", "internal/telephony/call.go:69", "internal/telephony/cdr.go:229"]
 
   # ───────────────────────── S2 bot 交互中主叫挂断 ─────────────────────────
@@ -151,7 +151,7 @@ cases:
       主叫已挂、channels=0(表面干净),但日志没有 "model session closed" —— provider WebSocket
       仍挂着计费;或 cdrs.is_contained=true(把主叫弃线记成 bot 圆满收线,污染 containment 指标)。
     evidence_dir: docs/verification/artifacts/VC-S2-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:拆线链/channels=0/is_contained=f/bot_sec=4;"model session closed"缺席是主叫先挂路径常态(verdict有叙述修订建议)
     refs: ["internal/aicall/session.go:728", "internal/aicall/session.go:288", "internal/aicall/ledger.go:175", "internal/aicall/orchestrator.go:187"]
 
   # ───────────────────────── S3 bot → 队列转人工(与 mod_callcenter 对账) ─────────────────────────
@@ -634,7 +634,7 @@ cases:
       或 language=zh 而 bot 说英文(DID.language 未进 X-AICC-Language 头,
       aicc_inbound.lua:76 → orchestrator.go:210 链路断裂),两种都不报错。
     evidence_dir: docs/verification/artifacts/VC-S8-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:provider恒openai不随语言变/zh全链/BOT中文;留证CUSTOMER=0
     refs: ["cmd/aicc/main.go:267", "internal/aicall/orchestrator.go:220", "internal/aicall/orchestrator.go:278", "freeswitch/scripts/aicc_inbound.lua:76"]
 
   # ───────────────────────── S9 ASR 全链:音频帧 → WS → final → SSE → UI → DB ─────────────────────────
