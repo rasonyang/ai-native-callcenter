@@ -222,7 +222,14 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - **C15(new,2026-08-20 T3.5 执行发现,即时根因)** click-to-dial 从未能工作:outbound.go:164 设
   `origination_caller_id_name = "Dial "+destination`(带空格),renderVars(adapter.go:309-321)不对值
   加引号 → FS originate `{…}` 段 "Parse Error!" → DESTINATION_OUT_OF_ORDER(fs 日志 19:02/19:04 两次实证,
-  audit_logs 167/165 对应请求)。修复=renderVars 对含空格/逗号的值加引号(或该值去空格)。
+  audit_logs 167/165 对应请求)。**已修并上线(commit b174a5c,2026-08-20)**,三处一并:
+  ①`origination_caller_id_name` 去空格("Dial-1007");②renderVars 维持裸拼接并写明约束——加引号会
+  破坏 inline transfer 的外层单引号,实测报 "Invalid Application 1007"(第二形态);
+  ③**click-to-dial 改 transfer 形态**(owner 指示:loopback 难追踪)——坐席腿应答后
+  `uuid_transfer <leg> <destination> XML default`,路由交还 dialplan(内部/外线由它决定),
+  BridgeToEndpoint+loopback 退出 click-to-dial 路径;AI 外呼仍用 loopback,默认值已钉 `/XML`
+  (loopback b 腿继承 a 腿 dialplan,继承到 inline 就把号码当应用名——第三形态)。
+  待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。
   **附带旅程缺口 G-A7**:坐席外呼(DIAL OUT / POST /calls/dial,internal/outbound 整个服务)不在三旅程
   与任何 case 内。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
