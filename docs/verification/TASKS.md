@@ -5,6 +5,21 @@
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
 
+## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
+
+**判定以腿是否穿过外部 PSTN 网关为准,不看号码形态:**
+
+| 情形 | callType |
+|---|---|
+| 第一条 leg 经 PSTN 网关**呼入** | `INBOUND` |
+| 外呼的 leg 经 PSTN 网关**呼出** | `OUTBOUND` |
+| 分机号互相拨打(不出网关) | `INTERNAL` |
+
+**能力限制:`INTERNAL` 通话不支持转接(transfer)、保持(hold)、取回(retrieve)。**
+影响面:①CDR 的 call_type 派生须按此实现(现状 click-to-dial 分机互拨被记成 OUTBOUND,见 C17);
+②呼叫控制接口对 INTERNAL 呼叫应拒绝上述三个操作(现状无此判断,见 **C18**);
+③账本相关 case(T6.11 外呼、S7 系列 hold/transfer)的 expect 须按此口径写。
+
 ---
 
 ## 1. 三条角色旅程(贴代码走查)
@@ -137,9 +152,9 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - **T6.5** DRAFT G-A1:agent 视角等待名单过滤 **T6.6** DRAFT G-C1/C2/C5:管理面生命周期三连
 - **T6.7** DRAFT G-B1:墙板/报表对账 **T6.8** DRAFT G-C3:DID 生命周期(停用=UNALLOCATED_NUMBER,引 S1-03 形态)
 - **T6.11(新)** DRAFT G-A7:坐席外呼全链(click-to-dial:先振坐席腿(auto-answer)→桥出→
-  CDR→ACW)——待 C15 修复后起草执行。calltype 判定口径(owner 2026-08-20):
-  **是否穿过外部 PSTN 网关**——分机互拨(如 1008→1007)= INTERNAL,经网关外呼
-  (如 1008→18688886669)= OUTBOUND;case 需两型各一断言
+  CDR→ACW)——click-to-dial 媒体链已通(2026-08-20 实测 1008→1007),但账面见 C17。
+  **待测(本轮未做)**:经 PSTN 网关的外呼一型(如 1008→18688886669)——媒体与 call_type=OUTBOUND
+  均未验证。case 需三型断言(INBOUND/OUTBOUND/INTERNAL,判定口径见 §0)+ INTERNAL 的能力限制(C18)
 - 约束:阶段 2–5 经验之后起草;expect 全给 file:line。
 - **T6.9(新)** W1/W2 合入后的账本改写:S1-02/S8-01 留证条款→正式断言(CUSTOMER|MODEL ≥1)并重跑;
   S5-01 按 RONA 新行为整体改写(agent_states 将不再"前后一致"!)并重跑;S3-01 members 词表(F1)回填。
@@ -234,9 +249,12 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   与任何 case 内。
 - **C17(new,2026-08-20 click-to-dial 复测发现)** click-to-dial 媒体已通(1008→1007 响铃、双向通话、
   挂断双向拆线),但**账面几乎为空**:call_type=OUTBOUND(按 owner 口径分机互拨应为 **INTERNAL**——
-  是否穿外部网关才是分界)、talk_sec=0(实际通话数十秒)、agent_ids 为空(发起坐席未归属)、
+  见 §0 口径)、talk_sec=0(实际通话数十秒)、agent_ids 为空(发起坐席未归属)、
   legs 只有 [DIALING/1008] 无被叫腿。根因方向:transfer 进 dialplan 后新建的被叫腿未被收养/归并
   (与 C11 的"读回侧丢失"同族)。**T6.11 的 case 起草以此为靶**;修复后 call_type 判定需按网关口径实现。
+- **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
+  对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
+  依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;
