@@ -318,3 +318,51 @@ func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
 		t.Errorf("events = %v, want one ABANDONED", ledger.queueEvents)
 	}
 }
+
+// A call the agent placed is still their call, and whether it was answered is
+// decided on the leg dialled out: the agent's own leg auto-answers in front of
+// them, and reading that as an answer recorded every unanswered dial-out as a
+// conversation, with no agent, no ring and no talk time (found live).
+func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
+	agentID := uuid.New()
+
+	answeredOut := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(30),
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, AnsweredAt: atPtr(0), ReleasedAt: atPtr(30)},
+			{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30)},
+		},
+	}
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), answeredOut)
+	if got.Status != store.CDRStatusAnswered {
+		t.Errorf("status = %q, want ANSWERED", got.Status)
+	}
+	if len(got.AgentIDs) != 1 || got.AgentIDs[0] != agentID {
+		t.Errorf("agentIds = %v, want the agent who dialled", got.AgentIDs)
+	}
+	if got.PrimaryAgentID == nil || *got.PrimaryAgentID != agentID {
+		t.Error("the call the agent placed has no primary agent")
+	}
+	if got.RingSec != 6 {
+		t.Errorf("ringSec = %d, want 6 (dialled at 2, answered at 8)", got.RingSec)
+	}
+	if got.TalkSec != 22 {
+		t.Errorf("talkSec = %d, want 22 (answered at 8, ended at 30)", got.TalkSec)
+	}
+	if len(got.Legs) != 1 || got.Legs[0].Kind != "TRUNK" {
+		t.Errorf("legs = %+v, want one TRUNK leg for the number dialled", got.Legs)
+	}
+
+	unanswered := answeredOut
+	unanswered.CallID = uuid.New()
+	unanswered.Parties = []PartySnapshot{
+		{Role: RoleOriginator, Number: "1008", AgentID: &agentID, AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
+		{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), ReleasedAt: atPtr(12)},
+	}
+	missed := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), unanswered)
+	if got := missed; got.Status != store.CDRStatusNoAnswer {
+		t.Errorf("nobody picked up, status = %q, want NO_ANSWER", got.Status)
+	}
+}

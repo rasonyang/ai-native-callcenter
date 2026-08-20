@@ -380,3 +380,23 @@ func TestDialAIRejectsUnknownAndFlowlessNumbers(t *testing.T) {
 		t.Errorf("bad number: err = %v", err)
 	}
 }
+
+// The ledger must not call a walk down the hall an outbound call: to the
+// switch every originated leg is outbound, so click-to-dial stamps what it
+// knows while the destination is still in hand (found live: an extension-to-
+// extension dial recorded as OUTBOUND).
+func TestDialStampsInternalVersusOutbound(t *testing.T) {
+	for _, tc := range []struct{ destination, want string }{
+		{"1007", "INTERNAL"},
+		{"18688886669", "OUTBOUND"},
+	} {
+		sw := &fakeSwitch{}
+		s := testService(t, sw, nil)
+		if _, err := s.Dial(context.Background(), "1008", tc.destination); err != nil {
+			t.Fatal(err)
+		}
+		if got := sw.lastOriginate().vars["aicc_call_type"]; got != tc.want {
+			t.Errorf("dialling %s stamped %q, want %q", tc.destination, got, tc.want)
+		}
+	}
+}

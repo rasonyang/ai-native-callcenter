@@ -261,7 +261,13 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   ③ **status 恒 ANSWERED**:远端 NO_USER_RESPONSE(对端未响应)的那通同样记 ANSWERED——
      坐席腿 auto-answer 被当成整通已接听;应按被叫腿结果判定(NO_ANSWER/FAILED)。
   实测样本:01a01f03-ca0d(外呼成功 13s)、01a01f03-6dd9(NO_USER_RESPONSE)、01a01ef9-1440(内部)。
-  **T6.11 的 case 起草以此三条为靶**。
+  **已全部修复并实测通过(2026-08-20)**:①`aicc_call_type` 由 click-to-dial 按位数判定(4 位=INTERNAL,
+  owner 简化口径)盖在坐席腿上,归一化进 SwitchEvent.CallTypeHint,callTypeOf 优先采信;
+  ②`aicc_extension` 一并盖上,坐席在自己发起的呼叫里可被归属;③assemble 新增"坐席发起"分支——
+  被叫腿决定 answered/ring/talk,坐席腿的 auto-answer 不再算接通,legs 渲染被叫腿(出网关=TRUNK、
+  内部=AGENT)。复测:INTERNAL 1008→1007 ring=2/talk=6/agents=1/legs=[AGENT/1007];
+  OUTBOUND 1008→18688886669 ring=2/talk=9/legs=[TRUNK/…];未接一型由单测钉住(NO_ANSWER)。
+  **残留**:b 腿在 bridge 前失败时会自成一通 CDR(样本 01a01f03-728b)——归 T6.11 起草时一并覆盖。
 - **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
   对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
   依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。

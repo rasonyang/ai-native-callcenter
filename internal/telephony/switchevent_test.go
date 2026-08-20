@@ -460,3 +460,17 @@ func TestTheMediaTapsEventsAreSubscribedTo(t *testing.T) {
 		}
 	}
 }
+
+// A stamped call type outranks the channel's direction: the switch sees every
+// leg we originate as outbound, whether it rings an extension or a carrier.
+func TestCallTypeHintOutranksDirection(t *testing.T) {
+	ev := SwitchEvent{Direction: DirectionOutbound, CallTypeHint: "INTERNAL"}
+	if got := callTypeOf(ev); string(got) != "INTERNAL" {
+		t.Errorf("callTypeOf = %q, want INTERNAL", got)
+	}
+	// Nonsense in the variable is ignored rather than trusted.
+	ev.CallTypeHint = "BANANA"
+	if got := callTypeOf(ev); string(got) != "OUTBOUND" {
+		t.Errorf("callTypeOf with a bad hint = %q, want OUTBOUND", got)
+	}
+}

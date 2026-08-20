@@ -5,10 +5,12 @@ package telephony
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
@@ -209,17 +211,39 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 			answered = leg
 		}
 	}
+
+	// A call the agent placed reads the other way round: their own leg is the
+	// originator, so the call is theirs no matter who they reached, and
+	// whether anybody picked up is decided on the leg dialled out — the
+	// agent's own leg auto-answers in front of them and says nothing about
+	// the person being called.
+	isAgentPlaced := originator != nil && originator.AgentID != nil
+	dialled := dialledLegs(snap)
+	if isAgentPlaced {
+		if !slices.Contains(cdr.AgentIDs, *originator.AgentID) {
+			cdr.AgentIDs = append(cdr.AgentIDs, *originator.AgentID)
+		}
+		for _, leg := range dialled {
+			if leg.AnsweredAt != nil && answered == nil {
+				answered = leg
+			}
+		}
+	}
+
 	if answered != nil {
 		cdr.Status = store.CDRStatusAnswered
 		cdr.AnsweredAt = *answered.AnsweredAt
 		cdr.PrimaryAgentID = answered.AgentID
+		if cdr.PrimaryAgentID == nil && isAgentPlaced {
+			cdr.PrimaryAgentID = originator.AgentID
+		}
 		cdr.RingSec = int(answered.AnsweredAt.Sub(answered.CreatedAt).Seconds())
 		talkEnd := cdr.EndedAt
 		if answered.ReleasedAt != nil {
 			talkEnd = *answered.ReleasedAt
 		}
 		cdr.TalkSec = int(talkEnd.Sub(*answered.AnsweredAt).Seconds())
-	} else if snap.Bot.Sec > 0 || (originator != nil && originator.AnsweredAt != nil && len(agentLegs) == 0 && snap.Queue.JoinedAt.IsZero()) {
+	} else if snap.Bot.Sec > 0 || (!isAgentPlaced && originator != nil && originator.AnsweredAt != nil && len(agentLegs) == 0 && snap.Queue.JoinedAt.IsZero()) {
 		// The bot answered, or the call never sought a person at all.
 		cdr.Status = store.CDRStatusAnswered
 		if originator != nil && originator.AnsweredAt != nil {
@@ -230,7 +254,11 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.MissedReason = a.missedReason(snap, agentLegs)
 	}
 
-	cdr.Legs = buildLegs(snap, originator, agentLegs)
+	if isAgentPlaced {
+		cdr.Legs = buildLegs(snap, originator, append(slices.Clone(agentLegs), dialled...))
+	} else {
+		cdr.Legs = buildLegs(snap, originator, agentLegs)
+	}
 	if snap.Bot.Summary != "" {
 		if cdr.UserData == nil {
 			cdr.UserData = map[string]any{}
@@ -297,7 +325,13 @@ func buildLegs(snap Snapshot, originator *PartySnapshot, agentLegs []*PartySnaps
 		legs = append(legs, leg)
 	}
 	for _, agent := range agentLegs {
-		leg := store.Leg{Kind: "AGENT", Label: agent.Number}
+		// A leg belonging to an agent is theirs; one the agent dialled out
+		// of the building went through a carrier.
+		kind := "AGENT"
+		if agent.AgentID == nil && snap.CallType == events.CallTypeOutbound {
+			kind = "TRUNK"
+		}
+		leg := store.Leg{Kind: kind, Label: agent.Number}
 		if agent.AnsweredAt != nil {
 			end := snap.CreatedAt
 			if agent.ReleasedAt != nil {
@@ -315,6 +349,21 @@ func buildLegs(snap Snapshot, originator *PartySnapshot, agentLegs []*PartySnaps
 		legs = append(legs, store.Leg{Kind: "DIALING", Label: originator.Number})
 	}
 	return legs
+}
+
+// dialledLegs are the legs a call reached out to that are nobody's agent:
+// the person an agent called. On an inbound call there are none — the bot's
+// leg is the switch's own and is accounted for as the bot's share.
+func dialledLegs(snap Snapshot) []*PartySnapshot {
+	var out []*PartySnapshot
+	for i := range snap.Parties {
+		p := &snap.Parties[i]
+		if p.Role == RoleOriginator || p.AgentID != nil || p.IsBotLeg {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // split separates the caller's leg from the agents'.

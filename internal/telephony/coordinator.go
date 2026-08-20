@@ -897,6 +897,13 @@ func (c *Coordinator) publish(ctx context.Context, ev events.Event, scope events
 
 // callTypeOf classifies a call from the switch's own view of the channel.
 func callTypeOf(ev SwitchEvent) events.CallType {
+	// Whoever placed the call may already know what it is. The switch cannot
+	// tell an extension from a carrier number here — both are simply legs it
+	// created outbound — so a stamped type outranks the guess below.
+	switch events.CallType(ev.CallTypeHint) {
+	case events.CallTypeInbound, events.CallTypeOutbound, events.CallTypeInternal:
+		return events.CallType(ev.CallTypeHint)
+	}
 	// A channel the switch created inbound came from outside; one it created
 	// outbound is a call we or the dialplan placed.
 	if ev.Direction == DirectionInbound {

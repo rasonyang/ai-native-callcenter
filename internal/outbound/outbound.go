@@ -136,6 +136,21 @@ func pinCodecs(vars map[string]string, endpoint string) {
 	}
 }
 
+// extensionDigits is how long an internal number is here. A destination of
+// exactly this many digits never leaves the building; anything longer goes out
+// through a carrier. Crossing the gateway is what actually decides the type,
+// but the dialplan owns that routing and the ledger needs an answer before the
+// second leg exists, so the length stands in for it.
+const extensionDigits = 4
+
+// callTypeFor classifies a dialled destination for the ledger.
+func callTypeFor(destination string) string {
+	if len(destination) == extensionDigits {
+		return "INTERNAL"
+	}
+	return "OUTBOUND"
+}
+
 // isDialable keeps dial strings boring: digits only, sane length. Everything
 // else stays out of command lines by construction.
 func isDialable(number string) bool {
@@ -173,6 +188,12 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 		// No space in the name: it travels inside an originate {…} block,
 		// where a space ends the block and kills the call before it routes.
 		"origination_caller_id_name": "Dial-" + destination,
+		// Who placed it: an originated leg carries no directory lookup, so
+		// without this the agent is missing from their own call's record.
+		"aicc_extension": agentExtension,
+		// What this call is, decided where the destination is still known:
+		// to the switch every originated leg is simply outbound.
+		"aicc_call_type": callTypeFor(destination),
 		// The agent leg speaks telephone audio, not what a browser would
 		// prefer: the leg the dialplan raises next inherits this one's codec,
 		// and a G.711-only phone answers an inherited opus offer with

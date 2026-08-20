@@ -124,6 +124,11 @@ type SwitchEvent struct {
 	DestinationNumber string // dialed number
 	CallerIDName      string
 	Context           string
+	// CallTypeHint is the type stamped by whoever placed the call, for the
+	// cases the switch's own view cannot decide: every leg we originate is
+	// "outbound" to the switch, whether it reaches an extension down the hall
+	// or a carrier. Empty leaves the classification to the channel.
+	CallTypeHint string
 
 	// Hangup detail.
 	HangupCause     string
@@ -214,6 +219,7 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	out.CallerIDName = ev.Get("Caller-Caller-ID-Name")
 	out.Context = ev.Get("Caller-Context")
 	out.OtherChannelID = ev.Get("Other-Leg-Unique-ID")
+	out.CallTypeHint = ev.Get("variable_aicc_call_type")
 
 	switch strings.ToUpper(ev.Get("Call-Direction")) {
 	case "INBOUND":
