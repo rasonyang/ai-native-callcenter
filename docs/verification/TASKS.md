@@ -271,6 +271,11 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
   对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
   依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。
+- **C19(new,2026-08-20 owner 现场发现,已修)** cockpit 把坐席**自己拨出**的呼叫渲染成来电:
+  `isRinging = state==='RINGING' || state==='DIALING'`(_app.agent.index.tsx、components/active-call.tsx
+  两处同源),于是 DIALING 期间出现"接听/拒接",还允许在未接通时转接。
+  **已修**:RINGING(呼叫送到坐席)与 DIALING(坐席自己发起)分开——DIALING 显示"正在外呼"标题
+  与单个挂断按钮,不再提供接听/保持/转接;新增 i18n `call.outgoing`(en/zh)与一条 cockpit 回归测试。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

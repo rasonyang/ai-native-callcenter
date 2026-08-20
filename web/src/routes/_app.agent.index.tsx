@@ -131,27 +131,38 @@ function CallPanel({ call }: { call: CallSnapshot }) {
   const other = otherParty(call, mine?.agentId)
   const elapsedSec = useElapsedSec(mine?.answeredAt ?? mine?.createdAt)
 
-  const isRinging = mine?.state === 'RINGING' || mine?.state === 'DIALING'
+  // Being rung and ringing somebody are opposite situations that share a
+  // state name only by accident: RINGING is a call delivered to this agent,
+  // DIALING is the leg they placed. Treating both as "incoming" offered an
+  // Accept button for a call the agent had just dialled themselves.
+  const isOffered = mine?.state === 'RINGING'
+  const isDialing = mine?.state === 'DIALING'
+  const isUnanswered = isOffered || isDialing
   const isHeld = mine?.state === 'HELD'
   const isMuted = Boolean(mine?.isMuted)
   // Answering is not instant: the phone gathers ICE before it picks up, which
   // takes seconds. Saying so beats a button that looks like it did nothing.
-  const isAnswering = actions.answer.isPending || (actions.answer.isSuccess && isRinging)
+  const isAnswering = actions.answer.isPending || (actions.answer.isSuccess && isOffered)
 
   return (
-    <Card title={isRinging ? t('call.incoming') : t('agent.activeCall')} aside={<CallBadges call={call} />}>
+    <Card
+      title={
+        isOffered ? t('call.incoming') : isDialing ? t('call.outgoing') : t('agent.activeCall')
+      }
+      aside={<CallBadges call={call} />}
+    >
       <div className="tabular text-base font-semibold">
         {other?.number ?? t('call.unknownNumber')}
       </div>
       <div className="tabular mt-1 text-sm text-muted-foreground">
-        {isRinging
+        {isUnanswered
           ? t(`partyStates.${mine?.state ?? 'RINGING'}`)
           : isHeld
             ? `${t('partyStates.HELD')} · ${formatDuration(elapsedSec, { padMinutes: true })}`
             : formatDuration(elapsedSec, { padMinutes: true })}
       </div>
 
-      {isRinging ? (
+      {isOffered ? (
         <div className="mt-3 flex gap-2">
           <Button
             className="flex-1 text-white hover:opacity-90"
@@ -168,6 +179,18 @@ function CallPanel({ call }: { call: CallSnapshot }) {
             onClick={() => actions.hangup.mutate(call.callId)}
           >
             {t('call.decline')}
+          </Button>
+        </div>
+      ) : isDialing ? (
+        // Nothing to accept on a call this agent placed; the only thing they
+        // can do before the other side picks up is give up on it.
+        <div className="mt-3">
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={() => actions.hangup.mutate(call.callId)}
+          >
+            {t('call.hangup')}
           </Button>
         </div>
       ) : (

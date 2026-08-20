@@ -25,7 +25,10 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
   const since = mine?.answeredAt ?? mine?.createdAt ?? call.createdAt
   const elapsedSec = useElapsedSec(since)
 
-  const isRinging = mine?.state === 'RINGING' || mine?.state === 'DIALING'
+  // Only a call delivered to this agent can be answered; DIALING is their own
+  // leg on a call they placed, and offering to answer that is nonsense.
+  const isRinging = mine?.state === 'RINGING'
+  const isDialing = mine?.state === 'DIALING'
   const isHeld = mine?.state === 'HELD'
   const busy =
     actions.answer.isPending || actions.hold.isPending ||
@@ -50,7 +53,7 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
             {t('call.answer')}
           </Button>
         )}
-        {!isRinging && !isHeld && (
+        {!isRinging && !isDialing && !isHeld && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => actions.hold.mutate(call.callId)}>
             <Pause />
             {t('call.hold')}
@@ -62,7 +65,7 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
             {t('call.retrieve')}
           </Button>
         )}
-        {!isRinging && (
+        {!isRinging && !isDialing && (
           <Button
             size="sm"
             variant="outline"

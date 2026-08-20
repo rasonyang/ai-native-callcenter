@@ -187,6 +187,16 @@ describe('ringing', () => {
       ),
     )
   })
+
+  // A call the agent placed is not a call to answer: their own leg is DIALING
+  // while the other side rings, and offering Accept there asked them to pick
+  // up their own outgoing call (seen live).
+  it('offers no answer on a call the agent placed', async () => {
+    await renderCockpit({ calls: [callFixture('DIALING')] })
+    expect(await screen.findByText(/calling out/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /accept/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /hang up/i })).toBeInTheDocument()
+  })
 })
 
 describe('dial out', () => {

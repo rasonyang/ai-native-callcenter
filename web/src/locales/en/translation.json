@@ -199,6 +199,7 @@
     "transferTo": "Extension",
     "unknownNumber": "Unknown number",
     "incoming": "Incoming call",
+    "outgoing": "Calling out",
     "answering": "Answering…",
     "accept": "Accept",
     "decline": "Decline",

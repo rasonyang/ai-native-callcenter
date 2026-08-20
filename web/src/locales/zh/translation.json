@@ -197,6 +197,7 @@
     "transferTo": "分机号",
     "unknownNumber": "未知号码",
     "incoming": "来电",
+    "outgoing": "正在外呼",
     "answering": "接听中…",
     "accept": "接听",
     "decline": "拒接",
