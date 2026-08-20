@@ -153,8 +153,9 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - **T6.7** DRAFT G-B1:墙板/报表对账 **T6.8** DRAFT G-C3:DID 生命周期(停用=UNALLOCATED_NUMBER,引 S1-03 形态)
 - **T6.11(新)** DRAFT G-A7:坐席外呼全链(click-to-dial:先振坐席腿(auto-answer)→桥出→
   CDR→ACW)——click-to-dial 媒体链已通(2026-08-20 实测 1008→1007),但账面见 C17。
-  **待测(本轮未做)**:经 PSTN 网关的外呼一型(如 1008→18688886669)——媒体与 call_type=OUTBOUND
-  均未验证。case 需三型断言(INBOUND/OUTBOUND/INTERNAL,判定口径见 §0)+ INTERNAL 的能力限制(C18)
+  **外呼一型已实测(2026-08-20)**:1008→18688886669 经 `pstn_sim_outbound` 出网关,call_type=OUTBOUND
+  正确,但账面同 C17 三条失真。case 需三型断言(INBOUND/OUTBOUND/INTERNAL,判定口径见 §0)
+  + INTERNAL 的能力限制(C18)
 - 约束:阶段 2–5 经验之后起草;expect 全给 file:line。
 - **T6.9(新)** W1/W2 合入后的账本改写:S1-02/S8-01 留证条款→正式断言(CUSTOMER|MODEL ≥1)并重跑;
   S5-01 按 RONA 新行为整体改写(agent_states 将不再"前后一致"!)并重跑;S3-01 members 词表(F1)回填。
@@ -247,11 +248,20 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。
   **附带旅程缺口 G-A7**:坐席外呼(DIAL OUT / POST /calls/dial,internal/outbound 整个服务)不在三旅程
   与任何 case 内。
-- **C17(new,2026-08-20 click-to-dial 复测发现)** click-to-dial 媒体已通(1008→1007 响铃、双向通话、
-  挂断双向拆线),但**账面几乎为空**:call_type=OUTBOUND(按 owner 口径分机互拨应为 **INTERNAL**——
-  见 §0 口径)、talk_sec=0(实际通话数十秒)、agent_ids 为空(发起坐席未归属)、
-  legs 只有 [DIALING/1008] 无被叫腿。根因方向:transfer 进 dialplan 后新建的被叫腿未被收养/归并
-  (与 C11 的"读回侧丢失"同族)。**T6.11 的 case 起草以此为靶**;修复后 call_type 判定需按网关口径实现。
+- **C17(new,2026-08-20 click-to-dial 复测,内部/外呼两型均已实证)** 媒体链正常(内部 1008→1007 响铃、
+  双向通话、任一侧挂断双向拆线;外呼 1008→18688886669 经 dialplan `pstn_sim_outbound` 正确出网关),
+  但**账面三处失真**,两型皆然:
+  ① **call_type 判定与 §0 口径不符**:coordinator.go:900-909 只看腿方向(outbound→OUTBOUND),
+     click-to-dial 的坐席腿恒为 originate 方向 → 分机互拨被记成 OUTBOUND(应 INTERNAL);
+     外呼记成 OUTBOUND 只是恰好撞对。正解须按"被叫腿是否经 PSTN 网关"判定,
+     而这依赖 ②。
+  ② **dialplan 抬起的被叫腿从未被收养**:legs 恒为 [DIALING/1008] 单条,无目标腿;
+     talk_sec=0(实测通话十几秒)、ring_sec=0、agent_ids 空、primary_agent_id 空——
+     发起坐席在自己发起的呼叫里查无归属(与 C11 的"读回/快照侧丢失"同族)。
+  ③ **status 恒 ANSWERED**:远端 NO_USER_RESPONSE(对端未响应)的那通同样记 ANSWERED——
+     坐席腿 auto-answer 被当成整通已接听;应按被叫腿结果判定(NO_ANSWER/FAILED)。
+  实测样本:01a01f03-ca0d(外呼成功 13s)、01a01f03-6dd9(NO_USER_RESPONSE)、01a01ef9-1440(内部)。
+  **T6.11 的 case 起草以此三条为靶**。
 - **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
   对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
   依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。
