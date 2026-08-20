@@ -1,0 +1,209 @@
+# 验证与跟进任务清单(正式版 v1,released 2026-08-20)
+
+> 前身:TASKS-draft.md(草案),经 owner 两轮决策(DECISIONS-pending.md,2026-08-20)后转正。
+> 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
+> 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
+> **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
+
+---
+
+## 1. 三条角色旅程(贴代码走查)
+
+每步:界面/接口锚点 → 支撑代码 → 已覆盖的 case → 缺口(缺口按审计口径归 **L-d**)。
+
+### 1.1 坐席(wei)旅程
+
+| # | 步骤 | 锚点(路由 / API / 代码) | 已有 case | 缺口 |
+|---|---|---|---|---|
+| A1 | 登录 + 话机注册 | login.tsx;softphone-bar(_app.tsx);luacc.directory→aicc_xml.lua:103 | VC-S11-01/02(PASS) | — |
+| A2 | READY / 小休 / 签出 | POST /agent/ready\|not-ready\|logout;agents/service.go | VC-S11-01(PASS) | — |
+| A3 | 看等待名单 | _app.agent.index;GET /calls/waiting(按 staffing 过滤,call_handlers.go:52-66) | VC-S3-01(sup 视角) | **G-A1**:agent 视角的 QueuesForAgent 过滤无 case |
+| A4 | 弹屏 + 接听 | PARTY_RINGING(coordinator.go:404-418)+ incoming 卡 | VC-S4-01 | G-A2(低):UI 渲染 bot summary/userData 呈现层无断言 |
+| A5 | 通话中:实时转写 | live-transcript.tsx;CALL_TRANSCRIPT(actor.go:261) | VC-S9-01/02 | — |
+| A6 | 通话中:联系人卡 | _app.agent.index ⋈ lib/contacts;GET /contacts | — | **G-A3**:contacts 全链无 case(tables.md 已记) |
+| A7 | 保持/取回 | POST /calls/{id}/hold\|retrieve(202);uuid_phone_event | VC-S7-01 | — |
+| A8 | DTMF | POST /calls/{id}/dtmf;uuid_send_dtmf 远端腿 | VC-S7-04 | — |
+| A9 | 转接 | POST /calls/{id}/transfer;Transfer 选主叫腿(coordinator.go:770-777) | VC-S7-02 | — |
+| A10 | 挂断→ACW(平台代开)→确认 | coordinator.go:246-264;OpenWrapUp 默认词;POST /agent/wrap-up(agent_handlers.go:193-207) | VC-S4-02/03 | — |
+| A11 | 坐席不接(RONA) | mod_callcenter 重派;app 侧死边(state.go:189) | VC-S5-01 | 缺口已拍板实现 → **W2**(实现后 S5-01 改写重跑) |
+| A12 | 回访单认领/办结 | _app.agent.callbacks;claim/complete(ledger_handlers.go:171/:196) | VC-S3-04(后半) | — |
+| A13 | 回看自己的通话 + 回放录音 | _app.agent.calls.tsx(RecordingPlayer,a6ff7b9);GET /cdrs(mine)+ /recordings/{id}/audio | — | **G-A4**:①列表只见自己 ②hasRecording 可播 ③**越权拒绝**(0639c56) |
+| A14 | 我的一天(my-day) | ledger.sql:222-240 CTE;_app.agent.index 概览 | — | **G-A5**:汇总数字无 case |
+| A15 | 话机失联 | ObserveDevice→DEVICE_IN_SERVICE→DEVICE_UNREACHABLE(state.go:207-210) | S11/S12 只到事件层 | **G-A6**:失联→摘除→恢复 旅程无 case |
+
+### 1.2 主管(supervisor)旅程
+
+| # | 步骤 | 锚点 | 已有 case | 缺口 |
+|---|---|---|---|---|
+| B1 | 墙板(今日数字) | _app.supervisor.index;Report*(ledger.sql:133-161) | — | **G-B1**:报表数字对账无 case |
+| B2 | live 呼叫墙 | GET /calls(requireSupervisorRole) | VC-S1-01、S7-03 | — |
+| B3 | 等待名单 | GET /calls/waiting | VC-S3-01、S6-01、S12-01 | — |
+| B4 | 坐席花名册 | _app.supervisor.agents;GET /agents | VC-S4-01(ON_CALL)、S12-03(isRegistered) | G-A6 同源(DEVICE_UNREACHABLE 展示) |
+| B5 | 队列概览(配员数) | _app.supervisor.queues(只读) | VC-S3-02(FAIL:DB↔switch 对账) | 对账缺陷已立案 → C1 |
+| B6 | CDR 检索/详情 | _app.admin.cdr.*(guard=SUPERVISOR);legs/transcript/RecordingPlayer | VC-S3-03、S4-04、S9-02 | G-B2(低):详情页 wrapUp 展示无断言 |
+| B7 | 质检评审 | API 在(recording_handlers.go:118/:152),web 零引用 | — | **已决 D1:下一期**(本期不补 UI、不起草 case) |
+| B8 | 实时转写旁听 | LiveTranscript 仅坐席 cockpit | — | **已决 D2=B:by design**(坐席工具;主管看事后 CDR 详情)——不补 UI、不起草 case |
+| B9 | SSE 断线恢复 | hub replay / SYSTEM_RESET | VC-S10-01/02(PASS) | — |
+
+### 1.3 管理员(admin)旅程
+
+| # | 步骤 | 锚点 | 已有 case | 缺口 |
+|---|---|---|---|---|
+| C1 | 账号/坐席管理 | _app.admin.agents;POST/PUT /agents | — | **G-C1**:建坐席→绑分机→签入→接听 全生命周期无 case |
+| C2 | 分机管理 | _app.admin.extensions;PUT(全量);luacc.directory | — | **G-C2**:建分机→注册鉴权→删除守卫 无 case |
+| C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" DRAFT(T6.8) |
+| C4 | 路由(队列)管理 | _app.admin.routing;saveQueue(lib/catalog.ts:51) | VC-S3-04 | ~~G-C4~~ **已闭**(F7:表单发全量) |
+| C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case |
+| C6 | 流程(flow)管理 | 现 CLI-only(flowadd) | — | **已决 D3:要做** → **W3**(`/admin/bots`,参考 ui-test) |
+| C7 | 处置词管理 | dispositions 无 CRUD | VC-S4-03(读侧) | **已决 D4:固定词表** → W5(记录);S4-03 断言转正式 |
+| C8 | 报表 | _app.admin.reports(guard=SUPERVISOR) | — | 并入 G-B1 |
+| C9 | 审计日志 | audit_logs 只写不读(httpapi/audit.go:33) | — | **已决 D5:要做** → **W4**(`/admin/audit`,参考 ui-test) |
+
+### 1.4 辅助两条泳道(把"孤儿 case"接住)
+
+- **呼叫者×bot 泳道**:VC-S1-01/02/03、S2-01、S8-01、S3-03(前半)、S3-04(前半)。
+- **平台/恢复泳道**:VC-S10-01/02(PASS)、S12-01/02/03。
+
+**双向对账结论**:28 个 case 全部有旅程归属(无孤儿);旅程缺口 14 个 G-*:7 个补 case
+(G-A1/A3/A4/A5/A6 + G-C1/C2/C5 可执行部分 + G-C3 DRAFT)、已决 5 个(G-B3 defer、G-B4 by design、
+G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、G-B2)。
+
+---
+
+## 2. needs-FACT 清单(执行前/执行中要落实的事实)
+
+| # | 事实问题 | 归属 | 状态/落实方式 |
+|---|---|---|---|
+| F1 | mod_callcenter `queue list members` 列名与 state 词表 | VC-S3-01 | 首跑抄录实测表头进 evidence |
+| F2 | `uuid_send_dtmf` 是否在目标通道产生 DTMF 事件 | VC-S7-04 | 首跑;无事件则按审计建议以 digit=5 判定 |
+| F3 | max_no_answer=0 下的重派节奏 | VC-S5-01 | 首跑抄录(留证半) |
+| F4 | app 重启窗内 member-queue-start 是否丢失 | VC-S12-01 | 已补 members 旁证 collect;两侧皆空=重跑 |
+| F5 | 队列停用后模型是否主动提出留言 | VC-S3-04 | 人工步骤直接说 leave a message |
+| F6 | ~~今日 95002 bot_sec=0 行的成因~~ | VC-S3-03 前置 | **已闭(2026-08-20,T1.2)——不是 lua fallback,是 S3-03 猎的真漂移在野实证**:call 01a01d3b-6e49-…(11:33)bot 全程服务(bridged/conversation started/handoff fired/"transferring the caller"),CDR 却 bot_sec=0、无 flow、无 BOT leg;stampChannel 失败会 Warn(actions.go:236)而日志无 Warn → 漂移点在 facts==nil 静默跳过(actions.go:83-86)或挂断读回(switchevent.go:81)之间——已在 VC-S3-03 加通话中 uuid_getvar 探针定位,执行时优先复现 |
+| F7 | ~~队列表单是否发全量~~ | G-C4 | **已闭**:`setEditing(row)` 整行拷贝(_app.admin.routing.tsx:99/:119) |
+| F8 | ~~DID is_enabled=false 是否真拒接~~ | G-C3 | **已闭**:视图层 `WHERE d.is_enabled`(pg_get_viewdef 实查) |
+| F9 | ~~goose_db_version 实表~~ | 覆盖表 | **已闭(2026-08-20,T1.1)**:实查 version_id 13/12/11 均 is_applied=t;tables.md 该行升 [FACT] |
+| F10 | 坐席取他人 recordingId 的拒绝路径 | G-A4/T6.1 | 先读 recording_handlers.go 归属判定,再以 **wei+ben** 实测 |
+| F11 | 非 seed 账号(chen/uiagent/liveagent 等 12 个)口令与归属 | 环境卫生 | 问 owner;留证即可,不阻塞 |
+
+---
+
+## 3. 任务清单(带排序约束)
+
+### 阶段 0 —— 账本修订 ✅ 完成(2026-08-20;owner 全批后应用)
+- **T0.1a 机械修订(零判断)**:SYS-1 fs_cli 全路径 ×11、SYS-2 期望码 202 ×3、SYS-3 `echo rc=$?` 删除 ×3
+  与基线差分 ×3、SYS-5 jq `.state`、SYS-6 删 `.recordingId //`、S12-03 sleep 45、S3-01 补 login、
+  S12-01 补 members 旁证、S1-02/S1-03/S12-02 的基线/计数补采。
+- **T0.1b 语义修订(逐条过目)**:SYS-8 两处留证式(S1-02、S8-01)、S5-01 拆可验半/留证半、
+  S7-02 改 ben/1002、SYS-7 读-改-写全量 PUT ×3、S3-04 note 判明、S3-01 括注以查询为准。
+- **T0.2** ~~F7/F8 核读~~ 已完成(审计 §0.1);F10 代码侧核读并入 T6.1 前置。
+
+### 阶段 1 —— 纯脚本/静态 ✅ 完成(2026-08-20)
+- **T1.1** ✅ F9 已闭;覆盖表勘误已应用——除计划内各项外,另发现并修正两处真勘误:events.md 的
+  PARTY_DTMF 与 fsm-edges.md 的 DIALING→RELEASE 原标 UNCOVERED,实际已分别由 VC-S7-04 / VC-S1-03 覆盖;
+  三份覆盖表的决议注记(D1–D7、W 系列指针)已补。
+- **T1.2** ✅ F6 已闭(重大发现):三行不是 lua fallback——call 01a01d3b-6e49-…(11:33)bot 全程服务、
+  handoff 已 fire、"transferring the caller" 已打,CDR 却 bot_sec=0/无 flow/无 BOT leg,即 VC-S3-03
+  猎的静默漂移的在野实证;stampChannel 失败会 Warn 而日志无 Warn → 漂移点在 facts==nil 静默跳过
+  (actions.go:83-86)或挂断读回(switchevent.go:81)之间;已在 VC-S3-03 增加通话中 uuid_getvar 探针,
+  T3.1 执行时定位。
+
+### 阶段 2 —— 呼叫者×bot 泳道执行(每 case 一通,可同日串行)
+- **T2.1** VC-S1-01 → VC-S1-02(同一通) **T2.2** VC-S1-03(95999) **T2.3** VC-S2-01 **T2.4** VC-S8-01(95002)
+- 约束:T0.1 之后;期间不动队列配置;**必须先于 W1 合入**(旧行为留证)。
+
+### 阶段 3 —— 人工坐席链执行(wei 话机 + 第 2 坐席 ben/1002,第二浏览器 profile)
+- **T3.1** VC-S3-01 → VC-S3-03 **T3.2** VC-S4-01 → S4-02 → S4-03 **T3.3** VC-S4-04 **T3.4** VC-S9-01 → S9-02
+- **T3.5** VC-S7-01 → S7-04 → S7-02(同一通,转接最后;目标 ben/1002);VC-S7-03 另起一通
+- **T3.6** ben 的一通带录音呼叫(95002→转人工→ben 接)——产出 primary_agent=ben 的 recordingId,T6.1 靶子
+- 约束:ben 仅 T3.5/T3.6 需要;T3.6 排 T3.5 后。
+
+### 阶段 4 —— 队列负路径(动队列状态,严格隔离)
+- **T4.1** VC-S5-01(RONA;**必须先于 W2 合入**——旧行为留证是 W2 的修复证据基线)
+- **T4.2** VC-S6-01 **T4.3** VC-S3-04(停用窗口单独执行,结束实测 isEnabled=true 才放行后续)
+- 约束:T4.3 最后;窗口内禁止并行呼叫。
+
+### 阶段 5 —— 恢复泳道(重启类,收官)
+- **T5.1** VC-S12-01 **T5.2** VC-S12-02 **T5.3** VC-S12-03(FS 重启,最后)
+
+### 阶段 6 —— 新 case 起草(旅程缺口 → 账本追加)
+- **T6.1** DRAFT G-A4:坐席回放 + 越权拒绝(wei+ben;靶子=T3.6;前置 F10 核读)
+- **T6.2** DRAFT G-A3:contacts 全链 **T6.3** DRAFT G-A5:my-day 对账 **T6.4** DRAFT G-A6:话机失联
+- **T6.5** DRAFT G-A1:agent 视角等待名单过滤 **T6.6** DRAFT G-C1/C2/C5:管理面生命周期三连
+- **T6.7** DRAFT G-B1:墙板/报表对账 **T6.8** DRAFT G-C3:DID 生命周期(停用=UNALLOCATED_NUMBER,引 S1-03 形态)
+- 约束:阶段 2–5 经验之后起草;expect 全给 file:line。
+- **T6.9(新)** W1/W2 合入后的账本改写:S1-02/S8-01 留证条款→正式断言(CUSTOMER|MODEL ≥1)并重跑;
+  S5-01 按 RONA 新行为整体改写(agent_states 将不再"前后一致"!)并重跑;S3-01 members 词表(F1)回填。
+- **T6.10(新)** W7 合入后:events.md 十行缺口关闭 + 为新事件补**最小断言**——优先挂进既有 case 的
+  SSE grep(如 CALL_RECORDING_* 挂 S4-04、SYSTEM_LINK 挂 S12-03、BOT_SESSION_* 挂 S1-01/S2-01),
+  而非新建 10 个 case;PARTY_DIALING/CALL_USER_DATA 若无既有挂点再单独起草。
+
+### 阶段 7 —— 工程实现与跟进(spec-first;W=已拍板,C=既有立案)
+
+**W 系列(2026-08-20 两轮决议产物):**
+- **W1 TranscribeModel 实现**(D7④):端对端模型自带 transcript,**stock profile 默认开**——
+  两个 profile 设 TranscribeModel 默认值(profile.go:71-108),realtime.go:367 分支激活,
+  CUSTOMER_SAID(session.go:440→orchestrator.go:325)全链贯通;AICC_* 配置可覆盖/关闭。
+  qwen 侧 owner 已确认支持(§补充 S2:response.text.delta 流式文本片段);实现期以
+  `AICC_LIVE_PROVIDER_TEST=1` 双 provider 复核。无契约面(纯后端)。
+  验收 = T6.9 重跑 S1-02/S8-01 见 CUSTOMER|MODEL 行。
+- **W2 RONA 全链实现**(D7②):消费 QUEUE_AGENT_STATE(switchevent.go:368 已归一化,现被弃)→
+  RingNoAnswer(state.go:189/service.go:342 已有,接上调用方)→ NOT_READY(SYSTEM)+AGENT_NOT_READY SSE+
+  switch 镜像;**含 missed_reason 条件互斥修复**(cdr.go:255-258:ABANDONED_RINGING 需 BridgedAt≠0
+  与"振铃中放弃"语义矛盾——修成互斥可达)。验收 = T6.9 重跑 S5-01(新 expect:坐席不接→被摘出路由、
+  missed_reason 语义正确)。fsm-edges.md/events.md 死边条目同步更新。
+- **W3 flows 管理面**(D3):**路由 `/admin/bots`**;交互参考 ui-test(admin/bots/index.tsx 列表 +
+  $flowId.tsx 详情:spec JSON 查看器、节点可达性分析、transitions 摘要、publish 对话框);
+  设计规范 web/CLAUDE.md。**范围含 UI 上传/编辑 spec**(§补充 S1)。顺序:openapi 契约
+  (GET /flows、GET /flows/{id} 含 revisions、POST /flows 新建、PUT /flows/{id} 草稿编辑、
+  POST /flows/{id}/publish;装载期校验 internal/flow/load.go 即编辑时校验)→ make api-generate →
+  handlers(flows/flow_revisions 已有 store 层,sql/flows.sql)→ UI。CLI flowadd 保留。ADMIN guard。
+- **W4 audit_logs 检索**(D5):**路由 `/admin/audit`**;参考 ui-test admin/audit.tsx(分类过滤由
+  action 前缀派生)。顺序:openapi 契约(GET /audit-logs:分页 + action 前缀/操作者/时间过滤)→
+  generate → handler(读侧 sqlc 新查询)→ UI。ADMIN guard。关闭 tables.md "只写不读"缺口。
+- **W5 D4 记录**:在设计文档(docs/phase1-decisions.md 或 design 附录)记一行"dispositions 固定词表
+  为产品决策(2026-08-20)";S4-03 断言转正式。
+- **W6 D1 记录**:质检评审 UI defer 下一期——tables.md/quality_reviews 行注记决议日期。
+- **W7 十个零生产者 SSE 类型全部实现**(D6),按难度四组:
+  ① CALL_RECORDING_STARTED/STOPPED——RECORD_START/STOP 已归一化(switchevent.go:259-264),
+  补 coordinator→Hub 一跳(scope 沿用 call 域);
+  ② DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布;
+  ③ PARTY_DIALING(addParty 时对 originator 腿宣告)、CALL_USER_DATA(userData 独立变更事件)、
+  SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)——全新 publish 点;
+  ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
+  events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
+  合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
+- **W8 trunk(中继号)管理**(§补充 S3):trunks 表(00002:137)从死表转正——契约评审先行
+  (trunk 与 FS gateway/luacc 视图的关系需要一次设计过目,direction 枚举 3 值现全死),
+  然后 openapi → generate → handlers → admin UI。settings 表处置仍待决(唯一残留)。
+- **W9 账号清理**(§补充 S4,含 seed 名单同步):live DB 只保留 **wei、agent、supervisor、admin**,其余
+  (amy、ben、chen、uiagent、liveagent、livesup、qa-sup、lin、sam、cara、tester、m45check)删除。
+  **seed 名单一起改**(owner 2026-08-20):demoPeople(seed.go:56-63)删去 amy、ben 两行,使
+  `AICC_SEED=demo` 不再把它们建回来;随之核对 seed 内对这两个账号的连带引用(queue_agents 配员、
+  agent_state_logs/cdrs 演示历史的 agent 归属)与受众文档里的演示账号清单(README/deploy/demo/README
+  及 zh-CN 版),同步收敛。注意 `agent` 账号本就不在 seed 内(手工建),保留只针对 live DB。
+  **连带的账本影响**:VC-S11-02(PASS)的分机抢占守卫用 amy 登录——清理后该 case 无法原样重跑,
+  W9 内一并把它改写为用 `agent` 账号(或届时保留的第二坐席)作抢占方。
+  **硬性排序:阶段 3–6 之后执行**——ben 是第 2 坐席物料(T3.5/T3.6/T6.1);清理前确认无 case
+  再需要它们。清理后花名册类断言的环境噪音消失(F11 关闭)。
+
+**C 系列(既有立案):**
+- **C1** VC-S3-02 根因修复:DeleteCallcenterTier 不对含域名字二次限定 + converge removed 以复查为准;
+  修后重跑 S3-02(stale tier 192.168.31.176 保留为修复验证的现场,**禁止提前手工清除**)
+- **C2** SYS-6 契约缺口:PartySnapshot 补 isBotLeg(`make api-breaking` 走查)
+- **C4** 死状态删除(D7①③ 已决):删 Call.ENDING(call.go:23,契约 CallState 同步)与转写 ENDED
+  (actor.go:110,契约 TranscriptionState 同步)——两处均 breaking,走 `make api-breaking`;
+  fsm-edges.md/enums.md 对应行、VC-S9-02 expect 括注随之更新
+- **C7** queue_events 读路径 or 修正 cdr.go:112 注释
+- **C10** 202 契约核对(SYS-2 源头)——**defer 第二期(§补充 S5,第二期需要)**;本期账本 expect 维持 202
+
+### 排序总则
+0. 追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。
+1. T0 先于一切;阶段 2→3→4→5 顺序固定(负路径与重启放后)。
+2. **验证先行于实现**:阶段 2(S1-02/S8-01)与 T4.1(S5-01)必须在 **W1/W2 合入前**按旧行为执行留证——
+   这是"账本钉住旧缺口→实现→T6.9 重跑证明修复"的证据链;同理 W7 组①③④ 涉及的事件断言在 T6.10 补。
+   W3/W4/W5/W6/W8 与验证执行无交集,可并行。
+3. C1 修复安排在阶段 3 之后合入更稳(依赖 tier 正确性的 case 先跑完);修后必重跑 VC-S3-02。
+   **W9(账号清理)硬性排在阶段 3–6 之后**——ben/amy 在此前是执行物料。
+4. 每 case 执行后:evidence 落 `docs/verification/artifacts/<ID>/`,status 更新单独 commit
+   (账本修订与执行结果不混提)。

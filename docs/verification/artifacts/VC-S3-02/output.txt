@@ -1,0 +1,35 @@
+== collect 1: DB desired (signed-in agents' staffing) ==
+agent-wei|support-en
+agent-wei|support-zh
+== collect 2: switch actual (tier list) ==
+agent-wei|support-en
+agent-wei|support-en
+agent-wei|support-zh
+== collect 3: agent list ==
+agent-wei|single_box||callback|user/1008@192.168.31.55|Available|Waiting|0|0|0|0|0|1787196980|1787197003|1787196979|1787197011|0|0|0|0|0
+== raw tier list ==
+queue|agent|state|level|position
+support-en@192.168.31.176|agent-wei|Ready|1|1
+support-en@192.168.31.55|agent-wei|Ready|1|1
+support-zh@192.168.31.55|agent-wei|Ready|1|1
++OK
+
+== raw queue list ==
+name|strategy|moh_sound|time_base_score|tier_rules_apply|tier_rule_wait_second|tier_rule_wait_multiply_level|tier_rule_no_agent_no_wait|discard_abandoned_after|abandoned_resume_allowed|max_wait_time|max_wait_time_with_no_agent|max_wait_time_with_no_agent_time_reached|record_template|calls_answered|calls_abandoned|ring_progressively_delay|skip_agents_with_external_calls|agent_no_answer_status
+support@default|longest-idle-agent|local_stream://moh|system|false|300|true|false|60|false|0|0|5||0|0|0|true|On Break
+support-zh@192.168.31.55|round-robin|$${hold_music}|queue|false|300|false|true|0|false|300|0|5||2|1|0|true|On Break
+support-en@192.168.31.55|longest-idle-agent|$${hold_music}|queue|false|300|false|true|60|false|300|0|5||0|1|0|true|On Break
++OK
+
+== app AICC_SWITCH_DOMAIN ==
+AICC_SWITCH_DOMAIN=192.168.31.55
+== probe: tier del on nonexistent doubly-qualified name ==
++OK
+
+== tier list after probe (stale row must still be there) ==
+queue|agent|state|level|position
+support-en@192.168.31.176|agent-wei|Ready|1|1
+support-en@192.168.31.55|agent-wei|Ready|1|1
+support-zh@192.168.31.55|agent-wei|Ready|1|1
++OK
+

@@ -1,0 +1,894 @@
+# SPDX-License-Identifier: Apache-2.0
+# 验证账本(S1–S12)。只读分析产物;所有 collect 命令针对第 0 部分的 dev 环境:
+#   app=/tmp/aicc(:8080,重启只用 deploy/dev/restart.sh)、DB=docker exec -i aicc-postgres、
+#   FreeSWITCH=宿主原生(fs_cli)、ESL=127.0.0.1:18021、转写摄取 ws=127.0.0.1:8090。
+#
+# 通用约定(每条用例的 collect 假定已执行过下面两行登录;为省篇幅不逐条重复):
+#   curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{"username":"supervisor","password":"aicc@12345"}' http://127.0.0.1:8080/api/v1/auth/login
+#   curl -s -c /tmp/vc-wei.jar -H 'Content-Type: application/json' -d '{"username":"wei","password":"aicc@12345"}' http://127.0.0.1:8080/api/v1/auth/login
+#   curl -s -c /tmp/vc-ben.jar -H 'Content-Type: application/json' -d '{"username":"ben","password":"aicc@12345"}' http://127.0.0.1:8080/api/v1/auth/login
+#   写操作一律加:-H 'X-AICC-Csrf: 1'(internal/httpapi/middleware.go:21,:41)。
+#   $LOG 指最新应用日志:LOG=$(ls -t logs/aicc-*.log | head -1)
+#   fs_cli 不在本机 PATH(login shell 亦无):collect 一律写全路径 /usr/local/freeswitch/bin/fs_cli(审计 SYS-1)。
+#   2026-08-20:审计修订 T0.1a/b 已应用(ledger-audit.md;owner 全批)——涉及 collect 命令、期望码 202、
+#   基线差分、留证式条款、第 2 坐席 ben/1002。留证条款在 W1/W2 落地后由 T6.9 转正式断言。
+#
+# 环境事实核对(与任务第 0 部分的差异,采集时以 DB 为准):
+#   - seed 将 wei 绑到分机 1001(internal/seed/seed.go:61);任务书写的是 1008。
+#     每条涉及 wei 的用例先跑 collect 里的"读绑定分机"命令,以查询结果为准,不臆造。
+#   - S8 的前提"en→OpenAI / zh→Qwen"与设计相反:一部署一 provider(phase1-decisions A1;
+#     cmd/aicc/main.go:267-275 启动期解析一次)。VC-S8-* 按系统真实承诺改写:
+#     language 只影响 flow 文案/voice/转写语言,不选 provider。
+#   - S5 的 app 侧 RONA(RingNoAnswer)无调用方(死边,fsm-edges.md §3);
+#     VC-S5-01 验证的是 mod_callcenter 的真实重排队行为 + app 侧"无痕"这一事实。
+#
+# ═══ 第 5 部分自检(逐项核对后打勾)═══
+# [x] 四份清单中每一行都有证据等级标记([FACT]/[INFERENCE]/[ASSUMPTION])
+# [x] 没有任何一行用推测填充位置(要么 file:line,要么 NOT FOUND;两处 [ASSUMPTION] 均附验证方法)
+# [x] openapi.json 中的每个事件类型(SseEventType 33 值)都在 events.md 出现过
+# [x] schema 中的每张表(00001–00013 全部 24 表 + 3 luacc 视图 + goose_db_version)都在 tables.md 出现过
+# [x] internal/actor 不存在(NOT FOUND,已在 fsm-edges.md 首段声明);实际 actor 实现
+#     (telephony party/call、agents presence、transcript actor、flow 阶段机、aicall 回合机)每条边都在 fsm-edges.md
+# [x] fsm-edges.md 中 UNCOVERED 的边:DIALING→RELEASED→VC-S1-03;HELD→RELEASED→VC-S7-03;
+#     非法迁移拒绝→VC-S4-02 日志断言;TALKING→ANSWER 自环→VC-S4-02 日志断言;
+#     RingNoAnswer / ENDING / 转写 ENDED→已明确标注为死代码
+# [x] ledger.yaml 中每个 human step 后都紧跟可粘贴的 collect 命令
+# [x] 未修改任何源码 / schema / 配置文件(本轮仅新增 docs/verification/** 文件)
+
+cases:
+
+  # ───────────────────────── S1 入站 → DID → flow → bot 应答 ─────────────────────────
+
+  - id: VC-S1-01
+    scenario: S1
+    layer: signaling
+    precondition: "/tmp/aicc 已用 deploy/dev/restart.sh 启动;$LOG 含 'voice provider selected' 与 'ai voice leg listening';软电话(分机 1000 或外部 SIP)可拨 95001"
+    steps:
+      - who: human
+        do: "用软电话拨 95001,听到 bot 开始说话后保持通话不挂断"
+      - who: agent
+        do: "在通话保持期间执行 collect,判定 bot 腿与主叫腿状态"
+    collect:
+      - "/usr/local/freeswitch/bin/fs_cli -x 'show channels' | cat"
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq ."
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'ai conversation started|ai call bridged' \"$LOG\" | tail -5"
+    expect: |
+      fs_cli show channels:恰好 2 个通道 —— 主叫腿(dest 95001)+ 出向 bot 腿(sofia/gateway/aicc_bot/95001),均 state=CS_EXCHANGE_MEDIA
+      GET /calls:恰好 1 个呼叫;state=RUNNING;language="en";parties 含 role=ORIGINATOR state=TALKING 的主叫腿与 isBotLeg=true 的 bot 腿
+      $LOG 含一行 "ai conversation started" 且字段 provider=<AICC_PROVIDER 启动值> language=en flowId=<novanet 流 slug>
+      $LOG 含 "ai call bridged" 且 law=PCMU 或 PCMA、isPassthrough 与 provider 匹配(openai=true)
+    failure_looks_like: |
+      show channels 有 2 个通道、caller 能听到 bot(一切"正常"),但 GET /calls 出现 2 个呼叫
+      (minted 与 provisional 未合并,reidentify 失效)—— 界面与账本随后都按两通电话记,且无任何报错。
+    evidence_dir: docs/verification/artifacts/VC-S1-01/
+    status: TODO
+    refs: ["internal/telephony/coordinator.go:329", "internal/telephony/coordinator.go:297", "internal/aicall/orchestrator.go:207", "freeswitch/scripts/aicc_inbound.lua:56"]
+
+  - id: VC-S1-02
+    scenario: S1
+    layer: app-state
+    precondition: "紧接 VC-S1-01;通话仍在进行"
+    steps:
+      - who: human
+        do: "对 bot 说一句可识别的话(如 what are your opening hours),等 bot 答完后挂断"
+      - who: agent
+        do: "执行 collect,判定 CDR 归属与转写落库"
+    collect:
+      - "sleep 3; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id, call_type, status, is_contained, bot_sec, total_sec, did, language, hangup_cause from cdrs order by started_at desc limit 1\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select seq, speaker, kind, source, is_final is not null as x, left(content->>'text',40) from transcripts where call_id='$CALL_ID' order by seq\" 2>/dev/null || docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select seq, speaker, kind, source, left(content->>'text',40) from transcripts where call_id='$CALL_ID' order by seq\""
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -c 'caller leg ended, closing the model session' \"$LOG\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from cdrs where call_id='$CALL_ID'\""
+    expect: |
+      cdrs 恰好新增 1 行,且同一 call_id 的 cdrs 行数 = 1(第 4 条):call_type=INBOUND,status=ANSWERED,
+      bot_sec>0,did=95001,language=en,is_contained=false(主叫先挂,非 bot 收线),hangup_cause=NORMAL_CLEARING
+      transcripts 该 call_id 至少 1 行:speaker=BOT(kind=TEXT,source=MODEL),seq 从 1 起连续无洞
+      【留证,不判定】CUSTOMER 行数落档 evidence_dir(当前实现应为 0:stock profile 未设 TranscribeModel、
+      ASR tap 只挂坐席腿——审计 SYS-8;若 >0 记录为实现变化,不作为 FAIL;W1 落地后转正式断言 CUSTOMER|MODEL ≥1)
+      日志计数 ≥1(watchLeg 收到主叫挂断)
+    failure_looks_like: |
+      cdrs 出现同一通话的 2 行(bot 侧与人侧都写了)—— 归属规则 cdr.go:79 被绕过;
+      或 transcripts 的 seq 有洞(空 final 烧号回归,actor.go:222 防线失效)。两者对呼叫者都不可见。
+    evidence_dir: docs/verification/artifacts/VC-S1-02/
+    status: TODO
+    refs: ["internal/aicall/ledger.go:130", "internal/telephony/cdr.go:79", "internal/transcript/actor.go:222", "internal/aicall/session.go:728"]
+
+  - id: VC-S1-03
+    scenario: S1
+    layer: signaling
+    precondition: "app 运行中;95999 不在 dids 表(collect 第 1 条先证实)"
+    steps:
+      - who: agent
+        do: "确认 95999 未配置并记录基线:执行 collect 第 1、2 条(第 1 条须返回 0)"
+      - who: human
+        do: "用软电话拨 95999,听到忙音/挂断即可(呼叫不会被应答)"
+      - who: agent
+        do: "执行其余 collect,判定未应答腿的 DIALING→RELEASED 边"
+    collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from dids where number='95999'\""
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo baseline_rejects=$(grep -c 'rejected party transition' \"$LOG\"); echo baseline_cdrs=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo rejects_now=$(grep -c 'rejected party transition' \"$LOG\"); echo cdrs_now=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, hangup_cause, answered_at is null as never_answered from cdrs order by started_at desc limit 1\""
+      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 100' | grep aicc_inbound | tail -3"
+    expect: |
+      第 1 条 = 0
+      cdrs_now = baseline_cdrs + 1(被拒话务入账);cdrs 最新行:status=NO_ANSWER,never_answered=t,
+      hangup_cause=UNALLOCATED_NUMBER
+      rejects_now = baseline_rejects(无新增;DIALING→RELEASE 是合法边,call.go:69)
+      FS console 含 aicc_inbound: "unknown number 95999"
+    failure_looks_like: |
+      呼叫被拒(人听到忙音,表面正确),但 cdrs 里根本没有行 —— 未应答的 provisional 呼叫
+      在 Finish 后没走 InsertCDR,漏记了被拒话务;或者出现 "rejected party transition"
+      (状态机把合法的未接释放当非法迁移吞掉)。
+    evidence_dir: docs/verification/artifacts/VC-S1-03/
+    status: TODO
+    refs: ["freeswitch/scripts/aicc_inbound.lua:47", "internal/telephony/call.go:69", "internal/telephony/cdr.go:229"]
+
+  # ───────────────────────── S2 bot 交互中主叫挂断 ─────────────────────────
+
+  - id: VC-S2-01
+    scenario: S2
+    layer: media
+    precondition: "app 运行中;95001 可达(VC-S1-01 已通过)"
+    steps:
+      - who: agent
+        do: "记录基线:执行 collect 第 1 条"
+      - who: human
+        do: "拨 95001,在 bot 说话说到一半时挂断(卡在句子中间)"
+      - who: agent
+        do: "执行其余 collect,判定双向拆线与资源回收"
+    collect:
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo baseline_mailbox=$(grep -c 'transcript mailbox full' \"$LOG\")"
+      - "sleep 3; LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'caller leg ended|model session closed|ai call failed' \"$LOG\" | tail -5"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'show channels count'"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, is_contained, bot_sec, hangup_cause from cdrs order by started_at desc limit 1\""
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo mailbox_now=$(grep -c 'transcript mailbox full' \"$LOG\")"
+    expect: |
+      日志顺序出现 "caller leg ended, closing the model session";无 "ai call failed"
+      show channels count = 0 total
+      cdrs 最新行:status=ANSWERED(bot 接了),is_contained=false,bot_sec ≥1,hangup_cause=NORMAL_CLEARING
+      mailbox_now = baseline_mailbox(无新增)
+    failure_looks_like: |
+      主叫已挂、channels=0(表面干净),但日志没有 "model session closed" —— provider WebSocket
+      仍挂着计费;或 cdrs.is_contained=true(把主叫弃线记成 bot 圆满收线,污染 containment 指标)。
+    evidence_dir: docs/verification/artifacts/VC-S2-01/
+    status: TODO
+    refs: ["internal/aicall/session.go:728", "internal/aicall/session.go:288", "internal/aicall/ledger.go:175", "internal/aicall/orchestrator.go:187"]
+
+  # ───────────────────────── S3 bot → 队列转人工(与 mod_callcenter 对账) ─────────────────────────
+
+  - id: VC-S3-01
+    scenario: S3
+    layer: signaling
+    precondition: "wei 已签入且 READY(collect 前 2 条先证实并可代做);队列 support-en 空"
+    steps:
+      - who: agent
+        do: "读 wei 的绑定分机、签入并置 READY(可脚本化,无需人):执行 collect 第 1–3 条"
+      - who: agent
+        do: "开启 SSE 抓流(90 秒窗口):执行 collect 第 4 条"
+      - who: human
+        do: "拨 95001,对 bot 说 I need to talk to a human agent,等听到转接提示音/保持音后不要挂断"
+      - who: agent
+        do: "执行其余 collect,判定入队三事件与等待名单"
+    collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select e.number from agents a join users u on u.id=a.user_id join extensions e on e.id=a.default_extension_id where u.username='wei'\""
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{}' | jq -c '.state // .error.code'"
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/ready | jq -c ."
+      - "curl -s -N --max-time 90 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3-sse.log 2>&1 &"
+      - "sleep 2; FS=/usr/local/freeswitch/bin/fs_cli; QN=$($FS -x 'callcenter_config queue list' | awk -F'|' '/^support-en@/{print $1; exit}'); echo QN=$QN; $FS -x \"callcenter_config queue list members $QN\""
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq ."
+      - "grep -E 'QUEUE_JOINED|QUEUE_COUNT|QUEUE_AGENT_OFFERED' /tmp/vc-s3-sse.log | head -6"
+    expect: |
+      第 1 条返回一个分机号(live 当前为 1008;以查询结果为准,后续用例引用它)
+      第 2 条 login 返回 state=NOT_READY(已签入则 AGENT_ALREADY_LOGGED_IN 亦可)
+      queue list members:恰好 1 行,state=Trying 或 Waiting,cid_number=主叫号码
+      GET /calls/waiting:items 恰好 1 项,queueName="support-en",fromNumber=主叫号码,slaThresholdSec=队列配置值
+      SSE 日志:QUEUE_JOINED 1 条(payload.queueName="support-en")→ QUEUE_COUNT 1 条(payload.waiting=1)
+      → wei READY 时应随后出现 QUEUE_AGENT_OFFERED(agentId=wei 的 agentId)
+    failure_looks_like: |
+      mod_callcenter members 里有 1 行(交换机侧在排队,主叫听着保持音,一切"正常"),
+      但 GET /calls/waiting 为空 —— QueueCatalog 未接上或队列名不匹配(waiting.go:199-205
+      直接 return),坐席屏幕永远看不到这个等待者,且两侧都不报错。
+    evidence_dir: docs/verification/artifacts/VC-S3-01/
+    status: TODO
+    refs: ["internal/aicall/actions.go:55", "internal/telephony/waiting.go:198", "internal/telephony/coordinator.go:568", "freeswitch/scripts/aicc_queue.lua:66"]
+
+  - id: VC-S3-02
+    scenario: S3
+    layer: app-state
+    precondition: "app 运行中;至少 wei 已签入(其余坐席状态任意)。纯脚本用例,无人工步骤"
+    steps:
+      - who: agent
+        do: "对账:DB 期望配员(已签入坐席) vs mod_callcenter tier 现实,执行 collect 并逐行 diff"
+    collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select a.callcenter_name || '|' || q.name from queue_agents qa join agents a on a.id=qa.agent_id join queues q on q.id=qa.queue_id join agent_states s on s.agent_id=a.id where s.state <> 'LOGGED_OUT' order by 1\""
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1 && NF>=5 {split($1,q,\"@\"); print $2 \"|\" q[1]}' | sort"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep -E 'agent-' | cat"
+    expect: |
+      第 1 条(DB 期望)与第 2 条(switch 现实)输出逐行完全一致(diff 为空),例如都含:
+      agent-wei|support-en
+      agent list:每个已签入坐席一行,status 与 DB 状态映射一致(READY→Available,NOT_READY→On Break;state.go:219-227),
+      contact 含其绑定分机号
+    failure_looks_like: |
+      switch 上存在 DB 没有的 tier(如坐席被撤出队列时人在签出态,DeleteCallcenterTier 从未执行)——
+      该坐席会继续接到已被撤销队列的来电;tier list 与 DB 各自"正常",只有 diff 能暴露。
+      反向:DB 有、switch 无(mod_callcenter 重启后 SyncTiers 未跑)—— 坐席 Available 却永远接不到呼叫。
+    evidence_dir: docs/verification/artifacts/VC-S3-02/
+    status: FAIL  # 2026-08-20 执行:陈旧 tier support-en@192.168.31.176 永生;converge 每次谎报 removed=1(根因见 verdict.md)
+    refs: ["internal/catalog/service.go:236", "internal/catalog/service.go:263", "internal/telephony/tiers.go:26", "internal/agents/service.go:614"]
+
+  - id: VC-S3-03
+    scenario: S3
+    layer: api
+    precondition: "紧接 VC-S3-01(主叫仍在队列或已振铃 wei)"
+    steps:
+      - who: human
+        do: "wei 在 Chrome 扩展软电话上点接听,与主叫互说一句,保持通话【先不要挂断】"
+      - who: agent
+        do: "通话中探针(定位 F6 漂移点:戳是否真的落在主叫通道上):执行 collect 第 1 条"
+      - who: human
+        do: "主叫挂断"
+      - who: agent
+        do: "执行其余 collect,判定单一 CDR 携带 bot 份额与队列时长"
+    collect:
+      - "FS=/usr/local/freeswitch/bin/fs_cli; CH=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq -r '.items[0].parties[] | select(.role==\"ORIGINATOR\") | .channelId'); echo CH=$CH; echo bot_sec=$($FS -x \"uuid_getvar $CH aicc_bot_sec\"); echo flow_id=$($FS -x \"uuid_getvar $CH aicc_flow_id\"); echo lang=$($FS -x \"uuid_getvar $CH aicc_language\"); echo did=$($FS -x \"uuid_getvar $CH aicc_did\")"
+      - "sleep 4; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id, status, bot_sec, queue_wait_sec, talk_sec, did, flow_id is not null as has_flow, array_length(agent_ids,1) from cdrs order by started_at desc limit 1\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select event, agent_id is not null as has_agent, wait_ms from queue_events where call_id='$CALL_ID' order by occurred_at\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/cdrs/$CALL_ID | jq '.legs'"
+    expect: |
+      cdrs 恰好 1 行(不是 bot/人各一行):status=ANSWERED,bot_sec>0,queue_wait_sec≥0,talk_sec>0,
+      did=95001,has_flow=t,agent_ids 长度=1
+      queue_events 该 call_id:JOINED → OFFERED(has_agent=t)→ BRIDGED(wait_ms>0)按时间序各≥1 行
+      GET /cdrs/{id}.legs:依次含 kind=BOT(durationSec>0)、kind=QUEUE(label=support-en)、kind=AGENT
+      探针(第 1 条):aicc_bot_sec/aicc_flow_id/aicc_language/aicc_did 均非 _undef_
+      ——若探针有值而 CDR 仍无 bot 份额,漂移在挂断事件读回侧(switchevent.go:81);
+      若探针即 _undef_,漂移在 stamp 侧(actions.go:83-86 的 facts==nil 静默跳过是首要嫌疑)。
+      [F6 实证 2026-08-20] 已有一例在野:call 01a01d3b-6e49-…(95002)bot 全程服务、handoff 已 fire、
+      "transferring the caller" 已打,CDR 却 bot_sec=0/无 flow/无 BOT leg——本用例执行时优先复现定位
+    failure_looks_like: |
+      通话全程顺利(人接到了、聊了、挂了),但 cdrs.bot_sec=0 且 flow_id 为空 ——
+      bot 份额通道变量没盖上(stampBotShare 未执行或 uuid_transfer 丢变量),
+      报表从此把这通"bot→人"呼叫当纯人工呼叫统计,无任何报错。
+    evidence_dir: docs/verification/artifacts/VC-S3-03/
+    status: TODO
+    refs: ["internal/aicall/actions.go:71", "internal/aicall/ledger.go:223", "internal/telephony/switchevent.go:81", "internal/telephony/cdr.go:151"]
+
+  - id: VC-S3-04
+    scenario: S3
+    layer: app-state
+    precondition: "队列 support-en 被临时停用,使 transfer_to_agent 被拒、bot 转而留言(用 collect 第 1 条停用;用后必须用最后一条恢复)"
+    steps:
+      - who: agent
+        do: "停用队列并开启 SSE 抓流:执行 collect 第 1、2 条"
+      - who: human
+        do: "拨 95001,要求转人工;bot 解释无法转接并提出留言时,说 yes, please tell them to call me back at 13800000000, my order is late,然后等 bot 确认后挂断"
+      - who: agent
+        do: "执行 collect 第 3–5 条判定回访单全链;再执行第 6、7 条(认领/完成)与第 8 条恢复队列"
+    collect:
+      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=false')\" | jq -c '.isEnabled'"
+      - "curl -s -N --max-time 120 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3cb-sse.log 2>&1 &"
+      - "sleep 2; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id, status, phone_number, left(message,60) from callbacks order by created_at desc limit 1\""
+      - "grep -c 'CALLBACK_CREATED' /tmp/vc-s3cb-sse.log"
+      - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); echo CB=$CB"
+      - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/callbacks/$CB/claim | jq -c '.status'"
+      - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/callbacks/$CB/complete -d '{\"status\":\"DONE\"}' | jq -c '.status'; grep -c 'CALLBACK_UPDATED' /tmp/vc-s3cb-sse.log"
+      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=true')\" | jq -c '.isEnabled'"
+    expect: |
+      callbacks 新增 1 行:status=OPEN,phone_number 含 13800000000(或主叫号码兜底),message 非空
+      SSE:CALLBACK_CREATED 计数=1;claim 返回 "CLAIMED";complete 返回 "DONE";CALLBACK_UPDATED 计数=2
+      最后一条恢复返回 true
+    failure_looks_like: |
+      bot 口头答应"我会记下留言"(对话完全自然),但 callbacks 表无新行 ——
+      InsertCallback 失败被 flow.Failed 吞成又一轮对话(actions.go:114-117),
+      主叫以为会被回call,实际无人知晓。SSE 计数=0 是唯一外部可见证据。
+    evidence_dir: docs/verification/artifacts/VC-S3-04/
+    status: TODO
+    refs: ["internal/aicall/actions.go:102", "internal/aicall/actions.go:60", "cmd/aicc/wiring.go:309", "internal/httpapi/ledger_handlers.go:171"]
+    note: "本用例同时补 events.md 缺口 CALLBACK_CREATED/UPDATED 与 tables.md callbacks 场景缺口;[已判明 2026-08-20] novanet_support.json 无 transfer 失败分支(global.transitions 仅 result.ok=1 成功边),拒绝后 bot 是否主动提出留言取决于模型对 refusalHint 的跟随(actions.go:58-64)——人工步骤直接说 leave a message, please 最稳。注意 /queues/{id} 是 PUT 全量替换(无 PATCH),启停一律读-改-写(审计 SYS-7)"
+
+  # ───────────────────────── S4 坐席应答 → 通话 → 挂断 → ACW → Done ─────────────────────────
+
+  - id: VC-S4-01
+    scenario: S4
+    layer: sse
+    precondition: "wei READY(VC-S3-01 第 1、2 条);SSE 抓流已开(collect 第 1 条)"
+    steps:
+      - who: agent
+        do: "开启 wei 视角 SSE 抓流:执行 collect 第 1 条"
+      - who: human
+        do: "拨 95001 → 转人工;wei 的浏览器话机响铃后点接听,保持通话"
+      - who: agent
+        do: "执行其余 collect,判定振铃→接通事件链与 ON_CALL"
+    collect:
+      - "curl -s -N --max-time 120 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s4-sse.log 2>&1 &"
+      - "sleep 2; grep -oE '\"type\":\"(PARTY_RINGING|QUEUE_AGENT_OFFERED|PARTY_ESTABLISHED|AGENT_AVAILABILITY)\"' /tmp/vc-s4-sse.log | sort | uniq -c"
+      - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq '.items[0].parties'"
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq '.items[] | select(.username==\"wei\") | {availability, isOnCall}'"
+    expect: |
+      SSE 依次含:QUEUE_AGENT_OFFERED ≥1、PARTY_RINGING =1(payload.extensionNumber=wei 分机)、
+      PARTY_ESTABLISHED ≥1、AGENT_AVAILABILITY ≥1
+      /calls/mine:wei 的腿 state=TALKING 且 agentId 非空;主叫腿 state=TALKING
+      roster:wei availability="ON_CALL",isOnCall=true
+    failure_looks_like: |
+      电话正常接通(媒体双向都有),但 SSE 无 PARTY_RINGING —— 坐席腿没被归到 wei
+      (agentForLeg 三个候选变量都没命中,coordinator.go:831-848),
+      屏幕不弹、事件按"主管可见"发,坐席端安静得像没来过电话。
+    evidence_dir: docs/verification/artifacts/VC-S4-01/
+    status: TODO
+    refs: ["internal/telephony/coordinator.go:404", "internal/telephony/coordinator.go:831", "internal/telephony/registry.go:336", "internal/agents/service.go:350"]
+
+  - id: VC-S4-02
+    scenario: S4
+    layer: app-state
+    precondition: "紧接 VC-S4-01,通话进行中"
+    steps:
+      - who: agent
+        do: "记录基线:执行 collect 第 1 条"
+      - who: human
+        do: "主叫挂断(不是 wei 挂)"
+      - who: agent
+        do: "执行其余 collect,判定 ACW 自动开启与平台开单"
+    collect:
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo baseline_rejects=$(grep -c 'rejected party transition' \"$LOG\")"
+      - "sleep 3; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason, s.wrap_up_call_id is not null as has_call from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select disposition_code, is_confirmed from wrap_ups order by created_at desc limit 1\""
+      - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/agent/wrap-up | jq '{callId, isConfirmed, dispositionCode}'"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo rejects_now=$(grep -c 'rejected party transition' \"$LOG\")"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
+    expect: |
+      agent_states:state=NOT_READY,reason=AFTER_CALL_WORK,has_call=t
+      wrap_ups 最新行:is_confirmed=f(平台代开,disposition 为默认值)
+      GET /agent/wrap-up:callId 非空且 isConfirmed=false
+      rejects_now = baseline_rejects(无新增;FS 重复 answer/乱序事件全被幂等表吸收)
+      switch 侧 agent-wei status="On Break"(ACW 镜像,不再被派单)
+    failure_looks_like: |
+      wei 屏幕进入 ACW(表面正确),但 fs_cli 里 agent-wei 仍 Available ——
+      镜像失败被 slog.Warn 吞掉(service.go:632-634),mod_callcenter 会在 ACW 期间
+      继续把下一通派给还在写小结的 wei。
+    evidence_dir: docs/verification/artifacts/VC-S4-02/
+    status: TODO
+    refs: ["internal/telephony/coordinator.go:246", "internal/telephony/coordinator.go:262", "internal/agents/service.go:267", "internal/agents/service.go:289", "internal/agents/state.go:161"]
+
+  - id: VC-S4-03
+    scenario: S4
+    layer: ui
+    precondition: "紧接 VC-S4-02,wei 处于 ACW 且确认卡显示中"
+    steps:
+      - who: human
+        do: "wei 在 cockpit 的 after-call 卡片上选处置(如 Resolved)、填一句备注、点 Done"
+      - who: agent
+        do: "执行 collect,判定确认落库 + 回 READY + 交换机镜像"
+    collect:
+      - "sleep 2; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select disposition_code, disposition_label, note <> '' as has_note, is_confirmed from wrap_ups order by created_at desc limit 1\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select code from dispositions where is_enabled order by position\""
+    expect: |
+      wrap_ups:disposition_code=RESOLVED(或所选),disposition_label='Resolved',has_note=t,is_confirmed=t
+      agent_states:state=READY,reason 为空
+      switch 侧 agent-wei status="Available"
+      dispositions 恰好 4 行:RESOLVED, FOLLOW_UP_REQUIRED, NO_ANSWER, OTHER(00012:40-44)
+    failure_looks_like: |
+      点 Done 后界面回 READY(乐观更新),但 wrap_ups.is_confirmed 仍为 f ——
+      确认写库失败而 presence 变更成功,完成率报表把这通永远算作"未确认",
+      坐席认为已办结,无人再看。
+    evidence_dir: docs/verification/artifacts/VC-S4-03/
+    status: TODO
+    refs: ["internal/httpapi/agent_handlers.go:172", "internal/store/sql/ledger.sql:188", "internal/agents/service.go:331", "internal/store/migrations/00013_wrap_up_is_confirmed.sql:17"]
+
+  - id: VC-S4-04
+    scenario: S4
+    layer: api
+    precondition: "95001 的 is_recording_enabled=true(collect 第 1 条查证;若为 f,用第 2 条打开,并在 expect 后还原);SeaweedFS 容器 aicc-seaweedfs 运行中(colima 已启动)"
+    steps:
+      - who: agent
+        do: "查证/打开录音开关:执行 collect 第 1、2 条"
+      - who: human
+        do: "拨 95001,和 bot 说两句(或转人工聊两句),挂断"
+      - who: agent
+        do: "等待录音落账(flush 2s + ingest):执行其余 collect"
+    collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select number, is_recording_enabled from dids where number='95001'\""
+      - "D=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/dids | jq -c '.items[] | select(.number==\"95001\")'); [ \"$(echo \"$D\" | jq -r '.isRecordingEnabled')\" = \"true\" ] && echo already-enabled || curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/dids/$(echo \"$D\" | jq -r '.id') -d \"$(echo \"$D\" | jq -c '.isRecordingEnabled=true')\" | jq -c '.isRecordingEnabled'"
+      - "sleep 8; CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select backend, bucket, size_bytes, duration_sec from recordings where call_id='$CALL_ID'\"; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select has_recording from cdrs where call_id='$CALL_ID'\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); RID=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/$CALL_ID/recordings | jq -r '.items[0].id'); curl -s -o /tmp/vc-s4-rec.wav -w '%{http_code} %{content_type} %{size_download}\\n' -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/recordings/$RID/audio"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'recording booked|no recording ingested' \"$LOG\" | tail -3"
+    expect: |
+      recordings 恰好 1 行:backend=S3,bucket=aicc-recordings,size_bytes>44(不止 WAV 头),duration_sec≥1
+      cdrs.has_recording=t
+      音频下载:HTTP 200,content_type 含 audio,size_download=size_bytes
+      日志含 "recording booked"(而非 "no recording ingested")
+    failure_looks_like: |
+      日志 "no recording ingested ... reason=<404>" 且 recordings 无行 —— 交换机确实录了
+      (mod_http_cache PUT 成功)但 key 约定(UTC 日期/call_id)与 ingest 侧不一致,
+      音频存在于 SeaweedFS 里却永远无人能听;呼叫流程全程无错。
+    evidence_dir: docs/verification/artifacts/VC-S4-04/
+    status: TODO
+    refs: ["internal/telephony/cdr.go:107", "internal/telephony/cdr.go:145", "freeswitch/scripts/aicc_inbound.lua:84", "internal/httpapi/recording_handlers.go:81"]
+    note: "补 tables.md recordings / quality_reviews 场景缺口的前半;评审(POST /recordings/{id}/reviews)可在本用例后直接追加"
+
+  # ───────────────────────── S5 坐席不接 / 振铃超时 ─────────────────────────
+
+  - id: VC-S5-01
+    scenario: S5
+    layer: signaling
+    precondition: "wei READY 且浏览器话机注册;amy 未签入;队列 support-en 空"
+    steps:
+      - who: agent
+        do: "记录基线并开启 SSE 抓流:执行 collect 第 1、2 条"
+      - who: human
+        do: "拨 95001 → 转人工;wei 的话机响铃后【不要接】,响-停-再响(共 ≥90 秒)后主叫挂断"
+      - who: agent
+        do: "执行其余 collect,判定重派与 app 侧痕迹"
+    collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
+      - "curl -s -N --max-time 180 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s5-sse.log 2>&1 &"
+      - "sleep 2; grep -c '\"type\":\"QUEUE_AGENT_OFFERED\"' /tmp/vc-s5-sse.log"
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select event, count(*) from queue_events where call_id='$CALL_ID' group by event order by 1\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, missed_reason from cdrs order by started_at desc limit 1\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
+    expect: |
+      —— 可验半(判定 PASS/FAIL)——
+      SSE:QUEUE_AGENT_OFFERED ≥1 且全程无 BRIDGED
+      queue_events:JOINED=1,OFFERED ≥1,无 BRIDGED
+      cdrs:status=NO_ANSWER,missed_reason=ABANDONED_WAITING(cdr.go:266-270:入过队且未 bridge、
+      Cause=Cancel、wait≥5s;ABANDONED_RINGING 需 BridgedAt≠0、AGENTS_DID_NOT_ANSWER 需未入队——均不可达)
+      wei 前后两次 agent_states 完全一致(state=READY)——app 侧 RONA 无调用方的既成事实
+      (D7② 已决实现,W2 落地后本用例由 T6.9 整体改写)
+      —— 留证半(落档 evidence_dir,不判定)——
+      OFFERED 实际次数与间隔(needs-FACT F3:max_no_answer=0/no_answer_delay_time=0 下的重派节奏);
+      RONA 三处无痕(presence/报表/坐席屏)的查询输出——缺口钉子,变化即预警
+    failure_looks_like: |
+      本用例的期望本身就在钉死一个静默缺口:switch 反复把呼叫派给一个不接的坐席,
+      QUEUE_AGENT_STATE(Ring-No-Answer)事件被 Normalize 后无人消费(enums.md §22),
+      presence、报表、坐席屏三处都毫无痕迹 —— 队列被一部没人守的话机吸干,系统处处"正常"。
+    evidence_dir: docs/verification/artifacts/VC-S5-01/
+    status: TODO
+    refs: ["internal/agents/state.go:189", "internal/agents/service.go:342", "internal/telephony/switchevent.go:368", "internal/telephony/cdr.go:251"]
+
+  # ───────────────────────── S6 排队中主叫挂断(abandon) ─────────────────────────
+
+  - id: VC-S6-01
+    scenario: S6
+    layer: app-state
+    precondition: "无 READY 坐席(执行 collect 第 1 条把 wei 置 BREAK);SSE 抓流开启(第 2 条)"
+    steps:
+      - who: agent
+        do: "摘除坐席并开启抓流:执行 collect 第 1、2 条"
+      - who: human
+        do: "拨 95001 → 转人工;听到保持音后默数 10 秒,主动挂断"
+      - who: agent
+        do: "执行其余 collect,判定放弃记账三处一致"
+    collect:
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/not-ready -d '{\"reason\":\"BREAK\"}' | jq -c '.state'"
+      - "curl -s -N --max-time 120 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s6-sse.log 2>&1 &"
+      - "sleep 3; grep -E 'QUEUE_LEFT|QUEUE_COUNT' /tmp/vc-s6-sse.log | tail -4"
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select event, wait_ms from queue_events where call_id='$CALL_ID' order by occurred_at\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, missed_reason, queue_wait_sec from cdrs order by started_at desc limit 1\""
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq '.items | length'"
+    expect: |
+      SSE:QUEUE_LEFT 1 条(payload.cause="Cancel",payload.waitSec≈10)+ QUEUE_COUNT(waiting=0)
+      queue_events:JOINED 后 ABANDONED(wait_ms 在 8000–15000 区间)
+      cdrs:status=NO_ANSWER,missed_reason=ABANDONED_WAITING,queue_wait_sec 在 8–15
+      /calls/waiting:items 长度=0(无幽灵等待者)
+    failure_looks_like: |
+      主叫挂断后 /calls/waiting 仍显示 1 人(幽灵)—— member-queue-end 晚于挂断到达、
+      channel 绑定已被回收,waiting.go:189-195 的 CHANNEL_HANGUP 兜底若失效,
+      等待名单会永远挂着一个已离开的人;switch 侧 members 早已为空,两侧都不报错。
+    evidence_dir: docs/verification/artifacts/VC-S6-01/
+    status: TODO
+    refs: ["internal/telephony/waiting.go:183", "internal/telephony/cdr.go:261", "internal/telephony/cdr.go:358", "internal/telephony/switchevent.go:353"]
+
+  # ───────────────────────── S7 保持 / 取回 / 转接 / DTMF ─────────────────────────
+
+  - id: VC-S7-01
+    scenario: S7
+    layer: api
+    precondition: "wei 与主叫在通话中(重走 VC-S3-01→S4-01 建立);SSE 抓流开启"
+    steps:
+      - who: agent
+        do: "开启抓流并取得 callId:执行 collect 第 1、2 条"
+      - who: human
+        do: "wei 在软电话界面点 Hold,等 3 秒,再点 Retrieve(或由 agent 用第 3、4 条 API 代做——能脚本化的部分归 agent)"
+      - who: agent
+        do: "执行其余 collect,判定保持/取回事件与 tap 暂停"
+    collect:
+      - "curl -s -N --max-time 120 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7-sse.log 2>&1 &"
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); echo CALL=$CALL"
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/hold -o /dev/null -w '%{http_code}\\n'"
+      - "sleep 3; CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/retrieve -o /dev/null -w '%{http_code}\\n'"
+      - "sleep 1; grep -oE '\"type\":\"(PARTY_HELD|PARTY_RETRIEVED)\"' /tmp/vc-s7-sse.log | sort | uniq -c"
+      - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq '[.items[0].parties[] | {role, state}]'"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'transcription tap refused a command' \"$LOG\" | tail -3"
+    expect: |
+      hold/retrieve 均返回 202(Accepted;callOp 统一码,call_handlers.go:141)
+      SSE:PARTY_HELD 1 条、PARTY_RETRIEVED 1 条
+      /calls/mine parties:wei 的腿回到 state=TALKING,主叫腿 TALKING
+      日志无新增 "transcription tap refused a command"(hold 期间 tap Pause/Resume 成功或 ErrNoTap 常态)
+    failure_looks_like: |
+      Hold 返回 204、主叫听到了保持音(交换机侧真保持了),但 SSE 无 PARTY_HELD ——
+      uuid_phone_event 触发的 CHANNEL_HOLD 没被映射到该腿(乱序/腿归属错),
+      主管墙上这通电话仍显示"通话中",转写 tap 也不会暂停,保持期间的私聊被继续转写。
+    evidence_dir: docs/verification/artifacts/VC-S7-01/
+    status: TODO
+    refs: ["internal/httpapi/call_handlers.go:80", "internal/telephony/adapter.go:176", "internal/telephony/registry.go:337", "internal/telephony/coordinator.go:200"]
+
+  - id: VC-S7-02
+    scenario: S7
+    layer: signaling
+    precondition: "wei 与主叫通话中;ben 已签入 READY 且第二个浏览器 profile 的话机注册分机 1002(live 实测 2026-08-20:amy 无默认分机、1000 属 uiagent、chen 等非 seed 账号不可登录;若无第 2 人,转 7002 队列亦可)"
+    steps:
+      - who: agent
+        do: "取得 callId 并发起转接(API 代做,能脚本化不劳人):执行 collect 第 1、2 条"
+      - who: human
+        do: "ben 的话机响铃后接听,确认能听到主叫;wei 侧确认已退出通话"
+      - who: agent
+        do: "执行其余 collect,判定主叫存活、wei 退出、单 CDR"
+    collect:
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); echo CALL=$CALL"
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/transfer -d '{\"destination\":\"1002\"}' -o /dev/null -w '%{http_code}\\n'"
+      - "sleep 4; /usr/local/freeswitch/bin/fs_cli -x 'show channels' | cat"
+      - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq '.items | length'"
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq '[.items[].parties[] | {number, state, agentId}]'"
+    expect: |
+      transfer 返回 202(Accepted;callOp 统一码,call_handlers.go:141)
+      show channels:主叫腿仍在;wei 的腿消失;ben 的腿(user/1002 注册联系地址)振铃或已接通
+      wei 的 /calls/mine:items 长度=0
+      主管 /calls:同一 callId 下主叫腿 TALKING + ben 的腿(agentId 非空)
+    failure_looks_like: |
+      wei 界面显示"已转出"(本地乐观),但 show channels 里主叫腿已消失 ——
+      adapter 把 uuid_transfer 打在了 wei 的腿上而不是主叫腿(coordinator.go:768-777 的
+      "caller 是幸存腿"选择失效),主叫被挂断,转接看起来成功了。
+    evidence_dir: docs/verification/artifacts/VC-S7-02/
+    status: TODO
+    refs: ["internal/telephony/coordinator.go:764", "internal/telephony/adapter.go:216", "internal/httpapi/call_handlers.go:113"]
+
+  - id: VC-S7-03
+    scenario: S7
+    layer: signaling
+    precondition: "wei 与主叫通话中(重建通话);本用例验证 fsm-edges 缺口边 HELD→RELEASED"
+    steps:
+      - who: agent
+        do: "对 wei 的腿下 Hold 并记基线:执行 collect 第 1、2 条"
+      - who: human
+        do: "保持中(主叫听到保持音时)主叫直接挂断"
+      - who: agent
+        do: "执行其余 collect,判定保持中挂断的收官"
+    collect:
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/hold -o /dev/null -w '%{http_code}\\n'"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); echo baseline_rejects=$(grep -c 'rejected party transition' \"$LOG\")"
+      - "sleep 4; LOG=$(ls -t logs/aicc-*.log | head -1); echo rejects_now=$(grep -c 'rejected party transition' \"$LOG\")"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, talk_sec > 0 as talked from cdrs order by started_at desc limit 1\""
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq '.items | length'"
+    expect: |
+      rejects_now = baseline_rejects(无新增;HELD→RELEASE 是合法边,call.go:84;
+      wei 腿的收线路径 TALKING/HELD→RELEASED 均不报非法)
+      cdrs:status=ANSWERED,talked=t
+      /calls:items 长度=0(呼叫收官,actor 退出)
+    failure_looks_like: |
+      主叫挂了、wei 腿也掉了(通话确实结束),但 /calls 里该呼叫永远留存 RUNNING ——
+      HELD 腿的 RELEASE 事件被判非法丢弃,Finish 永不触发,CDR 永不落库,
+      这通电话在墙上"讲"到进程重启为止。
+    evidence_dir: docs/verification/artifacts/VC-S7-03/
+    status: TODO
+    refs: ["internal/telephony/call.go:84", "internal/telephony/registry.go:341", "internal/telephony/call.go:310"]
+
+  - id: VC-S7-04
+    scenario: S7
+    layer: sse
+    precondition: "wei 与主叫通话中;SSE 抓流开启(补 events.md 缺口 PARTY_DTMF)"
+    steps:
+      - who: agent
+        do: "由 wei 会话向远端发 DTMF:执行 collect 第 1、2 条"
+      - who: human
+        do: "主叫侧确认听到按键音(嘟);随后主叫在自己话机上按一个键 5"
+      - who: agent
+        do: "执行其余 collect,判定两个方向的 DTMF 事件"
+    collect:
+      - "curl -s -N --max-time 90 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7d-sse.log 2>&1 &"
+      - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/dtmf -d '{\"digits\":\"42#\"}' -o /dev/null -w '%{http_code}\\n'"
+      - "sleep 3; grep '\"type\":\"PARTY_DTMF\"' /tmp/vc-s7d-sse.log | head -5"
+    expect: |
+      dtmf API 返回 202(Accepted;callOp 统一码,call_handlers.go:141)
+      SSE 出现 PARTY_DTMF,payload.digit 依次含 "4","2","#"(wei→远端方向;[INFERENCE] uuid_send_dtmf
+      是否在目标通道回发 DTMF 事件未经静态证实——若发送侧不产事件,以 digit="5" 一条为判定,
+      发送效果由主叫听感确认,并把实测结论回填 needs-FACT F2),
+      随后 1 条 digit="5"(主叫按键方向;durationMs>0,8kHz tick→ms 换算 switchevent.go:255-258)
+    failure_looks_like: |
+      API 204、主叫听到了嘟声(音真发出去了),但 SSE 无 PARTY_DTMF ——
+      digits 打在了 wei 自己腿上(SendDTMF 选远端腿的规则 coordinator.go:710-735 失效),
+      对端 IVR 什么都没收到,而坐席以为输完了工号。
+    evidence_dir: docs/verification/artifacts/VC-S7-04/
+    status: TODO
+    refs: ["internal/telephony/coordinator.go:710", "internal/telephony/registry.go:387", "internal/telephony/switchevent.go:252"]
+
+  # ───────────────────────── S8 语言(按真实设计改写:language 不选 provider) ─────────────────────────
+
+  - id: VC-S8-01
+    scenario: S8
+    layer: app-state
+    precondition: "95002(zh,队列 support-zh)已 seed;app 启动日志可读。注意:en→OpenAI/zh→Qwen 的路由不存在(phase1-decisions A1);本用例验证 language 的真实作用域"
+    steps:
+      - who: agent
+        do: "固定事实:读启动期 provider 决议(整个部署仅一次):执行 collect 第 1 条"
+      - who: human
+        do: "拨 95002,听到中文问候后用中文说 我想咨询营业时间,等 bot 用中文答完后挂断"
+      - who: agent
+        do: "执行其余 collect,判定语言只影响文案/voice/转写语言"
+    collect:
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -m1 'voice provider selected' \"$LOG\"; grep -c 'voice provider selected' \"$LOG\""
+      - "sleep 3; LOG=$(ls -t logs/aicc-*.log | head -1); grep 'ai conversation started' \"$LOG\" | tail -1"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select did, language, status from cdrs order by started_at desc limit 1\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select speaker, left(content->>'text',30) from transcripts where call_id='$CALL_ID' and kind='TEXT' order by seq limit 6\""
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from transcripts where call_id='$CALL_ID' and speaker='CUSTOMER'\""
+    expect: |
+      "voice provider selected" 整个日志恰好 1 次(启动期),provider=<AICC_PROVIDER 值>
+      "ai conversation started" 该通:language=zh,provider 与启动行完全相同(不随语言变化)
+      cdrs:did=95002,language=zh
+      transcripts:BOT 行(source=MODEL,kind=TEXT)文本为中文(问候/回答)——判定条款
+      【留证,不判定】第 5 条 CUSTOMER 行数落档 evidence_dir(当前实现应为 0:stock profile 未设
+      TranscribeModel、ASR tap 只挂坐席腿——审计 SYS-8;若 >0 记录为实现变化,不作为本用例 FAIL;
+      W1 落地后由 T6.9 转正式断言)
+    failure_looks_like: |
+      通话正常、中文对答如流,但该通日志 provider 与启动行不一致 ——
+      有人重新引入了 language→provider 映射(CLAUDE.md 明令的回归);
+      或 language=zh 而 bot 说英文(DID.language 未进 X-AICC-Language 头,
+      aicc_inbound.lua:76 → orchestrator.go:210 链路断裂),两种都不报错。
+    evidence_dir: docs/verification/artifacts/VC-S8-01/
+    status: TODO
+    refs: ["cmd/aicc/main.go:267", "internal/aicall/orchestrator.go:220", "internal/aicall/orchestrator.go:278", "freeswitch/scripts/aicc_inbound.lua:76"]
+
+  # ───────────────────────── S9 ASR 全链:音频帧 → WS → final → SSE → UI → DB ─────────────────────────
+
+  - id: VC-S9-01
+    scenario: S9
+    layer: asr-wire
+    precondition: "转写已启用($LOG 含 'live transcription enabled',否则先在 .env 配置——本轮不改配置,只记录 SKIP);wei READY;SSE 抓流以 wei 身份开启"
+    steps:
+      - who: agent
+        do: "确认转写在线并开抓流:执行 collect 第 1、2 条"
+      - who: human
+        do: "拨 95001 → 转人工;wei 接听后清晰地说 the quick brown fox jumps over the lazy dog,主叫再说一句话,然后主叫挂断"
+      - who: agent
+        do: "执行其余 collect,按链路逐段判定"
+    collect:
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -m1 'live transcription enabled' \"$LOG\""
+      - "curl -s -N --max-time 180 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s9-sse.log 2>&1 &"
+      - "sleep 3; LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'transcription tap attached|tapped stream connected|transcription live' \"$LOG\" | tail -6"
+      - "grep '\"type\":\"CALL_TRANSCRIPT\"' /tmp/vc-s9-sse.log | grep '\"isFinal\":false' | head -2; grep '\"type\":\"CALL_TRANSCRIPT\"' /tmp/vc-s9-sse.log | grep '\"isFinal\":true' | grep -i 'quick brown fox' | head -2"
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select seq, speaker, source, provider, agent_id is not null as has_agent, left(content->>'text',40) from transcripts where call_id='$CALL_ID' and source='ASR' order by seq\""
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'transcribe: audio was dropped' \"$LOG\" | tail -2"
+    expect: |
+      日志链:transcription tap attached → tapped stream connected → transcription live(同一 callId)
+      SSE:CALL_TRANSCRIPT isFinal=false ≥1(partial 上流)且 isFinal=true 的行含 "quick brown fox"
+      DB(source=ASR):speaker=HUMAN_AGENT 行 has_agent=t 且文本≈fox 句;speaker=CUSTOMER 行 has_agent=f;
+      seq 与该呼叫 MODEL 行同一序列不冲突(uq_transcripts_call_id_seq 不炸)
+      无 "transcribe: audio was dropped"
+    failure_looks_like: |
+      日志 "transcription tap attached" 后永远没有 "tapped stream connected" ——
+      uuid_audio_stream 返回 +OK 但 socket 从未建立(端口/防火墙/URL 错),
+      12 秒后才有 ERROR(STREAM_NEVER_CONNECTED);若连这个都没有,面板停在 Connecting…,
+      整通电话音频无声无息地去了 nowhere(switchevent.go:176-183 所述的历史故障形态)。
+    evidence_dir: docs/verification/artifacts/VC-S9-01/
+    status: TODO
+    refs: ["internal/streamin/tap.go:123", "internal/streamin/streamin.go:289", "internal/streamin/session.go:60", "internal/transcript/actor.go:261", "internal/streamin/pump.go:90"]
+
+  - id: VC-S9-02
+    scenario: S9
+    layer: sse
+    precondition: "紧接 VC-S9-01 同一通话窗口(用同一份 /tmp/vc-s9-sse.log)"
+    steps:
+      - who: agent
+        do: "通话结束后判定状态时间线(纯脚本)"
+    collect:
+      - "grep '\"type\":\"CALL_TRANSCRIPTION_STATE\"' /tmp/vc-s9-sse.log | grep -oE '\"state\":\"[A-Z_]+\"' | uniq"
+      - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); curl -s -b /tmp/vc-sup.jar \"http://127.0.0.1:8080/api/v1/calls/$CALL_ID/transcript\" | jq '{state: .state, n: (.items | length)}'"
+    expect: |
+      状态序列恰为:CONNECTING → LIVE → STOPPED(不出现 ENDED——契约有值但系统从不发布,见 enums.md §18;
+      出现 DEGRADED/ERROR 即为该次运行的真实故障,单独归档)
+      REST 快照:state 与最后一次事件一致(契约字段名 state,CallTranscript);items 数 = DB 中该 call 的行数
+    failure_looks_like: |
+      SSE 曾出现 LIVE,但通话结束后 REST 快照仍报 CONNECTING —— 快照与流各有一份状态源
+      (actor.go:96-99 立此存照要防的正是双源分歧);面板刷新后把一场成功转写显示成"连接中"。
+    evidence_dir: docs/verification/artifacts/VC-S9-02/
+    status: TODO
+    refs: ["internal/transcript/actor.go:117", "internal/streamin/session.go:232", "internal/httpapi/transcript_handlers.go:29"]
+
+  # ───────────────────────── S10 SSE 断线重连 / replay ─────────────────────────
+
+  - id: VC-S10-01
+    scenario: S10
+    layer: sse
+    precondition: "app 运行中。纯脚本用例(EventSource 的重连由浏览器做,这里用 curl 显式验证 replay 语义)"
+    steps:
+      - who: agent
+        do: "制造 3 个事件,记录 seq,再用 Last-Event-ID 回放验证窗口语义"
+    collect:
+      - "curl -s -N --max-time 15 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s10-a.log 2>&1 & sleep 1; for r in BREAK LUNCH TRAINING; do curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/not-ready -d '{\"reason\":\"'$r'\"}' -o /dev/null; sleep 1; done; wait"
+      - "grep -oE '^id: [0-9]+' /tmp/vc-s10-a.log | tail -3"
+      - "LAST=$(grep -oE '^id: [0-9]+' /tmp/vc-s10-a.log | tail -3 | head -1 | awk '{print $2}'); echo LAST=$LAST; curl -s -N --max-time 5 -b /tmp/vc-sup.jar -H \"Last-Event-ID: $LAST\" http://127.0.0.1:8080/api/v1/events > /tmp/vc-s10-b.log 2>&1; grep -E '^id: |^event: ' /tmp/vc-s10-b.log | head -10"
+    expect: |
+      第一段抓到 3 条 AGENT_NOT_READY,id 严格递增(设为 N1<N2<N3)
+      带 Last-Event-ID=N1 重连后,回放段开头恰好从 id=N2 开始(N2、N3 原样重放,
+      event 类型与第一段一致),且【没有】SYSTEM_RESET
+    failure_looks_like: |
+      重连后从 N1 自身或 N3 之后开始 —— off-by-one 的 replay(hub.go:140 条件是 > lastEventID),
+      客户端要么重复消费一条(界面闪烁重复弹屏),要么静默丢一条;两种都不报任何错。
+    evidence_dir: docs/verification/artifacts/VC-S10-01/
+    status: PASS  # 2026-08-20 执行:回放自 N2=6800099 起、无 SYSTEM_RESET,无 off-by-one
+    refs: ["internal/events/hub.go:121", "internal/events/hub.go:140", "internal/httpapi/events_handler.go:139"]
+
+  - id: VC-S10-02
+    scenario: S10
+    layer: sse
+    precondition: "允许重启 app(会话/呼叫都不在进行中);重启只用 deploy/dev/restart.sh"
+    steps:
+      - who: agent
+        do: "记录当前 seq → 重启 → 用旧 id 重连,判定 SYSTEM_RESET 语义(纯脚本;restart.sh 自带锁等待,勿裸 kill)"
+    collect:
+      - "curl -s -N --max-time 6 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s10c.log 2>&1; OLD=$(grep -oE '^id: [0-9]+' /tmp/vc-s10c.log | tail -1 | awk '{print $2}'); echo OLD=${OLD:-none}"
+      - "deploy/dev/restart.sh"
+      - "curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{\"username\":\"supervisor\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null -w '%{http_code}\\n'"
+      - "curl -s -N --max-time 5 -b /tmp/vc-sup.jar -H 'Last-Event-ID: 5' http://127.0.0.1:8080/api/v1/events > /tmp/vc-s10d.log 2>&1; head -6 /tmp/vc-s10d.log"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select name, value from seq_blocks\""
+    expect: |
+      restart.sh 输出 "started: logs/aicc-…"(锁等待重试机制生效)
+      重启后带任意旧 Last-Event-ID 重连:首帧为 event: SYSTEM_RESET(ring 为空 → hub.go:132 oldest==0),
+      data 含 "oldestSeq":0
+      seq_blocks.value 只增不减(块预留,重启烧掉余量是设计内行为,seq.go:11-14)
+      重启后新事件的 id 大于重启前所有 id(全局单调)
+    failure_looks_like: |
+      重启后新事件 id 从小数字重新开始 —— seq 块预留没走 DB(ReserveSeqBlock 失败静默降级,
+      seq.go:53-61),浏览器把新事件当旧事件丢弃,所有客户端"连着但永远不再更新"。
+    evidence_dir: docs/verification/artifacts/VC-S10-02/
+    status: PASS  # 2026-08-20 执行:restart.sh 一次成功;SYSTEM_RESET(oldestSeq:0);新 id 6900001>6800107;seq_blocks 6.9M→7.0M
+    refs: ["deploy/dev/restart.sh:12", "internal/events/hub.go:129", "internal/events/seq.go:44", "internal/httpapi/events_handler.go:79"]
+
+  # ───────────────────────── S11 坐席状态机全迁移 ─────────────────────────
+
+  - id: VC-S11-01
+    scenario: S11
+    layer: app-state
+    precondition: "wei 已签出(先执行 collect 第 1 条兜底登出;409 亦可)。纯脚本用例"
+    steps:
+      - who: agent
+        do: "依次驱动 login→ready→not-ready(BREAK)→ready→logout,每步三方核对(DB/SSE/switch)"
+    collect:
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/logout -o /dev/null -w 'pre-logout %{http_code}\\n'"
+      - "curl -s -N --max-time 60 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s11-sse.log 2>&1 &"
+      - "sleep 1; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{}' | jq -c '{state, reason, extensionNumber}'"
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/ready | jq -c '.state'; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/not-ready -d '{\"reason\":\"BREAK\"}' | jq -c '{state,reason}'; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/ready | jq -c '.state'; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/logout | jq -c '.state'"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select l.state, l.reason from agent_state_logs l join agents a on a.id=l.agent_id join users u on u.id=a.user_id where u.username='wei' order by l.entered_at desc limit 5\" | tail -r"
+      - "grep -oE '\"type\":\"AGENT_[A-Z_]+\"' /tmp/vc-s11-sse.log | sort | uniq -c"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
+    expect: |
+      login 返回 state=NOT_READY reason=LOGIN extensionNumber=<绑定分机>(LOGIN 落位,state.go:100-101 的"签入不即派单")
+      四连击返回依次:READY → {NOT_READY,BREAK} → READY → LOGGED_OUT
+      agent_state_logs 时间正序:NOT_READY/LOGIN → READY → NOT_READY/BREAK → READY → LOGGED_OUT
+      SSE 计数:AGENT_LOGGED_IN=1, AGENT_READY=2, AGENT_NOT_READY=1, AGENT_LOGGED_OUT=1
+      最终 switch 侧 agent-wei status="Logged Out"
+    failure_looks_like: |
+      API 全部 200、DB 序列完整(应用侧完美),但 switch 侧 status 停在 Available ——
+      mirrorStatus 失败只 Warn(service.go:628-635),签出的坐席仍会被 mod_callcenter 派单,
+      呼叫送进一个没人登录的浏览器话机。
+    evidence_dir: docs/verification/artifacts/VC-S11-01/
+    status: PASS  # 2026-08-20 执行:API/DB 日志/SSE 计数/switch 镜像四面一致;collect 的 tac/$3/sort 缺陷已回修
+    refs: ["internal/agents/state.go:102", "internal/agents/service.go:553", "internal/agents/service.go:628", "internal/store/sql/agents.sql:61"]
+
+  - id: VC-S11-02
+    scenario: S11
+    layer: api
+    precondition: "wei 已签入(先跑 login);amy 账号可登录。纯脚本用例(守卫边)"
+    steps:
+      - who: agent
+        do: "验证三个守卫:重复签入、抢占分机、未签入变更"
+    collect:
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{}' -o /dev/null -w '%{http_code} '; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{}' | jq -c '.error.code // .code'"
+      - "WEIEXT=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select e.number from agents a join users u on u.id=a.user_id join extensions e on e.id=a.default_extension_id where u.username='wei'\"); curl -s -c /tmp/vc-amy.jar -H 'Content-Type: application/json' -d '{\"username\":\"amy\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null; curl -s -b /tmp/vc-amy.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{\"extensionNumber\":\"'$WEIEXT'\"}' | jq -c '.error.code // .code'"
+      - "curl -s -b /tmp/vc-amy.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/ready | jq -c '.error.code // .code'"
+    expect: |
+      第 1 条:第一次 200(或已签入则 409),第二次恒为 "AGENT_ALREADY_LOGGED_IN"
+      第 2 条:恒为 "EXTENSION_IN_USE"(wei 的分机被占)
+      第 3 条:恒为 "AGENT_NOT_LOGGED_IN"(amy 未签入不得 ready)
+    failure_looks_like: |
+      amy 用 wei 的分机签入返回 200 —— extensionHolderLocked 判重失效(service.go:204-207),
+      两个坐席一部话机,mod_callcenter contact 指向同一注册,派单从此薛定谔;
+      界面上两人都显示"已签入",无任何冲突提示。
+    evidence_dir: docs/verification/artifacts/VC-S11-02/
+    status: PASS  # 2026-08-20 执行:三守卫码全中(409/AGENT_ALREADY_LOGGED_IN、EXTENSION_IN_USE、AGENT_NOT_LOGGED_IN)
+    refs: ["internal/agents/service.go:204", "internal/agents/state.go:104", "internal/httpapi/agent_handlers.go:67"]
+
+  # ───────────────────────── S12 恢复:应用重启 / FreeSWITCH 重启 / ESL 断连 ─────────────────────────
+
+  - id: VC-S12-01
+    scenario: S12
+    layer: signaling
+    precondition: "95001 的 fallback 队列=support-en(luacc.dids 可查);允许重启 app"
+    steps:
+      - who: human
+        do: "拨 95001,等 bot 说话中【不要挂断】"
+      - who: agent
+        do: "通话进行中执行 collect 第 1 条重启 app(restart.sh 自带锁等待)"
+      - who: human
+        do: "观察听感:bot 声音中断后应转入保持音(落入 fallback 队列);确认后挂断"
+      - who: agent
+        do: "执行其余 collect,判定降级路径与新实例接管"
+    collect:
+      - "deploy/dev/restart.sh"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot leg failed' | tail -2"
+      - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -cE 'database ready|voice leg listening' \"$LOG\""
+      - "curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{\"username\":\"supervisor\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null; curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq ."
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config queue list members support-en@192.168.31.55'"
+    expect: |
+      restart.sh 输出 "started:"(旧实例 advisory lock 释放后新实例才起,store.go:83-100)
+      FS console:恰好 1 行 "aicc_inbound: bot leg failed for 95001"(bridge 断 → lua 兜底,inbound.lua:101-110)
+      新实例日志含 database ready 与 voice leg listening
+      /calls/waiting:该主叫出现在 support-en 等待名单(等待名单不依赖 registry 收养,waiting.go:222-233)
+      判定辅助(最后一条 members):members 有行而 /calls/waiting 为空 = 应用侧缺口;
+      两侧皆空 = member-queue-start 落在新实例 ESL 断档窗(needs-FACT F4),重跑本用例
+    failure_looks_like: |
+      restart.sh 秒退 "failed to start" —— 旧实例的 advisory lock 还挂着(裸 kill+start 的竞态形态);
+      或者主叫确实进了队列(听到保持音)但 /calls/waiting 为空 —— 新实例收养失败,
+      这通电话直到有人接起前对所有屏幕都是隐形的。
+    evidence_dir: docs/verification/artifacts/VC-S12-01/
+    status: TODO
+    refs: ["internal/store/store.go:83", "freeswitch/scripts/aicc_inbound.lua:101", "deploy/dev/restart.sh:12", "internal/telephony/coordinator.go:329"]
+
+  - id: VC-S12-02
+    scenario: S12
+    layer: app-state
+    precondition: "wei 与主叫在人工通话中(重走 S3→S4 建立);允许重启 app。本用例钉死一个已知恢复缺口"
+    steps:
+      - who: agent
+        do: "通话进行中重启并记账面基线:执行 collect 第 1–5 条"
+      - who: human
+        do: "重启完成后 wei 与主叫确认通话媒体未断(FS 桥不受 app 重启影响),再互道结束,主叫挂断"
+      - who: agent
+        do: "执行其余 collect,判定重启前后状态账"
+    collect:
+      - "deploy/dev/restart.sh"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'show channels count'"
+      - "curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{\"username\":\"supervisor\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null; curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq '.items | length'"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
+      - "echo baseline_cdrs=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
+      - "sleep 5; echo cdrs_now=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
+    expect: |
+      重启期间 show channels count = 2 total(媒体不掉,FS 独立于 app)
+      重启后 /calls items=0【已知缺口的既成事实】:mid-call 重启后 registry 为空,
+      收养只发生在 CHANNEL_CREATE/callcenter 事件上,进行中的人工通话对新实例不可见
+      wei 的 agent_states 恢复为重启前值(Restore,service.go:505)
+      挂断后 5 秒:cdrs_now = baseline_cdrs(该通话【没有】新行)—— CHANNEL_HANGUP 落在未知 channel 上
+      被丢弃(Dispatch 返回 false,coordinator 无兜底),差值=0 是本用例要钉死的账面损失
+    failure_looks_like: |
+      本用例的 expect 本身就是失败形态的记录:通话对双方完全正常、挂断也顺滑,
+      但这通电话既不在墙上、也永远不进账本 —— 一次 deploy 窗口里所有在讲的电话都被静默漏记。
+      若未来实现了 show channels 对账恢复,期望改为 items≥1 且 cdrs+1。
+    evidence_dir: docs/verification/artifacts/VC-S12-02/
+    status: TODO
+    refs: ["internal/telephony/registry.go:140", "internal/telephony/coordinator.go:37", "internal/agents/service.go:505", "cmd/aicc/main.go:142"]
+
+  - id: VC-S12-03
+    scenario: S12
+    layer: signaling
+    precondition: "无进行中呼叫;wei 已签入 READY;允许重启 FreeSWITCH(会中断所有注册约 5–15 秒)"
+    steps:
+      - who: human
+        do: "重启 FreeSWITCH:在终端执行 sudo /usr/local/freeswitch/bin/freeswitch -stop 后重新启动其 LaunchDaemon/前台进程(按本机启动方式;这是唯一无法脚本化的特权动作)"
+      - who: agent
+        do: "执行 collect,判定 ESL 重连后的三项重建(agents/tiers/registrations)"
+    collect:
+      - "sleep 45; LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'agent presence mirrored to the switch|registrations reconciled|staffing (reconciled|already matched)' \"$LOG\" | tail -6"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1 && NF>=5 {print $2\"|\"$1}' | grep agent-wei"
+      - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq '.items[] | select(.username==\"wei\") | {availability, isRegistered}'"
+    expect: |
+      日志(新连接后)依次出现:"agent presence mirrored to the switch"(agents=签入数)、
+      "agent staffing reconciled" 或 "agent staffing already matched"、"registrations reconciled"
+      switch 侧重建完成:agent-wei status="Available",tier agent-wei|support-en@<domain> 存在
+      roster:wei isRegistered=true(浏览器话机重注册后),availability=READY
+    failure_looks_like: |
+      FS 重启后 fs_cli agent list 为空且日志无 "mirrored" —— OnConnect 钩子没跑
+      (esl.Link 重连成功但钩子未注册/未触发),坐席在 app 里全是 READY,
+      switch 里却谁都不存在:每个入队呼叫都等到超时,页面上毫无异常。
+    evidence_dir: docs/verification/artifacts/VC-S12-03/
+    status: TODO
+    refs: ["cmd/aicc/wiring.go:99", "cmd/aicc/wiring.go:134", "internal/agents/service.go:528", "internal/catalog/service.go:377", "internal/esl/link.go:55"]

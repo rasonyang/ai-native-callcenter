@@ -1,0 +1,3 @@
+event: SYSTEM_RESET
+data: {"version":1,"seq":0,"type":"SYSTEM_RESET","occurredAt":"2026-08-20T04:52:13.835607Z","payload":{"oldestSeq":0}}
+

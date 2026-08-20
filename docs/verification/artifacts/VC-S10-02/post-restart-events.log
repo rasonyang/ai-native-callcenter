@@ -1,0 +1,8 @@
+id: 6900001
+event: AGENT_LOGGED_IN
+data: {"version":1,"seq":6900001,"type":"AGENT_LOGGED_IN","occurredAt":"2026-08-20T04:53:04.987758Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"NOT_READY","displayName":"Wei","extensionNumber":"1008","reason":"LOGIN","state":"NOT_READY"}}
+
+id: 6900002
+event: AGENT_READY
+data: {"version":1,"seq":6900002,"type":"AGENT_READY","occurredAt":"2026-08-20T04:53:06.029072Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"READY","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+
