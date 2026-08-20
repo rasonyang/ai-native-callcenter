@@ -232,6 +232,11 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。
   **附带旅程缺口 G-A7**:坐席外呼(DIAL OUT / POST /calls/dial,internal/outbound 整个服务)不在三旅程
   与任何 case 内。
+- **C17(new,2026-08-20 click-to-dial 复测发现)** click-to-dial 媒体已通(1008→1007 响铃、双向通话、
+  挂断双向拆线),但**账面几乎为空**:call_type=OUTBOUND(按 owner 口径分机互拨应为 **INTERNAL**——
+  是否穿外部网关才是分界)、talk_sec=0(实际通话数十秒)、agent_ids 为空(发起坐席未归属)、
+  legs 只有 [DIALING/1008] 无被叫腿。根因方向:transfer 进 dialplan 后新建的被叫腿未被收养/归并
+  (与 C11 的"读回侧丢失"同族)。**T6.11 的 case 起草以此为靶**;修复后 call_type 判定需按网关口径实现。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

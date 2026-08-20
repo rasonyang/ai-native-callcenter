@@ -235,6 +235,11 @@ func TestDialIsAgentFirst(t *testing.T) {
 	if first.vars["sip_auto_answer"] != "true" {
 		t.Error("the agent clicked; their leg should auto-answer")
 	}
+	// The next leg inherits this one's codec, and a G.711-only phone rejects
+	// an inherited opus offer outright (found live).
+	if pin := first.vars["absolute_codec_string"]; pin != "PCMU" {
+		t.Errorf("agent leg codec pin = %q, want PCMU", pin)
+	}
 	if sw.transferCount() != 0 {
 		t.Fatal("the customer was dialed before the agent answered")
 	}

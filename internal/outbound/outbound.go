@@ -173,6 +173,12 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 		// No space in the name: it travels inside an originate {…} block,
 		// where a space ends the block and kills the call before it routes.
 		"origination_caller_id_name": "Dial-" + destination,
+		// The agent leg speaks telephone audio, not what a browser would
+		// prefer: the leg the dialplan raises next inherits this one's codec,
+		// and a G.711-only phone answers an inherited opus offer with
+		// INCOMPATIBLE_DESTINATION (found live). One codec, no comma — a
+		// comma inside the block is a variable separator.
+		"absolute_codec_string": "PCMU",
 	}
 	if s.cfg.CallerID != "" {
 		// Presented onward when the dialplan bridges out; the agent's own
