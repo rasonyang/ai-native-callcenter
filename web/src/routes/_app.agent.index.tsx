@@ -152,7 +152,10 @@ function CallPanel({ call }: { call: CallSnapshot }) {
       aside={<CallBadges call={call} />}
     >
       <div className="tabular text-base font-semibold">
-        {other?.number ?? t('call.unknownNumber')}
+        {/* While a placed call is still dialling there is no other party yet
+            — the switch has not raised that leg — but the number being called
+            is known: it rides the agent's own leg. */}
+        {other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')}
       </div>
       <div className="tabular mt-1 text-sm text-muted-foreground">
         {isUnanswered
@@ -584,7 +587,11 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
   // The caller stays on the card after they hang up: the agent is still
   // working that call — writing it up, calling the customer back — and a card
   // that emptied itself at the hangup would take the person away mid-sentence.
-  const number = other?.number ?? lastCall.number
+  // A call still dialling has only the agent's own leg, and the number being
+  // called rides it: without this the agent reads "Unknown number" for a
+  // number they typed themselves a second ago.
+  const mine = call ? myParty(call, call.parties.find((p) => p.agentId)?.agentId) : undefined
+  const number = other?.number ?? mine?.otherNumber ?? lastCall.number
   const { contact } = useContactFor(number)
 
   if (!call && !number) {

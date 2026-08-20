@@ -38,7 +38,11 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
     <div className="space-y-3">
       <div className="flex items-baseline justify-between gap-2">
         <div>
-          <div className="text-base font-medium tabular">{other?.number ?? t('call.unknownNumber')}</div>
+          {/* A call still dialling has only the agent's own leg; the number
+              being called rides it. */}
+          <div className="text-base font-medium tabular">
+            {other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')}
+          </div>
           <div className="text-xs text-muted-foreground">
             {t(`callTypes.${call.callType}`)} · {t(`partyStates.${mine?.state ?? 'RINGING'}`)}
           </div>

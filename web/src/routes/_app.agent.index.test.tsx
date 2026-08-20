@@ -18,6 +18,7 @@ import {
   renderPage,
   emitEvent,
   waitingFixture,
+  AGENT_ID,
   type Backend,
 } from '@/test/harness'
 
@@ -192,12 +193,41 @@ describe('ringing', () => {
   // while the other side rings, and offering Accept there asked them to pick
   // up their own outgoing call (seen live).
   it('offers no answer on a call the agent placed', async () => {
-    await renderCockpit({ calls: [callFixture('DIALING')] })
+    await renderCockpit({ calls: [placedCall()] })
     expect(await screen.findByText(/calling out/i)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /accept/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /hang up/i })).toBeInTheDocument()
   })
+
+  // Until the far end is raised the call has one leg — the agent's — and the
+  // number being called is on it. Reading only the other party showed the
+  // agent "Unknown number" for a number they had just typed (seen live).
+  it('names the number being called before the far end exists', async () => {
+    await renderCockpit({ calls: [placedCall()] })
+    // Both the call panel and the customer panel name it, and neither falls
+    // back to "unknown".
+    expect(await screen.findAllByText('1007')).toHaveLength(2)
+    expect(screen.queryByText(/unknown number/i)).not.toBeInTheDocument()
+  })
 })
+
+/** A call the agent placed, still dialling: only their own leg exists. */
+function placedCall() {
+  const call = callFixture('DIALING')
+  return {
+    ...call,
+    callType: 'INTERNAL' as const,
+    parties: [
+      {
+        ...call.parties[1],
+        role: 'ORIGINATOR' as const,
+        number: '1008',
+        otherNumber: '1007',
+        agentId: AGENT_ID,
+      },
+    ],
+  }
+}
 
 describe('dial out', () => {
   it('dials a typed number', async () => {
