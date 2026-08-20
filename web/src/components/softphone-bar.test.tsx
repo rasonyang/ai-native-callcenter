@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { SoftphoneBar } from '@/components/softphone-bar'
 import {
+  AGENT_ID,
   CALL_ID,
   CALLER,
   callFixture,
@@ -236,5 +237,31 @@ describe('dialler', () => {
     // No second call may be placed from inside a live one.
     expect(within(pad).queryByRole('button', { name: /^dial$/i })).toBeNull()
     expect(api.commands.some((c) => c.path === '/calls/dial')).toBe(false)
+  })
+
+  // On a call the agent placed, the number they dialled is on their own leg;
+  // reading only "the other party" left the bar saying Unknown number for a
+  // call whose panels named it correctly (seen live).
+  it('names the number on a call the agent placed', async () => {
+    const call = callFixture('TALKING')
+    await renderBar({
+      calls: [
+        {
+          ...call,
+          callType: 'INTERNAL',
+          parties: [
+            {
+              ...call.parties[1],
+              role: 'ORIGINATOR',
+              number: '1008',
+              otherNumber: '1007',
+              agentId: AGENT_ID,
+            },
+          ],
+        },
+      ],
+    })
+    expect(await screen.findByText('1007')).toBeInTheDocument()
+    expect(screen.queryByText(/unknown number/i)).toBeNull()
   })
 })

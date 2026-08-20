@@ -280,6 +280,9 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   双双显示 "Unknown number"(owner 现场发现)。三处显示层(cockpit 通话卡、客户卡、软电话条)改为
   回落到坐席腿的 `otherNumber`(即被叫号码,CDR 的 to_number 同源);回归测试用单腿的
   placedCall fixture 钉住"两个面板都报出被叫号、不出现 unknown"。
+  **第二轮(owner 又抓到)**:顶部软电话条第一轮漏改,通话已建立仍显示 Unknown number;同处另有
+  方向图标按 callType 判定(INTERNAL 一律画成来电箭头)——两者一并修:号码同样回落 `otherNumber`,
+  方向改按坐席自己的 role(ORIGINATOR=外呼箭头),并补 softphone-bar 回归测试。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

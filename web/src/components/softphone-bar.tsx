@@ -210,7 +210,10 @@ function CallInfo({ call }: { call?: CallSnapshot }) {
     return <span className="truncate text-xs text-muted-foreground">{t('agent.idle')}</span>
   }
 
-  const DirectionIcon = call.callType === 'OUTBOUND' ? PhoneOutgoing : PhoneIncoming
+  // Which way the call went is the agent's own position in it, not the call
+  // type: an internal call is outgoing for whoever placed it and incoming for
+  // whoever was rung.
+  const DirectionIcon = mine?.role === 'ORIGINATOR' ? PhoneOutgoing : PhoneIncoming
   return (
     <span className="flex min-w-0 items-center gap-2">
       <DirectionIcon
@@ -218,7 +221,10 @@ function CallInfo({ call }: { call?: CallSnapshot }) {
         style={{ color: PARTY_STATE_COLOR[mine?.state ?? 'RINGING'] }}
       />
       <span className="tabular truncate text-sm font-medium">
-        {other?.number ?? t('call.unknownNumber')}
+        {/* A leg the switch has not raised yet, or has not reached this
+            snapshot, is still a number the agent knows: it rides their own
+            leg, which is where the ledger reads it from too. */}
+        {other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')}
       </span>
       {isEstablished ? (
         <span className="tabular shrink-0 text-xs text-muted-foreground">
