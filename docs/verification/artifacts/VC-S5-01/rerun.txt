@@ -1,0 +1,28 @@
+=== VC-S5-01 rerun after C22 fix (2026-08-21T05:48:17Z) ===
+CALL_ID=01a022da-67d0-7c7a-9095-b54ac0affcd1
+### collect#5 cdrs status / missed_reason
+NO_ANSWER|ABANDONED_WAITING
+### full row
+bot_sec=12 ring_sec=121 queue_wait_sec=121 talk_sec=0 total_sec=142 agent_ids=1 distinct=1 primary=NULL flow=true
+### legs
+ERROR:  aggregate functions are not allowed in GROUP BY
+LINE 1: select l->>'kind'||' x'||count(*)||' sum='||sum((l->>'durati...
+                                 ^
+### collect#3/#4 SSE + queue_events
+23
+  23 "type":"QUEUE_AGENT_OFFERED"
+   2 "type":"QUEUE_COUNT"
+   1 "type":"QUEUE_JOINED"
+   1 "type":"QUEUE_LEFT"
+ABANDONED|1
+JOINED|1
+OFFERED|23
+### collect#6 wei agent_states after (baseline was READY|)
+READY|
+### counters (baseline cdr 6189 / phantom 47)
+6190
+47
+### legs
+AGENT|23|0
+BOT|1|12
+QUEUE|1|121

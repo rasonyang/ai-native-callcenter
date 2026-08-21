@@ -359,6 +359,16 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   修复须同时给出"bot 接过但最终无人应答"的收官口径,并与 W2 的 missed_reason 互斥修复对齐;
   T4.2(VC-S6-01,排队中放弃)大概率命中同一分支,执行时留证对照。
   证据:`docs/verification/artifacts/VC-S5-01/verdict.md`。
+  **已修(2026-08-21,commit `71ec949`)**:①`cdr.go` 引入 `soughtAPerson`(有坐席腿或进过队列)
+  —— bot 接听只在呼叫仍属于 bot 时才判 ANSWERED,一旦要找人就由那个人来回答;
+  ②`agent_ids` 用 `slices.Contains` 去重(23 次重试是同一个人;`legs` 里的 23 段 AGENT **有意保留**,
+  详情页应看得见交换机试了多少次,两者口径不同);③新增 `ringSpan()`,无人接听时按
+  "第一条派单腿创建 → 最后一条释放"计 `ring_sec`。回归测试 `TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken`
+  以实测那通电话为原型,摘掉修复即报出线上那四个值;另加 `TestABotServedCallThatTimedOutInQueueIsMissed`
+  (队列超时→NO_AVAILABLE_AGENT)。**复验**:VC-S5-01 重跑 FAIL→PASS(NO_ANSWER/ABANDONED_WAITING、
+  agent_ids=1、ring_sec=121、bot_sec=12 保留、单行 CDR、幽灵计数不动)。
+  **未动**:`ABANDONED_RINGING` 的条件互斥错误仍归 W2;RONA 状态机(坐席被摘出路由)仍归 W2 ——
+  C22 修的是账目,不是状态机。
 - **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
   而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
