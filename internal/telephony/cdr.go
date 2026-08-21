@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -255,16 +256,19 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	}
 
 	// The switch answering and a person answering are different facts and the
-	// ledger keeps them apart. answered_at is the caller's own leg — the 200
-	// OK that went to the carrier — so it is set whenever the switch picked
-	// up, including on a call the bot served and nobody took, which the
-	// carrier bills all the same.
-	if originator != nil && originator.AnsweredAt != nil {
+	// ledger keeps them apart. answered_at is when the call became billable,
+	// which is a question about the leg facing whoever charges for it — so it
+	// is set whenever that leg was answered, including on a call the bot
+	// served and nobody took, which the carrier bills all the same.
+	billed := billedLeg(snap, originator, dialled)
+	switch {
+	case billed != nil && billed.AnsweredAt != nil:
+		cdr.AnsweredAt = *billed.AnsweredAt
+		cdr.BillSec = max(0, int(cdr.EndedAt.Sub(*billed.AnsweredAt).Seconds()))
+	case originator != nil && originator.AnsweredAt != nil:
+		// Nobody charges for two extensions talking, but the call was still
+		// answered and the row should say when.
 		cdr.AnsweredAt = *originator.AnsweredAt
-		cdr.BillSec = int(cdr.EndedAt.Sub(*originator.AnsweredAt).Seconds())
-		if cdr.BillSec < 0 {
-			cdr.BillSec = 0
-		}
 	}
 
 	// Whether a *person* was reached is a question the bridge answers and the
@@ -324,6 +328,8 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 			cdr.UserData["botReason"] = snap.Bot.Reason
 		}
 	}
+	a.checkDurations(snap, &cdr)
+
 	cdr.Tech = map[string]any{}
 	if originator != nil {
 		cdr.Tech["callerChannelId"] = originator.ChannelID
@@ -357,6 +363,61 @@ func botLeg(snap Snapshot) *PartySnapshot {
 		}
 	}
 	return nil
+}
+
+// checkDurations says so when the row's own numbers cannot all be true.
+//
+// The five durations are each derived separately and nothing used to compare
+// them, which is how a bill longer than the call it was for reached the ledger
+// and stayed there: arithmetically impossible, and silent. This does not
+// correct anything — a number quietly adjusted to look consistent is worse
+// than one that is visibly wrong — it reports, and puts what it saw where a
+// later reader can find it.
+func (a *CDRAssembler) checkDurations(snap Snapshot, cdr *store.CDR) {
+	var wrong []string
+	if cdr.BillSec > cdr.TotalSec {
+		wrong = append(wrong, "billed for longer than the call lasted")
+	}
+	if cdr.TalkSec > cdr.TotalSec {
+		wrong = append(wrong, "talked for longer than the call lasted")
+	}
+	if cdr.BotSec+cdr.QueueWaitSec+cdr.TalkSec > cdr.TotalSec {
+		wrong = append(wrong, "the phases add up to more than the call")
+	}
+	if len(wrong) == 0 {
+		return
+	}
+	a.log.Warn("the call's durations disagree with each other",
+		"callId", snap.CallID, "callType", string(snap.CallType),
+		"problems", strings.Join(wrong, "; "),
+		"botSec", cdr.BotSec, "queueWaitSec", cdr.QueueWaitSec,
+		"ringSec", cdr.RingSec, "talkSec", cdr.TalkSec,
+		"billSec", cdr.BillSec, "totalSec", cdr.TotalSec)
+}
+
+// billedLeg is the leg the money is on: the one facing whoever charges for the
+// call.
+//
+// On an inbound call that is the caller's own — the switch answered it and the
+// carrier has been charging since, whatever happened afterwards. On a call an
+// agent placed it is the leg dialled out, because the agent's own leg
+// auto-answers in front of them and nobody bills for that; anchoring on it
+// produced a bill longer than the call itself. Between two extensions nobody
+// bills at all.
+func billedLeg(snap Snapshot, originator *PartySnapshot, dialled []*PartySnapshot) *PartySnapshot {
+	switch snap.CallType {
+	case events.CallTypeInternal:
+		return nil
+	case events.CallTypeOutbound:
+		for _, leg := range dialled {
+			if leg.AnsweredAt != nil {
+				return leg
+			}
+		}
+		return nil
+	default:
+		return originator
+	}
 }
 
 // talkingLegs are the legs whose bridges count as a person on the call: the

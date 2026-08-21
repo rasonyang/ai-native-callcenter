@@ -755,10 +755,10 @@ type BusinessHours struct {
 type CDR struct {
 	AgentIDs *[]openapi_types.UUID `json:"agentIds,omitempty"`
 
-	// AnsweredAt When the switch answered the caller's own leg — the moment it sent 200 OK towards the carrier, and so the moment billing starts. Set whenever the switch answered, including calls the bot served and no agent ever took; absent only when the leg was never answered at all.
+	// AnsweredAt When the call became billable: the moment the leg facing whoever charges for it was answered. Inbound, that is the caller's own leg and the 200 OK the switch sent towards the carrier; on a call an agent placed it is the leg dialled out, since the agent's own phone picks up in front of them and nobody bills for that. Set even on a call the bot served and no agent took, which is billed all the same. Between two extensions it records the answer while billSec stays 0.
 	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
 
-	// BillSec Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered.
+	// BillSec Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered, and 0 between two extensions, which nobody charges for.
 	BillSec int `json:"billSec"`
 
 	// BotSec Seconds the caller spent with the bot, ending when they actually left it — after any closing sentence has finished playing, not when the transfer was decided.

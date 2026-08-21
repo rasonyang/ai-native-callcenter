@@ -1595,7 +1595,7 @@ export interface components {
             startedAt: string;
             /**
              * Format: date-time
-             * @description When the switch answered the caller's own leg — the moment it sent 200 OK towards the carrier, and so the moment billing starts. Set whenever the switch answered, including calls the bot served and no agent ever took; absent only when the leg was never answered at all.
+             * @description When the call became billable: the moment the leg facing whoever charges for it was answered. Inbound, that is the caller's own leg and the 200 OK the switch sent towards the carrier; on a call an agent placed it is the leg dialled out, since the agent's own phone picks up in front of them and nobody bills for that. Set even on a call the bot served and no agent took, which is billed all the same. Between two extensions it records the answer while billSec stays 0.
              */
             answeredAt?: string;
             /** Format: date-time */
@@ -1620,7 +1620,7 @@ export interface components {
             queueWaitSec: number;
             /** @description Seconds an agent had two-way media with the caller, measured from the bridges on the agent legs and unioned across them, so a call passed from one agent to another counts both stretches once. A leg that answered without a bridge — an auto-answer phone in front of nobody, a codec mismatch — contributes nothing. Hold counts as talk. */
             talkSec: number;
-            /** @description Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered. */
+            /** @description Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered, and 0 between two extensions, which nobody charges for. */
             billSec: number;
             /** @description Seconds from startedAt to endedAt, the whole life of the call including the time before it was answered. Not the billable duration; see billSec. */
             totalSec: number;

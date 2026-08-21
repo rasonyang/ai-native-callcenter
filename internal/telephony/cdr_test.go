@@ -665,3 +665,63 @@ func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
 		t.Error("tech carries a switch figure the switch never gave")
 	}
 }
+
+// The live regression of 2026-08-21: an agent dialled another extension and
+// the row came back billed for 23 seconds of a 21-second call. The agent's own
+// leg auto-answers in front of them two seconds before the call exists as far
+// as the ledger is concerned, and anchoring the money there produced a bill
+// longer than the thing it was for.
+func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
+	agentID := uuid.New()
+
+	// An agent placing an outbound call: their own leg answers at 0, the
+	// person they called answers at 6.
+	outbound := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ChannelID: "agent",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(40),
+				Bridges: []BridgeSpan{{OtherChannelID: "out", StartedAt: at(6), EndedAt: at(40)}}},
+			{Role: RoleTarget, Number: "18688886669", ChannelID: "out",
+				CreatedAt: at(2), AnsweredAt: atPtr(6), ReleasedAt: atPtr(40),
+				Bridges: []BridgeSpan{{OtherChannelID: "agent", StartedAt: at(6), EndedAt: at(40)}}},
+		},
+	}
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), outbound)
+	if got.BillSec != 34 {
+		t.Errorf("billSec = %d, want 34 — the carrier charges from when the person answered at 6, "+
+			"not from the agent's own phone picking up at 0", got.BillSec)
+	}
+	if got.BillSec > got.TotalSec {
+		t.Errorf("billSec %d exceeds totalSec %d, which cannot be true of any call",
+			got.BillSec, got.TotalSec)
+	}
+
+	// Two extensions: nobody charges for it, but it was still answered.
+	internal := outbound
+	internal.CallID = uuid.New()
+	internal.CallType = events.CallTypeInternal
+	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), internal)
+	if got.BillSec != 0 {
+		t.Errorf("billSec = %d on a call between two extensions, want 0 — nobody bills for it",
+			got.BillSec)
+	}
+	if got.AnsweredAt.IsZero() {
+		t.Error("an internal call that was answered records no answer time")
+	}
+
+	// Inbound is unchanged: the caller's own leg is the one facing the carrier.
+	inbound := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+				AnsweredAt: atPtr(1), ReleasedAt: atPtr(40)},
+		},
+	}
+	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), inbound)
+	if got.BillSec != 39 {
+		t.Errorf("billSec = %d, want 39 — inbound still bills from the switch answering", got.BillSec)
+	}
+}

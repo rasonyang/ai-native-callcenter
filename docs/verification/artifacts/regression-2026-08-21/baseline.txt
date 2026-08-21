@@ -1,0 +1,7 @@
+=== 整体回归基线 2026-08-21T09:40:26Z ===
+cdrs=6196
+phantom_outbound=47
+=== C12 三角色(无需通话) ===
+sup    http=200
+admin  http=200
+wei    http=200
