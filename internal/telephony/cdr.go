@@ -322,6 +322,23 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	cdr.Tech = map[string]any{}
 	if originator != nil {
 		cdr.Tech["callerChannelId"] = originator.ChannelID
+		// The switch counted the same seconds independently. Carrying its
+		// figure alongside ours is what turns the billing number from
+		// something asserted into something checkable — a charge nobody can
+		// check is one nobody can defend either.
+		//
+		// A second of disagreement is ordinary and means nothing: we truncate
+		// where the switch rounds, so 103.57 seconds is our 103 and its 104.
+		// Beyond that the two are counting different things and somebody
+		// should know which.
+		if originator.BilledSec > 0 {
+			cdr.Tech["switchBillSec"] = originator.BilledSec
+			if drift := cdr.BillSec - originator.BilledSec; drift > billDriftTolerance || drift < -billDriftTolerance {
+				a.log.Warn("the ledger and the switch disagree on billable time",
+					"callId", snap.CallID, "billSec", cdr.BillSec,
+					"switchBillSec", originator.BilledSec)
+			}
+		}
 	}
 	return cdr
 }
@@ -391,6 +408,12 @@ func ringSpan(agentLegs []*PartySnapshot) int {
 	}
 	return int(last.Sub(first).Seconds())
 }
+
+// billDriftTolerance is how far the ledger and the switch may differ on
+// billable seconds before it is worth saying so. One second is arithmetic — we
+// truncate, the switch rounds — and measured drift on live calls has stayed
+// inside it.
+const billDriftTolerance = 2
 
 // missedReason follows the design's precedence: the caller's own phase first.
 func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) string {

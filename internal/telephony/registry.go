@@ -343,6 +343,7 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		party.TransferredAway = ev.TransferredAway
 		// Whatever the leg was still bridged to, it is not any more.
 		party.CloseBridge(ev.OccurredAt)
+		party.BilledSec = ev.BilledSec
 		// The AI leg's share arrives as channel variables on hangup, and the
 		// legs carry different parts of it: each fills in what is still
 		// missing rather than claiming the whole share for whichever hung up

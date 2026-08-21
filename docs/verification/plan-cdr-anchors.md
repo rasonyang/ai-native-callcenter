@@ -209,7 +209,7 @@ C22 的两条回归测试要改判据。新增测试至少四条:
 | F13 | `variable_billsec` / `variable_answer_stamp` 是否出现在 `CHANNEL_HANGUP_COMPLETE` | **是**(2026-08-21 实证)。主叫腿挂断带着 `answer_stamp` / `answer_epoch` / `billsec` / `billmsec` / `duration` / `start_stamp` / `end_stamp` / `progress_media_stamp`。计费数字**有了第二个独立来源** |
 | F14 | 协商转接(consult)期间两条坐席腿是否真会同时 bridge | 待 consult 进入验收范围;不卡 —— 并集算法两种情况都对 |
 
-F13 已落实,故追加一条低成本的自洽校验(**尚未实现**):`assemble()` 收尾比对自算的 `bill_sec`
+F13 已落实,自洽校验**已实现**(commit 见下):`assemble()` 收尾比对自算的 `bill_sec`
 与交换机的 `billsec`,不一致记 WARN 并把两个值都落进 `tech`。**不改数,只让它说话。**
 
 首份实测的差都是 1 秒,且来源清楚:

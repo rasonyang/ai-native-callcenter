@@ -213,6 +213,9 @@ type Party struct {
 	// conversation with a person from one with the bot — an agent's leg is
 	// never bridged to the bot's.
 	Bridges []BridgeSpan
+	// BilledSec is the switch's own count of this leg's answered seconds, kept
+	// beside ours so the two can be compared rather than merely trusted.
+	BilledSec int
 	// IsMuted tracks the switch-side mute on this leg. The switch reports no
 	// event for it and no channel variable survives a re-read, so this is the
 	// only record that the agent's microphone is off — which is precisely why
@@ -442,6 +445,8 @@ type PartySnapshot struct {
 	IsMuted      bool   `json:"isMuted,omitempty"`
 	// Bridges is this leg's two-way-media history; see BridgeSpan.
 	Bridges []BridgeSpan `json:"bridges,omitempty"`
+	// BilledSec is the switch's own count of this leg's answered seconds.
+	BilledSec int `json:"billedSec,omitempty"`
 }
 
 // Snapshot copies the call into a value safe to hand outside the actor.
@@ -476,6 +481,7 @@ func (c *Call) Snapshot() Snapshot {
 			IsBotLeg:     p.IsBotLeg,
 			IsMuted:      p.IsMuted,
 			Bridges:      slices.Clone(p.Bridges),
+			BilledSec:    p.BilledSec,
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

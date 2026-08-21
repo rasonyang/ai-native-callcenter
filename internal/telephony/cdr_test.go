@@ -596,3 +596,34 @@ func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
 		t.Errorf("talkSec = %d, want 112 — the agent's own stretch", answered.TalkSec)
 	}
 }
+
+// The switch's own count of the billable seconds rides onto the row beside
+// ours, so a charge can be checked instead of only asserted.
+func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
+	base := func(switchBilled int) Snapshot {
+		return Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CreatedAt: at(0), EndedAt: atPtr(103),
+			Bot: BotShare{Sec: 9, DID: "95001"},
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+					AnsweredAt: atPtr(0), ReleasedAt: atPtr(103), BilledSec: switchBilled},
+			},
+		}
+	}
+
+	// One second apart is arithmetic: we truncate where the switch rounds.
+	agreed := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), base(104))
+	if agreed.BillSec != 103 {
+		t.Errorf("billSec = %d, want 103", agreed.BillSec)
+	}
+	if got := agreed.Tech["switchBillSec"]; got != 104 {
+		t.Errorf("tech.switchBillSec = %v, want 104 — the second source has to reach the row", got)
+	}
+
+	// A leg the switch never billed leaves the field off rather than claiming 0.
+	none := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), base(0))
+	if _, present := none.Tech["switchBillSec"]; present {
+		t.Error("tech carries a switch figure the switch never gave")
+	}
+}

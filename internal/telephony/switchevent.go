@@ -166,6 +166,13 @@ type SwitchEvent struct {
 	// Hangup detail.
 	HangupCause     string
 	HangupCauseQ850 int
+	// BilledSec is the switch's own count of the seconds this leg was
+	// answered, read from its billsec at hangup. It is not what the ledger
+	// records — that is derived from the leg's own timestamps — but a second,
+	// independent account of the same fact, which is what makes it worth
+	// carrying: a billing figure with nothing to check it against is a figure
+	// nobody can dispute or defend.
+	BilledSec int
 	// Bot carries the AI leg's share of the story, read from channel
 	// variables when the caller's leg hangs up. Zero when the call never
 	// met a bot.
@@ -300,6 +307,9 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		}
 		out.TransferredAway = transferredAway(ev)
 		out.Bot = botShare(ev)
+		if sec, ok := ev.GetInt("variable_billsec"); ok {
+			out.BilledSec = int(sec)
+		}
 	case "DTMF":
 		out.Kind = KindDTMF
 		out.Digit = ev.Get("DTMF-Digit")

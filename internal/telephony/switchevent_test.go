@@ -602,3 +602,37 @@ func TestQueueEventsRouteToTheWaitingCaller(t *testing.T) {
 		t.Errorf("agent-state-change ChannelID = %q, want %q", got.ChannelID, agent)
 	}
 }
+
+// The switch counts the answered seconds itself and puts the figure on the
+// hangup. Carrying it is what lets the ledger's billing be checked rather than
+// only trusted.
+func TestNormalizeReadsTheSwitchesOwnBilledSeconds(t *testing.T) {
+	got, ok := Normalize(event(map[string]string{
+		"Event-Name":            "CHANNEL_HANGUP_COMPLETE",
+		"Unique-ID":             "019ff973-6b32-7557-b7c4-11b3fdb692f0",
+		"Hangup-Cause":          "NORMAL_CLEARING",
+		"variable_billsec":      "104",
+		"variable_billmsec":     "103570",
+		"variable_answer_stamp": "2026-08-21 15:09:26",
+		"variable_duration":     "104",
+	}))
+	if !ok {
+		t.Fatal("Normalize rejected a hangup")
+	}
+	if got.BilledSec != 104 {
+		t.Errorf("BilledSec = %d, want 104", got.BilledSec)
+	}
+
+	// A leg that never answered carries no billsec, and nothing is invented.
+	quiet, ok := Normalize(event(map[string]string{
+		"Event-Name":   "CHANNEL_HANGUP_COMPLETE",
+		"Unique-ID":    "019ff974-1a01-7000-9c3d-2b8e5f0a1c44",
+		"Hangup-Cause": "NO_ANSWER",
+	}))
+	if !ok {
+		t.Fatal("Normalize rejected an unanswered hangup")
+	}
+	if quiet.BilledSec != 0 {
+		t.Errorf("BilledSec = %d on a leg that never answered, want 0", quiet.BilledSec)
+	}
+}
