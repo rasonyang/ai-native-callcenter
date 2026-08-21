@@ -818,11 +818,16 @@ func (c *Coordinator) Transfer(ctx context.Context, callID, agentID uuid.UUID, d
 }
 
 // CallsForAgent returns the live calls an agent is part of.
+// The agent's leg has to still be on the call. Having once had one is not the
+// same thing: after a transfer the agent's leg is released and the
+// conversation belongs to somebody else, but the call stayed on the first
+// agent's screen until the whole thing ended, showing them a call they had
+// already passed on and controls for a leg the switch had hung up.
 func (c *Coordinator) CallsForAgent(agentID uuid.UUID) []Snapshot {
 	var out []Snapshot
 	for _, snap := range c.registry.SnapshotAll() {
 		for _, p := range snap.Parties {
-			if p.AgentID != nil && *p.AgentID == agentID {
+			if p.AgentID != nil && *p.AgentID == agentID && p.IsActive() {
 				out = append(out, snap)
 				break
 			}

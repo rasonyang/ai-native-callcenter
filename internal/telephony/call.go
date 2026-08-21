@@ -449,6 +449,11 @@ type PartySnapshot struct {
 	BilledSec int `json:"billedSec,omitempty"`
 }
 
+// IsActive reports whether this leg is still on the call.
+func (p PartySnapshot) IsActive() bool {
+	return p.State != PartyReleased
+}
+
 // Snapshot copies the call into a value safe to hand outside the actor.
 func (c *Call) Snapshot() Snapshot {
 	s := Snapshot{

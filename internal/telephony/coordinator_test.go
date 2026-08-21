@@ -770,3 +770,46 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 		t.Errorf("hold on an agentless inbound call returned %v, want ErrNoAgentLeg", err)
 	}
 }
+
+// Having once had a leg on a call is not the same as being on it. After a
+// transfer the first agent's leg is released and the conversation is somebody
+// else's, but the call stayed on their screen until the whole thing ended —
+// showing them a call they had passed on, with controls for a leg the switch
+// had already hung up (found live, 2026-08-21).
+func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	ctx := t.Context()
+
+	wei, ben := uuid.New(), uuid.New()
+	callID := uuid.New()
+	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true); err != nil {
+		t.Fatal(err)
+	}
+	_ = registry.Do(callID, func(call *Call) {
+		caller := call.AddParty("caller", "18688886669", at(0))
+		caller.State = PartyTalking
+		first := call.AddParty("wei-chan", "1008", at(1))
+		first.AgentID = &wei
+		first.State = PartyTalking
+	})
+
+	if got := c.CallsForAgent(wei); len(got) != 1 {
+		t.Fatalf("wei has %d calls while talking, want 1", len(got))
+	}
+
+	// The transfer: wei's leg goes, ben's arrives.
+	_ = registry.Do(callID, func(call *Call) {
+		call.PartyByChannel("wei-chan").State = PartyReleased
+		second := call.AddParty("ben-chan", "1007", at(60))
+		second.AgentID = &ben
+		second.State = PartyTalking
+	})
+
+	if got := c.CallsForAgent(wei); len(got) != 0 {
+		t.Errorf("wei still has %d calls after passing the conversation on", len(got))
+	}
+	if got := c.CallsForAgent(ben); len(got) != 1 {
+		t.Errorf("ben has %d calls after taking the conversation over, want 1", len(got))
+	}
+}
