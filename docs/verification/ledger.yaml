@@ -890,5 +890,5 @@ cases:
       (esl.Link 重连成功但钩子未注册/未触发),坐席在 app 里全是 READY,
       switch 里却谁都不存在:每个入队呼叫都等到超时,页面上毫无异常。
     evidence_dir: docs/verification/artifacts/VC-S12-03/
-    status: TODO
+    status: PASS  # 2026-08-21 执行:esl 20:50:29 断→20:50:45 连,三条重建日志同毫秒区间齐全;switch agent-wei=Available、tier support-en@…55 在、roster isRegistered=true/READY、两话机重注册。保留:added=0——mod_callcenter 自 callcenter.db 自行恢复,reconcile 只确认未恢复,真正的重建路径未被压到→建议追加 VC-S12-04(清空 callcenter.db 后重启)。C1 陈旧行未随重启浮现
     refs: ["cmd/aicc/wiring.go:99", "cmd/aicc/wiring.go:134", "internal/agents/service.go:528", "internal/catalog/service.go:377", "internal/esl/link.go:55"]

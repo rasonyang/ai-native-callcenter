@@ -159,6 +159,14 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - 约束:阶段 2–5 经验之后起草;expect 全给 file:line。
 - **T6.9(新)** W1/W2 合入后的账本改写:S1-02/S8-01 留证条款→正式断言(CUSTOMER|MODEL ≥1)并重跑;
   S5-01 按 RONA 新行为整体改写(agent_states 将不再"前后一致"!)并重跑;S3-01 members 词表(F1)回填。
+- **T6.12(新,2026-08-21 T5.3 执行发现)** DRAFT **VC-S12-04:交换机侧状态真丢失后的重建**。
+  S12-03 通过了,但**没有压到重建路径**:mod_callcenter 的 agents/tiers 存在它自己的
+  `/usr/local/freeswitch/db/callcenter.db`,交换机重启时自行恢复,我们的 reconcile 只是**确认**
+  (`already matched … added=0`),没有**恢复**。即 S12-03 证明的是"重连钩子会触发且两侧一致",
+  未证明"switch 侧真丢了时应用能推回去"。
+  起草要点:停机后清空该库(`delete from agents; delete from tiers;`)再启动,
+  断言 `added=` 为正、tier 与 agent status 由应用重新建立、且**不出现** S12-03 的
+  `failure_looks_like`(app 里人人 READY 而 switch 里谁都不存在)。
 - **T6.10(新)** W7 合入后:events.md 十行缺口关闭 + 为新事件补**最小断言**——优先挂进既有 case 的
   SSE grep(如 CALL_RECORDING_* 挂 S4-04、SYSTEM_LINK 挂 S12-03、BOT_SESSION_* 挂 S1-01/S2-01),
   而非新建 10 个 case;PARTY_DIALING/CALL_USER_DATA 若无既有挂点再单独起草。
