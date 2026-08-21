@@ -296,6 +296,7 @@ func (stubCalls) AllCalls() []telephony.Snapshot               { return nil }
 func (stubCalls) WaitingCalls([]uuid.UUID) []telephony.WaitingCall {
 	return nil
 }
+func (stubCalls) AllWaitingCalls() []telephony.WaitingCall { return nil }
 
 type stubCatalog struct{}
 

@@ -1804,7 +1804,7 @@ type ServerInterface interface {
 	// ListMyCalls The calls the caller is a party to
 	// (GET /calls/mine)
 	ListMyCalls(w http.ResponseWriter, r *http.Request)
-	// ListWaitingCalls Callers waiting in the queues the caller staffs
+	// ListWaitingCalls Callers waiting in queue
 	// (GET /calls/waiting)
 	ListWaitingCalls(w http.ResponseWriter, r *http.Request)
 	// AnswerCall Answer the caller's own ringing leg
@@ -2074,7 +2074,7 @@ func (_ Unimplemented) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ListWaitingCalls Callers waiting in the queues the caller staffs
+// ListWaitingCalls Callers waiting in queue
 // (GET /calls/waiting)
 func (_ Unimplemented) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)

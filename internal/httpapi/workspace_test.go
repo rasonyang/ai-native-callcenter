@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -50,12 +51,19 @@ func (a *recordingAgents) EndWrapUp(context.Context, uuid.UUID) (agents.Presence
 type waitingCalls struct {
 	stubCalls
 	askedFor []uuid.UUID
+	askedAll bool
 	answer   []telephony.WaitingCall
+	everyone []telephony.WaitingCall
 }
 
 func (c *waitingCalls) WaitingCalls(queueIDs []uuid.UUID) []telephony.WaitingCall {
 	c.askedFor = queueIDs
 	return c.answer
+}
+
+func (c *waitingCalls) AllWaitingCalls() []telephony.WaitingCall {
+	c.askedAll = true
+	return c.everyone
 }
 
 // staffedAgent resolves every session to one agent staffing two queues.
@@ -237,4 +245,62 @@ func TestTheAgentWorkspaceRoutesAreAgentOnly(t *testing.T) {
 				"session's agent identity, which a non-agent session does not have", route)
 		}
 	}
+}
+
+// A supervisor works no line, so there is no staffing to scope the waiting
+// list to — they watch every queue, which is the same split ListCalls makes.
+// Before this they were refused outright for not being an agent, which left
+// the one view of who is waiting available only to the people already busy.
+func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
+	staffed := []uuid.UUID{uuid.New()}
+	calls := &waitingCalls{
+		answer: []telephony.WaitingCall{
+			{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en"},
+		},
+		everyone: []telephony.WaitingCall{
+			{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
+			{CallID: uuid.New(), QueueID: uuid.New(), QueueName: "support-zh", FromNumber: "18688886669"},
+		},
+	}
+	// A directory that would refuse: a supervisor is nobody's agent.
+	srv := New(config.Config{}, Deps{
+		Agents: &recordingAgents{}, AgentDir: noAgentDir{}, Calls: calls,
+	})
+
+	w := httptest.NewRecorder()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/calls/waiting", nil)
+	r = r.WithContext(contextWithIdentity(r.Context(),
+		auth.Identity{UserID: uuid.New(), Role: auth.RoleSupervisor}))
+	srv.ListWaitingCalls(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body)
+	}
+	if !calls.askedAll {
+		t.Error("the supervisor was scoped to somebody's staffing instead of the whole floor")
+	}
+	if calls.askedFor != nil {
+		t.Errorf("the agent-scoped view was consulted for a supervisor: %v", calls.askedFor)
+	}
+	var body struct {
+		Items []struct {
+			QueueName string `json:"queueName"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Items) != 2 {
+		t.Errorf("items = %+v, want both queues", body.Items)
+	}
+}
+
+// noAgentDir stands for a directory asked about somebody who is not an agent.
+type noAgentDir struct{}
+
+func (noAgentDir) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
+}
+func (noAgentDir) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, errors.New("not an agent")
 }

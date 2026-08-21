@@ -33,6 +33,9 @@ type CallService interface {
 	// reached anybody. It cannot be derived from the calls above — a caller
 	// on hold music in a queue looks like any other live call.
 	WaitingCalls(queueIDs []uuid.UUID) []telephony.WaitingCall
+	// AllWaitingCalls is the same view across every queue, for whoever
+	// watches the whole floor rather than working one line of it.
+	AllWaitingCalls() []telephony.WaitingCall
 }
 
 // ListMyCalls lists the calls the caller is currently a party to.
@@ -44,12 +47,24 @@ func (s *Server) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.CallsForAgent(agentID)})
 }
 
-// ListWaitingCalls lists the callers waiting in the queues this agent staffs.
+// ListWaitingCalls lists the callers waiting in the queues this agent staffs,
+// or every queue for a supervisor.
 //
-// The queues come from the agent's staffing, not from the request: an agent
-// works the line they are on, and the same rule already decides which queue
-// events reach their event stream.
+// An agent's queues come from their staffing, not from the request: they work
+// the line they are on, and the same rule already decides which queue events
+// reach their event stream. A supervisor works no line and watches all of
+// them, which is the same split ListCalls already makes.
 func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
+	id, ok := identityFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return
+	}
+	if id.Role.AtLeast(auth.RoleSupervisor) {
+		writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.AllWaitingCalls()})
+		return
+	}
+
 	agentID, ok := s.agentIDFor(w, r)
 	if !ok {
 		return

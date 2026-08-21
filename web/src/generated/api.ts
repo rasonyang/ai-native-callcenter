@@ -325,8 +325,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Callers waiting in the queues the caller staffs
-         * @description The live waiting line of every queue this agent is staffed on, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. Requires the AGENT role and an agent profile.
+         * Callers waiting in queue
+         * @description The live waiting line, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. An agent sees the queues they are staffed on — the same rule that decides which queue events reach their event stream. A supervisor works no line and sees every queue, as they do on GET /calls.
          */
         get: operations["listWaitingCalls"];
         put?: never;

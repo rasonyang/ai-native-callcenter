@@ -393,6 +393,13 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;
   账本 S6-01/S12-01/S12-02 的该行 collect 先改用 wei jar(下轮修订批)。
+  **【owner 裁决 2026-08-21】补主管分支(看全部队列)。已修**:`ListWaitingCalls` 认出
+  `Role.AtLeast(RoleSupervisor)` 即走 `AllWaitingCalls()`(该方法本已存在),坐席仍按配员归属;
+  与 `ListCalls`("for supervision",无限制)口径一致。契约 description 同步写明两种视角。
+  实测三角色均 200(supervisor / admin / agent)。回归测试
+  `TestTheWaitingListIsEveryQueueForASupervisor`(用一个"查无此坐席"的目录桩,
+  确保主管不是靠碰巧有坐席身份才通过)。**账本 S6-01/S12-01/S12-02 的 collect 可改回主管会话**
+  —— 但 C23① 记的另一半(队列启停需 ADMIN)仍然成立,不要一并改。
 
 ### 排序总则
 0. 追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。
