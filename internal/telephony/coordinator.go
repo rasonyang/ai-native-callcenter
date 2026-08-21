@@ -345,7 +345,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 
 	// A leg dialed towards a signed-in agent belongs to that agent's call, not
 	// to a new one: it is the delivery of a call already in a queue.
-	agentID, isAgentLeg := c.agentForLeg(ev)
+	agentID, agentExtension, isAgentLeg := c.agentForLeg(ev)
 	if callID == uuid.Nil && ev.MemberChannelID != "" {
 		if member, ok := c.registry.CallForChannel(ev.MemberChannelID); ok {
 			// Joining the caller's call now, rather than waiting for the
@@ -362,7 +362,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 					"channelId", ev.ChannelID, "callId", member, "error", err)
 				return
 			}
-			c.addParty(ctx, member, ev, agentID, isAgentLeg)
+			c.addParty(ctx, member, ev, agentID, agentExtension, isAgentLeg)
 			return
 		}
 		// The caller's own leg is not on the books yet. The bridge will still
@@ -382,7 +382,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		if err := c.registry.BindChannel(ev.ChannelID, callID); err != nil {
 			slog.WarnContext(ctx, "cannot bind channel", "channelId", ev.ChannelID, "error", err)
 		}
-		c.addParty(ctx, callID, ev, agentID, isAgentLeg)
+		c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg)
 		return
 	}
 
@@ -391,11 +391,11 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		slog.WarnContext(ctx, "cannot bind channel", "channelId", ev.ChannelID, "error", err)
 		return
 	}
-	c.addParty(ctx, callID, ev, agentID, isAgentLeg)
+	c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg)
 }
 
 // addParty appends a leg to a call and announces it.
-func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchEvent, agentID uuid.UUID, isAgentLeg bool) {
+func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchEvent, agentID uuid.UUID, agentExtension string, isAgentLeg bool) {
 	var (
 		partyID  uuid.UUID
 		callType events.CallType
@@ -429,9 +429,14 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			AgentID:  &agentID,
 			UserData: userData,
 			Payload: map[string]any{
-				"fromNumber":      ev.ANI,
-				"toNumber":        ev.DestinationNumber,
-				"extensionNumber": ev.DestinationNumber,
+				"fromNumber": ev.ANI,
+				// The extension the leg was attributed to, not the address the
+				// switch dialled: a browser softphone's destination is the
+				// random contact user it registered under, and telling an
+				// agent they are being rung at "g7bih4lv" is telling them
+				// nothing.
+				"toNumber":        agentExtension,
+				"extensionNumber": agentExtension,
 			},
 		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
 
@@ -845,9 +850,13 @@ func (c *Coordinator) agentChannel(callID, agentID uuid.UUID) (string, error) {
 // a random contact user, so a leg dialled at user/1001 arrives with a
 // destination like "hbp99nv8" and only the directory's own dialed_user still
 // carries the extension.
-func (c *Coordinator) agentForLeg(ev SwitchEvent) (uuid.UUID, bool) {
+// It also returns the extension it matched on. A browser softphone registers
+// under a random contact user, so the switch's destination for a leg dialled
+// at it is a token like "g7bih4lv" — which is what the agent's own screen was
+// being told they were being rung at.
+func (c *Coordinator) agentForLeg(ev SwitchEvent) (agentID uuid.UUID, extension string, ok bool) {
 	if c.agents == nil {
-		return uuid.Nil, false
+		return uuid.Nil, "", false
 	}
 	for _, candidate := range []string{
 		ev.Raw.Variable("dialed_user"),
@@ -858,10 +867,10 @@ func (c *Coordinator) agentForLeg(ev SwitchEvent) (uuid.UUID, bool) {
 			continue
 		}
 		if agentID, ok := c.agents.AgentAtExtension(candidate); ok {
-			return agentID, true
+			return agentID, candidate, true
 		}
 	}
-	return uuid.Nil, false
+	return uuid.Nil, "", false
 }
 
 // isMintedID reports whether a call's identity was minted by the dialplan.

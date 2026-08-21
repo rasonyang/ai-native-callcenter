@@ -274,6 +274,11 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   浏览器话机的 WS 注册标识(实测 "g7bih4lv")而非坐席分机号:coordinator.go:412-416 直取
   ev.DestinationNumber,而 :829-848 的 agentForLeg 早已把腿正确归户——归户成功后应以坐席绑定分机
   回填屏显字段。修复后 S4-01 的该条款转正。
+  **已修(2026-08-21)**:`agentForLeg` 现在把**匹配到的那个候选**一并返回
+  (`dialed_user` / `aicc_extension` / `DestinationNumber` 三选一),`addParty` 透传,
+  PARTY_RINGING 的 `toNumber` 与 `extensionNumber` 都改用它。回归测试
+  `TestARingingLegNamesTheExtensionNotTheContactToken` 以实测那个 `"g7bih4lv"` 为原型,
+  摘掉修复即报出该 token。**S4-01 的该条款可转正**(下次重跑时核)。
 - **C14(new,2026-08-20 T3.4 执行发现,FAIL 立案)** ASR tap 摄取路径丢帧:一通 ~23s 的转写
   HUMAN_AGENT 丢 46/1146(4.0%)、CUSTOMER 丢 78/1084(7.2%)("transcribe: audio was dropped",
   pump.go:226),识别文本随之崩坏(fox 句 → "Butro focus jobs owing the lazy workin")。pump 计数器

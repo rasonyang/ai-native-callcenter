@@ -685,3 +685,33 @@ func TestTheBotShareSurvivesTheLegThatHangsUpFirst(t *testing.T) {
 		t.Errorf("Bot.DID = %q, want 95001", snap.Bot.DID)
 	}
 }
+
+// A browser softphone registers under a random contact user, so the switch's
+// destination for a leg dialled at it is a token like "g7bih4lv". The leg is
+// still attributed to the right agent — the directory's dialed_user says so —
+// but the event that puts the call on their screen was quoting the token back
+// at them as the extension they were being rung at (found live, 2026-08-20).
+func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	ctx := t.Context()
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
+		// What a browser phone's leg actually looks like: the destination is
+		// the registration token, and only dialed_user names the extension.
+		"Caller-Destination-Number": "g7bih4lv",
+		"variable_dialed_user":      agentExtension,
+	}))
+
+	waitFor(t, func() bool { return pub.has(events.TypePartyRinging) })
+
+	ev, _, _ := pub.find(events.TypePartyRinging)
+	for _, field := range []string{"extensionNumber", "toNumber"} {
+		got, _ := ev.Payload[field].(string)
+		if got != agentExtension {
+			t.Errorf("payload.%s = %q, want the agent's extension %q — an agent told they are "+
+				"being rung at a registration token has been told nothing", field, got, agentExtension)
+		}
+	}
+}
