@@ -156,18 +156,23 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	botSec := int(endedAt.Sub(r.answeredAt).Seconds())
 
 	cdr := store.CDR{
-		CallID:      r.callID,
-		StartedAt:   r.startedAt,
-		AnsweredAt:  r.answeredAt,
-		EndedAt:     endedAt,
-		CallType:    string(call.callType),
-		Language:    call.language,
-		FromNumber:  call.fromNumber,
-		ToNumber:    call.did,
-		DID:         call.did,
-		FlowID:      call.flowID,
-		QueueID:     transferQueue,
-		BotSec:      botSec,
+		CallID:     r.callID,
+		StartedAt:  r.startedAt,
+		AnsweredAt: r.answeredAt,
+		EndedAt:    endedAt,
+		CallType:   string(call.callType),
+		Language:   call.language,
+		FromNumber: call.fromNumber,
+		ToNumber:   call.did,
+		DID:        call.did,
+		FlowID:     call.flowID,
+		QueueID:    transferQueue,
+		BotSec:     botSec,
+		// The carrier bills a call the bot answered exactly as it bills one a
+		// person answered — from the answer to the end. This path writes the
+		// row for calls that never reached a person, and those are billed too;
+		// leaving it at zero told the ledger they were free.
+		BillSec:     max(0, int(endedAt.Sub(r.answeredAt).Seconds())),
 		TotalSec:    int(endedAt.Sub(r.startedAt).Seconds()),
 		Status:      status,
 		HangupCause: hangupCause,

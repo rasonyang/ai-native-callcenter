@@ -256,3 +256,27 @@ func TestTakeMessageAnnouncesTheCallback(t *testing.T) {
 		t.Errorf("announced the wrong row: %+v", announced[0])
 	}
 }
+
+// A call the bot answered and nobody else took is billed by the carrier from
+// the answer, exactly like one a person took. This path writes the row for
+// those calls, and it was writing zero (found in the regression pass,
+// 2026-08-21: a 34-second contained call billed as free).
+func TestAContainedCallIsStillBilled(t *testing.T) {
+	ledger := newFakeLedger()
+	recorder := newCallRecorder(uuid.New(), time.Now().Add(-40*time.Second), nil)
+	recorder.answeredAt = time.Now().Add(-34 * time.Second)
+	recorder.markHangup()
+	recorder.finish(ledger, testFacts(), discard())
+
+	if len(ledger.cdrs) != 1 {
+		t.Fatalf("wrote %d rows, want 1", len(ledger.cdrs))
+	}
+	got := ledger.cdrs[0]
+	if got.BillSec < 33 || got.BillSec > 35 {
+		t.Errorf("billSec = %d, want about 34 — the carrier charged for every second of it",
+			got.BillSec)
+	}
+	if got.BillSec > got.TotalSec {
+		t.Errorf("billSec %d exceeds totalSec %d", got.BillSec, got.TotalSec)
+	}
+}
