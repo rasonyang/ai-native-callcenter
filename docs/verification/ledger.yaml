@@ -281,7 +281,7 @@ cases:
       InsertCallback 失败被 flow.Failed 吞成又一轮对话(actions.go:114-117),
       主叫以为会被回call,实际无人知晓。SSE 计数=0 是唯一外部可见证据。
     evidence_dir: docs/verification/artifacts/VC-S3-04/
-    status: TODO
+    status: PASS  # 2026-08-21 执行:callbacks OPEN/13800000000/message 非空、CALLBACK_CREATED=1、claim CLAIMED、complete DONE、CALLBACK_UPDATED=2、队列已恢复 is_enabled=t(放行门通过);collect 三处缺陷见 verdict:①队列启停需 ADMIN(主管 403)②grep 裸串把一个 SSE 事件数成两个③--max-time 120 太短
     refs: ["internal/aicall/actions.go:102", "internal/aicall/actions.go:60", "cmd/aicc/wiring.go:309", "internal/httpapi/ledger_handlers.go:171"]
     note: "本用例同时补 events.md 缺口 CALLBACK_CREATED/UPDATED 与 tables.md callbacks 场景缺口;[已判明 2026-08-20] novanet_support.json 无 transfer 失败分支(global.transitions 仅 result.ok=1 成功边),拒绝后 bot 是否主动提出留言取决于模型对 refusalHint 的跟随(actions.go:58-64)——人工步骤直接说 leave a message, please 最稳。注意 /queues/{id} 是 PUT 全量替换(无 PATCH),启停一律读-改-写(审计 SYS-7)"
 

@@ -373,6 +373,15 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   `403 FORBIDDEN {"code":"FORBIDDEN","message":"this account is not an agent"}`,坐席会话 200。
   连带发现**账本 collect 缺陷**:VC-S6-01 第 6 条写的是 `/tmp/vc-sup.jar`,在 C12 修复前
   **永远取不到**。修复前该条须改用坐席会话(diff 见 `artifacts/VC-S6-01/verdict.md`)。
+- **C23(new,2026-08-21 阶段 4 执行发现,账本 collect 缺陷三型)** 三处都会让 collect 静默失效,
+  非产品缺陷但会误导判定,建议随阶段 6 的账本改写一并回修:
+  ①**角色门比账本假设的细**:队列启停(`PUT /queues/{id}`)需 ADMIN,主管会话 403
+  `{"requiredRole":"ADMIN"}`;`/calls/waiting` 拒绝主管(C12)。账本多处默认"主管会话万能"。
+  ②**`grep -c '事件名'` 把一个 SSE 事件数成两个** —— SSE 每事件产生 `event:` 与 `data:` 两行;
+  应改为 `grep -c '"type":"事件名"'`。影响 VC-S3-04 的 CALLBACK_CREATED/UPDATED 计数,
+  以及其他用裸串计数的条款。
+  ③**`--max-time 120` 太短**:从开启抓流到人工拨号、对话、挂断超过 120 秒是常态,
+  VC-S6-01 首跑因此漏抓 SSE 条款。建议 S3/S5/S6/S7 统一 1800。
 - **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
   而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
