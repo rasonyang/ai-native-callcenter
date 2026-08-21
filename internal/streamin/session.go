@@ -30,12 +30,25 @@ type session struct {
 	log   Logger
 	cfg   Config
 
+	// mu guards pumps. The session's own goroutine builds them and feeds
+	// them, but Server.Stop closes sessions from whatever goroutine is
+	// shutting the server down — including one still starting up, where the
+	// teardown would read the array the startup was midway through writing.
+	mu    sync.Mutex
 	pumps [2]*pump
 	// mono holds the de-interleaved output so the split allocates once per
 	// frame size rather than once per frame.
 	mono [2][]byte
 
 	once sync.Once
+}
+
+// livePumps is the current set, copied under the lock so callers can work with
+// it without holding one. Two pointers; the copy is free next to a frame.
+func (s *session) livePumps() [2]*pump {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pumps
 }
 
 // run reads the tapped stream until it ends, and reports whether it ended
@@ -140,8 +153,11 @@ func (s *session) startPumps() error {
 
 	for i, client := range clients {
 		speaker := speakerFor(i)
-		s.pumps[i] = newPump(speaker, s.cfg.Profile.Name, client,
+		p := newPump(speaker, s.cfg.Profile.Name, client,
 			s.cfg.Profile.OwnsEndpointing, s.log)
+		s.mu.Lock()
+		s.pumps[i] = p
+		s.mu.Unlock()
 		go s.consume(speaker, client)
 	}
 	return nil
@@ -171,7 +187,7 @@ func (s *session) split(frame []byte) {
 	}
 	// The pump owns its frame once handed over, so each gets its own copy —
 	// the scratch buffer is reused on the very next frame.
-	for c, p := range s.pumps {
+	for c, p := range s.livePumps() {
 		if p == nil {
 			continue
 		}
@@ -224,7 +240,7 @@ func (s *session) close(ctx context.Context) {
 }
 
 func (s *session) closeLocked(ctx context.Context) {
-	for _, p := range s.pumps {
+	for _, p := range s.livePumps() {
 		if p != nil {
 			p.close(ctx)
 		}
