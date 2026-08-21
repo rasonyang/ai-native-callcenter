@@ -69,9 +69,17 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 			{Role: RoleTarget, Number: "95012", IsBotLeg: true, AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
 		},
 	}
+	// The live shape of a contained call: the dialplan exports the DID to the
+	// leg it dials towards the bot, so a share is present without a handover
+	// ever having happened. Reading "non-empty" as "handed over" made both
+	// paths race for this row, settled silently by whichever insert lost the
+	// primary key (C21).
+	contained.Bot = BotShare{DID: "95012"}
+
+	// A real handover: the bot stamped the caller's channel on its way out.
 	transferred := contained
 	transferred.CallID = uuid.New()
-	transferred.Bot = BotShare{Sec: 20, DID: "95012"}
+	transferred.Bot = BotShare{Sec: 20, DID: "95012", IsStamped: true}
 
 	ledger := &memoryLedger{}
 	assembler := newAssembler(ledger, staticQueues{})
@@ -98,6 +106,36 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 	if ledger.cdrs[0].CallID != transferred.CallID {
 		t.Errorf("wrote the contained call's cdr — that row belongs to the bot")
 	}
+}
+
+// A transfer decided in the first second stamps a duration of zero, and that
+// is still a handover. Nothing about the share's contents can be the test —
+// only that the bot wrote one.
+func TestAnImmediateHandoverIsStillAHandover(t *testing.T) {
+	snap := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Bot: BotShare{Sec: 0, DID: "95012", IsStamped: true},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "13800138000", AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+			{Role: RoleTarget, Number: "95012", IsBotLeg: true, AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+		},
+	}
+	ledger := &memoryLedger{}
+	newAssembler(ledger, staticQueues{}).CallFinished(snap)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ledger.mu.Lock()
+		n := len(ledger.cdrs)
+		ledger.mu.Unlock()
+		if n >= 1 {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Error("a call handed to a person in its first second reached no ledger at all")
 }
 
 // at builds timestamps relative to one base so durations are legible.

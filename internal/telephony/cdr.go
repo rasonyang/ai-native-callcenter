@@ -78,7 +78,12 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		// the transcript, timings and containment this path cannot see. The
 		// bot-share stamp is what marks a handover, and only then does this
 		// path own the row.
-		if !hasBotLeg(snap) || !snap.Bot.IsZero() {
+		//
+		// "Non-empty" was not that test. The dialplan exports the DID to the
+		// leg it dials towards the bot, so a share was never empty and both
+		// paths raced for every contained call, settled silently by whichever
+		// insert lost the primary key.
+		if !hasBotLeg(snap) || snap.Bot.HandedOver() {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
 				a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)

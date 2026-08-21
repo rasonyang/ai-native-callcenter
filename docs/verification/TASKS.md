@@ -394,6 +394,12 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   静默决胜。近三日两通 contained 呼叫都是 recorder 赢(bot_sec>0),但这是运气不是保证:人工路径
   的那一行没有 bot 的转写、时长与 containment。真正的交接标记应是 `Bot.Sec > 0`(只有
   `stampBotShare` 会设)。修复须同时核对 contained 呼叫的 CDR 归属,故未在验收途中动。
+  **已修(2026-08-21)**:判据改为"**bot 是否盖过章**"本身,而不是章的内容 ——
+  `BotShare.IsStamped` 在 `variable_aicc_bot_sec` **存在**时置位(注意不是 `>0`:
+  第一秒内决定的转接会盖出 0),`CallFinished` 改用 `snap.Bot.HandedOver()`。
+  contained 呼叫因此不再进人工路径,竞态消失。两条回归测试:
+  `TestTheBotOwnsItsFinishedCalls`(fixture 补上 contained 也带导出 DID 的真实形态)、
+  `TestAnImmediateHandoverIsStillAHandover`(Sec=0 仍须落库,否则该通电话会一行都没有)。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

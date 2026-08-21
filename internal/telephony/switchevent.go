@@ -71,7 +71,20 @@ type BotShare struct {
 	Queue   string
 	Summary string
 	Reason  string
+	// IsStamped records that the bot wrote its share onto the caller's
+	// channel, which it does when it hands the call to a person and at no
+	// other time. It is not the same as any field being set: the dialplan
+	// exports the DID and the language to the leg it dials towards the bot, so
+	// every bot call carries those whether or not a person was ever asked for
+	// — and a transfer decided inside the first second stamps a duration of 0.
+	IsStamped bool
 }
+
+// HandedOver reports whether the bot passed this call to a person, which is
+// what decides who writes the ledger row: a call the bot kept is the bot's
+// story, told from a session that holds the transcript and the containment
+// this path cannot see.
+func (b BotShare) HandedOver() bool { return b.IsStamped }
 
 // IsZero reports whether the call ever met a bot.
 func (b BotShare) IsZero() bool {
@@ -109,12 +122,16 @@ func (b *BotShare) Merge(other BotShare) {
 	if b.Reason == "" {
 		b.Reason = other.Reason
 	}
+	if !b.IsStamped {
+		b.IsStamped = other.IsStamped
+	}
 }
 
 func botShare(ev *esl.Event) BotShare {
 	var out BotShare
 	if sec, ok := ev.GetInt("variable_aicc_bot_sec"); ok {
 		out.Sec = int(sec)
+		out.IsStamped = true
 	}
 	if raw := ev.Get("variable_aicc_flow_id"); raw != "" {
 		if parsed, err := uuid.Parse(raw); err == nil {
