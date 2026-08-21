@@ -204,7 +204,11 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// The people involved, and how long they talked.
 	var answered *PartySnapshot
 	for _, leg := range agentLegs {
-		if leg.AgentID != nil {
+		// One agent, however many times the queue dialled them. A delivery
+		// the switch cancels and retries is the same person being tried
+		// again, and every retry used to be appended here — a caller nobody
+		// picked up left twenty-three copies of one agent on the row.
+		if leg.AgentID != nil && !slices.Contains(cdr.AgentIDs, *leg.AgentID) {
 			cdr.AgentIDs = append(cdr.AgentIDs, *leg.AgentID)
 		}
 		if leg.AnsweredAt != nil && answered == nil {
@@ -230,7 +234,17 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 
-	if answered != nil {
+	// Whether a call was answered is a question about whoever it was trying
+	// to reach. The bot picking up settles it only while the call is still
+	// the bot's: once the caller joins a queue or a leg goes out towards an
+	// agent, they are waiting for a person, and nobody picking up is not an
+	// answered call however long the bot spoke first. Reading the bot's own
+	// answer as the call's hid every abandoned queue call here, because every
+	// inbound call meets the bot first.
+	soughtAPerson := len(agentLegs) > 0 || !snap.Queue.JoinedAt.IsZero()
+
+	switch {
+	case answered != nil:
 		cdr.Status = store.CDRStatusAnswered
 		cdr.AnsweredAt = *answered.AnsweredAt
 		cdr.PrimaryAgentID = answered.AgentID
@@ -243,15 +257,20 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 			talkEnd = *answered.ReleasedAt
 		}
 		cdr.TalkSec = int(talkEnd.Sub(*answered.AnsweredAt).Seconds())
-	} else if snap.Bot.Sec > 0 || (!isAgentPlaced && originator != nil && originator.AnsweredAt != nil && len(agentLegs) == 0 && snap.Queue.JoinedAt.IsZero()) {
-		// The bot answered, or the call never sought a person at all.
+
+	case !isAgentPlaced && !soughtAPerson &&
+		(snap.Bot.Sec > 0 || (originator != nil && originator.AnsweredAt != nil)):
+		// The bot answered and the call stayed with it, or the call never
+		// sought a person at all.
 		cdr.Status = store.CDRStatusAnswered
 		if originator != nil && originator.AnsweredAt != nil {
 			cdr.AnsweredAt = *originator.AnsweredAt
 		}
-	} else {
+
+	default:
 		cdr.Status = store.CDRStatusNoAnswer
 		cdr.MissedReason = a.missedReason(snap, agentLegs)
+		cdr.RingSec = ringSpan(agentLegs)
 	}
 
 	if isAgentPlaced {
@@ -273,6 +292,31 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.Tech["callerChannelId"] = originator.ChannelID
 	}
 	return cdr
+}
+
+// ringSpan is how long a call nobody answered spent ringing people: from the
+// first leg dialled towards an agent to the last one released. A queue that
+// re-offers dials a fresh leg every time, so no single leg holds the answer —
+// the span is what the caller sat through. Only for calls that went
+// unanswered; once somebody picks up, the ring that counts is theirs.
+func ringSpan(agentLegs []*PartySnapshot) int {
+	var first, last time.Time
+	for _, leg := range agentLegs {
+		if first.IsZero() || leg.CreatedAt.Before(first) {
+			first = leg.CreatedAt
+		}
+		end := leg.CreatedAt
+		if leg.ReleasedAt != nil {
+			end = *leg.ReleasedAt
+		}
+		if end.After(last) {
+			last = end
+		}
+	}
+	if first.IsZero() || !last.After(first) {
+		return 0
+	}
+	return int(last.Sub(first).Seconds())
 }
 
 // missedReason follows the design's precedence: the caller's own phase first.

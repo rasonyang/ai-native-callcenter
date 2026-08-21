@@ -366,3 +366,69 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 		t.Errorf("nobody picked up, status = %q, want NO_ANSWER", got.Status)
 	}
 }
+
+// The live RONA shape (2026-08-21, call 01a02299): the bot answered and handed
+// the caller to a queue, the switch dialled one agent twenty-three times over
+// 159 seconds, nobody picked up, and the caller gave up. Reading the bot's own
+// answer as the call's made this ANSWERED with no missed reason — and since
+// every inbound call here meets the bot first, that hid queue abandonment
+// across the board.
+func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
+	agentID := uuid.New()
+
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(175),
+		Bot:   BotShare{Sec: 9, DID: "95001"},
+		Queue: QueueFacts{Name: "support-en", JoinedAt: at(16), LeftAt: at(175), Cause: "Cancel"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", AnsweredAt: atPtr(0), ReleasedAt: atPtr(175)},
+		},
+	}
+	// Twenty-three deliveries towards the same agent, none of them answered.
+	for i := range 23 {
+		snap.Parties = append(snap.Parties, PartySnapshot{
+			Role: RoleTarget, Number: "1008", AgentID: idPtr(agentID),
+			CreatedAt: at(16 + i), ReleasedAt: atPtr(17 + i),
+		})
+	}
+
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+
+	if cdr.Status != store.CDRStatusNoAnswer {
+		t.Errorf("status = %s, want NO_ANSWER — the bot spoke, but nobody the caller was waiting for did",
+			cdr.Status)
+	}
+	if cdr.MissedReason != "ABANDONED_WAITING" {
+		t.Errorf("missedReason = %q, want ABANDONED_WAITING", cdr.MissedReason)
+	}
+	if len(cdr.AgentIDs) != 1 {
+		t.Errorf("agentIds has %d entries, want 1 — twenty-three retries are one agent", len(cdr.AgentIDs))
+	}
+	if cdr.RingSec == 0 {
+		t.Error("ringSec = 0 after 159 seconds of ringing")
+	}
+	if cdr.TalkSec != 0 || cdr.PrimaryAgentID != nil {
+		t.Errorf("talkSec=%d primaryAgent=%v, want nothing — nobody talked", cdr.TalkSec, cdr.PrimaryAgentID)
+	}
+	// The bot's own share is still the bot's, and still on the row.
+	if cdr.BotSec != 9 {
+		t.Errorf("botSec = %d, want 9 — the bot did speak", cdr.BotSec)
+	}
+}
+
+// A queue that timed the caller out, after the bot had served them, is equally
+// not an answered call.
+func TestABotServedCallThatTimedOutInQueueIsMissed(t *testing.T) {
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(300),
+		Bot:     BotShare{Sec: 12, DID: "95001"},
+		Queue:   QueueFacts{Name: "support-en", JoinedAt: at(12), LeftAt: at(300), Cause: "Timeout"},
+		Parties: []PartySnapshot{{Role: RoleOriginator, AnsweredAt: atPtr(0), ReleasedAt: atPtr(300)}},
+	}
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+	if cdr.Status != store.CDRStatusNoAnswer || cdr.MissedReason != "NO_AVAILABLE_AGENT" {
+		t.Errorf("status=%s missedReason=%q, want NO_ANSWER/NO_AVAILABLE_AGENT", cdr.Status, cdr.MissedReason)
+	}
+}
