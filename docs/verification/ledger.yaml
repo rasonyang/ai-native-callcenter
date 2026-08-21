@@ -213,7 +213,7 @@ cases:
       该坐席会继续接到已被撤销队列的来电;tier list 与 DB 各自"正常",只有 diff 能暴露。
       反向:DB 有、switch 无(mod_callcenter 重启后 SyncTiers 未跑)—— 坐席 Available 却永远接不到呼叫。
     evidence_dir: docs/verification/artifacts/VC-S3-02/
-    status: FAIL  # 2026-08-20 执行:陈旧 tier support-en@192.168.31.176 永生;converge 每次谎报 removed=1(根因见 verdict.md)
+    status: FAIL  # 2026-08-20 执行:陈旧 tier support-en@192.168.31.176 永生;converge 每次谎报 removed=1(根因见 verdict.md)。2026-08-21 追记:症状已潜伏——该行仍在 callcenter.db,但因同名队列不存在而从 tier list 消失,converge 遂不再谎报(removed=0);代码缺陷未动(DeleteCallcenterTier 仍二次限定域)→ 此时重跑会得到假通过,判定维持 FAIL
     refs: ["internal/catalog/service.go:236", "internal/catalog/service.go:263", "internal/telephony/tiers.go:26", "internal/agents/service.go:614"]
 
   - id: VC-S3-03

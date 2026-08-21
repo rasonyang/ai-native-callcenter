@@ -242,7 +242,18 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 
 **C 系列(既有立案):**
 - **C1** VC-S3-02 根因修复:DeleteCallcenterTier 不对含域名字二次限定 + converge removed 以复查为准;
-  修后重跑 S3-02(stale tier 192.168.31.176 保留为修复验证的现场,**禁止提前手工清除**)
+  修后重跑 S3-02。
+  **【状态变更 2026-08-21,阶段 5 开跑前复查】症状已潜伏,缺陷未动。**
+  陈旧行 `support-en@192.168.31.176|agent-wei` **仍在 `/usr/local/freeswitch/db/callcenter.db`**,
+  但因同名队列早已不存在(本机 IP 固定为 …55),mod_callcenter 只列已加载队列的 tier,
+  故它从 `callcenter_config tier list` 中消失;converge 读不到它,`removed=1` 的谎报随之消失
+  (今日日志为 `already matched … removed=0`)。
+  **代码缺陷一字未动**,只要该域的队列再次出现(IP 换回、或多机部署里另一台的域进入视野),
+  行与谎报会一并回来。**⚠ 此时重跑 VC-S3-02 会得到假通过**,判定维持 FAIL。
+  原"禁止手工清除 stale tier"的约束**作废**——它已不在 `tier list` 里,无可清除;
+  需要复现时改为:往 `callcenter.db` 的 tiers 插一行异域条目,或临时建一个该名字的队列。
+  阶段 5 的 S12-03 重启 FreeSWITCH 会让 mod_callcenter 从该 db 重新加载,那行**有可能重新浮现**
+  —— 若浮现,C1 即重获活的复现场景,是好事。
 - **C2** SYS-6 契约缺口:PartySnapshot 补 isBotLeg(`make api-breaking` 走查)
 - **C4** 死状态删除(D7①③ 已决):删 Call.ENDING(call.go:23,契约 CallState 同步)与转写 ENDED
   (actor.go:110,契约 TranscriptionState 同步)——两处均 breaking,走 `make api-breaking`;

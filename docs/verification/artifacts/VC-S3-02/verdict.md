@@ -25,3 +25,34 @@
 ## 判定依据(expect 对照)
 - expect 要求两侧逐行一致 → 实际 switch 多出 support-en@192.168.31.176 一行 → 不一致 → FAIL。
 - agent list:agent-wei status=Available、contact=user/1008@192.168.31.55,与 DB(READY、分机 1008)一致 → 该子项通过。
+
+---
+
+## 追记 2026-08-21:症状潜伏,缺陷未动 —— 重跑会得到假通过
+
+阶段 5 开跑前复查,现场变了:
+
+```
+callcenter_config tier list   →  只有 3 行(support-en@…55 / support-zh@…55 ×2),陈旧行不在其中
+sqlite3 /usr/local/freeswitch/db/callcenter.db "select queue, agent from tiers"
+                              →  4 行,含 support-en@192.168.31.176|agent-wei   ← 还在
+今天的 converge 日志           →  "already matched … added=0 removed=0"          ← 不再谎报
+```
+
+**陈旧行仍在 mod_callcenter 自己的数据库里,只是从 `tier list` 里消失了** ——
+mod_callcenter 只列出**已加载队列**的 tier,而叫 `support-en@192.168.31.176` 的队列早已不存在
+(本机 IP 已固定为 …55)。于是 `CallcenterTiers()` 读不到它,converge 也就不再对它下发那条
+注定落空的删除,`removed=1` 的谎报随之消失。
+
+**代码缺陷一个字没动**:`adapter.go` 的 `DeleteCallcenterTier` 仍然无条件
+`a.QueueName(queue)`,任何已含 `@` 的名字都会被二次限定成
+`support-en@192.168.31.176@192.168.31.55`。只要那个域的队列再次出现(主机 IP 换回去、
+或多机部署里另一台的域进入视野),行会重新浮现,谎报也会一并回来。
+
+**因此:今天重跑 VC-S3-02 大概率 PASS,而那是假通过。** 判定维持 FAIL,
+直到 `DeleteCallcenterTier` 的二次限定与 converge 的 `removed` 计数口径被真正修掉。
+复现方法(需要时):往 `callcenter.db` 的 tiers 插一行异域条目,或临时建一个该名字的队列。
+
+**对阶段 5 的影响:无。** S12-03 的 expect 是"**正确的** tier 存在",多一行陈旧的不会让它失败。
+反过来,S12-03 重启 FreeSWITCH 会让 mod_callcenter 从 `callcenter.db` 重新加载,
+那一行有可能重新进入 `tier list` —— 若真如此,C1 就重新有了活的复现场景,对修它是好事。
