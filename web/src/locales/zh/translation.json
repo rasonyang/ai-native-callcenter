@@ -355,6 +355,7 @@
     "botTime": "机器人时长",
     "waitTime": "排队等待",
     "talkTime": "通话时长",
+    "billTime": "计费时长",
     "userData": "业务数据",
     "recording": "录音",
     "noRecording": "该通话没有录音。",

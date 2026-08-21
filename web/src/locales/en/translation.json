@@ -357,6 +357,7 @@
     "botTime": "Bot time",
     "waitTime": "Queue wait",
     "talkTime": "Talk time",
+    "billTime": "Billable",
     "userData": "Business data",
     "recording": "Recording",
     "noRecording": "No recording was made for this call.",

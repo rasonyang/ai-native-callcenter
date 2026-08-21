@@ -153,6 +153,7 @@ export function cdrFixture(overrides: Partial<CDR> = {}): CDR {
     botSec: 40,
     queueWaitSec: 12,
     talkSec: 245,
+    billSec: 300,
     totalSec: 300,
     status: 'ANSWERED',
     isContained: false,

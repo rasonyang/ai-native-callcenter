@@ -1595,7 +1595,7 @@ export interface components {
             startedAt: string;
             /**
              * Format: date-time
-             * @description Absent when the call was never answered.
+             * @description When the switch answered the caller's own leg — the moment it sent 200 OK towards the carrier, and so the moment billing starts. Set whenever the switch answered, including calls the bot served and no agent ever took; absent only when the leg was never answered at all.
              */
             answeredAt?: string;
             /** Format: date-time */
@@ -1612,10 +1612,17 @@ export interface components {
             agentIds?: string[];
             /** Format: uuid */
             primaryAgentId?: string;
+            /** @description Seconds spent ringing an agent. For an answered call, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. */
             ringSec: number;
+            /** @description Seconds the caller spent with the bot, ending when they actually left it — after any closing sentence has finished playing, not when the transfer was decided. */
             botSec: number;
+            /** @description Seconds the caller waited in queue, from joining to being bridged to an agent, or to leaving if they never were. Ringing happens inside this window, so ringSec is a sub-interval of it rather than an addition to it. */
             queueWaitSec: number;
+            /** @description Seconds an agent had two-way media with the caller, measured from the bridges on the agent legs and unioned across them, so a call passed from one agent to another counts both stretches once. A leg that answered without a bridge — an auto-answer phone in front of nobody, a codec mismatch — contributes nothing. Hold counts as talk. */
             talkSec: number;
+            /** @description Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered. */
+            billSec: number;
+            /** @description Seconds from startedAt to endedAt, the whole life of the call including the time before it was answered. Not the billable duration; see billSec. */
             totalSec: number;
             status: components["schemas"]["CDRStatus"];
             hangupCause?: string;

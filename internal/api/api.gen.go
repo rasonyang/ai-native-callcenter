@@ -752,10 +752,15 @@ type BusinessHours struct {
 type CDR struct {
 	AgentIDs *[]openapi_types.UUID `json:"agentIds,omitempty"`
 
-	// AnsweredAt Absent when the call was never answered.
-	AnsweredAt *time.Time         `json:"answeredAt,omitempty"`
-	BotSec     int                `json:"botSec"`
-	CallID     openapi_types.UUID `json:"callId"`
+	// AnsweredAt When the switch answered the caller's own leg — the moment it sent 200 OK towards the carrier, and so the moment billing starts. Set whenever the switch answered, including calls the bot served and no agent ever took; absent only when the leg was never answered at all.
+	AnsweredAt *time.Time `json:"answeredAt,omitempty"`
+
+	// BillSec Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered.
+	BillSec int `json:"billSec"`
+
+	// BotSec Seconds the caller spent with the bot, ending when they actually left it — after any closing sentence has finished playing, not when the transfer was decided.
+	BotSec int                `json:"botSec"`
+	CallID openapi_types.UUID `json:"callId"`
 
 	// CallType Caller-perspective call type, stamped at creation and immutable across transfers.
 	CallType     CallType            `json:"callType"`
@@ -776,17 +781,25 @@ type CDR struct {
 	MissedReason   *string             `json:"missedReason,omitempty"`
 	PrimaryAgentID *openapi_types.UUID `json:"primaryAgentId,omitempty"`
 	QueueID        *openapi_types.UUID `json:"queueId,omitempty"`
-	QueueWaitSec   int                 `json:"queueWaitSec"`
-	RingSec        int                 `json:"ringSec"`
-	StartedAt      time.Time           `json:"startedAt"`
+
+	// QueueWaitSec Seconds the caller waited in queue, from joining to being bridged to an agent, or to leaving if they never were. Ringing happens inside this window, so ringSec is a sub-interval of it rather than an addition to it.
+	QueueWaitSec int `json:"queueWaitSec"`
+
+	// RingSec Seconds spent ringing an agent. For an answered call, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer.
+	RingSec   int       `json:"ringSec"`
+	StartedAt time.Time `json:"startedAt"`
 
 	// Status How the call concluded. There is no MISSED status: abandonment is a missedReason on an ANSWERED row, because the bot answered first.
-	Status  CDRStatus `json:"status"`
-	TalkSec int       `json:"talkSec"`
+	Status CDRStatus `json:"status"`
+
+	// TalkSec Seconds an agent had two-way media with the caller, measured from the bridges on the agent legs and unioned across them, so a call passed from one agent to another counts both stretches once. A leg that answered without a bridge — an auto-answer phone in front of nobody, a codec mismatch — contributes nothing. Hold counts as talk.
+	TalkSec int `json:"talkSec"`
 
 	// Tech Technical residue (switch causes and the like); never business data.
 	Tech     *map[string]interface{} `json:"tech,omitempty"`
 	ToNumber string                  `json:"toNumber"`
+
+	// TotalSec Seconds from startedAt to endedAt, the whole life of the call including the time before it was answered. Not the billable duration; see billSec.
 	TotalSec int                     `json:"totalSec"`
 	UserData *map[string]interface{} `json:"userData,omitempty"`
 

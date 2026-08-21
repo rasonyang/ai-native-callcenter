@@ -49,7 +49,10 @@ type CDR struct {
 	BotSec       int `json:"botSec"`
 	QueueWaitSec int `json:"queueWaitSec"`
 	TalkSec      int `json:"talkSec"`
-	TotalSec     int `json:"totalSec"`
+	// BillSec is what the carrier bills: the caller's own leg answering
+	// through to the end of the call, whoever did or did not take it.
+	BillSec  int `json:"billSec"`
+	TotalSec int `json:"totalSec"`
 
 	Status       string `json:"status"`
 	HangupCause  string `json:"hangupCause,omitempty"`
@@ -146,6 +149,7 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		BotSec:         int32(cdr.BotSec),
 		QueueWaitSec:   int32(cdr.QueueWaitSec),
 		TalkSec:        int32(cdr.TalkSec),
+		BillSec:        int32(cdr.BillSec),
 		TotalSec:       int32(cdr.TotalSec),
 		Status:         cdr.Status,
 		HangupCause:    cdr.HangupCause,
@@ -314,6 +318,7 @@ func fromRow(row queries.Cdr) CDR {
 		BotSec:         int(row.BotSec),
 		QueueWaitSec:   int(row.QueueWaitSec),
 		TalkSec:        int(row.TalkSec),
+		BillSec:        int(row.BillSec),
 		TotalSec:       int(row.TotalSec),
 		Status:         row.Status,
 		HangupCause:    row.HangupCause,

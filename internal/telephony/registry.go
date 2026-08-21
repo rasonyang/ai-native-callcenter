@@ -341,6 +341,8 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 	case KindChannelHangup:
 		party.ReleaseCause = ev.HangupCause
 		party.TransferredAway = ev.TransferredAway
+		// Whatever the leg was still bridged to, it is not any more.
+		party.CloseBridge(ev.OccurredAt)
 		// The AI leg's share arrives as channel variables on hangup, and the
 		// legs carry different parts of it: each fills in what is still
 		// missing rather than claiming the whole share for whichever hung up
@@ -361,9 +363,28 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		}
 	case KindChannelBridge:
 		// A bridge tells us who is talking to whom; it is not a state change.
+		// It is, though, the only moment that says a conversation actually
+		// started — answering does not, since a phone can answer with nobody
+		// in front of it and a leg whose codec cannot meet the caller's
+		// answers with no media at all.
 		if other := a.call.PartyByChannel(ev.OtherChannelID); other != nil {
 			party.OtherNumber = other.Number
 			other.OtherNumber = party.Number
+			other.OpenBridge(party.ChannelID, ev.OccurredAt)
+		}
+		party.OpenBridge(ev.OtherChannelID, ev.OccurredAt)
+
+	case KindChannelUnbridge:
+		// A leg on hold has not left the conversation — the caller hears music
+		// instead of a person, and the agent is still on the call. Owner's
+		// ruling (2026-08-21): hold counts as talk. Saying so here rather than
+		// relying on the switch not to unbridge on hold, which is not
+		// established either way.
+		if party.State != PartyHeld {
+			party.CloseBridge(ev.OccurredAt)
+		}
+		if other := a.call.PartyByChannel(ev.OtherChannelID); other != nil && other.State != PartyHeld {
+			other.CloseBridge(ev.OccurredAt)
 		}
 
 	// The queue's own view of the caller, recorded for the CDR's timings.

@@ -127,7 +127,8 @@ func TestAssembleAnsweredCallSplitsTheDurations(t *testing.T) {
 			{Role: RoleOriginator, Number: "13800138000", ChannelID: "chan-a",
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(100), ReleaseCause: "NORMAL_CLEARING"},
 			{Role: RoleTarget, Number: "1007", AgentID: idPtr(agentID),
-				CreatedAt: at(45), AnsweredAt: atPtr(50), ReleasedAt: atPtr(100)},
+				CreatedAt: at(45), AnsweredAt: atPtr(50), ReleasedAt: atPtr(100),
+				Bridges: []BridgeSpan{{OtherChannelID: "chan-a", StartedAt: at(50), EndedAt: at(100)}}},
 		},
 	}
 
@@ -331,8 +332,14 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(30),
 		Parties: []PartySnapshot{
-			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, AnsweredAt: atPtr(0), ReleasedAt: atPtr(30)},
-			{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30)},
+			// The agent's own leg auto-answers in front of them at 0; what
+			// says the person they called picked up is the bridge at 8.
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ChannelID: "chan-agent",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(30),
+				Bridges: []BridgeSpan{{OtherChannelID: "chan-out", StartedAt: at(8), EndedAt: at(30)}}},
+			{Role: RoleTarget, Number: "18688886669", ChannelID: "chan-out",
+				CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
+				Bridges: []BridgeSpan{{OtherChannelID: "chan-agent", StartedAt: at(8), EndedAt: at(30)}}},
 		},
 	}
 	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), answeredOut)
@@ -430,5 +437,155 @@ func TestABotServedCallThatTimedOutInQueueIsMissed(t *testing.T) {
 	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
 	if cdr.Status != store.CDRStatusNoAnswer || cdr.MissedReason != "NO_AVAILABLE_AGENT" {
 		t.Errorf("status=%s missedReason=%q, want NO_ANSWER/NO_AVAILABLE_AGENT", cdr.Status, cdr.MissedReason)
+	}
+}
+
+// A call passed from one agent to another is one conversation carried by two
+// people, and both stretches are work. Modelled on the live transfer of
+// 2026-08-21 (call 01a021f5): wei held it for 58 seconds, ben for 35, and the
+// ledger booked 58 because it read only the first leg that answered.
+func TestTalkTimeCountsEveryAgentTheCallReached(t *testing.T) {
+	wei, ben := uuid.New(), uuid.New()
+
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(200),
+		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), BridgedAt: at(100)},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(200)},
+			{Role: RoleTarget, Number: "1008", AgentID: idPtr(wei), ChannelID: "wei",
+				CreatedAt: at(95), AnsweredAt: atPtr(100), ReleasedAt: atPtr(158),
+				Bridges: []BridgeSpan{{OtherChannelID: "caller", StartedAt: at(100), EndedAt: at(158)}}},
+			{Role: RoleTarget, Number: "1007", AgentID: idPtr(ben), ChannelID: "ben",
+				CreatedAt: at(158), AnsweredAt: atPtr(165), ReleasedAt: atPtr(200),
+				Bridges: []BridgeSpan{{OtherChannelID: "caller", StartedAt: at(165), EndedAt: at(200)}}},
+		},
+	}
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+
+	if cdr.TalkSec != 58+35 {
+		t.Errorf("talkSec = %d, want 93 — wei's 58 and ben's 35 are both work", cdr.TalkSec)
+	}
+	if cdr.PrimaryAgentID == nil || *cdr.PrimaryAgentID != wei {
+		t.Error("the agent who first reached the caller is not the primary")
+	}
+	if cdr.RingSec != 5 {
+		t.Errorf("ringSec = %d, want 5 — wei's leg was dialled at 95 and bridged at 100", cdr.RingSec)
+	}
+}
+
+// A leg can answer without anyone being reached: an auto-answer phone picks up
+// in front of nobody, and a leg whose codec cannot meet the caller's returns a
+// clean 200 with no media at all — which is exactly what the click-to-dial
+// INCOMPATIBLE_DESTINATION of 2026-08-20 did.
+func TestALegThatAnsweredWithoutABridgeReachedNobody(t *testing.T) {
+	agentID := uuid.New()
+
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), LeftAt: at(40), Cause: "Cancel"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+			// Answered at 10, never bridged, died of a codec mismatch.
+			{Role: RoleTarget, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+				CreatedAt: at(8), AnsweredAt: atPtr(10), ReleasedAt: atPtr(12),
+				ReleaseCause: "INCOMPATIBLE_DESTINATION"},
+		},
+	}
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+
+	if cdr.Status != store.CDRStatusNoAnswer {
+		t.Errorf("status = %s, want NO_ANSWER — the phone answered, the caller heard nobody", cdr.Status)
+	}
+	if cdr.TalkSec != 0 {
+		t.Errorf("talkSec = %d, want 0 — there was no two-way media", cdr.TalkSec)
+	}
+	if cdr.PrimaryAgentID != nil {
+		t.Error("a call nobody was reached on has a primary agent")
+	}
+}
+
+// Owner's ruling (2026-08-21): hold counts as talk. The caller hears music
+// instead of a person, but the agent has not left the call.
+func TestHoldCountsAsTalk(t *testing.T) {
+	agentID := uuid.New()
+
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(100),
+		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), BridgedAt: at(10)},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(100)},
+			// One unbroken stretch across a hold from 40 to 70: the switch may
+			// or may not unbridge on hold, and the accounting does not depend
+			// on finding out.
+			{Role: RoleTarget, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+				CreatedAt: at(5), AnsweredAt: atPtr(10), ReleasedAt: atPtr(100),
+				Bridges: []BridgeSpan{{OtherChannelID: "caller", StartedAt: at(10), EndedAt: at(100)}}},
+		},
+	}
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+
+	if cdr.TalkSec != 90 {
+		t.Errorf("talkSec = %d, want 90 — the 30 seconds on hold are still the agent's call", cdr.TalkSec)
+	}
+}
+
+// The carrier bills from the moment the switch answered, whoever did or did
+// not take the call afterwards. Modelled on the RONA call of 2026-08-21: the
+// bot spoke, nobody took it, and the carrier billed all 142 seconds.
+func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
+	agentID := uuid.New()
+
+	missed := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(142),
+		Bot:   BotShare{Sec: 12, DID: "95001"},
+		Queue: QueueFacts{Name: "support-en", JoinedAt: at(21), LeftAt: at(142), Cause: "Cancel"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(142)},
+			{Role: RoleTarget, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+				CreatedAt: at(21), ReleasedAt: atPtr(142)},
+		},
+	}
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), missed)
+
+	if cdr.Status != store.CDRStatusNoAnswer {
+		t.Fatalf("status = %s, want NO_ANSWER", cdr.Status)
+	}
+	if cdr.BillSec != 142 {
+		t.Errorf("billSec = %d, want 142 — the switch answered at 0 and the carrier bills from there",
+			cdr.BillSec)
+	}
+	if cdr.AnsweredAt.IsZero() {
+		t.Error("answeredAt is unset on a call the switch answered; billing has no anchor")
+	}
+	if cdr.TalkSec != 0 {
+		t.Errorf("talkSec = %d, want 0 — nobody was reached", cdr.TalkSec)
+	}
+
+	// And on a call an agent did take, billing still runs from the caller's
+	// own answer, not from the agent's pickup.
+	took := missed
+	took.CallID = uuid.New()
+	took.Parties = []PartySnapshot{
+		{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
+			AnsweredAt: atPtr(0), ReleasedAt: atPtr(142)},
+		{Role: RoleTarget, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+			CreatedAt: at(21), AnsweredAt: atPtr(30), ReleasedAt: atPtr(142),
+			Bridges: []BridgeSpan{{OtherChannelID: "caller", StartedAt: at(30), EndedAt: at(142)}}},
+	}
+	answered := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), took)
+	if answered.BillSec != 142 {
+		t.Errorf("billSec = %d, want 142 — the agent arriving at 30 does not move the carrier's clock",
+			answered.BillSec)
+	}
+	if answered.TalkSec != 112 {
+		t.Errorf("talkSec = %d, want 112 — the agent's own stretch", answered.TalkSec)
 	}
 }

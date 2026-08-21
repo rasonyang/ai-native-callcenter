@@ -287,3 +287,58 @@ func TestSpeakerConstraintMatchesTheGoConstants(t *testing.T) {
 		t.Errorf("the database still allows CALLER: %s", clause)
 	}
 }
+
+// bill_sec is backfilled from the answer the old ledger happened to record, so
+// a call the switch answered carries a duration afterwards and one it never
+// answered carries nothing. The fresh database cannot show this: the column
+// has a default of 0 and every new row computes its own.
+func TestMigrationsBackfillBillSec(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 13); err != nil {
+		t.Fatalf("migrating to 13 failed: %v", err)
+	}
+
+	const (
+		answered = "55555555-5555-5555-5555-555555555555"
+		missed   = "66666666-6666-6666-6666-666666666666"
+	)
+	// A call the switch answered and that ran 90 seconds after the answer.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO cdrs (call_id, started_at, answered_at, ended_at, call_type, status, hangup_cause)
+		VALUES ($1, now() - interval '120 seconds', now() - interval '90 seconds', now(),
+		        'INBOUND', 'ANSWERED', 'NORMAL_CLEARING')`, answered); err != nil {
+		t.Fatalf("seed an answered call: %v", err)
+	}
+	// One the switch never answered at all.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, hangup_cause)
+		VALUES ($1, now() - interval '30 seconds', now(), 'OUTBOUND', 'NO_ANSWER', 'NO_ANSWER')`,
+		missed); err != nil {
+		t.Fatalf("seed an unanswered call: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with history failed: %v", err)
+	}
+
+	var billed, unbilled int
+	if err := db.QueryRowContext(ctx,
+		`SELECT bill_sec FROM cdrs WHERE call_id = $1`, answered).Scan(&billed); err != nil {
+		t.Fatalf("read the answered row: %v", err)
+	}
+	if billed < 89 || billed > 91 {
+		t.Errorf("bill_sec = %d, want about 90 — the carrier billed from the answer, "+
+			"and a history that reads 0 makes every earlier call look free", billed)
+	}
+	if err := db.QueryRowContext(ctx,
+		`SELECT bill_sec FROM cdrs WHERE call_id = $1`, missed).Scan(&unbilled); err != nil {
+		t.Fatalf("read the unanswered row: %v", err)
+	}
+	if unbilled != 0 {
+		t.Errorf("bill_sec = %d on a call the switch never answered, want 0", unbilled)
+	}
+}

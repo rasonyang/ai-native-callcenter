@@ -86,6 +86,79 @@ var partyTransitions = map[PartyState]map[PartyTrigger]PartyState{
 	PartyReleased: {},
 }
 
+// OpenBridge records that this leg has become bridged to another, if it is not
+// already recorded as bridged. Idempotent: the switch can report the same
+// bridge from both legs, and a leg retrieved from hold re-bridges to a stretch
+// that was never closed.
+func (p *Party) OpenBridge(otherChannelID string, at time.Time) {
+	if n := len(p.Bridges); n > 0 && p.Bridges[n-1].EndedAt.IsZero() {
+		return
+	}
+	p.Bridges = append(p.Bridges, BridgeSpan{OtherChannelID: otherChannelID, StartedAt: at})
+}
+
+// CloseBridge ends the open stretch, if there is one.
+func (p *Party) CloseBridge(at time.Time) {
+	if n := len(p.Bridges); n > 0 && p.Bridges[n-1].EndedAt.IsZero() {
+		p.Bridges[n-1].EndedAt = at
+	}
+}
+
+// BridgedSec is the total time these legs spent in two-way media, counting any
+// stretch they shared only once. Overlap is real: during a consultation the
+// caller is bridged to two agents at once, and an extension calling another
+// extension puts the same conversation on two legs that both belong to agents.
+//
+// A stretch still open when the call ended is closed at endedAt.
+func BridgedSec(parties []*PartySnapshot, endedAt time.Time) int {
+	type span struct{ from, to time.Time }
+	var spans []span
+	for _, p := range parties {
+		for _, b := range p.Bridges {
+			to := b.EndedAt
+			if to.IsZero() {
+				to = endedAt
+			}
+			if to.After(b.StartedAt) {
+				spans = append(spans, span{b.StartedAt, to})
+			}
+		}
+	}
+	if len(spans) == 0 {
+		return 0
+	}
+	slices.SortFunc(spans, func(a, b span) int { return a.from.Compare(b.from) })
+
+	var total time.Duration
+	cur := spans[0]
+	for _, s := range spans[1:] {
+		if s.from.After(cur.to) {
+			total += cur.to.Sub(cur.from)
+			cur = s
+			continue
+		}
+		if s.to.After(cur.to) {
+			cur.to = s.to
+		}
+	}
+	total += cur.to.Sub(cur.from)
+	return int(total.Seconds())
+}
+
+// FirstBridgeAt is when these legs first carried a conversation, or the zero
+// time if none ever did.
+func FirstBridgeAt(parties []*PartySnapshot) time.Time {
+	var first time.Time
+	for _, p := range parties {
+		for _, b := range p.Bridges {
+			if first.IsZero() || b.StartedAt.Before(first) {
+				first = b.StartedAt
+			}
+		}
+	}
+	return first
+}
+
 // ErrIllegalTransition reports a state change the machine forbids.
 type ErrIllegalTransition struct {
 	From    PartyState
@@ -98,6 +171,19 @@ func (e ErrIllegalTransition) Error() string {
 
 // Party is one leg of a call. PartyID is the FreeSWITCH channel UUID, assigned
 // by us before the channel exists wherever we originate it.
+// BridgeSpan is one stretch of two-way media between this leg and another.
+// EndedAt is zero while the bridge is still up.
+//
+// Answering is not the same as being heard: an auto-answer phone picks up in
+// front of nobody, and a leg whose codec cannot meet the caller's returns a
+// clean 200 with no media at all. The bridge is what says a conversation
+// happened.
+type BridgeSpan struct {
+	OtherChannelID string    `json:"otherChannelId,omitempty"`
+	StartedAt      time.Time `json:"startedAt"`
+	EndedAt        time.Time `json:"endedAt,omitzero"`
+}
+
 type Party struct {
 	PartyID   uuid.UUID
 	ChannelID string
@@ -120,6 +206,13 @@ type Party struct {
 	// that has one and was never handed to a person belongs to the bot's
 	// ledger, not this path's.
 	IsBotLeg bool
+	// Bridges are the stretches during which this leg had two-way media with
+	// another. A leg can have several: the caller is bridged to the bot, then
+	// to the agent who takes the call over, then to whoever that agent
+	// transfers it to. Whose leg a stretch sits on is what tells a
+	// conversation with a person from one with the bot — an agent's leg is
+	// never bridged to the bot's.
+	Bridges []BridgeSpan
 	// IsMuted tracks the switch-side mute on this leg. The switch reports no
 	// event for it and no channel variable survives a re-read, so this is the
 	// only record that the agent's microphone is off — which is precisely why
@@ -347,6 +440,8 @@ type PartySnapshot struct {
 	ReleaseCause string `json:"releaseCause,omitempty"`
 	IsBotLeg     bool   `json:"isBotLeg,omitempty"`
 	IsMuted      bool   `json:"isMuted,omitempty"`
+	// Bridges is this leg's two-way-media history; see BridgeSpan.
+	Bridges []BridgeSpan `json:"bridges,omitempty"`
 }
 
 // Snapshot copies the call into a value safe to hand outside the actor.
@@ -380,6 +475,7 @@ func (c *Call) Snapshot() Snapshot {
 			ReleaseCause: p.ReleaseCause,
 			IsBotLeg:     p.IsBotLeg,
 			IsMuted:      p.IsMuted,
+			Bridges:      slices.Clone(p.Bridges),
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

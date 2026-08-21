@@ -89,6 +89,7 @@ type Cdr struct {
 	UserData       []byte             `json:"userData"`
 	Tech           []byte             `json:"tech"`
 	Legs           []byte             `json:"legs"`
+	BillSec        int32              `json:"billSec"`
 }
 
 type Contact struct {

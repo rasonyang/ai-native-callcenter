@@ -171,6 +171,21 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	}
 	cdr.TotalSec = int(cdr.EndedAt.Sub(cdr.StartedAt).Seconds())
 
+	// How long the caller was actually with the bot is the bot leg's own
+	// bridge, which ends when they are transferred away — after the closing
+	// sentence has finished playing. The channel variable the bot stamps is
+	// written when it decides to transfer, several seconds earlier, and those
+	// seconds were landing in no column at all.
+	if bot := botLeg(snap); bot != nil {
+		if bridged := BridgedSec([]*PartySnapshot{bot}, cdr.EndedAt); bridged > 0 {
+			if drift := bridged - cdr.BotSec; drift > 2 || drift < -2 {
+				a.log.Warn("the bot's stamped duration disagrees with its bridge",
+					"callId", snap.CallID, "stampedSec", cdr.BotSec, "bridgedSec", bridged)
+			}
+			cdr.BotSec = bridged
+		}
+	}
+
 	if originator != nil {
 		cdr.FromNumber = originator.Number
 		cdr.HangupCause = originator.ReleaseCause
@@ -234,38 +249,55 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 
-	// Whether a call was answered is a question about whoever it was trying
-	// to reach. The bot picking up settles it only while the call is still
-	// the bot's: once the caller joins a queue or a leg goes out towards an
-	// agent, they are waiting for a person, and nobody picking up is not an
-	// answered call however long the bot spoke first. Reading the bot's own
-	// answer as the call's hid every abandoned queue call here, because every
-	// inbound call meets the bot first.
+	// The switch answering and a person answering are different facts and the
+	// ledger keeps them apart. answered_at is the caller's own leg — the 200
+	// OK that went to the carrier — so it is set whenever the switch picked
+	// up, including on a call the bot served and nobody took, which the
+	// carrier bills all the same.
+	if originator != nil && originator.AnsweredAt != nil {
+		cdr.AnsweredAt = *originator.AnsweredAt
+		cdr.BillSec = int(cdr.EndedAt.Sub(*originator.AnsweredAt).Seconds())
+		if cdr.BillSec < 0 {
+			cdr.BillSec = 0
+		}
+	}
+
+	// Whether a *person* was reached is a question the bridge answers and the
+	// answer does not: an auto-answer phone picks up in front of nobody, and a
+	// leg whose codec cannot meet the caller's returns a clean 200 with no
+	// media at all. Only the agent legs' own stretches count — the bot's sit
+	// on the bot's leg, and an agent's leg is never bridged to it.
+	talking := talkingLegs(snap, agentLegs, isAgentPlaced, dialled)
+	agentTalkSec := BridgedSec(talking, cdr.EndedAt)
+	firstBridge := FirstBridgeAt(talking)
+
+	// Once the caller joins a queue or a leg goes out towards an agent, they
+	// are waiting for a person, and nobody arriving is not an answered call
+	// however long the bot spoke first. Reading the bot's own answer as the
+	// call's hid every abandoned queue call here, because every inbound call
+	// meets the bot first.
 	soughtAPerson := len(agentLegs) > 0 || !snap.Queue.JoinedAt.IsZero()
 
 	switch {
-	case answered != nil:
+	case !firstBridge.IsZero():
 		cdr.Status = store.CDRStatusAnswered
-		cdr.AnsweredAt = *answered.AnsweredAt
-		cdr.PrimaryAgentID = answered.AgentID
+		cdr.TalkSec = agentTalkSec
+		if reached := firstBridgedLeg(talking); reached != nil {
+			cdr.PrimaryAgentID = reached.AgentID
+			cdr.RingSec = int(firstBridge.Sub(reached.CreatedAt).Seconds())
+		}
 		if cdr.PrimaryAgentID == nil && isAgentPlaced {
 			cdr.PrimaryAgentID = originator.AgentID
 		}
-		cdr.RingSec = int(answered.AnsweredAt.Sub(answered.CreatedAt).Seconds())
-		talkEnd := cdr.EndedAt
-		if answered.ReleasedAt != nil {
-			talkEnd = *answered.ReleasedAt
+		if cdr.RingSec < 0 {
+			cdr.RingSec = 0
 		}
-		cdr.TalkSec = int(talkEnd.Sub(*answered.AnsweredAt).Seconds())
 
 	case !isAgentPlaced && !soughtAPerson &&
 		(snap.Bot.Sec > 0 || (originator != nil && originator.AnsweredAt != nil)):
 		// The bot answered and the call stayed with it, or the call never
 		// sought a person at all.
 		cdr.Status = store.CDRStatusAnswered
-		if originator != nil && originator.AnsweredAt != nil {
-			cdr.AnsweredAt = *originator.AnsweredAt
-		}
 
 	default:
 		cdr.Status = store.CDRStatusNoAnswer
@@ -292,6 +324,47 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.Tech["callerChannelId"] = originator.ChannelID
 	}
 	return cdr
+}
+
+// botLeg is the leg the switch dialled towards the AI gateway, or nil on a
+// call that never met a bot.
+func botLeg(snap Snapshot) *PartySnapshot {
+	for i := range snap.Parties {
+		if snap.Parties[i].IsBotLeg {
+			return &snap.Parties[i]
+		}
+	}
+	return nil
+}
+
+// talkingLegs are the legs whose bridges count as a person on the call: the
+// agent legs, plus — on a call an agent placed — the leg dialled out to
+// whoever they were calling, since the agent's own leg auto-answers in front
+// of them and says nothing about the person being reached.
+//
+// The bot's leg is deliberately absent. Its bridge is the caller's time with
+// the bot, accounted for as the bot's share, and an agent's leg is never
+// bridged to it.
+func talkingLegs(snap Snapshot, agentLegs []*PartySnapshot, isAgentPlaced bool, dialled []*PartySnapshot) []*PartySnapshot {
+	if !isAgentPlaced {
+		return agentLegs
+	}
+	return append(slices.Clone(agentLegs), dialled...)
+}
+
+// firstBridgedLeg is the leg that first carried a conversation, which is the
+// one whose ring time the caller actually waited through.
+func firstBridgedLeg(parties []*PartySnapshot) *PartySnapshot {
+	var best *PartySnapshot
+	var at time.Time
+	for _, p := range parties {
+		for _, b := range p.Bridges {
+			if at.IsZero() || b.StartedAt.Before(at) {
+				at, best = b.StartedAt, p
+			}
+		}
+	}
+	return best
 }
 
 // ringSpan is how long a call nobody answered spent ringing people: from the

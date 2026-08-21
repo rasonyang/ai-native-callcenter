@@ -65,6 +65,9 @@ function CallDetail() {
             <Fact label={t('cdr.talkTime')}>
               <span className="tabular">{formatDuration(cdr.talkSec)}</span>
             </Fact>
+            <Fact label={t('cdr.billTime')}>
+              <span className="tabular">{formatDuration(cdr.billSec)}</span>
+            </Fact>
           </dl>
           {cdr.userData && Object.keys(cdr.userData).length > 0 && (
             <>

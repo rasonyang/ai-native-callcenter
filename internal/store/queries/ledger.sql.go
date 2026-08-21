@@ -80,7 +80,7 @@ func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, er
 }
 
 const getCDR = `-- name: GetCDR :one
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs FROM cdrs WHERE call_id = $1
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec FROM cdrs WHERE call_id = $1
 `
 
 func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
@@ -114,6 +114,7 @@ func (q *Queries) GetCDR(ctx context.Context, callID uuid.UUID) (Cdr, error) {
 		&i.UserData,
 		&i.Tech,
 		&i.Legs,
+		&i.BillSec,
 	)
 	return i, err
 }
@@ -242,16 +243,16 @@ INSERT INTO cdrs (
     call_id, started_at, answered_at, ended_at, call_type, language,
     from_number, to_number, did, flow_id, queue_id,
     agent_ids, primary_agent_id,
-    ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec,
+    ring_sec, bot_sec, queue_wait_sec, talk_sec, bill_sec, total_sec,
     status, hangup_cause, missed_reason, disposition,
     is_contained, has_recording, user_data, tech, legs
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10, $11,
     $12, $13,
-    $14, $15, $16, $17, $18,
-    $19, $20, $21, $22,
-    $23, $24, $25, $26, $27
+    $14, $15, $16, $17, $18, $19,
+    $20, $21, $22, $23,
+    $24, $25, $26, $27, $28
 ) ON CONFLICT (call_id) DO NOTHING
 `
 
@@ -273,6 +274,7 @@ type InsertCDRParams struct {
 	BotSec         int32              `json:"botSec"`
 	QueueWaitSec   int32              `json:"queueWaitSec"`
 	TalkSec        int32              `json:"talkSec"`
+	BillSec        int32              `json:"billSec"`
 	TotalSec       int32              `json:"totalSec"`
 	Status         string             `json:"status"`
 	HangupCause    string             `json:"hangupCause"`
@@ -305,6 +307,7 @@ func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) error {
 		arg.BotSec,
 		arg.QueueWaitSec,
 		arg.TalkSec,
+		arg.BillSec,
 		arg.TotalSec,
 		arg.Status,
 		arg.HangupCause,
@@ -512,7 +515,7 @@ func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscript
 }
 
 const listCDRs = `-- name: ListCDRs :many
-SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs FROM cdrs
+SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec FROM cdrs
 WHERE ($1::timestamptz IS NULL OR started_at >= $1)
   AND ($2::timestamptz IS NULL OR started_at < $2)
   AND ($3::uuid IS NULL OR queue_id = $3)
@@ -584,6 +587,7 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 			&i.UserData,
 			&i.Tech,
 			&i.Legs,
+			&i.BillSec,
 		); err != nil {
 			return nil, err
 		}
