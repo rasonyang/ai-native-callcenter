@@ -1,0 +1,16 @@
+=== T5.2 前置 2026-08-21T12:24:53Z ===
+{"username":"wei","state":"READY","availability":"ON_CALL","extensionNumber":"1008"}
+reg 1008
+reg 1007
+channels=
+collect#5 baseline_cdrs=6206
+wei_state_before=READY|
+=== 重启前 ===
+channels: 2 total.
+{"calls":1,"parties":[{"role":"ORIGINATOR","state":"TALKING","number":"18688886669"},{"role":"TARGET","state":"RELEASED","number":"95001"},{"role":"TARGET","state":"TALKING","number":"1008"}]}
+=== collect#1 restart.sh(通话进行中) ===
+started: logs/aicc-20260821-202532.log
+=== collect#2 重启后 channels(expect: 2 total,媒体不掉) ===
+
+2 total.
+

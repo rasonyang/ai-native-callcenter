@@ -863,7 +863,7 @@ cases:
       但这通电话既不在墙上、也永远不进账本 —— 一次 deploy 窗口里所有在讲的电话都被静默漏记。
       若未来实现了 show channels 对账恢复,期望改为 items≥1 且 cdrs+1。
     evidence_dir: docs/verification/artifacts/VC-S12-02/
-    status: TODO
+    status: PASS  # 2026-08-21 执行:四条 expect 全中(媒体不掉 2 channels 且 owner 确认可互听、/calls=0、agent_states 恢复 READY|、cdrs 6206→6206 无新行);新实例 adopt/HANGUP/写CDR 计数皆 0。新记一层比 expect 更严重:重启后 wei 读作 availability=READY 而他正在通话中——正在讲话的坐席被当作空闲,会被再派单
     refs: ["internal/telephony/registry.go:140", "internal/telephony/coordinator.go:37", "internal/agents/service.go:505", "cmd/aicc/main.go:142"]
 
   - id: VC-S12-03
