@@ -157,6 +157,9 @@ func (s *Server) callOp(w http.ResponseWriter, r *http.Request, callID uuid.UUID
 		writeError(w, http.StatusNotFound, CodeCallNotFound, "no such call", nil)
 	case errors.Is(err, telephony.ErrNoAgentLeg), errors.Is(err, telephony.ErrNotCallParty):
 		writeError(w, http.StatusForbidden, CodeNotCallParty, "you are not on this call", nil)
+	case errors.Is(err, telephony.ErrNotForCallType):
+		writeError(w, http.StatusConflict, CodeOperationNotAllowedForCallType,
+			"this is not available on an internal call", nil)
 	case errors.Is(err, telephony.ErrInvalidDTMF):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"digits must be 0-9, A-D, * or #", map[string]any{"field": "digits"})

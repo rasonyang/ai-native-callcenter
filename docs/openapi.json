@@ -1031,7 +1031,7 @@
           "calls"
         ],
         "summary": "Hold the caller's own leg",
-        "description": "Requires the AGENT role and being a party to the call.",
+        "description": "Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
             "cookieSession": [],
@@ -1081,7 +1081,7 @@
           "calls"
         ],
         "summary": "Retrieve the held leg",
-        "description": "Requires the AGENT role and being a party to the call.",
+        "description": "Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
             "cookieSession": [],
@@ -1281,7 +1281,7 @@
           "calls"
         ],
         "summary": "Transfer the other party away",
-        "description": "Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call.",
+        "description": "Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
             "cookieSession": [],
@@ -3550,6 +3550,7 @@
           "AGENT_NOT_IN_WRAP_UP",
           "CALL_NOT_FOUND",
           "NOT_CALL_PARTY",
+          "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE",
           "USER_SUSPENDED",
           "SWITCH_DOWN",
           "STORAGE_DOWN",

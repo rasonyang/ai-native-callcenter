@@ -30,11 +30,14 @@ const (
 	CodeAgentNotInWrapUp     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
 	CodeCallNotFound         ErrorCode = "CALL_NOT_FOUND"
 	CodeNotCallParty         ErrorCode = "NOT_CALL_PARTY"
-	CodeUserSuspended        ErrorCode = "USER_SUSPENDED"
-	CodeSwitchDown           ErrorCode = "SWITCH_DOWN"
-	CodeStorageDown          ErrorCode = "STORAGE_DOWN"
-	CodeRateLimited          ErrorCode = "RATE_LIMITED"
-	CodeInternal             ErrorCode = "INTERNAL"
+	// CodeOperationNotAllowedForCallType refuses a control this kind of
+	// call does not offer, rather than a control this caller may not use.
+	CodeOperationNotAllowedForCallType ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
+	CodeUserSuspended                  ErrorCode = "USER_SUSPENDED"
+	CodeSwitchDown                     ErrorCode = "SWITCH_DOWN"
+	CodeStorageDown                    ErrorCode = "STORAGE_DOWN"
+	CodeRateLimited                    ErrorCode = "RATE_LIMITED"
+	CodeInternal                       ErrorCode = "INTERNAL"
 )
 
 // APIError is the single error envelope of the API.

@@ -140,6 +140,11 @@ function CallPanel({ call }: { call: CallSnapshot }) {
   const isUnanswered = isOffered || isDialing
   const isHeld = mine?.state === 'HELD'
   const isMuted = Boolean(mine?.isMuted)
+  // One extension calling another is two people on a line, not a call being
+  // handled: nowhere to pass it to and no queue to put it back into. The
+  // server refuses hold, retrieve and transfer on it, so the keys are dark
+  // rather than offering something that comes back as an error.
+  const isInternal = call.callType === 'INTERNAL'
   // Answering is not instant: the phone gathers ICE before it picks up, which
   // takes seconds. Saying so beats a button that looks like it did nothing.
   const isAnswering = actions.answer.isPending || (actions.answer.isSuccess && isOffered)
@@ -218,13 +223,14 @@ function CallPanel({ call }: { call: CallSnapshot }) {
           <CallActionButton
             label={isHeld ? t('call.retrieve') : t('call.hold')}
             active={isHeld}
+            disabled={isInternal}
             onClick={() =>
               isHeld ? actions.retrieve.mutate(call.callId) : actions.hold.mutate(call.callId)
             }
           >
             {isHeld ? <Play /> : <Pause />}
           </CallActionButton>
-          <TransferButton callId={call.callId} />
+          <TransferButton callId={call.callId} disabled={isInternal} />
           <CallActionButton
             disabled
             label={t('call.conference')}
@@ -324,7 +330,7 @@ function DTMFButton({ callId }: { callId: string }) {
 }
 
 /** Transfer sends the far end to a queue extension or a number. */
-function TransferButton({ callId }: { callId: string }) {
+function TransferButton({ callId, disabled }: { callId: string; disabled?: boolean }) {
   const { t } = useTranslation()
   const actions = useCallActions()
   const [destination, setDestination] = useState('')
@@ -344,6 +350,7 @@ function TransferButton({ callId }: { callId: string }) {
         <Button
           variant="outline"
           className="w-full"
+          disabled={disabled}
           title={t('call.transfer')}
           aria-label={t('call.transfer')}
         >

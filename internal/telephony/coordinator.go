@@ -32,6 +32,12 @@ var (
 	ErrNotCallParty = errors.New("not a party to this call")
 	ErrNoAgentLeg   = errors.New("no agent leg on this call")
 	ErrInvalidDTMF  = errors.New("not a DTMF sequence")
+	// ErrNotForCallType reports an operation this kind of call does not offer.
+	// One extension calling another is two people on a line, not a call being
+	// handled: there is no third party to pass it to and no queue to put it
+	// back into, so transferring, holding and retrieving it mean nothing
+	// (owner's ruling, 2026-08-20).
+	ErrNotForCallType = errors.New("not available on this kind of call")
 )
 
 // Coordinator turns switch events into calls and carries out call control.
@@ -660,7 +666,7 @@ func (c *Coordinator) Answer(ctx context.Context, callID, agentID uuid.UUID) err
 
 // Hold and Retrieve drive the agent's own phone.
 func (c *Coordinator) Hold(ctx context.Context, callID, agentID uuid.UUID) error {
-	channelID, err := c.agentChannel(callID, agentID)
+	channelID, err := c.handledChannel(callID, agentID)
 	if err != nil {
 		return err
 	}
@@ -668,7 +674,7 @@ func (c *Coordinator) Hold(ctx context.Context, callID, agentID uuid.UUID) error
 }
 
 func (c *Coordinator) Retrieve(ctx context.Context, callID, agentID uuid.UUID) error {
-	channelID, err := c.agentChannel(callID, agentID)
+	channelID, err := c.handledChannel(callID, agentID)
 	if err != nil {
 		return err
 	}
@@ -789,7 +795,9 @@ func (c *Coordinator) Transfer(ctx context.Context, callID, agentID uuid.UUID, d
 	}
 	// The caller is the leg that must survive the transfer.
 	var callerChannel string
+	var callType events.CallType
 	err := c.registry.Do(callID, func(call *Call) {
+		callType = call.CallType
 		for _, p := range call.Parties {
 			if p.IsActive() && p.AgentID == nil {
 				callerChannel = p.ChannelID
@@ -799,6 +807,9 @@ func (c *Coordinator) Transfer(ctx context.Context, callID, agentID uuid.UUID, d
 	})
 	if err != nil {
 		return err
+	}
+	if callType == events.CallTypeInternal {
+		return ErrNotForCallType
 	}
 	if callerChannel == "" {
 		return ErrNotCallParty
@@ -824,6 +835,20 @@ func (c *Coordinator) CallsForAgent(agentID uuid.UUID) []Snapshot {
 func (c *Coordinator) AllCalls() []Snapshot { return c.registry.SnapshotAll() }
 
 // agentChannel finds an agent's own live leg on a call.
+// handledChannel is agentChannel for the operations that only make sense on a
+// call somebody is handling. An internal call is refused before the switch is
+// touched, so an agent is told no rather than shown a control that half works.
+func (c *Coordinator) handledChannel(callID, agentID uuid.UUID) (string, error) {
+	var callType events.CallType
+	if err := c.registry.Do(callID, func(call *Call) { callType = call.CallType }); err != nil {
+		return "", err
+	}
+	if callType == events.CallTypeInternal {
+		return "", ErrNotForCallType
+	}
+	return c.agentChannel(callID, agentID)
+}
+
 func (c *Coordinator) agentChannel(callID, agentID uuid.UUID) (string, error) {
 	var channelID string
 	err := c.registry.Do(callID, func(call *Call) {

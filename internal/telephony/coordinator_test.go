@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -713,5 +714,59 @@ func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
 			t.Errorf("payload.%s = %q, want the agent's extension %q — an agent told they are "+
 				"being rung at a registration token has been told nothing", field, got, agentExtension)
 		}
+	}
+}
+
+// One extension calling another is two people on a line, not a call being
+// handled: there is no third party to pass it to and no queue to put it back
+// into. Owner's ruling (2026-08-20) is that the three controls are refused,
+// and the refusal happens before the switch is touched.
+func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	ctx := t.Context()
+
+	agentID := testAgentID
+	internalID := uuid.New()
+	call, err := registry.CreateCall(ctx, internalID, events.CallTypeInternal, "en", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = registry.Do(internalID, func(call *Call) {
+		p := call.AddParty("caller-chan", "1007", at(0))
+		p.State = PartyTalking
+		a := call.AddParty("agent-chan", "1008", at(1))
+		a.AgentID = &agentID
+		a.State = PartyTalking
+	})
+	_ = call
+
+	for name, op := range map[string]func() error{
+		"hold":     func() error { return c.Hold(ctx, internalID, agentID) },
+		"retrieve": func() error { return c.Retrieve(ctx, internalID, agentID) },
+		"transfer": func() error { return c.Transfer(ctx, internalID, agentID, "1009") },
+	} {
+		if err := op(); !errors.Is(err, ErrNotForCallType) {
+			t.Errorf("%s on an internal call returned %v, want ErrNotForCallType", name, err)
+		}
+	}
+
+	// An inbound call is not refused for this reason. Given one with nothing
+	// to act on, the refusal that comes back is about the call's own state —
+	// which is how we know the type check let it through rather than that the
+	// operation happened to fail.
+	inboundID := uuid.New()
+	if _, err := registry.CreateCall(ctx, inboundID, events.CallTypeInbound, "en", true); err != nil {
+		t.Fatal(err)
+	}
+	_ = registry.Do(inboundID, func(call *Call) {
+		p := call.AddParty("caller-2", "18688886669", at(0))
+		p.State = PartyTalking
+	})
+	switch err := c.Hold(ctx, inboundID, agentID); {
+	case errors.Is(err, ErrNotForCallType):
+		t.Error("an inbound call was refused as though it were internal")
+	case !errors.Is(err, ErrNoAgentLeg):
+		t.Errorf("hold on an agentless inbound call returned %v, want ErrNoAgentLeg", err)
 	}
 }

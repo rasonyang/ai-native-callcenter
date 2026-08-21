@@ -198,23 +198,24 @@ func (e CreateCallRequestKind) Valid() bool {
 
 // Defines values for ErrorCode.
 const (
-	ErrorCodeAGENTALREADYLOGGEDIN ErrorCode = "AGENT_ALREADY_LOGGED_IN"
-	ErrorCodeAGENTNOTINWRAPUP     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
-	ErrorCodeAGENTNOTLOGGEDIN     ErrorCode = "AGENT_NOT_LOGGED_IN"
-	ErrorCodeCALLNOTFOUND         ErrorCode = "CALL_NOT_FOUND"
-	ErrorCodeCONFLICT             ErrorCode = "CONFLICT"
-	ErrorCodeEXTENSIONINUSE       ErrorCode = "EXTENSION_IN_USE"
-	ErrorCodeFORBIDDEN            ErrorCode = "FORBIDDEN"
-	ErrorCodeINTERNAL             ErrorCode = "INTERNAL"
-	ErrorCodeINVALIDCREDENTIALS   ErrorCode = "INVALID_CREDENTIALS"
-	ErrorCodeNOTCALLPARTY         ErrorCode = "NOT_CALL_PARTY"
-	ErrorCodeNOTFOUND             ErrorCode = "NOT_FOUND"
-	ErrorCodeRATELIMITED          ErrorCode = "RATE_LIMITED"
-	ErrorCodeSESSIONEXPIRED       ErrorCode = "SESSION_EXPIRED"
-	ErrorCodeSTORAGEDOWN          ErrorCode = "STORAGE_DOWN"
-	ErrorCodeSWITCHDOWN           ErrorCode = "SWITCH_DOWN"
-	ErrorCodeUSERSUSPENDED        ErrorCode = "USER_SUSPENDED"
-	ErrorCodeVALIDATIONFAILED     ErrorCode = "VALIDATION_FAILED"
+	ErrorCodeAGENTALREADYLOGGEDIN           ErrorCode = "AGENT_ALREADY_LOGGED_IN"
+	ErrorCodeAGENTNOTINWRAPUP               ErrorCode = "AGENT_NOT_IN_WRAP_UP"
+	ErrorCodeAGENTNOTLOGGEDIN               ErrorCode = "AGENT_NOT_LOGGED_IN"
+	ErrorCodeCALLNOTFOUND                   ErrorCode = "CALL_NOT_FOUND"
+	ErrorCodeCONFLICT                       ErrorCode = "CONFLICT"
+	ErrorCodeEXTENSIONINUSE                 ErrorCode = "EXTENSION_IN_USE"
+	ErrorCodeFORBIDDEN                      ErrorCode = "FORBIDDEN"
+	ErrorCodeINTERNAL                       ErrorCode = "INTERNAL"
+	ErrorCodeINVALIDCREDENTIALS             ErrorCode = "INVALID_CREDENTIALS"
+	ErrorCodeNOTCALLPARTY                   ErrorCode = "NOT_CALL_PARTY"
+	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
+	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
+	ErrorCodeRATELIMITED                    ErrorCode = "RATE_LIMITED"
+	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
+	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
+	ErrorCodeSWITCHDOWN                     ErrorCode = "SWITCH_DOWN"
+	ErrorCodeUSERSUSPENDED                  ErrorCode = "USER_SUSPENDED"
+	ErrorCodeVALIDATIONFAILED               ErrorCode = "VALIDATION_FAILED"
 )
 
 // Valid indicates whether the value is a known member of the ErrorCode enum.
@@ -241,6 +242,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeNOTCALLPARTY:
 		return true
 	case ErrorCodeNOTFOUND:
+		return true
+	case ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE:
 		return true
 	case ErrorCodeRATELIMITED:
 		return true

@@ -30,6 +30,10 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
   const isRinging = mine?.state === 'RINGING'
   const isDialing = mine?.state === 'DIALING'
   const isHeld = mine?.state === 'HELD'
+  // One extension calling another is two people on a line, not a call being
+  // handled: nowhere to pass it to and no queue to put it back into. The
+  // server refuses these three, so the buttons do not offer them.
+  const isInternal = call.callType === 'INTERNAL'
   const busy =
     actions.answer.isPending || actions.hold.isPending ||
     actions.retrieve.isPending || actions.hangup.isPending || actions.transfer.isPending
@@ -57,19 +61,19 @@ export function ActiveCall({ call, agentId }: { call: CallSnapshot; agentId?: st
             {t('call.answer')}
           </Button>
         )}
-        {!isRinging && !isDialing && !isHeld && (
+        {!isRinging && !isDialing && !isHeld && !isInternal && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => actions.hold.mutate(call.callId)}>
             <Pause />
             {t('call.hold')}
           </Button>
         )}
-        {isHeld && (
+        {isHeld && !isInternal && (
           <Button size="sm" variant="outline" disabled={busy} onClick={() => actions.retrieve.mutate(call.callId)}>
             <Play />
             {t('call.retrieve')}
           </Button>
         )}
-        {!isRinging && !isDialing && (
+        {!isRinging && !isDialing && !isInternal && (
           <Button
             size="sm"
             variant="outline"

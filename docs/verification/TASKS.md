@@ -319,6 +319,15 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 - **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
   对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
   依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。
+  **【owner 裁决 2026-08-21】接口层拒 + UI 禁用。已修**:规则落在 telephony 层
+  (呼叫模型才知道 `CallType`),新 sentinel `ErrNotForCallType`;`Hold`/`Retrieve` 走新的
+  `handledChannel()`(先查类型再取腿),`Transfer` 在取到主叫腿后同样判一次。
+  httpapi 映射为 **409 `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE`**(契约新增该错误码,
+  三个操作的 description 同步写明理由)。UI 两处:工作台控制键组把保持/取回、转接置灰
+  (静音与挂断仍可用),通话卡直接不渲染这三个按钮。
+  测试:`TestInternalCallsRefuseTheControlsThatMeanNothingOnThem`(含反例——inbound 呼叫
+  返回的是 `ErrNoAgentLeg` 而非类型拒绝,以此证明类型闸放行了它)+ 前端两条
+  (INTERNAL 置灰、INBOUND 仍可用)。
 - **C19(new,2026-08-20 owner 现场发现,已修)** cockpit 把坐席**自己拨出**的呼叫渲染成来电:
   `isRinging = state==='RINGING' || state==='DIALING'`(_app.agent.index.tsx、components/active-call.tsx
   两处同源),于是 DIALING 期间出现"接听/拒接",还允许在未接通时转接。

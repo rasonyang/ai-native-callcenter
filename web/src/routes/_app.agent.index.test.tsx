@@ -90,6 +90,28 @@ describe('control grid', () => {
     )
   })
 
+  // One extension calling another is two people on a line, not a call being
+  // handled: nowhere to pass it to and no queue to put it back into. The
+  // server refuses these, so the keys must not offer them.
+  it('darkens hold and transfer on a call between two extensions', async () => {
+    const internal = callFixture('TALKING')
+    internal.callType = 'INTERNAL'
+    await renderCockpit({ calls: [internal] })
+    const grid = await screen.findByRole('group', { name: /call controls/i })
+
+    expect(within(grid).getByRole('button', { name: /^hold$/i })).toBeDisabled()
+    expect(within(grid).getByRole('button', { name: /^transfer$/i })).toBeDisabled()
+    // Muting yourself and hanging up still make sense on any call.
+    expect(within(grid).getByRole('button', { name: /^mute$/i })).toBeEnabled()
+  })
+
+  it('leaves hold and transfer available on a call the agent is handling', async () => {
+    await renderCockpit(onCall)
+    const grid = await screen.findByRole('group', { name: /call controls/i })
+    expect(within(grid).getByRole('button', { name: /^hold$/i })).toBeEnabled()
+    expect(within(grid).getByRole('button', { name: /^transfer$/i })).toBeEnabled()
+  })
+
   it('sends a tone the moment a key is pressed', async () => {
     const { api, user } = await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })

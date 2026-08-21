@@ -388,7 +388,7 @@ export interface paths {
         put?: never;
         /**
          * Hold the caller's own leg
-         * @description Requires the AGENT role and being a party to the call.
+         * @description Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.
          */
         post: operations["holdCall"];
         delete?: never;
@@ -408,7 +408,7 @@ export interface paths {
         put?: never;
         /**
          * Retrieve the held leg
-         * @description Requires the AGENT role and being a party to the call.
+         * @description Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.
          */
         post: operations["retrieveCall"];
         delete?: never;
@@ -488,7 +488,7 @@ export interface paths {
         put?: never;
         /**
          * Transfer the other party away
-         * @description Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call.
+         * @description Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.
          */
         post: operations["transferCall"];
         delete?: never;
@@ -1121,7 +1121,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
