@@ -509,7 +509,7 @@ cases:
       uuid_phone_event 触发的 CHANNEL_HOLD 没被映射到该腿(乱序/腿归属错),
       主管墙上这通电话仍显示"通话中",转写 tap 也不会暂停,保持期间的私聊被继续转写。
     evidence_dir: docs/verification/artifacts/VC-S7-01/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:hold/retrieve 均 202;PARTY_HELD/PARTY_RETRIEVED 各 1;tap 无 refused
     refs: ["internal/httpapi/call_handlers.go:80", "internal/telephony/adapter.go:176", "internal/telephony/registry.go:337", "internal/telephony/coordinator.go:200"]
 
   - id: VC-S7-02
@@ -539,7 +539,7 @@ cases:
       adapter 把 uuid_transfer 打在了 wei 的腿上而不是主叫腿(coordinator.go:768-777 的
       "caller 是幸存腿"选择失效),主叫被挂断,转接看起来成功了。
     evidence_dir: docs/verification/artifacts/VC-S7-02/
-    status: TODO
+    status: PASS  # 2026-08-21 执行:transfer 202、主叫腿存活、wei 腿消失、单 CDR agent_ids{wei,ben};偏差:目标改 1007(1002 无话机);同场发现 C20 幽灵派单呼叫
     refs: ["internal/telephony/coordinator.go:764", "internal/telephony/adapter.go:216", "internal/httpapi/call_handlers.go:113"]
 
   - id: VC-S7-03
@@ -569,7 +569,7 @@ cases:
       HELD 腿的 RELEASE 事件被判非法丢弃,Finish 永不触发,CDR 永不落库,
       这通电话在墙上"讲"到进程重启为止。
     evidence_dir: docs/verification/artifacts/VC-S7-03/
-    status: TODO
+    status: PASS  # 2026-08-21 执行:HELD→RELEASED 合法(rejects 0→0)、ANSWERED talk_sec=119、/calls 收零;同场验证 C20 修复(幽灵 CDR +12→+0)
     refs: ["internal/telephony/call.go:84", "internal/telephony/registry.go:341", "internal/telephony/call.go:310"]
 
   - id: VC-S7-04
@@ -598,7 +598,7 @@ cases:
       digits 打在了 wei 自己腿上(SendDTMF 选远端腿的规则 coordinator.go:710-735 失效),
       对端 IVR 什么都没收到,而坐席以为输完了工号。
     evidence_dir: docs/verification/artifacts/VC-S7-04/
-    status: TODO
+    status: PASS  # 2026-08-20 执行:dtmf 202、收到方向 digit=5 durationMs=600;F2 判定:uuid_send_dtmf 不产事件,发出的 4/2/# 无 SSE
     refs: ["internal/telephony/coordinator.go:710", "internal/telephony/registry.go:387", "internal/telephony/switchevent.go:252"]
 
   # ───────────────────────── S8 语言(按真实设计改写:language 不选 provider) ─────────────────────────

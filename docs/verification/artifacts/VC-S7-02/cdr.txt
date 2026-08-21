@@ -1,0 +1,56 @@
+### CDR
+-[ RECORD 1 ]----+----------------------------------------------------------------------------
+call_id          | 01a021f5-0ce9-7403-a820-4659a425b02c
+call_type        | INBOUND
+from_number      | 18688886669
+to_number        | 95001
+did              | 95001
+primary_agent_id | 807b2164-bd6b-47e9-9286-39a1ca831cea
+agent_ids        | {807b2164-bd6b-47e9-9286-39a1ca831cea,7d8e39b9-98d6-4ac9-889a-72bf7aca4699}
+queue_id         | b098f1bf-91c4-441b-a903-59ab8f85f6be
+ring_sec         | 16
+bot_sec          | 0
+queue_wait_sec   | 135
+talk_sec         | 58
+total_sec        | 191
+status           | ANSWERED
+hangup_cause     | NORMAL_CLEARING
+missed_reason    | 
+is_contained     | f
+
+### legs
+[
+    {
+        "kind": "QUEUE",
+        "label": "support-en",
+        "durationSec": 135
+    },
+    {
+        "kind": "AGENT",
+        "label": "1008",
+        "durationSec": 58
+    },
+    {
+        "kind": "AGENT",
+        "label": "1007",
+        "durationSec": 35
+    }
+]
+### any phantom CDR for the provisional outbound call?
+               call_id                | call_type | from_number |  to_number  |  status   | total_sec 
+--------------------------------------+-----------+-------------+-------------+-----------+-----------
+ 01a021f5-5300-783d-a3c6-93459bb73484 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |        59
+ 01a021f6-3a9d-7a3d-bbea-bf2222b2c674 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3af1-7255-9ab4-f432cb42c99f | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3b4a-7ea6-8f7b-0ce2d5f65fed | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3ba6-7071-bf62-96ebc9fc98a6 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3bf4-70a0-acdb-4d319a4561b4 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3c55-7d00-b823-ead9c19b73c8 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3ca9-7d1f-8b78-e63492700cd6 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3d0b-710d-9748-3afc7f690f70 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3d58-7b17-8e8e-ab6a04d630b0 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3db0-7c35-9ca9-20fd025f27c0 | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f6-3e02-75d0-91af-4c3cfdf3b83d | OUTBOUND  | 1008        | 18688886669 | NO_ANSWER |         0
+ 01a021f5-0ce9-7403-a820-4659a425b02c | INBOUND   | 18688886669 | 95001       | ANSWERED  |       191
+(13 rows)
+

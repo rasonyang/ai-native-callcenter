@@ -283,6 +283,27 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   **第二轮(owner 又抓到)**:顶部软电话条第一轮漏改,通话已建立仍显示 Unknown number;同处另有
   方向图标按 callType 判定(INTERNAL 一律画成来电箭头)——两者一并修:号码同样回落 `otherNumber`,
   方向改按坐席自己的 role(ORIGINATOR=外呼箭头),并补 softphone-bar 回归测试。
+- **C20(new,2026-08-21 T3.5 途中 owner 现场发现,已修)** 队列派单腿被当成坐席自己发起的外呼:
+  mod_callcenter originate 派单腿时,coordinator 见到陌生 outbound channel 先铸一个 provisional
+  agent-only call,要等 `CHANNEL_BRIDGE` 才由 `join` 并入主叫。**振铃期间两个 call 并存**,
+  `/calls/mine` 两条都返回,工作台在两者之间翻转 —— owner 报的"Ringing 变为 Dialing"即此,
+  **不是 FSM 违规**(`call.go` 的 partyTransitions 本就没有这两个状态之间的边)。派单腿在幽灵 call
+  里是第一个 party,按 `AddParty` 规则拿到 ORIGINATOR/DIALING;在真实 call 里是后来的,拿到
+  TARGET/RINGING。二级后果:派单在接通前被取消时,幽灵 call 从未 bridge 就死,**却照样写 CDR**
+  ——单通排队电话实测产出 **12 条** `坐席分机 → 主叫号` 的 NO_ANSWER OUTBOUND 记录
+  (即 C17 残留项"b 腿自成一通 CDR"的真身,规模是每次派单重试一条)。
+  历史核查该型记录最早见于 2026-08-19,**早于 08-20 的 CallType/CDR 改动**,故为既有缺陷非回归。
+  **已修**:`strings mod_callcenter.so` 实证派单腿带 `cc_side` / `cc_member_session_uuid`(主叫 channel);
+  ①`normalizeChannel` 读出后填 `SwitchEvent.MemberChannelID`(判据用 `member != ChannelID`,
+  主叫自己那条腿在同一变量里放的是自己的 id,故该比较即使 `cc_side` 缺失也成立);
+  ②`adopt()` 见到带该印记的腿**直接挂到主叫的 call 上**,不再铸 provisional call。
+  派单腿由此从出生就是 TARGET/RINGING、callType 保持主叫的 INBOUND。
+  复测(VC-S7-03 同场):振铃期 `/calls/mine` 2→**1** 条、role/state 由 ORIGINATOR/DIALING →
+  **TARGET/RINGING**、callType OUTBOUND → **INBOUND**、幽灵 CDR 增量 +12 → **+0**、
+  CDR 总增量 +13 → **+1**。单测两条:`TestNormalizeReadsTheQueueDeliveryStamp`(主叫自己那条腿
+  不得被当成派单)、`TestQueueDeliveryLegJoinsTheCallerImmediately`。
+  **余留**:派单腿的 CHANNEL_CREATE 若抢在主叫入册之前到达,仍会走旧路(铸 call → bridge 合并),
+  该竞态未消除,只是回到修改前的行为。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

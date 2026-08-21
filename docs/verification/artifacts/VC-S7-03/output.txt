@@ -1,0 +1,47 @@
+CALL=01a02229-924b-7acc-90f6-d1e123f55967
+### parties before hold
+[{"role":"ORIGINATOR","state":"TALKING","number":"18688886669"},{"role":"TARGET","state":"RELEASED","number":"95001"},{"role":"TARGET","state":"TALKING","number":"1008"}]
+### hold
+http=202
+### parties after hold
+[{"role":"ORIGINATOR","state":"TALKING","number":"18688886669"},{"role":"TARGET","state":"RELEASED","number":"95001"},{"role":"TARGET","state":"HELD","number":"1008"}]
+### rejected party transitions (baseline was 0)
+rejects_now=0
+### live calls (expect 0)
+{"count":0}
+### fs channels
+
+0 total.
+
+### the CDR
+-[ RECORD 1 ]--+-------------------------------------
+call_id        | 01a02229-924b-7acc-90f6-d1e123f55967
+call_type      | INBOUND
+from_number    | 18688886669
+to_number      | 95001
+has_primary    | t
+ring_sec       | 54
+bot_sec        | 0
+queue_wait_sec | 55
+talk_sec       | 119
+total_sec      | 192
+status         | ANSWERED
+hangup_cause   | NORMAL_CLEARING
+missed_reason  | 
+
+### legs
+[
+    {
+        "kind": "QUEUE",
+        "label": "support-en",
+        "durationSec": 55
+    },
+    {
+        "kind": "AGENT",
+        "label": "1008",
+        "durationSec": 119
+    }
+]
+### counters vs baseline (total 6183 / phantom 47)
+cdr_total=6184
+cdr_phantom_outbound=47
