@@ -249,7 +249,7 @@ cases:
       bot 份额通道变量没盖上(stampBotShare 未执行或 uuid_transfer 丢变量),
       报表从此把这通"bot→人"呼叫当纯人工呼叫统计,无任何报错。
     evidence_dir: docs/verification/artifacts/VC-S3-03/
-    status: FAIL  # 2026-08-20 执行:探针证明四戳在通道上而CDR丢bot份额+flow→漂移在读回/快照侧;queue_wait_sec含通话时长(C11);collect#4应为.cdr.legs(verdict)
+    status: PASS  # 2026-08-21 重跑(C11 修复后):bot_sec=13/has_flow=t/legs含BOT/单行CDR/queue_wait_sec=5;首跑2026-08-20为FAIL→立案C11(根因非读回侧,见artifacts/C11/verdict.md);collect#4应为.cdr.legs
     refs: ["internal/aicall/actions.go:71", "internal/aicall/ledger.go:223", "internal/telephony/switchevent.go:81", "internal/telephony/cdr.go:151"]
 
   - id: VC-S3-04

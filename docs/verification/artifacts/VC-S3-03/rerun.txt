@@ -1,0 +1,13 @@
+=== S3-03 rerun after C11 fix (2026-08-21T04:06:57Z) ===
+### collect#2 cdrs (expect: 1 row, ANSWERED, bot_sec>0, talk_sec>0, did=95001, has_flow=t, agents=1)
+01a0227e-bba1-709a-9b58-cfeb60fec721|ANSWERED|13|5|11|95001|t|1
+### cdr_total (baseline 6186)
+6187
+### collect#3 queue_events
+JOINED|f|0
+OFFERED|t|0
+BRIDGED|t|6403
+### collect#4 legs (via API; .cdr.legs per the verdict's collect fix)
+[{"kind":"BOT","label":"","durationSec":13},{"kind":"QUEUE","label":"support-en","durationSec":5},{"kind":"AGENT","label":"1008","durationSec":11}]
+### user_data
+{"botReason": "Caller asked to be transferred to a human agent.", "botSummary": "Caller requested a transfer to a human agent for assistance."}

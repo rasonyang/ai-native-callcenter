@@ -241,7 +241,7 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   legs 首次出现 `BOT 17s`;两通产 2 行 CDR 无重复,幽灵计数不动。
   单测三条:`TestBotShareMergesAcrossLegs`、`TestQueueEventsRouteToTheWaitingCaller`、
   `TestTheBotShareSurvivesTheLegThatHangsUpFirst`(摘掉修复即报线上那三个值)。
-  详见 `docs/verification/artifacts/C11/verdict.md`。**VC-S3-03 待用 95001 重跑收官。**
+  详见 `docs/verification/artifacts/C11/verdict.md`。**VC-S3-03 已于 2026-08-21 12:06 用 95001 重跑,FAIL→PASS**(bot_sec=13、has_flow=t、legs 含 BOT、单行 CDR)。
 - **C13(new,2026-08-20 T3.2 执行发现)** PARTY_RINGING payload 的 extensionNumber/toNumber 携带
   浏览器话机的 WS 注册标识(实测 "g7bih4lv")而非坐席分机号:coordinator.go:412-416 直取
   ev.DestinationNumber,而 :829-848 的 agentForLeg 早已把腿正确归户——归户成功后应以坐席绑定分机
