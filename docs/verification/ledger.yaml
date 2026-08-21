@@ -830,7 +830,7 @@ cases:
       或者主叫确实进了队列(听到保持音)但 /calls/waiting 为空 —— 新实例收养失败,
       这通电话直到有人接起前对所有屏幕都是隐形的。
     evidence_dir: docs/verification/artifacts/VC-S12-01/
-    status: TODO
+    status: FAIL  # 2026-08-21 执行:restart.sh 与新实例接管均正常,但 lua 兜底 0 行、/calls/waiting 空、主叫直接断线。根因(主证据):aicc_inbound.lua:69 设 hangup_after_bridge=true,bot 腿一死主叫腿 50ms 内被跟随挂断,兜底块无机会执行;continue_on_fail 只覆盖'压根没接通',不覆盖'接通后对端消失'→ 立案 C26。F4 判定辅助不适用(主叫从未进队,重跑同果)。次生:被打断的呼叫无 CDR(即 S12-02 记的已知缺口)
     refs: ["internal/store/store.go:83", "freeswitch/scripts/aicc_inbound.lua:101", "deploy/dev/restart.sh:12", "internal/telephony/coordinator.go:329"]
 
   - id: VC-S12-02

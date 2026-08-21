@@ -427,6 +427,20 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   挂断的腿的控制按钮。这就是 owner 在 T3.5 与本次回归两度报的"**1008 没有挂断**"。
   **已修**:`CallsForAgent` 增加 `p.IsActive()`(新增 `PartySnapshot.IsActive()`,与 `Party` 对称)。
   回归测试 `TestACallPassedOnLeavesTheFirstAgentsScreen`。
+- **C26(new,2026-08-21 T5.1 执行发现,FAIL 立案)** **bot 腿死后的 fallback 兜底对最可能的故因不可达。**
+  `aicc_inbound.lua:69` 设 `hangup_after_bridge=true`,bot 腿一挂,主叫腿在 **50 毫秒**内被跟随挂断
+  (FS 日志实证:`20:09:31.106` bot 腿 hangup → `20:09:31.156` 主叫腿
+  `Overriding SIP cause 480 with 200 from the other leg` → hangup),
+  第 104 行 `if session:ready()` 的兜底块**没有机会执行**。owner 听感:"直接断了",无保持音。
+  第 70 行的 `continue_on_fail=true` 覆盖的是**另一种**故障——桥接**压根没接通**(拨号时网关就是死的);
+  它不覆盖"接通了、然后对端消失",而 **app 重启 / 进程崩溃 / provider 掉线全是后者**,
+  正是这个兜底最该管的那些情况。
+  **修法有两难,这是它不能一行改掉的原因**:直接把 `hangup_after_bridge` 改 `false`,
+  会让 **bot 正常收官的每一通电话**也落进 `session:ready()` 从而被塞进人工队列。
+  兜底必须能分辨"bot 把事办完了"与"bot 消失了"。建议形态:bot 关闭自己那条腿之前,
+  往主叫通道盖一个收官印记(与转接时盖 `aicc_bot_sec` 同一手法),Lua 见印记则挂断、
+  无印记则转 fallback 队列。修复后重跑 VC-S12-01。
+  证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
 - **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
   而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
