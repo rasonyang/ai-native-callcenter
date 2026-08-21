@@ -1,0 +1,40 @@
+=== VC-S5-01 collect (2026-08-21T04:38:50Z) ===
+### collect#3 SSE QUEUE_AGENT_OFFERED count
+23
+### SSE BRIDGED-ish types present (expect none)
+  23 "type":"QUEUE_AGENT_OFFERED"
+   2 "type":"QUEUE_COUNT"
+   1 "type":"QUEUE_JOINED"
+   1 "type":"QUEUE_LEFT"
+### collect#4 queue_events for the latest call
+CALL_ID=01a02299-b24b-7c84-98c2-b4347c2f2885
+ABANDONED|1
+JOINED|1
+OFFERED|23
+### collect#5 cdrs status / missed_reason
+ANSWERED|
+### collect#6 wei agent_states after
+READY|
+### cdr_total (baseline 6187)
+6188
+### agent_ids: total vs distinct
+23|1
+### legs: kind -> count
+AGENT|23|0
+BOT|1|9
+QUEUE|1|159
+### parties on the call (how many delivery legs)
+25
+### did any phantom CDR appear? (baseline 47)
+47
+### F3 留证:OFFERED 节奏(23 次)
+Traceback (most recent call last):
+  File "<string>", line 3, in <module>
+    ts=[datetime.datetime.fromisoformat(l.strip().replace('Z','+00:00')) for l in sys.stdin]
+        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ValueError: Invalid isoformat string: '2026-08-21T04:35:08.104642+00:00"'
+### F3 留证:OFFERED 节奏(23 次)
+count = 23
+first = 2026-08-21T04:35:08.104642+00:00 last = 2026-08-21T04:37:10.086110+00:00
+span_sec = 122.0
+gaps_sec = [60.08, 0.07, 0.08, 0.11, 0.08, 0.11, 0.08, 0.08, 0.11, 0.09, 0.09, 60.09, 0.07, 0.08, 0.09, 0.1, 0.08, 0.12, 0.07, 0.12, 0.08, 0.11]

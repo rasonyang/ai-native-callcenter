@@ -442,7 +442,7 @@ cases:
       QUEUE_AGENT_STATE(Ring-No-Answer)事件被 Normalize 后无人消费(enums.md §22),
       presence、报表、坐席屏三处都毫无痕迹 —— 队列被一部没人守的话机吸干,系统处处"正常"。
     evidence_dir: docs/verification/artifacts/VC-S5-01/
-    status: TODO
+    status: FAIL  # 2026-08-21 执行:SSE/queue_events/agent_states 三项符合(OFFERED=23、无 BRIDGED、wei 前后皆 READY|),但 cdrs=ANSWERED/missed_reason 空 → 队列放弃在报表全线不可见;expect 原写于 C11 修复前(Bot.Sec 恒 0 时才会落到 NO_ANSWER 分支)→ 立案 C22;F3 已落实(1 派单+60s+11 连发/轮)
     refs: ["internal/agents/state.go:189", "internal/agents/service.go:342", "internal/telephony/switchevent.go:368", "internal/telephony/cdr.go:251"]
 
   # ───────────────────────── S6 排队中主叫挂断(abandon) ─────────────────────────

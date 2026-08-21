@@ -177,6 +177,34 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   switch 镜像;**含 missed_reason 条件互斥修复**(cdr.go:255-258:ABANDONED_RINGING 需 BridgedAt≠0
   与"振铃中放弃"语义矛盾——修成互斥可达)。验收 = T6.9 重跑 S5-01(新 expect:坐席不接→被摘出路由、
   missed_reason 语义正确)。fsm-edges.md/events.md 死边条目同步更新。
+  **W2.1 队列超时参数(2026-08-21 owner 提问触发的配置核查,与 W2 同批落地)** ——
+  现状是 RONA 被整个关掉了,且从配置痕迹看是**漏配而非决策**:
+
+  | 参数 | 现值 | 来源 | 推荐 |
+  |---|---|---|---|
+  | `agent-originate-timeout` | 未设 → 默认 **60s**(与 VC-S5-01 实测 60.08s 间隔吻合) | callcenter.conf.xml 无此 param | **15–20s** —— 收益最大的一项;60s 意味着一次漏接让主叫白等一分钟 |
+  | `max_no_answer` | `0`(无限) | 从未设置;**adapter 连 setter 都没有** | **2** —— 取 1 太敏感,WebRTC 话机一次网络抖动就被踢下线 |
+  | `no_answer_delay_time` | `0`(立即重派) | `adapter.go:98` 有 setter,**无人调用** | **60s** —— max_no_answer 生效后退居兜底 |
+  | `reject_delay_time` | `0` | `adapter.go:93` 有 setter,**无人调用** | **60s** |
+  | `busy_delay_time` | `0` | 无 setter | **60s** |
+  | `wrap_up_time` | `0` | `service.go:604` 主动置 0 | **保持 0** —— ACW 归应用,现有决策正确 |
+
+  判定为漏配的三个证据:①两个队列都已配好 `agent_no_answer_status='On Break'`,只等
+  `max_no_answer` 触发;②adapter 写好了三个 setter 却没有调用方;③**`queues.rona_delay_sec`
+  是死配置** —— DB(support-en=10)、`internal/catalog/types.go:122`、OpenAPI 契约里都有,
+  能读能改,但 `freeswitch/scripts/aicc_xml.lua:152-174` 从不下发,永不生效。
+
+  **落地次序上的硬约束**:光调 `max_no_answer` 只能修好一半。mod_callcenter 命中后把坐席置为
+  `agent_no_answer_status`,而应用会把自己的 presence 反向镜像回交换机(`service.go:628`
+  `mirrorStatus`),下一次镜像就把人推回 Available,应用自己的 `agent_states` 仍是 READY
+  —— VC-S5-01 实测到的"前后完全一致"正是这个。**所以状态转移必须由应用拥有、交换机只做通知**,
+  参数调优必须与 W2 主体同批,否则得到一个交换机与应用互相打架的半成品。
+
+  实现面因此含三件事:①给 adapter 补 `max_no_answer` / `busy_delay_time` 的 setter;
+  ②`mirrorRegistration`(service.go:595-612)在 add 之后一并下发这批参数,取值来自队列/坐席配置
+  而非硬编码;③把 `rona_delay_sec` 接上(要么下发,要么从契约里删——不留死配置)。
+  队列侧另有一处不一致待一并处理:support-zh 的 `rona_delay_sec`/`sla_threshold_sec`/
+  `discard_abandoned_after_sec` 均为 0,而 support-en 是 10/20/60,seed 两边不同口径。
 - **W3 flows 管理面**(D3):**路由 `/admin/bots`**;交互参考 ui-test(admin/bots/index.tsx 列表 +
   $flowId.tsx 详情:spec JSON 查看器、节点可达性分析、transitions 摘要、publish 对话框);
   设计规范 web/CLAUDE.md。**范围含 UI 上传/编辑 spec**(§补充 S1)。顺序:openapi 契约
@@ -319,6 +347,18 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   不得被当成派单)、`TestQueueDeliveryLegJoinsTheCallerImmediately`。
   **余留**:派单腿的 CHANNEL_CREATE 若抢在主叫入册之前到达,仍会走旧路(铸 call → bridge 合并),
   该竞态未消除,只是回到修改前的行为。
+- **C22(new,2026-08-21 T4.1 执行发现,FAIL 立案)** 一通"bot 接了 → 转队列 → 无人应答 → 主叫放弃"
+  的电话被记成 `ANSWERED`,`missed_reason` 为空 —— **队列放弃在报表里全线不可见**
+  (本部署所有入站电话都先过 bot,因此是全线,不是个例)。
+  根因:`cdr.go:246` 的 `snap.Bot.Sec > 0` **无条件**判 ANSWERED,不问之后是否进队列、是否有人接。
+  **这条分支在 C11 修好之前打不到**(转接呼叫的 `Bot.Sec` 恒 0),故账本 VC-S5-01 的
+  `expect: status=NO_ANSWER` 是照着**由缺陷造成的**行为写的;C11 修复让缺陷显形,不是制造。
+  同一行 CDR 另两处失真(C20 修复后才落到这一行上,此前 23 条派单腿各自成幽灵 call):
+  `agent_ids` 23 个元素去重后 1 个(cdr.go:206-210 逐腿 append 无去重)、
+  `legs` 含 23 段 0 秒的 AGENT、`ring_sec=0`(响了 159 秒;cdr.go:238 只在 `answered != nil` 时才算)。
+  修复须同时给出"bot 接过但最终无人应答"的收官口径,并与 W2 的 missed_reason 互斥修复对齐;
+  T4.2(VC-S6-01,排队中放弃)大概率命中同一分支,执行时留证对照。
+  证据:`docs/verification/artifacts/VC-S5-01/verdict.md`。
 - **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
   而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
