@@ -475,7 +475,7 @@ cases:
       channel 绑定已被回收,waiting.go:189-195 的 CHANNEL_HANGUP 兜底若失效,
       等待名单会永远挂着一个已离开的人;switch 侧 members 早已为空,两侧都不报错。
     evidence_dir: docs/verification/artifacts/VC-S6-01/
-    status: TODO
+    status: PASS  # 2026-08-21 执行(两通):SSE QUEUE_LEFT cause=Cancel/waitSec=14 + QUEUE_COUNT waiting=0、queue_events ABANDONED wait_ms=14000、cdrs NO_ANSWER/ABANDONED_WAITING/queue_wait=13、/calls/waiting=0;collect#6 缺陷:主管会话 403(C12)——修复前须改用坐席会话,见 verdict
     refs: ["internal/telephony/waiting.go:183", "internal/telephony/cdr.go:261", "internal/telephony/cdr.go:358", "internal/telephony/switchevent.go:353"]
 
   # ───────────────────────── S7 保持 / 取回 / 转接 / DTMF ─────────────────────────
