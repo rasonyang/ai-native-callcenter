@@ -156,10 +156,13 @@ type SwitchEvent struct {
 	Registered bool
 
 	// Queue activity (mod_callcenter).
-	Queue           string
-	AgentName       string
-	AgentState      string
-	AgentStatus     string
+	Queue       string
+	AgentName   string
+	AgentState  string
+	AgentStatus string
+	// MemberChannelID is the waiting caller's channel: on a queue event the
+	// member the event is about, on a channel event the caller the leg was
+	// dialled to serve. Empty on a leg that is nobody's delivery.
 	MemberChannelID string
 	MemberCount     int
 	Cause           string
@@ -220,6 +223,15 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	out.Context = ev.Get("Caller-Context")
 	out.OtherChannelID = ev.Get("Other-Leg-Unique-ID")
 	out.CallTypeHint = ev.Get("variable_aicc_call_type")
+
+	// mod_callcenter dials the agent on a waiting caller's behalf and stamps
+	// that caller's channel onto the leg it creates, which is the only thing
+	// tying the two together before they bridge. cc_side names which half of a
+	// delivery a leg is; the member's own leg carries its own id here, so the
+	// comparison identifies the agent's half even where cc_side is absent.
+	if member := ev.Get("variable_cc_member_session_uuid"); member != "" && member != out.ChannelID {
+		out.MemberChannelID = member
+	}
 
 	switch strings.ToUpper(ev.Get("Call-Direction")) {
 	case "INBOUND":

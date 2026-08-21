@@ -474,3 +474,45 @@ func TestCallTypeHintOutranksDirection(t *testing.T) {
 		t.Errorf("callTypeOf with a bad hint = %q, want OUTBOUND", got)
 	}
 }
+
+// A queue delivery leg carries the waiting caller's channel, which is the only
+// thing tying the two together before they bridge. The member's own leg
+// carries its own id in that variable and must not be read as a delivery.
+func TestNormalizeReadsTheQueueDeliveryStamp(t *testing.T) {
+	const (
+		member = "019ff973-6b32-7557-b7c4-11b3fdb692f0"
+		agent  = "019ff974-1a01-7000-9c3d-2b8e5f0a1c44"
+	)
+
+	delivery, ok := Normalize(event(map[string]string{
+		"Event-Name":                      "CHANNEL_CREATE",
+		"Unique-ID":                       agent,
+		"Channel-Name":                    "sofia/internal/1008@192.168.31.55",
+		"Call-Direction":                  "outbound",
+		"Caller-Destination-Number":       "1008",
+		"variable_cc_side":                "agent",
+		"variable_cc_member_session_uuid": member,
+		"variable_cc_queue":               "support-en",
+	}))
+	if !ok {
+		t.Fatal("Normalize rejected a delivery leg's CHANNEL_CREATE")
+	}
+	if delivery.MemberChannelID != member {
+		t.Errorf("MemberChannelID = %q, want the caller's channel %q", delivery.MemberChannelID, member)
+	}
+
+	caller, ok := Normalize(event(map[string]string{
+		"Event-Name":                      "CHANNEL_CREATE",
+		"Unique-ID":                       member,
+		"Channel-Name":                    "sofia/external/18688886669@192.168.31.5",
+		"Call-Direction":                  "inbound",
+		"variable_cc_side":                "member",
+		"variable_cc_member_session_uuid": member,
+	}))
+	if !ok {
+		t.Fatal("Normalize rejected the member's CHANNEL_CREATE")
+	}
+	if caller.MemberChannelID != "" {
+		t.Errorf("MemberChannelID = %q on the member's own leg, want empty", caller.MemberChannelID)
+	}
+}

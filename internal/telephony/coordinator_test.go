@@ -565,3 +565,66 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 	}
 	return events.Event{}, events.Scope{}, false
 }
+
+// A queue delivery leg joins the caller's call the moment it is created, not
+// at the bridge. On a call of its own it would be that call's first party —
+// ORIGINATOR/DIALING — and the agent's screen would show them dialling the
+// caller who is in fact ringing them; a delivery mod_callcenter cancels before
+// it answers never bridges at all, so the stray call reached the ledger as an
+// outbound CDR with caller and agent reversed, one per retry.
+func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	ctx := t.Context()
+	minted := uuid.New().String()
+	callerChan, agentChan := "caller-chan", "agent-chan"
+	// Context "public" is how a call off the carrier arrives, which is what
+	// makes this an INBOUND call rather than an extension calling an extension.
+	vars := map[string]string{"variable_aicc_call_id": minted, "Caller-Context": "public"}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
+
+	// mod_callcenter dials the agent and stamps the waiting caller's channel.
+	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound", map[string]string{
+		"variable_dialed_user":            agentExtension,
+		"variable_cc_side":                "agent",
+		"variable_cc_member_session_uuid": callerChan,
+	}))
+
+	callID, ok := registry.CallForChannel(agentChan)
+	if !ok {
+		t.Fatal("the delivery leg is bound to no call")
+	}
+	callerID, ok := registry.CallForChannel(callerChan)
+	if !ok {
+		t.Fatal("the caller is bound to no call")
+	}
+	if callID != callerID {
+		t.Fatalf("delivery leg is on call %s, want the caller's %s", callID, callerID)
+	}
+
+	var role PartyRole
+	var state PartyState
+	var callType events.CallType
+	if err := registry.Do(callID, func(call *Call) {
+		callType = call.CallType
+		if p := call.PartyByChannel(agentChan); p != nil {
+			role, state = p.Role, p.State
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if role != RoleTarget {
+		t.Errorf("delivery leg role = %q, want TARGET — the agent is being offered the call, not placing it", role)
+	}
+	if state != PartyRinging {
+		t.Errorf("delivery leg state = %q, want RINGING", state)
+	}
+	// The caller's inbound classification is not restated by the leg the
+	// switch dials outward to reach the agent.
+	if callType != events.CallTypeInbound {
+		t.Errorf("CallType = %q, want INBOUND", callType)
+	}
+}

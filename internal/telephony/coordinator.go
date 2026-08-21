@@ -346,10 +346,29 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 	// A leg dialed towards a signed-in agent belongs to that agent's call, not
 	// to a new one: it is the delivery of a call already in a queue.
 	agentID, isAgentLeg := c.agentForLeg(ev)
-	if isAgentLeg && callID == uuid.Nil {
-		// The bridge event will join this leg to the caller's call; until then
-		// it is tracked on its own so its ringing state is not lost.
-		slog.DebugContext(ctx, "agent leg created", "channelId", ev.ChannelID, "agentId", agentID)
+	if callID == uuid.Nil && ev.MemberChannelID != "" {
+		if member, ok := c.registry.CallForChannel(ev.MemberChannelID); ok {
+			// Joining the caller's call now, rather than waiting for the
+			// bridge to merge two calls, is what makes the offer read as an
+			// offer. A delivery leg on a call of its own is that call's first
+			// party, so it comes out ORIGINATOR/DIALING, and the agent is
+			// shown dialling the caller who is in fact ringing them. Worse,
+			// a delivery mod_callcenter cancels before it answers never
+			// bridges at all: the stray call ends unmerged and reaches the
+			// ledger as an outbound CDR with caller and agent reversed, one
+			// per retry.
+			if err := c.registry.BindChannel(ev.ChannelID, member); err != nil {
+				slog.WarnContext(ctx, "cannot bind delivery leg",
+					"channelId", ev.ChannelID, "callId", member, "error", err)
+				return
+			}
+			c.addParty(ctx, member, ev, agentID, isAgentLeg)
+			return
+		}
+		// The caller's own leg is not on the books yet. The bridge will still
+		// merge the two, which is the behaviour this replaced.
+		slog.DebugContext(ctx, "delivery leg outran its caller",
+			"channelId", ev.ChannelID, "memberChannelId", ev.MemberChannelID)
 	}
 
 	if callID == uuid.Nil {
