@@ -422,6 +422,13 @@ func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
 	if cdr.BotSec != 9 {
 		t.Errorf("botSec = %d, want 9 — the bot did speak", cdr.BotSec)
 	}
+	// The journey and the row's own bot_sec are the same number.
+	for _, leg := range cdr.Legs {
+		if leg.Kind == "BOT" && leg.DurationSec != cdr.BotSec {
+			t.Errorf("the BOT leg reads %ds while bot_sec reads %ds; one row, two answers",
+				leg.DurationSec, cdr.BotSec)
+		}
+	}
 }
 
 // A queue that timed the caller out, after the bot had served them, is equally

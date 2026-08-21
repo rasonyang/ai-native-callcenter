@@ -203,15 +203,24 @@ C22 的两条回归测试要改判据。新增测试至少四条:
 
 ## 6. needs-FACT(实施前要落实)
 
-| # | 事实 | 怎么落实 | 卡住什么 |
-|---|---|---|---|
-| F12 | `uuid_phone_event hold` 是否触发 `CHANNEL_UNBRIDGE` | 下一通 hold 通话时抓 ESL 事件流 | 不卡 —— §2.2 的写法两种情况都对,但落实后可简化 |
-| F13 | `variable_billsec` / `variable_answer_stamp` 是否出现在 `CHANNEL_HANGUP_COMPLETE` | 同一通电话抓 hangup 事件的变量表 | 卡 §6 的对账校验;`libfreeswitch.1.dylib` 已证实核心导出这些变量名,但**出现在事件上**未证实 |
-| F14 | 协商转接(consult)期间两条坐席腿是否真会同时 bridge | 待 consult 功能进入验收范围 | 不卡 —— 并集算法两种情况都对 |
+| # | 事实 | 结论 |
+|---|---|---|
+| F12 | `uuid_phone_event hold` 是否触发 `CHANNEL_UNBRIDGE` | **否**(2026-08-21 实证)。事件序列是 `CHANNEL_HOLD` → `CHANNEL_UNHOLD`,中间无 UNBRIDGE;唯一那次 UNBRIDGE 是 bot 腿在转接时离开。owner 的"hold 计入 talk"因此是自然行为,§2.2 那道 `party.State != PartyHeld` 防护是保险而非承重 —— **保留**,因为它把裁决写进了代码,而不是让账目依赖交换机的某个未言明的行为 |
+| F13 | `variable_billsec` / `variable_answer_stamp` 是否出现在 `CHANNEL_HANGUP_COMPLETE` | **是**(2026-08-21 实证)。主叫腿挂断带着 `answer_stamp` / `answer_epoch` / `billsec` / `billmsec` / `duration` / `start_stamp` / `end_stamp` / `progress_media_stamp`。计费数字**有了第二个独立来源** |
+| F14 | 协商转接(consult)期间两条坐席腿是否真会同时 bridge | 待 consult 进入验收范围;不卡 —— 并集算法两种情况都对 |
 
-F13 落实后追加一条低成本的自洽校验:`assemble()` 收尾比对自算的 `bill_sec` 与交换机的
-`billsec`,不一致记 WARN 并把两个值都落进 `tech`。**不改数,只让它说话** —— 这正是
-审查②建议的具体形态,且计费数字有了第二个独立来源。
+F13 已落实,故追加一条低成本的自洽校验(**尚未实现**):`assemble()` 收尾比对自算的 `bill_sec`
+与交换机的 `billsec`,不一致记 WARN 并把两个值都落进 `tech`。**不改数,只让它说话。**
+
+首份实测的差都是 1 秒,且来源清楚:
+
+| | 我们算的 | 交换机的 | 差因 |
+|---|---|---|---|
+| `bill_sec` | 103 | `billsec=104`(`billmsec=103570`) | 我们截断,FS 四舍五入 |
+| `talk_sec` | 80 | 坐席腿 `billsec=81` | 应答到桥接之间的间隙 —— **这正是本次改动要区分的那件事** |
+| `bot_sec` | 14 | bot 腿 `billsec=15` | 同上 |
+
+因此校验的容差应为 **±2 秒**,超出才 WARN。
 
 ## 7. 实施顺序
 

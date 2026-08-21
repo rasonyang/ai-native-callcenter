@@ -306,9 +306,9 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	}
 
 	if isAgentPlaced {
-		cdr.Legs = buildLegs(snap, originator, append(slices.Clone(agentLegs), dialled...))
+		cdr.Legs = buildLegs(snap, originator, append(slices.Clone(agentLegs), dialled...), cdr.BotSec)
 	} else {
-		cdr.Legs = buildLegs(snap, originator, agentLegs)
+		cdr.Legs = buildLegs(snap, originator, agentLegs, cdr.BotSec)
 	}
 	if snap.Bot.Summary != "" {
 		if cdr.UserData == nil {
@@ -421,11 +421,13 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 	return ""
 }
 
-// buildLegs writes the journey for the detail view, in order.
-func buildLegs(snap Snapshot, originator *PartySnapshot, agentLegs []*PartySnapshot) []store.Leg {
+// buildLegs writes the journey for the detail view, in order. botSec is the
+// reconciled figure rather than the raw stamp, so the journey and the row's
+// own bot_sec cannot disagree with each other.
+func buildLegs(snap Snapshot, originator *PartySnapshot, agentLegs []*PartySnapshot, botSec int) []store.Leg {
 	var legs []store.Leg
-	if snap.Bot.Sec > 0 || snap.Bot.FlowID != nil {
-		legs = append(legs, store.Leg{Kind: "BOT", DurationSec: snap.Bot.Sec})
+	if botSec > 0 || snap.Bot.FlowID != nil {
+		legs = append(legs, store.Leg{Kind: "BOT", DurationSec: botSec})
 	}
 	if !snap.Queue.JoinedAt.IsZero() {
 		leg := store.Leg{Kind: "QUEUE", Label: snap.Queue.Name}
