@@ -6,6 +6,8 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 )
 
@@ -514,5 +516,89 @@ func TestNormalizeReadsTheQueueDeliveryStamp(t *testing.T) {
 	}
 	if caller.MemberChannelID != "" {
 		t.Errorf("MemberChannelID = %q on the member's own leg, want empty", caller.MemberChannelID)
+	}
+}
+
+// The dialplan exports the DID to the leg dialled towards the bot, and that
+// leg hangs up the moment a transfer moves the caller on — long before the
+// caller's own leg delivers what the bot actually did. Taking the first
+// non-empty share whole let the DID-only half shut the rest out.
+func TestBotShareMergesAcrossLegs(t *testing.T) {
+	flow := uuid.New()
+
+	// What the bot leg carries when it hangs up at the transfer.
+	got := BotShare{DID: "95001"}
+	// What the caller's leg carries a conversation later.
+	got.Merge(BotShare{
+		Sec: 42, FlowID: &flow, DID: "95001",
+		Summary: "billing question", Reason: "AGENT_REQUESTED",
+	})
+
+	if got.Sec != 42 {
+		t.Errorf("Sec = %d, want 42 — the bot's tally arrives on the caller's leg", got.Sec)
+	}
+	if got.FlowID == nil || *got.FlowID != flow {
+		t.Errorf("FlowID = %v, want %v", got.FlowID, flow)
+	}
+	if got.Summary != "billing question" || got.Reason != "AGENT_REQUESTED" {
+		t.Errorf("summary/reason = %q/%q, want them carried over", got.Summary, got.Reason)
+	}
+	if got.DID != "95001" {
+		t.Errorf("DID = %q, want the value already held", got.DID)
+	}
+
+	// What is already known is never overwritten by a later, emptier leg.
+	got.Merge(BotShare{})
+	if got.Sec != 42 || got.FlowID == nil || got.DID != "95001" {
+		t.Errorf("an empty share erased what was known: %+v", got)
+	}
+}
+
+// mod_callcenter announces the bridge on the leg it dialled to reach the
+// agent, not on the caller's. The facts it carries are the caller's, so the
+// event has to reach the caller's call.
+func TestQueueEventsRouteToTheWaitingCaller(t *testing.T) {
+	const (
+		member = "019ff973-6b32-7557-b7c4-11b3fdb692f0"
+		agent  = "019ff974-1a01-7000-9c3d-2b8e5f0a1c44"
+	)
+	for _, action := range []string{
+		"member-queue-start", "member-queue-end", "agent-offering",
+		"bridge-agent-start", "bridge-agent-end",
+	} {
+		got, ok := Normalize(event(map[string]string{
+			"Event-Name":             "CUSTOM",
+			"Event-Subclass":         "callcenter::info",
+			"Unique-ID":              agent,
+			"CC-Action":              action,
+			"CC-Queue":               "support-en@192.168.31.55",
+			"CC-Agent":               "agent-wei",
+			"CC-Member-Session-UUID": member,
+			"CC-Member-CID-Number":   "18688886669",
+		}))
+		if !ok {
+			t.Fatalf("%s: Normalize rejected the event", action)
+		}
+		if got.ChannelID != member {
+			t.Errorf("%s: ChannelID = %q, want the waiting caller's channel %q",
+				action, got.ChannelID, member)
+		}
+	}
+
+	// An agent's own state change is not about any one caller and keeps the
+	// channel the switch raised it on.
+	got, ok := Normalize(event(map[string]string{
+		"Event-Name":     "CUSTOM",
+		"Event-Subclass": "callcenter::info",
+		"Unique-ID":      agent,
+		"CC-Action":      "agent-state-change",
+		"CC-Agent":       "agent-wei",
+		"CC-Agent-State": "Waiting",
+	}))
+	if !ok {
+		t.Fatal("Normalize rejected an agent state change")
+	}
+	if got.ChannelID != agent {
+		t.Errorf("agent-state-change ChannelID = %q, want %q", got.ChannelID, agent)
 	}
 }

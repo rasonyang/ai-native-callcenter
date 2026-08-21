@@ -221,12 +221,27 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   fsm-edges.md/enums.md 对应行、VC-S9-02 expect 括注随之更新
 - **C7** queue_events 读路径 or 修正 cdr.go:112 注释
 - **C10** 202 契约核对(SYS-2 源头)——**defer 第二期(§补充 S5,第二期需要)**;本期账本 expect 维持 202
-- **C11(new,2026-08-20 T3.1 执行发现,FAIL 立案)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
+- **C11(new,2026-08-20 T3.1 执行发现;2026-08-21 已修并现场复验)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
   通话中探针证明 aicc_bot_sec/aicc_flow_id/aicc_language/aicc_did 四戳都在主叫通道上,挂断后 CDR 仍
   bot_sec=0/flow 空 → 丢失在读回/快照侧(botShare switchevent.go:81 / registry.go:346 / 合并路径);
   同时 queue_wait_sec=joined→left(把通话时长计入等待,真实等待应为 joined→bridged;queue_events 的
   BRIDGED wait_ms 反而正确)——疑似 Queue.BridgedAt 与 Bot 同因丢失。在野样本:上午 95002 三行 +
   本次 01a01ea6-76d1。修复后重跑 VC-S3-03。
+  **根因(2026-08-21 实测,与立案时的猜测不同——读回侧无罪)**:是两条独立缺陷。
+  ①`aicc_inbound.lua:64` 的 `export_vars` 把 `aicc_did` 导出到 bot 腿;转接时 `session.Close()`
+  让 bot 腿**立刻**挂断,带来一份只有 DID 的 share,而 registry 当时的规则是"先到者胜"
+  (`if a.call.Bot.IsZero()`),于是一两分钟后主叫挂断带来的完整 share 被整份丢弃 —— 这正好解释了
+  那个一直没被解释的分界:Lua 导出的 did/language 有值,app 盖的 bot_sec/flow_id/user_data 全空。
+  改为 `BotShare.Merge` 按字段填补。②mod_callcenter 的 `bridge-agent-start` 抛在**坐席腿**上,
+  `normalizeCallcenter` 只在 `ChannelID==""` 时才回落 member 通道,于是 `Queue.BridgedAt` 落到坐席腿
+  所在的 call(修 C20 前那是幽灵 call),merge 时被 `if call.Queue.JoinedAt.IsZero()` 挡掉而整份丢失。
+  改为 member 相关六个 kind 一律按 member 通道路由。
+  **复验(95002→ben)**:bot_sec=17(原恒 0)、flow_id 非空、botSummary/botReason 落库、
+  queue_wait_sec=4 与 `queue_events.BRIDGED wait_ms=4513` 吻合(LEFT 为 14000)、
+  legs 首次出现 `BOT 17s`;两通产 2 行 CDR 无重复,幽灵计数不动。
+  单测三条:`TestBotShareMergesAcrossLegs`、`TestQueueEventsRouteToTheWaitingCaller`、
+  `TestTheBotShareSurvivesTheLegThatHangsUpFirst`(摘掉修复即报线上那三个值)。
+  详见 `docs/verification/artifacts/C11/verdict.md`。**VC-S3-03 待用 95001 重跑收官。**
 - **C13(new,2026-08-20 T3.2 执行发现)** PARTY_RINGING payload 的 extensionNumber/toNumber 携带
   浏览器话机的 WS 注册标识(实测 "g7bih4lv")而非坐席分机号:coordinator.go:412-416 直取
   ev.DestinationNumber,而 :829-848 的 agentForLeg 早已把腿正确归户——归户成功后应以坐席绑定分机
@@ -304,6 +319,13 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   不得被当成派单)、`TestQueueDeliveryLegJoinsTheCallerImmediately`。
   **余留**:派单腿的 CHANNEL_CREATE 若抢在主叫入册之前到达,仍会走旧路(铸 call → bridge 合并),
   该竞态未消除,只是回到修改前的行为。
+- **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
+  用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
+  而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
+  与 aicall recorder 抢同一个 `call_id`,靠 `ON CONFLICT (call_id) DO NOTHING`(ledger.sql:19)
+  静默决胜。近三日两通 contained 呼叫都是 recorder 赢(bot_sec>0),但这是运气不是保证:人工路径
+  的那一行没有 bot 的转写、时长与 containment。真正的交接标记应是 `Bot.Sec > 0`(只有
+  `stampBotShare` 会设)。修复须同时核对 contained 呼叫的 CDR 归属,故未在验收途中动。
 - **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;

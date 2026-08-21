@@ -628,3 +628,60 @@ func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
 		t.Errorf("CallType = %q, want INBOUND", callType)
 	}
 }
+
+// The whole shape of the loss C11 recorded: on a transferred call the bot's
+// leg hangs up first, carrying only the DID the dialplan exported to it, and
+// the caller's leg delivers the bot's actual tally a conversation later. The
+// call must end up with both halves.
+func TestTheBotShareSurvivesTheLegThatHangsUpFirst(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	finished := &finishedCollector{}
+	registry.OnCallFinished = finished.add
+	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
+
+	ctx := t.Context()
+	minted := uuid.New().String()
+	flowID := uuid.New()
+	callerChan, botChan := "caller-chan", "bot-chan"
+	// aicc_inbound.lua exports aicc_call_id, aicc_did and aicc_language, so
+	// the leg dialled towards the bot answers for the DID and nothing else.
+	exported := map[string]string{
+		"variable_aicc_call_id":  minted,
+		"variable_aicc_did":      "95001",
+		"variable_aicc_language": "en",
+		"Caller-Context":         "public",
+	}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", exported))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", exported))
+	c.Handle(ctx, raw("CHANNEL_CREATE", botChan, "outbound", exported))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", botChan, "outbound", exported))
+
+	// The bot transfers the caller and closes its own leg immediately.
+	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", botChan, "outbound", exported))
+
+	// A conversation later the caller hangs up, carrying what the bot stamped.
+	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", callerChan, "inbound",
+		merged(exported, map[string]string{
+			"variable_aicc_bot_sec":     "42",
+			"variable_aicc_flow_id":     flowID.String(),
+			"variable_aicc_bot_summary": "billing question",
+			"variable_aicc_bot_reason":  "AGENT_REQUESTED",
+		})))
+
+	waitFor(t, func() bool { return len(finished.all()) == 1 })
+	snap := finished.all()[0]
+
+	if snap.Bot.Sec != 42 {
+		t.Errorf("Bot.Sec = %d, want 42 — the bot leg's DID-only share shut this out", snap.Bot.Sec)
+	}
+	if snap.Bot.FlowID == nil || *snap.Bot.FlowID != flowID {
+		t.Errorf("Bot.FlowID = %v, want %v", snap.Bot.FlowID, flowID)
+	}
+	if snap.Bot.Summary != "billing question" {
+		t.Errorf("Bot.Summary = %q, want the summary stamped for the agent", snap.Bot.Summary)
+	}
+	if snap.Bot.DID != "95001" {
+		t.Errorf("Bot.DID = %q, want 95001", snap.Bot.DID)
+	}
+}

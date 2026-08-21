@@ -78,6 +78,39 @@ func (b BotShare) IsZero() bool {
 	return b.Sec == 0 && b.FlowID == nil && b.DID == "" && b.Queue == ""
 }
 
+// Merge fills in what this share does not know yet from another leg's copy.
+//
+// The legs of one call know different parts. The dialplan exports the DID to
+// the leg it dials towards the bot, so that leg can answer for the DID and
+// nothing else — and on a transfer it hangs up first, the moment the caller
+// moves on. The bot's own tally, how long it spoke and which flow it ran and
+// what it learned, is stamped on the caller's channel and only arrives a
+// conversation later, when that leg finally hangs up.
+//
+// Taking the first non-empty share whole let the bot leg's DID shut the
+// caller's leg out, and every transferred call reached the ledger with
+// bot_sec 0, no flow and no summary.
+func (b *BotShare) Merge(other BotShare) {
+	if b.Sec == 0 {
+		b.Sec = other.Sec
+	}
+	if b.FlowID == nil {
+		b.FlowID = other.FlowID
+	}
+	if b.DID == "" {
+		b.DID = other.DID
+	}
+	if b.Queue == "" {
+		b.Queue = other.Queue
+	}
+	if b.Summary == "" {
+		b.Summary = other.Summary
+	}
+	if b.Reason == "" {
+		b.Reason = other.Reason
+	}
+}
+
 func botShare(ev *esl.Event) BotShare {
 	var out BotShare
 	if sec, ok := ev.GetInt("variable_aicc_bot_sec"); ok {
@@ -397,6 +430,21 @@ func normalizeCallcenter(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		// agent-add, tier-update and similar administrative echoes of our own
 		// commands carry no state we do not already know.
 		return SwitchEvent{}, false
+	}
+
+	// A queue event about a waiting caller belongs to that caller's call, and
+	// mod_callcenter does not always raise it on their channel: the bridge is
+	// announced on the leg it dialled to reach the agent. Routing by whichever
+	// channel the switch happened to use put the bridge time on the agent's
+	// leg, where the caller's ledger never saw it, and queue_wait_sec fell
+	// back to the moment the caller left the queue — counting the whole
+	// conversation as time spent waiting.
+	switch out.Kind {
+	case KindQueueMemberJoined, KindQueueMemberLeft, KindQueueAgentOffered,
+		KindQueueBridgeStart, KindQueueBridgeEnd, KindQueueBridgeFailed:
+		if out.MemberChannelID != "" {
+			out.ChannelID = out.MemberChannelID
+		}
 	}
 	return out, true
 }

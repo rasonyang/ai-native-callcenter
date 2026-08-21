@@ -341,11 +341,11 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 	case KindChannelHangup:
 		party.ReleaseCause = ev.HangupCause
 		party.TransferredAway = ev.TransferredAway
-		// The AI leg's share arrives as channel variables on the caller's
-		// hangup; any leg of the call may carry them, the first wins.
-		if a.call.Bot.IsZero() && !ev.Bot.IsZero() {
-			a.call.Bot = ev.Bot
-		}
+		// The AI leg's share arrives as channel variables on hangup, and the
+		// legs carry different parts of it: each fills in what is still
+		// missing rather than claiming the whole share for whichever hung up
+		// first.
+		a.call.Bot.Merge(ev.Bot)
 		a.transition(party, TriggerRelease, ev, events.TypePartyReleased)
 		if a.call.Finish(ev.OccurredAt) {
 			a.publish(events.TypeCallCDR, nil, map[string]any{

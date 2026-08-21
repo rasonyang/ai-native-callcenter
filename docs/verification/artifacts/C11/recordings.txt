@@ -1,0 +1,5 @@
+### T3.6 recordings (primary_agent = ben)
+ERROR:  column r.started_at does not exist
+LINE 1: ... r.id as recording_id, r.call_id, r.duration_sec, r.started_...
+                                                             ^
+HINT:  Perhaps you meant to reference the column "c.started_at".

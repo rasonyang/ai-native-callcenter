@@ -525,9 +525,7 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 		if call.Queue.JoinedAt.IsZero() && !movedQueue.JoinedAt.IsZero() {
 			call.Queue = movedQueue
 		}
-		if call.Bot.IsZero() && !movedBot.IsZero() {
-			call.Bot = movedBot
-		}
+		call.Bot.Merge(movedBot)
 		// One conversation has one originator: the earliest inbound leg.
 		// Both provisional calls named their own first leg the originator,
 		// and keeping two makes the CDR's from-number a coin toss.

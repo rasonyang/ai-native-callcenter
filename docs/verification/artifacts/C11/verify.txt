@@ -1,0 +1,33 @@
+### is 7d8e39b9 ben?
+ben|7d8e39b9-98d6-4ac9-889a-72bf7aca4699
+### legs (BOT leg must be present)
+[
+    {
+        "kind": "BOT",
+        "label": "",
+        "durationSec": 17
+    },
+    {
+        "kind": "QUEUE",
+        "label": "support-zh",
+        "durationSec": 4
+    },
+    {
+        "kind": "AGENT",
+        "label": "1007",
+        "durationSec": 10
+    }
+]
+### queue_events vs queue_wait_sec=4
+  event  | wait_ms 
+---------+---------
+ JOINED  |       0
+ OFFERED |       0
+ BRIDGED |    4513
+ LEFT    |   14000
+(4 rows)
+
+### counters vs baseline (cdr 6184 / rec 25 / phantom 47)
+cdr_total=6186
+recordings_total=27
+phantom_outbound=47
