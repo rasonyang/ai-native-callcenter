@@ -1,0 +1,105 @@
+########## C32 重测(aicc context 改动之后)—— 10:22:46Z ##########
+场景与首次诊断相同:wei(1008,浏览器 SIP.js)经 API 发起 click-to-dial → 1002
+{"callId":"01a028fe-8d36-722e-b348-fbfdda3356d6"}
+
+http=201
+[10:22:49Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_CONSUME_MEDIA 
+[10:22:52Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:22:55Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:22:58Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:01Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:04Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:07Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:10Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:13Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+[10:23:16Z]  | sofia/internal/fugn18u1@fir5trtiabbu.invalid/CS_EXECUTE sofia/internal/1002@192.168.31.55:53300/CS_EXCHANGE_MEDIA 
+--- owner 确认已接。应用侧现场 ---
+[{"callType":"INTERNAL","state":"RUNNING","parties":[{"role":"ORIGINATOR","state":"TALKING","agentId":"807b2164","number":"1008","otherNumber":"1002"},{"role":"TARGET","state":"TALKING","agentId":"7d8e39b9","number":"1002","otherNumber":"1008"}]}]
+--- 关键:transfer 这次到底调没调 ---
+time=2026-08-22T18:22:46.071+08:00 level=INFO msg="click-to-dial placed" callId=01a028fe-8d36-722e-b348-fbfdda3356d6 agentExtension=1008 destination=1002
+  transfer failed 计数 = 0
+--- 交换机:那条腿走了哪个 context、印记是什么 ---
+  context          = aicc
+  aicc_call_type   = INTERNAL
+  aicc_extension   = 1008
+--- FS 日志里这次的 transfer ---
+01a02877-de29-74fe-9421-abec2e4f4275 2026-08-22 15:55:39.433046 100.00% [NOTICE] switch_ivr.c:2303 Transfer sofia/internal/1002@192.168.31.55 to XML[1
+0c60cfca-94e0-4d15-9598-bcbedabfb43a 2026-08-22 18:22:47.213909 100.00% [NOTICE] switch_ivr.c:2303 Transfer sofia/internal/fugn18u1@fir5trtiabbu.inval
+--- VC-S14-04 的能力限制断言(INTERNAL 应拒 hold/retrieve/transfer,mute 应放行)CALL=01a028fe-8d36-722e-b348-fbfdda3356d6 ---
+  hold      {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  retrieve  {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  transfer  {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  mute      http=202
+  unmute    http=202
+  hold      {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  retrieve  {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  transfer  {"error":{"code":"OPERATION_NOT_ALLOWED_FOR_CALL_TYPE","message":"this is not available on an internal call"}}
+ http=409
+  mute      http=202
+  unmute    http=202
+--- 等挂断并收 CDR(轮询)---
+type|status|from->to|ring/talk/bill/total|agents|legs
+INTERNAL|ANSWERED|1008->1002|ring=2 talk=245 bill=0 total=249|agents=2|legs=[{"kind": "AGENT", "label": "1002", "durationSec": 245}]
+--- 幽灵核对(基线 6259)---
+CDR 总数=6260
+10:22:46 INTERNAL ANSWERED 1008->1002
+########## 外线一型:wei(1008)→ 18688886669 —— 10:30:14Z ##########
+cdr_baseline=6260
+{"callId":"01a02905-63ca-7ba4-8f25-86c8eb0641ca"}
+
+http=201
+CALL2=01a02905-63ca-7ba4-8f25-86c8eb0641ca
+[10:30:17Z]  | 
+[10:30:20Z]  | 
+[10:30:23Z]  | 
+[10:30:26Z]  | 
+[10:30:29Z]  | 
+[10:30:32Z]  | 
+[10:30:35Z]  | 
+[10:30:38Z]  | 
+--- 应用日志 ---
+time=2026-08-22T18:22:46.071+08:00 level=INFO msg="click-to-dial placed" callId=01a028fe-8d36-722e-b348-fbfdda3356d6 agentExtension=1008 destination=1002
+time=2026-08-22T18:30:14.220+08:00 level=INFO msg="click-to-dial placed" callId=01a02905-63ca-7ba4-8f25-86c8eb0641ca agentExtension=1008 destination=18688886669
+--- FS 日志 18:30 前后 ---
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:932 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) State 
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:607 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) State 
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_session.c:1748 Session 3 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) L
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [NOTICE] switch_core_session.c:1766 Session 3 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) 
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [NOTICE] switch_core_session.c:1770 Close Channel sofia/internal/fugn18u1@fir5trtiabbu.invali
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:735 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) Runnin
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:745 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) State 
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] mod_sofia.c:380 sofia/internal/fugn18u1@fir5trtiabbu.invalid SOFIA DESTROY
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:175 sofia/internal/fugn18u1@fir5trtiabbu.invalid Standard
+186bb3c8-8d50-440f-870b-6ba5ef67e3c9 2026-08-22 18:30:15.363909 100.00% [DEBUG] switch_core_state_machine.c:745 (sofia/internal/fugn18u1@fir5trtiabbu.invalid) State 
+2026-08-22 18:30:15.393909 100.00% [DEBUG] mod_callcenter.c:1180 Updated Agent agent-wei set status = On Break
+2026-08-22 18:30:42.693909 100.00% [DEBUG] sofia.c:6560 Ping to sip user '1002@192.168.31.55' succeeded with code 200 - count 3, state Reachable
+--- aicc context 里有 1868888666x 的规则吗 ---
+-rw-r--r--@ 1 rasonyang  staff  866 Aug 22 15:25 /usr/local/freeswitch/conf/dialplan/aicc_pstn_sim.xml
+3
+--- 外线一型第二次尝试(第一次 NO_ROUTE_DESTINATION,手工 originate 两次均成功→疑偶发)---
+cdr_baseline=6263
+{"callId":"01a02911-fed5-7080-9024-c51d49d8f6a5"}
+
+http=201
+[10:44:03Z] 
+[10:44:06Z] 
+[10:44:09Z] 
+[10:44:12Z] 
+[10:44:15Z] 
+[10:44:18Z] 
+[10:44:21Z] 
+{"callId":"01a02911-fed5-7080-9024-c51d49d8f6a5"}
+
+http=201
+[10:44:03Z] 
+[10:44:06Z] 
+[10:44:09Z] 
+[10:44:12Z] 
+[10:44:15Z] 
+[10:44:18Z] 
+[10:44:21Z] 
