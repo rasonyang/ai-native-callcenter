@@ -1,0 +1,116 @@
+########## 阶段 A:只有第一通(support-en)在等待 —— 01:49:44Z ##########
+--- switch members ---
++OK
+
+--- wei (配员 en+zh) ---
+[{"queueName":"support-en","fromNumber":"18688886669"}]
+--- ben (只配员 zh) ---
+[]
+--- supervisor ---
+[{"queueName":"support-en","fromNumber":"18688886669"}]
+--- members(带域名)---
+cols=17
+instance_id|cid_number|cid_name
+single_box|18688886669|18688886669
+||
+--- members(带域名)---
+cols=17
+instance_id|cid_number|cid_name
+single_box|18688886669|18688886669
+||
+########## 阶段 B:两通同时等待 —— 01:51:03Z ##########
+--- 1. tier list (switch) ---
+agent-ben|support-zh@192.168.31.55
+agent-wei|support-en@192.168.31.55
+agent-wei|support-zh@192.168.31.55
+--- 1b. queue_agents (DB — 端点真正查的源) ---
+ben|support-zh
+wei|support-en
+wei|support-zh
+--- 2. wei (配员 en+zh) ---
+[{"queueName":"support-zh","fromNumber":"18688886669"}]
+--- 3. ben (只配员 zh) ---
+[{"queueName":"support-zh","fromNumber":"18688886669"}]
+--- 4. supervisor ---
+[{"queueName":"support-zh","fromNumber":"18688886669"}]
+--- switch members 两队列 ---
+support-en: 
+support-zh: single_box state=0 
+--- 现存通道 ---
+
+2 total.
+
+--- 第一通去哪了:最近 CDR ---
+01a02728-50e8-72ec-8ab5-ff2a24e00f3e|95001|t|NO_ANSWER|ABANDONED_WAITING|22|38|NORMAL_CLEARING|2026-08-22 01:49:08.723548+00
+--- app 日志:队列进出 ---
+time=2026-08-22T08:45:08.907+08:00 level=INFO msg="queue staffing reconciled" agents=4
+time=2026-08-22T09:49:23.692+08:00 level=INFO msg="transferring the caller" callId=81bbf25c-186e-1240-12be-13b7ded14ed8 aiccCallId=01a02728-50e8-72ec-8ab5-ff2a24e00f3e di
+time=2026-08-22T09:50:23.950+08:00 level=INFO msg="transferring the caller" callId=a6a49632-186e-1240-12be-13b7ded14ed8 aiccCallId=01a02729-42cb-78cd-98e0-dc0ee0f75013 di
+[{"queueName":"support-zh","fromNumber":"18688886669"}]
+--- switch members 两队列 ---
+support-en: 
+support-zh: single_box state=0 
+--- 现存通道 ---
+
+2 total.
+
+--- 第一通去哪了:最近 CDR ---
+01a02728-50e8-72ec-8ab5-ff2a24e00f3e|95001|t|NO_ANSWER|ABANDONED_WAITING|22|38|NORMAL_CLEARING|2026-08-22 01:49:08.723548+00
+--- app 日志:队列进出 ---
+time=2026-08-22T08:45:08.907+08:00 level=INFO msg="queue staffing reconciled" agents=4
+time=2026-08-22T09:49:23.692+08:00 level=INFO msg="transferring the caller" callId=81bbf25c-186e-1240-12be-13b7ded14ed8 aiccCallId=01a02728-50e8-72ec-8ab5-ff2a24e00f3e di
+time=2026-08-22T09:50:23.950+08:00 level=INFO msg="transferring the caller" callId=a6a49632-186e-1240-12be-13b7ded14ed8 aiccCallId=01a02729-42cb-78cd-98e0-dc0ee0f75013 di
+########## 阶段 C:两通【真正同时】等待 —— 01:55:36Z ##########
+--- 1. tier list (switch) ---
+agent-ben|support-zh@192.168.31.55
+agent-wei|support-en@192.168.31.55
+agent-wei|support-zh@192.168.31.55
+--- 1b. queue_agents (DB — 端点真正查的源) ---
+ben|support-zh
+wei|support-en
+wei|support-zh
+--- switch members 两队列 ---
+support-en : single_box 
+support-zh : single_box 
+--- 2. wei (配员 en+zh) ---
+[{"queueName":"support-en","fromNumber":"18688886669"},{"queueName":"support-zh","fromNumber":"18688886660"}]
+--- 3. ben (只配员 zh) ---
+[{"queueName":"support-zh","fromNumber":"18688886660"}]
+--- 4. supervisor ---
+[{"queueName":"support-en","fromNumber":"18688886669"},{"queueName":"support-zh","fromNumber":"18688886660"}]
+--- 补强:三视角对 support-zh 那条的 callId 是否同一个 ---
+wei  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+ben  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+sup  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+--- 两位等待者是不同的呼叫(不是一行渲染两次)---
+[{"queueName":"support-en","callId":"01a0272c-fea7-7e22-9e5e-2ffeacbbd1aa","fromNumber":"18688886669"},{"queueName":"support-zh","callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660"}]
+--- 通道数 ---
+
+--- 补强:三视角对 support-zh 那条的 callId 是否同一个 ---
+wei  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+ben  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+sup  [{"callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660","queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f"}]
+--- 两位等待者是不同的呼叫(不是一行渲染两次)---
+[{"queueName":"support-en","callId":"01a0272c-fea7-7e22-9e5e-2ffeacbbd1aa","fromNumber":"18688886669"},{"queueName":"support-zh","callId":"01a0272d-50ed-73e0-9102-0189de94c4d0","fromNumber":"18688886660"}]
+--- 通道数 ---
+
+########## 收尾:两通已挂断 —— 01:57:42Z ##########
+--- 等待名单应清空 ---
+0
+--- 通道 ---
+
+--- 两通的 CDR ---
+01a0272c-fea7-7e22-9e5e-2ffeacbbd1aa|95001|NO_ANSWER|ABANDONED_WAITING|13|145|NORMAL_CLEARING
+01a0272d-50ed-73e0-9102-0189de94c4d0|95002|NO_ANSWER|ABANDONED_WAITING|15|123|NORMAL_CLEARING
+--- 幽灵行核对(本次窗口内不该有多余行)---
+2|18688886660->95002 , 18688886669->95001
+########## 收尾:两通已挂断 —— 01:57:42Z ##########
+--- 等待名单应清空 ---
+0
+--- 通道 ---
+
+--- 两通的 CDR ---
+01a0272c-fea7-7e22-9e5e-2ffeacbbd1aa|95001|NO_ANSWER|ABANDONED_WAITING|13|145|NORMAL_CLEARING
+01a0272d-50ed-73e0-9102-0189de94c4d0|95002|NO_ANSWER|ABANDONED_WAITING|15|123|NORMAL_CLEARING
+--- 幽灵行核对(本次窗口内不该有多余行)---
+2|18688886660->95002 , 18688886669->95001

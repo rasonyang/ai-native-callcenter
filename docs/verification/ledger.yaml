@@ -978,7 +978,7 @@ cases:
       wei 只看到一条,于是他配员的另一条队列在他屏幕上永远是空的,
       电话在那里排队而唯一能接的人不知道。
     evidence_dir: docs/verification/artifacts/VC-S13-01/
-    status: TODO
+    status: PASS  # 2026-08-22 执行(两路真正同时等待):wei 见 support-en+support-zh 各 1、ben 恰好 1 条只见 support-zh、主管见 2 条;三视角对 zh 那条的 callId/queueId/fromNumber 完全相同。两主叫号码不同(…669/…660),排除"一行渲染两次"。方法论:先挂再拨的两段单等待者快照证明不了 WaitingCalls 的多队列并集——必须同时在场。顺带复验 C22(两通 NO_ANSWER/ABANDONED_WAITING、bot_sec 保留)与零幽灵行
     refs: ["internal/httpapi/call_handlers.go:52", "internal/httpapi/call_handlers.go:72", "internal/telephony/waiting.go:168", "internal/httpapi/agent_handlers.go:27"]
     note: "本用例是 C12 修复后的配套:主管看全部、坐席看自己的,两条线要同时成立才算对。
       ben 现只在 support-zh 的 tier 上(2026-08-21 实测),不必额外配置"
