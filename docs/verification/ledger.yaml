@@ -950,18 +950,26 @@ cases:
   - id: VC-S13-01
     scenario: S13
     layer: api
-    precondition: "wei 配员 support-en 与 support-zh;ben **只**配员 support-zh(实测 tier 现状即如此);
-      两人均 READY;两条队列各有一名等待者"
+    precondition: "wei 配员 support-en 与 support-zh;ben **只**配员 support-zh(实测现状即如此);
+      两条队列**各有一名等待者,且必须同时在场**(见 steps)。
+      坐席可用性与本端点无关,**建议两人都置 On Break**:ListQueuesForAgent(telephony.sql:75-80)
+      只 JOIN queue_agents,不含任何可用性条件;留 READY 只会引入竞态 —— 派单腿响话机,
+      一旦接起主叫 bridge 掉就离开等待名单(waiting.go 的 QueueBridgeStart),取证窗口当场消失
+      (2026-08-22 实测)。队列 max_wait_time=300,窗口 5 分钟"
     steps:
       - who: agent
-        do: "确认两人的配员差异:执行 collect 第 1 条"
+        do: "确认两人的配员差异:执行 collect 第 1、2 条(第 1 条 DB 为准,第 2 条 switch 为旁证)"
       - who: human
-        do: "拨 95001(→support-en)听到保持音后【不要挂断】;
-          用第二路主叫拨 95002(→support-zh)同样保持等待。
-          若只有一路主叫,则先后拨两次、第一次不挂断"
+        do: "拨 95001(→support-en),对 bot 说转人工,听到保持音后【不要挂断】;
+          **另一路主叫**拨 95002(→support-zh)同样转人工并保持。**两路必须同时在保持音上**。
+          原文退路'若只有一路主叫,则先后拨两次、第一次不挂断'**做不到**,已删 ——
+          一路主叫无法同时保持两通;先挂再拨得到的是两段单等待者快照,证明不了 WaitingCalls
+          对**多个 queueID 的并集**(只返回列表首个 id 的实现在两段快照里都表现正确)。
+          本机第二路可用**分机 1007**(已注册 sip:1007@192.168.31.55:53300,不绑任何坐席)"
       - who: agent
         do: "执行其余 collect,判定三种视角各自看到什么"
     collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select u.username||'|'||q.name from queue_agents qa join agents a on a.id=qa.agent_id join users u on u.id=a.user_id join queues q on q.id=qa.queue_id where u.username in ('wei','ben') order by 1\""
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1&&NF>=5{print $2\"|\"$1}' | sort"
       - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq -c '[.items[]|{queueName, fromNumber}] | sort_by(.queueName)'"
       - "curl -s -b /tmp/vc-ben.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq -c '[.items[]|{queueName, fromNumber}] | sort_by(.queueName)'"
@@ -972,6 +980,10 @@ cases:
         (call_handlers.go:72 以 QueuesForAgent 取队列,再交给 WaitingCalls 过滤)
       supervisor:两条都在(C12 修复后走 AllWaitingCalls,call_handlers.go 的 RoleSupervisor 分支)
       三者对 support-zh 那一条的 fromNumber 一致 —— 同一个等待者,三种视角
+        (更强的形式:callId 与 queueId 也应相同,2026-08-22 实测如此)
+      **取证源**:第 1 条(DB queue_agents)是端点真正查的那个;第 2 条(switch tier list)只是旁证。
+        两者会不一致 —— 2026-08-22 实测 DB 有 amy/chen 而 switch 没有(LOGGED_OUT 的坐席
+        mod_callcenter 不加载,与 C1 同机制)。判定以 DB 为准
     failure_looks_like: |
       ben 也看到了 support-en 的等待者 —— 过滤失效,坐席被展示了自己接不到的电话:
       他会去点、去等,而队列永远不会把那通派给他。反向的失败同样静默:
@@ -987,6 +999,9 @@ cases:
     scenario: S13
     layer: api
     precondition: "库中存在两通有录音的已收官呼叫,主责坐席分别是 ben 与 wei,且互不参与对方那通。
+      ⚠ **'互不参与'必须自己核,不能顺手取最近一通**:2026-08-22 实测 wei 最近的录音呼叫
+      01a023ec-… 的 agent_ids 是 {ben, wei}(一次转接),ben 本就正当在场 —— 拿它做越权靶子,
+      403 反而是错判、200 也什么都证明不了。取靶子须带『对方不在 agent_ids 里』的过滤。
       2026-08-21 实测可用靶子:ben 的 01a02275-…(recordingId 01a02276-2a62-…)。
       wei 的靶子取其最近一通 has_recording=t 的 CDR"
     steps:
@@ -996,14 +1011,18 @@ cases:
         do: "执行其余 collect,判定列表归属、可播、越权拒绝三件事"
     collect:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select c.call_id, u.username, c.has_recording, r.id from cdrs c join agents a on a.id=c.primary_agent_id join users u on u.id=a.user_id join recordings r on r.call_id=c.call_id where c.has_recording order by c.started_at desc limit 6\""
-      - "curl -s -b /tmp/vc-ben.jar 'http://127.0.0.1:8080/api/v1/cdrs/mine?limit=50' | jq -c '{total, mine_only: ([.items[].callId] | length)}'"
+      - "curl -s -b /tmp/vc-ben.jar 'http://127.0.0.1:8080/api/v1/cdrs/mine?limit=50' | jq -r '.items[].callId' | sort > /tmp/vc-ben-api.txt; wc -l < /tmp/vc-ben-api.txt"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select c.call_id from cdrs c left join agents a0 on a0.id=c.primary_agent_id left join users u0 on u0.id=a0.user_id where coalesce(u0.username,'')='ben' or exists (select 1 from unnest(c.agent_ids) aid join agents a on a.id=aid join users u on u.id=a.user_id where u.username='ben') order by c.started_at desc limit 50\" | sort > /tmp/vc-ben-db.txt; diff /tmp/vc-ben-api.txt /tmp/vc-ben-db.txt && echo 'API 与 DB 归属集合一致'"
       - "BEN_CALL=<ben 的 call_id>; curl -s -b /tmp/vc-ben.jar 'http://127.0.0.1:8080/api/v1/cdrs/mine?limit=50' | jq -c --arg c \"$BEN_CALL\" '[.items[]|select(.callId==$c)|{callId,hasRecording}]'"
       - "WEI_CALL=<wei 的 call_id>; curl -s -b /tmp/vc-ben.jar 'http://127.0.0.1:8080/api/v1/cdrs/mine?limit=50' | jq -c --arg c \"$WEI_CALL\" '[.items[]|select(.callId==$c)] | length'"
       - "BEN_REC=<ben 的 recording_id>; curl -s -o /tmp/vc-ben-audio.wav -w 'ben→自己 http=%{http_code} bytes=%{size_download} type=%{content_type}\\n' -b /tmp/vc-ben.jar http://127.0.0.1:8080/api/v1/recordings/$BEN_REC/audio"
       - "WEI_REC=<wei 的 recording_id>; curl -s -b /tmp/vc-ben.jar http://127.0.0.1:8080/api/v1/recordings/$WEI_REC/audio -w '\\nben→别人 http=%{http_code}\\n' | head -c 200"
       - "WEI_REC=<wei 的 recording_id>; curl -s -o /dev/null -w 'sup→任意 http=%{http_code}\\n' -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/recordings/$WEI_REC/audio"
     expect: |
-      /cdrs/mine(ben):**含**他自己那通,**不含** wei 那通(第 4 条长度=0)
+      /cdrs/mine(ben)的集合**逐一等于** DB 按 agentWasOnCall 算出的集合(第 2–3 条 diff 无输出)
+        —— 原写法 `{total, mine_only: (…|length)}` 是**条目数对条目数**,恒等成立,什么都不检查
+        (2026-08-22 修订)。实测 10 行全中,其中 6 行 primary 是 wei:转接后 ben 在 agent_ids 里,按规则本就该在
+      /cdrs/mine(ben):**含**他自己那通,**不含** wei 那通(第 5 条长度=0)
         —— 归属线是 agentWasOnCall:primary 或在 agent_ids 里(recording_handlers.go:55-61)
       ben 取自己那通的音频:http=200,bytes>0,content_type 为 audio/*
       ben 取 wei 那通的音频:**http=403**,body 含 "not one of your calls"
