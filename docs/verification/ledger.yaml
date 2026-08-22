@@ -1042,21 +1042,34 @@ cases:
   - id: VC-S13-03
     scenario: S13
     layer: api
-    precondition: "wei 今天至少接过 2 通并各自完成 ACW(阶段 3–5 的执行已自然满足);
-      本用例只读,不产生新呼叫"
+    precondition: "存在**至少一个有数据的日窗**,其中 wei 主责过 ≥2 通并完成 ACW;只读,不产生新呼叫。
+      窗口由 collect 显式给出,**两侧必须用同一组边界** —— 原写法一边用端点默认(本地午夜),
+      一边用 psql 的 date_trunc('day', now())(DB 时区实为 Etc/UTC),**两个『当天』差 8 小时**,
+      本地 00:00–08:00 接的电话会一边算一边不算(2026-08-22 实测)。
+      原写『wei **今天**至少接过 2 通』亦是空窗陷阱:非执行日跑会四项全 0 而『逐一相等』(同 VC-S13-04)"
     steps:
       - who: agent
         do: "取汇总与明细两侧,逐项对账:执行全部 collect"
     collect:
-      - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/reports/me | jq -c ."
-      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*), coalesce(sum(talk_sec),0) from cdrs c join agents a on a.id=c.primary_agent_id join users u on u.id=a.user_id where u.username='wei' and c.started_at >= date_trunc('day', now())\""
-      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*), count(*) filter (where is_confirmed) from wrap_ups w join agents a on a.id=w.agent_id join users u on u.id=a.user_id where u.username='wei' and w.created_at >= date_trunc('day', now())\""
+      - "FROM=2026-08-21T00:00:00+08:00; TO=2026-08-22T00:00:00+08:00; echo \"$FROM $TO\" | tee /tmp/vc-myday-window.txt   # 挑一个 wei 主责过 ≥2 通的日窗;两侧共用"
+      - "read FROM TO < /tmp/vc-myday-window.txt; curl -s -b /tmp/vc-wei.jar --get --data-urlencode \"from=$FROM\" --data-urlencode \"to=$TO\" http://127.0.0.1:8080/api/v1/reports/me | jq -c '{callsHandled,talkSec,wrapUpsOpened,wrapUpsConfirmed}'"
+      - "read FROM TO < /tmp/vc-myday-window.txt; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*), coalesce(sum(talk_sec),0) from cdrs c join agents a on a.id=c.primary_agent_id join users u on u.id=a.user_id where u.username='wei' and c.started_at >= '$FROM' and c.started_at < '$TO'\""
+      - "read FROM TO < /tmp/vc-myday-window.txt; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select coalesce(sum(talk_sec),0) as talk, coalesce(sum(total_sec),0) as total from cdrs c join agents a on a.id=c.primary_agent_id join users u on u.id=a.user_id where u.username='wei' and c.started_at >= '$FROM' and c.started_at < '$TO'\"   # 反例对照:talkSec 若误用 total_sec 会是右边那个数"
+      - "read FROM TO < /tmp/vc-myday-window.txt; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*), count(*) filter (where is_confirmed) from wrap_ups w join agents a on a.id=w.agent_id join users u on u.id=a.user_id where u.username='wei' and w.created_at >= '$FROM' and w.created_at < '$TO'\""
     expect: |
-      my-day 的 callsHandled 与 talkSec 等于第 2 条的两个数
+      my-day(第 2 条)的 callsHandled 与 talkSec 等于第 3 条的两个数
         —— 同一口径:primary_agent_id 且 started_at 落在当天(ledger.sql:220-226 的 handled CTE)
-      my-day 的 wrapUpsOpened 与 wrapUpsConfirmed 等于第 3 条的两个数
+      my-day(第 2 条)的 wrapUpsOpened 与 wrapUpsConfirmed 等于第 5 条的两个数
         —— filings CTE 按 created_at 计,且 confirmed 用 FILTER (WHERE is_confirmed)(ledger.sql:235-241)
       三个数都 ≥ 阶段 3–5 实际执行过的通话数(不做上界断言:环境里还有 seed 与他人的行)
+      **闸门**:callsHandled 必须 **> 0**,否则窗口里没数据,四项全 0 的"相等"毫无信息量,判 **SKIP**
+      **两侧边界必须同源**:端点默认是**进程本地**午夜、DB 的 now() 是 **Etc/UTC** —— 差 8 小时。
+        collect 已改为显式传 from/to 并让 psql 用同一对值;不要退回任何一侧的默认
+      **反例对照(第 4 条)**:talkSec 应等于 sum(talk_sec) 而非 sum(total_sec)。
+        2026-08-21 窗口实测两者 888 vs 1190(差 34%),故本断言确有分辨力
+      **wrapUpsOpened 可以大于 callsHandled,不是缺陷**:filings 按 wrap_ups.agent_id(谁开的 ACW)、
+        handled 按 cdrs.primary_agent_id(谁是主责);转接后坐席开了 ACW 而主责归他人。
+        2026-08-21 实测 9 vs 6,差额 = 2 条主责为 ben + 1 条无主责,逐行查过无重复
     failure_looks_like: |
       汇总比明细多或少,而两边都不报错 —— 坐席首页的数字与他自己的通话列表对不上,
       却没有任何提示说明哪个是对的。最隐蔽的一种:talkSec 用了 sum(total_sec) 而不是 sum(talk_sec),
@@ -1168,17 +1181,22 @@ cases:
       - who: agent
         do: "执行全部 collect:建 → 列 → 按号码查 → 改 → 删 → 确认已删"
     collect:
-      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/contacts -d '{\"displayName\":\"VC Probe\",\"phoneNumber\":\"18600000001\",\"company\":\"NovaNet\",\"notes\":\"created by VC-S13-06\"}' -w '\\nhttp=%{http_code}\\n'"
-      - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?q=18600000001' | jq -c '[.items[]|{contactId,displayName,phoneNumber}]'"
-      - "CID=<上一条的 contactId>; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/contacts/$CID -d '{\"displayName\":\"VC Probe Renamed\",\"phoneNumber\":\"18600000001\",\"company\":\"NovaNet\",\"notes\":\"renamed\"}' -w '\\nhttp=%{http_code}\\n' | jq -c '{displayName}'"
-      - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?q=Renamed' | jq -c '[.items[]|.displayName]'"
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/contacts -d '{\"name\":\"VC Probe\",\"phoneNumber\":\"18600000001\",\"company\":\"NovaNet\",\"notes\":\"created by VC-S13-06\"}' -w '\\nhttp=%{http_code}\\n'"
+      - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?q=18600000001' | jq -c '[.items[]|{id,name,phoneNumber}]'"
+      - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?phoneNumber=18600000001' | jq -c '[.items[]|{id,name}]'"
+      - "CID=<第 1 条响应里的 id>; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/contacts/$CID -d '{\"name\":\"VC Probe Renamed\",\"phoneNumber\":\"18600000001\",\"company\":\"NovaNet\",\"notes\":\"renamed\"}' -o /tmp/vc-contact-put.json -w 'put http=%{http_code}\\n'; jq -c '{name,company,notes}' /tmp/vc-contact-put.json"
+      - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?q=Renamed' | jq -c '[.items[]|.name]'"
       - "CID=<同上>; curl -s -o /dev/null -w 'delete http=%{http_code}\\n' -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/contacts/$CID"
       - "curl -s -b /tmp/vc-wei.jar 'http://127.0.0.1:8080/api/v1/contacts?q=18600000001' | jq -c '.items | length'"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from contacts where phone_number='18600000001'\""
     expect: |
-      建:201,响应含 contactId
-      列/查:按号码能查到,displayName 与写入一致
-      改:200,displayName 变为 "VC Probe Renamed",且按新名字能查到
-      删:204(或 200);删后按号码查 items 长度=0
+      建:201,响应含 **id**(不是 contactId —— Contact schema 的主键字段名就叫 id)
+      列/查:**按号码**能查到(q 跨字段匹配,不是只认名字),**name** 与写入一致
+        —— 请求体字段是 name 而非 displayName(ContactWrite 仅 phoneNumber 必填,另有 email/tags)
+        2026-08-22 修订:草案这两个名字都猜错了;按 note 的规矩改的是 collect,expect 实质未动
+      改:200,name 变为 "VC Probe Renamed",且按新名字能查到
+      删:**204**(契约只列 204);删后按号码查 items 长度=0,
+        且**直接查库** phone_number 行数=0 —— 证伪"软删 + 列表过滤"那一路,只看列表是不够的
       全程使用**坐席**会话——联系人是坐席通话中要用的东西,不应要求管理员权限
     failure_looks_like: |
       建返回 201 而按号码查不到 —— 查询走的是另一个字段(例如只匹配 displayName),
@@ -1187,7 +1205,9 @@ cases:
     evidence_dir: docs/verification/artifacts/VC-S13-06/
     status: PASS  # 2026-08-22 执行:建 201→按号码查到→改名 200 并可按新名查→删 204→查 0。真删非软删(直接查库 count=0,contacts 总数回到基线 1)。全程坐席会话。note 点名的三处已核契约:字段是 name/id 不是草案猜的 displayName/contactId(已改 collect)、q 有效且另有 phoneNumber、DELETE 是 204
     refs: ["internal/httpapi/contact_handlers.go:31", "docs/verification/coverage/tables.md"]
-    note: "【起草时未核三处,执行前须查】①POST/PUT 的请求体字段名(本草案按 displayName/phoneNumber/
+    note: "【三处已于 2026-08-22 执行前核过契约,结论已写进 expect:字段是 name、主键是 id、
+      查询 q 有效(另有更精确的 phoneNumber)、DELETE 是 204。以下为起草原文,留档】
+      ①POST/PUT 的请求体字段名(本草案按 displayName/phoneNumber/
       company/notes 书写,须以 docs/openapi.json 的 Contact schema 为准);②查询参数是否为 q;
       ③DELETE 的成功码是 204 还是 200。三处以契约为准,不符则改 collect 而非改 expect"
 
