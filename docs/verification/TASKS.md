@@ -9,7 +9,7 @@
 > 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
 > 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 12 项、余 14 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31。
+> **C 系列已修 12 项、余 15 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31 / C32。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -497,6 +497,12 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   次要候选(若 context 隔离不可行):给拨号方案后继腿一个指回原呼叫的印记,同 C20 的思路。
   **在修复之前**:幽灵计数会被这类行污染,账本里以 `from_number ~ '^[0-9]{4}$'` 统计幽灵的口径
   需同时排除 `to_number=''` 的行。
+  **【2026-08-22 VC-S14-04 补记:还有一层比数量更重的质量问题】**
+  跌落 voicemail 的那一腿被记成 **`OUTBOUND | ANSWERED | 1002->voicemail | talk_sec=9`,
+  且挂在一个坐席名下(`agent_ids` 非空)**。也就是说**语音信箱的问候语被计成一通已接通的坐席通话**。
+  它会进 `callsHandled`、进 `talkSec`、进队列与坐席报表 —— **把从来没人说过话的 9 秒算成坐席工时**。
+  VC-S13-03(my-day)与 VC-S13-04(报表)读的都是这个数。同一窗口实测两次点击各产一行。
+  故 C24 不只是『多几行脏数据』,它**污染工时与服务水平统计**;修复优先级应据此上调。
 - **C25(new,2026-08-21 整体回归发现,已修)** **转接走的电话不离开第一个坐席的屏幕。**
   `CallsForAgent`(coordinator.go)只匹配 `p.AgentID == agentID`,**不看这条腿死没死**,
   于是坐席只要曾经有过一条腿,这通电话就一直留在他的 `/calls/mine` 上,直到整通结束。
@@ -602,6 +608,34 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **连带**:这说明 **VC-S1-03 的覆盖比它看起来薄** —— 那条只断言了行数(+6 对应 6 条日志),
   从未断言号码,所以这个洞在它眼皮底下 PASS 了两天。C31 修复后应给 S1-03 补一条号码断言。
   证据:`docs/verification/artifacts/VC-S14-03/verdict.md`。
+- **C32(new,2026-08-22 VC-S14-04 执行发现,FAIL 立案,未修)** **从浏览器话机发起的 click-to-dial
+  拨不出去 —— 被叫从未响铃。**
+  `POST /calls/dial` 返回 201、`callType` 判定正确,但交换机侧**全程只有坐席那一条腿**。
+  FS 状态机(通道即 originate 指定的 `origination_uuid`):
+
+  ```
+  CS_NEW → CS_INIT → CS_ROUTING → CS_CONSUME_MEDIA
+  [proceeding][180] → [completing][200] → [ready][200]     ← 200 回来了,sip_auto_answer 生效
+  ……此后停在 CS_CONSUME_MEDIA,从未进入 CS_EXECUTE
+  ```
+
+  **拿到 200 却从未到达"已应答"**:`&park()` 没执行,`CHANNEL_ANSWER` 没发出。
+  而转接正挂在这个事件上 —— `outbound.go:213` 的 `arm(agentLeg, onAnswer)` 由
+  `KindChannelAnswer`(`:347→362`)触发才调 `TransferToExtension`(`:214`)。
+  事件不来,**被叫号码从头到尾没有被拨过**。
+  佐证:`click-to-dial transfer failed` 日志计数 **0** —— 不是转接失败,是根本没调用。
+  **判别实验已做**:改由 ben 的**原生软电话**(Telephone 1.6/UDP)发起,一次就通
+  (`CS_EXECUTE` + 对端 `CS_EXCHANGE_MEDIA`,账面全对)。**变量锁定在发起腿**。
+  ⚠ **不能直接断言"WebRTC 一向如此"**:C17 于 2026-08-20 复测这条路时是通的,当时 1008
+  也是这部浏览器话机;今日 wei 的话机因 VC-S13-05 被 Sign Out 后重新注册过,中间有变量。
+  **怀疑但未证实**:originate 里钉的 `absolute_codec_string=PCMU` 在 DTLS/opus 的 WebRTC 腿上
+  使媒体协商无法收官。修前应先做一次最小复现(同一部浏览器话机,去掉该 var 再拨)。
+  **连带两条**:
+  ①**应用侧把这通电话当成已接通**(party 全程 `state=TALKING`),交换机侧却连应答都没到;
+  ②**UI 给它渲染了"接听"按钮** —— owner 截图里同一屏同时是
+  `CALLING OUT / Dialling` 与 `Inbound`,顶栏还有绿色 Answer。点下去之后炸出 C24 全套
+  (本窗口 10 行 CDR、真实通话仅 2 通)。C19 修的是"外呼被画成来电",这里是它的变种。
+  证据:`docs/verification/artifacts/VC-S14-04/verdict.md`。
 - **C21(new,2026-08-21 修 C11 时发现;2026-08-21 已修 —— 原头部标注"未修"与正文矛盾,
   2026-08-22 扫描时更正)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
