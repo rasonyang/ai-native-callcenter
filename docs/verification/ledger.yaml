@@ -17,7 +17,7 @@
 #   fs_cli 不在本机 PATH(login shell 亦无):collect 一律写全路径 /usr/local/freeswitch/bin/fs_cli(审计 SYS-1)。
 #   2026-08-20:审计修订 T0.1a/b 已应用(ledger-audit.md;owner 全批)——涉及 collect 命令、期望码 202、
 #   基线差分、留证式条款、第 2 坐席 ben/1002。留证条款在 W1/W2 落地后由 T6.9 转正式断言。
-#   2026-08-22:阶段 6 的 11 条草案(ledger-draft-phase6.md,commit 8321675)按原样并入 ——
+#   2026-08-22:阶段 6 的 11 条草案(ledger-draft-phase6.md,commit 8321675)按原样并入,owner 已批准 ——
 #     新场景 S13(坐席与主管旅程缺口)、S14(管理面生命周期 + 坐席外呼),另 VC-S12-04 并入既有 S12。
 #     11 条全部 status: TODO,尚未执行。其 collect 已按阶段 2–5 的教训写:SSE 抓流 --max-time 1800、
 #     事件计数用 grep -c '"type":"X"'(裸串会把一个事件数成两个)、会话按端点真实要求的角色选、
