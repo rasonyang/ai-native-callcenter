@@ -9,7 +9,7 @@
 > 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
 > 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 12 项、余 15 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31 / C32。
+> **C 系列已修 12 项、余 14 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -651,8 +651,19 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **连带**:这说明 **VC-S1-03 的覆盖比它看起来薄** —— 那条只断言了行数(+6 对应 6 条日志),
   从未断言号码,所以这个洞在它眼皮底下 PASS 了两天。C31 修复后应给 S1-03 补一条号码断言。
   证据:`docs/verification/artifacts/VC-S14-03/verdict.md`。
-- **C32(new,2026-08-22 VC-S14-04 执行发现,FAIL 立案,未修)** **从浏览器话机发起的 click-to-dial
-  拨不出去 —— 被叫从未响铃。**
+- **C32(new,2026-08-22 VC-S14-04 执行发现;同日重测【不再复现】,原因未证明)**
+  **【状态变更 2026-08-22 19:10】** 今日交换机侧改造(aicc context 全链、internal profile context、
+  `TransferToExtension` 目标 context 由 default 改 aicc、FreeSWITCH 重启、`internal_auth_calls=true`)
+  之后重测:wei 的腿到达 `CS_EXECUTE`、transfer 真实执行、被叫接通,**症状消失**。
+  **VC-S14-04 已随之重跑转 PASS**(两型账面 + 409 能力限制全通)。
+  **但记为『不再复现』而非『已修』**:当时的怀疑(`absolute_codec_string=PCMU` 在 DTLS/WebRTC 腿上
+  使媒体协商无法收官)**从未被验证**,而其间的变更有多项,无法归因。未经解释的痊愈会静默复发,
+  守卫交给可重跑的 VC-S14-04。若再现,优先验证那个 PCMU 猜想(同一部浏览器话机,去掉该 var 再拨)。
+  **同期查明并修掉的一个真缺陷(我今日引入)**:部署方的中继规则放在第二个 `<context name="aicc">`
+  文件里,FreeSWITCH **只用第一个、静默忽略其余** —— 规则对 `xml_locate` 可见、对呼叫不可达,
+  每次外呼都 `NO_ROUTE_DESTINATION`。已给 aicc context 加 `<X-PRE-PROCESS include "aicc/*.xml">`
+  扩展点(同原厂 `default.xml` 收 `default/*.xml`),部署规则以裸 `<extension>` 放入。
+  ~~原文如下~~ **从浏览器话机发起的 click-to-dial 拨不出去 —— 被叫从未响铃。**
   `POST /calls/dial` 返回 201、`callType` 判定正确,但交换机侧**全程只有坐席那一条腿**。
   FS 状态机(通道即 originate 指定的 `origination_uuid`):
 

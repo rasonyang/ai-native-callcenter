@@ -124,3 +124,53 @@ app 侧那条 party 全程 `state=TALKING` —— 应用认为已接通,交换�
 
 环境:0 通道、0 活呼叫,wei 的 ACW 已由 owner 收掉。
 **未清理的残留**:本窗口 8 行幽灵 CDR 留在库里(属 C24,按既有约定不手工删)。
+
+---
+
+# 重跑 2026-08-22 18:22–19:08 · 判定改为:**PASS**
+
+首次执行(13:38)因 **C32** 在第一步就断了 —— 从浏览器话机发起的 click-to-dial 拨不出去。
+今日的交换机侧改造(aicc context 全链、profile context、`TransferToExtension` 目标 context)
+之后重测,C32 不再复现,本例得以完整执行。
+
+## 内部一型:wei(1008,浏览器)→ ben(1002)
+
+```
+18:22:49  wei 腿 CS_EXECUTE(首次诊断时死在 CS_CONSUME_MEDIA)
+          FS 日志有真实 Transfer;应用 click-to-dial transfer failed 计数 = 0
+```
+
+| expect | 实测 | |
+|---|---|---|
+| `call_type=INTERNAL` | INTERNAL | ✓ |
+| `status=ANSWERED`,legs 只含被叫段 `AGENT\|<ben 的分机>` | `legs=[{AGENT, 1002, 245s}]` | ✓ |
+| **talk_sec 是两条坐席腿的并集,不是两倍** | `talk=245`、`total=249`(不是 490) | ✓ |
+| **bill_sec=0**(分机互拨无运营商计费) | `bill=0`,`answered_at` 有值 | ✓ |
+| hold / retrieve / transfer 均 **409 OPERATION_NOT_ALLOWED_FOR_CALL_TYPE** | 三者皆 409,body 为 "this is not available on an internal call" | ✓ |
+| mute **202** | `202`(unmute 亦 202) | ✓ |
+
+**C18 至此首次获得现场验证** —— 此前只有单元测试。CDR 6259 → 6260,恰好 1 行,零幽灵。
+
+## 外线一型:wei(1008)→ 18688886669(owner 于 11:08 经工作台拨出)
+
+审计确认走的是本用例的接口:`11:08:29 POST /api/v1/calls/dial {"destination":"18688886669"}`。
+
+| expect | 实测 | |
+|---|---|---|
+| `call_type=OUTBOUND`,legs 含 **TRUNK** 段 | `legs=[{TRUNK, 18688886669, 6s}]` | ✓ |
+| **bill_sec 从被叫应答起算,故 bill_sec ≤ total_sec 恒成立** | `bill=6`、`total=6`、`ring=2`、`talk=6` | ✓ |
+| `tech.switchBillSec` 与 `bill_sec` 相差 ≤2 秒 | `switchBillSec=8` vs `bill=6`,**差 2** | ✓ |
+
+**2026-08-21 曾出现的 `bill_sec=23 > total_sec=21` 不可能值未重现** —— 计费锚点的修复现场确认。
+
+## 执行注记(owner 提供,已回写用例)
+
+**外呼 pstn_sim 必须提前让 owner 准备接听。** 被叫手机不在线时,交换机侧收到的是
+`480 Temporarily Unavailable` 或 `NO_USER_RESPONSE`,拿到的是不可判定的结果而非失败证据 ——
+本次因此白跑了三拨,其中一拨还让我一度错判为"中继坏了"(见 C32/verdict-retest.md 的更正)。
+
+## 判定
+
+**PASS。** 两型的账面与能力限制逐条成立。本例的价值正如起草时所写:
+把 C15/C17/C18 与计费锚点固化成回归断言 —— 这些都是改一行就会静默退化的东西,
+而今天它们经历了一整轮交换机侧改造,靠这条用例才确认没有退化。

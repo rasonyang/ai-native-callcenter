@@ -1442,7 +1442,7 @@ cases:
       能力限制侧:三个操作有一个放行了,坐席可以把一通分机互拨"转接"出去,
       而 Transfer 会去找一条不存在的主叫腿。
     evidence_dir: docs/verification/artifacts/VC-S14-04/
-    status: FAIL  # 2026-08-22 执行:主断言不成立 → C32。wei(浏览器话机)发起的 click-to-dial 被叫从未响铃——坐席腿拿到 200 却停在 CS_CONSUME_MEDIA、从不进 CS_EXECUTE,CHANNEL_ANSWER 不发出,arm 的 onAnswer 不触发,TransferToExtension 根本没被调用(日志 transfer failed 计数 0)。判别实验:改由 ben(原生软电话)发起一次就通,变量锁定在发起腿。反向那通的账面断言全中(INTERNAL/ANSWERED/legs 只含被叫/talk=12 是并集非两倍/bill=0),说明 C15/C17 的成果还在,断的是它前面的信令。外线一型与 409 能力限制未执行。另:UI 给这通打不出去的电话渲染了 Answer 按钮,点击后炸出 C24 全套(本窗口 10 行 CDR 仅 2 通真实),其中 1002->voicemail 被记成 ANSWERED/talk=9/挂在坐席名下
+    status: PASS  # 2026-08-22 重跑(C32 不再复现后)两型全通:内部 talk=245 是并集非两倍/bill=0/legs 只含 AGENT|1002,hold+retrieve+transfer 三者 409 OPERATION_NOT_ALLOWED_FOR_CALL_TYPE 而 mute 202(C18 首次现场验证);外线 legs 含 TRUNK|18688886669、bill=6≤total=6、switchBillSec=8 相差 2 秒(08-21 那个 23>21 未重现)。各产 1 行 CDR 零幽灵。执行注记:外呼 pstn_sim 须提前让 owner 备接,否则拿到 480/NO_USER_RESPONSE 不可判定。首次执行的记录保留于下 # 2026-08-22 首次执行:主断言不成立 → C32。wei(浏览器话机)发起的 click-to-dial 被叫从未响铃——坐席腿拿到 200 却停在 CS_CONSUME_MEDIA、从不进 CS_EXECUTE,CHANNEL_ANSWER 不发出,arm 的 onAnswer 不触发,TransferToExtension 根本没被调用(日志 transfer failed 计数 0)。判别实验:改由 ben(原生软电话)发起一次就通,变量锁定在发起腿。反向那通的账面断言全中(INTERNAL/ANSWERED/legs 只含被叫/talk=12 是并集非两倍/bill=0),说明 C15/C17 的成果还在,断的是它前面的信令。外线一型与 409 能力限制未执行。另:UI 给这通打不出去的电话渲染了 Answer 按钮,点击后炸出 C24 全套(本窗口 10 行 CDR 仅 2 通真实),其中 1002->voicemail 被记成 ANSWERED/talk=9/挂在坐席名下
     refs: ["internal/outbound/outbound.go:196", "internal/telephony/coordinator.go:848", "internal/telephony/cdr.go:152", "internal/httpapi/call_handlers.go:141"]
     note: "本用例的每一条 expect 都有 2026-08-21 的实测支撑(见 regression-2026-08-21/verdict.md),
       起草时即为'已知会通过'。两通电话预期各产 1 行,故 cdr_now - cdr_baseline = 2。它的价值不在发现新问题,而在把当日修的 C15/C17/C18/C25
