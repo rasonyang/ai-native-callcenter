@@ -237,6 +237,11 @@ func TestReadyMirrorsAvailableToTheSwitch(t *testing.T) {
 	svc, _, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
+	// The switch knows this phone before anybody signs in at it: registration
+	// events and the reconcile on connect both land here. Signing in without
+	// it would be an agent at a phone nothing has ever heard from, which is
+	// unreachable by the same rule the wallboard uses.
+	svc.ObserveDevice(ctx, "1001", true, true)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -313,6 +318,10 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	svc := NewService(store, sw, &fakePublisher{})
 	ctx := context.Background()
 
+	// The phone is known good before sign-in, as it is in production: an agent
+	// at a phone nothing has heard from is unreachable, and would be mirrored
+	// On Break whatever they had chosen.
+	svc.ObserveDevice(ctx, "1001", true, true)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -341,6 +350,71 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	}
 	if !sw.seen("status agent-1001 Available") {
 		t.Errorf("the switch was told %v, want the agent routable again", sw.commands)
+	}
+}
+
+// A phone that stops answering has to reach the switch, or the queue keeps
+// choosing an agent whose number will not ring: every call rings out to
+// timeout, is offered again, and nothing on any screen says why. Knowing it in
+// the roster is not enough — mod_callcenter is what picks who gets the call.
+//
+// The event has to say what happened, too. Publishing the in-service type in
+// both directions meant a phone's death was announced as DEVICE_IN_SERVICE
+// carrying DEVICE_UNREACHABLE in its payload: anything filtering on type was
+// told the opposite of the truth.
+func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
+	svc, _, sw, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	svc.ObserveDevice(ctx, "1001", true, true)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Ready(ctx, agentID); err != nil {
+		t.Fatal(err)
+	}
+	if !sw.seen("status agent-1001 Available") {
+		t.Fatalf("the agent never became routable: %v", sw.commands)
+	}
+
+	// The phone goes away. The agent has chosen nothing — they are still READY.
+	svc.ObserveDevice(ctx, "1001", false, true)
+
+	if got := svc.Presence(agentID); got.CurrentState() != StateReady {
+		t.Errorf("state = %s, want READY — losing a phone is not a decision to stop taking calls", got.CurrentState())
+	}
+	if got := svc.Presence(agentID).Availability(); got != AvailDeviceUnreachable {
+		t.Errorf("availability = %s, want DEVICE_UNREACHABLE", got)
+	}
+	last := ""
+	for _, c := range sw.commands {
+		if strings.HasPrefix(c, "status agent-1001 ") {
+			last = c
+		}
+	}
+	if last != "status agent-1001 On Break" {
+		t.Errorf("the switch was last told %q, want On Break — it will otherwise keep offering to a phone that cannot ring", last)
+	}
+
+	types := pub.types()
+	if got := types[len(types)-1]; got != events.TypeDeviceUnregistered {
+		t.Errorf("the phone's loss was announced as %s, want %s", got, events.TypeDeviceUnregistered)
+	}
+
+	// And back again.
+	svc.ObserveDevice(ctx, "1001", true, true)
+	last = ""
+	for _, c := range sw.commands {
+		if strings.HasPrefix(c, "status agent-1001 ") {
+			last = c
+		}
+	}
+	if last != "status agent-1001 Available" {
+		t.Errorf("the switch was last told %q after the phone came back, want Available", last)
+	}
+	types = pub.types()
+	if got := types[len(types)-1]; got != events.TypeDeviceInService {
+		t.Errorf("the phone's return was announced as %s, want %s", got, events.TypeDeviceInService)
 	}
 }
 

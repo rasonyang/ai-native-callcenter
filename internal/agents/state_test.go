@@ -223,21 +223,35 @@ func TestAvailabilityPrecedence(t *testing.T) {
 }
 
 func TestCallcenterStatusMapping(t *testing.T) {
+	// A signed-in agent always carries an observed device: Login applies what
+	// the switch already said about the phone, so "ready with no device" is a
+	// presence production never holds — Availability() reads it as unreachable
+	// for the same reason.
+	live := func(st State, rs Reason) Presence {
+		return Presence{State: st, Reason: rs, IsRegistered: true, IsDeviceInService: true}
+	}
 	tests := []struct {
-		state  State
-		reason Reason
-		want   string
+		name string
+		p    Presence
+		want string
 	}{
-		{StateReady, "", "Available"},
-		{StateNotReady, ReasonLunch, "On Break"},
-		{StateNotReady, ReasonAfterCallWork, "On Break"},
-		{StateNotReady, ReasonSystem, "On Break"},
-		{StateLoggedOut, "", "Logged Out"},
+		{"ready at a working phone", live(StateReady, ""), "Available"},
+		{"on a break", live(StateNotReady, ReasonLunch), "On Break"},
+		{"in after-call work", live(StateNotReady, ReasonAfterCallWork), "On Break"},
+		{"put not-ready by the system", live(StateNotReady, ReasonSystem), "On Break"},
+		{"signed out", live(StateLoggedOut, ""), "Logged Out"},
+
+		// Wanting calls and being able to take them are different things. The
+		// switch only understands the second, and offering to a phone that has
+		// stopped answering costs a caller a full ring-out every time.
+		{"ready but the phone has gone",
+			Presence{State: StateReady, IsRegistered: false, IsDeviceInService: true}, "On Break"},
+		{"ready but the phone stopped answering keepalives",
+			Presence{State: StateReady, IsRegistered: true, IsDeviceInService: false}, "On Break"},
 	}
 	for _, tt := range tests {
-		p := Presence{State: tt.state, Reason: tt.reason}
-		if got := p.CallcenterStatus(); got != tt.want {
-			t.Errorf("%s(%s) mapped to %q, want %q", tt.state, tt.reason, got, tt.want)
+		if got := tt.p.CallcenterStatus(); got != tt.want {
+			t.Errorf("%s: mapped to %q, want %q", tt.name, got, tt.want)
 		}
 	}
 }

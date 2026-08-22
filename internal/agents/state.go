@@ -216,9 +216,19 @@ func (p Presence) Availability() Availability {
 // CallcenterStatus maps our presence onto the three statuses mod_callcenter
 // understands. Our states are richer, so several map onto "On Break": the
 // distinction is ours to keep, not the switch's.
+//
+// Wanting calls is not the same as being able to take them. An agent whose
+// phone has stopped answering is still READY — losing a phone says nothing
+// about their intent — but the switch must not keep offering to a number that
+// will not ring. Reading only the state is how a queue came to deliver every
+// call to a dead browser tab, each one ringing out to timeout before being
+// offered again, with nothing on any screen to say why.
 func (p Presence) CallcenterStatus() string {
 	switch p.CurrentState() {
 	case StateReady:
+		if !p.IsRegistered || !p.IsDeviceInService {
+			return "On Break"
+		}
 		return "Available"
 	case StateNotReady:
 		return "On Break"

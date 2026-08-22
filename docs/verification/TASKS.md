@@ -9,7 +9,7 @@
 > 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
 > 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 12 项、余 14 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 13 项、余 13 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C29 / C30 / C31;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -294,10 +294,13 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   originator 腿确实以 DIALING 创建(`call.go:209`),只是没有事件宣告它(`events.md:11`)。
   **实现 `PARTY_DIALING` 应优先于其余九个**:它是唯一一个让 FSM 的起点在流上隐形的缺口,
   而且订阅方(如坐席自己的工作台)要靠它才能在对方接起之前知道这条腿存在。
-  另见 **C28②**:`DEVICE_*` 那一对不是"没实现",是**发错了一个**,W7 要做的是改对而非补上。
+  另见 **C28②**:`DEVICE_*` 那一对不是"没实现",是**发错了一个**。
+  **2026-08-22 已随 C28 改对** —— `ObserveDevice` 现在按方向发 `DEVICE_UNREGISTERED` / `DEVICE_IN_SERVICE`,
+  `DEVICE_UNREGISTERED` 从此有生产者,W7 的清单据此减一。
   ① CALL_RECORDING_STARTED/STOPPED——RECORD_START/STOP 已归一化(switchevent.go:259-264),
   补 coordinator→Hub 一跳(scope 沿用 call 域);
-  ② DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布;
+  ② ~~DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布~~
+  **已做(C28,2026-08-22)**;`DEVICE_REGISTERED` 仍无生产者 —— 恢复走的是 `DEVICE_IN_SERVICE`;
   ③ PARTY_DIALING(addParty 时对 originator 腿宣告)、CALL_USER_DATA(userData 独立变更事件)、
   SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)——全新 publish 点;
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
@@ -586,7 +589,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **修法**:先定口径(建议取行业通行的 ÷ 呼入总数,即 reports.tsx 那个),两处统一,
   并在表头标出定义;若确需保留两个指标,就给它们两个名字,不要都叫 SLA。
   证据:`docs/verification/artifacts/VC-S13-04/verdict.md` §4②。
-- **C28(new,2026-08-22 VC-S13-05 执行发现,未修)** **话机没了,交换机不知道;而发出去的事件说的是反话。**
+- **C28(new,2026-08-22 VC-S13-05 执行发现;2026-08-22 已修,待重跑 VC-S13-05 转正)** **话机没了,交换机不知道;而发出去的事件说的是反话。**
   根因同一个函数 `internal/agents/service.go:371-396` 的 `ObserveDevice`,后果两条:
   ① **交换机镜像根本没被调用**。应用侧正确地把坐席记成 `availability=DEVICE_UNREACHABLE`、
      `isRegistered=false`(且 `state` 仍为 READY —— 意愿与可达性分开,这一点是对的),
@@ -605,6 +608,22 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **与 W7 的关系要更正**:events.md 把这两个类型列为"十个零生产者"之一,读起来像"还没实现";
   **实测是发错了一个**。W7 该做的不是"补一个生产者",而是**把现有这个改对** —— 建议同批修 ①。
   证据:`docs/verification/artifacts/VC-S13-05/verdict.md`。
+
+  **已修(2026-08-22)**,三处,各自独立:
+  - `internal/agents/state.go` `CallcenterStatus()` —— 意愿与可达性分开的前提下,把**可达性**读进来:
+    READY 但 `!IsRegistered || !IsDeviceInService` 映射为 `On Break`。
+    坐席在应用里仍是 READY(掉线不说明意愿),交换机看到的是"现在别派给他"。
+  - `internal/agents/service.go` `ObserveDevice` —— 补上原本整段缺失的镜像调用 `s.mirrorStatus(profile, snapshot)`。
+    ①的根因不是映射错,是**这条路径压根没往交换机写过**。
+  - 同一函数,事件类型按方向取:掉线发 `TypeDeviceUnregistered`,恢复发 `TypeDeviceInService`,
+    不再一律 `IN_SERVICE`。**W7 的记录随之要改**:`DEVICE_UNREGISTERED` 从此有生产者。
+  回归:`TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened`。三处**逐一摘除验证**过 ——
+  摘①报 `the switch was last told "status agent-1001 Available", want On Break`;摘②直接 FAIL;
+  摘③报 `the phone's loss was announced as DEVICE_IN_SERVICE, want DEVICE_UNREGISTERED`;
+  三处还原后全套 0 FAIL。另有三条既有用例同批改写(`TestCallcenterStatusMapping` /
+  `TestReadyMirrorsAvailableToTheSwitch` / `TestWrapUpDoesNotEndByItself`):它们把"登录但从未观测过话机"
+  当常态,而生产路径在 `Login` 里就用 `applyDeviceLocked` 施加已知话机状态 —— 那个函数自己的注释写着
+  *"Without this an agent signing in at a perfectly good phone reads as unreachable until the phone happens to re-register."*
 - **C29(new,2026-08-22 VC-S14-01 执行发现,未修)** **建分机不显式写 `isEnabled`,建出来的是停用的,
   而 API 只回 201。** 同一分钟的 A/B:
   ```

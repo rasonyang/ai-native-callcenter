@@ -31,9 +31,9 @@
 | AGENT_READY | internal/agents/service.go:248 | use-event-stream.ts:16-24 | S4, S11 | [FACT] | |
 | AGENT_NOT_READY | internal/agents/service.go:255(NotReady)、:274(StartWrapUp)、:343(RingNoAnswer,无调用方) | use-event-stream.ts:16-24 | S4, S11 | [FACT] | :343 路径死代码(见 fsm-edges.md) |
 | AGENT_AVAILABILITY | internal/agents/service.go:362(SetOnCall 变化时) | use-event-stream.ts:16-24 | S4, S11 | [FACT] | SetOnCall 由 coordinator.go:419(振铃)/:258(挂断)驱动 |
-| DEVICE_REGISTERED | NOT FOUND | 仅通用分发(events.ts:61;ROSTER 失效) | UNCOVERED | [FACT] | 交换机事件 KindDeviceRegistered 存在(switchevent.go:288-300)且驱动 ObserveDevice(cmd/aicc/main.go:399-400),但 ObserveDevice 只发布 DEVICE_IN_SERVICE(service.go:394),此 SSE 类型从未发出 |
-| DEVICE_UNREGISTERED | NOT FOUND | 仅通用分发(events.ts:61) | UNCOVERED | [FACT] | 同上 |
-| DEVICE_IN_SERVICE | internal/agents/service.go:394(ObserveDevice) | use-event-stream.ts:16-24;_app.tsx:41 / _app.supervisor.agents.tsx:27(DEVICE_UNREACHABLE 展示) | S11, S12 | [FACT] | 注册与 keepalive 两路信号都汇到它(main.go:399-405) |
+| DEVICE_REGISTERED | NOT FOUND | 仅通用分发(events.ts:61;ROSTER 失效) | UNCOVERED | [FACT] | 交换机事件 KindDeviceRegistered 存在(switchevent.go:288-300)且驱动 ObserveDevice(cmd/aicc/main.go:399-400);2026-08-22 C28 后 ObserveDevice 按方向发布,但**恢复那一侧仍发 DEVICE_IN_SERVICE**(service.go:409),此类型依旧从未发出 |
+| DEVICE_UNREGISTERED | internal/agents/service.go:409-411(ObserveDevice,话机不可达时) | 仅通用分发(events.ts:61) | S13(VC-S13-05 待重跑) | [FACT] | 2026-08-22 C28 修正:此前上线掉线一律发 DEVICE_IN_SERVICE,掉线那条顶着相反的类型名 |
+| DEVICE_IN_SERVICE | internal/agents/service.go:409(ObserveDevice,话机可达时) | use-event-stream.ts:16-24;_app.tsx:41 / _app.supervisor.agents.tsx:27(DEVICE_UNREACHABLE 展示) | S11, S12 | [FACT] | 注册与 keepalive 两路信号都汇到它(main.go:399-405) |
 | BOT_SESSION_STARTED | NOT FOUND | 仅通用分发(events.ts:62) | UNCOVERED | [FACT] | aicall 路径完全不向 events.Hub 发布(internal/aicall 全包无 Publish 调用);bot 会话开始只有日志 orchestrator.go:310 |
 | BOT_INTERRUPTED | NOT FOUND | 仅通用分发(events.ts:63) | UNCOVERED | [FACT] | barge-in 只是 aicall 内部事件(session.go:514) |
 | BOT_SESSION_ENDED | NOT FOUND | 仅通用分发(events.ts:63) | UNCOVERED | [FACT] | |
@@ -45,13 +45,15 @@
 ## 缺口汇总
 
 ### 需删除(或降级出契约)
-- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:PARTY_DIALING、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、DEVICE_UNREGISTERED、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(10 个契约内类型零生产者)。删除属于 breaking change,需走 `make api-breaking`。
+- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:PARTY_DIALING、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 9 个)。删除属于 breaking change,需走 `make api-breaking`。
 
 ### 需实现(契约已承诺、代码未生产)——【2026-08-20 决议 D6:以下全部实现 → TASKS W7(四组推进);"需删除"选项作废】
 - PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。
 - CALL_USER_DATA — producer NOT FOUND(userData 只随其它事件携带)。
 - CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED — RECORD_START/STOP 已订阅并归一化(switchevent.go:33-34、:259-264)但事件链在 coordinator 处中断。
-- DEVICE_REGISTERED / DEVICE_UNREGISTERED — 交换机侧信号已达 ObserveDevice,SSE 层从未区分发布。
+- DEVICE_REGISTERED / ~~DEVICE_UNREGISTERED~~ — 交换机侧信号已达 ObserveDevice。**2026-08-22 C28 已区分发布**:
+  不可达发 DEVICE_UNREGISTERED,可达发 DEVICE_IN_SERVICE。剩 DEVICE_REGISTERED 一个 ——
+  它与 DEVICE_IN_SERVICE 的分工要先定语义(注册成功 vs 可服务),不是补一行 publish 的事。
 - BOT_SESSION_STARTED / BOT_INTERRUPTED / BOT_SESSION_ENDED — aicall 路径无 Hub 依赖,三类型全空。
 - SYSTEM_LINK — 无发布点(ESL 断连/重连当前只有日志 + OnConnect 钩子)。
 

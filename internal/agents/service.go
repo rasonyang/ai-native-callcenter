@@ -390,9 +390,27 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, isR
 	if !found {
 		return
 	}
-	if profile, err := s.store.AgentProfile(ctx, agentID); err == nil {
-		s.publish(ctx, events.TypeDeviceInService, profile, snapshot)
+	profile, err := s.store.AgentProfile(ctx, agentID)
+	if err != nil {
+		return
 	}
+
+	// Tell the switch. Knowing a phone is gone is worth nothing while
+	// mod_callcenter still believes it can ring: the queue keeps choosing that
+	// agent, every call rings out to timeout, and the wallboard shows somebody
+	// online who never answers.
+	s.mirrorStatus(profile, snapshot)
+
+	// Name the event for what happened. Publishing the in-service type in both
+	// directions meant the event announcing a phone's death was called
+	// DEVICE_IN_SERVICE and carried DEVICE_UNREACHABLE in its payload — a
+	// consumer filtering on type was told the opposite of the truth, and the
+	// contract's DEVICE_UNREGISTERED had no producer at all.
+	t := events.TypeDeviceInService
+	if !isRegistered || !isInService {
+		t = events.TypeDeviceUnregistered
+	}
+	s.publish(ctx, t, profile, snapshot)
 }
 
 // Presence returns an agent's live presence.
