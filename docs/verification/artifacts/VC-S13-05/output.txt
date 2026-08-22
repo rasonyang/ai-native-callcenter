@@ -1,0 +1,191 @@
+########## VC-S13-05 基线 —— 02:50:19Z ##########
+--- 1. roster 基线 ---
+{"state":"READY","availability":"READY","isRegistered":true}
+--- 基线:switch 侧 agent-wei 状态 ---
+Available
+--- 基线:注册 ---
+User:       	1008@192.168.31.55
+--- 2. 开启 SSE 抓流(1800s)---
+SSE pid=26099 行数=       0
+########## 失联后(等 30 秒)—— 02:59:31Z ##########
+--- 3. registrations ---
+User:       	1008@192.168.31.55
+--- 4. roster ---
+{"state":"READY","availability":"READY","isRegistered":true}
+--- 5. SSE 计数 ---
+DEVICE_UNREGISTERED=0  AGENT_NOT_READY=0
+--- 6. switch 侧 agent-wei(note 点名的那条:ObserveDevice 会不会驱动镜像)---
+Available
+--- 附:SSE 里出现过的事件类型 ---
+   1 "type":"DEVICE_IN_SERVICE"
+########## 失联后(等 30 秒)—— 02:59:31Z ##########
+--- 3. registrations ---
+User:       	1008@192.168.31.55
+--- 4. roster ---
+{"state":"READY","availability":"READY","isRegistered":true}
+--- 5. SSE 计数 ---
+DEVICE_UNREGISTERED=0  AGENT_NOT_READY=0
+--- 6. switch 侧 agent-wei(note 点名的那条:ObserveDevice 会不会驱动镜像)---
+Available
+--- 附:SSE 里出现过的事件类型 ---
+   1 "type":"DEVICE_IN_SERVICE"
+--- 注册的细节:还剩多久过期、传输是不是还活着 ---
+
+Registrations:
+=================================================================================================
+Call-ID:    	lauqo1ravlohvj8k8n82
+User:       	1008@192.168.31.55
+Contact:    	"" <sip:6cml0pp5@r11oi30e5p1l.invalid;transport=ws;fs_nat=yes;fs_path=sip%3A6cml0pp5%40192.168.31.55%3A51897%3Btransport%3Dwss>
+Agent:      	SIP.js/0.21.2
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 11:05:22) EXPSECS(257)
+Ping-Status:	Reachable
+Ping-Time:	3.37
+Host:       	RasonYangs-MacBook-Pro.local
+IP:         	192.168.31.55
+Port:       	51897
+Auth-User:  	1008
+Auth-Realm: 	ws.aicc.test
+MWI-Account:	1008@192.168.31.55
+
+Total items returned: 1
+=================================================================================================
+
+--- ws 连接 ---
+            192.168.31.55	  alias	                                  internal	ALIASED
+            internal-ipv6	profile	    sip:mod_sofia@[fdfe:dcba:9876::1]:5060	RUNNING (0)
+                 internal	profile	          sip:mod_sofia@192.168.31.55:5060	RUNNING (0)
+--- 注册的细节:还剩多久过期、传输是不是还活着 ---
+
+Registrations:
+=================================================================================================
+Call-ID:    	lauqo1ravlohvj8k8n82
+User:       	1008@192.168.31.55
+Contact:    	"" <sip:6cml0pp5@r11oi30e5p1l.invalid;transport=ws;fs_nat=yes;fs_path=sip%3A6cml0pp5%40192.168.31.55%3A51897%3Btransport%3Dwss>
+Agent:      	SIP.js/0.21.2
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 11:05:22) EXPSECS(257)
+Ping-Status:	Reachable
+Ping-Time:	3.37
+Host:       	RasonYangs-MacBook-Pro.local
+IP:         	192.168.31.55
+Port:       	51897
+Auth-User:  	1008
+Auth-Realm: 	ws.aicc.test
+MWI-Account:	1008@192.168.31.55
+
+Total items returned: 1
+=================================================================================================
+
+--- ws 连接 ---
+            192.168.31.55	  alias	                                  internal	ALIASED
+            internal-ipv6	profile	    sip:mod_sofia@[fdfe:dcba:9876::1]:5060	RUNNING (0)
+                 internal	profile	          sip:mod_sofia@192.168.31.55:5060	RUNNING (0)
+########## 轮询等注册真正消失(最多 7 分钟)—— 起于 03:02:29Z ##########
+[03:02:29Z] reg=1 EXPSECS(173) Ping-Status: Reachable | roster={"availability":"READY","isRegistered":true} | SSE_UNREG=0
+[03:02:59Z] reg=1 EXPSECS(143) Ping-Status: Reachable | roster={"availability":"READY","isRegistered":true} | SSE_UNREG=0
+[03:03:29Z] reg=1 EXPSECS(113) Ping-Status: Reachable | roster={"availability":"READY","isRegistered":true} | SSE_UNREG=0
+[03:03:59Z] reg=1 EXPSECS(83) Ping-Status: Reachable | roster={"availability":"READY","isRegistered":true} | SSE_UNREG=0
+[03:05:08Z] reg=1 EXPSECS(608) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:05:29Z] reg=1 EXPSECS(587) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:05:49Z] reg=1 EXPSECS(567) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:06:09Z] reg=1 EXPSECS(547) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:06:29Z] reg=1 EXPSECS(527) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:06:49Z] reg=1 EXPSECS(507) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:07:09Z] reg=1 EXPSECS(487) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:07:29Z] reg=1 EXPSECS(467) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:07:49Z] reg=1 EXPSECS(447) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+[03:08:09Z] reg=1 EXPSECS(427) | roster={"availability":"READY","isRegistered":true} | cc=Available | SSE_UNREG=0
+########## 前置未成立:话机根本没断 —— 03:08:19Z ##########
+同一个 Call-ID 在 03:05:08 续注册,EXPSECS 由 83 跳回 608:
+Call-ID:    	lauqo1ravlohvj8k8n82
+Contact:    	"" <sip:6cml0pp5@r11oi30e5p1l.invalid;transport=ws;fs_nat=yes;fs_path=sip%3A6cml0pp5%40192.168.31.55%3A51897%3Btransport%3Dwss>
+Agent:      	SIP.js/0.21.2
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 11:15:16) EXPSECS(417)
+Ping-Status:	Reachable
+→ 同 Call-ID / 同 Contact / 同源端口 51897,是**同一个 SIP.js 客户端在续期**,不是新客户端。
+→ 应用侧报 READY/isRegistered=true 是**对的**:设备确实还在注册且 Reachable。
+→ 本轮不构成缺陷,是前置条件没达成。
+########## 第二轮:扩展里 Sign Out / Clear Account —— 03:12:05Z ##########
+[03:12:05Z] reg=0  | roster={"state":"READY","availability":"DEVICE_UNREACHABLE","isRegistered":false} | cc=Available | SSE_UNREG=0 DEV_IN_SVC=3
+########## 第二轮:扩展里 Sign Out / Clear Account —— 03:12:05Z ##########
+[03:12:05Z] reg=0  | roster={"state":"READY","availability":"DEVICE_UNREACHABLE","isRegistered":false} | cc=Available | SSE_UNREG=0 DEV_IN_SVC=3
+--- 再等 60 秒,看 switch 侧会不会追上 ---
+[03:14:03Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:17Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:31Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:45Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:59Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+--- DEVICE_UNREGISTERED 这个事件有没有生产者(还是 W7 的零生产者之一)---
+internal/telephony/switchevent.go:40:	KindDeviceUnregistered SwitchEventKind = "DEVICE_UNREGISTERED"
+internal/events/event.go:58:	TypeDeviceUnregistered Type = "DEVICE_UNREGISTERED"
+internal/api/api.gen.go:474:	SSEEventTypeDEVICEUNREGISTERED     SSEEventType = "DEVICE_UNREGISTERED"
+web/src/generated/api.ts:1895:        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "CALL_TRANSCRIPT" | "CALL_TRANSCRIPTION_STATE" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_IN_SERVICE" | "BOT_SESSION_STARTED" | "BOT_INTERRUPTED" | "BOT_SESSION_ENDED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
+web/src/lib/events.ts:61:    'AGENT_AVAILABILITY', 'DEVICE_REGISTERED', 'DEVICE_UNREGISTERED',
+docs/verification/coverage/events.md:35:| DEVICE_UNREGISTERED | NOT FOUND | 仅通用分发(events.ts:61) | UNCOVERED | [FACT] | 同上 |
+docs/verification/coverage/events.md:48:- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:PARTY_DIALING、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、DEVICE_UNREGISTERED、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(10 个契约内类型零生产者)。删除属于 breaking change,需走 `make api-breaking`。
+docs/verification/coverage/events.md:54:- DEVICE_REGISTERED / DEVICE_UNREGISTERED — 交换机侧信号已达 ObserveDevice,SSE 层从未区分发布。
+[03:14:03Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:17Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:31Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:45Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+[03:14:59Z] roster={"availability":"DEVICE_UNREACHABLE","isRegistered":false} cc=Available SSE_UNREG=0
+--- DEVICE_UNREGISTERED 这个事件有没有生产者(还是 W7 的零生产者之一)---
+internal/telephony/switchevent.go:40:	KindDeviceUnregistered SwitchEventKind = "DEVICE_UNREGISTERED"
+internal/events/event.go:58:	TypeDeviceUnregistered Type = "DEVICE_UNREGISTERED"
+internal/api/api.gen.go:474:	SSEEventTypeDEVICEUNREGISTERED     SSEEventType = "DEVICE_UNREGISTERED"
+web/src/generated/api.ts:1895:        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "CALL_TRANSCRIPT" | "CALL_TRANSCRIPTION_STATE" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_IN_SERVICE" | "BOT_SESSION_STARTED" | "BOT_INTERRUPTED" | "BOT_SESSION_ENDED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
+web/src/lib/events.ts:61:    'AGENT_AVAILABILITY', 'DEVICE_REGISTERED', 'DEVICE_UNREGISTERED',
+docs/verification/coverage/events.md:35:| DEVICE_UNREGISTERED | NOT FOUND | 仅通用分发(events.ts:61) | UNCOVERED | [FACT] | 同上 |
+docs/verification/coverage/events.md:48:- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:PARTY_DIALING、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、DEVICE_UNREGISTERED、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(10 个契约内类型零生产者)。删除属于 breaking change,需走 `make api-breaking`。
+docs/verification/coverage/events.md:54:- DEVICE_REGISTERED / DEVICE_UNREGISTERED — 交换机侧信号已达 ObserveDevice,SSE 层从未区分发布。
+--- SSE 日志里 DEVICE_IN_SERVICE 各条的载荷(看掉线那一刻发了什么)---
+data: {"version":1,"seq":9200420,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T02:54:22.876796Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"READY","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+data: {"version":1,"seq":9200421,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:04:16.936337Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"READY","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+data: {"version":1,"seq":9200422,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:10:37.796783Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"DEVICE_UNREACHABLE","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+--- 根因(service.go:371-396)---
+ObserveDevice 无论设备是上线还是掉线,第 394 行一律 publish(events.TypeDeviceInService);
+全函数没有任何一处调用交换机镜像 —— 所以 agent-wei 永远停在 Available。
+--- SSE 日志里 DEVICE_IN_SERVICE 各条的载荷(看掉线那一刻发了什么)---
+data: {"version":1,"seq":9200420,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T02:54:22.876796Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"READY","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+data: {"version":1,"seq":9200421,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:04:16.936337Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"READY","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+data: {"version":1,"seq":9200422,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:10:37.796783Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"DEVICE_UNREACHABLE","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+--- 根因(service.go:371-396)---
+ObserveDevice 无论设备是上线还是掉线,第 394 行一律 publish(events.TypeDeviceInService);
+全函数没有任何一处调用交换机镜像 —— 所以 agent-wei 永远停在 Available。
+########## 恢复后 —— 03:32:02Z ##########
+--- 7. roster ---
+{"state":"READY","availability":"READY","isRegistered":true}
+--- registrations ---
+User:       	1008@192.168.31.55
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 11:42:23) EXPSECS(616)
+Ping-Status:	Reachable
+--- switch 侧 agent-wei ---
+Available
+--- 8. SSE 计数 ---
+DEVICE_IN_SERVICE=3  DEVICE_UNREGISTERED=0  DEVICE_REGISTERED=0
+--- 恢复那一条的载荷 ---
+data: {"version":1,"seq":9200422,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:10:37.796783Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"DEVICE_UNREACHABLE","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+########## 恢复后 —— 03:32:02Z ##########
+--- 7. roster ---
+{"state":"READY","availability":"READY","isRegistered":true}
+--- registrations ---
+User:       	1008@192.168.31.55
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 11:42:23) EXPSECS(616)
+Ping-Status:	Reachable
+--- switch 侧 agent-wei ---
+Available
+--- 8. SSE 计数 ---
+DEVICE_IN_SERVICE=3  DEVICE_UNREGISTERED=0  DEVICE_REGISTERED=0
+--- 恢复那一条的载荷 ---
+data: {"version":1,"seq":9200422,"type":"DEVICE_IN_SERVICE","occurredAt":"2026-08-22T03:10:37.796783Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"DEVICE_UNREACHABLE","displayName":"Wei","extensionNumber":"1008","state":"READY"}}
+--- 抓流还活着吗(--max-time 1800,起于 02:50:19Z)---
+抓流应到期于 03:20:19Z;重注册发生在 ~03:31 —— 晚于到期
+--- 三条 DEVICE_IN_SERVICE 的时间与载荷 ---
+seq=9200420 at=2026-08-22T02:54:22.876796Z availability=READY
+seq=9200421 at=2026-08-22T03:04:16.936337Z availability=READY
+seq=9200422 at=2026-08-22T03:10:37.796783Z availability=DEVICE_UNREACHABLE
+--- 抓流还活着吗(--max-time 1800,起于 02:50:19Z)---
+抓流应到期于 03:20:19Z;重注册发生在 ~03:31 —— 晚于到期
+--- 三条 DEVICE_IN_SERVICE 的时间与载荷 ---
+seq=9200420 at=2026-08-22T02:54:22.876796Z availability=READY
+seq=9200421 at=2026-08-22T03:04:16.936337Z availability=READY
+seq=9200422 at=2026-08-22T03:10:37.796783Z availability=DEVICE_UNREACHABLE

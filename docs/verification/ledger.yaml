@@ -1167,7 +1167,7 @@ cases:
       主管墙上看到的是"有人在线却没人接",而坐席本人早已下班。
       这正是 state.go:207 注释里写的那句"崩掉的浏览器标签页和正常的看起来一模一样"。
     evidence_dir: docs/verification/artifacts/VC-S13-05/
-    status: TODO
+    status: FAIL  # 2026-08-22 执行:应用侧三条全中(reg 消失、availability=DEVICE_UNREACHABLE、state 仍 READY);两条不成立 → C28:①ObserveDevice 全函数不碰交换机镜像,agent-wei 持续 Available,队列会继续往死话机派单;②掉线发的是 DEVICE_IN_SERVICE 且载荷写着 DEVICE_UNREACHABLE(自相矛盾),契约里的 DEVICE_UNREGISTERED/DEVICE_REGISTERED 一次没出现。另:第一轮"关标签页"杀不掉扩展后台的注册(同 Call-ID 续期),人工步骤已改
     refs: ["internal/agents/state.go:207", "internal/agents/service.go:366", "internal/agents/service.go:394", "internal/events/event.go:57"]
     note: "【执行前须落实】switch 侧那条断言(agent-wei 不再 Available)对应哪次镜像调用尚未静态确认——
       ObserveDevice 是否会驱动 mirrorStatus 需在执行时以日志佐证。若实测 switch 侧仍 Available
