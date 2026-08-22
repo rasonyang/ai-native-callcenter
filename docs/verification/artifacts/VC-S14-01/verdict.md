@@ -79,3 +79,30 @@ FreeSWITCH 侧那条注册仍在(`EXPSECS` 从 198 往下走),那是**交换机�
 
 **实测确认(03:58:37Z)**:`1099` 的注册到期后**没有再上来**,注册条数由 3 → 0。
 删掉分机行 → 视图随之为空 → 话机续注册被拒。这一路是对的。
+
+## 更正:上文"零残留"说早了
+
+执行 VC-S14-02 的前置检查时发现,把 amy 临时绑到 1099 这一步在**交换机侧**留下了东西 ——
+应用侧 amy 确实回到了未绑定,但 mod_callcenter 里多出了:
+
+```
+agent-amy   contact=user/1099@192.168.31.55   status=Logged Out
+tier        agent-amy|support-en@192.168.31.55
+```
+
+`contact` 指向的 **1099 已经被删掉了**,是个悬空联系地址。因为她 `Logged Out`,不会被派单,
+但这是本次测试引入的、测试前不存在的状态(amy 的 `queue_agents` 行是原有的,
+她此前没出现在交换机上,是因为她没有分机)。
+
+已清理并**以复查为准**确认(不认 `+OK`,认 `tier list` / `agent list` 的复读,C1 的教训):
+
+```
+callcenter_config tier del support-en@192.168.31.55 agent-amy   → +OK
+callcenter_config agent del agent-amy                           → +OK
+复查:tier list 回到 3 条(agent-ben|support-zh、agent-wei|support-en、agent-wei|support-zh)
+      agent list 中 amy 已消失
+```
+
+**教训**:临时绑一个坐席到探针分机,副作用不止在应用库里 —— 绑定会把这个坐席
+**镜像进交换机**,而随后删掉分机不会把镜像撤回去。下次做同类替身测试,
+收尾要连交换机侧一起复查,不能只看应用库。

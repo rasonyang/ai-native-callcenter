@@ -1305,7 +1305,7 @@ cases:
     collect:
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1&&NF>=5{print $2\"|\"$1}' | sort"
       - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/queues/$QID/agents | jq -c '[.items[].username]'"
-      - "QID=<同上>; BEN=<ben 的 agentId>; curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID/agents -d '{\"agentIds\":[\"<wei 的 agentId>\",\"'$BEN'\"]}' -w '\\nhttp=%{http_code}\\n'"
+      - "QID=<同上>; BEN=<ben 的 agentId>; curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID/agents -d '{\"agentId\":\"'$BEN'\",\"level\":1,\"position\":2}' -w '\\nhttp=%{http_code}\\n'"
       - "sleep 2; /usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1&&NF>=5{print $2\"|\"$1}' | grep agent-ben | sort"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep 'agent staffing' \"$LOG\" | tail -3"
       - "QID=<同上>; BEN=<同上>; curl -s -o /dev/null -w 'unstaff http=%{http_code}\\n' -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/queues/$QID/agents/$BEN"
@@ -1325,9 +1325,13 @@ cases:
     evidence_dir: docs/verification/artifacts/VC-S14-02/
     status: TODO
     refs: ["internal/httpapi/catalog_handlers.go:108", "internal/httpapi/catalog_handlers.go:126", "internal/catalog/service.go:286", "internal/telephony/adapter.go:145"]
-    note: "PUT /queues/{id}/agents 是**全量替换**(与 SYS-7 记的 PUT 语义一致),
-      所以第 3 条必须把 wei 一起带上,否则会把 wei 撤下来。
-      请求体字段名 agentIds 为草案假设,执行前以契约核实"
+    note: "【2026-08-22 已核契约,草案两处都错,已改】
+      ①请求体不是 `agentIds` 数组,是 **`StaffQueueRequest`:必填 `agentId`(单数)**,
+        另有可选 `level`/`position`(省略时 handler 各置 1,catalog_handlers.go:117-122)。
+      ②因此 **PUT 不是全量替换**,是单个坐席的 upsert(`SetQueueAgent`,catalog/service.go:443)——
+        原 note 说'必须把 wei 一起带上,否则会把 wei 撤下来'是错的,**wei 从来不在风险里**。
+        写成数组反而会 decode 出 agentId=uuid.Nil。
+      本例给 position=2,让 ben 排在 wei 之后,便于观察派单顺序"
 
   - id: VC-S14-03
     scenario: S14
