@@ -5,9 +5,10 @@
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
 >
-> **当前状态(2026-08-22 过期标记扫描,HEAD 8321675)**:账本 28 case 已全部执行完毕 ——
-> **25 PASS / 3 FAIL / 0 TODO**;3 个 FAIL 是 VC-S3-02(→ C1)、VC-S9-01(→ C14)、VC-S12-01(→ C26)。
-> 阶段 0–5 已完成,阶段 6 已起草待批准。阶段 7:**W 系列(W1–W9)未开工**;
+> **当前状态(2026-08-22)**:账本 **39 case —— 25 PASS / 3 FAIL / 11 TODO**。
+> 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
+> 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
+> 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
 > **C 系列已修 12 项、余 9 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
@@ -39,25 +40,25 @@
 |---|---|---|---|---|
 | A1 | 登录 + 话机注册 | login.tsx;softphone-bar(_app.tsx);luacc.directory→aicc_xml.lua:103 | VC-S11-01/02(PASS) | — |
 | A2 | READY / 小休 / 签出 | POST /agent/ready\|not-ready\|logout;agents/service.go | VC-S11-01(PASS) | — |
-| A3 | 看等待名单 | _app.agent.index;GET /calls/waiting(按 staffing 过滤,call_handlers.go:52-66) | VC-S3-01(sup 视角) | **G-A1**:agent 视角的 QueuesForAgent 过滤无 case → 已起草 **VC-S13-01**(待批准) |
+| A3 | 看等待名单 | _app.agent.index;GET /calls/waiting(按 staffing 过滤,call_handlers.go:52-66) | VC-S3-01(sup 视角) | **G-A1**:agent 视角的 QueuesForAgent 过滤无 case → 已起草 **VC-S13-01**(已并入) |
 | A4 | 弹屏 + 接听 | PARTY_RINGING(coordinator.go:404-418)+ incoming 卡 | VC-S4-01 | G-A2(低):UI 渲染 bot summary/userData 呈现层无断言 |
 | A5 | 通话中:实时转写 | live-transcript.tsx;CALL_TRANSCRIPT(actor.go:261) | VC-S9-01/02 | — |
-| A6 | 通话中:联系人卡 | _app.agent.index ⋈ lib/contacts;GET /contacts | — | **G-A3**:contacts 全链无 case(tables.md 已记)→ 已起草 **VC-S13-06**(待批准) |
+| A6 | 通话中:联系人卡 | _app.agent.index ⋈ lib/contacts;GET /contacts | — | **G-A3**:contacts 全链无 case(tables.md 已记)→ 已起草 **VC-S13-06**(已并入) |
 | A7 | 保持/取回 | POST /calls/{id}/hold\|retrieve(202);uuid_phone_event | VC-S7-01 | — |
 | A8 | DTMF | POST /calls/{id}/dtmf;uuid_send_dtmf 远端腿 | VC-S7-04 | — |
 | A9 | 转接 | POST /calls/{id}/transfer;Transfer 选主叫腿(coordinator.go:770-777) | VC-S7-02 | — |
 | A10 | 挂断→ACW(平台代开)→确认 | coordinator.go:246-264;OpenWrapUp 默认词;POST /agent/wrap-up(agent_handlers.go:193-207) | VC-S4-02/03 | — |
 | A11 | 坐席不接(RONA) | mod_callcenter 重派;app 侧死边(state.go:189) | VC-S5-01 | 缺口已拍板实现 → **W2**(S5-01 已因 C22 于 08-21 重跑一次 PASS;W2 落地后仍须按 RONA 新行为整体改写再跑,见 T6.9) |
 | A12 | 回访单认领/办结 | _app.agent.callbacks;claim/complete(ledger_handlers.go:171/:196) | VC-S3-04(后半) | — |
-| A13 | 回看自己的通话 + 回放录音 | _app.agent.calls.tsx(RecordingPlayer,a6ff7b9);GET /cdrs(mine)+ /recordings/{id}/audio | — | **G-A4**:①列表只见自己 ②hasRecording 可播 ③**越权拒绝**(0639c56)→ 已起草 **VC-S13-02**(待批准) |
-| A14 | 我的一天(my-day) | ledger.sql:222-240 CTE;_app.agent.index 概览 | — | **G-A5**:汇总数字无 case → 已起草 **VC-S13-03**(待批准) |
-| A15 | 话机失联 | ObserveDevice→DEVICE_IN_SERVICE→DEVICE_UNREACHABLE(state.go:207-210) | S11/S12 只到事件层 | **G-A6**:失联→摘除→恢复 旅程无 case → 已起草 **VC-S13-05**(待批准) |
+| A13 | 回看自己的通话 + 回放录音 | _app.agent.calls.tsx(RecordingPlayer,a6ff7b9);GET /cdrs(mine)+ /recordings/{id}/audio | — | **G-A4**:①列表只见自己 ②hasRecording 可播 ③**越权拒绝**(0639c56)→ 已起草 **VC-S13-02**(已并入) |
+| A14 | 我的一天(my-day) | ledger.sql:222-240 CTE;_app.agent.index 概览 | — | **G-A5**:汇总数字无 case → 已起草 **VC-S13-03**(已并入) |
+| A15 | 话机失联 | ObserveDevice→DEVICE_IN_SERVICE→DEVICE_UNREACHABLE(state.go:207-210) | S11/S12 只到事件层 | **G-A6**:失联→摘除→恢复 旅程无 case → 已起草 **VC-S13-05**(已并入) |
 
 ### 1.2 主管(supervisor)旅程
 
 | # | 步骤 | 锚点 | 已有 case | 缺口 |
 |---|---|---|---|---|
-| B1 | 墙板(今日数字) | _app.supervisor.index;Report*(ledger.sql:133-161) | — | **G-B1**:报表数字对账无 case → 已起草 **VC-S13-04**(待批准) |
+| B1 | 墙板(今日数字) | _app.supervisor.index;Report*(ledger.sql:133-161) | — | **G-B1**:报表数字对账无 case → 已起草 **VC-S13-04**(已并入) |
 | B2 | live 呼叫墙 | GET /calls(requireSupervisorRole) | VC-S1-01、S7-03 | — |
 | B3 | 等待名单 | GET /calls/waiting | VC-S3-01、S6-01、S12-01 | — |
 | B4 | 坐席花名册 | _app.supervisor.agents;GET /agents | VC-S4-01(ON_CALL)、S12-03(isRegistered) | G-A6 同源(DEVICE_UNREACHABLE 展示) |
@@ -72,10 +73,10 @@
 | # | 步骤 | 锚点 | 已有 case | 缺口 |
 |---|---|---|---|---|
 | C1 | 账号/坐席管理 | _app.admin.agents;POST/PUT /agents | — | **G-C1**:建坐席→绑分机→签入→接听 全生命周期无 case → **未起草**(与 W9 账号清理冲突,排 W9 之后) |
-| C2 | 分机管理 | _app.admin.extensions;PUT(全量);luacc.directory | — | **G-C2**:建分机→注册鉴权→删除守卫 无 case → 已起草 **VC-S14-01**(待批准) |
-| C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" → 已起草 **VC-S14-03**(待批准) |
+| C2 | 分机管理 | _app.admin.extensions;PUT(全量);luacc.directory | — | **G-C2**:建分机→注册鉴权→删除守卫 无 case → 已起草 **VC-S14-01**(已并入) |
+| C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" → 已起草 **VC-S14-03**(已并入) |
 | C4 | 路由(队列)管理 | _app.admin.routing;saveQueue(lib/catalog.ts:51) | VC-S3-04 | ~~G-C4~~ **已闭**(F7:表单发全量) |
-| C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case → 已起草 **VC-S14-02**(待批准) |
+| C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case → 已起草 **VC-S14-02**(已并入) |
 | C6 | 流程(flow)管理 | 现 CLI-only(flowadd) | — | **已决 D3:要做** → **W3**(`/admin/bots`,参考 ui-test) |
 | C7 | 处置词管理 | dispositions 无 CRUD | VC-S4-03(读侧) | **已决 D4:固定词表** → W5(记录);S4-03 断言转正式 |
 | C8 | 报表 | _app.admin.reports(guard=SUPERVISOR) | — | 并入 G-B1 |
@@ -90,11 +91,11 @@
 (G-A1/A3/A4/A5/A6 + G-C1/C2/C5 可执行部分 + G-C3 DRAFT)、已决 5 个(G-B3 defer、G-B4 by design、
 G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、G-B2)。
 
-**起草进度(2026-08-22,草案待批准)**:G-A1→VC-S13-01、G-A3→VC-S13-06、G-A4→VC-S13-02、
+**起草进度(2026-08-22,已并入 `ledger.yaml`)**:G-A1→VC-S13-01、G-A3→VC-S13-06、G-A4→VC-S13-02、
 G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5→VC-S14-02、G-C3→VC-S14-03;
 **G-C1 未起草**(与 W9 账号清理冲突)。另有两条不在上表内:C15 附带记的 **G-A7**(坐席外呼全链)
 已起草为 **VC-S14-04**,T5.3 发现的重建缺口已起草为 **VC-S12-04**。
-草案并入 `ledger.yaml` 之前,本节计数维持原值不动。
+本节上一段的缺口计数是 v1 发布时的口径,作为历史保留;当前实际覆盖以 `ledger.yaml` 为准。
 
 ---
 
@@ -176,9 +177,11 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   sqlite 库,交换机重启时自行恢复,我们的 reconcile 只是**确认**(`already matched … added=0`)
   → 因此追加 **T6.12 / VC-S12-04**
 
-### 阶段 6 —— 新 case 起草(旅程缺口 → 账本追加)· **11 case 已起草,待批准后并入 ledger.yaml**
+### 阶段 6 —— 新 case 起草 ✅ 起草并并入完成(2026-08-22,账本 28 → 39;G-C1 排 W9 后,T6.9/T6.10 归 W 系列后)
 
-> **状态(2026-08-22)**:草案在 `docs/verification/ledger-draft-phase6.md`(commit 8321675),
+> **状态(2026-08-22)**:11 条草案已按原样并入 `ledger.yaml` —— 新场景 **S13**(坐席与主管旅程缺口,
+> 6 条)、**S14**(管理面生命周期 + 坐席外呼,4 条),另 **VC-S12-04** 并入既有 S12 段;
+> 全部 `status: TODO`。草案原件保留在 `docs/verification/ledger-draft-phase6.md`(commit 8321675),
 > 38 条 `file:line` 已机械校验(文件存在、行号在范围内),其中 6 条抽查过指向内容。
 > **T6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.7 / 6.8 / 6.11 / 6.12 已起草**。
 > **T6.6 只完成三分之二** —— G-C2→VC-S14-01、G-C5→VC-S14-02 已起草,
@@ -353,7 +356,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   BridgeToEndpoint+loopback 退出 click-to-dial 路径;AI 外呼仍用 loopback,默认值已钉 `/XML`
   (loopback b 腿继承 a 腿 dialplan,继承到 inline 就把号码当应用名——第三形态)。
   ~~待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。~~
-  **已了结**:两型 live 复测均已通过,结果记在 **C17**;T6.11 已起草为 **VC-S14-04**(待批准)。
+  **已了结**:两型 live 复测均已通过,结果记在 **C17**;T6.11 已起草为 **VC-S14-04**(已并入)。
   **附带旅程缺口 G-A7**:坐席外呼(DIAL OUT / POST /calls/dial,internal/outbound 整个服务)不在三旅程
   与任何 case 内。
 - **C16(2026-08-21 `go test -race` 实证,已修;2026-08-22 补立案 —— 修好了却一直没有条目)**
