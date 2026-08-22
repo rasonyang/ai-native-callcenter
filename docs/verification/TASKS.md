@@ -9,7 +9,7 @@
 > 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
 > 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 12 项、余 10 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27。
+> **C 系列已修 12 项、余 13 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -537,6 +537,48 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **修法**:先定口径(建议取行业通行的 ÷ 呼入总数,即 reports.tsx 那个),两处统一,
   并在表头标出定义;若确需保留两个指标,就给它们两个名字,不要都叫 SLA。
   证据:`docs/verification/artifacts/VC-S13-04/verdict.md` §4②。
+- **C28(new,2026-08-22 VC-S13-05 执行发现,未修)** **话机没了,交换机不知道;而发出去的事件说的是反话。**
+  根因同一个函数 `internal/agents/service.go:371-396` 的 `ObserveDevice`,后果两条:
+  ① **交换机镜像根本没被调用**。应用侧正确地把坐席记成 `availability=DEVICE_UNREACHABLE`、
+     `isRegistered=false`(且 `state` 仍为 READY —— 意愿与可达性分开,这一点是对的),
+     但全函数没有一处触及交换机状态,`callcenter_config agent list` 里 **agent-wei 持续 `Available`**
+     (实测持续观察 60+ 秒未追上)。**队列会继续把电话派给一部不存在的话机**,
+     每通振铃到超时再重派;主管墙上看到"有人在线却没人接",而坐席早已下线。
+  ② **掉线时发出的事件类型是反的**。第 394 行**上线掉线一律** `publish(events.TypeDeviceInService)`,
+     于是掉线那一条顶着 `DEVICE_IN_SERVICE` 的名字、载荷里写着 `DEVICE_UNREACHABLE`。实测三条:
+     ```
+     seq=9200420 02:54:22Z availability=READY               ← 续注册
+     seq=9200421 03:04:16Z availability=READY               ← 续注册
+     seq=9200422 03:10:37Z availability=DEVICE_UNREACHABLE  ← 掉线,类型却仍是 IN_SERVICE
+     ```
+     按 `type` 过滤的消费者被告知了相反的事;只有忽略类型去读载荷的才对。
+     契约里的 `DEVICE_UNREGISTERED` / `DEVICE_REGISTERED` **一次都没出现过**(实测计数 0/0)。
+  **与 W7 的关系要更正**:events.md 把这两个类型列为"十个零生产者"之一,读起来像"还没实现";
+  **实测是发错了一个**。W7 该做的不是"补一个生产者",而是**把现有这个改对** —— 建议同批修 ①。
+  证据:`docs/verification/artifacts/VC-S13-05/verdict.md`。
+- **C29(new,2026-08-22 VC-S14-01 执行发现,未修)** **建分机不显式写 `isEnabled`,建出来的是停用的,
+  而 API 只回 201。** 同一分钟的 A/B:
+  ```
+  POST {number,password,displayName}                → isEnabled:false,luacc.directory 计数 0
+  POST {number,password,displayName,isEnabled:true} → isEnabled:true, luacc.directory 计数 1
+  ```
+  根因:契约里 `isEnabled` 是**可选**的,而 `CreateExtension`(`catalog_handlers.go:48-55`)
+  `decode` 进普通结构体 `catalog.Extension`,**省略即 Go 零值 `false`** 并直接写库 ——
+  `extensions.is_enabled` 的列默认值 `true` 永远轮不到生效(佐证:库里原有 20 个分机全是 `t`)。
+  后果:`luacc.directory` 带 `WHERE e.is_enabled`,这部分机 **Lua 查不到、永远注册不上**,
+  而管理员在 API 侧看不出任何异常 —— 排查会指向话机或网络,不会指向这里。
+  **同型风险**:任何"可选布尔 + 非指针字段"的写接口都有这个问题,修时应一并排查(catalog 各 Create/Update)。
+- **C30(new,2026-08-22 VC-S14-01 执行发现,未修)** **删除分机没有任何守卫,坐席被静默解绑。**
+  `DeleteExtension`(`catalog_handlers.go:67-69`)→ `catalog/service.go:128-130` → store,
+  **中间没有任何检查**;唯一可能的保护是外键,而它是
+  `fk_agents_extensions … ON DELETE SET NULL`(**不是** `RESTRICT`)。
+  实测(amy 绑到该分机、话机正在注册时删):`DELETE → http=204`,分机行没了,
+  **amy 的绑定变成 NULL,无错误无提示**,`luacc.directory` 随之清空。
+  后果即 `failure_looks_like` 第一种:那名坐席的话机下次重注册就失败,而应用里他仍是 READY,
+  队列继续给他派单,直到有人发现"这个人接不到电话"。
+  **契约层面也缺位**:`DELETE /extensions/{extensionId}` 只声明 `204,400,401,403,404,503`,
+  **没有 409** —— "拒绝"这条路在契约里就没有位置,修复须**先改契约**(spec-first)。
+  证据:`docs/verification/artifacts/VC-S14-01/verdict.md`。
 - **C21(new,2026-08-21 修 C11 时发现;2026-08-21 已修 —— 原头部标注"未修"与正文矛盾,
   2026-08-22 扫描时更正)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,

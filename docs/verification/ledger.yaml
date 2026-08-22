@@ -1133,7 +1133,12 @@ cases:
       - who: agent
         do: "记录基线并开启抓流:执行 collect 第 1、2 条"
       - who: human
-        do: "**直接关掉 wei 的软电话标签页**(不要先签出——签出是另一条路径),等 30 秒"
+        do: "让 wei 的话机**真正离线**:在 web-sip-phone 扩展里 **Sign Out / Clear Account**
+          (或在 chrome://extensions 禁用该扩展)。**不要只关标签页** —— 软电话是 Chrome 扩展,
+          SIP 注册活在扩展的后台上下文里,关标签页杀不掉它(2026-08-22 实测:同一个 Call-ID
+          在 EXPSECS 倒数到 83 时续期跳回 608,应用侧报 READY 是对的)。
+          也不要先签出 —— 签出是另一条路径。
+          ⚠ 清账号后恢复需要重填 Domain/Account/Password,执行前先记下坐席分机的这三个值"
       - who: agent
         do: "执行 collect 第 3–5 条,判定失联是否被识别"
       - who: human
@@ -1143,7 +1148,7 @@ cases:
     collect:
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq -c '.items[]|select(.username==\"wei\")|{state,availability,isRegistered}'"
       - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s13dev-sse.log 2>&1 &"
-      - "sleep 30; /usr/local/freeswitch/bin/fs_cli -x 'show registrations' | awk -F',' 'NR>1&&NF>3{print $1}'"
+      - "for i in $(seq 1 20); do N=$(/usr/local/freeswitch/bin/fs_cli -x 'sofia status profile internal reg' | grep -c '^User:'); E=$(/usr/local/freeswitch/bin/fs_cli -x 'sofia status profile internal reg' | grep -oE 'EXPSECS\\([0-9]+\\)' | head -1); echo \"[$(date -u +%H:%M:%SZ)] reg=$N $E\"; [ \"$N\" = \"0\" ] && break; sleep 15; done   # 不要用固定 sleep 30:注册到期是分钟级(实测 EXPSECS 起始 600 秒量级)"
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq -c '.items[]|select(.username==\"wei\")|{state,availability,isRegistered}'"
       - "grep -c '\"type\":\"DEVICE_UNREGISTERED\"' /tmp/vc-s13dev-sse.log; grep -c '\"type\":\"AGENT_NOT_READY\"' /tmp/vc-s13dev-sse.log"
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
@@ -1156,8 +1161,15 @@ cases:
           (state.go:207-210:!IsRegistered || !IsDeviceInService → AvailDeviceUnreachable,
            该分支排在 StateNotReady 之后、default READY 之前)
         **state 仍为 READY** —— 失联不改坐席自己的意愿,只改可达性;两者是不同的列
-        SSE:DEVICE_UNREGISTERED ≥1
+        【留证,不判定】SSE 的 DEVICE_UNREGISTERED 计数落档 evidence_dir。
+        当前实现应为 **0** —— 见 **C28②**:ObserveDevice 上线掉线一律发 DEVICE_IN_SERVICE,
+        掉线那条顶着 IN_SERVICE 的名字、载荷却是 DEVICE_UNREACHABLE;契约里的
+        DEVICE_UNREGISTERED / DEVICE_REGISTERED 一次都没出现过(2026-08-22 实测 0/0/3)。
+        本条是我起草时的错:把一个零生产者类型写成了硬断言,应如 S1-02 的 CUSTOMER 行写成留证。
+        W7 落地后由 T6.10 转正式断言
         switch 侧 agent-wei status **不再是 Available**(否则队列仍会往一部死话机派单)
+        —— **2026-08-22 实测不成立,已立案 C28①**:ObserveDevice 全函数不触及交换机镜像,
+        持续观察 60+ 秒 agent-wei 始终 Available。本条**维持为断言不降级**,C28 修复后应转绿
       恢复后:
         roster 回到 availability=READY、isRegistered=true;SSE 出现 DEVICE_IN_SERVICE
           (service.go:394 的 publish 点)
@@ -1169,7 +1181,8 @@ cases:
     evidence_dir: docs/verification/artifacts/VC-S13-05/
     status: FAIL  # 2026-08-22 执行:应用侧三条全中(reg 消失、availability=DEVICE_UNREACHABLE、state 仍 READY);两条不成立 → C28:①ObserveDevice 全函数不碰交换机镜像,agent-wei 持续 Available,队列会继续往死话机派单;②掉线发的是 DEVICE_IN_SERVICE 且载荷写着 DEVICE_UNREACHABLE(自相矛盾),契约里的 DEVICE_UNREGISTERED/DEVICE_REGISTERED 一次没出现。另:第一轮"关标签页"杀不掉扩展后台的注册(同 Call-ID 续期),人工步骤已改
     refs: ["internal/agents/state.go:207", "internal/agents/service.go:366", "internal/agents/service.go:394", "internal/events/event.go:57"]
-    note: "【执行前须落实】switch 侧那条断言(agent-wei 不再 Available)对应哪次镜像调用尚未静态确认——
+    note: "【2026-08-22 已落实,结论:没有那次调用 —— 见 C28①。以下为起草时原文,留档】
+      【执行前须落实】switch 侧那条断言(agent-wei 不再 Available)对应哪次镜像调用尚未静态确认——
       ObserveDevice 是否会驱动 mirrorStatus 需在执行时以日志佐证。若实测 switch 侧仍 Available
       而应用侧已 DEVICE_UNREACHABLE,则为**新缺陷**(队列仍向死话机派单),按实测立案而非改 expect"
 
@@ -1226,11 +1239,15 @@ cases:
       - who: agent
         do: "执行 collect 第 3、4 条判定注册与 Lua 目录一致"
       - who: agent
-        do: "执行第 5 条尝试删除一个**已被坐席绑定**的分机(1008),判定守卫"
+        do: "执行第 5 条尝试删除一个**已被坐席绑定**的分机,判定守卫。
+          ⚠ **不要用 1008**(wei 的在用话机,且 S14-02/S14-04/S12-04 还要用他):外键是
+          `ON DELETE SET NULL`,照原文执行会**当场把 wei 静默解绑**。改用一个**未绑定的坐席**
+          (2026-08-22 用的是 amy)临时绑到本用例自建的 1099 再删 —— 守卫要挡的是
+          『存在绑定』,与绑的是谁无关,断言等价且事后零残留"
       - who: agent
         do: "执行第 6、7 条删除 1099 并确认目录随之失效"
     collect:
-      - "curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/extensions -d '{\"number\":\"1099\",\"password\":\"vc-probe-pass\",\"displayName\":\"VC Probe\"}' -w '\\nhttp=%{http_code}\\n'"
+      - "curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/extensions -d '{\"number\":\"1099\",\"password\":\"vc-probe-pass\",\"displayName\":\"VC Probe\",\"isEnabled\":true}' -w '\\nhttp=%{http_code}\\n'"
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select number, display_name from luacc.directory where number='1099'\""
       - "/usr/local/freeswitch/bin/fs_cli -x 'show registrations' | awk -F',' 'NR>1&&NF>3{print $1}' | grep -c 1099"
       - "/usr/local/freeswitch/bin/fs_cli -x 'sofia status profile internal reg' | grep -c 1099 || true"
@@ -1240,9 +1257,18 @@ cases:
     expect: |
       建:201;`luacc.directory` 立刻可查到 1099 —— Lua 目录是视图,不需要 reload
         (aicc_xml.lua:103 按 number 查该视图)
+      ⚠ **请求体必须显式带 `isEnabled: true`**,否则建出来的分机是**停用**的:
+        `isEnabled` 在契约里可选,decode 进普通结构体后省略即 Go 零值 false,列默认值 true
+        永不生效;而 luacc.directory 带 `WHERE e.is_enabled`,该分机**永远注册不上**而 API 只回 201。
+        这是缺陷 **C29**,不是用例的前提 —— C29 修好后这一条可去掉。
+        `kind` 省略取 `AGENT`(2026-08-22 实测),不必显式给
       话机注册成功:show registrations 含 1099
-      删一个**被坐席绑定**的分机(1008):**拒绝**,4xx 且错误码可辨
-        (期望是 409/CONFLICT 一类,不是 500;具体码见下方 note)
+      删一个**被坐席绑定**的分机:**应当拒绝**,4xx 且错误码可辨(409/CONFLICT 一类)
+        —— **2026-08-22 实测不成立,已立案 C30**:返回 **204**,分机行删除,
+        该坐席的 default_extension_id 被**静默置 NULL**(外键 ON DELETE SET NULL,不是 RESTRICT),
+        应用层从 handler 到 service 无任何检查。契约的 DELETE 也只声明 204/400/401/403/404/503,
+        **没有 409** —— 修复须先改契约(spec-first)。
+        本条**维持为断言不降级**(note 原文:"不要为了让用例通过而把 expect 降级成'删除成功'")
       删 1099:204;删后 `luacc.directory` 查不到 —— 目录随之失效,该分机再也注册不上
       坐席会话执行同样的建/删:403(写操作是 ADMIN 权限,与 C23① 同族)
     failure_looks_like: |
