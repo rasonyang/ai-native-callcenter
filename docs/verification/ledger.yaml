@@ -28,7 +28,11 @@
 #
 # 环境事实核对(与任务第 0 部分的差异,采集时以 DB 为准):
 #   - seed 将 wei 绑到分机 1001(internal/seed/seed.go:61);任务书写的是 1008。
-#     每条涉及 wei 的用例先跑 collect 里的"读绑定分机"命令,以查询结果为准,不臆造。
+#     每条涉及**任何坐席**的用例都先读绑定分机,以查询结果为准,不臆造 —— 不只是 wei。
+#     2026-08-22 的教训:VC-S14-04 把 ben 写死成 1007,而 seed.go:63 绑的是 **1002**;
+#     1007 是 2026-08-21 执行 VC-S7-02 时因"1002 无话机"临时改的目标(见该例 status 注),
+#     那个临时偏差被当成事实写进了后来的用例。读一条就能避免:
+#     docker exec -i aicc-postgres psql -U aicc -d aicc -Atc "select u.username, coalesce(e.number,'(unbound)') from agents a join users u on u.id=a.user_id left join extensions e on e.id=a.default_extension_id order by u.username"
 #   - S8 的前提"en→OpenAI / zh→Qwen"与设计相反:一部署一 provider(phase1-decisions A1;
 #     cmd/aicc/main.go:267-275 启动期解析一次)。VC-S8-* 按系统真实承诺改写:
 #     language 只影响 flow 文案/voice/转写语言,不选 provider。
@@ -1372,13 +1376,18 @@ cases:
   - id: VC-S14-04
     scenario: S14
     layer: signaling
-    precondition: "wei(1008)与 ben(1007)均已签入 READY 且话机注册;
+    precondition: "wei 与 ben 均已签入 READY 且**各自绑定的分机**上有话机注册 ——
+      分机号**执行时现读**(collect 第 1 条),不要沿用本文里的示例值:
+      2026-08-22 实测 wei=1008、**ben=1002**(seed.go:63 的配置);
+      本例原写'ben(1007)'是错的 —— 1007 不绑任何坐席,那是 08-21 的一次临时偏差被抄了进来。
+      ⚠ 内部一型的 expect 里有一条'talk_sec 是两条坐席腿区间的**并集**',
+      它要求**被叫腿属于某个坐席**;拨到一个不绑坐席的分机,这条断言根本不成立。
       pstn_sim 网关可用(外呼一型需要)"
     steps:
       - who: agent
         do: "记基线:执行 collect 第 1 条"
       - who: agent
-        do: "发起内部外呼 1008→1007:第 2 条"
+        do: "发起内部外呼 wei→ben(号码用第 1 条读到的值):第 2 条"
       - who: human
         do: "ben 接听,通话数秒后由 **ben** 挂断"
       - who: agent
@@ -1390,17 +1399,18 @@ cases:
       - who: agent
         do: "执行其余 collect,判定外呼一型的账面"
     collect:
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select u.username||'='||coalesce(e.number,'(unbound)') from agents a join users u on u.id=a.user_id left join extensions e on e.id=a.default_extension_id where u.username in ('wei','ben')\"; echo '把 ben 的号码记为 $BEN_EXT 供后续条目使用'"
       - "echo cdr_baseline=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
-      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/dial -d '{\"destination\":\"1007\"}' -w '\\nhttp=%{http_code}\\n'"
+      - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/dial -d '{\"destination\":\"$BEN_EXT\"}' -w '\\nhttp=%{http_code}\\n'"
       - "CALL=<上一条的 callId>; for op in hold retrieve; do printf '%-9s ' $op; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/$op -w ' http=%{http_code}\\n' | head -c 120; done; printf 'transfer  '; curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/transfer -d '{\"destination\":\"1009\"}' -w ' http=%{http_code}\\n' | head -c 120; printf 'mute      '; curl -s -o /dev/null -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/mute -w 'http=%{http_code}\\n'"
       - "CALL=<同上>; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_type, status, from_number, to_number, ring_sec, talk_sec, bill_sec, total_sec, array_length(agent_ids,1), legs from cdrs where call_id='$CALL'\""
       - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/dial -d '{\"destination\":\"18688886669\"}' -w '\\nhttp=%{http_code}\\n'"
       - "CALL2=<上一条的 callId>; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_type, status, from_number, to_number, ring_sec, talk_sec, bill_sec, total_sec, legs, tech from cdrs where call_id='$CALL2'\""
       - "echo cdr_now=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
     expect: |
-      内部一型(1008→1007):
+      内部一型(wei→ben,2026-08-22 现读为 1008→1002):
         call_type=**INTERNAL**(4 位数走 callTypeFor,outbound.go:196 盖 aicc_call_type)
-        status=ANSWERED,legs 只含被叫那一段 AGENT|1007
+        status=ANSWERED,legs 只含被叫那一段 AGENT|<ben 的分机>
         **talk_sec 是两条坐席腿区间的并集,不是两倍** —— 两条腿都有 AgentID,
           并集把同一段对话收成一段(2026-08-21 实测 17 秒)
         **bill_sec=0** —— 分机互拨没有运营商计费(billedLeg 对 INTERNAL 返回 nil);
