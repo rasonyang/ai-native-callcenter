@@ -1173,6 +1173,11 @@ export interface components {
         Availability: "LOGGED_OUT" | "ON_CALL" | "WRAP_UP" | "NOT_READY" | "DEVICE_UNREACHABLE" | "READY";
         /** @description One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it. */
         Presence: {
+            /**
+             * Format: uuid
+             * @description Whose presence this is. The cockpit needs it to tell its own party from the other side on a call where both parties are agents — an internal extension-to-extension call reaches both of them through /calls/mine, and picking the first party that happens to carry an agentId shows one agent the other one's state.
+             */
+            agentId: string;
             state: components["schemas"]["AgentState"];
             reason?: components["schemas"]["NotReadyReason"];
             availability: components["schemas"]["Availability"];

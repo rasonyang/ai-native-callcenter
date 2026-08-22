@@ -25,6 +25,7 @@ function presenceFor(state: FixtureState, now: number): Presence {
   const enteredAt = new Date(now).toISOString()
   if (state === 'wrapUp') {
     return {
+      agentId: AGENT_ID,
       state: 'NOT_READY',
       reason: 'AFTER_CALL_WORK',
       availability: 'WRAP_UP',
@@ -34,6 +35,7 @@ function presenceFor(state: FixtureState, now: number): Presence {
     }
   }
   return {
+    agentId: AGENT_ID,
     state: 'READY',
     reason: undefined,
     availability: state === 'onCall' || state === 'ringing' ? 'ON_CALL' : 'READY',

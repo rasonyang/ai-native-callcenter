@@ -72,6 +72,7 @@ export const CALLER = '+861083550341'
 
 export function presenceFixture(overrides: Partial<Presence> = {}): Presence {
   return {
+    agentId: AGENT_ID,
     state: 'READY',
     availability: 'READY',
     extensionNumber: '1001',

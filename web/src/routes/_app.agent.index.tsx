@@ -61,7 +61,7 @@ function AgentCockpit() {
         <CallerCard call={call} lastCall={lastCall} />
         <LiveTranscriptBoundary
           callId={call?.callId}
-          myAgentId={call?.parties.find((p) => p.agentId)?.agentId}
+          myAgentId={presence?.agentId}
           streamStatus={streamStatus}
           className="min-h-0 flex-1"
         />
@@ -88,11 +88,10 @@ function AgentCockpit() {
  */
 function useLastCall(signedIn: boolean, call?: CallSnapshot): LastCall {
   const { data } = useMyCDRs({ limit: 1 })
+  const { data: presence } = usePresence(signedIn)
   const [remembered, setRemembered] = useState<{ callId: string; number: string }>()
 
-  const liveNumber = call
-    ? otherParty(call, call.parties.find((p) => p.agentId)?.agentId)?.number
-    : undefined
+  const liveNumber = call ? otherParty(call, presence?.agentId)?.number : undefined
 
   useEffect(() => {
     if (call && liveNumber) setRemembered({ callId: call.callId, number: liveNumber })
@@ -127,7 +126,12 @@ interface LastCall {
 function CallPanel({ call }: { call: CallSnapshot }) {
   const { t } = useTranslation()
   const actions = useCallActions()
-  const mine = myParty(call, call.parties.find((p) => p.agentId)?.agentId)
+  // Who "I" am has to come from the session, not from the call. On a call
+  // between two extensions both parties carry an agentId, and taking the first
+  // one showed the callee their caller's leg: the panel read CALLING OUT and
+  // Dialling on a screen whose owner was the one being rung.
+  const { data: presence } = usePresence(true)
+  const mine = myParty(call, presence?.agentId)
   const other = otherParty(call, mine?.agentId)
   const elapsedSec = useElapsedSec(mine?.answeredAt ?? mine?.createdAt)
 
@@ -590,14 +594,15 @@ function CallbacksCard() {
  */
 function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCall }) {
   const { t, i18n } = useTranslation()
-  const other = call ? otherParty(call, call.parties.find((p) => p.agentId)?.agentId) : undefined
+  const { data: presence } = usePresence(true)
+  const other = call ? otherParty(call, presence?.agentId) : undefined
   // The caller stays on the card after they hang up: the agent is still
   // working that call — writing it up, calling the customer back — and a card
   // that emptied itself at the hangup would take the person away mid-sentence.
   // A call still dialling has only the agent's own leg, and the number being
   // called rides it: without this the agent reads "Unknown number" for a
   // number they typed themselves a second ago.
-  const mine = call ? myParty(call, call.parties.find((p) => p.agentId)?.agentId) : undefined
+  const mine = call ? myParty(call, presence?.agentId) : undefined
   const number = other?.number ?? mine?.otherNumber ?? lastCall.number
   const { contact } = useContactFor(number)
 

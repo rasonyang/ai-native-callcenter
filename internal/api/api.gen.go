@@ -1189,6 +1189,9 @@ type PartyState string
 
 // Presence One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.
 type Presence struct {
+	// AgentID Whose presence this is. The cockpit needs it to tell its own party from the other side on a call where both parties are agents — an internal extension-to-extension call reaches both of them through /calls/mine, and picking the first party that happens to carry an agentId shows one agent the other one's state.
+	AgentID openapi_types.UUID `json:"agentId"`
+
 	// Availability The single word that answers: could this agent take a call, and if not, why.
 	Availability    Availability `json:"availability"`
 	EnteredAt       time.Time    `json:"enteredAt"`

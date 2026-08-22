@@ -200,7 +200,11 @@ const PARTY_STATE_COLOR: Record<PartyState, string> = {
 /** Who is on the line and for how long. Fixed width, so nothing jitters. */
 function CallInfo({ call }: { call?: CallSnapshot }) {
   const { t } = useTranslation()
-  const agentId = call?.parties.find((p) => p.agentId)?.agentId
+  // Who "I" am comes from the session. Both parties of an extension-to-extension
+  // call carry an agentId, so taking the first one showed the callee the
+  // caller's leg — the bar read the placer's DIALING on the receiver's screen.
+  const { data: presence } = usePresence(true)
+  const agentId = presence?.agentId
   const mine = call ? myParty(call, agentId) : undefined
   const other = call ? otherParty(call, agentId) : undefined
   const isEstablished = mine?.state === 'TALKING' || mine?.state === 'HELD'
@@ -250,20 +254,26 @@ function ActionBar({ call }: { call?: CallSnapshot }) {
   const { t } = useTranslation()
   const actions = useCallActions()
   const [transferTo, setTransferTo] = useState('')
+  const { data: presence } = usePresence(true)
 
-  const agentId = call?.parties.find((p) => p.agentId)?.agentId
+  const agentId = presence?.agentId
   const mine = call ? myParty(call, agentId) : undefined
-  const isRinging = mine?.state === 'RINGING' || mine?.state === 'DIALING'
+  // Being rung and ringing somebody share no button. RINGING is a call handed
+  // to this agent and can be answered; DIALING is one they placed, and there is
+  // nothing to answer — offering the key put an Answer button on the screen of
+  // the person who had just dialled. Same split the cockpit makes.
+  const isOffered = mine?.state === 'RINGING'
+  const isUnanswered = isOffered || mine?.state === 'DIALING'
   const isHeld = mine?.state === 'HELD'
   const isEstablished = mine?.state === 'TALKING' || isHeld
   const isMuted = Boolean(mine?.isMuted)
   // Answering is not instant: the phone gathers ICE before it picks up, which
   // takes seconds. Saying so beats a button that looks like it did nothing.
-  const isAnswering = actions.answer.isPending || (actions.answer.isSuccess && isRinging)
+  const isAnswering = actions.answer.isPending || (actions.answer.isSuccess && isOffered)
 
   return (
     <span className="flex items-center gap-0.5">
-      {isRinging && call && (
+      {isOffered && call && (
         <Button
           size="icon"
           title={t('call.answer')}
@@ -318,8 +328,8 @@ function ActionBar({ call }: { call?: CallSnapshot }) {
         size="icon"
         variant="destructive"
         disabled={!call}
-        title={isRinging ? t('call.decline') : t('call.hangup')}
-        aria-label={isRinging ? t('call.decline') : t('call.hangup')}
+        title={isUnanswered ? t('call.decline') : t('call.hangup')}
+        aria-label={isUnanswered ? t('call.decline') : t('call.hangup')}
         onClick={() => call && actions.hangup.mutate(call.callId)}
       >
         <PhoneOff />

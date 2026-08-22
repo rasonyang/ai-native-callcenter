@@ -32,8 +32,13 @@ type AgentDirectory interface {
 // Timestamps are truncated to the second: presence moves in whole seconds and
 // a screen renders it that way, so the sub-second digits would be noise on
 // every event.
-func presenceOf(p agents.Presence) api.Presence {
+// The agent id is not part of agents.Presence — that type is a state, not an
+// identity — so it is passed alongside. The cockpit needs it: on a call between
+// two extensions both parties carry an agentId, and without knowing which one
+// is the reader the screen picks the wrong side.
+func presenceOf(agentID uuid.UUID, p agents.Presence) api.Presence {
 	out := api.Presence{
+		AgentID:      agentID,
 		State:        api.AgentState(p.CurrentState()),
 		Availability: api.Availability(p.Availability()),
 		EnteredAt:    p.EnteredAt.UTC().Truncate(time.Second),
@@ -82,7 +87,7 @@ func (s *Server) AgentLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := s.agents.Login(r.Context(), agentID, req.ExtensionNumber)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 func (s *Server) AgentLogout(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +96,7 @@ func (s *Server) AgentLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.agents.Logout(r.Context(), agentID)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 func (s *Server) AgentReady(w http.ResponseWriter, r *http.Request) {
@@ -100,7 +105,7 @@ func (s *Server) AgentReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p, err := s.agents.Ready(r.Context(), agentID)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +126,7 @@ func (s *Server) AgentNotReady(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := s.agents.NotReady(r.Context(), agentID, req.Reason)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 // GetAgentWrapUp serves the record waiting on this agent.
@@ -204,7 +209,7 @@ func (s *Server) AgentWrapUp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p, err := s.agents.EndWrapUp(r.Context(), agentID)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 // trimmed passes an optional field through, keeping the difference between
@@ -223,7 +228,7 @@ func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, presenceOf(s.agents.Presence(agentID)))
+	writeJSON(w, http.StatusOK, presenceOf(agentID, s.agents.Presence(agentID)))
 }
 
 func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -240,7 +245,7 @@ func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
 // abandoned phone stops absorbing calls.
 func (s *Server) ForceLogoutAgent(w http.ResponseWriter, r *http.Request, agentID uuid.UUID) {
 	p, err := s.agents.Logout(r.Context(), agentID)
-	s.writePresence(w, r, p, err)
+	s.writePresence(w, r, agentID, p, err)
 }
 
 //
@@ -352,10 +357,10 @@ func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 // writePresence maps service errors onto the API error vocabulary.
-func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, p agents.Presence, err error) {
+func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, agentID uuid.UUID, p agents.Presence, err error) {
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, presenceOf(p))
+		writeJSON(w, http.StatusOK, presenceOf(agentID, p))
 	case errors.Is(err, agents.ErrUnknownAgent):
 		writeError(w, http.StatusForbidden, CodeForbidden, "this account is not an agent", nil)
 	case errors.Is(err, agents.ErrExtensionInUse):

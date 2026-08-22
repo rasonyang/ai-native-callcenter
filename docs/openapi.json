@@ -3696,6 +3696,11 @@
         "type": "object",
         "description": "One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.",
         "properties": {
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Whose presence this is. The cockpit needs it to tell its own party from the other side on a call where both parties are agents — an internal extension-to-extension call reaches both of them through /calls/mine, and picking the first party that happens to carry an agentId shows one agent the other one's state."
+          },
           "state": {
             "$ref": "#/components/schemas/AgentState"
           },
@@ -3719,6 +3724,7 @@
           }
         },
         "required": [
+          "agentId",
           "state",
           "availability",
           "enteredAt"

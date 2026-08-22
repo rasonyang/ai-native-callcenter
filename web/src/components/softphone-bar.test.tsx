@@ -195,6 +195,61 @@ describe('call controls', () => {
   })
 })
 
+/**
+ * A call this agent placed themselves, and an internal call where the other
+ * party is an agent too. The bar used to read the first party carrying an
+ * agentId as "me", and to treat DIALING as ringing — together that put an
+ * Answer button on the screen of whoever had just dialled, and showed the
+ * person being rung their caller's leg instead of their own.
+ */
+const OTHER_AGENT_ID = '00000000-0000-4000-8000-0000000000a2'
+
+function placedByThisAgent() {
+  const call = callFixture('DIALING')
+  return {
+    ...call,
+    callType: 'INTERNAL' as const,
+    parties: [{ ...call.parties[1], role: 'ORIGINATOR' as const, number: '1008', otherNumber: '1002' }],
+  }
+}
+
+function rungByAnotherAgent() {
+  const call = callFixture('RINGING')
+  const at = new Date().toISOString()
+  return {
+    ...call,
+    callType: 'INTERNAL' as const,
+    parties: [
+      // The placer first, which is what made the naive lookup pick them.
+      { partyId: 'pa', channelId: 'placer', role: 'ORIGINATOR' as const, state: 'DIALING' as const,
+        number: '1002', otherNumber: '1008', agentId: OTHER_AGENT_ID, createdAt: at },
+      { partyId: 'pb', channelId: 'callee', role: 'TARGET' as const, state: 'RINGING' as const,
+        number: '1008', otherNumber: '1002', agentId: AGENT_ID, createdAt: at },
+    ],
+  }
+}
+
+describe('who the bar thinks it belongs to', () => {
+  it('offers nothing to answer on a call this agent placed', async () => {
+    await renderBar({ calls: [placedByThisAgent()], presence: presenceFixture({ availability: 'ON_CALL' }) })
+    await screen.findByText(/1002/)
+    expect(screen.queryByRole('button', { name: /^answer$/i })).not.toBeInTheDocument()
+  })
+
+  it('answers on behalf of the agent being rung, not the one dialling', async () => {
+    const { api, user } = await renderBar({
+      calls: [rungByAnotherAgent()],
+      presence: presenceFixture({ availability: 'ON_CALL' }),
+    })
+    await user.click(await screen.findByRole('button', { name: /^answer$/i }))
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/answer` }),
+      ),
+    )
+  })
+})
+
 describe('dialler', () => {
   it('composes a number on the keypad and dials it', async () => {
     const { api, user } = await renderBar()

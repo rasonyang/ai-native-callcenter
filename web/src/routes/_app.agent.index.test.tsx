@@ -251,6 +251,85 @@ function placedCall() {
   }
 }
 
+/**
+ * An internal call between two agents. Both parties carry an agentId, which is
+ * the case the cockpit used to get wrong: it took the first party that had one
+ * as "me", and the placer is listed first, so the person being rung was shown
+ * the caller's leg — Calling out, Dialling, and an Answer button that answered
+ * nothing. Who "I" am has to come from the session.
+ */
+const OTHER_AGENT_ID = '00000000-0000-4000-8000-0000000000a2'
+
+function agentToAgentCall() {
+  const call = callFixture('RINGING')
+  const at = new Date().toISOString()
+  return {
+    ...call,
+    callType: 'INTERNAL' as const,
+    queue: undefined,
+    parties: [
+      // The one who dialled, deliberately first in the list.
+      {
+        partyId: '00000000-0000-4000-8000-0000000000pa',
+        channelId: 'placer',
+        role: 'ORIGINATOR' as const,
+        state: 'DIALING' as const,
+        number: '1002',
+        otherNumber: '1008',
+        agentId: OTHER_AGENT_ID,
+        createdAt: at,
+      },
+      // The one being rung — the owner of the screen under test.
+      {
+        partyId: '00000000-0000-4000-8000-0000000000pb',
+        channelId: 'callee',
+        role: 'TARGET' as const,
+        state: 'RINGING' as const,
+        number: '1008',
+        otherNumber: '1002',
+        agentId: AGENT_ID,
+        createdAt: at,
+      },
+    ],
+  }
+}
+
+describe('an internal call seen from each side', () => {
+  it('shows the agent being rung their own leg, not the placer\'s', async () => {
+    await renderCockpit({
+      calls: [agentToAgentCall()],
+      presence: presenceFixture({ agentId: AGENT_ID, availability: 'ON_CALL' }),
+    })
+    expect(await screen.findByText(/incoming call/i)).toBeVisible()
+    expect(screen.getByText(/^ringing$/i)).toBeVisible()
+    expect(screen.queryByText(/^dialling$/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/calling out/i)).not.toBeInTheDocument()
+  })
+
+  it('lets the one being rung accept, and answers their own call', async () => {
+    const { api, user } = await renderCockpit({
+      calls: [agentToAgentCall()],
+      presence: presenceFixture({ agentId: AGENT_ID, availability: 'ON_CALL' }),
+    })
+    await user.click(await screen.findByRole('button', { name: /accept/i }))
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/answer` }),
+      ),
+    )
+  })
+
+  it('shows the placer that they are calling out, with nothing to answer', async () => {
+    await renderCockpit({
+      calls: [agentToAgentCall()],
+      presence: presenceFixture({ agentId: OTHER_AGENT_ID, availability: 'ON_CALL' }),
+    })
+    expect(await screen.findByText(/calling out/i)).toBeVisible()
+    expect(screen.getByText(/^dialling$/i)).toBeVisible()
+    expect(screen.queryByRole('button', { name: /accept/i })).not.toBeInTheDocument()
+  })
+})
+
 describe('dial out', () => {
   it('dials a typed number', async () => {
     const { api, user } = await renderCockpit()
