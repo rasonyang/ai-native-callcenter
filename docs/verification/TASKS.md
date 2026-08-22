@@ -4,6 +4,12 @@
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
+>
+> **当前状态(2026-08-22 过期标记扫描,HEAD 8321675)**:账本 28 case 已全部执行完毕 ——
+> **25 PASS / 3 FAIL / 0 TODO**;3 个 FAIL 是 VC-S3-02(→ C1)、VC-S9-01(→ C14)、VC-S12-01(→ C26)。
+> 阶段 0–5 已完成,阶段 6 已起草待批准。阶段 7:**W 系列(W1–W9)未开工**;
+> **C 系列已修 12 项、余 9 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26。
+> 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
 
@@ -16,8 +22,9 @@
 | 分机号互相拨打(不出网关) | `INTERNAL` |
 
 **能力限制:`INTERNAL` 通话不支持转接(transfer)、保持(hold)、取回(retrieve)。**
-影响面:①CDR 的 call_type 派生须按此实现(现状 click-to-dial 分机互拨被记成 OUTBOUND,见 C17);
-②呼叫控制接口对 INTERNAL 呼叫应拒绝上述三个操作(现状无此判断,见 **C18**);
+影响面:①CDR 的 call_type 派生须按此实现(立案时 click-to-dial 分机互拨被记成 OUTBOUND,
+见 C17 —— **2026-08-20 已修**);②呼叫控制接口对 INTERNAL 呼叫应拒绝上述三个操作(立案时无此判断,
+见 **C18** —— **2026-08-21 已修**,409 `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE`);
 ③账本相关 case(T6.11 外呼、S7 系列 hold/transfer)的 expect 须按此口径写。
 
 ---
@@ -32,29 +39,29 @@
 |---|---|---|---|---|
 | A1 | 登录 + 话机注册 | login.tsx;softphone-bar(_app.tsx);luacc.directory→aicc_xml.lua:103 | VC-S11-01/02(PASS) | — |
 | A2 | READY / 小休 / 签出 | POST /agent/ready\|not-ready\|logout;agents/service.go | VC-S11-01(PASS) | — |
-| A3 | 看等待名单 | _app.agent.index;GET /calls/waiting(按 staffing 过滤,call_handlers.go:52-66) | VC-S3-01(sup 视角) | **G-A1**:agent 视角的 QueuesForAgent 过滤无 case |
+| A3 | 看等待名单 | _app.agent.index;GET /calls/waiting(按 staffing 过滤,call_handlers.go:52-66) | VC-S3-01(sup 视角) | **G-A1**:agent 视角的 QueuesForAgent 过滤无 case → 已起草 **VC-S13-01**(待批准) |
 | A4 | 弹屏 + 接听 | PARTY_RINGING(coordinator.go:404-418)+ incoming 卡 | VC-S4-01 | G-A2(低):UI 渲染 bot summary/userData 呈现层无断言 |
 | A5 | 通话中:实时转写 | live-transcript.tsx;CALL_TRANSCRIPT(actor.go:261) | VC-S9-01/02 | — |
-| A6 | 通话中:联系人卡 | _app.agent.index ⋈ lib/contacts;GET /contacts | — | **G-A3**:contacts 全链无 case(tables.md 已记) |
+| A6 | 通话中:联系人卡 | _app.agent.index ⋈ lib/contacts;GET /contacts | — | **G-A3**:contacts 全链无 case(tables.md 已记)→ 已起草 **VC-S13-06**(待批准) |
 | A7 | 保持/取回 | POST /calls/{id}/hold\|retrieve(202);uuid_phone_event | VC-S7-01 | — |
 | A8 | DTMF | POST /calls/{id}/dtmf;uuid_send_dtmf 远端腿 | VC-S7-04 | — |
 | A9 | 转接 | POST /calls/{id}/transfer;Transfer 选主叫腿(coordinator.go:770-777) | VC-S7-02 | — |
 | A10 | 挂断→ACW(平台代开)→确认 | coordinator.go:246-264;OpenWrapUp 默认词;POST /agent/wrap-up(agent_handlers.go:193-207) | VC-S4-02/03 | — |
-| A11 | 坐席不接(RONA) | mod_callcenter 重派;app 侧死边(state.go:189) | VC-S5-01 | 缺口已拍板实现 → **W2**(实现后 S5-01 改写重跑) |
+| A11 | 坐席不接(RONA) | mod_callcenter 重派;app 侧死边(state.go:189) | VC-S5-01 | 缺口已拍板实现 → **W2**(S5-01 已因 C22 于 08-21 重跑一次 PASS;W2 落地后仍须按 RONA 新行为整体改写再跑,见 T6.9) |
 | A12 | 回访单认领/办结 | _app.agent.callbacks;claim/complete(ledger_handlers.go:171/:196) | VC-S3-04(后半) | — |
-| A13 | 回看自己的通话 + 回放录音 | _app.agent.calls.tsx(RecordingPlayer,a6ff7b9);GET /cdrs(mine)+ /recordings/{id}/audio | — | **G-A4**:①列表只见自己 ②hasRecording 可播 ③**越权拒绝**(0639c56) |
-| A14 | 我的一天(my-day) | ledger.sql:222-240 CTE;_app.agent.index 概览 | — | **G-A5**:汇总数字无 case |
-| A15 | 话机失联 | ObserveDevice→DEVICE_IN_SERVICE→DEVICE_UNREACHABLE(state.go:207-210) | S11/S12 只到事件层 | **G-A6**:失联→摘除→恢复 旅程无 case |
+| A13 | 回看自己的通话 + 回放录音 | _app.agent.calls.tsx(RecordingPlayer,a6ff7b9);GET /cdrs(mine)+ /recordings/{id}/audio | — | **G-A4**:①列表只见自己 ②hasRecording 可播 ③**越权拒绝**(0639c56)→ 已起草 **VC-S13-02**(待批准) |
+| A14 | 我的一天(my-day) | ledger.sql:222-240 CTE;_app.agent.index 概览 | — | **G-A5**:汇总数字无 case → 已起草 **VC-S13-03**(待批准) |
+| A15 | 话机失联 | ObserveDevice→DEVICE_IN_SERVICE→DEVICE_UNREACHABLE(state.go:207-210) | S11/S12 只到事件层 | **G-A6**:失联→摘除→恢复 旅程无 case → 已起草 **VC-S13-05**(待批准) |
 
 ### 1.2 主管(supervisor)旅程
 
 | # | 步骤 | 锚点 | 已有 case | 缺口 |
 |---|---|---|---|---|
-| B1 | 墙板(今日数字) | _app.supervisor.index;Report*(ledger.sql:133-161) | — | **G-B1**:报表数字对账无 case |
+| B1 | 墙板(今日数字) | _app.supervisor.index;Report*(ledger.sql:133-161) | — | **G-B1**:报表数字对账无 case → 已起草 **VC-S13-04**(待批准) |
 | B2 | live 呼叫墙 | GET /calls(requireSupervisorRole) | VC-S1-01、S7-03 | — |
 | B3 | 等待名单 | GET /calls/waiting | VC-S3-01、S6-01、S12-01 | — |
 | B4 | 坐席花名册 | _app.supervisor.agents;GET /agents | VC-S4-01(ON_CALL)、S12-03(isRegistered) | G-A6 同源(DEVICE_UNREACHABLE 展示) |
-| B5 | 队列概览(配员数) | _app.supervisor.queues(只读) | VC-S3-02(FAIL:DB↔switch 对账) | 对账缺陷已立案 → C1 |
+| B5 | 队列概览(配员数) | _app.supervisor.queues(只读) | VC-S3-02(FAIL:DB↔switch 对账) | 对账缺陷已立案 → C1(⚠ 症状已潜伏,直接重跑会**假通过**) |
 | B6 | CDR 检索/详情 | _app.admin.cdr.*(guard=SUPERVISOR);legs/transcript/RecordingPlayer | VC-S3-03、S4-04、S9-02 | G-B2(低):详情页 wrapUp 展示无断言 |
 | B7 | 质检评审 | API 在(recording_handlers.go:118/:152),web 零引用 | — | **已决 D1:下一期**(本期不补 UI、不起草 case) |
 | B8 | 实时转写旁听 | LiveTranscript 仅坐席 cockpit | — | **已决 D2=B:by design**(坐席工具;主管看事后 CDR 详情)——不补 UI、不起草 case |
@@ -64,11 +71,11 @@
 
 | # | 步骤 | 锚点 | 已有 case | 缺口 |
 |---|---|---|---|---|
-| C1 | 账号/坐席管理 | _app.admin.agents;POST/PUT /agents | — | **G-C1**:建坐席→绑分机→签入→接听 全生命周期无 case |
-| C2 | 分机管理 | _app.admin.extensions;PUT(全量);luacc.directory | — | **G-C2**:建分机→注册鉴权→删除守卫 无 case |
-| C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" DRAFT(T6.8) |
+| C1 | 账号/坐席管理 | _app.admin.agents;POST/PUT /agents | — | **G-C1**:建坐席→绑分机→签入→接听 全生命周期无 case → **未起草**(与 W9 账号清理冲突,排 W9 之后) |
+| C2 | 分机管理 | _app.admin.extensions;PUT(全量);luacc.directory | — | **G-C2**:建分机→注册鉴权→删除守卫 无 case → 已起草 **VC-S14-01**(待批准) |
+| C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" → 已起草 **VC-S14-03**(待批准) |
 | C4 | 路由(队列)管理 | _app.admin.routing;saveQueue(lib/catalog.ts:51) | VC-S3-04 | ~~G-C4~~ **已闭**(F7:表单发全量) |
-| C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case |
+| C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case → 已起草 **VC-S14-02**(待批准) |
 | C6 | 流程(flow)管理 | 现 CLI-only(flowadd) | — | **已决 D3:要做** → **W3**(`/admin/bots`,参考 ui-test) |
 | C7 | 处置词管理 | dispositions 无 CRUD | VC-S4-03(读侧) | **已决 D4:固定词表** → W5(记录);S4-03 断言转正式 |
 | C8 | 报表 | _app.admin.reports(guard=SUPERVISOR) | — | 并入 G-B1 |
@@ -83,6 +90,12 @@
 (G-A1/A3/A4/A5/A6 + G-C1/C2/C5 可执行部分 + G-C3 DRAFT)、已决 5 个(G-B3 defer、G-B4 by design、
 G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、G-B2)。
 
+**起草进度(2026-08-22,草案待批准)**:G-A1→VC-S13-01、G-A3→VC-S13-06、G-A4→VC-S13-02、
+G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5→VC-S14-02、G-C3→VC-S14-03;
+**G-C1 未起草**(与 W9 账号清理冲突)。另有两条不在上表内:C15 附带记的 **G-A7**(坐席外呼全链)
+已起草为 **VC-S14-04**,T5.3 发现的重建缺口已起草为 **VC-S12-04**。
+草案并入 `ledger.yaml` 之前,本节计数维持原值不动。
+
 ---
 
 ## 2. needs-FACT 清单(执行前/执行中要落实的事实)
@@ -90,15 +103,15 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
 | # | 事实问题 | 归属 | 状态/落实方式 |
 |---|---|---|---|
 | F1 | ~~members 列名与 state 词表~~ | VC-S3-01 | **已闭(2026-08-20)**:实测表头 17 列,state=Trying 实见(VC-S3-01/verdict) |
-| F2 | `uuid_send_dtmf` 是否在目标通道产生 DTMF 事件 | VC-S7-04 | 首跑;无事件则按审计建议以 digit=5 判定 |
-| F3 | max_no_answer=0 下的重派节奏 | VC-S5-01 | 首跑抄录(留证半) |
-| F4 | app 重启窗内 member-queue-start 是否丢失 | VC-S12-01 | 已补 members 旁证 collect;两侧皆空=重跑 |
-| F5 | 队列停用后模型是否主动提出留言 | VC-S3-04 | 人工步骤直接说 leave a message |
+| F2 | ~~`uuid_send_dtmf` 是否在目标通道产生 DTMF 事件~~ | VC-S7-04 | **已闭(2026-08-20):不产生** —— 发出的 4/2/# 在 SSE 里一条都没有,同一抓流里主叫按的 5 正常到达;PARTY_DTMF 只覆盖**收到的**按键。坐席界面若要回显自己按了什么,须由应用在 `SendDTMF` 成功后自行 publish(建议记入 events.md 语义说明) |
+| F3 | ~~max_no_answer=0 下的重派节奏~~ | VC-S5-01 | **已闭(2026-08-21)**:1 次派单 → **60 秒**振铃超时 → 约 0.1 秒间隔的 **11 连发** → 再 60 秒 → 再 11 连发。那 60s 是 `agent-originate-timeout` 未设时的默认值;推荐参数见阶段 7 的 **W2.1** 表 |
+| F4 | ~~app 重启窗内 member-queue-start 是否丢失~~ | VC-S12-01 | **已闭(2026-08-21,结论是"本题不适用")**:主叫**从未进入队列** —— `hangup_after_bridge` 让主叫腿在 bot 腿死后 50ms 内被跟随挂断,Lua 的兜底块没机会执行(→ **C26**)。原"两侧皆空=重跑"的判定辅助**作废** |
+| F5 | 队列停用后模型是否**主动**提出留言 | VC-S3-04 | **部分闭(2026-08-21)**:留言全链已证(callbacks 建行 → claim → complete 全通),但**本题未被压到** —— 按落实方式由人工直接说了 leave a message,模型是否**主动**提出仍无证据。要答此题需另造一次**不给提示**的执行 |
 | F6 | ~~今日 95002 bot_sec=0 行的成因~~ | VC-S3-03 前置 | **已闭(2026-08-20,T1.2)——不是 lua fallback,是 S3-03 猎的真漂移在野实证**:call 01a01d3b-6e49-…(11:33)bot 全程服务(bridged/conversation started/handoff fired/"transferring the caller"),CDR 却 bot_sec=0、无 flow、无 BOT leg;stampChannel 失败会 Warn(actions.go:236)而日志无 Warn → 漂移点在 facts==nil 静默跳过(actions.go:83-86)或挂断读回(switchevent.go:81)之间——已在 VC-S3-03 加通话中 uuid_getvar 探针定位,执行时优先复现 |
 | F7 | ~~队列表单是否发全量~~ | G-C4 | **已闭**:`setEditing(row)` 整行拷贝(_app.admin.routing.tsx:99/:119) |
 | F8 | ~~DID is_enabled=false 是否真拒接~~ | G-C3 | **已闭**:视图层 `WHERE d.is_enabled`(pg_get_viewdef 实查) |
 | F9 | ~~goose_db_version 实表~~ | 覆盖表 | **已闭(2026-08-20,T1.1)**:实查 version_id 13/12/11 均 is_applied=t;tables.md 该行升 [FACT] |
-| F10 | 坐席取他人 recordingId 的拒绝路径 | G-A4/T6.1 | 先读 recording_handlers.go 归属判定,再以 **wei+ben** 实测 |
+| F10 | 坐席取他人 recordingId 的拒绝路径 | G-A4/T6.1 | **半闭(2026-08-22)**:代码侧已读并写进 VC-S13-02 的 expect(`recording_handlers.go:46-50/:55-61/:91`,主管由 `:33` 的 `Role.AtLeast` 早退);**wei+ben 实测未做**,随 VC-S13-02 执行时落实 |
 | F11 | 非 seed 账号(chen/uiagent/liveagent 等 12 个)口令与归属 | 环境卫生 | 问 owner;留证即可,不阻塞 |
 
 ---
@@ -132,21 +145,48 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   VC-S1-01/verdict);环境观察:主叫链路(1000@ws.aicc.test→192.168.31.5)对失败呼叫自动重试、
   cdrs 存在来源不明测试行(tone-a/5900)——均记档,不阻塞。W1 合入前置条件已满足(旧行为留证完成)。
 
-### 阶段 3 —— 人工坐席链执行(wei 话机 + 第 2 坐席 ben/1002,第二浏览器 profile)
-- **T3.1** VC-S3-01 → VC-S3-03 **T3.2** VC-S4-01 → S4-02 → S4-03 **T3.3** VC-S4-04 **T3.4** VC-S9-01 → S9-02
-- **T3.5** VC-S7-01 → S7-04 → S7-02(同一通,转接最后;目标 ben/1002);VC-S7-03 另起一通
-- **T3.6** ben 的一通带录音呼叫(95002→转人工→ben 接)——产出 primary_agent=ben 的 recordingId,T6.1 靶子
-- 约束:ben 仅 T3.5/T3.6 需要;T3.6 排 T3.5 后。
+### 阶段 3 —— 人工坐席链执行 ✅ 完成(2026-08-20 18:10 – 2026-08-21 10:34;12 case:11 PASS / 1 FAIL)
+- **T3.1** ✅ VC-S3-01 PASS;VC-S3-03 首跑 FAIL(bot 份额与队列等待账丢失 → **C11**),
+  修后 08-21 12:06 重跑 **PASS**
+- **T3.2** ✅ VC-S4-01 / S4-02 / S4-03 PASS。途中发现 **C13**(PARTY_RINGING 报浏览器注册标识而非分机号),
+  已修;S4-01 的该条款**待重跑时转正**
+- **T3.3** ✅ VC-S4-04 PASS
+- **T3.4** VC-S9-01 **FAIL**(ASR 摄取丢帧 4.0%/7.2% → **C14**,至今未修)、VC-S9-02 PASS
+- **T3.5** ✅ VC-S7-01 / S7-04 / S7-02 / S7-03 全 PASS;途中现场发现并修 **C15 / C17 / C18 / C19 / C20**
+  (click-to-dial 全链 + INTERNAL 能力限制 + 队列派单腿归属)
+- **T3.6** ✅ 已产出 ben 的带录音呼叫 `01a02275-8884-…`(recordingId `01a02276-2a62-…`,zh,39 秒)
+  —— 即 VC-S13-02 的越权靶子
+- 约束(已履行):ben 仅 T3.5/T3.6 需要;T3.6 排 T3.5 后。
 
-### 阶段 4 —— 队列负路径(动队列状态,严格隔离)
-- **T4.1** VC-S5-01(RONA;**必须先于 W2 合入**——旧行为留证是 W2 的修复证据基线)
-- **T4.2** VC-S6-01 **T4.3** VC-S3-04(停用窗口单独执行,结束实测 isEnabled=true 才放行后续)
-- 约束:T4.3 最后;窗口内禁止并行呼叫。
+### 阶段 4 —— 队列负路径 ✅ 完成(2026-08-21 12:34–16:05;3 case 全 PASS)
+- **T4.1** ✅ VC-S5-01 首跑 **FAIL**(bot 接过的电话一律记 ANSWERED,队列放弃在报表里全线不可见
+  → **C22**),修后 08-21 13:46 重跑 **PASS**。**W1/W2 合入前的旧行为留证已完成**;
+  F3 的重派节奏抄录见 needs-FACT
+- **T4.2** ✅ VC-S6-01 PASS。当场坐实 **C12**(`/calls/waiting` 拒绝主管,已修),
+  并暴露账本 collect 三型缺陷 → **C23**
+- **T4.3** ✅ VC-S3-04 PASS;放行门已满足(结束实测 `isEnabled=true`,队列已在交换机侧恢复)
+- 约束(已履行):T4.3 最后;窗口内无并行呼叫。
 
-### 阶段 5 —— 恢复泳道(重启类,收官)
-- **T5.1** VC-S12-01 **T5.2** VC-S12-02 **T5.3** VC-S12-03(FS 重启,最后)
+### 阶段 5 —— 恢复泳道 ✅ 完成(2026-08-21 20:09–20:50;3 case:2 PASS / 1 FAIL)
+- **T5.1** VC-S12-01 **FAIL** —— bot 腿死后主叫腿在 50ms 内被跟随挂断,Lua 兜底块不可达
+  (→ **C26**,未修)
+- **T5.2** ✅ VC-S12-02 PASS。媒体不中断;重启窗内的在途呼叫对新实例不可见、也不进账本(已知缺口)。
+  另记一层比 expect 更重的:**正在通话的坐席在 app 里读作 READY**,下一通排队呼叫会派给他
+- **T5.3** ✅ VC-S12-03 PASS,但**没有压到重建路径** —— mod_callcenter 的 agents/tiers 存在它自己的
+  sqlite 库,交换机重启时自行恢复,我们的 reconcile 只是**确认**(`already matched … added=0`)
+  → 因此追加 **T6.12 / VC-S12-04**
 
-### 阶段 6 —— 新 case 起草(旅程缺口 → 账本追加)
+### 阶段 6 —— 新 case 起草(旅程缺口 → 账本追加)· **11 case 已起草,待批准后并入 ledger.yaml**
+
+> **状态(2026-08-22)**:草案在 `docs/verification/ledger-draft-phase6.md`(commit 8321675),
+> 38 条 `file:line` 已机械校验(文件存在、行号在范围内),其中 6 条抽查过指向内容。
+> **T6.1 / 6.2 / 6.3 / 6.4 / 6.5 / 6.7 / 6.8 / 6.11 / 6.12 已起草**。
+> **T6.6 只完成三分之二** —— G-C2→VC-S14-01、G-C5→VC-S14-02 已起草,
+> **G-C1(坐席账号全生命周期)未起草**:它要建号删号,与 **W9 的账号清理**直接冲突,排在 W9 落地后。
+> **T6.9 / T6.10 阻塞于 W1/W2/W7**,不在本阶段完成。
+> 三处静态确认不了的(删除已绑定分机的行为、停用 DID 后的拒接形态、三处请求体字段名)写在 case 的
+> `note` 里:实测不符即立案,**不得为了让用例通过而降低 expect**。
+
 - **T6.1** DRAFT G-A4:坐席回放 + 越权拒绝(wei+ben;靶子=T3.6;前置 F10 核读)
 - **T6.2** DRAFT G-A3:contacts 全链 **T6.3** DRAFT G-A5:my-day 对账 **T6.4** DRAFT G-A6:话机失联
 - **T6.5** DRAFT G-A1:agent 视角等待名单过滤 **T6.6** DRAFT G-C1/C2/C5:管理面生命周期三连
@@ -289,7 +329,7 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   单测三条:`TestBotShareMergesAcrossLegs`、`TestQueueEventsRouteToTheWaitingCaller`、
   `TestTheBotShareSurvivesTheLegThatHangsUpFirst`(摘掉修复即报线上那三个值)。
   详见 `docs/verification/artifacts/C11/verdict.md`。**VC-S3-03 已于 2026-08-21 12:06 用 95001 重跑,FAIL→PASS**(bot_sec=13、has_flow=t、legs 含 BOT、单行 CDR)。
-- **C13(new,2026-08-20 T3.2 执行发现)** PARTY_RINGING payload 的 extensionNumber/toNumber 携带
+- **C13(new,2026-08-20 T3.2 执行发现;2026-08-21 已修,S4-01 条款待重跑转正)** PARTY_RINGING payload 的 extensionNumber/toNumber 携带
   浏览器话机的 WS 注册标识(实测 "g7bih4lv")而非坐席分机号:coordinator.go:412-416 直取
   ev.DestinationNumber,而 :829-848 的 agentForLeg 早已把腿正确归户——归户成功后应以坐席绑定分机
   回填屏显字段。修复后 S4-01 的该条款转正。
@@ -302,7 +342,7 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   HUMAN_AGENT 丢 46/1146(4.0%)、CUSTOMER 丢 78/1084(7.2%)("transcribe: audio was dropped",
   pump.go:226),识别文本随之崩坏(fox 句 → "Butro focus jobs owing the lazy workin")。pump 计数器
   证明是"没送到"而非"听错"。候选:pump 背压/缓冲、双流并发写。修复后重跑 VC-S9-01。
-- **C15(new,2026-08-20 T3.5 执行发现,即时根因)** click-to-dial 从未能工作:outbound.go:164 设
+- **C15(new,2026-08-20 T3.5 执行发现,即时根因;2026-08-20 已修并上线 b174a5c)** click-to-dial 从未能工作:outbound.go:164 设
   `origination_caller_id_name = "Dial "+destination`(带空格),renderVars(adapter.go:309-321)不对值
   加引号 → FS originate `{…}` 段 "Parse Error!" → DESTINATION_OUT_OF_ORDER(fs 日志 19:02/19:04 两次实证,
   audit_logs 167/165 对应请求)。**已修并上线(commit b174a5c,2026-08-20)**,三处一并:
@@ -312,10 +352,18 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   `uuid_transfer <leg> <destination> XML default`,路由交还 dialplan(内部/外线由它决定),
   BridgeToEndpoint+loopback 退出 click-to-dial 路径;AI 外呼仍用 loopback,默认值已钉 `/XML`
   (loopback b 腿继承 a 腿 dialplan,继承到 inline 就把号码当应用名——第三形态)。
-  待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。
+  ~~待办:live 复测(1008→1007 内部、1008→外线号)后 T6.11 起草 case。~~
+  **已了结**:两型 live 复测均已通过,结果记在 **C17**;T6.11 已起草为 **VC-S14-04**(待批准)。
   **附带旅程缺口 G-A7**:坐席外呼(DIAL OUT / POST /calls/dial,internal/outbound 整个服务)不在三旅程
   与任何 case 内。
-- **C17(new,2026-08-20 click-to-dial 复测,内部/外呼两型均已实证)** 媒体链正常(内部 1008→1007 响铃、
+- **C16(2026-08-21 `go test -race` 实证,已修;2026-08-22 补立案 —— 修好了却一直没有条目)**
+  `internal/streamin` 的会话拆除与会话启动争同一个 `pumps` 数组:`Server.Stop` 从关服的 goroutine
+  关闭每一个活会话,而仍在启动中的那个会话正由自己的 goroutine 半写着该数组;`sync.Once` 只保证
+  拆除不跑两遍,从未给拆除与启动定序。**已修(commit `68948a7`)**:`pumps` 上锁,两侧都取;
+  帧路径在锁内把两个指针拷出,不再就地 range —— 一次无竞争加锁加两个字的拷贝,对着相隔二十毫秒的帧。
+  意义在门本身:`go test -race ./...` 自此**首次整体通过**;此前几乎每次运行都报这条,
+  即"仍是红的、且已没人在看"的最坏状态。
+- **C17(new,2026-08-20 click-to-dial 复测,内部/外呼两型均已实证;2026-08-20 已修,残留另立 C24)** 媒体链正常(内部 1008→1007 响铃、
   双向通话、任一侧挂断双向拆线;外呼 1008→18688886669 经 dialplan `pstn_sim_outbound` 正确出网关),
   但**账面三处失真**,两型皆然:
   ① **call_type 判定与 §0 口径不符**:coordinator.go:900-909 只看腿方向(outbound→OUTBOUND),
@@ -334,8 +382,10 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   被叫腿决定 answered/ring/talk,坐席腿的 auto-answer 不再算接通,legs 渲染被叫腿(出网关=TRUNK、
   内部=AGENT)。复测:INTERNAL 1008→1007 ring=2/talk=6/agents=1/legs=[AGENT/1007];
   OUTBOUND 1008→18688886669 ring=2/talk=9/legs=[TRUNK/…];未接一型由单测钉住(NO_ANSWER)。
-  **残留**:b 腿在 bridge 前失败时会自成一通 CDR(样本 01a01f03-728b)——归 T6.11 起草时一并覆盖。
-- **C18(new,2026-08-20 owner 直裁)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
+  **残留**:b 腿在 bridge 前失败时会自成一通 CDR(样本 01a01f03-728b)。
+  ~~归 T6.11 起草时一并覆盖。~~ **其真身已于 2026-08-21 查明并另立 C24**(拨号方案跌落 voicemail 的
+  后继路由),不再归 T6.11;**C24 仍未修**。
+- **C18(new,2026-08-20 owner 直裁;2026-08-21 已修,409 `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE`)** INTERNAL 呼叫的能力限制未实现:transfer / hold / retrieve
   对分机互拨的呼叫应被拒绝(接口层给出明确错误码,UI 相应禁用),现状三者一律放行。
   依赖 C17 的 call_type 正确派生先落地(否则判据本身不可靠)。补 case 归 T6.11 同批。
   **【owner 裁决 2026-08-21】接口层拒 + UI 禁用。已修**:规则落在 telephony 层
@@ -380,7 +430,8 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   不得被当成派单)、`TestQueueDeliveryLegJoinsTheCallerImmediately`。
   **余留**:派单腿的 CHANNEL_CREATE 若抢在主叫入册之前到达,仍会走旧路(铸 call → bridge 合并),
   该竞态未消除,只是回到修改前的行为。
-- **C22(new,2026-08-21 T4.1 执行发现,FAIL 立案)** 一通"bot 接了 → 转队列 → 无人应答 → 主叫放弃"
+- **C22(new,2026-08-21 T4.1 执行发现,FAIL 立案;2026-08-21 已修账目,S5-01 已重跑 PASS ——
+  ABANDONED_RINGING 条件互斥与 RONA 状态机仍归 W2)** 一通"bot 接了 → 转队列 → 无人应答 → 主叫放弃"
   的电话被记成 `ANSWERED`,`missed_reason` 为空 —— **队列放弃在报表里全线不可见**
   (本部署所有入站电话都先过 bot,因此是全线,不是个例)。
   根因:`cdr.go:246` 的 `snap.Bot.Sec > 0` **无条件**判 ANSWERED,不问之后是否进队列、是否有人接。
@@ -406,8 +457,11 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   `403 FORBIDDEN {"code":"FORBIDDEN","message":"this account is not an agent"}`,坐席会话 200。
   连带发现**账本 collect 缺陷**:VC-S6-01 第 6 条写的是 `/tmp/vc-sup.jar`,在 C12 修复前
   **永远取不到**。修复前该条须改用坐席会话(diff 见 `artifacts/VC-S6-01/verdict.md`)。
-- **C23(new,2026-08-21 阶段 4 执行发现,账本 collect 缺陷三型)** 三处都会让 collect 静默失效,
-  非产品缺陷但会误导判定,建议随阶段 6 的账本改写一并回修:
+- **C23(new,2026-08-21 阶段 4 执行发现,账本 collect 缺陷三型;新起草的 case 已避开,既有 case 未回修)**
+  三处都会让 collect 静默失效,非产品缺陷但会误导判定。
+  **状态(2026-08-22)**:阶段 6 的 11 条草案在写的时候已按这三条办(抓流 1800、按 `"type":"X"` 计数、
+  按端点真实要求的角色选会话),但**既有 28 条 case 的 collect 一条都没改** —— 回修仍待做,
+  排在草案并入 `ledger.yaml` 的那一批:
   ①**角色门比账本假设的细**:队列启停(`PUT /queues/{id}`)需 ADMIN,主管会话 403
   `{"requiredRole":"ADMIN"}`;`/calls/waiting` 拒绝主管(C12)。账本多处默认"主管会话万能"。
   ②**`grep -c '事件名'` 把一个 SSE 事件数成两个** —— SSE 每事件产生 `event:` 与 `data:` 两行;
@@ -449,7 +503,8 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   往主叫通道盖一个收官印记(与转接时盖 `aicc_bot_sec` 同一手法),Lua 见印记则挂断、
   无印记则转 fallback 队列。修复后重跑 VC-S12-01。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
-- **C21(new,2026-08-21 修 C11 时发现,未修)** CDR 归属靠一场静默竞态决出:`CallFinished`
+- **C21(new,2026-08-21 修 C11 时发现;2026-08-21 已修 —— 原头部标注"未修"与正文矛盾,
+  2026-08-22 扫描时更正)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
   而 bot 腿总带着 `export_vars` 导出的 DID —— 于是**纯 bot 呼叫(contained)时人工路径也会尝试写行**,
   与 aicall recorder 抢同一个 `call_id`,靠 `ON CONFLICT (call_id) DO NOTHING`(ledger.sql:19)
@@ -462,7 +517,7 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   contained 呼叫因此不再进人工路径,竞态消失。两条回归测试:
   `TestTheBotOwnsItsFinishedCalls`(fixture 补上 contained 也带导出 DID 的真实形态)、
   `TestAnImmediateHandoverIsStillAHandover`(Sec=0 仍须落库,否则该通电话会一行都没有)。
-- **C12(new,2026-08-20 T3.1 执行发现)** GET /calls/waiting 拒绝 supervisor(403 "this account is
+- **C12(new,2026-08-20 T3.1 执行发现;2026-08-21 已修并现场复验)** GET /calls/waiting 拒绝 supervisor(403 "this account is
   not an agent",call_handlers.go:52-66 agent 视角实现)——与旅程 B3 及账本多 case 的 sup 假设冲突。
   决策+修复:handler 补 supervisor 分支(全队列)or 契约明确 agent-only 并改 UI/账本口径;
   账本 S6-01/S12-01/S12-02 的该行 collect 先改用 wei jar(下轮修订批)。
@@ -475,12 +530,17 @@ G-C6/C7/C8 → W3/W5/W4)、已闭 1 个(G-C4)、低优先呈现层 2 个(G-A2、
   —— 但 C23① 记的另一半(队列启停需 ADMIN)仍然成立,不要一并改。
 
 ### 排序总则
-0. 追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。
-1. T0 先于一切;阶段 2→3→4→5 顺序固定(负路径与重启放后)。
-2. **验证先行于实现**:阶段 2(S1-02/S8-01)与 T4.1(S5-01)必须在 **W1/W2 合入前**按旧行为执行留证——
-   这是"账本钉住旧缺口→实现→T6.9 重跑证明修复"的证据链;同理 W7 组①③④ 涉及的事件断言在 T6.10 补。
+0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
+1. ~~T0 先于一切;阶段 2→3→4→5 顺序固定(负路径与重启放后)。~~ **已履行**:阶段 0–5 全部按序完成。
+2. **验证先行于实现** —— **前置条件现已满足**:阶段 2(S1-02/S8-01)与 T4.1(S5-01)均已在
+   **W1/W2 合入前**按旧行为执行留证,"账本钉住旧缺口 → 实现 → T6.9 重跑证明修复"的证据链已成立,
+   **W1/W2 可以开工**。W7 组①③④ 涉及的事件断言仍在 T6.10 补。
    W3/W4/W5/W6/W8 与验证执行无交集,可并行。
-3. C1 修复安排在阶段 3 之后合入更稳(依赖 tier 正确性的 case 先跑完);修后必重跑 VC-S3-02。
-   **W9(账号清理)硬性排在阶段 3–6 之后**——ben/amy 在此前是执行物料。
+3. C1:依赖 tier 正确性的 case 已全部跑完,**修复不再被阻塞**。但注意 **C1 的症状已潜伏** ——
+   修后重跑 VC-S3-02 前须先按 C1 条目里的办法重造复现场景,否则会得到**假通过**。
+   **W9(账号清理)**:原写"硬性排在阶段 3–6 之后"。阶段 6 现已起草完毕,但 ⚠ **W9 仍不得开工** ——
+   已起草的 **VC-S13-01**(ben 只配员 support-zh 的过滤)与 **VC-S13-02**(以 ben 的录音
+   `01a02276-2a62-…` 作越权靶子)都以 ben 为执行物料,而它们**尚未执行**。
+   W9 的真正前置是"依赖 ben 的用例**执行完毕**",不是"起草完毕"。
 4. 每 case 执行后:evidence 落 `docs/verification/artifacts/<ID>/`,status 更新单独 commit
    (账本修订与执行结果不混提)。
