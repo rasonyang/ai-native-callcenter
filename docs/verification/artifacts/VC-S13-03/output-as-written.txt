@@ -1,0 +1,17 @@
+########## 按原样执行(默认窗口 = 本地当天)—— 2026-08-22 10:28:44 +08 ##########
+--- 1. /reports/me ---
+{"callsHandled":0,"talkSec":0,"wrapUpSec":0,"signedInSec":37724,"avgHandleSec":0,"avgWrapUpSec":0,"occupancyPct":0,"wrapUpsOpened":0,"wrapUpsConfirmed":0,"confirmedPct":0}
+--- 2. cdrs (今天, wei 为 primary) ---
+0|0
+--- 3. wrap_ups (今天) ---
+0|0
+--- 两侧的'当天'边界是否同一个 ---
+Etc/UTC
+2026-08-22 00:00:00+00|2026-08-22 02:29:22.465514+00
+host local midnight = 2026-08-22 00:00:00 +0800   (host now 2026-08-22 10:29:20 +0800)
+--- 3. wrap_ups (今天) ---
+0|0
+--- 两侧的'当天'边界是否同一个 ---
+Etc/UTC
+2026-08-22 00:00:00+00|2026-08-22 02:29:22.465514+00
+host local midnight = 2026-08-22 00:00:00 +0800   (host now 2026-08-22 10:29:20 +0800)

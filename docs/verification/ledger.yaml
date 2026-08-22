@@ -1062,7 +1062,7 @@ cases:
       却没有任何提示说明哪个是对的。最隐蔽的一种:talkSec 用了 sum(total_sec) 而不是 sum(talk_sec),
       数字始终偏大且始终"看起来合理",直到有人拿它算工时。
     evidence_dir: docs/verification/artifacts/VC-S13-03/
-    status: TODO
+    status: PASS  # 2026-08-22 执行(窗口挪到 08-21 本地日):callsHandled 6=6、talkSec 888=888、wrapUpsOpened 9=9、wrapUpsConfirmed 3=3。断言有分辨力:同窗口 sum(total_sec)=1190,若实现误用它会差 34%。9>6 已逐行查明(无重复;2 条主责是 ben、1 条无主责),两个 CTE 谓词本就不同。发现两处 collect 缺陷:①"今天"空窗假通过 ②端点用本地午夜、psql 用 DB 的 UTC now(),两侧边界差 8 小时
     refs: ["internal/store/sql/ledger.sql:215", "internal/store/sql/ledger.sql:220", "internal/store/sql/ledger.sql:235", "internal/httpapi/agent_handlers.go:252"]
     note: "路径与字段已对契约核实(2026-08-21):operationId getMyDay = **GET /reports/me**,
       响应 schema AgentToday 含 callsHandled / talkSec / wrapUpsOpened / wrapUpsConfirmed
@@ -1185,7 +1185,7 @@ cases:
       坐席在通话中输入来电号码却查不到这个人,而那正是这张表存在的唯一理由。
       另一种:删返回 204 但行仍在,只是被标记;若列表不过滤已删,联系人会"删不掉"。
     evidence_dir: docs/verification/artifacts/VC-S13-06/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:建 201→按号码查到→改名 200 并可按新名查→删 204→查 0。真删非软删(直接查库 count=0,contacts 总数回到基线 1)。全程坐席会话。note 点名的三处已核契约:字段是 name/id 不是草案猜的 displayName/contactId(已改 collect)、q 有效且另有 phoneNumber、DELETE 是 204
     refs: ["internal/httpapi/contact_handlers.go:31", "docs/verification/coverage/tables.md"]
     note: "【起草时未核三处,执行前须查】①POST/PUT 的请求体字段名(本草案按 displayName/phoneNumber/
       company/notes 书写,须以 docs/openapi.json 的 Contact schema 为准);②查询参数是否为 q;

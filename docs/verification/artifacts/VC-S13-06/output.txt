@@ -1,0 +1,23 @@
+########## VC-S13-06 联系人全链(字段按契约:name/id,非草案的 displayName/contactId)##########
+--- 0. 基线 ---
+1
+--- 1. 建(坐席会话)---
+{"company":"NovaNet","createdAt":"2026-08-22T10:32:51.772933+08:00","email":"","id":"01a02750-4ff7-793b-ad7c-4baff141e50f","name":"VC Probe","notes":"created by VC-S13-06","phoneNumber":"18600000001","tags":[],"updatedAt":"2026-08-22T10:32:51.772933+08:00"}
+
+http=201
+CID=01a02750-4ff7-793b-ad7c-4baff141e50f
+--- 2. 按号码查(q=号码 —— failure_looks_like 点名的那条路径)---
+[{"id":"01a02750-4ff7-793b-ad7c-4baff141e50f","name":"VC Probe","phoneNumber":"18600000001"}]
+--- 2b. 按 phoneNumber= 精确查 ---
+[{"id":"01a02750-4ff7-793b-ad7c-4baff141e50f","name":"VC Probe"}]
+--- 3. 改名 ---
+{"name":"VC Probe Renamed","company":"NovaNet","notes":"renamed"}
+--- 4. 按新名字查 ---
+["VC Probe Renamed"]
+--- 5. 删 ---
+delete http=204
+--- 6. 删后按号码查(应 0)---
+0
+--- 6b. 库里是真删还是软删 ---
+0
+1
