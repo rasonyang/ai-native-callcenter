@@ -1165,18 +1165,22 @@ cases:
           (state.go:207-210:!IsRegistered || !IsDeviceInService → AvailDeviceUnreachable,
            该分支排在 StateNotReady 之后、default READY 之前)
         **state 仍为 READY** —— 失联不改坐席自己的意愿,只改可达性;两者是不同的列
-        【留证,不判定】SSE 的 DEVICE_UNREGISTERED 计数落档 evidence_dir。
-        当前实现应为 **0** —— 见 **C28②**:ObserveDevice 上线掉线一律发 DEVICE_IN_SERVICE,
-        掉线那条顶着 IN_SERVICE 的名字、载荷却是 DEVICE_UNREACHABLE;契约里的
-        DEVICE_UNREGISTERED / DEVICE_REGISTERED 一次都没出现过(2026-08-22 实测 0/0/3)。
-        本条是我起草时的错:把一个零生产者类型写成了硬断言,应如 S1-02 的 CUSTOMER 行写成留证。
-        W7 落地后由 T6.10 转正式断言
+        SSE 出现 **DEVICE_UNREGISTERED**(计数 ≥1)—— 掉线要以掉线的名字发出去。
+        【本条的来历】起草时它是硬断言,首轮执行实测 0,我把它降为留证并立案 **C28②**:
+        ObserveDevice 上线掉线一律发 DEVICE_IN_SERVICE,掉线那条顶着 IN_SERVICE 的名字、
+        载荷却写着 DEVICE_UNREACHABLE,按 type 过滤的消费者被告知了相反的事。
+        **C28 已修(2026-08-22,commit 6b79d4c)**:service.go:409-411 按方向取类型,
+        DEVICE_UNREGISTERED 从此有生产者 —— 故本条恢复为断言,不再等 W7
         switch 侧 agent-wei status **不再是 Available**(否则队列仍会往一部死话机派单)
-        —— **2026-08-22 实测不成立,已立案 C28①**:ObserveDevice 全函数不触及交换机镜像,
-        持续观察 60+ 秒 agent-wei 始终 Available。本条**维持为断言不降级**,C28 修复后应转绿
+        —— **2026-08-22 首轮实测不成立,已立案 C28①**:ObserveDevice 全函数不触及交换机镜像,
+        持续观察 60+ 秒 agent-wei 始终 Available。本条当时维持为断言不降级;
+        **C28 已修**:ObserveDevice 现在调 mirrorStatus,CallcenterStatus 也把可达性读进映射
+        (READY + 话机不可达 → On Break)。故本轮预期 agent-wei 为 **On Break**
       恢复后:
         roster 回到 availability=READY、isRegistered=true;SSE 出现 DEVICE_IN_SERVICE
-          (service.go:394 的 publish 点)
+          (service.go:409 的 publish 点;恢复走 IN_SERVICE 而非 DEVICE_REGISTERED ——
+           后者仍无生产者,两者的分工待 W7 定语义)
+        switch 侧 agent-wei 回到 **Available**(镜像跟着可达性一起回来)
     failure_looks_like: |
       标签页关了、注册没了,而 roster 里 wei 依旧 READY/Available、switch 里也依旧 Available ——
       队列把每一通电话都派给一部不存在的话机,每通都振铃到超时再重派,
@@ -1184,7 +1188,7 @@ cases:
       这正是 state.go:207 注释里写的那句"崩掉的浏览器标签页和正常的看起来一模一样"。
     evidence_dir: docs/verification/artifacts/VC-S13-05/
     status: FAIL  # 2026-08-22 执行:应用侧三条全中(reg 消失、availability=DEVICE_UNREACHABLE、state 仍 READY);两条不成立 → C28:①ObserveDevice 全函数不碰交换机镜像,agent-wei 持续 Available,队列会继续往死话机派单;②掉线发的是 DEVICE_IN_SERVICE 且载荷写着 DEVICE_UNREACHABLE(自相矛盾),契约里的 DEVICE_UNREGISTERED/DEVICE_REGISTERED 一次没出现。另:第一轮"关标签页"杀不掉扩展后台的注册(同 Call-ID 续期),人工步骤已改
-    refs: ["internal/agents/state.go:207", "internal/agents/service.go:366", "internal/agents/service.go:394", "internal/events/event.go:57"]
+    refs: ["internal/agents/state.go:207", "internal/agents/state.go:219-232", "internal/agents/service.go:394-413", "internal/events/event.go:57"]
     note: "【2026-08-22 已落实,结论:没有那次调用 —— 见 C28①。以下为起草时原文,留档】
       【执行前须落实】switch 侧那条断言(agent-wei 不再 Available)对应哪次镜像调用尚未静态确认——
       ObserveDevice 是否会驱动 mirrorStatus 需在执行时以日志佐证。若实测 switch 侧仍 Available
