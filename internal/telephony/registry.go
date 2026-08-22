@@ -452,26 +452,26 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 	// is not their business. Two agents talking to each other therefore each
 	// see three events about themselves rather than six about both.
 	//
-	// A party with no agent is the other side of somebody's conversation
-	// rather than a colleague's leg, and it keeps the whole call as its
-	// audience. The caller's leg on an inbound call belongs to nobody, so
-	// scoping it to its own agent addresses it to nobody — and a live call on
-	// 2026-08-18 showed what that costs: the customer hung up, both legs ended
-	// on the switch, and the agent's bar stayed on the call
-	// (TestACallerReleaseReachesTheBridgedAgent).
+	// A party with no agent is addressed to no agent. That is not a gap to
+	// widen: a customer hanging up ends the agent's leg too, so the agent is
+	// told by their own PARTY_RELEASED — the one their screen is about. If an
+	// agent's bar ever stays up after a customer leaves, the missing event is
+	// the agent's own, and broadcasting somebody else's leg would hide that
+	// rather than fix it (owner directive 2026-08-22, replacing a scope that
+	// had been widened after the 2026-08-18 incident).
 	//
-	// Before a call reaches anybody that audience is empty, which is also
-	// correct: a caller alone in a queue who hangs up has no agent to tell, and
-	// the event belongs in the CDR and a supervisor's view rather than in
-	// somebody's softphone.
+	// A caller who abandons a queue before reaching anybody therefore reaches
+	// no agent's stream at all, which is correct: there is nobody whose screen
+	// it is about. It is in the CDR, and supervisors see everything.
 	//
-	// Call-scoped events (p == nil) keep the whole conversation too: they are
-	// about the call, not about a leg of it.
+	// Call-scoped events (p == nil) keep the whole conversation: they are about
+	// the call, not about a leg of it.
 	scope := events.Scope{AgentIDs: a.call.AgentIDs()}
 	if p != nil {
 		partyID := p.PartyID
 		ev.PartyID = &partyID
 		ev.AgentID = p.AgentID
+		scope.AgentIDs = nil
 		if p.AgentID != nil {
 			scope.AgentIDs = []uuid.UUID{*p.AgentID}
 		}

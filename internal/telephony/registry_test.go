@@ -368,23 +368,28 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 	}
 }
 
-// The customer hangs up and the agent's softphone clears.
+// The customer hangs up and the agent's softphone clears — on the agent's own
+// release, which is the event their screen is about.
 //
-// Observed failing on a live call (2026-08-18): the caller released, both legs
-// ended on the switch, and the agent's bar stayed on the call. The caller's
-// leg has no agent of its own, so scoping a party event by that party's agent
-// addressed the release to nobody — which under a fall-through-to-everyone hub
-// still reached the bridged agent, and under a default-deny hub reaches no one.
+// This was once written the other way round. A live call on 2026-08-18 left an
+// agent's bar up after the customer left, and the fix widened every party event
+// to all agents on the call so the customer's release would reach the agent
+// too. That masked the real defect: ending the customer's leg ends the agent's,
+// so the agent's own release is always coming, and if it does not arrive that
+// is the bug to find. Widening also gave both parties of an agent-to-agent call
+// the same audience, which is how an agent being rung came to be shown their
+// caller's leg (owner directive 2026-08-22).
 //
-// The audience of anything that happens on a call is every agent on the call.
-func TestACallerReleaseReachesTheBridgedAgent(t *testing.T) {
+// So the test now hangs up both legs, as the switch does, and asks what the
+// agent is told about their own.
+func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 	agentID := uuid.New()
 	for _, tc := range []struct {
 		name    string
 		who     events.Subscriber
 		wantSaw bool
 	}{
-		{name: "the agent bridged to the caller", wantSaw: true,
+		{name: "the agent whose leg it was", wantSaw: true,
 			who: events.Subscriber{AgentID: &agentID}},
 		{name: "an agent on another call", wantSaw: false,
 			who: events.Subscriber{AgentID: ptr(uuid.New())}},
@@ -416,8 +421,11 @@ func TestACallerReleaseReachesTheBridgedAgent(t *testing.T) {
 			reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "caller-chan", OccurredAt: testTime})
 			reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "agent-chan", OccurredAt: testTime})
 
-			// The customer hangs up.
+			// The customer hangs up, which ends the agent's leg with it —
+			// hangup_after_bridge, and what the switch was seen doing live.
 			reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "caller-chan",
+				HangupCause: "NORMAL_CLEARING", OccurredAt: testTime.Add(time.Minute)})
+			reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "agent-chan",
 				HangupCause: "NORMAL_CLEARING", OccurredAt: testTime.Add(time.Minute)})
 
 			saw := false
@@ -435,9 +443,9 @@ func TestACallerReleaseReachesTheBridgedAgent(t *testing.T) {
 				}
 			}
 			if saw != tc.wantSaw {
-				t.Errorf("saw the caller's release = %v, want %v — an agent whose "+
-					"customer hung up must be told, or their softphone stays on a "+
-					"call that ended", saw, tc.wantSaw)
+				t.Errorf("saw a release = %v, want %v — an agent whose customer hung "+
+					"up must be told their own leg ended, or their softphone stays "+
+					"on a call that is over", saw, tc.wantSaw)
 			}
 		})
 	}
