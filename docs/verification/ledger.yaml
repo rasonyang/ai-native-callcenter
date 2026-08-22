@@ -1378,7 +1378,7 @@ cases:
       而管理页面上它显示为停用。反向的失败:停用后拨过去是长振铃后静音挂断,
       主叫不知道发生了什么,运营商侧也拿不到明确的拒接原因。
     evidence_dir: docs/verification/artifacts/VC-S14-03/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:建号 201 且 luacc.dids 立刻可查 → 首拨 bot 应答 CDR did=95009/bot_sec=6 单行 → 停用后底表仍在而 luacc.dids 计数 0 → 再拨 owner 实测软电话立即报 "Call to 95009 failed: Not Found"(非静音非长振铃),FS 日志恰好两条 unknown number 对应两次拨号。note② 已落实:aicc_inbound.lua:47-51 走 UNALLOCATED_NUMBER。顺带:C29 在 /dids 上复现(系统性);被拒行 did/to_number 皆空、记不出对方拨的号 → C31
     refs: ["internal/httpapi/catalog_handlers.go:139", "internal/httpapi/catalog_handlers.go:148", "internal/store/migrations/00002_telephony.sql:171", "freeswitch/scripts/aicc_inbound.lua:44"]
     note: "【执行前须落实】①POST /dids 的请求体字段名以契约 DID schema 为准;
       ②停用后的**听感与拒接码**尚未静态确认——Lua 在 route 为 nil 时走哪条分支需读

@@ -9,7 +9,7 @@
 > 原 28 条已全部执行完毕(25 PASS / 3 FAIL:VC-S3-02→C1、VC-S9-01→C14、VC-S12-01→C26);
 > 阶段 6 起草的 11 条已于同日并入,均为 **TODO,尚未执行**。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 12 项、余 13 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30。
+> **C 系列已修 12 项、余 14 项** —— C1 / C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C28 / C29 / C30 / C31。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -567,7 +567,10 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   `extensions.is_enabled` 的列默认值 `true` 永远轮不到生效(佐证:库里原有 20 个分机全是 `t`)。
   后果:`luacc.directory` 带 `WHERE e.is_enabled`,这部分机 **Lua 查不到、永远注册不上**,
   而管理员在 API 侧看不出任何异常 —— 排查会指向话机或网络,不会指向这里。
-  **同型风险**:任何"可选布尔 + 非指针字段"的写接口都有这个问题,修时应一并排查(catalog 各 Create/Update)。
+  **同型风险已坐实,不是分机接口独有** —— 2026-08-22 在 `POST /dids` 上复现同一形态
+  (VC-S14-03 执行时顺带验证):不带 `isEnabled` 建出 `false` 且 `luacc.dids` 查不到;
+  带 `isEnabled:true` 则正常。**凡"可选布尔 + 非指针字段"的写接口都要一并排查**
+  (catalog 各 Create/Update)。修法建议:请求体改用指针或 `*bool`,区分"未提供"与"显式 false"。
 - **C30(new,2026-08-22 VC-S14-01 执行发现,未修)** **删除分机没有任何守卫,坐席被静默解绑。**
   `DeleteExtension`(`catalog_handlers.go:67-69`)→ `catalog/service.go:128-130` → store,
   **中间没有任何检查**;唯一可能的保护是外键,而它是
@@ -579,6 +582,26 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **契约层面也缺位**:`DELETE /extensions/{extensionId}` 只声明 `204,400,401,403,404,503`,
   **没有 409** —— "拒绝"这条路在契约里就没有位置,修复须**先改契约**(spec-first)。
   证据:`docs/verification/artifacts/VC-S14-01/verdict.md`。
+- **C31(new,2026-08-22 VC-S14-03 执行发现,未修)** **被拒的来电入了账,却记不出对方拨的是哪个号。**
+  一通打向未配置/已停用号码的呼叫会正确落一行 CDR,`hangup_cause=UNALLOCATED_NUMBER` 也精确 ——
+  但 `did` 为 **NULL**、`to_number` 为**空**:
+
+  ```
+  call_id        | call_type | did    | status    | to_number | hangup_cause
+  01a027ea-4c17… | INBOUND   | (null) | NO_ANSWER | (空)      | UNALLOCATED_NUMBER
+  ```
+
+  **全库 11 行 `UNALLOCATED_NUMBER` 无一例外**(2026-08-19 至今),含 VC-S1-03 当时产生的 6 行。
+  机制:`internal/telephony/cdr.go:199-201` —— `ToNumber = originator.OtherNumber`,
+  取不到则回落 `cdr.DID`;被拒呼叫两者皆空。
+  **而交换机是知道的**:同一时刻 FS 日志打着
+  `aicc_inbound: unknown number 95009 from 18688886669`(`aicc_inbound.lua:49`)。
+  后果:运营看得到"有人被拒",看不出**他拨的是什么** ——
+  "有人一直打一个已停用的号"与"有人在扫号"在账本里长得一模一样,
+  而前者要通知客户、后者要告警,处置完全不同。
+  **连带**:这说明 **VC-S1-03 的覆盖比它看起来薄** —— 那条只断言了行数(+6 对应 6 条日志),
+  从未断言号码,所以这个洞在它眼皮底下 PASS 了两天。C31 修复后应给 S1-03 补一条号码断言。
+  证据:`docs/verification/artifacts/VC-S14-03/verdict.md`。
 - **C21(new,2026-08-21 修 C11 时发现;2026-08-21 已修 —— 原头部标注"未修"与正文矛盾,
   2026-08-22 扫描时更正)** CDR 归属靠一场静默竞态决出:`CallFinished`
   用 `!snap.Bot.IsZero()` 判断"bot 已交接、人工路径拥有这一行",但 `IsZero()` 把 `DID` 也算在内,
