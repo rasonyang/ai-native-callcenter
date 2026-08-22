@@ -1015,7 +1015,7 @@ cases:
       而访问日志里它和一次正常回放毫无区别。反向的失败同样要命:
       ben 取自己那通得到 403,坐席无法回听自己刚接的电话,而唯一能自查的手段就此关闭。
     evidence_dir: docs/verification/artifacts/VC-S13-02/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:五条全中——ben 列表含己不含 wei、取己 200/1258924B/audio-wav、取 wei 403 "not one of your calls"、主管 200。403 有辨别力(同会话在自己那条拿到 200)。F10 由此闭合。发现:wei 最近一通录音的 agent_ids 含 ben(转接),不能当越权靶子——已回写 precondition;另 C24 幽灵行带着 ben 的 agent_id 进了他的 /cdrs/mine(见 verdict 末节)
     refs: ["internal/httpapi/recording_handlers.go:27", "internal/httpapi/recording_handlers.go:55", "internal/httpapi/recording_handlers.go:81", "internal/httpapi/ledger_handlers.go:19"]
     note: "collect 里的 <…> 占位符执行时由第 1 条的输出填入。
       音频取回用 -o 落盘再看 size,不要直接管道到 jq —— 那是二进制流"
