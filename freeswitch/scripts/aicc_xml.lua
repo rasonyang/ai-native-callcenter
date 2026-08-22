@@ -59,6 +59,14 @@ end
 -- registration is stored under: the agent softphone reaches FreeSWITCH through
 -- a TLS proxy and authenticates against that hostname. Lookups therefore key
 -- on the extension number alone.
+--
+-- aicc_managed marks a channel as ours from the moment it exists. Everything a
+-- dialplan can stamp arrives one step too late for the leg that triggered the
+-- dialplan — the caller's CHANNEL_CREATE reaches the application first — so a
+-- variable that rides the directory entry is the only thing both legs of a
+-- call between two of our accounts carry from birth. user_context puts those
+-- accounts in the aicc dialplan for the same reason: the account, not the
+-- call, is what aicc owns.
 local function directory_document(domain, row)
   local auto_answer = ""
   if row.is_auto_answer == "t" or row.is_auto_answer == true then
@@ -80,6 +88,7 @@ local function directory_document(domain, row)
           <variable name="user_context" value="aicc"/>
           <variable name="effective_caller_id_name" value="%s"/>
           <variable name="effective_caller_id_number" value="%s"/>
+          <variable name="aicc_managed" value="true"/>
           <variable name="aicc_extension" value="%s"/>
 %s        </variables>
       </user>

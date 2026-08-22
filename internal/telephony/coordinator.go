@@ -352,8 +352,15 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 	// A leg dialed towards a signed-in agent belongs to that agent's call, not
 	// to a new one: it is the delivery of a call already in a queue.
 	agentID, agentExtension, isAgentLeg := c.agentForLeg(ev)
-	if callID == uuid.Nil && ev.MemberChannelID != "" {
-		if member, ok := c.registry.CallForChannel(ev.MemberChannelID); ok {
+	// Either pointer answers the same question: which call is this leg the
+	// second half of. mod_callcenter supplies one for a queue delivery; our
+	// own dialplan supplies the other for one extension calling another.
+	parent := ev.MemberChannelID
+	if parent == "" {
+		parent = ev.ParentChannelID
+	}
+	if callID == uuid.Nil && parent != "" {
+		if member, ok := c.registry.CallForChannel(parent); ok {
 			// Joining the caller's call now, rather than waiting for the
 			// bridge to merge two calls, is what makes the offer read as an
 			// offer. A delivery leg on a call of its own is that call's first
@@ -373,8 +380,8 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		}
 		// The caller's own leg is not on the books yet. The bridge will still
 		// merge the two, which is the behaviour this replaced.
-		slog.DebugContext(ctx, "delivery leg outran its caller",
-			"channelId", ev.ChannelID, "memberChannelId", ev.MemberChannelID)
+		slog.DebugContext(ctx, "second leg outran its caller",
+			"channelId", ev.ChannelID, "parentChannelId", parent)
 	}
 
 	if callID == uuid.Nil {

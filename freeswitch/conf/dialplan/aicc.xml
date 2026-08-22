@@ -44,10 +44,23 @@
       One agent phone calling another.
 
       The two exports are what the application needs and what the stock rule
-      never gave it. aicc_call_id lands on both legs, which is how the pair is
-      recognised as one call instead of two: without it the second leg arrives
-      unrelated to the first, is adopted into a provisional call of its own,
-      and the agent it belongs to is rendered as the one placing it.
+      never gave it.
+
+      aicc_parent_channel names the channel this bridge was raised for, so the
+      second leg can be recognised as the other half of the first one's call.
+      It cannot be a call id: the caller's CHANNEL_CREATE reaches the
+      application before this dialplan runs, so the caller can never carry its
+      own identity in time — whichever leg the identity is minted on, the other
+      one has already been adopted into a call of its own. A pointer back to
+      the first leg has no such race, and it is the mechanism mod_callcenter
+      already supplies for queue deliveries (cc_member_session_uuid).
+      export puts the value on both legs; the leg that names itself is the
+      caller, which is how they are told apart.
+
+      Without it the second leg is adopted into a provisional call of its own,
+      becomes that call's first party, and is therefore rendered ORIGINATOR and
+      DIALING — the agent being rung is shown dialling the person calling them.
+
       aicc_call_type says INTERNAL where the switch would only see an outbound
       leg and guess OUTBOUND — the type is decided here, where the destination
       is still known to be an extension.
@@ -58,7 +71,7 @@
     -->
     <extension name="aicc_internal">
       <condition field="destination_number" expression="^(10[0-9][0-9])$">
-        <action application="export" data="aicc_call_id=${uuid}"/>
+        <action application="export" data="aicc_parent_channel=${uuid}"/>
         <action application="export" data="aicc_call_type=INTERNAL"/>
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="continue_on_fail=false"/>

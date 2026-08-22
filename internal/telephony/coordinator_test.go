@@ -573,6 +573,71 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // caller who is in fact ringing them; a delivery mod_callcenter cancels before
 // it answers never bridges at all, so the stray call reached the ledger as an
 // outbound CDR with caller and agent reversed, one per retry.
+// One extension calling another: the same shape as a queue delivery, but
+// mod_callcenter knows nothing about it, so the pointer back to the first leg
+// comes from our own dialplan instead. It cannot be a call id — the caller's
+// CHANNEL_CREATE reaches us before the dialplan runs, so whichever leg the
+// identity is minted on, the other has already been adopted on its own.
+//
+// Without the pointer the second leg is that new call's first party and comes
+// out ORIGINATOR/DIALING, which is what the agent being rung was shown: their
+// caller's leg, labelled "Calling out", on their own screen.
+func TestTheSecondLegOfAnInternalCallJoinsTheFirst(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	ctx := t.Context()
+	callerChan, calleeChan := "caller-chan", "callee-chan"
+
+	// The caller's leg arrives before the dialplan has run: no aicc variable
+	// on it at all, which is the whole reason a call id cannot do this job.
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", map[string]string{
+		"Caller-Context": "aicc",
+	}))
+
+	// The dialplan bridges, and the leg it raises names the channel it was
+	// raised for. export also puts the value on the caller's own leg, where it
+	// equals that leg's own id and is therefore ignored.
+	c.Handle(ctx, raw("CHANNEL_CREATE", calleeChan, "outbound", map[string]string{
+		"variable_dialed_user":         agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+		"variable_aicc_call_type":      "INTERNAL",
+		"Caller-Context":               "aicc",
+	}))
+
+	calleeCall, ok := registry.CallForChannel(calleeChan)
+	if !ok {
+		t.Fatal("the called leg is bound to no call")
+	}
+	callerCall, ok := registry.CallForChannel(callerChan)
+	if !ok {
+		t.Fatal("the caller is bound to no call")
+	}
+	if calleeCall != callerCall {
+		t.Fatalf("the two legs are on separate calls (%s and %s); one call was dialled, not two",
+			calleeCall, callerCall)
+	}
+
+	var calleeRole, callerRole PartyRole
+	var calleeState, callerState PartyState
+	if err := registry.Do(callerCall, func(call *Call) {
+		if p := call.PartyByChannel(calleeChan); p != nil {
+			calleeRole, calleeState = p.Role, p.State
+		}
+		if p := call.PartyByChannel(callerChan); p != nil {
+			callerRole, callerState = p.Role, p.State
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if callerRole != RoleOriginator || callerState != PartyDialing {
+		t.Errorf("caller = %s/%s, want ORIGINATOR/DIALING — they placed the call", callerRole, callerState)
+	}
+	if calleeRole != RoleTarget || calleeState != PartyRinging {
+		t.Errorf("callee = %s/%s, want TARGET/RINGING — their phone is the one ringing", calleeRole, calleeState)
+	}
+}
+
 func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})

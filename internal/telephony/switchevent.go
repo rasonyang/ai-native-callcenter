@@ -221,6 +221,10 @@ type SwitchEvent struct {
 	// member the event is about, on a channel event the caller the leg was
 	// dialled to serve. Empty on a leg that is nobody's delivery.
 	MemberChannelID string
+	// ParentChannelID names the channel whose dialplan raised this leg. It is
+	// the same idea as MemberChannelID for a case mod_callcenter knows nothing
+	// about: one extension calling another.
+	ParentChannelID string
 	MemberCount     int
 	Cause           string
 	CancelReason    string
@@ -288,6 +292,15 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	// comparison identifies the agent's half even where cc_side is absent.
 	if member := ev.Get("variable_cc_member_session_uuid"); member != "" && member != out.ChannelID {
 		out.MemberChannelID = member
+	}
+
+	// A leg our own dialplan raised names the channel it was raised for. The
+	// caller's CHANNEL_CREATE happens before the dialplan runs, so the caller
+	// can never carry its own call id in time; what the second leg can carry
+	// is a pointer back to the first. export puts the value on both legs, so
+	// the same comparison the member id uses tells them apart.
+	if parent := ev.Get("variable_aicc_parent_channel"); parent != "" && parent != out.ChannelID {
+		out.ParentChannelID = parent
 	}
 
 	switch strings.ToUpper(ev.Get("Call-Direction")) {

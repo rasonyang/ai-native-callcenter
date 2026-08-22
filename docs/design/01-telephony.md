@@ -138,6 +138,27 @@ Static directory users 1000–1019 remain as fallback during migration; removed 
 
 > **Why D6 was wrong.** Leaving extension-to-extension dialling on the stock `Local_Extension` works as telephony and fails as a call centre. Those legs carry no `aicc_*` variables, so the application sees an unattributed pair of channels, mints a call around them, and gets both direction and roles wrong — the agent *being rung* was shown "Calling out", their caller's leg, and an OUTBOUND badge on an internal call (owner-reported 2026-08-22, live). The same rule falls through to voicemail on no-answer, and each successor leg becomes its own CDR row with a voicemail greeting booked as a handled agent call (**C24**). Both are consequences of routing aicc calls through rules that were never about aicc, and both disappear by not doing that. **Agent-to-agent internal calls go through the aicc routing chain like everything else.**
 >
+> **`user_context` alone does not get a phone into this context — the profile does.** Setting
+> it on the directory user is necessary but inert here, and three live attempts on 2026-08-22
+> established why, in this order:
+>
+> 1. `user_context=aicc` alone changed nothing. A phone's INVITE takes the **profile's**
+>    context, `public`, and `public.xml`'s stock `public_extensions` rule transfers `10xx` to
+>    `XML default` before anything of ours is reached. **A FreeSWITCH restart made no
+>    difference**, which ruled caching out — the path is structural.
+> 2. Ordering cannot win it. Our include sits at `public.xml:61`, *below* the stock rule at
+>    `:46`, and an include's position is fixed in the file rather than by filename.
+> 3. `internal_auth_calls=true` did not fix it either. `apply-inbound-acl="domains"` admits LAN
+>    devices without a challenge regardless, so the directory is still never consulted.
+>    (It was turned on anyway, on the owner's instruction: unauthenticated INVITEs from anything
+>    on the LAN is not a posture a call centre should ship. It is hardening, **not** the fix.)
+>
+> What works is **`sip_profiles/internal.xml` → `<param name="context" value="aicc"/>`**: calls
+> start in aicc and never pass through `public` at all. `user_context=aicc` stays set so both
+> mechanisms agree wherever the directory *is* consulted. Inbound from a carrier keeps its
+> doorway in `public`, because that profile is a different one and untrusted inbound belongs
+> there.
+
 > Nothing from the stock context is inherited. Feature codes an agent phone never uses — call pickup, park, redial, the voicemail keys — are absent by choice; anything an agent genuinely needs is added to `aicc.xml` explicitly. Deployment-specific trunk rules (this laptop's `pstn_sim`, a real carrier elsewhere) are added to the same context by the deployment, not to `default`.
 
 **D7 `autoload_configs/switch.conf.xml`**: `sessions-per-second 30` → `100` (outbound AI ramp headroom). `max-sessions 1000`, RTP range 16384–32768, `uuid-version 7` unchanged.
