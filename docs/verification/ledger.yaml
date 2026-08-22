@@ -943,7 +943,7 @@ cases:
       app 里人人 READY,switch 里谁都不存在,每个入队呼叫等到超时,页面上毫无异常。
       这正是 S12-03 的 failure_looks_like 描述、而 S12-03 无法触及的那个失败。
     evidence_dir: docs/verification/artifacts/VC-S12-04/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:清空后重建路径真正被压到——agent-wei desired=2 actual=0 added=2、agent-ben added=1(S12-03 只拿到 already matched/added=0,这是两者唯一分野),agent list 与 tier list 均重建。执行偏离:用例写的清 sqlite 是错的,mod_callcenter 连的是 PostgreSQL aicc_fs(odbc-dsn 实查生效,sqlite 最后写入停在 08-21 是死数据)——此发现同时更正 VC-S12-03 判定里"自行恢复来自 sqlite"的归因。同批完成队列名去 @domain 迁移(owner 直裁,C1 的根),两侧带 @ 行数均为 0
     refs: ["internal/catalog/service.go:286", "internal/agents/service.go:595", "cmd/aicc/wiring.go:99", "internal/esl/link.go:55"]
     note: "清空前务必先跑 collect 第 2 条留底,便于失败后手工恢复。
       C1 的陈旧行 support-en@192.168.31.176 也在该库,清空会一并抹掉 ——

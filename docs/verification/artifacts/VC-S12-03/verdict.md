@@ -38,6 +38,14 @@
 所以本例证明的是:**ESL 重连钩子会触发,且触发后两侧一致**。
 它**没有**证明:交换机侧状态真的丢了时,应用能把它推回去。
 
+**【2026-08-22 更正:归因错了】** 上面写的"存在它自己的 `/usr/local/freeswitch/db/callcenter.db`
+(sqlite)"是**错的**。实查:`callcenter.conf` 的 `odbc-dsn` 指向 **PostgreSQL 的 `aicc_fs`**
+且已生效(`aicc_cc_dsn` 全局已设,库里 agents/members/tiers 三张表内容与现状一致);
+那个 sqlite 文件最后写入停在 2026-08-21 09:40,是配好 DSN 之前留下的**死数据**。
+**自行恢复来自 PostgreSQL,不是 sqlite。** 本例的结论(重启后两侧一致、reconcile 只是确认
+而非恢复)不受影响,机制说明按此更正。真正的重建路径已由 **VC-S12-04 于 2026-08-22 压到并通过**
+(`actual=0 → added=2`)。
+
 要压到后者,需要在重启前清空 mod_callcenter 的库(例如停机后
 `sqlite3 /usr/local/freeswitch/db/callcenter.db "delete from agents; delete from tiers;"`),
 再启动并观察 `added=` 是否为正。**建议追加为 VC-S12-04**(阶段 6 起草)。
