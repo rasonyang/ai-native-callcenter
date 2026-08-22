@@ -77,7 +77,7 @@ local function directory_document(domain, row)
           <param name="password" value="%s"/>
         </params>
         <variables>
-          <variable name="user_context" value="default"/>
+          <variable name="user_context" value="aicc"/>
           <variable name="effective_caller_id_name" value="%s"/>
           <variable name="effective_caller_id_number" value="%s"/>
           <variable name="aicc_extension" value="%s"/>

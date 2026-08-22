@@ -1,0 +1,72 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The dialplan context every aicc-managed SIP account lives in.
+
+  aicc_xml.lua puts each account it serves into this context, so everything an
+  agent phone can dial is decided here and nowhere else. That is the whole
+  point: the stock dialplan is left untouched, and this file is the only place
+  a reader has to look to know what an extension reaches.
+
+  It replaces an earlier arrangement in which agents sat in the stock `default`
+  context and extension-to-extension dialling was left to the stock
+  `Local_Extension` rule (design 01 §7 D6). That rule works as telephony and
+  fails as a call centre: the legs it raises carry none of the aicc variables,
+  so the application sees an unattributed pair of channels, mints a call of its
+  own around them and gets both the direction and the roles wrong — the agent
+  being rung was shown "Calling out" and their caller's leg. It also falls
+  through to voicemail on no-answer, and each successor leg becomes its own CDR
+  row (C24). Neither is a thing to patch around downstream; both disappear by
+  not routing aicc calls through rules that were never about aicc.
+
+  Nothing from the stock context is inherited. Feature codes an agent phone
+  never uses — call pickup, park, redial, the voicemail keys — are absent by
+  choice rather than by oversight. Anything an agent genuinely needs is added
+  here explicitly, which keeps the reachable surface of a call centre phone
+  something you can read in one screen.
+-->
+<include>
+  <context name="aicc">
+
+    <!--
+      Queue extensions. The bot transfers a caller here when it calls
+      transfer_to_agent, and aicc_inbound falls back here when the bot cannot
+      take a call at all. Which queue serves which extension is a database
+      question, so the script answers it.
+    -->
+    <extension name="aicc_queue">
+      <condition field="destination_number" expression="^(7\d{3})$">
+        <action application="lua" data="aicc_queue.lua $1"/>
+      </condition>
+    </extension>
+
+    <!--
+      One agent phone calling another.
+
+      The two exports are what the application needs and what the stock rule
+      never gave it. aicc_call_id lands on both legs, which is how the pair is
+      recognised as one call instead of two: without it the second leg arrives
+      unrelated to the first, is adopted into a provisional call of its own,
+      and the agent it belongs to is rendered as the one placing it.
+      aicc_call_type says INTERNAL where the switch would only see an outbound
+      leg and guess OUTBOUND — the type is decided here, where the destination
+      is still known to be an extension.
+
+      continue_on_fail is false on purpose. An internal call nobody answers is
+      an internal call nobody answered; there is no voicemail to fall into and
+      no successor leg to write a second record for.
+    -->
+    <extension name="aicc_internal">
+      <condition field="destination_number" expression="^(10[0-9][0-9])$">
+        <action application="export" data="aicc_call_id=${uuid}"/>
+        <action application="export" data="aicc_call_type=INTERNAL"/>
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=false"/>
+        <action application="set" data="call_timeout=30"/>
+        <action application="set" data="ringback=${us-ring}"/>
+        <action application="bridge" data="user/$1@${domain_name}"/>
+      </condition>
+    </extension>
+
+  </context>
+</include>

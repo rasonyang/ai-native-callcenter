@@ -304,6 +304,14 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **硬性排序:阶段 3–6 之后执行**——ben 是第 2 坐席物料(T3.5/T3.6/T6.1);清理前确认无 case
   再需要它们。清理后花名册类断言的环境噪音消失(F11 关闭)。
 
+- **W10(new,owner 直裁 2026-08-22)** **生产禁用 `loopback`。** AI 外呼路径目前默认
+  `AICC_OUTBOUND_ENDPOINT=loopback/%s/aicc/XML`(本次已把 `default` 改成 `aicc`,但 loopback 本身还在)。
+  真实部署把它设成自己的中继 `sofia/gateway/<gw>/%s` 即可绕开,**但代码不该以 loopback 为默认形态** ——
+  应改成 click-to-dial 已在用的那套:originate + park,应答后 `uuid_transfer` 进 aicc 拨号方案。
+  相关约定同批落地(已生效):**所有交换机命令的 context 默认 `aicc`**
+  (`adapter.go` `TransferToExtension`、`outbound.go`、两个 lua 的 `transfer … XML aicc`);
+  **用户目录的默认 context 也是 `aicc`**(`aicc_xml.lua`)。见设计 01 §7 **D6a**。
+
 **C 系列(既有立案):**
 - **C1** VC-S3-02 根因修复:DeleteCallcenterTier 不对含域名字二次限定 + converge removed 以复查为准;
   修后重跑 S3-02。

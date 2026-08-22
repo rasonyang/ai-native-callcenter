@@ -255,9 +255,10 @@ func TestDialIsAgentFirst(t *testing.T) {
 	}
 	// The dialplan owns routing: an extension stays internal, a carrier
 	// number leaves through its gateway. Naming an endpoint here would be a
-	// second copy of that decision.
-	if move.context != "default" {
-		t.Errorf("context = %q, want the dialplan's own", move.context)
+	// second copy of that decision. The dialplan in question is aicc's own —
+	// the stock one defines none of these extensions (design 01 §7 D6a).
+	if move.context != "aicc" {
+		t.Errorf("context = %q, want aicc's own dialplan", move.context)
 	}
 	if sw.bridgeCount() != 0 {
 		t.Error("click-to-dial built a bridge instead of using the dialplan")

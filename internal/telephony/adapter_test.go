@@ -98,9 +98,12 @@ func TestCommandStrings(t *testing.T) {
 			want: "uuid_phone_event chan-1 hold",
 		},
 		{
-			name: "transfer to a queue extension goes through the dialplan",
+			// An empty context means aicc's own, not the stock one: every
+			// extension this switch transfers to is one aicc defines
+			// (design 01 §7 D6a).
+			name: "transfer to a queue extension goes through aicc's dialplan",
 			act:  func(a *Adapter) error { return a.TransferToExtension("chan-1", "7001", "") },
-			want: "uuid_transfer chan-1 7001 XML default",
+			want: "uuid_transfer chan-1 7001 XML aicc",
 		},
 		{
 			// Never originate plus uuid_bridge: bridging needs media up on one

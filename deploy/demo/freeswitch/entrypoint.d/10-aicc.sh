@@ -31,11 +31,21 @@ OVERLAY=/aicc/conf   # files this demo owns outright
 echo "aicc: applying switch configuration"
 
 # --- D8: the Lua scripts and the three configuration files we ship ----------
-mkdir -p "$SCRIPTS" "$CONF/sip_profiles/external" "$CONF/dialplan/public" "$CONF/dialplan/default"
+#
+# dialplan/aicc.xml is a context of its own, not an include dropped into the
+# stock ones: every account aicc_xml.lua serves is put in that context, so the
+# whole of what an agent phone can dial lives in one file and the shipped
+# dialplan is left alone (design 01 §7 D6, superseded).
+mkdir -p "$SCRIPTS" "$CONF/sip_profiles/external" "$CONF/dialplan/public"
 copy "$SRC"/scripts/*.lua "$SCRIPTS/"
 copy "$SRC/conf/sip_profiles/external/aicc_bot.xml" "$CONF/sip_profiles/external/"
 copy "$SRC/conf/dialplan/public/05_aicc.xml"        "$CONF/dialplan/public/"
-copy "$SRC/conf/dialplan/default/05_aicc.xml"       "$CONF/dialplan/default/"
+copy "$SRC/conf/dialplan/aicc.xml"                  "$CONF/dialplan/"
+
+# An older build of this image put a queue-extension include into the stock
+# default context. It is part of the aicc context now, and a stale copy would
+# keep answering 7xxx for anyone still routed through default.
+rm -f "$CONF/dialplan/default/05_aicc.xml"
 
 # --- D3: bind the XML handler that serves the directory and the queues ------
 copy "$OVERLAY/autoload_configs/lua.conf.xml" "$CONF/autoload_configs/lua.conf.xml"
@@ -122,7 +132,7 @@ for expected in \
     "$SCRIPTS/aicc_queue.lua" \
     "$CONF/sip_profiles/external/aicc_bot.xml" \
     "$CONF/dialplan/public/05_aicc.xml" \
-    "$CONF/dialplan/default/05_aicc.xml" \
+    "$CONF/dialplan/aicc.xml" \
     "$CONF/vars_aicc.xml"; do
     [ -f "$expected" ] || { echo "aicc: $expected was not installed" >&2; exit 1; }
 done

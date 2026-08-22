@@ -40,10 +40,15 @@ type Config struct {
 	// EndpointFormat renders a destination number into a dial string for the
 	// AI outbound leg, e.g. "sofia/gateway/pstn/%s". Only that path needs it:
 	// click-to-dial hands the destination to the dialplan instead. The
-	// default loops back into the local dialplan — pinned to XML, because a
-	// loopback leg inherits the a-leg's dialplan and would otherwise read the
-	// number as an application name — which is what a dev box without a trunk
-	// can reach.
+	// default loops back into the local dialplan — pinned to the aicc context
+	// and to XML, because a loopback leg inherits the a-leg's dialplan and
+	// would otherwise read the number as an application name — which is what a
+	// dev box without a trunk can reach.
+	//
+	// That default is for development only. Loopback is not to be used in
+	// production (owner directive 2026-08-22): a deployment sets this to its
+	// own trunk, sofia/gateway/<gw>/%s, and the AI outbound path should stop
+	// depending on loopback altogether — tracked as W10.
 	EndpointFormat string
 	// BotGateway is the gateway name the switch bridges AI legs through.
 	BotGateway string
@@ -60,7 +65,7 @@ type Config struct {
 
 func (c Config) withDefaults() Config {
 	if c.EndpointFormat == "" {
-		c.EndpointFormat = "loopback/%s/default/XML"
+		c.EndpointFormat = "loopback/%s/aicc/XML"
 	}
 	if c.BotGateway == "" {
 		c.BotGateway = "aicc_bot"
@@ -211,7 +216,7 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 	}
 
 	s.arm(agentLeg.String(), func() {
-		if err := s.sw.TransferToExtension(agentLeg.String(), destination, "default"); err != nil {
+		if err := s.sw.TransferToExtension(agentLeg.String(), destination, "aicc"); err != nil {
 			s.log.Error("click-to-dial transfer failed",
 				"callId", callID, "destination", destination, "error", err)
 		}

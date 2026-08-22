@@ -213,9 +213,14 @@ func (a *Adapter) Hangup(channelID, cause string) error {
 
 // TransferToExtension moves a live caller to a dialplan extension. This is how
 // a caller reaches a queue: the queue extension runs the queue script.
+//
+// The default context is aicc's own. Every extension this switch is asked to
+// transfer to is one aicc defines, and the stock dialplan defines none of
+// them: landing a transfer in `default` would route it by rules written for a
+// different product.
 func (a *Adapter) TransferToExtension(channelID, extension, context string) error {
 	if context == "" {
-		context = "default"
+		context = "aicc"
 	}
 	return a.exec("uuid_transfer %s %s XML %s", channelID, extension, context)
 }

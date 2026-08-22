@@ -113,7 +113,7 @@ if overflow == "BOT_FLOW" then
 elseif overflow == "FORWARD" then
   local target = queue.overflow_target
   if target ~= nil and target ~= "" then
-    session:execute("transfer", target .. " XML default")
+    session:execute("transfer", target .. " XML aicc")
     return
   end
   session:hangup("NORMAL_CLEARING")

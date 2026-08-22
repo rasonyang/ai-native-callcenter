@@ -152,7 +152,7 @@ func Load() (Config, error) {
 		Provider:               env("AICC_PROVIDER", "openai"),
 		ProviderEndpoint:       env("AICC_PROVIDER_ENDPOINT", ""),
 		ProviderModel:          env("AICC_PROVIDER_MODEL", ""),
-		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/default/XML"),
+		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/aicc/XML"),
 		OutboundCallerID:       env("AICC_OUTBOUND_CLID", ""),
 		RecordingBackend:       env("AICC_RECORDING_BACKEND", "FS"),
 		RecordingDir:           env("AICC_RECORDING_DIR", ""),

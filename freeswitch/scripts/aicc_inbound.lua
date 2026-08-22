@@ -107,7 +107,7 @@ if session:ready() then
 
   local fallback = route.fallback_queue_ext_number
   if fallback ~= nil and fallback ~= "" then
-    session:execute("transfer", fallback .. " XML default")
+    session:execute("transfer", fallback .. " XML aicc")
   else
     session:execute("playback", "ivr/ivr-call_cannot_be_completed_as_dialed.wav")
     session:hangup("NORMAL_TEMPORARY_FAILURE")
