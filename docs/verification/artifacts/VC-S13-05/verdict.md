@@ -80,3 +80,56 @@ seq=9200422  03:10:37Z  availability=DEVICE_UNREACHABLE   ← 掉线
 `SSE DEVICE_UNREGISTERED ≥1` 被我写成了**硬断言**,而它是 W7 名下的零生产者类型 ——
 本该像 S1-02 的 CUSTOMER 行那样写成**留证条款**。已改为留证,并把本次实测的
 0 / 0 / 3 记为 W7 落地前的旧行为基线。
+
+---
+
+## 重跑 —— 2026-08-22 12:01–12:09Z(C28 已修,commit `6b79d4c`)
+
+**判定:PASS**(首轮 FAIL 的两条全部转绿,其余五条维持)
+
+### 失联后
+
+| 断言 | 首轮 | 本轮 | 实测 |
+|---|---|---|---|
+| 1008 从注册表消失 | ✓ | ✓ | Sign Out 主动发了 unregister,**没等到期** —— 首轮等了几分钟,这轮 3 秒内就没了 |
+| `availability=DEVICE_UNREACHABLE`、`isRegistered=false` | ✓ | ✓ | `{"state":"READY","availability":"DEVICE_UNREACHABLE","isRegistered":false}` |
+| `state` 仍为 READY | ✓ | ✓ | 同上 —— 掉线不改坐席的意愿,只改可达性 |
+| SSE 发出 `DEVICE_UNREGISTERED` | **0** ✗ | **1** ✓ | 见下 |
+| switch 侧 agent-wei 不再 Available | 持续 `Available` ✗ | **`On Break`** ✓ | `callcenter_config agent list` 第 6 列 |
+
+wei 名下 `DEVICE_*` 的完整序列(supervisor 流,同一 agentId):
+
+```
+seq=10300011 12:06:30Z DEVICE_IN_SERVICE    payload.availability=READY               state=READY   ← 基线续注册
+seq=10300012 12:07:29Z DEVICE_UNREGISTERED  payload.availability=DEVICE_UNREACHABLE  state=READY   ← 掉线
+seq=10300014 12:08:40Z DEVICE_IN_SERVICE    payload.availability=READY               state=READY   ← 恢复
+```
+
+对照首轮那三条 —— 当时第三条顶着 `DEVICE_IN_SERVICE` 的名字、载荷写着 `DEVICE_UNREACHABLE`,
+名与实相反。这轮**名字和载荷说的是同一件事**,按 `type` 过滤的消费者和读载荷的消费者第一次会得到同一个结论。
+
+交换机镜像同步走了一个完整来回:`Available → On Break → Available`。
+
+### 恢复后
+
+| 断言 | 实测 |
+|---|---|
+| roster 回到 `availability=READY`、`isRegistered=true` | `{"state":"READY","availability":"READY","isRegistered":true}` ✓ |
+| SSE 出现 `DEVICE_IN_SERVICE` | 计数 3(基线 1 + 恢复 1 + ben 的 1)✓ |
+| switch 侧回到 `Available` | ✓ |
+
+`DEVICE_REGISTERED` 本轮仍为 **0**,与预期一致 —— C28 没有动它。恢复走 `DEVICE_IN_SERVICE`,
+两者的分工是语义问题(注册成功 vs 可服务),留给 W7,不是补一行 publish 的事。
+
+### 顺带证明的一条
+
+基线本身就是 C28 的反向检查:wei `READY` 且话机在册时,switch 侧是 `Available` ——
+新加的可达性判断没有把好话机误判成不可达。
+
+### 执行中两处自己的错(留档)
+
+- `POST /api/v1/agents/me/ready` 拿到 `http=200`,**那个 200 是假的**:该路径不存在,
+  落到了内嵌 SPA 的 index.html。真实路径是 `/api/v1/agent/ready`(`docs/openapi.json` paths)。
+  **凡对写接口只看 http_code 不看副作用的采集都可能被这样骗过** —— 当时 roster 没变才露出马脚。
+- 头写成 `CSRF='-H X-AICC-Csrf: 1'` 再 `$CSRF` 展开:**zsh 不对无引号变量做分词**,
+  整串被当成一个参数,curl 收不到头,继续 403。写成字面量才对。
