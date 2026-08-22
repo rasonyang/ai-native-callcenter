@@ -187,9 +187,30 @@ func (oneAgent) AgentAtExtension(ext string) (uuid.UUID, bool) {
 	}
 	return uuid.Nil, false
 }
-func (oneAgent) AgentByCallcenterName(string) (uuid.UUID, bool)           { return uuid.Nil, false }
-func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)               {}
-func (oneAgent) BeginAfterCallWork(context.Context, uuid.UUID, uuid.UUID) {}
+func (oneAgent) AgentByCallcenterName(string) (uuid.UUID, bool) { return uuid.Nil, false }
+
+// twoAgents tells the two ends of an internal call apart: an agent owns one
+// extension, so a leg at somebody else's extension is not theirs.
+const otherExtension = "1002"
+
+var otherAgentID = uuid.MustParse("00000000-0000-4000-8000-00000000a002")
+
+type twoAgents struct{}
+
+func (twoAgents) AgentAtExtension(ext string) (uuid.UUID, bool) {
+	switch ext {
+	case agentExtension:
+		return testAgentID, true
+	case otherExtension:
+		return otherAgentID, true
+	}
+	return uuid.Nil, false
+}
+func (twoAgents) AgentByCallcenterName(string) (uuid.UUID, bool)           { return uuid.Nil, false }
+func (twoAgents) SetOnCall(context.Context, uuid.UUID, bool)               {}
+func (twoAgents) BeginAfterCallWork(context.Context, uuid.UUID, uuid.UUID) {}
+func (oneAgent) SetOnCall(context.Context, uuid.UUID, bool)                {}
+func (oneAgent) BeginAfterCallWork(context.Context, uuid.UUID, uuid.UUID)  {}
 
 // recordingTapper captures what the coordinator asked of the media tap.
 type recordingTapper struct {
@@ -592,15 +613,16 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // whose phone was ringing.
 func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
 	registry := NewRegistry(nullPublisher{})
-	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	c := NewCoordinator(registry, nil, twoAgents{}, nullPublisher{})
 
 	ctx := t.Context()
 	callerChan, calleeChan := "caller-chan", "callee-chan"
 
-	// The caller dials the agent's extension. Their leg is inbound: they
-	// raised it, and its destination is who they are calling.
+	// One agent dials the other. The caller's leg is inbound: they raised it,
+	// it sits at their own extension, and its destination is the colleague.
 	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", map[string]string{
 		"Caller-Destination-Number": agentExtension,
+		"Caller-Caller-ID-Number":   otherExtension,
 		"Caller-Context":            "aicc",
 	}))
 	// The leg the dialplan raises towards that agent is outbound, and its
@@ -626,11 +648,17 @@ func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("reading the call: %v", err)
 	}
-	if calleeAgent == nil {
-		t.Error("the leg dialled towards the agent carries no agent id; the delivery is unattributed")
+	if calleeAgent == nil || *calleeAgent != testAgentID {
+		t.Errorf("the leg dialled towards the agent is attributed to %v, want the agent at that extension", calleeAgent)
 	}
-	if callerAgent != nil {
-		t.Errorf("the caller's own leg is attributed to agent %s — they dialled that extension, they are not sitting at it", *callerAgent)
+	// An agent owns one extension. The caller is sitting at theirs, not at the
+	// one they dialled, so the call belongs on both screens — as the placer on
+	// one and the person being rung on the other.
+	if callerAgent == nil || *callerAgent != otherAgentID {
+		t.Errorf("the caller's own leg is attributed to %v, want the agent sitting at %s", callerAgent, otherExtension)
+	}
+	if callerAgent != nil && calleeAgent != nil && *callerAgent == *calleeAgent {
+		t.Error("both legs carry one agent id; the cockpit cannot tell which party is its own")
 	}
 }
 

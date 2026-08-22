@@ -899,16 +899,20 @@ func (c *Coordinator) agentForLeg(ev SwitchEvent) (agentID uuid.UUID, extension 
 		ev.Raw.Variable("dialed_user"),
 		ev.Raw.Variable("aicc_extension"),
 	}
-	// The destination says who a leg is being delivered *to*, which identifies
-	// its owner only when the switch is the one that raised it. On a leg a
-	// phone originated, the destination is whoever they are calling: matching
-	// on it hands the caller's own leg to the person they dialled. Two agents
-	// on one internal call then carry the same id, the cockpit picks whichever
-	// party comes first, and the one being rung is shown their caller's leg —
-	// "Calling out", dialling, on the screen of somebody whose phone is
-	// ringing (owner-reported 2026-08-22, live).
+	// An agent owns one extension, so a leg belongs to whoever is sitting at
+	// the end the leg is at — and which end that is depends on who raised it.
+	// The switch dialled an outbound leg *to* somebody; an inbound leg came
+	// *from* somebody. Reading the destination either way hands a caller's own
+	// leg to the person they dialled: both legs of an internal call then carry
+	// the same agent id, the cockpit takes whichever party comes first, and the
+	// one being rung is shown their caller's leg — "Calling out", dialling, on
+	// the screen of somebody whose phone is ringing (owner-reported
+	// 2026-08-22, live). Inbound calls never showed it because a caller off the
+	// carrier arrives with a number that is nobody's extension.
 	if ev.Direction == DirectionOutbound {
 		candidates = append(candidates, ev.DestinationNumber)
+	} else {
+		candidates = append(candidates, ev.ANI)
 	}
 	for _, candidate := range candidates {
 		if candidate == "" {
