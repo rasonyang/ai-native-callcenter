@@ -582,6 +582,58 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // Without the pointer the second leg is that new call's first party and comes
 // out ORIGINATOR/DIALING, which is what the agent being rung was shown: their
 // caller's leg, labelled "Calling out", on their own screen.
+// A caller's own leg belongs to the caller, not to the person they dialled.
+//
+// The switch's destination for a leg identifies an agent only when the switch
+// raised that leg towards them. A phone-originated leg carries the number it is
+// calling, so matching on it gave both legs of an internal call the same agent
+// id — and the cockpit, taking the first party with an id as its own, showed
+// the agent being rung their caller's leg: Calling out, dialling, on a screen
+// whose phone was ringing.
+func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	ctx := t.Context()
+	callerChan, calleeChan := "caller-chan", "callee-chan"
+
+	// The caller dials the agent's extension. Their leg is inbound: they
+	// raised it, and its destination is who they are calling.
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", map[string]string{
+		"Caller-Destination-Number": agentExtension,
+		"Caller-Context":            "aicc",
+	}))
+	// The leg the dialplan raises towards that agent is outbound, and its
+	// destination does identify them.
+	c.Handle(ctx, raw("CHANNEL_CREATE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+		"Caller-Context":               "aicc",
+	}))
+
+	callID, ok := registry.CallForChannel(callerChan)
+	if !ok {
+		t.Fatal("the caller is bound to no call")
+	}
+	var callerAgent, calleeAgent *uuid.UUID
+	if err := registry.Do(callID, func(call *Call) {
+		if p := call.PartyByChannel(callerChan); p != nil {
+			callerAgent = p.AgentID
+		}
+		if p := call.PartyByChannel(calleeChan); p != nil {
+			calleeAgent = p.AgentID
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if calleeAgent == nil {
+		t.Error("the leg dialled towards the agent carries no agent id; the delivery is unattributed")
+	}
+	if callerAgent != nil {
+		t.Errorf("the caller's own leg is attributed to agent %s — they dialled that extension, they are not sitting at it", *callerAgent)
+	}
+}
+
 func TestTheSecondLegOfAnInternalCallJoinsTheFirst(t *testing.T) {
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
