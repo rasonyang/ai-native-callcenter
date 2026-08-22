@@ -282,6 +282,19 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   为产品决策(2026-08-20)";S4-03 断言转正式。
 - **W6 D1 记录**:质检评审 UI defer 下一期——tables.md/quality_reviews 行注记决议日期。
 - **W7 十个零生产者 SSE 类型全部实现**(D6),按难度四组:
+  **【2026-08-22 现场证据,owner 提问触发】** `PARTY_DIALING` 的缺席在事件流上是看得见的:
+  一通分机互拨(1002→1008)的完整流里,主叫 party 的**第一次出现就是 `PARTY_ESTABLISHED`** ——
+  ```
+  9800005 PARTY_RINGING     partyId=…b32e (wei, TARGET)      ← 被叫宣告了 RINGING
+  9800007 PARTY_ESTABLISHED partyId=…b32e (wei)   RINGING→TALKING
+  9800008 PARTY_ESTABLISHED partyId=…b305 (ben, ORIGINATOR)  ← 它的 DIALING 从未被宣告
+  ```
+  两条 `PARTY_ESTABLISHED` 是**两个不同的 party**,各自合法迁移,不存在 `TALKING→TALKING`;
+  但 owner 读流时的疑问是对的 —— **从流上看不到 `DIALING`,party 一出现就已经在通话**。
+  originator 腿确实以 DIALING 创建(`call.go:209`),只是没有事件宣告它(`events.md:11`)。
+  **实现 `PARTY_DIALING` 应优先于其余九个**:它是唯一一个让 FSM 的起点在流上隐形的缺口,
+  而且订阅方(如坐席自己的工作台)要靠它才能在对方接起之前知道这条腿存在。
+  另见 **C28②**:`DEVICE_*` 那一对不是"没实现",是**发错了一个**,W7 要做的是改对而非补上。
   ① CALL_RECORDING_STARTED/STOPPED——RECORD_START/STOP 已归一化(switchevent.go:259-264),
   补 coordinator→Hub 一跳(scope 沿用 call 域);
   ② DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布;
