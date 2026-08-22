@@ -71,3 +71,42 @@ originate …sofia/gateway/pstn_sim/18688886669 &park()   →   -ERR NO_USER_RES
 
 **结论**:外线一型的失败**先于** click-to-dial —— 中继现在拨不出去。
 待模拟器/对端恢复后重测,方能判定 VC-S14-04 的外线一半。
+
+---
+
+## 更正:先前"中继坏了"的判断是错的,真因是我今天引入的一个 dialplan 缺陷
+
+18:53 那次我据 `-ERR NO_USER_RESPONSE` 判定"中继现在拨不出去"。**那个判断是错的** ——
+当时 owner 的被叫手机不在线,直接经网关拨自然无应答,我把它读成了中继故障。
+19:01 手机在线时手工经网关拨:`[proceeding][183] → [completing][200]`,**中继一直是好的**。
+
+真因在 aicc context:
+
+```
+19:01(修复前)  Processing …->18688886669 in context aicc
+                hanging up, cause: NO_ROUTE_DESTINATION      ← 没有任何规则匹配
+```
+
+`pstn_sim_outbound` 明明写在 `aicc_pstn_sim.xml` 的 `<context name="aicc">` 里,
+`xml_locate` 也看得见它 —— 但 **`aicc.xml` 与 `aicc_pstn_sim.xml` 各自声明了一个同名 context,
+FreeSWITCH 只用第一个,第二个被静默忽略**。规则在 XML 里,对呼叫却不可达。
+
+**修法**:`aicc.xml` 的 context 末尾加 `<X-PRE-PROCESS cmd="include" data="aicc/*.xml"/>`,
+部署方把自己的规则作为**裸 `<extension>`** 放进 `dialplan/aicc/`,不再自建 context ——
+与原厂 `default.xml` 收 `default/*.xml` 同一形态。
+
+修复后:
+
+```
+19:01:13.156  Transfer → XML[18688886669@aicc]
+19:01:13.156  Processing …->18688886669 in context aicc
+19:01:13.156  New Channel sofia/external/18688886669        ← 规则匹配,网关腿建起来了
+19:01:13.216  entering state [terminated][480]              ← 对端 480,手机那一刻不可接
+```
+
+**我方路径已通**,`480 Temporarily Unavailable` 是对端应答。外线一型的账面断言
+(`call_type=OUTBOUND`、legs 含 TRUNK 段、`bill_sec` 从被叫应答起算且 ≤ `total_sec`、
+`tech.switchBillSec` 相差 ≤2 秒)仍待一次**被叫真正接听**的呼叫。
+
+**执行注记(owner 提供)**:外呼 pstn_sim 必须**提前让 owner 准备接听**,
+否则拿到的是 480/NO_USER_RESPONSE 而非可判定的结果。

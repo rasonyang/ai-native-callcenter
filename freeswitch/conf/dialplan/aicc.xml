@@ -81,5 +81,19 @@
       </condition>
     </extension>
 
+    <!--
+      Where a deployment adds what only it has: this laptop's simulated PSTN
+      trunk, somebody else's carrier, a feature code a particular floor needs.
+
+      It has to be an include rather than a second file declaring this context
+      again. Two files that both open <context name="aicc"> do not merge — the
+      first is used and the second is silently ignored, so its rules are
+      visible to xml_locate and unreachable to a call. That cost an afternoon:
+      a trunk rule sat in a second file, every outbound click-to-dial reached
+      the dialplan and found nothing, and the leg hung up NO_ROUTE_DESTINATION
+      while the rule appeared to be right there.
+    -->
+    <X-PRE-PROCESS cmd="include" data="aicc/*.xml"/>
+
   </context>
 </include>
