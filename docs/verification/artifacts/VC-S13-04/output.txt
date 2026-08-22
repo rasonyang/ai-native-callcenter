@@ -1,0 +1,53 @@
+################ WINDOW 2026-08-21T00:00:00Z .. 2026-08-22T00:00:00Z ################
+--- overview (report) ---
+{"totalCalls":36,"answeredCalls":14,"abandonedCalls":6,"containedCalls":1,"queueCalls":15,"answeredWithinSla":6}
+--- cdrs (detail) total|answered|abandoned|contained|queue ---
+36|14|6|1|15
+--- queues (report) ---
+[{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":2},{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":13}]
+--- cdrs by queue (detail) ---
+019ffaae-9bf6-7e48-8fc7-47ce0998250f|2
+b098f1bf-91c4-441b-a903-59ab8f85f6be|13
+--- missed_reason breakdown ---
+ABANDONED_WAITING|6
+(null)|30
+
+################ WINDOW 2026-08-20T00:00:00Z .. 2026-08-21T00:00:00Z ################
+--- overview (report) ---
+{"totalCalls":74,"answeredCalls":38,"abandonedCalls":4,"containedCalls":1,"queueCalls":12,"answeredWithinSla":5}
+--- cdrs (detail) total|answered|abandoned|contained|queue ---
+74|38|4|1|12
+--- queues (report) ---
+[{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":4},{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":8}]
+--- cdrs by queue (detail) ---
+019ffaae-9bf6-7e48-8fc7-47ce0998250f|4
+b098f1bf-91c4-441b-a903-59ab8f85f6be|8
+--- missed_reason breakdown ---
+ABANDONED_WAITING|3
+(null)|70
+SHORT_ABANDONED|1
+
+################ SLA 分母核对 ################
+--- 2026-08-21 queues rows (report) ---
+{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":13,"answeredCalls":7,"answeredWithinSla":4,"sla_by_total":31,"sla_by_answered":57}
+{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":2,"answeredCalls":2,"answeredWithinSla":2,"sla_by_total":100,"sla_by_answered":100}
+--- 2026-08-20 queues rows (report) ---
+{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":8,"answeredCalls":6,"answeredWithinSla":3,"sla_by_total":38,"sla_by_answered":50}
+{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":4,"answeredCalls":2,"answeredWithinSla":2,"sla_by_total":50,"sla_by_answered":100}
+--- overview answeredWithinSla vs 两种分母 ---
+2026-08-21 {"answeredWithinSla":6,"queueCalls":15,"totalCalls":36,"pct_by_queueCalls":40,"pct_by_totalCalls":17}
+2026-08-20 {"answeredWithinSla":5,"queueCalls":12,"totalCalls":74,"pct_by_queueCalls":42,"pct_by_totalCalls":7}
+ABANDONED_WAITING|3
+(null)|70
+SHORT_ABANDONED|1
+
+################ SLA 分母核对 ################
+--- 2026-08-21 queues rows (report) ---
+{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":13,"answeredCalls":7,"answeredWithinSla":4,"sla_by_total":31,"sla_by_answered":57}
+{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":2,"answeredCalls":2,"answeredWithinSla":2,"sla_by_total":100,"sla_by_answered":100}
+--- 2026-08-20 queues rows (report) ---
+{"queueId":"b098f1bf-91c4-441b-a903-59ab8f85f6be","totalCalls":8,"answeredCalls":6,"answeredWithinSla":3,"sla_by_total":38,"sla_by_answered":50}
+{"queueId":"019ffaae-9bf6-7e48-8fc7-47ce0998250f","totalCalls":4,"answeredCalls":2,"answeredWithinSla":2,"sla_by_total":50,"sla_by_answered":100}
+--- overview answeredWithinSla vs 两种分母 ---
+2026-08-21 {"answeredWithinSla":6,"queueCalls":15,"totalCalls":36,"pct_by_queueCalls":40,"pct_by_totalCalls":17}
+2026-08-20 {"answeredWithinSla":5,"queueCalls":12,"totalCalls":74,"pct_by_queueCalls":42,"pct_by_totalCalls":7}

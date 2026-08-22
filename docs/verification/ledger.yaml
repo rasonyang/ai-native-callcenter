@@ -1078,7 +1078,7 @@ cases:
       或差在 abandoned 的口径(把所有 NO_ANSWER 都算成放弃,把 NO_AVAILABLE_AGENT
       和直拨未接也计了进去)。两种都不会报错,只会让日报常年偏若干个百分点。
     evidence_dir: docs/verification/artifacts/VC-S13-04/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:两个真实日窗(08-21/08-20)十四项逐一相等,FILTER 与 psql 同构;ABANDONED_RINGING 两窗皆 0——W2 前的留证已取到。按原样跑的"今天"窗口是空的(0=0 假通过)→ collect 缺陷,见 verdict §6。SLA 一项:expect 的警告只对 overview 成立(queues 行自带 queue_id 过滤),另牵出 C27(两块屏两个分母)
     refs: ["internal/store/sql/ledger.sql:120", "internal/store/sql/ledger.sql:137", "internal/store/sql/ledger.sql:153", "internal/httpapi/ledger_handlers.go:19"]
     note: "端点已对契约核实(2026-08-21):getReportOverview=GET /reports/overview、
       getReportQueues=GET /reports/queues、getReportDaily=GET /reports/daily,守卫均为 SUPERVISOR。
