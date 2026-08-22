@@ -1,0 +1,33 @@
+########## VC-S3-02 重跑 —— 10:03:19Z ##########
+--- 1. DB 期望(已签入坐席的配员)---
+agent-ben|support-zh
+agent-wei|support-en
+agent-wei|support-zh
+--- 2. switch 现实(tier list)---
+agent-ben|support-zh
+agent-wei|support-en
+agent-wei|support-zh
+--- diff(应为空)---
+  ✓ 逐行完全一致,diff 为空
+--- 3. agent list ---
+agent-ben|single_box||callback|user/1002@192.168.31.55|Available|Waiting|0|0|0|0|0|0|0|0|1787392373|0|0|0|0|0
+agent-wei|single_box||callback|user/1008@192.168.31.55|Available|Waiting|0|0|0|0|0|0|0|0|1787392373|0|0|0|0|0
+
+--- C1 第二半的直接探针:删一条【根本不存在】的 tier,看交换机怎么答 ---
+  tier del 一个不存在的队列 → +OK
+  tier del 一个不存在的坐席 → +OK
+  → 交换机对 miss 的删除同样回 +OK;converge 见 nil 即 removed++(service.go:288-295),不复查。
+  → C1 的第二半【未修】:removed= 仍可能谎报。本用例不断言它,故不影响判定。
+--- 复查:探针没有破坏现状 ---
+  agent-ben|support-zh
+  agent-wei|support-en
+  agent-wei|support-zh
+--- C1 第二半的直接探针:删一条【根本不存在】的 tier,看交换机怎么答 ---
+  tier del 一个不存在的队列 → +OK
+  tier del 一个不存在的坐席 → +OK
+  → 交换机对 miss 的删除同样回 +OK;converge 见 nil 即 removed++(service.go:288-295),不复查。
+  → C1 的第二半【未修】:removed= 仍可能谎报。本用例不断言它,故不影响判定。
+--- 复查:探针没有破坏现状 ---
+  agent-ben|support-zh
+  agent-wei|support-en
+  agent-wei|support-zh
