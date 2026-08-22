@@ -446,24 +446,35 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 		Payload:  payload,
 		UserData: a.call.UserData,
 	}
-	// Addressed to every agent on the call, not to the agent whose leg this
-	// event is about. The event still names that leg — ev.AgentID below — but
-	// the audience is the conversation's.
+	// A leg event goes to the agent whose leg it is. An agent works one leg,
+	// and the states it moves through — ringing, established, released — are
+	// the ones their own screen is about; a colleague's leg on the same call
+	// is not their business. Two agents talking to each other therefore each
+	// see three events about themselves rather than six about both.
 	//
-	// The caller's leg has no agent of its own, so scoping by the party's own
-	// agent addressed a caller's release to nobody. Under the old
-	// fall-through-to-everyone hub that reached the bridged agent anyway, by
-	// accident; under a default-deny hub it reaches no one, and the agent's
-	// softphone sits on a call the customer has already hung up.
+	// A party with no agent is the other side of somebody's conversation
+	// rather than a colleague's leg, and it keeps the whole call as its
+	// audience. The caller's leg on an inbound call belongs to nobody, so
+	// scoping it to its own agent addresses it to nobody — and a live call on
+	// 2026-08-18 showed what that costs: the customer hung up, both legs ended
+	// on the switch, and the agent's bar stayed on the call
+	// (TestACallerReleaseReachesTheBridgedAgent).
 	//
-	// Empty is still possible and still correct: a call with no agent party at
-	// all is the bot phase or a caller alone in a queue, and that goes to
-	// supervisors and administrators.
+	// Before a call reaches anybody that audience is empty, which is also
+	// correct: a caller alone in a queue who hangs up has no agent to tell, and
+	// the event belongs in the CDR and a supervisor's view rather than in
+	// somebody's softphone.
+	//
+	// Call-scoped events (p == nil) keep the whole conversation too: they are
+	// about the call, not about a leg of it.
 	scope := events.Scope{AgentIDs: a.call.AgentIDs()}
 	if p != nil {
 		partyID := p.PartyID
 		ev.PartyID = &partyID
 		ev.AgentID = p.AgentID
+		if p.AgentID != nil {
+			scope.AgentIDs = []uuid.UUID{*p.AgentID}
+		}
 	}
 	if a.call.QueueID != nil {
 		scope.QueueID = a.call.QueueID

@@ -611,6 +611,62 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // id — and the cockpit, taking the first party with an id as its own, showed
 // the agent being rung their caller's leg: Calling out, dialling, on a screen
 // whose phone was ringing.
+// An agent works one leg, so their stream is about that leg. On a call between
+// two agents each of them should see their own party ring, establish and
+// release — not six events about both of them.
+//
+// The exception is a party with no agent: the caller's leg on an inbound call
+// belongs to nobody, and scoping it to its own agent would address the
+// customer's hangup to nobody at all.
+func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	c := NewCoordinator(registry, nil, twoAgents{}, pub)
+
+	ctx := t.Context()
+	callerChan, calleeChan := "caller-chan", "callee-chan"
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", map[string]string{
+		"Caller-Destination-Number": agentExtension,
+		"Caller-Caller-ID-Number":   otherExtension,
+		"Caller-Context":            "aicc",
+	}))
+	c.Handle(ctx, raw("CHANNEL_CREATE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+		"Caller-Context":               "aicc",
+	}))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+	}))
+
+	// Parties publish from their call's own goroutine, so wait rather than read.
+	deadline := time.After(2 * time.Second)
+	for {
+		pub.mu.Lock()
+		var scope *events.Scope
+		for i, ev := range pub.events {
+			if ev.Type == events.TypePartyEstablished && ev.AgentID != nil && *ev.AgentID == testAgentID {
+				sc := pub.scopes[i]
+				scope = &sc
+			}
+		}
+		pub.mu.Unlock()
+		if scope != nil {
+			if len(scope.AgentIDs) != 1 || scope.AgentIDs[0] != testAgentID {
+				t.Errorf("the established event for the agent's own leg is addressed to %v, want only %s — a colleague's leg is not their business",
+					scope.AgentIDs, testAgentID)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("no PARTY_ESTABLISHED naming that agent was published")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, twoAgents{}, nullPublisher{})
