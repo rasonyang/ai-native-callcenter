@@ -61,9 +61,9 @@ func TestCommandStrings(t *testing.T) {
 		want string
 	}{
 		{
-			name: "queue names carry the switch domain",
+			name: "queue names are the queue name, with no domain",
 			act:  func(a *Adapter) error { return a.AddCallcenterTier("support-en", "agent-1001", 1, 1) },
-			want: "callcenter_config tier add support-en@aicc.test agent-1001 1 1",
+			want: "callcenter_config tier add support-en agent-1001 1 1",
 		},
 		{
 			name: "agents are added as callback so the switch originates to them",
@@ -135,7 +135,7 @@ func TestCommandStrings(t *testing.T) {
 		{
 			name: "queue reload names the queue the switch knows",
 			act:  func(a *Adapter) error { return a.ReloadQueue("support-en") },
-			want: "callcenter_config queue reload support-en@aicc.test",
+			want: "callcenter_config queue reload support-en",
 		},
 	}
 

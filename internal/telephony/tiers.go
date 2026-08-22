@@ -49,20 +49,23 @@ func (a *Adapter) CallcenterTiers() (map[string][]string, error) {
 	return out, nil
 }
 
-// bareQueueName is QueueName's inverse.
+// bareQueueName reads a queue name the switch reports back.
 //
-// The domain suffix is ours, not mod_callcenter's: aicc_xml.lua names every
-// queue "<name>@<domain>" when it renders the configuration (aicc_xml.lua:156),
-// aicc_queue.lua dials the same form (aicc_queue.lua:66), and QueueName applies
-// it to every tier command. The switch appends nothing — it stores and reports
-// literally what it was told. So the adapter owns the qualification in both
-// directions and no caller above it needs to know queue names carry a domain.
+// Names written now carry no domain, so for those this returns them unchanged.
+// It still cuts at the first "@" because rows written before 2026-08-22 are
+// qualified by whatever the host's address was then, and those are the rows
+// that most need recognising: an unrecognised tier is one converge can neither
+// match nor remove, which is how a tier under this machine's previous address
+// outlived it (C1). Reading them as the queue they always were lets converge
+// reconcile them away rather than stare past them.
 //
-// TrimSuffix rather than cutting at the first "@": a queue qualified by some
-// other domain is not ours, and collapsing it to a bare name would let it
-// masquerade as one.
+// The switch appends nothing of its own — it stores and reports literally what
+// it was told — so anything qualified here was qualified by us.
 func (a *Adapter) bareQueueName(qualified string) string {
-	return strings.TrimSuffix(qualified, "@"+a.domain)
+	if at := strings.Index(qualified, "@"); at >= 0 {
+		return qualified[:at]
+	}
+	return qualified
 }
 
 // parseTiers reads mod_callcenter's pipe-separated listing. The header line and

@@ -162,7 +162,9 @@ local function handle_callcenter()
                      is_abandoned_resume_allowed
               FROM luacc.queues]], function(row)
     count = count + 1
-    local queue_name = row.name .. "@" .. domain
+    -- No domain suffix: the switch stores what it is told, and a name that
+    -- embeds this host's address goes stale the moment the address does (C1).
+    local queue_name = row.name
     table.insert(parts, string.format('        <queue name="%s">', escape(queue_name)))
     table.insert(parts, string.format('          <param name="strategy" value="%s"/>',
       STRATEGY[row.strategy] or "longest-idle-agent"))

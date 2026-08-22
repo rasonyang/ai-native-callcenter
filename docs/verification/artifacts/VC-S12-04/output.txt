@@ -1,0 +1,33 @@
+########## VC-S12-04 —— 09:30:00Z ##########
+--- 前置:无进行中呼叫 ---
+
+--- 前置:两坐席 READY ---
+{"username":"ben","state":"NOT_READY","availability":"WRAP_UP","extensionNumber":"1002","isRegistered":true}
+{"username":"wei","state":"READY","availability":"READY","extensionNumber":"1008","isRegistered":true}
+--- 1. 重建前 agent list ---
+agent|On Break
+uiagent|Available
+agent-ben|On Break
+agent-wei|Available
+--- 2. 重建前 tiers(留底,失败可手工恢复)---
+support-en@192.168.31.176|agent-wei
+support-en@192.168.31.55|agent-wei
+support-zh@192.168.31.55|agent-wei
+support-zh@192.168.31.55|agent-ben
+--- 附:tier list(交换机视角)---
+agent-ben|support-zh@192.168.31.55
+agent-wei|support-en@192.168.31.55
+agent-wei|support-zh@192.168.31.55
+ben wrap-up=200
+ben ready=200
+--- 前置复查 ---
+{"username":"ben","state":"READY","availability":"READY"}
+{"username":"wei","state":"READY","availability":"READY"}
+agent-wei|Available
+agent-ben|Available
+ben ready=200
+--- 前置复查 ---
+{"username":"ben","state":"READY","availability":"READY"}
+{"username":"wei","state":"READY","availability":"READY"}
+agent-wei|Available
+agent-ben|Available

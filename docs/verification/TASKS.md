@@ -326,8 +326,19 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **用户目录的默认 context 也是 `aicc`**(`aicc_xml.lua`)。见设计 01 §7 **D6a**。
 
 **C 系列(既有立案):**
-- **C1** VC-S3-02 根因修复:DeleteCallcenterTier 不对含域名字二次限定 + converge removed 以复查为准;
+- **C1** VC-S3-02 根因修复。~~DeleteCallcenterTier 不对含域名字二次限定~~ + converge removed 以复查为准;
   修后重跑 S3-02。
+  **【修法变更 2026-08-22,owner 直裁:"queue name 应该不需要 @domain,从源头就应该去掉"】**
+  原修法是让删除**处理**含域的名字;新修法是**让这类名字不存在** —— 队列名不再带 `@domain`。
+  那个后缀本就是我们加的(`tiers.go` 原注释:*"The domain suffix is ours, not mod_callcenter's…
+  The switch appends nothing"*),单租户下不携带任何信息,却嵌进了**会变的主机地址**:
+  本机由 `.176` 变 `.55`,旧名字下的每一条 tier 就成了 converge 既匹配不到、也删不掉的东西。
+  已从源头四处去掉:`adapter.go` `QueueName`、`tiers.go` `bareQueueName`、
+  `aicc_xml.lua`(渲染 callcenter.conf)、`aicc_queue.lua`(送主叫进队列)。
+  `bareQueueName` 改为在**第一个 `@` 处截断**,好让 2026-08-22 之前写下的旧行**仍能被认出**
+  并由 converge 清掉 —— 认不出的 tier 就是删不掉的 tier,这正是那一行活过一次改址的原因。
+  测试:`TestAQueueNameCarriesNoDomain`、`TestATierUnderAnOldAddressIsStillThatQueue`。
+  **待办**:`aicc_fs` 库里现存的旧名字行需清掉并让应用重建(与 VC-S12-04 同一动作,见该例)。
   **【状态变更 2026-08-21,阶段 5 开跑前复查】症状已潜伏,缺陷未动。**
   陈旧行 `support-en@192.168.31.176|agent-wei` **仍在 `/usr/local/freeswitch/db/callcenter.db`**,
   但因同名队列早已不存在(本机 IP 固定为 …55),mod_callcenter 只列已加载队列的 tier,

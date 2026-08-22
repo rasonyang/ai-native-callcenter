@@ -37,9 +37,16 @@ func NewAdapter(cmd Commander, domain string) *Adapter {
 // IsUp reports whether the switch link is usable.
 func (a *Adapter) IsUp() bool { return a.cmd.IsUp() }
 
-// QueueName renders a queue's switch-side name. The Lua configuration handler
-// uses the same form, so the two never disagree.
-func (a *Adapter) QueueName(name string) string { return name + "@" + a.domain }
+// QueueName renders a queue's switch-side name: the name itself.
+//
+// It used to append "@" and the domain. The switch appends nothing of its own —
+// it stores and reports literally what it is told — so that suffix was ours,
+// and in a single-tenant product it carried no information. What it did carry
+// was the host's IP address, which moves: when this machine went from .176 to
+// .55 every tier written under the old name became unreachable by the new one,
+// and converge could neither see them nor delete them (C1). A name that cannot
+// go stale is a better fix than a delete that copes with stale names.
+func (a *Adapter) QueueName(name string) string { return name }
 
 // Endpoint renders a registered extension's dial string.
 func (a *Adapter) Endpoint(extensionNumber string) string {

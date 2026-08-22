@@ -63,7 +63,7 @@ end
 
 local domain = freeswitch.getGlobalVariable("domain") or "default"
 session:setVariable("aicc_queue", queue.name)
-session:execute("callcenter", queue.name .. "@" .. domain)
+session:execute("callcenter", queue.name)
 
 -- Past this point the caller left the queue without being bridged to an agent:
 -- they waited too long, no agent was staffed, or the queue rejected them. A
