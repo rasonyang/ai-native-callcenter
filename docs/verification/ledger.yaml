@@ -1053,12 +1053,14 @@ cases:
   - id: VC-S13-04
     scenario: S13
     layer: api
-    precondition: "当天已有若干已收官呼叫(阶段 3–5 的执行已自然满足);只读,不产生新呼叫"
+    precondition: "库中至少有一天存在已收官呼叫;只读,不产生新呼叫。
+      窗口由 collect 第 1 条自动落到**最近一个有 CDR 的 UTC 日窗** —— 原写法写死'今天',
+      在非执行日跑会得到空窗、五项 0=0 的假通过(2026-08-22 实测,见 verdict §1 与 §6)"
     steps:
       - who: agent
         do: "取报表与明细两侧,按同一时间窗逐项对账:执行全部 collect"
     collect:
-      - "FROM=$(date -u +%Y-%m-%dT00:00:00Z); TO=$(date -u -v+1d +%Y-%m-%dT00:00:00Z 2>/dev/null || date -u -d tomorrow +%Y-%m-%dT00:00:00Z); echo \"$FROM $TO\" | tee /tmp/vc-window.txt"
+      - "D=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select (started_at at time zone 'UTC')::date from cdrs order by started_at desc limit 1\"); FROM=\"${D}T00:00:00Z\"; TO=$(date -u -j -f %Y-%m-%d -v+1d \"$D\" +%Y-%m-%dT00:00:00Z 2>/dev/null || date -u -d \"$D +1 day\" +%Y-%m-%dT00:00:00Z); echo \"$FROM $TO\" | tee /tmp/vc-window.txt"
       - "read FROM TO < /tmp/vc-window.txt; curl -s -b /tmp/vc-sup.jar \"http://127.0.0.1:8080/api/v1/reports/overview?from=$FROM&to=$TO\" | jq -c ."
       - "read FROM TO < /tmp/vc-window.txt; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*), count(*) filter (where status='ANSWERED'), count(*) filter (where missed_reason in ('SHORT_ABANDONED','ABANDONED_RINGING','ABANDONED_WAITING')), count(*) filter (where is_contained), count(*) filter (where queue_id is not null) from cdrs where started_at >= '$FROM' and started_at < '$TO'\""
       - "read FROM TO < /tmp/vc-window.txt; curl -s -b /tmp/vc-sup.jar \"http://127.0.0.1:8080/api/v1/reports/queues?from=$FROM&to=$TO\" | jq -c '[.items[]|{queueId,totalCalls}]'"
@@ -1066,12 +1068,18 @@ cases:
     expect: |
       overview 的 totalCalls / answeredCalls / abandonedCalls / containedCalls / queueCalls
         五项逐一等于第 3 条的五个数 —— 同一口径,ledger.sql:120-136 的 FILTER 子句即定义
+      **先过闸门**:第 3 条的 total 必须 **> 0**。全 0 说明窗口里没有呼叫,此时五项
+        "逐一相等"毫无信息量,判 **SKIP 而非 PASS**(2026-08-22 的教训)
       **abandonedCalls 的口径要特别核**:它数的是 missed_reason 落在三个 ABANDONED* 值里的行
         (ledger.sql:124-125)。ABANDONED_RINGING 目前**不可达**(条件互斥,归 W2),
         故实测该项应只由 SHORT_ABANDONED 与 ABANDONED_WAITING 贡献
       queues 报表:每个 queueId 的 totalCalls 等于第 5 条同 queueId 的计数
-      answeredWithinSla 的分母是 queueCalls 而非 totalCalls(ledger.sql:127-129)——
-        若前端把它除以 totalCalls,SLA 会被系统性低估;本用例只断言后端数字,呈现层归 G-B2
+      answeredWithinSla **只在 overview 上有分母陷阱**(ledger.sql:127-129):分母应是 queueCalls
+        而非 totalCalls,后者含非排队呼叫 —— 2026-08-20 实测 42% vs 7%,六倍低估。
+        **`/reports/queues` 的行不适用此警告**:ReportByQueue 自带 WHERE queue_id IS NOT NULL
+        (ledger.sql:147),行内 totalCalls 就是该队列的排队呼叫数,除它是对的。
+        (本句 2026-08-22 修订:原文未分两个端点,把 queues 也一并警告了,错)
+      本用例只断言后端数字;呈现层归 G-B2,另见 **C27**(两块屏用两个不同分母渲染同一字段)
     failure_looks_like: |
       报表数字自洽、页面也正常,但和明细差几行 —— 差在时间窗的边界(报表用 started_at,
       若某处误用 ended_at,跨零点的通话会两天各算一次或一次都不算),
