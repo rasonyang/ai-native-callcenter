@@ -1311,8 +1311,16 @@ cases:
       - "QID=<同上>; BEN=<同上>; curl -s -o /dev/null -w 'unstaff http=%{http_code}\\n' -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/queues/$QID/agents/$BEN"
       - "sleep 2; /usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1&&NF>=5{print $2\"|\"$1}' | grep -c 'agent-ben|support-en' || true"
     expect: |
-      配员:2xx;2 秒内 switch 侧出现 `agent-ben|support-en@<domain>`
-        —— 日志应显示 `agent staffing reconciled` 且 **added=1**(而不是 already matched)
+      配员:2xx(实测 **204**);2 秒内 switch 侧出现 `agent-ben|support-en@<domain>`
+      **配员必须被证明真的参与路由**,不能只看它出现在 tier list 里 ——
+        人工步骤拨 95001(→support-en)后,`agent list` 里 ben 应依次走
+        `Available/Waiting` → `Available/Receiving` → `Available/In a queue call`,
+        且该通 CDR 的 primary=ben、queue=support-en(2026-08-21 起草时漏了这一层断言)
+      **不要去日志里找 `agent staffing reconciled` / `added=1`** —— 2026-08-22 修订:
+        那两行来自 **ESL 重连时的对账**,不是本路径。`StaffQueue` 直接调
+        `AddCallcenterTier`(catalog/service.go:450-454),**成功时不打任何日志**,
+        只有失败才 `Warn "tier not applied on the switch"`。
+        正确的日志侧断言是:**该 Warn 计数为 0**;配员是否落地一律以 `tier list` 复查为准
       撤销:2xx;2 秒内该 tier 消失,计数=0
       **撤销的计数必须以复查为准**:C1 已证实 `removed=` 会谎报(mod_callcenter 对 miss 的
         tier del 返回 +OK,converge 记 removed=1 而 tier 仍在,见 VC-S3-02/verdict.md)。
@@ -1323,7 +1331,7 @@ cases:
       撤销侧的镜像失败更隐蔽:tier 删不掉(C1 的形态),被撤下的坐席继续被派单,
       而两侧的日志都显示成功。
     evidence_dir: docs/verification/artifacts/VC-S14-02/
-    status: TODO
+    status: PASS  # 2026-08-22 执行:配员 204 → 2 秒内 tier 出现 → 拨 95001 真的派给 ben(agent list 逐拍 Waiting→Receiving→In a queue call,wei 全程 On Break 隔离成立)→ CDR primary=ben/queue=support-en/talk=43/wait=4,单行无幽灵 → 撤销 204 → tier 复读消失、应用侧回到基线三人。ben 分机现读为 1002(非草案写死的 1007)。用例修订三处:agentIds→agentId 单数、PUT 不是全量替换(wei 不在风险里)、日志断言找错子系统(StaffQueue 直调 AddCallcenterTier,成功不打日志)
     refs: ["internal/httpapi/catalog_handlers.go:108", "internal/httpapi/catalog_handlers.go:126", "internal/catalog/service.go:286", "internal/telephony/adapter.go:145"]
     note: "【2026-08-22 已核契约,草案两处都错,已改】
       ①请求体不是 `agentIds` 数组,是 **`StaffQueueRequest`:必填 `agentId`(单数)**,
