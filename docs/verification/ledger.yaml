@@ -1251,7 +1251,7 @@ cases:
       另一种:删了行但 Lua 目录还查得到(视图未过滤或有缓存),分机被删了却还能注册,
       等于一个没有归属、鉴权仍然有效的分机长期存在。
     evidence_dir: docs/verification/artifacts/VC-S14-01/
-    status: TODO
+    status: FAIL  # 2026-08-22 执行:建 201、话机注册成功(Telephone 1.6/UDP)、坐席建分机 403、删后目录清空且续注册被拒(03:58:37 注册 3→0)——这些都对。两个缺陷:①C30 删除守卫不存在,删一个【被坐席绑定且话机在注册】的分机返回 204 并静默解绑(外键是 ON DELETE SET NULL 不是 RESTRICT;契约 DELETE 连 409 都没声明);②C29 建分机不显式写 isEnabled 就建出停用的(可选布尔取 Go 零值,列默认 true 永不生效),luacc.directory 带 WHERE is_enabled 故该分机永远注册不上而 API 只回 201。note① 已解:字段名草案猜对,kind 省略取 AGENT。执行偏离:守卫测试改用未绑定的 amy 临时绑 1099,不动 wei 的 1008
     refs: ["internal/httpapi/catalog_handlers.go:48", "internal/httpapi/catalog_handlers.go:67", "freeswitch/scripts/aicc_xml.lua:103", "internal/store/migrations/00002_telephony.sql:171"]
     note: "【执行前须落实两处】①创建请求体的字段名(number/password/displayName 为草案假设,
       以契约 Extension schema 为准);②删除已绑定分机的**期望行为本身尚未静态确认**——

@@ -1,0 +1,188 @@
+########## VC-S14-01 —— 03:37:02Z ##########
+--- 0. 基线 ---
+20
+0
+--- 1. 建 1099(请求体按草案原样,不带 kind)---
+{"id":"01a0278b-1b49-7d1b-ad03-1e80652dbfba","number":"1099","kind":"AGENT","displayName":"VC Probe","isEnabled":false,"createdAt":"2026-08-22T11:37:04.344718+08:00"}
+
+http=201
+--- 1b. 库里这行长什么样(kind 取到什么)---
+01a0278b-1b49-7d1b-ad03-1e80652dbfba|1099|AGENT|VC Probe|f|vc-probe-pass
+--- 2. luacc.directory 是否立刻可查(视图,应无需 reload)---
+--- 附:坐席会话建分机应 403(C23① 同族)---
+wei 建分机 http=403
+--- luacc.directory 视图定义(是否按 is_enabled 过滤)---
+ SELECT e.number,
+    e.password,
+    e.display_name,
+    e.is_enabled,
+    COALESCE(a.is_auto_answer, false) AS is_auto_answer
+   FROM extensions e
+     LEFT JOIN agents a ON a.default_extension_id = e.id
+  WHERE e.is_enabled;
+--- 其他 20 个分机的 is_enabled ---
+f|1
+t|20
+--- 建分机的代码:isEnabled 怎么来的 ---
+46-}
+47-
+48:func (s *Server) CreateExtension(w http.ResponseWriter, r *http.Request) {
+49-	var in catalog.Extension
+50-	if !decode(w, r, &in) {
+51-		return
+52-	}
+53-	out, err := s.catalog.CreateExtension(r.Context(), in)
+54-	s.writeCatalog(w, r, out, err, http.StatusCreated)
+55-}
+56-
+57-func (s *Server) UpdateExtension(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+58-	var in catalog.Extension
+59-	if !decode(w, r, &in) {
+60-		return
+--- luacc.directory 视图定义(是否按 is_enabled 过滤)---
+ SELECT e.number,
+    e.password,
+    e.display_name,
+    e.is_enabled,
+    COALESCE(a.is_auto_answer, false) AS is_auto_answer
+   FROM extensions e
+     LEFT JOIN agents a ON a.default_extension_id = e.id
+  WHERE e.is_enabled;
+--- 其他 20 个分机的 is_enabled ---
+f|1
+t|20
+--- 建分机的代码:isEnabled 怎么来的 ---
+46-}
+47-
+48:func (s *Server) CreateExtension(w http.ResponseWriter, r *http.Request) {
+49-	var in catalog.Extension
+50-	if !decode(w, r, &in) {
+51-		return
+52-	}
+53-	out, err := s.catalog.CreateExtension(r.Context(), in)
+54-	s.writeCatalog(w, r, out, err, http.StatusCreated)
+55-}
+56-
+57-func (s *Server) UpdateExtension(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+58-	var in catalog.Extension
+59-	if !decode(w, r, &in) {
+60-		return
+--- 求证:显式带 isEnabled:true 建一个,看是不是就正常 ---
+{"number":null,"isEnabled":null}
+0
+  → 带了就 true 且进目录;不带就 false 且不进目录。可选布尔取了 Go 零值,与列默认值 true 相反
+--- 清掉 1098 ---
+  delete 1098 http=200
+--- 把 1099 启用(PUT 全量),再看目录 ---
+{"number":"1099","isEnabled":true}
+1099|VC Probe|t
+EXT1099=01a0278b-1b49-7d1b-ad03-1e80652dbfba
+--- 求证:显式带 isEnabled:true 建一个,看是不是就正常 ---
+{"number":null,"isEnabled":null}
+0
+  → 带了就 true 且进目录;不带就 false 且不进目录。可选布尔取了 Go 零值,与列默认值 true 相反
+--- 清掉 1098 ---
+  delete 1098 http=200
+--- 把 1099 启用(PUT 全量),再看目录 ---
+{"number":"1099","isEnabled":true}
+1099|VC Probe|t
+EXT1099=01a0278b-1b49-7d1b-ad03-1e80652dbfba
+--- 先确认刚才那次空 id 的 DELETE 没有伤到任何东西 ---
+21
+  (基线是 20,建了 1099 应为 21)
+1000 1001 1002 1003 1004 1005 1006 1007 1008 1009 1010 1011 1012 1013 1014 1015 1016 1017 1018 1019 1099 
+--- 重做 1098 求证,这次看完整响应 ---
+{"id":"01a0278d-7007-7a58-89f4-cd2e54d32ec0","number":"1098","kind":"AGENT","displayName":"probe2","isEnabled":true,"createdAt":"2026-08-22T11:39:36.953763+08:00"}
+
+http=201
+--- 先确认刚才那次空 id 的 DELETE 没有伤到任何东西 ---
+21
+  (基线是 20,建了 1099 应为 21)
+1000 1001 1002 1003 1004 1005 1006 1007 1008 1009 1010 1011 1012 1013 1014 1015 1016 1017 1018 1019 1099 
+--- 重做 1098 求证,这次看完整响应 ---
+{"id":"01a0278d-7007-7a58-89f4-cd2e54d32ec0","number":"1098","kind":"AGENT","displayName":"probe2","isEnabled":true,"createdAt":"2026-08-22T11:39:36.953763+08:00"}
+
+http=201
+1098 在目录里吗: 1
+→ 对照成立:不带 isEnabled → false 且不入目录;带 isEnabled:true → true 且入目录
+(题外:首次用 password="x" 建 1098 被拒,换成正常口令即 201 —— 口令有长度校验)
+清掉 1098 http=204
+21
+--- 当前 1099 状态:已启用、已进目录,等你注册 ---
+1099|VC Probe|t|vc-probe-pass
+1098 在目录里吗: 1
+→ 对照成立:不带 isEnabled → false 且不入目录;带 isEnabled:true → true 且入目录
+(题外:首次用 password="x" 建 1098 被拒,换成正常口令即 201 —— 口令有长度校验)
+清掉 1098 http=204
+21
+--- 当前 1099 状态:已启用、已进目录,等你注册 ---
+1099|VC Probe|t|vc-probe-pass
+########## 1099 注册后 —— 03:53:15Z ##########
+--- 3/4. 注册 ---
+User:       	1008@192.168.31.55
+Agent:      	SIP.js/0.21.2
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 12:02:11) EXPSECS(536)
+Ping-Status:	Reachable
+Auth-User:  	1008
+Auth-Realm: 	ws.aicc.test
+User:       	1099@192.168.31.55
+Agent:      	Telephone 1.6
+Status:     	Registered(UDP)(unknown) EXP(2026-08-22 11:58:32) EXPSECS(317)
+Ping-Status:	Reachable
+Auth-User:  	1099
+Auth-Realm: 	192.168.31.55
+--- 计数 ---
+含 1099 的注册条数 = 3
+########## 5. 删除守卫:删一个【已被坐席绑定】的分机 —— 03:54:13Z ##########
+偏离说明:用例原写'删 1008'。1008 是 wei 的在用话机,且 S14-02/S14-04/S12-04 都还要用他。
+外键是 fk_agents_extensions ... ON DELETE SET NULL,删了会静默解绑,故改用未绑定的 amy 临时绑到 1099。
+断言等价:守卫要挡的是'存在绑定',与绑的是谁无关。
+--- 5a. 把 amy 绑到 1099 ---
+
+http=200
+amy|1099
+--- 5b. 现在删这个【被绑定且有话机在注册】的分机 ---
+
+http=204
+--- 5c. 后果 ---
+0
+amy|(unbound)
+0
+--- 6/7. 删后:分机数、目录、以及那部话机的注册还在不在 ---
+20
+  (基线 20 —— 已回到基线,1099 已清)
+amy 原本就是未绑定,现状即原状,无需恢复
+User:       	1008@192.168.31.55
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 12:02:11) EXPSECS(417)
+User:       	1099@192.168.31.55
+Status:     	Registered(UDP)(unknown) EXP(2026-08-22 11:58:32) EXPSECS(198)
+→ FreeSWITCH 侧的注册是缓存的,要等到期或下次续注册才会掉
+--- 6/7. 删后:分机数、目录、以及那部话机的注册还在不在 ---
+20
+  (基线 20 —— 已回到基线,1099 已清)
+amy 原本就是未绑定,现状即原状,无需恢复
+User:       	1008@192.168.31.55
+Status:     	Registered(WSS-NAT)(unknown) EXP(2026-08-22 12:02:11) EXPSECS(417)
+User:       	1099@192.168.31.55
+Status:     	Registered(UDP)(unknown) EXP(2026-08-22 11:58:32) EXPSECS(198)
+→ FreeSWITCH 侧的注册是缓存的,要等到期或下次续注册才会掉
+--- 等 1099 自己续注册,看会不会被拒(目录里已经没有它了)---
+[03:56:02Z] 1099 注册条数=3 EXPSECS(150)
+[03:56:15Z] 1099 注册条数=3 EXPSECS(137)
+[03:56:28Z] 1099 注册条数=3 EXPSECS(124)
+[03:56:41Z] 1099 注册条数=3 EXPSECS(111)
+[03:56:54Z] 1099 注册条数=3 EXPSECS(98)
+[03:57:07Z] 1099 注册条数=3 EXPSECS(85)
+[03:57:20Z] 1099 注册条数=3 EXPSECS(72)
+[03:57:33Z] 1099 注册条数=3 EXPSECS(59)
+--- 等 1099 自己续注册,看会不会被拒(目录里已经没有它了)---
+[03:56:02Z] 1099 注册条数=3 EXPSECS(150)
+[03:56:15Z] 1099 注册条数=3 EXPSECS(137)
+[03:56:28Z] 1099 注册条数=3 EXPSECS(124)
+[03:56:41Z] 1099 注册条数=3 EXPSECS(111)
+[03:56:54Z] 1099 注册条数=3 EXPSECS(98)
+[03:57:07Z] 1099 注册条数=3 EXPSECS(85)
+[03:57:20Z] 1099 注册条数=3 EXPSECS(72)
+[03:57:33Z] 1099 注册条数=3 EXPSECS(59)
+[03:58:37Z] 1099 注册条数=0 
+>>> 1099 注册已消失于 03:58:37Z —— 分机被删后续注册未获通过
