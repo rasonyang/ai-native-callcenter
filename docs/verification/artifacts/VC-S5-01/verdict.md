@@ -76,3 +76,63 @@ gaps_sec = [60.08, 0.07, 0.08, 0.11, 0.08, 0.11, 0.08, 0.08, 0.11, 0.09, 0.09,
 这就是 `failure_looks_like` 描述的场景在真实参数下的样子:一部没人守的话机可以把队列
 吸干,而 presence、报表、坐席屏三处**确实**毫无痕迹(wei 的 agent_states 前后一模一样)。
 本条留证是 W2(D7② RONA 全链实现)的修复前基线。
+
+---
+
+## 重跑 —— 2026-08-23 16:04(W2/W2.1 落地后;材料改用 95002 / support-zh / 中文)
+
+### 第一次尝试:信号选错了,现场把它揪出来
+
+首版消费 `agent-status-change` → `On Break`。看起来像"消费交换机的决定",实际上
+**`On Break` 只是一个词,而应用镜像 presence 用的正是同一个词**,两者到达时长得一模一样。
+
+```
+15:50:12  Agent agent-wei Origination Canceled : NO_ANSWER    ← 漏接 #1
+15:50:12  Agent agent-wei sleeping for 60 seconds             ← no_answer_delay_time 生效
+          no_answer_count=1，max_no_answer=2 未满 → 交换机根本没摘人
+15:51:30  Updated Agent agent-wei set status = On Break       ← 我们自己镜像下去的
+wei 状态历史:NOT_READY/SYSTEM 落在 07:56:21Z ——【重启那一刻】,不是那通电话
+```
+
+后果比"测不出来"更糟:**每次重启,设备状态尚未观测到的坐席被镜像成 On Break,
+回声立刻返回,于是每人都因"从未派给他的电话"被摘出路由** —— 与 C39 同源。
+两道守卫理论正确、实际无用:那一刻 presence 确实 READY,话机确实可达。
+
+**改用"派单失败 + 原因 NO_ANSWER"**:这个信号我们自己产生不出来 ——
+交换机只在**真的响过某人**之后才报;原因把"被无视的话机"与"根本接不了的话机"分开
+(`USER_BUSY` 即今早 C37 那 42 次、`ORIGINATOR_CANCEL` 是队列自己撤回),都不是坐席的过失。
+**一次漏接即摘人**,交换机的 `max_no_answer=2` 留作兜底。
+
+留下的诊断日志是分出这件事的唯一手段 —— **静默 decline 与"根本没被调用"长得一模一样**。
+
+### 第二次:三边一致,12 毫秒
+
+```
+16:04:08.094  a delivered call rang out unanswered  agent=agent-wei queue=support-zh cause=NO_ANSWER
+16:04:08.096  wei → NOT_READY / SYSTEM          （+2ms）
+16:04:08.106  AGENT_NOT_READY 上流              （+10ms）
+交换机        agent-wei status=On Break  no_answer_count=1
+CDR           95002 | NO_ANSWER | ABANDONED_WAITING | ring_sec=59 | bot_sec=12 | agent_ids=1
+queue_events  JOINED=1  OFFERED=1  ABANDONED=1  无 BRIDGED
+```
+
+首跑时这里是"前后完全一致 state=READY" —— 交换机摘了人、应用不知道、下次镜像又把他推回去。
+现在交换机**通知**、应用**决定**、应用**发布**、应用**镜像回去**,三边一致。
+
+`missed_reason=ABANDONED_WAITING` 也对:主叫是在振铃结束之后才挂的,
+而"他离开那一刻那次振铃是否还活着"正是今天 W2 给 `ABANDONED_RINGING` 补上的判据。
+
+### 未过的一条:振铃时长仍是 59 秒,不是 15 秒
+
+`ring_sec=59`,交换机侧 `16:03:08.7 → 16:04:08.0`。
+`agent-originate-timeout=15` 已写进 `aicc_xml.lua` 的 `<settings>` 并随 XML 下发,
+**但 mod_callcenter 只在模块装载时读 settings** —— `reloadxml` 不会让它重读。
+这是一处"看起来已生效、实际没有"的配置,正是本轮验收要抓的那类。
+
+已执行 `reload mod_callcenter` 并重启应用重建坐席与配员
+(三个坐席 `max_no_answer=2` 回位、三条 tier 回位)。**该条待下一通电话确认。**
+
+### 判定
+
+**暂不判 PASS。** RONA 全链的断言全部成立,但本轮修订时写进 expect 的
+"每次振铃约 15 秒"一条**实测不成立**,原因已定位并已处置,待一通确认电话。
