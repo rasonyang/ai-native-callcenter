@@ -105,6 +105,27 @@ func (a *Adapter) SetCallcenterAgentNoAnswerDelay(name string, sec int) error {
 	return a.exec("callcenter_config agent set no_answer_delay_time %s %d", name, sec)
 }
 
+// SetCallcenterAgentMaxNoAnswer sets how many delivered calls an agent may let
+// ring out before the switch benches them.
+//
+// Zero means never, which is what a queue does when nobody has set this: an
+// unattended phone keeps being offered every caller in turn, each one ringing
+// to timeout before the next attempt, and the queue drains through a handset
+// nobody is holding.
+func (a *Adapter) SetCallcenterAgentMaxNoAnswer(name string, count int) error {
+	return a.exec("callcenter_config agent set max_no_answer %s %d", name, count)
+}
+
+// SetCallcenterAgentBusyDelay sets how long the switch waits before offering
+// again to an agent whose phone answered busy.
+//
+// Zero means immediately, and immediately means a tight loop: measured on
+// 2026-08-23, a phone left with a dangling invitation refused forty-two
+// offers in three minutes while the caller heard hold music throughout (C37).
+func (a *Adapter) SetCallcenterAgentBusyDelay(name string, sec int) error {
+	return a.exec("callcenter_config agent set busy_delay_time %s %d", name, sec)
+}
+
 // SetCallcenterAgentWrapUp sets the switch's own wrap-up timer. We always set
 // it to zero: after-call work is ours, so that the reason an agent is
 // unavailable stays visible in our own vocabulary.

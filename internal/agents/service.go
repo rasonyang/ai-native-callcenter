@@ -37,6 +37,13 @@ type SwitchControl interface {
 	SetCallcenterAgentContact(name, extensionNumber string, autoAnswer bool) error
 	SetCallcenterAgentStatus(name, status string) error
 	SetCallcenterAgentWrapUp(name string, sec int) error
+	// The routing guards. Left at their defaults the switch never benches an
+	// unattended phone and retries a refusing one without pause; see
+	// mirrorRouting for what each is for.
+	SetCallcenterAgentMaxNoAnswer(name string, count int) error
+	SetCallcenterAgentNoAnswerDelay(name string, sec int) error
+	SetCallcenterAgentRejectDelay(name string, sec int) error
+	SetCallcenterAgentBusyDelay(name string, sec int) error
 	IsUp() bool
 }
 
@@ -609,6 +616,58 @@ func (s *Service) persist(ctx context.Context, agentID uuid.UUID, p Presence) er
 	return nil
 }
 
+// Routing guards, applied to every agent the switch is told about.
+//
+// These are the switch's own protections against a phone that is not being
+// answered, and every one of them ships disabled. Left that way, a queue
+// delivers to an unattended handset forever: each caller rings out to the
+// originate timeout, is offered to the same phone again, and the queue drains
+// through somebody who went home. maxNoAnswer is what ends that — the switch
+// counts, and tells us, and we decide what it means for the agent.
+//
+// The delays are the pause before offering again to a phone that said no. At
+// zero there is no pause at all: a phone left with a dangling invitation
+// refused forty-two offers in three minutes on 2026-08-23 while the caller
+// heard hold music throughout, and neither the agent's screen nor the
+// wallboard showed anything happening.
+const (
+	maxNoAnswerBeforeBenched = 2
+	noAnswerDelaySec         = 60
+	rejectDelaySec           = 60
+	busyDelaySec             = 60
+)
+
+// mirrorRouting hands the switch the guards it will not set for itself.
+//
+// One agent may staff several queues, so these are the agent's own settings
+// rather than any queue's — which is also mod_callcenter's own shape, and the
+// reason queues.rona_delay_sec has never had anywhere to go.
+func (s *Service) mirrorRouting(name string) {
+	guards := []struct {
+		what string
+		set  func() error
+	}{
+		{"max_no_answer", func() error {
+			return s.switchCtl.SetCallcenterAgentMaxNoAnswer(name, maxNoAnswerBeforeBenched)
+		}},
+		{"no_answer_delay_time", func() error {
+			return s.switchCtl.SetCallcenterAgentNoAnswerDelay(name, noAnswerDelaySec)
+		}},
+		{"reject_delay_time", func() error {
+			return s.switchCtl.SetCallcenterAgentRejectDelay(name, rejectDelaySec)
+		}},
+		{"busy_delay_time", func() error {
+			return s.switchCtl.SetCallcenterAgentBusyDelay(name, busyDelaySec)
+		}},
+	}
+	for _, guard := range guards {
+		if err := guard.set(); err != nil {
+			slog.Warn("callcenter routing guard not applied",
+				"agent", name, "guard", guard.what, "error", err)
+		}
+	}
+}
+
 // mirrorRegistration makes the switch aware of an agent and their phone.
 func (s *Service) mirrorRegistration(profile Profile, p Presence) {
 	if s.switchCtl == nil || !s.switchCtl.IsUp() {
@@ -622,6 +681,7 @@ func (s *Service) mirrorRegistration(profile Profile, p Presence) {
 	if err := s.switchCtl.SetCallcenterAgentWrapUp(name, 0); err != nil {
 		slog.Warn("callcenter wrap-up reset failed", "agent", name, "error", err)
 	}
+	s.mirrorRouting(name)
 	if p.ExtensionNumber != "" {
 		if err := s.switchCtl.SetCallcenterAgentContact(name, p.ExtensionNumber, profile.IsAutoAnswer); err != nil {
 			slog.Warn("callcenter contact update failed", "agent", name, "error", err)

@@ -139,6 +139,22 @@ func (f *fakeSwitch) AddCallcenterAgent(name string) error {
 	return f.record("agent add %s", name)
 }
 
+func (f *fakeSwitch) SetCallcenterAgentMaxNoAnswer(name string, count int) error {
+	return f.record("max_no_answer %s %d", name, count)
+}
+
+func (f *fakeSwitch) SetCallcenterAgentNoAnswerDelay(name string, sec int) error {
+	return f.record("no_answer_delay_time %s %d", name, sec)
+}
+
+func (f *fakeSwitch) SetCallcenterAgentRejectDelay(name string, sec int) error {
+	return f.record("reject_delay_time %s %d", name, sec)
+}
+
+func (f *fakeSwitch) SetCallcenterAgentBusyDelay(name string, sec int) error {
+	return f.record("busy_delay_time %s %d", name, sec)
+}
+
 func (f *fakeSwitch) SetCallcenterAgentContact(name, ext string, auto bool) error {
 	return f.record("contact %s %s auto=%v", name, ext, auto)
 }
@@ -527,5 +543,34 @@ func TestLoginAdoptsAlreadyKnownDeviceState(t *testing.T) {
 
 	if got := svc.Presence(agentID).Availability(); got != AvailReady {
 		t.Errorf("availability = %s, want READY: the phone was known to be registered", got)
+	}
+}
+
+// Every one of the switch's own protections against an unanswered phone ships
+// disabled, and the queue's behaviour when they are is the failure this
+// campaign kept meeting: calls delivered to a handset nobody is holding, each
+// ringing to timeout before the next attempt, and a refusing phone retried
+// with no pause at all.
+func TestAnAgentTheSwitchLearnsAboutComesWithItsRoutingGuards(t *testing.T) {
+	svc, _, sw, _, agentID := newTestService(t)
+
+	if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+		t.Fatalf("login: %v", err)
+	}
+
+	for _, want := range []string{
+		"max_no_answer agent-1001 2",
+		"no_answer_delay_time agent-1001 60",
+		"reject_delay_time agent-1001 60",
+		"busy_delay_time agent-1001 60",
+	} {
+		if !sw.seen(want) {
+			t.Errorf("the switch was never told %q; without it the queue keeps "+
+				"offering to a phone that is not being answered", want)
+		}
+	}
+	// After-call work stays ours, so the switch's own timer stays off.
+	if !sw.seen("wrapup agent-1001 0") {
+		t.Error("the switch's wrap-up timer was not reset")
 	}
 }

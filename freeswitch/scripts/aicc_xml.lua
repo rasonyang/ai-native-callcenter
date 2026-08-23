@@ -153,6 +153,13 @@ local function handle_callcenter()
   if cc_dsn ~= "" then
     table.insert(parts, string.format('        <param name="odbc-dsn" value="%s"/>', escape(cc_dsn)))
   end
+  -- How long a delivered call rings an agent before the queue gives up on
+  -- them. Unset it is sixty seconds, and sixty seconds is what one missed
+  -- call costs the caller: they hear hold music for a full minute while a
+  -- phone nobody is holding rings out, and only then does the queue try
+  -- somebody else. Fifteen is long enough to reach a headset and short
+  -- enough that a miss is not a minute.
+  table.insert(parts, '        <param name="agent-originate-timeout" value="15"/>')
   table.insert(parts, "      </settings>\n      <queues>")
 
   local count = 0
