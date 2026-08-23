@@ -1436,6 +1436,15 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   而坐席自己的 party 从未换过通话,**没有什么要通知他**。
   回归 `TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove` 断言的正是"零条 id 变更"
   与"最终落在 minted 那通上";摘除验证(把 agent-only 放回前面)两条断言同时失败。
+  **现场复验(2026-08-23 18:46,同一条点击拨号)** —— C44/C45/C46 三条一起看:
+  ```
+  PARTY_DIALING → AGENT_AVAILABILITY(ON_CALL) → PARTY_ESTABLISHED → PARTY_RELEASED → CALL_CDR
+  ```
+  与修前那十条相比:自拨腿的 `PARTY_RINGING` 没了、`PARTY_CHANGED` **一条都没有**、
+  callId 全程是 minted 的那一个(修前是 `2c3b → 3102 → 2c3b`)、
+  **每一条 call 事件的信封都带 `orderId`**(修前 8/10)。
+  `AGENT_AVAILABILITY(ON_CALL)` 仍在 —— 去掉振铃事件没有把它一起带走。
+  CDR:`OUTBOUND | from=1008 | to=18688886669 | user_data={"orderId":"9999000000000000"}`。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
