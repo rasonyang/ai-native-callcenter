@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -456,3 +457,73 @@ func ptr(id uuid.UUID) *uuid.UUID { return &id }
 type seqStub struct{}
 
 func (seqStub) ReserveSeqBlock(context.Context, string, int64) (int64, error) { return 1, nil }
+
+// Whether a conversation is being recorded is a fact about the call, so it
+// reaches everyone on the call rather than one leg's agent. The signal was
+// normalized long before anything published it: RECORD_START and RECORD_STOP
+// arrived, were understood, and went nowhere (W7 group one).
+func TestTheCallSaysWhenItIsBeingRecorded(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	t.Cleanup(registry.Shutdown)
+
+	callID := uuid.New()
+	if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInbound, "zh", true); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := registry.BindChannel("caller-chan", callID); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	// Recording starts on a channel that is a leg of the call, as it does live.
+	if err := registry.Do(callID, func(call *Call) {
+		call.AddParty("caller-chan", "18600000000", time.Now())
+	}); err != nil {
+		t.Fatalf("add party: %v", err)
+	}
+
+	registry.Dispatch(SwitchEvent{
+		Kind: KindRecordStart, ChannelID: "caller-chan", OccurredAt: time.Now(),
+		RecordingPath: "/usr/local/freeswitch/recordings/2026/08/23/x.wav",
+	})
+	registry.Dispatch(SwitchEvent{
+		Kind: KindRecordStop, ChannelID: "caller-chan", OccurredAt: time.Now(),
+		RecordingPath: "/usr/local/freeswitch/recordings/2026/08/23/x.wav",
+	})
+	waitFor(t, func() bool {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		return len(pub.events) >= 2
+	})
+
+	pub.mu.Lock()
+	seen := append([]events.Event(nil), pub.events...)
+	pub.mu.Unlock()
+
+	var started, stopped *events.Event
+	for _, ev := range seen {
+		switch ev.Type {
+		case events.TypeCallRecordingStarted:
+			e := ev
+			started = &e
+		case events.TypeCallRecordingStopped:
+			e := ev
+			stopped = &e
+		}
+	}
+	if started == nil || stopped == nil {
+		t.Fatalf("recording was never announced: %+v", seen)
+	}
+	if started.PartyID != nil || started.AgentID != nil {
+		t.Error("the recording was announced as a leg's event; it is the call that " +
+			"is being recorded, and everyone on it should hear so")
+	}
+	// The switch names a path on its own disk. Nobody holding a browser can
+	// use it, and the recording itself is fetched by call id.
+	for _, ev := range []*events.Event{started, stopped} {
+		for k, v := range ev.Payload {
+			if s, ok := v.(string); ok && strings.Contains(s, "/freeswitch/") {
+				t.Errorf("the switch's own file path went out on the wire as %s=%v", k, v)
+			}
+		}
+	}
+}

@@ -411,6 +411,21 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 			"digit":      ev.Digit,
 			"durationMs": ev.DurationMs,
 		})
+
+	// Whether this conversation is being recorded is a fact about the call and
+	// not about a leg of it, so it goes to everyone on the call — which is
+	// what publishing with no party does.
+	//
+	// The switch names the file it is writing and that name is not sent on.
+	// It is a path on the switch's own disk, meaningful to nobody holding a
+	// browser, and the recording is fetched through the recordings API by call
+	// id when there is one to fetch. What a screen needs from this event is
+	// that it happened, and when — both of which the envelope already carries.
+	case KindRecordStart:
+		a.publish(events.TypeCallRecordingStarted, nil, nil)
+
+	case KindRecordStop:
+		a.publish(events.TypeCallRecordingStopped, nil, nil)
 	}
 }
 

@@ -17,8 +17,8 @@
 | PARTY_CHANGED | internal/telephony/coordinator.go:555-562(merge,reason=CALL_MERGED);coordinator.go:694-700(mute,payload isMuted) | use-event-stream.ts:25 | S3, S4, S7 | [FACT] | merge 场景 2026-08-18 现场缺陷的修复(coordinator.go:536-544 注释) |
 | PARTY_DTMF | internal/telephony/registry.go:388(ESL DTMF) | 仅通用分发(events.ts:56) | S7(VC-S7-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:已挂 VC-S7-04(双向按键) |
 | CALL_USER_DATA | NOT FOUND | use-event-stream.ts:25(有专门分支) | UNCOVERED | [FACT] | 常量 event.go:38;无 publish 点。userData 实际作为字段搭其它事件下发(registry.go:425),独立事件从未发出 |
-| CALL_RECORDING_STARTED | NOT FOUND | 仅通用分发(events.ts:57) | UNCOVERED | [FACT] | RECORD_START 已归一化(switchevent.go:259-261)但无消费者、无发布 |
-| CALL_RECORDING_STOPPED | NOT FOUND | 仅通用分发(events.ts:57) | UNCOVERED | [FACT] | 同上(switchevent.go:262-264) |
+| CALL_RECORDING_STARTED | internal/telephony/registry.go(actor,2026-08-23 W7①) | 仅通用分发(events.ts:57) | COVERED(生产者) | [FACT] | RECORD_START 早已归一化,只是从来没人消费。现由 call actor 以**通话作用域**发布(`publish(t, nil, nil)`)——录不录音是通话的事,不是某条腿的事。**不带交换机的文件路径**:那是交换机自己磁盘上的路径,浏览器拿着没用,录音按 call_id 走 recordings API 取 |
+| CALL_RECORDING_STOPPED | internal/telephony/registry.go(actor,2026-08-23 W7①) | 仅通用分发(events.ts:57) | COVERED(生产者) | [FACT] | 同上 |
 | CALL_CDR | internal/telephony/registry.go:351-354(Finish 时) | web/src/lib/use-event-stream.ts:39-43(CDRS+REPORTS 失效) | S2, S4, S6 | [FACT] | 纯 bot 呼叫的主叫腿同样在 registry 中,挂断也发 CALL_CDR(即 S1/S2 覆盖);CDR 行归属另判(cdr.go:79) |
 | CALL_TRANSCRIPT | internal/transcript/actor.go:213(partial)、actor.go:261(final) | web/src/lib/transcript.ts:162-171(useEventListener);web/src/components/live-transcript.tsx | S1, S9 | [FACT] | partial 只上流不入库(actor.go:212-214) |
 | CALL_TRANSCRIPTION_STATE | internal/transcript/actor.go:190(State());状态源:internal/streamin/streamin.go:391(CONNECTING)、:429(ERROR);internal/streamin/session.go:57(ERROR)、:60(LIVE)、:217(DEGRADED)、:232(STOPPED) | web/src/lib/transcript.ts:173-179;live-transcript.tsx:30-32 | S9 | [FACT] | IDLE 仅作快照默认值(actor.go:117-124),从不发布;ENDED 定义(actor.go:110)从不发布 |
@@ -45,7 +45,7 @@
 ## 缺口汇总
 
 ### 需删除(或降级出契约)
-- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:~~PARTY_DIALING~~(2026-08-23 W7 起有生产者)、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 8 个)。删除属于 breaking change,需走 `make api-breaking`。
+- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:~~PARTY_DIALING~~(2026-08-23 W7 起有生产者)、CALL_USER_DATA、~~CALL_RECORDING_STARTED/STOPPED~~(2026-08-23 W7① 起有生产者)、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 6 个)。删除属于 breaking change,需走 `make api-breaking`。
 
 ### 需实现(契约已承诺、代码未生产)——【2026-08-20 决议 D6:以下全部实现 → TASKS W7(四组推进);"需删除"选项作废】
 - ~~PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。~~ **已实现(2026-08-23,W7)。**

@@ -349,8 +349,14 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   另见 **C28②**:`DEVICE_*` 那一对不是"没实现",是**发错了一个**。
   **2026-08-22 已随 C28 改对** —— `ObserveDevice` 现在按方向发 `DEVICE_UNREGISTERED` / `DEVICE_IN_SERVICE`,
   `DEVICE_UNREGISTERED` 从此有生产者,W7 的清单据此减一。
-  ① CALL_RECORDING_STARTED/STOPPED——RECORD_START/STOP 已归一化(switchevent.go:259-264),
-  补 coordinator→Hub 一跳(scope 沿用 call 域);
+  ① ~~CALL_RECORDING_STARTED/STOPPED~~ **【已做 2026-08-23】** —— 信号早已归一化,
+     只是从来没人消费。改在 **call actor** 里发(不是 coordinator):那里
+     `publish(t, nil, …)` 天然就是**通话作用域**,而"这通电话在不在录音"正是关于通话、
+     不是关于某条腿的。**不带交换机的文件路径** —— 那是交换机自己磁盘上的路径,
+     浏览器拿着没用,录音按 call_id 走 recordings API 取;屏幕要的只是"发生了、什么时候",
+     而这两样信封本来就带着。两条反向摘除验证:去掉两条宣告 → 用例超时;
+     改成带路径的腿事件 → 报"录音被当成某条腿的事"并揪出路径外泄。
+     零生产者 8 → 6。
   ② ~~DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布~~
   **已做(C28,2026-08-22)**;`DEVICE_REGISTERED` 仍无生产者 —— 恢复走的是 `DEVICE_IN_SERVICE`;
   ③ ~~PARTY_DIALING(addParty 时对 originator 腿宣告)~~ **【已做 2026-08-23】** ——
