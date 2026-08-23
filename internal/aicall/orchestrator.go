@@ -334,6 +334,9 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		"provider", profile.Name, "language", language)
 
 	o.drive(ctx, session, runtime, actions, recorder, log)
+	// The call is over. Whatever was waiting for a closing line to be heard
+	// will never hear it, and the caller's channel is gone with the call.
+	actions.disarm()
 	return nil
 }
 

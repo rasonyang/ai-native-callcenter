@@ -170,6 +170,19 @@ func (a *callActions) arm(_ context.Context, action func()) {
 	})
 }
 
+// disarm drops whatever was waiting to be spoken over, because the call it
+// belonged to has ended. The cap that exists to rescue a closing line that
+// never finishes cannot tell that case from a caller who hung up in the middle
+// of one — and there it fired ten seconds after the caller was gone, onto a
+// channel that no longer existed: two warnings and a "transfer failed" that
+// reads exactly like a real one.
+func (a *callActions) disarm() {
+	a.mu.Lock()
+	a.armed = nil
+	a.armedGeneration++
+	a.mu.Unlock()
+}
+
 // onPlaybackDone runs whatever was armed, now that the caller has heard the
 // line that precedes it. turn says whose playback this was: the turn the tool
 // call arrived in does not count, only a turn the tool's result created.

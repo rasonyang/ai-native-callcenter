@@ -619,3 +619,30 @@ func TestTheBotStampsItsDurationWhenTheCallerIsHandedOnNotWhenItDecides(t *testi
 			"when the bot decided", got)
 	}
 }
+
+// An armed action waits for a closing line to be heard, with a cap in case it
+// never finishes. A caller who hangs up in the middle of that line makes the
+// cap the only thing left running — and ten seconds after they are gone it
+// transfers a channel that no longer exists, warning twice and erroring once
+// on the way. The alarm reads exactly like a real failed transfer, which is
+// the worst kind of noise (C51, live 2026-08-23).
+func TestNothingArmedRunsOnceTheCallHasEnded(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, session, model := testActions(t, sw)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	time.Sleep(20 * time.Millisecond)
+
+	if _, err := actions.TransferToAgent(t.Context(), flow.TransferRequest{
+		Queue: "support", Reason: "BILLING", Summary: "wants a refund",
+	}); err != nil {
+		t.Fatalf("transfer refused: %v", err)
+	}
+
+	actions.disarm() // the caller hung up while the bridge line was playing
+
+	actions.onPlaybackDone(session.currentTurn() + 1)
+	if got := sw.recordedTransfers(); len(got) != 0 {
+		t.Errorf("transferred a channel whose call had ended: %v", got)
+	}
+}
