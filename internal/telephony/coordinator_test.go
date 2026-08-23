@@ -1485,3 +1485,95 @@ func TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove(t *testing.T) {
 		t.Errorf("the agent's channel ended on call %s, want %s", id, minted)
 	}
 }
+
+// C24's closure turned this up in the ledger: three internal calls nobody
+// answered, each written down with the caller in both columns. Every agent leg
+// read its far end off the ANI, which is the caller on a leg the switch
+// delivers and the agent themselves on a leg the agent's own phone raised.
+// A bridge overwrites the field the moment two legs meet, so only a call that
+// never connected ever kept the wrong answer — and that is exactly the call
+// whose record has nothing else to say who was dialled.
+func TestALegKnowsWhoItFacesBeforeAnythingHasBridged(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		vars  map[string]string
+		dir   string
+		agent string
+		want  string
+	}{
+		{
+			// An agent picks up their handset and dials a colleague. Their own
+			// leg is inbound and already carries their extension; where it is
+			// headed is the destination.
+			name: "the leg an agent's own phone raises faces where it is headed",
+			dir:  "inbound",
+			vars: map[string]string{
+				"Caller-Caller-ID-Number":   otherExtension,
+				"Caller-Destination-Number": agentExtension,
+				"Caller-Context":            "aicc",
+			},
+			want: agentExtension,
+		},
+		{
+			// mod_callcenter dials the agent to deliver a waiting caller. The
+			// leg is outbound, its destination is the agent, and the customer
+			// it is bringing them is the ANI.
+			name: "a delivery leg faces the caller it is bringing",
+			dir:  "outbound",
+			vars: map[string]string{
+				"variable_dialed_user":            agentExtension,
+				"variable_cc_side":                "agent",
+				"Caller-Caller-ID-Number":         "13800138000",
+				"Caller-Destination-Number":       agentExtension,
+				"variable_cc_member_session_uuid": "no-such-caller",
+			},
+			want: "13800138000",
+		},
+		{
+			// Click-to-dial rings the agent first. Its leg is outbound and
+			// reaches this branch correctly only because Dial() puts the
+			// destination in origination_caller_id_number so the agent's
+			// handset shows who it is ringing — take that away and this
+			// becomes the agent's own caller id again.
+			name: "the leg click-to-dial originates faces the number it will reach",
+			dir:  "outbound",
+			vars: map[string]string{
+				"variable_dialed_user":      agentExtension,
+				"Caller-Caller-ID-Number":   otherExtension,
+				"Caller-Destination-Number": agentExtension,
+				"variable_aicc_extension":   agentExtension,
+				"Caller-Context":            "aicc",
+			},
+			want: otherExtension,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			registry := NewRegistry(nullPublisher{})
+			c := NewCoordinator(registry, nil, twoAgents{}, nullPublisher{})
+
+			ctx := t.Context()
+			const channel = "the-leg"
+			c.Handle(ctx, raw("CHANNEL_CREATE", channel, tc.dir, tc.vars))
+
+			callID, ok := registry.CallForChannel(channel)
+			if !ok {
+				t.Fatal("the leg is bound to no call")
+			}
+			var got string
+			var agentID *uuid.UUID
+			if err := registry.Do(callID, func(call *Call) {
+				if p := call.PartyByChannel(channel); p != nil {
+					got, agentID = p.OtherNumber, p.AgentID
+				}
+			}); err != nil {
+				t.Fatalf("reading the call: %v", err)
+			}
+			if agentID == nil {
+				t.Fatal("the leg is not attributed to an agent, so this case tests nothing")
+			}
+			if got != tc.want {
+				t.Errorf("otherNumber = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

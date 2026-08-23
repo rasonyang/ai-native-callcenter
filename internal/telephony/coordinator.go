@@ -457,7 +457,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		p := call.AddParty(ev.ChannelID, legNumber(ev), ev.OccurredAt)
 		if isAgentLeg {
 			p.AgentID = &agentID
-			p.OtherNumber = ev.ANI
+			p.OtherNumber = otherNumber(ev)
 		}
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
@@ -1215,6 +1215,35 @@ func callTypeOf(ev SwitchEvent) events.CallType {
 // originator, the dialled extension for a leg being delivered. The directory's
 // dialed_user is preferred because a browser softphone's destination is a
 // random contact user rather than an extension.
+// otherNumber is the address at the far end of an agent's leg, read from the
+// leg itself before anything has bridged — which is the only moment an
+// unanswered call ever offers.
+//
+// It is the mirror of legNumber: whichever of the two numbers a leg took for
+// its own, the other one belongs to the party it faces. A leg the switch
+// delivers to an agent — a queue delivery, or the leg click-to-dial
+// originates — is outbound, took the dialled extension for its own, and the
+// caller it is bringing is the ANI. A leg an agent's own phone raises is
+// inbound, took the ANI for its own, and the far end is where it is headed.
+//
+// Reading ANI for both was right in one case and wrong in the other, and the
+// wrong one was invisible for a fortnight because the bridge overwrites this
+// the moment a call connects. Only a call nobody answered kept the mistake,
+// and it kept it in the ledger: an agent dialling a colleague from their
+// handset who got no answer was written down as having dialled themselves.
+//
+// A note for whoever touches click-to-dial: that path works through this
+// branch only because Dial() puts the *destination* in the agent leg's
+// origination_caller_id_number, so the agent's handset shows who it is
+// ringing. Take that display trick away and the ANI here becomes the agent's
+// own caller id, silently.
+func otherNumber(ev SwitchEvent) string {
+	if ev.Direction == DirectionInbound {
+		return ev.DestinationNumber
+	}
+	return ev.ANI
+}
+
 func legNumber(ev SwitchEvent) string {
 	if ev.Direction == DirectionInbound {
 		return ev.ANI
