@@ -1611,8 +1611,9 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   接通的通话有 legs、有 bridge,未接的通话只有这一列。
   同一个字段也是坐席工作台"正在通话/正在呼叫"那一行的号码来源
   (`active-call.tsx:48`、`softphone-bar.tsx:231`、`_app.agent.index.tsx:167`,
-  均为 `other?.number ?? mine?.otherNumber`),所以坐席从话机拨出、对方还没接的那段时间,
-  屏幕上显示的是他自己的号码。
+  均为 `other?.number ?? mine?.otherNumber`),所以坐席从话机拨出后、**在对方那条腿出现之前
+  的那个窗口里**,屏幕上显示的是他自己的号码。对方腿一加入(`aicc_parent_channel`,几乎是
+  紧接着),`other.number` 就接管了显示 —— 所以这一条不能靠肉眼复现,别照字面去试。
   **修法**:`otherNumber(ev)` 做成 `legNumber(ev)` 的镜像 —— 腿拿了哪个号做自己的,
   另一个就属于它面对的那一方(inbound 取 `DestinationNumber`,outbound 取 `ANI`)。
   **给后来人的一条提醒(已写进注释)**:click-to-dial 走 outbound 分支之所以一直是对的,
