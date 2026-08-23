@@ -232,8 +232,15 @@ describe input-audio transcription as on by default; it is configured under
 `conversation.item.input_audio_transcription.*` event is expected, and
 `store.TranscriptRoleCaller` rows are never written.
 
-`[ASSUMPTION]` Qwen-Audio-Realtime's default behaviour for input transcription on the
-`qwen-audio-3.0-realtime-plus` s2s model is unverified.
+~~`[ASSUMPTION]` Qwen-Audio-Realtime's default behaviour for input transcription on the
+`qwen-audio-3.0-realtime-plus` s2s model is unverified.~~
+`[MEASURED 2026-08-23]` **It transcribes input unprompted.** Live calls on the qwen
+profile produce `CUSTOMER|MODEL` transcript rows carrying the caller's own words,
+while the Beta branch of `buildSessionUpdate` sends no transcription field at all
+and `EventTypeInputTranscript` has exactly one source —
+`conversation.item.input_audio_transcription.delta/completed` (`realtime.go:517-521`).
+The vendor therefore sends those events without being asked. Setting a
+`TranscribeModel` on `QwenProfile` would be a value nothing reads.
 
 **Consequence:** what is called "the transcript" today is, on the OpenAI path, a
 record of the **bot's own words plus tool traces** and nothing the caller said,
@@ -428,7 +435,7 @@ identity silently underneath it.
 | G-03 | No WebSocket **server** anywhere in the process; the only HTTP surface is chi with cookie sessions + CSRF (`internal/httpapi/server.go:112-250`) | **BLOCKER** | `cmd/aicc`, new `internal/streamin` | Separate listener + token auth (§8.2, D5) |
 | G-04 | The transcript is an in-memory slice written once at teardown (`internal/aicall/ledger.go:79-90,136`) — nothing can read it during the call, and a crash loses it | **BLOCKER** | `internal/aicall`, `internal/store` | Incremental append through a per-call transcript sequencer (§8.4) |
 | G-05 | `BOT_TRANSCRIPT` is declared and never published (`internal/events/event.go:59`; `rg` finds no publisher) | **MAJOR** | `internal/aicall`, `internal/events`, contract | Publish a call-scoped `CALL_TRANSCRIPT` and retire `BOT_TRANSCRIPT` (§11, D-SSE) |
-| G-06 | The caller's speech is almost certainly not transcribed in the bot phase (`internal/provider/profile.go:70-115` leave `TranscribeModel` empty; `realtime.go:367`) | **MAJOR** | `internal/provider/profile.go`, `realtime.go:380-389` | Set a transcription model on each profile; add the field to the Beta dialect |
+| G-06 | The caller's speech is almost certainly not transcribed in the bot phase (`internal/provider/profile.go:70-115` leave `TranscribeModel` empty; `realtime.go:367`) | **MAJOR** | `internal/provider/profile.go`, `realtime.go:380-389` | ~~Set a transcription model on each profile; add the field to the Beta dialect~~ **CLOSED 2026-08-23 (W1)** — openai gets the default (`gpt-live-transcribe`) plus an `AICC_PROVIDER_TRANSCRIBE_MODEL` override with an explicit `off`; qwen needs neither, measured to transcribe unprompted, so **the Beta dialect is deliberately left without the field** — adding it would be dead configuration |
 | G-07 | No REST route returns a transcript for a **live** call, and the only transcript route is SUPERVISOR-gated (`server.go:207-210`) | **MAJOR** | `docs/openapi.json`, `internal/httpapi` | `GET /calls/{callId}/transcript` under a call-involvement check (§10, D8) |
 | G-08 | `transcripts` cannot represent a third speaker, a leg, a partial, an offset, a language or a producer (`00005_call_ledger.sql:56-65`) | **MAJOR** | migrations, `internal/store`, contract, TS, i18n | §9 Table 3 |
 | G-09 | SSE **replay ignores the original scope**: `who.wants(ev, Scope{})` at `internal/events/hub.go:132` passes an empty scope, so on reconnect an agent is replayed events they were never entitled to receive live | **MAJOR** (privacy; pre-existing, becomes serious once transcripts are on the stream) | `internal/events/hub.go` | Store the scope alongside each ring entry and apply it on replay |

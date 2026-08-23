@@ -32,8 +32,10 @@ type Profile struct {
 
 	Style sessionStyle
 	Voice string
-	// TranscribeModel enables transcription of caller audio. Empty leaves it
-	// to the provider.
+	// TranscribeModel asks the conversation session to transcribe what the
+	// caller says, under audio.input.transcription. Empty leaves it to the
+	// provider, which is not the same as off: one vendor here transcribes
+	// unasked and the other does not.
 	TranscribeModel string
 
 	// AcceptsG711 means telephone audio can be passed through untouched, with
@@ -69,12 +71,19 @@ type Profile struct {
 // conversion anywhere between the caller and the model.
 func OpenAIProfile() Profile {
 	return Profile{
-		Name:                  "openai",
-		Endpoint:              "wss://api.openai.com/v1/realtime",
-		Model:                 "gpt-realtime-2.1",
-		APIKeyEnv:             "OPENAI_API_KEY",
-		Style:                 styleGA,
-		Voice:                 "marin",
+		Name:      "openai",
+		Endpoint:  "wss://api.openai.com/v1/realtime",
+		Model:     "gpt-realtime-2.1",
+		APIKeyEnv: "OPENAI_API_KEY",
+		Style:     styleGA,
+		Voice:     "marin",
+		// Without this the caller is not transcribed during the bot phase at
+		// all: this vendor does not transcribe input unless asked, so the
+		// "transcript" of a bot call was the bot's own words and its tool
+		// traces, with nothing the caller said in it. The model name and the
+		// field it goes in are both measured (design 08 §Appendix, the
+		// transcription session's audio.input.transcription.model).
+		TranscribeModel:       "gpt-live-transcribe",
 		AcceptsG711:           true,
 		LinearInput:           media.PCM16Format(media.RateProviderOut),
 		LinearOutput:          media.PCM16Format(media.RateProviderOut),
@@ -91,12 +100,21 @@ func OpenAIProfile() Profile {
 // conversion happens on our side.
 func QwenProfile() Profile {
 	return Profile{
-		Name:         "qwen",
-		Endpoint:     "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-		Model:        "qwen-audio-3.0-realtime-plus",
-		APIKeyEnv:    "ALIYUN_API_KEY",
-		Style:        styleBeta,
-		Voice:        "longanqian",
+		Name:      "qwen",
+		Endpoint:  "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+		Model:     "qwen-audio-3.0-realtime-plus",
+		APIKeyEnv: "ALIYUN_API_KEY",
+		Style:     styleBeta,
+		Voice:     "longanqian",
+		// No TranscribeModel, and that is the finding rather than an omission.
+		// Design 08 §4.2 left it open — "Qwen-Audio-Realtime's default
+		// behaviour for input transcription is unverified" — and live calls on
+		// 2026-08-23 settled it: this dialect sends
+		// conversation.item.input_audio_transcription.* unprompted, and the
+		// caller's words reach the transcript as CUSTOMER|MODEL rows, while
+		// the Beta branch of buildSessionUpdate sends no transcription field
+		// at all. Setting one here would be a value nothing reads — the same
+		// dead configuration this campaign has been filing against.
 		AcceptsG711:  false,
 		LinearInput:  media.PCM16Format(media.RateProviderIn),
 		LinearOutput: media.PCM16Format(media.RateProviderOut),
@@ -131,6 +149,14 @@ const (
 type Override struct {
 	Endpoint string
 	Model    string
+	// TranscribeModel replaces the profile's own, and TranscribeOff turns
+	// caller transcription off outright.
+	//
+	// Two fields rather than one because an empty environment value means
+	// unset, so a profile default that is not empty cannot be blanked by
+	// leaving the variable empty. Off has to be something somebody can say.
+	TranscribeModel string
+	TranscribeOff   bool
 }
 
 // ProfileFor returns the profile of the provider this deployment runs, with
@@ -156,6 +182,12 @@ func ProfileFor(name string, override Override) (Profile, error) {
 	}
 	if override.Model != "" {
 		profile.Model = override.Model
+	}
+	switch {
+	case override.TranscribeOff:
+		profile.TranscribeModel = ""
+	case override.TranscribeModel != "":
+		profile.TranscribeModel = override.TranscribeModel
 	}
 	return profile, nil
 }

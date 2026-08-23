@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -264,15 +265,27 @@ func run() error {
 	if cfg.IsBotEnabled {
 		// One provider answers every call in this deployment; an unknown name
 		// is a startup failure, not a surprise on the first call.
+		transcribeOff := strings.EqualFold(cfg.ProviderTranscribeModel, "off")
+		transcribeModel := cfg.ProviderTranscribeModel
+		if transcribeOff {
+			transcribeModel = ""
+		}
 		profile, err := provider.ProfileFor(cfg.Provider, provider.Override{
-			Endpoint: cfg.ProviderEndpoint,
-			Model:    cfg.ProviderModel,
+			Endpoint:        cfg.ProviderEndpoint,
+			Model:           cfg.ProviderModel,
+			TranscribeModel: transcribeModel,
+			TranscribeOff:   transcribeOff,
 		})
 		if err != nil {
 			return fmt.Errorf("AICC_PROVIDER: %w", err)
 		}
 		slog.Info("voice provider selected",
-			"provider", profile.Name, "model", profile.Model, "endpoint", profile.Endpoint)
+			"provider", profile.Name, "model", profile.Model, "endpoint", profile.Endpoint,
+			// Whether the caller's own words will be in the bot phase's
+			// transcript at all, said at startup rather than discovered from
+			// an empty column afterwards. Empty on a vendor that transcribes
+			// unasked is not the same as off.
+			"transcribesCaller", profile.TranscribeModel)
 
 		orchestrator, err := aicall.NewOrchestrator(botConfig(
 			botUAS(cfg),

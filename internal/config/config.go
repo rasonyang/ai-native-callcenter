@@ -94,6 +94,12 @@ type Config struct {
 	// of the hostname, so there is no useful default to fall back on.
 	TranscribeEndpoint string
 	TranscribeModel    string
+	// ProviderTranscribeModel overrides what the *conversation* session is
+	// asked to transcribe the caller with — a different thing from
+	// TranscribeModel above, which belongs to the standalone recogniser used
+	// for the human phase. The literal "off" disables it: an empty value
+	// means unset here, so it cannot blank a profile's own default.
+	ProviderTranscribeModel string
 
 	// Recordings. Backend FS keeps files where the switch wrote them;
 	// S3 uploads them to any S3-compatible store and clears the local spool.
@@ -142,33 +148,34 @@ func Load() (Config, error) {
 		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
 
-		IsTranscriptionEnabled: envBool("AICC_TRANSCRIPTION_ENABLED", false),
-		StreamAddr:             env("AICC_STREAM_ADDR", "127.0.0.1:8090"),
-		StreamPublicURL:        env("AICC_STREAM_PUBLIC_URL", ""),
-		StreamSecret:           env("AICC_STREAM_SECRET", ""),
-		TranscribeProvider:     env("AICC_TRANSCRIBE_PROVIDER", ""),
-		TranscribeEndpoint:     env("AICC_TRANSCRIBE_ENDPOINT", ""),
-		TranscribeModel:        env("AICC_TRANSCRIBE_MODEL", ""),
-		Provider:               env("AICC_PROVIDER", "openai"),
-		ProviderEndpoint:       env("AICC_PROVIDER_ENDPOINT", ""),
-		ProviderModel:          env("AICC_PROVIDER_MODEL", ""),
-		OutboundEndpoint:       env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/aicc/XML"),
-		OutboundCallerID:       env("AICC_OUTBOUND_CLID", ""),
-		RecordingBackend:       env("AICC_RECORDING_BACKEND", "FS"),
-		RecordingDir:           env("AICC_RECORDING_DIR", ""),
-		S3Endpoint:             env("AICC_S3_ENDPOINT", ""),
-		S3AccessKey:            env("AICC_S3_ACCESS_KEY", ""),
-		S3SecretKey:            env("AICC_S3_SECRET_KEY", ""),
-		S3Bucket:               env("AICC_S3_BUCKET", "aicc-recordings"),
-		S3IsSSL:                envBool("AICC_S3_SSL", false),
-		SessionTTL:             envDuration("AICC_SESSION_TTL", 12*time.Hour),
-		SessionCookie:          env("AICC_SESSION_COOKIE", "aicc_session"),
-		SecureCookies:          envBool("AICC_SECURE_COOKIES", false),
-		LogLevel:               env("AICC_LOG_LEVEL", "info"),
-		LogDir:                 env("AICC_LOG_DIR", "logs"),
-		OTLPEndpoint:           env("AICC_OTLP_ENDPOINT", ""),
-		ServiceName:            env("AICC_SERVICE_NAME", "aicc"),
-		Seed:                   env("AICC_SEED", ""),
+		IsTranscriptionEnabled:  envBool("AICC_TRANSCRIPTION_ENABLED", false),
+		StreamAddr:              env("AICC_STREAM_ADDR", "127.0.0.1:8090"),
+		StreamPublicURL:         env("AICC_STREAM_PUBLIC_URL", ""),
+		StreamSecret:            env("AICC_STREAM_SECRET", ""),
+		TranscribeProvider:      env("AICC_TRANSCRIBE_PROVIDER", ""),
+		TranscribeEndpoint:      env("AICC_TRANSCRIBE_ENDPOINT", ""),
+		TranscribeModel:         env("AICC_TRANSCRIBE_MODEL", ""),
+		ProviderTranscribeModel: env("AICC_PROVIDER_TRANSCRIBE_MODEL", ""),
+		Provider:                env("AICC_PROVIDER", "openai"),
+		ProviderEndpoint:        env("AICC_PROVIDER_ENDPOINT", ""),
+		ProviderModel:           env("AICC_PROVIDER_MODEL", ""),
+		OutboundEndpoint:        env("AICC_OUTBOUND_ENDPOINT", "loopback/%s/aicc/XML"),
+		OutboundCallerID:        env("AICC_OUTBOUND_CLID", ""),
+		RecordingBackend:        env("AICC_RECORDING_BACKEND", "FS"),
+		RecordingDir:            env("AICC_RECORDING_DIR", ""),
+		S3Endpoint:              env("AICC_S3_ENDPOINT", ""),
+		S3AccessKey:             env("AICC_S3_ACCESS_KEY", ""),
+		S3SecretKey:             env("AICC_S3_SECRET_KEY", ""),
+		S3Bucket:                env("AICC_S3_BUCKET", "aicc-recordings"),
+		S3IsSSL:                 envBool("AICC_S3_SSL", false),
+		SessionTTL:              envDuration("AICC_SESSION_TTL", 12*time.Hour),
+		SessionCookie:           env("AICC_SESSION_COOKIE", "aicc_session"),
+		SecureCookies:           envBool("AICC_SECURE_COOKIES", false),
+		LogLevel:                env("AICC_LOG_LEVEL", "info"),
+		LogDir:                  env("AICC_LOG_DIR", "logs"),
+		OTLPEndpoint:            env("AICC_OTLP_ENDPOINT", ""),
+		ServiceName:             env("AICC_SERVICE_NAME", "aicc"),
+		Seed:                    env("AICC_SEED", ""),
 	}
 
 	return c, c.validate()
