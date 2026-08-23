@@ -45,6 +45,9 @@ type presenceWiring interface {
 	AttachWrapUps(agents.WrapUpLedger)
 	SyncSwitch(ctx context.Context)
 	ObserveDevice(ctx context.Context, extensionNumber string, isRegistered, isInService bool)
+	// NoteDevice records a phone without mirroring it, for the pass that has
+	// to happen before presence is sent to the switch.
+	NoteDevice(extensionNumber string, isRegistered, isInService bool)
 }
 
 // staffingWiring is the catalog in its two roles: the thing agent presence
@@ -138,15 +141,32 @@ func (c composition) connect() {
 // announced to nobody, and no later event says it again. The switch has been
 // holding them the whole time.
 func (c composition) onSwitchConnected(ctx context.Context) {
+	// The phones first, and quietly. Presence comes back from the database
+	// with them unknown, unknown reads as unreachable, and an agent who is
+	// perfectly fine therefore computes as On Break. Mirroring that before
+	// learning better is not a harmless flicker: measured on 2026-08-23, the
+	// queue had already begun offering a caller to that agent, this set them
+	// On Break mid-delivery, and the caller waited out the queue's no-answer
+	// delay — eighty seconds — before anybody was tried again.
+	regs, err := c.Registrations()
+	if err != nil {
+		// Not fatal — the rest of the reconciliation still has to run, and an
+		// agent whose phone we could not ask about is better mirrored from
+		// what we know than left off the switch entirely. But a read that
+		// failed has told us nothing, whatever it handed back with the error.
+		c.Log.WarnContext(ctx, "could not read registrations", "error", err)
+		regs = nil
+	}
+	for _, reg := range regs {
+		c.Agents.NoteDevice(reg.Extension, true, reg.IsReachable)
+	}
+
 	c.Agents.SyncSwitch(ctx)
 	c.Catalog.SyncTiers(ctx)
 	c.Coordinator.ReconcileWaiting(ctx)
 
-	regs, err := c.Registrations()
-	if err != nil {
-		c.Log.WarnContext(ctx, "could not read registrations", "error", err)
-		return
-	}
+	// Again, now out loud: the same observations, published this time, so a
+	// phone that changed while we were away reaches the screens watching it.
 	for _, reg := range regs {
 		c.Agents.ObserveDevice(ctx, reg.Extension, true, reg.IsReachable)
 	}

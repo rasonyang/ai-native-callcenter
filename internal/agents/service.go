@@ -413,6 +413,32 @@ func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
 // A registered phone that stops answering keepalives is the agent-side failure
 // that matters most: a crashed browser tab looks exactly like a working one,
 // so an agent can sit in ready while every call to them fails.
+// NoteDevice records what the switch says about a phone without telling the
+// switch anything back.
+//
+// For the pass that runs before presence is mirrored on connect. Presence is
+// restored from the database with the phones unknown, and unknown reads as
+// unreachable, so an agent who is perfectly fine computes as On Break — and
+// mirroring that is not merely wrong for a moment. Measured on 2026-08-23: the
+// queue had already begun offering a caller to that agent, the mirror set them
+// On Break mid-delivery, the offer died, and although the application put it
+// right sixty milliseconds later the queue then waited out its no-answer delay
+// before trying again. The caller paid eighty seconds for it.
+//
+// So the phones are learned first and quietly, and the mirror that follows
+// carries the truth the first time.
+func (s *Service) NoteDevice(extensionNumber string, isRegistered, isInService bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.devices[extensionNumber] = deviceState{isRegistered: isRegistered, isInService: isInService}
+	for _, p := range s.live {
+		if p.ExtensionNumber == extensionNumber && !p.IsLoggedOut() {
+			p.IsRegistered, p.IsDeviceInService = isRegistered, isInService
+			return
+		}
+	}
+}
+
 func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, isRegistered, isInService bool) {
 	s.mu.Lock()
 	s.devices[extensionNumber] = deviceState{isRegistered: isRegistered, isInService: isInService}

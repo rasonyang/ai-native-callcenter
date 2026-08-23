@@ -67,12 +67,28 @@ type fakeAgents struct {
 	wrapUps  agents.WrapUpLedger
 	synced   int
 	observed []telephony.Registration
+	noted    []string
+	// steps is what happened in the order it happened, which is the whole
+	// point of one of these tests.
+	steps []string
 }
 
 func (f *fakeAgents) AttachStaffing(s agents.Staffing)    { f.staffing = s }
 func (f *fakeAgents) AttachWrapUps(l agents.WrapUpLedger) { f.wrapUps = l }
-func (f *fakeAgents) SyncSwitch(context.Context)          { f.synced++ }
+func (f *fakeAgents) SyncSwitch(context.Context) {
+	f.synced++
+	// What the switch would be told, in the order it would be told it: the
+	// point of the fix is that presence is never mirrored before the phones
+	// are known.
+	f.steps = append(f.steps, "sync")
+}
+
+func (f *fakeAgents) NoteDevice(ext string, _, _ bool) {
+	f.noted = append(f.noted, ext)
+	f.steps = append(f.steps, "note:"+ext)
+}
 func (f *fakeAgents) ObserveDevice(_ context.Context, ext string, isRegistered, isInService bool) {
+	f.steps = append(f.steps, "observe:"+ext)
 	if !isRegistered {
 		return
 	}
@@ -495,4 +511,40 @@ func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
 		t.Errorf("scope = %+v, want a broadcast — a default-deny hub delivers "+
 			"an unaddressed callback to nobody but supervisors", pub.scopes[0])
 	}
+}
+
+// Presence must never be mirrored to the switch before the phones are known.
+//
+// Presence comes back from the database with them unknown, unknown reads as
+// unreachable, and an agent who is perfectly fine therefore computes as On
+// Break. Sending that is not a flicker: measured live on 2026-08-23, the queue
+// had already begun offering a caller to that agent, the mirror set them On
+// Break mid-delivery, and the caller then waited out the queue's no-answer
+// delay — eighty seconds — before anybody was tried again.
+func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
+	f := newWiringFixture(t)
+	f.comp.connect()
+
+	f.link.onConnect(t.Context())
+
+	if len(f.agents.noted) == 0 {
+		t.Fatal("no phone was recorded before the mirror")
+	}
+	firstSync := -1
+	for i, step := range f.agents.steps {
+		if step == "sync" {
+			firstSync = i
+			break
+		}
+	}
+	if firstSync < 0 {
+		t.Fatal("presence was never mirrored")
+	}
+	for i, step := range f.agents.steps[:firstSync] {
+		_ = i
+		if len(step) > 5 && step[:5] == "note:" {
+			return // a phone was learned before the mirror: what this is for
+		}
+	}
+	t.Errorf("presence was mirrored before any phone was known: %v", f.agents.steps)
 }

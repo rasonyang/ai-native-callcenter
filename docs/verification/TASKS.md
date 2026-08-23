@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 20 项、余 14 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C39 / C41;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 21 项、余 13 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C41;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1191,6 +1191,34 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **判定前不要改** —— 这两条的修法方向相反(一个要去掉短路,一个要调顺序或加重试)。
   下一步:在 `ObserveDevice`/`mirrorStatus` 上加一条能分辨"短路了"与"写了但被盖"的日志,
   再重启一次即可定案;不需要真实通话。
+
+  **【2026-08-23 已定案并修复 —— 两条候选都不对,真机制更糟】**
+  按上面的办法加了镜像诊断(`mirroring presence to the switch`,含 status 与三个来源字段),
+  一次重启就说清了:
+
+  ```
+  16:42:44.063  (FS) Updated Agent agent-wei set state = Receiving   ← 交换机已在派单给 wei
+  16:42:46.263  (FS) agent-wei set status = On Break                 ← 重启对账,派单还在飞
+  16:42:46.333  (FS) agent-wei set status = Available                ← 60 毫秒后就纠正了
+  16:44:07      下一次派单                                            ← 主叫多等 81 秒
+  ```
+
+  **不是"卡在 On Break"**(应用 60 毫秒就纠正了,两次重启实测都是几十毫秒),
+  **而是重启时的 presence 镜像打断了一次正在进行的派单** —— mod_callcenter 随后按
+  `no_answer_delay_time=60` 退避才再试。原来记的"63 秒"是**症状的时长,不是状态的时长**,
+  归因错了。
+  **根因**:`Restore` 在启动时从库里载回 presence 并调 `applyDeviceLocked`,
+  而那一刻 `s.devices` 是空的 —— **不知道 = 不可达**,于是一个好端端的坐席算出 `On Break`;
+  `SyncSwitch` 随即把这个错值广播出去,**在读注册表之前**。
+  **修法**:连接钩子里**先安静地学话机,再镜像 presence**。新增 `Service.NoteDevice`
+  (只记录,不镜像、不发事件),连接后先跑一遍;随后 `SyncSwitch` 拿到的就是真值,
+  **错的 On Break 一次也不会发出去**。原有的 `ObserveDevice` 循环留在镜像之后,
+  仍然发 `DEVICE_*` 事件,让离线期间变过的话机能到达屏幕。
+  顺带修正一处:注册表**读失败时把返回值当无效**(此前失败仍会用它带回的行)。
+  回归:`TestThePhonesAreKnownBeforePresenceIsMirrored`(断言顺序,不是断言调用次数);
+  摘除验证 → *"no phone was recorded before the mirror"*。
+  **现场复验**:重启后第一条镜像就是 `agent-wei status=Available isRegistered=true`,
+  错值不再出现。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md` 末节。
 
 - **C40(new,2026-08-23 开跑 C14 时发现;当场已修)**
