@@ -86,6 +86,7 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 
 	a.arm(ctx, func() {
 		a.log.Info("transferring the caller", "queue", queue.Name, "ext", queue.ExtNumber)
+		a.handOnCaller()
 		if err := a.orchestrator.cfg.Switch.TransferToExtension(
 			a.callerChannel, queue.ExtNumber, "default"); err != nil {
 			a.log.Error("transfer failed", "queue", queue.Name, "error", err)
@@ -129,6 +130,7 @@ func (a *callActions) Hangup(ctx context.Context, _ flow.HangupRequest) (flow.Re
 	}
 	a.arm(ctx, func() {
 		a.log.Info("hanging up after the farewell")
+		a.markFinished("HANGUP")
 		a.session.Close(context.Background())
 	})
 	return flow.Succeeded(nil, ""), nil
@@ -217,6 +219,7 @@ func (a *callActions) rescueCaller() {
 		for _, queue := range queues {
 			if queue.ID == *a.fallbackQueue {
 				a.log.Info("rescuing the caller to the fallback queue", "queue", queue.Name)
+				a.handOnCaller()
 				if err := a.orchestrator.cfg.Switch.TransferToExtension(
 					a.callerChannel, queue.ExtNumber, "default"); err != nil {
 					a.log.Error("rescue transfer failed", "error", err)
@@ -226,6 +229,40 @@ func (a *callActions) rescueCaller() {
 		}
 	}
 	a.session.Close(context.Background())
+}
+
+// markFinished tells the dialplan that this call ended because the bot decided
+// it had, and not because the bot disappeared.
+//
+// The inbound script cannot tell those apart on its own: both look like a
+// bridge that ended. It used to be spared the question by hangup_after_bridge,
+// which took the caller down with the bot leg — and took the fallback with it,
+// for exactly the failures the fallback exists for (the application restarts,
+// the process dies, a provider drops). Now the script keeps the caller and
+// asks: marked means the conversation reached its end, so hang up; unmarked
+// means the bot vanished mid-call, so find the caller a human.
+//
+// Only the two closes that ARE the deliberate ending carry it — the hangup
+// tool and a flow reaching its terminal phase. A transfer must not: if the
+// transfer fails, the absence of this mark is what sends the caller to the
+// fallback queue instead of dropping them, and that failure is likeliest at
+// the moment the mark would be wrong.
+func (a *callActions) markFinished(how string) {
+	if a.callerChannel == "" {
+		return
+	}
+	a.stampChannel("aicc_bot_finished", how)
+}
+
+// handOnCaller puts the switch's teardown rule back before the caller leaves
+// us for a queue: from there an agent's hangup ends the call.
+func (a *callActions) handOnCaller() {
+	if a.callerChannel == "" {
+		return
+	}
+	if err := a.orchestrator.cfg.Switch.EndCallerWithTheirBridge(a.callerChannel); err != nil {
+		a.log.Warn("could not restore the caller's teardown rule", "error", err)
+	}
 }
 
 func (a *callActions) stampChannel(name, value string) {

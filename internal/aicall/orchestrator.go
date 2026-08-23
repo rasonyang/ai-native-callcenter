@@ -61,6 +61,10 @@ type Switch interface {
 	// SetVariable stamps business context onto the caller's channel, so it
 	// survives into the queue and the answering agent's screen pop.
 	SetVariable(channelID, name, value string) error
+	// EndCallerWithTheirBridge restores the switch's own teardown rule before
+	// the caller is handed on. The inbound script suspends it for the bot
+	// bridge; everything downstream of us expects it back.
+	EndCallerWithTheirBridge(channelID string) error
 }
 
 // SessionFactory builds a provider session; swapped out in tests.
@@ -392,6 +396,7 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 			actions.recorder.markHangup()
 		}
 		actions.arm(context.Background(), func() {
+			actions.markFinished("FLOW_END")
 			session.Close(context.Background())
 		})
 	}

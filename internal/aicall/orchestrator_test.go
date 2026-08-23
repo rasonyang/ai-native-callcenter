@@ -34,6 +34,7 @@ func (c *fakeCatalog) Queues(context.Context) ([]catalog.Queue, error) { return 
 type fakeSwitch struct {
 	mu        sync.Mutex
 	transfers []string // "channel→extension"
+	handedOn  []string // channels whose teardown rule was put back
 	variables map[string]string
 }
 
@@ -52,6 +53,19 @@ func (s *fakeSwitch) SetVariable(_, name, value string) error {
 	}
 	s.variables[name] = value
 	return nil
+}
+
+func (s *fakeSwitch) EndCallerWithTheirBridge(channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.handedOn = append(s.handedOn, channelID)
+	return nil
+}
+
+func (s *fakeSwitch) handedOnCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.handedOn)
 }
 
 func (s *fakeSwitch) recordedTransfers() []string {
@@ -442,5 +456,119 @@ func TestAnOrchestratorWithoutAProviderIsRejected(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "provider") {
 		t.Errorf("error %q does not say what is missing", err)
+	}
+}
+
+// The dialplan keeps the caller alive past the bot leg now, so it has to be
+// told which of the two things happened. These pin the marking, and — just as
+// load-bearing — the places that must NOT mark.
+//
+// What made this necessary: with hangup_after_bridge on, a bot leg that died
+// took the caller down inside fifty milliseconds, so the fallback block never
+// ran for the failures it exists for. The caller heard the call simply cut.
+func TestTheBotSaysWhetherItMeantToEndTheCall(t *testing.T) {
+	const marker = "aicc_bot_finished"
+
+	t.Run("the hangup tool marks the ending as deliberate", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		actions, session, _ := testActions(t, sw)
+
+		if _, err := actions.Hangup(t.Context(), flow.HangupRequest{}); err != nil {
+			t.Fatalf("hangup: %v", err)
+		}
+		if got := sw.variable(marker); got != "" {
+			t.Errorf("marked before the farewell played: %q", got)
+		}
+
+		actions.onPlaybackDone(session.currentTurn() + 1)
+		<-session.done
+
+		if got := sw.variable(marker); got != "HANGUP" {
+			t.Errorf("%s = %q, want HANGUP — unmarked, the dialplan sends a "+
+				"caller who heard goodbye to a queue", marker, got)
+		}
+	})
+
+	t.Run("a transfer marks nothing, so a failed one still rescues", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		actions, session, _ := testActions(t, sw)
+		actions.orchestrator.cfg.Catalog = &fakeCatalog{queues: []catalog.Queue{
+			{ID: uuid.New(), Name: "support-en", ExtNumber: "7001", IsEnabled: true},
+		}}
+
+		result, err := actions.TransferToAgent(t.Context(),
+			flow.TransferRequest{Queue: "support-en", Summary: "wants a person"})
+		if err != nil || !result.IsOK {
+			t.Fatalf("transfer refused: %+v %v", result, err)
+		}
+		actions.onPlaybackDone(session.currentTurn() + 1)
+
+		if got := sw.variable(marker); got != "" {
+			t.Errorf("a transfer marked the call as finished (%q). If the transfer "+
+				"fails the caller is then hung up instead of rescued — and it "+
+				"fails exactly when the switch is in trouble", got)
+		}
+		if sw.handedOnCount() != 1 {
+			t.Errorf("the caller's teardown rule was not restored before the "+
+				"transfer (%d calls); from a queue the agent's hangup must end "+
+				"the call", sw.handedOnCount())
+		}
+	})
+
+	t.Run("a call with no caller channel marks nothing and does not fail", func(t *testing.T) {
+		sw := &fakeSwitch{}
+		actions, session, _ := testActions(t, sw)
+		actions.callerChannel = ""
+
+		if _, err := actions.Hangup(t.Context(), flow.HangupRequest{}); err != nil {
+			t.Fatalf("hangup: %v", err)
+		}
+		actions.onPlaybackDone(session.currentTurn() + 1)
+		<-session.done
+
+		if got := sw.variable(marker); got != "" {
+			t.Errorf("stamped a channel that does not exist: %q", got)
+		}
+	})
+}
+
+// The other deliberate ending: the flow itself concludes. It is containment
+// for the ledger already; it has to look deliberate to the dialplan too, or
+// every flow that ends by design drops its caller into a queue.
+func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
+	session, _, _ := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	sw := &fakeSwitch{}
+	o := testOrchestrator(t, sw)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	spec, err := flow.Load([]byte(`{
+		"id": "terminal-marks",
+		"specVersion": "v2",
+		"initialNode": "welcome",
+		"global": {"persona": "You answer the phone."},
+		"nodes": {
+			"welcome": {"instruction": "Greet.", "tools": [],
+				"transitions": [{"on": "NO_INPUT", "target": "farewell"}]},
+			"farewell": {"instruction": "Say goodbye.", "tools": [], "isTerminal": true}
+		}
+	}`))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "caller-channel-1",
+	}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+
+	o.afterMove(engine.OnNoInput(), session, runtime, actions, log)
+	actions.onPlaybackDone(session.currentTurn() + 1)
+	<-session.done
+
+	if got := sw.variable("aicc_bot_finished"); got != "FLOW_END" {
+		t.Errorf("aicc_bot_finished = %q, want FLOW_END", got)
 	}
 }

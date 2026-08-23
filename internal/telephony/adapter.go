@@ -298,6 +298,18 @@ func (a *Adapter) SetVariable(channelID, name, value string) error {
 	return a.exec("uuid_setvar %s %s %s", channelID, name, value)
 }
 
+// EndCallerWithTheirBridge restores the switch's rule that the caller's leg
+// ends when the leg it is bridged to does.
+//
+// The inbound script turns that rule off before bridging to the bot, because
+// with it on a bot leg that dies takes the caller with it in fifty
+// milliseconds and no fallback can run. It has to go back on before the caller
+// is handed to a queue: from there an agent's hangup is the end of the call,
+// and a caller who outlives it is a channel nobody is on.
+func (a *Adapter) EndCallerWithTheirBridge(channelID string) error {
+	return a.SetVariable(channelID, "hangup_after_bridge", "true")
+}
+
 // ShowChannels returns every live channel as JSON, the source of truth when
 // reconciling after a restart or a reconnect.
 func (a *Adapter) ShowChannels() (string, error) { return a.cmd.API("show channels as json") }

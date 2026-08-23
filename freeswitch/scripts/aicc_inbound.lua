@@ -66,7 +66,13 @@ session:setVariable("export_vars", "aicc_call_id,aicc_did,aicc_language")
 -- The bot leg is G.711 only: it terminates RTP in the application, which
 -- speaks both laws and nothing else.
 session:setVariable("absolute_codec_string", "PCMU,PCMA")
-session:setVariable("hangup_after_bridge", "true")
+-- Deliberately NOT hangup_after_bridge. With it on, a bot leg that dies takes
+-- the caller down with it inside fifty milliseconds — measured — and the
+-- fallback below never runs. The failures that fallback exists for are exactly
+-- those: the application restarts, the process dies, a provider drops. The
+-- caller now survives the bridge and the block below decides what happens to
+-- them; the application puts this rule back before handing them to a queue.
+session:setVariable("hangup_after_bridge", "false")
 session:setVariable("continue_on_fail", "true")
 
 -- Business context travels to the bot in SIP headers, the same mechanism the
@@ -98,15 +104,40 @@ end
 session:execute("bridge",
   "{absolute_codec_string=PCMU,PCMA}sofia/gateway/aicc_bot/" .. route.number)
 
--- Reaching this point means the bot never took the call: the gateway is down,
--- the application is out of capacity, or a provider is unreachable. The caller
--- must still get to a human where one is configured.
+-- The caller is still here, and there are two reasons for that.
+--
+-- The bot may have finished with them: the conversation reached its goodbye or
+-- its last phase, and the application stamped aicc_bot_finished on this channel
+-- before closing its own leg. Then this is simply the end of the call.
+--
+-- Or the bot may have vanished — never answered at all (gateway down, no
+-- capacity), or answered and then disappeared (the application restarted, the
+-- process died, a provider dropped). Nothing stamped anything, and the caller
+-- must still reach a human where one is configured.
+--
+-- The distinction is the mark, not the cause: only the application knows
+-- whether it meant to end the call, and it says so before it goes.
 if session:ready() then
+  local finished = session:getVariable("aicc_bot_finished")
+  if finished ~= nil and finished ~= "" then
+    log("info", "bot finished the call on " .. route.number .. " (" .. finished .. ")")
+    session:hangup("NORMAL_CLEARING")
+    return
+  end
+
   local cause = session:getVariable("originate_disposition") or "unknown"
-  log("warning", "bot leg failed for " .. route.number .. " (" .. cause .. ")")
+  -- Which of the two vanishings it was, for whoever reads this at 3am. The
+  -- branch below does not depend on getting this right: bridge_uuid is set
+  -- when a bridge actually came up, so its absence means the bot never
+  -- answered, and either way the caller goes to the same place.
+  local connected = session:getVariable("bridge_uuid")
+  local what = (connected ~= nil and connected ~= "") and "vanished" or "failed"
+  log("warning", "bot leg " .. what .. " for " .. route.number .. " (" .. cause .. ")")
 
   local fallback = route.fallback_queue_ext_number
   if fallback ~= nil and fallback ~= "" then
+    -- Back on before they go: from a queue, the agent's hangup ends the call.
+    session:setVariable("hangup_after_bridge", "true")
     session:execute("transfer", fallback .. " XML aicc")
   else
     session:execute("playback", "ivr/ivr-call_cannot_be_completed_as_dialed.wav")

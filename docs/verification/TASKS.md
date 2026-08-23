@@ -573,6 +573,33 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   往主叫通道盖一个收官印记(与转接时盖 `aicc_bot_sec` 同一手法),Lua 见印记则挂断、
   无印记则转 fallback 队列。修复后重跑 VC-S12-01。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
+  **【已修 2026-08-23,owner 于当日批准修法】** 按立案时建议的形态实现,两处细化写在这里:
+  - **Lua**:`hangup_after_bridge` 由 `true` 改 **`false`**,主叫因此活过 bot 腿;
+    bridge 之后的块先读印记 `aicc_bot_finished` —— **有印记**就是这通电话谈完了,
+    `session:hangup("NORMAL_CLEARING")`;**无印记**就是 bot 消失了,照旧走 fallback。
+    日志按 `bridge_uuid` 是否存在分成 `bot leg failed`(压根没接通)与 `bot leg vanished`
+    (接通后消失)两句 —— **分支不依赖这个判断**,判错只影响日志措辞。
+  - **Go 只在两处盖印**:`Hangup` 工具(`actions.go` 的 armed 闭包)与
+    **流程走到终态**(`orchestrator.go` `afterMove`)。这两处"关掉自己那条腿"本身就是收官动作。
+    **转接一律不盖** —— 这是对立案建议("bot 关闭自己那条腿之前盖印")的细化,理由:
+    若在 `uuid_transfer` 之前盖印而**转接失败**,Lua 见印记就会把主叫挂掉,
+    等于把一次失败的转接变成了正在修的那个掉线;而转接最可能失败的时刻,
+    恰恰就是交换机出问题的时刻。**不盖印,失败的转接反而自愈**:主叫落进 fallback 队列。
+    同理 `rescueCaller` 与"没有 fallback 可去"那条也都不盖。
+  - **主叫交出去之前要把交换机的收尾规则放回去**:`hangup_after_bridge=false` 是留在
+    **主叫通道**上的,会跟着他进队列;若不还原,坐席挂机后主叫可能不跟着结束。
+    新增 `Adapter.EndCallerWithTheirBridge`(FS 词汇留在 adapter 里,不外泄进 aicall),
+    `TransferToAgent` 与 `rescueCaller` 转接前各调一次;Lua 的 fallback 分支同样先还原再 transfer。
+  回归:`TestTheBotSaysWhetherItMeantToEndTheCall`(3 子例)、`TestAFlowThatConcludesAlsoSaysSo`。
+  **四处逐一摘除验证**,含一条**反向**:摘 HANGUP 印 → *"aicc_bot_finished = "", want HANGUP —
+  unmarked, the dialplan sends a caller who heard goodbye to a queue"*;摘 FLOW_END 印 → 同形;
+  摘转接前的规则还原 → *"the caller's teardown rule was not restored before the transfer"*;
+  **给转接加上印记**(反向)→ *"a transfer marked the call as finished ("TRANSFER"). If the
+  transfer fails the caller is then hung up instead of rescued"*。全部还原后 `go test -race ./...` 0 FAIL。
+  **Lua 那半只能现场证**,这正是 VC-S12-01 重跑的意义;重跑同时要证**反方向** ——
+  一通正常收官的电话仍旧只是挂断,不会掉进队列。
+  ⚠ 本机 FreeSWITCH 是原生安装,`/usr/local/freeswitch/scripts/` 里是**副本不是软链**
+  (改前已核对三个脚本与仓库一致,无本地漂移),改完须 `cp` 过去;mod_lua 每通电话读一次文件,不需要 reload。
 - **C27(new,2026-08-22 VC-S13-04 执行发现,未修)** **同一个 SLA 字段,两块屏用两个不同的分母,
   谁都没标口径。** 后端 `answeredWithinSla` 是一个**计数**(`ledger.sql:143`:排队等待 ≤20 秒
   且已接听),不是比率;分母由前端自己选,而两处选得不一样:
