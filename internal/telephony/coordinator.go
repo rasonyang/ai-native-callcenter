@@ -499,7 +499,13 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 
 	// A leg towards an agent is what puts a call on their screen, with enough
 	// context to render it without asking for anything else.
-	if isAgentLeg {
+	//
+	// Not the leg an agent placed themselves, though. That one is dialling,
+	// PARTY_DIALING has just said so, and announcing it as ringing too says
+	// the same transition twice — the second time in the callee's words,
+	// naming the number being dialled as the one doing the ringing. Being on
+	// the call is a separate fact and still follows either way.
+	if isAgentLeg && !isOriginator {
 		c.publish(ctx, events.Event{
 			Type:     events.TypePartyRinging,
 			CallID:   &callID,
@@ -518,7 +524,10 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 				"extensionNumber": agentExtension,
 			},
 		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
+	}
 
+	// Whichever way the leg was raised, the agent is on a call now.
+	if isAgentLeg {
 		c.agents.SetOnCall(ctx, agentID, true)
 	}
 }
@@ -697,10 +706,12 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 	var moved []*Party
 	var movedQueue QueueFacts
 	var movedBot BotShare
+	var movedUserData map[string]any
 	_ = c.registry.Do(absorb, func(call *Call) {
 		moved = append(moved, call.Parties...)
 		movedQueue = call.Queue
 		movedBot = call.Bot
+		movedUserData = call.UserData
 	})
 
 	err := c.registry.Do(keep, func(call *Call) {
@@ -715,6 +726,13 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 			call.Queue = movedQueue
 		}
 		call.Bot.Merge(movedBot)
+		// The business data too. It moved with everything else or it did not
+		// move at all, and which of two calls is kept depends on which leg the
+		// switch announced first — so leaving it behind would lose a caller's
+		// order number on some calls and not others, for a reason nobody
+		// could see. Merge rather than replace: the kept call's own data is
+		// not somebody else's to overwrite.
+		call.MergeUserData(movedUserData)
 		// One conversation has one originator: the earliest inbound leg.
 		// Both provisional calls named their own first leg the originator,
 		// and keeping two makes the CDR's from-number a coin toss.
@@ -749,8 +767,13 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 // it belongs to is not. Scoped to the agent on the moved leg, who is the only
 // one holding a stale id.
 func (c *Coordinator) announceMerge(ctx context.Context, keep uuid.UUID, moved []*Party) {
-	var callType events.CallType
-	if err := c.registry.Do(keep, func(call *Call) { callType = call.CallType }); err != nil {
+	var (
+		callType events.CallType
+		userData map[string]any
+	)
+	if err := c.registry.Do(keep, func(call *Call) {
+		callType, userData = call.CallType, call.UserData
+	}); err != nil {
 		return
 	}
 	for _, p := range moved {
@@ -764,6 +787,7 @@ func (c *Coordinator) announceMerge(ctx context.Context, keep uuid.UUID, moved [
 			CallType: callType,
 			PartyID:  &partyID,
 			AgentID:  &agentID,
+			UserData: userData,
 			Payload:  map[string]any{"reason": "CALL_MERGED"},
 		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
 	}
@@ -886,23 +910,30 @@ func (c *Coordinator) setMuted(ctx context.Context, callID, agentID uuid.UUID, m
 		return err
 	}
 
-	var changed *Party
+	var (
+		changed  *Party
+		callType events.CallType
+		userData map[string]any
+	)
 	if err := c.registry.Do(callID, func(call *Call) {
 		if p := call.PartyByChannel(channelID); p != nil {
 			p.IsMuted = muted
 			changed = p
 		}
+		callType, userData = call.CallType, call.UserData
 	}); err != nil {
 		return err
 	}
 	if changed != nil {
 		partyID := changed.PartyID
 		c.publish(ctx, events.Event{
-			Type:    events.TypePartyChanged,
-			CallID:  &callID,
-			PartyID: &partyID,
-			AgentID: &agentID,
-			Payload: map[string]any{"isMuted": muted},
+			Type:     events.TypePartyChanged,
+			CallID:   &callID,
+			CallType: callType,
+			PartyID:  &partyID,
+			AgentID:  &agentID,
+			UserData: userData,
+			Payload:  map[string]any{"isMuted": muted},
 		}, events.Scope{AgentIDs: []uuid.UUID{agentID}})
 	}
 	return nil

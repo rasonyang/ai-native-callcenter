@@ -959,11 +959,17 @@ func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 	ctx := t.Context()
+	// A leg being rung, which is a delivery: the caller exists first and the
+	// agent's leg names them. A lone agent leg is the originator of its own
+	// call and is dialling, not ringing — that is PARTY_DIALING's subject.
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound",
+		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
 	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
 		// What a browser phone's leg actually looks like: the destination is
 		// the registration token, and only dialed_user names the extension.
-		"Caller-Destination-Number": "g7bih4lv",
-		"variable_dialed_user":      agentExtension,
+		"Caller-Destination-Number":       "g7bih4lv",
+		"variable_dialed_user":            agentExtension,
+		"variable_cc_member_session_uuid": "caller-chan",
 	}))
 
 	waitFor(t, func() bool { return pub.has(events.TypePartyRinging) })
@@ -1343,5 +1349,85 @@ func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
 	if len(ev.UserData) != 0 {
 		t.Errorf("an inbound call arrived carrying %v — that belongs to another call",
 			ev.UserData)
+	}
+}
+
+// The contract says a call event repeats callType and userData so a screen-pop
+// needs no further request. Two PARTY_CHANGED publishes did not: on a live
+// call carrying business data, eight of ten events had it and these two came
+// through empty. Nothing broke, because the panel reads its cache — but the
+// promise was only true of the events that happened to keep it.
+func TestEveryCallEventRepeatsTheContextTheEnvelopePromises(t *testing.T) {
+	minted := uuid.New()
+	sent := map[string]any{"orderId": "9999000000000000"}
+
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+	c.AttachCallData(stashedData{minted: sent})
+
+	// A placed call whose agent leg then merges into it: the shape click-to-dial
+	// produces, and where the merge announcement is made.
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{
+			"variable_aicc_call_id": minted.String(),
+			"variable_dialed_user":  agentExtension,
+		}))
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "far-chan", "inbound",
+		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+	c.Handle(t.Context(), raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		map[string]string{"Other-Leg-Unique-ID": "far-chan"}))
+
+	var checked int
+	pub.mu.Lock()
+	seen := append([]events.Event(nil), pub.events...)
+	pub.mu.Unlock()
+	for _, ev := range seen {
+		if ev.Type != events.TypePartyChanged {
+			continue
+		}
+		checked++
+		if len(ev.UserData) == 0 {
+			t.Errorf("%s carried no userData; a consumer rendering from the envelope "+
+				"watches the call's context vanish and come back", ev.Type)
+		}
+		if ev.CallType == "" {
+			t.Errorf("%s carried no callType", ev.Type)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no PARTY_CHANGED was published, so this asserted nothing")
+	}
+}
+
+// A leg the agent placed themselves says it is dialling, once. Announcing it
+// as ringing as well says the same transition twice — and the second time in
+// the callee's words, which on an outgoing leg name the number being dialled
+// as the one doing the ringing. Being on the call is a separate fact and
+// still follows.
+func TestALegTheAgentPlacedIsNotAlsoAnnouncedAsRinging(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	pub := &capturingPublisher{}
+	agents := &presenceCalls{}
+	c := NewCoordinator(registry, nil, agents, pub)
+
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+
+	if !pub.has(events.TypePartyDialing) {
+		t.Fatal("the leg did not announce that it was dialling")
+	}
+	if pub.has(events.TypePartyRinging) {
+		ev, _, _ := pub.find(events.TypePartyRinging)
+		t.Errorf("the same leg was announced as ringing too: %v", ev.Payload)
+	}
+	agents.mu.Lock()
+	onCall := len(agents.steps)
+	agents.mu.Unlock()
+	if onCall == 0 {
+		t.Error("the agent was not put on the call; dropping the ringing event " +
+			"must not drop that with it")
 	}
 }
