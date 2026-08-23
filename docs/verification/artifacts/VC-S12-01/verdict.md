@@ -281,4 +281,7 @@ CDR: INBOUND|ANSWERED|NORMAL_CLEARING|bot_sec=12|talk_sec=161|bill_sec=177|queue
 启动对账读到了两个注册,却没能把 wei 镜像回 `Available`;真正让他恢复的像是话机自己的一次续注册。
 形态正是 C28 那段注释警告过的 ——
 *"an agent signing in at a perfectly good phone reads as unreachable until the phone happens to re-register"*。
-代价是这位主叫多等了一分钟。**只观察到一次,机制未查证**,先记在这里。
+代价是这位主叫多等了一分钟。**已立案 C39**,并已排除一种解释:`Registrations()` 没读错 ——
+同机现在报的是 `Ping-Status: Reachable`,而解析器只在显式 `Unreachable` 时才判不可达。
+余下两种候选(`ObserveDevice` 短路不镜像 / 与 `SyncSwitch` 的写入顺序竞态)日志分不出来,
+修法方向相反,故不猜;加一条能分辨二者的日志再重启一次即可定案,不需要真实通话。

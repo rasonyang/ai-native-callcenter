@@ -12,7 +12,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 18 项、余 14 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 18 项、余 15 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38 / C39;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1044,6 +1044,32 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   方向待定:要么人工阶段允许**补写**(把 DO NOTHING 换成有条件的 UPDATE,须先想清楚哪些列可覆盖),
   要么 bot recorder 在"腿是被我们自己关停杀死的"时不落终局行。**两条都要先想清楚再动 C21 的那把锁。**
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
+
+- **C39(new,2026-08-23 VC-S12-01 第二次重跑发现,未修;机制两说,未判定)**
+  **重启后坐席在交换机上被判 `On Break` 达 63 秒,而应用侧的注册对账只差 6 毫秒就读完了。**
+  ```
+  11:12:59.329  esl connected
+  11:12:59.368  (FS) Updated Agent agent-ben set status = On Break
+  11:12:59.377  agent presence mirrored to the switch  agents=3      ← SyncSwitch
+  11:12:59.388  (FS) Updated Agent agent-wei set status = On Break
+  11:12:59.394  registrations reconciled endpoints=2                 ← ObserveDevice ×2
+  11:14:02.328  (FS) Updated Agent agent-wei set status = Available   ← 63 秒后
+  ```
+  代价是**这位主叫多等了一分钟**才被派单 —— 而他正是被兜底救回来的那一通。
+  形态正是 C28 那段注释警告过的:*"an agent signing in at a perfectly good phone reads as
+  unreachable until the phone happens to re-register"* —— 真正让 wei 恢复的像是话机自己的续注册。
+  **不是 `Registrations()` 读错**:同一台机器现在 `sofia status profile internal reg` 报的是
+  `Ping-Status: Reachable`,而解析器只在**显式 `Unreachable`** 时才判不可达
+  (`registrations.go:71`),所以 `ObserveDevice(1008, true, true)` 本该映射成 `Available`。
+  **两种候选机制,日志分不出来,都没有证据**:
+  ① `ObserveDevice` 在"观测结果与已持久化的 presence 一致"时短路,不再镜像 ——
+     于是 `SyncSwitch` 先写下的 `On Break` 没人纠正;
+  ② `SyncSwitch` 与注册对账之间存在**写入顺序/异步竞态**(FS 侧的写发生在 .368 与 .388,
+     跨在应用的 .377 与 .394 两侧),后写的把 `Available` 盖回了 `On Break`。
+  **判定前不要改** —— 这两条的修法方向相反(一个要去掉短路,一个要调顺序或加重试)。
+  下一步:在 `ObserveDevice`/`mirrorStatus` 上加一条能分辨"短路了"与"写了但被盖"的日志,
+  再重启一次即可定案;不需要真实通话。
+  证据:`docs/verification/artifacts/VC-S12-01/verdict.md` 末节。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
