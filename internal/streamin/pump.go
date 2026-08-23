@@ -18,6 +18,10 @@ import (
 // enough that what survives is still worth transcribing.
 const queueDepth = 100
 
+// frameInterval is how much audio one frame carries, and therefore how long a
+// send may take before the pump is falling behind by definition.
+const frameInterval = 20 * time.Millisecond
+
 // silenceRMS is the level below which a frame counts as silence, and
 // silenceRun is how much of it ends an utterance. Both matter only where the
 // engine refuses to end one itself.
@@ -48,6 +52,24 @@ type pump struct {
 
 	sent    atomic.Int64
 	dropped atomic.Int64
+
+	// How the audio was lost, not merely how much. A hole in a transcript
+	// reads the same whichever way it happened, and the three ways want
+	// opposite fixes: the recogniser stalling for whole seconds at a time, the
+	// recogniser being steadily a little too slow for 50 frames a second, or
+	// the switch delivering in bursts this queue is too shallow to absorb.
+	//
+	// sendSlow counts sends that took as long as the frame they carried —
+	// past that the pump is losing ground by definition. sendMaxMs is the
+	// worst single send. dropRuns counts how many separate times dropping
+	// started, so two stalls and two hundred scattered losses stop looking
+	// alike.
+	sendSlow  atomic.Int64
+	sendMaxMs atomic.Int64
+	dropRuns  atomic.Int64
+	// isDropping belongs to the writer's goroutine alone: write is called from
+	// the one goroutine that splits the switch's stream.
+	isDropping bool
 
 	// ownsEndpointing drives the silence detector. Where the engine segments
 	// for itself, this stays false and no commit is ever sent.
@@ -100,9 +122,16 @@ func (p *pump) write(frame []byte) {
 	// commit is ever sent and no final ever arrives.
 	p.observe(frame)
 
-	for {
+	// A run of dropping ends when a frame goes in without having to evict one,
+	// not merely when the retry after an eviction fits: the retry always fits,
+	// so counting that as recovery would make one stall look like a hundred
+	// separate ones.
+	for first := true; ; first = false {
 		select {
 		case p.frames <- frame:
+			if first {
+				p.isDropping = false
+			}
 			return
 		default:
 		}
@@ -111,6 +140,10 @@ func (p *pump) write(frame []byte) {
 		select {
 		case <-p.frames:
 			p.dropped.Add(1)
+			if !p.isDropping {
+				p.isDropping = true
+				p.dropRuns.Add(1)
+			}
 		default:
 			// Drained by the reader in between; the next send will fit.
 		}
@@ -123,13 +156,30 @@ func (p *pump) run() {
 		case <-p.done:
 			return
 		case frame := <-p.frames:
-			if err := p.session.SendAudio(frame); err != nil {
+			startedAt := time.Now()
+			err := p.session.SendAudio(frame)
+			// Timed on the way out rather than sampled: what this is for is the
+			// rare send, and an average would hide exactly the stall that
+			// empties two seconds of queue in one go.
+			p.recordSend(time.Since(startedAt))
+			if err != nil {
 				p.log.Warn("transcribe: audio rejected",
 					"speaker", p.speaker, "provider", p.provider, "error", err)
 				continue
 			}
 			p.sent.Add(1)
 		}
+	}
+}
+
+// recordSend accounts for how long the recogniser took to accept one frame.
+// Called from the send loop alone, so the max is a plain load and store.
+func (p *pump) recordSend(took time.Duration) {
+	if took >= frameInterval {
+		p.sendSlow.Add(1)
+	}
+	if ms := took.Milliseconds(); ms > p.sendMaxMs.Load() {
+		p.sendMaxMs.Store(ms)
 	}
 }
 
@@ -225,7 +275,15 @@ func (p *pump) close(ctx context.Context) {
 			// whoever later scrapes a counter.
 			p.log.Warn("transcribe: audio was dropped for this speaker",
 				"speaker", p.speaker, "provider", p.provider,
-				"sent", sent, "dropped", dropped)
+				"sent", sent, "dropped", dropped,
+				// Which of the three shapes this was. A couple of runs with a
+				// large maxSendMs is the recogniser stalling; drops spread
+				// over many runs with no slow sends is the switch arriving in
+				// bursts; slow sends in proportion to the audio is a
+				// recogniser that is simply not keeping up.
+				"dropRuns", p.dropRuns.Load(),
+				"slowSends", p.sendSlow.Load(),
+				"maxSendMs", p.sendMaxMs.Load())
 		}
 		_ = p.session.Close(ctx)
 	})
