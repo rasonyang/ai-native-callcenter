@@ -1238,7 +1238,8 @@ cases:
     scenario: S14
     layer: app-state
     precondition: "ADMIN 会话可用(/tmp/vc-admin.jar);
-      一个未被占用的分机号(建议 1099)与一部可改配置的话机"
+      一个未被占用的分机号(建议 1099)与一部可改配置的话机;
+      一名**当前没有绑定分机**的坐席(2026-08-22 与本轮都用 amy)供守卫那一段临时绑定"
     steps:
       - who: agent
         do: "建分机:执行 collect 第 1、2 条"
@@ -1247,37 +1248,42 @@ cases:
       - who: agent
         do: "执行 collect 第 3、4 条判定注册与 Lua 目录一致"
       - who: agent
-        do: "执行第 5 条尝试删除一个**已被坐席绑定**的分机,判定守卫。
-          ⚠ **不要用 1008**(wei 的在用话机,且 S14-02/S14-04/S12-04 还要用他):外键是
-          `ON DELETE SET NULL`,照原文执行会**当场把 wei 静默解绑**。改用一个**未绑定的坐席**
-          (2026-08-22 用的是 amy)临时绑到本用例自建的 1099 再删 —— 守卫要挡的是
-          『存在绑定』,与绑的是谁无关,断言等价且事后零残留"
+        do: "执行 collect 第 5–8 条判定删除守卫:把**未绑定的坐席 amy** 临时绑到本用例自建的 1099,
+          删它,读回 amy 的绑定,再解绑。
+          ⚠ **不要用 1008**(wei 的在用话机,且 S14-02/S14-04/S12-04 还要用他):
+          守卫要挡的是『存在绑定』,与绑的是谁无关,用自建分机断言等价且事后零残留。
+          绑定用 psql 直写是**故意**的:这是夹具,而被测的守卫在数据库上,
+          经不经过 API 建立的绑定对它没有区别。
+          ⚠ 按 **username** 定位坐席,不要按 `callcenter_name` —— 后者是 `agent-amy` 不是 `amy`,
+          写错不会报错,只会**一行都不更新**,于是删除成功而看起来像守卫失效"
       - who: agent
-        do: "执行第 6、7 条删除 1099 并确认目录随之失效"
+        do: "执行第 9、10 条删除已解绑的 1099 并确认目录随之失效"
     collect:
-      - "curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/extensions -d '{\"number\":\"1099\",\"password\":\"vc-probe-pass\",\"displayName\":\"VC Probe\",\"isEnabled\":true}' -w '\\nhttp=%{http_code}\\n'"
+      - "curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/extensions -d '{\"number\":\"1099\",\"password\":\"vc-probe-pass\",\"displayName\":\"VC Probe\"}' -w '\\nhttp=%{http_code}\\n'"
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select number, display_name from luacc.directory where number='1099'\""
       - "/usr/local/freeswitch/bin/fs_cli -x 'show registrations' | awk -F',' 'NR>1&&NF>3{print $1}' | grep -c 1099"
       - "/usr/local/freeswitch/bin/fs_cli -x 'sofia status profile internal reg' | grep -c 1099 || true"
-      - "EXT1008=<1008 的 extensionId>; curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/extensions/$EXT1008 -w '\\nhttp=%{http_code}\\n' | head -c 200"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"update agents set default_extension_id=(select id from extensions where number='1099') where user_id=(select id from users where username='amy')\""
+      - "EXT1099=<1099 的 extensionId>; curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/extensions/$EXT1099 -w '\\nhttp=%{http_code}\\n' | head -c 300"
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select u.username, a.default_extension_id is not null as still_bound from agents a join users u on u.id=a.user_id where u.username='amy'\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"update agents set default_extension_id=null where user_id=(select id from users where username='amy')\""
       - "EXT1099=<1099 的 extensionId>; curl -s -o /dev/null -w 'delete 1099 http=%{http_code}\\n' -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -X DELETE http://127.0.0.1:8080/api/v1/extensions/$EXT1099"
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from luacc.directory where number='1099'\""
     expect: |
       建:201;`luacc.directory` 立刻可查到 1099 —— Lua 目录是视图,不需要 reload
         (aicc_xml.lua:103 按 number 查该视图)
-      ⚠ **请求体必须显式带 `isEnabled: true`**,否则建出来的分机是**停用**的:
-        `isEnabled` 在契约里可选,decode 进普通结构体后省略即 Go 零值 false,列默认值 true
-        永不生效;而 luacc.directory 带 `WHERE e.is_enabled`,该分机**永远注册不上**而 API 只回 201。
-        这是缺陷 **C29**,不是用例的前提 —— C29 修好后这一条可去掉。
-        `kind` 省略取 `AGENT`(2026-08-22 实测),不必显式给
+      **请求体不带 `isEnabled`**,建出来的分机必须是**启用**的 —— 省略即取契约声明的默认值 true,
+        不是 Go 零值 false。`luacc.directory` 带 `WHERE e.is_enabled`,所以第 2 条查得到这一行
+        本身就是"它是启用的"的证据;查不到即 **C29 回归**(2026-08-23 修复前正是查不到,
+        而 API 照样回 201,分机永远注册不上)。`kind` 省略取 `AGENT`(2026-08-22 实测),不必显式给
       话机注册成功:show registrations 含 1099
-      删一个**被坐席绑定**的分机:**应当拒绝**,4xx 且错误码可辨(409/CONFLICT 一类)
-        —— **2026-08-22 实测不成立,已立案 C30**:返回 **204**,分机行删除,
-        该坐席的 default_extension_id 被**静默置 NULL**(外键 ON DELETE SET NULL,不是 RESTRICT),
-        应用层从 handler 到 service 无任何检查。契约的 DELETE 也只声明 204/400/401/403/404/503,
-        **没有 409** —— 修复须先改契约(spec-first)。
-        本条**维持为断言不降级**(note 原文:"不要为了让用例通过而把 expect 降级成'删除成功'")
-      删 1099:204;删后 `luacc.directory` 查不到 —— 目录随之失效,该分机再也注册不上
+      删一个**被坐席绑定**的分机(amy 临时绑到 1099):**拒绝** ——
+        **409**,错误码 `EXTENSION_ASSIGNED_TO_AGENT`,报文里说得出该怎么办(先解绑);
+        且 amy 的 `default_extension_id` **仍然非空**(第 8 条 still_bound = t)。
+        守卫是外键 `fk_agents_extensions ON DELETE RESTRICT`(migration 00015),
+        不是 service 预检 —— 所以走 psql 直删也一样被挡。
+        (2026-08-22 首跑此处返回 **204** 并静默解绑,即 **C30**;2026-08-23 已修)
+      解绑后删 1099:204;删后 `luacc.directory` 查不到 —— 目录随之失效,该分机再也注册不上
       坐席会话执行同样的建/删:403(写操作是 ADMIN 权限,与 C23① 同族)
     failure_looks_like: |
       删掉一个坐席正在用的分机而系统照单全收 —— 那名坐席的话机下次重注册就失败,
@@ -1286,11 +1292,12 @@ cases:
       等于一个没有归属、鉴权仍然有效的分机长期存在。
     evidence_dir: docs/verification/artifacts/VC-S14-01/
     status: FAIL  # 2026-08-22 执行:建 201、话机注册成功(Telephone 1.6/UDP)、坐席建分机 403、删后目录清空且续注册被拒(03:58:37 注册 3→0)——这些都对。两个缺陷:①C30 删除守卫不存在,删一个【被坐席绑定且话机在注册】的分机返回 204 并静默解绑(外键是 ON DELETE SET NULL 不是 RESTRICT;契约 DELETE 连 409 都没声明);②C29 建分机不显式写 isEnabled 就建出停用的(可选布尔取 Go 零值,列默认 true 永不生效),luacc.directory 带 WHERE is_enabled 故该分机永远注册不上而 API 只回 201。note① 已解:字段名草案猜对,kind 省略取 AGENT。执行偏离:守卫测试改用未绑定的 amy 临时绑 1099,不动 wei 的 1008
-    refs: ["internal/httpapi/catalog_handlers.go:48", "internal/httpapi/catalog_handlers.go:67", "freeswitch/scripts/aicc_xml.lua:103", "internal/store/migrations/00002_telephony.sql:171"]
-    note: "【执行前须落实两处】①创建请求体的字段名(number/password/displayName 为草案假设,
-      以契约 Extension schema 为准);②删除已绑定分机的**期望行为本身尚未静态确认**——
-      若实测直接删成功,那是**新缺陷**,按实测立案并把本条 expect 改写为留证。
-      不要为了让用例通过而把 expect 降级成'删除成功'"
+    refs: ["internal/catalog/types.go:35-48", "internal/httpapi/catalog_handlers.go:48-55", "internal/httpapi/catalog_handlers.go:67-69", "internal/httpapi/catalog_handlers.go:203-206", "internal/httpapi/errors.go:82-90", "internal/store/migrations/00015_an_extension_in_use_cannot_be_deleted.sql", "freeswitch/scripts/aicc_xml.lua:103", "internal/store/migrations/00002_telephony.sql:171"]
+    note: "【两处 note 已解,保留经过】①创建请求体的字段名(草案假设)2026-08-22 实测猜对,
+      `kind` 省略取 AGENT;②删除已绑定分机的期望行为当时尚未静态确认,实测**直接删成功**,
+      按当时约定立案为 C30 而**没有把 expect 降级成'删除成功'** —— 两条失败断言原样留着,
+      2026-08-23 修完(C29 取默认值、C30 外键改 RESTRICT + 409)后原样重跑。
+      本轮修订把 C29 那条警示改回断言:请求体**不带** isEnabled,建出的分机必须是启用的"
 
   - id: VC-S14-02
     scenario: S14
