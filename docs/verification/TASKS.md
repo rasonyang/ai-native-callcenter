@@ -5,11 +5,11 @@
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
 >
-> **当前状态(2026-08-22)**:账本 **39 case —— 36 PASS / 3 FAIL / 0 TODO**。
+> **当前状态(2026-08-23)**:账本 **39 case —— 37 PASS / 2 FAIL / 0 TODO**。
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
-> 余下 3 条 FAIL:**VC-S9-01→C14**(ASR 丢帧,唯一需要开放式调查的)、
-> **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)、
-> **VC-S14-01→C29/C30** —— **两条均已于 2026-08-23 修复,待现场重跑**(可选布尔取默认值;删分机改由外键 RESTRICT 挡住,409)。
+> 余下 2 条 FAIL:**VC-S9-01→C14**(ASR 丢帧,唯一需要开放式调查的)、
+> **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)。
+> **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
 > **C 系列已修 15 项、余 12 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C31 / C33;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
@@ -682,6 +682,10 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   编辑时 `setEditing(row)` 整行带上 —— SPA 从来没触发过这个洞,修后 PUT 也始终显式发送。
   **后续(未做)**:catalog 组的请求体仍直接解到 `catalog.*` 而非生成的 `api.*` 类型。
   CLAUDE.md 指的方向是后者,但那是一次跨 18 个字段的搬迁,验收途中不动;留作后续。
+  **现场复验(2026-08-23,VC-S14-01 重跑)**:`POST /extensions` 不带 `isEnabled` → 201 且
+  `isEnabled:true`,`luacc.directory` 查得到,话机随后经 WSS 真的注册上 ——
+  8-22 同一条命令建出的是停用分机、目录零行、永远注册不上。
+  同一轮 `POST /queues` 不带布尔 → `isEnabled:true`、`isRecordingEnabled:true`,队列侧同样成立。
 - **C30(new,2026-08-22 VC-S14-01 执行发现,未修)** **删除分机没有任何守卫,坐席被静默解绑。**
   `DeleteExtension`(`catalog_handlers.go:67-69`)→ `catalog/service.go:128-130` → store,
   **中间没有任何检查**;唯一可能的保护是外键,而它是
@@ -718,6 +722,19 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   `AICC_SEED=fresh` 的删除顺序是先 users(级联 agents)后 extensions,不受 RESTRICT 影响。
   `make api-lint` 通过;`api-breaking` **0 error / 303 warning**
   (新增 enum 值在每个错误响应上各报一次 warning,与历次加码同形),`--fail-on ERR` 放行。
+  **【重跑当场又抓到一处并修掉 —— `10ca069`】** 守卫成立,**但报错报错了**:
+  第一次删除返回的是 **503 `STORAGE_DOWN`** 而不是 409 —— 正是上面那段注释里写着要避免的那件事。
+  根因:**显式 `ON DELETE RESTRICT` 抛的是 SQLSTATE `23001 restrict_violation`**,
+  不是 `23503 foreign_key_violation`(后者用于 `NO ACTION` 与插入侧);边界只认 23503,遂落进 default。
+  **单元测试没拦住的原因值得单记**:那条测试是我用**自己以为的错误码**造出 `PgError` 喂给 handler 的,
+  与服务端犯同一个错,于是两边一致通过 —— **桩件不会在世界的问题上反驳你**。
+  现改成两个 SQLSTATE 都认,测试里的 code 与 message **抄自这次真实失败**;
+  摘除 23001 那一支即报 `SQLSTATE 23001: http = 503, want 409`。
+  这是"现场重跑"相对"跑测试"的价值:代码、单测、契约三方一致,却一致地错着。
+  **现场复验(2026-08-23)**:amy 绑到 1099 后删 → **409 `EXTENSION_ASSIGNED_TO_AGENT`**,
+  报文写明先解绑,amy 仍绑着、分机行与注册都还在;`psql` 直删同样被拒(证明守卫不在 handler);
+  解绑后删 → 204,`luacc.directory` 归零;坐席会话建分机 403。
+  夹具改用 psql 直写,**交换机侧零残留**(对比 8-22 走 API 绑定留下指向已删分机的悬空 contact,事后需清理)。
   **同族疑点(未取证,未立号)**:删队列没有对应守卫 —— `queue_agents` 是 `ON DELETE CASCADE`
   (静默清空配员),`dids.fallback_queue_id` 是 `ON DELETE SET NULL`(号码静默失去兜底队列)。
   形态与本条相同但**尚未实测**,若要比照办理需另起一条用例取证,不夹带进本条。
@@ -815,7 +832,14 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   "RONA 不等待"、"SLA 门限 0 秒"、"放弃呼叫立即丢弃"。
   与 C29 的差别在于:布尔那半是**建出来就不通**(Lua 查不到),整数这半是**建出来就在跑,只是参数不是文档说的那个**,
   更难被发现。**未修 —— 是否修、修到哪一层由 owner 定**;本条只立案,不夹带进 C29。
-  取证:见 VC-S14-01 重跑记录(建队列不带这三个字段,读回三个 0)。
+  **已取证(2026-08-23,VC-S14-01 重跑顺带)**:`POST /queues {"name":…,"extNumber":"7099"}`
+  → 201,`discardAbandonedAfterSec:0` / `ronaDelaySec:0` / `slaThresholdSec:0`,
+  而同一响应的 `isEnabled` / `isRecordingEnabled` 都是 true —— 布尔那半已修,整数这半没有。
+  **库里已有真实受害者**:`support-zh` 现为 `0|0|0`,`support-en` 为 `60|10|20`,
+  而种子对两条队列用的是**同一条 INSERT**(`seed.go:252`,只显式写 `sla_threshold_sec=20`)——
+  说明 support-zh 是后来被某次 API 写操作抹平的。
+  **连带**:凡在 support-zh 上量过的 SLA 数字,门限都是 **0 秒**而不是 20 秒,读旧结论时要当心。
+  证据:`docs/verification/artifacts/VC-S14-01/verdict.md`。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

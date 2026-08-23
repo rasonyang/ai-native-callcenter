@@ -106,3 +106,114 @@ callcenter_config agent del agent-amy                           → +OK
 **教训**:临时绑一个坐席到探针分机,副作用不止在应用库里 —— 绑定会把这个坐席
 **镜像进交换机**,而随后删掉分机不会把镜像撤回去。下次做同类替身测试,
 收尾要连交换机侧一起复查,不能只看应用库。
+
+---
+
+## 重跑 —— 2026-08-23 09:16–09:36(C29 修于 `4b371de`,C30 修于 `42d7fc2`+`10ca069`)
+
+两条失败断言**原样重跑**,没有一条被改软。用例本身只改了一处:创建请求体**去掉**了
+`isEnabled: true` —— 那是当初为绕开 C29 加的,并写明"C29 修好后这一条可去掉"。
+现在"省略"本身就是被断言的行为。
+
+### C29 那半:不带 `isEnabled` 建出来的分机是启用的
+
+```
+POST /extensions {"number":"1099","password":"…","displayName":"VC Probe"}
+→ 201  {"id":"01a02c30-…","number":"1099","kind":"AGENT","isEnabled":true,…}
+
+luacc.directory where number='1099'  → 1099|VC Probe        （8-22 首跑:0 行）
+show registrations                    → 1099 已注册（WSS，192.168.31.55:50938）
+```
+
+`luacc.directory` 带 `WHERE e.is_enabled`,所以**查得到这一行**就是"它是启用的"的证据 ——
+不需要另取一条断言。话机随后真的注册上了,这是这半修复的完整闭环:
+8-22 那次建出来的分机 Lua 查不到,话机永远注册不上,而 API 一样回 201。
+
+`kind` 仍然省略,仍然取 `AGENT` —— 与 8-22 一致。
+
+### C30 那半:删一个坐席正在用的分机被拒
+
+| 步骤 | 8-22 首跑 | 8-23 重跑 |
+|---|---|---|
+| amy 绑到 1099 后 DELETE | **204** | **409** `EXTENSION_ASSIGNED_TO_AGENT` |
+| 报文 | (无) | `an agent has that extension as their phone; unbind them before deleting it` |
+| amy 的绑定 | **被静默置 NULL** | **仍然绑着**(still_bound = t) |
+| 分机行 | 已删除 | **还在**,注册也没断 |
+| 解绑后 DELETE | —— | 204 |
+| 删后 `luacc.directory` | 0 | 0 |
+| 坐席会话建分机 | 403 | 403 `FORBIDDEN` / requiredRole ADMIN |
+
+守卫是外键而不是 service 预检,所以**不走 API 也一样挡得住** —— 顺手证了一次:
+
+```
+psql> delete from extensions where number='1099';
+ERROR:  update or delete on table "extensions" violates RESTRICT setting of
+        foreign key constraint "fk_agents_extensions" on table "agents"
+DETAIL:  Key (id)=(01a02c30-…) is referenced from table "agents".
+```
+
+### 现场抓到的第二个缺陷:守卫成立,但报错报错了
+
+**第一次跑 collect 第 6 条,返回的是 `503 STORAGE_DOWN`,不是 409。**
+删除确实被挡住了(分机还在、amy 还绑着),但操作员收到的是"存储故障" ——
+正是修复代码自己的注释里写着要避免的那件事:*"a guard that reports itself as storage down
+teaches the operator to retry, and retrying will never work."*
+
+根因在日志里一眼可见:
+
+```
+msg="catalog request failed" error="ERROR: update or delete on table \"extensions\"
+violates RESTRICT setting of foreign key constraint \"fk_agents_extensions\"
+on table \"agents\" (SQLSTATE 23001)"
+```
+
+**23001 `restrict_violation`,不是 23503 `foreign_key_violation`。**
+PostgreSQL 对**显式 `ON DELETE RESTRICT`** 用前者,`NO ACTION` 与插入侧才用后者。
+边界只认 23503,于是落进 default 变成 503。
+
+**为什么单元测试没拦住**:那条测试是我**用自己以为的错误码**造出来的 `PgError` 喂给 handler 的 ——
+它和服务端犯的是同一个错,于是两边一致通过。**桩件不会在世界的问题上反驳你。**
+现已改成两个 SQLSTATE 都认,测试里的 code 与 message **抄自这次真实失败**;
+摘除 23001 那一支,测试报 `SQLSTATE 23001: http = 503, want 409`。修在 `10ca069`。
+
+这一条是"现场重跑"相对"跑测试"的全部价值所在:代码、单测、契约三方一致,
+却一致地错着,只有真库能说话。
+
+### 收尾:这次交换机侧零残留
+
+8-22 那次把 amy 绑到 1099 是**走 API** 的,于是她被镜像进 mod_callcenter,
+删掉分机后留下一个指向已删分机的悬空 contact,事后专门清理过(见上一节)。
+本轮账本明确改成 **psql 直写夹具**,复查证实没有再产生镜像:
+
+```
+callcenter_config agent list → agent-ben / uiagent / agent-wei   （无 amy）
+callcenter_config tier list  → 3 条,与清理后一致
+```
+
+应用库同样干净:1099 已删、amy 未绑定、探针队列已删。
+
+### 顺带取到的证据:C33(同型缺陷的整数版)
+
+修 C29 时读代码发现、本轮实测坐实 —— **不带那三个整数字段建队列,建出来是 0,不是列默认值**:
+
+```
+POST /queues {"name":"vc-c33-probe","extNumber":"7099","displayName":"C33 Probe"}
+→ 201  discardAbandonedAfterSec:0   ronaDelaySec:0   slaThresholdSec:0
+        列默认值分别是            60             10              20
+   同一响应:isEnabled:true  isRecordingEnabled:true  ← 布尔那半已经好了
+```
+
+机制与 C29 完全相同(`validate()` 不给这三个兜底,INSERT 又把列名一一写出,列默认永不生效),
+差别在于**后果的可见性**:布尔那半是"建出来就不通",整数这半是"建出来就在跑,只是参数不是文档说的那个"。
+
+**库里已经有一个真实受害者**:`support-zh` 现在是 `0|0|0`,而 `support-en` 是 `60|10|20` ——
+种子对两条队列用的是**同一条 INSERT**(`seed.go:252`,只显式写 `sla_threshold_sec=20`),
+所以 support-zh 是后来被某次 API 写操作抹平的。
+**连带**:凡在 support-zh 上量过的 SLA 数字,门限都是 **0 秒**,不是 20 秒。
+
+C33 **未修**,只立案,不夹带进 C29 的修复。探针队列已删除。
+
+### 判定
+
+**PASS。** 两条断言各自成立且都不是靠改软过的;C30 那半在重跑当场又暴露并修掉了报错映射的错误,
+修完再跑才算数。C33 是本轮的新增留证,不影响本条判定。
