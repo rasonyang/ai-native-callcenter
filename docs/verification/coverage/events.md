@@ -8,7 +8,7 @@
 
 | 项目 | producer 位置 | consumer 位置 | 覆盖场景 | 证据等级 | 备注 |
 |---|---|---|---|---|---|
-| PARTY_DIALING | internal/telephony/coordinator.go(addParty,2026-08-23 W7) | 仅通用分发(events.ts:54;use-event-stream.ts:25 使 CALLS 缓存失效) | COVERED(生产者) | [FACT] | **2026-08-23 W7 补上生产者**:发起腿(`Role == ORIGINATOR`,以 DIALING 创建)在 addParty 时宣告。作用域同其它 leg 事件——有坐席则只发给他本人,无坐席(主叫自己的腿)则不进任何坐席的流,只有主管看得到。此前订阅方看到的第一条永远是 PARTY_ESTABLISHED,party 一出现就已在通话,FSM 的起点在流上隐形 |
+| PARTY_DIALING | internal/telephony/coordinator.go(addParty,2026-08-23 W7) | 仅通用分发(events.ts:54;use-event-stream.ts:25 使 CALLS 缓存失效) | COVERED(生产者) | [FACT] | **2026-08-23 W7 补上生产者**:发起腿(`Role == ORIGINATOR`,以 DIALING 创建)在 addParty 时宣告。作用域同其它 leg 事件——有坐席则只发给他本人,无坐席(主叫自己的腿)则不进任何坐席的流,只有主管看得到。此前订阅方看到的第一条永远是 PARTY_ESTABLISHED,party 一出现就已在通话,FSM 的起点在流上隐形。载荷取**本腿自己的号 + 目的号**(不是 PARTY_RINGING 那对被叫视角的号),且目的号仅在其为数字时下发 —— 浏览器话机被拨的地址是注册令牌(实测 `doskp0mj`)。三通现场分机互拨验证 |
 | PARTY_RINGING | internal/telephony/coordinator.go:404-417(addParty,坐席腿) | web/src/lib/use-event-stream.ts:25(CALLS 失效→软电话/主管视图刷新) | S4, S5 | [FACT] | 仅在"腿投递给已签入坐席"时发布并附 screen-pop 上下文;非坐席腿的 RINGING 不发布 |
 | PARTY_ESTABLISHED | internal/telephony/registry.go:336(transition on CHANNEL_ANSWER) | use-event-stream.ts:25 | S1, S4, S7 | [FACT] | payload=role/state(registry.go:405) |
 | PARTY_HELD | internal/telephony/registry.go:338(CHANNEL_HOLD) | use-event-stream.ts:25 | S7 | [FACT] | |
