@@ -345,8 +345,38 @@ func (s *Service) EndWrapUp(ctx context.Context, agentID uuid.UUID) (Presence, e
 	return s.Ready(ctx, agentID)
 }
 
+// BenchForNoAnswer is RingNoAnswer for the switch path, which has nothing to
+// do with a refusal and nowhere to report one: by the time this arrives the
+// queue has already stopped offering to the agent.
+func (s *Service) BenchForNoAnswer(ctx context.Context, agentID uuid.UUID) {
+	if _, err := s.RingNoAnswer(ctx, agentID); err != nil {
+		slog.WarnContext(ctx, "could not bench an agent the switch stopped offering to",
+			"agentId", agentID, "error", err)
+	}
+}
+
 // RingNoAnswer takes an agent out of routing after they ignored a call.
+//
+// Two guards, and both are about what the switch's notification can and cannot
+// mean. The switch benches an agent by setting them On Break, and so do we —
+// this service mirrors its own presence with the same word — so the
+// notification arrives for both, and the difference has to be read from what
+// we already know about the agent.
+//
+// Still READY: an agent who is already not taking calls has nothing to change,
+// which is also what stops our own mirror write from echoing back in here as a
+// fresh missed call.
+//
+// Reachable: ringing out is something only a working phone can do. A READY
+// agent whose phone has gone unreachable is mirrored to the switch as On Break
+// on purpose (C28) — losing a phone says nothing about their intent — and
+// reading that back as "they ignored a call" would take their READY away for
+// a reason that was never theirs.
 func (s *Service) RingNoAnswer(ctx context.Context, agentID uuid.UUID) (Presence, error) {
+	current := s.Presence(agentID)
+	if current.CurrentState() != StateReady || !current.IsRegistered || !current.IsDeviceInService {
+		return current, nil
+	}
 	return s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
 		return p.RingNoAnswer(s.now())
 	})

@@ -18,9 +18,10 @@ import (
 // because the order is load-bearing: an agent still marked on a call derives
 // ON_CALL, which outranks WRAP_UP.
 type presenceCalls struct {
-	mu    sync.Mutex
-	steps []string
-	calls []uuid.UUID
+	mu      sync.Mutex
+	steps   []string
+	calls   []uuid.UUID
+	benched []uuid.UUID
 }
 
 func (p *presenceCalls) AgentAtExtension(ext string) (uuid.UUID, bool) {
@@ -40,6 +41,12 @@ func (p *presenceCalls) SetOnCall(_ context.Context, _ uuid.UUID, onCall bool) {
 		return
 	}
 	p.steps = append(p.steps, "offCall")
+}
+
+func (p *presenceCalls) BenchForNoAnswer(_ context.Context, agentID uuid.UUID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.benched = append(p.benched, agentID)
 }
 
 func (p *presenceCalls) BeginAfterCallWork(_ context.Context, agentID, callID uuid.UUID) {

@@ -20,6 +20,11 @@ import (
 type AgentLookup interface {
 	AgentAtExtension(extensionNumber string) (uuid.UUID, bool)
 	AgentByCallcenterName(name string) (uuid.UUID, bool)
+	// BenchForNoAnswer takes an agent out of routing after the switch benched
+	// them for letting delivered calls ring out. Fire and forget: the switch
+	// has already stopped offering to them, and what it means for their
+	// presence is ours to decide, not something to report back.
+	BenchForNoAnswer(ctx context.Context, agentID uuid.UUID)
 	SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
 	// BeginAfterCallWork starts an agent's wrap-up for the call whose agent
 	// leg just ended. Fire and forget: a call is over whether or not presence
@@ -180,6 +185,9 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.adopt(ctx, ev)
 	case KindChannelBridge:
 		c.join(ctx, ev)
+	case KindQueueAgentStatus:
+		c.agentBenchedBySwitch(ctx, ev)
+
 	case KindQueueAgentOffered:
 		c.offerToAgent(ctx, ev)
 	}
@@ -506,6 +514,36 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	// written to the database, published to nobody, the agent's panel empty
 	// for the whole conversation.
 	c.announceAudience(keep)
+}
+
+// agentBenchedBySwitch turns the queue's own decision to stop offering to an
+// agent into that agent's presence.
+//
+// mod_callcenter counts the calls an agent lets ring out and, at the limit,
+// sets them to the queue's agent_no_answer_status — On Break. That is the
+// switch telling us something happened, not deciding what it means: an agent
+// benched on the switch while still READY in the application is the state
+// VC-S5-01 found live, where the two sides disagreed and the next presence
+// mirror pushed the agent straight back into rotation.
+//
+// So the notification comes here and the application makes the transition,
+// which then mirrors back down. Whether this particular On Break is the
+// switch's own or the echo of ours is decided in the presence service, which
+// is the only place that knows what it already believes.
+func (c *Coordinator) agentBenchedBySwitch(ctx context.Context, ev SwitchEvent) {
+	if c.agents == nil || ev.AgentName == "" {
+		return
+	}
+	if !strings.EqualFold(strings.TrimSpace(ev.AgentStatus), "On Break") {
+		return
+	}
+	agentID, ok := c.agents.AgentByCallcenterName(ev.AgentName)
+	if !ok {
+		return
+	}
+	slog.InfoContext(ctx, "the switch benched an agent for unanswered calls",
+		"agent", ev.AgentName, "agentId", agentID, "queue", ev.Queue)
+	c.agents.BenchForNoAnswer(ctx, agentID)
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an

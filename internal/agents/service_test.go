@@ -574,3 +574,91 @@ func TestAnAgentTheSwitchLearnsAboutComesWithItsRoutingGuards(t *testing.T) {
 		t.Error("the switch's wrap-up timer was not reset")
 	}
 }
+
+// The switch benches an agent by setting them On Break, and so do we. Both
+// arrive here as the same notification, so what separates them is what this
+// service already believes about the agent.
+func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
+	t.Run("a ready agent at a working phone is taken out of routing", func(t *testing.T) {
+		svc, _, _, pub, agentID := newTestService(t)
+		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		svc.ObserveDevice(t.Context(), "1008", true, true)
+		if _, err := svc.Ready(t.Context(), agentID); err != nil {
+			t.Fatalf("ready: %v", err)
+		}
+
+		got, err := svc.RingNoAnswer(t.Context(), agentID)
+		if err != nil {
+			t.Fatalf("ring-no-answer: %v", err)
+		}
+		if got.CurrentState() != StateNotReady || got.Reason != ReasonSystem {
+			t.Errorf("presence = %s/%s, want NOT_READY/SYSTEM — a phone that is not "+
+				"being answered has to stop absorbing the queue",
+				got.CurrentState(), got.Reason)
+		}
+		if !hasType(pub.types(), events.TypeAgentNotReady) {
+			t.Error("nothing was published; the agent's own screen would not say why " +
+				"they stopped receiving calls")
+		}
+	})
+
+	t.Run("our own mirror echoing back changes nothing", func(t *testing.T) {
+		svc, _, _, _, agentID := newTestService(t)
+		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		svc.ObserveDevice(t.Context(), "1008", true, true)
+		if _, err := svc.Ready(t.Context(), agentID); err != nil {
+			t.Fatalf("ready: %v", err)
+		}
+		if _, err := svc.RingNoAnswer(t.Context(), agentID); err != nil {
+			t.Fatalf("first: %v", err)
+		}
+		before := svc.Presence(agentID)
+
+		// The transition mirrors On Break down to the switch, which announces
+		// it back. Reading that as a second missed call would restart the
+		// clock on an agent who is already benched.
+		if _, err := svc.RingNoAnswer(t.Context(), agentID); err != nil {
+			t.Fatalf("echo: %v", err)
+		}
+		if got := svc.Presence(agentID); got.EnteredAt != before.EnteredAt {
+			t.Error("the echo was taken for a fresh miss and moved the agent again")
+		}
+	})
+
+	t.Run("a lost phone is not an ignored call", func(t *testing.T) {
+		svc, _, _, _, agentID := newTestService(t)
+		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+			t.Fatalf("login: %v", err)
+		}
+		if _, err := svc.Ready(t.Context(), agentID); err != nil {
+			t.Fatalf("ready: %v", err)
+		}
+		// The phone goes. We mirror On Break on purpose — the switch must not
+		// keep offering — while their READY stands, because losing a phone
+		// says nothing about their intent (C28).
+		svc.ObserveDevice(t.Context(), "1008", false, false)
+
+		got, err := svc.RingNoAnswer(t.Context(), agentID)
+		if err != nil {
+			t.Fatalf("ring-no-answer: %v", err)
+		}
+		if got.CurrentState() != StateReady {
+			t.Errorf("state = %s, want READY — the On Break we mirrored for an "+
+				"unreachable phone was read back as the agent ignoring a call, "+
+				"and it cost them a state they never changed", got.CurrentState())
+		}
+	})
+}
+
+func hasType(types []events.Type, want events.Type) bool {
+	for _, t := range types {
+		if t == want {
+			return true
+		}
+	}
+	return false
+}
