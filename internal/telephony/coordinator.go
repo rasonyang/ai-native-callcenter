@@ -595,12 +595,24 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 		// call is always the one absorbed.
 		absorb := otherID
 		switch {
+		// A minted identity outranks everything else, and it has to be asked
+		// first. The rule below it — an agent-only call is the provisional one
+		// and gives way — is right for a queue delivery, where the agent's leg
+		// arrived on a call of its own. It is exactly wrong for a call the
+		// agent placed: at the moment that call bridges it holds nothing but
+		// the agent's own leg, so it read as provisional and gave way to the
+		// far end's, and the identity everything else refers to was the one
+		// discarded. Reidentify then put it back a few milliseconds later,
+		// which is why one click-to-dial announced two merges and told the
+		// agent their call id twice (C46).
+		case c.isMintedID(callID) && !c.isMintedID(otherID):
+			// keep as is
+		case c.isMintedID(otherID) && !c.isMintedID(callID):
+			keep, absorb = otherID, callID
 		case c.isAgentOnly(callID):
 			keep, absorb = otherID, callID
 		case c.isAgentOnly(otherID):
 			// keep as is
-		case c.isMintedID(otherID) && !c.isMintedID(callID):
-			keep, absorb = otherID, callID
 		}
 		c.merge(ctx, keep, absorb)
 	}

@@ -1431,3 +1431,57 @@ func TestALegTheAgentPlacedIsNotAlsoAnnouncedAsRinging(t *testing.T) {
 			"must not drop that with it")
 	}
 }
+
+// A call the agent placed keeps the identity the dialplan minted for it, and
+// the agent is never told it changed — because it does not.
+//
+// At the moment such a call bridges it holds nothing but the agent's own leg,
+// which read as "provisional, give way" — a rule written for a queue delivery,
+// where the agent's leg really did arrive on a call of its own. So the minted
+// identity was discarded in favour of the far end's, and reidentify put it
+// back milliseconds later. Live, that told the agent their call id twice
+// within twelve milliseconds, the first one already on its way out (C46).
+func TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove(t *testing.T) {
+	minted := uuid.New()
+
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	// The agent's own leg, raised with the identity the request minted.
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
+		"variable_aicc_call_id": minted.String(),
+		"variable_dialed_user":  agentExtension,
+	}))
+	// The far end, raised by the dialplan and carrying no identity of its own.
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "far-chan", "outbound", nil))
+	c.Handle(t.Context(), raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		map[string]string{"Other-Leg-Unique-ID": "far-chan"}))
+
+	pub.mu.Lock()
+	var merges []events.Event
+	for _, ev := range pub.events {
+		if ev.Type == events.TypePartyChanged {
+			merges = append(merges, ev)
+		}
+	}
+	pub.mu.Unlock()
+
+	// None at all, which is better than one: the agent's own party never
+	// moved, so there is nothing to tell them. Before this, it moved out of
+	// the minted call and back again, and they were told twice.
+	if len(merges) != 0 {
+		ids := make([]string, 0, len(merges))
+		for _, ev := range merges {
+			ids = append(ids, ev.CallID.String())
+		}
+		t.Errorf("announced %d id changes (%v) to an agent whose call never changed "+
+			"identity; each one sends a panel to refetch", len(merges), ids)
+	}
+	// And the surviving call is the minted one, which is what every other
+	// record of this call refers to.
+	if id, ok := c.registry.CallForChannel("agent-chan"); !ok || id != minted {
+		t.Errorf("the agent's channel ended on call %s, want %s", id, minted)
+	}
+}
