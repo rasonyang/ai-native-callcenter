@@ -243,7 +243,8 @@ func run() error {
 		Registrations: func() ([]telephony.Registration, error) {
 			return adapter.Registrations(cfg.SIPProfile)
 		},
-		Log: slog.Default(),
+		Events: hub,
+		Log:    slog.Default(),
 	}.connect()
 
 	// Outbound: click-to-dial and the AI outbound leg share one originator.

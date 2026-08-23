@@ -59,6 +59,10 @@ type staffingWiring interface {
 
 type connectHook interface {
 	OnConnect(fn func(context.Context))
+	// OnLost fires when the connection to the switch drops. Both halves are
+	// needed to say anything useful about the link: an event that only ever
+	// reports coming back cannot tell a reconnect from a first start.
+	OnLost(fn func())
 }
 
 // composition is every connection between the parts, in one place that can be
@@ -80,7 +84,32 @@ type composition struct {
 	Audiences     telephony.Audiences
 	Taps          telephony.Tapper
 	Registrations func() ([]telephony.Registration, error)
+	Events        systemPublisher
 	Log           *slog.Logger
+}
+
+// systemPublisher is the slice of the hub used to announce facts about the
+// system rather than about any call.
+type systemPublisher interface {
+	Publish(ctx context.Context, ev events.Event, scope events.Scope) events.Event
+}
+
+// announceLink tells every screen whether the switch is reachable.
+//
+// Broadcast, not scoped: an agent whose switch has gone cannot take a call,
+// place one, or be told why their buttons have stopped working, and that is
+// not a fact about any one call or queue. The type has been in the contract
+// with nothing producing it, so a panel could only ever guess — and the hook
+// to hang it on was written and never called, like several others found this
+// week.
+func (c composition) announceLink(ctx context.Context, isUp bool) {
+	if c.Events == nil {
+		return
+	}
+	c.Events.Publish(ctx, events.Event{
+		Type:    events.TypeSystemLink,
+		Payload: map[string]any{"isUp": isUp},
+	}, events.Scope{IsBroadcast: true})
 }
 
 // connect makes every connection. Order is load-bearing in one place and
@@ -101,6 +130,12 @@ func (c composition) connect() {
 	// The switch forgets its agents when it restarts, and we are the source of
 	// truth, so every reconnect rebuilds its view.
 	c.Link.OnConnect(c.onSwitchConnected)
+
+	// And the screens are told either way. Losing the switch is the one
+	// failure an agent can neither see nor work around, and until now the
+	// only sign of it was that nothing happened any more.
+	c.Link.OnConnect(func(ctx context.Context) { c.announceLink(ctx, true) })
+	c.Link.OnLost(func() { c.announceLink(context.Background(), false) })
 
 	// Who may see a call's live transcript is decided from who is on the call,
 	// which only this side knows. Without it every transcript event falls

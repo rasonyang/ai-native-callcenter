@@ -116,9 +116,37 @@ func (f *fakeAudiences) SetAudience(callID uuid.UUID, agentIDs []uuid.UUID) {
 	f.set[callID] = agentIDs
 }
 
-type fakeLink struct{ onConnect func(context.Context) }
+type fakeLink struct {
+	onConnect []func(context.Context)
+	onLost    []func()
+}
 
-func (f *fakeLink) OnConnect(fn func(context.Context)) { f.onConnect = fn }
+func (f *fakeLink) OnConnect(fn func(context.Context)) { f.onConnect = append(f.onConnect, fn) }
+func (f *fakeLink) OnLost(fn func())                   { f.onLost = append(f.onLost, fn) }
+
+func (f *fakeLink) connected(ctx context.Context) {
+	for _, fn := range f.onConnect {
+		fn(ctx)
+	}
+}
+
+func (f *fakeLink) lost() {
+	for _, fn := range f.onLost {
+		fn()
+	}
+}
+
+// systemEvents records what was announced about the system itself.
+type systemEvents struct {
+	events []events.Event
+}
+
+func (s *systemEvents) Publish(_ context.Context, ev events.Event, scope events.Scope) events.Event {
+	if scope.IsBroadcast {
+		s.events = append(s.events, ev)
+	}
+	return ev
+}
 
 // fakeWrapUps stands in for the ledger the beginning of after-call work opens
 // a record in.
@@ -152,6 +180,7 @@ type wiringFixture struct {
 	agents      *fakeAgents
 	catalog     *fakeCatalog
 	link        *fakeLink
+	system      *systemEvents
 	taps        *fakeTapper
 	audiences   *fakeAudiences
 	queues      fakeQueues
@@ -174,6 +203,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		agents:      &fakeAgents{},
 		catalog:     &fakeCatalog{},
 		link:        &fakeLink{},
+		system:      &systemEvents{},
 		taps:        &fakeTapper{},
 		audiences:   &fakeAudiences{},
 		transcripts: &retirer{},
@@ -201,6 +231,7 @@ func newWiringFixture(t *testing.T) *wiringFixture {
 		Audiences:     f.audiences,
 		Taps:          f.taps,
 		Registrations: func() ([]telephony.Registration, error) { f.regsCalls++; return f.regs, f.regsErr },
+		Events:        f.system,
 		Log:           slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	return f
@@ -228,7 +259,7 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	})
 
 	t.Run("the switch link has a reconnect handler", func(t *testing.T) {
-		if f.link.onConnect == nil {
+		if len(f.link.onConnect) == 0 {
 			t.Fatal("nothing is registered on the link's reconnect")
 		}
 	})
@@ -328,7 +359,7 @@ func TestNoTapMeansNoTapConnections(t *testing.T) {
 		t.Errorf("detached %v with no tap configured", f.taps.detachedCalls)
 	}
 	// The unconditional half is still wired.
-	if f.agents.staffing == nil || f.link.onConnect == nil ||
+	if f.agents.staffing == nil || len(f.link.onConnect) == 0 ||
 		f.coordinator.cdr == nil || f.coordinator.audiences == nil {
 		t.Error("turning transcription off dropped a connection that is not its own")
 	}
@@ -340,7 +371,7 @@ func TestReconnectRebuildsPresenceStaffingAndDevices(t *testing.T) {
 	f := newWiringFixture(t)
 	f.comp.connect()
 
-	f.link.onConnect(t.Context())
+	f.link.connected(t.Context())
 
 	if f.agents.synced != 1 {
 		t.Errorf("presence synced %d times, want 1", f.agents.synced)
@@ -381,7 +412,7 @@ func TestReconnectStillSyncsWhenRegistrationsCannotBeRead(t *testing.T) {
 	f.regsErr = errors.New("-ERR not connected")
 	f.comp.connect()
 
-	f.link.onConnect(t.Context())
+	f.link.connected(t.Context())
 
 	if f.agents.synced != 1 || f.catalog.tiersSynced != 1 {
 		t.Errorf("synced presence %d and tiers %d, want 1 each even with the "+
@@ -525,7 +556,7 @@ func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
 	f := newWiringFixture(t)
 	f.comp.connect()
 
-	f.link.onConnect(t.Context())
+	f.link.connected(t.Context())
 
 	if len(f.agents.noted) == 0 {
 		t.Fatal("no phone was recorded before the mirror")
@@ -547,4 +578,32 @@ func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
 		}
 	}
 	t.Errorf("presence was mirrored before any phone was known: %v", f.agents.steps)
+}
+
+// Losing the switch is the one failure an agent can neither see nor work
+// around: nothing rings, nothing they press does anything, and until now the
+// only sign of it was that nothing happened any more. SYSTEM_LINK has been in
+// the contract with nothing producing it, and the hook to hang it on was
+// written and never called.
+func TestTheScreensAreToldWhenTheSwitchGoesAndComesBack(t *testing.T) {
+	f := newWiringFixture(t)
+	f.comp.connect()
+
+	f.link.lost()
+	f.link.connected(t.Context())
+
+	if len(f.system.events) != 2 {
+		t.Fatalf("announced %d system events, want one each way: %+v",
+			len(f.system.events), f.system.events)
+	}
+	lost, back := f.system.events[0], f.system.events[1]
+	if lost.Type != events.TypeSystemLink || back.Type != events.TypeSystemLink {
+		t.Fatalf("types = %s, %s", lost.Type, back.Type)
+	}
+	if lost.Payload["isUp"] != false {
+		t.Errorf("losing the switch announced isUp=%v", lost.Payload["isUp"])
+	}
+	if back.Payload["isUp"] != true {
+		t.Errorf("getting it back announced isUp=%v", back.Payload["isUp"])
+	}
 }

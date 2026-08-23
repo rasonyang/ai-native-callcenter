@@ -39,13 +39,13 @@
 | BOT_SESSION_ENDED | NOT FOUND | 仅通用分发(events.ts:63) | UNCOVERED | [FACT] | |
 | CALLBACK_CREATED | cmd/aicc/wiring.go:309-317(announceCallback,IsBroadcast;由 internal/aicall/actions.go:118 触发) | use-event-stream.ts:36-38;_app.agent.callbacks.tsx | S3(VC-S3-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:已挂 VC-S3-04 |
 | CALLBACK_UPDATED | internal/httpapi/ledger_handlers.go:185(Claim)、:217(Complete),经 publishCallback :222-… | use-event-stream.ts:36-38;_app.agent.callbacks.tsx:130-148 | S3(VC-S3-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:已挂 VC-S3-04 |
-| SYSTEM_LINK | NOT FOUND | 仅通用分发(events.ts:64) | UNCOVERED | [FACT] | 常量 event.go:69;从未发出。语义(链路状态)天然属于 S12,但当前无实现 |
+| SYSTEM_LINK | cmd/aicc/wiring.go(announceLink,2026-08-23 W7③) | 仅通用分发 | COVERED(生产者) | [FACT] | 挂在 `esl.Link` 的 `OnConnect`/`OnLost` 上,两个方向都发(`{isUp:true|false}`),**广播作用域** —— 交换机没了是坐席既看不见也绕不过去的那种故障,而在此之前唯一的迹象就是"什么都不再发生了"。`OnLost` 这个钩子此前**写好从没被调用**,与 `ListQueueMembers` / `ShowChannels` / `LoadPresence` 同型 |
 | SYSTEM_RESET | internal/httpapi/events_handler.go:79-88(resume 点超出 ring 时) | web/src/lib/events.ts:49(onReset);use-event-stream.ts:86(全量 invalidateQueries) | S10 | [FACT] | 判定条件 hub.go:129-133(oldest==0 或 lastEventID+1 < oldest) |
 
 ## 缺口汇总
 
 ### 需删除(或降级出契约)
-- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:~~PARTY_DIALING~~(2026-08-23 W7 起有生产者)、CALL_USER_DATA、~~CALL_RECORDING_STARTED/STOPPED~~(2026-08-23 W7① 起有生产者)、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 6 个)。删除属于 breaking change,需走 `make api-breaking`。
+- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:~~PARTY_DIALING~~(2026-08-23 W7 起有生产者)、CALL_USER_DATA、~~CALL_RECORDING_STARTED/STOPPED~~(2026-08-23 W7① 起有生产者)、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、~~SYSTEM_LINK~~(2026-08-23 W7③ 起有生产者)(原 10 个契约内类型零生产者,现 5 个)。删除属于 breaking change,需走 `make api-breaking`。
 
 ### 需实现(契约已承诺、代码未生产)——【2026-08-20 决议 D6:以下全部实现 → TASKS W7(四组推进);"需删除"选项作废】
 - ~~PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。~~ **已实现(2026-08-23,W7)。**
