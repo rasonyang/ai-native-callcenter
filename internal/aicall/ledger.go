@@ -242,12 +242,24 @@ const (
 
 // stampBotShare writes the bot's part of the story onto the caller's channel,
 // so the CDR the human path writes after a transfer carries it.
-func (a *callActions) stampBotShare(recorder *callRecorder, facts *callFacts) {
-	botSec := int(time.Since(recorder.answeredAt).Seconds())
-	a.stampChannel("aicc_bot_sec", strconv.Itoa(botSec))
+func (a *callActions) stampBotShare(facts *callFacts) {
 	a.stampChannel("aicc_language", facts.language)
 	if facts.flowID != nil {
 		a.stampChannel("aicc_flow_id", facts.flowID.String())
 	}
 	a.stampChannel("aicc_did", facts.did)
+}
+
+// stampBotSec writes how long the caller was with the bot, and belongs at the
+// moment they are handed on rather than the moment the bot decided to hand
+// them on: a transfer waits for the closing sentence to be heard, and the
+// caller is with the bot while it plays.
+//
+// Written at the decision it was short by the length of the goodbye, and the
+// assembler — which reads the bot leg's own bridge and prefers it — warned
+// about the disagreement on every correctly transferred call. A warning that
+// fires every time is one nobody reads.
+func (a *callActions) stampBotSec(recorder *callRecorder) {
+	botSec := int(time.Since(recorder.answeredAt).Seconds())
+	a.stampChannel("aicc_bot_sec", strconv.Itoa(botSec))
 }

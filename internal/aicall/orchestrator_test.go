@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -570,5 +571,51 @@ func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 
 	if got := sw.variable("aicc_bot_finished"); got != "FLOW_END" {
 		t.Errorf("aicc_bot_finished = %q, want FLOW_END", got)
+	}
+}
+
+// How long the caller was with the bot is not known when the bot decides to
+// transfer: the closing sentence still has to be spoken, and the caller is
+// with the bot while it plays. Stamped at the decision, the number disagreed
+// with the leg's own bridge on every single transferred call — by the length
+// of the goodbye — and the assembler warned about the difference every time,
+// which is how a warning meant to catch real disagreement became noise (C50,
+// live 2026-08-23: stamped 7, bridged 12).
+func TestTheBotStampsItsDurationWhenTheCallerIsHandedOnNotWhenItDecides(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, session, model := testActions(t, sw)
+	actions.facts = testFacts()
+	actions.recorder = newCallRecorder(uuid.New(), time.Now().Add(-7*time.Second), nil)
+
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	time.Sleep(20 * time.Millisecond)
+
+	if _, err := actions.TransferToAgent(t.Context(), flow.TransferRequest{
+		Queue: "support", Reason: "BILLING", Summary: "wants a refund",
+	}); err != nil {
+		t.Fatalf("transfer refused: %v", err)
+	}
+
+	// What the conversation established is stamped straight away — it cannot
+	// change, and it must not lose a race with the caller moving on.
+	if got := sw.variable("aicc_did"); got != "95012" {
+		t.Errorf("aicc_did = %q at the decision, want it stamped there", got)
+	}
+	if got := sw.variable("aicc_bot_sec"); got != "" {
+		t.Errorf("aicc_bot_sec = %q at the decision — the goodbye has not been "+
+			"spoken yet, so the caller's time with the bot is still growing", got)
+	}
+
+	actions.onPlaybackDone(session.currentTurn() + 1)
+	if got := sw.recordedTransfers(); len(got) != 1 {
+		t.Fatalf("transfers = %v, want the caller handed on", got)
+	}
+	switch got, err := strconv.Atoi(sw.variable("aicc_bot_sec")); {
+	case err != nil:
+		t.Errorf("aicc_bot_sec = %q after the handoff, want the seconds with the bot",
+			sw.variable("aicc_bot_sec"))
+	case got < 7:
+		t.Errorf("aicc_bot_sec = %d, want at least the 7 seconds already elapsed "+
+			"when the bot decided", got)
 	}
 }

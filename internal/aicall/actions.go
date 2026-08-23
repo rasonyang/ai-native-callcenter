@@ -80,12 +80,16 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 	if a.recorder != nil {
 		a.recorder.markTransferred(queue.ID)
 		if a.facts != nil {
-			a.stampBotShare(a.recorder, a.facts)
+			a.stampBotShare(a.facts)
 		}
 	}
 
 	a.arm(ctx, func() {
 		a.log.Info("transferring the caller", "queue", queue.Name, "ext", queue.ExtNumber)
+		// Last, because it is the only one of the bot's stamps still changing.
+		if a.recorder != nil {
+			a.stampBotSec(a.recorder)
+		}
 		a.handOnCaller()
 		// No context: the switch knows which dialplan this deployment runs in,
 		// and naming one here is how the bot came to hand its callers to a
