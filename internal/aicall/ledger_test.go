@@ -144,18 +144,30 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 
 // A transferred call is not finished: the human path owns the one CDR, and the
 // bot writes only what it alone saw — the transcript.
-func TestATransferredCallWritesTheTranscriptButNoCDR(t *testing.T) {
+func TestATransferredCallStillWritesTheRowItKnows(t *testing.T) {
 	ledger := newFakeLedger()
 	callID := uuid.New()
+	queueID := uuid.New()
 	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
 
 	recorder.say(store.SpeakerCustomer, "转人工")
-	recorder.markTransferred(uuid.New())
+	recorder.markTransferred(queueID)
 
 	recorder.finish(ledger, testFacts(), discard())
 
-	if len(ledger.cdrs) != 0 {
-		t.Fatalf("the bot wrote a CDR for a call it handed away: %+v", ledger.cdrs)
+	if len(ledger.cdrs) != 1 {
+		t.Fatalf("wrote %d cdrs for a call it handed away, want the one it knows about",
+			len(ledger.cdrs))
+	}
+	cdr := ledger.cdrs[0]
+	if cdr.QueueID == nil || *cdr.QueueID != queueID {
+		t.Errorf("queueId = %v, want the queue the caller was handed to", cdr.QueueID)
+	}
+	if cdr.Status != store.CDRStatusAnswered {
+		t.Errorf("status = %s, want ANSWERED — the bot did answer this call", cdr.Status)
+	}
+	if cdr.IsContained {
+		t.Error("a call handed to a person was marked contained")
 	}
 	flushTranscript()
 	if len(transcripts.get(callID)) != 1 {

@@ -135,16 +135,22 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	defer cancel()
 
 	r.mu.Lock()
-	isTransferred := r.isTransferred
 	endReason := r.endReason
 	hangupCause := r.hangupCause
 	transferQueue := r.transferQueue
 	r.mu.Unlock()
 
-	if isTransferred {
-		return
-	}
-
+	// A transferred call is normally the human path's row to write, and this
+	// one is provisional: it is replaced the moment that path writes, because
+	// the row that saw the call end later wins (see InsertCDR).
+	//
+	// It is written all the same, because "transferred" is decided when the
+	// bot calls the tool and the caller is not handed on until the closing
+	// sentence has been heard. A caller who hangs up during the goodbye leaves
+	// the mark set with nothing having happened, and there is no failure to
+	// react to — no transfer was ever attempted. Declining to write here lost
+	// those calls from the ledger entirely: the bot answered, spoke, decided,
+	// and the call appeared nowhere at all.
 	endedAt := time.Now()
 	status := store.CDRStatusAnswered
 	if endReason == "FAILED" {
