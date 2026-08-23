@@ -49,7 +49,9 @@
 
 ### 需实现(契约已承诺、代码未生产)——【2026-08-20 决议 D6:以下全部实现 → TASKS W7(四组推进);"需删除"选项作废】
 - ~~PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。~~ **已实现(2026-08-23,W7)。**
-- CALL_USER_DATA — producer NOT FOUND(userData 只随其它事件携带)。
+- CALL_USER_DATA — producer NOT FOUND,**且不应补**(2026-08-23 查明,C42):
+  `userData` 没有任何写入路径(建呼叫时设不了、无接口可改、`MergeUserData` 只有测试调用),
+  **没有变更就没有变更事件**。要做须先建写入能力,那是产品决策。
 - CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED — RECORD_START/STOP 已订阅并归一化(switchevent.go:33-34、:259-264)但事件链在 coordinator 处中断。
 - DEVICE_REGISTERED / ~~DEVICE_UNREGISTERED~~ — 交换机侧信号已达 ObserveDevice。**2026-08-22 C28 已区分发布**:
   不可达发 DEVICE_UNREGISTERED,可达发 DEVICE_IN_SERVICE。剩 DEVICE_REGISTERED 一个 ——
