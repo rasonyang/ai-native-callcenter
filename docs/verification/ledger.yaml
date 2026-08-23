@@ -436,7 +436,11 @@ cases:
       - who: agent
         do: "记录基线并开启 SSE 抓流:执行 collect 第 1、2 条"
       - who: human
-        do: "拨 95001 → 转人工;wei 的话机响铃后【不要接】,响-停-再响(共 ≥90 秒)后主叫挂断"
+        do: "拨 **95002**(中文,队列 support-zh —— 自 2026-08-23 起验收材料改用中文侧)→ 用中文要求转人工;
+          wei 的话机响铃后【不要接】。节奏已随 W2.1 改变:每次约响 **15 秒**(原 60 秒),
+          停约 **60 秒**,再响第二次;**两次都不要接**。第二次响完 `max_no_answer=2` 满,
+          wei 会被摘出路由 —— **等这一步发生之后**(话机不再响),主叫再挂断,
+          这样 missed_reason 才确定为 ABANDONED_WAITING。全程约 2 分半"
       - who: agent
         do: "执行其余 collect,判定重派与 app 侧痕迹"
     collect:
@@ -450,13 +454,21 @@ cases:
       —— 可验半(判定 PASS/FAIL)——
       SSE:QUEUE_AGENT_OFFERED ≥1 且全程无 BRIDGED
       queue_events:JOINED=1,OFFERED ≥1,无 BRIDGED
-      cdrs:status=NO_ANSWER,missed_reason=ABANDONED_WAITING(cdr.go:266-270:入过队且未 bridge、
-      Cause=Cancel、wait≥5s;ABANDONED_RINGING 需 BridgedAt≠0、AGENTS_DID_NOT_ANSWER 需未入队——均不可达)
-      wei 前后两次 agent_states 完全一致(state=READY)——app 侧 RONA 无调用方的既成事实
-      (D7② 已决实现,W2 落地后本用例由 T6.9 整体改写)
+      cdrs:status=NO_ANSWER,missed_reason=**ABANDONED_WAITING** —— 主叫是在**没有话机在响**的时候
+      挂断的(两轮响铃都已结束、wei 已被摘出路由)。若他恰在响铃中挂断,正确答案是 ABANDONED_RINGING;
+      两者的分界是"他离开那一刻那次振铃是否还活着",2026-08-23 W2 改对(此前 ABANDONED_RINGING
+      要求已桥接,对"响铃中放弃"永不可达,这类主叫全被记成 AGENTS_DID_NOT_ANSWER)
+      **wei 最终为 NOT_READY / reason=SYSTEM**(2026-08-23 W2 落地后由留证转为断言,且与首跑相反):
+      交换机数满 `max_no_answer=2` 把他置 On Break —— 那是**通知**;应用据此做状态转移并发
+      `AGENT_NOT_READY`,再反向镜像。首跑时"前后完全一致 state=READY"正是两边打架的证据:
+      交换机摘了人,应用不知道,下一次镜像又把他推回 Available
+      SSE 含 `AGENT_NOT_READY`(agentId=wei,reason=SYSTEM);交换机侧 `callcenter_config agent list`
+      中 agent-wei 的 status=On Break
+      **每次振铃约 15 秒而非 60 秒**(`agent-originate-timeout` 由 Lua 的 <settings> 下发,W2.1);
+      两次派单之间约 60 秒(`no_answer_delay_time`)
       —— 留证半(落档 evidence_dir,不判定)——
-      OFFERED 实际次数与间隔(needs-FACT F3:max_no_answer=0/no_answer_delay_time=0 下的重派节奏);
-      RONA 三处无痕(presence/报表/坐席屏)的查询输出——缺口钉子,变化即预警
+      OFFERED 实际次数与间隔(F3 的重派节奏在 W2.1 参数落地后应当整体改变);
+      wei 被摘出后队列的去向(support-zh 另有 ben 配员,support-en 只有 wei)
     failure_looks_like: |
       本用例的期望本身就在钉死一个静默缺口:switch 反复把呼叫派给一个不接的坐席,
       QUEUE_AGENT_STATE(Ring-No-Answer)事件被 Normalize 后无人消费(enums.md §22),
