@@ -71,3 +71,23 @@ func TestARowWithNoUsableJoinTimeIsDroppedRatherThanInvented(t *testing.T) {
 		}
 	}
 }
+
+// uuid_getvar's three answers, captured from the switch on 2026-08-23 against
+// a live caller's channel mid-call. Written from the documentation this parser
+// would have agreed with whatever it got wrong; these are what the switch
+// actually said.
+func TestWhatTheSwitchAnswersForAChannelVariable(t *testing.T) {
+	for reply, want := range map[string]string{
+		"01a02c97-ae6b-773a-a2ea-a5359f0f313a": "01a02c97-ae6b-773a-a2ea-a5359f0f313a", // set
+		"en":                                   "en",
+		"95001":                                "95001",
+		"_undef_":                              "", // set on no call: the switch's word for nothing
+		"-ERR No such channel!":                "", // the channel is gone
+		"":                                     "",
+		"  en  ":                               "en",
+	} {
+		if got := parseChannelVariable(reply); got != want {
+			t.Errorf("parseChannelVariable(%q) = %q, want %q", reply, got, want)
+		}
+	}
+}

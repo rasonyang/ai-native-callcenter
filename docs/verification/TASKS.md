@@ -993,8 +993,11 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   回归三条:`TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo`、
   `TestAChannelThatCannotNameItsCallIsNotAdopted`、`TestAdoptingIsIdempotent`;
   **五处逐一摘除验证**(去掉收养 / 用恢复时刻当起点 / 不置 TALKING / 新铸 id / 说不出 id 也照收)。
-  ⚠ `uuid_getvar` 的返回格式是**按文档写的,尚未现场核对** —— 但读错只会退化成"不收养"
-  (`_undef_`/`-ERR`/空 一律当作没有),不会造出一个身份错误的通话。重跑时须现场确认。
+  **`uuid_getvar` 的返回格式已现场核对(2026-08-23,对着一通活着的通话)**,三种回答与实现一致:
+  已设置 → 裸值(`01a02c97-ae6b-…` / `en` / `95001`);未设置 → `_undef_`;通道没了 → `-ERR No such channel!`。
+  已抄进 `TestWhatTheSwitchAnswersForAChannelVariable` 当 fixture。
+  同一次还证实两件事:入呼的 `aicc_call_type` 就是 `_undef_`(所以默认 INBOUND 是对的),
+  以及**转接的那一通 `aicc_bot_finished` 确实是 `_undef_`** —— C26"转接一律不盖印"的设计在真实转接上成立。
 - **C37(new,2026-08-23 VC-S12-01 重跑发现,未修;观察一次,机制未独立复现)**
   **一次被取消的派单把坐席话机卡死,之后每 70 毫秒被重试一次,持续到主叫放弃。**
   ```
