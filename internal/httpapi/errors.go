@@ -79,11 +79,20 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
-// violatesConstraint reports a PostgreSQL foreign-key failure raised by one
+// violatesConstraint reports a PostgreSQL referential failure raised by one
 // named constraint. Named, because the answer differs per constraint: a
 // referenced row that must not disappear is a conflict the operator can
 // resolve, and saying which one lets the message say what to do about it.
+//
+// Two SQLSTATEs, because PostgreSQL uses different ones for the same idea:
+// an explicit ON DELETE RESTRICT raises 23001 restrict_violation, while
+// NO ACTION and the insert side raise 23503 foreign_key_violation. Matching
+// only 23503 — which is the one everybody knows — let a live delete fall
+// through to "storage down" while every test agreed it would not.
 func violatesConstraint(err error, name string) bool {
 	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == name
+	if !errors.As(err, &pgErr) || pgErr.ConstraintName != name {
+		return false
+	}
+	return pgErr.Code == "23001" || pgErr.Code == "23503"
 }

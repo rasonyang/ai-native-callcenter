@@ -148,40 +148,55 @@ func (c *deletingCatalog) DeleteExtension(context.Context, uuid.UUID) error { re
 // refusal reported as "storage down" — the default for an unrecognised
 // driver error — teaches them to retry, and retrying will never work.
 func TestDeletingAnExtensionAnAgentWorksAtIsRefusedAsAConflict(t *testing.T) {
-	c := &deletingCatalog{err: &pgconn.PgError{
-		Code:           "23503",
-		ConstraintName: "fk_agents_extensions",
-		Message:        `update or delete on table "extensions" violates foreign key constraint`,
-	}}
-	s := &Server{catalog: c}
-	w := httptest.NewRecorder()
+	// 23001 verbatim from a live delete, because the first version of this
+	// test guessed 23503 and passed while the server returned 503: an
+	// explicit ON DELETE RESTRICT raises restrict_violation, not
+	// foreign_key_violation. 23503 is here too — NO ACTION and the insert
+	// side use it — but it is the one that was never the problem.
+	for _, code := range []string{"23001", "23503"} {
+		c := &deletingCatalog{err: &pgconn.PgError{
+			Code:           code,
+			ConstraintName: "fk_agents_extensions",
+			Message: `update or delete on table "extensions" violates RESTRICT ` +
+				`setting of foreign key constraint "fk_agents_extensions" on table "agents"`,
+		}}
+		s := &Server{catalog: c}
+		w := httptest.NewRecorder()
 
-	s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
+		s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
 
-	if w.Code != http.StatusConflict {
-		t.Errorf("http = %d, want 409", w.Code)
+		if w.Code != http.StatusConflict {
+			t.Errorf("SQLSTATE %s: http = %d, want 409", code, w.Code)
+		}
+		checkBindingConflict(t, code, w)
 	}
-	var env struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
-		t.Fatalf("body: %v (%s)", err, w.Body.String())
-	}
-	if env.Error.Code != string(CodeExtensionAssignedToAgent) {
-		t.Errorf("code = %q, want EXTENSION_ASSIGNED_TO_AGENT", env.Error.Code)
-	}
-	if !strings.Contains(env.Error.Message, "unbind") {
-		t.Errorf("message does not say what to do about it: %q", env.Error.Message)
+}
+
+func checkBindingConflict(t *testing.T, code string, w *httptest.ResponseRecorder) {
+	t.Helper()
+	{
+		var env struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+			t.Fatalf("SQLSTATE %s: body: %v (%s)", code, err, w.Body.String())
+		}
+		if env.Error.Code != string(CodeExtensionAssignedToAgent) {
+			t.Errorf("SQLSTATE %s: code = %q, want EXTENSION_ASSIGNED_TO_AGENT", code, env.Error.Code)
+		}
+		if !strings.Contains(env.Error.Message, "unbind") {
+			t.Errorf("SQLSTATE %s: message does not say what to do about it: %q", code, env.Error.Message)
+		}
 	}
 }
 
 // A delete that fails for any other reason is not this conflict: reporting it
 // as one would send the operator looking for a binding that is not there.
 func TestAnUnrelatedDeleteFailureIsNotTheBindingConflict(t *testing.T) {
-	c := &deletingCatalog{err: &pgconn.PgError{Code: "23503", ConstraintName: "fk_something_else"}}
+	c := &deletingCatalog{err: &pgconn.PgError{Code: "23001", ConstraintName: "fk_something_else"}}
 	s := &Server{catalog: c}
 	w := httptest.NewRecorder()
 
