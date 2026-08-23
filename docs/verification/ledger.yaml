@@ -109,7 +109,7 @@ cases:
       cdrs 出现同一通话的 2 行(bot 侧与人侧都写了)—— 归属规则 cdr.go:79 被绕过;
       或 transcripts 的 seq 有洞(空 final 烧号回归,actor.go:222 防线失效)。两者对呼叫者都不可见。
     evidence_dir: docs/verification/artifacts/VC-S1-02/
-    status: PASS  # 2026-08-20 执行:单行CDR(bot_sec=125)/BOT行seq1-10连续/留证CUSTOMER=0与SYS-8一致
+    status: PASS  # ⚠ 2026-08-23 W1 落地后,本条的 CUSTOMER|MODEL ≥1 由留证转为断言,而**本用例自那以后没有整条重跑过**——它是 S1 链的续接用例(前置"紧接 VC-S1-01;通话仍在进行"),重跑要连 S1-01 一起。旁证:同日 95001 上的通话确实产出了 CUSTOMER|MODEL 行(qwen 不问自答,与 S8-01 同一代码路径),但那不是按本条 collect 采的,**不足以充当本条的判定**。下次重跑 S1 链时补齐。 # 2026-08-20 执行:单行CDR(bot_sec=125)/BOT行seq1-10连续/留证CUSTOMER=0与SYS-8一致
     refs: ["internal/aicall/ledger.go:130", "internal/telephony/cdr.go:79", "internal/transcript/actor.go:222", "internal/aicall/session.go:728"]
 
   - id: VC-S1-03
@@ -654,7 +654,7 @@ cases:
       或 language=zh 而 bot 说英文(DID.language 未进 X-AICC-Language 头,
       aicc_inbound.lua:76 → orchestrator.go:210 链路断裂),两种都不报错。
     evidence_dir: docs/verification/artifacts/VC-S8-01/
-    status: PASS  # 2026-08-20 执行:provider恒openai不随语言变/zh全链/BOT中文;留证CUSTOMER=0
+    status: PASS  # 2026-08-23 13:11 重跑(W1 落地,留证转断言;自本日起验收材料改用 support-zh/中文):启动 "voice provider selected" 全日志恰好 1 次 provider=qwen,本通 ai conversation started did=95002 provider=qwen language=zh —— 与启动行完全一致,语言没有选 provider;CDR 95002|zh|ANSWERED|INBOUND|bot_sec=16;转写三行全 source=MODEL,BOT 行为中文,**CUSTOMER 行数=1**（"我想咨询时，营业时间。"）——该条 2026-08-20 首跑时为留证且实测 0(与 SYS-8 一致),W1 后转为断言并成立。qwen 侧不设 TranscribeModel 是刻意的:实测它不问自答,设了就是死配置。 # 2026-08-20 首次执行:2026-08-20 执行:provider恒openai不随语言变/zh全链/BOT中文;留证CUSTOMER=0
     refs: ["cmd/aicc/main.go:267", "internal/aicall/orchestrator.go:220", "internal/aicall/orchestrator.go:278", "freeswitch/scripts/aicc_inbound.lua:76"]
 
   # ───────────────────────── S9 ASR 全链:音频帧 → WS → final → SSE → UI → DB ─────────────────────────
