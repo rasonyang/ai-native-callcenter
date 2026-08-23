@@ -99,8 +99,11 @@ cases:
       cdrs 恰好新增 1 行,且同一 call_id 的 cdrs 行数 = 1(第 4 条):call_type=INBOUND,status=ANSWERED,
       bot_sec>0,did=95001,language=en,is_contained=false(主叫先挂,非 bot 收线),hangup_cause=NORMAL_CLEARING
       transcripts 该 call_id 至少 1 行:speaker=BOT(kind=TEXT,source=MODEL),seq 从 1 起连续无洞
-      【留证,不判定】CUSTOMER 行数落档 evidence_dir(当前实现应为 0:stock profile 未设 TranscribeModel、
-      ASR tap 只挂坐席腿——审计 SYS-8;若 >0 记录为实现变化,不作为 FAIL;W1 落地后转正式断言 CUSTOMER|MODEL ≥1)
+      **CUSTOMER|MODEL ≥1**(2026-08-23 W1 落地后由留证转为断言):主叫说的那句话必须落进转写。
+      在此之前 stock profile 未设 TranscribeModel,bot 阶段的"转写"只有 bot 自己的话和工具痕迹,
+      主叫说了什么一个字都没有(设计 08 的 G-06)。openai 侧现由 profile 默认的
+      `gpt-live-transcribe` 请求;qwen 侧无需请求 —— 实测它不问自答
+      (`conversation.item.input_audio_transcription.*`),故其 profile 故意不设,免得留下死配置
       日志计数 ≥1(watchLeg 收到主叫挂断)
     failure_looks_like: |
       cdrs 出现同一通话的 2 行(bot 侧与人侧都写了)—— 归属规则 cdr.go:79 被绕过;
@@ -642,9 +645,9 @@ cases:
       "ai conversation started" 该通:language=zh,provider 与启动行完全相同(不随语言变化)
       cdrs:did=95002,language=zh
       transcripts:BOT 行(source=MODEL,kind=TEXT)文本为中文(问候/回答)——判定条款
-      【留证,不判定】第 5 条 CUSTOMER 行数落档 evidence_dir(当前实现应为 0:stock profile 未设
-      TranscribeModel、ASR tap 只挂坐席腿——审计 SYS-8;若 >0 记录为实现变化,不作为本用例 FAIL;
-      W1 落地后由 T6.9 转正式断言)
+      **第 5 条 CUSTOMER 行数 ≥1**(2026-08-23 W1 落地后由留证转为断言):中文那句
+      "我想咨询营业时间"必须落进转写。理由同 S1-02:在此之前 bot 阶段的转写里没有主叫的任何一句话。
+      本条同时是**中文侧**的证据 —— 转写语言跟随呼叫语言,而不是部署的 provider
     failure_looks_like: |
       通话正常、中文对答如流,但该通日志 provider 与启动行不一致 ——
       有人重新引入了 language→provider 映射(CLAUDE.md 明令的回归);
