@@ -686,7 +686,7 @@ cases:
       12 秒后才有 ERROR(STREAM_NEVER_CONNECTED);若连这个都没有,面板停在 Connecting…,
       整通电话音频无声无息地去了 nowhere(switchevent.go:176-183 所述的历史故障形态)。
     evidence_dir: docs/verification/artifacts/VC-S9-01/
-    status: FAIL  # 2026-08-20 执行:链路/归户/共序全通,但双侧丢帧(4%/7.2%)致fox句识别崩坏→C14立案(verdict)
+    status: PASS  # 2026-08-23 11:47-12:14 重跑(四通,provider 已切 qwen):四条断言全绿——日志链 tap attached→tapped stream connected→transcription live；SSE CALL_TRANSCRIPT isFinal=false ×27，isFinal=true 含 fox 句且 speaker=HUMAN_AGENT/agentId=wei；DB source=ASR 的 HUMAN_AGENT 行 has_agent=t 且文本为 fox 句、CUSTOMER 行 has_agent=f、seq 8-13 与 MODEL 行共序无冲突；整通无 "audio was dropped"。C14 在 qwen 路径上不复现：三通 tap 在线的电话（19s/41s/36s，每侧合计约 4800 帧）丢帧全为 0，而立案那次（openai 路径）每侧约 1100 帧丢 46(4.0%)/78(7.2%)——openai 每帧 base64+JSON 封装且 24kHz，qwen 是裸二进制帧且 16kHz。不写成"已修"：丢弃策略、队列深度、写超时一行未改，openai 路径是否仍丢帧未测。途中两次发现并修掉 C40（tap 与受众都困在 join 的合并分支里，2026-08-21 派单腿早绑定后再也够不着——每通队列派单的电话两天没有转写；第一版只修了 tap，抓 wei 的 SSE 才发现受众也没宣告，转写写进库发给了没有人）。第二通的文本崩坏系执行者同时扮演主叫与坐席且同房间造成的串音，把手机拿开即恢复一字不差——同时证伪了立案时"崩坏必因丢帧"的推断。证据：sse-2026-08-23.log。# 2026-08-20 首次执行:链路/归户/共序全通,但双侧丢帧(4%/7.2%)致fox句识别崩坏→C14立案
     refs: ["internal/streamin/tap.go:123", "internal/streamin/streamin.go:289", "internal/streamin/session.go:60", "internal/transcript/actor.go:261", "internal/streamin/pump.go:90"]
 
   - id: VC-S9-02
