@@ -485,10 +485,29 @@ const billDriftTolerance = 2
 func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) string {
 	queue := snap.Queue
 
-	// The caller abandoned while an agent's phone was ringing.
-	for _, leg := range agentLegs {
-		if leg.AnsweredAt == nil && leg.ReleasedAt != nil && !queue.BridgedAt.IsZero() {
-			return "ABANDONED_RINGING"
+	// Only ever asked about a call nobody answered, so a queue that bridged
+	// did not stay bridged, and the phase the caller was in when they gave up
+	// is what the reason names.
+	//
+	// A phone was ringing when they went. The condition used to require that
+	// the queue *had* bridged, which is the opposite of what the sentence
+	// above it says and made the branch unreachable for the case it describes:
+	// a caller who hangs up mid-ring never got as far as a bridge. Left that
+	// way, every one of them was filed under AGENTS_DID_NOT_ANSWER — the
+	// agent's fault rather than the caller's choice, on the very report a
+	// supervisor reads to tell those apart.
+	if queue.BridgedAt.IsZero() && isCallerGone(queue) {
+		for _, leg := range agentLegs {
+			// Ringing *at the moment they went*, which is not the same as
+			// having rung at some point: a caller who sat through
+			// twenty-three attempts and then waited another two minutes in
+			// silence abandoned the wait, not a ring. The ring that was cut
+			// short by the hangup is the one that ends no earlier than the
+			// caller's own departure.
+			if leg.AnsweredAt == nil && leg.ReleasedAt != nil &&
+				!leg.ReleasedAt.Before(queue.LeftAt) {
+				return "ABANDONED_RINGING"
+			}
 		}
 	}
 
@@ -497,6 +516,13 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 		switch {
 		case queue.Cause == "Timeout":
 			// The queue gave up on the caller, not the reverse.
+			return "NO_AVAILABLE_AGENT"
+		case !isCallerGone(queue):
+			// Still queued, or removed for a reason that was not theirs, and
+			// phones did ring: the agents are what went wrong here.
+			if len(agentLegs) > 0 {
+				return "AGENTS_DID_NOT_ANSWER"
+			}
 			return "NO_AVAILABLE_AGENT"
 		case wait >= 0 && wait < shortAbandonThreshold:
 			return "SHORT_ABANDONED"
@@ -508,6 +534,15 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 		return "AGENTS_DID_NOT_ANSWER"
 	}
 	return ""
+}
+
+// isCallerGone reports whether the caller is the one who ended it, in the
+// queue's own vocabulary: Cancel is the caller leaving, Timeout is the queue
+// giving up on them. Anything else is read as not the caller's doing — the
+// safer way round, because blaming a caller who did not hang up is the error a
+// supervisor cannot see in the report.
+func isCallerGone(queue QueueFacts) bool {
+	return strings.EqualFold(strings.TrimSpace(queue.Cause), "Cancel")
 }
 
 // buildLegs writes the journey for the detail view, in order. botSec is the

@@ -210,15 +210,33 @@ func TestMissedReasons(t *testing.T) {
 		want string
 	}{
 		{
+			// No BridgedAt: a caller who hangs up mid-ring never gets as far
+			// as a bridge, which is why requiring one made this reason
+			// unreachable for the case it names and filed every such caller
+			// under AGENTS_DID_NOT_ANSWER instead.
 			name: "abandoned while the agent's phone rang",
 			snap: Snapshot{
-				Queue: QueueFacts{JoinedAt: at(0), BridgedAt: at(10), LeftAt: at(15), Cause: "Cancel"},
+				Queue: QueueFacts{JoinedAt: at(0), LeftAt: at(15), Cause: "Cancel"},
 				Parties: []PartySnapshot{
 					{Role: RoleOriginator, ReleasedAt: atPtr(15)},
 					{Role: RoleTarget, AgentID: idPtr(agentID), CreatedAt: at(10), ReleasedAt: atPtr(15)},
 				},
 			},
 			want: "ABANDONED_RINGING",
+		},
+		{
+			// The same shape but the caller stayed: the queue took them off
+			// the agent who would not pick up. That is the agents' failure,
+			// and it must not read as the caller's choice.
+			name: "the agent let it ring out while the caller waited",
+			snap: Snapshot{
+				Queue: QueueFacts{JoinedAt: at(0), LeftAt: at(300), Cause: "Timeout"},
+				Parties: []PartySnapshot{
+					{Role: RoleOriginator, ReleasedAt: atPtr(300)},
+					{Role: RoleTarget, AgentID: idPtr(agentID), CreatedAt: at(10), ReleasedAt: atPtr(25)},
+				},
+			},
+			want: "NO_AVAILABLE_AGENT",
 		},
 		{
 			name: "gave up almost immediately",
@@ -235,6 +253,21 @@ func TestMissedReasons(t *testing.T) {
 				Parties: []PartySnapshot{{Role: RoleOriginator, ReleasedAt: atPtr(90)}},
 			},
 			want: "ABANDONED_WAITING",
+		},
+		{
+			// The queue never said why they left — the departure event is one
+			// this campaign has watched go missing (C36). Phones rang and
+			// nobody picked up, and that much is recorded, so the row says so
+			// rather than inventing a choice the caller may not have made.
+			name: "the queue never said why they left, but phones rang",
+			snap: Snapshot{
+				Queue: QueueFacts{JoinedAt: at(0), LeftAt: at(120)},
+				Parties: []PartySnapshot{
+					{Role: RoleOriginator, ReleasedAt: atPtr(120)},
+					{Role: RoleTarget, AgentID: idPtr(agentID), CreatedAt: at(10), ReleasedAt: atPtr(25)},
+				},
+			},
+			want: "AGENTS_DID_NOT_ANSWER",
 		},
 		{
 			name: "the queue gave up on the caller",
