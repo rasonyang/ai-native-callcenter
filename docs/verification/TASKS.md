@@ -1093,6 +1093,18 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   (带 `variable_cc_member_session_uuid`)造腿。摘除验证:把早退还原,该用例报
   `condition not reached in time`,旧用例照旧通过 —— 正是它两天来的表现。
   **对 C14 的意义**:在此之前 VC-S9-01 **根本无法重跑** —— 没有 ASR,就没有丢帧可测。
+  **【当天补修:第一版只修了一半】** tap 挪出去了,**`announceAudience` 还留在合并分支里**,
+  理由写的是"没有合并就没有 party 迁移,不必重播受众" —— **这个理由是错的**。
+  转写 actor 按 `agentIDs` 给自己定 scope(`transcript/actor.go` 的 `scope()`),
+  受众没被宣告过就是空,于是**每一行都写进了库、发给了没有人**:
+  现场抓 wei 的 SSE,整通电话 `QUEUE_JOINED`/`PARTY_*`/`CALL_CDR` 都在,
+  **一条 `CALL_TRANSCRIPT` 都没有**,而库里 ASR 行好好地躺着 —— 坐席面板全程空白且不报错。
+  受众和 tap 是同一个理由、同一个时刻:**派单腿在创建时就绑进来了,没有任何东西迁移,
+  但这通电话上确实多了一个人**。两者一起挪到合并分支之外。
+  回归用例同步补上受众断言;摘除验证(只在合并时宣告)报
+  `audience = [] (announced=false)`。
+  这一条是**现场重跑相对跑测试的又一次兑现**:我自己的修复自洽、测试全绿,
+  只有真实的 SSE 流说了不。
   证据:`docs/verification/artifacts/VC-S9-01/verdict.md`(重跑记录)。
 
 ### 排序总则

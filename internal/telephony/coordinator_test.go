@@ -304,6 +304,8 @@ func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
 	c.AttachTaps(taps)
+	audiences := newRecordingAudiences()
+	c.AttachAudiences(audiences)
 
 	ctx := t.Context()
 	minted := uuid.New().String()
@@ -334,6 +336,15 @@ func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
 	}
 	if taps.agents[agentChan] != testAgentID {
 		t.Errorf("the tap carries agent %s, want %s", taps.agents[agentChan], testAgentID)
+	}
+	// And the audience, for the same reason at the same moment: the transcript
+	// scopes itself to the agents on the call, so an unannounced audience
+	// means every line is written to the database and published to nobody.
+	// The panel stays empty for the whole conversation and nothing errors.
+	got, ok := audiences.forCall(uuid.MustParse(minted))
+	if !ok || len(got) != 1 || got[0] != testAgentID {
+		t.Errorf("audience = %v (announced=%v), want just %s — a transcript with "+
+			"no audience never reaches the agent it is about", got, ok, testAgentID)
 	}
 }
 

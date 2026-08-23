@@ -493,14 +493,19 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 			keep, absorb = otherID, callID
 		}
 		c.merge(ctx, keep, absorb)
-		// Parties moved between calls, so who is on this one has changed.
-		c.announceAudience(keep)
 	}
 
 	// The tap goes on now, at the bridge, on a leg that may be milliseconds
 	// old — measured to survive, so there is no attach-on-answer-and-discard
 	// fallback to maintain.
 	c.tapAgentLeg(keep, ev.ChannelID, ev.OtherChannelID)
+	// And who is on this call, for the same reason and at the same moment. A
+	// merge is one way the audience changes and not the only one: a delivery
+	// leg bound at its creation joins the call without anything moving, and
+	// announcing only on a merge left the transcript with no audience at all —
+	// written to the database, published to nobody, the agent's panel empty
+	// for the whole conversation.
+	c.announceAudience(keep)
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an
