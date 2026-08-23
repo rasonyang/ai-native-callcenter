@@ -275,6 +275,44 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   而非硬编码;③把 `rona_delay_sec` 接上(要么下发,要么从契约里删——不留死配置)。
   队列侧另有一处不一致待一并处理:support-zh 的 `rona_delay_sec`/`sla_threshold_sec`/
   `discard_abandoned_after_sec` 均为 0,而 support-en 是 10/20/60,seed 两边不同口径。
+
+  **【2026-08-23 落地,三个提交;现场重跑待做】**
+  - **`cbf0391` 交换机侧的守卫**:四个**每坐席**参数随 `mirrorRegistration` 一并下发 ——
+    `max_no_answer=2` / `no_answer_delay_time=60` / `reject_delay_time=60` / `busy_delay_time=60`;
+    补写了 `max_no_answer` 与 `busy_delay_time` 两个 setter(另两个此前有 setter 无调用方)。
+    **`agent-originate-timeout` 是全局参数**,由 `aicc_xml.lua` 的 `<settings>` 下发,60 → **15 秒**。
+    连带:`reject_delay_time=60` 正是 **C37**(被拒的派单 70 毫秒一次空转三分钟)的直接对策,
+    该条状态随之改为"参数已改,待复现验证"。
+  - **`27be54c` 应用侧的消费**:`KindQueueAgentStatus`(此前归一化后被丢弃)→
+    交换机把坐席置 `On Break` = **通知**,应用据此 `RingNoAnswer` → NOT_READY(SYSTEM) +
+    `AGENT_NOT_READY` + 反向镜像。**状态转移归应用所有,交换机只做通知** —— 这正是 W2.1
+    点名的硬约束,VC-S5-01 实测到的"前后完全一致"就是两边打架的结果。
+    **两道守卫都在 presence 服务里**,因为只有它知道自己已经相信了什么:
+    ①**仍为 READY** —— 已经不接单的人没有什么可改,这同时切断了"我们自己的镜像回声被当成新的漏接";
+    ②**话机可达** —— 响不响得起来是好话机才有的事;READY 但话机失联的人是**我们故意**镜像成
+    On Break 的(C28),把它读回来会夺走一个他从未改变过的状态。
+  - **`88a636f` missed_reason 的矛盾**:`ABANDONED_RINGING` 原本要求队列**已桥接**,
+    而"响铃中放弃"的人根本走不到桥接 —— 该分支对它自己描述的情形不可达,
+    这类主叫**全被记成 `AGENTS_DID_NOT_ANSWER`**:本该是主叫的选择,记成了坐席的过失,
+    而主管正是靠这份报表分辨两者。仅仅反转条件会矫枉过正 —— 8 月那次事故的 fixture 证明了:
+    23 次派单无人接听、随后主叫又静默等了两分钟才挂断,**响过,但不是他离开时响的**。
+    故判据是"他离开那一刻还活着的那次振铃"(腿的释放不早于主叫的离开)。
+    "谁结束的"取队列自己的词汇(`Cancel` vs `Timeout`),不靠推断 —— 其余一律**不算**主叫的选择,
+    因为把没挂机的主叫记成放弃,是报表上看不出来的那种错。
+    第三种情形随之补名:队列没说为什么走(这种缺失本轮 C36 见过),而话机确实响过 →
+    `AGENTS_DID_NOT_ANSWER`,记**录到的事**,不发明一个主叫未必做过的选择。
+    **摘除验证抓到我自己刚写的死代码**:这个新分支在补 fixture 之前没有任何用例能到达。
+  - **support-zh 的 `0|0|0` 已修复**:live 库 UPDATE 成 `10|20|60` 与 support-en 一致;
+    **seed 也一并改**(`seed.go`)—— 原先只显式写 `sla_threshold_sec`,其余靠列默认值,
+    而经 API 建的队列会拿到 0(C33),两条本该一样的队列因此按"从哪扇门进来"分了岔。
+    ⚠ 这动了 **C33 的现场证据**:support-zh 那行不再是受害者,C33 的证据以
+    `VC-S12-01/verdict.md` 里抄下的读数为准。
+  - **仍未决(须 owner 定)**:`queues.rona_delay_sec` **在交换机里没有位置** ——
+    `callcenter_config queue list` 的列里根本没有 RONA 延迟,它是**每坐席**的
+    `no_answer_delay_time`;一个坐席同时配员两条队列时 per-queue 的值无解,
+    这正是 mod_callcenter 把它放在坐席上的原因。所以"下发"这条路走不通,
+    剩下的是**从契约里删**(改契约 + 迁移,spec-first),或者重新定义它的含义。
+    本轮**没有动它**,它仍是死配置。
 - **W3 flows 管理面**(D3):**路由 `/admin/bots`**;交互参考 ui-test(admin/bots/index.tsx 列表 +
   $flowId.tsx 详情:spec JSON 查看器、节点可达性分析、transitions 摘要、publish 对话框);
   设计规范 web/CLAUDE.md。**范围含 UI 上传/编辑 spec**(§补充 S1)。顺序:openapi 契约
@@ -1042,6 +1080,10 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **与 C36 同源但后果独立**:即使收养修好,这个忙等循环仍会让一名坐席在整通电话里
   既接不到、也不显示为忙。**只观察到一次**(重启后的状态下),机制未独立复现 ——
   若要处理,先补一条能稳定重现它的用例。
+  **【2026-08-23 参数已改,待复现验证】** W2.1 随 `mirrorRegistration` 下发了
+  `reject_delay_time=60`(此前是 0 = 立即重试),这正是本条的直接对策:被拒之后要等一分钟才会再派。
+  **但本条不改判为"已修"** —— 触发条件(那条挂死的 INVITE)本身还没弄清,
+  而且没有能稳定重现它的用例。下次遇到时先看重试间隔是不是变成了 60 秒。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
 
 - **C38(new,2026-08-23 VC-S12-01 第二次重跑发现,未修)**

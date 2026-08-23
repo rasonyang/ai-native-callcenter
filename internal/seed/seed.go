@@ -248,9 +248,16 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 		{"support-en", "7001", "Support (EN)"},
 		{"support-zh", "7002", "Support (ZH)"},
 	} {
+		// Every column the demo depends on, named rather than left to the
+		// table's defaults: a queue created through the API without them comes
+		// out with zeros (C33), and one seeded queue already differed from the
+		// other for exactly that reason. Two queues that are meant to be alike
+		// should not be able to drift apart depending on which door they came
+		// through.
 		if _, err := st.Pool.Exec(ctx, `
-			INSERT INTO queues (id, name, ext_number, display_name, sla_threshold_sec)
-			VALUES ($1, $2, $3, $4, 20)
+			INSERT INTO queues (id, name, ext_number, display_name,
+			                    sla_threshold_sec, rona_delay_sec, discard_abandoned_after_sec)
+			VALUES ($1, $2, $3, $4, 20, 10, 60)
 			ON CONFLICT (name) DO NOTHING`,
 			uuid.New(), q.name, q.ext, q.display); err != nil {
 			return nil, nil, err
