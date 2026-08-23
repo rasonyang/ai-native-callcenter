@@ -575,3 +575,72 @@ func insertAgent(t *testing.T, pool *pgxpool.Pool, username string) uuid.UUID {
 	}
 	return agentID
 }
+
+// One row per call, written by whichever path saw the call end — and, where
+// both did, by the one that saw more of it.
+//
+// The two writers overlap in exactly one situation, found live: a restart
+// kills the bot's leg, no transfer was ever marked, so the bot writes the call
+// off as ended; the caller then survives, reaches a queue and talks to an
+// agent for four minutes. Under the old first-writer-wins rule that row was
+// discarded in silence, and the ledger the carrier is billed from said a bot
+// call ended at the restart with no agent, no queue and no talk time.
+//
+// Through InsertCDR itself, not a hand-written upsert: the rule is only worth
+// anything if the query that ships implements it.
+func TestALaterEndingReplacesTheRowThatSawLessOfTheCall(t *testing.T) {
+	ledger, _, pool := workspaceStore(t)
+	ctx := context.Background()
+	callID := uuid.New()
+	started := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Second)
+
+	row := func(endedAt time.Time, talkSec int, agentIDs []uuid.UUID) CDR {
+		return CDR{
+			CallID: callID, StartedAt: started, AnsweredAt: started, EndedAt: endedAt,
+			CallType: "INBOUND", Language: "zh", FromNumber: "18600000000",
+			ToNumber: "95002", Status: CDRStatusAnswered,
+			TalkSec: talkSec, BotSec: 36, BillSec: 36, TotalSec: 36,
+			AgentIDs: agentIDs,
+		}
+	}
+
+	// The bot writes the call off when its leg dies with the process.
+	botEnd := started.Add(37 * time.Second)
+	if err := ledger.InsertCDR(ctx, row(botEnd, 0, nil)); err != nil {
+		t.Fatalf("bot row: %v", err)
+	}
+	// The caller lived on and spent four minutes with an agent.
+	agentID := insertAgent(t, pool, "w2-later-ending")
+	humanEnd := botEnd.Add(4 * time.Minute)
+	if err := ledger.InsertCDR(ctx, row(humanEnd, 240, []uuid.UUID{agentID})); err != nil {
+		t.Fatalf("human row: %v", err)
+	}
+
+	got, err := ledger.GetCDR(ctx, callID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.TalkSec != 240 {
+		t.Errorf("talkSec = %d, want 240 — the agent's four minutes were discarded",
+			got.TalkSec)
+	}
+	if !got.EndedAt.UTC().Equal(humanEnd) {
+		t.Errorf("endedAt = %s, want the caller's own hangup %s", got.EndedAt, humanEnd)
+	}
+	if len(got.AgentIDs) != 1 {
+		t.Errorf("agentIds = %v, want the agent who took the call", got.AgentIDs)
+	}
+
+	// And it only ever goes forwards: a row that saw less cannot take it back.
+	if err := ledger.InsertCDR(ctx, row(botEnd, 0, nil)); err != nil {
+		t.Fatalf("late bot row: %v", err)
+	}
+	got, err = ledger.GetCDR(ctx, callID)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if got.TalkSec != 240 {
+		t.Errorf("talkSec = %d after a shorter row arrived; the rule has to be "+
+			"monotone or two writers trade the row back and forth", got.TalkSec)
+	}
+}

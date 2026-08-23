@@ -253,7 +253,35 @@ INSERT INTO cdrs (
     $14, $15, $16, $17, $18, $19,
     $20, $21, $22, $23,
     $24, $25, $26, $27, $28
-) ON CONFLICT (call_id) DO NOTHING
+) ON CONFLICT (call_id) DO UPDATE SET
+    started_at = EXCLUDED.started_at,
+    answered_at = EXCLUDED.answered_at,
+    ended_at = EXCLUDED.ended_at,
+    call_type = EXCLUDED.call_type,
+    language = EXCLUDED.language,
+    from_number = EXCLUDED.from_number,
+    to_number = EXCLUDED.to_number,
+    did = EXCLUDED.did,
+    flow_id = EXCLUDED.flow_id,
+    queue_id = EXCLUDED.queue_id,
+    agent_ids = EXCLUDED.agent_ids,
+    primary_agent_id = EXCLUDED.primary_agent_id,
+    ring_sec = EXCLUDED.ring_sec,
+    bot_sec = EXCLUDED.bot_sec,
+    queue_wait_sec = EXCLUDED.queue_wait_sec,
+    talk_sec = EXCLUDED.talk_sec,
+    bill_sec = EXCLUDED.bill_sec,
+    total_sec = EXCLUDED.total_sec,
+    status = EXCLUDED.status,
+    hangup_cause = EXCLUDED.hangup_cause,
+    missed_reason = EXCLUDED.missed_reason,
+    disposition = EXCLUDED.disposition,
+    is_contained = EXCLUDED.is_contained,
+    has_recording = EXCLUDED.has_recording,
+    user_data = EXCLUDED.user_data,
+    tech = EXCLUDED.tech,
+    legs = EXCLUDED.legs
+WHERE EXCLUDED.ended_at > cdrs.ended_at
 `
 
 type InsertCDRParams struct {
@@ -288,6 +316,22 @@ type InsertCDRParams struct {
 }
 
 // SPDX-License-Identifier: Apache-2.0
+//
+// One row per call, written by whichever path saw the call end — and, where
+// both did, by the one that saw more of it.
+//
+// The two paths do not normally overlap: a transferred call belongs to the
+// human path and a contained one to the bot's, and each declines to write the
+// other's. They overlapped in exactly one situation, and it took a live
+// restart to find: the bot's leg dies with the process, no transfer was ever
+// marked, so the bot writes the call off as ended — and then the caller lives
+// on, reaches a queue, and talks to somebody for four minutes that DO NOTHING
+// silently discarded. The row said a bot call ended at the restart, with no
+// agent, no queue and no talk time, on the record the carrier is billed from.
+//
+// A later ending means more of the call is known, so that row wins. The rule
+// is monotone, which is what keeps this safe as an upsert: a row can only ever
+// be replaced by one that reaches further, never flip back.
 func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) error {
 	_, err := q.db.Exec(ctx, insertCDR,
 		arg.CallID,

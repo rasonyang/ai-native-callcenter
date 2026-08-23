@@ -105,9 +105,15 @@ const (
 	CDRStatusFailed   = "FAILED"
 )
 
-// InsertCDR writes the ledger row. A second insert for the same call is a
-// no-op: the first writer wins, which is what makes call retirement safe to
-// run from more than one place.
+// InsertCDR writes the ledger row, or replaces one that saw less of the call.
+//
+// Retirement runs from more than one place, so a second write for the same
+// call has to be safe. It used to be safe by being a no-op — first writer
+// wins — and that discarded the truth in the one case where the two writers
+// disagreed: a bot leg killed by a restart wrote the call off as ended, and
+// the four minutes the caller then spent with an agent had nowhere to go. The
+// rule is now that a row ending later replaces one ending earlier, because a
+// later ending means more of the call is known.
 func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 	userData, err := marshalOr(cdr.UserData, "{}")
 	if err != nil {
