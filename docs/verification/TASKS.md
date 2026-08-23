@@ -8,10 +8,11 @@
 > **当前状态(2026-08-23)**:账本 **39 case —— 37 PASS / 2 FAIL / 0 TODO**。
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
 > 余下 2 条 FAIL:**VC-S9-01→C14**(ASR 丢帧,唯一需要开放式调查的)、
-> **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)。
+> **VC-S12-01→C36**(**C26 已于 2026-08-23 修复并现场证实**;本条转而卡在新暴露的
+> "重启后不收养队列中的主叫"——主叫真的进了队列,但所有屏幕都看不见他)。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 17 项、余 12 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 17 项、余 14 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34 / C36 / C37;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -918,6 +919,41 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **后续(未做,须 owner 定)**:`TransferToExtension` 的 `context` 参数现在**没有任何调用点在用**,
   留着就是同一个陷阱的下一次机会,建议**直接删掉这个参数**;那要动 `aicall.Switch` 接口与各桩件,
   不夹带进本次修复。
+  证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
+
+- **C36(new,2026-08-23 VC-S12-01 重跑发现,未修)**
+  **重启后新实例不收养队列里的主叫,而把每一次派单的坐席腿当成一通新外呼。**
+  主叫在交换机上确实在队列里:
+  ```
+  callcenter_config queue list members support-en
+  support-en|…|session_uuid=01a02c57-a227-…|18688886669|state=Trying|serving_agent=agent-wei
+  ```
+  而应用侧:`/api/v1/calls/waiting` → `{"items":[]}`;
+  `/api/v1/calls` → 只有一通 **`callType: OUTBOUND`**、唯一 party 是 `1008` 的 `DIALING` 腿,
+  `otherNumber` 才是主叫号码。**主叫本人从头到尾不在应用里**,每派单一次就多开一通假外呼
+  (实测 RONA 后重派,又是一通新的假 OUTBOUND)。
+  后果即本用例 `failure_looks_like` 的原话:*"这通电话直到有人接起前对所有屏幕都是隐形的"* ——
+  主管看不到有人在等、报表少一通、坐席弹屏没有来电上下文。
+  **为什么现在才看见**:C26 修好之前主叫在 bot 腿死后 50 毫秒内就被挂断,根本活不到进队列,
+  这个洞一直躲在它后面。**这是 VC-S12-01 目前判 FAIL 的唯一原因**(C26 那半已证实修好)。
+  方向:重启后的通道对账(`ShowChannels` 收养)没有把"已在 callcenter 里排队的主叫通道"认回来;
+  而 `cc_member_session_uuid` 本来就是为这件事准备的(见 `aicc.xml` 关于第二条腿的长注释)。
+  证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
+- **C37(new,2026-08-23 VC-S12-01 重跑发现,未修;观察一次,机制未独立复现)**
+  **一次被取消的派单把坐席话机卡死,之后每 70 毫秒被重试一次,持续到主叫放弃。**
+  ```
+  09:59:14.428  第一次派单 agent-wei
+  09:59:16.128  Agent agent-wei Origination Canceled : ORIGINATOR_CANCEL
+  09:59:16.2 起  USER_BUSY … USER_BUSY …  约 70ms 一次,共 42 次,持续三分钟
+  10:02:25      Member … abandoned waiting in queue support-en
+  ```
+  第一条振铃腿没被拆干净(通道在 `CS_CONSUME_MEDIA/RINGING` 一直挂着),
+  浏览器话机此后对每个新 INVITE 回 486;而**拒绝不是无应答**,不走 RONA 退避,
+  `reject_delay_time=0`(`callcenter_config agent list` 实测,由应用镜像写入)于是立即重试。
+  owner 当时的观感:"只听到保持音,并没有看到 1008 响铃"。
+  **与 C36 同源但后果独立**:即使收养修好,这个忙等循环仍会让一名坐席在整通电话里
+  既接不到、也不显示为忙。**只观察到一次**(重启后的状态下),机制未独立复现 ——
+  若要处理,先补一条能稳定重现它的用例。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
 
 ### 排序总则
