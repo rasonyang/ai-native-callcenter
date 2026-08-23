@@ -12,7 +12,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 18 项、余 15 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38 / C39;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 19 项、余 15 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38 / C39;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1070,6 +1070,30 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   下一步:在 `ObserveDevice`/`mirrorStatus` 上加一条能分辨"短路了"与"写了但被盖"的日志,
   再重启一次即可定案;不需要真实通话。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md` 末节。
+
+- **C40(new,2026-08-23 开跑 C14 时发现;当场已修)**
+  **一次修复顺手关掉了人工阶段的实时转写,静默两天。**
+  重跑 VC-S9-01 的第一通电话:通话正常、坐席通了 28 秒、CDR 正确,
+  **而应用日志里连一行 `transcription tap attached` 都没有** —— 转写从头到尾没有开始。
+  根因在 `Coordinator.join`(`coordinator.go`):tap 挂在**合并分支里面**,
+  而入口第一行是 `if !ok || !otherOK || callID == otherID { return }`。
+  **`dec47ad`(2026-08-21,"a queue delivery leg joins the caller it was dialled for")**
+  让派单腿在 `CHANNEL_CREATE` 时就绑进主叫那通电话 —— 那个改动是对的,它正是阻止
+  "派单读成一通外呼"的东西(见 C36 后一半)—— 但从此桥接时两条腿**已经在同一通电话里**,
+  `callID == otherID` 直接 return,`tapAgentLeg` 再也够不着。
+  **时间线正好错开一天**:VC-S9-01 最后一次执行是 2026-08-20,绑定次日落地,
+  此后没人重跑过这条 —— 于是**每一通经队列派单的电话都没有转写,而没有任何东西报错**。
+  **为什么单测没拦住**:既有那条 `TestTheTapGoesOnTheAgentLegAtTheBridge` 造的派单腿
+  **只带 `variable_dialed_user`、不带 `cc_member_session_uuid`** —— 那是 8-21 之前的形态。
+  测试模型停在旧世界,于是它一直绿着,而生产早已换了形状。
+  **已修**:合并与否是**身份**问题,挂不挂 tap 是**桥接**问题,两者不是同一个问题 ——
+  `join` 改成"需要合并才合并",tap 无条件在桥接时挂上;`announceAudience` 仍留在合并分支里
+  (没有合并就没有 party 迁移,不必重播受众)。
+  回归:`TestTheTapGoesOnEvenWhenThereIsNothingToMerge` —— **按真实派单形态**
+  (带 `variable_cc_member_session_uuid`)造腿。摘除验证:把早退还原,该用例报
+  `condition not reached in time`,旧用例照旧通过 —— 正是它两天来的表现。
+  **对 C14 的意义**:在此之前 VC-S9-01 **根本无法重跑** —— 没有 ASR,就没有丢帧可测。
+  证据:`docs/verification/artifacts/VC-S9-01/verdict.md`(重跑记录)。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

@@ -465,31 +465,42 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	}
 	callID, ok := c.registry.CallForChannel(ev.ChannelID)
 	otherID, otherOK := c.registry.CallForChannel(ev.OtherChannelID)
-	if !ok || !otherOK || callID == otherID {
+	if !ok || !otherOK {
 		return
 	}
 
-	// Keep the identity everything else refers to. A minted id — chosen by
-	// the dialplan before any leg existed — outranks a provisional one: the
-	// bot's transcript and both halves of the CDR meet on it. An agent-only
-	// call is always the one absorbed.
-	keep, absorb := callID, otherID
-	switch {
-	case c.isAgentOnly(callID):
-		keep, absorb = otherID, callID
-	case c.isAgentOnly(otherID):
-		// keep as is
-	case c.isMintedID(otherID) && !c.isMintedID(callID):
-		keep, absorb = otherID, callID
+	// Two calls becoming one is the common case but not the only one: a queue
+	// delivery leg is bound to the caller's call the moment it is created, so
+	// by the time it bridges there is nothing left to merge. That is correct
+	// and deliberate — it is what stops the offer reading as an outbound call
+	// — and for two days it also meant the branch below was skipped, taking
+	// the transcription tap with it. Whether a merge was needed is a question
+	// about identity; the tap is a question about a bridge, and they are not
+	// the same question.
+	keep := callID
+	if callID != otherID {
+		// Keep the identity everything else refers to. A minted id — chosen by
+		// the dialplan before any leg existed — outranks a provisional one: the
+		// bot's transcript and both halves of the CDR meet on it. An agent-only
+		// call is always the one absorbed.
+		absorb := otherID
+		switch {
+		case c.isAgentOnly(callID):
+			keep, absorb = otherID, callID
+		case c.isAgentOnly(otherID):
+			// keep as is
+		case c.isMintedID(otherID) && !c.isMintedID(callID):
+			keep, absorb = otherID, callID
+		}
+		c.merge(ctx, keep, absorb)
+		// Parties moved between calls, so who is on this one has changed.
+		c.announceAudience(keep)
 	}
-	c.merge(ctx, keep, absorb)
 
 	// The tap goes on now, at the bridge, on a leg that may be milliseconds
 	// old — measured to survive, so there is no attach-on-answer-and-discard
 	// fallback to maintain.
 	c.tapAgentLeg(keep, ev.ChannelID, ev.OtherChannelID)
-	// Parties moved between calls, so who is on this one has changed.
-	c.announceAudience(keep)
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an

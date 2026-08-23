@@ -291,6 +291,52 @@ func (r *recordingTapper) snapshot() ([]string, []string, []string, []string) {
 		append([]string(nil), r.resumed...), append([]string(nil), r.detached...)
 }
 
+// The same bridge, with the delivery leg shaped the way mod_callcenter really
+// sends it: carrying the caller's channel, so the leg is bound to the caller's
+// call the moment it is created and there is nothing left to merge.
+//
+// That binding landed on 2026-08-21, one day after VC-S9-01 last ran, and the
+// tap lived inside the merge branch. For two days every queue-delivered call
+// went untranscribed and the test above kept passing, because it models a
+// delivery leg with no member pointer — the shape production stopped sending.
+func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	taps := newRecordingTapper()
+	c.AttachTaps(taps)
+
+	ctx := t.Context()
+	minted := uuid.New().String()
+	callerChan, agentChan := "caller-chan", "agent-chan"
+	vars := map[string]string{"variable_aicc_call_id": minted, "variable_aicc_language": "en"}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
+
+	// mod_callcenter stamps the member's channel onto the leg it dials, which
+	// is what binds the two before any bridge.
+	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound", map[string]string{
+		"variable_dialed_user":            agentExtension,
+		"variable_cc_member_session_uuid": callerChan,
+	}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
+
+	waitFor(t, func() bool {
+		attached, _, _, _ := taps.snapshot()
+		return len(attached) > 0
+	})
+	attached, _, _, _ := taps.snapshot()
+	if len(attached) != 1 || attached[0] != agentChan {
+		t.Fatalf("attached to %v, want the agent's leg %s — a bridge that needed no "+
+			"merge is still a bridge, and the human phase still needs transcribing",
+			attached, agentChan)
+	}
+	if taps.agents[agentChan] != testAgentID {
+		t.Errorf("the tap carries agent %s, want %s", taps.agents[agentChan], testAgentID)
+	}
+}
+
 // The tap goes on the agent's leg and never the caller's. That is the whole
 // attribution model: the agent leg's lifetime is exactly the human phase, and
 // it carries one known agent, so a line's speaker is structural rather than
