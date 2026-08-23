@@ -478,7 +478,7 @@ cases:
       QUEUE_AGENT_STATE(Ring-No-Answer)事件被 Normalize 后无人消费(enums.md §22),
       presence、报表、坐席屏三处都毫无痕迹 —— 队列被一部没人守的话机吸干,系统处处"正常"。
     evidence_dir: docs/verification/artifacts/VC-S5-01/
-    status: PASS  # 2026-08-21 重跑(C22 修复后):NO_ANSWER/ABANDONED_WAITING、agent_ids 去重=1、ring_sec=121、bot_sec=12 保留、单行 CDR;首跑同日为 FAIL(status=ANSWERED——bot 接听被当成呼叫被接听,C11 修好后才显形)→ 立案并修复 C22;F3 已落实(1 派单+60s+11 连发/轮,见 W2.1);RONA 状态机缺口仍在(wei 前后皆 READY|),留证为 W2 基线
+    status: PASS  # 2026-08-23 16:04 重跑(W2/W2.1 落地;材料改用 95002/support-zh/中文):RONA 全链三边一致,12 毫秒内闭合——"a delivered call rang out unanswered agent=agent-wei queue=support-zh cause=NO_ANSWER"(16:04:08.094)→ wei NOT_READY/SYSTEM(+2ms)→ AGENT_NOT_READY 上流(+10ms)→ 交换机 agent-wei status=On Break no_answer_count=1；CDR 95002|NO_ANSWER|ABANDONED_WAITING|ring_sec=59|agent_ids=1；queue_events JOINED=1 OFFERED=1 ABANDONED=1 无 BRIDGED。首跑时此处是"前后完全一致 state=READY"（交换机摘了人、应用不知道、下次镜像又推回去）。过程中第一版消费 agent-status-change→On Break 被现场证伪：那个词应用自己镜像时也在写，结果每次重启都把设备状态尚未观测的坐席按"漏接"摘掉（wei 的状态历史落在重启那一刻而非通话）；改用"派单失败+原因 NO_ANSWER"后自证不可伪造。振铃时长仍 59 秒（目标 15）已降为留证并立案 C41——参数送达交换机且模块已重载仍不生效，不因它判 FAIL 也不假装生效。 # 2026-08-21 重跑(C22 修复后):2026-08-21 重跑(C22 修复后):NO_ANSWER/ABANDONED_WAITING、agent_ids 去重=1、ring_sec=121、bot_sec=12 保留、单行 CDR;首跑同日为 FAIL(status=ANSWERED——bot 接听被当成呼叫被接听,C11 修好后才显形)→ 立案并修复 C22;F3 已落实(1 派单+60s+11 连发/轮,见 W2.1);RONA 状态机缺口仍在(wei 前后皆 READY|),留证为 W2 基线
     refs: ["internal/agents/state.go:189", "internal/agents/service.go:342", "internal/telephony/switchevent.go:368", "internal/telephony/cdr.go:251"]
 
   # ───────────────────────── S6 排队中主叫挂断(abandon) ─────────────────────────
