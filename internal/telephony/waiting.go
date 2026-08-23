@@ -303,6 +303,9 @@ func (c *Coordinator) ReconcileWaiting(ctx context.Context) {
 				continue
 			}
 			held[member.ChannelID] = true
+			// Before the join, so the restored entry can carry the call's own
+			// identity rather than only the number the switch reports.
+			c.adoptQueuedCaller(ctx, member)
 			before := len(c.waiting.All())
 			c.queueJoined(ctx, SwitchEvent{
 				Kind:            KindQueueMemberJoined,
@@ -331,6 +334,79 @@ func (c *Coordinator) ReconcileWaiting(ctx context.Context) {
 		slog.InfoContext(ctx, "waiting line reconciled",
 			"restored", restored, "dropped", dropped, "queues", len(read))
 	}
+}
+
+// adoptQueuedCaller takes back a call this process never saw start.
+//
+// A caller queued across a restart is on a channel the registry has no record
+// of, and the consequence is not merely a missing row: the leg mod_callcenter
+// raises to offer them to an agent points back at a call that does not exist,
+// so it becomes the first party of a call of its own and comes out as an
+// outbound one, the agent shown dialling the person who is in fact ringing
+// them — one such call per offer, and per retry. The delivery guard that
+// prevents all of this needs a call to bind to, and this is what gives it one.
+//
+// The identity is recovered, never minted. The dialplan chose this call's id
+// before any leg existed and the recording, the transcript and any CDR already
+// refer to it; a fresh id would orphan all three. A channel that cannot tell us
+// its id is left alone — the caller still appears in the waiting line under the
+// switch's own view of their number, which is what happens today.
+//
+// Nothing is replayed. The caller answered minutes ago, so their leg is added
+// in the state it is actually in rather than walked forward through a history
+// that would announce them as ringing now. Screens recover through the
+// SYSTEM_RESET a restart already sends them, which is what that exists for.
+func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember) {
+	if _, known := c.registry.CallForChannel(member.ChannelID); known {
+		return
+	}
+	callID, err := c.adapter.ChannelVariable(member.ChannelID, "aicc_call_id")
+	if err != nil || callID == "" {
+		slog.WarnContext(ctx, "cannot adopt a queued caller: the channel does not name its call",
+			"channelId", member.ChannelID, "queue", member.Queue, "error", err)
+		return
+	}
+	parsed, err := uuid.Parse(callID)
+	if err != nil {
+		slog.WarnContext(ctx, "cannot adopt a queued caller: unreadable call id",
+			"channelId", member.ChannelID, "callId", callID, "error", err)
+		return
+	}
+
+	// Stamped at creation and immutable ever after, so it is read rather than
+	// assumed. Only a call that says otherwise is anything but inbound: a
+	// number reaching a queue arrived from outside.
+	callType := events.CallTypeInbound
+	if hint, _ := c.adapter.ChannelVariable(member.ChannelID, "aicc_call_type"); hint != "" {
+		callType = events.CallType(hint)
+	}
+	language, _ := c.adapter.ChannelVariable(member.ChannelID, "aicc_language")
+
+	if _, err := c.registry.CreateCall(ctx, parsed, callType, language, true); err != nil {
+		// Already there is not a failure: two queues reporting the same caller,
+		// or a second reconcile, both land here.
+		return
+	}
+	if err := c.registry.BindChannel(member.ChannelID, parsed); err != nil {
+		slog.WarnContext(ctx, "adopted a call but could not bind its channel",
+			"channelId", member.ChannelID, "callId", parsed, "error", err)
+		return
+	}
+
+	startedAt := member.StartedAt
+	if startedAt.IsZero() {
+		startedAt = member.JoinedAt
+	}
+	_ = c.registry.Do(parsed, func(call *Call) {
+		call.CreatedAt = startedAt
+		party := call.AddParty(member.ChannelID, member.Number, startedAt)
+		// They answered long before this: a caller cannot be held in a queue
+		// without having been.
+		party.State = PartyTalking
+		party.AnsweredAt = startedAt
+	})
+	slog.InfoContext(ctx, "adopted a caller queued across a restart",
+		"callId", parsed, "channelId", member.ChannelID, "queue", member.Queue)
 }
 
 func (c *Coordinator) queueLeft(ctx context.Context, channelID string, ev SwitchEvent) {

@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 )
 
@@ -37,6 +39,25 @@ func switchHolding(rows map[string][]string, failing map[string]bool) func(strin
 			return "", fmt.Errorf("-ERR no reply")
 		}
 		return strings.Join(append([]string{memberHeader}, rows[queue]...), "\n") + "\n+OK\n", nil
+	}
+}
+
+// channelSaying answers uuid_getvar for the adopted channel as well as the
+// member listing, so a test can say what the switch remembers about a call
+// this process never saw start.
+func channelSaying(vars map[string]string, rows map[string][]string) func(string) (string, error) {
+	members := switchHolding(rows, nil)
+	return func(cmd string) (string, error) {
+		if after, ok := strings.CutPrefix(cmd, "uuid_getvar "); ok {
+			fields := strings.Fields(after)
+			if len(fields) == 2 {
+				if v, ok := vars[fields[1]]; ok {
+					return v, nil
+				}
+			}
+			return "_undef_", nil
+		}
+		return members(cmd)
 	}
 }
 
@@ -167,5 +188,101 @@ func TestAnAnsweredCallerIsNotRestoredToTheLine(t *testing.T) {
 
 	if got := c.AllWaitingCalls(); len(got) != 0 {
 		t.Errorf("a caller already talking to an agent was put back in the queue: %+v", got)
+	}
+}
+
+// The waiting entry is only half of it. A caller the registry does not know is
+// a caller whose delivery leg has nothing to attach to, so mod_callcenter's
+// offer becomes a call of its own — outbound, agent as originator, one per
+// retry. That is what the switch showed live on 2026-08-23.
+func TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo(t *testing.T) {
+	joined := time.Now().Add(-90 * time.Second).Truncate(time.Second).UTC()
+	started := joined.Add(-19 * time.Second)
+	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
+
+	c, _ := reconcileFixture(t, channelSaying(map[string]string{
+		"aicc_call_id":  callID.String(),
+		"aicc_language": "en",
+	}, map[string][]string{
+		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
+	}))
+
+	c.ReconcileWaiting(context.Background())
+
+	got, known := c.registry.CallForChannel("caller-1")
+	if !known {
+		t.Fatal("the caller's channel is still unknown; every offer will open a call of its own")
+	}
+	// Recovered, not minted: the recording and the transcript already name it.
+	if got != callID {
+		t.Errorf("callId = %s, want the id the dialplan minted %s", got, callID)
+	}
+
+	snap, err := c.registry.Snapshot(callID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.CallType != events.CallTypeInbound {
+		t.Errorf("callType = %q, want INBOUND", snap.CallType)
+	}
+	if !snap.CreatedAt.Equal(started) {
+		t.Errorf("createdAt = %s, want the call's own start %s — a recovered call "+
+			"must not begin at the recovery", snap.CreatedAt, started)
+	}
+	if len(snap.Parties) != 1 {
+		t.Fatalf("adopted %d parties, want 1: %+v", len(snap.Parties), snap.Parties)
+	}
+	party := snap.Parties[0]
+	if party.Role != RoleOriginator || party.State != PartyTalking {
+		t.Errorf("party = %s/%s, want ORIGINATOR/TALKING — they answered long ago",
+			party.Role, party.State)
+	}
+	// And the waiting entry now names the call rather than only the number.
+	waiting := c.AllWaitingCalls()
+	if len(waiting) != 1 || waiting[0].CallID != callID {
+		t.Errorf("the waiting entry did not pick up the adopted call: %+v", waiting)
+	}
+}
+
+// A channel that cannot name its call is left alone. Minting an id here would
+// orphan the recording and the transcript that already carry the real one.
+func TestAChannelThatCannotNameItsCallIsNotAdopted(t *testing.T) {
+	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	c, _ := reconcileFixture(t, channelSaying(map[string]string{}, map[string][]string{
+		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
+	}))
+
+	c.ReconcileWaiting(context.Background())
+
+	if _, known := c.registry.CallForChannel("caller-1"); known {
+		t.Error("a call was invented for a channel that never said which call it was")
+	}
+	// The caller is still visible, on the switch's own view of their number.
+	waiting := c.AllWaitingCalls()
+	if len(waiting) != 1 || waiting[0].FromNumber != "18688886669" {
+		t.Errorf("the caller vanished from the line as well: %+v", waiting)
+	}
+}
+
+// An adoption runs once. A second reconcile must not try to create the call
+// again, nor add the caller's leg twice.
+func TestAdoptingIsIdempotent(t *testing.T) {
+	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
+	c, _ := reconcileFixture(t, channelSaying(map[string]string{
+		"aicc_call_id": callID.String(),
+	}, map[string][]string{
+		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
+	}))
+
+	c.ReconcileWaiting(context.Background())
+	c.ReconcileWaiting(context.Background())
+
+	snap, err := c.registry.Snapshot(callID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if len(snap.Parties) != 1 {
+		t.Errorf("the caller's leg was added %d times", len(snap.Parties))
 	}
 }

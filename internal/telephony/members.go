@@ -21,6 +21,11 @@ type QueueMember struct {
 	ChannelID string
 	Number    string
 	JoinedAt  time.Time
+	// StartedAt is when the call itself began, which the switch reports
+	// alongside the join. A call adopted after a restart needs its real start:
+	// stamping it with the moment we noticed would make every recovered call's
+	// duration begin at the recovery.
+	StartedAt time.Time
 	// State is the switch's word for what is happening to this member:
 	// Waiting, Trying, Answered and so on. Kept verbatim; the decision about
 	// which states count as waiting belongs to the reader.
@@ -40,6 +45,36 @@ func (m QueueMember) IsWaiting() bool {
 		return true
 	}
 	return false
+}
+
+// ChannelVariable reads one variable off a live channel.
+//
+// Needed to adopt a call this process never saw start: the identity the
+// dialplan minted for it lives on the channel and nowhere else, and recovering
+// that identity rather than minting a new one is what keeps the recording, the
+// transcript and the CDR talking about the same call.
+//
+// An unset variable is not an error — the switch answers with its own word for
+// nothing, and so does this: the empty string. Anything unrecognised reads as
+// empty too, so a misread degrades to "we could not adopt this call" rather
+// than to a call adopted with a wrong identity.
+func (a *Adapter) ChannelVariable(channelID, name string) (string, error) {
+	out, err := a.cmd.API(fmt.Sprintf("uuid_getvar %s %s", channelID, name))
+	if err != nil {
+		return "", fmt.Errorf("read %s of %s: %w", name, channelID, err)
+	}
+	return parseChannelVariable(out), nil
+}
+
+// parseChannelVariable reads what uuid_getvar answers. The switch says _undef_
+// for a variable that is not set and -ERR for a channel that is gone; neither
+// is a value.
+func parseChannelVariable(out string) string {
+	out = strings.TrimSpace(out)
+	if out == "" || out == "_undef_" || strings.HasPrefix(out, "-ERR") {
+		return ""
+	}
+	return out
 }
 
 // QueueMembers asks the switch who is queued for one queue.
@@ -63,6 +98,7 @@ const (
 	memberColQueue       = 0
 	memberColSessionUUID = 3
 	memberColCIDNumber   = 4
+	memberColSystemEpoch = 6
 	memberColJoinedEpoch = 7
 	memberColState       = 15
 	memberColCount       = 17
@@ -98,13 +134,21 @@ func parseQueueMembers(out string) []QueueMember {
 		if channelID == "" {
 			continue
 		}
-		members = append(members, QueueMember{
+		member := QueueMember{
 			Queue:     parts[memberColQueue],
 			ChannelID: channelID,
 			Number:    strings.TrimSpace(parts[memberColCIDNumber]),
 			JoinedAt:  time.Unix(joined, 0).UTC(),
 			State:     strings.TrimSpace(parts[memberColState]),
-		})
+		}
+		// The call's own start, where the switch reports one. Unlike the join
+		// time this is not worth dropping a member over: a caller in a queue
+		// is worth knowing about even if their call has to be dated from the
+		// moment they joined it.
+		if started, err := strconv.ParseInt(parts[memberColSystemEpoch], 10, 64); err == nil && started > 0 {
+			member.StartedAt = time.Unix(started, 0).UTC()
+		}
+		members = append(members, member)
 	}
 	return members
 }
