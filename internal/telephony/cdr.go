@@ -267,7 +267,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// which is a question about the leg facing whoever charges for it — so it
 	// is set whenever that leg was answered, including on a call the bot
 	// served and nobody took, which the carrier bills all the same.
-	billed := billedLeg(snap, originator, dialled)
+	billed := billedLeg(snap, originator, dialled, isAgentPlaced)
 	switch {
 	case billed != nil && billed.AnsweredAt != nil:
 		cdr.AnsweredAt = *billed.AnsweredAt
@@ -411,11 +411,19 @@ func (a *CDRAssembler) checkDurations(snap Snapshot, cdr *store.CDR) {
 // auto-answers in front of them and nobody bills for that; anchoring on it
 // produced a bill longer than the call itself. Between two extensions nobody
 // bills at all.
-func billedLeg(snap Snapshot, originator *PartySnapshot, dialled []*PartySnapshot) *PartySnapshot {
+func billedLeg(snap Snapshot, originator *PartySnapshot, dialled []*PartySnapshot, isAgentPlaced bool) *PartySnapshot {
 	switch snap.CallType {
 	case events.CallTypeInternal:
 		return nil
 	case events.CallTypeOutbound:
+		// Which leg faces the carrier depends on who placed the call. On a
+		// call this platform placed, it *is* the originator — we created that
+		// leg towards the trunk. An agent dialling out sits on the originator
+		// themselves, so theirs is the one dialled, and their own phone
+		// auto-answering in front of them is not the call becoming billable.
+		if !isAgentPlaced {
+			return originator
+		}
 		for _, leg := range dialled {
 			if leg.AnsweredAt != nil {
 				return leg

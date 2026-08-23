@@ -804,3 +804,51 @@ func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 			got.FromNumber, got.ToNumber)
 	}
 }
+
+// Which leg faces whoever charges for the call depends on who placed it. An
+// agent dialling out sits on the originator, so the carrier's leg is the one
+// dialled — and the agent's own auto-answering phone must never be read as the
+// call becoming billable. On a call this platform placed, the leg towards the
+// carrier *is* the originator, because we created it; looking past it for a
+// dialled trunk that does not exist billed every AI outbound call at zero.
+// Live, 2026-08-23: bill_sec 0 against the switch's own 21 on that same leg.
+func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testing.T) {
+	agentID := uuid.New()
+	placed := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(30),
+		Bot: BotShare{Sec: 12, DID: "95002"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "chan-customer",
+				AnsweredAt: atPtr(4), ReleasedAt: atPtr(30), BilledSec: 26},
+			{Role: RoleTarget, Number: "1008", AgentID: &agentID, ChannelID: "chan-agent",
+				CreatedAt: at(16), AnsweredAt: atPtr(20), ReleasedAt: atPtr(30)},
+		},
+	}
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), placed)
+	if got.BillSec != 26 {
+		t.Errorf("billSec = %d, want 26 — the customer answered at 4 and the call "+
+			"ran to 30, and the carrier charges for all of it", got.BillSec)
+	}
+	if !got.AnsweredAt.Equal(at(4)) {
+		t.Errorf("answeredAt = %v, want the moment the customer picked up", got.AnsweredAt)
+	}
+
+	// The branch that must not move with it: an agent dialled out and nobody
+	// picked up. Their own phone auto-answered in front of them, and that is
+	// not a billable call.
+	unanswered := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(12),
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID,
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
+			{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), ReleasedAt: atPtr(12)},
+		},
+	}
+	if got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), unanswered); got.BillSec != 0 {
+		t.Errorf("billSec = %d on a dial-out nobody answered, want 0", got.BillSec)
+	}
+}
