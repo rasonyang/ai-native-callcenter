@@ -16,7 +16,8 @@ import (
 
 // OutboundService places calls on request.
 type OutboundService interface {
-	Dial(ctx context.Context, agentExtension, destination string) (uuid.UUID, error)
+	Dial(ctx context.Context, agentExtension, destination string,
+		userData map[string]string) (uuid.UUID, error)
 	DialAI(ctx context.Context, req outbound.AIDialRequest) (uuid.UUID, error)
 }
 
@@ -39,7 +40,16 @@ func (s *Server) DialCall(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination)
+	var userData map[string]string
+	if req.UserData != nil {
+		if err := checkUserData(*req.UserData); err != nil {
+			writeError(w, http.StatusBadRequest, CodeUserDataTooLarge, err.Error(),
+				map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
+			return
+		}
+		userData = *req.UserData
+	}
+	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination, userData)
 	if err != nil {
 		writeOutboundError(w, err)
 		return

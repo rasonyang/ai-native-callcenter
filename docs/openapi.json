@@ -4269,6 +4269,15 @@
           "destination": {
             "type": "string",
             "description": "The number to call once the agent's own leg answers."
+          },
+          "userData": {
+            "type": "object",
+            "description": "Business data to attach to the call, on the same terms as POST /calls: flat key/value, values strings, at most 32 keys and 1024 bytes of UTF-8 each, 400 USER_DATA_TOO_LARGE over either limit rather than truncated. Omitted and {} mean the same thing. It never reaches the switch.",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxProperties": 32
           }
         },
         "required": [

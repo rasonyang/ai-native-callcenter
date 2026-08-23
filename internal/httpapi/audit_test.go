@@ -352,7 +352,7 @@ func (stubContacts) Delete(context.Context, uuid.UUID) error { return nil }
 
 type stubOutbound struct{}
 
-func (stubOutbound) Dial(context.Context, string, string) (uuid.UUID, error) {
+func (stubOutbound) Dial(context.Context, string, string, map[string]string) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, error) {

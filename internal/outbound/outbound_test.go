@@ -220,7 +220,7 @@ func TestDialIsAgentFirst(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	callID, err := s.Dial(context.Background(), "1001", "13912345678")
+	callID, err := s.Dial(context.Background(), "1001", "13912345678", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	if _, err := s.Dial(context.Background(), "1001", "13912345678"); err != nil {
+	if _, err := s.Dial(context.Background(), "1001", "13912345678", nil); err != nil {
 		t.Fatal(err)
 	}
 	leg := sw.lastOriginate().partyID.String()
@@ -393,7 +393,7 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 	} {
 		sw := &fakeSwitch{}
 		s := testService(t, sw, nil)
-		if _, err := s.Dial(context.Background(), "1008", tc.destination); err != nil {
+		if _, err := s.Dial(context.Background(), "1008", tc.destination, nil); err != nil {
 			t.Fatal(err)
 		}
 		if got := sw.lastOriginate().vars["aicc_call_type"]; got != tc.want {

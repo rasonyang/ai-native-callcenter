@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 )
 
@@ -150,4 +152,72 @@ func errorCodeOf(t *testing.T, w *httptest.ResponseRecorder) string {
 		t.Fatalf("body: %v (%s)", err, w.Body)
 	}
 	return env.Error.Code
+}
+
+// The same terms on the other door. A call the agent places from their own
+// phone carries business data exactly as a placed AI call does — same shape,
+// same limits, same carrier — because two ways of saying the same thing is
+// how a second scheme starts.
+func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
+	dial := func(body string) (*httptest.ResponseRecorder, *recordingDialer) {
+		dialer := &recordingDialer{}
+		s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/calls/dial", strings.NewReader(body))
+		req = req.WithContext(contextWithIdentity(req.Context(), auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}))
+		s.DialCall(w, req)
+		return w, dialer
+	}
+
+	w, dialer := dial(`{"destination":"18688886669","userData":{"orderId":"9999000000000000"}}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if len(dialer.userData) == 0 {
+		t.Fatal("the dial carried no business data at all")
+	}
+	if got := dialer.userData["orderId"]; got != "9999000000000000" {
+		t.Errorf("orderId = %q", got)
+	}
+
+	w, _ = dial(`{"destination":"18688886669","userData":` + oversizedValue() + `}`)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("an oversized value returned %d, want 400", w.Code)
+	}
+	if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
+		t.Errorf("code = %q, want USER_DATA_TOO_LARGE", code)
+	}
+}
+
+func oversizedValue() string {
+	body, _ := json.Marshal(map[string]string{"note": strings.Repeat("x", userDataMaxValueBytes+1)})
+	return string(body)
+}
+
+type recordingDialer struct {
+	stubOutbound
+	userData map[string]string
+}
+
+func (d *recordingDialer) Dial(_ context.Context, _, _ string, userData map[string]string) (uuid.UUID, error) {
+	d.userData = userData
+	return uuid.New(), nil
+}
+
+type dialerDirectory struct{}
+
+func (dialerDirectory) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (dialerDirectory) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+// dialerPresence is stubAgents with a phone: click-to-dial refuses an agent
+// who is not signed in at one.
+type dialerPresence struct{ stubAgents }
+
+func (dialerPresence) Presence(uuid.UUID) agents.Presence {
+	return agents.Presence{ExtensionNumber: "1008"}
 }

@@ -179,7 +179,8 @@ func isDialable(number string) bool {
 // leg is then transferred into the dialplan at the destination, which routes
 // it the same way a phone dialling that number would be routed — no second
 // copy of the routing rules here, and no loopback legs to trace.
-func (s *Service) Dial(ctx context.Context, agentExtension, destination string) (uuid.UUID, error) {
+func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
+	userData map[string]string) (uuid.UUID, error) {
 	if !isDialable(destination) || !isDialable(agentExtension) {
 		return uuid.Nil, ErrBadNumber
 	}
@@ -189,6 +190,12 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 
 	callID := uuid.Must(uuid.NewV7())
 	agentLeg := uuid.New()
+
+	// Before the originate, for the same reason as an AI call: the agent's
+	// leg can reach the registry while this function is still running.
+	if s.callData != nil {
+		s.callData.Put(callID, userData)
+	}
 
 	vars := map[string]string{
 		"aicc_call_id":                 callID.String(),
@@ -216,6 +223,9 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 		vars["effective_caller_id_number"] = s.cfg.CallerID
 	}
 	if _, err := s.sw.Originate(agentLeg, s.sw.Endpoint(agentExtension), vars); err != nil {
+		if s.callData != nil {
+			s.callData.Drop(callID)
+		}
 		return uuid.Nil, err
 	}
 

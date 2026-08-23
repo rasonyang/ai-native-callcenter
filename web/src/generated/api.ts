@@ -1393,6 +1393,10 @@ export interface components {
         DialRequest: {
             /** @description The number to call once the agent's own leg answers. */
             destination: string;
+            /** @description Business data to attach to the call, on the same terms as POST /calls: flat key/value, values strings, at most 32 keys and 1024 bytes of UTF-8 each, 400 USER_DATA_TOO_LARGE over either limit rather than truncated. Omitted and {} mean the same thing. It never reaches the switch. */
+            userData?: {
+                [key: string]: string;
+            };
         };
         DialResponse: {
             /** Format: uuid */
