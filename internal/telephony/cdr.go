@@ -195,9 +195,16 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	if originator != nil {
 		cdr.FromNumber = originator.Number
 		cdr.HangupCause = originator.ReleaseCause
-		if cdr.DID == "" {
+		switch {
+		case cdr.DID == "":
 			cdr.ToNumber = originator.OtherNumber
-		} else {
+		case snap.CallType == events.CallTypeOutbound:
+			// A DID on a call this platform placed is the number the call
+			// went out from, not one anybody dialled — and the leg the
+			// registry calls the originator is the customer's, because we
+			// created it. Both ends were landing in the other's column.
+			cdr.FromNumber, cdr.ToNumber = cdr.DID, originator.Number
+		default:
 			cdr.ToNumber = cdr.DID
 		}
 	}

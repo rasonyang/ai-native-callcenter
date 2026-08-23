@@ -758,3 +758,49 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 		t.Errorf("billSec = %d, want 39 — inbound still bills from the switch answering", got.BillSec)
 	}
 }
+
+// A DID on a call this platform placed is the number the call went out *from*,
+// not a number anybody dialled. Written as though every call carrying a DID
+// were inbound, the row the human path writes came out reversed — from the
+// customer, to our own DID — and no AI outbound call could be found by the
+// number it actually rang. The bot's own writer had the identical bug and was
+// fixed first (C43), which is why only a call that reached an agent still
+// showed it: after a transfer this assembler owns the row, not the bot's.
+// Live, 2026-08-23: 95002 → 18688886669, transferred, landed as
+// from=18688886669 to=95002.
+func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
+	agentID := uuid.New()
+	placed := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(30),
+		Bot: BotShare{Sec: 12, DID: "95002"},
+		Parties: []PartySnapshot{
+			// The leg the registry calls the originator is the customer's:
+			// this platform dialled it, so it exists before anything else.
+			{Role: RoleOriginator, Number: "18688886669", ChannelID: "chan-customer",
+				AnsweredAt: atPtr(4), ReleasedAt: atPtr(30)},
+			{Role: RoleTarget, Number: "1008", AgentID: &agentID, ChannelID: "chan-agent",
+				CreatedAt: at(16), AnsweredAt: atPtr(20), ReleasedAt: atPtr(30)},
+		},
+	}
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), placed)
+	if got.FromNumber != "95002" {
+		t.Errorf("fromNumber = %q, want the DID 95002 — the number this platform "+
+			"called from", got.FromNumber)
+	}
+	if got.ToNumber != "18688886669" {
+		t.Errorf("toNumber = %q, want the number that was rung", got.ToNumber)
+	}
+
+	// The branch that must not move with it: on a call that came in, the DID
+	// is what the caller dialled and stays the destination.
+	arrived := placed
+	arrived.CallID = uuid.New()
+	arrived.CallType = events.CallTypeInbound
+	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), arrived)
+	if got.FromNumber != "18688886669" || got.ToNumber != "95002" {
+		t.Errorf("an inbound call landed as %q → %q, want 18688886669 → 95002",
+			got.FromNumber, got.ToNumber)
+	}
+}
