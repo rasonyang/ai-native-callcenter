@@ -15,7 +15,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 19 项、余 14 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38 / C39;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 19 项、余 15 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C38 / C39 / C41;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1168,6 +1168,26 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   这一条是**现场重跑相对跑测试的又一次兑现**:我自己的修复自洽、测试全绿,
   只有真实的 SSE 流说了不。
   证据:`docs/verification/artifacts/VC-S9-01/verdict.md`(重跑记录)。
+
+- **C41(new,2026-08-23 W2.1 落地时发现,未解)**
+  **`agent-originate-timeout` 送到了、被接受了、不起作用 —— 振铃仍是 60 秒。**
+  ```
+  xml_locate configuration … callcenter.conf
+    <settings><param name="agent-originate-timeout" value="15"></param></settings>   ← 交换机确实看到了
+  实测振铃  16:09:07.33 → 16:10:07.02 = 59.7 秒（CDR ring_sec=59）
+  ```
+  已排除的解释:①**参数名没写错** —— `strings mod_callcenter.so` 里有这个字面量;
+  ②**Lua 确实在供这份配置** —— 同一次 `reload mod_callcenter` 之后 support-en/support-zh
+  两条队列都从 Lua 重建了出来,而它们只可能来自这份 XML;
+  ③**不是没重读** —— 已执行 `reload mod_callcenter`(不是只 `reloadxml`),模块重新装载过。
+  剩下的候选没有证据分辨:该参数或许只在**队列**块里被读、或许被每次派单的其它取值覆盖、
+  或许是模块本身的问题。**没有继续猜** —— 参数留在 `<settings>` 里(无害,且与文档一致)。
+  **影响**:一次漏接仍然让主叫白等一分钟。W2.1 表格里"收益最大的一项"因此**尚未兑现**;
+  而同批的其余四个**每坐席**参数(`max_no_answer` / `no_answer_delay_time` /
+  `reject_delay_time` / `busy_delay_time`)**实测已生效**(交换机侧 agent list 可见,
+  且 "sleeping for 60 seconds" 现场可见)。
+  下一步建议:把该 param 同时写进每个 `<queue>` 块试一次;仍无效则读 mod_callcenter 源码定位取值处。
+  证据:`docs/verification/artifacts/VC-S5-01/verdict.md` 末节。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
