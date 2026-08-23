@@ -87,8 +87,12 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 	a.arm(ctx, func() {
 		a.log.Info("transferring the caller", "queue", queue.Name, "ext", queue.ExtNumber)
 		a.handOnCaller()
+		// No context: the switch knows which dialplan this deployment runs in,
+		// and naming one here is how the bot came to hand its callers to a
+		// context where the queue extension does not exist. They heard hold
+		// music and joined nothing.
 		if err := a.orchestrator.cfg.Switch.TransferToExtension(
-			a.callerChannel, queue.ExtNumber, "default"); err != nil {
+			a.callerChannel, queue.ExtNumber, ""); err != nil {
 			a.log.Error("transfer failed", "queue", queue.Name, "error", err)
 		}
 		// Our SIP leg's job is done either way; the caller's leg has moved on.
@@ -221,7 +225,7 @@ func (a *callActions) rescueCaller() {
 				a.log.Info("rescuing the caller to the fallback queue", "queue", queue.Name)
 				a.handOnCaller()
 				if err := a.orchestrator.cfg.Switch.TransferToExtension(
-					a.callerChannel, queue.ExtNumber, "default"); err != nil {
+					a.callerChannel, queue.ExtNumber, ""); err != nil {
 					a.log.Error("rescue transfer failed", "error", err)
 				}
 				break

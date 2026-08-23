@@ -480,7 +480,7 @@ func (o *Orchestrator) rescue(dialog *voice.Dialog) {
 		if queue.ID == *did.FallbackQueueID {
 			o.log.Info("transferring the caller to the fallback queue",
 				"callId", dialog.CallID, "queue", queue.Name)
-			if err := o.cfg.Switch.TransferToExtension(channel, queue.ExtNumber, "default"); err != nil {
+			if err := o.cfg.Switch.TransferToExtension(channel, queue.ExtNumber, ""); err != nil {
 				o.log.Error("fallback transfer failed", "callId", dialog.CallID, "error", err)
 			}
 			return

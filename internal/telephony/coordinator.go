@@ -821,7 +821,11 @@ func (c *Coordinator) Transfer(ctx context.Context, callID, agentID uuid.UUID, d
 	if callerChannel == "" {
 		return ErrNotCallParty
 	}
-	return c.adapter.TransferToExtension(callerChannel, destination, "default")
+	// No context named here: the adapter knows the one this deployment runs.
+	// Naming the stock context sent queue transfers to a dialplan with no
+	// queue extensions in it, which fails by doing nothing at all — the caller
+	// hears hold music and has joined no queue.
+	return c.adapter.TransferToExtension(callerChannel, destination, "")
 }
 
 // CallsForAgent returns the live calls an agent is part of.

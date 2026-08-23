@@ -11,7 +11,7 @@
 > **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 15 项、余 13 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C31 / C33 / C34;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 17 项、余 12 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C27 / C31 / C33 / C34;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -888,6 +888,37 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   与 C28 那轮"SPA 兜底把未知路径也回 200"是同一类陷阱:**判写操作不能只看状态码**。
   修法无需改契约(404 已经声明好了),只需 store 交出 rows affected、`writeDeleted` 据此分流。
   证据:`docs/verification/artifacts/VC-S14-01/verdict.md`。
+
+- **C35(new,2026-08-23 VC-S12-01 重跑时 owner 手动复测转接暴露;当场已修)**
+  **bot 把主叫转进了错误的 dialplan context,于是"转接成功"等于什么都没发生。**
+  现场对照,同一个队列分机、相差三分钟:
+  ```
+  09:59:14  Transfer …18688886669 to XML[7001@aicc]     ← 今天新写的 Lua 兜底
+            → mod_callcenter: Member 18688886669 joining queue support-en
+  10:02:44  Transfer …18688886669 to XML[7001@default]  ← bot 的 transfer_to_agent
+  10:03:40  Transfer …18688886669 to XML[7001@default]  ← 同上,第二次
+            → **一行 joining queue 都没有**
+  ```
+  `7001` 只在 **aicc** context 有匹配(`aicc.xml` 的 `aicc_queue`,7xxx → aicc_queue.lua);
+  `default` 里没有任何队列分机。后果是**静默的**:主叫听到保持音、以为在排队,
+  实际**没有进任何队列**,坐席话机永远不会响,墙板上也不会多一个人。
+  owner 手测时的原话是"只听到保持音,并没有看到 1008 响铃"。
+  **根因是一个没人用的默认值**:`Adapter.TransferToExtension` 在 8-22 那批 aicc context 改造里
+  已经把**空 context 默认成 `aicc`**,注释还写着 *"landing a transfer in `default` would route it
+  by rules written for a different product"* —— 但**四个调用点全都显式传 `"default"`**,
+  把那个默认顶掉了:`aicall/actions.go`(transfer_to_agent、rescueCaller)、
+  `aicall/orchestrator.go`(bot 起不来时的 fallback)、`telephony/coordinator.go`(坐席发起的转接)。
+  **为什么两天没被发现**:原厂 `default.xml` 有一条 `^(10[01][0-9])$` 的本地分机规则,
+  于是**转到坐席分机(1008)在 default 里碰巧能走通**,VC-S14-04 那类用例照样通过;
+  只有**队列**分机在 default 里无处可去。这也正是 owner 定的
+  "原厂拨号方案和 aicc context 尽量解耦"要防的事 —— 我们一直在借原厂的规则活着。
+  **已修**:四处一律改传空 context,由 adapter 决定;并在两处写下为什么不在这里点名 context。
+  `go test -race ./...` 0 FAIL(单测覆盖不到这条 —— 它是 ESL 命令的一个字符串参数,
+  桩件不会说 `default` 里没有 7001;**这条只有现场能证**)。
+  **后续(未做,须 owner 定)**:`TransferToExtension` 的 `context` 参数现在**没有任何调用点在用**,
+  留着就是同一个陷阱的下一次机会,建议**直接删掉这个参数**;那要动 `aicall.Switch` 接口与各桩件,
+  不夹带进本次修复。
+  证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
