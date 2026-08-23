@@ -836,12 +836,14 @@ cases:
         do: "执行其余 collect,判定降级路径与新实例接管"
     collect:
       - "deploy/dev/restart.sh"
-      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot leg (failed|vanished)' | tail -2"
+      - "grep -aE 'aicc_inbound: bot leg (failed|vanished)' /usr/local/freeswitch/log/freeswitch.log | tail -2"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -cE 'database ready|voice leg listening' \"$LOG\""
       - "curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{\"username\":\"supervisor\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null; curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq ."
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config queue list members support-en@192.168.31.55'"
-      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot (finished the call|leg (failed|vanished))' | tail -3"
+      - "grep -aE 'aicc_inbound: bot (finished the call|leg (failed|vanished))' /usr/local/freeswitch/log/freeswitch.log | tail -3"
     expect: |
+      ⚠ 这两条读的是**日志文件**而不是 `fs_cli console last N`:收官那一行是 INFO,
+        控制台缓冲区按 loglevel 过滤、又只有 N 行,2026-08-23 重跑时它明明发生了却grep 不到 —— 差点被读成"没执行"。
       **基线(正常收尾那一通)**:听感就是挂断,不是保持音。
         FS console 有 "aicc_inbound: bot finished the call on 95001 (HANGUP)"
         (走到终态则是 FLOW_END),且**没有** "bot leg vanished/failed",也没有进队列。
