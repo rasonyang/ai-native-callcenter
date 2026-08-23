@@ -155,6 +155,20 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	}
 	botSec := int(endedAt.Sub(r.answeredAt).Seconds())
 
+	// Which end is which depends on who called whom, and the two facts we
+	// have do not move: the DID is always this side and the ANI is always the
+	// far side. On a call that came in, the far side is the caller and the DID
+	// is what they dialled. On a call this platform placed, the far side is
+	// the person answering and the DID is the number shown to them.
+	//
+	// Written as though every call were inbound, an outbound row came out
+	// reversed — and its to_number was always the DID, so no AI outbound call
+	// could be found by the number it actually called (C43).
+	fromNumber, toNumber := call.fromNumber, call.did
+	if call.callType == callTypeOutbound {
+		fromNumber, toNumber = call.did, call.fromNumber
+	}
+
 	cdr := store.CDR{
 		CallID:     r.callID,
 		StartedAt:  r.startedAt,
@@ -162,8 +176,8 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		EndedAt:    endedAt,
 		CallType:   string(call.callType),
 		Language:   call.language,
-		FromNumber: call.fromNumber,
-		ToNumber:   call.did,
+		FromNumber: fromNumber,
+		ToNumber:   toNumber,
 		DID:        call.did,
 		FlowID:     call.flowID,
 		QueueID:    transferQueue,

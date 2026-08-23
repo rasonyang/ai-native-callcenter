@@ -280,3 +280,49 @@ func TestAContainedCallIsStillBilled(t *testing.T) {
 		t.Errorf("billSec %d exceeds totalSec %d", got.BillSec, got.TotalSec)
 	}
 }
+
+// The DID is always this side of the call and the ANI is always the far side.
+// Which of them is "from" therefore depends on who called whom, and writing
+// every row as though the call had come in reversed every outbound one — with
+// to_number always equal to the DID, so no AI outbound call could be found by
+// the number it actually called (C43, measured live on 2026-08-23).
+func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		callType         callType
+		wantFrom, wantTo string
+	}{
+		{"a call that came in", callTypeInbound, "13800138000", "95012"},
+		{"a call this platform placed", callTypeOutbound, "95012", "13800138000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ledger := newFakeLedger()
+			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder.markHangup()
+
+			facts := testFacts()
+			facts.callType = tc.callType
+			recorder.finish(ledger, facts, discard())
+
+			if len(ledger.cdrs) != 1 {
+				t.Fatalf("wrote %d cdrs, want 1", len(ledger.cdrs))
+			}
+			cdr := ledger.cdrs[0]
+			if cdr.FromNumber != tc.wantFrom || cdr.ToNumber != tc.wantTo {
+				t.Errorf("from/to = %s/%s, want %s/%s",
+					cdr.FromNumber, cdr.ToNumber, tc.wantFrom, tc.wantTo)
+			}
+			// The DID is the DID either way: it says which of our numbers the
+			// call belongs to, not which end of it.
+			if cdr.DID != "95012" {
+				t.Errorf("did = %s, want 95012", cdr.DID)
+			}
+			// And on an outbound call the number dialled must be findable —
+			// which it is not while to_number simply repeats the DID.
+			if tc.callType == callTypeOutbound && cdr.ToNumber == cdr.DID {
+				t.Error("to_number is the DID again; searching AI outbound calls by " +
+					"the number they called finds nothing")
+			}
+		})
+	}
+}
