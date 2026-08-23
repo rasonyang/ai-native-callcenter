@@ -65,7 +65,7 @@ Lua 见印记则挂断、无印记则转 fallback 队列。
 
 ---
 
-## 重跑 —— 2026-08-23 09:55–10:12(C26 修于 `bd27bce`;途中又修 C35 `<本次提交>`)
+## 重跑 —— 2026-08-23 09:55–10:12(C26 修于 `bd27bce`;途中又修 C35 `1ed4cc9`)
 
 ### 基线先跑:一通正常收尾的电话仍旧只是结束
 
@@ -124,7 +124,7 @@ CDR:`INBOUND | 95001 | ANSWERED | NORMAL_CLEARING | bot_sec=49`。
 ```
 09:59:14.428  第一次派单
 09:59:16.128  Agent agent-wei Origination Canceled : ORIGINATOR_CANCEL
-09:59:16.2 起 USER_BUSY … USER_BUSY … 约 70 毫秒一次,持续三分钟(42 次)
+09:59:16.2 起 USER_BUSY … 一簇一簇地重试,簇内约 70 毫秒一次;三分钟里共 42 次拒绝
 10:02:25     Member … abandoned waiting in queue support-en
 ```
 

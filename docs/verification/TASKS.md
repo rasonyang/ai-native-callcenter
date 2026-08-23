@@ -944,7 +944,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ```
   09:59:14.428  第一次派单 agent-wei
   09:59:16.128  Agent agent-wei Origination Canceled : ORIGINATOR_CANCEL
-  09:59:16.2 起  USER_BUSY … USER_BUSY …  约 70ms 一次,共 42 次,持续三分钟
+  09:59:16.2 起  USER_BUSY … 一簇一簇地重试,簇内约 70ms 一次;三分钟里共 42 次拒绝
   10:02:25      Member … abandoned waiting in queue support-en
   ```
   第一条振铃腿没被拆干净(通道在 `CS_CONSUME_MEDIA/RINGING` 一直挂着),
