@@ -32,6 +32,21 @@ type Extension struct {
 	Password string `json:"password,omitempty"`
 }
 
+// NewExtension is the shape a create or update body is decoded into: the
+// server's defaults, already applied.
+//
+// A boolean cannot be defaulted after the fact. Every other default in this
+// file is applied in validate, which cannot tell a field the operator omitted
+// from one they sent as false — both arrive as Go's zero value. So the
+// defaults that are booleans are seeded before the decoder runs, and JSON
+// leaves an absent field untouched: omitted keeps the default, an explicit
+// false still wins. Decoding into a bare struct is how extensions came to be
+// created disabled — invisible to the directory view the switch reads, so the
+// phone simply never registered and nothing in the API said why.
+func NewExtension() Extension {
+	return Extension{IsEnabled: true}
+}
+
 func (e *Extension) validate(requirePassword bool) error {
 	e.Number = trim(e.Number)
 	e.DisplayName = trim(e.DisplayName)
@@ -127,6 +142,13 @@ type Queue struct {
 	IsEnabled                bool            `json:"isEnabled"`
 }
 
+// NewQueue is the shape a create or update body is decoded into. See
+// NewExtension for why the boolean defaults are seeded rather than applied in
+// validate. isAbandonedResumeAllowed is left false, which is its default.
+func NewQueue() Queue {
+	return Queue{IsEnabled: true, IsRecordingEnabled: true}
+}
+
 func (q *Queue) validate() error {
 	q.Name = trim(q.Name)
 	q.ExtNumber = trim(q.ExtNumber)
@@ -209,6 +231,13 @@ type DID struct {
 	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
 	Description        string     `json:"description"`
 	IsEnabled          bool       `json:"isEnabled"`
+}
+
+// NewDID is the shape a create or update body is decoded into. See
+// NewExtension for why the boolean defaults are seeded rather than applied in
+// validate.
+func NewDID() DID {
+	return DID{IsEnabled: true, IsRecordingEnabled: true}
 }
 
 func (d *DID) validate() error {

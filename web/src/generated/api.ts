@@ -1433,7 +1433,7 @@ export interface components {
             /** Format: date-time */
             createdAt: string;
         };
-        /** @description Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>"). */
+        /** @description Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true). */
         ExtensionWrite: {
             number: string;
             kind?: components["schemas"]["ExtensionKind"];
@@ -1496,7 +1496,7 @@ export interface components {
             overflow: components["schemas"]["Overflow"];
             isEnabled: boolean;
         };
-        /** @description Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300). */
+        /** @description Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300, isEnabled true, isRecordingEnabled true). */
         QueueWrite: {
             /** @description Switch-safe identifier: no spaces, @ or quotes. */
             name: string;
@@ -1563,7 +1563,7 @@ export interface components {
             description: string;
             isEnabled: boolean;
         };
-        /** @description Create or update a DID. Omitted language defaults to en. */
+        /** @description Create or update a DID. Omitted fields take server defaults (language en, isEnabled true, isRecordingEnabled true). */
         DIDWrite: {
             number: string;
             language?: string;

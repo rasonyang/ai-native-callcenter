@@ -9,9 +9,9 @@
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
 > 余下 3 条 FAIL:**VC-S9-01→C14**(ASR 丢帧,唯一需要开放式调查的)、
 > **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)、
-> **VC-S14-01→C29/C30**(可选布尔写成 false;删分机无守卫,须先改契约)。
+> **VC-S14-01→C29/C30**(可选布尔写成 false —— **C29 已于 2026-08-23 修复,待重跑**;删分机无守卫,须先改契约)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 13 项、余 13 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C29 / C30 / C31;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 14 项、余 13 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C30 / C31 / C33;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -641,6 +641,47 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   (VC-S14-03 执行时顺带验证):不带 `isEnabled` 建出 `false` 且 `luacc.dids` 查不到;
   带 `isEnabled:true` 则正常。**凡"可选布尔 + 非指针字段"的写接口都要一并排查**
   (catalog 各 Create/Update)。修法建议:请求体改用指针或 `*bool`,区分"未提供"与"显式 false"。
+  **【已修 2026-08-23】** 修法与立案时写的建议(`*bool`)**不同**,理由记在这里,不让偏离无声发生:
+  可选布尔的默认值**在解码前先种进结构体**,而不是把字段指针化。
+  `catalog.NewExtension/NewQueue/NewDID`(types.go,紧挨各自的 `validate`)返回"默认值已经施加好"的空壳,
+  6 处 handler 的解码目标由 `var in catalog.X` 改成 `in := catalog.NewX()`。
+  `encoding/json` **不碰报文里没有的字段**,所以省略保留默认、显式 `false` 照旧生效 —— 与指针法的分辨力等价。
+  **为什么不用 `*bool`**:①三条 Write schema 的散文一直写着 *"Omitted fields take server defaults"*,
+  PUT 是整体替换;指针会诱导出"省略=保持原值"的第二套语义,与契约冲突。
+  ②响应里这几个字段是 `required` 且非空,把领域类型指针化会让它们能 marshal 成 `null`。
+  ③默认值因此和 `validate` 里其它默认(kind、mohSound、strategy、language…)待在同一个文件里,不散进 handler。
+  **8 个写接口 × 可选布尔全部排查**(不止分机):
+
+  | 字段 | 列默认 | 修前建出 | 处置 |
+  |---|---|---|---|
+  | `extensions.is_enabled` | true | **false** | 已修 |
+  | `queues.is_enabled` | true | **false** | 已修 |
+  | `queues.is_recording_enabled` | true | **false** | 已修 |
+  | `queues.is_abandoned_resume_allowed` | false | false | 与 Go 零值一致,**不动**(并加反向断言,防止被顺手种成 true) |
+  | `dids.is_enabled` | true | **false** | 已修 |
+  | `dids.is_recording_enabled` | true | **false** | 已修 |
+  | `agents.is_auto_answer` | false | false | 与 Go 零值一致,**不动** —— 这是排查走完,不是跳过 |
+
+  另两张带 `is_enabled DEFAULT true` 的表(`trunks`、`dispositions`)**没有写接口**
+  (契约里 `/dispositions` 只有 GET,trunks 一条路由都没有),不在本次面内。
+  **契约变更只有三行 description**,把布尔默认写进各 Write schema 的默认清单。
+  **没有加 `default` 关键字** —— 试过并撤回:`openapi-typescript` 会把带 `default` 的可选字段在 TS 里升成**必填**
+  (`isEnabled?: boolean` → `isEnabled: boolean`),等于要求客户端必须发送一个契约里 optional 的字段,
+  与本次修复的意思正好相反;全库既有 12 处 `default` 全在 query 参数上(生成器对 parameters 有豁免),
+  请求体里从来没有过。`make api-lint` 通过,`api-breaking` 无破坏性变更。
+  **PUT 语义就此记明**:省略即回到服务端默认(整体替换),**不是**"保持原值" —— 依契约散文,是决定不是意外。
+  回归:`TestAnOmittedBooleanTakesTheDeclaredDefault`(`internal/httpapi/catalog_handlers_test.go`,5 子例)。
+  五处 seed **逐一摘除验证**:摘分机报 *"the extension was created disabled; the phone would never register"*
+  (并连带 *"an update that omitted isEnabled disabled the extension"*);摘队列两处分别报
+  *"the queue was created disabled"* / *"the queue was created without recording; calls would go unrecorded"*;
+  摘号码两处均报 *"the number was created disabled or unrecorded: {…}"* 并打出整个结构体指出是哪一个;
+  反向那条(把 `isAbandonedResumeAllowed` 也种成 true)报 *"isAbandonedResumeAllowed defaulted true, want false"*。
+  全部还原后 `go test -race ./...` 0 FAIL。
+  **前端未受影响也不会被反向影响**:三处表单新建时自带 `isEnabled: true`
+  (`_app.admin.extensions.tsx:39` / `_app.admin.numbers.tsx:49` / `_app.admin.routing.tsx:48`),
+  编辑时 `setEditing(row)` 整行带上 —— SPA 从来没触发过这个洞,修后 PUT 也始终显式发送。
+  **后续(未做)**:catalog 组的请求体仍直接解到 `catalog.*` 而非生成的 `api.*` 类型。
+  CLAUDE.md 指的方向是后者,但那是一次跨 18 个字段的搬迁,验收途中不动;留作后续。
 - **C30(new,2026-08-22 VC-S14-01 执行发现,未修)** **删除分机没有任何守卫,坐席被静默解绑。**
   `DeleteExtension`(`catalog_handlers.go:67-69`)→ `catalog/service.go:128-130` → store,
   **中间没有任何检查**;唯一可能的保护是外键,而它是
@@ -736,6 +777,17 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   `TestTheWaitingListIsEveryQueueForASupervisor`(用一个"查无此坐席"的目录桩,
   确保主管不是靠碰巧有坐席身份才通过)。**账本 S6-01/S12-01/S12-02 的 collect 可改回主管会话**
   —— 但 C23① 记的另一半(队列启停需 ADMIN)仍然成立,不要一并改。
+
+- **C33(new,2026-08-23 修 C29 时发现,未修)** **同一个病的整数版:队列的三个非零列默认同样永不生效。**
+  `queues` 有三列的默认值不是零 —— `discard_abandoned_after_sec DEFAULT 60`、
+  `rona_delay_sec DEFAULT 10`、`sla_threshold_sec DEFAULT 20` —— 而 `Queue.validate()`
+  只给 `mohSound`/`strategy`/`displayName`/`tierRules.waitSec` 兜底,**这三个没有**;
+  `CreateQueue` 的 INSERT 又把列名一一写出(telephony.sql:26),列默认因此轮不到生效。
+  机制与 C29 **完全相同**,只是零值这次是 `0` 而不是 `false`,所以不显示为"停用",而显示为
+  "RONA 不等待"、"SLA 门限 0 秒"、"放弃呼叫立即丢弃"。
+  与 C29 的差别在于:布尔那半是**建出来就不通**(Lua 查不到),整数这半是**建出来就在跑,只是参数不是文档说的那个**,
+  更难被发现。**未修 —— 是否修、修到哪一层由 owner 定**;本条只立案,不夹带进 C29。
+  取证:见 VC-S14-01 重跑记录(建队列不带这三个字段,读回三个 0)。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

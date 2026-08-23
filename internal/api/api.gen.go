@@ -1007,7 +1007,7 @@ type DIDList struct {
 	Items []DID `json:"items"`
 }
 
-// DIDWrite Create or update a DID. Omitted language defaults to en.
+// DIDWrite Create or update a DID. Omitted fields take server defaults (language en, isEnabled true, isRecordingEnabled true).
 type DIDWrite struct {
 	Description        *string             `json:"description,omitempty"`
 	FallbackQueueID    *openapi_types.UUID `json:"fallbackQueueId,omitempty"`
@@ -1097,7 +1097,7 @@ type ExtensionList struct {
 	Items []Extension `json:"items"`
 }
 
-// ExtensionWrite Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>").
+// ExtensionWrite Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
 type ExtensionWrite struct {
 	DisplayName *string        `json:"displayName,omitempty"`
 	IsEnabled   *bool          `json:"isEnabled,omitempty"`
@@ -1306,7 +1306,7 @@ type QueueReportList struct {
 	Items []QueueReport `json:"items"`
 }
 
-// QueueWrite Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300).
+// QueueWrite Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300, isEnabled true, isRecordingEnabled true).
 type QueueWrite struct {
 	AnnounceFrequencySec     *int             `json:"announceFrequencySec,omitempty"`
 	AnnounceSound            *string          `json:"announceSound,omitempty"`

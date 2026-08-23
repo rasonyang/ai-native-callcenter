@@ -46,7 +46,7 @@ func (s *Server) ListExtensions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CreateExtension(w http.ResponseWriter, r *http.Request) {
-	var in catalog.Extension
+	in := catalog.NewExtension()
 	if !decode(w, r, &in) {
 		return
 	}
@@ -55,7 +55,7 @@ func (s *Server) CreateExtension(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) UpdateExtension(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	var in catalog.Extension
+	in := catalog.NewExtension()
 	if !decode(w, r, &in) {
 		return
 	}
@@ -78,7 +78,7 @@ func (s *Server) ListQueues(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request) {
-	var in catalog.Queue
+	in := catalog.NewQueue()
 	if !decode(w, r, &in) {
 		return
 	}
@@ -87,7 +87,7 @@ func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) UpdateQueue(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	var in catalog.Queue
+	in := catalog.NewQueue()
 	if !decode(w, r, &in) {
 		return
 	}
@@ -137,7 +137,7 @@ func (s *Server) ListDIDs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) CreateDID(w http.ResponseWriter, r *http.Request) {
-	var in catalog.DID
+	in := catalog.NewDID()
 	if !decode(w, r, &in) {
 		return
 	}
@@ -146,7 +146,7 @@ func (s *Server) CreateDID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) UpdateDID(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	var in catalog.DID
+	in := catalog.NewDID()
 	if !decode(w, r, &in) {
 		return
 	}
