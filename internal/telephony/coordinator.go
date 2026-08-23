@@ -422,7 +422,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		callType     events.CallType
 		userData     map[string]any
 		isOriginator bool
-		dialled      string
+		ownNumber    string
 	)
 
 	err := c.registry.Do(callID, func(call *Call) {
@@ -437,7 +437,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
 		isOriginator = p.Role == RoleOriginator
-		dialled = p.Number
+		ownNumber = p.Number
 	})
 	if err != nil || partyID == uuid.Nil {
 		return
@@ -469,8 +469,14 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			AgentID:  dialingAgent,
 			UserData: userData,
 			Payload: map[string]any{
-				"fromNumber": ev.ANI,
-				"toNumber":   dialled,
+				// This leg's own number and where it is calling. Deliberately
+				// not the pair PARTY_RINGING uses: that one renders the
+				// callee's view — who is ringing you — and read off an
+				// originating leg it comes out backwards, saying the number
+				// being dialled is the one doing the dialling. Measured on a
+				// live 1008→1002 call, which is how it was caught.
+				"fromNumber": ownNumber,
+				"toNumber":   ev.DestinationNumber,
 			},
 		}, scope)
 	}

@@ -1190,6 +1190,38 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		}
 	})
 
+	// Two live internal calls on 2026-08-23 caught the payload facing the wrong
+	// way: 1008 dialling 1002 announced {from:1002, to:1008}, and 1002
+	// dialling 1008 announced {from:1002, to:1002}. Both came of borrowing the
+	// pair PARTY_RINGING renders, which is the callee's view — who is ringing
+	// you — and is backwards on the leg doing the ringing.
+	t.Run("it reads from the dialling leg's own point of view", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{
+				"variable_dialed_user":      agentExtension,
+				"Caller-Caller-ID-Number":   agentExtension,
+				"Caller-Destination-Number": "1002",
+			}))
+
+		ev, _, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("no PARTY_DIALING")
+		}
+		if got := ev.Payload["fromNumber"]; got != agentExtension {
+			t.Errorf("fromNumber = %v, want the dialling leg's own number %s",
+				got, agentExtension)
+		}
+		if got := ev.Payload["toNumber"]; got != "1002" {
+			t.Errorf("toNumber = %v, want the number being dialled — announcing the "+
+				"callee as the caller is worse than announcing nothing", got)
+		}
+	})
+
 	t.Run("a leg that answers a call is ringing, not dialling", func(t *testing.T) {
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
