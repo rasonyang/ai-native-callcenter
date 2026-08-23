@@ -41,6 +41,9 @@ type fakeCoordinator struct {
 	// and the wrapper is the transcript's retirement.
 	hookWhenCDRAttached func()
 	reg                 *telephony.Registry
+	// waitingReconciled counts the rebuilds of the waiting line, which only a
+	// connect should trigger.
+	waitingReconciled int
 }
 
 func (f *fakeCoordinator) AttachTaps(t telephony.Tapper) { f.taps = t }
@@ -48,6 +51,8 @@ func (f *fakeCoordinator) AttachTaps(t telephony.Tapper) { f.taps = t }
 func (f *fakeCoordinator) AttachAudiences(a telephony.Audiences) { f.audiences = a }
 
 func (f *fakeCoordinator) AttachQueues(q telephony.QueueCatalog) { f.queues = q }
+
+func (f *fakeCoordinator) ReconcileWaiting(context.Context) { f.waitingReconciled++ }
 
 func (f *fakeCoordinator) AttachCDR(a *telephony.CDRAssembler) {
 	f.cdr = a
@@ -111,6 +116,8 @@ type fakeQueues struct{}
 func (fakeQueues) QueueByName(context.Context, string) (telephony.QueueSummary, bool) {
 	return telephony.QueueSummary{}, false
 }
+
+func (fakeQueues) Queues(context.Context) ([]telephony.QueueSummary, error) { return nil, nil }
 
 type fakeTapper struct {
 	detachedCalls []uuid.UUID
@@ -328,6 +335,14 @@ func TestReconnectRebuildsPresenceStaffingAndDevices(t *testing.T) {
 	}
 	if f.regsCalls != 1 {
 		t.Errorf("registrations read %d times, want 1", f.regsCalls)
+	}
+	// The third fact a reconnect has to rebuild. A queue join is announced
+	// once, so a caller handed to a queue while this process was down was
+	// announced to nobody — and the fallback that rescues a caller from a
+	// dying bot leg fires at exactly that moment.
+	if f.coordinator.waitingReconciled != 1 {
+		t.Errorf("waiting line rebuilt %d times, want 1 — a caller queued during "+
+			"the gap waits where no screen can see them", f.coordinator.waitingReconciled)
 	}
 	want := []telephony.Registration{
 		{Extension: "1001", IsReachable: true},

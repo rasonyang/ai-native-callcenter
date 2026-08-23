@@ -37,6 +37,7 @@ type switchWiring interface {
 	AttachCDR(*telephony.CDRAssembler)
 	AttachAudiences(telephony.Audiences)
 	AttachQueues(telephony.QueueCatalog)
+	ReconcileWaiting(ctx context.Context)
 }
 
 type presenceWiring interface {
@@ -131,9 +132,15 @@ func (c composition) connect() {
 // unroutable. An agent the switch knows but has no tier for is not routable
 // either — the queue has nobody to offer to and the caller abandons — and
 // presence and staffing are both ours, so both are rebuilt here.
+//
+// Who is waiting is the third such fact and the one that was missing. A queue
+// join is announced once; a caller who joined while this process was down was
+// announced to nobody, and no later event says it again. The switch has been
+// holding them the whole time.
 func (c composition) onSwitchConnected(ctx context.Context) {
 	c.Agents.SyncSwitch(ctx)
 	c.Catalog.SyncTiers(ctx)
+	c.Coordinator.ReconcileWaiting(ctx)
 
 	regs, err := c.Registrations()
 	if err != nil {

@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"context"
+	"log/slog"
 	"slices"
 	"sync"
 	"time"
@@ -30,6 +31,10 @@ type QueueSummary struct {
 // its business.
 type QueueCatalog interface {
 	QueueByName(ctx context.Context, name string) (QueueSummary, bool)
+	// Queues is every queue this system configures, which is the list to ask
+	// the switch about when rebuilding who is waiting. The switch will only be
+	// asked about queues we could render anyway.
+	Queues(ctx context.Context) ([]QueueSummary, error)
 }
 
 // WaitingCall is one caller in a queue who has not reached anybody yet.
@@ -248,6 +253,84 @@ func (c *Coordinator) queueJoined(ctx context.Context, ev SwitchEvent) {
 		},
 	}, events.Scope{QueueID: &call.QueueID})
 	c.publishQueueCount(ctx, call.QueueID, call.QueueName)
+}
+
+// ReconcileWaiting converges the waiting line on the switch's own view of who
+// is queued.
+//
+// A join is announced once. Miss that announcement and nothing ever says it
+// again: the caller waits, the queue holds them, and every screen shows an
+// empty line until an agent happens to answer. The whole of a restart is such
+// a gap — a caller the bot hands to a queue while this process is down is
+// announced to nobody — and that is not a rare case here, because the fallback
+// that rescues a caller from a dying bot leg fires at exactly that moment.
+//
+// Converge rather than top up. The switch is the truth: a caller it holds and
+// we do not is added, and one we hold and it does not is removed. Adding only
+// would leave a ghost waiting forever for anyone who left during the gap,
+// which is the same false report as a delete that never checked what it
+// deleted.
+//
+// Restored entries go through queueJoined, so they publish and de-duplicate
+// exactly as a live join does. That is what makes this safe on an ordinary
+// reconnect, where the process never died and every entry is already held:
+// the line's own key is the member's channel, so each restore is a no-op.
+func (c *Coordinator) ReconcileWaiting(ctx context.Context) {
+	if c.queues == nil || c.adapter == nil {
+		return
+	}
+	queues, err := c.queues.Queues(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "could not read queues to rebuild the waiting line", "error", err)
+		return
+	}
+
+	held := map[string]bool{}
+	read := map[uuid.UUID]bool{}
+	restored := 0
+	for _, queue := range queues {
+		members, err := c.adapter.QueueMembers(queue.Name)
+		if err != nil {
+			// Leave this queue's entries alone: a queue we could not read is
+			// not a queue we know to be empty.
+			slog.WarnContext(ctx, "could not read a queue's members",
+				"queue", queue.Name, "error", err)
+			continue
+		}
+		read[queue.ID] = true
+		for _, member := range members {
+			if !member.IsWaiting() {
+				continue
+			}
+			held[member.ChannelID] = true
+			before := len(c.waiting.All())
+			c.queueJoined(ctx, SwitchEvent{
+				Kind:            KindQueueMemberJoined,
+				Queue:           member.Queue,
+				MemberChannelID: member.ChannelID,
+				ANI:             member.Number,
+				JoinedAt:        member.JoinedAt,
+				OccurredAt:      time.Now().UTC(),
+			})
+			if len(c.waiting.All()) > before {
+				restored++
+			}
+		}
+	}
+
+	dropped := 0
+	for _, call := range c.waiting.All() {
+		if held[call.channelID] || !read[call.QueueID] {
+			continue
+		}
+		c.queueLeft(ctx, call.channelID, SwitchEvent{OccurredAt: time.Now().UTC()})
+		dropped++
+	}
+
+	if restored > 0 || dropped > 0 {
+		slog.InfoContext(ctx, "waiting line reconciled",
+			"restored", restored, "dropped", dropped, "queues", len(read))
+	}
 }
 
 func (c *Coordinator) queueLeft(ctx context.Context, channelID string, ev SwitchEvent) {

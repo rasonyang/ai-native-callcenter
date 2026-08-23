@@ -39,6 +39,10 @@ func (fakeQueues) QueueByName(_ context.Context, name string) (QueueSummary, boo
 	return QueueSummary{}, false
 }
 
+func (fakeQueues) Queues(context.Context) ([]QueueSummary, error) {
+	return []QueueSummary{supportEN, supportZH}, nil
+}
+
 // The queue panel is driven by a run of events rather than by one, so this
 // adds "every event of a type" to the shared capturing publisher.
 func ofType(p *capturingPublisher, t events.Type) []events.Event {

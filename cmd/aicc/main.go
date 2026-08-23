@@ -452,6 +452,23 @@ func (q queueCatalog) QueueByName(ctx context.Context, name string) (telephony.Q
 	}, true
 }
 
+func (q queueCatalog) Queues(ctx context.Context) ([]telephony.QueueSummary, error) {
+	queues, err := q.catalog.Queues(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]telephony.QueueSummary, 0, len(queues))
+	for _, queue := range queues {
+		out = append(out, telephony.QueueSummary{
+			ID:              queue.ID,
+			Name:            queue.Name,
+			DisplayName:     queue.DisplayName,
+			SLAThresholdSec: queue.SLAThresholdSec,
+		})
+	}
+	return out, nil
+}
+
 // seqReserver adapts the store to the events package's reserver interface.
 type seqReserver struct{ st *store.Store }
 

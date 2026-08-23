@@ -939,6 +939,44 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   方向:重启后的通道对账(`ShowChannels` 收养)没有把"已在 callcenter 里排队的主叫通道"认回来;
   而 `cc_member_session_uuid` 本来就是为这件事准备的(见 `aicc.xml` 关于第二条腿的长注释)。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
+  **【前一半已修 2026-08-23:等待名单】** 根因比"没收养"更朴素:**入队只被宣告一次**。
+  `member-queue-start` 落在重启的 ESL 断档窗里(09:59:11–09:59:17,入队在 09:59:14.388),
+  此后**没有任何事件会再说一遍** —— 这正是 needs-FACT **F4** 的形态,而 F4 当初被判"本题不适用",
+  理由是"主叫从未进入队列";**C26 修好后这个理由不成立了,F4 就此重开**(表格那一行须更正)。
+  更要命的是:把主叫从垂死 bot 腿上救下来的兜底,**恰恰就在这一刻触发** ——
+  最需要被看见的那通电话,正好落在最看不见的那个窗口里。
+  **修法**:连接钩子里加第三项对账 —— `Coordinator.ReconcileWaiting`,
+  按交换机自己的成员表重建等待名单(`callcenter_config queue list members`)。
+  三件事值得记:
+  - **两个读取器早就写好了,只是从没被接上**:`Adapter.ListQueueMembers` 的注释写着
+    *"used to reconcile after a reconnect"*,`ShowChannels` 的写着
+    *"the source of truth when reconciling after a restart or a reconnect"* ——
+    **两个都没有任何调用点**。C36 是接线缺口,不是设计缺失。
+  - **是收敛不是补齐**:交换机是真相,两个方向都算 —— 它有我们没有的,加;
+    我们有它没有的,删。只加不删会留下永远排队的幽灵,与 C1 那个"不复查就报成功"同形。
+    但**读失败的队列不动它的条目** —— 读不到不等于知道它空。
+  - **等待起点取交换机的 `joined_epoch`,绝不取 `time.Now()`**:用当下时间恢复,
+    一通已经等了两分钟的电话会显示成刚来的,**队列的服务水平反而因为我们弄丢了它而变好看** ——
+    与 C27/C33 police 的是同一种数字不诚实。解析不出可用的入队时间就丢弃该行,
+    宁可等下一次事件重建,也不发明一个等待时长。
+  恢复走的是 `queueJoined` 本身,所以发布与去重和真实入队完全一致;去重键是成员通道,
+  于是**进程没死的普通重连是彻底的 no-op**(有回归用例钉住)。
+  回归:`TestTheSwitchsOwnMemberListingIsRead`(fixture 是**本次现场原样抄下来的**成员行,
+  连表头和 `+OK` 一起 —— 凭记忆敲的 fixture 会和自己的 bug 一起通过,这是 C30 那次
+  SQLSTATE 23001 的教训)、`TestACallerQueuedWhileWeWereDownIsFoundAgain`、
+  `TestACallerWhoLeftWhileWeWereDownIsNotStillWaiting`、`TestReconnectingWithNothingChangedSaysNothing`、
+  `TestAQueueWeCouldNotReadKeepsItsCallers`、`TestAnAnsweredCallerIsNotRestoredToTheLine`、
+  以及连接钩子那条 `TestReconnectRebuildsPresenceStaffingAndDevices`。**五处逐一摘除验证**过。
+  **后一半仍未修(假 OUTBOUND)**:主叫的 Call 不在 registry 里,于是每条派单腿都自成一通外呼。
+  `coordinator.go` 里那段守卫早就预见了这件事(注释原文:*"the stray call ends unmerged and
+  reaches the ledger as an outbound CDR with caller and agent reversed, one per retry"*),
+  它只是**没有可绑的东西**。方向已定:在 `ReconcileWaiting` 里顺带**收养**主叫的通道 ——
+  从通道上取回 `aicc_call_id`(不是新铸一个,否则录音与转写会成孤儿),
+  起始时间取成员行的 `system_epoch`,主叫方 party 直接置 ESTABLISHED(他早就接通了),
+  不重放事件(重放会把"两分钟前就接通的人"说成正在振铃);屏幕靠重启本就会发的
+  `SYSTEM_RESET` 重新拉快照。**`ShowChannels` 全量清扫暂不做**:它会在每一次瞬时重连时运行,
+  而那时 registry 正持有活着的通话,收养一个正在与 bot 通话的主叫会重新打开 C21 关掉的
+  "两个写入者抢同一行 CDR"的竞态。
 - **C37(new,2026-08-23 VC-S12-01 重跑发现,未修;观察一次,机制未独立复现)**
   **一次被取消的派单把坐席话机卡死,之后每 70 毫秒被重试一次,持续到主叫放弃。**
   ```

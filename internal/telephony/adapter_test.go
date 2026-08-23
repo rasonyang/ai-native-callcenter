@@ -13,12 +13,20 @@ import (
 type fakeCommander struct {
 	sent  []string
 	reply string
-	err   error
-	up    bool
+	// replyFor answers per command, for the callers that ask the switch more
+	// than one question in a row. An empty result falls through to reply.
+	replyFor func(cmd string) (string, error)
+	err      error
+	up       bool
 }
 
 func (f *fakeCommander) API(cmd string) (string, error) {
 	f.sent = append(f.sent, cmd)
+	if f.replyFor != nil {
+		if out, err := f.replyFor(cmd); out != "" || err != nil {
+			return out, err
+		}
+	}
 	if f.err != nil {
 		return "", f.err
 	}
