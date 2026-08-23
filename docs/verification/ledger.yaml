@@ -856,8 +856,13 @@ cases:
         (2026-08-21 首跑此处 **0 行**,主叫在 50ms 内被跟随挂断 —— 即 C26)
       新实例日志含 database ready 与 voice leg listening
       /calls/waiting:该主叫出现在 support-en 等待名单(等待名单不依赖 registry 收养,waiting.go:222-233)
-      判定辅助(最后一条 members):members 有行而 /calls/waiting 为空 = 应用侧缺口;
-      两侧皆空 = member-queue-start 落在新实例 ESL 断档窗(needs-FACT F4),重跑本用例
+      **两侧皆空不再是重跑的理由**:2026-08-23 起连接钩子会按交换机自己的成员表重建等待名单
+        (`ReconcileWaiting`),所以入队事件落在 ESL 断档窗里也会被补回来 —— needs-FACT F4
+        当初判"本题不适用"的理由(主叫从未进队)已被 C26 推翻,现在两侧皆空是**缺陷**。
+      主叫还必须在**应用的通话里**,不只在等待名单里:`/api/v1/calls` 应当有一通
+        `callType: INBOUND`、party 是主叫本人的通话,**不应**出现"唯一 party 是坐席、
+        callType 为 OUTBOUND"的假外呼(那是 C36 的形态,每派单一次多开一通)。
+        且这通电话的 `callId` 必须是**拨号方案原本铸的那一个**(与录音、转写同名),不是新铸的
     failure_looks_like: |
       restart.sh 秒退 "failed to start" —— 旧实例的 advisory lock 还挂着(裸 kill+start 的竞态形态);
       或者主叫确实进了队列(听到保持音)但 /calls/waiting 为空 —— 新实例收养失败,
