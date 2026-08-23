@@ -375,6 +375,14 @@ func (s *Service) BenchForNoAnswer(ctx context.Context, agentID uuid.UUID) {
 func (s *Service) RingNoAnswer(ctx context.Context, agentID uuid.UUID) (Presence, error) {
 	current := s.Presence(agentID)
 	if current.CurrentState() != StateReady || !current.IsRegistered || !current.IsDeviceInService {
+		// Said out loud, because declining silently is indistinguishable from
+		// never having been called: the first live run of this produced
+		// fifteen notifications, no transition and no error, and the log had
+		// nothing to say which of the three reasons it was.
+		slog.InfoContext(ctx, "not benching an agent the switch stopped offering to",
+			"agentId", agentID, "state", current.CurrentState(),
+			"isRegistered", current.IsRegistered,
+			"isDeviceInService", current.IsDeviceInService)
 		return current, nil
 	}
 	return s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
@@ -737,6 +745,15 @@ func (s *Service) mirrorStatus(profile Profile, p Presence) {
 	if s.switchCtl == nil || !s.switchCtl.IsUp() {
 		return
 	}
+	// What we are about to tell the switch and what it was derived from. The
+	// mirror has been the suspect in two open questions — an agent stuck On
+	// Break for sixty-three seconds after a restart (C39), and a benching
+	// notification nobody could attribute — and neither could be settled
+	// because the mirror never said what it believed.
+	slog.Debug("mirroring presence to the switch",
+		"agent", profile.CallcenterName, "status", p.CallcenterStatus(),
+		"state", p.CurrentState(), "isRegistered", p.IsRegistered,
+		"isDeviceInService", p.IsDeviceInService)
 	if err := s.switchCtl.SetCallcenterAgentStatus(profile.CallcenterName, p.CallcenterStatus()); err != nil {
 		slog.Warn("callcenter status update failed", "agent", profile.CallcenterName, "error", err)
 	}

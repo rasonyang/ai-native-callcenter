@@ -185,8 +185,8 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		c.adopt(ctx, ev)
 	case KindChannelBridge:
 		c.join(ctx, ev)
-	case KindQueueAgentStatus:
-		c.agentBenchedBySwitch(ctx, ev)
+	case KindQueueBridgeFailed:
+		c.agentDidNotAnswer(ctx, ev)
 
 	case KindQueueAgentOffered:
 		c.offerToAgent(ctx, ev)
@@ -516,33 +516,40 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	c.announceAudience(keep)
 }
 
-// agentBenchedBySwitch turns the queue's own decision to stop offering to an
-// agent into that agent's presence.
+// agentDidNotAnswer takes an agent out of routing when a call the queue
+// delivered to them rang out unanswered.
 //
-// mod_callcenter counts the calls an agent lets ring out and, at the limit,
-// sets them to the queue's agent_no_answer_status — On Break. That is the
-// switch telling us something happened, not deciding what it means: an agent
-// benched on the switch while still READY in the application is the state
-// VC-S5-01 found live, where the two sides disagreed and the next presence
-// mirror pushed the agent straight back into rotation.
+// The signal is the failed delivery and its cause, not the agent's status.
+// Status was the first choice and it was wrong: the switch benches an agent by
+// setting them On Break and this application mirrors presence with the same
+// word, so the notification arrives for both and nothing in it says which. It
+// cost a live run to find out — every restart mirrored On Break for agents
+// whose device state had not been observed yet, the echo came straight back,
+// and each one was read as a call the agent had ignored. Agents were benched
+// at startup for calls that were never delivered.
 //
-// So the notification comes here and the application makes the transition,
-// which then mirrors back down. Whether this particular On Break is the
-// switch's own or the echo of ours is decided in the presence service, which
-// is the only place that knows what it already believes.
-func (c *Coordinator) agentBenchedBySwitch(ctx context.Context, ev SwitchEvent) {
+// A failed delivery cannot be confused that way: the switch only reports one
+// after actually ringing somebody. The cause is what separates a phone that
+// was ignored from a phone that could not take the call at all — busy, or an
+// offer the queue itself withdrew — and only the first is this agent's doing.
+//
+// One is enough. An unanswered phone absorbs callers one at a time, each
+// waiting out the ring; the agent takes one click to come back. The switch
+// keeps its own count as a backstop for anything this misses.
+func (c *Coordinator) agentDidNotAnswer(ctx context.Context, ev SwitchEvent) {
 	if c.agents == nil || ev.AgentName == "" {
 		return
 	}
-	if !strings.EqualFold(strings.TrimSpace(ev.AgentStatus), "On Break") {
+	if !strings.EqualFold(strings.TrimSpace(ev.HangupCause), "NO_ANSWER") {
 		return
 	}
 	agentID, ok := c.agents.AgentByCallcenterName(ev.AgentName)
 	if !ok {
 		return
 	}
-	slog.InfoContext(ctx, "the switch benched an agent for unanswered calls",
-		"agent", ev.AgentName, "agentId", agentID, "queue", ev.Queue)
+	slog.InfoContext(ctx, "a delivered call rang out unanswered",
+		"agent", ev.AgentName, "agentId", agentID, "queue", ev.Queue,
+		"cause", ev.HangupCause)
 	c.agents.BenchForNoAnswer(ctx, agentID)
 }
 

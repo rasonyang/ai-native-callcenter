@@ -1074,3 +1074,48 @@ func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
 		t.Errorf("ben has %d calls after taking the conversation over, want 1", len(got))
 	}
 }
+
+// The signal has to be one our own mirror cannot produce. Status was the first
+// choice, and a live run showed why it was wrong: this application mirrors
+// presence to the switch with the same word the switch uses to bench an agent,
+// the echo comes straight back, and every restart read it as calls the agents
+// had ignored.
+func TestOnlyACallThatRangOutTakesAnAgentOutOfRouting(t *testing.T) {
+	cases := map[string]struct {
+		action, cause string
+		wantBenched   bool
+	}{
+		"a delivery that rang out":        {"bridge-agent-fail", "NO_ANSWER", true},
+		"a phone that was busy":           {"bridge-agent-fail", "USER_BUSY", false},
+		"an offer the queue withdrew":     {"bridge-agent-fail", "ORIGINATOR_CANCEL", false},
+		"a status change we mirrored":     {"agent-status-change", "", false},
+		"a delivery that failed silently": {"bridge-agent-fail", "", false},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			registry := NewRegistry(nullPublisher{})
+			t.Cleanup(registry.Shutdown)
+			agents := &presenceCalls{}
+			c := NewCoordinator(registry, nil, agents, nullPublisher{})
+
+			headers := map[string]string{
+				"Event-Name": "CUSTOM", "Event-Subclass": "callcenter::info",
+				"CC-Action": tc.action, "CC-Agent": agentCallcenterName,
+				"CC-Queue": "support-zh", "CC-Hangup-Cause": tc.cause,
+				"CC-Agent-Status": "On Break",
+			}
+			ev, ok := Normalize(esl.NewEvent(headers, ""))
+			if !ok {
+				t.Fatalf("unnormalizable: %v", headers)
+			}
+			c.Handle(t.Context(), ev)
+
+			agents.mu.Lock()
+			benched := len(agents.benched)
+			agents.mu.Unlock()
+			if (benched > 0) != tc.wantBenched {
+				t.Errorf("benched=%d, want benched=%v — %s", benched, tc.wantBenched, name)
+			}
+		})
+	}
+}
