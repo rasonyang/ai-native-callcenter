@@ -1119,3 +1119,99 @@ func TestOnlyACallThatRangOutTakesAnAgentOutOfRouting(t *testing.T) {
 		})
 	}
 }
+
+// The leg that starts a call is created dialling and said so to nobody: on the
+// stream a party's first appearance was PARTY_ESTABLISHED, so it arrived
+// already talking and the state machine's own starting point was invisible.
+// The owner found it by reading a live stream of one extension calling
+// another (2026-08-22).
+func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
+	t.Run("an agent placing a call sees their own leg before it is answered", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		// The agent's own leg starts the call, so it is the originator.
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{"variable_dialed_user": agentExtension}))
+
+		ev, _, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("nothing announced the dialling leg; the workbench shows nothing " +
+				"until the other end picks up")
+		}
+		if ev.AgentID == nil || *ev.AgentID != testAgentID {
+			t.Errorf("agentId = %v, want the agent whose leg it is", ev.AgentID)
+		}
+		if ev.PartyID == nil {
+			t.Error("the event names no party")
+		}
+	})
+
+	t.Run("it is the agent's own leg and nobody else's", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{"variable_dialed_user": agentExtension}))
+
+		_, scope, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("no PARTY_DIALING")
+		}
+		if len(scope.AgentIDs) != 1 || scope.AgentIDs[0] != testAgentID {
+			t.Errorf("scope = %v, want only the agent whose leg it is — a colleague's "+
+				"cockpit cannot tell whose leg it is being shown", scope.AgentIDs)
+		}
+	})
+
+	t.Run("a caller's own dialling leg reaches no agent", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, noAgents{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound",
+			map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+
+		ev, scope, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("the caller's own leg was not announced at all")
+		}
+		if ev.AgentID != nil {
+			t.Errorf("agentId = %v on a leg with no agent", ev.AgentID)
+		}
+		if len(scope.AgentIDs) != 0 {
+			t.Errorf("scope = %v, want nobody — a caller's leg is a supervisor's "+
+				"business, not another agent's", scope.AgentIDs)
+		}
+	})
+
+	t.Run("a leg that answers a call is ringing, not dialling", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+		minted := uuid.New().String()
+		vars := map[string]string{"variable_aicc_call_id": minted}
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+		before := len(pub.events)
+		// The delivery leg joins an existing call, so it is not its originator.
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{
+				"variable_dialed_user":            agentExtension,
+				"variable_cc_member_session_uuid": "caller-chan",
+			}))
+
+		for _, ev := range pub.events[before:] {
+			if ev.Type == events.TypePartyDialing {
+				t.Error("the delivery leg announced itself as dialling; the agent is " +
+					"being rung, not ringing somebody")
+			}
+		}
+	})
+}

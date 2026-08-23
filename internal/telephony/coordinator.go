@@ -418,9 +418,11 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 // addParty appends a leg to a call and announces it.
 func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchEvent, agentID uuid.UUID, agentExtension string, isAgentLeg bool) {
 	var (
-		partyID  uuid.UUID
-		callType events.CallType
-		userData map[string]any
+		partyID      uuid.UUID
+		callType     events.CallType
+		userData     map[string]any
+		isOriginator bool
+		dialled      string
 	)
 
 	err := c.registry.Do(callID, func(call *Call) {
@@ -434,9 +436,43 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		}
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
+		isOriginator = p.Role == RoleOriginator
+		dialled = p.Number
 	})
 	if err != nil || partyID == uuid.Nil {
 		return
+	}
+
+	// The leg that starts a call is created dialling and, until now, said so
+	// to nobody: the first any subscriber heard of it was PARTY_ESTABLISHED,
+	// so the party appeared already talking and the state machine's own
+	// starting point was invisible on the stream. On an agent's outgoing call
+	// this is the difference between a workbench that shows the call from the
+	// moment it is placed and one that shows nothing until the other end picks
+	// up.
+	//
+	// Scoped like every other leg event: to the agent whose leg it is, and to
+	// nobody if the leg has no agent. A caller's own dialling leg is a
+	// supervisor's business, not another agent's.
+	if isOriginator {
+		scope := events.Scope{}
+		var dialingAgent *uuid.UUID
+		if isAgentLeg {
+			dialingAgent = &agentID
+			scope = events.Scope{AgentIDs: []uuid.UUID{agentID}}
+		}
+		c.publish(ctx, events.Event{
+			Type:     events.TypePartyDialing,
+			CallID:   &callID,
+			CallType: callType,
+			PartyID:  &partyID,
+			AgentID:  dialingAgent,
+			UserData: userData,
+			Payload: map[string]any{
+				"fromNumber": ev.ANI,
+				"toNumber":   dialled,
+			},
+		}, scope)
 	}
 
 	// A leg towards an agent is what puts a call on their screen, with enough

@@ -8,7 +8,7 @@
 
 | 项目 | producer 位置 | consumer 位置 | 覆盖场景 | 证据等级 | 备注 |
 |---|---|---|---|---|---|
-| PARTY_DIALING | NOT FOUND | 仅通用分发(events.ts:54;use-event-stream.ts:25 使 CALLS 缓存失效) | UNCOVERED | [FACT] | 常量定义于 internal/events/event.go:26;全仓 grep 无 publish 点。originator 腿确实以 DIALING 状态创建(internal/telephony/call.go:209)但无事件宣告 |
+| PARTY_DIALING | internal/telephony/coordinator.go(addParty,2026-08-23 W7) | 仅通用分发(events.ts:54;use-event-stream.ts:25 使 CALLS 缓存失效) | COVERED(生产者) | [FACT] | **2026-08-23 W7 补上生产者**:发起腿(`Role == ORIGINATOR`,以 DIALING 创建)在 addParty 时宣告。作用域同其它 leg 事件——有坐席则只发给他本人,无坐席(主叫自己的腿)则不进任何坐席的流,只有主管看得到。此前订阅方看到的第一条永远是 PARTY_ESTABLISHED,party 一出现就已在通话,FSM 的起点在流上隐形 |
 | PARTY_RINGING | internal/telephony/coordinator.go:404-417(addParty,坐席腿) | web/src/lib/use-event-stream.ts:25(CALLS 失效→软电话/主管视图刷新) | S4, S5 | [FACT] | 仅在"腿投递给已签入坐席"时发布并附 screen-pop 上下文;非坐席腿的 RINGING 不发布 |
 | PARTY_ESTABLISHED | internal/telephony/registry.go:336(transition on CHANNEL_ANSWER) | use-event-stream.ts:25 | S1, S4, S7 | [FACT] | payload=role/state(registry.go:405) |
 | PARTY_HELD | internal/telephony/registry.go:338(CHANNEL_HOLD) | use-event-stream.ts:25 | S7 | [FACT] | |
@@ -45,10 +45,10 @@
 ## 缺口汇总
 
 ### 需删除(或降级出契约)
-- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:PARTY_DIALING、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 9 个)。删除属于 breaking change,需走 `make api-breaking`。
+- 无强删除建议——以下"需实现"项若产品决定不做,应从 `SseEventType` 契约与 `internal/events/event.go` 同步移除:~~PARTY_DIALING~~(2026-08-23 W7 起有生产者)、CALL_USER_DATA、CALL_RECORDING_STARTED/STOPPED、DEVICE_REGISTERED、~~DEVICE_UNREGISTERED~~(2026-08-22 C28 起有生产者)、BOT_SESSION_STARTED、BOT_INTERRUPTED、BOT_SESSION_ENDED、SYSTEM_LINK(原 10 个契约内类型零生产者,现 8 个)。删除属于 breaking change,需走 `make api-breaking`。
 
 ### 需实现(契约已承诺、代码未生产)——【2026-08-20 决议 D6:以下全部实现 → TASKS W7(四组推进);"需删除"选项作废】
-- PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。
+- ~~PARTY_DIALING — producer NOT FOUND(event.go:26 仅定义)。~~ **已实现(2026-08-23,W7)。**
 - CALL_USER_DATA — producer NOT FOUND(userData 只随其它事件携带)。
 - CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED — RECORD_START/STOP 已订阅并归一化(switchevent.go:33-34、:259-264)但事件链在 coordinator 处中断。
 - DEVICE_REGISTERED / ~~DEVICE_UNREGISTERED~~ — 交换机侧信号已达 ObserveDevice。**2026-08-22 C28 已区分发布**:

@@ -353,7 +353,12 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   补 coordinator→Hub 一跳(scope 沿用 call 域);
   ② ~~DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布~~
   **已做(C28,2026-08-22)**;`DEVICE_REGISTERED` 仍无生产者 —— 恢复走的是 `DEVICE_IN_SERVICE`;
-  ③ PARTY_DIALING(addParty 时对 originator 腿宣告)、CALL_USER_DATA(userData 独立变更事件)、
+  ③ ~~PARTY_DIALING(addParty 时对 originator 腿宣告)~~ **【已做 2026-08-23】** ——
+     发起腿(`Role == ORIGINATOR`)在 `addParty` 时宣告 `PARTY_DIALING`,
+     **作用域严格照"腿事件私有于其坐席"办**:有坐席只发他本人,无坐席(主叫自己的腿)
+     不进任何坐席的流。四个子例钉住,含两条反向 —— 给每条发起腿都安上坐席、
+     把派单腿也当成发起腿宣告,各自立刻失败(**派单腿是被响,不是在响别人**)。
+     零生产者从 9 个降到 8 个。、CALL_USER_DATA(userData 独立变更事件)、
   SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)——全新 publish 点;
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
