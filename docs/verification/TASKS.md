@@ -9,9 +9,9 @@
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
 > 余下 3 条 FAIL:**VC-S9-01→C14**(ASR 丢帧,唯一需要开放式调查的)、
 > **VC-S12-01→C26**(bot 腿死后的 fallback,修法已设计未批准)、
-> **VC-S14-01→C29/C30**(可选布尔写成 false —— **C29 已于 2026-08-23 修复,待重跑**;删分机无守卫,须先改契约)。
+> **VC-S14-01→C29/C30** —— **两条均已于 2026-08-23 修复,待现场重跑**(可选布尔取默认值;删分机改由外键 RESTRICT 挡住,409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 14 项、余 13 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C30 / C31 / C33;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 15 项、余 12 项 + C32 不再复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C14 / C23 / C24 / C26 / C27 / C31 / C33;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -693,6 +693,34 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **契约层面也缺位**:`DELETE /extensions/{extensionId}` 只声明 `204,400,401,403,404,503`,
   **没有 409** —— "拒绝"这条路在契约里就没有位置,修复须**先改契约**(spec-first)。
   证据:`docs/verification/artifacts/VC-S14-01/verdict.md`。
+  **【已修 2026-08-23】** 守卫落在**外键**上,不是 service 里的预检 —— 立案原文点名的就是
+  `ON DELETE SET NULL`,那不是保护而是"把伤害做得安静一点"的指令。
+  迁移 `00015_an_extension_in_use_cannot_be_deleted.sql` 把它换成 **`ON DELETE RESTRICT`**。
+  这样**每条路径都挡得住**,包括不走 API 的 psql;service 预检只挡得住 handler 那一条。
+  **契约先改**(spec-first):`DELETE /extensions/{extensionId}` 增 409,
+  新错误码 **`EXTENSION_ASSIGNED_TO_AGENT`** 进 `ErrorCode` enum 与 `Conflict` 响应的码清单,
+  operation description 写明何时被拒、以及"先解绑"这个动作。
+  **没有复用 `EXTENSION_IN_USE`** —— 它的含义是"另一名坐席已在该分机签入"
+  (签入冲突,`agent_handlers.go:367`,en/zh 两份文案都是这么写的);
+  拿它表示"被绑定"会把两件事混成一件,前端还会给出错的指引。
+  边界翻译:`violatesConstraint(err, "fk_agents_extensions")`(`errors.go`)把 23503 认成冲突,
+  **按约束名匹配而不是笼统认 23503** —— 别的外键失败不该冒充这一条。
+  不认的话它会落进 default 变成 **503 STORAGE_DOWN**,那会教操作员去重试,而重试永远不会成功。
+  **迁移纪律**:有 Down(退回 SET NULL);关键是**带历史的库**那一档 ——
+  `TestMigrationsRefuseToDeleteAnExtensionAnAgentWorksAt` 先迁到 14、写入一行"已绑定"的 agent,
+  再迁完,断言四件事:绑定**没被改写**、删被绑定的分机报 `fk_agents_extensions`、
+  删没人用的分机**照常成功**(守卫不能变成阻碍)、解绑后可删。
+  **摘除验证**:把 00015 改回 `SET NULL`,该用例报
+  *"deleting an extension an agent works at succeeded; they were just unbound in silence"*;还原后通过。
+  边界两条:`TestDeletingAnExtensionAnAgentWorksAtIsRefusedAsAConflict`(409 + 码 + 文案里有 "unbind")、
+  `TestAnUnrelatedDeleteFailureIsNotTheBindingConflict`(换个约束名不得冒充本冲突)。
+  两语种文案已加。**影响面核对**:全库只有一个外键引用 `extensions`;
+  `AICC_SEED=fresh` 的删除顺序是先 users(级联 agents)后 extensions,不受 RESTRICT 影响。
+  `make api-lint` 通过;`api-breaking` **0 error / 303 warning**
+  (新增 enum 值在每个错误响应上各报一次 warning,与历次加码同形),`--fail-on ERR` 放行。
+  **同族疑点(未取证,未立号)**:删队列没有对应守卫 —— `queue_agents` 是 `ON DELETE CASCADE`
+  (静默清空配员),`dids.fallback_queue_id` 是 `ON DELETE SET NULL`(号码静默失去兜底队列)。
+  形态与本条相同但**尚未实测**,若要比照办理需另起一条用例取证,不夹带进本条。
 - **C31(new,2026-08-22 VC-S14-03 执行发现,未修)** **被拒的来电入了账,却记不出对方拨的是哪个号。**
   一通打向未配置/已停用号码的呼叫会正确落一行 CDR,`hangup_cause=UNALLOCATED_NUMBER` 也精确 ——
   但 `did` 为 **NULL**、`to_number` 为**空**:

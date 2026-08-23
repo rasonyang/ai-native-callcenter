@@ -18,18 +18,22 @@ type ErrorCode string
 
 // Error codes shared by the API surface.
 const (
-	CodeInvalidCredentials   ErrorCode = "INVALID_CREDENTIALS"
-	CodeSessionExpired       ErrorCode = "SESSION_EXPIRED"
-	CodeForbidden            ErrorCode = "FORBIDDEN"
-	CodeValidationFailed     ErrorCode = "VALIDATION_FAILED"
-	CodeNotFound             ErrorCode = "NOT_FOUND"
-	CodeConflict             ErrorCode = "CONFLICT"
-	CodeExtensionInUse       ErrorCode = "EXTENSION_IN_USE"
-	CodeAgentAlreadyLoggedIn ErrorCode = "AGENT_ALREADY_LOGGED_IN"
-	CodeAgentNotLoggedIn     ErrorCode = "AGENT_NOT_LOGGED_IN"
-	CodeAgentNotInWrapUp     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
-	CodeCallNotFound         ErrorCode = "CALL_NOT_FOUND"
-	CodeNotCallParty         ErrorCode = "NOT_CALL_PARTY"
+	CodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS"
+	CodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
+	CodeForbidden          ErrorCode = "FORBIDDEN"
+	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
+	CodeNotFound           ErrorCode = "NOT_FOUND"
+	CodeConflict           ErrorCode = "CONFLICT"
+	CodeExtensionInUse     ErrorCode = "EXTENSION_IN_USE"
+	// CodeExtensionAssignedToAgent refuses to delete an extension somebody
+	// works at. Distinct from CodeExtensionInUse, which is a sign-in
+	// collision: this one is about the binding, not the session.
+	CodeExtensionAssignedToAgent ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
+	CodeAgentAlreadyLoggedIn     ErrorCode = "AGENT_ALREADY_LOGGED_IN"
+	CodeAgentNotLoggedIn         ErrorCode = "AGENT_NOT_LOGGED_IN"
+	CodeAgentNotInWrapUp         ErrorCode = "AGENT_NOT_IN_WRAP_UP"
+	CodeCallNotFound             ErrorCode = "CALL_NOT_FOUND"
+	CodeNotCallParty             ErrorCode = "NOT_CALL_PARTY"
 	// CodeOperationNotAllowedForCallType refuses a control this kind of
 	// call does not offer, rather than a control this caller may not use.
 	CodeOperationNotAllowedForCallType ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
@@ -73,4 +77,13 @@ func writeError(w http.ResponseWriter, status int, code ErrorCode, message strin
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// violatesConstraint reports a PostgreSQL foreign-key failure raised by one
+// named constraint. Named, because the answer differs per constraint: a
+// referenced row that must not disappear is a conflict the operator can
+// resolve, and saying which one lets the message say what to do about it.
+func violatesConstraint(err error, name string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == name
 }

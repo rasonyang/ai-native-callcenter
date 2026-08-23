@@ -342,3 +342,78 @@ func TestMigrationsBackfillBillSec(t *testing.T) {
 		t.Errorf("bill_sec = %d on a call the switch never answered, want 0", unbilled)
 	}
 }
+
+// The only thing standing between a mistyped delete and a silently unbound
+// agent was a foreign key, and it said SET NULL — do the damage quietly. This
+// migration turns it into a refusal, and the case that matters is the one a
+// fresh database cannot show: a deployment that already has agents bound to
+// their phones must revalidate under the stricter rule without a rewrite.
+func TestMigrationsRefuseToDeleteAnExtensionAnAgentWorksAt(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	// Stop short of the migration under test, so the binding exists before the
+	// constraint changes underneath it.
+	if err := goose.UpToContext(ctx, db, "migrations", 14); err != nil {
+		t.Fatalf("migrating to 14 failed: %v", err)
+	}
+
+	const (
+		extID   = "22222222-2222-2222-2222-222222222222"
+		spareID = "33333333-3333-3333-3333-333333333333"
+		userID  = "44444444-4444-4444-4444-444444444444"
+		agentID = "55555555-5555-5555-5555-555555555555"
+	)
+	seed := []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO extensions (id, number, kind, password)
+		  VALUES ($1, '1099', 'AGENT', 'x'), ($2, '1098', 'AGENT', 'x')`, []any{extID, spareID}},
+		{`INSERT INTO users (id, username, password_hash, display_name, role)
+		  VALUES ($1, 'probe', 'x', 'Probe', 'AGENT')`, []any{userID}},
+		{`INSERT INTO agents (id, user_id, callcenter_name, default_extension_id)
+		  VALUES ($1, $2, 'probe', $3)`, []any{agentID, userID, extID}},
+	}
+	for _, s := range seed {
+		if _, err := db.ExecContext(ctx, s.sql, s.args...); err != nil {
+			t.Fatalf("seed a bound agent: %v", err)
+		}
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database that already binds agents to phones failed: %v", err)
+	}
+
+	var bound string
+	if err := db.QueryRowContext(ctx,
+		`SELECT default_extension_id FROM agents WHERE id = $1`, agentID).Scan(&bound); err != nil {
+		t.Fatalf("read the binding back: %v", err)
+	}
+	if bound != extID {
+		t.Errorf("the binding changed to %s; the migration was supposed to rewrite nothing", bound)
+	}
+
+	if _, err := db.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, extID); err == nil {
+		t.Error("deleting an extension an agent works at succeeded; they were just unbound in silence")
+	} else if !strings.Contains(err.Error(), "fk_agents_extensions") {
+		t.Errorf("the delete failed for the wrong reason: %v", err)
+	}
+
+	// The refusal has to be about this binding and nothing else: an extension
+	// nobody works at still deletes, or the guard would be an obstruction.
+	if _, err := db.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, spareID); err != nil {
+		t.Errorf("deleting an unused extension was refused: %v", err)
+	}
+
+	// And unbinding is the deliberate act that makes the delete possible.
+	if _, err := db.ExecContext(ctx,
+		`UPDATE agents SET default_extension_id = NULL WHERE id = $1`, agentID); err != nil {
+		t.Fatalf("unbind: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM extensions WHERE id = $1`, extID); err != nil {
+		t.Errorf("the extension could not be deleted after the agent was unbound: %v", err)
+	}
+}

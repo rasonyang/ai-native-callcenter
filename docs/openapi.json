@@ -1724,7 +1724,7 @@
           "catalog"
         ],
         "summary": "Delete an extension",
-        "description": "Requires ADMIN.",
+        "description": "Requires ADMIN. Refused with 409 EXTENSION_ASSIGNED_TO_AGENT while an agent has the extension as their phone: deleting it would unbind them silently, and the next registration their phone attempts would fail with nothing in the application to say why. Unbind the agent first.",
         "security": [
           {
             "cookieSession": [],
@@ -1757,6 +1757,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -3483,7 +3486,7 @@
         }
       },
       "Conflict": {
-        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
+        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
         "content": {
           "application/json": {
             "schema": {
@@ -3545,6 +3548,7 @@
           "NOT_FOUND",
           "CONFLICT",
           "EXTENSION_IN_USE",
+          "EXTENSION_ASSIGNED_TO_AGENT",
           "AGENT_ALREADY_LOGGED_IN",
           "AGENT_NOT_LOGGED_IN",
           "AGENT_NOT_IN_WRAP_UP",

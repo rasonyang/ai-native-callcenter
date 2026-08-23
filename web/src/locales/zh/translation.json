@@ -98,6 +98,7 @@
     "INTERNAL": "发生了错误。",
     "UNKNOWN": "未知错误。",
     "EXTENSION_IN_USE": "该分机已被其他坐席签入。",
+    "EXTENSION_ASSIGNED_TO_AGENT": "该分机是某位坐席的话机,请先解除绑定再删除。",
     "AGENT_ALREADY_LOGGED_IN": "您已签入。",
     "AGENT_NOT_LOGGED_IN": "您尚未签入。",
     "CALL_NOT_FOUND": "该通话已结束。",

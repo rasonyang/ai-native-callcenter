@@ -203,6 +203,7 @@ const (
 	ErrorCodeAGENTNOTLOGGEDIN               ErrorCode = "AGENT_NOT_LOGGED_IN"
 	ErrorCodeCALLNOTFOUND                   ErrorCode = "CALL_NOT_FOUND"
 	ErrorCodeCONFLICT                       ErrorCode = "CONFLICT"
+	ErrorCodeEXTENSIONASSIGNEDTOAGENT       ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
 	ErrorCodeEXTENSIONINUSE                 ErrorCode = "EXTENSION_IN_USE"
 	ErrorCodeFORBIDDEN                      ErrorCode = "FORBIDDEN"
 	ErrorCodeINTERNAL                       ErrorCode = "INTERNAL"
@@ -230,6 +231,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeCALLNOTFOUND:
 		return true
 	case ErrorCodeCONFLICT:
+		return true
+	case ErrorCodeEXTENSIONASSIGNEDTOAGENT:
 		return true
 	case ErrorCodeEXTENSIONINUSE:
 		return true

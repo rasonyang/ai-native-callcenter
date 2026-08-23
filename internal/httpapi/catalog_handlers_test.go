@@ -4,12 +4,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 )
@@ -131,4 +133,61 @@ func TestAnOmittedBooleanTakesTheDeclaredDefault(t *testing.T) {
 			t.Errorf("an explicit false was overridden: %+v", c.did)
 		}
 	})
+}
+
+// deletingCatalog fails every delete the way PostgreSQL does when the guard
+// holds: the referenced row cannot go while somebody points at it.
+type deletingCatalog struct {
+	stubCatalog
+	err error
+}
+
+func (c *deletingCatalog) DeleteExtension(context.Context, uuid.UUID) error { return c.err }
+
+// The database refuses; the operator has to be told what to do about it. A
+// refusal reported as "storage down" — the default for an unrecognised
+// driver error — teaches them to retry, and retrying will never work.
+func TestDeletingAnExtensionAnAgentWorksAtIsRefusedAsAConflict(t *testing.T) {
+	c := &deletingCatalog{err: &pgconn.PgError{
+		Code:           "23503",
+		ConstraintName: "fk_agents_extensions",
+		Message:        `update or delete on table "extensions" violates foreign key constraint`,
+	}}
+	s := &Server{catalog: c}
+	w := httptest.NewRecorder()
+
+	s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("http = %d, want 409", w.Code)
+	}
+	var env struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &env); err != nil {
+		t.Fatalf("body: %v (%s)", err, w.Body.String())
+	}
+	if env.Error.Code != string(CodeExtensionAssignedToAgent) {
+		t.Errorf("code = %q, want EXTENSION_ASSIGNED_TO_AGENT", env.Error.Code)
+	}
+	if !strings.Contains(env.Error.Message, "unbind") {
+		t.Errorf("message does not say what to do about it: %q", env.Error.Message)
+	}
+}
+
+// A delete that fails for any other reason is not this conflict: reporting it
+// as one would send the operator looking for a binding that is not there.
+func TestAnUnrelatedDeleteFailureIsNotTheBindingConflict(t *testing.T) {
+	c := &deletingCatalog{err: &pgconn.PgError{Code: "23503", ConstraintName: "fk_something_else"}}
+	s := &Server{catalog: c}
+	w := httptest.NewRecorder()
+
+	s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
+
+	if w.Code == http.StatusConflict {
+		t.Errorf("an unrelated constraint was reported as the agent binding: %s", w.Body.String())
+	}
 }

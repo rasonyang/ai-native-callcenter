@@ -198,8 +198,14 @@ func (s *Server) writeDeleted(w http.ResponseWriter, r *http.Request, err error)
 // writeCatalogError maps service errors onto the API vocabulary. A unique
 // violation from the database is reported as a conflict rather than an
 // internal error, because it means the operator picked a number that is taken.
+// So is the refusal to delete an extension an agent works at: the database is
+// the guard there, and a guard that reports itself as "storage down" teaches
+// the operator to retry rather than to unbind.
 func (s *Server) writeCatalogError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
+	case violatesConstraint(err, "fk_agents_extensions"):
+		writeError(w, http.StatusConflict, CodeExtensionAssignedToAgent,
+			"an agent has that extension as their phone; unbind them before deleting it", nil)
 	case errors.Is(err, catalog.ErrValidation):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(), nil)
 	case errors.Is(err, catalog.ErrNotFound):

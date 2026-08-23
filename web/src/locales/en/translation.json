@@ -98,6 +98,7 @@
     "INTERNAL": "Something went wrong.",
     "UNKNOWN": "Unexpected error.",
     "EXTENSION_IN_USE": "Another agent is signed in at that extension.",
+    "EXTENSION_ASSIGNED_TO_AGENT": "An agent has that extension as their phone. Unbind them before deleting it.",
     "AGENT_ALREADY_LOGGED_IN": "You are already signed in.",
     "AGENT_NOT_LOGGED_IN": "You are not signed in.",
     "CALL_NOT_FOUND": "That call has already ended.",
