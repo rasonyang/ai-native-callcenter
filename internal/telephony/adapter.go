@@ -79,11 +79,27 @@ func (a *Adapter) DeleteCallcenterAgent(name string) error {
 // SetCallcenterAgentContact points an agent at the phone they signed in on.
 // Auto-answer is expressed as a channel variable on the originate, which is
 // what a remote-controlled browser phone needs.
+// agentRingSec is how long a delivered call rings an agent before the queue
+// gives up on them.
+//
+// It rides the agent's own dial string because the queue's own setting does
+// not work. agent-originate-timeout is a real parameter — it is in the
+// module's strings, it belongs to the settings block, and the settings block
+// is demonstrably read, since odbc-dsn arrives through it — and the switch was
+// shown to be holding the value, in both the settings and each queue. Rings
+// still lasted the default minute, three times measured (C41).
+//
+// A minute is what one missed call costs the caller: they hear hold music
+// while a phone nobody is holding rings out, and only then does the queue try
+// somebody else. Fifteen seconds is long enough to reach a headset.
+const agentRingSec = 15
+
 func (a *Adapter) SetCallcenterAgentContact(name, extensionNumber string, autoAnswer bool) error {
-	contact := a.Endpoint(extensionNumber)
+	vars := []string{fmt.Sprintf("leg_timeout=%d", agentRingSec)}
 	if autoAnswer {
-		contact = "{sip_auto_answer=true}" + contact
+		vars = append(vars, "sip_auto_answer=true")
 	}
+	contact := "{" + strings.Join(vars, ",") + "}" + a.Endpoint(extensionNumber)
 	return a.exec("callcenter_config agent set contact %s '%s'", name, contact)
 }
 

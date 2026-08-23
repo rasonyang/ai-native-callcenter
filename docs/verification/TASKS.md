@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 21 项、余 13 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C41;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 22 项、余 12 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1274,7 +1274,19 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   而同批的其余四个**每坐席**参数(`max_no_answer` / `no_answer_delay_time` /
   `reject_delay_time` / `busy_delay_time`)**实测已生效**(交换机侧 agent list 可见,
   且 "sleeping for 60 seconds" 现场可见)。
-  下一步建议:把该 param 同时写进每个 `<queue>` 块试一次;仍无效则读 mod_callcenter 源码定位取值处。
+  **【2026-08-23 已修 —— 绕开该参数,不是让它生效】**
+  按建议把 param 同时写进每个 `<queue>` 块并重载,**第三次实测仍是 59 秒**。
+  至此四条替代解释全部排除、两个位置都试过,判定为
+  **`agent-originate-timeout` 在本版本 mod_callcenter 上不起作用**,不再猜下去。
+  **改走我们自己控制得了的那条路**:振铃时长挂在**坐席自己的拨号串**上 ——
+  `callcenter_config agent set contact` 的值是我们下发的,而这段代码本就示范了
+  `{...}` 前缀可用(`sip_auto_answer=true`),于是 contact 变成
+  `{leg_timeout=15}user/1008@…`(需要自动应答时是 `{leg_timeout=15,sip_auto_answer=true}…`)。
+  **现场实测**:`17:14:13.115` 起振 → `17:14:28.003` `Origination Canceled`,**14.9 秒**;
+  CDR `ring_sec=14`(此前三次都是 59)。W2 的 RONA 链在其上照常闭合
+  (`a delivered call rang out unanswered` → wei `NOT_READY/SYSTEM`)。
+  两条被钉住的命令串同批更新(`TestCommandStrings`)。
+  **W2.1 表格里"收益最大的一项"至此兑现**:一次漏接从让主叫白等一分钟,变成十五秒。
   证据:`docs/verification/artifacts/VC-S5-01/verdict.md` 末节。
 
 ### 排序总则

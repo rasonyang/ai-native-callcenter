@@ -176,6 +176,14 @@ local function handle_callcenter()
     table.insert(parts, string.format('          <param name="strategy" value="%s"/>',
       STRATEGY[row.strategy] or "longest-idle-agent"))
     table.insert(parts, string.format('          <param name="moh-sound" value="%s"/>', escape(row.moh_sound)))
+    -- Also here, not only in <settings>. The settings block is demonstrably
+    -- read — odbc-dsn arrives from it and the queues persist because of it —
+    -- and the switch is demonstrably given this parameter, yet rings kept
+    -- lasting the default sixty seconds (C41). Since the module reads a
+    -- number of its globals as defaults for per-object values, naming it on
+    -- the object costs nothing and is the one remaining thing that can be
+    -- tried without guessing at source we do not have.
+    table.insert(parts, '          <param name="agent-originate-timeout" value="15"/>')
     table.insert(parts, string.format('          <param name="max-wait-time" value="%s"/>', escape(row.max_wait_sec)))
     table.insert(parts, string.format('          <param name="max-wait-time-with-no-agent" value="%s"/>',
       escape(row.max_wait_no_agent_sec)))

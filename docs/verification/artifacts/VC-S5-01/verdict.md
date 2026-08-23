@@ -144,3 +144,21 @@ queue_events  JOINED=1  OFFERED=1  ABANDONED=1  无 BRIDGED
 已立案 **C41**,该条降为留证。
 
 **PASS** —— RONA 全链的断言两次成立;振铃时长一条不因它判 FAIL,也不假装它已经生效。
+
+### C41 收尾(2026-08-23 17:14):绕开那个参数,而不是让它生效
+
+把 `agent-originate-timeout` 同时写进 `<settings>` 与每个 `<queue>` 并重载,**第三次实测仍是 59 秒**。
+四条替代解释全部排除(参数名在模块字符串表里、`<settings>` 确实被读——同块的 `odbc-dsn` 在生效、
+`xml_locate` 证明交换机拿到了值、模块确实重新装载过),故判定该参数在本版本 mod_callcenter 上不起作用。
+
+改走自己控制得了的路:振铃时长挂在坐席自己的拨号串上 ——
+`contact={leg_timeout=15}user/1008@192.168.31.55`。
+
+```
+17:14:13.115  Setting outbound caller_id_name        ← 起振
+17:14:28.003  Agent agent-wei Origination Canceled   ← 14.9 秒（此前 59.7）
+CDR           95002 | NO_ANSWER | ABANDONED_WAITING | ring_sec=14
+17:14:28.050  a delivered call rang out unanswered → wei NOT_READY/SYSTEM
+```
+
+本条 expect 里那条振铃时长随之**由留证转回断言**。

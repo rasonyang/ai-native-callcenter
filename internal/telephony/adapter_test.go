@@ -81,12 +81,14 @@ func TestCommandStrings(t *testing.T) {
 		{
 			name: "contact is a registered endpoint",
 			act:  func(a *Adapter) error { return a.SetCallcenterAgentContact("agent-1001", "1001", false) },
-			want: "callcenter_config agent set contact agent-1001 'user/1001@aicc.test'",
+			// The ring is bounded on the agent's own dial string: the queue's
+			// own setting for it does not work on this module (C41).
+			want: "callcenter_config agent set contact agent-1001 '{leg_timeout=15}user/1001@aicc.test'",
 		},
 		{
 			name: "auto answer rides as a channel variable on the contact",
 			act:  func(a *Adapter) error { return a.SetCallcenterAgentContact("agent-1001", "1001", true) },
-			want: "callcenter_config agent set contact agent-1001 '{sip_auto_answer=true}user/1001@aicc.test'",
+			want: "callcenter_config agent set contact agent-1001 '{leg_timeout=15,sip_auto_answer=true}user/1001@aicc.test'",
 		},
 		{
 			name: "status mirrors our presence",

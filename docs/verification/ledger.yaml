@@ -469,10 +469,10 @@ cases:
       中 agent-wei 的 status=On Break
       两次派单之间约 60 秒(`no_answer_delay_time`)—— **实测生效**(交换机侧
       "Agent agent-wei sleeping for 60 seconds")
-      【留证,不判定】每次振铃的时长:目标是 15 秒(`agent-originate-timeout`,W2.1 表格里
-      "收益最大的一项"),而 2026-08-23 两次实测都是 **59 秒** —— 参数已送达交换机
-      (`xml_locate` 可见)且模块已重新装载,仍不生效,原因未定位,已立案 **C41**。
-      C41 解决后本条转为断言;在此之前**不因它判 FAIL**,也不假装它已经生效
+      **每次振铃约 15 秒而非 60 秒**(2026-08-23 C41 解决后由留证转回断言;实测 14.9 秒,
+      CDR `ring_sec=14`)。做法不是让 `agent-originate-timeout` 生效 —— 那个参数
+      三次实测都不起作用,四条替代解释已逐一排除 —— 而是把振铃时长挂在**坐席自己的拨号串**上:
+      `contact={leg_timeout=15}user/<ext>@<domain>`。一次漏接因此从让主叫白等一分钟变成十五秒
       —— 留证半(落档 evidence_dir,不判定)——
       OFFERED 实际次数与间隔(F3 的重派节奏在 W2.1 参数落地后应当整体改变);
       wei 被摘出后队列的去向(support-zh 另有 ben 配员,support-en 只有 wei)
