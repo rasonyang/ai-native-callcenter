@@ -468,16 +468,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			PartyID:  &partyID,
 			AgentID:  dialingAgent,
 			UserData: userData,
-			Payload: map[string]any{
-				// This leg's own number and where it is calling. Deliberately
-				// not the pair PARTY_RINGING uses: that one renders the
-				// callee's view — who is ringing you — and read off an
-				// originating leg it comes out backwards, saying the number
-				// being dialled is the one doing the dialling. Measured on a
-				// live 1008→1002 call, which is how it was caught.
-				"fromNumber": ownNumber,
-				"toNumber":   ev.DestinationNumber,
-			},
+			Payload:  dialingPayload(ownNumber, ev.DestinationNumber),
 		}, scope)
 	}
 
@@ -505,6 +496,41 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 
 		c.agents.SetOnCall(ctx, agentID, true)
 	}
+}
+
+// dialingPayload renders a dialling leg from its own point of view.
+//
+// Deliberately not the pair PARTY_RINGING uses: that one is the callee's view —
+// who is ringing you — and read off the leg doing the ringing it comes out
+// backwards, naming the number being called as the caller. Two live internal
+// calls showed both ways it goes wrong.
+//
+// The destination is only worth sending when it is a number. A browser
+// softphone is dialled at the random contact user it registered under, so the
+// address the switch used can be "doskp0mj" — measured on a live 1008→1002
+// call — and a workbench told the agent is calling doskp0mj has been told
+// nothing. Left out, the callee's own number arrives moments later with their
+// leg; sent, it is a wrong answer that looks like a right one.
+func dialingPayload(ownNumber, destination string) map[string]any {
+	payload := map[string]any{"fromNumber": ownNumber}
+	if isDialledNumber(destination) {
+		payload["toNumber"] = destination
+	}
+	return payload
+}
+
+// isDialledNumber reports whether the switch's destination is something a
+// person would recognise as a number rather than a registration token.
+func isDialledNumber(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // join merges the two legs of a bridge into one call, which is how a queued

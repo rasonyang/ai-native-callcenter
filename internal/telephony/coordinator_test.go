@@ -1222,6 +1222,24 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		}
 	})
 
+	// A browser softphone is dialled at the random contact user it registered
+	// under: "doskp0mj" here, verbatim from a live 1008→1002 call. Announcing
+	// that as the number being called is a wrong answer wearing the shape of a
+	// right one, and the callee's real number arrives moments later anyway.
+	t.Run("a registration token is not a number and is left out", func(t *testing.T) {
+		got := dialingPayload("1008", "doskp0mj")
+		if got["fromNumber"] != "1008" {
+			t.Errorf("fromNumber = %v", got["fromNumber"])
+		}
+		if to, present := got["toNumber"]; present {
+			t.Errorf("toNumber = %v; a workbench told the agent is calling %q has "+
+				"been told nothing", to, to)
+		}
+		if withNumber := dialingPayload("1002", "1008"); withNumber["toNumber"] != "1008" {
+			t.Errorf("a real destination was dropped: %v", withNumber)
+		}
+	})
+
 	t.Run("a leg that answers a call is ringing, not dialling", func(t *testing.T) {
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
