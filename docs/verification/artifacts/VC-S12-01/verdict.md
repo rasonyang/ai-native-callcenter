@@ -170,3 +170,115 @@ CDR 一行:`INBOUND | 95001 | ANSWERED | NORMAL_CLEARING | bot_sec=13 | talk_sec
 **FAIL(C26 那半已修并证实;卡在 C36)。**
 不把 expect 降级成"主叫进了队列就算过" —— 队列里有一通所有屏幕都看不见的电话,
 正是本用例一开始就写明的失败形态。
+
+---
+
+## 第二次重跑 —— 2026-08-23 11:05–11:22(C36 两半修于 `f5b5fce` + `a24431c`)
+
+**本轮是切到 qwen 之后的第一批真实通话**(`AICC_PROVIDER=qwen`,语音
+`qwen-audio-3.0-realtime-plus`,转写 `qwen-audio-3.0-asr-flash-streaming`)。
+先跑通对话再跑场景,免得 qwen 的接线问题冒充成 C36 的结果。
+
+### 基线①:转接那一通,顺带把 `uuid_getvar` 的格式当场核对了
+
+bot 正常对话 → 转人工 → 坐席接起。趁通话活着抓交换机的真实回答:
+
+```
+uuid_getvar <caller> aicc_call_id   → 01a02c97-ae6b-773a-a2ea-a5359f0f313a   已设置 → 裸值
+uuid_getvar <caller> aicc_language  → en
+uuid_getvar <caller> aicc_call_type → _undef_                                 未设置
+uuid_getvar 00000000-…  aicc_call_id → -ERR No such channel!                  通道没了
+```
+
+与按文档写的实现一致,已抄成 fixture(`TestWhatTheSwitchAnswersForAChannelVariable`)。
+顺带证实两件事:入呼的 `aicc_call_type` 就是 `_undef_`(默认 INBOUND 是对的,不是碰巧);
+**这通被转接的电话 `aicc_bot_finished` 确实是 `_undef_`** —— C26"转接一律不盖印"在真实转接上成立。
+
+应用侧形状(**没重启过的对照组**,收养要复现的就是它):
+
+```
+01a02c97-ae6b-…  INBOUND  RUNNING
+   ORIGINATOR TALKING 18688886669 <-> 1008
+   TARGET     RELEASED 95001      <-> 18688886669     ← bot 腿,转接后释放
+   TARGET     TALKING  1008       <-> 18688886669
+CDR: INBOUND|ANSWERED|NORMAL_CLEARING|bot_sec=12|talk_sec=161|bill_sec=177|queue 有值
+```
+
+### 基线②:一通自己收尾的电话仍旧只是挂断(qwen 上)
+
+用例的基线断言是"和 bot 谈到**它自己收尾**",而上面那通是转接 —— **不算**。
+按 C34 的教训(没采到的断言不能算过)另拨一通,全程沉默:
+
+```
+11:21:12  ai conversation started  provider=qwen
+11:21:24 / 11:21:37 / 11:21:50   dead air ×3(各 8 秒)
+11:21:50.600  flow reached a terminal phase … node=farewell
+11:21:54.518  aicc_inbound: bot finished the call on 95001 (FLOW_END)
+11:21:54.558  Channel …18688886669 hanging up, cause: NORMAL_CLEARING
+```
+
+见到印记 **40 毫秒后**挂断,队列零成员,CDR 是 `INBOUND|ANSWERED|NORMAL_CLEARING|bot_sec=41|queue NULL`。
+**两条印记路径至此都有现场证据**:`HANGUP`(09:56,模型自己调工具)与 `FLOW_END`(11:21,流程走到终态)。
+
+### C36 两半:主叫被看见,而且是他本人
+
+通话中重启(11:12:44–11:13:02):
+
+```
+11:12:57.158  aicc_inbound: bot leg vanished for 95001 (SUCCESS)      ← C26
+11:12:59.384  adopted a caller queued across a restart
+              callId=01a02c9a-d6fb-7af7-88de-92b97cfd16a8
+              channelId=01a02c9a-d6d4-7370-8878-30ec7b619d96
+11:12:59.387  waiting line reconciled  restored=1 dropped=0 queues=2
+```
+
+那个 callId 是我**在重启之前**从通道上抄下来的同一个 —— 身份是取回来的,不是新铸的。
+
+| | 上一轮(仅修 C26) | 本轮(C36 两半已修) |
+|---|---|---|
+| `/calls/waiting` | **空** | 有他:`INBOUND`、`support-en`、`joinedAt 03:12:57Z`、`language en` |
+| `joinedAt` | —— | **真实入队时刻**,不是发现他的 03:12:59 |
+| `/api/v1/calls` | 一通假 **OUTBOUND**,唯一 party 是 1008 的 DIALING 腿,每派单一次多开一通 | **一通 INBOUND**,`ORIGINATOR TALKING 18688886669` |
+| callId | 无 | **拨号方案原生的那一个**(录音 1 条、转写 18 行都挂在它下面) |
+
+坐席接起后合并正确 —— `ORIGINATOR TALKING 18688886669 <-> 1008` 与
+`TARGET TALKING 1008`(带 agentId),`/calls/waiting` 随之清空,与对照组同形。
+
+用例 expect 逐条:基线只挂断 ✓;`started:` ✓;恰好一行 `bot leg vanished` ✓;
+新实例 `database ready` + `voice leg listening` ✓;等待名单有他 ✓;
+应用里是他本人的 INBOUND 通话、callId 原生 ✓。
+
+### 判定
+
+**PASS。** 断言无一降级。
+
+### 本轮暴露的下一层:被收养的通话,账本只记到重启那一秒(→ C38)
+
+```
+被收养  01a02c9a-d6fb-…  bot_sec=36  talk_sec=0    bill_sec=36  queue_id=NULL
+        started 03:12:20   ended 03:12:57   ← bot 腿死掉的那一刻
+对照组  01a02c97-ae6b-…  bot_sec=12  talk_sec=161  bill_sec=177 queue_id 有值
+```
+
+坐席实际通了四分多钟(11:14:02 接起,约 11:17 挂断)。`tech` 字段指认写入者:
+被收养那行是 `{codec, sipCallId, remoteRtpAddr}` —— **bot recorder 的形状**;
+对照组是 `{switchBillSec, callerChannelId}` —— 人工路径的形状。
+旧实例关闭时把这通电话当"到此为止"落了一行,随后人工阶段那一行被
+`ON CONFLICT (call_id) DO NOTHING` **静默丢弃**。
+
+**这是 C21 竞态的另一副面孔**:不是两个写入者抢,而是 bot 先写下的那行**没人能再纠正**。
+后果:一通被兜底救回、坐席真的接了的电话,在账本里长得像一通在重启那秒就结束的纯 bot 通话 ——
+坐席工时不见了,队列不见了,计费短了几分钟。**已立案 C38,未修。**
+
+### 另一处观察(未立案):重启后坐席被判 On Break 63 秒
+
+```
+11:12:59.388  Updated Agent agent-wei set status = On Break
+11:12:59.394  registrations reconciled endpoints=2      ← 应用侧只差 6 毫秒就读完了
+11:14:02.328  Updated Agent agent-wei set status = Available
+```
+
+启动对账读到了两个注册,却没能把 wei 镜像回 `Available`;真正让他恢复的像是话机自己的一次续注册。
+形态正是 C28 那段注释警告过的 ——
+*"an agent signing in at a perfectly good phone reads as unreachable until the phone happens to re-register"*。
+代价是这位主叫多等了一分钟。**只观察到一次,机制未查证**,先记在这里。
