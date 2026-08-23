@@ -136,6 +136,9 @@ func writeOutboundError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, outbound.ErrBadNumber):
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "not a dialable number", nil)
+	case errors.Is(err, outbound.ErrNoOutboundEndpoint):
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown,
+			"this deployment has no outbound endpoint configured", nil)
 	case errors.Is(err, outbound.ErrUnknownDID):
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "no such DID", nil)
 	case errors.Is(err, outbound.ErrFlowless):

@@ -64,9 +64,17 @@ type Config struct {
 }
 
 func (c Config) withDefaults() Config {
-	if c.EndpointFormat == "" {
-		c.EndpointFormat = "loopback/%s/aicc/XML"
-	}
+	// No default, deliberately. It used to be loopback/%s/aicc/XML, which
+	// routed the call through the dialplan and looked like it worked — and on
+	// an AI call it did not: origination_uuid pins the loopback's own A leg,
+	// the customer is reached on the B leg bridged out beyond it, and the A
+	// leg is gone by the time the bot has anything to say about the caller.
+	// Every stamp and every transfer then came back "No such channel!", so an
+	// AI outbound call could never be handed to a person (C47).
+	//
+	// Which endpoint reaches a carrier is a fact about the deployment and
+	// there is no value that is right for two of them. Rather than ship one
+	// that is wrong quietly, an unset endpoint refuses the call and says so.
 	if c.BotGateway == "" {
 		c.BotGateway = "aicc_bot"
 	}
@@ -128,10 +136,15 @@ func New(cfg Config, sw Switch, dids DIDSource,
 
 // Errors the API layer translates.
 var (
-	ErrBadNumber     = fmt.Errorf("outbound: not a dialable number")
-	ErrUnknownDID    = fmt.Errorf("outbound: no such DID")
-	ErrFlowless      = fmt.Errorf("outbound: the DID has no published flow")
-	ErrAlreadyPlaced = fmt.Errorf("outbound: this call was already placed")
+	ErrBadNumber = fmt.Errorf("outbound: not a dialable number")
+	// ErrNoOutboundEndpoint means nobody has said how this deployment reaches
+	// a carrier. There is no default worth guessing: the one that used to be
+	// here routed through the dialplan by loopback and left every AI outbound
+	// call unable to reach a person (C47).
+	ErrNoOutboundEndpoint = fmt.Errorf("outbound: AICC_OUTBOUND_ENDPOINT is not set")
+	ErrUnknownDID         = fmt.Errorf("outbound: no such DID")
+	ErrFlowless           = fmt.Errorf("outbound: the DID has no published flow")
+	ErrAlreadyPlaced      = fmt.Errorf("outbound: this call was already placed")
 )
 
 // pinCodecs adds the G.711 pin on legs that leave through sofia. Loopback
@@ -265,6 +278,9 @@ type AIDialRequest struct {
 // park; when they answer, transfer their leg into a bridge to the bot
 // gateway with the same correlation headers an inbound call carries.
 func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, error) {
+	if s.cfg.EndpointFormat == "" {
+		return uuid.Nil, ErrNoOutboundEndpoint
+	}
 	if !isDialable(req.To) {
 		return uuid.Nil, ErrBadNumber
 	}

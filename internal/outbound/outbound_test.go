@@ -176,9 +176,18 @@ func (f fakeDIDs) DIDs(context.Context) ([]catalog.DID, error) { return f, nil }
 
 func testService(t *testing.T, sw *fakeSwitch, history map[uuid.UUID]bool) *Service {
 	t.Helper()
+	return testServiceWithEndpoint(t, sw, history, "sofia/gateway/pstn_sim/%s")
+}
+
+// testServiceWithEndpoint builds a service that reaches carriers the way the
+// given format says. A deployment must state one; there is no default worth
+// guessing (C47).
+func testServiceWithEndpoint(t *testing.T, sw *fakeSwitch,
+	history map[uuid.UUID]bool, endpointFormat string) *Service {
+	t.Helper()
 	flowID := uuid.New()
 	dids := fakeDIDs{{Number: "95012", Language: "zh", FlowID: &flowID, IsEnabled: true}}
-	return New(Config{}, sw, dids,
+	return New(Config{EndpointFormat: endpointFormat}, sw, dids,
 		func(_ context.Context, id uuid.UUID) (bool, error) { return history[id], nil },
 		func(uuid.UUID) bool { return false },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -348,7 +357,11 @@ func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
 // live): the G.711 pin may only ride legs that leave through sofia.
 func TestCodecPinNeverRidesLoopbackLegs(t *testing.T) {
 	sw := &fakeSwitch{}
-	s := testService(t, sw, nil) // default endpoint format is loopback
+	// Named rather than defaulted: there is no loopback default any more, and
+	// no deployment should choose one (C47). The rule under test is about the
+	// pin, which may only ride a leg that leaves through sofia whatever the
+	// endpoint happens to be.
+	s := testServiceWithEndpoint(t, sw, nil, "loopback/%s/aicc/XML")
 
 	_, err := s.DialAI(context.Background(), AIDialRequest{To: "13912345678", DIDNumber: "95012"})
 	if err != nil {
