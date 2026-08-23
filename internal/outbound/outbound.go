@@ -88,6 +88,9 @@ type Service struct {
 	isLive  func(callID uuid.UUID) bool
 	limiter *Limiter
 	log     *slog.Logger
+	// callData holds what a placed call was asked to carry until the call
+	// itself exists to hold it.
+	callData *CallData
 
 	mu      sync.Mutex
 	pending map[string]*pendingLeg // by channel id
@@ -111,14 +114,15 @@ func New(cfg Config, sw Switch, dids DIDSource,
 		log = slog.Default()
 	}
 	return &Service{
-		cfg:     cfg,
-		sw:      sw,
-		dids:    dids,
-		hasCDR:  hasCDR,
-		isLive:  isLive,
-		limiter: NewLimiter(cfg.RatePerSec),
-		log:     log,
-		pending: map[string]*pendingLeg{},
+		cfg:      cfg,
+		sw:       sw,
+		dids:     dids,
+		hasCDR:   hasCDR,
+		isLive:   isLive,
+		limiter:  NewLimiter(cfg.RatePerSec),
+		callData: NewCallData(),
+		log:      log,
+		pending:  map[string]*pendingLeg{},
 	}
 }
 
@@ -227,6 +231,11 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string) 
 	return callID, nil
 }
 
+// Data exposes what placed calls were asked to carry, for the parts that build
+// a call's identity from what the switch tells them and have no other way to
+// learn it.
+func (s *Service) Data() *CallData { return s.callData }
+
 // AIDialRequest asks for an AI outbound call.
 type AIDialRequest struct {
 	// CallID makes retries idempotent; zero mints a fresh identity.
@@ -237,6 +246,9 @@ type AIDialRequest struct {
 	DIDNumber string
 	// Language overrides the DID's default when set.
 	Language string
+	// UserData is business data to carry to whoever ends up on the call, and
+	// into its ledger row. It is held here rather than sent to the switch.
+	UserData map[string]string
 }
 
 // DialAI is the inbound AI path reversed: originate towards the customer,
@@ -276,6 +288,14 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 		return uuid.Nil, err
 	}
 
+	// Before the originate, because the call can exist before this returns:
+	// the switch raises the channel and the registry mints the call from it
+	// while we are still here. Dropped again on any failure below, so a call
+	// that never happened does not leave its business data waiting.
+	if s.callData != nil {
+		s.callData.Put(callID, req.UserData)
+	}
+
 	customerLeg := uuid.New()
 	vars := map[string]string{
 		"aicc_call_id":                 callID.String(),
@@ -285,6 +305,9 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	endpoint := fmt.Sprintf(s.cfg.EndpointFormat, req.To)
 	pinCodecs(vars, endpoint)
 	if _, err := s.sw.Originate(customerLeg, endpoint, vars); err != nil {
+		if s.callData != nil {
+			s.callData.Drop(callID)
+		}
 		return uuid.Nil, err
 	}
 

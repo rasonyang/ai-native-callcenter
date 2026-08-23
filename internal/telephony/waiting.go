@@ -169,6 +169,11 @@ func sortByWait(calls []WaitingCall) {
 // Without it the waiting line stays empty rather than guessing.
 func (c *Coordinator) AttachQueues(q QueueCatalog) { c.queues = q }
 
+// AttachCallData points call creation at the business data a placed call was
+// asked to carry. Without it an outbound call reaches the agent's screen with
+// nothing on it but the number.
+func (c *Coordinator) AttachCallData(d CallDataSource) { c.callData = d }
+
 // WaitingCalls lists who is waiting in the given queues.
 func (c *Coordinator) WaitingCalls(queueIDs []uuid.UUID) []WaitingCall {
 	return c.waiting.InQueues(queueIDs)

@@ -341,6 +341,7 @@ func botConfig(
 	backendBase string,
 	profile provider.Profile,
 	announce func(store.Callback),
+	callData aicall.CallDataSource,
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
 		UAS:              uas,
@@ -352,6 +353,9 @@ func botConfig(
 		BackendBase:      backendBase,
 		Profile:          profile,
 		AnnounceCallback: announce,
+		// A call the bot finishes alone writes the only ledger row it will
+		// ever have, so the business data has to reach the bot too.
+		CallData: callData,
 	}
 }
 

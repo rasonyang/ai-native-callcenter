@@ -215,6 +215,7 @@ const (
 	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
 	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
 	ErrorCodeSWITCHDOWN                     ErrorCode = "SWITCH_DOWN"
+	ErrorCodeUSERDATATOOLARGE               ErrorCode = "USER_DATA_TOO_LARGE"
 	ErrorCodeUSERSUSPENDED                  ErrorCode = "USER_SUSPENDED"
 	ErrorCodeVALIDATIONFAILED               ErrorCode = "VALIDATION_FAILED"
 )
@@ -255,6 +256,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeSTORAGEDOWN:
 		return true
 	case ErrorCodeSWITCHDOWN:
+		return true
+	case ErrorCodeUSERDATATOOLARGE:
 		return true
 	case ErrorCodeUSERSUSPENDED:
 		return true
@@ -953,6 +956,9 @@ type CreateCallRequest struct {
 
 	// To The number to dial.
 	To string `json:"to"`
+
+	// UserData Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	UserData *map[string]string `json:"userData,omitempty"`
 }
 
 // CreateCallRequestKind defines model for CreateCallRequest.Kind.

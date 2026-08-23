@@ -1265,3 +1265,83 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		}
 	})
 }
+
+// stashedData stands in for the store an outbound request leaves its business
+// data in. Keyed by call id, because that is the only thing the switch's own
+// event carries back that the request also chose.
+type stashedData map[uuid.UUID]map[string]any
+
+func (d stashedData) CallData(callID uuid.UUID) map[string]any { return d[callID] }
+
+// Business data attached when a call is placed has to reach the agent's
+// screen, and it does not travel through the switch to get there: it is left
+// here when the call is placed and picked up when the call comes into being.
+func TestBusinessDataAttachedToAPlacedCallReachesTheAgent(t *testing.T) {
+	minted := uuid.New()
+	sent := map[string]any{"ticketId": "T-1", "tier": "VIP", "订单": "ORD-9"}
+
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+	c.AttachCallData(stashedData{minted: sent})
+
+	// The customer's leg, minted by the request that placed the call.
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "customer-chan", "outbound",
+		map[string]string{"variable_aicc_call_id": minted.String()}))
+	// The agent is rung for it, which is the event their screen pops from.
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
+		"variable_dialed_user":            agentExtension,
+		"variable_cc_member_session_uuid": "customer-chan",
+	}))
+
+	ev, _, ok := pub.find(events.TypePartyRinging)
+	if !ok {
+		t.Fatal("the agent was never rung")
+	}
+	// Non-empty first: two empty maps compare equal, and a test that only
+	// compared them would pass while nothing was carried at all.
+	if len(ev.UserData) == 0 {
+		t.Fatal("the ringing event carried no business data; the screen pops with " +
+			"nothing on it but the number")
+	}
+	if len(ev.UserData) != len(sent) {
+		t.Errorf("carried %d keys, sent %d: %v", len(ev.UserData), len(sent), ev.UserData)
+	}
+	for k, want := range sent {
+		if got := ev.UserData[k]; got != want {
+			t.Errorf("userData[%q] = %v, want %v", k, got, want)
+		}
+	}
+}
+
+// An inbound call was never placed through this application, so there is
+// nothing stashed for it and nothing to pick up. The regression this pins is
+// the obvious wrong shape: reading the stash by anything less specific than
+// the call's own id — the extension, say — would hand one call's business data
+// to another.
+func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
+	somebodyElse := uuid.New()
+
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	pub := &capturingPublisher{}
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+	c.AttachCallData(stashedData{somebodyElse: {"ticketId": "not-yours"}})
+
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound",
+		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
+		"variable_dialed_user":            agentExtension,
+		"variable_cc_member_session_uuid": "caller-chan",
+	}))
+
+	ev, _, ok := pub.find(events.TypePartyRinging)
+	if !ok {
+		t.Fatal("the agent was never rung")
+	}
+	if len(ev.UserData) != 0 {
+		t.Errorf("an inbound call arrived carrying %v — that belongs to another call",
+			ev.UserData)
+	}
+}

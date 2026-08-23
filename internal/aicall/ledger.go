@@ -179,6 +179,7 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		// Contained: the bot answered and finished the call itself, properly.
 		IsContained:  status == store.CDRStatusAnswered && endReason == "HANGUP",
 		HasRecording: call.isRecordingEnabled,
+		UserData:     call.userData,
 		Tech:         call.tech,
 		Legs: []store.Leg{{
 			Kind:        "BOT",
@@ -212,6 +213,8 @@ type callFacts struct {
 	flowSlug           string
 	isRecordingEnabled bool
 	tech               map[string]any
+	// userData is business data the request attached when it placed the call.
+	userData map[string]any
 }
 
 // callType mirrors the domain enum without importing the events package into

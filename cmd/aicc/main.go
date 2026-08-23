@@ -258,6 +258,11 @@ func run() error {
 			return err == nil
 		}, slog.Default())
 
+	// Business data a request attached to a call reaches the call itself here,
+	// and the bot's own session below. It deliberately never goes through the
+	// switch, so these two readers are the only ways it travels.
+	coordinator.AttachCallData(outboundSvc.Data())
+
 	go link.Run(ctx)
 	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc, outboundSvc)
 
@@ -298,6 +303,7 @@ func run() error {
 			cfg.BotBackendBase,
 			profile,
 			announceCallback(ctx, hub),
+			outboundSvc.Data(),
 		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)

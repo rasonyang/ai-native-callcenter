@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -58,7 +59,18 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.UserData != nil {
+		if err := checkUserData(*req.UserData); err != nil {
+			writeError(w, http.StatusBadRequest, CodeUserDataTooLarge, err.Error(),
+				map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
+			return
+		}
+	}
+
 	dial := outbound.AIDialRequest{To: req.To}
+	if req.UserData != nil {
+		dial.UserData = *req.UserData
+	}
 	if req.DID != nil {
 		dial.DIDNumber = *req.DID
 	}
@@ -81,6 +93,33 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
+}
+
+// Business data is carried to a screen and into a ledger row, so it is bounded
+// where it arrives rather than wherever it first fails to fit.
+const (
+	userDataMaxKeys       = 32
+	userDataMaxValueBytes = 1024
+)
+
+// checkUserData refuses what will not fit. Refusing is the point: truncating
+// business data leaves a screen showing half a customer's details and no sign
+// that the other half was ever sent.
+//
+// Bytes, not characters: the limit is about what is stored and shipped, and a
+// Chinese value is three bytes a character where an English one is one.
+func checkUserData(data map[string]string) error {
+	if len(data) > userDataMaxKeys {
+		return fmt.Errorf("userData has %d keys, at most %d are accepted",
+			len(data), userDataMaxKeys)
+	}
+	for k, v := range data {
+		if len(v) > userDataMaxValueBytes {
+			return fmt.Errorf("userData[%q] is %d bytes, at most %d are accepted",
+				k, len(v), userDataMaxValueBytes)
+		}
+	}
+	return nil
 }
 
 func writeOutboundError(w http.ResponseWriter, err error) {

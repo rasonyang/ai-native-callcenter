@@ -498,6 +498,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		"http://127.0.0.1:8080",
 		provider.Profile{Name: "openai"},
 		func(store.Callback) {},
+		outbound.NewCallData(),
 	)
 
 	if missing := zeroFields(cfg, "Sessions", "Logger"); len(missing) > 0 {

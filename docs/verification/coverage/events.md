@@ -52,6 +52,9 @@
 - CALL_USER_DATA — producer NOT FOUND,**且不应补**(2026-08-23 查明,C42):
   `userData` 没有任何写入路径(建呼叫时设不了、无接口可改、`MergeUserData` 只有测试调用),
   **没有变更就没有变更事件**。要做须先建写入能力,那是产品决策。
+  **2026-08-23 更新**:置呼时的写入路径已建(`POST /calls` 的 `userData`,C42),
+  数据随事件**信封**下发;但**本事件仍无生产者且应当如此** —— 数据只在置呼时给定,
+  没有变更可宣告,产生它的"呼叫中修改"是另行立项的一条。
 - CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED — RECORD_START/STOP 已订阅并归一化(switchevent.go:33-34、:259-264)但事件链在 coordinator 处中断。
 - DEVICE_REGISTERED / ~~DEVICE_UNREGISTERED~~ — 交换机侧信号已达 ObserveDevice。**2026-08-22 C28 已区分发布**:
   不可达发 DEVICE_UNREGISTERED,可达发 DEVICE_IN_SERVICE。剩 DEVICE_REGISTERED 一个 ——

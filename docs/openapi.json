@@ -3446,7 +3446,7 @@
     },
     "responses": {
       "BadRequest": {
-        "description": "The request is malformed: unparseable body or an invalid identifier. Code VALIDATION_FAILED.",
+        "description": "The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE.",
         "content": {
           "application/json": {
             "schema": {
@@ -3545,6 +3545,7 @@
           "SESSION_EXPIRED",
           "FORBIDDEN",
           "VALIDATION_FAILED",
+          "USER_DATA_TOO_LARGE",
           "NOT_FOUND",
           "CONFLICT",
           "EXTENSION_IN_USE",
@@ -4312,6 +4313,15 @@
           "language": {
             "type": "string",
             "description": "Overrides the DID's language when set."
+          },
+          "userData": {
+            "type": "object",
+            "description": "Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch.",
+            "additionalProperties": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "maxProperties": 32
           }
         },
         "required": [

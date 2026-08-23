@@ -1325,6 +1325,34 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ②从契约里摘掉 `userData` 与 `CALL_USER_DATA`(breaking change,走 `make api-breaking`)。
   **不建议的第三条**:为它补一个 publish 点 —— 那是给一个不存在的功能伪造生产者。
 
+  **【2026-08-23 owner 选①,已建置呼时的写入路径】** `POST /calls` 增加可选 `userData`:
+  扁平 KV(值为字符串)、最多 32 键、单值 ≤1024 **字节**,超限 **400 `USER_DATA_TOO_LARGE`**
+  —— 拒绝而不截断:一块只显示了半份客户资料、又不说另一半去哪了的屏幕,比一个失败的请求更糟。
+  **限额是字节不是字符**,而本部署的验收材料是中文(一字三字节),按字符算会放进三倍。
+  上限写进 schema(`maxProperties` / `additionalProperties.maxLength`)而不是只写在描述里,
+  但生成代码不强制,handler 才是执行者。
+  **承载复用既有的,没有第二套**:值最终落在 `Call.UserData` →
+  事件**信封**上的 `userData`(`events/event.go:98`,弹屏消费点
+  `web/src/routes/_app.agent.index.tsx:617`)→ 快照 → `cdrs.user_data`
+  (`00005_call_ledger.sql:43`,写在 `ledgerstore.go:118/166`)。
+  **不写 FreeSWITCH channel var**:业务数据一旦上通道变量,就同时进了交换机的日志、库和事件流,
+  而坐席屏幕本来就从这一侧到达。因此请求把它留在应用里,由**两个读者**取:
+  协调层(建通话时挂上,弹屏与人工 CDR 靠它)与 bot 会话
+  (**AI 外呼被 bot 收官时,落库的是 bot 那一行,而 `internal/aicall` 完全不接触 registry** ——
+  没有这个读者,数据会在转接时到得了屏幕、在不需要转接的通话里从账本消失)。
+  是"读"不是"取走",因为两个读者都要读到。
+  载体带 TTL(10 分钟)与容量上限:originate 失败会立刻 `Drop`,但"交换机收下了却什么也没发生"
+  的通话会留下孤儿条目,而那正是最不该长期留存的数据。
+  **两个建通话点都挂**(`coordinator.go` 的 `adopt` 与 reidentify 两处)——
+  一通电话的哪条腿先报出 minted id 是不确定的,只挂一处会让业务数据取决于交换机先announce 了谁。
+  **前提核实的两处出入**(记录在案,不是假设):①**没有 `calls` 表**,活着的通话只在内存里,
+  落库点是结束时的 CDR,所以"写 calls.user_data"落到 **`cdrs.user_data`** —— 同一列、同一读路径;
+  ②`cdrs.user_data` 是 `jsonb **NOT NULL** DEFAULT '{}'`,**存不了 NULL**;
+  "null 与空对象等价"因此实现为**都不记录**(空 map 不入载体,列保持其 `'{}'` 默认值),
+  语义一致而未改列约束 —— 改成可空需要迁移,不在本次范围。
+  **`CALL_USER_DATA` 事件仍无生产者,这是对的**:数据现在只在置呼时给定,**没有"变更"可宣告**;
+  产生它的是**呼叫中修改**,而那一条 owner 已明确另行立项(TAttachUserData 等价物)。
+
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
 1. ~~T0 先于一切;阶段 2→3→4→5 顺序固定(负路径与重启放后)。~~ **已履行**:阶段 0–5 全部按序完成。

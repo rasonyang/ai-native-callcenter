@@ -1121,7 +1121,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1413,6 +1413,10 @@ export interface components {
             did?: string;
             /** @description Overrides the DID's language when set. */
             language?: string;
+            /** @description Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch. */
+            userData?: {
+                [key: string]: string;
+            };
         };
         CreateCallResponse: {
             /** Format: uuid */
@@ -2009,7 +2013,7 @@ export interface components {
         };
     };
     responses: {
-        /** @description The request is malformed: unparseable body or an invalid identifier. Code VALIDATION_FAILED. */
+        /** @description The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE. */
         BadRequest: {
             headers: {
                 [name: string]: unknown;

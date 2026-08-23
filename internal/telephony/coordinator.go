@@ -17,6 +17,13 @@ import (
 // AgentLookup is the agent service as call control needs it: who is at which
 // phone, and the two facts about an agent that only a call can report — that
 // they are on one, and that their part of one has ended.
+// CallDataSource answers what business data a call was placed with, by the id
+// the request minted for it. Nothing else knows: it deliberately never touches
+// the switch.
+type CallDataSource interface {
+	CallData(callID uuid.UUID) map[string]any
+}
+
 type AgentLookup interface {
 	AgentAtExtension(extensionNumber string) (uuid.UUID, bool)
 	AgentByCallcenterName(name string) (uuid.UUID, bool)
@@ -59,6 +66,13 @@ type Coordinator struct {
 	cdr       *CDRAssembler
 	taps      Tapper
 	audiences Audiences
+	// callData is what a placed call was asked to carry. Only a call placed
+	// through this application has any, and it arrives here rather than
+	// through the switch: business data on a channel variable is business
+	// data in the switch's logs and event stream, and the screen it is for is
+	// reached from this side anyway.
+	callData CallDataSource
+
 	// queues resolves the switch's queue names; nil leaves the waiting line
 	// empty, which is honest — a queue we cannot name is one no screen can
 	// render.
@@ -335,6 +349,11 @@ func (c *Coordinator) reidentify(ctx context.Context, ev SwitchEvent) {
 	if _, err := c.registry.CreateCall(ctx, minted, callTypeOf(ev),
 		ev.Raw.Variable("aicc_language"), true); err == nil {
 		slog.DebugContext(ctx, "minted call created on reidentify", "callId", minted)
+		// Here too: whichever of a call's legs names the minted id first is
+		// the one that brings the call into being, and both are equally
+		// likely. Attaching in only one of the two places would make the
+		// business data depend on which channel the switch announced first.
+		c.applyCallData(minted)
 	}
 	c.merge(ctx, minted, bound)
 }
@@ -406,6 +425,12 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg)
 		return
 	}
+
+	// What the request asked this call to carry, if it was placed here. The
+	// call is minted from the switch's own event, so this is the first moment
+	// anything can hold it — and holding it on the call is what puts it on
+	// the event envelope and, through the snapshot, into the ledger row.
+	c.applyCallData(callID)
 
 	_ = call
 	if err := c.registry.BindChannel(ev.ChannelID, callID); err != nil {
@@ -619,6 +644,23 @@ func (c *Coordinator) agentDidNotAnswer(ctx context.Context, ev SwitchEvent) {
 		"agent", ev.AgentName, "agentId", agentID, "queue", ev.Queue,
 		"cause", ev.HangupCause)
 	c.agents.BenchForNoAnswer(ctx, agentID)
+}
+
+// applyCallData attaches the business data a placed call was asked to carry.
+//
+// Read rather than taken: the bot's own session reads the same entry, and on a
+// call the bot finishes alone that read is the one that reaches the ledger.
+func (c *Coordinator) applyCallData(callID uuid.UUID) {
+	if c.callData == nil {
+		return
+	}
+	data := c.callData.CallData(callID)
+	if len(data) == 0 {
+		return
+	}
+	_ = c.registry.Do(callID, func(call *Call) {
+		call.MergeUserData(data)
+	})
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an

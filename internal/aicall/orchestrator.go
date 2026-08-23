@@ -67,6 +67,14 @@ type Switch interface {
 	EndCallerWithTheirBridge(channelID string) error
 }
 
+// CallDataSource answers what business data a call was placed with. Only a
+// call this application placed has any, and it never travels through the
+// switch — so on a call the bot finishes alone, this is the only way that data
+// reaches the ledger row the bot writes.
+type CallDataSource interface {
+	CallData(callID uuid.UUID) map[string]any
+}
+
 // SessionFactory builds a provider session; swapped out in tests.
 type SessionFactory func(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error)
 
@@ -79,6 +87,10 @@ type OrchestratorConfig struct {
 	Sessions SessionFactory
 	// Ledger receives finished calls; nil disables writing.
 	Ledger Ledger
+	// CallData answers what business data a placed call was asked to carry.
+	// Nil leaves the bot's ledger row without it, which is what happened
+	// before there was anywhere to ask.
+	CallData CallDataSource
 	// Transcripts hands out the per-call actor that owns transcript order for
 	// both phases of a call; nil disables transcripts entirely.
 	Transcripts *transcript.Registry
@@ -260,6 +272,13 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 			"codec":         dialog.RTP.Law().String(),
 			"remoteRtpAddr": dialog.RemoteRTPAddr.String(),
 		},
+	}
+	// A call this application placed may have been asked to carry business
+	// data. On a call the bot finishes alone this row is the only one written,
+	// so without this the data would reach the agent's screen on a transfer
+	// and vanish from the ledger on every call that never needed one.
+	if o.cfg.CallData != nil {
+		facts.userData = o.cfg.CallData.CallData(ledgerCallID)
 	}
 	defer recorder.finish(o.cfg.Ledger, facts, log)
 

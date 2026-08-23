@@ -22,9 +22,13 @@ const (
 	CodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
 	CodeForbidden          ErrorCode = "FORBIDDEN"
 	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
-	CodeNotFound           ErrorCode = "NOT_FOUND"
-	CodeConflict           ErrorCode = "CONFLICT"
-	CodeExtensionInUse     ErrorCode = "EXTENSION_IN_USE"
+	// CodeUserDataTooLarge refuses business data rather than truncating it:
+	// a screen showing half a customer's details is worse than one saying the
+	// request was refused.
+	CodeUserDataTooLarge ErrorCode = "USER_DATA_TOO_LARGE"
+	CodeNotFound         ErrorCode = "NOT_FOUND"
+	CodeConflict         ErrorCode = "CONFLICT"
+	CodeExtensionInUse   ErrorCode = "EXTENSION_IN_USE"
 	// CodeExtensionAssignedToAgent refuses to delete an extension somebody
 	// works at. Distinct from CodeExtensionInUse, which is a sign-in
 	// collision: this one is about the binding, not the session.
