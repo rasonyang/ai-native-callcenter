@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 26 项、余 13 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C42;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
+> **C 系列已修 26 项、余 15 项 + C32/C14 不复现** —— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C24 / C27 / C31 / C33 / C34 / C37 / C42 / C47 / C48;**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。**C32 已不再复现**(原因未证明,守卫为 VC-S14-04)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1455,6 +1455,39 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **每一条 call 事件的信封都带 `orderId`**(修前 8/10)。
   `AGENT_AVAILABILITY(ON_CALL)` 仍在 —— 去掉振铃事件没有把它一起带走。
   CDR:`OUTBOUND | from=1008 | to=18688886669 | user_data={"orderId":"9999000000000000"}`。
+
+- **C47(new,2026-08-23 验 C43 时撞出,未修 —— 这是 W10 的具体危害)**
+  **AI 外呼根本转不到人工:`X-AICC-Channel-ID` 指向的是一条已经消失的 loopback 腿。**
+  ```
+  18:52:33  could not stamp the caller's channel  variable=aicc_did
+            error="uuid_setvar 5789e101-… aicc_did 95002: -ERR No such channel!"   ×6
+  18:52:43  transfer failed
+            error="uuid_transfer 5789e101-… 7002 XML aicc: -ERR No such channel!"
+  ```
+  交换机日志里 `5789e101-…` 是 **`loopback/18688886669-a`**。
+  `AICC_OUTBOUND_ENDPOINT` 默认 `loopback/%s/aicc/XML`,`Originate` 把
+  `origination_uuid` 钉在 loopback 的 **a 腿**上,而真正打给客户的是 **b 腿**经 pstn_sim 桥出去的那条;
+  a 腿在真实通话建立之后就不在了。于是 `DialAI` 写进 `sip_h_X-AICC-Channel-ID` 的那个 id
+  **从 bot 拿到它的那一刻起就已经是个死引用**。
+  后果:**AI 外呼永远无法转人工**,也永远盖不上 bot 的份额
+  (`aicc_bot_sec` / `aicc_bot_summary` / `aicc_flow_id` 六个变量全部写失败)。
+  呼入不受影响 —— 那条链的 `X-AICC-Channel-ID` 由 `aicc_inbound.lua` 用
+  `session:getVariable("uuid")` 取的是真通道。
+  **这正是 W10(生产禁用 loopback)要防的事,而且它不只是"生产"的问题** ——
+  开发环境同样跑不通 AI 外呼转人工。
+  修法方向:外呼不要经 loopback(直接 `sofia/gateway/…` 或让 originate 落在真实腿上),
+  或在 b 腿建立后把真实通道 id 回填给 bot。**须与 W10 一起决定,不要各修各的。**
+- **C48(new,2026-08-23 同上,未修)**
+  **转接失败的 AI 通话,账本里一行都没有。**
+  上面那通:bot 接了、说了话、请求转接、转接失败、主叫挂断 —— **`cdrs` 里查无此行**。
+  机制:`internal/aicall/ledger.go` 的 `finish` 在 `isTransferred` 为真时**直接 return**
+  (注释写着"转接意味着人工路径拥有那唯一一行 CDR"),而转接**失败**时人工路径
+  从来没有拿到这通电话,于是**两边都不写**。
+  与 C38 是一对:C38 是"bot 写了、人工那行被丢弃",这一条是"bot 不写、人工也没有"。
+  后果比 C38 重:C38 至少留下一行残缺的,这一条是**整通电话从账本上消失**,
+  计费、报表、质检全都看不到它发生过。
+  修法方向:`isTransferred` 不该是"我不写"的理由,而应是"我写一行**待人工补全**的",
+  或者转接失败时把 `isTransferred` 撤回。C38 的 upsert(看得更远的行胜出)已经为前者铺好了路。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
