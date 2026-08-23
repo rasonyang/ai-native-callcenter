@@ -377,8 +377,15 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      'g7bih4lv' is telling them nothing"*),同一个坑隔了一条腿。
      故目的号**只在它是数字时才发** —— 不发,被叫自己的号几秒后随他的腿就到;
      发了,那是个**长着正确答案样子的错误答案**。
-     ③第三轮三通全对,`PARTY_DIALING` 在每条 party 的最前,发起腿只进它自己坐席的流。、CALL_USER_DATA(userData 独立变更事件)、
-  SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)——全新 publish 点;
+     ③第三轮三通全对,`PARTY_DIALING` 在每条 party 的最前,发起腿只进它自己坐席的流。
+  ③b **CALL_USER_DATA**(userData 独立变更事件)—— 全新 publish 点,**本组仅剩这一条**。
+  ③c ~~SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)~~ **【已做 2026-08-23】** ——
+     两个方向都发(`{isUp:true|false}`),**广播作用域**:交换机没了是坐席既看不见、
+     也绕不过去的那种故障(不响、按什么都没反应),而在此之前唯一的迹象就是"什么都不再发生了"。
+     `esl.Link.OnLost` 这个钩子**写好从没被调用** —— 本周第四个同型的
+     (`ListQueueMembers` / `ShowChannels` / `LoadPresence` / `OnLost`)。
+     摘除验证:只发重连那一半 → 用例报"只宣告了 1 条,两个方向各要一条";
+     只会报"回来了"的事件分不清重连与首次启动。零生产者 6 → 5。
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
