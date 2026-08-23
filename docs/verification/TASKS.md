@@ -3,7 +3,8 @@
 > 前身:TASKS-draft.md(草案),经 owner 两轮决策(DECISIONS-pending.md,2026-08-20)后转正。
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
-> **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W9)。唯一残留决策:settings 死表处置。
+> **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
+> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23)**;W3 / W4 / W7 / W8 / W9 / W10 未开工。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
@@ -322,9 +323,16 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
 - **W4 audit_logs 检索**(D5):**路由 `/admin/audit`**;参考 ui-test admin/audit.tsx(分类过滤由
   action 前缀派生)。顺序:openapi 契约(GET /audit-logs:分页 + action 前缀/操作者/时间过滤)→
   generate → handler(读侧 sqlc 新查询)→ UI。ADMIN guard。关闭 tables.md "只写不读"缺口。
-- **W5 D4 记录**:在设计文档(docs/phase1-decisions.md 或 design 附录)记一行"dispositions 固定词表
-  为产品决策(2026-08-20)";S4-03 断言转正式。
-- **W6 D1 记录**:质检评审 UI defer 下一期——tables.md/quality_reviews 行注记决议日期。
+- ~~**W5 D4 记录**~~ **【已完成 2026-08-23】**:决议记进了**设计集**本身
+  (`docs/design/03-data.md` 的 `dispositions` 行,带日期与理由:四个词全中心认同,
+  胜过谁都对不上账的四百个;因此"恰好这四个"是**契约级**断言,加第五个是要重开的决议、
+  不是配置变更)。`coverage/tables.md` 的 D4 注记本就已在。S4-03 的该行确认为硬断言
+  (原本就不是留证),并补上了它为何是契约级的出处。
+- ~~**W6 D1 记录**~~ **【已完成 2026-08-23】**:同样记进设计集
+  (`docs/design/03-data.md` 的 `quality_reviews` 行):API 完整并保留契约、前端零引用,
+  **这张表只进不出是带日期的决定,不是没人发现的疏漏**;并指回
+  `coverage/tables.md` 中该行的 UNCOVERED 标注。tables.md 侧的注记(含决议日期)本就已在,
+  缺的是设计文档这一半 —— 两处都记,才不会有人在下一期读设计文档时把它当成缺口去补。
 - **W7 十个零生产者 SSE 类型全部实现**(D6),按难度四组:
   **【2026-08-22 现场证据,owner 提问触发】** `PARTY_DIALING` 的缺席在事件流上是看得见的:
   一通分机互拨(1002→1008)的完整流里,主叫 party 的**第一次出现就是 `PARTY_ESTABLISHED`** ——

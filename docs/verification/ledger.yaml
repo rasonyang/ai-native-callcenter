@@ -386,7 +386,10 @@ cases:
       wrap_ups:disposition_code=RESOLVED(或所选),disposition_label='Resolved',has_note=t,is_confirmed=t
       agent_states:state=READY,reason 为空
       switch 侧 agent-wei status="Available"
-      dispositions 恰好 4 行:RESOLVED, FOLLOW_UP_REQUIRED, NO_ANSWER, OTHER(00012:40-44)
+      dispositions **恰好 4 行**:RESOLVED, FOLLOW_UP_REQUIRED, NO_ANSWER, OTHER(00012:40-44)——
+      **契约级断言**(D4 决议 2026-08-20:固定词表是产品决策,不做 CRUD;
+      记录在 `docs/design/03-data.md` 的 dispositions 行,W5)。多一个词不是配置变更,
+      而是要重开的决议:一整个呼叫中心认同的四个词,比谁都对不上账的四百个值钱
     failure_looks_like: |
       点 Done 后界面回 READY(乐观更新),但 wrap_ups.is_confirmed 仍为 f ——
       确认写库失败而 presence 变更成功,完成率报表把这通永远算作"未确认",

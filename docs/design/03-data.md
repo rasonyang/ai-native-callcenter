@@ -89,6 +89,15 @@ recordings(id uuid pk, call_id fk, backend varchar check in ('FS','S3'), bucket 
            format varchar default 'WAV', created_at, deleted_at)
 quality_reviews(id uuid pk, recording_id fk, call_id, reviewer_id fk,
                 scores jsonb, total_score smallint, notes text, created_at)
+                                   -- DECIDED 2026-08-20 (D1): the review UI is deferred to the
+                                   -- next phase. The API is complete and keeps its contract
+                                   -- (POST /recordings/{id}/reviews, ListCallReviews), and the
+                                   -- frontend does not reference it — so this table is written to
+                                   -- and never read back, deliberately and with a date on it
+                                   -- rather than as an oversight somebody rediscovers. Nothing
+                                   -- here is a gap to close until that phase: see
+                                   -- docs/verification/coverage/tables.md, where the row is
+                                   -- marked UNCOVERED for the same reason.
 callbacks(id uuid pk, call_id, queue_id, phone_number text, message text,
           status varchar check in ('OPEN','DONE','DISMISSED'), created_at, handled_by, handled_at)
 queue_events(id bigserial, occurred_at, call_id, queue_id,
@@ -103,6 +112,14 @@ dispositions(code varchar pk, label text, position int, is_enabled bool)
                                    -- installation with no vocabulary cannot complete a wrap-up at
                                    -- all, and the disposition is required. One flat list — with a
                                    -- handful of words there is nothing to group.
+                                   -- DECIDED 2026-08-20 (D4): the vocabulary is fixed and there is
+                                   -- no CRUD for it. Four words a whole call centre agrees on are
+                                   -- worth more than four hundred nobody can report across, and a
+                                   -- list operators can extend becomes one every report has to
+                                   -- guess at. Because it is a product decision rather than an
+                                   -- implementation detail, "exactly these four" is a
+                                   -- contract-level assertion (VC-S4-03) and adding a fifth is a
+                                   -- decision to reopen, not a configuration change.
 wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
          note text, is_confirmed bool, created_at, pk(call_id, agent_id))
                                    -- opened by the platform when after-call work begins (default
