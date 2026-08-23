@@ -822,7 +822,12 @@ cases:
     precondition: "95001 的 fallback 队列=support-en(luacc.dids 可查);允许重启 app"
     steps:
       - who: human
-        do: "拨 95001,等 bot 说话中【不要挂断】"
+        do: "**基线先跑**:拨 95001,和 bot 谈到它自己收尾(道别/走到终态),听感应当就是**挂断**"
+      - who: agent
+        do: "执行 collect 第 6 条,确认这一通走的是印记那条路(`bot finished the call`),
+          **没有**落进队列 —— 这是本次修法最容易破坏的方向,先证它没坏"
+      - who: human
+        do: "再拨 95001,等 bot 说话中【不要挂断】"
       - who: agent
         do: "通话进行中执行 collect 第 1 条重启 app(restart.sh 自带锁等待)"
       - who: human
@@ -831,13 +836,22 @@ cases:
         do: "执行其余 collect,判定降级路径与新实例接管"
     collect:
       - "deploy/dev/restart.sh"
-      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot leg failed' | tail -2"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot leg (failed|vanished)' | tail -2"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -cE 'database ready|voice leg listening' \"$LOG\""
       - "curl -s -c /tmp/vc-sup.jar -H 'Content-Type: application/json' -d '{\"username\":\"supervisor\",\"password\":\"aicc@12345\"}' http://127.0.0.1:8080/api/v1/auth/login -o /dev/null; curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq ."
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config queue list members support-en@192.168.31.55'"
+      - "/usr/local/freeswitch/bin/fs_cli -x 'console last 200' | grep -E 'aicc_inbound: bot (finished the call|leg (failed|vanished))' | tail -3"
     expect: |
+      **基线(正常收尾那一通)**:听感就是挂断,不是保持音。
+        FS console 有 "aicc_inbound: bot finished the call on 95001 (HANGUP)"
+        (走到终态则是 FLOW_END),且**没有** "bot leg vanished/failed",也没有进队列。
+        这是本次修法的反方向:兜底靠"主叫活过 bot 腿"实现,若印记那条路失灵,
+        **每一通谈完的电话都会被塞进人工队列** —— 比原缺陷更吵。
       restart.sh 输出 "started:"(旧实例 advisory lock 释放后新实例才起,store.go:83-100)
-      FS console:恰好 1 行 "aicc_inbound: bot leg failed for 95001"(bridge 断 → lua 兜底,inbound.lua:101-110)
+      FS console:恰好 1 行 "aicc_inbound: bot leg **vanished** for 95001"
+        —— vanished 而非 failed,因为这一通是**接通之后**对端消失(按 bridge_uuid 区分);
+        兜底块得以执行,是因为 `hangup_after_bridge=false` 让主叫活过了 bot 腿(inbound.lua)。
+        (2026-08-21 首跑此处 **0 行**,主叫在 50ms 内被跟随挂断 —— 即 C26)
       新实例日志含 database ready 与 voice leg listening
       /calls/waiting:该主叫出现在 support-en 等待名单(等待名单不依赖 registry 收养,waiting.go:222-233)
       判定辅助(最后一条 members):members 有行而 /calls/waiting 为空 = 应用侧缺口;
@@ -848,7 +862,7 @@ cases:
       这通电话直到有人接起前对所有屏幕都是隐形的。
     evidence_dir: docs/verification/artifacts/VC-S12-01/
     status: FAIL  # 2026-08-21 执行:restart.sh 与新实例接管均正常,但 lua 兜底 0 行、/calls/waiting 空、主叫直接断线。根因(主证据):aicc_inbound.lua:69 设 hangup_after_bridge=true,bot 腿一死主叫腿 50ms 内被跟随挂断,兜底块无机会执行;continue_on_fail 只覆盖'压根没接通',不覆盖'接通后对端消失'→ 立案 C26。F4 判定辅助不适用(主叫从未进队,重跑同果)。次生:被打断的呼叫无 CDR(即 S12-02 记的已知缺口)
-    refs: ["internal/store/store.go:83", "freeswitch/scripts/aicc_inbound.lua:101", "deploy/dev/restart.sh:12", "internal/telephony/coordinator.go:329"]
+    refs: ["internal/store/store.go:83", "freeswitch/scripts/aicc_inbound.lua", "internal/aicall/actions.go", "internal/aicall/orchestrator.go", "internal/telephony/adapter.go", "deploy/dev/restart.sh:12", "internal/telephony/coordinator.go:329"]
 
   - id: VC-S12-02
     scenario: S12
