@@ -319,7 +319,13 @@
     "boundExtensionHint": "The extension this agent signs in at. An extension belongs to one agent.",
     "noExtension": "No phone",
     "autoAnswer": "Auto answer",
-    "autoAnswerHint": "Whether the phone picks up queue calls without the agent clicking answer."
+    "autoAnswerHint": "Whether the phone picks up queue calls without the agent clicking answer.",
+    "generate": "Generate",
+    "reveal": "Show password",
+    "revealTitle": "SIP password for {{number}}",
+    "revealHint": "Reading this is recorded in the audit trail. It is what the handset registers with.",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",

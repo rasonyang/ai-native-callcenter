@@ -8,6 +8,7 @@ import (
 	"encoding/base32"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"regexp"
 	"strings"
@@ -335,4 +336,40 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// RevealExtensionPassword answers what a phone was given, and records that it
+// was asked.
+//
+// The password is stored in clear (D4), so this endpoint is the whole of the
+// exposure and the whole of the control. It is audited from the handler rather
+// than by the middleware: that middleware guarantees coverage of *mutations*,
+// structurally, and a read that discloses a credential is a different category
+// of event — the handler that discloses is the one that knows it did.
+func (s *Server) RevealExtensionPassword(w http.ResponseWriter, r *http.Request, extensionID uuid.UUID) {
+	if s.catalog == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot read the phone", nil)
+		return
+	}
+	password, err := s.catalog.ExtensionPassword(r.Context(), extensionID)
+	if err != nil {
+		s.writeCatalogError(w, r, err)
+		return
+	}
+
+	// Recorded before the answer leaves: a disclosure whose record failed is
+	// still a disclosure, and the log line says so loudly.
+	if s.auditor != nil {
+		var actorID *uuid.UUID
+		if identity, ok := identityFrom(r.Context()); ok {
+			id := identity.UserID
+			actorID = &id
+		}
+		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+		if err := s.auditor.Audit(r.Context(), actorID,
+			"GET "+routePattern(r), "extension", extensionID.String(), nil, ip); err != nil {
+			s.logAuditFailure(r, err)
+		}
+	}
+	writeJSON(w, http.StatusOK, api.ExtensionSecret{Password: password})
 }

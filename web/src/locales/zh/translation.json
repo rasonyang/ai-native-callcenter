@@ -317,7 +317,13 @@
     "boundExtensionHint": "该坐席签入的分机。一个分机只能属于一个坐席。",
     "noExtension": "未绑定话机",
     "autoAnswer": "自动应答",
-    "autoAnswerHint": "话机是否无需坐席点击即自动接听队列来电。"
+    "autoAnswerHint": "话机是否无需坐席点击即自动接听队列来电。",
+    "generate": "生成",
+    "reveal": "查看口令",
+    "revealTitle": "分机 {{number}} 的 SIP 口令",
+    "revealHint": "这次查看会记入审计日志。话机就是用它注册的。",
+    "copy": "复制",
+    "copied": "已复制"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",

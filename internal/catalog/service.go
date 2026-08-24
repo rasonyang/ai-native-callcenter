@@ -24,6 +24,7 @@ type Store interface {
 	CreateExtension(ctx context.Context, e Extension) (Extension, error)
 	UpdateExtension(ctx context.Context, e Extension) (Extension, error)
 	SetExtensionPassword(ctx context.Context, id uuid.UUID, password string) error
+	ExtensionPassword(ctx context.Context, id uuid.UUID) (string, error)
 	AllocateExtension(ctx context.Context, e Extension, rangeLow, rangeHigh int) (Extension, error)
 	DeleteExtension(ctx context.Context, id uuid.UUID) error
 
@@ -131,6 +132,15 @@ func (s *Service) AllocateExtension(ctx context.Context, e Extension,
 	}
 	e.ID = uuid.Must(uuid.NewV7())
 	return s.store.AllocateExtension(ctx, e, rangeLow, rangeHigh)
+}
+
+// ExtensionPassword reads a phone's SIP credential in clear.
+//
+// Deliberately not part of Extension: a credential should have to be asked for
+// by name, so it cannot ride along in a list, a snapshot or a form that only
+// meant to show a number.
+func (s *Service) ExtensionPassword(ctx context.Context, id uuid.UUID) (string, error) {
+	return s.store.ExtensionPassword(ctx, id)
 }
 
 // UpdateExtension changes an extension. An empty password leaves it alone, so

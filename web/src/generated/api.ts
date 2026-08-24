@@ -669,6 +669,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/extensions/{extensionId}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a phone's SIP password
+         * @description The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.
+         *
+         *     Every read is recorded in the audit trail, including who asked and which phone. Requires ADMIN.
+         */
+        get: operations["revealExtensionPassword"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/queues": {
         parameters: {
             query?: never;
@@ -1648,6 +1670,14 @@ export interface components {
         };
         ExtensionList: {
             items: components["schemas"]["Extension"][];
+        };
+        /**
+         * @description A phone's SIP registration password, in clear.
+         *
+         *     It is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.
+         */
+        ExtensionSecret: {
+            password: string;
         };
         /**
          * @description How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.
@@ -3489,6 +3519,32 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revealExtensionPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                extensionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The password, in clear. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExtensionSecret"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

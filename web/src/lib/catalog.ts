@@ -45,6 +45,14 @@ export const catalogApi = {
     request<Extension>(`/extensions/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteExtension: (id: string) => request<void>(`/extensions/${id}`, { method: 'DELETE' }),
 
+  /**
+   * A phone's SIP password, in clear. Asked for by name and never carried by
+   * the list, because reading it is recorded and a credential that arrives
+   * unasked cannot be.
+   */
+  extensionPassword: (id: string) =>
+    request<{ password: string }>(`/extensions/${id}/password`),
+
   queues: () => request<{ items: Queue[] }>('/queues'),
   createQueue: (body: Partial<QueueWrite>) =>
     request<Queue>('/queues', { method: 'POST', body: JSON.stringify(body) }),
@@ -115,4 +123,16 @@ export function useCatalogMutations() {
       onSuccess: after(DIDS_KEY),
     }),
   }
+}
+
+/**
+ * A phone credential nobody has to invent, minted in the browser for a new
+ * extension. The server mints its own for a phone it allocates; this is for
+ * the one an operator adds by hand, so the field is never left to "1234".
+ */
+export function generateSIPPassword(): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('')
 }

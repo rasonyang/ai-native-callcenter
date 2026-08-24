@@ -220,6 +220,9 @@ func (s *Server) router() chi.Router {
 						admin.Post("/extensions", op.CreateExtension)
 						admin.Put("/extensions/{extensionId}", op.UpdateExtension)
 						admin.Delete("/extensions/{extensionId}", op.DeleteExtension)
+						// The one way to learn a phone's credential, and the
+						// one place that reading it is recorded.
+						admin.Get("/extensions/{extensionId}/password", op.RevealExtensionPassword)
 
 						admin.Post("/queues", op.CreateQueue)
 						admin.Put("/queues/{queueId}", op.UpdateQueue)

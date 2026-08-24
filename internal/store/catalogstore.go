@@ -131,6 +131,18 @@ func (c *CatalogStore) CreateExtension(ctx context.Context, e catalog.Extension)
 	return extensionOf(row), nil
 }
 
+// ExtensionPassword reads the stored credential.
+func (c *CatalogStore) ExtensionPassword(ctx context.Context, id uuid.UUID) (string, error) {
+	row, err := c.q.GetExtension(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", catalog.ErrNotFound
+		}
+		return "", fmt.Errorf("read extension %s: %w", id, err)
+	}
+	return row.Password, nil
+}
+
 func (c *CatalogStore) UpdateExtension(ctx context.Context, e catalog.Extension) (catalog.Extension, error) {
 	row, err := c.q.UpdateExtension(ctx, queries.UpdateExtensionParams{
 		ID:          e.ID,

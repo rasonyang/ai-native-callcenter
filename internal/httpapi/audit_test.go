@@ -302,6 +302,10 @@ func (stubCalls) AllWaitingCalls() []telephony.WaitingCall { return nil }
 
 type stubCatalog struct{}
 
+func (stubCatalog) ExtensionPassword(context.Context, uuid.UUID) (string, error) {
+	return "", nil
+}
+
 func (stubCatalog) Extensions(context.Context) ([]catalog.Extension, error) { return nil, nil }
 func (stubCatalog) CreateExtension(context.Context, catalog.Extension) (catalog.Extension, error) {
 	return catalog.Extension{}, nil

@@ -20,6 +20,9 @@ type CatalogService interface {
 	CreateExtension(ctx context.Context, e catalog.Extension) (catalog.Extension, error)
 	UpdateExtension(ctx context.Context, e catalog.Extension) (catalog.Extension, error)
 	DeleteExtension(ctx context.Context, id uuid.UUID) error
+	// ExtensionPassword is separate from the extension so a credential has to
+	// be asked for by name and cannot ride along in a list or a form.
+	ExtensionPassword(ctx context.Context, id uuid.UUID) (string, error)
 
 	Queues(ctx context.Context) ([]catalog.Queue, error)
 	CreateQueue(ctx context.Context, q catalog.Queue) (catalog.Queue, error)

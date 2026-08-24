@@ -1189,6 +1189,13 @@ type ExtensionList struct {
 	Items []Extension `json:"items"`
 }
 
+// ExtensionSecret A phone's SIP registration password, in clear.
+//
+// It is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.
+type ExtensionSecret struct {
+	Password string `json:"password"`
+}
+
 // ExtensionWrite Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
 type ExtensionWrite struct {
 	DisplayName *string        `json:"displayName,omitempty"`
@@ -2186,6 +2193,9 @@ type ServerInterface interface {
 	// UpdateExtension Update an extension
 	// (PUT /extensions/{extensionId})
 	UpdateExtension(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID)
+	// RevealExtensionPassword Read a phone's SIP password
+	// (GET /extensions/{extensionId}/password)
+	RevealExtensionPassword(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID)
 	// ListFlows All flows
 	// (GET /flows)
 	ListFlows(w http.ResponseWriter, r *http.Request)
@@ -2576,6 +2586,12 @@ func (_ Unimplemented) DeleteExtension(w http.ResponseWriter, r *http.Request, e
 // UpdateExtension Update an extension
 // (PUT /extensions/{extensionId})
 func (_ Unimplemented) UpdateExtension(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevealExtensionPassword Read a phone's SIP password
+// (GET /extensions/{extensionId}/password)
+func (_ Unimplemented) RevealExtensionPassword(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4232,6 +4248,32 @@ func (siw *ServerInterfaceWrapper) UpdateExtension(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// RevealExtensionPassword operation middleware
+func (siw *ServerInterfaceWrapper) RevealExtensionPassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "extensionId" -------------
+	var extensionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "extensionId", chi.URLParam(r, "extensionId"), &extensionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "extensionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevealExtensionPassword(w, r, extensionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListFlows operation middleware
 func (siw *ServerInterfaceWrapper) ListFlows(w http.ResponseWriter, r *http.Request) {
 
@@ -5119,6 +5161,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/extensions/{extensionId}", wrapper.UpdateExtension)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/extensions/{extensionId}/password", wrapper.RevealExtensionPassword)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/flows", wrapper.ListFlows)

@@ -1955,6 +1955,51 @@
         }
       }
     },
+    "/extensions/{extensionId}/password": {
+      "get": {
+        "operationId": "revealExtensionPassword",
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Read a phone's SIP password",
+        "description": "The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.\n\nEvery read is recorded in the audit trail, including who asked and which phone. Requires ADMIN.",
+        "parameters": [
+          {
+            "name": "extensionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The password, in clear.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtensionSecret"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/queues": {
       "get": {
         "operationId": "listQueues",
@@ -5130,6 +5175,18 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "ExtensionSecret": {
+        "type": "object",
+        "description": "A phone's SIP registration password, in clear.\n\nIt is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.",
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
         ]
       },
       "Strategy": {
