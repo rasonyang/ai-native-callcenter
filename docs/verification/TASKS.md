@@ -513,8 +513,24 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     这是行为变更,验收时要确认没有人依赖它为 true。
 
   **执行顺序(依赖决定,不可换):**
-  1. **W11.1 `pstn_sim` → `pstn_gateway`**(D6)。独立提交,零行为变更。仓内 + 宿主机 conf,
-     `sofia` 重载后**真机验证一通外呼**。
+  1. ~~**W11.1 `pstn_sim` → `pstn_gateway`**(D6)~~ **【已完成 2026-08-24 `f2c3457`】**
+     **宿主机实为五个文件,不是条目原估的两个**:`vars.xml` 的三个变量、
+     `sip_profiles/external/pstn_sim.xml`、以及 **三个** dialplan 目录各一份
+     (`default` / `public` / `aicc`,产品真正走的是 `aicc` 那份)。各自备份为
+     `*.pre-gwrename-20260824` —— 后缀不以 `.xml` 结尾,include 的 `*.xml` 通配装不进去,
+     否则会得到两个同名网关。`reloadxml` + `sofia profile external restart reloadxml` 生效。
+     **真机验证(wei/1008 click-to-dial → 18688886669,接通后对端挂断)**:
+     `[aicc->pstn_gateway_outbound]` 正则 PASS →
+     `bridge(…origination_caller_id_number=95001…sofia/gateway/pstn_gateway/18688886669)` →
+     18:34:00 对端应答 → 18:34:04 NORMAL_CLEARING 双向拆线。
+     CDR `01a03355`:OUTBOUND / ANSWERED / ring 1 / talk 4 / total 6 / `legs=[TRUNK|18688886669]`
+     / `switchBillSec=4` —— 与改名前那通外线同型(VC-S14-04)。改名后日志里 `pstn_sim` 出现 **0 次**。
+     **变量改名是会静默失败的那一处**:dialplan 引用未定义的 `$${pstn_gateway_caller_id}` 会渲染成
+     空 caller id 而电话照打,日志里它解析成 `95001`,才说明变量是**跟着引用一起**改的。
+     **⚠ 只验证了宿主机这一半。** `.env` 的 `AICC_OUTBOUND_ENDPOINT` 没有被这通电话走到 ——
+     click-to-dial 的坐席腿是 `sw.Endpoint(分机)`,应答后 `uuid_transfer` 进 dialplan,
+     **全程不读 `EndpointFormat`**;那个字符串只有 **AI 外呼 `DialAI`**(`outbound.go:281/342`)才用。
+     仓内那一半要一通 AI 外呼才算走完,**未做**。
   2. **W11.2 号段分配器**(D2/D3)。`AICC_EXTENSION_RANGE` + 最小空闲号 + advisory lock。
      F12 已解,不再阻塞。
   3. **W11.3 Users 写侧**。`POST/PUT /users`(角色 `AGENT|SUPERVISOR|ADMIN`、account 可编辑、
