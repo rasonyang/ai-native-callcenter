@@ -118,3 +118,66 @@ reject_delay_time=60 / busy_delay_time=60`。
 
 **对照组**:同一流程改用 ben 的原生软电话(1002)。若不复现,嫌疑就锁定在浏览器话机侧,
 而那需要在 `web-sip-phone` 会话里处理(它是另一个仓库,改动走那条路)。
+
+---
+
+# 补录 · 根因确认与 486 实验(同日,12:00–12:10)
+
+## 一、根因:web-sip-phone 的 RESET 出路只有一条
+
+读 `web-sip-phone/src/offscreen/call-session.ts` 得到:
+
+- `handleInvite`(:67-77)只在 `session === null && state === CallState.Idle` 时受理,否则回 486。
+- 被取消的振铃:`handleSessionState` 收到 `Terminated`、`state === Ringing` → 映射 `CANCEL`
+  → `session = null`、状态进入 **Ended**。
+- **离开 Ended/Failed 只有两条路**:`setState` 挂的 `resetTimer`
+  (`RESET_MS_ENDED=1000` / `RESET_MS_FAILED=3000`),或 `forceIdle()` ——
+  而 `forceIdle()` **唯一调用方**是 `sip-runtime.ts:418` 的 `rebuildUa()`,即只有传输重建。
+
+**那一个 `setTimeout` 没执行,话机就对之后每个 INVITE 回 486,直到传输重建。**
+这解释了全部七次:只在浏览器话机、由被取消的振铃触发、跨通话不自愈、隔一阵子(重连后)又好。
+
+**aicc 侧无法证实也无法排除的部分**:应用只记 `registrations reconciled`,
+**不记单个话机的注册/注销**,所以对方提出的第二条路径(`terminate()` 清定时器不补跑 RESET,
+配置变更的 stop→start 继承 Ended)在我们的日志里查不到佐证。这本身是个观测缺口。
+
+## 二、web-sip-phone 的处置(对方会话答复,已修)
+
+1. `handleInvite` 惰性补跑 RESET:`session === null` 且处于 Ended/Failed 时先回 Idle 再受理。
+   **定时器降级为 UI 快路径,受理不再依赖任何后台定时器。**
+2. `SipRuntime.start()` 开头调 `forceIdle()`,堵住 stop→start 继承路径。
+3. 486 按状态拆分:真在通话/振铃的四态仍 486;**槽被一个已进终态的 session 占着 → 480**。
+4. 那个 1s/3s 的合法 486 窗口**取消**,不是缩短。
+5. 新增诊断字段 `overdueByMs` —— 正值即"定时器该跑而没跑"的硬证据。238/238 通过。
+
+**他们驳回了我提的"压住 INVITE 等 1 秒",理由更好**:压住会重新引入一个
+"必须按时醒来"的依赖,正是这次出事的那一类东西。
+
+## 三、486 实验:交换机侧**没有**兜底
+
+做法(无需人工):`originate {sip_auto_answer=true}user/1008 &park()` 占住 wei 的话机,
+再把一个主叫送进 **support-en**(该队列只配了 wei)。
+
+```
+12:01:15.83  INVITE → wei
+12:01:15.83  entering state [terminated][486]
+12:01:15.83  Hangup … [CS_CONSUME_MEDIA] [USER_BUSY]
+```
+
+两次独立执行(12:01、12:05),**wei 全程 `status=Available` / `no_answer_count=0`**。
+
+**结论:486 → USER_BUSY,不计入 `max_no_answer`,坐席不会被挪出轮转。**
+对照:同日 11:31 的**无应答**一型,15 秒超时后 wei 立刻被置 `NOT_READY(SYSTEM)` 并停止派单。
+**两条路径的兜底待遇完全不同。**
+
+**未观察到的部分,如实记**:两次的合成主叫分别只待了 14 秒与 41 秒,
+都不足 `busy_delay_time=60`,所以**没有看到第二次派单**。
+"会不会一分钟一次无限重试"是**从参数推的,不是测出来的**。
+
+## 四、C37 的现状
+
+- **成因**:已在代码层确认(web-sip-phone),浏览器侧的冻结机制未证实,对方选择不证实 ——
+  修复对机制不敏感,并留了 `overdueByMs` 让下一次现场自证。
+- **修复**:在 web-sip-phone 一侧,已落地。
+- **aicc 侧兜底**:**无应答有,486 没有**。若将来出现别的成因导致话机持续 486,
+  交换机侧拦不住 —— 这是一个已知的、有意留下的缺口,记在此处。
