@@ -35,7 +35,7 @@
 | (新建) → CreateCall → CREATED | call.go:194-202(NewCall);registry.go:95-121 | 快照/API | S1 | [FACT] | |
 | CREATED → AddParty → RUNNING | call.go:220-222 | 同上 | S1, S4 | [FACT] | |
 | RUNNING → 最后一腿 RELEASE(Finish)→ ENDED | call.go:310-317;触发 registry.go:350-361 | OnCallFinished→CDR(cdr.go:72)+转写收官(wiring.go:115);OnCallRetired→tap 收官(wiring.go:121) | S2, S4, S6 | [FACT] | ENDED 后 actor 自停(registry.go:360) |
-| * → ENDING → * | NOT FOUND | — | UNCOVERED | [FACT] | ENDING(call.go:23)无任何赋值:死状态(enums.md 同记) |
+| ~~* → ENDING → *~~ | — | — | 已删除 | [FACT] | 2026-08-24 C4:状态与契约枚举一并删除 |
 | RUNNING → Retire(被合并吸收)→ actor 退出(无 ENDED) | registry.go:224-231;coordinator.go:525(merge) | OnCallRetired(registry.go:267-274) | S3, S4 | [FACT] | 被吸收呼叫不产生 CDR/CALL_CDR(coordinator.go:487 注释) |
 | * → Shutdown → actor 退出 | registry.go:241-253 | 同上 | S12 | [FACT] | 优雅关闭停所有 actor |
 | 身份改写:provisional → minted(reidentify/merge) | coordinator.go:297-326;merge :488-528 | announceMerge→PARTY_CHANGED(coordinator.go:545-563) | S1, S3, S4 | [FACT] | 2026-08-18 现场缺陷补的通告 |
@@ -92,7 +92,7 @@
 ## 缺口汇总
 
 ### 需删除(死代码/死状态)
-- Call 状态 `ENDING`(call.go:23)——2026-08-20 决议 D7①:**删除**(有 ENDED 即可)→ TASKS C4(breaking)。
+- ~~Call 状态 `ENDING`(call.go:23)~~ —— D7① **已于 2026-08-24 执行**(C4):契约 → generate → 实现,`make api-breaking` 报无破坏(响应侧枚举收窄)。
 - `Presence.RingNoAnswer` 全链——2026-08-20 决议 D7②:**实现**(消费 QUEUE_AGENT_STATE,含 missed_reason 互斥修复)→ TASKS W2。
 - 转写状态 `ENDED`(actor.go:110)——2026-08-20 决议 D7③:**先删除** → TASKS C4(breaking)。
 

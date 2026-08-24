@@ -1298,7 +1298,7 @@ export interface components {
          */
         CallType: "INBOUND" | "OUTBOUND" | "CONSULT" | "INTERNAL";
         /** @enum {string} */
-        CallState: "CREATED" | "RUNNING" | "ENDING" | "ENDED";
+        CallState: "CREATED" | "RUNNING" | "ENDED";
         /** @enum {string} */
         PartyRole: "ORIGINATOR" | "TARGET";
         /** @enum {string} */
@@ -1314,6 +1314,8 @@ export interface components {
             otherNumber?: string;
             /** Format: uuid */
             agentId?: string;
+            /** @description True for the leg the switch dialled towards the AI gateway. A caller talking to the bot is on a call with two legs and only one person, and nothing else in this object distinguishes that leg from an agent it has no agentId for. */
+            isBotLeg?: boolean;
             /** @description True while the switch is silencing this leg's microphone. */
             isMuted?: boolean;
             /** Format: date-time */
@@ -1979,7 +1981,7 @@ export interface components {
          */
         TranscriptSource: "MODEL" | "ASR";
         /**
-         * @description Health of live transcription for a call, as the agent should see it.
+         * @description Health of live transcription for a call, as the agent should see it. ENDED is the snapshot's answer for a call that is over: it is produced by GET /calls/{callId}/transcript rather than by the transcription actor, which is why the actor's own mirror of these values does not name it.
          * @enum {string}
          */
         TranscriptionState: "IDLE" | "CONNECTING" | "LIVE" | "DEGRADED" | "ERROR" | "STOPPED" | "ENDED";

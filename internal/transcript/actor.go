@@ -107,7 +107,14 @@ const (
 	StateDegraded   = "DEGRADED"
 	StateError      = "ERROR"
 	StateStopped    = "STOPPED"
-	StateEnded      = "ENDED"
+	// StateEnded is never assigned here and that is not an oversight: ENDED is
+	// the *snapshot's* answer for a call that is over, produced by the
+	// transcript handler when the call is no longer live and no actor remains
+	// to ask. It stays in this mirror so the mirror is complete — a reader
+	// comparing it against the contract enum must not find a value missing and
+	// conclude the contract has one nothing produces. (C4 filed it as dead; it
+	// is not, and the compile lock said so.)
+	StateEnded = "ENDED"
 )
 
 // CurrentState reports the last state published for this call, so a client

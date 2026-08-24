@@ -14,7 +14,7 @@ One ESL **inbound-mode** connection (default `127.0.0.1:18021`, password from en
 
 ## 2. State machines (table-driven tests mandatory)
 
-**Call FSM** (aggregate): `CREATED → RUNNING → ENDING → ENDED`.
+**Call FSM** (aggregate): `CREATED → RUNNING → ENDED`. There is no `ENDING`: a call ends when its last party releases, which is one event, so there was never a moment to be in it — the state was declared, never assigned and never read, and removed 2026-08-24 (**C4**).
 
 **CallType** (Genesys lineage; Go `CallType`, values `INBOUND | OUTBOUND | CONSULT | INTERNAL`): stamped at call creation, **immutable across transfers** — the caller-perspective in/out distinction survives every handoff (an AI outbound callback transferred to an agent still reads OUTBOUND on the agent's screen). Assignment: `INBOUND` — call arrives from a trunk/DID (public context); `OUTBOUND` — we originate to an external number (F4 AI outbound, F5 click-to-dial); `INTERNAL` — both parties are our extensions (e.g. `Local_Extension` dialing); `CONSULT` — a secondary leg created on behalf of an active call (reserved in the contract for the consult-transfer roadmap; MVP emits only the first three). Present on every call event envelope (04 §4).
 

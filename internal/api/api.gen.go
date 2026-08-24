@@ -95,7 +95,6 @@ func (e CDRStatus) Valid() bool {
 const (
 	CallStateCREATED CallState = "CREATED"
 	CallStateENDED   CallState = "ENDED"
-	CallStateENDING  CallState = "ENDING"
 	CallStateRUNNING CallState = "RUNNING"
 )
 
@@ -105,8 +104,6 @@ func (e CallState) Valid() bool {
 	case CallStateCREATED:
 		return true
 	case CallStateENDED:
-		return true
-	case CallStateENDING:
 		return true
 	case CallStateRUNNING:
 		return true
@@ -869,7 +866,7 @@ type CallTranscript struct {
 	Items        []TranscriptLine `json:"items"`
 	NextSinceSeq int64            `json:"nextSinceSeq"`
 
-	// State Health of live transcription for a call, as the agent should see it.
+	// State Health of live transcription for a call, as the agent should see it. ENDED is the snapshot's answer for a call that is over: it is produced by GET /calls/{callId}/transcript rather than by the transcription actor, which is why the actor's own mirror of these values does not name it.
 	State TranscriptionState `json:"state"`
 }
 
@@ -1186,6 +1183,9 @@ type PartySnapshot struct {
 	ChannelID  string              `json:"channelId"`
 	CreatedAt  time.Time           `json:"createdAt"`
 
+	// IsBotLeg True for the leg the switch dialled towards the AI gateway. A caller talking to the bot is on a call with two legs and only one person, and nothing else in this object distinguishes that leg from an agent it has no agentId for.
+	IsBotLeg *bool `json:"isBotLeg,omitempty"`
+
 	// IsMuted True while the switch is silencing this leg's microphone.
 	IsMuted     *bool              `json:"isMuted,omitempty"`
 	Number      *string            `json:"number,omitempty"`
@@ -1496,7 +1496,7 @@ type TranscriptLine struct {
 // TranscriptSource Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.
 type TranscriptSource string
 
-// TranscriptionState Health of live transcription for a call, as the agent should see it.
+// TranscriptionState Health of live transcription for a call, as the agent should see it. ENDED is the snapshot's answer for a call that is over: it is produced by GET /calls/{callId}/transcript rather than by the transcription actor, which is why the actor's own mirror of these values does not name it.
 type TranscriptionState string
 
 // TransferRequest defines model for TransferRequest.

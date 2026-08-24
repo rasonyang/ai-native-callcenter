@@ -4001,7 +4001,6 @@
         "enum": [
           "CREATED",
           "RUNNING",
-          "ENDING",
           "ENDED"
         ]
       },
@@ -4048,6 +4047,10 @@
           "agentId": {
             "type": "string",
             "format": "uuid"
+          },
+          "isBotLeg": {
+            "type": "boolean",
+            "description": "True for the leg the switch dialled towards the AI gateway. A caller talking to the bot is on a call with two legs and only one person, and nothing else in this object distinguishes that leg from an agent it has no agentId for."
           },
           "isMuted": {
             "type": "boolean",
@@ -5974,7 +5977,7 @@
       },
       "TranscriptionState": {
         "type": "string",
-        "description": "Health of live transcription for a call, as the agent should see it.",
+        "description": "Health of live transcription for a call, as the agent should see it. ENDED is the snapshot's answer for a call that is over: it is produced by GET /calls/{callId}/transcript rather than by the transcription actor, which is why the actor's own mirror of these values does not name it.",
         "enum": [
           "IDLE",
           "CONNECTING",

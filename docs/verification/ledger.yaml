@@ -48,7 +48,8 @@
 #     (telephony party/call、agents presence、transcript actor、flow 阶段机、aicall 回合机)每条边都在 fsm-edges.md
 # [x] fsm-edges.md 中 UNCOVERED 的边:DIALING→RELEASED→VC-S1-03;HELD→RELEASED→VC-S7-03;
 #     非法迁移拒绝→VC-S4-02 日志断言;TALKING→ANSWER 自环→VC-S4-02 日志断言;
-#     RingNoAnswer / ENDING / 转写 ENDED→已明确标注为死代码
+#     RingNoAnswer / ENDING→死代码(ENDING 已于 2026-08-24 C4 删除);
+#     转写 ENDED **不是死代码** —— 2026-08-20 VC-S9-02 当场查明它是 REST 收官合成值,见 enums.md §18
 # [x] ledger.yaml 中每个 human step 后都紧跟可粘贴的 collect 命令
 # [x] 未修改任何源码 / schema / 配置文件(本轮仅新增 docs/verification/** 文件)
 
@@ -722,7 +723,8 @@ cases:
       - "grep '\"type\":\"CALL_TRANSCRIPTION_STATE\"' /tmp/vc-s9-sse.log | grep -oE '\"state\":\"[A-Z_]+\"' | uniq"
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); curl -s -b /tmp/vc-sup.jar \"http://127.0.0.1:8080/api/v1/calls/$CALL_ID/transcript\" | jq '{state: .state, n: (.items | length)}'"
     expect: |
-      状态序列恰为:CONNECTING → LIVE → STOPPED(不出现 ENDED——契约有值但系统从不发布,见 enums.md §18;
+      状态序列恰为:CONNECTING → LIVE → STOPPED(**流上**不出现 ENDED —— 它由 REST 快照对已结束呼叫合成,
+      不由 actor 发布,见 enums.md §18;2026-08-20 本例执行时当场查明,2026-08-24 C4 据此保留该枚举值;
       出现 DEGRADED/ERROR 即为该次运行的真实故障,单独归档)
       REST 快照:state 与最后一次事件一致(契约字段名 state,CallTranscript);items 数 = DB 中该 call 的行数
     failure_looks_like: |

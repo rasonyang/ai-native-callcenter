@@ -56,7 +56,7 @@
 |---|---|---|---|---|---|
 | CREATED | telephony/call.go:198(NewCall) | Snapshot→GET /calls | S1 | [FACT] | |
 | RUNNING | call.go:220-222(首腿加入) | 同上;web 呼叫视图 | S1, S4 | [FACT] | |
-| ENDING | NOT FOUND | 契约允许 | UNCOVERED | [FACT] | call.go:23 仅定义,无赋值;死值 |
+| ~~ENDING~~ | — | — | 已删除 | [FACT] | 2026-08-24 C4:定义、契约枚举、生成物一并删除。呼叫在最后一条腿释放时结束,是一个事件,从来没有一个时刻处在 ENDING |
 | ENDED | call.go:314(Finish) | registry.go:350 后续钩子 | S2, S4, S6 | [FACT] | |
 
 ## 7. PartyState(openapi.json:4003)/ PartyRole(openapi.json:3996)
@@ -165,7 +165,7 @@
 | DEGRADED | session.go:217(单侧 ASR 失败) | live-transcript.tsx:32 | S9 | [FACT] | 带 degradedSpeakers(actor.go:187) |
 | ERROR | session.go:57(ASR_START_FAILED/ASR_NEVER_STARTED);streamin.go:429(STREAM_NEVER_CONNECTED) | 同上 | S9 | [FACT] | |
 | STOPPED | session.go:232(流关闭) | 同上 | S9 | [FACT] | |
-| ENDED | NOT FOUND | 契约允许 | UNCOVERED | [FACT] | actor.go:110 仅定义;死值 |
+| ENDED | **httpapi/transcript_handlers.go:68** | live-transcript.tsx / lib/transcript.ts:103 | S9-02 | [FACT] | **2026-08-24 更正:不是死值。** actor 从不赋值,但它是**快照**对一通已结束呼叫的回答(REST 收官合成),前端据此渲染且有专测。VC-S9-02 的 status 早在 2026-08-20 就写下了这一点,而 C4 条目直到 2026-08-24 仍写着死值 |
 
 ## 19. ErrorCode(openapi.json:3537;常量 httpapi/errors.go:21-37)
 
@@ -253,7 +253,7 @@
 ## 缺口汇总
 
 ### 需删除(死值:契约/CHECK 允许、代码永不产生)
-- CallState=ENDING(call.go:23)
+- ~~CallState=ENDING(call.go:23)~~ —— 2026-08-24 C4 已删除
 - CallType=CONSULT(event.go:81)
 - CDRStatus=BUSY(ledgerstore.go:101)
 - LegKind=TRUNK(openapi:4829)

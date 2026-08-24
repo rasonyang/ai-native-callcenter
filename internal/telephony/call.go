@@ -20,8 +20,11 @@ type CallState string
 const (
 	CallCreated CallState = "CREATED"
 	CallRunning CallState = "RUNNING"
-	CallEnding  CallState = "ENDING"
 	CallEnded   CallState = "ENDED"
+	// No ENDING. A call ends when its last party releases, which is one
+	// event, so there was never a moment to be in it — the state was declared,
+	// never assigned and never read (C4). A name in an enum that nothing can
+	// produce is a promise to every client that it might.
 )
 
 // PartyState is the lifecycle of one call leg.
