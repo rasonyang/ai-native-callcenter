@@ -939,3 +939,56 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 		}
 	})
 }
+
+// Both halves of one defect: a call that never connected still has to say who
+// it was between. A rejected caller had dialled something and the row did not
+// say what (C31); an AI outbound nobody answered had been dialled to somebody
+// and the row did not say who (C53).
+func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
+	t.Run("a rejected caller's row says what they dialled", func(t *testing.T) {
+		// 95009 is served by nobody, so aicc_inbound rejects before a second
+		// leg exists. The only leg there is knows its own destination.
+		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CreatedAt: at(0), EndedAt: atPtr(0),
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "18688886669", OtherNumber: "95009",
+					ChannelID: "caller", ReleasedAt: atPtr(0),
+					ReleaseCause: "UNALLOCATED_NUMBER"},
+			},
+		})
+		if cdr.ToNumber != "95009" {
+			t.Errorf("toNumber = %q, want 95009 — "+
+				"a disconnected number rung all day and somebody scanning numbers "+
+				"look the same in a ledger that does not say which was dialled",
+				cdr.ToNumber)
+		}
+		if cdr.FromNumber != "18688886669" {
+			t.Errorf("fromNumber = %q, want the caller", cdr.FromNumber)
+		}
+	})
+
+	t.Run("an unanswered AI outbound row says who was called", func(t *testing.T) {
+		// The DID rides the customer's leg from creation, so the row takes the
+		// direction a platform-placed call has even though nothing answered.
+		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CreatedAt: at(0), EndedAt: atPtr(0),
+			Bot: BotShare{DID: "95002"},
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "18688886669", ChannelID: "customer",
+					ReleasedAt: atPtr(0), ReleaseCause: "NO_USER_RESPONSE"},
+			},
+		})
+		if cdr.ToNumber != "18688886669" {
+			t.Errorf("toNumber = %q, want the customer — an outbound campaign ringing "+
+				"out and one that never ran must not look the same", cdr.ToNumber)
+		}
+		if cdr.FromNumber != "95002" {
+			t.Errorf("fromNumber = %q, want the DID it went out from", cdr.FromNumber)
+		}
+		if cdr.Status != store.CDRStatusNoAnswer {
+			t.Errorf("status = %q, want NO_ANSWER", cdr.Status)
+		}
+	})
+}

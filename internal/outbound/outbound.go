@@ -324,8 +324,19 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 
 	customerLeg := uuid.New()
 	vars := map[string]string{
-		"aicc_call_id":                 callID.String(),
-		"aicc_language":                language,
+		"aicc_call_id":  callID.String(),
+		"aicc_language": language,
+		// The number this call goes out from, on the leg from the moment it
+		// exists rather than only on the bridge to the bot. A call nobody
+		// answers never reaches that bridge, so its row had neither the number
+		// dialled nor the number it was dialled from — the ledger could not
+		// tell an outbound campaign ringing out from one that never ran
+		// (C53). It is also what lets the row take the direction a platform
+		// -placed call has: from the DID, to the customer.
+		//
+		// Not enough to make this a bot leg: that asks whether the leg was
+		// dialled *at* the DID, and this one is dialled at the customer.
+		"aicc_did":                     did.Number,
 		"origination_caller_id_number": did.Number,
 	}
 	endpoint := fmt.Sprintf(s.cfg.EndpointFormat, req.To)

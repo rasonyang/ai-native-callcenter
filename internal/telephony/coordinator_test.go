@@ -1688,3 +1688,88 @@ func TestAnAgentIsNotToldTheyAreTalkingUntilSomebodyIsThere(t *testing.T) {
 		}
 	}
 }
+
+// The one leg with nobody to ask about its far end is the one that needed it
+// most: a call to a number this system does not serve is rejected before a
+// second leg exists, so the row said somebody had been turned away without
+// saying what they had dialled. Eleven such rows in the ledger, while the
+// switch logged "unknown number 95009 from …" as it rejected each one (C31).
+func TestARejectedCallersLegKnowsWhatTheyDialled(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	const channel = "rejected-caller"
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", channel, "inbound", map[string]string{
+		"Caller-Caller-ID-Number":   "18688886669",
+		"Caller-Destination-Number": "95009",
+		"Caller-Context":            "public",
+	}))
+
+	callID, ok := registry.CallForChannel(channel)
+	if !ok {
+		t.Fatal("the caller is bound to no call")
+	}
+	var number, other string
+	var agentID *uuid.UUID
+	if err := registry.Do(callID, func(call *Call) {
+		if p := call.PartyByChannel(channel); p != nil {
+			number, other, agentID = p.Number, p.OtherNumber, p.AgentID
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if agentID != nil {
+		t.Fatal("this leg belongs to an agent, so it tests the wrong thing")
+	}
+	if number != "18688886669" {
+		t.Errorf("number = %q, want the caller", number)
+	}
+	if other != "95009" {
+		t.Errorf("otherNumber = %q, want 95009 — without it a disconnected number "+
+			"rung all day and somebody scanning numbers are the same row", other)
+	}
+}
+
+// The DID now rides the customer's leg of an AI outbound from creation (C53).
+// It must not make that leg look like the bot's: isBotLeg asks whether the leg
+// was dialled *at* the DID, and this one is dialled at the customer.
+func TestTheCustomerLegOfAnAIOutboundIsNotMistakenForTheBots(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+
+	const customer, bot = "customer-leg", "bot-leg"
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", customer, "outbound", map[string]string{
+		"variable_aicc_did":         "95012",
+		"Caller-Destination-Number": "13912345678",
+	}))
+	c.Handle(t.Context(), raw("CHANNEL_CREATE", bot, "outbound", map[string]string{
+		"variable_aicc_did":            "95012",
+		"Caller-Destination-Number":    "95012",
+		"variable_aicc_parent_channel": customer,
+	}))
+
+	callID, ok := registry.CallForChannel(customer)
+	if !ok {
+		t.Fatal("the customer's leg is bound to no call")
+	}
+	var customerIsBot, botIsBot bool
+	if err := registry.Do(callID, func(call *Call) {
+		if p := call.PartyByChannel(customer); p != nil {
+			customerIsBot = p.IsBotLeg
+		}
+		if p := call.PartyByChannel(bot); p != nil {
+			botIsBot = p.IsBotLeg
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if customerIsBot {
+		t.Error("the customer's leg is marked as the bot's; the ledger would hand " +
+			"the row to the bot's writer for a call the bot never took")
+	}
+	if !botIsBot {
+		t.Error("the leg dialled at the DID is not marked as the bot's")
+	}
+}

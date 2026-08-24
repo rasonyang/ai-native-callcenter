@@ -455,9 +455,16 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			return
 		}
 		p := call.AddParty(ev.ChannelID, legNumber(ev), ev.OccurredAt)
+		// Every leg, not only an agent's. Which number a leg faces is a fact
+		// about the leg, and the one leg that had nobody to ask about it was
+		// the one that needed it most: a call to a number this system does not
+		// serve is rejected before any second leg exists, so the row recorded
+		// that somebody had been turned away without recording what they had
+		// dialled (C31). Eleven such rows, and the switch knew the whole time
+		// — aicc_inbound logs "unknown number 95009 from …" as it rejects.
+		p.OtherNumber = otherNumber(ev)
 		if isAgentLeg {
 			p.AgentID = &agentID
-			p.OtherNumber = otherNumber(ev)
 		}
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData

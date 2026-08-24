@@ -414,3 +414,29 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 		}
 	}
 }
+
+// A call nobody answers never reaches the bridge to the bot, and the DID was
+// only stamped there. So an AI outbound that rang out was written down with
+// neither the number dialled nor the number it was dialled from, and an
+// outbound campaign ringing out looked exactly like one that never ran (C53).
+func TestDialAIStampsTheDIDOnTheLegThatMayNeverBeAnswered(t *testing.T) {
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+
+	if _, err := s.DialAI(context.Background(),
+		AIDialRequest{To: "13912345678", DIDNumber: "95012"}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := sw.lastOriginate()
+	if got := first.vars["aicc_did"]; got != "95012" {
+		t.Errorf("aicc_did on the originate = %q, want 95012 — the row has nothing "+
+			"else to learn it from when nobody picks up", got)
+	}
+	// It must not make the customer's leg look like the bot's: that asks
+	// whether the leg was dialled *at* the DID, and this one is dialled at
+	// the customer.
+	if strings.Contains(first.endpoint, "/95012") {
+		t.Errorf("the originate went to the DID instead of the customer: %q", first.endpoint)
+	}
+}
