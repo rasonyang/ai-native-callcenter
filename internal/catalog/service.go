@@ -263,7 +263,7 @@ func (s *Service) ReconcileAgentTiers(ctx context.Context, agentID uuid.UUID) {
 func (s *Service) converge(ctx context.Context, name string,
 	desired map[string]QueueAgent, actual map[string]struct{}) reconcileResult {
 
-	var added, removed, failed, deferred int
+	var attemptedAdd, attemptedRemove, failed, deferred int
 	for queue, tier := range desired {
 		if _, ok := actual[queue]; ok {
 			continue
@@ -271,7 +271,7 @@ func (s *Service) converge(ctx context.Context, name string,
 		err := s.switchCtl.AddCallcenterTier(queue, name, tier.Level, tier.Position)
 		switch {
 		case err == nil:
-			added++
+			attemptedAdd++
 		case isDeferred(err):
 			// The switch does not know this agent yet, which is the ordinary
 			// state of anyone staffed while signed out. Their sign-in applies
@@ -292,7 +292,26 @@ func (s *Service) converge(ctx context.Context, name string,
 			failed++
 			continue
 		}
-		removed++
+		attemptedRemove++
+	}
+
+	// What the switch accepted is not what the switch did. `tier del` answers
+	// +OK for a tier that was never there — verbatim, from a live probe:
+	//
+	//     callcenter_config tier del does-not-exist agent-wei  → +OK
+	//     callcenter_config tier del support-en agent-nobody   → +OK
+	//
+	// so counting a nil error as a removal made `removed=` a claim nothing
+	// stood behind (C1). It said 1 for a tier that had not existed since the
+	// machine changed address, which is a report of work done where none was.
+	//
+	// So ask the switch again and count the difference. Only when something
+	// was attempted: the ordinary case is that nothing changed, and that case
+	// still costs one read of the switch's staffing, not two.
+	added, removed := attemptedAdd, attemptedRemove
+	verified := true
+	if attemptedAdd+attemptedRemove > 0 {
+		added, removed, verified = s.recount(ctx, name, actual, attemptedAdd, attemptedRemove)
 	}
 
 	// Logged every time, zeros included. "This agent staffs nothing" and "this
@@ -301,17 +320,51 @@ func (s *Service) converge(ctx context.Context, name string,
 	// the call that went nowhere.
 	attrs := []any{"agent", name, "desired", len(desired), "actual", len(actual),
 		"added", added, "removed", removed}
+	if !verified {
+		attrs = append(attrs, "isVerified", false)
+	}
 	if deferred > 0 {
 		attrs = append(attrs, "deferredUntilSignIn", deferred)
 	}
-	if added+removed+failed > 0 {
+	if attemptedAdd+attemptedRemove+failed > 0 {
 		// The switch had drifted from this system. That is the condition this
 		// exists to correct, so it is said at a level someone will see.
 		slog.WarnContext(ctx, "agent staffing reconciled", append(attrs, "failed", failed)...)
-		return reconcileResult{added, removed, failed, deferred}
+		return reconcileResult{added, removed, failed, deferred, verified}
 	}
 	slog.InfoContext(ctx, "agent staffing already matched", attrs...)
-	return reconcileResult{added, removed, failed, deferred}
+	return reconcileResult{added, removed, failed, deferred, verified}
+}
+
+// recount asks the switch what its staffing is now and reports how it actually
+// moved, so `added`/`removed` describe the world rather than the commands we
+// sent it.
+//
+// A failed re-read is reported as unverified rather than swallowed: falling
+// back to the attempted counts silently would put us back where we started,
+// with a number nothing stands behind. The counts are still the best available
+// answer, so they are returned — labelled.
+func (s *Service) recount(ctx context.Context, name string, before map[string]struct{},
+	attemptedAdd, attemptedRemove int) (added, removed int, verified bool) {
+
+	onSwitch, err := s.switchCtl.CallcenterTiers()
+	if err != nil {
+		slog.WarnContext(ctx, "could not verify what the switch did with the tiers",
+			"agent", name, "error", err)
+		return attemptedAdd, attemptedRemove, false
+	}
+	after := setOf(onSwitch[name])
+	for queue := range after {
+		if _, was := before[queue]; !was {
+			added++
+		}
+	}
+	for queue := range before {
+		if _, still := after[queue]; !still {
+			removed++
+		}
+	}
+	return added, removed, true
 }
 
 // reconcileResult is what one agent's convergence did.
@@ -319,8 +372,14 @@ func (s *Service) converge(ctx context.Context, name string,
 // Returned as well as logged because the difference between "deferred" and
 // "failed" is the whole point of telling them apart, and an outcome that exists
 // only in a log line is one no test can hold to account.
+//
+// added/removed are counted from the switch's own staffing before and after,
+// not from the commands it accepted — see recount. isVerified is false when
+// that second read failed, which is the one case the numbers are a claim
+// rather than an observation.
 type reconcileResult struct {
 	added, removed, failed, deferred int
+	isVerified                       bool
 }
 
 // isDeferred reports an error the switch will stop returning once the agent

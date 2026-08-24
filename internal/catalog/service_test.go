@@ -4,6 +4,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -317,4 +318,118 @@ func TestATierForAnAgentTheSwitchHasNotMetIsDeferredNotFailed(t *testing.T) {
 		t.Errorf("added %+v removed %+v; neither should have happened", base.added, base.removed)
 	}
 	_ = queueID
+}
+
+// honestSwitch actually does what it is told, so its tier list changes. The
+// bare fakeSwitch does not, which is not laziness — it is mod_callcenter,
+// which answers +OK to `tier del` for a tier that was never there.
+type honestSwitch struct{ *fakeSwitch }
+
+func (h honestSwitch) AddCallcenterTier(queue, agent string, level, position int) error {
+	if err := h.fakeSwitch.AddCallcenterTier(queue, agent, level, position); err != nil {
+		return err
+	}
+	h.onSwitch[agent] = append(h.onSwitch[agent], queue)
+	return nil
+}
+
+func (h honestSwitch) DeleteCallcenterTier(queue, agent string) error {
+	if err := h.fakeSwitch.DeleteCallcenterTier(queue, agent); err != nil {
+		return err
+	}
+	kept := h.onSwitch[agent][:0]
+	for _, q := range h.onSwitch[agent] {
+		if q != queue {
+			kept = append(kept, q)
+		}
+	}
+	h.onSwitch[agent] = kept
+	return nil
+}
+
+// The half of C1 the queue-name fix did not reach. Live probe, verbatim:
+//
+//	callcenter_config tier del does-not-exist agent-wei  → +OK
+//	callcenter_config tier del support-en agent-nobody   → +OK
+//
+// The switch says +OK for a tier that was never there, and converge counted a
+// nil error as a removal. So `removed=` reported work that had not happened —
+// it said 1 for a tier that had not existed since this machine changed
+// address. VC-S3-02 cannot see this: it asserts that both sides agree
+// afterwards, and a false report of how they came to agree does not disturb
+// that. Only counting the switch's own before and after catches it.
+func TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted(t *testing.T) {
+	t.Run("a removal the switch only said +OK to is not counted", func(t *testing.T) {
+		sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
+			// The switch's staffing does not change when told to delete, which
+			// is what a tier that was never really there looks like.
+			"agent-wei": {"support-en"},
+		}}
+		svc := NewService(&fakeStore{}, sw, fakeNames{})
+
+		got := svc.converge(context.Background(), "agent-wei",
+			map[string]QueueAgent{}, map[string]struct{}{"support-en": {}})
+
+		if len(sw.removed) != 1 {
+			t.Fatalf("the delete was not attempted at all: %+v", sw.removed)
+		}
+		if got.removed != 0 {
+			t.Errorf("removed = %d, want 0 — the switch answered +OK and removed nothing, "+
+				"and reporting work that did not happen is the whole defect", got.removed)
+		}
+		if !got.isVerified {
+			t.Error("isVerified = false, but the switch answered the second read")
+		}
+	})
+
+	t.Run("a removal that happened is counted", func(t *testing.T) {
+		base := &fakeSwitch{isUp: true, onSwitch: map[string][]string{"agent-wei": {"support-en"}}}
+		svc := NewService(&fakeStore{}, honestSwitch{base}, fakeNames{})
+
+		got := svc.converge(context.Background(), "agent-wei",
+			map[string]QueueAgent{}, map[string]struct{}{"support-en": {}})
+
+		if got.removed != 1 {
+			t.Errorf("removed = %d, want 1 — the tier is gone from the switch's own list; "+
+				"refusing to count a real removal would be the opposite lie", got.removed)
+		}
+	})
+
+	t.Run("an addition that happened is counted", func(t *testing.T) {
+		base := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
+		svc := NewService(&fakeStore{}, honestSwitch{base}, fakeNames{})
+
+		got := svc.converge(context.Background(), "agent-wei",
+			map[string]QueueAgent{"support-en": {Level: 1, Position: 1}}, map[string]struct{}{})
+
+		if got.added != 1 {
+			t.Errorf("added = %d, want 1", got.added)
+		}
+	})
+
+	t.Run("a second read that fails is reported as unverified", func(t *testing.T) {
+		sw := &blindSwitch{fakeSwitch: &fakeSwitch{isUp: true,
+			onSwitch: map[string][]string{"agent-wei": {"support-en"}}}}
+		svc := NewService(&fakeStore{}, sw, fakeNames{})
+
+		got := svc.converge(context.Background(), "agent-wei",
+			map[string]QueueAgent{}, map[string]struct{}{"support-en": {}})
+
+		if got.isVerified {
+			t.Error("isVerified = true although the switch could not be re-read")
+		}
+		// The attempted count is still the best answer available; what must not
+		// happen is it passing for an observation.
+		if got.removed != 1 {
+			t.Errorf("removed = %d, want the attempted 1 — unverified, not discarded", got.removed)
+		}
+	})
+}
+
+// blindSwitch takes commands but cannot be asked what it holds, which is the
+// one case the counts are a claim rather than an observation.
+type blindSwitch struct{ *fakeSwitch }
+
+func (blindSwitch) CallcenterTiers() (map[string][]string, error) {
+	return nil, errors.New("no reply")
 }
