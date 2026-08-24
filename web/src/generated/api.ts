@@ -1113,6 +1113,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calls/{callId}/queue-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A call's journey through the queues
+         * @description Every movement the switch reported for this caller, oldest first: the queues joined, each agent offered the call, and how it left. The CDR answers how the call ended; this answers how routing behaved on the way there — a call offered thirty-three times and one offered once are the same abandoned row in the CDR.
+         *
+         *     Supervision, not an agent's own view: these rows name colleagues who were offered the call and did not take it.
+         */
+        get: operations["listCallQueueEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2016,6 +2038,32 @@ export interface components {
             nextSinceSeq: number;
             isLive: boolean;
             state: components["schemas"]["TranscriptionState"];
+        };
+        /**
+         * @description What happened to a caller in a queue. OFFERED repeats: one call can be offered to several agents, or to the same agent several times, before it is bridged or abandoned.
+         * @enum {string}
+         */
+        QueueEventName: "JOINED" | "LEFT" | "OFFERED" | "BRIDGED" | "ABANDONED";
+        /** @description One movement of a caller through a queue. */
+        QueueEvent: {
+            /** Format: date-time */
+            occurredAt: string;
+            /** Format: uuid */
+            queueId: string;
+            event: components["schemas"]["QueueEventName"];
+            /**
+             * Format: uuid
+             * @description The agent this movement concerns: who was offered the call, or who it was bridged to. Absent for movements that concern no one in particular.
+             */
+            agentId?: string;
+            /**
+             * Format: int32
+             * @description How long the caller had been waiting when this happened. Zero where the movement does not measure a wait.
+             */
+            waitMs: number;
+        };
+        QueueEventList: {
+            items: components["schemas"]["QueueEvent"][];
         };
     };
     responses: {
@@ -3926,6 +3974,32 @@ export interface operations {
                     "text/event-stream": components["schemas"]["SseEvent"];
                 };
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listCallQueueEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                callId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The call's queue movements, oldest first, possibly empty — a call that never entered a queue has none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QueueEventList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];

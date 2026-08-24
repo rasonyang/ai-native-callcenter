@@ -3427,6 +3427,51 @@
           }
         }
       }
+    },
+    "/calls/{callId}/queue-events": {
+      "get": {
+        "operationId": "listCallQueueEvents",
+        "tags": [
+          "calls"
+        ],
+        "summary": "A call's journey through the queues",
+        "description": "Every movement the switch reported for this caller, oldest first: the queues joined, each agent offered the call, and how it left. The CDR answers how the call ended; this answers how routing behaved on the way there — a call offered thirty-three times and one offered once are the same abandoned row in the CDR.\n\nSupervision, not an agent's own view: these rows name colleagues who were offered the call and did not take it.",
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The call's queue movements, oldest first, possibly empty — a call that never entered a queue has none.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueEventList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -6086,6 +6131,64 @@
           "nextSinceSeq",
           "isLive",
           "state"
+        ]
+      },
+      "QueueEventName": {
+        "type": "string",
+        "description": "What happened to a caller in a queue. OFFERED repeats: one call can be offered to several agents, or to the same agent several times, before it is bridged or abandoned.",
+        "enum": [
+          "JOINED",
+          "LEFT",
+          "OFFERED",
+          "BRIDGED",
+          "ABANDONED"
+        ]
+      },
+      "QueueEvent": {
+        "type": "object",
+        "description": "One movement of a caller through a queue.",
+        "properties": {
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "event": {
+            "$ref": "#/components/schemas/QueueEventName"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The agent this movement concerns: who was offered the call, or who it was bridged to. Absent for movements that concern no one in particular."
+          },
+          "waitMs": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How long the caller had been waiting when this happened. Zero where the movement does not measure a wait."
+          }
+        },
+        "required": [
+          "occurredAt",
+          "queueId",
+          "event",
+          "waitMs"
+        ]
+      },
+      "QueueEventList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/QueueEvent"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       }
     }

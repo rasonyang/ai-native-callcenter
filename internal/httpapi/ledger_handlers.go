@@ -295,3 +295,44 @@ func stringOr[T ~string](value *T) string {
 	}
 	return string(*value)
 }
+
+// ListCallQueueEvents answers how routing behaved on one call.
+//
+// The CDR says how a call ended. It cannot say how it got there: it holds one
+// queue id where a caller may have crossed several, and one missed reason
+// where the caller may have been offered to a dozen agents in turn. Those
+// movements have been written since the beginning and read by nothing (C7),
+// so the questions they answer had no answer — and one of them is open.
+// Seven calls in this database were offered between ten and thirty-three
+// times; the worst reads ABANDONED_WAITING, 220 seconds, one agent id.
+//
+// Supervision rather than an agent's own view, and deliberately so: these
+// rows name the colleagues a call was offered to and who did not take it,
+// which is exactly the kind of thing an agent's own stream is kept clear of.
+func (s *Server) ListCallQueueEvents(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	if s.ledger == nil {
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the queue events", nil)
+		return
+	}
+	rows, err := s.ledger.QueueEventsByCall(r.Context(), callID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot read a call's queue events",
+			"callId", callID, "error", err)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the queue events", nil)
+		return
+	}
+
+	// Empty is an answer, not an absence: a call that never entered a queue
+	// has no journey, and saying so is different from failing to look.
+	items := make([]api.QueueEvent, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, api.QueueEvent{
+			OccurredAt: row.OccurredAt,
+			QueueID:    row.QueueID,
+			Event:      api.QueueEventName(row.Event),
+			AgentID:    row.AgentID,
+			WaitMs:     int32(row.WaitMs),
+		})
+	}
+	writeJSON(w, http.StatusOK, api.QueueEventList{Items: items})
+}

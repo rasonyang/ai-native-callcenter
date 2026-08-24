@@ -937,6 +937,50 @@ func (q *Queries) OpenWrapUp(ctx context.Context, arg OpenWrapUpParams) error {
 	return err
 }
 
+const queueEventsByCall = `-- name: QueueEventsByCall :many
+SELECT occurred_at, queue_id, event, agent_id, wait_ms
+FROM queue_events
+WHERE call_id = $1
+ORDER BY occurred_at, id
+`
+
+type QueueEventsByCallRow struct {
+	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
+	QueueID    uuid.UUID          `json:"queueId"`
+	Event      string             `json:"event"`
+	AgentID    *uuid.UUID         `json:"agentId"`
+	WaitMs     int32              `json:"waitMs"`
+}
+
+// One call's journey through the queues, oldest first. (occurred_at, id)
+// because two movements of one call can share a millisecond and a journey that
+// reorders between two reads is not a journey.
+func (q *Queries) QueueEventsByCall(ctx context.Context, callID *uuid.UUID) ([]QueueEventsByCallRow, error) {
+	rows, err := q.db.Query(ctx, queueEventsByCall, callID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueueEventsByCallRow{}
+	for rows.Next() {
+		var i QueueEventsByCallRow
+		if err := rows.Scan(
+			&i.OccurredAt,
+			&i.QueueID,
+			&i.Event,
+			&i.AgentID,
+			&i.WaitMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const reportAgentToday = `-- name: ReportAgentToday :one
 WITH bounds AS (
     SELECT $1::timestamptz AS from_at, $2::timestamptz AS to_at

@@ -412,6 +412,33 @@ func (e PartyState) Valid() bool {
 	}
 }
 
+// Defines values for QueueEventName.
+const (
+	QueueEventNameABANDONED QueueEventName = "ABANDONED"
+	QueueEventNameBRIDGED   QueueEventName = "BRIDGED"
+	QueueEventNameJOINED    QueueEventName = "JOINED"
+	QueueEventNameLEFT      QueueEventName = "LEFT"
+	QueueEventNameOFFERED   QueueEventName = "OFFERED"
+)
+
+// Valid indicates whether the value is a known member of the QueueEventName enum.
+func (e QueueEventName) Valid() bool {
+	switch e {
+	case QueueEventNameABANDONED:
+		return true
+	case QueueEventNameBRIDGED:
+		return true
+	case QueueEventNameJOINED:
+		return true
+	case QueueEventNameLEFT:
+		return true
+	case QueueEventNameOFFERED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	RoleADMIN      Role = "ADMIN"
@@ -1283,6 +1310,28 @@ type QueueAgentList struct {
 	Items []QueueAgent `json:"items"`
 }
 
+// QueueEvent One movement of a caller through a queue.
+type QueueEvent struct {
+	// AgentID The agent this movement concerns: who was offered the call, or who it was bridged to. Absent for movements that concern no one in particular.
+	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
+
+	// Event What happened to a caller in a queue. OFFERED repeats: one call can be offered to several agents, or to the same agent several times, before it is bridged or abandoned.
+	Event      QueueEventName     `json:"event"`
+	OccurredAt time.Time          `json:"occurredAt"`
+	QueueID    openapi_types.UUID `json:"queueId"`
+
+	// WaitMs How long the caller had been waiting when this happened. Zero where the movement does not measure a wait.
+	WaitMs int32 `json:"waitMs"`
+}
+
+// QueueEventList defines model for QueueEventList.
+type QueueEventList struct {
+	Items []QueueEvent `json:"items"`
+}
+
+// QueueEventName What happened to a caller in a queue. OFFERED repeats: one call can be offered to several agents, or to the same agent several times, before it is bridged or abandoned.
+type QueueEventName string
+
 // QueueFacts A call's passage through a queue.
 type QueueFacts struct {
 	AgentID      *openapi_types.UUID `json:"agentId,omitempty"`
@@ -1840,6 +1889,9 @@ type ServerInterface interface {
 	// MuteCall Mute the agent's own microphone
 	// (POST /calls/{callId}/mute)
 	MuteCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// ListCallQueueEvents A call's journey through the queues
+	// (GET /calls/{callId}/queue-events)
+	ListCallQueueEvents(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
 	// ListCallRecordings A call's audio artifacts
 	// (GET /calls/{callId}/recordings)
 	ListCallRecordings(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
@@ -2125,6 +2177,12 @@ func (_ Unimplemented) HoldCall(w http.ResponseWriter, r *http.Request, callID o
 // MuteCall Mute the agent's own microphone
 // (POST /calls/{callId}/mute)
 func (_ Unimplemented) MuteCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCallQueueEvents A call's journey through the queues
+// (GET /calls/{callId}/queue-events)
+func (_ Unimplemented) ListCallQueueEvents(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2913,6 +2971,32 @@ func (siw *ServerInterfaceWrapper) MuteCall(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.MuteCall(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCallQueueEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListCallQueueEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callId" -------------
+	var callID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callId", chi.URLParam(r, "callId"), &callID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCallQueueEvents(w, r, callID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4387,6 +4471,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/mute", wrapper.MuteCall)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/calls/{callId}/queue-events", wrapper.ListCallQueueEvents)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/calls/{callId}/recordings", wrapper.ListCallRecordings)

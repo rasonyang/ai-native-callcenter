@@ -256,6 +256,7 @@ func (s *Server) router() chi.Router {
 						sup.Get("/cdrs", op.ListCDRs)
 						sup.Get("/cdrs/{callId}", op.GetCDR)
 						sup.Get("/calls/{callId}/reviews", op.ListCallReviews)
+						sup.Get("/calls/{callId}/queue-events", op.ListCallQueueEvents)
 						sup.Post("/recordings/{recordingId}/reviews", op.CreateRecordingReview)
 						sup.Get("/reports/overview", op.GetReportOverview)
 						sup.Get("/reports/queues", op.GetReportQueues)

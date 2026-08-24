@@ -1065,3 +1065,35 @@ func marshalOr(v any, empty string) ([]byte, error) {
 	}
 	return encoded, nil
 }
+
+// QueueEvent is one movement of a caller through a queue.
+//
+// The CDR says how a call ended; these say how routing behaved on the way
+// there. A call offered once and a call offered thirty-three times are the
+// same abandoned row in the CDR.
+type QueueEvent struct {
+	OccurredAt time.Time
+	QueueID    uuid.UUID
+	Event      string
+	AgentID    *uuid.UUID
+	WaitMs     int
+}
+
+// QueueEventsByCall reads one call's journey through the queues, oldest first.
+func (l *LedgerStore) QueueEventsByCall(ctx context.Context, callID uuid.UUID) ([]QueueEvent, error) {
+	rows, err := l.q.QueueEventsByCall(ctx, &callID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]QueueEvent, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, QueueEvent{
+			OccurredAt: row.OccurredAt.Time,
+			QueueID:    row.QueueID,
+			Event:      row.Event,
+			AgentID:    row.AgentID,
+			WaitMs:     int(row.WaitMs),
+		})
+	}
+	return out, nil
+}

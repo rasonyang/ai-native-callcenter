@@ -298,3 +298,12 @@ SELECT handled.calls_handled, handled.talk_sec,
        presence.wrap_up_sec, presence.wrap_ups, presence.signed_in_sec,
        filings.wrap_ups_opened, filings.wrap_ups_confirmed
 FROM handled, presence, filings;
+
+-- name: QueueEventsByCall :many
+-- One call's journey through the queues, oldest first. (occurred_at, id)
+-- because two movements of one call can share a millisecond and a journey that
+-- reorders between two reads is not a journey.
+SELECT occurred_at, queue_id, event, agent_id, wait_ms
+FROM queue_events
+WHERE call_id = $1
+ORDER BY occurred_at, id;
