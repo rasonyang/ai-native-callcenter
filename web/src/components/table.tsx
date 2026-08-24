@@ -48,8 +48,24 @@ export function TBody({ children }: { children: ReactNode }) {
   return <tbody>{children}</tbody>
 }
 
-export function Tr({ children, className }: { children: ReactNode; className?: string }) {
-  return <tr className={cn('h-9 border-b last:border-0 hover:bg-muted', className)}>{children}</tr>
+export function Tr({
+  children,
+  className,
+  onClick,
+}: {
+  children: ReactNode
+  className?: string
+  /** Set only where the whole row is the link to a detail page. */
+  onClick?: () => void
+}) {
+  return (
+    <tr
+      onClick={onClick}
+      className={cn('h-9 border-b last:border-0 hover:bg-muted', className)}
+    >
+      {children}
+    </tr>
+  )
 }
 
 export function Td({

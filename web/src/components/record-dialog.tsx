@@ -18,6 +18,7 @@ export function RecordDialog({
   title,
   error,
   isSaving,
+  submitLabel,
   onSubmit,
   children,
 }: {
@@ -26,6 +27,8 @@ export function RecordDialog({
   title: string
   error?: ReactNode
   isSaving?: boolean
+  /** Names the act where "Save" would understate it, as Publish does. */
+  submitLabel?: string
   onSubmit: () => void
   children: ReactNode
 }) {
@@ -56,7 +59,7 @@ export function RecordDialog({
                 </Button>
               </Dialog.Close>
               <Button type="submit" size="sm" disabled={isSaving}>
-                {t('common.save')}
+                {submitLabel ?? t('common.save')}
               </Button>
             </div>
           </form>

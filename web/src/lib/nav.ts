@@ -62,7 +62,7 @@ export const NAV: NavGroup[] = [
       { to: '/admin/extensions', labelKey: 'nav.extensions', icon: PhoneCall, minRole: 'ADMIN', isReady: true },
       { to: '/admin/routing', labelKey: 'nav.routing', icon: ListChecks, minRole: 'ADMIN', isReady: true },
       { to: '/admin/numbers', labelKey: 'nav.numbers', icon: ScrollText, minRole: 'ADMIN', isReady: true },
-      { to: '/admin/bots', labelKey: 'nav.bots', icon: Bot, minRole: 'ADMIN', isReady: false },
+      { to: '/admin/bots', labelKey: 'nav.bots', icon: Bot, minRole: 'ADMIN', isReady: true },
     ],
   },
   {

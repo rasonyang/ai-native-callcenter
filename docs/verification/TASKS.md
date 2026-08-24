@@ -4,7 +4,7 @@
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
-> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 已完成(2026-08-24)**;W3 / W7 / W8 / W10 未开工;**W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
+> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;W7 / W8 / W10 未开工;**W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
@@ -84,7 +84,7 @@
 | C3 | 号码(DID)管理 | _app.admin.numbers;PUT(全量);luacc.dids→lua:44 | VC-S8-01、S4-04 | **G-C3**(F8 已闭:视图 `WHERE d.is_enabled` 过滤):剩"建号→放号→拨通→停用→拒接" → 已起草 **VC-S14-03**(已并入) |
 | C4 | 路由(队列)管理 | _app.admin.routing;saveQueue(lib/catalog.ts:51) | VC-S3-04 | ~~G-C4~~ **已闭**(F7:表单发全量) |
 | C5 | 队列配员 | staffQueue/unstaffQueue;PUT /queues/{id}/agents | VC-S3-02(FAIL) | G-C5:配员→tier 生效→撤销 UI 全链无 case → 已起草 **VC-S14-02**(已并入) |
-| C6 | 流程(flow)管理 | 现 CLI-only(flowadd) | — | **已决 D3:要做** → **W3**(`/admin/bots`,参考 ui-test) |
+| C6 | 流程(flow)管理 | ~~现 CLI-only(flowadd)~~ → `/admin/bots` + `/flows` 五个操作 | — | **已闭(2026-08-24,W3)**;`flowadd` 保留为自动化入口 |
 | C7 | 处置词管理 | dispositions 无 CRUD | VC-S4-03(读侧) | **已决 D4:固定词表** → W5(记录);S4-03 断言转正式 |
 | C8 | 报表 | _app.admin.reports(guard=SUPERVISOR) | — | 并入 G-B1 |
 | C9 | 审计日志 | audit_logs 只写不读(httpapi/audit.go:33) | — | **已决 D5:要做** → **W4**(`/admin/audit`,参考 ui-test) |
@@ -314,12 +314,30 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     这正是 mod_callcenter 把它放在坐席上的原因。所以"下发"这条路走不通,
     剩下的是**从契约里删**(改契约 + 迁移,spec-first),或者重新定义它的含义。
     本轮**没有动它**,它仍是死配置。
-- **W3 flows 管理面**(D3):**路由 `/admin/bots`**;交互参考 ui-test(admin/bots/index.tsx 列表 +
-  $flowId.tsx 详情:spec JSON 查看器、节点可达性分析、transitions 摘要、publish 对话框);
-  设计规范 web/CLAUDE.md。**范围含 UI 上传/编辑 spec**(§补充 S1)。顺序:openapi 契约
-  (GET /flows、GET /flows/{id} 含 revisions、POST /flows 新建、PUT /flows/{id} 草稿编辑、
-  POST /flows/{id}/publish;装载期校验 internal/flow/load.go 即编辑时校验)→ make api-generate →
-  handlers(flows/flow_revisions 已有 store 层,sql/flows.sql)→ UI。CLI flowadd 保留。ADMIN guard。
+- ~~**W3 flows 管理面**(D3)~~ **【已完成 2026-08-24】** `/admin/bots` 与五个 ADMIN 操作
+  (`GET /flows`、`POST /flows`、`GET /flows/{flowId}` 含草稿与修订、`PUT /flows/{flowId}`、
+  `POST /flows/{flowId}/publish`)。契约 → generate → store → handlers → UI,
+  `api-lint`/`api-check`/`api-breaking` 全绿,CLI `flowadd` 保留为自动化入口。
+  **spec 在契约里是不透明文档**(`type: object`)。方言归 `internal/flow` 的装载器 ——
+  那是**活着的通话解析已发布修订时跑的同一段代码**;在 openapi.json 里再写一遍这个形状,
+  就是第二份定义,而它随时可以和真正在跑的那份漂移。所以契约只管"这里有个文档",
+  校验归装载器,**被拒时回 422 并带上它找到的全部问题**(`params.problems`)——
+  作者改一份 spec 该一次看完整份报告,而不是存一次发现一条。为此给 `flow.Load` 加了
+  `ValidationError`(问题列表 + 原样的拼接消息,启动日志要的还是后者)。
+  **`hasUnpublishedChanges` 交给 PostgreSQL 判定**:jsonb 相等是语义的,重排键、重新缩进
+  都不是改动,`IS DISTINCT FROM` 又让"从未发布"成为它本来就是的那个真值;在 Go 里比字节两头都错。
+  真库测试抓到了另一半 —— 写成普通 `<>`,未发布的流程那一列是 NULL,扫进 `bool` 直接失败
+  (与 W4 的 NULL 扫描是同一类,fake 复现不了)。**前端同一个坑**:草稿保存回来的是服务端的键序,
+  按文本比较会让每个刚存过的流程永远显示"未保存",而 Publish 要求草稿干净 —— 它就永远按不下去。
+  **顺带修好 `flowadd` 的更新分支绕过校验**:slug 撞车时它直连生成的 query 写草稿,
+  一份坏文件能覆盖掉正在用的流程,直到 Publish 才报错;现在两条路都走会校验的
+  `FlowStore.UpdateDraft`。
+  **可达性分析放在前端**:装载器不拒绝孤立阶段,这是对的——通话只是永远走不到那里,
+  运行时不坏;但它几乎总是一次改了一半的重命名,所以由这一屏提示,**不在服务端规则旁边
+  再发明一条**。参考 UI 的 `validateFlow` 把装载器的规则用 TS 又写了一遍,没有照抄:
+  那正是会漂移的第二份定义。
+  **故意不做**:没有 DELETE(号码的外键本来就挡着,而这一屏不是用来删流程的);
+  **旧修订的快照不回吐** —— 把它读回来就是回滚,那是另一个决定。
 - ~~**W4 audit_logs 检索**(D5)~~ **【已完成 2026-08-24 `f0328b6` + `6158eaa`】**
   `GET /audit-logs`(ADMIN,最新在前,`actorId`/`actionPrefix`/`from`/`to` + limit-offset)
   与 `/admin/audit` 页面。契约 → generate → handler → UI,`api-lint`/`api-check`/`api-breaking` 全绿。

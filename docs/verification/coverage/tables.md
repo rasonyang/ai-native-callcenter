@@ -16,8 +16,8 @@
 | queue_agents(00002:104) | sql/telephony.sql:58-61(upsert),:64(删) | sql/telephony.sql:69(ListQueueAgents);catalog/service.go:346(desiredTiers) | StaffQueue catalog_handlers.go:108;Unstaff :126;ListQueueAgents :103 | _app.supervisor.queues.tsx | S3, S11 | [FACT] | 与 mod_callcenter tier 双向收敛(catalog/service.go:236-315)——S3 对账的 DB 侧 |
 | dids(00002:121;00003/00008 改 flow 约束) | sql/telephony.sql:83,:95,:102;seed.go(demoNumbers 95001/95002) | sql/telephony.sql:89,:92;luacc.dids(00002:171-180)→ aicc_inbound.lua:44;orchestrator findDID(aicall/orchestrator.go:427-438) | ListDIDs catalog_handlers.go:134;Create :139;Update :148;Delete :158 | _app.admin.numbers.tsx | S1, S8 | [FACT] | flow_id ON DELETE RESTRICT(00008:17-20) |
 | trunks(00002:137) | NOT FOUND | NOT FOUND | NOT FOUND | NOT FOUND | UNCOVERED | [FACT] | 建表后零引用(仅迁移命中);direction 枚举 3 值全死;2026-08-20 决议:需要(中继号管理)→ TASKS W8 |
-| flows(00004:7) | sql/flows.sql:10,:15,:26(publish);cmd/aicc/flowadd.go(唯一入口) | sql/flows.sql:4,:7,:37 | NOT FOUND(openapi paths 无 /flows) | NOT FOUND | S1 | [FACT] | 流程管理现仅 CLI;2026-08-20 决议 D3:要做(含 UI 上传/编辑 spec)→ TASKS W3(/admin/bots) |
-| flow_revisions(00004:19) | sql/flows.sql:21(publish 时插入) | sql/flows.sql:32(PublishedSpec join)→ aicall/orchestrator.go:226 | NOT FOUND | NOT FOUND | S1 | [FACT] | 仅发布修订可被呼叫使用 |
+| flows(00004:7) | sql/flows.sql:10,:15,:26(publish);cmd/aicc/flowadd.go 与 **httpapi CreateFlow/UpdateFlowDraft/PublishFlow** | sql/flows.sql:4,:7,:37,**ListFlowSummaries/GetFlowSummary/GetFlowDraft** ← **httpapi ListFlows/GetFlow(`GET /flows`、`GET /flows/{flowId}`,ADMIN)** | **`/admin/bots`** | NOT FOUND | S1 | [FACT] | **2026-08-24 W3 已闭**:契约先行的五个操作 + 图形化草稿编辑面;spec 在契约里是不透明文档,方言归 `internal/flow` 的装载器,被拒时回 422 并带上全部问题。`hasUnpublishedChanges` 由 PostgreSQL 的 jsonb `IS DISTINCT FROM` 判定(键序与空白不是差异)。**同批修好 `flowadd` 更新分支绕过校验**的旧洞 |
+| flow_revisions(00004:19) | sql/flows.sql:21(publish 时插入) | sql/flows.sql:32(PublishedSpec join)→ aicall/orchestrator.go:226;**ListFlowRevisions ← `GET /flows/{flowId}`** | **`/admin/bots/$flowId` 的“发布历史”页签** | NOT FOUND | S1 | [FACT] | 仅发布修订可被呼叫使用。**读侧只给元数据(何时、备注、哪一条在跑),不回吐快照本身** —— 把旧修订读回来就是回滚,那是另一个决定,W3 没做 |
 | cdrs(00005:7) | sql/ledger.sql:4(InsertCDR ← telephony/cdr.go:81 与 aicall/ledger.go:184 与 seed/history);:104(MarkRecorded ← cdr.go:137) | sql/ledger.sql:21,:24,:37;报表 :133-:161;my-day :222;contacts last_call :26 | ListCDRs ledger_handlers.go:20;ListMyCDRs :51;GetCDR :122;Report* :252-:272 | _app.admin.cdr.index.tsx;_app.admin.cdr.$callId.tsx;_app.agent.calls.tsx;_app.admin.reports.tsx | S1, S2, S3, S4, S6 | [FACT] | 归属规则:有 bot 腿且未盖 bot-share 戳→bot 侧写(cdr.go:79);disposition 列自 00010 起无人写有效值(00010 注释:6) |
 | transcripts(00005:56;00009 加列/改 speaker) | sql/ledger.sql:51(InsertTranscriptLine ← transcript/actor.go:253) | sql/ledger.sql:57,:62(增量 after seq) | GetCallTranscript transcript_handlers.go:29 | components/live-transcript.tsx;_app.admin.cdr.$callId.tsx | S1, S9, S10 | [FACT] | seq 每呼叫独占分配(actor.go:226),partial 不入库 |
 | recordings(00005:67) | sql/ledger.sql:68(InsertRecording ← telephony/cdr.go:126-133) | sql/ledger.sql:73,:76 | ListCallRecordings recording_handlers.go:64;GetRecordingAudio :81 | components/recording-player.tsx;_app.admin.cdr.$callId.tsx;_app.agent.calls.tsx | S4(VC-S4-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:场景已挂 VC-S4-04;坐席回放/越权另由 TASKS T6.1 起草 |
@@ -42,8 +42,8 @@
 ### 需实现 →(2026-08-20 决议更新)
 - ~~queue_events **读路径**~~ —— **2026-08-24 C7 已闭合**:`GET /calls/{callId}/queue-events`(主管专属)。无人读期间表中已积下 273 行 OFFERED、七通被派单 10–33 次且每通只派给同一坐席,见 `artifacts/C7/verdict-2026-08-24.md`。
 - quality_reviews **UI** — **已决 D1:defer 下一期**(TASKS W6 记录)。
-- audit_logs **读路径/查询 API** — **已决 D5:要做** → TASKS **W4**(`/admin/audit`,参考 ui-test)。
-- flows / flow_revisions 的 **API 与 UI** — **已决 D3:要做,含 UI 上传/编辑 spec** → TASKS **W3**(`/admin/bots`)。
+- ~~audit_logs **读路径/查询 API**~~ — **2026-08-24 W4 已闭**(`GET /audit-logs` + `/admin/audit`);本行此前漏划,表内第 27 行的注记才是当时就写下的。
+- ~~flows / flow_revisions 的 **API 与 UI**~~ — **2026-08-24 W3 已闭**:`/flows` 五个操作 + `/admin/bots`(列表、JSON 编辑器、阶段图、工具与人设、发布历史)。CLI `flowadd` 保留为自动化入口。
 
 ### 需补场景 →(2026-08-20 勘误)
 - ~~recordings~~ 已挂 VC-S4-04;坐席回放/越权由 TASKS T6.1 起草。
