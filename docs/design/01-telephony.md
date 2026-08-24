@@ -18,7 +18,47 @@ One ESL **inbound-mode** connection (default `127.0.0.1:18021`, password from en
 
 **CallType** (Genesys lineage; Go `CallType`, values `INBOUND | OUTBOUND | CONSULT | INTERNAL`): stamped at call creation, **immutable across transfers** — the caller-perspective in/out distinction survives every handoff (an AI outbound callback transferred to an agent still reads OUTBOUND on the agent's screen). Assignment: `INBOUND` — call arrives from a trunk/DID (public context); `OUTBOUND` — we originate to an external number (F4 AI outbound, F5 click-to-dial); `INTERNAL` — both parties are our extensions (e.g. `Local_Extension` dialing); `CONSULT` — a secondary leg created on behalf of an active call (reserved in the contract for the consult-transfer roadmap; MVP emits only the first three). Present on every call event envelope (04 §4).
 
-**Party FSM** (per leg; `party_id` = channel UUID): `DIALING|RINGING → TALKING ⇄ HELD → RELEASED`. First party is the sole originator (starts DIALING); all later parties start RINGING. Illegal edges rejected and logged (`DIALING→RINGING`, out of `RELEASED`, …). Wire events are party-scoped: `PARTY_DIALING/RINGING/ESTABLISHED/HELD/RETRIEVED/RELEASED` plus `PARTY_CHANGED` (transfer replaces a party within the same call, `callId` stable) — `PARTY_ESTABLISHED` is the edge into `TALKING` (Genesys `EventEstablished` naming), **fired by the switch's `CHANNEL_BRIDGE`, not by `CHANNEL_ANSWER`** (owner's rule 2026-08-24, superseding the original answer-driven edge — see **C55** in `docs/verification/TASKS.md`): a leg answering is that leg's own fact and the ledger keeps it as one (`bill_sec`), while being on a call is a fact about two legs. An auto-answer phone picks up in front of nobody; a caller the switch answers to play queue music is talking to nobody. Every party state change goes through the transition table — the table is the only thing that may move a party.
+**Party FSM** (per leg; `party_id` = channel UUID). **This diagram is the specification** (owner, 2026-08-24) — the transition table in `internal/telephony/call.go` implements it, and the table is the only thing that may move a party. Every party event (`PARTY_DIALING/RINGING/ESTABLISHED/HELD/RETRIEVED/RELEASED`) is an edge here and nowhere else:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+
+    Idle --> Queued: EventQueued
+    Idle --> Dialing: EventDialing
+    Idle --> Ringing: EventRinging
+
+    Queued --> Ringing: EventRinging
+    Queued --> Idle: EventReleased / EventDestinationBusy
+
+    Dialing --> Ringing: EventRinging
+    Dialing --> Talk: EventEstablished
+    Dialing --> Idle: EventReleased
+
+    Ringing --> Talk: EventEstablished
+    Ringing --> Idle: EventReleased / EventAbandoned
+
+    Talk --> Held: EventHeld
+    Held --> Talk: EventRetrieved
+
+    Talk --> Idle: EventReleased
+    Held --> Idle: EventReleased
+```
+
+`EventEstablished` is the edge into `Talk` (Genesys `EventEstablished` naming) and it is **fired by the switch's `CHANNEL_BRIDGE`, not by `CHANNEL_ANSWER`** (owner's rule 2026-08-24, superseding the original answer-driven edge — see **C55** in `docs/verification/TASKS.md`): a leg answering is that leg's own fact and the ledger keeps it as one (`bill_sec`), while being on a call is a fact about two legs. An auto-answer phone picks up in front of nobody; a caller the switch answers to play queue music is talking to nobody.
+
+The first party is the sole originator (enters `Dialing`); later parties enter `Ringing`. Illegal edges are rejected and logged.
+
+**Where the implementation stands against this diagram** (recorded 2026-08-24, tracked as **C56**):
+
+| Spec | Implemented | |
+|---|---|---|
+| `Idle` as birth and death | no `Idle`; a party is a channel, so it is born already `DIALING`/`RINGING` and ends in `RELEASED`, which is terminal | naming/shape difference, not behaviour: `RELEASED` is the diagram's terminal `Idle` |
+| `Queued` | **absent** — a caller waiting in a queue sits in `DIALING` | the real gap; it is why the queue-adoption path used to assign `TALKING` by hand |
+| `Dialing → Ringing` (`EventRinging`) | **forbidden** — `call.go` names it deliberately absent, "a leg does not change role mid-life" | **conflict, unresolved**: the diagram allows it and the owner's own note of the same day gave it as an example of what cannot happen. Needs a ruling before either side moves. |
+| `EventQueued` / `EventAbandoned` / `EventDestinationBusy` | absent — every ending is `TriggerRelease` carrying a hangup cause | the causes exist, the distinct triggers do not |
+
+`PartyState` is on the wire (`api.*`, `web/src/generated/api.ts`), so adding `IDLE`/`QUEUED` is a contract change and goes contract → generate → implement → test, with `make api-breaking`.
 
 **Agent FSM**:
 

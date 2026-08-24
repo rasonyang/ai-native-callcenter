@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 34 项、余 14 项 + C32/C14 不复现**(34+14+2 = 50,与条目实数一致)—— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C34 / C37 / C42 / C53 / C54;**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 34 项、余 15 项 + C32/C14 不复现**(34+15+2 = 51,与条目实数一致)—— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C34 / C37 / C42 / C53 / C54 / C56(party FSM 规格与实现的差,含一处待裁);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1691,6 +1691,23 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   按新语义反而更准:自动应答却没接通的腿不该产生话后处理)。
   **设计已同步修订**:01 §Party FSM、04 §SSE 事件表、08 §16/§17 三处原文都写着 answer-driven,
   已按 m4-findings 的惯例就地改写并回指本条。
+
+- **C56(new,2026-08-24 owner 给出 party FSM 规格后立案,未修)**
+  **实现的转移表与规格状态图之间有四处差,其中一处是正面冲突。**
+  owner 2026-08-24 给出 party FSM 的 mermaid 状态图并要求"记录在文档中",
+  已按原样落进 `docs/design/01-telephony.md` §2,并声明**该图即规格**,
+  `internal/telephony/call.go` 的 `partyTransitions` 是它的实现、且是**唯一能移动 party 的东西**
+  (转移表的注释与 `fsm-edges.md` 表头都已回指)。差异如下:
+  | 规格 | 实现 | 判断 |
+  |---|---|---|
+  | `Idle` 既是起点也是终点 | 无 `Idle`;party 就是一条 channel,出生即 `DIALING`/`RINGING`,终于 `RELEASED`(终态) | **形状差,非行为差** —— `RELEASED` 就是图里那个终止的 `Idle` |
+  | `Queued` | **没有**;排队等待的主叫现在坐在 `DIALING` 里 | **真缺口**。正因为没有它,收养排队主叫的代码才会去手写 `TALKING`(见 C55) |
+  | `Dialing → Ringing`(`EventRinging`) | **禁止**,`call.go` 明写"deliberately absent … a leg does not change role mid-life" | **正面冲突,待裁**。图里这条边存在;而 owner 同日的另一句正好把 `Dialing → Ringing` 举为不会发生的例子。两处不能同时成立,**任何一边动之前需要一句话定夺** |
+  | `EventQueued` / `EventAbandoned` / `EventDestinationBusy` | 没有对应 trigger;所有结束都是 `TriggerRelease` 携一个 hangup cause | 原因区分得出来,独立的 trigger 没有 |
+  **不逐条零敲**:`PartyState` 在线上(`api.*`、`web/src/generated/api.ts`),
+  加 `IDLE`/`QUEUED` 是契约变更,须走契约 → generate → 实现 → 测试并跑 `make api-breaking`;
+  `Queued` 落地还会改动等待队列、主管视图与 CDR 的 `queue_wait_sec` 口径。
+  故整条按一次设计变更处理,不在缺陷修复里顺手做。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

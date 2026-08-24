@@ -9,13 +9,16 @@
 
 ## 1. Party 状态机(转移表 internal/telephony/call.go:66-87;应用 apply call.go:132-145;非法转移拒绝并告警 registry.go:396-404)
 
+> **规格是 `docs/design/01-telephony.md` §2 的状态图**(owner 2026-08-24)。本表记录的是**实现**的边;
+> 实现与规格之间尚存的差(无 IDLE / 无 QUEUED / DIALING→RINGING 规格允许而实现禁止)登记在 C56。
+
 | 项目(from → event → to) | producer 位置 | consumer 位置 | 覆盖场景 | 证据等级 | 备注 |
 |---|---|---|---|---|---|
 | (新originator腿) → AddParty → DIALING | call.go:208-209 | coordinator.adopt→addParty(coordinator.go:379-397) | S1 | [FACT] | 首腿=originator |
 | (新target腿) → AddParty → RINGING | call.go:207 | 同上;坐席腿发 PARTY_RINGING(coordinator.go:404-417) | S4, S5 | [FACT] | |
-| DIALING → ANSWER → TALKING | call.go:68 | registry.go:335-336(CHANNEL_ANSWER→PARTY_ESTABLISHED) | S1(主叫腿被 answer) | [FACT] | |
+| DIALING → ANSWER → TALKING | call.go:68 | **registry.establish(),由 CHANNEL_BRIDGE 触发**(2026-08-24 C55 起;此前为 CHANNEL_ANSWER) | S1(主叫腿被桥接) | [FACT] | 应答只记 AnsweredAt,不再迁移状态 |
 | DIALING → RELEASE → RELEASED | call.go:69 | registry.go:341-349 | S1(VC-S1-03 已挂,TODO) | [FACT] | 2026-08-20 勘误:未知号 95999 在 answer 前即挂断(lua:47-49),VC-S1-03 正验证此边 |
-| RINGING → ANSWER → TALKING | call.go:72 | registry.go:335-336 | S4 | [FACT] | |
+| RINGING → ANSWER → TALKING | call.go:72 | **registry.establish(),由 CHANNEL_BRIDGE 触发**(C55) | S4 | [FACT] | 一次桥接把两条腿一起送进 TALKING |
 | RINGING → RELEASE → RELEASED | call.go:73 | registry.go:341-349 | S5, S6 | [FACT] | 振铃未接即挂(RONA 重排队/振铃中放弃) |
 | TALKING → HOLD → HELD | call.go:76 | registry.go:337-338(→PARTY_HELD) | S7 | [FACT] | |
 | TALKING → RELEASE → RELEASED | call.go:77 | registry.go:341-349 | S2, S4 | [FACT] | |
