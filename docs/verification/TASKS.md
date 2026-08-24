@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 41 项、余 8 项 + C32/C14 不复现**(41+8+2 = 51,与条目实数一致)—— C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C37 / C42 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 与 `Queued` 两处均已裁定为图错代码对,仅余 `EventAbandoned` 一条 trigger 粒度的小缺口,不再涉及契约);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 43 项、余 6 项 + C32/C14 不复现**(43+6+2 = 51,与条目实数一致)—— C7 / C10(已决 defer 第二期)/ C23 / C37 / C42 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 与 `Queued` 两处均已裁定为图错代码对,仅余 `EventAbandoned` 一条 trigger 粒度的小缺口,不再涉及契约);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -475,10 +475,33 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ④复读失败 → `isVerified=false` 且仍给出尝试数。已验证去掉复读后 ①④ FAIL。
   **⚠ VC-S3-02 的假通过风险不变**:它断言的是事后一致,谎报不体现在那里;
   重跑它之前仍须按上面的办法重造场景,否则拿到的仍是无判别力的 PASS。
-- **C2** SYS-6 契约缺口:PartySnapshot 补 isBotLeg(`make api-breaking` 走查)
-- **C4** 死状态删除(D7①③ 已决):删 Call.ENDING(call.go:23,契约 CallState 同步)与转写 ENDED
-  (actor.go:110,契约 TranscriptionState 同步)——两处均 breaking,走 `make api-breaking`;
-  fsm-edges.md/enums.md 对应行、VC-S9-02 expect 括注随之更新
+- **C2(已修 2026-08-24 `7c10489`,留证 `artifacts/C4/verdict-2026-08-24.md`)**
+  SYS-6 契约缺口:PartySnapshot 补 isBotLeg。**纯契约缺口** —— Go 的 `PartySnapshot`
+  早就带着 `isBotLeg`(`call.go:459`)、线上一直在发,只有 `docs/openapi.json` 没声明;
+  实现侧一行未动。它必须有名字的理由:**和 bot 通话的主叫,这通电话有两条腿、只有一个人**,
+  而这个对象里没有别的字段能把那条腿与"一个恰好没有 agentId 的坐席腿"分开。
+  `make api-breaking` 无破坏(新增可选字段)。
+- **C4(已修 2026-08-24 `7c10489`;后半撤回,留证 `artifacts/C4/verdict-2026-08-24.md`)**
+  死状态删除(D7①③ 已决)。
+  **前半成立并已执行**:`Call.ENDING` 删除(定义、契约枚举、生成物)。呼叫在**最后一条腿释放**时
+  结束,那是一个事件,所以**从来没有一个时刻处在 ENDING**;定义过、从未赋值、从未读取。
+  `make api-breaking BASE=main` → **无破坏**(响应侧枚举收窄)。
+  **⚠ 后半撤回:转写 `ENDED` 不是死值。** 删除时**编译锁拒绝了构建**
+  (`transcript_handlers.go:68: undefined: api.TranscriptionStateENDED`)。
+  它是**快照对一通已结束呼叫的回答** —— 呼叫不再存活、也没有 actor 可问时由 REST 合成;
+  前端消费它(`live-transcript.tsx:35` 上色、`lib/transcript.ts:103` 推导),
+  并有一条**以它命名的测试**(`freezes at ENDED after a call rather than falling back to IDLE`)。
+  删掉它会打断一个自带测试的行为。
+  **这条最该记的是:证据早就在账本里。** VC-S9-02 在 **2026-08-20** 执行时当场查明并写进了 status
+  ——"发现 ENDED 是 REST 收官合成值(handlers:69)→ D7③ 前提推翻待重议"——
+  而本条目直到 2026-08-24 仍写着"死值",**整整四天**。与 C49 同型:话已经说出来了,没人回去改结论。
+  **处置**:契约保留 `ENDED` 并在 description 写明生产者是 REST 快照而非 actor;
+  `actor.go` **保留** `StateEnded` 并写明它在此处永不赋值的原因 —— 镜像要完整,
+  否则下一个人比对契约时会得出和本条一样的结论。
+  **连带订正(两个方向都改)**:01-telephony.md 的 Call FSM;enums.md 的 ENDING 行(已删除)
+  **与 ENDED 行(由"死值"改为记明生产者与消费者)**;fsm-edges.md 的 ENDING 边与 D7①;
+  ledger.yaml 的清单行;以及 **VC-S9-02 的 expect** —— 它原写"契约有值但系统从不发布",
+  改为"**流上**不出现,由 REST 快照合成"。
 - **C7** queue_events 读路径 or 修正 cdr.go:112 注释
 - **C10** 202 契约核对(SYS-2 源头)——**defer 第二期(§补充 S5,第二期需要)**;本期账本 expect 维持 202
 - **C11(new,2026-08-20 T3.1 执行发现;2026-08-21 已修并现场复验)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
