@@ -15,9 +15,7 @@ type ExtensionKind string
 // Extension kinds.
 const (
 	KindAgent ExtensionKind = "AGENT"
-	KindBot   ExtensionKind = "BOT"
 	KindQueue ExtensionKind = "QUEUE"
-	KindPlain ExtensionKind = "PLAIN"
 )
 
 // Extension is a SIP endpoint the switch will accept a registration for.
@@ -38,7 +36,6 @@ type Extension struct {
 	// AgentID is read-only here: the binding is written from the agent's side,
 	// where the database can still refuse to delete a phone somebody works at.
 	AgentID *uuid.UUID `json:"agentId,omitempty"`
-	FlowID  *uuid.UUID `json:"flowId,omitempty"`
 	QueueID *uuid.UUID `json:"queueId,omitempty"`
 }
 
@@ -77,7 +74,7 @@ func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	e.DisplayName = trim(e.DisplayName)
 
 	switch e.Kind {
-	case KindAgent, KindBot, KindQueue, KindPlain:
+	case KindAgent, KindQueue:
 	case "":
 		e.Kind = KindAgent
 	default:
@@ -88,20 +85,13 @@ func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	}
 	// A number serves one thing. The database refuses the contradiction too,
 	// but saying which field is wrong is this layer's job.
-	switch e.Kind {
-	case KindBot:
-		if e.FlowID == nil {
-			return fmt.Errorf("%w: a BOT extension needs the flow it answers with", ErrValidation)
-		}
-		e.QueueID = nil
-	case KindQueue:
+	if e.Kind == KindQueue {
 		if e.QueueID == nil {
 			return fmt.Errorf("%w: a QUEUE extension needs the queue it reaches", ErrValidation)
 		}
-		e.FlowID = nil
-	default:
+	} else {
 		// A target left behind by a changed kind is a claim nothing honours.
-		e.FlowID, e.QueueID = nil, nil
+		e.QueueID = nil
 	}
 	return nil
 }

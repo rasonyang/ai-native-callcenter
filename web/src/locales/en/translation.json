@@ -248,8 +248,6 @@
     "passwordUnchangedHint": "Leave blank to keep the current password.",
     "kinds": {
       "AGENT": "Agent",
-      "BOT": "Bot",
-      "PLAIN": "Plain",
       "QUEUE": "Queue"
     },
     "routingHint": "Queues and how they choose an agent. Changes reach the switch immediately.",
@@ -332,7 +330,6 @@
     "kindChangeClearsTarget": "Changing what this number serves will clear the target it has now. Continue?",
     "targetAgent": "Agent",
     "targetAgentHint": "Only accounts with no phone are listed: an account may hold one.",
-    "targetFlow": "Flow",
     "targetQueue": "Queue",
     "targetNone": "None",
     "passwordNewHint": "Generated, shown once, and gone when you leave this form. Copy it now.",
@@ -340,9 +337,7 @@
     "resetPassword": "Reset",
     "kindHints": {
       "AGENT": "A person's phone.",
-      "BOT": "Answers with a bot flow.",
-      "QUEUE": "Reaches a queue.",
-      "PLAIN": "A bare number with no target."
+      "QUEUE": "Reaches a queue."
     }
   },
   "cdr": {

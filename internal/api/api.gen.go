@@ -274,8 +274,6 @@ func (e ErrorCode) Valid() bool {
 // Defines values for ExtensionKind.
 const (
 	ExtensionKindAGENT ExtensionKind = "AGENT"
-	ExtensionKindBOT   ExtensionKind = "BOT"
-	ExtensionKindPLAIN ExtensionKind = "PLAIN"
 	ExtensionKindQUEUE ExtensionKind = "QUEUE"
 )
 
@@ -283,10 +281,6 @@ const (
 func (e ExtensionKind) Valid() bool {
 	switch e {
 	case ExtensionKindAGENT:
-		return true
-	case ExtensionKindBOT:
-		return true
-	case ExtensionKindPLAIN:
 		return true
 	case ExtensionKindQUEUE:
 		return true
@@ -1180,13 +1174,12 @@ type Extension struct {
 	AgentID     *openapi_types.UUID `json:"agentId,omitempty"`
 	CreatedAt   time.Time           `json:"createdAt"`
 	DisplayName string              `json:"displayName"`
+	ID          openapi_types.UUID  `json:"id"`
+	IsEnabled   bool                `json:"isEnabled"`
 
-	// FlowID The flow a BOT extension answers with.
-	FlowID    *openapi_types.UUID `json:"flowId,omitempty"`
-	ID        openapi_types.UUID  `json:"id"`
-	IsEnabled bool                `json:"isEnabled"`
-
-	// Kind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+	// Kind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
+	//
+	// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
 	Kind   ExtensionKind `json:"kind"`
 	Number string        `json:"number"`
 
@@ -1194,7 +1187,9 @@ type Extension struct {
 	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
 }
 
-// ExtensionKind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+// ExtensionKind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
+//
+// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
 type ExtensionKind string
 
 // ExtensionList defines model for ExtensionList.
@@ -1214,19 +1209,18 @@ type ExtensionSecret struct {
 // The target must match the kind. Changing the kind clears the targets that no longer apply, which is why a form asks before it does so.
 type ExtensionWrite struct {
 	DisplayName *string `json:"displayName,omitempty"`
+	IsEnabled   *bool   `json:"isEnabled,omitempty"`
 
-	// FlowID Required for kind BOT and refused for any other kind: a number cannot serve two things, and a target left behind by a changed kind is a claim nothing honours.
-	FlowID    *openapi_types.UUID `json:"flowId,omitempty"`
-	IsEnabled *bool               `json:"isEnabled,omitempty"`
-
-	// Kind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+	// Kind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
+	//
+	// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
 	Kind   *ExtensionKind `json:"kind,omitempty"`
 	Number string         `json:"number"`
 
 	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch.
 	Password *string `json:"password,omitempty"`
 
-	// QueueID Required for kind QUEUE and refused for any other kind.
+	// QueueID Required for kind QUEUE and refused for kind AGENT: a number reaches a queue or belongs to a person, and a target left behind by a changed kind is a claim nothing honours.
 	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
 }
 

@@ -2,8 +2,8 @@
 
 -- name: CreateExtension :one
 INSERT INTO extensions (id, number, kind, password, display_name, is_enabled,
-                        flow_id, queue_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        queue_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetExtension :one
@@ -18,7 +18,7 @@ ORDER BY e.number;
 -- name: UpdateExtension :one
 UPDATE extensions
 SET kind = $2, display_name = $3, is_enabled = $4,
-    flow_id = $5, queue_id = $6, updated_at = now()
+    queue_id = $5, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

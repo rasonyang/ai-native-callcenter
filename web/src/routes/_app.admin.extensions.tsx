@@ -15,7 +15,6 @@ import {
   catalogApi, generateSIPPassword, useCatalogMutations, useExtensions, useQueues,
   type Extension, type ExtensionDraft, type ExtensionKind,
 } from '@/lib/catalog'
-import { useFlows } from '@/lib/flows'
 import { useUsers } from '@/lib/users'
 
 /** The SIP endpoints the switch will accept a registration for. */
@@ -24,14 +23,17 @@ export const Route = createFileRoute('/_app/admin/extensions')({
   component: ExtensionsPage,
 })
 
-const KINDS: ExtensionKind[] = ['AGENT', 'BOT', 'QUEUE', 'PLAIN']
+const KINDS: ExtensionKind[] = ['AGENT', 'QUEUE']
 
-/** Which target a kind may carry. PLAIN carries none, and says so. */
-const TARGET_OF: Record<ExtensionKind, 'agent' | 'flow' | 'queue' | null> = {
+/**
+ * Which target a kind carries. Two kinds, because two is what an extension can
+ * be: somebody's phone, or a way into a queue. BOT and PLAIN were retired —
+ * PLAIN said what an unbound AGENT already says, and a BOT extension routed
+ * nothing, since a caller reaches a bot through the DID that names its flow.
+ */
+const TARGET_OF: Record<ExtensionKind, 'agent' | 'queue'> = {
   AGENT: 'agent',
-  BOT: 'flow',
   QUEUE: 'queue',
-  PLAIN: null,
 }
 
 /** The lowest number not already taken — the same rule the server allocates by. */
@@ -76,7 +78,6 @@ function ExtensionsPage() {
   // panel would carry. State holds only whether one exists.
   const minted = useRef<string | null>(null)
   const [hasMinted, setHasMinted] = useState(false)
-  const flows = useFlows()
   const queues = useQueues()
   const users = useUsers()
 
@@ -221,17 +222,11 @@ function ExtensionsPage() {
                 // before — a leftover one is a claim nothing honours. Asked
                 // about once, because it is the operator's work being thrown
                 // away, not ours.
-                const hadTarget = Boolean(editing.agentId ?? editing.flowId ?? editing.queueId)
+                const hadTarget = Boolean(editing.agentId ?? editing.queueId)
                 if (hadTarget && TARGET_OF[kind] !== TARGET_OF[editing.kind ?? 'AGENT']) {
                   if (!window.confirm(t('admin.kindChangeClearsTarget'))) return
                 }
-                setEditing({
-                  ...editing,
-                  kind,
-                  agentId: undefined,
-                  flowId: undefined,
-                  queueId: undefined,
-                })
+                setEditing({ ...editing, kind, agentId: undefined, queueId: undefined })
               }}
               options={KINDS.map((k) => ({ value: k, label: t(`admin.kinds.${k}`) }))}
             />
@@ -250,18 +245,6 @@ function ExtensionsPage() {
                     value: u.agentId as string,
                     label: `${u.displayName} (${u.username})`,
                   })),
-                ]}
-              />
-            </Field>
-          )}
-          {TARGET_OF[editing.kind ?? 'AGENT'] === 'flow' && (
-            <Field label={t('admin.targetFlow')}>
-              <Select
-                value={editing.flowId ?? ''}
-                onChange={(flowId) => setEditing({ ...editing, flowId: flowId || undefined })}
-                options={[
-                  { value: '', label: t('admin.targetNone') },
-                  ...(flows.data?.items ?? []).map((f) => ({ value: f.flowId, label: f.name })),
                 ]}
               />
             </Field>

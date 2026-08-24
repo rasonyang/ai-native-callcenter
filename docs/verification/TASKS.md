@@ -584,9 +584,33 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      `luacc.directory` 里看得到它(交换机据此放行注册)、用新账号登录 200、
      审计行里初始口令是 `"[redacted]"`(C58 的按字段名脱敏接住了它)。
      **话机注册的真机验证归 W11.4** —— 生成的 SIP 口令在 reveal 端点做出来之前没人读得到。
-  4. **W11.4 Extensions**。kind 目标选择器 + 编辑态回填;口令可生成、可拷贝、不明文显示,
-     取明文走 D5 的 reveal 端点。**含 D1 的关联翻转**,牵动 `luacc.directory` 视图、
-     agents 服务、catalog handlers、VC-S11-02 —— 漏改视图会编译通过、单测全绿、**真机注册失败**。
+  4. ~~**W11.4 Extensions**~~ **【已完成 2026-08-24 `813f619` + `c990676` + kind 收窄】**
+     `GET /extensions/{extensionId}/password`(ADMIN,每次读都记审计)、按 kind 切换的目标选择器、
+     号码预填下一个空闲号(可编辑,越界/占用**在输入时**报而不是提交后)、口令三态。
+     **D1 的关联翻转没有做,而且不该做**:`agents.default_extension_id` 那一侧已经有 D1 要的
+     两道保障(`uq_agents_default_extension` 一人一机 + `fk_agents_extensions RESTRICT`
+     拒绝删除有人在用的分机),而 **00015 是特意把删除守卫放进数据库的** —— 起因是分机被静默
+     解绑后坐席仍 READY、队列继续派单,那次迁移的原话是"the delete must fail even when it
+     arrives by psql"。翻过来会把这道守卫连同 VC-S14-01 一起拆掉,换不来任何行为收益。
+     故 `00017` 只加了没有住处的 `flow_id`/`queue_id`。
+     **口令三态,没有一态往 input 里渲染占位密文** —— 一排点是对"里面有什么"的谎言,
+     而浏览器会把它原样提交回来。新建:生成→只显示一次+Copy,**明文只存在 ref 里**,
+     不进 form state、不进序列化草稿、不进 input 的 value,关闭表单即遗忘;
+     已有:**不渲染输入框**,Copy 走审计端点、Reset 替换。非 ADMIN 由路由守卫挡住,按钮不渲染。
+     **reveal 在 handler 里审计而不是中间件**:中间件保证的是**变更**的结构性覆盖,
+     按路径往里加一条读正是 C58 那种会过期的守卫形状;泄露是另一类事件,
+     而知道自己泄露了的是那个 handler。
+     **`00018` 把 kind 收成 `AGENT | QUEUE`(owner 直裁,选项 B)**:`PLAIN` 是 `AGENT 未绑定`
+     的第二种拼法(00017 自己的 CHECK 就把两者当同一件事,而 live 库 21 个分机全是 AGENT、
+     只有 7 个真绑了人 —— "没人用的裸话机"已经被表达了 14 次);**`BOT` 路由不了任何东西** ——
+     来电经 `aicc_inbound.lua` 桥到 `sofia/gateway/aicc_bot/<did.number>`,应用再按 DID 解析
+     `dids.flow_id`,**分机表在这条路上一次都没出现**。`flow_id` 随 BOT 一同删除;
+     指向 flow 的是 DID,而那一列 W3 的 flows 列表已经有了。
+     **现场**:BOT 分机绑 flow→201 / 不绑→422 / 改 PLAIN 清空目标 / psql 造矛盾被 CHECK 拒绝;
+     收窄后 `BOT` 回 422、live 的 21 行毫发无损、`flow_id` 列已消失;
+     **真 SIP 客户端用 reveal 到的口令注册成功(`Registered(UDP)`)—— W11.3 欠的那条话机注册验证随之闭合。**
+     **遗留一笔**:`extensions.queue_id` 与 `queues.ext_number` 是同一件事的两处记录,
+     没有东西保证它们一致(owner 已决不迁 `ext_number`),待 W11.5 或单独一条处理。
   5. **W11.5 Numbers**(D7/D8/D9)。方向布尔、`flow_id` CHECK、缺省外呼号。
      **与 W8(trunk 管理面)是同一块地,W8 排在其后**,免得中继号的契约评审和这里的方向列打架。
   6. **W11.6 Bot Flows 加"指向该 flow 的分机"列**(D10,join)。依赖 4。

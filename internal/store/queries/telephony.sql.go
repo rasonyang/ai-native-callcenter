@@ -59,9 +59,9 @@ func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, erro
 const createExtension = `-- name: CreateExtension :one
 
 INSERT INTO extensions (id, number, kind, password, display_name, is_enabled,
-                        flow_id, queue_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id
+                        queue_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id
 `
 
 type CreateExtensionParams struct {
@@ -71,7 +71,6 @@ type CreateExtensionParams struct {
 	Password    string     `json:"password"`
 	DisplayName string     `json:"displayName"`
 	IsEnabled   bool       `json:"isEnabled"`
-	FlowID      *uuid.UUID `json:"flowId"`
 	QueueID     *uuid.UUID `json:"queueId"`
 }
 
@@ -84,7 +83,6 @@ func (q *Queries) CreateExtension(ctx context.Context, arg CreateExtensionParams
 		arg.Password,
 		arg.DisplayName,
 		arg.IsEnabled,
-		arg.FlowID,
 		arg.QueueID,
 	)
 	var i Extension
@@ -97,7 +95,6 @@ func (q *Queries) CreateExtension(ctx context.Context, arg CreateExtensionParams
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.FlowID,
 		&i.QueueID,
 	)
 	return i, err
@@ -244,7 +241,7 @@ func (q *Queries) GetDIDByNumber(ctx context.Context, number string) (Did, error
 }
 
 const getExtension = `-- name: GetExtension :one
-SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id FROM extensions WHERE id = $1
+SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id FROM extensions WHERE id = $1
 `
 
 func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, error) {
@@ -259,7 +256,6 @@ func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, er
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.FlowID,
 		&i.QueueID,
 	)
 	return i, err
@@ -333,7 +329,7 @@ func (q *Queries) ListDIDs(ctx context.Context) ([]Did, error) {
 }
 
 const listExtensions = `-- name: ListExtensions :many
-SELECT e.id, e.number, e.kind, e.password, e.display_name, e.is_enabled, e.created_at, e.updated_at, e.flow_id, e.queue_id, a.id AS agent_id
+SELECT e.id, e.number, e.kind, e.password, e.display_name, e.is_enabled, e.created_at, e.updated_at, e.queue_id, a.id AS agent_id
 FROM extensions e
 LEFT JOIN agents a ON a.default_extension_id = e.id
 ORDER BY e.number
@@ -348,7 +344,6 @@ type ListExtensionsRow struct {
 	IsEnabled   bool               `json:"isEnabled"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
-	FlowID      *uuid.UUID         `json:"flowId"`
 	QueueID     *uuid.UUID         `json:"queueId"`
 	AgentID     *uuid.UUID         `json:"agentId"`
 }
@@ -371,7 +366,6 @@ func (q *Queries) ListExtensions(ctx context.Context) ([]ListExtensionsRow, erro
 			&i.IsEnabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.FlowID,
 			&i.QueueID,
 			&i.AgentID,
 		); err != nil {
@@ -659,9 +653,9 @@ func (q *Queries) UpdateDID(ctx context.Context, arg UpdateDIDParams) (Did, erro
 const updateExtension = `-- name: UpdateExtension :one
 UPDATE extensions
 SET kind = $2, display_name = $3, is_enabled = $4,
-    flow_id = $5, queue_id = $6, updated_at = now()
+    queue_id = $5, updated_at = now()
 WHERE id = $1
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id
+RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id
 `
 
 type UpdateExtensionParams struct {
@@ -669,7 +663,6 @@ type UpdateExtensionParams struct {
 	Kind        string     `json:"kind"`
 	DisplayName string     `json:"displayName"`
 	IsEnabled   bool       `json:"isEnabled"`
-	FlowID      *uuid.UUID `json:"flowId"`
 	QueueID     *uuid.UUID `json:"queueId"`
 }
 
@@ -679,7 +672,6 @@ func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams
 		arg.Kind,
 		arg.DisplayName,
 		arg.IsEnabled,
-		arg.FlowID,
 		arg.QueueID,
 	)
 	var i Extension
@@ -692,7 +684,6 @@ func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.FlowID,
 		&i.QueueID,
 	)
 	return i, err

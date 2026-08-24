@@ -85,8 +85,15 @@ func TestNumbersOutsideThePoolAreLeftAlone(t *testing.T) {
 	cat := poolStore(t, 4)
 	ctx := context.Background()
 
+	// A queue's number: in the same table, outside the pool.
+	queueID := uuid.Must(uuid.NewV7())
+	if _, err := cat.pool.Exec(ctx, `INSERT INTO queues (id, name, ext_number, display_name)
+		VALUES ($1, 'support', '7002', 'Support')`, queueID); err != nil {
+		t.Fatalf("seed the queue: %v", err)
+	}
 	outside := catalog.Extension{
-		ID: uuid.Must(uuid.NewV7()), Number: "7002", Kind: catalog.KindPlain,
+		ID: uuid.Must(uuid.NewV7()), Number: "7002", Kind: catalog.KindQueue,
+		QueueID:  &queueID,
 		Password: "queue-secret", DisplayName: "Support queue", IsEnabled: true,
 	}
 	if _, err := cat.CreateExtension(ctx, outside); err != nil {

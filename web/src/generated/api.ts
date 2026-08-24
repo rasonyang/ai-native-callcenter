@@ -1647,10 +1647,12 @@ export interface components {
             isDuplicate?: boolean;
         };
         /**
-         * @description What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+         * @description What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
+         *
+         *     BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
          * @enum {string}
          */
-        ExtensionKind: "AGENT" | "BOT" | "QUEUE" | "PLAIN";
+        ExtensionKind: "AGENT" | "QUEUE";
         /** @description A SIP endpoint the switch will accept a registration for. */
         Extension: {
             /** Format: uuid */
@@ -1666,11 +1668,6 @@ export interface components {
              * @description The agent whose phone this is. Read here and written by binding the agent to it: the binding lives on the agent so the database can still refuse to delete a phone somebody works at, which is a guard an incident put there.
              */
             agentId?: string;
-            /**
-             * Format: uuid
-             * @description The flow a BOT extension answers with.
-             */
-            flowId?: string;
             /**
              * Format: uuid
              * @description The queue a QUEUE extension reaches.
@@ -1691,12 +1688,7 @@ export interface components {
             password?: string;
             /**
              * Format: uuid
-             * @description Required for kind BOT and refused for any other kind: a number cannot serve two things, and a target left behind by a changed kind is a claim nothing honours.
-             */
-            flowId?: string;
-            /**
-             * Format: uuid
-             * @description Required for kind QUEUE and refused for any other kind.
+             * @description Required for kind QUEUE and refused for kind AGENT: a number reaches a queue or belongs to a person, and a target left behind by a changed kind is a claim nothing honours.
              */
             queueId?: string;
         };

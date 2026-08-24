@@ -246,8 +246,6 @@
     "passwordUnchangedHint": "留空则保持原密码不变。",
     "kinds": {
       "AGENT": "坐席",
-      "BOT": "机器人",
-      "PLAIN": "普通",
       "QUEUE": "队列"
     },
     "routingHint": "队列及其分配方式，修改后立即下发到交换机。",
@@ -330,7 +328,6 @@
     "kindChangeClearsTarget": "改变这个号码服务的对象，会清掉它现在的目标。继续？",
     "targetAgent": "坐席",
     "targetAgentHint": "只列出还没有话机的账号：一个账号至多一部。",
-    "targetFlow": "流程",
     "targetQueue": "队列",
     "targetNone": "无",
     "passwordNewHint": "生成后只显示这一次，离开表单就看不到了。现在复制。",
@@ -338,9 +335,7 @@
     "resetPassword": "重设",
     "kindHints": {
       "AGENT": "某个人的话机。",
-      "BOT": "用机器人流程接听。",
-      "QUEUE": "接到一个队列。",
-      "PLAIN": "没有目标的裸号码。"
+      "QUEUE": "接到一个队列。"
     }
   },
   "cdr": {

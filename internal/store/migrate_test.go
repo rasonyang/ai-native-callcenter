@@ -446,7 +446,7 @@ func TestMigrationsLetExistingExtensionsKeepTheirLabels(t *testing.T) {
 		t.Fatalf("seed extensions of the old vocabulary: %v", err)
 	}
 
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+	if err := goose.UpToContext(ctx, db, "migrations", 17); err != nil {
 		t.Fatalf("migrating a database that already holds extensions failed: %v", err)
 	}
 
@@ -481,5 +481,55 @@ func TestMigrationsLetExistingExtensionsKeepTheirLabels(t *testing.T) {
 		 VALUES (gen_random_uuid(), '1094', 'BOT', 'x', gen_random_uuid())`); err == nil {
 		t.Error("a BOT extension was allowed to point at a queue; kind and target " +
 			"can now disagree, and whichever one a reader trusts is a coin toss")
+	}
+}
+
+// 00018 narrows the vocabulary, and a narrowing is the one shape that fails on
+// a populated database and passes on a fresh one.
+//
+// A deployment that labelled a phone BOT or PLAIN must migrate rather than be
+// refused with "is violated by some row" on every boot. Both become AGENT,
+// which is what they were doing anyway — a registerable number, bound to
+// somebody or not.
+func TestMigrationsRelabelTheKindsThatNoLongerExist(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 17); err != nil {
+		t.Fatalf("migrating to 17 failed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password)
+		 VALUES (gen_random_uuid(), '1093', 'BOT', 'x'),
+		        (gen_random_uuid(), '1092', 'PLAIN', 'x'),
+		        (gen_random_uuid(), '1091', 'AGENT', 'x')`); err != nil {
+		t.Fatalf("seed the retired kinds: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database that still labels phones BOT or PLAIN failed: %v", err)
+	}
+
+	var others int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM extensions WHERE kind <> 'AGENT'`).Scan(&others); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if others != 0 {
+		t.Errorf("%d extensions kept a kind that no longer exists", others)
+	}
+
+	// The narrowed CHECK holds, and a queue target still needs its kind.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password)
+		 VALUES (gen_random_uuid(), '1090', 'BOT', 'x')`); err == nil {
+		t.Error("a BOT extension was accepted after the kind was retired")
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password, queue_id)
+		 VALUES (gen_random_uuid(), '1089', 'AGENT', 'x', gen_random_uuid())`); err == nil {
+		t.Error("an AGENT extension was allowed to point at a queue")
 	}
 }
