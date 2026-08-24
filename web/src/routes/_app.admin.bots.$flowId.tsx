@@ -8,6 +8,7 @@ import { Field, Input, RecordDialog } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useNameThisPage } from '@/lib/breadcrumb'
 import { describeError } from '@/lib/errors'
 import {
   describeRule, locateNodes, sameSpec, specProblems,
@@ -48,6 +49,9 @@ function FlowDesigner() {
   const [spec, setSpec] = useState<FlowSpec>({})
   const [parseError, setParseError] = useState<string | null>(null)
   const loaded = useRef<string | null>(null)
+
+  // The trail ends in the flow's own name, which only exists once it is here.
+  useNameThisPage(data?.flow.name)
 
   // The server's copy seeds the editor once. Refetches after a save must not
   // overwrite what the author has typed since.

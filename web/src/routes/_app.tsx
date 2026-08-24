@@ -1,6 +1,7 @@
 import { Outlet, createFileRoute, redirect, useRouterState } from '@tanstack/react-router'
 
 import { AppShell } from '@/components/app-shell'
+import { BreadcrumbDetailProvider } from '@/lib/breadcrumb'
 import { SoftphoneBar } from '@/components/softphone-bar'
 import { usePresence } from '@/lib/agent'
 import { ApiError, api } from '@/lib/api'
@@ -47,16 +48,19 @@ function AppLayout() {
     // One EventSource feeds the whole application; this makes its tail and its
     // health reachable from any panel below, without a second connection.
     <EventStreamProvider value={{ status, listeners }}>
-      <AppShell
-        user={user}
-        streamStatus={status}
-        pathname={pathname}
-        deviceState={deviceState}
-        // An agent carries their call controls with them on every page.
-        softphone={isAgent ? <SoftphoneBar /> : undefined}
-      >
-        <Outlet />
-      </AppShell>
+      {/* The shell draws the trail; the page below names what it is about. */}
+      <BreadcrumbDetailProvider>
+        <AppShell
+          user={user}
+          streamStatus={status}
+          pathname={pathname}
+          deviceState={deviceState}
+          // An agent carries their call controls with them on every page.
+          softphone={isAgent ? <SoftphoneBar /> : undefined}
+        >
+          <Outlet />
+        </AppShell>
+      </BreadcrumbDetailProvider>
     </EventStreamProvider>
   )
 }

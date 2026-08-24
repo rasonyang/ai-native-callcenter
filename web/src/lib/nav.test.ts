@@ -113,23 +113,61 @@ describe('the route guard', () => {
 })
 
 describe('the breadcrumb', () => {
-  it('names the viewer’s role, not the section the page files under', () => {
-    // The ledger lives under /admin and a supervisor may read it. Labelling
-    // their page "Administrator" — and linking to a page they cannot open —
-    // would be wrong twice.
+  it('starts at the sidebar group the page sits under', () => {
+    // Not the reader's role: the ledger is one screen two roles share, and
+    // "Administrator" would be a claim about the reader that this page is in
+    // no position to make.
     expect(breadcrumbFor('/admin/cdr', 'SUPERVISOR')).toEqual([
-      { labelKey: 'roles.SUPERVISOR', to: '/supervisor' },
+      { labelKey: 'nav.system', to: '/admin/cdr' },
       { labelKey: 'nav.cdr' },
     ])
     expect(breadcrumbFor('/admin/cdr', 'ADMIN')).toEqual([
-      { labelKey: 'roles.ADMIN', to: '/admin' },
+      { labelKey: 'nav.system', to: '/admin/cdr' },
       { labelKey: 'nav.cdr' },
     ])
   })
 
-  it('resolves a detail page to the section it sits under', () => {
-    expect(breadcrumbFor('/admin/bots/some-flow-id', 'ADMIN')[1]).toEqual({
-      labelKey: 'nav.bots',
+  // A group has no page of its own, so it links to where it starts for this
+  // reader — which is a different page for a supervisor than for an
+  // administrator, and never one they cannot open.
+  it('links a group to the first page in it this reader may open', () => {
+    expect(breadcrumbFor('/admin/bots', 'ADMIN')[0]).toEqual({
+      labelKey: 'nav.manage',
+      to: '/admin',
     })
+    expect(breadcrumbFor('/supervisor/queues', 'SUPERVISOR')[0]).toEqual({
+      labelKey: 'nav.supervise',
+      to: '/supervisor',
+    })
+  })
+
+  it('ends in the record the page is about, and links the section above it', () => {
+    expect(breadcrumbFor('/admin/bots/019ffd60', 'ADMIN', 'novanet_support')).toEqual([
+      { labelKey: 'nav.manage', to: '/admin' },
+      { labelKey: 'nav.bots', to: '/admin/bots' },
+      { label: 'novanet_support' },
+    ])
+  })
+
+  // Every level above the current one is one click away, and the current one
+  // is never a link — the reader is already standing on it.
+  it('links every segment but the last', () => {
+    for (const trail of [
+      breadcrumbFor('/admin/bots', 'ADMIN'),
+      breadcrumbFor('/admin/bots/019ffd60', 'ADMIN', 'novanet_support'),
+      breadcrumbFor('/agent/calls', 'AGENT'),
+    ]) {
+      expect(trail.slice(0, -1).every((crumb) => Boolean(crumb.to))).toBe(true)
+      expect(trail[trail.length - 1].to).toBeUndefined()
+    }
+  })
+
+  // Until the page knows what it is looking at there is nothing to add, and a
+  // gap would read as a record with no name.
+  it('stops at the section while the record is still loading', () => {
+    expect(breadcrumbFor('/admin/bots/019ffd60', 'ADMIN')).toEqual([
+      { labelKey: 'nav.manage', to: '/admin' },
+      { labelKey: 'nav.bots' },
+    ])
   })
 })

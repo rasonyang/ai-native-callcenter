@@ -100,32 +100,48 @@ export function visibleTo(role: Role, item: NavItem): boolean {
 }
 
 export interface Crumb {
-  labelKey: string
+  /** A translation key, for the segments that come from the nav config. */
+  labelKey?: string
+  /** Literal text, for a segment naming one record. */
+  label?: string
+  /** Absent on the last segment: it is where the reader already is. */
   to?: string
 }
 
+/** Where a group starts for this viewer — the first page in it they may open. */
+function groupHomeFor(group: NavGroup, role: Role): string | undefined {
+  return group.items.find((item) => visibleTo(role, item) && item.isReady)?.to
+}
+
 /**
- * Resolves "Role / Section" for a path. Every segment but the last links to a
- * fixed target, never to browser history.
+ * Resolves "Group / Section / Detail" for a path. Every segment but the last
+ * links to a fixed target, never to browser history, so any level above the
+ * current one is one click away.
  *
- * The role segment is the viewer's own, not the section's: the call ledger
- * lives under /admin and a supervisor may read it, and labelling their page
- * "Administrator" — with a link to a page they cannot open — would be twice
- * wrong.
+ * The first segment is the sidebar group — Manage, System, Supervise,
+ * Workspace — not the reader's role. The group is what the page actually sits
+ * under, and it is the same word they just clicked in the sidebar; a role name
+ * there claimed something else, and on a page two roles share (the ledger) it
+ * claimed it wrongly.
  */
-export function breadcrumbFor(pathname: string, role: Role): Crumb[] {
-  let best: NavItem | undefined
+export function breadcrumbFor(pathname: string, role: Role, detail?: string): Crumb[] {
+  let best: { group: NavGroup; item: NavItem } | undefined
   for (const group of NAV) {
     for (const item of group.items) {
       if (pathname === item.to || pathname.startsWith(item.to + '/')) {
-        if (!best || item.to.length > best.to.length) best = item
+        if (!best || item.to.length > best.item.to.length) best = { group, item }
       }
     }
   }
   if (!best) return [{ labelKey: 'app.name' }]
 
-  return [
-    { labelKey: `roles.${role}`, to: roleHomeFor(role) },
-    { labelKey: best.labelKey },
+  const trail: Crumb[] = [
+    { labelKey: best.group.labelKey, to: groupHomeFor(best.group, role) },
+    { labelKey: best.item.labelKey, to: best.item.to },
   ]
+  if (detail) trail.push({ label: detail })
+
+  // The reader is standing on the last one, so it is text rather than a link.
+  delete trail[trail.length - 1].to
+  return trail
 }

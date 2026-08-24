@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 
 import { PageHeader } from '@/components/page-header'
 import { RecordingPlayer } from '@/components/recording-player'
+import { useNameThisPage } from '@/lib/breadcrumb'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
@@ -20,6 +21,10 @@ function CallDetail() {
   const { callId } = Route.useParams()
   const { t, i18n } = useTranslation()
   const { data, isPending, isError, error } = useCDR(callId)
+
+  // A finished call has no name, so the trail ends in the id it is filed
+  // under — which is also what anyone quoting this page will quote.
+  useNameThisPage(callId)
 
   if (isPending) {
     return <p className="text-xs text-muted-foreground">{t('common.loading')}</p>

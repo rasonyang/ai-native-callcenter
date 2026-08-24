@@ -7,6 +7,7 @@ import type { ReactNode } from 'react'
 import { LanguageSwitch } from '@/components/language-switch'
 import { Button } from '@/components/ui/button'
 import type { Identity, Role } from '@/lib/api'
+import { useBreadcrumbDetail } from '@/lib/breadcrumb'
 import { NAV, breadcrumbFor, visibleTo } from '@/lib/nav'
 import { useLogout } from '@/lib/session'
 import type { StreamStatus } from '@/lib/use-event-stream'
@@ -98,22 +99,27 @@ export function AppShell({
  */
 function Breadcrumb({ pathname, role }: { pathname: string; role: Role }) {
   const { t } = useTranslation()
-  const crumbs = breadcrumbFor(pathname, role)
+  const detail = useBreadcrumbDetail()
+  const crumbs = breadcrumbFor(pathname, role, detail)
 
   return (
     <div className="flex shrink-0 items-center gap-1.5 text-sm">
-      {crumbs.map((crumb, index) => (
-        <span key={crumb.labelKey + index} className="flex items-center gap-1.5">
-          {index > 0 && <span className="text-muted-foreground/50">/</span>}
-          {crumb.to ? (
-            <Link to={crumb.to} className="text-muted-foreground hover:text-primary">
-              {t(crumb.labelKey)}
-            </Link>
-          ) : (
-            <span className="font-medium">{t(crumb.labelKey)}</span>
-          )}
-        </span>
-      ))}
+      {crumbs.map((crumb, index) => {
+        // A record's own name is text the operator gave it, never a key.
+        const text = crumb.labelKey ? t(crumb.labelKey) : (crumb.label ?? '')
+        return (
+          <span key={(crumb.labelKey ?? crumb.label) + String(index)} className="flex items-center gap-1.5">
+            {index > 0 && <span className="text-muted-foreground/50">/</span>}
+            {crumb.to ? (
+              <Link to={crumb.to} className="text-muted-foreground hover:text-primary">
+                {text}
+              </Link>
+            ) : (
+              <span className="font-medium">{text}</span>
+            )}
+          </span>
+        )
+      })}
     </div>
   )
 }

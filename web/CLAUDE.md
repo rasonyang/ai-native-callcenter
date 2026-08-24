@@ -56,13 +56,20 @@ re-implement a variant.
   adding it there too.
 
 ## Topbar breadcrumb (all pages)
-- Pattern: Role / Section / Detail — e.g. "Admin / Bot Flows / early_collections".
-- The Role segment is the **viewer's own**, not the section's: the ledger lives
-  under /admin and a supervisor may read it, so labelling their page "Admin" —
-  and linking to one they cannot open — would be wrong twice.
+- Pattern: Group / Section / Detail — e.g. "Manage / Bot Flows / novanet_support".
+- The first segment is the **sidebar group** (Workspace, Supervise, Manage,
+  System), which is the word the reader just clicked, not their role. A role
+  name there claims something the page is in no position to claim, and on a
+  screen two roles share (the ledger) it claims it wrongly.
 - Every segment except the last is a LINK with a FIXED target (never history
-  back): Role → the role index route (/agent, /supervisor, /admin);
-  Section → its sidebar-nav route (e.g. Bot Flows → /admin/bots).
+  back): Group → the first page in it **this reader may open** (a group has no
+  page of its own, and the answer differs by role — never link somewhere they
+  would be bounced from); Section → its sidebar-nav route (Bot Flows →
+  /admin/bots), so a detail page is always one click from its list.
+- The Detail segment is the record's own name or id, supplied by the page
+  through `useNameThisPage()` (`src/lib/breadcrumb.tsx`) — it cannot be derived
+  from a path that carries a uuid. A page still loading passes undefined and
+  the trail simply stops at the section.
 - The last segment is the current location: font-medium, never a link.
   Detail segments show the entity id/name verbatim.
 - Interaction must distinguish clickable from non-clickable:
