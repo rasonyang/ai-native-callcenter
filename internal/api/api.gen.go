@@ -1176,6 +1176,89 @@ type ExtensionWrite struct {
 	Password *string `json:"password,omitempty"`
 }
 
+// Flow A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.
+type Flow struct {
+	CreatedAt time.Time          `json:"createdAt"`
+	FlowID    openapi_types.UUID `json:"flowId"`
+
+	// HasUnpublishedChanges The draft differs from the published revision, or nothing is published yet. Callers hear the revision, so this is the gap between what is written and what answers the phone.
+	HasUnpublishedChanges bool   `json:"hasUnpublishedChanges"`
+	Name                  string `json:"name"`
+
+	// PublishedAt When the current revision went live. Absent while nothing is published.
+	PublishedAt *time.Time `json:"publishedAt,omitempty"`
+
+	// PublishedRevisionID The revision live calls run. Absent while the flow has never been published — a number pointing at it reaches no bot.
+	PublishedRevisionID *openapi_types.UUID `json:"publishedRevisionId,omitempty"`
+
+	// Slug Stable identifier chosen at creation and never changed: it is the key `aicc flowadd` updates an existing flow by.
+	Slug      string    `json:"slug"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// FlowCreate A new flow, stored as a draft. Creating does not publish: a number pointing at an unpublished flow reaches no bot, so going live stays a separate, deliberate act.
+type FlowCreate struct {
+	Name string `json:"name"`
+	Slug string `json:"slug"`
+
+	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	//
+	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+	Spec FlowSpec `json:"spec"`
+}
+
+// FlowDetail One flow: what it is, what its draft says, and every time it has been published.
+type FlowDetail struct {
+	// DraftSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	//
+	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+	DraftSpec FlowSpec `json:"draftSpec"`
+
+	// Flow A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.
+	Flow Flow `json:"flow"`
+
+	// Revisions Newest first.
+	Revisions []FlowRevision `json:"revisions"`
+}
+
+// FlowDraftWrite Replaces the draft wholesale. The slug is not editable: it is the identity automation updates the flow by, and renaming it would quietly create a second flow on the next `aicc flowadd`. Live calls are unaffected until the draft is published.
+type FlowDraftWrite struct {
+	Name string `json:"name"`
+
+	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	//
+	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+	Spec FlowSpec `json:"spec"`
+}
+
+// FlowList defines model for FlowList.
+type FlowList struct {
+	Items []Flow `json:"items"`
+}
+
+// FlowPublish Take the current draft live.
+type FlowPublish struct {
+	// Note Why this revision was published; kept with the snapshot.
+	Note *string `json:"note,omitempty"`
+}
+
+// FlowRevision A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer.
+type FlowRevision struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// IsPublished This is the revision live calls run.
+	IsPublished bool `json:"isPublished"`
+
+	// Note Why it was published; empty when none was given.
+	Note       string             `json:"note"`
+	RevisionID openapi_types.UUID `json:"revisionId"`
+}
+
+// FlowSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+//
+// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+type FlowSpec map[string]interface{}
+
 // Identity The authenticated user.
 type Identity struct {
 	DisplayName string `json:"displayName"`
@@ -1840,6 +1923,15 @@ type CreateExtensionJSONRequestBody = ExtensionWrite
 // UpdateExtensionJSONRequestBody defines body for UpdateExtension for application/json ContentType.
 type UpdateExtensionJSONRequestBody = ExtensionWrite
 
+// CreateFlowJSONRequestBody defines body for CreateFlow for application/json ContentType.
+type CreateFlowJSONRequestBody = FlowCreate
+
+// UpdateFlowDraftJSONRequestBody defines body for UpdateFlowDraft for application/json ContentType.
+type UpdateFlowDraftJSONRequestBody = FlowDraftWrite
+
+// PublishFlowJSONRequestBody defines body for PublishFlow for application/json ContentType.
+type PublishFlowJSONRequestBody = FlowPublish
+
 // CreateQueueJSONRequestBody defines body for CreateQueue for application/json ContentType.
 type CreateQueueJSONRequestBody = QueueWrite
 
@@ -2013,6 +2105,21 @@ type ServerInterface interface {
 	// UpdateExtension Update an extension
 	// (PUT /extensions/{extensionId})
 	UpdateExtension(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID)
+	// ListFlows All flows
+	// (GET /flows)
+	ListFlows(w http.ResponseWriter, r *http.Request)
+	// CreateFlow Create a flow
+	// (POST /flows)
+	CreateFlow(w http.ResponseWriter, r *http.Request)
+	// GetFlow One flow, its draft and its revisions
+	// (GET /flows/{flowId})
+	GetFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID)
+	// UpdateFlowDraft Replace the draft
+	// (PUT /flows/{flowId})
+	UpdateFlowDraft(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID)
+	// PublishFlow Publish the draft
+	// (POST /flows/{flowId}/publish)
+	PublishFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID)
 	// ListQueues All queues
 	// (GET /queues)
 	ListQueues(w http.ResponseWriter, r *http.Request)
@@ -2379,6 +2486,36 @@ func (_ Unimplemented) DeleteExtension(w http.ResponseWriter, r *http.Request, e
 // UpdateExtension Update an extension
 // (PUT /extensions/{extensionId})
 func (_ Unimplemented) UpdateExtension(w http.ResponseWriter, r *http.Request, extensionID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFlows All flows
+// (GET /flows)
+func (_ Unimplemented) ListFlows(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateFlow Create a flow
+// (POST /flows)
+func (_ Unimplemented) CreateFlow(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetFlow One flow, its draft and its revisions
+// (GET /flows/{flowId})
+func (_ Unimplemented) GetFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateFlowDraft Replace the draft
+// (PUT /flows/{flowId})
+func (_ Unimplemented) UpdateFlowDraft(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PublishFlow Publish the draft
+// (POST /flows/{flowId}/publish)
+func (_ Unimplemented) PublishFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3987,6 +4124,112 @@ func (siw *ServerInterfaceWrapper) UpdateExtension(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListFlows operation middleware
+func (siw *ServerInterfaceWrapper) ListFlows(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFlows(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFlow operation middleware
+func (siw *ServerInterfaceWrapper) CreateFlow(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFlow(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFlow operation middleware
+func (siw *ServerInterfaceWrapper) GetFlow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "flowId" -------------
+	var flowID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "flowId", chi.URLParam(r, "flowId"), &flowID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "flowId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFlow(w, r, flowID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFlowDraft operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFlowDraft(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "flowId" -------------
+	var flowID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "flowId", chi.URLParam(r, "flowId"), &flowID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "flowId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFlowDraft(w, r, flowID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PublishFlow operation middleware
+func (siw *ServerInterfaceWrapper) PublishFlow(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "flowId" -------------
+	var flowID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "flowId", chi.URLParam(r, "flowId"), &flowID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "flowId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishFlow(w, r, flowID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListQueues operation middleware
 func (siw *ServerInterfaceWrapper) ListQueues(w http.ResponseWriter, r *http.Request) {
 
@@ -4702,6 +4945,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/extensions/{extensionId}", wrapper.UpdateExtension)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/flows", wrapper.ListFlows)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/flows", wrapper.CreateFlow)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/flows/{flowId}", wrapper.GetFlow)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/flows/{flowId}", wrapper.UpdateFlowDraft)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/flows/{flowId}/publish", wrapper.PublishFlow)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/queues", wrapper.ListQueues)

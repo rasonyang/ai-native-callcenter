@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createFlow = `-- name: CreateFlow :one
@@ -116,6 +117,53 @@ func (q *Queries) GetFlowBySlug(ctx context.Context, slug string) (Flow, error) 
 	return i, err
 }
 
+const getFlowDraft = `-- name: GetFlowDraft :one
+SELECT draft_spec FROM flows WHERE id = $1
+`
+
+func (q *Queries) GetFlowDraft(ctx context.Context, id uuid.UUID) ([]byte, error) {
+	row := q.db.QueryRow(ctx, getFlowDraft, id)
+	var draft_spec []byte
+	err := row.Scan(&draft_spec)
+	return draft_spec, err
+}
+
+const getFlowSummary = `-- name: GetFlowSummary :one
+SELECT f.id, f.slug, f.name, f.published_revision_id, f.published_at,
+       f.created_at, f.updated_at,
+       (r.spec IS DISTINCT FROM f.draft_spec)::boolean AS has_unpublished_changes
+FROM flows f
+LEFT JOIN flow_revisions r ON r.id = f.published_revision_id
+WHERE f.id = $1
+`
+
+type GetFlowSummaryRow struct {
+	ID                    uuid.UUID          `json:"id"`
+	Slug                  string             `json:"slug"`
+	Name                  string             `json:"name"`
+	PublishedRevisionID   *uuid.UUID         `json:"publishedRevisionId"`
+	PublishedAt           pgtype.Timestamptz `json:"publishedAt"`
+	CreatedAt             pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt             pgtype.Timestamptz `json:"updatedAt"`
+	HasUnpublishedChanges bool               `json:"hasUnpublishedChanges"`
+}
+
+func (q *Queries) GetFlowSummary(ctx context.Context, id uuid.UUID) (GetFlowSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getFlowSummary, id)
+	var i GetFlowSummaryRow
+	err := row.Scan(
+		&i.ID,
+		&i.Slug,
+		&i.Name,
+		&i.PublishedRevisionID,
+		&i.PublishedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.HasUnpublishedChanges,
+	)
+	return i, err
+}
+
 const getPublishedSpec = `-- name: GetPublishedSpec :one
 SELECT r.spec
 FROM flows f
@@ -128,6 +176,104 @@ func (q *Queries) GetPublishedSpec(ctx context.Context, id uuid.UUID) ([]byte, e
 	var spec []byte
 	err := row.Scan(&spec)
 	return spec, err
+}
+
+const listFlowRevisions = `-- name: ListFlowRevisions :many
+SELECT r.id, r.note, r.created_at,
+       (r.id = f.published_revision_id)::boolean AS is_published
+FROM flow_revisions r
+JOIN flows f ON f.id = r.flow_id
+WHERE r.flow_id = $1
+ORDER BY r.created_at DESC, r.id DESC
+`
+
+type ListFlowRevisionsRow struct {
+	ID          uuid.UUID          `json:"id"`
+	Note        string             `json:"note"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	IsPublished bool               `json:"isPublished"`
+}
+
+func (q *Queries) ListFlowRevisions(ctx context.Context, flowID uuid.UUID) ([]ListFlowRevisionsRow, error) {
+	rows, err := q.db.Query(ctx, listFlowRevisions, flowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFlowRevisionsRow{}
+	for rows.Next() {
+		var i ListFlowRevisionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Note,
+			&i.CreatedAt,
+			&i.IsPublished,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFlowSummaries = `-- name: ListFlowSummaries :many
+
+SELECT f.id, f.slug, f.name, f.published_revision_id, f.published_at,
+       f.created_at, f.updated_at,
+       (r.spec IS DISTINCT FROM f.draft_spec)::boolean AS has_unpublished_changes
+FROM flows f
+LEFT JOIN flow_revisions r ON r.id = f.published_revision_id
+ORDER BY f.name
+`
+
+type ListFlowSummariesRow struct {
+	ID                    uuid.UUID          `json:"id"`
+	Slug                  string             `json:"slug"`
+	Name                  string             `json:"name"`
+	PublishedRevisionID   *uuid.UUID         `json:"publishedRevisionId"`
+	PublishedAt           pgtype.Timestamptz `json:"publishedAt"`
+	CreatedAt             pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt             pgtype.Timestamptz `json:"updatedAt"`
+	HasUnpublishedChanges bool               `json:"hasUnpublishedChanges"`
+}
+
+// The list and detail reads never select draft_spec alongside the summary:
+// a roster of flows should not ship every spec, and the one place the draft
+// is wanted asks for it by itself.
+//
+// has_unpublished_changes is decided by PostgreSQL, not by Go: jsonb equality
+// is semantic (key order and whitespace are not differences), and IS DISTINCT
+// FROM makes "never published" — a NULL revision — the true case it is.
+func (q *Queries) ListFlowSummaries(ctx context.Context) ([]ListFlowSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listFlowSummaries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFlowSummariesRow{}
+	for rows.Next() {
+		var i ListFlowSummariesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Slug,
+			&i.Name,
+			&i.PublishedRevisionID,
+			&i.PublishedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.HasUnpublishedChanges,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFlows = `-- name: ListFlows :many

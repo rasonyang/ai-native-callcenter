@@ -336,6 +336,7 @@ func run() error {
 			catalogSvc,
 			st.Contacts(),
 			st.Ledger(),
+			st.Flows(),
 			recordings,
 			st.Ledger(),
 			outboundSvc,

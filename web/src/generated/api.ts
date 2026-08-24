@@ -765,6 +765,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/flows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All flows
+         * @description Identity and publication state of every flow, by name. Requires ADMIN.
+         */
+        get: operations["listFlows"];
+        put?: never;
+        /**
+         * Create a flow
+         * @description Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it. Requires ADMIN.
+         */
+        post: operations["createFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flows/{flowId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One flow, its draft and its revisions
+         * @description Requires ADMIN.
+         */
+        get: operations["getFlow"];
+        /**
+         * Replace the draft
+         * @description Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems. Requires ADMIN.
+         */
+        put: operations["updateFlowDraft"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flows/{flowId}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Publish the draft
+         * @description Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on. Requires ADMIN.
+         */
+        post: operations["publishFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cdrs": {
         parameters: {
             query?: never;
@@ -1631,6 +1699,75 @@ export interface components {
         };
         DIDList: {
             items: components["schemas"]["DID"][];
+        };
+        /**
+         * @description One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+         *
+         *     The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+         */
+        FlowSpec: {
+            [key: string]: unknown;
+        };
+        /** @description A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does. */
+        Flow: {
+            /** Format: uuid */
+            flowId: string;
+            /** @description Stable identifier chosen at creation and never changed: it is the key `aicc flowadd` updates an existing flow by. */
+            slug: string;
+            name: string;
+            /**
+             * Format: uuid
+             * @description The revision live calls run. Absent while the flow has never been published — a number pointing at it reaches no bot.
+             */
+            publishedRevisionId?: string;
+            /**
+             * Format: date-time
+             * @description When the current revision went live. Absent while nothing is published.
+             */
+            publishedAt?: string;
+            /** @description The draft differs from the published revision, or nothing is published yet. Callers hear the revision, so this is the gap between what is written and what answers the phone. */
+            hasUnpublishedChanges: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        FlowList: {
+            items: components["schemas"]["Flow"][];
+        };
+        /** @description A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer. */
+        FlowRevision: {
+            /** Format: uuid */
+            revisionId: string;
+            /** @description Why it was published; empty when none was given. */
+            note: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @description This is the revision live calls run. */
+            isPublished: boolean;
+        };
+        /** @description One flow: what it is, what its draft says, and every time it has been published. */
+        FlowDetail: {
+            flow: components["schemas"]["Flow"];
+            draftSpec: components["schemas"]["FlowSpec"];
+            /** @description Newest first. */
+            revisions: components["schemas"]["FlowRevision"][];
+        };
+        /** @description A new flow, stored as a draft. Creating does not publish: a number pointing at an unpublished flow reaches no bot, so going live stays a separate, deliberate act. */
+        FlowCreate: {
+            slug: string;
+            name: string;
+            spec: components["schemas"]["FlowSpec"];
+        };
+        /** @description Replaces the draft wholesale. The slug is not editable: it is the identity automation updates the flow by, and renaming it would quietly create a second flow on the next `aicc flowadd`. Live calls are unaffected until the draft is published. */
+        FlowDraftWrite: {
+            name: string;
+            spec: components["schemas"]["FlowSpec"];
+        };
+        /** @description Take the current draft live. */
+        FlowPublish: {
+            /** @description Why this revision was published; kept with the snapshot. */
+            note?: string;
         };
         /**
          * @description How the call concluded. There is no MISSED status: abandonment is a missedReason on an ANSWERED row, because the bot answered first.
@@ -3484,6 +3621,149 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listFlows: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every flow. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowCreate"];
+            };
+        };
+        responses: {
+            /** @description The stored flow, unpublished. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The flow. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateFlowDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FlowDraftWrite"];
+            };
+        };
+        responses: {
+            /** @description The flow after the edit. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    publishFlow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FlowPublish"];
+            };
+        };
+        responses: {
+            /** @description The flow, now pointing at its new revision. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Flow"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

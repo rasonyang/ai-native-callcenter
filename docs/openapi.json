@@ -39,6 +39,10 @@
       "description": "Configuration: extensions, queues, staffing and DIDs. Admin territory; queue reads are supervision."
     },
     {
+      "name": "flows",
+      "description": "Conversation flows the bot runs: drafts, revisions, publication."
+    },
+    {
       "name": "cdrs",
       "description": "The finished-call ledger: CDRs, transcripts and journeys."
     },
@@ -2328,6 +2332,268 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/flows": {
+      "get": {
+        "operationId": "listFlows",
+        "tags": [
+          "flows"
+        ],
+        "summary": "All flows",
+        "description": "Identity and publication state of every flow, by name. Requires ADMIN.",
+        "responses": {
+          "200": {
+            "description": "Every flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createFlow",
+        "tags": [
+          "flows"
+        ],
+        "summary": "Create a flow",
+        "description": "Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored flow, unpublished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flow"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/flows/{flowId}": {
+      "get": {
+        "operationId": "getFlow",
+        "tags": [
+          "flows"
+        ],
+        "summary": "One flow, its draft and its revisions",
+        "description": "Requires ADMIN.",
+        "parameters": [
+          {
+            "name": "flowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateFlowDraft",
+        "tags": [
+          "flows"
+        ],
+        "summary": "Replace the draft",
+        "description": "Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "flowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowDraftWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The flow after the edit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flow"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/flows/{flowId}/publish": {
+      "post": {
+        "operationId": "publishFlow",
+        "tags": [
+          "flows"
+        ],
+        "summary": "Publish the draft",
+        "description": "Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "flowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FlowPublish"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The flow, now pointing at its new revision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Flow"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -4983,6 +5249,178 @@
         "required": [
           "items"
         ]
+      },
+      "FlowSpec": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.\n\nThe document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run."
+      },
+      "Flow": {
+        "type": "object",
+        "description": "A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.",
+        "properties": {
+          "flowId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "slug": {
+            "type": "string",
+            "description": "Stable identifier chosen at creation and never changed: it is the key `aicc flowadd` updates an existing flow by."
+          },
+          "name": {
+            "type": "string"
+          },
+          "publishedRevisionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The revision live calls run. Absent while the flow has never been published — a number pointing at it reaches no bot."
+          },
+          "publishedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the current revision went live. Absent while nothing is published."
+          },
+          "hasUnpublishedChanges": {
+            "type": "boolean",
+            "description": "The draft differs from the published revision, or nothing is published yet. Callers hear the revision, so this is the gap between what is written and what answers the phone."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "flowId",
+          "slug",
+          "name",
+          "hasUnpublishedChanges",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "FlowList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Flow"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "FlowRevision": {
+        "type": "object",
+        "description": "A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer.",
+        "properties": {
+          "revisionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "note": {
+            "type": "string",
+            "description": "Why it was published; empty when none was given."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "isPublished": {
+            "type": "boolean",
+            "description": "This is the revision live calls run."
+          }
+        },
+        "required": [
+          "revisionId",
+          "note",
+          "createdAt",
+          "isPublished"
+        ]
+      },
+      "FlowDetail": {
+        "type": "object",
+        "description": "One flow: what it is, what its draft says, and every time it has been published.",
+        "properties": {
+          "flow": {
+            "$ref": "#/components/schemas/Flow"
+          },
+          "draftSpec": {
+            "$ref": "#/components/schemas/FlowSpec"
+          },
+          "revisions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FlowRevision"
+            },
+            "description": "Newest first."
+          }
+        },
+        "required": [
+          "flow",
+          "draftSpec",
+          "revisions"
+        ]
+      },
+      "FlowCreate": {
+        "type": "object",
+        "description": "A new flow, stored as a draft. Creating does not publish: a number pointing at an unpublished flow reaches no bot, so going live stays a separate, deliberate act.",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-z0-9][a-z0-9_-]*$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "spec": {
+            "$ref": "#/components/schemas/FlowSpec"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "spec"
+        ]
+      },
+      "FlowDraftWrite": {
+        "type": "object",
+        "description": "Replaces the draft wholesale. The slug is not editable: it is the identity automation updates the flow by, and renaming it would quietly create a second flow on the next `aicc flowadd`. Live calls are unaffected until the draft is published.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "spec": {
+            "$ref": "#/components/schemas/FlowSpec"
+          }
+        },
+        "required": [
+          "name",
+          "spec"
+        ]
+      },
+      "FlowPublish": {
+        "type": "object",
+        "description": "Take the current draft live.",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 200,
+            "description": "Why this revision was published; kept with the snapshot."
+          }
+        }
       },
       "CDRStatus": {
         "type": "string",

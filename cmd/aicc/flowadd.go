@@ -64,10 +64,8 @@ func runFlowAdd(args []string) error {
 		if lookupErr != nil {
 			return err
 		}
-		if _, err := st.Queries.UpdateFlowDraft(ctx, queries.UpdateFlowDraftParams{
-			ID: existing.ID, Name: existing.Name, DraftSpec: data,
-		}); err != nil {
-			return fmt.Errorf("update flow %s: %w", resolvedSlug, err)
+		if err := flows.UpdateDraft(ctx, existing.ID, existing.Name, data); err != nil {
+			return err
 		}
 		id = existing.ID
 	}

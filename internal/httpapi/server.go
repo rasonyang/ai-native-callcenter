@@ -54,6 +54,7 @@ type Server struct {
 	catalog     CatalogService
 	contacts    ContactService
 	ledger      *store.LedgerStore
+	flows       FlowService
 	recordings  RecordingStreamer
 	auditor     Auditor
 	outbound    OutboundService
@@ -75,6 +76,9 @@ type Deps struct {
 	Contacts ContactService
 	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
 	Ledger *store.LedgerStore
+	// Flows are the conversations the bot runs; nil hides the flow endpoints
+	// and leaves `aicc flowadd` as the only way in.
+	Flows FlowService
 	// Recordings streams stored call audio; nil disables playback.
 	Recordings RecordingStreamer
 	// Auditor records mutating requests; nil disables the trail.
@@ -99,6 +103,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		catalog:     deps.Catalog,
 		contacts:    deps.Contacts,
 		ledger:      deps.Ledger,
+		flows:       deps.Flows,
 		recordings:  deps.Recordings,
 		auditor:     deps.Auditor,
 		outbound:    deps.Outbound,
@@ -232,6 +237,21 @@ func (s *Server) router() chi.Router {
 						sup.Use(requireSupervisorRole)
 						sup.Get("/queues", op.ListQueues)
 						sup.Get("/queues/{queueId}/agents", op.ListQueueAgents)
+					})
+				}
+
+				if s.flows != nil {
+					// A flow is what the bot says and does, and publishing
+					// one changes what every caller on its numbers hears.
+					// Administration, like the numbers that point at it.
+					private.Group(func(admin chi.Router) {
+						admin.Use(requireRole(auth.RoleAdmin))
+
+						admin.Get("/flows", op.ListFlows)
+						admin.Post("/flows", op.CreateFlow)
+						admin.Get("/flows/{flowId}", op.GetFlow)
+						admin.Put("/flows/{flowId}", op.UpdateFlowDraft)
+						admin.Post("/flows/{flowId}/publish", op.PublishFlow)
 					})
 				}
 

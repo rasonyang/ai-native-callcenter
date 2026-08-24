@@ -106,10 +106,25 @@ func (s *Spec) validate() error {
 	}
 
 	if len(problems) > 0 {
-		return fmt.Errorf("flow %s is not usable:\n  - %s",
-			s.ID, strings.Join(problems, "\n  - "))
+		return &ValidationError{FlowID: s.ID, Problems: problems}
 	}
 	return nil
+}
+
+// ValidationError is everything wrong with a flow rather than the first thing.
+//
+// The list is the point: an author fixing a spec should see the whole report
+// at once, not discover it one save at a time. The joined message is what a
+// startup log wants; the slice is what an editor puts next to the lines.
+type ValidationError struct {
+	// FlowID is the spec's own id, which may itself be one of the problems.
+	FlowID   string
+	Problems []string
+}
+
+func (e *ValidationError) Error() string {
+	return fmt.Sprintf("flow %s is not usable:\n  - %s",
+		e.FlowID, strings.Join(e.Problems, "\n  - "))
 }
 
 // knownToolNames is everything a phase may legitimately allow: the flow's own
