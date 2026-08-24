@@ -659,8 +659,14 @@ func split(snap Snapshot) (originator *PartySnapshot, agentLegs []*PartySnapshot
 	return originator, agentLegs
 }
 
-// QueueEvent records one member movement into the ledger. The coordinator
-// calls it for every callcenter fact worth reporting on.
+// QueueEvent records one member movement into the ledger.
+//
+// Not for the reports — those read cdrs, and this comment used to claim
+// otherwise (C7). These rows are the call's journey rather than its outcome:
+// which queues it crossed, which agents were offered it and declined, how long
+// the caller had been waiting each time. A CDR keeps one queue id and one
+// missed reason, so a call offered once and a call offered thirty-three times
+// are the same row there. Read back by GET /calls/{callId}/queue-events.
 func (a *CDRAssembler) QueueEvent(ctx context.Context, ev SwitchEvent, callID *uuid.UUID, agentID *uuid.UUID) {
 	if a.queues == nil {
 		return

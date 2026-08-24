@@ -23,7 +23,7 @@
 | recordings(00005:67) | sql/ledger.sql:68(InsertRecording ← telephony/cdr.go:126-133) | sql/ledger.sql:73,:76 | ListCallRecordings recording_handlers.go:64;GetRecordingAudio :81 | components/recording-player.tsx;_app.admin.cdr.$callId.tsx;_app.agent.calls.tsx | S4(VC-S4-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:场景已挂 VC-S4-04;坐席回放/越权另由 TASKS T6.1 起草 |
 | quality_reviews(00005:82) | sql/ledger.sql:107(CreateRecordingReview recording_handlers.go:118) | sql/ledger.sql:112(ListCallReviews :152) | recording_handlers.go:118,:152 | NOT FOUND | UNCOVERED | [FACT] | API 存在但 web 零引用——写得进、看不见;2026-08-20 决议 D1:UI defer 下一期 |
 | callbacks(00005:97;00006 加 CLAIMED) | sql/ledger.sql:79(InsertCallback ← aicall/actions.go:112);:90,:115(claim/complete ← ledger_handlers.go:171,:196) | sql/ledger.sql:84 | ListCallbacks ledger_handlers.go:156;Claim :171;Complete :196 | _app.agent.callbacks.tsx | S3(VC-S3-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:take_message 全链已挂 VC-S3-04 |
-| queue_events(00005:114) | sql/ledger.sql:96(InsertQueueEvent ← telephony/cdr.go:373-381);seed.go:107 | NOT FOUND | NOT FOUND | NOT FOUND | S3, S5, S6(仅写入侧) | [FACT] | 只写不读:报表实际读 cdrs(ledger.sql:133-161)。cdr.go:112 注释宣称"报表读这些行"与现实不符 |
+| queue_events(00005:114) | sql/ledger.sql InsertQueueEvent ← telephony/cdr.go QueueEvent();seed.go:107 | **QueueEventsByCall ← httpapi ListCallQueueEvents(`GET /calls/{callId}/queue-events`,主管)** | NOT FOUND | NOT FOUND | S3, S5, S6 | [FACT] | **2026-08-24 C7 已建读路径**(最小面积:一通电话的队列旅程,无面板无聚合)。报表仍读 cdrs —— 那是**结果**,本表是**过程**(跨队列、逐次派单、每次的等待)。cdr.go 那句失实注释已改 |
 | audit_logs(00005:127) | sql/ledger.sql:100(auditTrail 中间件 httpapi/audit.go:33) | NOT FOUND | NOT FOUND | NOT FOUND | UNCOVERED | [FACT] | 只写不读;2026-08-20 决议 D5:补检索 → TASKS W4(/admin/audit) |
 | dispositions(00010:31;00012 扁平化为 4 词) | 迁移内种子 00012:40-44 | sql/ledger.sql:171(ListDispositions),:174(校验) | ListDispositions ledger_handlers.go:80;AgentWrapUp agent_handlers.go:172 | _app.agent.index.tsx(ACW 卡片) | S4 | [FACT] | 无管理 CRUD;2026-08-20 决议 D4:固定词表为产品决策(TASKS W5 入档),"恰好 4 词"断言转正式 |
 | wrap_ups(00010:63;00012 删 category;00013 加 is_confirmed) | sql/ledger.sql:180(OpenWrapUp ← agents/service.go:289);:188(确认 ← agent_handlers.go:172) | sql/ledger.sql:198,:204;my-day :240 | GetAgentWrapUp agent_handlers.go:132;AgentWrapUp :172 | _app.agent.index.tsx(确认卡) | S4 | [FACT] | 平台开单(is_confirmed=false)/坐席确认(true)的两段写 |
@@ -40,7 +40,7 @@
 - trunks(00002:137)— ~~删除候选~~ **已决 S3:需要,中继号要管理** → TASKS **W8**(契约评审先行)。
 
 ### 需实现 →(2026-08-20 决议更新)
-- queue_events **读路径**(sql/ledger.sql:96 只有写)— 仍开放(TASKS C7:实现读取 or 修正 cdr.go:112 注释)。
+- ~~queue_events **读路径**~~ —— **2026-08-24 C7 已闭合**:`GET /calls/{callId}/queue-events`(主管专属)。无人读期间表中已积下 273 行 OFFERED、七通被派单 10–33 次且每通只派给同一坐席,见 `artifacts/C7/verdict-2026-08-24.md`。
 - quality_reviews **UI** — **已决 D1:defer 下一期**(TASKS W6 记录)。
 - audit_logs **读路径/查询 API** — **已决 D5:要做** → TASKS **W4**(`/admin/audit`,参考 ui-test)。
 - flows / flow_revisions 的 **API 与 UI** — **已决 D3:要做,含 UI 上传/编辑 spec** → TASKS **W3**(`/admin/bots`)。

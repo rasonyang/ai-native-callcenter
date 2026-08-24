@@ -205,11 +205,11 @@
 | cdrs.missed_reason=AGENTS_DID_NOT_ANSWER | cdr.go:273-275 | 同上 | S5 | [FACT] | |
 | cdrs.missed_reason=NO_AVAILABLE_AGENT | cdr.go:264-266(queue.Cause=="Timeout") | 同上 | S5, S6 | [FACT] | |
 | cdrs.missed_reason=OUT_OF_HOURS | NOT FOUND | CHECK 允许 | UNCOVERED | [FACT] | 死值(营业时间路由未实现) |
-| queue_events.event=JOINED | cdr.go:350(store 常量 ledgerstore.go:825) | NOT FOUND(无读者,见 tables.md) | S3 | [FACT] | |
-| queue_events.event=OFFERED | cdr.go:352 | NOT FOUND | S4, S5 | [FACT] | |
-| queue_events.event=BRIDGED | cdr.go:354 | NOT FOUND | S4 | [FACT] | |
-| queue_events.event=ABANDONED | cdr.go:361-362(Cause=="Cancel") | NOT FOUND | S6 | [FACT] | |
-| queue_events.event=LEFT | cdr.go:364 | NOT FOUND | S3 | [FACT] | |
+| queue_events.event=JOINED | cdr.go:350(store 常量 ledgerstore.go:825) | httpapi ListCallQueueEvents | S3 | [FACT] | |
+| queue_events.event=OFFERED | cdr.go:352 | httpapi ListCallQueueEvents | S4, S5 | [FACT] | |
+| queue_events.event=BRIDGED | cdr.go:354 | httpapi ListCallQueueEvents | S4 | [FACT] | |
+| queue_events.event=ABANDONED | cdr.go:361-362(Cause=="Cancel") | httpapi ListCallQueueEvents | S6 | [FACT] | |
+| queue_events.event=LEFT | cdr.go:364 | httpapi ListCallQueueEvents | S3 | [FACT] | |
 | recordings.backend=FS | internal/recording/fs.go(Backend()) | CHECK 00005:70;cdr.go:128 | UNCOVERED | [FACT] | 录音无场景;需补 |
 | recordings.backend=S3 | internal/recording/s3.go(Backend());dev 默认(memory:project-dev-recording-seaweedfs) | 同上 | UNCOVERED | [FACT] | 同上 |
 | trunks.direction=INBOUND/OUTBOUND/BIDIRECTIONAL | NOT FOUND | NOT FOUND | UNCOVERED | [FACT] | 表本身零使用(tables.md) |
