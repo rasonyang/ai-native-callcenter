@@ -251,6 +251,8 @@ func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
 // Stubs: enough presence to make every conditional route group register.
 type stubAgents struct{}
 
+func (stubAgents) MirrorAgent(context.Context, uuid.UUID) {}
+
 func (stubAgents) Login(context.Context, uuid.UUID, string) (agents.Presence, error) {
 	return agents.Presence{}, nil
 }

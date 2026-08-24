@@ -9,7 +9,23 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const countOtherActiveAdmins = `-- name: CountOtherActiveAdmins :one
+
+SELECT count(*) FROM users
+WHERE role = 'ADMIN' AND status = 'ACTIVE' AND id <> $1
+`
+
+// Guards the last way in. Counted inside the same transaction as the change,
+// so two administrators cannot each demote the other by acting at once.
+func (q *Queries) CountOtherActiveAdmins(ctx context.Context, id uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOtherActiveAdmins, id)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
 
 const createUser = `-- name: CreateUser :one
 
@@ -51,6 +67,51 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastLoginAt,
+	)
+	return i, err
+}
+
+const getAccount = `-- name: GetAccount :one
+SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.status, u.locale, u.created_at, u.updated_at, u.last_login_at, a.id AS agent_id, a.callcenter_name, e.number AS extension_number
+FROM users u
+LEFT JOIN agents a ON a.user_id = u.id
+LEFT JOIN extensions e ON e.id = a.default_extension_id
+WHERE u.id = $1
+`
+
+type GetAccountRow struct {
+	ID              uuid.UUID          `json:"id"`
+	Username        string             `json:"username"`
+	PasswordHash    string             `json:"passwordHash"`
+	DisplayName     string             `json:"displayName"`
+	Role            string             `json:"role"`
+	Status          string             `json:"status"`
+	Locale          *string            `json:"locale"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	LastLoginAt     pgtype.Timestamptz `json:"lastLoginAt"`
+	AgentID         *uuid.UUID         `json:"agentId"`
+	CallcenterName  *string            `json:"callcenterName"`
+	ExtensionNumber *string            `json:"extensionNumber"`
+}
+
+func (q *Queries) GetAccount(ctx context.Context, id uuid.UUID) (GetAccountRow, error) {
+	row := q.db.QueryRow(ctx, getAccount, id)
+	var i GetAccountRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.Status,
+		&i.Locale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLoginAt,
+		&i.AgentID,
+		&i.CallcenterName,
+		&i.ExtensionNumber,
 	)
 	return i, err
 }
@@ -99,6 +160,68 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 	return i, err
 }
 
+const listAccounts = `-- name: ListAccounts :many
+
+SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.status, u.locale, u.created_at, u.updated_at, u.last_login_at, a.id AS agent_id, a.callcenter_name, e.number AS extension_number
+FROM users u
+LEFT JOIN agents a ON a.user_id = u.id
+LEFT JOIN extensions e ON e.id = a.default_extension_id
+ORDER BY u.username
+`
+
+type ListAccountsRow struct {
+	ID              uuid.UUID          `json:"id"`
+	Username        string             `json:"username"`
+	PasswordHash    string             `json:"passwordHash"`
+	DisplayName     string             `json:"displayName"`
+	Role            string             `json:"role"`
+	Status          string             `json:"status"`
+	Locale          *string            `json:"locale"`
+	CreatedAt       pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt       pgtype.Timestamptz `json:"updatedAt"`
+	LastLoginAt     pgtype.Timestamptz `json:"lastLoginAt"`
+	AgentID         *uuid.UUID         `json:"agentId"`
+	CallcenterName  *string            `json:"callcenterName"`
+	ExtensionNumber *string            `json:"extensionNumber"`
+}
+
+// Everything the accounts screen shows in one read: the account, and the ACD
+// identity and phone it has when it has them. An administrator matches neither
+// join, which is the point — a user is not always an agent.
+func (q *Queries) ListAccounts(ctx context.Context) ([]ListAccountsRow, error) {
+	rows, err := q.db.Query(ctx, listAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAccountsRow{}
+	for rows.Next() {
+		var i ListAccountsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.PasswordHash,
+			&i.DisplayName,
+			&i.Role,
+			&i.Status,
+			&i.Locale,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastLoginAt,
+			&i.AgentID,
+			&i.CallcenterName,
+			&i.ExtensionNumber,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, password_hash, display_name, role, status, locale, created_at, updated_at, last_login_at FROM users ORDER BY username
 `
@@ -141,6 +264,48 @@ UPDATE users SET last_login_at = now() WHERE id = $1
 func (q *Queries) TouchUserLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, touchUserLogin, id)
 	return err
+}
+
+const updateUser = `-- name: UpdateUser :one
+UPDATE users
+SET username = $2, display_name = $3, role = $4, status = $5, locale = $6,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, username, password_hash, display_name, role, status, locale, created_at, updated_at, last_login_at
+`
+
+type UpdateUserParams struct {
+	ID          uuid.UUID `json:"id"`
+	Username    string    `json:"username"`
+	DisplayName string    `json:"displayName"`
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+	Locale      *string   `json:"locale"`
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUser,
+		arg.ID,
+		arg.Username,
+		arg.DisplayName,
+		arg.Role,
+		arg.Status,
+		arg.Locale,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.PasswordHash,
+		&i.DisplayName,
+		&i.Role,
+		&i.Status,
+		&i.Locale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastLoginAt,
+	)
+	return i, err
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec

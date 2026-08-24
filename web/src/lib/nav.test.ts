@@ -24,7 +24,7 @@ describe('the sidebar each role gets', () => {
   it('gives an administrator the platform, and nothing operational', () => {
     expect(menuFor('ADMIN')).toEqual([
       '/admin',
-      '/admin/agents',
+      '/admin/users',
       '/admin/extensions',
       '/admin/routing',
       '/admin/numbers',

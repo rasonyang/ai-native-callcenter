@@ -51,10 +51,27 @@ func (c *CatalogStore) AllocateExtension(ctx context.Context, e catalog.Extensio
 	}
 	// Safe after Commit: pgx answers ErrTxClosed, which nothing acts on.
 	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := c.q.WithTx(tx)
 
+	row, err := allocateExtensionTx(ctx, c.q.WithTx(tx), e, rangeLow, rangeHigh)
+	if err != nil {
+		return catalog.Extension{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.Extension{}, fmt.Errorf("commit extension %s: %w", row.Number, err)
+	}
+	return extensionOf(row), nil
+}
+
+// allocateExtensionTx is the allocation itself, on a transaction somebody else
+// owns: the pool lock, the search and the insert.
+//
+// Shared rather than copied, because provisioning an account allocates a phone
+// inside a larger transaction. Two copies of a lock discipline is how one of
+// them quietly loses it.
+func allocateExtensionTx(ctx context.Context, qtx *queries.Queries,
+	e catalog.Extension, rangeLow, rangeHigh int) (queries.Extension, error) {
 	if err := qtx.LockExtensionPool(ctx, extensionPoolLockKey); err != nil {
-		return catalog.Extension{}, fmt.Errorf("lock extension pool: %w", err)
+		return queries.Extension{}, fmt.Errorf("lock extension pool: %w", err)
 	}
 	number, err := qtx.LowestFreeExtensionNumber(ctx, queries.LowestFreeExtensionNumberParams{
 		RangeLow:  int32(rangeLow),
@@ -62,9 +79,9 @@ func (c *CatalogStore) AllocateExtension(ctx context.Context, e catalog.Extensio
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return catalog.Extension{}, catalog.ErrPoolExhausted
+			return queries.Extension{}, catalog.ErrPoolExhausted
 		}
-		return catalog.Extension{}, fmt.Errorf("find a free extension number: %w", err)
+		return queries.Extension{}, fmt.Errorf("find a free extension number: %w", err)
 	}
 	e.Number = number
 	e.NameAfterNumber()
@@ -78,12 +95,9 @@ func (c *CatalogStore) AllocateExtension(ctx context.Context, e catalog.Extensio
 		IsEnabled:   e.IsEnabled,
 	})
 	if err != nil {
-		return catalog.Extension{}, fmt.Errorf("create extension %s: %w", e.Number, err)
+		return queries.Extension{}, fmt.Errorf("create extension %s: %w", e.Number, err)
 	}
-	if err := tx.Commit(ctx); err != nil {
-		return catalog.Extension{}, fmt.Errorf("commit extension %s: %w", e.Number, err)
-	}
-	return extensionOf(row), nil
+	return row, nil
 }
 
 //

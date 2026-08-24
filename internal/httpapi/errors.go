@@ -33,11 +33,17 @@ const (
 	// works at. Distinct from CodeExtensionInUse, which is a sign-in
 	// collision: this one is about the binding, not the session.
 	CodeExtensionAssignedToAgent ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
-	CodeAgentAlreadyLoggedIn     ErrorCode = "AGENT_ALREADY_LOGGED_IN"
-	CodeAgentNotLoggedIn         ErrorCode = "AGENT_NOT_LOGGED_IN"
-	CodeAgentNotInWrapUp         ErrorCode = "AGENT_NOT_IN_WRAP_UP"
-	CodeCallNotFound             ErrorCode = "CALL_NOT_FOUND"
-	CodeNotCallParty             ErrorCode = "NOT_CALL_PARTY"
+	// CodeExtensionPoolExhausted is not a collision: nothing the operator
+	// asked for was taken, the deployment has run out of numbers.
+	CodeExtensionPoolExhausted ErrorCode = "EXTENSION_POOL_EXHAUSTED"
+	// CodeLastAdmin refuses the change that would leave nobody able to
+	// administer the product.
+	CodeLastAdmin            ErrorCode = "LAST_ADMIN"
+	CodeAgentAlreadyLoggedIn ErrorCode = "AGENT_ALREADY_LOGGED_IN"
+	CodeAgentNotLoggedIn     ErrorCode = "AGENT_NOT_LOGGED_IN"
+	CodeAgentNotInWrapUp     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
+	CodeCallNotFound         ErrorCode = "CALL_NOT_FOUND"
+	CodeNotCallParty         ErrorCode = "NOT_CALL_PARTY"
 	// CodeOperationNotAllowedForCallType refuses a control this kind of
 	// call does not offer, rather than a control this caller may not use.
 	CodeOperationNotAllowedForCallType ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"

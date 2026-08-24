@@ -550,6 +550,17 @@ func normalizeAgentConfig(cfg AgentConfig) (AgentConfig, error) {
 	return cfg, nil
 }
 
+// MirrorAgent pushes an agent's configuration to the switch.
+//
+// Exported for provisioning, which writes the account, the identity and the
+// phone in one transaction rather than through this service — so the mirror
+// this service does for itself has to be asked for. Without it the agent
+// exists in the product and not in mod_callcenter, and nothing says so until
+// a queue fails to offer them a call.
+func (s *Service) MirrorAgent(ctx context.Context, agentID uuid.UUID) {
+	s.mirrorConfig(ctx, agentID)
+}
+
 // mirrorConfig pushes a changed binding to the switch, so a rebound phone
 // takes calls without waiting for the agent to sign in again.
 func (s *Service) mirrorConfig(ctx context.Context, agentID uuid.UUID) {

@@ -38,7 +38,7 @@
     "queues": "队列",
     "quality": "质检",
     "overview": "概览",
-    "users": "用户与角色",
+    "users": "用户",
     "routing": "队列与路由",
     "bots": "机器人流程",
     "cdr": "通话记录",
@@ -554,5 +554,30 @@
     "maxTurns": "最大轮次",
     "fallbackTarget": "兜底阶段",
     "alwaysAllowed": "始终可用"
+  },
+  "users": {
+    "hint": "谁在用这个产品，以及每个人被配了什么。",
+    "newUser": "新建账号",
+    "editUser": "编辑账号",
+    "username": "登录名",
+    "usernameHint": "字母、数字、点、下划线和连字符。坐席在交换机侧的名字由它派生，之后不可改名。",
+    "displayName": "姓名",
+    "role": "角色",
+    "roleHint": "坐席与主管会从号段里分到一部话机；管理员不接电话，不配话机。",
+    "status": "状态",
+    "statusHint": "停用在下一个请求上就生效，不用等到下次登录。",
+    "statuses": {
+      "ACTIVE": "正常",
+      "SUSPENDED": "已停用"
+    },
+    "extension": "分机",
+    "noPhone": "无",
+    "noUsers": "还没有账号。",
+    "initialPassword": "初始口令",
+    "newPassword": "新口令",
+    "passwordHint": "至少 8 位。没有任何地方能读回它，管理员只能重设。",
+    "resetPassword": "重设口令",
+    "resetTitle": "为 {{username}} 设置口令",
+    "resetHint": "用旧口令建立的会话会全部结束。"
   }
 }

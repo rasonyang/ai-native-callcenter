@@ -202,9 +202,11 @@ const (
 	ErrorCodeCONFLICT                       ErrorCode = "CONFLICT"
 	ErrorCodeEXTENSIONASSIGNEDTOAGENT       ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
 	ErrorCodeEXTENSIONINUSE                 ErrorCode = "EXTENSION_IN_USE"
+	ErrorCodeEXTENSIONPOOLEXHAUSTED         ErrorCode = "EXTENSION_POOL_EXHAUSTED"
 	ErrorCodeFORBIDDEN                      ErrorCode = "FORBIDDEN"
 	ErrorCodeINTERNAL                       ErrorCode = "INTERNAL"
 	ErrorCodeINVALIDCREDENTIALS             ErrorCode = "INVALID_CREDENTIALS"
+	ErrorCodeLASTADMIN                      ErrorCode = "LAST_ADMIN"
 	ErrorCodeNOTCALLPARTY                   ErrorCode = "NOT_CALL_PARTY"
 	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
 	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
@@ -234,11 +236,15 @@ func (e ErrorCode) Valid() bool {
 		return true
 	case ErrorCodeEXTENSIONINUSE:
 		return true
+	case ErrorCodeEXTENSIONPOOLEXHAUSTED:
+		return true
 	case ErrorCodeFORBIDDEN:
 		return true
 	case ErrorCodeINTERNAL:
 		return true
 	case ErrorCodeINVALIDCREDENTIALS:
+		return true
+	case ErrorCodeLASTADMIN:
 		return true
 	case ErrorCodeNOTCALLPARTY:
 		return true
@@ -688,6 +694,24 @@ func (e TranscriptionState) Valid() bool {
 	case TranscriptionStateLIVE:
 		return true
 	case TranscriptionStateSTOPPED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for UserStatus.
+const (
+	UserStatusACTIVE    UserStatus = "ACTIVE"
+	UserStatusSUSPENDED UserStatus = "SUSPENDED"
+)
+
+// Valid indicates whether the value is a known member of the UserStatus enum.
+func (e UserStatus) Valid() bool {
+	switch e {
+	case UserStatusACTIVE:
+		return true
+	case UserStatusSUSPENDED:
 		return true
 	default:
 		return false
@@ -1341,6 +1365,11 @@ type PartySnapshot struct {
 // PartyState defines model for PartyState.
 type PartyState string
 
+// PasswordReset A password an administrator sets on somebody else's account. Every session opened with the old one is revoked, so a reset ends access rather than merely changing what would work next time.
+type PasswordReset struct {
+	Password string `json:"password"`
+}
+
 // Presence One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.
 type Presence struct {
 	// AgentID Whose presence this is. The cockpit needs it to tell its own party from the other side on a call where both parties are agents — an internal extension-to-extension call reaches both of them through /calls/mine, and picking the first party that happens to carry an agentId shows one agent the other one's state.
@@ -1669,19 +1698,62 @@ type TransferRequest struct {
 	Destination string `json:"destination"`
 }
 
-// User An account, as the agent editor needs to name it.
+// User An account, with the agent identity and phone that belong to it when it has them.
 type User struct {
-	DisplayName string `json:"displayName"`
+	// AgentID The ACD identity, present for an account that takes calls. An administrator has none — they are a user but not an agent, and the two are not the same thing.
+	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
+
+	// CallcenterName How the switch names this agent. Stamped when the identity is created and never renamed afterwards: it is what mod_callcenter, its tiers and every historical record know them by.
+	CallcenterName *string `json:"callcenterName,omitempty"`
+	DisplayName    string  `json:"displayName"`
+
+	// ExtensionNumber The phone bound to this account, allocated from AICC_EXTENSION_RANGE when the account was created. Absent for an account with no phone.
+	ExtensionNumber *string `json:"extensionNumber,omitempty"`
 
 	// Role Ranked roles; a higher role passes every lower gate (ADMIN > SUPERVISOR > AGENT).
-	Role     Role               `json:"role"`
+	Role Role `json:"role"`
+
+	// Status Whether the account may sign in. A suspended account is refused on its next request, not at its next login: the session check reads the account, so suspending takes hold at once.
+	Status   UserStatus         `json:"status"`
 	UserID   openapi_types.UUID `json:"userId"`
 	Username string             `json:"username"`
+}
+
+// UserCreate A new account. An AGENT or SUPERVISOR also gets an ACD identity and a phone allocated from the extension pool, in the same transaction: an account that takes calls is not usable without them, and half-provisioning is not a state anybody could act on. An ADMIN gets neither.
+type UserCreate struct {
+	// DisplayName Defaults to the username.
+	DisplayName *string `json:"displayName,omitempty"`
+	Locale      *string `json:"locale,omitempty"`
+
+	// Password The initial password. The account can be given a new one at any time by an administrator; nothing here can read it back.
+	Password string `json:"password"`
+
+	// Role Ranked roles; a higher role passes every lower gate (ADMIN > SUPERVISOR > AGENT).
+	Role Role `json:"role"`
+
+	// Username Letters, digits, dot, underscore and hyphen. Narrower than the column, because an agent's switch-side name is derived from it and mod_callcenter cannot hold a space, an @ or a quote.
+	Username string `json:"username"`
 }
 
 // UserList defines model for UserList.
 type UserList struct {
 	Items []User `json:"items"`
+}
+
+// UserStatus Whether the account may sign in. A suspended account is refused on its next request, not at its next login: the session check reads the account, so suspending takes hold at once.
+type UserStatus string
+
+// UserUpdate The account as it should now read — a whole replacement, so read it, change what you meant, and send all of it back. Promoting an ADMIN to a call-taking role provisions the identity and phone they lack; demoting one never removes them, because their state history and filed wrap-ups hang off that identity.
+type UserUpdate struct {
+	DisplayName *string `json:"displayName,omitempty"`
+	Locale      *string `json:"locale,omitempty"`
+
+	// Role Ranked roles; a higher role passes every lower gate (ADMIN > SUPERVISOR > AGENT).
+	Role Role `json:"role"`
+
+	// Status Whether the account may sign in. A suspended account is refused on its next request, not at its next login: the session check reads the account, so suspending takes hold at once.
+	Status   UserStatus `json:"status"`
+	Username string     `json:"username"`
 }
 
 // WaitingCall A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next.
@@ -1944,6 +2016,15 @@ type StaffQueueJSONRequestBody = StaffQueueRequest
 // CreateRecordingReviewJSONRequestBody defines body for CreateRecordingReview for application/json ContentType.
 type CreateRecordingReviewJSONRequestBody = CreateReviewRequest
 
+// CreateUserJSONRequestBody defines body for CreateUser for application/json ContentType.
+type CreateUserJSONRequestBody = UserCreate
+
+// UpdateUserJSONRequestBody defines body for UpdateUser for application/json ContentType.
+type UpdateUserJSONRequestBody = UserUpdate
+
+// ResetUserPasswordJSONRequestBody defines body for ResetUserPassword for application/json ContentType.
+type ResetUserPasswordJSONRequestBody = PasswordReset
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
 	// AgentLogin Sign in to a phone
@@ -2165,6 +2246,15 @@ type ServerInterface interface {
 	// ListUsers Accounts
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
+	// CreateUser Create an account
+	// (POST /users)
+	CreateUser(w http.ResponseWriter, r *http.Request)
+	// UpdateUser Edit an account
+	// (PUT /users/{userId})
+	UpdateUser(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID)
+	// ResetUserPassword Set an account's password
+	// (POST /users/{userId}/password)
+	ResetUserPassword(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -2606,6 +2696,24 @@ func (_ Unimplemented) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
 // ListUsers Accounts
 // (GET /users)
 func (_ Unimplemented) ListUsers(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateUser Create an account
+// (POST /users)
+func (_ Unimplemented) CreateUser(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateUser Edit an account
+// (PUT /users/{userId})
+func (_ Unimplemented) UpdateUser(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResetUserPassword Set an account's password
+// (POST /users/{userId}/password)
+func (_ Unimplemented) ResetUserPassword(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4674,6 +4782,72 @@ func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// CreateUser operation middleware
+func (siw *ServerInterfaceWrapper) CreateUser(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateUser(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateUser operation middleware
+func (siw *ServerInterfaceWrapper) UpdateUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateUser(w, r, userID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetUserPassword operation middleware
+func (siw *ServerInterfaceWrapper) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "userId" -------------
+	var userID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userId", chi.URLParam(r, "userId"), &userID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "userId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetUserPassword(w, r, userID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -5005,6 +5179,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/users", wrapper.ListUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/users", wrapper.CreateUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/users/{userId}", wrapper.UpdateUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/users/{userId}/password", wrapper.ResetUserPassword)
 	})
 
 	return r

@@ -43,7 +43,7 @@ re-implement a variant.
   (`roles: Role[]`), never a floor. An administrator configures the platform,
   a supervisor watches the floor, an agent takes calls — the sidebar is a job
   description, not a seniority ladder.
-- ADMIN: Overview, Agents & Phones, Extensions, Queues & Routing, Numbers,
+- ADMIN: Overview, Users, Extensions, Queues & Routing, Numbers,
   Bot Flows / CDR, Reports, Audit Log.
   SUPERVISOR: Wallboard, Agents, Queues / CDR, Reports.
   AGENT: Dashboard, My Calls, Contacts, Callbacks.

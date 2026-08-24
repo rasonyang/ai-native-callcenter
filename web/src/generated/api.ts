@@ -242,11 +242,55 @@ export interface paths {
         };
         /**
          * Accounts
-         * @description Every account, so an agent identity can be attached to one. Read-only: accounts are created with the aicc useradd command. Requires ADMIN.
+         * @description Every account, with the agent identity and phone each one has. Requires ADMIN.
          */
         get: operations["listUsers"];
         put?: never;
+        /**
+         * Create an account
+         * @description Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint. Requires ADMIN.
+         */
+        post: operations["createUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Edit an account
+         * @description Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer. Requires ADMIN.
+         */
+        put: operations["updateUser"];
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/users/{userId}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set an account's password
+         * @description An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked. Requires ADMIN.
+         */
+        post: operations["resetUserPassword"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1233,7 +1277,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1390,16 +1434,54 @@ export interface components {
              */
             defaultExtensionId?: string;
         };
-        /** @description An account, as the agent editor needs to name it. */
+        /** @description An account, with the agent identity and phone that belong to it when it has them. */
         User: {
             /** Format: uuid */
             userId: string;
             username: string;
             displayName: string;
             role: components["schemas"]["Role"];
+            status: components["schemas"]["UserStatus"];
+            /**
+             * Format: uuid
+             * @description The ACD identity, present for an account that takes calls. An administrator has none — they are a user but not an agent, and the two are not the same thing.
+             */
+            agentId?: string;
+            /** @description How the switch names this agent. Stamped when the identity is created and never renamed afterwards: it is what mod_callcenter, its tiers and every historical record know them by. */
+            callcenterName?: string;
+            /** @description The phone bound to this account, allocated from AICC_EXTENSION_RANGE when the account was created. Absent for an account with no phone. */
+            extensionNumber?: string;
         };
         UserList: {
             items: components["schemas"]["User"][];
+        };
+        /**
+         * @description Whether the account may sign in. A suspended account is refused on its next request, not at its next login: the session check reads the account, so suspending takes hold at once.
+         * @enum {string}
+         */
+        UserStatus: "ACTIVE" | "SUSPENDED";
+        /** @description A new account. An AGENT or SUPERVISOR also gets an ACD identity and a phone allocated from the extension pool, in the same transaction: an account that takes calls is not usable without them, and half-provisioning is not a state anybody could act on. An ADMIN gets neither. */
+        UserCreate: {
+            /** @description Letters, digits, dot, underscore and hyphen. Narrower than the column, because an agent's switch-side name is derived from it and mod_callcenter cannot hold a space, an @ or a quote. */
+            username: string;
+            /** @description Defaults to the username. */
+            displayName?: string;
+            role: components["schemas"]["Role"];
+            /** @description The initial password. The account can be given a new one at any time by an administrator; nothing here can read it back. */
+            password: string;
+            locale?: string;
+        };
+        /** @description The account as it should now read — a whole replacement, so read it, change what you meant, and send all of it back. Promoting an ADMIN to a call-taking role provisions the identity and phone they lack; demoting one never removes them, because their state history and filed wrap-ups hang off that identity. */
+        UserUpdate: {
+            username: string;
+            displayName?: string;
+            role: components["schemas"]["Role"];
+            status: components["schemas"]["UserStatus"];
+            locale?: string;
+        };
+        /** @description A password an administrator sets on somebody else's account. Every session opened with the old one is revoked, so a reset ends access rather than merely changing what would work next time. */
+        PasswordReset: {
+            password: string;
         };
         RosterList: {
             items: components["schemas"]["RosterEntry"][];
@@ -2292,7 +2374,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -2738,6 +2820,99 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreate"];
+            };
+        };
+        responses: {
+            /** @description The account, with whatever was provisioned for it. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdate"];
+            };
+        };
+        responses: {
+            /** @description The account as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["User"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    resetUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                userId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordReset"];
+            };
+        };
+        responses: {
+            /** @description The password is set and the old sessions are gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

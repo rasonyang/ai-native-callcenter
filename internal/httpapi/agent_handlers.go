@@ -336,26 +336,6 @@ func (s *Server) writeAgentConfigError(w http.ResponseWriter, r *http.Request, e
 	}
 }
 
-// handleListUsers lists accounts so an agent identity can be attached to one.
-func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := s.auth.ListUsers(r.Context())
-	if err != nil {
-		slog.ErrorContext(r.Context(), "list users failed", "error", err)
-		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot list accounts", nil)
-		return
-	}
-	items := make([]api.User, 0, len(users))
-	for _, u := range users {
-		items = append(items, api.User{
-			UserID:      u.UserID,
-			Username:    u.Username,
-			DisplayName: u.DisplayName,
-			Role:        api.Role(u.Role),
-		})
-	}
-	writeJSON(w, http.StatusOK, api.UserList{Items: items})
-}
-
 // writePresence maps service errors onto the API error vocabulary.
 func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, agentID uuid.UUID, p agents.Presence, err error) {
 	switch {

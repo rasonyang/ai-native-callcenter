@@ -696,7 +696,7 @@
           "system"
         ],
         "summary": "Accounts",
-        "description": "Every account, so an agent identity can be attached to one. Read-only: accounts are created with the aicc useradd command. Requires ADMIN.",
+        "description": "Every account, with the agent identity and phone each one has. Requires ADMIN.",
         "responses": {
           "200": {
             "description": "Every account.",
@@ -713,6 +713,190 @@
           },
           "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createUser",
+        "tags": [
+          "system"
+        ],
+        "summary": "Create an account",
+        "description": "Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The account, with whatever was provisioned for it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/users/{userId}": {
+      "put": {
+        "operationId": "updateUser",
+        "tags": [
+          "system"
+        ],
+        "summary": "Edit an account",
+        "description": "Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The account as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/users/{userId}/password": {
+      "post": {
+        "operationId": "resetUserPassword",
+        "tags": [
+          "system"
+        ],
+        "summary": "Set an account's password",
+        "description": "An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked. Requires ADMIN.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordReset"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "The password is set and the old sessions are gone."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -3887,7 +4071,7 @@
         }
       },
       "Conflict": {
-        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
+        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
         "content": {
           "application/json": {
             "schema": {
@@ -3951,6 +4135,8 @@
           "CONFLICT",
           "EXTENSION_IN_USE",
           "EXTENSION_ASSIGNED_TO_AGENT",
+          "LAST_ADMIN",
+          "EXTENSION_POOL_EXHAUSTED",
           "AGENT_ALREADY_LOGGED_IN",
           "AGENT_NOT_LOGGED_IN",
           "AGENT_NOT_IN_WRAP_UP",
@@ -4336,7 +4522,7 @@
       },
       "User": {
         "type": "object",
-        "description": "An account, as the agent editor needs to name it.",
+        "description": "An account, with the agent identity and phone that belong to it when it has them.",
         "properties": {
           "userId": {
             "type": "string",
@@ -4350,13 +4536,30 @@
           },
           "role": {
             "$ref": "#/components/schemas/Role"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UserStatus"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The ACD identity, present for an account that takes calls. An administrator has none — they are a user but not an agent, and the two are not the same thing."
+          },
+          "callcenterName": {
+            "type": "string",
+            "description": "How the switch names this agent. Stamped when the identity is created and never renamed afterwards: it is what mod_callcenter, its tiers and every historical record know them by."
+          },
+          "extensionNumber": {
+            "type": "string",
+            "description": "The phone bound to this account, allocated from AICC_EXTENSION_RANGE when the account was created. Absent for an account with no phone."
           }
         },
         "required": [
           "userId",
           "username",
           "displayName",
-          "role"
+          "role",
+          "status"
         ]
       },
       "UserList": {
@@ -4371,6 +4574,93 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "UserStatus": {
+        "type": "string",
+        "description": "Whether the account may sign in. A suspended account is refused on its next request, not at its next login: the session check reads the account, so suspending takes hold at once.",
+        "enum": [
+          "ACTIVE",
+          "SUSPENDED"
+        ]
+      },
+      "UserCreate": {
+        "type": "object",
+        "description": "A new account. An AGENT or SUPERVISOR also gets an ACD identity and a phone allocated from the extension pool, in the same transaction: an account that takes calls is not usable without them, and half-provisioning is not a state anybody could act on. An ADMIN gets neither.",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._-]+$",
+            "description": "Letters, digits, dot, underscore and hyphen. Narrower than the column, because an agent's switch-side name is derived from it and mod_callcenter cannot hold a space, an @ or a quote."
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 120,
+            "description": "Defaults to the username."
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "password": {
+            "type": "string",
+            "minLength": 8,
+            "description": "The initial password. The account can be given a new one at any time by an administrator; nothing here can read it back."
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 8
+          }
+        },
+        "required": [
+          "username",
+          "role",
+          "password"
+        ]
+      },
+      "UserUpdate": {
+        "type": "object",
+        "description": "The account as it should now read — a whole replacement, so read it, change what you meant, and send all of it back. Promoting an ADMIN to a call-taking role provisions the identity and phone they lack; demoting one never removes them, because their state history and filed wrap-ups hang off that identity.",
+        "properties": {
+          "username": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^[a-zA-Z0-9._-]+$"
+          },
+          "displayName": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "role": {
+            "$ref": "#/components/schemas/Role"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UserStatus"
+          },
+          "locale": {
+            "type": "string",
+            "maxLength": 8
+          }
+        },
+        "required": [
+          "username",
+          "role",
+          "status"
+        ]
+      },
+      "PasswordReset": {
+        "type": "object",
+        "description": "A password an administrator sets on somebody else's account. Every session opened with the old one is revoked, so a reset ends access rather than merely changing what would work next time.",
+        "properties": {
+          "password": {
+            "type": "string",
+            "minLength": 8
+          }
+        },
+        "required": [
+          "password"
         ]
       },
       "RosterList": {

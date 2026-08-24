@@ -471,6 +471,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&store.ContactStore{},
 		&store.LedgerStore{},
 		&store.FlowStore{},
+		&store.AccountStore{},
 		fakeStreamer{},
 		&store.LedgerStore{},
 		&outbound.Service{},

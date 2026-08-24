@@ -36,7 +36,7 @@
     "queues": "Queues",
     "quality": "Quality",
     "overview": "Overview",
-    "users": "Users & Roles",
+    "users": "Users",
     "routing": "Queues & Routing",
     "bots": "Bot Flows",
     "cdr": "CDR",
@@ -557,5 +557,30 @@
     "maxTurns": "Max turns",
     "fallbackTarget": "Fallback phase",
     "alwaysAllowed": "Always allowed"
+  },
+  "users": {
+    "hint": "Who uses this product, and what each of them was given.",
+    "newUser": "New account",
+    "editUser": "Edit account",
+    "username": "Username",
+    "usernameHint": "Letters, digits, dot, underscore and hyphen. The agent's switch-side name is derived from it and cannot be renamed afterwards.",
+    "displayName": "Name",
+    "role": "Role",
+    "roleHint": "An agent or supervisor is given a phone from the extension pool; an administrator takes no calls and gets none.",
+    "status": "Status",
+    "statusHint": "A suspended account is refused on its next request, not at its next sign-in.",
+    "statuses": {
+      "ACTIVE": "Active",
+      "SUSPENDED": "Suspended"
+    },
+    "extension": "Phone",
+    "noPhone": "none",
+    "noUsers": "No accounts yet.",
+    "initialPassword": "Initial password",
+    "newPassword": "New password",
+    "passwordHint": "At least 8 characters. Nothing can read it back; an administrator can only replace it.",
+    "resetPassword": "Reset password",
+    "resetTitle": "Set a password for {{username}}",
+    "resetHint": "Every session opened with the old password is ended."
   }
 }

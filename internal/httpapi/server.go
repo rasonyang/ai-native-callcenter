@@ -38,6 +38,9 @@ type AgentService interface {
 	// for, which is what a filing is recorded against.
 	// Configuration, as administration edits it.
 	CreateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
+	// MirrorAgent tells the switch about an agent provisioned around this
+	// service, in the one transaction that writes account, identity and phone.
+	MirrorAgent(ctx context.Context, agentID uuid.UUID)
 	UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
 	DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 }
@@ -55,6 +58,7 @@ type Server struct {
 	contacts    ContactService
 	ledger      *store.LedgerStore
 	flows       FlowService
+	accounts    AccountService
 	recordings  RecordingStreamer
 	auditor     Auditor
 	outbound    OutboundService
@@ -79,6 +83,8 @@ type Deps struct {
 	// Flows are the conversations the bot runs; nil hides the flow endpoints
 	// and leaves `aicc flowadd` as the only way in.
 	Flows FlowService
+	// Accounts provisions people; nil leaves `aicc useradd` as the only way in.
+	Accounts AccountService
 	// Recordings streams stored call audio; nil disables playback.
 	Recordings RecordingStreamer
 	// Auditor records mutating requests; nil disables the trail.
@@ -104,6 +110,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		contacts:    deps.Contacts,
 		ledger:      deps.Ledger,
 		flows:       deps.Flows,
+		accounts:    deps.Accounts,
 		recordings:  deps.Recordings,
 		auditor:     deps.Auditor,
 		outbound:    deps.Outbound,
@@ -224,6 +231,12 @@ func (s *Server) router() chi.Router {
 						// trail names accounts and carries what their requests
 						// contained.
 						admin.Get("/audit-logs", op.ListAuditLogs)
+
+						// Accounts, and for a role that takes calls the ACD
+						// identity and phone provisioned with them.
+						admin.Post("/users", op.CreateUser)
+						admin.Put("/users/{userId}", op.UpdateUser)
+						admin.Post("/users/{userId}/password", op.ResetUserPassword)
 
 						admin.Get("/dids", op.ListDIDs)
 						admin.Post("/dids", op.CreateDID)

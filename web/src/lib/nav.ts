@@ -70,8 +70,7 @@ export const NAV: NavGroup[] = [
     roleHome: '/admin',
     items: [
       { to: '/admin', labelKey: 'nav.overview', icon: Activity, roles: ['ADMIN'], isReady: true },
-      { to: '/admin/users', labelKey: 'nav.users', icon: Users, roles: ['ADMIN'], isReady: false },
-      { to: '/admin/agents', labelKey: 'nav.agentIdentities', icon: Headphones, roles: ['ADMIN'], isReady: true },
+      { to: '/admin/users', labelKey: 'nav.users', icon: Users, roles: ['ADMIN'], isReady: true },
       { to: '/admin/extensions', labelKey: 'nav.extensions', icon: PhoneCall, roles: ['ADMIN'], isReady: true },
       { to: '/admin/routing', labelKey: 'nav.routing', icon: ListChecks, roles: ['ADMIN'], isReady: true },
       { to: '/admin/numbers', labelKey: 'nav.numbers', icon: ScrollText, roles: ['ADMIN'], isReady: true },
