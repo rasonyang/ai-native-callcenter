@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
+import { requireRole } from '@/lib/guards'
 import {
   myParty, otherParty, useCallActions, useCurrentWrapUp, useElapsedSec,
   useIsWrapUpPending, useMyCalls, usePresence, usePresenceActions, useWaitingCalls,
@@ -39,7 +40,10 @@ import { cn, formatDuration } from '@/lib/utils'
  * history); the platform publishes no queue-depth events and has no contact
  * store, so those panels are deliberately absent rather than faked.
  */
-export const Route = createFileRoute('/_app/agent/')({ component: AgentCockpit })
+export const Route = createFileRoute('/_app/agent/')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'AGENT'),
+  component: AgentCockpit,
+})
 
 function AgentCockpit() {
   const streamStatus = useStreamStatus()

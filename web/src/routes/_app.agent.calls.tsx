@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
+import { requireRole } from '@/lib/guards'
 import {
   formatDuration, ledgerApi, recordingAudioUrl, useMyCDRs,
   type CDR, type CDRStatus, type RecordingRow,
@@ -26,6 +27,7 @@ import {
  * the calls do — the agent replays their own, nobody else's.
  */
 export const Route = createFileRoute('/_app/agent/calls')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'AGENT'),
   component: MyCallsPage,
 })
 

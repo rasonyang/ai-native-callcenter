@@ -38,8 +38,28 @@ After the first page is approved, every new page MUST reuse its exact patterns:
 same page-header component, same table component, same card component. Never
 re-implement a variant.
 
+## Navigation is partitioned by role, not ranked
+- `src/lib/nav.ts` gives every item the exact set of roles it belongs to
+  (`roles: Role[]`), never a floor. An administrator configures the platform,
+  a supervisor watches the floor, an agent takes calls — the sidebar is a job
+  description, not a seniority ladder.
+- ADMIN: Overview, Agents & Phones, Extensions, Queues & Routing, Numbers,
+  Bot Flows / CDR, Reports, Audit Log.
+  SUPERVISOR: Wallboard, Agents, Queues / CDR, Reports.
+  AGENT: Dashboard, My Calls, Contacts, Callbacks.
+  CDR and Reports are the only overlap, and only between the two senior roles.
+- The route guard uses the same sets (`requireRole(user, ...roles)`): a page
+  hidden from the menu but reachable by URL is half a rule. A refused visitor
+  is sent to their own `roleHomeFor(role)` — never towards the door that just
+  closed, which is how a redirect loop starts.
+- `src/lib/nav.test.ts` pins all three menus literally. Adding a page means
+  adding it there too.
+
 ## Topbar breadcrumb (all pages)
 - Pattern: Role / Section / Detail — e.g. "Admin / Bot Flows / early_collections".
+- The Role segment is the **viewer's own**, not the section's: the ledger lives
+  under /admin and a supervisor may read it, so labelling their page "Admin" —
+  and linking to one they cannot open — would be wrong twice.
 - Every segment except the last is a LINK with a FIXED target (never history
   back): Role → the role index route (/agent, /supervisor, /admin);
   Section → its sidebar-nav route (e.g. Bot Flows → /admin/bots).

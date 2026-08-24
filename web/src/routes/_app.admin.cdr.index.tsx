@@ -16,7 +16,7 @@ import {
 
 /** The finished-call ledger, filterable, newest first. */
 export const Route = createFileRoute('/_app/admin/cdr/')({
-  beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
+  beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN', 'SUPERVISOR'),
   component: CDRExplorer,
 })
 

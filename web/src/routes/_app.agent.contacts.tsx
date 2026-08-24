@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError } from '@/lib/errors'
+import { requireRole } from '@/lib/guards'
 import { useContactMutations, useContacts, type Contact } from '@/lib/contacts'
 
 /**
@@ -22,6 +23,7 @@ import { useContactMutations, useContacts, type Contact } from '@/lib/contacts'
  * a CRM; this is not one.
  */
 export const Route = createFileRoute('/_app/agent/contacts')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'AGENT'),
   component: ContactsPage,
 })
 

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { LanguageSwitch } from '@/components/language-switch'
 import { describeError } from '@/lib/errors'
+import { roleHomeFor } from '@/lib/nav'
 import { useLogin } from '@/lib/session'
 
 export const Route = createFileRoute('/login')({ component: LoginPage })
@@ -24,7 +25,7 @@ function LoginPage() {
       { username, password },
       {
         onSuccess: ({ user }) => {
-          void navigate({ to: user.role === 'AGENT' ? '/agent' : '/supervisor' })
+          void navigate({ to: roleHomeFor(user.role) })
         },
       },
     )

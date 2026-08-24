@@ -1,18 +1,22 @@
 import { redirect } from '@tanstack/react-router'
 
 import type { Identity, Role } from './api'
-
-const ROLE_RANK: Record<Role, number> = { AGENT: 1, SUPERVISOR: 2, ADMIN: 3 }
+import { roleHomeFor } from './nav'
 
 /**
- * Keeps a page out of the hands of a role that cannot use it.
+ * Keeps a page out of the hands of a role it does not belong to.
+ *
+ * The roles are a set, not a floor, and they are the same set the sidebar
+ * filters on: a page hidden from the menu but reachable by typing its URL is
+ * half a rule, and the half that is missing is the one anybody would notice.
  *
  * The server refuses the data regardless, so this is not the security
- * boundary; it exists so nobody is shown a page whose every request will fail.
+ * boundary; it exists so nobody is shown a page whose every request will fail,
+ * and so an administrator does not land in the agent cockpit.
  */
-export function requireRole(user: Identity | undefined, min: Role) {
+export function requireRole(user: Identity | undefined, ...roles: Role[]) {
   if (!user) throw redirect({ to: '/login' })
-  if (ROLE_RANK[user.role] < ROLE_RANK[min]) {
-    throw redirect({ to: user.role === 'AGENT' ? '/agent' : '/supervisor' })
+  if (!roles.includes(user.role)) {
+    throw redirect({ to: roleHomeFor(user.role) })
   }
 }

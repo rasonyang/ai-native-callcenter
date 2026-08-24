@@ -12,7 +12,7 @@ import {
 
 /** One finished call: its facts, its recording, and the words spoken. */
 export const Route = createFileRoute('/_app/admin/cdr/$callId')({
-  beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
+  beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN', 'SUPERVISOR'),
   component: CallDetail,
 })
 

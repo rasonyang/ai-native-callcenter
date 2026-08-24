@@ -7,6 +7,7 @@ import { Select } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { describeError } from '@/lib/errors'
+import { requireRole } from '@/lib/guards'
 import { useSession } from '@/lib/session'
 import {
   useCallbackMutations, useCallbacks, type Callback, type CallbackStatus,
@@ -18,6 +19,7 @@ import {
  * the list moves live on the event stream.
  */
 export const Route = createFileRoute('/_app/agent/callbacks')({
+  beforeLoad: ({ context }) => requireRole(context.user, 'AGENT'),
   component: CallbacksPage,
 })
 

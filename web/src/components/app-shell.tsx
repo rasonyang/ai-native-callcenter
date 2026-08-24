@@ -6,8 +6,8 @@ import type { ReactNode } from 'react'
 
 import { LanguageSwitch } from '@/components/language-switch'
 import { Button } from '@/components/ui/button'
-import type { Identity } from '@/lib/api'
-import { NAV, allowed, breadcrumbFor } from '@/lib/nav'
+import type { Identity, Role } from '@/lib/api'
+import { NAV, breadcrumbFor, visibleTo } from '@/lib/nav'
 import { useLogout } from '@/lib/session'
 import type { StreamStatus } from '@/lib/use-event-stream'
 import { cn } from '@/lib/utils'
@@ -47,7 +47,7 @@ export function AppShell({
         <nav className="flex-1 overflow-y-auto px-2 pb-4">
           {NAV.map((group) => {
             const items = group.items.filter(
-              (item) => allowed(user.role, item.minRole) && item.isReady,
+              (item) => visibleTo(user.role, item) && item.isReady,
             )
             if (items.length === 0) return null
             return (
@@ -77,7 +77,7 @@ export function AppShell({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-6">
-          <Breadcrumb pathname={pathname} />
+          <Breadcrumb pathname={pathname} role={user.role} />
           {softphone}
           <div className="ml-auto flex items-center gap-2">
             <StreamIndicator status={streamStatus} />
@@ -96,9 +96,9 @@ export function AppShell({
  * Role / Section, derived from the nav config. Clickable segments are
  * secondary and turn accent on hover; the current one is primary and inert.
  */
-function Breadcrumb({ pathname }: { pathname: string }) {
+function Breadcrumb({ pathname, role }: { pathname: string; role: Role }) {
   const { t } = useTranslation()
-  const crumbs = breadcrumbFor(pathname)
+  const crumbs = breadcrumbFor(pathname, role)
 
   return (
     <div className="flex shrink-0 items-center gap-1.5 text-sm">

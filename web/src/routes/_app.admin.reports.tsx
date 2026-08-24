@@ -15,7 +15,7 @@ import {
 
 /** Aggregates over the finished-call ledger for a chosen window. */
 export const Route = createFileRoute('/_app/admin/reports')({
-  beforeLoad: ({ context }) => requireRole(context.user, 'SUPERVISOR'),
+  beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN', 'SUPERVISOR'),
   component: ReportsPage,
 })
 
