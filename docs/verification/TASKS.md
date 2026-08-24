@@ -1691,6 +1691,18 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   按新语义反而更准:自动应答却没接通的腿不该产生话后处理)。
   **设计已同步修订**:01 §Party FSM、04 §SSE 事件表、08 §16/§17 三处原文都写着 answer-driven,
   已按 m4-findings 的惯例就地改写并回指本条。
+  **现场闭合(2026-08-24,两通对照,留证 `artifacts/C55/verdict-2026-08-24.md`)**:
+  未接那通(`01a03124-6b2a`)wei 的流只有 `PARTY_DIALING → PARTY_RELEASED`,**零条 ESTABLISHED**,
+  30 秒状态未离开 DIALING;接通那通(`01a0312f-64c6`)`answeredAt=00:33:05.9`(坐席腿自动应答)
+  与 `PARTY_ESTABLISHED=00:33:09.8`(桥接)**相差 4 秒,正是被叫响铃的时间** —— 改动前两者同刻。
+  CDR `ANSWERED/ring=3/talk=11/total=16`。wei 流上只 1 条 ESTABLISHED 而非 2,符合"腿的事件
+  只发给它自己的坐席";ben 那条在 ben 的流上,单测断言 2 条是因测试 publisher 不做范围过滤。
+  **残留(未修,待定)**:接通那行的 `answered_at` 仍记坐席腿自动应答的时刻,早 4 秒。
+  `cdr.go` 该分支的理由是"内线没人计费,但通话确实接通了,行里该说何时" —— 没有计费理由,
+  按本条规则应记桥接时刻;计费分支有理由,不动。
+  **另记(未修)**:两通的 `PARTY_RELEASED` 都带 `isTransferredAway: true` 而都没转接过 ——
+  click-to-dial 用 `uuid_transfer` 送坐席腿进拨号方案,交换机据此打了标记。
+  工作台若拿它区分"电话转走了"和"通话结束",会判错。
 
 - **C56(new,2026-08-24 owner 给出 party FSM 规格后立案,未修)**
   **实现的转移表与规格状态图之间有四处差;其中一处已于当日裁定(实现对、图错),余三处为缺口。**
