@@ -176,7 +176,7 @@ func (f fakeDIDs) DIDs(context.Context) ([]catalog.DID, error) { return f, nil }
 
 func testService(t *testing.T, sw *fakeSwitch, history map[uuid.UUID]bool) *Service {
 	t.Helper()
-	return testServiceWithEndpoint(t, sw, history, "sofia/gateway/pstn_sim/%s")
+	return testServiceWithEndpoint(t, sw, history, "sofia/gateway/pstn_gateway/%s")
 }
 
 // testServiceWithEndpoint builds a service that reaches carriers the way the

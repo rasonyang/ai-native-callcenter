@@ -204,7 +204,7 @@ Static directory users 1000–1019 remain as fallback during migration; removed 
 > doorway in `public`, because that profile is a different one and untrusted inbound belongs
 > there.
 
-> Nothing from the stock context is inherited. Feature codes an agent phone never uses — call pickup, park, redial, the voicemail keys — are absent by choice; anything an agent genuinely needs is added to `aicc.xml` explicitly. Deployment-specific trunk rules (this laptop's `pstn_sim`, a real carrier elsewhere) are added to the same context by the deployment, not to `default`.
+> Nothing from the stock context is inherited. Feature codes an agent phone never uses — call pickup, park, redial, the voicemail keys — are absent by choice; anything an agent genuinely needs is added to `aicc.xml` explicitly. Deployment-specific trunk rules (this laptop's `pstn_gateway`, a real carrier elsewhere) are added to the same context by the deployment, not to `default`.
 
 **D7 `autoload_configs/switch.conf.xml`**: `sessions-per-second 30` → `100` (outbound AI ramp headroom). `max-sessions 1000`, RTP range 16384–32768, `uuid-version 7` unchanged.
 
