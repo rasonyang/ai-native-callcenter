@@ -446,6 +446,26 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
+- **`settings` 死表(§补充的唯一残留)** **【已决并完成 2026-08-24 `00022`】** —— **删表 + 顺手把保留期做了**。
+  `settings` 是 key/value 表,0 行、**没有任何 Go/Lua/sqlc 查询碰它**。而本仓的配置答案早已定下:
+  `AICC_*` 环境变量、`.env.example` 是唯一登记册(49 条,CLAUDE.md 明文要求与 `config.go` 同步)。
+  一张 settings 表就是**第二套配置系统**在和它竞争 —— 今天清了一整天的那种两处真相。
+  **但它和 trunks 不同**:它有一项**有设计读者**的条目 —— 设计 03 写着录音保留期
+  "daily job deletes storage objects + stamps `deleted_at` where `age > settings.retentionDays`"。
+  顺着它查下去,那个功能有**三处遗迹而只有一处是死的**:`settings.retentionDays` 空表无人读;
+  但 **`recordings.deleted_at` 是承重的**(每一条录音读都在 `WHERE deleted_at IS NULL`)、
+  `recording.Storage.Delete` 也在(注释写着 "for retention")—— **只差那个 job,它从来没建**。
+  故本次一并建成:`AICC_RECORDING_RETENTION_DAYS`(**默认 0 = 永久保留**,
+  升级进这个功能的部署不会因为没人填数字就开始删录音)、`recording.Sweeper` 每小时扫一批(每批 500)。
+  **顺序是先删对象再盖章**:反过来会丢失字节 —— 行标了删除而对象还在,那是一份再也没人会去找、
+  却要一直付费的孤儿。这个顺序下,两步之间失败留下的是"列得出来但放不出来"的录音,
+  看得见,而且下一轮自愈(删一个已经不在的对象不算失败,而正是想要达到的状态)。
+  **行保留、只删音频**:没有录音的 CDR 仍是一通电话的记录,连行一起消失则是"这通电话没发生过",
+  那是另一句话,而且是假的。
+  单测钉住四条(0 不删任何东西 / 对象删不掉就不盖章 / 对象本来就没了仍要盖章 /
+  一个失败不阻断其余),真库测试钉住年龄比较与"已扫过的不再来"。
+  **`DECISIONS-pending` 至此没有待决条目。**
+
 - ~~**W8 trunk(中继号)管理**(§补充 S3)~~ **【已撤销 2026-08-24,owner 直裁;`00021`】**
   **删表 + 只读状态**,而不是管理面。查清的事实:`trunks` 表 0 行、**没有任何 Go/Lua/SQL 读它**、
   `luacc` 里没有 trunks 视图、`aicc_xml.lua` 只服务 directory/dialplan/configuration(仅 callcenter.conf,
