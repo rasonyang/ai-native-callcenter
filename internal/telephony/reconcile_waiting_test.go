@@ -233,8 +233,10 @@ func TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo(t *testing.T)
 		t.Fatalf("adopted %d parties, want 1: %+v", len(snap.Parties), snap.Parties)
 	}
 	party := snap.Parties[0]
-	if party.Role != RoleOriginator || party.State != PartyTalking {
-		t.Errorf("party = %s/%s, want ORIGINATOR/TALKING — they answered long ago",
+	if party.Role != RoleOriginator || party.State != PartyDialing {
+		t.Errorf("party = %s/%s, want ORIGINATOR/DIALING — the switch answered them long "+
+			"ago, which the restored answeredAt records, but a caller waiting in a queue "+
+			"is talking to nobody and reaches TALKING at the bridge like everyone else",
 			party.Role, party.State)
 	}
 	// And the waiting entry now names the call rather than only the number.

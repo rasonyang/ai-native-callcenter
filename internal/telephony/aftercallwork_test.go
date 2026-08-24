@@ -84,10 +84,14 @@ func answerAndEndAnAgentLeg(t *testing.T, c *Coordinator, answered bool) uuid.UU
 	c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound",
 		map[string]string{"variable_dialed_user": agentExtension}))
-	c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
-		merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
+	// A phone that was picked up answers and is then bridged; a phone that was
+	// not does neither. The switch never bridges a leg nobody answered, and it
+	// is the bridge that puts the agent in the conversation — so the two
+	// events go together or not at all.
 	if answered {
 		c.Handle(ctx, raw("CHANNEL_ANSWER", agentChan, "outbound", vars))
+		c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
+			merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
 	}
 	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", agentChan, "outbound", vars))
 	return minted

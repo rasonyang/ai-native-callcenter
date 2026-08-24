@@ -63,7 +63,7 @@ Mechanics: 15s `: hb` heartbeat; `Last-Event-ID` resume from the in-memory ring 
 
 | Type | When |
 |---|---|
-| `PARTY_DIALING / PARTY_RINGING / PARTY_ESTABLISHED / PARTY_HELD / PARTY_RETRIEVED / PARTY_RELEASED` (cause, party role) | party lifecycle — one event per leg (a bridged call emits e.g. two `PARTY_ESTABLISHED`); `PARTY_RINGING` to an agent carries the full screen-pop payload (ANI/DNIS, queue, userData) — zero follow-up GETs |
+| `PARTY_DIALING / PARTY_RINGING / PARTY_ESTABLISHED / PARTY_HELD / PARTY_RETRIEVED / PARTY_RELEASED` (cause, party role) | party lifecycle — one event per leg (a bridged call emits e.g. two `PARTY_ESTABLISHED`, **both at the bridge**: `PARTY_ESTABLISHED` follows `CHANNEL_BRIDGE`, not `CHANNEL_ANSWER`, so a call nobody answered emits none at all — owner's rule 2026-08-24, C55); `PARTY_RINGING` to an agent carries the full screen-pop payload (ANI/DNIS, queue, userData) — zero follow-up GETs |
 | `PARTY_CHANGED` (replacedPartyId, to, reason: `TRANSFER`\|`NO_ANSWER` — a new party replaces an old one within the same call, `callId` stable) · `PARTY_DTMF` · `CALL_USER_DATA` (full map, call-scoped) | in-call |
 | `CALL_RECORDING_STARTED / CALL_RECORDING_STOPPED` · `CALL_CDR` (full CDR) | facts |
 | `QUEUE_JOINED / QUEUE_LEFT` (cause) · `QUEUE_COUNT` (waiting, longestWaitAt) · `QUEUE_AGENT_OFFERED` | mod_callcenter events normalized. **Published since 2026-08-19** (the first three were declared and never emitted): scoped to the queue, so the agents staffing it and supervision receive them and nobody else does. A caller stops being "waiting" at the *bridge*, not at `member-queue-end` — the queue only announces that once the conversation is over — and a hangup removes them whether or not the queue ever says so. |

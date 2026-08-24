@@ -406,8 +406,12 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 		call.CreatedAt = startedAt
 		party := call.AddParty(member.ChannelID, member.Number, startedAt)
 		// They answered long before this: a caller cannot be held in a queue
-		// without having been.
-		party.State = PartyTalking
+		// without having been. That is a billing fact and it is all this
+		// restores — a caller waiting in a queue is talking to nobody, so the
+		// party stays where AddParty put it and reaches TALKING the way every
+		// other party does, through the FSM, when the switch bridges them to
+		// an agent. Assigning the state here would also have skipped the
+		// transition table, which is the one place a party's state may change.
 		party.AnsweredAt = startedAt
 	})
 	slog.InfoContext(ctx, "adopted a caller queued across a restart",

@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 33 项、余 14 项 + C32/C14 不复现**(33+14+2 = 49,与条目实数一致)—— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C34 / C37 / C42 / C53 / C54;**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 34 项、余 14 项 + C32/C14 不复现**(34+14+2 = 50,与条目实数一致)—— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C34 / C37 / C42 / C53 / C54;**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1649,6 +1649,48 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   C51 的 armed-action 告警与 C47 的灾难同文)。**C49 当初就是被这类噪声盖住没人读的**,
   而现在盖它的换成了这一条。
   修法很轻:通话从未接通(`cdr.AnsweredAt` 为零 / `status != ANSWERED`)就不做这个比对。
+
+- **C55(new,2026-08-24 owner 读实时流发现,已修)**
+  **`PARTY_ESTABLISHED` 在没有人接听的通话上照样发出 —— 坐席被告知"正在通话",而对方还在响铃。**
+  owner 现场证据(`01a0310d-5613-737e-9d0c-750b093ae993`,wei 1008 拨 ben 1002,ben 全程未接):
+  ```json
+  {"type":"PARTY_ESTABLISHED","occurredAt":"2026-08-23T23:55:53.913745Z",
+   "agentId":"807b2164-…(wei)","payload":{"role":"ORIGINATOR","state":"TALKING"}}
+  ```
+  通话 23:55:52 建立、23:55:53 就发出 ESTABLISHED,而账本这一行是
+  `NO_ANSWER / talk_sec=0 / answered_at=23:55:53`。
+  **原因**:click-to-dial 先响坐席、`sip_auto_answer=true`,坐席自己那条腿一秒内自动应答;
+  而 `registry.go` 把 `CHANNEL_ANSWER` 直接接到 `TriggerAnswer → TALKING`。
+  于是坐席工作台整整三十秒显示"正在通话",直到响铃超时。
+  **【owner 直裁 2026-08-24】**
+  ① "established 只有在双方都接听的情况才会产生";
+  ② "`PARTY_ESTABLISHED` 大部分基于 freeswitch bridged esl 事件";
+  ③ "dialing/ringing/established/held/released 这些 party 事件要基于 FSM"。
+  **讽刺的是这份代码早就知道**:`registry.go` 的 `KindChannelBridge` 分支写着
+  "a bridge tells us who is talking to whom … it is the only moment that says a conversation
+  actually started — answering does not, since a phone can answer with nobody in front of it";
+  `cdr.go` 也写着"whether a *person* was reached is a question the bridge answers and the
+  answer does not"。**账本一直按桥接算 `talk_sec` 与 `status`,只有 party 的状态没照做。**
+  **修法**:`CHANNEL_ANSWER` 只记 `party.AnsweredAt`(计费事实),不再迁移状态、不再发事件;
+  新增 `establish()` 在 `CHANNEL_BRIDGE` 上把**两条腿**一起送进 TALKING。
+  仍然走 `transition → apply → partyTransitions`,**转换表依旧是唯一能移动 party 的东西**
+  (owner 的 ③);`establish` 只放行 DIALING/RINGING 两个来源,
+  已 TALKING 的重复桥接静默(转接、re-invite),HELD 仍只能由 RETRIEVE 回来。
+  **`answered_at`/`bill_sec` 刻意不动** —— 那问的是"这条腿何时应答",是承运商计费的问题,
+  与"有没有人在对面"是两件事,C49 刚把它修对,不能被这次改动带偏。
+  **顺带修掉一处绕过 FSM 的赋值**:`waiting.go` 收养重启期间排队的主叫时直接
+  `party.State = PartyTalking`。排队等待的主叫并没有在跟谁通话,现在只恢复 `AnsweredAt`,
+  状态留在 `AddParty` 给的 DIALING,等真正桥接到坐席时按 FSM 迁移。
+  **事件的条数没变,时刻变了**:接通的通话仍然两条 `PARTY_ESTABLISHED`,只是都在桥接那一刻;
+  唯一少掉事件的是**从未接通的通话**,那正是缺陷本身。载荷与事件名未动,不涉及契约破坏。
+  **测试**:`TestAnAgentIsNotToldTheyAreTalkingUntilSomebodyIsThere` 完整复现 owner 那一通
+  (自动应答 → 对方响铃 → 零 ESTABLISHED 且不 TALKING 但 `AnsweredAt` 已记 → 桥接后恰好两条),
+  已验证旧代码下 FAIL。另有三处夹具按真实时序订正:
+  `answerAndEndAnAgentLeg` 原先"先桥接、再选择性应答"—— 交换机不会桥接一条没人接的腿,
+  未接那一型现在两个事件都不发(它同时暴露了 after-call-work 依赖的正是"有没有进过对话",
+  按新语义反而更准:自动应答却没接通的腿不该产生话后处理)。
+  **设计已同步修订**:01 §Party FSM、04 §SSE 事件表、08 §16/§17 三处原文都写着 answer-driven,
+  已按 m4-findings 的惯例就地改写并回指本条。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

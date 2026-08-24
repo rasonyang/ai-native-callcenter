@@ -333,7 +333,22 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 
 	switch ev.Kind {
 	case KindChannelAnswer:
-		a.transition(party, TriggerAnswer, ev, events.TypePartyEstablished)
+		// A leg answering is a billing fact, not a conversation. An
+		// auto-answer phone picks up in front of nobody, a leg whose codec
+		// cannot meet the caller's returns a clean 200 with no media at all,
+		// and a caller the switch answers to play music is talking to a queue.
+		// The ledger has always kept the two apart — bill_sec asks when this
+		// leg answered, talk_sec asks when it was bridged — and the party's
+		// own state now says the same thing.
+		//
+		// So record the answer and announce nothing: PARTY_ESTABLISHED waits
+		// for the bridge. Owner's rule (2026-08-24), from reading a live
+		// stream of a click-to-dial nobody picked up: the agent's own leg
+		// auto-answers a second after the click, and the cockpit was told
+		// TALKING while the colleague's phone rang for thirty seconds.
+		if party.AnsweredAt.IsZero() {
+			party.AnsweredAt = ev.OccurredAt
+		}
 	case KindChannelHold:
 		a.transition(party, TriggerHold, ev, events.TypePartyHeld)
 	case KindChannelUnhold:
@@ -372,8 +387,10 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 			party.OtherNumber = other.Number
 			other.OtherNumber = party.Number
 			other.OpenBridge(party.ChannelID, ev.OccurredAt)
+			a.establish(other, ev)
 		}
 		party.OpenBridge(ev.OtherChannelID, ev.OccurredAt)
+		a.establish(party, ev)
 
 	case KindChannelUnbridge:
 		// A leg on hold has not left the conversation — the caller hears music
@@ -430,6 +447,21 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 }
 
 // transition applies a party trigger and publishes the matching event.
+// establish moves a leg into the conversation, which is what a bridge means
+// and what answering does not.
+//
+// Only a leg still waiting to be connected has anywhere to go. A leg already
+// TALKING is being re-bridged — a transfer, a re-invite — and has nothing new
+// to announce; a HELD leg comes back through RETRIEVE, not through here, and
+// hold deliberately leaves the bridge open so that a caller on music still
+// counts as being on the call.
+func (a *actor) establish(p *Party, ev SwitchEvent) {
+	if p.State != PartyDialing && p.State != PartyRinging {
+		return
+	}
+	a.transition(p, TriggerAnswer, ev, events.TypePartyEstablished)
+}
+
 func (a *actor) transition(p *Party, trigger PartyTrigger, ev SwitchEvent, eventType events.Type) {
 	if err := p.apply(trigger, ev.OccurredAt); err != nil {
 		// An out-of-order or duplicate switch event is a fact about the

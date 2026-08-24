@@ -699,6 +699,12 @@ func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
 		"Caller-Destination-Number":    agentExtension,
 		"variable_aicc_parent_channel": callerChan,
 	}))
+	// Answering is not joining: the leg is established when the two are
+	// bridged, which is the event that carries PARTY_ESTABLISHED.
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number": agentExtension,
+		"Other-Leg-Unique-ID":       callerChan,
+	}))
 
 	// Parties publish from their call's own goroutine, so wait rather than read.
 	deadline := time.After(2 * time.Second)
@@ -1575,5 +1581,110 @@ func TestALegKnowsWhoItFacesBeforeAnythingHasBridged(t *testing.T) {
 				t.Errorf("otherNumber = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The owner read a live stream of a click-to-dial nobody picked up
+// (2026-08-24, 01a0310d-5613): wei clicked to dial ben, wei's own leg
+// auto-answered a second later, and the cockpit was told PARTY_ESTABLISHED /
+// TALKING while ben's phone rang for thirty seconds and was never answered.
+//
+// Owner's rule: ESTABLISHED means both ends are on the call, and it comes off
+// the switch's bridge event. Answering is a leg's own fact — the ledger has
+// always kept the two apart, and now so does the party.
+func TestAnAgentIsNotToldTheyAreTalkingUntilSomebodyIsThere(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	t.Cleanup(registry.Shutdown)
+	c := NewCoordinator(registry, nil, twoAgents{}, pub)
+
+	ctx := t.Context()
+	agentChan, calleeChan := "agent-chan", "callee-chan"
+
+	// Click-to-dial rings the agent first, and their phone auto-answers.
+	c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound", map[string]string{
+		"variable_dialed_user":    agentExtension,
+		"variable_aicc_extension": agentExtension,
+		"Caller-Caller-ID-Number": otherExtension,
+		"Caller-Context":          "aicc",
+	}))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", agentChan, "outbound", map[string]string{
+		"variable_dialed_user":    agentExtension,
+		"variable_aicc_extension": agentExtension,
+	}))
+	// The colleague's phone rings and rings.
+	c.Handle(ctx, raw("CHANNEL_CREATE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    otherExtension,
+		"variable_aicc_parent_channel": agentChan,
+		"Caller-Context":               "aicc",
+	}))
+
+	// Nothing to wait for — the assertion is that nothing arrives — so give
+	// the actor a moment to have published it if it were going to.
+	time.Sleep(50 * time.Millisecond)
+
+	pub.mu.Lock()
+	var established []events.Type
+	for _, ev := range pub.events {
+		if ev.Type == events.TypePartyEstablished {
+			established = append(established, ev.Type)
+		}
+	}
+	pub.mu.Unlock()
+	if len(established) != 0 {
+		t.Errorf("%d PARTY_ESTABLISHED published while the far end was still ringing; "+
+			"the agent's own leg auto-answering is not a conversation", len(established))
+	}
+
+	callID, ok := registry.CallForChannel(agentChan)
+	if !ok {
+		t.Fatal("the agent's leg is bound to no call")
+	}
+	var state PartyState
+	var answered time.Time
+	if err := registry.Do(callID, func(call *Call) {
+		if p := call.PartyByChannel(agentChan); p != nil {
+			state, answered = p.State, p.AnsweredAt
+		}
+	}); err != nil {
+		t.Fatalf("reading the call: %v", err)
+	}
+	if state == PartyTalking {
+		t.Error("the agent's party is TALKING with nobody on the other end")
+	}
+	// The answer is still recorded: it is what the carrier bills, and dropping
+	// it would have moved bill_sec, which is a different question entirely.
+	if answered.IsZero() {
+		t.Error("the leg's own answer was not recorded; bill_sec asks that question")
+	}
+
+	// Now the colleague picks up and the switch bridges the two.
+	c.Handle(ctx, raw("CHANNEL_ANSWER", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number": otherExtension,
+	}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number": otherExtension,
+		"Other-Leg-Unique-ID":       agentChan,
+	}))
+
+	deadline := time.After(2 * time.Second)
+	for {
+		pub.mu.Lock()
+		n := 0
+		for _, ev := range pub.events {
+			if ev.Type == events.TypePartyEstablished {
+				n++
+			}
+		}
+		pub.mu.Unlock()
+		// Both halves of a connected call are established, at the same moment.
+		if n == 2 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("%d PARTY_ESTABLISHED after the bridge, want 2 — one per leg", n)
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }

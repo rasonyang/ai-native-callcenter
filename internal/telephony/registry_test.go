@@ -74,11 +74,14 @@ func TestRegistryRoutesEventsToTheOwningCall(t *testing.T) {
 		t.Fatalf("CreateCall() error = %v", err)
 	}
 	call.AddParty("chan-a", "+8613800138000", testTime)
+	call.AddParty("chan-b", "1001", testTime)
 	if err := reg.BindChannel("chan-a", callID); err != nil {
 		t.Fatalf("BindChannel() error = %v", err)
 	}
 
-	if !reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "chan-a", OccurredAt: testTime}) {
+	// The bridge is what establishes a party, so it is the event this routes.
+	if !reg.Dispatch(SwitchEvent{Kind: KindChannelBridge, ChannelID: "chan-a",
+		OtherChannelID: "chan-b", OccurredAt: testTime}) {
 		t.Fatal("Dispatch() did not route a bound channel")
 	}
 
