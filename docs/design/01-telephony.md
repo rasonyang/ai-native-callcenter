@@ -31,7 +31,6 @@ stateDiagram-v2
     Queued --> Ringing: EventRinging
     Queued --> Idle: EventReleased / EventDestinationBusy
 
-    Dialing --> Ringing: EventRinging
     Dialing --> Talk: EventEstablished
     Dialing --> Idle: EventReleased
 
@@ -49,13 +48,15 @@ stateDiagram-v2
 
 The first party is the sole originator (enters `Dialing`); later parties enter `Ringing`. Illegal edges are rejected and logged.
 
-**Where the implementation stands against this diagram** (recorded 2026-08-24, tracked as **C56**):
+**`Dialing → Ringing` is forbidden** (owner's ruling 2026-08-24, on reading the first draft of this diagram, which carried the edge). A leg does not change role mid-life: `Dialing` is the party that placed the call and `Ringing` is a party being offered one, so an edge between them would mean a leg became somebody else. Ringback heard by the caller belongs to the *other* party's `Ringing`, not to a second state for the originator. `RINGING → DIALING` is absent for the same reason.
+
+**Where the implementation stands against this diagram** (recorded 2026-08-24, tracked as **C56** — three open gaps, one row already resolved):
 
 | Spec | Implemented | |
 |---|---|---|
 | `Idle` as birth and death | no `Idle`; a party is a channel, so it is born already `DIALING`/`RINGING` and ends in `RELEASED`, which is terminal | naming/shape difference, not behaviour: `RELEASED` is the diagram's terminal `Idle` |
 | `Queued` | **absent** — a caller waiting in a queue sits in `DIALING` | the real gap; it is why the queue-adoption path used to assign `TALKING` by hand |
-| `Dialing → Ringing` (`EventRinging`) | **forbidden** — `call.go` names it deliberately absent, "a leg does not change role mid-life" | **conflict, unresolved**: the diagram allows it and the owner's own note of the same day gave it as an example of what cannot happen. Needs a ruling before either side moves. |
+| ~~`Dialing → Ringing`~~ — **removed from the diagram** | forbidden | **resolved 2026-08-24**: the first draft of the diagram carried this edge; owner ruled it must be forbidden. The implementation was right and the diagram is amended. No code change. |
 | `EventQueued` / `EventAbandoned` / `EventDestinationBusy` | absent — every ending is `TriggerRelease` carrying a hangup cause | the causes exist, the distinct triggers do not |
 
 `PartyState` is on the wire (`api.*`, `web/src/generated/api.ts`), so adding `IDLE`/`QUEUED` is a contract change and goes contract → generate → implement → test, with `make api-breaking`.

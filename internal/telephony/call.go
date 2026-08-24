@@ -63,13 +63,17 @@ const (
 // assigning a state anywhere else skips this table and is a defect.
 //
 // The specification is the diagram in docs/design/01-telephony.md §2 (owner,
-// 2026-08-24). Where this table still differs from it — no IDLE, no QUEUED,
-// and DIALING→RINGING absent where the diagram allows it — the differences
-// are named there and tracked as C56; do not close the gap piecemeal here,
-// PartyState is on the wire.
+// 2026-08-24). Where this table still differs from it — no IDLE and no
+// QUEUED — the differences are named there and tracked as C56; do not close
+// the gap piecemeal here, PartyState is on the wire.
 //
-// Deliberately absent for now: DIALING→RINGING and RINGING→DIALING (a leg
-// does not change role mid-life), and every edge out of RELEASED (terminal).
+// Deliberately absent: DIALING→RINGING and RINGING→DIALING. A leg does not
+// change role mid-life — DIALING is the party that placed the call, RINGING
+// is a party being offered one, and an edge between them would mean a leg
+// became somebody else. The caller's ringback is the *other* party's RINGING.
+// The first draft of the specification carried DIALING→RINGING; the owner
+// ruled it forbidden (2026-08-24), so this table stands and the diagram was
+// amended. Every edge out of RELEASED is absent too (terminal).
 var partyTransitions = map[PartyState]map[PartyTrigger]PartyState{
 	PartyDialing: {
 		TriggerAnswer:  PartyTalking,

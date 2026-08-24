@@ -1693,7 +1693,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   已按 m4-findings 的惯例就地改写并回指本条。
 
 - **C56(new,2026-08-24 owner 给出 party FSM 规格后立案,未修)**
-  **实现的转移表与规格状态图之间有四处差,其中一处是正面冲突。**
+  **实现的转移表与规格状态图之间有四处差;其中一处已于当日裁定(实现对、图错),余三处为缺口。**
   owner 2026-08-24 给出 party FSM 的 mermaid 状态图并要求"记录在文档中",
   已按原样落进 `docs/design/01-telephony.md` §2,并声明**该图即规格**,
   `internal/telephony/call.go` 的 `partyTransitions` 是它的实现、且是**唯一能移动 party 的东西**
@@ -1702,7 +1702,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   |---|---|---|
   | `Idle` 既是起点也是终点 | 无 `Idle`;party 就是一条 channel,出生即 `DIALING`/`RINGING`,终于 `RELEASED`(终态) | **形状差,非行为差** —— `RELEASED` 就是图里那个终止的 `Idle` |
   | `Queued` | **没有**;排队等待的主叫现在坐在 `DIALING` 里 | **真缺口**。正因为没有它,收养排队主叫的代码才会去手写 `TALKING`(见 C55) |
-  | `Dialing → Ringing`(`EventRinging`) | **禁止**,`call.go` 明写"deliberately absent … a leg does not change role mid-life" | **正面冲突,待裁**。图里这条边存在;而 owner 同日的另一句正好把 `Dialing → Ringing` 举为不会发生的例子。两处不能同时成立,**任何一边动之前需要一句话定夺** |
+  | ~~`Dialing → Ringing`~~ **已从图中删除** | **禁止** | **2026-08-24 已裁定**:owner "Dialing → Ringing 是必须禁止的"。首版图带着这条边,与 `call.go` 的 deliberately absent 正面冲突;裁定的结果是**实现对、图错**,图已修订,代码一行未动。理由也一并写进两处:一条腿不会中途换角色 —— DIALING 是发起方,RINGING 是被叫方,这条边意味着一条腿变成了另一个人;主叫听到的回铃属于**对方**那条腿的 RINGING |
   | `EventQueued` / `EventAbandoned` / `EventDestinationBusy` | 没有对应 trigger;所有结束都是 `TriggerRelease` 携一个 hangup cause | 原因区分得出来,独立的 trigger 没有 |
   **不逐条零敲**:`PartyState` 在线上(`api.*`、`web/src/generated/api.ts`),
   加 `IDLE`/`QUEUED` 是契约变更,须走契约 → generate → 实现 → 测试并跑 `make api-breaking`;
