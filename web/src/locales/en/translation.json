@@ -287,7 +287,6 @@
     "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
     "description": "Description",
     "overviewHint": "What is configured, and whether the parts you cannot see are alive.",
-    "agentExtensions": "{{count}} for agents",
     "queuesNote": "{{count}} enabled",
     "numbersNote": "{{enabled}} enabled · {{withFlow}} with a flow",
     "agentsNote": "{{count}} signed in",
@@ -295,7 +294,7 @@
     "eventStream": "Event stream",
     "consolesLive": "{{count}} consoles live",
     "replayWindow": "Oldest replayable event",
-    "healthHint": "A console that falls behind this sequence resynchronises from snapshots.",
+    "healthHint": "A console that falls behind this sequence resynchronises from snapshots. A trunk is defined in the switch's own configuration; this reads its state.",
     "shortcuts": "Go to",
     "agentsHint": "Who is an agent, and which phone they are bound to. An agent signs in at that extension and nowhere else.",
     "addAgent": "Add agent",
@@ -334,7 +333,11 @@
       "outbound": "Outbound"
     },
     "botFlowHint": "What the bot says when somebody calls this number.",
-    "noFlow": "None"
+    "noFlow": "None",
+    "trunk": "Trunk {{name}}",
+    "trunks": "Trunks",
+    "noTrunks": "none — the switch reports no gateway",
+    "boundExtensions": "{{count}} with an agent"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",

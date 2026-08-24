@@ -6,7 +6,7 @@
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
 > **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;
 > **W11 管理面闭环已于 2026-08-24 全部完成**(六个子项;过程中 owner 三次收窄原规格);
-> W7 / W8 / W10 未开工(**W8 排在 W11.5 之后,前置已满足**);
+> **W8 已撤销**(2026-08-24 owner 直裁:删表 + 只读状态,见条目);W7 / W10 未开工;
 > **W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
@@ -18,7 +18,7 @@
 > **VC-S12-01 已于 2026-08-23 转 PASS**:C26(bot 腿死后主叫活下来)与 C36 两半
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
-> 阶段 0–6 已完成。阶段 7:**W1–W6 与 W11 已完成,W7 / W8 / W10 未开工**(此行原写"W1–W9 未开工",是 v1 发布时的笔误,2026-08-24 更正);
+> 阶段 0–6 已完成。阶段 7:**W1–W6 与 W11 已完成,W8 已撤销,W7 / W10 未开工**(此行原写"W1–W9 未开工",是 v1 发布时的笔误,2026-08-24 更正);
 > **C 系列已修 47 项、真开 1 项(C57)+ C10 已决 defer 第二期 + C42 已移出另立项目 + C32/C14 不复现**(47+1+1+1+2 = 52,与条目实数一致)—— **唯一待办是 C57**(CDR 时长字段是否构成划分;owner 已决:立案,以后再查)。C37 于 2026-08-24 查明成因(web-sip-phone 的 RESET 出路只有一个后台定时器)并由该仓修复,aicc 侧零改动;**遗留一个已知缺口:486 不计入 `max_no_answer`,交换机侧对持续拒绝的话机没有兜底**(见条目五);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
@@ -446,11 +446,23 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
-- **W8 trunk(中继号)管理**(§补充 S3)**—— 排在 W11.5 之后(2026-08-24)**:号码的方向列
-  与缺省外呼号先落地,免得中继号的契约评审和它们打架;D6 也已把 gateway 定为系统级配置、
-  不进 `dids` 表。trunks 表(00002:137)从死表转正——契约评审先行
-  (trunk 与 FS gateway/luacc 视图的关系需要一次设计过目,direction 枚举 3 值现全死),
-  然后 openapi → generate → handlers → admin UI。settings 表处置仍待决(唯一残留)。
+- ~~**W8 trunk(中继号)管理**(§补充 S3)~~ **【已撤销 2026-08-24,owner 直裁;`00021`】**
+  **删表 + 只读状态**,而不是管理面。查清的事实:`trunks` 表 0 行、**没有任何 Go/Lua/SQL 读它**、
+  `luacc` 里没有 trunks 视图、`aicc_xml.lua` 只服务 directory/dialplan/configuration(仅 callcenter.conf,
+  其余 configuration 键一律 fall through)。**网关定义在交换机自己的 sofia profile XML 里、
+  profile 加载时读取,应用不写那个文件** —— 要让一行变成网关,得再加 `luacc.trunks` 视图、
+  让 `aicc_xml.lua` 接管 configuration 的 sofia 部分、每次改动触发 `sofia profile external rescan`,
+  为一个单机部署只有一个、部署时配一次的东西。
+  而 **D6 早已定下 gateway 是系统级配置**,一个编辑它的界面正说反了;它也兑现不了承诺 ——
+  **W11.1 改名时仓内只能改一半**,另一半在不受版本控制的宿主机 XML 里。
+  **留下的是那真实的一半**:`GET /system/health` 增加 `trunks[]`(名字/profile/地址/state/isUp),
+  经 `sofia status` 读取,Overview 的 SYSTEM HEALTH 卡片逐条显示。
+  **state 原样透传交换机自己的词**(REGED/NOREG/DOWN/FAIL_WAIT),不映射成"好/坏":
+  down 得有名字的时候就该说那个名字。**`NOREG` 算 up** —— IP 中继按设计从不注册,
+  把它算成 down 会在每个健康的部署上报一个不存在的故障(单测钉住这一条)。
+  交换机连不上时给空列表而不是报错:这份回答的其余部分仍然是真的。
+  **顺带修**:Overview 的分机 KPI 显示 `admin.boundExtensions` 原始 key —— 上一批改名时漏了翻译。
+
 - **W9 账号清理**(§补充 S4,含 seed 名单同步):live DB 只保留 **wei、agent、supervisor、admin**,其余
   (amy、ben、chen、uiagent、liveagent、livesup、qa-sup、lin、sam、cara、tester、m45check)删除。
   **seed 名单一起改**(owner 2026-08-20):demoPeople(seed.go:56-63)删去 amy、ben 两行,使

@@ -285,7 +285,6 @@
     "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
     "description": "说明",
     "overviewHint": "平台已配置了哪些内容，以及看不见的部分是否正常。",
-    "agentExtensions": "{{count}} 个坐席分机",
     "queuesNote": "{{count}} 个已启用",
     "numbersNote": "{{enabled}} 个已启用 · {{withFlow}} 个已绑定流程",
     "agentsNote": "{{count}} 人已签入",
@@ -293,7 +292,7 @@
     "eventStream": "事件流",
     "consolesLive": "{{count}} 个控制台在线",
     "replayWindow": "最早可重放事件",
-    "healthHint": "落后于该序号的控制台会从快照重新同步。",
+    "healthHint": "落后于这个序号的控制台会从快照重新同步。中继定义在交换机自己的配置里，这里只读它的状态。",
     "shortcuts": "前往",
     "agentsHint": "谁是坐席，以及绑定了哪部话机。坐席只能在该分机签入。",
     "addAgent": "新增坐席",
@@ -332,7 +331,11 @@
       "outbound": "呼出"
     },
     "botFlowHint": "有人打这个号码时，机器人说什么。",
-    "noFlow": "无"
+    "noFlow": "无",
+    "trunk": "中继 {{name}}",
+    "trunks": "中继",
+    "noTrunks": "无 —— 交换机没有报告任何网关",
+    "boundExtensions": "{{count}} 台有主"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",

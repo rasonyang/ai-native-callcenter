@@ -3841,8 +3841,8 @@
         "tags": [
           "system"
         ],
-        "summary": "Stream introspection",
-        "description": "Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.",
+        "summary": "Stream and trunk introspection",
+        "description": "Stream counters and the trunks the switch holds. Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.",
         "responses": {
           "200": {
             "description": "Stream counters.",
@@ -6705,6 +6705,13 @@
             "type": "integer",
             "format": "int64",
             "description": "Oldest sequence still in the replay ring; a client behind it must resync."
+          },
+          "trunks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Trunk"
+            },
+            "description": "The gateways the switch holds. Empty when the switch cannot be reached."
           }
         },
         "required": [
@@ -7152,6 +7159,38 @@
         "required": [
           "items",
           "total"
+        ]
+      },
+      "Trunk": {
+        "type": "object",
+        "description": "A gateway as the switch currently holds it. Read, never written: a gateway is defined in the switch's own profile configuration and this application does not write that file. What the product can usefully answer is whether the trunk is there.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "profile": {
+            "type": "string",
+            "description": "The sofia profile it lives on."
+          },
+          "address": {
+            "type": "string",
+            "description": "Where the switch sends calls for it."
+          },
+          "state": {
+            "type": "string",
+            "description": "The switch's own word — REGED, NOREG, DOWN, FAIL_WAIT. Passed through rather than mapped: a trunk down for a reason the switch has a name for should say that name."
+          },
+          "isUp": {
+            "type": "boolean",
+            "description": "Whether the switch would place a call through it now. A NOREG gateway is dialable as it stands — an IP trunk never registers by design — so registration is not the question."
+          }
+        },
+        "required": [
+          "name",
+          "profile",
+          "address",
+          "state",
+          "isUp"
         ]
       }
     }

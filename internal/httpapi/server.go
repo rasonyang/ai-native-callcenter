@@ -18,6 +18,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 // AgentService is the agent presence surface used by the API.
@@ -45,6 +46,12 @@ type AgentService interface {
 	DeleteAgent(ctx context.Context, agentID uuid.UUID) error
 }
 
+// TrunkReader reports the gateways the switch holds. Read-only by design: a
+// gateway is defined in the switch's own configuration, not here.
+type TrunkReader interface {
+	Trunks() ([]telephony.Trunk, error)
+}
+
 // Server owns the HTTP surface: REST, SSE and the embedded SPA.
 type Server struct {
 	cfg         config.Config
@@ -59,6 +66,7 @@ type Server struct {
 	ledger      *store.LedgerStore
 	flows       FlowService
 	accounts    AccountService
+	trunks      TrunkReader
 	recordings  RecordingStreamer
 	auditor     Auditor
 	outbound    OutboundService
@@ -85,6 +93,8 @@ type Deps struct {
 	Flows FlowService
 	// Accounts provisions people; nil leaves `aicc useradd` as the only way in.
 	Accounts AccountService
+	// Trunks reports the gateways the switch holds; nil leaves the card empty.
+	Trunks TrunkReader
 	// Recordings streams stored call audio; nil disables playback.
 	Recordings RecordingStreamer
 	// Auditor records mutating requests; nil disables the trail.
@@ -111,6 +121,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		ledger:      deps.Ledger,
 		flows:       deps.Flows,
 		accounts:    deps.Accounts,
+		trunks:      deps.Trunks,
 		recordings:  deps.Recordings,
 		auditor:     deps.Auditor,
 		outbound:    deps.Outbound,

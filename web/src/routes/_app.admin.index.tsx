@@ -79,6 +79,24 @@ function AdminOverview() {
             label={t('admin.replayWindow')}
             value={health.data ? `#${health.data.oldestSeq}` : '—'}
           />
+          {/* Read from the switch, never managed here: a gateway is defined in
+              the switch's own configuration and this application does not
+              write that file. What the product can answer is whether the
+              trunk is there, which is the first thing to check when outbound
+              calls stop going out. */}
+          {(health.data?.trunks ?? []).map((trunk) => (
+            <HealthRow
+              key={`${trunk.profile}::${trunk.name}`}
+              label={t('admin.trunk', { name: trunk.name })}
+              // The switch's own word, not a yes/no: a trunk down for a reason
+              // it has a name for should say that name.
+              value={`${trunk.state} · ${trunk.address}`}
+              isDegraded={!trunk.isUp}
+            />
+          ))}
+          {health.data && (health.data.trunks ?? []).length === 0 && (
+            <HealthRow label={t('admin.trunks')} value={t('admin.noTrunks')} isDegraded />
+          )}
         </dl>
         <p className="mt-3 text-xs text-muted-foreground">{t('admin.healthHint')}</p>
       </section>

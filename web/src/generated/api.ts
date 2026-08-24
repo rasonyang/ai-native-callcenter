@@ -1215,8 +1215,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Stream introspection
-         * @description Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.
+         * Stream and trunk introspection
+         * @description Stream counters and the trunks the switch holds. Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.
          */
         get: operations["getSystemHealth"];
         put?: never;
@@ -2217,6 +2217,8 @@ export interface components {
              * @description Oldest sequence still in the replay ring; a client behind it must resync.
              */
             oldestSeq: number;
+            /** @description The gateways the switch holds. Empty when the switch cannot be reached. */
+            trunks?: components["schemas"]["Trunk"][];
         };
         /**
          * @description Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.
@@ -2387,6 +2389,18 @@ export interface components {
             items: components["schemas"]["AuditEntry"][];
             /** @description Total rows matching the filter, for paging. */
             total: number;
+        };
+        /** @description A gateway as the switch currently holds it. Read, never written: a gateway is defined in the switch's own profile configuration and this application does not write that file. What the product can usefully answer is whether the trunk is there. */
+        Trunk: {
+            name: string;
+            /** @description The sofia profile it lives on. */
+            profile: string;
+            /** @description Where the switch sends calls for it. */
+            address: string;
+            /** @description The switch's own word — REGED, NOREG, DOWN, FAIL_WAIT. Passed through rather than mapped: a trunk down for a reason the switch has a name for should say that name. */
+            state: string;
+            /** @description Whether the switch would place a call through it now. A NOREG gateway is dialable as it stands — an IP trunk never registers by design — so registration is not the question. */
+            isUp: boolean;
         };
     };
     responses: {

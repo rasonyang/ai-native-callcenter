@@ -73,7 +73,8 @@ export const api = {
 
   me: () => request<{ user: Identity }>('/auth/me'),
 
-  health: () => request<{ sseClients: number; oldestSeq: number }>('/system/health'),
+  /** Stream counters and the trunks the switch holds, read never written. */
+  health: () => request<components['schemas']['SystemHealth']>('/system/health'),
 }
 
 // --- Agents ---------------------------------------------------------------

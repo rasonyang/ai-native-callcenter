@@ -338,6 +338,7 @@ func run() error {
 			st.Ledger(),
 			st.Flows(),
 			st.Accounts(),
+			adapter,
 			recordings,
 			st.Ledger(),
 			outboundSvc,

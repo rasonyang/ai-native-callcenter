@@ -351,6 +351,72 @@ func (a *Adapter) EndCallerWithTheirBridge(channelID string) error {
 // reconciling after a restart or a reconnect.
 func (a *Adapter) ShowChannels() (string, error) { return a.cmd.API("show channels as json") }
 
+// Trunk is a gateway as the switch currently holds it.
+type Trunk struct {
+	// Name is the gateway's, without the profile it lives on.
+	Name    string `json:"name"`
+	Profile string `json:"profile"`
+	// Address is where the switch sends calls for it.
+	Address string `json:"address"`
+	// State is the switch's own word — REGED, NOREG, DOWN, FAIL_WAIT and the
+	// rest. Passed through rather than mapped: a trunk that is down for a
+	// reason the switch has a name for should say that name, not "not ok".
+	State string `json:"state"`
+	// IsUp is whether the switch would place a call through it now. A NOREG
+	// gateway is dialable as it stands — it never registers by design — so
+	// "registered" is not the question.
+	IsUp bool `json:"isUp"`
+}
+
+// Trunks asks the switch which gateways it holds and what state they are in.
+//
+// Read, never written: a gateway is defined in the switch's own profile XML
+// and this application does not write that file (see migration 00021). What
+// an operator needs from the product is the answer to "is the trunk there",
+// which is exactly what the switch already knows.
+func (a *Adapter) Trunks() ([]Trunk, error) {
+	out, err := a.cmd.API("sofia status")
+	if err != nil {
+		return nil, err
+	}
+	return parseTrunks(out), nil
+}
+
+// parseTrunks reads the tab-separated table `sofia status` prints.
+//
+// Columns are Name, Type, Data, State, and the rows that matter are the ones
+// whose type is "gateway"; the profiles and aliases in the same table are not
+// trunks. The name arrives as "profile::gateway", which is split so each half
+// can be shown as what it is.
+func parseTrunks(out string) []Trunk {
+	var trunks []Trunk
+	for _, line := range strings.Split(out, "\n") {
+		cols := strings.Split(line, "\t")
+		if len(cols) < 4 {
+			continue
+		}
+		for i := range cols {
+			cols[i] = strings.TrimSpace(cols[i])
+		}
+		if cols[1] != "gateway" {
+			continue
+		}
+		profile, name, found := strings.Cut(cols[0], "::")
+		if !found {
+			profile, name = "", cols[0]
+		}
+		state := cols[3]
+		trunks = append(trunks, Trunk{
+			Name: name, Profile: profile, Address: cols[2], State: state,
+			// NOREG is the state of a trunk that never registers by design,
+			// which is how an IP trunk is normally arranged: calling it down
+			// would report a fault on every healthy deployment.
+			IsUp: state == "REGED" || state == "NOREG",
+		})
+	}
+	return trunks
+}
+
 // exec runs a command and turns a switch-level error reply into a Go error.
 func (a *Adapter) exec(format string, args ...any) error {
 	cmd := fmt.Sprintf(format, args...)

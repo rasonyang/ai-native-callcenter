@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 type loginRequest struct {
@@ -74,9 +75,27 @@ func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetSystemHealth(w http.ResponseWriter, _ *http.Request) {
+	// Trunks are read here rather than managed anywhere: a gateway is defined
+	// in the switch's own profile configuration, which this application does
+	// not write (migration 00021). An operator whose outbound calls are
+	// failing needs to know whether the trunk is there, and the switch is the
+	// only thing that knows.
+	//
+	// An empty list when the switch cannot be reached, not an error: the rest
+	// of this answer is still true, and a screen that fails wholesale because
+	// one card cannot be filled tells the reader less than one that says so.
+	trunks := []telephony.Trunk{}
+	if s.trunks != nil {
+		if found, err := s.trunks.Trunks(); err == nil {
+			trunks = found
+		} else {
+			slog.Warn("cannot read the switch's trunks", "error", err)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"sseClients": s.hub.SubscriberCount(),
 		"oldestSeq":  s.hub.OldestSeq(),
+		"trunks":     trunks,
 	})
 }
 

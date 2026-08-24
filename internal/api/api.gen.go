@@ -1658,6 +1658,9 @@ type SystemHealth struct {
 
 	// SSEClients Live event-stream subscribers.
 	SSEClients int `json:"sseClients"`
+
+	// Trunks The gateways the switch holds. Empty when the switch cannot be reached.
+	Trunks *[]Trunk `json:"trunks,omitempty"`
 }
 
 // TierRules How a queue widens its agent search over time.
@@ -1701,6 +1704,22 @@ type TranscriptionState string
 type TransferRequest struct {
 	// Destination Queue extension or dialable number.
 	Destination string `json:"destination"`
+}
+
+// Trunk A gateway as the switch currently holds it. Read, never written: a gateway is defined in the switch's own profile configuration and this application does not write that file. What the product can usefully answer is whether the trunk is there.
+type Trunk struct {
+	// Address Where the switch sends calls for it.
+	Address string `json:"address"`
+
+	// IsUp Whether the switch would place a call through it now. A NOREG gateway is dialable as it stands — an IP trunk never registers by design — so registration is not the question.
+	IsUp bool   `json:"isUp"`
+	Name string `json:"name"`
+
+	// Profile The sofia profile it lives on.
+	Profile string `json:"profile"`
+
+	// State The switch's own word — REGED, NOREG, DOWN, FAIL_WAIT. Passed through rather than mapped: a trunk down for a reason the switch has a name for should say that name.
+	State string `json:"state"`
 }
 
 // User An account, with the agent identity and phone that belong to it when it has them.
@@ -2248,7 +2267,7 @@ type ServerInterface interface {
 	// GetReportQueues Per-queue aggregates
 	// (GET /reports/queues)
 	GetReportQueues(w http.ResponseWriter, r *http.Request, params GetReportQueuesParams)
-	// GetSystemHealth Stream introspection
+	// GetSystemHealth Stream and trunk introspection
 	// (GET /system/health)
 	GetSystemHealth(w http.ResponseWriter, r *http.Request)
 	// ListUsers Accounts
@@ -2701,7 +2720,7 @@ func (_ Unimplemented) GetReportQueues(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// GetSystemHealth Stream introspection
+// GetSystemHealth Stream and trunk introspection
 // (GET /system/health)
 func (_ Unimplemented) GetSystemHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
