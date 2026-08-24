@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 35 项、余 14 项 + C32/C14 不复现**(35+14+2 = 51,与条目实数一致)—— C1(仅修一半)/ C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C37 / C42 / C53 / C54 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 已裁定为图错代码对,余三处缺口);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 36 项、余 13 项 + C32/C14 不复现**(36+13+2 = 51,与条目实数一致)—— C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C33 / C37 / C42 / C53 / C54 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 已裁定为图错代码对,余三处缺口);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -454,6 +454,27 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   需要复现时改为:往 `callcenter.db` 的 tiers 插一行异域条目,或临时建一个该名字的队列。
   阶段 5 的 S12-03 重启 FreeSWITCH 会让 mod_callcenter 从该 db 重新加载,那行**有可能重新浮现**
   —— 若浮现,C1 即重获活的复现场景,是好事。
+  **【后半已修 · 2026-08-24 `799963e`,留证 `artifacts/C1/verdict-second-half-2026-08-24.md`】**
+  **前提今日重探仍成立**:`tier del does-not-exist agent-wei → +OK`、
+  `tier del support-en agent-nobody → +OK`。
+  **修法**:两个循环只记**尝试次数**;有过尝试才再读一次交换机自己的 tier 表,
+  按**前后差集**得出 added/removed。没有尝试就不重读 —— 常态(两侧本就一致)的
+  交换机读取次数不变,仍是一次,不是两次。
+  第二次读失败**不静默回落**到尝试数,而是照报尝试数并标 `isVerified=false`;
+  静默回落等于回到原点 —— 一个没有东西支撑的数字。
+  **现场(诚实路径未改坏)**:给 `agent-ben` 手工插一条库里没有的 tier
+  (`tier add support-en agent-ben 1 9`),重启触发对账得
+  `agent=agent-ben desired=1 actual=2 added=0 removed=1 failed=0`,
+  且 `tier list` 确认真的没了;全程日志 `isVerified` 出现 **0 次**。
+  **谎报本身仍无现场用例**,理由与"症状已潜伏"同 —— 能回 +OK 却删不掉的是异域陈旧行,
+  而它不出现在 `tier list` 里,converge 根本读不到、也就不会去删。
+  复现需先造场景(往 `callcenter.db` 插异域 tier,或临时建同名队列),不是修复的前置。
+  谎报路径由单测钉住,直接构造"答 +OK 但 tier 表不变"的开关。
+  **新用例**(印证"验收不能用 VC-S3-02")`TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted`
+  四型:①答 +OK 却没删 → `removed=0`;②真删了 → `removed=1`;③真加了 → `added=1`;
+  ④复读失败 → `isVerified=false` 且仍给出尝试数。已验证去掉复读后 ①④ FAIL。
+  **⚠ VC-S3-02 的假通过风险不变**:它断言的是事后一致,谎报不体现在那里;
+  重跑它之前仍须按上面的办法重造场景,否则拿到的仍是无判别力的 PASS。
 - **C2** SYS-6 契约缺口:PartySnapshot 补 isBotLeg(`make api-breaking` 走查)
 - **C4** 死状态删除(D7①③ 已决):删 Call.ENDING(call.go:23,契约 CallState 同步)与转写 ENDED
   (actor.go:110,契约 TranscriptionState 同步)——两处均 breaking,走 `make api-breaking`;
