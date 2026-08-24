@@ -231,3 +231,68 @@ func mustFind(t *testing.T, acc *AccountStore, username string) uuid.UUID {
 	t.Fatalf("no account named %s", username)
 	return uuid.Nil
 }
+
+// The retention query, against a real server: the age comparison is
+// PostgreSQL's make_interval and the exclusion is the partial condition every
+// other recording read already uses.
+func TestExpiredRecordingsAreOldEnoughAndNotAlreadySwept(t *testing.T) {
+	ctx := context.Background()
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	st, err := Open(ctx, dsn, 4)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(st.Close)
+
+	callID := uuid.Must(uuid.NewV7())
+	if _, err := st.Pool.Exec(ctx, `
+		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status)
+		VALUES ($1, now() - interval '100 days', now() - interval '100 days', 'INBOUND', 'ANSWERED')`,
+		callID); err != nil {
+		t.Fatalf("seed the call: %v", err)
+	}
+	seed := func(ageDays int, sweptAlready bool) uuid.UUID {
+		id := uuid.Must(uuid.NewV7())
+		deleted := "NULL"
+		if sweptAlready {
+			deleted = "now()"
+		}
+		if _, err := st.Pool.Exec(ctx, `
+			INSERT INTO recordings (id, call_id, backend, object_key, created_at, deleted_at)
+			VALUES ($1, $2, 'FS', $3, now() - make_interval(days => $4), `+deleted+`)`,
+			id, callID, id.String()+".wav", ageDays); err != nil {
+			t.Fatalf("seed a recording: %v", err)
+		}
+		return id
+	}
+	old := seed(40, false)
+	seed(40, true)  // already swept
+	seed(10, false) // too young
+
+	due, err := st.Ledger().ExpiredRecordings(ctx, 30, 100)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(due) != 1 || due[0].ID != old {
+		t.Fatalf("due = %+v, want only the unswept 40-day-old one", due)
+	}
+	if due[0].Key == "" {
+		t.Error("the object key is empty; the sweep would have nothing to delete")
+	}
+
+	if err := st.Ledger().MarkRecordingDeleted(ctx, old); err != nil {
+		t.Fatalf("mark: %v", err)
+	}
+	again, err := st.Ledger().ExpiredRecordings(ctx, 30, 100)
+	if err != nil {
+		t.Fatalf("list again: %v", err)
+	}
+	if len(again) != 0 {
+		t.Errorf("still due after being marked: %+v — every sweep would delete it again", again)
+	}
+}

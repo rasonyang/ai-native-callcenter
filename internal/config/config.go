@@ -139,6 +139,12 @@ type Config struct {
 	// to "what am I calling".
 	QueueRange string
 
+	// RecordingRetentionDays is how long a recording is kept before the
+	// retention sweep deletes it. Zero keeps it for ever, which is the
+	// default: a deployment that upgrades into this feature must not start
+	// deleting audio because nobody set a number.
+	RecordingRetentionDays int
+
 	Seed string // "" | "demo" | "fresh"
 }
 
@@ -221,6 +227,7 @@ func Load() (Config, error) {
 		ServiceName:             env("AICC_SERVICE_NAME", "aicc"),
 		ExtensionRange:          env("AICC_EXTENSION_RANGE", "1000-1999"),
 		QueueRange:              env("AICC_QUEUE_RANGE", "7000-7999"),
+		RecordingRetentionDays:  envInt("AICC_RECORDING_RETENTION_DAYS", 0),
 		Seed:                    env("AICC_SEED", ""),
 	}
 
@@ -281,6 +288,10 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE must start at 1 or above, got %d", low))
 	} else if high < low {
 		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE ends before it starts (%d-%d)", low, high))
+	}
+	if c.RecordingRetentionDays < 0 {
+		errs = append(errs, fmt.Errorf(
+			"AICC_RECORDING_RETENTION_DAYS must be 0 or more, got %d", c.RecordingRetentionDays))
 	}
 	switch c.Seed {
 	case "", "demo", "fresh":

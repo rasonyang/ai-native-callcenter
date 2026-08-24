@@ -333,3 +333,22 @@ WHERE (sqlc.narg('actor_id')::uuid IS NULL OR a.actor_id = sqlc.narg('actor_id')
        OR a.action LIKE sqlc.narg('action_prefix')::text || '%')
   AND (sqlc.narg('from_at')::timestamptz IS NULL OR a.occurred_at >= sqlc.narg('from_at')::timestamptz)
   AND (sqlc.narg('to_at')::timestamptz IS NULL OR a.occurred_at < sqlc.narg('to_at')::timestamptz);
+
+-- Recordings past their retention period, oldest first.
+--
+-- Age is measured from when the recording was made, not from the call's start:
+-- they are the same instant in every real case, and created_at is the column
+-- this table actually has an answer for.
+--
+-- Already-swept rows are excluded, so a sweep that fails halfway resumes
+-- rather than reconsidering what it has already deleted.
+
+-- name: ExpiredRecordings :many
+SELECT * FROM recordings
+WHERE deleted_at IS NULL
+  AND created_at < now() - make_interval(days => sqlc.arg(retention_days)::int)
+ORDER BY created_at
+LIMIT sqlc.arg(max_rows)::int;
+
+-- name: MarkRecordingDeleted :exec
+UPDATE recordings SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL;

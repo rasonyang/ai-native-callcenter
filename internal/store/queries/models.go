@@ -272,12 +272,6 @@ type Session struct {
 	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
 }
 
-type Setting struct {
-	Key       string             `json:"key"`
-	Value     []byte             `json:"value"`
-	UpdatedAt pgtype.Timestamptz `json:"updatedAt"`
-}
-
 type Transcript struct {
 	ID          int64              `json:"id"`
 	CallID      uuid.UUID          `json:"callId"`
@@ -293,17 +287,6 @@ type Transcript struct {
 	Source      string             `json:"source"`
 	Provider    string             `json:"provider"`
 	UtteranceID string             `json:"utteranceId"`
-}
-
-type Trunk struct {
-	ID          uuid.UUID          `json:"id"`
-	Name        string             `json:"name"`
-	Direction   string             `json:"direction"`
-	MaxChannels int32              `json:"maxChannels"`
-	Config      []byte             `json:"config"`
-	IsEnabled   bool               `json:"isEnabled"`
-	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
-	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
 }
 
 type User struct {

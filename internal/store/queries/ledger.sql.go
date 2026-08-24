@@ -107,6 +107,59 @@ func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, er
 	return count, err
 }
 
+const expiredRecordings = `-- name: ExpiredRecordings :many
+
+SELECT id, call_id, backend, bucket, object_key, size_bytes, duration_sec, format, created_at, deleted_at FROM recordings
+WHERE deleted_at IS NULL
+  AND created_at < now() - make_interval(days => $1::int)
+ORDER BY created_at
+LIMIT $2::int
+`
+
+type ExpiredRecordingsParams struct {
+	RetentionDays int32 `json:"retentionDays"`
+	MaxRows       int32 `json:"maxRows"`
+}
+
+// Recordings past their retention period, oldest first.
+//
+// Age is measured from when the recording was made, not from the call's start:
+// they are the same instant in every real case, and created_at is the column
+// this table actually has an answer for.
+//
+// Already-swept rows are excluded, so a sweep that fails halfway resumes
+// rather than reconsidering what it has already deleted.
+func (q *Queries) ExpiredRecordings(ctx context.Context, arg ExpiredRecordingsParams) ([]Recording, error) {
+	rows, err := q.db.Query(ctx, expiredRecordings, arg.RetentionDays, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Recording{}
+	for rows.Next() {
+		var i Recording
+		if err := rows.Scan(
+			&i.ID,
+			&i.CallID,
+			&i.Backend,
+			&i.Bucket,
+			&i.ObjectKey,
+			&i.SizeBytes,
+			&i.DurationSec,
+			&i.Format,
+			&i.CreatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getCDR = `-- name: GetCDR :one
 SELECT call_id, started_at, answered_at, ended_at, call_type, language, from_number, to_number, did, flow_id, queue_id, agent_ids, primary_agent_id, ring_sec, bot_sec, queue_wait_sec, talk_sec, total_sec, status, hangup_cause, missed_reason, disposition, is_contained, has_recording, user_data, tech, legs, bill_sec FROM cdrs WHERE call_id = $1
 `
@@ -1014,6 +1067,15 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const markRecordingDeleted = `-- name: MarkRecordingDeleted :exec
+UPDATE recordings SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) MarkRecordingDeleted(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markRecordingDeleted, id)
+	return err
 }
 
 const openWrapUp = `-- name: OpenWrapUp :exec

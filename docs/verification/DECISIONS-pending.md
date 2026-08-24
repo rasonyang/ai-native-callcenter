@@ -2,7 +2,8 @@
 
 > 来源:ledger-audit.md(SYS-6/SYS-8、coverage 缺口汇总)+ TASKS 三角色旅程走查。
 > **2026-08-20 两轮拍板后:D1–D7 全部已决**(见各项【决议】行),实现项落 TASKS.md 阶段 7 的 W 系列。
-> 第二轮补充决议见文末 §补充;**唯一残留:settings 死表的处置**(trunks 已决"需要",settings 未提及)。
+> 第二轮补充决议见文末 §补充。**~~唯一残留:settings 死表的处置~~ 已于 2026-08-24 决完:删表,配置只有一个家(`AICC_*` + `.env.example` 登记册);它唯一有设计读者的那一项 `retentionDays` 同日建成 `AICC_RECORDING_RETENTION_DAYS`(默认 0=永久保留)。trunks 同日撤回并删表(见 S3)。**
+> **本文件已无残留决策。**
 
 ## D1 质检评审 UI(G-B3)
 **【决议 2026-08-20】放下一期,本期不做。** quality_reviews API 保留;tables.md 缺口标注 defer;
@@ -28,7 +29,7 @@ VC-S4-03 的"恰好 4 行"断言由此转为正式契约级断言。
 ## D5 audit_logs 检索(G-C8)
 **【决议 2026-08-20】要做。** 参考 `~/workspaces/github/ui-test`(admin/audit.tsx:分类过滤由
 action 前缀派生);**路由定为 `/admin/audit`**(owner 指定)。落 TASKS W4(spec-first)。
-settings/trunks 两张死表的处置不在本决议内(仍开放,归 D6 同席讨论亦可)。
+~~settings/trunks 两张死表的处置不在本决议内(仍开放)~~ —— **2026-08-24 两张都已决:双双删表**(`00021` trunks、`00022` settings)。共同的理由是同一条:**它们各自代表的东西不在这个应用手里** ——网关归交换机的 sofia profile XML,配置归 `AICC_*` 与 `.env.example` 登记册。
 
 ## D6 契约内 10 个零生产者 SSE 类型(events.md 需实现节)
 **【决议 2026-08-20】全部实现。** 落 TASKS **W7**,按实现难度分四组推进:

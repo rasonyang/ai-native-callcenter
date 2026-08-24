@@ -359,6 +359,14 @@ func run() error {
 
 	go purgeSessions(ctx, authSvc)
 
+	// Recording retention. Off unless AICC_RECORDING_RETENTION_DAYS says
+	// otherwise, so upgrading into this feature deletes nothing until somebody
+	// chooses a number.
+	if recordings != nil {
+		go recording.NewSweeper(st.Ledger(), recordings, cfg.RecordingRetentionDays,
+			slog.Default()).Run(ctx)
+	}
+
 	<-ctx.Done()
 	slog.Info("shutting down")
 

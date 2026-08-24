@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
 
@@ -1171,4 +1172,32 @@ func stampOrNull(t time.Time) pgtype.Timestamptz {
 		return pgtype.Timestamptz{}
 	}
 	return pgtype.Timestamptz{Time: t, Valid: true}
+}
+
+// ExpiredRecordings lists recordings past their retention period, oldest
+// first. Already-swept rows are excluded, so a sweep that failed halfway
+// resumes rather than reconsidering what it has already deleted.
+func (s *LedgerStore) ExpiredRecordings(ctx context.Context, retentionDays, limit int) (
+	[]recording.Expired, error) {
+	rows, err := s.q.ExpiredRecordings(ctx, queries.ExpiredRecordingsParams{
+		RetentionDays: int32(retentionDays),
+		MaxRows:       int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list expired recordings: %w", err)
+	}
+	out := make([]recording.Expired, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, recording.Expired{ID: r.ID, Key: r.ObjectKey})
+	}
+	return out, nil
+}
+
+// MarkRecordingDeleted records that a recording's audio is gone. The row stays:
+// what a call was and how long it lasted is not the recording.
+func (s *LedgerStore) MarkRecordingDeleted(ctx context.Context, id uuid.UUID) error {
+	if err := s.q.MarkRecordingDeleted(ctx, id); err != nil {
+		return fmt.Errorf("mark recording %s deleted: %w", id, err)
+	}
+	return nil
 }
