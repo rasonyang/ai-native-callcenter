@@ -136,6 +136,11 @@ func writeOutboundError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, outbound.ErrBadNumber):
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "not a dialable number", nil)
+	case errors.Is(err, outbound.ErrNoDefaultOutbound):
+		// Its own answer, because the operator can act on it: mark a number as
+		// the one calls go out from.
+		writeError(w, http.StatusConflict, CodeConflict,
+			"no number is marked as the default outbound one", nil)
 	case errors.Is(err, outbound.ErrNoOutboundEndpoint):
 		writeError(w, http.StatusServiceUnavailable, CodeStorageDown,
 			"this deployment has no outbound endpoint configured", nil)

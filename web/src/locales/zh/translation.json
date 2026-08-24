@@ -280,7 +280,6 @@
     "language": "语言",
     "languageHint": "设置该号码的问候语、提示词语言与音色。",
     "botFlow": "机器人流程",
-    "flowPending": "尚未配置",
     "fallbackQueue": "兜底队列",
     "noFallbackQueue": "无",
     "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
@@ -320,7 +319,20 @@
     "passwordExistingHint": "这里不显示。复制会读回它并记入审计；重设会替换它，旧口令立刻失效。",
     "resetPassword": "重设",
     "assignedTo": "归属坐席",
-    "unassigned": "无人"
+    "unassigned": "无人",
+    "direction": "方向",
+    "directionHint": "号码要么能被打进来、要么能打出去，或者两者都行。能被打进来的，得有一个机器人流程来接。",
+    "allowInbound": "可呼入",
+    "allowOutbound": "可呼出",
+    "isDefaultOutbound": "外呼未指定号码时用它",
+    "defaultOutboundMark": "· 缺省",
+    "directions": {
+      "both": "呼入 · 呼出",
+      "inbound": "呼入",
+      "outbound": "呼出"
+    },
+    "botFlowHint": "有人打这个号码时，机器人说什么。",
+    "noFlow": "无"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",

@@ -115,6 +115,9 @@ type Did struct {
 	Description        string             `json:"description"`
 	IsEnabled          bool               `json:"isEnabled"`
 	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+	AllowInbound       bool               `json:"allowInbound"`
+	AllowOutbound      bool               `json:"allowOutbound"`
+	IsDefaultOutbound  bool               `json:"isDefaultOutbound"`
 }
 
 type Disposition struct {

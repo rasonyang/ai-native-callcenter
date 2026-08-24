@@ -4,6 +4,7 @@ package catalog
 
 import (
 	"errors"
+	"github.com/google/uuid"
 	"strings"
 	"testing"
 )
@@ -164,14 +165,30 @@ func TestQueueDefaults(t *testing.T) {
 }
 
 func TestDIDValidation(t *testing.T) {
+	someFlow := uuid.New()
 	tests := []struct {
 		name    string
 		did     DID
 		wantErr string
 	}{
-		{name: "a number and nothing else is enough", did: DID{Number: "95011"}},
-		{name: "letters are refused", did: DID{Number: "95-011"}, wantErr: "digits"},
-		{name: "a long language tag is refused", did: DID{Number: "95011", Language: "english-uk"}, wantErr: "language"},
+		{name: "an inbound number with the flow it answers with",
+			did: DID{Number: "95011", AllowInbound: true, FlowID: &someFlow}},
+		// The one shape a flowless number is allowed to have: nobody calls it,
+		// so there is nothing for it to answer.
+		{name: "an outbound-only number needs no flow",
+			did: DID{Number: "95011", AllowOutbound: true}},
+		{name: "an inbound number without a flow is refused",
+			did: DID{Number: "95011", AllowInbound: true}, wantErr: "flow"},
+		{name: "a number calls cannot go through either way is refused",
+			did: DID{Number: "95011"}, wantErr: "take calls"},
+		{name: "a number that cannot dial out cannot be the default one",
+			did:     DID{Number: "95011", AllowInbound: true, FlowID: &someFlow, IsDefaultOutbound: true},
+			wantErr: "default"},
+		{name: "letters are refused",
+			did: DID{Number: "95-011", AllowInbound: true, FlowID: &someFlow}, wantErr: "digits"},
+		{name: "a long language tag is refused",
+			did:     DID{Number: "95011", Language: "english-uk", AllowInbound: true, FlowID: &someFlow},
+			wantErr: "language"},
 	}
 
 	for _, tt := range tests {

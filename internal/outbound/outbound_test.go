@@ -4,6 +4,7 @@ package outbound
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -186,7 +187,13 @@ func testServiceWithEndpoint(t *testing.T, sw *fakeSwitch,
 	history map[uuid.UUID]bool, endpointFormat string) *Service {
 	t.Helper()
 	flowID := uuid.New()
-	dids := fakeDIDs{{Number: "95012", Language: "zh", FlowID: &flowID, IsEnabled: true}}
+	// One number that answers and one the deployment dials out from: a
+	// click-to-dial is refused without the second, by design (D9).
+	dids := fakeDIDs{
+		{Number: "95012", Language: "zh", FlowID: &flowID, IsEnabled: true, AllowInbound: true},
+		{Number: "95011", Language: "en", IsEnabled: true,
+			AllowOutbound: true, IsDefaultOutbound: true},
+	}
 	return New(Config{EndpointFormat: endpointFormat}, sw, dids,
 		func(_ context.Context, id uuid.UUID) (bool, error) { return history[id], nil },
 		func(uuid.UUID) bool { return false },
@@ -438,5 +445,29 @@ func TestDialAIStampsTheDIDOnTheLegThatMayNeverBeAnswered(t *testing.T) {
 	// the customer.
 	if strings.Contains(first.endpoint, "/95012") {
 		t.Errorf("the originate went to the DID instead of the customer: %q", first.endpoint)
+	}
+}
+
+// With no number to call from, the call does not go out.
+//
+// The alternative is what happened before: effective_caller_id_number left
+// unset, and the trunk presenting whatever the gateway is configured with — a
+// number the operator never chose, on every call, discoverable only by asking
+// somebody who was rung what they saw. A refusal says so; a fallback does not.
+func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T) {
+	sw := &fakeSwitch{}
+	flowID := uuid.New()
+	svc := New(Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw,
+		fakeDIDs{{Number: "95012", Language: "zh", FlowID: &flowID,
+			IsEnabled: true, AllowInbound: true}},
+		nil, nil, slog.New(slog.DiscardHandler))
+
+	_, err := svc.Dial(context.Background(), "1001", "18688886669", nil)
+	if !errors.Is(err, ErrNoDefaultOutbound) {
+		t.Fatalf("error = %v, want ErrNoDefaultOutbound", err)
+	}
+	if len(sw.originates) != 0 {
+		t.Errorf("the agent's phone was rung for a call that could not go out: %v",
+			sw.originates)
 	}
 }

@@ -1788,7 +1788,7 @@ export interface components {
              */
             position: number;
         };
-        /** @description An external number that reaches this call centre. Every number is meant to answer with a bot flow; the fallback queue takes the caller when the bot cannot. */
+        /** @description An external number and which way calls go through it. A number callers can reach answers with a bot flow; the fallback queue takes the caller when the bot cannot. A number used only for dialling out has no flow to bind, because nobody calls it. */
         DID: {
             /** Format: uuid */
             id: string;
@@ -1802,8 +1802,18 @@ export interface components {
             isRecordingEnabled: boolean;
             description: string;
             isEnabled: boolean;
+            /** @description Callers can reach this number. An inbound number answers with a flow, so one is required. */
+            allowInbound: boolean;
+            /** @description This platform can place calls from this number. */
+            allowOutbound: boolean;
+            /** @description The number an agent's call goes out from when nothing names one. At most one number in the deployment carries this, enforced by the database rather than by whoever remembers to clear the last one. */
+            isDefaultOutbound: boolean;
         };
-        /** @description Create or update a DID. Omitted fields take server defaults (language en, isEnabled true, isRecordingEnabled true). */
+        /**
+         * @description Create or update a number. Omitted fields take server defaults (language en, inbound, isEnabled true, isRecordingEnabled true).
+         *
+         *     A number must go somewhere: at least one direction. An inbound one needs a flow, and only an outbound one can be the default a call goes out from.
+         */
         DIDWrite: {
             number: string;
             language?: string;
@@ -1814,6 +1824,12 @@ export interface components {
             isRecordingEnabled?: boolean;
             description?: string;
             isEnabled?: boolean;
+            /** @description Callers can reach this number. An inbound number answers with a flow, so one is required. */
+            allowInbound?: boolean;
+            /** @description This platform can place calls from this number. */
+            allowOutbound?: boolean;
+            /** @description The number an agent's call goes out from when nothing names one. At most one number in the deployment carries this, enforced by the database rather than by whoever remembers to clear the last one. */
+            isDefaultOutbound?: boolean;
         };
         DIDList: {
             items: components["schemas"]["DID"][];

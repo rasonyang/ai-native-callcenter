@@ -1056,14 +1056,22 @@ type CurrentWrapUp struct {
 	Note             string    `json:"note"`
 }
 
-// DID An external number that reaches this call centre. Every number is meant to answer with a bot flow; the fallback queue takes the caller when the bot cannot.
+// DID An external number and which way calls go through it. A number callers can reach answers with a bot flow; the fallback queue takes the caller when the bot cannot. A number used only for dialling out has no flow to bind, because nobody calls it.
 type DID struct {
-	Description        string              `json:"description"`
-	FallbackQueueID    *openapi_types.UUID `json:"fallbackQueueId,omitempty"`
-	FlowID             *openapi_types.UUID `json:"flowId,omitempty"`
-	ID                 openapi_types.UUID  `json:"id"`
-	IsEnabled          bool                `json:"isEnabled"`
-	IsRecordingEnabled bool                `json:"isRecordingEnabled"`
+	// AllowInbound Callers can reach this number. An inbound number answers with a flow, so one is required.
+	AllowInbound bool `json:"allowInbound"`
+
+	// AllowOutbound This platform can place calls from this number.
+	AllowOutbound   bool                `json:"allowOutbound"`
+	Description     string              `json:"description"`
+	FallbackQueueID *openapi_types.UUID `json:"fallbackQueueId,omitempty"`
+	FlowID          *openapi_types.UUID `json:"flowId,omitempty"`
+	ID              openapi_types.UUID  `json:"id"`
+
+	// IsDefaultOutbound The number an agent's call goes out from when nothing names one. At most one number in the deployment carries this, enforced by the database rather than by whoever remembers to clear the last one.
+	IsDefaultOutbound  bool `json:"isDefaultOutbound"`
+	IsEnabled          bool `json:"isEnabled"`
+	IsRecordingEnabled bool `json:"isRecordingEnabled"`
 
 	// Language Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting, the prompt language and the voice; it does not select a provider, which is a deployment-wide setting.
 	Language string `json:"language"`
@@ -1075,15 +1083,25 @@ type DIDList struct {
 	Items []DID `json:"items"`
 }
 
-// DIDWrite Create or update a DID. Omitted fields take server defaults (language en, isEnabled true, isRecordingEnabled true).
+// DIDWrite Create or update a number. Omitted fields take server defaults (language en, inbound, isEnabled true, isRecordingEnabled true).
+//
+// A number must go somewhere: at least one direction. An inbound one needs a flow, and only an outbound one can be the default a call goes out from.
 type DIDWrite struct {
-	Description        *string             `json:"description,omitempty"`
-	FallbackQueueID    *openapi_types.UUID `json:"fallbackQueueId,omitempty"`
-	FlowID             *openapi_types.UUID `json:"flowId,omitempty"`
-	IsEnabled          *bool               `json:"isEnabled,omitempty"`
-	IsRecordingEnabled *bool               `json:"isRecordingEnabled,omitempty"`
-	Language           *string             `json:"language,omitempty"`
-	Number             string              `json:"number"`
+	// AllowInbound Callers can reach this number. An inbound number answers with a flow, so one is required.
+	AllowInbound *bool `json:"allowInbound,omitempty"`
+
+	// AllowOutbound This platform can place calls from this number.
+	AllowOutbound   *bool               `json:"allowOutbound,omitempty"`
+	Description     *string             `json:"description,omitempty"`
+	FallbackQueueID *openapi_types.UUID `json:"fallbackQueueId,omitempty"`
+	FlowID          *openapi_types.UUID `json:"flowId,omitempty"`
+
+	// IsDefaultOutbound The number an agent's call goes out from when nothing names one. At most one number in the deployment carries this, enforced by the database rather than by whoever remembers to clear the last one.
+	IsDefaultOutbound  *bool   `json:"isDefaultOutbound,omitempty"`
+	IsEnabled          *bool   `json:"isEnabled,omitempty"`
+	IsRecordingEnabled *bool   `json:"isRecordingEnabled,omitempty"`
+	Language           *string `json:"language,omitempty"`
+	Number             string  `json:"number"`
 }
 
 // DTMFRequest defines model for DTMFRequest.

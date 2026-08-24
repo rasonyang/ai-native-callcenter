@@ -9,6 +9,7 @@ import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError } from '@/lib/errors'
+import { useFlows } from '@/lib/flows'
 import { requireRole } from '@/lib/guards'
 import { useCatalogMutations, useDIDs, useQueues, type DIDDraft } from '@/lib/catalog'
 
@@ -26,6 +27,7 @@ export const Route = createFileRoute('/_app/admin/numbers')({
 function NumbersPage() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useDIDs()
+  const flows = useFlows()
   const { data: queues } = useQueues()
   const { saveDID, deleteDID } = useCatalogMutations()
   const [editing, setEditing] = useState<DIDDraft | null>(null)
@@ -35,6 +37,8 @@ function NumbersPage() {
     { value: '', label: t('admin.noFallbackQueue') },
     ...(queues?.items ?? []).map((q) => ({ value: q.id, label: q.displayName })),
   ]
+  const flowName = (id?: string) =>
+    (flows.data?.items ?? []).find((f) => f.flowId === id)?.name ?? t('admin.noFlow')
   const queueName = (id?: string) =>
     queues?.items.find((q) => q.id === id)?.displayName ?? '—'
 
@@ -57,6 +61,7 @@ function NumbersPage() {
       <DataTable>
         <THead>
           <Th>{t('admin.number')}</Th>
+          <Th>{t('admin.direction')}</Th>
           <Th>{t('admin.language')}</Th>
           <Th>{t('admin.botFlow')}</Th>
           <Th>{t('admin.fallbackQueue')}</Th>
@@ -65,18 +70,24 @@ function NumbersPage() {
           <Th align="right">{t('supervisor.actions')}</Th>
         </THead>
         <TBody>
-          {isPending && <TableMessage colSpan={7}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={7}>{describeError(error, t)}</TableMessage>}
+          {isPending && <TableMessage colSpan={8}>{t('common.loading')}</TableMessage>}
+          {isError && <TableMessage colSpan={8}>{describeError(error, t)}</TableMessage>}
           {!isPending && rows.length === 0 && (
-            <TableMessage colSpan={7}>{t('admin.noNumbers')}</TableMessage>
+            <TableMessage colSpan={8}>{t('admin.noNumbers')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
               <Td className="tabular font-medium">{row.number}</Td>
+              <Td className="text-xs text-muted-foreground">
+                {directionOf(row, t)}
+                {row.isDefaultOutbound && (
+                  <span className="ml-1.5 text-primary">{t('admin.defaultOutboundMark')}</span>
+                )}
+              </Td>
               <Td className="text-xs text-muted-foreground">{row.language}</Td>
               <Td className="text-xs text-muted-foreground">
-                {/* The flow catalogue arrives with the AI voice leg. */}
-                {row.flowId ? row.flowId.slice(0, 8) : t('admin.flowPending')}
+                {/* Named, not an id fragment: the flow catalogue exists now. */}
+                {flowName(row.flowId)}
               </Td>
               <Td className="text-xs text-muted-foreground">{queueName(row.fallbackQueueId)}</Td>
               <Td className="text-xs text-muted-foreground">
@@ -114,6 +125,61 @@ function NumbersPage() {
               onChange={(e) => setEditing({ ...editing, number: e.target.value })}
             />
           </Field>
+          {/* Two checkboxes rather than a choice: a number that both takes
+              calls and places them is ordinary. */}
+          <Field label={t('admin.direction')} hint={t('admin.directionHint')}>
+            <span className="flex flex-col gap-1.5 pt-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={editing.allowInbound ?? false}
+                  onChange={(e) => setEditing({ ...editing, allowInbound: e.target.checked })}
+                />
+                {t('admin.allowInbound')}
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={editing.allowOutbound ?? false}
+                  onChange={(e) =>
+                    setEditing({
+                      ...editing,
+                      allowOutbound: e.target.checked,
+                      // A number that cannot dial out cannot be the one calls
+                      // go out from; unticking one unticks the other rather
+                      // than leaving a contradiction for the server to refuse.
+                      isDefaultOutbound: e.target.checked && editing.isDefaultOutbound,
+                    })
+                  }
+                />
+                {t('admin.allowOutbound')}
+              </label>
+              {editing.allowOutbound && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editing.isDefaultOutbound ?? false}
+                    onChange={(e) =>
+                      setEditing({ ...editing, isDefaultOutbound: e.target.checked })
+                    }
+                  />
+                  {t('admin.isDefaultOutbound')}
+                </label>
+              )}
+            </span>
+          </Field>
+          {editing.allowInbound && (
+            <Field label={t('admin.botFlow')} hint={t('admin.botFlowHint')}>
+              <Select
+                value={editing.flowId ?? ''}
+                onChange={(id) => setEditing({ ...editing, flowId: id === '' ? undefined : id })}
+                options={[
+                  { value: '', label: t('admin.noFlow') },
+                  ...(flows.data?.items ?? []).map((f) => ({ value: f.flowId, label: f.name })),
+                ]}
+              />
+            </Field>
+          )}
           <Field label={t('admin.language')} hint={t('admin.languageHint')}>
             <Select
               value={editing.language ?? 'en'}
@@ -153,4 +219,19 @@ function NumbersPage() {
       )}
     </>
   )
+}
+
+/**
+ * Which way calls go through a number, in one phrase.
+ *
+ * Both is the ordinary case and has to read as one thing rather than as two
+ * flags the reader has to combine.
+ */
+function directionOf(
+  did: { allowInbound: boolean; allowOutbound: boolean },
+  t: (key: string) => string,
+): string {
+  if (did.allowInbound && did.allowOutbound) return t('admin.directions.both')
+  if (did.allowOutbound) return t('admin.directions.outbound')
+  return t('admin.directions.inbound')
 }

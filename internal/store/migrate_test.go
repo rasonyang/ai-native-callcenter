@@ -596,3 +596,62 @@ func TestMigrationsDropTheColumnsWithoutLosingABinding(t *testing.T) {
 			"registerable because two columns it never used went away", served)
 	}
 }
+
+// 00020 narrows what a number may be, on a database that already holds one the
+// new rule forbids.
+//
+// A fresh database has no flowless number, so this is the only place the
+// rewrite is exercised: without it every deployment holding one is refused
+// with "is violated by some row" on every boot.
+func TestMigrationsGiveAFlowlessNumberTheOnlyShapeItMayHave(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 19); err != nil {
+		t.Fatalf("migrating to 19 failed: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO dids (id, number, language, is_enabled)
+		 VALUES (gen_random_uuid(), '95099', 'zh', true)`); err != nil {
+		t.Fatalf("seed a flowless number: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database that holds a flowless number failed: %v", err)
+	}
+
+	var inbound, outbound bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT allow_inbound, allow_outbound FROM dids WHERE number = '95099'`).
+		Scan(&inbound, &outbound); err != nil {
+		t.Fatalf("read the number back: %v", err)
+	}
+	if inbound || !outbound {
+		t.Errorf("95099 is inbound=%v outbound=%v — a number with no flow cannot "+
+			"claim to take calls it has nothing to answer with", inbound, outbound)
+	}
+
+	// The rules hold from here on, against psql as well as the API.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO dids (id, number, language, allow_inbound)
+		 VALUES (gen_random_uuid(), '95098', 'en', true)`); err == nil {
+		t.Error("an inbound number was accepted with no flow to answer with")
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO dids (id, number, language, allow_inbound, allow_outbound)
+		 VALUES (gen_random_uuid(), '95097', 'en', false, false)`); err == nil {
+		t.Error("a number was accepted that calls cannot go through in either direction")
+	}
+	if _, err := db.ExecContext(ctx,
+		`UPDATE dids SET is_default_outbound = true WHERE number = '95099'`); err != nil {
+		t.Fatalf("mark the only outbound number as the default: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO dids (id, number, language, allow_inbound, allow_outbound, is_default_outbound)
+		 VALUES (gen_random_uuid(), '95096', 'en', false, true, true)`); err == nil {
+		t.Error("a second default outbound number was accepted; which one a call " +
+			"comes from would depend on the order rows are read in")
+	}
+}

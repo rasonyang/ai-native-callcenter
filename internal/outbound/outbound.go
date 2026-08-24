@@ -142,9 +142,14 @@ var (
 	// here routed through the dialplan by loopback and left every AI outbound
 	// call unable to reach a person (C47).
 	ErrNoOutboundEndpoint = fmt.Errorf("outbound: AICC_OUTBOUND_ENDPOINT is not set")
-	ErrUnknownDID         = fmt.Errorf("outbound: no such DID")
-	ErrFlowless           = fmt.Errorf("outbound: the DID has no published flow")
-	ErrAlreadyPlaced      = fmt.Errorf("outbound: this call was already placed")
+	// ErrNoDefaultOutbound means no number is marked as the one calls go out
+	// from. Refused rather than defaulted: the alternative is every call
+	// presenting whatever the gateway carries, which nobody chose and nothing
+	// records.
+	ErrNoDefaultOutbound = fmt.Errorf("outbound: no number is marked as the default outbound one")
+	ErrUnknownDID        = fmt.Errorf("outbound: no such DID")
+	ErrFlowless          = fmt.Errorf("outbound: the DID has no published flow")
+	ErrAlreadyPlaced     = fmt.Errorf("outbound: this call was already placed")
 )
 
 // pinCodecs adds the G.711 pin on legs that leave through sofia. Loopback
@@ -230,11 +235,22 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
 		// comma inside the block is a variable separator.
 		"absolute_codec_string": "PCMU",
 	}
-	if s.cfg.CallerID != "" {
-		// Presented onward when the dialplan bridges out; the agent's own
-		// display above is the origination_* pair.
-		vars["effective_caller_id_number"] = s.cfg.CallerID
+	// Presented onward when the dialplan bridges out; the agent's own display
+	// above is the origination_* pair.
+	//
+	// It comes from the number marked as the deployment's default outbound one,
+	// and its absence is a refusal rather than a fallback (D9). Left unset, the
+	// trunk presents whatever the gateway happens to be configured with — a
+	// number the operator never chose, on every call, discoverable only by
+	// asking somebody who was rung what they saw.
+	clid, err := s.defaultOutboundNumber(ctx)
+	if err != nil {
+		if s.callData != nil {
+			s.callData.Drop(callID)
+		}
+		return uuid.Nil, err
 	}
+	vars["effective_caller_id_number"] = clid
 	if _, err := s.sw.Originate(agentLeg, s.sw.Endpoint(agentExtension), vars); err != nil {
 		if s.callData != nil {
 			s.callData.Drop(callID)
@@ -373,6 +389,31 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	s.log.Info("ai outbound placed", "callId", callID,
 		"to", req.To, "did", did.Number, "language", language)
 	return callID, nil
+}
+
+// defaultOutboundNumber is the number a call this platform places comes from.
+//
+// The database allows at most one (uq_dids_default_outbound), so this is a
+// lookup and not a choice. Refused rather than defaulted: a caller id nobody
+// chose is worse than a call that does not go out, because the second one says
+// so and the first one does not.
+func (s *Service) defaultOutboundNumber(ctx context.Context) (string, error) {
+	// Configuration still wins where a deployment has set it: the env var
+	// predates the flag and removing it silently would change what a working
+	// deployment presents.
+	if s.cfg.CallerID != "" {
+		return s.cfg.CallerID, nil
+	}
+	dids, err := s.dids.DIDs(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, did := range dids {
+		if did.IsDefaultOutbound && did.IsEnabled {
+			return did.Number, nil
+		}
+	}
+	return "", ErrNoDefaultOutbound
 }
 
 func (s *Service) findDID(ctx context.Context, number string) (catalog.DID, error) {

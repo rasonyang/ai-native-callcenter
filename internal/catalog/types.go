@@ -253,9 +253,9 @@ type DID struct {
 	// frontend. It sets the greeting, the prompt language and the voice; the
 	// provider is a deployment-wide setting and this never selects it.
 	Language string `json:"language"`
-	// FlowID is the conversation the bot runs. Every number is meant to answer
-	// with a bot; the flow catalogue arrives with the AI voice leg, so a
-	// number may exist without one in the meantime.
+	// FlowID is the conversation the bot runs. A number callers can reach must
+	// have one; a number used only for dialling out has nothing to answer
+	// with, because nobody calls it.
 	FlowID *uuid.UUID `json:"flowId,omitempty"`
 	// FallbackQueueID is where the caller goes when the bot cannot take the
 	// call at all: a provider outage, no capacity, or the gateway down.
@@ -263,13 +263,26 @@ type DID struct {
 	IsRecordingEnabled bool       `json:"isRecordingEnabled"`
 	Description        string     `json:"description"`
 	IsEnabled          bool       `json:"isEnabled"`
+
+	// Which way calls go through this number. Two flags rather than one
+	// choice: a number that both takes calls and places them is ordinary, and
+	// an enum cannot say so without a third value meaning "both".
+	AllowInbound  bool `json:"allowInbound"`
+	AllowOutbound bool `json:"allowOutbound"`
+	// IsDefaultOutbound marks the number an agent's call goes out from when
+	// nothing names one. At most one in the deployment, enforced by a partial
+	// unique index rather than by whoever remembers to clear the last one.
+	IsDefaultOutbound bool `json:"isDefaultOutbound"`
 }
 
 // NewDID is the shape a create or update body is decoded into. See
 // NewExtension for why the boolean defaults are seeded rather than applied in
 // validate.
 func NewDID() DID {
-	return DID{IsEnabled: true, IsRecordingEnabled: true}
+	// Inbound by default: a number somebody adds is almost always one they
+	// have been given to be called on, and the flow it answers with is the
+	// next thing the form asks for.
+	return DID{IsEnabled: true, IsRecordingEnabled: true, AllowInbound: true}
 }
 
 func (d *DID) validate() error {
@@ -285,6 +298,18 @@ func (d *DID) validate() error {
 	}
 	if len(d.Language) > 8 {
 		return fmt.Errorf("%w: language must be a short subtag such as en or zh", ErrValidation)
+	}
+	// The database refuses each of these too. Saying which field is wrong,
+	// and why, is this layer's job — a CHECK constraint's name is not an
+	// answer anybody can act on.
+	if !d.AllowInbound && !d.AllowOutbound {
+		return fmt.Errorf("%w: a number must take calls, place them, or both", ErrValidation)
+	}
+	if d.AllowInbound && d.FlowID == nil {
+		return fmt.Errorf("%w: a number callers can reach needs the flow it answers with", ErrValidation)
+	}
+	if d.IsDefaultOutbound && !d.AllowOutbound {
+		return fmt.Errorf("%w: a number that cannot place calls cannot be the default one", ErrValidation)
 	}
 	return nil
 }

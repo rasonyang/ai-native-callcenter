@@ -84,8 +84,8 @@ ORDER BY q.name;
 
 -- name: CreateDID :one
 INSERT INTO dids (id, number, language, flow_id, fallback_queue_id,
-                  is_recording_enabled, description, is_enabled)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                  is_recording_enabled, description, is_enabled, allow_inbound, allow_outbound, is_default_outbound)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: GetDIDByNumber :one
@@ -97,7 +97,8 @@ SELECT * FROM dids ORDER BY number;
 -- name: UpdateDID :one
 UPDATE dids
 SET language = $2, flow_id = $3, fallback_queue_id = $4,
-    is_recording_enabled = $5, description = $6, is_enabled = $7
+    is_recording_enabled = $5, description = $6, is_enabled = $7,
+    allow_inbound = $8, allow_outbound = $9, is_default_outbound = $10
 WHERE id = $1
 RETURNING *;
 
@@ -142,3 +143,10 @@ WHERE NOT EXISTS (
 )
 ORDER BY gs.n
 LIMIT 1;
+
+-- The number a call this platform places comes from when nothing names one.
+-- At most one row can carry the flag (uq_dids_default_outbound), so this asks
+-- for it rather than picking among candidates.
+
+-- name: DefaultOutboundDID :one
+SELECT * FROM dids WHERE is_default_outbound AND is_enabled;

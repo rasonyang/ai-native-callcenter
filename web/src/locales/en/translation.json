@@ -282,7 +282,6 @@
     "language": "Language",
     "languageHint": "Sets the greeting, prompt language and voice for this number.",
     "botFlow": "Bot flow",
-    "flowPending": "Not configured yet",
     "fallbackQueue": "Fallback queue",
     "noFallbackQueue": "None",
     "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
@@ -322,7 +321,20 @@
     "passwordExistingHint": "Not shown here. Copy reads it back and records that it was read; Reset replaces it and the old one stops working at once.",
     "resetPassword": "Reset",
     "assignedTo": "Agent",
-    "unassigned": "nobody"
+    "unassigned": "nobody",
+    "direction": "Direction",
+    "directionHint": "A number must take calls, place them, or both. One callers can reach answers with a bot flow.",
+    "allowInbound": "Callers can reach it",
+    "allowOutbound": "Calls can go out from it",
+    "isDefaultOutbound": "Use it when an outbound call names no number",
+    "defaultOutboundMark": "· default",
+    "directions": {
+      "both": "In · Out",
+      "inbound": "Inbound",
+      "outbound": "Outbound"
+    },
+    "botFlowHint": "What the bot says when somebody calls this number.",
+    "noFlow": "None"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",

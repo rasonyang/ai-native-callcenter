@@ -437,6 +437,9 @@ func (c *CatalogStore) CreateDID(ctx context.Context, d catalog.DID) (catalog.DI
 		IsRecordingEnabled: d.IsRecordingEnabled,
 		Description:        d.Description,
 		IsEnabled:          d.IsEnabled,
+		AllowInbound:       d.AllowInbound,
+		AllowOutbound:      d.AllowOutbound,
+		IsDefaultOutbound:  d.IsDefaultOutbound,
 	})
 	if err != nil {
 		return catalog.DID{}, fmt.Errorf("create did: %w", err)
@@ -453,6 +456,9 @@ func (c *CatalogStore) UpdateDID(ctx context.Context, d catalog.DID) (catalog.DI
 		IsRecordingEnabled: d.IsRecordingEnabled,
 		Description:        d.Description,
 		IsEnabled:          d.IsEnabled,
+		AllowInbound:       d.AllowInbound,
+		AllowOutbound:      d.AllowOutbound,
+		IsDefaultOutbound:  d.IsDefaultOutbound,
 	})
 	if err != nil {
 		return catalog.DID{}, fmt.Errorf("update did: %w", err)
@@ -474,6 +480,9 @@ func didOf(r queries.Did) catalog.DID {
 		IsRecordingEnabled: r.IsRecordingEnabled,
 		Description:        r.Description,
 		IsEnabled:          r.IsEnabled,
+		AllowInbound:       r.AllowInbound,
+		AllowOutbound:      r.AllowOutbound,
+		IsDefaultOutbound:  r.IsDefaultOutbound,
 	}
 }
 
