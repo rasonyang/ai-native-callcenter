@@ -527,10 +527,16 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      / `switchBillSec=4` —— 与改名前那通外线同型(VC-S14-04)。改名后日志里 `pstn_sim` 出现 **0 次**。
      **变量改名是会静默失败的那一处**:dialplan 引用未定义的 `$${pstn_gateway_caller_id}` 会渲染成
      空 caller id 而电话照打,日志里它解析成 `95001`,才说明变量是**跟着引用一起**改的。
-     **⚠ 只验证了宿主机这一半。** `.env` 的 `AICC_OUTBOUND_ENDPOINT` 没有被这通电话走到 ——
-     click-to-dial 的坐席腿是 `sw.Endpoint(分机)`,应答后 `uuid_transfer` 进 dialplan,
-     **全程不读 `EndpointFormat`**;那个字符串只有 **AI 外呼 `DialAI`**(`outbound.go:281/342`)才用。
-     仓内那一半要一通 AI 外呼才算走完,**未做**。
+     **仓内那一半由第二通电话闭合(同日)**:click-to-dial 不读 `EndpointFormat` ——
+     坐席腿是 `sw.Endpoint(分机)`,应答后 `uuid_transfer` 进 dialplan;
+     `AICC_OUTBOUND_ENDPOINT` 只有 **AI 外呼 `DialAI`**(`outbound.go:281/342`)才用。
+     故补打一通 AI 外呼(`POST /calls` AI_OUTBOUND,did=95002,`45e04474`):
+     交换机侧出的正是 `sofia/gateway/pstn_gateway/18688886669`,
+     **两条路径的网关名至此都跑过了**。这通同时把 AI 外呼全链又走了一遍 ——
+     应答 → bot(qwen/zh,`novanet_support` 的 `welcome`)→ 主叫要人工 →
+     `transfer_to_agent` 进 `support-zh`(ext 7002)→ 1002 接起 → 挂断。
+     CDR:`OUTBOUND / ANSWERED / 95002 → 18688886669`,`legs=[BOT 12s, QUEUE support-zh 2s,
+     AGENT 1002 5s]`,`bot_sec=12` / `talk_sec=4` / `total=22`,零幽灵行。
   2. **W11.2 号段分配器**(D2/D3)。`AICC_EXTENSION_RANGE` + 最小空闲号 + advisory lock。
      F12 已解,不再阻塞。
   3. **W11.3 Users 写侧**。`POST/PUT /users`(角色 `AGENT|SUPERVISOR|ADMIN`、account 可编辑、
