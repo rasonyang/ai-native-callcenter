@@ -172,7 +172,7 @@
     "queuesFailed": "Cannot read the queues.",
     "queueCount": "{{count}} queues",
     "staffed": "Staffed",
-    "sla": "SLA",
+    "sla": "Service level",
     "perQueue": "Per queue",
     "calls": "Calls",
     "answered": "Answered",
@@ -182,7 +182,8 @@
     "noQueueData": "No calls in this window yet.",
     "lastDays": "Last {{count}} days",
     "unassignedQueue": "No queue",
-    "allStatuses": "All statuses"
+    "allStatuses": "All statuses",
+    "slaHint": "Calls answered within the queue threshold, as a share of all calls offered — unanswered calls stay in the denominator."
   },
   "partyStates": {
     "DIALING": "Dialling",
@@ -410,7 +411,7 @@
     "queue": "Queue",
     "calls": "Calls",
     "answeredShort": "Answered",
-    "sla": "SLA",
+    "sla": "Service level",
     "avgWait": "Avg wait",
     "maxWait": "Max wait",
     "noQueueCalls": "No queue calls in this window.",
@@ -418,7 +419,8 @@
     "containedShort": "Contained",
     "abandonedShort": "Abandoned",
     "noCalls": "No calls in this window.",
-    "unknownQueue": "Removed queue"
+    "unknownQueue": "Removed queue",
+    "slaHint": "Calls answered within the queue threshold, as a share of all calls offered — unanswered calls stay in the denominator."
   },
   "device": {
     "reachable": "Phone registered",

@@ -109,7 +109,9 @@ function ReportsPage() {
             <Th>{t('reports.queue')}</Th>
             <Th align="right">{t('reports.calls')}</Th>
             <Th align="right">{t('reports.answeredShort')}</Th>
-            <Th align="right">{t('reports.sla')}</Th>
+            <Th align="right">
+              <span title={t('reports.slaHint')}>{t('reports.sla')}</span>
+            </Th>
             <Th align="right">{t('reports.avgWait')}</Th>
             <Th align="right">{t('reports.maxWait')}</Th>
           </THead>
@@ -123,6 +125,9 @@ function ReportsPage() {
                 <Td>{queueName(row.queueId)}</Td>
                 <Td align="right" className="tabular">{row.totalCalls}</Td>
                 <Td align="right" className="tabular">{row.answeredCalls}</Td>
+                {/* Over every call offered — the same denominator the
+                    supervisor's wallboard uses, since C27 found the two
+                    disagreeing on one queue on one day. */}
                 <Td align="right" className="tabular">
                   {row.totalCalls > 0
                     ? `${Math.round((row.answeredWithinSla / row.totalCalls) * 100)}%`

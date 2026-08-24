@@ -36,7 +36,9 @@ export function QueuePerformance() {
           <Th>{t('supervisor.queue')}</Th>
           <Th align="right">{t('supervisor.calls')}</Th>
           <Th align="right">{t('supervisor.abandoned')}</Th>
-          <Th align="right">{t('supervisor.sla')}</Th>
+          <Th align="right">
+            <span title={t('supervisor.slaHint')}>{t('supervisor.sla')}</span>
+          </Th>
           <Th align="right" className="whitespace-nowrap">
             {t('supervisor.avgWait')}
           </Th>
@@ -51,11 +53,19 @@ export function QueuePerformance() {
             <TableMessage colSpan={6}>{t('supervisor.noQueueData')}</TableMessage>
           )}
           {rows.map((row) => {
-            // Service level is the share of answered calls that beat the
-            // queue's threshold; with nothing answered there is nothing to rate.
+            // Over every call offered, not over the answered ones. Dividing by
+            // answered calls is self-consistent and answers a different
+            // question — and the worse a queue does, the better that answer
+            // looks, because the calls nobody took leave the denominator with
+            // them. A queue where every call rings out approaches 100%.
+            //
+            // The admin report divides the same count by total calls, so a
+            // supervisor and an administrator were reading one queue on one
+            // day and seeing 100% and 47% (C27). One definition, named in the
+            // header, so the number says which question it answers.
             const sla =
-              row.answeredCalls > 0
-                ? Math.round((row.answeredWithinSla / row.answeredCalls) * 100)
+              row.totalCalls > 0
+                ? Math.round((row.answeredWithinSla / row.totalCalls) * 100)
                 : undefined
             return (
               <Tr key={row.queueId ?? 'none'}>

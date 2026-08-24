@@ -170,7 +170,7 @@
     "queuesFailed": "无法读取队列。",
     "queueCount": "{{count}} 个队列",
     "staffed": "配备坐席",
-    "sla": "服务水平目标",
+    "sla": "服务水平",
     "perQueue": "按队列",
     "calls": "通话量",
     "answered": "已接听",
@@ -180,7 +180,8 @@
     "noQueueData": "此时间段内暂无通话。",
     "lastDays": "最近 {{count}} 天",
     "unassignedQueue": "未进队列",
-    "allStatuses": "全部状态"
+    "allStatuses": "全部状态",
+    "slaHint": "在队列门限内接起的呼叫,占呼入总数的比例 —— 未接通的呼叫仍留在分母里。"
   },
   "partyStates": {
     "DIALING": "外呼中",
@@ -408,7 +409,7 @@
     "queue": "队列",
     "calls": "通话量",
     "answeredShort": "接听",
-    "sla": "达标率",
+    "sla": "服务水平",
     "avgWait": "平均等待",
     "maxWait": "最长等待",
     "noQueueCalls": "窗口内没有队列通话。",
@@ -416,7 +417,8 @@
     "containedShort": "闭环",
     "abandonedShort": "放弃",
     "noCalls": "窗口内没有通话。",
-    "unknownQueue": "已删除队列"
+    "unknownQueue": "已删除队列",
+    "slaHint": "在队列门限内接起的呼叫,占呼入总数的比例 —— 未接通的呼叫仍留在分母里。"
   },
   "device": {
     "reachable": "话机已注册",
