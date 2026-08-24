@@ -276,6 +276,7 @@ const (
 	ExtensionKindAGENT ExtensionKind = "AGENT"
 	ExtensionKindBOT   ExtensionKind = "BOT"
 	ExtensionKindPLAIN ExtensionKind = "PLAIN"
+	ExtensionKindQUEUE ExtensionKind = "QUEUE"
 )
 
 // Valid indicates whether the value is a known member of the ExtensionKind enum.
@@ -286,6 +287,8 @@ func (e ExtensionKind) Valid() bool {
 	case ExtensionKindBOT:
 		return true
 	case ExtensionKindPLAIN:
+		return true
+	case ExtensionKindQUEUE:
 		return true
 	default:
 		return false
@@ -1173,15 +1176,25 @@ type ErrorResponse struct {
 
 // Extension A SIP endpoint the switch will accept a registration for.
 type Extension struct {
-	CreatedAt   time.Time          `json:"createdAt"`
-	DisplayName string             `json:"displayName"`
-	ID          openapi_types.UUID `json:"id"`
-	IsEnabled   bool               `json:"isEnabled"`
-	Kind        ExtensionKind      `json:"kind"`
-	Number      string             `json:"number"`
+	// AgentID The agent whose phone this is. Read here and written by binding the agent to it: the binding lives on the agent so the database can still refuse to delete a phone somebody works at, which is a guard an incident put there.
+	AgentID     *openapi_types.UUID `json:"agentId,omitempty"`
+	CreatedAt   time.Time           `json:"createdAt"`
+	DisplayName string              `json:"displayName"`
+
+	// FlowID The flow a BOT extension answers with.
+	FlowID    *openapi_types.UUID `json:"flowId,omitempty"`
+	ID        openapi_types.UUID  `json:"id"`
+	IsEnabled bool                `json:"isEnabled"`
+
+	// Kind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+	Kind   ExtensionKind `json:"kind"`
+	Number string        `json:"number"`
+
+	// QueueID The queue a QUEUE extension reaches.
+	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
 }
 
-// ExtensionKind defines model for ExtensionKind.
+// ExtensionKind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
 type ExtensionKind string
 
 // ExtensionList defines model for ExtensionList.
@@ -1197,14 +1210,24 @@ type ExtensionSecret struct {
 }
 
 // ExtensionWrite Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
+//
+// The target must match the kind. Changing the kind clears the targets that no longer apply, which is why a form asks before it does so.
 type ExtensionWrite struct {
-	DisplayName *string        `json:"displayName,omitempty"`
-	IsEnabled   *bool          `json:"isEnabled,omitempty"`
-	Kind        *ExtensionKind `json:"kind,omitempty"`
-	Number      string         `json:"number"`
+	DisplayName *string `json:"displayName,omitempty"`
+
+	// FlowID Required for kind BOT and refused for any other kind: a number cannot serve two things, and a target left behind by a changed kind is a claim nothing honours.
+	FlowID    *openapi_types.UUID `json:"flowId,omitempty"`
+	IsEnabled *bool               `json:"isEnabled,omitempty"`
+
+	// Kind What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+	Kind   *ExtensionKind `json:"kind,omitempty"`
+	Number string         `json:"number"`
 
 	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch.
 	Password *string `json:"password,omitempty"`
+
+	// QueueID Required for kind QUEUE and refused for any other kind.
+	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
 }
 
 // Flow A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.

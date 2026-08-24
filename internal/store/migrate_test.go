@@ -417,3 +417,69 @@ func TestMigrationsRefuseToDeleteAnExtensionAnAgentWorksAt(t *testing.T) {
 		t.Errorf("the extension could not be deleted after the agent was unbound: %v", err)
 	}
 }
+
+// 00017 widens the extension vocabulary and adds two target columns to a table
+// that already holds rows.
+//
+// A fresh database cannot see what this checks. Every existing extension is an
+// AGENT with no target, so it must revalidate under the new kind/target CHECK
+// untouched — and the constraint has to accept "no target at all", because
+// that is what every row in every deployment currently is.
+func TestMigrationsLetExistingExtensionsKeepTheirLabels(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 16); err != nil {
+		t.Fatalf("migrating to 16 failed: %v", err)
+	}
+
+	const (
+		agentExt = "66666666-6666-6666-6666-666666666666"
+		plainExt = "77777777-7777-7777-7777-777777777777"
+	)
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password)
+		 VALUES ($1, '1097', 'AGENT', 'x'), ($2, '1096', 'PLAIN', 'x')`,
+		agentExt, plainExt); err != nil {
+		t.Fatalf("seed extensions of the old vocabulary: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database that already holds extensions failed: %v", err)
+	}
+
+	var kinds []string
+	rows, err := db.QueryContext(ctx,
+		`SELECT kind FROM extensions WHERE id IN ($1, $2) ORDER BY number DESC`, agentExt, plainExt)
+	if err != nil {
+		t.Fatalf("read the kinds back: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind string
+		if err := rows.Scan(&kind); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		kinds = append(kinds, kind)
+	}
+	if len(kinds) != 2 || kinds[0] != "AGENT" || kinds[1] != "PLAIN" {
+		t.Errorf("kinds = %v, want AGENT and PLAIN — the migration relabelled rows "+
+			"it was only supposed to make room beside", kinds)
+	}
+
+	// The vocabulary is wider, and the CHECK still refuses a row that claims
+	// two things at once.
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password)
+		 VALUES (gen_random_uuid(), '1095', 'QUEUE', 'x')`); err != nil {
+		t.Errorf("a QUEUE extension was refused: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO extensions (id, number, kind, password, queue_id)
+		 VALUES (gen_random_uuid(), '1094', 'BOT', 'x', gen_random_uuid())`); err == nil {
+		t.Error("a BOT extension was allowed to point at a queue; kind and target " +
+			"can now disagree, and whichever one a reader trusts is a coin toss")
+	}
+}

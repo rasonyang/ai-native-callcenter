@@ -247,7 +247,8 @@
     "kinds": {
       "AGENT": "坐席",
       "BOT": "机器人",
-      "PLAIN": "普通"
+      "PLAIN": "普通",
+      "QUEUE": "队列"
     },
     "routingHint": "队列及其分配方式，修改后立即下发到交换机。",
     "addQueue": "新增队列",
@@ -323,7 +324,24 @@
     "revealTitle": "分机 {{number}} 的 SIP 口令",
     "revealHint": "这次查看会记入审计日志。话机就是用它注册的。",
     "copy": "复制",
-    "copied": "已复制"
+    "copied": "已复制",
+    "numberOutOfRange": "超出号段（{{low}}–{{high}}）。",
+    "numberTaken": "这个号码已被占用。",
+    "kindChangeClearsTarget": "改变这个号码服务的对象，会清掉它现在的目标。继续？",
+    "targetAgent": "坐席",
+    "targetAgentHint": "只列出还没有话机的账号：一个账号至多一部。",
+    "targetFlow": "流程",
+    "targetQueue": "队列",
+    "targetNone": "无",
+    "passwordNewHint": "生成后只显示这一次，离开表单就看不到了。现在复制。",
+    "passwordExistingHint": "这里不显示。复制会读回它并记入审计；重设会替换它，旧口令立刻失效。",
+    "resetPassword": "重设",
+    "kindHints": {
+      "AGENT": "某个人的话机。",
+      "BOT": "用机器人流程接听。",
+      "QUEUE": "接到一个队列。",
+      "PLAIN": "没有目标的裸号码。"
+    }
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",

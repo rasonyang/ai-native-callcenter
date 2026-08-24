@@ -16,6 +16,7 @@ type ExtensionKind string
 const (
 	KindAgent ExtensionKind = "AGENT"
 	KindBot   ExtensionKind = "BOT"
+	KindQueue ExtensionKind = "QUEUE"
 	KindPlain ExtensionKind = "PLAIN"
 )
 
@@ -28,8 +29,17 @@ type Extension struct {
 	IsEnabled   bool          `json:"isEnabled"`
 	CreatedAt   time.Time     `json:"createdAt"`
 	// Password is write-only: it is accepted on create and update and never
-	// returned, because the only reader that needs it is the switch.
+	// returned, because the only reader that needs it is the switch. Reading
+	// it back is a separate, audited request.
 	Password string `json:"password,omitempty"`
+
+	// What this number serves, at most one of them, matching Kind.
+	//
+	// AgentID is read-only here: the binding is written from the agent's side,
+	// where the database can still refuse to delete a phone somebody works at.
+	AgentID *uuid.UUID `json:"agentId,omitempty"`
+	FlowID  *uuid.UUID `json:"flowId,omitempty"`
+	QueueID *uuid.UUID `json:"queueId,omitempty"`
 }
 
 // NewExtension is the shape a create or update body is decoded into: the
@@ -67,7 +77,7 @@ func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	e.DisplayName = trim(e.DisplayName)
 
 	switch e.Kind {
-	case KindAgent, KindBot, KindPlain:
+	case KindAgent, KindBot, KindQueue, KindPlain:
 	case "":
 		e.Kind = KindAgent
 	default:
@@ -75,6 +85,23 @@ func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	}
 	if requirePassword && len(e.Password) < 6 {
 		return fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
+	}
+	// A number serves one thing. The database refuses the contradiction too,
+	// but saying which field is wrong is this layer's job.
+	switch e.Kind {
+	case KindBot:
+		if e.FlowID == nil {
+			return fmt.Errorf("%w: a BOT extension needs the flow it answers with", ErrValidation)
+		}
+		e.QueueID = nil
+	case KindQueue:
+		if e.QueueID == nil {
+			return fmt.Errorf("%w: a QUEUE extension needs the queue it reaches", ErrValidation)
+		}
+		e.FlowID = nil
+	default:
+		// A target left behind by a changed kind is a claim nothing honours.
+		e.FlowID, e.QueueID = nil, nil
 	}
 	return nil
 }

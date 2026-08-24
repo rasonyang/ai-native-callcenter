@@ -133,6 +133,8 @@ type Extension struct {
 	IsEnabled   bool               `json:"isEnabled"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+	FlowID      *uuid.UUID         `json:"flowId"`
+	QueueID     *uuid.UUID         `json:"queueId"`
 }
 
 type Flow struct {

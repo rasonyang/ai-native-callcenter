@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { KeyRound, Plus, Trash2 } from 'lucide-react'
 import { Dialog, Popover } from 'radix-ui'
@@ -12,9 +12,11 @@ import { Button } from '@/components/ui/button'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
-  catalogApi, generateSIPPassword, useCatalogMutations, useExtensions,
+  catalogApi, generateSIPPassword, useCatalogMutations, useExtensions, useQueues,
   type Extension, type ExtensionDraft, type ExtensionKind,
 } from '@/lib/catalog'
+import { useFlows } from '@/lib/flows'
+import { useUsers } from '@/lib/users'
 
 /** The SIP endpoints the switch will accept a registration for. */
 export const Route = createFileRoute('/_app/admin/extensions')({
@@ -22,7 +24,46 @@ export const Route = createFileRoute('/_app/admin/extensions')({
   component: ExtensionsPage,
 })
 
-const KINDS: ExtensionKind[] = ['AGENT', 'BOT', 'PLAIN']
+const KINDS: ExtensionKind[] = ['AGENT', 'BOT', 'QUEUE', 'PLAIN']
+
+/** Which target a kind may carry. PLAIN carries none, and says so. */
+const TARGET_OF: Record<ExtensionKind, 'agent' | 'flow' | 'queue' | null> = {
+  AGENT: 'agent',
+  BOT: 'flow',
+  QUEUE: 'queue',
+  PLAIN: null,
+}
+
+/** The lowest number not already taken — the same rule the server allocates by. */
+function nextFreeNumber(taken: Set<string>, low: number, high: number): string {
+  for (let n = low; n <= high; n++) {
+    if (!taken.has(String(n))) return String(n)
+  }
+  return ''
+}
+
+const POOL_LOW = 1000
+const POOL_HIGH = 1999
+
+/**
+ * What is wrong with the number being typed, said while it is being typed.
+ *
+ * Out of range and already taken are both refusals the server would make on
+ * submit; finding out then means retyping a form that looked finished.
+ */
+function numberProblem(
+  editing: ExtensionDraft | null,
+  taken: Set<string>,
+  rows: Extension[],
+): 'range' | 'taken' | null {
+  if (!editing || editing.id) return null
+  const number = (editing.number ?? '').trim()
+  if (number === '') return null
+  const n = Number(number)
+  if (!/^\d+$/.test(number) || n < POOL_LOW || n > POOL_HIGH) return 'range'
+  if (taken.has(number) && !rows.some((e) => e.id === editing.id)) return 'taken'
+  return null
+}
 
 function ExtensionsPage() {
   const { t } = useTranslation()
@@ -30,8 +71,27 @@ function ExtensionsPage() {
   const { saveExtension, deleteExtension } = useCatalogMutations()
   const [editing, setEditing] = useState<ExtensionDraft | null>(null)
   const [revealing, setRevealing] = useState<Extension | null>(null)
+  // The freshly minted password lives here and nowhere else: not in form
+  // state, not in an input's value, not in anything a draft or a devtools
+  // panel would carry. State holds only whether one exists.
+  const minted = useRef<string | null>(null)
+  const [hasMinted, setHasMinted] = useState(false)
+  const flows = useFlows()
+  const queues = useQueues()
+  const users = useUsers()
 
   const rows = data?.items ?? []
+  const taken = new Set(rows.map((e) => e.number))
+  const numberError = numberProblem(editing, taken, rows)
+
+  // An account may hold one phone, so the picker offers the ones that have
+  // none — the collision is shown before the form is sent, not after.
+  const boundElsewhere = new Set(
+    rows.filter((e) => e.id !== editing?.id && e.agentId).map((e) => e.agentId as string),
+  )
+  const freeAgents = (users.data?.items ?? []).filter(
+    (u) => u.agentId && !boundElsewhere.has(u.agentId),
+  )
 
   return (
     <>
@@ -39,7 +99,20 @@ function ExtensionsPage() {
         title={t('nav.extensions')}
         description={t('admin.extensionsHint')}
         actions={
-          <Button size="sm" onClick={() => setEditing({ kind: 'AGENT', isEnabled: true })}>
+          <Button
+            size="sm"
+            onClick={() => {
+              minted.current = null
+              setHasMinted(false)
+              setEditing({
+                kind: 'AGENT',
+                isEnabled: true,
+                // Prefilled, still editable: the operator is usually asking
+                // for the next desk, not for a particular number.
+                number: nextFreeNumber(new Set(rows.map((e) => e.number)), POOL_LOW, POOL_HIGH),
+              })
+            }}
+          >
             <Plus />
             {t('admin.addExtension')}
           </Button>
@@ -91,18 +164,44 @@ function ExtensionsPage() {
       {editing && (
         <RecordDialog
           open
-          onOpenChange={(open) => !open && setEditing(null)}
+          onOpenChange={(open) => {
+            if (open) return
+            // Leaving the form forgets it: shown once, and once only.
+            minted.current = null
+            setHasMinted(false)
+            setEditing(null)
+          }}
           title={editing.id ? t('admin.editExtension') : t('admin.addExtension')}
           isSaving={saveExtension.isPending}
           error={saveExtension.isError ? describeError(saveExtension.error, t) : undefined}
           onSubmit={() =>
-            saveExtension.mutate(editing, { onSuccess: () => setEditing(null) })
+            // The secret joins the payload here and only here.
+            saveExtension.mutate(
+              { ...editing, password: minted.current ?? undefined },
+              {
+                onSuccess: () => {
+                  minted.current = null
+                  setHasMinted(false)
+                  setEditing(null)
+                },
+              },
+            )
           }
         >
-          <Field label={t('admin.number')}>
+          <Field
+            label={t('admin.number')}
+            hint={
+              numberError === 'range'
+                ? t('admin.numberOutOfRange', { low: POOL_LOW, high: POOL_HIGH })
+                : numberError === 'taken'
+                  ? t('admin.numberTaken')
+                  : undefined
+            }
+          >
             <Input
               autoFocus
               disabled={Boolean(editing.id)}
+              aria-invalid={numberError !== null}
               value={editing.number ?? ''}
               onChange={(e) => setEditing({ ...editing, number: e.target.value })}
             />
@@ -113,38 +212,138 @@ function ExtensionsPage() {
               onChange={(e) => setEditing({ ...editing, displayName: e.target.value })}
             />
           </Field>
-          <Field label={t('admin.kind')}>
+          <Field label={t('admin.kind')} hint={t(`admin.kindHints.${editing.kind ?? 'AGENT'}`)}>
             <Select
               value={editing.kind ?? 'AGENT'}
-              onChange={(kind) => setEditing({ ...editing, kind: kind as ExtensionKind })}
+              onChange={(next) => {
+                const kind = next as ExtensionKind
+                // Changing what a number serves drops the target it served
+                // before — a leftover one is a claim nothing honours. Asked
+                // about once, because it is the operator's work being thrown
+                // away, not ours.
+                const hadTarget = Boolean(editing.agentId ?? editing.flowId ?? editing.queueId)
+                if (hadTarget && TARGET_OF[kind] !== TARGET_OF[editing.kind ?? 'AGENT']) {
+                  if (!window.confirm(t('admin.kindChangeClearsTarget'))) return
+                }
+                setEditing({
+                  ...editing,
+                  kind,
+                  agentId: undefined,
+                  flowId: undefined,
+                  queueId: undefined,
+                })
+              }}
               options={KINDS.map((k) => ({ value: k, label: t(`admin.kinds.${k}`) }))}
             />
           </Field>
-          <Field
-            label={t('admin.password')}
-            hint={editing.id ? t('admin.passwordUnchangedHint') : undefined}
-          >
-            {/* Generated rather than invented: a credential somebody types
-                from memory is the one that ends up being 1234, and nothing
-                downstream ever asks how it was chosen. */}
-            <span className="flex gap-2">
-              <Input
-                type="password"
-                autoComplete="new-password"
-                className="flex-1"
-                value={editing.password ?? ''}
-                onChange={(e) => setEditing({ ...editing, password: e.target.value })}
+
+          {/* One selector, chosen by kind. PLAIN shows none, which is the
+              whole of what PLAIN means. */}
+          {TARGET_OF[editing.kind ?? 'AGENT'] === 'agent' && (
+            <Field label={t('admin.targetAgent')} hint={t('admin.targetAgentHint')}>
+              <Select
+                value={editing.agentId ?? ''}
+                onChange={(agentId) => setEditing({ ...editing, agentId: agentId || undefined })}
+                options={[
+                  { value: '', label: t('admin.targetNone') },
+                  ...freeAgents.map((u) => ({
+                    value: u.agentId as string,
+                    label: `${u.displayName} (${u.username})`,
+                  })),
+                ]}
               />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setEditing({ ...editing, password: generateSIPPassword() })}
-              >
-                {t('admin.generate')}
-              </Button>
-            </span>
-          </Field>
+            </Field>
+          )}
+          {TARGET_OF[editing.kind ?? 'AGENT'] === 'flow' && (
+            <Field label={t('admin.targetFlow')}>
+              <Select
+                value={editing.flowId ?? ''}
+                onChange={(flowId) => setEditing({ ...editing, flowId: flowId || undefined })}
+                options={[
+                  { value: '', label: t('admin.targetNone') },
+                  ...(flows.data?.items ?? []).map((f) => ({ value: f.flowId, label: f.name })),
+                ]}
+              />
+            </Field>
+          )}
+          {TARGET_OF[editing.kind ?? 'AGENT'] === 'queue' && (
+            <Field label={t('admin.targetQueue')}>
+              <Select
+                value={editing.queueId ?? ''}
+                onChange={(queueId) => setEditing({ ...editing, queueId: queueId || undefined })}
+                options={[
+                  { value: '', label: t('admin.targetNone') },
+                  ...(queues.data?.items ?? []).map((q) => ({ value: q.id, label: q.displayName })),
+                ]}
+              />
+            </Field>
+          )}
+          {/* Three states, and none of them renders a placeholder cipher into
+              an input. A row of dots in a password box is a lie about what is
+              there, and the browser will happily submit it back.
+
+              New: generate, then show the plaintext once, beside a Copy. It is
+              held in a ref rather than form state so it is never part of what
+              a re-render, a devtools panel or a serialized draft can carry.
+
+              Existing: no field at all — Copy reads it through the audited
+              endpoint, Reset replaces it. */}
+          {editing.id ? (
+            <Field label={t('admin.password')} hint={t('admin.passwordExistingHint')}>
+              <span className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setRevealing(rows.find((e) => e.id === editing.id) ?? null)}
+                >
+                  <KeyRound />
+                  {t('admin.reveal')}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    minted.current = generateSIPPassword()
+                    setHasMinted(true)
+                  }}
+                >
+                  {t('admin.resetPassword')}
+                </Button>
+              </span>
+            </Field>
+          ) : (
+            <Field label={t('admin.password')} hint={t('admin.passwordNewHint')}>
+              {hasMinted ? (
+                <span className="flex items-center gap-2">
+                  <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-sm">
+                    {minted.current}
+                  </code>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void navigator.clipboard.writeText(minted.current ?? '')}
+                  >
+                    {t('admin.copy')}
+                  </Button>
+                </span>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    minted.current = generateSIPPassword()
+                    setHasMinted(true)
+                  }}
+                >
+                  {t('admin.generate')}
+                </Button>
+              )}
+            </Field>
+          )}
           <Field label={t('admin.enabled')}>
             <Select
               value={String(editing.isEnabled ?? true)}

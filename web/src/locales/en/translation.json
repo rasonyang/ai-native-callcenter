@@ -249,7 +249,8 @@
     "kinds": {
       "AGENT": "Agent",
       "BOT": "Bot",
-      "PLAIN": "Plain"
+      "PLAIN": "Plain",
+      "QUEUE": "Queue"
     },
     "routingHint": "Queues and how they choose an agent. Changes reach the switch immediately.",
     "addQueue": "Add queue",
@@ -325,7 +326,24 @@
     "revealTitle": "SIP password for {{number}}",
     "revealHint": "Reading this is recorded in the audit trail. It is what the handset registers with.",
     "copy": "Copy",
-    "copied": "Copied"
+    "copied": "Copied",
+    "numberOutOfRange": "Outside the extension range ({{low}}–{{high}}).",
+    "numberTaken": "That number is already in use.",
+    "kindChangeClearsTarget": "Changing what this number serves will clear the target it has now. Continue?",
+    "targetAgent": "Agent",
+    "targetAgentHint": "Only accounts with no phone are listed: an account may hold one.",
+    "targetFlow": "Flow",
+    "targetQueue": "Queue",
+    "targetNone": "None",
+    "passwordNewHint": "Generated, shown once, and gone when you leave this form. Copy it now.",
+    "passwordExistingHint": "Not shown here. Copy reads it back and records that it was read; Reset replaces it and the old one stops working at once.",
+    "resetPassword": "Reset",
+    "kindHints": {
+      "AGENT": "A person's phone.",
+      "BOT": "Answers with a bot flow.",
+      "QUEUE": "Reaches a queue.",
+      "PLAIN": "A bare number with no target."
+    }
   },
   "cdr": {
     "hint": "Every finished call, newest first.",

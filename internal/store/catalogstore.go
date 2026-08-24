@@ -111,7 +111,16 @@ func (c *CatalogStore) ListExtensions(ctx context.Context) ([]catalog.Extension,
 	}
 	out := make([]catalog.Extension, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, extensionOf(r))
+		e := extensionOf(queries.Extension{
+			ID: r.ID, Number: r.Number, Kind: r.Kind, Password: r.Password,
+			DisplayName: r.DisplayName, IsEnabled: r.IsEnabled,
+			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+			FlowID: r.FlowID, QueueID: r.QueueID,
+		})
+		// Joined rather than stored: the binding belongs to the agent, and a
+		// second copy here would be a second thing to keep true.
+		e.AgentID = r.AgentID
+		out = append(out, e)
 	}
 	return out, nil
 }
@@ -124,6 +133,8 @@ func (c *CatalogStore) CreateExtension(ctx context.Context, e catalog.Extension)
 		Password:    e.Password,
 		DisplayName: e.DisplayName,
 		IsEnabled:   e.IsEnabled,
+		FlowID:      e.FlowID,
+		QueueID:     e.QueueID,
 	})
 	if err != nil {
 		return catalog.Extension{}, fmt.Errorf("create extension: %w", err)
@@ -149,6 +160,8 @@ func (c *CatalogStore) UpdateExtension(ctx context.Context, e catalog.Extension)
 		Kind:        string(e.Kind),
 		DisplayName: e.DisplayName,
 		IsEnabled:   e.IsEnabled,
+		FlowID:      e.FlowID,
+		QueueID:     e.QueueID,
 	})
 	if err != nil {
 		return catalog.Extension{}, fmt.Errorf("update extension: %w", err)
@@ -189,6 +202,8 @@ func extensionOf(r queries.Extension) catalog.Extension {
 		DisplayName: r.DisplayName,
 		IsEnabled:   r.IsEnabled,
 		CreatedAt:   r.CreatedAt.Time,
+		FlowID:      r.FlowID,
+		QueueID:     r.QueueID,
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createDID = `-- name: CreateDID :one
@@ -57,18 +58,21 @@ func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, erro
 
 const createExtension = `-- name: CreateExtension :one
 
-INSERT INTO extensions (id, number, kind, password, display_name, is_enabled)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at
+INSERT INTO extensions (id, number, kind, password, display_name, is_enabled,
+                        flow_id, queue_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id
 `
 
 type CreateExtensionParams struct {
-	ID          uuid.UUID `json:"id"`
-	Number      string    `json:"number"`
-	Kind        string    `json:"kind"`
-	Password    string    `json:"password"`
-	DisplayName string    `json:"displayName"`
-	IsEnabled   bool      `json:"isEnabled"`
+	ID          uuid.UUID  `json:"id"`
+	Number      string     `json:"number"`
+	Kind        string     `json:"kind"`
+	Password    string     `json:"password"`
+	DisplayName string     `json:"displayName"`
+	IsEnabled   bool       `json:"isEnabled"`
+	FlowID      *uuid.UUID `json:"flowId"`
+	QueueID     *uuid.UUID `json:"queueId"`
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -80,6 +84,8 @@ func (q *Queries) CreateExtension(ctx context.Context, arg CreateExtensionParams
 		arg.Password,
 		arg.DisplayName,
 		arg.IsEnabled,
+		arg.FlowID,
+		arg.QueueID,
 	)
 	var i Extension
 	err := row.Scan(
@@ -91,6 +97,8 @@ func (q *Queries) CreateExtension(ctx context.Context, arg CreateExtensionParams
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FlowID,
+		&i.QueueID,
 	)
 	return i, err
 }
@@ -236,7 +244,7 @@ func (q *Queries) GetDIDByNumber(ctx context.Context, number string) (Did, error
 }
 
 const getExtension = `-- name: GetExtension :one
-SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at FROM extensions WHERE id = $1
+SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id FROM extensions WHERE id = $1
 `
 
 func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, error) {
@@ -251,6 +259,8 @@ func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, er
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FlowID,
+		&i.QueueID,
 	)
 	return i, err
 }
@@ -323,18 +333,35 @@ func (q *Queries) ListDIDs(ctx context.Context) ([]Did, error) {
 }
 
 const listExtensions = `-- name: ListExtensions :many
-SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at FROM extensions ORDER BY number
+SELECT e.id, e.number, e.kind, e.password, e.display_name, e.is_enabled, e.created_at, e.updated_at, e.flow_id, e.queue_id, a.id AS agent_id
+FROM extensions e
+LEFT JOIN agents a ON a.default_extension_id = e.id
+ORDER BY e.number
 `
 
-func (q *Queries) ListExtensions(ctx context.Context) ([]Extension, error) {
+type ListExtensionsRow struct {
+	ID          uuid.UUID          `json:"id"`
+	Number      string             `json:"number"`
+	Kind        string             `json:"kind"`
+	Password    string             `json:"password"`
+	DisplayName string             `json:"displayName"`
+	IsEnabled   bool               `json:"isEnabled"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
+	FlowID      *uuid.UUID         `json:"flowId"`
+	QueueID     *uuid.UUID         `json:"queueId"`
+	AgentID     *uuid.UUID         `json:"agentId"`
+}
+
+func (q *Queries) ListExtensions(ctx context.Context) ([]ListExtensionsRow, error) {
 	rows, err := q.db.Query(ctx, listExtensions)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Extension{}
+	items := []ListExtensionsRow{}
 	for rows.Next() {
-		var i Extension
+		var i ListExtensionsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Number,
@@ -344,6 +371,9 @@ func (q *Queries) ListExtensions(ctx context.Context) ([]Extension, error) {
 			&i.IsEnabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.FlowID,
+			&i.QueueID,
+			&i.AgentID,
 		); err != nil {
 			return nil, err
 		}
@@ -628,16 +658,19 @@ func (q *Queries) UpdateDID(ctx context.Context, arg UpdateDIDParams) (Did, erro
 
 const updateExtension = `-- name: UpdateExtension :one
 UPDATE extensions
-SET kind = $2, display_name = $3, is_enabled = $4, updated_at = now()
+SET kind = $2, display_name = $3, is_enabled = $4,
+    flow_id = $5, queue_id = $6, updated_at = now()
 WHERE id = $1
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at
+RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, flow_id, queue_id
 `
 
 type UpdateExtensionParams struct {
-	ID          uuid.UUID `json:"id"`
-	Kind        string    `json:"kind"`
-	DisplayName string    `json:"displayName"`
-	IsEnabled   bool      `json:"isEnabled"`
+	ID          uuid.UUID  `json:"id"`
+	Kind        string     `json:"kind"`
+	DisplayName string     `json:"displayName"`
+	IsEnabled   bool       `json:"isEnabled"`
+	FlowID      *uuid.UUID `json:"flowId"`
+	QueueID     *uuid.UUID `json:"queueId"`
 }
 
 func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams) (Extension, error) {
@@ -646,6 +679,8 @@ func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams
 		arg.Kind,
 		arg.DisplayName,
 		arg.IsEnabled,
+		arg.FlowID,
+		arg.QueueID,
 	)
 	var i Extension
 	err := row.Scan(
@@ -657,6 +692,8 @@ func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FlowID,
+		&i.QueueID,
 	)
 	return i, err
 }

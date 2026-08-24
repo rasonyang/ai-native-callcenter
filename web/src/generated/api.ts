@@ -1646,8 +1646,11 @@ export interface components {
             /** @description Present and true when the client-minted callId was already placed; the response points at the existing call. */
             isDuplicate?: boolean;
         };
-        /** @enum {string} */
-        ExtensionKind: "AGENT" | "BOT" | "PLAIN";
+        /**
+         * @description What an extension serves, and therefore what it may point at: AGENT a person, BOT a flow, QUEUE a queue, PLAIN nothing at all. PLAIN is not a placeholder — it is the honest name for a number that answers to no target.
+         * @enum {string}
+         */
+        ExtensionKind: "AGENT" | "BOT" | "QUEUE" | "PLAIN";
         /** @description A SIP endpoint the switch will accept a registration for. */
         Extension: {
             /** Format: uuid */
@@ -1658,8 +1661,27 @@ export interface components {
             isEnabled: boolean;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: uuid
+             * @description The agent whose phone this is. Read here and written by binding the agent to it: the binding lives on the agent so the database can still refuse to delete a phone somebody works at, which is a guard an incident put there.
+             */
+            agentId?: string;
+            /**
+             * Format: uuid
+             * @description The flow a BOT extension answers with.
+             */
+            flowId?: string;
+            /**
+             * Format: uuid
+             * @description The queue a QUEUE extension reaches.
+             */
+            queueId?: string;
         };
-        /** @description Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true). */
+        /**
+         * @description Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
+         *
+         *     The target must match the kind. Changing the kind clears the targets that no longer apply, which is why a form asks before it does so.
+         */
         ExtensionWrite: {
             number: string;
             kind?: components["schemas"]["ExtensionKind"];
@@ -1667,6 +1689,16 @@ export interface components {
             isEnabled?: boolean;
             /** @description Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch. */
             password?: string;
+            /**
+             * Format: uuid
+             * @description Required for kind BOT and refused for any other kind: a number cannot serve two things, and a target left behind by a changed kind is a claim nothing honours.
+             */
+            flowId?: string;
+            /**
+             * Format: uuid
+             * @description Required for kind QUEUE and refused for any other kind.
+             */
+            queueId?: string;
         };
         ExtensionList: {
             items: components["schemas"]["Extension"][];
