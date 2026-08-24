@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 38 项、余 11 项 + C32/C14 不复现**(38+11+2 = 51,与条目实数一致)—— C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C37 / C42 / C53 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 已裁定为图错代码对,余三处缺口);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 38 项、余 11 项 + C32/C14 不复现**(38+11+2 = 51,与条目实数一致)—— C2 / C4 / C7 / C10(已决 defer 第二期)/ C23 / C27 / C31 / C37 / C42 / C53 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 与 `Queued` 两处均已裁定为图错代码对,仅余 `EventAbandoned` 一条 trigger 粒度的小缺口,不再涉及契约);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -1778,7 +1778,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   工作台若拿它区分"电话转走了"和"通话结束",会判错。
 
 - **C56(new,2026-08-24 owner 给出 party FSM 规格后立案,未修)**
-  **实现的转移表与规格状态图之间有四处差;其中一处已于当日裁定(实现对、图错),余三处为缺口。**
+  **实现的转移表与规格状态图之间有四处差;当日两处裁定为"实现对、图错",余一处缺口、一处形状差。**
   owner 2026-08-24 给出 party FSM 的 mermaid 状态图并要求"记录在文档中",
   已按原样落进 `docs/design/01-telephony.md` §2,并声明**该图即规格**,
   `internal/telephony/call.go` 的 `partyTransitions` 是它的实现、且是**唯一能移动 party 的东西**
@@ -1786,13 +1786,12 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   | 规格 | 实现 | 判断 |
   |---|---|---|
   | `Idle` 既是起点也是终点 | 无 `Idle`;party 就是一条 channel,出生即 `DIALING`/`RINGING`,终于 `RELEASED`(终态) | **形状差,非行为差** —— `RELEASED` 就是图里那个终止的 `Idle` |
-  | `Queued` | **没有**;排队等待的主叫现在坐在 `DIALING` 里 | **真缺口**。正因为没有它,收养排队主叫的代码才会去手写 `TALKING`(见 C55) |
+  | ~~`Queued`~~ **已从图中删除** | 没有 | **2026-08-24 已裁定**:owner 复看本节时提出,**它根本不是 party 的状态**。party 就是一条 channel,排队等待的主叫是一条**开着、交换机在放音乐**的 channel —— 腿本身什么都没变。**电话在哪**是呼叫的事实,系统已经记在那里了(`call.Queue` 的 name/joinedAt/bridgedAt、`queue_events` 表、CDR 的 `queue_wait_sec`);在 party 上再存一份只可能与它们不一致。它也**没有生产者**:排队是 mod_callcenter 的事,经 `callcenter::info member-queue-start/-end` 观察,没有任何 `CHANNEL_*` 说得出"已排队"。而且**两条腿哪条都对不上这个形状**:`Queued → Ringing` 需要一条先等待、后响铃的腿,可排队的主叫和派给坐席的那条腿是**两条不同的 channel**,后者**生下来就是 RINGING**,呼叫等待期间它根本不存在。**代价只有措辞**:听着保持音的主叫显示为 `Dialing` 确实别扭 —— 那是既有状态的**命名**问题,不构成新增状态的理由;真要解决也是改名,不是加一个。**实现对、图错,代码一行未动。** |
   | ~~`Dialing → Ringing`~~ **已从图中删除** | **禁止** | **2026-08-24 已裁定**:owner "Dialing → Ringing 是必须禁止的"。首版图带着这条边,与 `call.go` 的 deliberately absent 正面冲突;裁定的结果是**实现对、图错**,图已修订,代码一行未动。理由也一并写进两处:一条腿不会中途换角色 —— DIALING 是发起方,RINGING 是被叫方,这条边意味着一条腿变成了另一个人;主叫听到的回铃属于**对方**那条腿的 RINGING |
-  | `EventQueued` / `EventAbandoned` / `EventDestinationBusy` | 没有对应 trigger;所有结束都是 `TriggerRelease` 携一个 hangup cause | 原因区分得出来,独立的 trigger 没有 |
-  **不逐条零敲**:`PartyState` 在线上(`api.*`、`web/src/generated/api.ts`),
-  加 `IDLE`/`QUEUED` 是契约变更,须走契约 → generate → 实现 → 测试并跑 `make api-breaking`;
-  `Queued` 落地还会改动等待队列、主管视图与 CDR 的 `queue_wait_sec` 口径。
-  故整条按一次设计变更处理,不在缺陷修复里顺手做。
+  | `EventAbandoned` | 没有对应 trigger;所有结束都是 `TriggerRelease` 携一个 hangup cause | **仅存的缺口**:原因区分得出来,独立的 trigger 没有。`EventQueued` 与 `EventDestinationBusy` 随 `Queued` 一并退出 —— 目的忙就是一次带该 cause 的 release,与其他所有结束同型 |
+  **`Queued` 退出后,C56 不再需要任何契约变更** —— 仅存的 `EventAbandoned` 是 trigger 粒度,
+  不新增 `PartyState`。`IDLE` 那一行是形状差不是行为差(`RELEASED` 就是图里终止的 `Idle`),
+  同样不动契约。原先写的"整条按一次设计变更处理"因此作废:剩下的是一条小改,不是一次设计变更。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。

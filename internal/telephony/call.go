@@ -63,9 +63,13 @@ const (
 // assigning a state anywhere else skips this table and is a defect.
 //
 // The specification is the diagram in docs/design/01-telephony.md §2 (owner,
-// 2026-08-24). Where this table still differs from it — no IDLE and no
-// QUEUED — the differences are named there and tracked as C56; do not close
-// the gap piecemeal here, PartyState is on the wire.
+// 2026-08-24). This table implements it. The one difference left is shape
+// rather than behaviour — the diagram's IDLE is birth and death, and a party
+// is a channel, so it is born DIALING or RINGING and ends in the terminal
+// RELEASED. QUEUED was considered and withdrawn: a caller waiting in a queue
+// is a channel with music playing, and where the call is belongs to the call
+// (call.Queue, queue_events, queue_wait_sec), not to the leg. Tracked as C56.
+// PartyState is on the wire, so do not add a state here without the contract.
 //
 // Deliberately absent: DIALING→RINGING and RINGING→DIALING. A leg does not
 // change role mid-life — DIALING is the party that placed the call, RINGING
