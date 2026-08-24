@@ -4,7 +4,9 @@
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
-> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;W7 / W8 / W10 未开工;**W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
+> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;
+> **W11 管理面闭环(2026-08-24 立项,owner 直裁)排在 W7 / W8 / W10 之前** —— 它是"能不能用",那三项是"更完整";
+> W7 / W8 / W10 未开工;**W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
@@ -15,7 +17,7 @@
 > **VC-S12-01 已于 2026-08-23 转 PASS**:C26(bot 腿死后主叫活下来)与 C36 两半
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
-> 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
+> 阶段 0–6 已完成。阶段 7:**W1–W6 已完成,W7 / W8 / W10 / W11 未开工**(此行原写"W1–W9 未开工",是 v1 发布时的笔误,2026-08-24 更正);
 > **C 系列已修 47 项、真开 1 项(C57)+ C10 已决 defer 第二期 + C42 已移出另立项目 + C32/C14 不复现**(47+1+1+1+2 = 52,与条目实数一致)—— **唯一待办是 C57**(CDR 时长字段是否构成划分;owner 已决:立案,以后再查)。C37 于 2026-08-24 查明成因(web-sip-phone 的 RESET 出路只有一个后台定时器)并由该仓修复,aicc 侧零改动;**遗留一个已知缺口:486 不计入 `max_no_answer`,交换机侧对持续拒绝的话机没有兜底**(见条目五);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
@@ -121,6 +123,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
 | F9 | ~~goose_db_version 实表~~ | 覆盖表 | **已闭(2026-08-20,T1.1)**:实查 version_id 13/12/11 均 is_applied=t;tables.md 该行升 [FACT] |
 | F10 | 坐席取他人 recordingId 的拒绝路径 | G-A4/T6.1 | **半闭(2026-08-22)**:代码侧已读并写进 VC-S13-02 的 expect(`recording_handlers.go:46-50/:55-61/:91`,主管由 `:33` 的 `Role.AtLeast` 早退);**wei+ben 实测未做**,随 VC-S13-02 执行时落实 |
 | F11 | 非 seed 账号(chen/uiagent/liveagent 等 12 个)口令与归属 | 环境卫生 | 问 owner;留证即可,不阻塞 |
+| F12 | ~~历史表是按分机外键还是按号码文本记的~~ | W11 分配器(D3) | **已闭(2026-08-24,实查)——按 agent uuid,号洞可以复用**:`agent_state_logs.agent_id`/`agent_states.agent_id` 是 FK CASCADE,`wrap_ups` 是 `(call_id, agent_id)` 主键,`queue_agents` 是 `(queue_id, agent_id)` 主键,`cdrs` 存 `agent_ids uuid[]` + `primary_agent_id`。**没有一张表拿分机 id 或号码当身份键**;唯一的号码文本是 `agent_states.extension_number`,那是登录时覆写的当前态,不是历史。所以最小空闲号复用**不会**让新坐席继承离职坐席的历史行。**次级影响另记**:`cdrs.from_number`/`to_number`/`legs` 是号码文本,按号码检索 CDR 会把复用前后混在一起 —— 这在今天"删掉分机再建同号"时就已成立,不是复用策略引入的 |
 
 ---
 
@@ -442,7 +445,9 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
-- **W8 trunk(中继号)管理**(§补充 S3):trunks 表(00002:137)从死表转正——契约评审先行
+- **W8 trunk(中继号)管理**(§补充 S3)**—— 排在 W11.5 之后(2026-08-24)**:号码的方向列
+  与缺省外呼号先落地,免得中继号的契约评审和它们打架;D6 也已把 gateway 定为系统级配置、
+  不进 `dids` 表。trunks 表(00002:137)从死表转正——契约评审先行
   (trunk 与 FS gateway/luacc 视图的关系需要一次设计过目,direction 枚举 3 值现全死),
   然后 openapi → generate → handlers → admin UI。settings 表处置仍待决(唯一残留)。
 - **W9 账号清理**(§补充 S4,含 seed 名单同步):live DB 只保留 **wei、agent、supervisor、admin**,其余
@@ -460,6 +465,74 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   而 C37 的定性完全依赖"浏览器话机 7 : 原生软电话 0"这个对照;C24/C52/C55 的现场验证也用两部话机
   互为对照。**建议:账号清掉,但把分机 1002 保留并挂到 `agent` 名下** ——
   花名册照清,不同实现的第二部话机这个诊断能力也留住。
+
+- **W11 管理面闭环(new,owner 直裁 2026-08-24)** —— **优先于 W7 / W8 / W10**。
+  管理面现在不闭环:**没有任何接口能创建账号**(`/users` 只有 GET,`POST /agents` 还要求先有
+  `userId`),账号只能用 `aicc useradd` 建。补齐到可用为止。
+
+  **前置"`agents` 表改名 `users`"作废(owner 2026-08-24)** —— 本仓不存在那张混装表:
+  身份早已在 `users`(username / password_hash / role / status / locale),`agents` 是纯 ACD
+  (`callcenter_name` / `is_auto_answer` / `default_extension_id` / `user_id`)。改名要达成的拆分
+  已经做完,而 `users` 这个名字正被身份表占着。**换成"新建 `/users` 写侧"**,这才是不闭环的根。
+  (本仓没有承载那条原表述的文档,故无处可标 superseded —— 记在这里就是它的墓碑。
+  D8 的 superseded 另有其处:`docs/design/m4-cleanup-findings.md` 的 F-01。)
+
+  **已定决策(owner 2026-08-24):**
+  - **D1** user↔extension 是 **1:0..1**,DB 强制。**注意本仓的关联方向是反的**:现为
+    `agents.default_extension_id` + `uq_agents_default_extension UNIQUE … WHERE NOT NULL`,
+    抢占已被占用的分机已回 409(VC-S11-02 覆盖)。D1 要的 `extensions.agent_id` +
+    `UNIQUE (agent_id) WHERE agent_id IS NOT NULL` 落地时**必须撤掉原来那一处** ——
+    两个方向同时存在就是两处真相,而它们会各自漂移。这是 W11.4 最大的一块。
+  - **D2** 号段来自 `AICC_EXTENSION_RANGE`(默认 1000-1999),AGENT/SUPERVISOR 共用一池。新增配置。
+  - **D3** 分配取号段内**最小空闲号** + advisory lock;禁止 `MAX+1`。**前置已查清,见 F12:安全。**
+  - **D4** SIP 口令**明文存**。realm 绑宿主 IP,本环境已漂移两次;a1-hash 会随域变更集体失效且
+    无法重算,只能全员重置口令、打断当班注册。代价记录在案:能调 reveal 端点即可取明文。
+  - **D5** 口令读取走独立端点,ADMIN-only + 审计;schema 中永不含口令字段。
+    ⚠ 与 **C58** 同源:`auditTrail` 已按字段名递归脱敏,reveal 端点的**响应**不经审计,
+    但它的**调用**必须留在账上 —— 这正是 D5 说"+ 审计"的地方。
+  - **D6** gateway 是系统级配置,不进 `dids` 表。同时改名 `pstn_sim` → `pstn_gateway`。
+    **本仓只能改一半**:`pstn_sim` 只存在于宿主机 `/usr/local/freeswitch/conf/vars.xml:454-459`
+    与 `sip_profiles/external/pstn_sim.xml`(**不在版本控制内**),仓内只有 `.env` 的
+    `AICC_OUTBOUND_ENDPOINT` 和测试字面量。宿主机那半边手工改 + `sofia` 重载,改完才生效。
+  - **D7** 方向用两个布尔列(`allow_inbound` / `allow_outbound`),不用枚举数组。`dids` 现无方向列。
+  - **D8** `flow_id` 约束改为 `CHECK (NOT allow_inbound OR flow_id IS NOT NULL)` ——
+    纯呼出号码没有 bot 可绑。horizon 上"恢复 NOT NULL"的原表述**作废,记 superseded**。
+  - **D9** 缺省外呼号:部分唯一索引保证全局至多一条;无缺省时**快速失败,不得回落到分机号**。
+    **今天就在静默回落**:`outbound.go` 的坐席点击外呼用 `cfg.OutboundCallerID`
+    (`AICC_OUTBOUND_CLID`),为空时**什么都不设**,由 gateway 的 `pstn_sim_caller_id=95001` 兜底。
+    AI 外呼走 `did.Number`,那一条是对的。
+  - **D10** bots 的 extensions 列是 join 出来的,不建冗余列。
+  - **kind 词表:只把 `PLAIN` 改名 `QUEUE`(owner 2026-08-24)** —— 不把 `queues.ext_number`
+    迁进 `extensions`。现状:`extensions.kind` 是 `AGENT | BOT | PLAIN`,库里只有 `AGENT` 20 条,
+    `BOT`/`PLAIN` 各 0 条;队列的分机号是 `queues.ext_number` 这一列,不是 extensions 行。
+    **因此 `kind=QUEUE` 的目标选择器指向什么、与 `queues.ext_number` 如何不打架,是 W11.4
+    开工时唯一待定的细节** —— 到那一步再定,不在这里猜。
+  - **Auto answer:只从表单摘掉(owner 2026-08-24)** —— 列与交换机接线保留。它现在是通的:
+    admin UI → API → `agents.is_auto_answer` → `luacc.directory` 视图 → `aicc_xml.lua` 下发
+    `sip_auto_answer` → 并传给 mod_callcenter 的 agent contact。**摘掉表单后新建坐席一律 false**,
+    这是行为变更,验收时要确认没有人依赖它为 true。
+
+  **执行顺序(依赖决定,不可换):**
+  1. **W11.1 `pstn_sim` → `pstn_gateway`**(D6)。独立提交,零行为变更。仓内 + 宿主机 conf,
+     `sofia` 重载后**真机验证一通外呼**。
+  2. **W11.2 号段分配器**(D2/D3)。`AICC_EXTENSION_RANGE` + 最小空闲号 + advisory lock。
+     F12 已解,不再阻塞。
+  3. **W11.3 Users 写侧**。`POST/PUT /users`(角色 `AGENT|SUPERVISOR|ADMIN`、account 可编辑、
+     初始口令、管理员重置)+ 建 AGENT/SUPERVISOR 时自动配一条分机(依赖 2)。
+     `/admin/agents` 改名 Users。**`/agents` 花名册、`/agent/*` 自身态、SSE 事件名、presence 枚举、
+     mod_callcenter 标识符一概不动** —— ADMIN 是 user 但不是 agent,两个概念不能合并。
+  4. **W11.4 Extensions**。kind 目标选择器 + 编辑态回填;口令可生成、可拷贝、不明文显示,
+     取明文走 D5 的 reveal 端点。**含 D1 的关联翻转**,牵动 `luacc.directory` 视图、
+     agents 服务、catalog handlers、VC-S11-02 —— 漏改视图会编译通过、单测全绿、**真机注册失败**。
+  5. **W11.5 Numbers**(D7/D8/D9)。方向布尔、`flow_id` CHECK、缺省外呼号。
+     **与 W8(trunk 管理面)是同一块地,W8 排在其后**,免得中继号的契约评审和这里的方向列打架。
+  6. **W11.6 Bot Flows 加"指向该 flow 的分机"列**(D10,join)。依赖 4。
+
+  **验收(硬性):**
+  - 改名提交(W11.1)的验收是"行为不变",**含一通真实呼叫走完全链**。
+  - **呼入过滤、缺省外呼、话机注册三条必须真机验证,单测不算。**
+  - lua 里的裸 SQL 与写死的 domain 字面量漏改会编译通过、单测全绿、真机注册失败 ——
+    每一步都要过一遍 `luacc.*` 视图与 `freeswitch/scripts/*.lua`。
 
 - **W10(new,owner 直裁 2026-08-22)** **生产禁用 `loopback`。** AI 外呼路径目前默认
   `AICC_OUTBOUND_ENDPOINT=loopback/%s/aicc/XML`(本次已把 `default` 改成 `aicc`,但 loopback 本身还在)。
@@ -2071,6 +2144,10 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **先看系统自己记下了什么,再去推断。**
 
 ### 排序总则
+-1. **W11(管理面闭环)优先于 W7 / W8 / W10(owner 直裁 2026-08-24)** —— 前者是"能不能用",
+   后三者是"更完整"。它与验证执行无交集(39 条已全部跑完),不受总则 2 约束。
+   **内部顺序由依赖锁死**:W11.1 改名 → W11.2 分配器 → W11.3 Users → W11.4 Extensions →
+   W11.5 Numbers → W11.6 bots 分机列;**W8(trunk)排在 W11.5 之后**,它们动的是同一块地。
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
 1. ~~T0 先于一切;阶段 2→3→4→5 顺序固定(负路径与重启放后)。~~ **已履行**:阶段 0–5 全部按序完成。
 2. **验证先行于实现** —— 原 28 条的留证已完成:阶段 2(S1-02/S8-01)与 T4.1(S5-01)均已在

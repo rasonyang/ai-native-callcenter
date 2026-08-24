@@ -103,6 +103,17 @@ rather than the code being bent to them (see §5): `docs/design/03-data.md:46`
 declared `flow_id uuid NOT NULL`, and its M4.8 note stated as fact that "its
 `flow_id` is NOT NULL".
 
+**Superseded 2026-08-24 (owner, D8 of TASKS W11).** Restoring `NOT NULL` is no
+longer the plan, and the reason it was deferred no longer holds either. The
+blocker named above — "`docs/openapi.json` has no `/flows` path at all" — was
+closed by W3: `GET /flows` exists and the DID form can pick one. But a stricter
+column would now be wrong for a different reason: numbers are gaining a
+direction (`allow_inbound` / `allow_outbound`, D7), and **a purely outbound
+number has no bot to bind** — `NOT NULL` would forbid a legitimate row. The
+constraint becomes `CHECK (NOT allow_inbound OR flow_id IS NOT NULL)`: every
+number that can be *called* answers with a flow, which is what P4 actually
+rules on. This paragraph's "restore it once the picker exists" is retired.
+
 ### F-02 — provider endpoints are hardcoded — **REFACTOR**
 
 `internal/provider/profile.go` pins `wss://api.openai.com/v1/realtime` and
