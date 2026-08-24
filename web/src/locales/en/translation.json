@@ -235,13 +235,13 @@
     "acrossQueueCalls": "across {{count}} queue calls"
   },
   "admin": {
-    "extensionsHint": "Endpoints the switch accepts a registration for. Agents sign in at one of these.",
+    "extensionsHint": "Endpoints the switch accepts a registration for. A phone is created with the account it belongs to.",
     "editExtension": "Edit extension",
     "noExtensions": "No extensions yet.",
     "deleteExtensionConfirm": "Delete extension {{number}}? Its phone stops registering.",
     "number": "Number",
     "displayName": "Display name",
-    "enabled": "Enabled",
+    "enabled": "Registration",
     "password": "Password",
     "passwordUnchangedHint": "Leave blank to keep the current password.",
     "routingHint": "Queues and how they choose an agent. Changes reach the switch immediately.",
@@ -321,8 +321,8 @@
     "passwordNewHint": "Generated, shown once, and gone when you leave this form. Copy it now.",
     "passwordExistingHint": "Not shown here. Copy reads it back and records that it was read; Reset replaces it and the old one stops working at once.",
     "resetPassword": "Reset",
-    "bound": "Assigned",
-    "unbound": "Unassigned"
+    "assignedTo": "Agent",
+    "unassigned": "nobody"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",
