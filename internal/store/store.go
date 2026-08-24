@@ -25,6 +25,15 @@ var migrationFS embed.FS
 // FreeSWITCH and one database. It is a footgun guard, not leader election.
 const advisoryLockKey int64 = 0x41494343 // "AICC"
 
+// extensionPoolLockKey serialises extension-number allocation.
+//
+// It must not be advisoryLockKey, and the reason is easy to miss: session-level
+// and transaction-level advisory locks share one keyspace, and this process
+// holds the instance lock on a dedicated connection for its whole life.
+// Reusing that key would make the first allocation wait for a lock we are
+// never going to release — a hang with no error and no timeout.
+const extensionPoolLockKey int64 = 0x414943430001 // "AICC" + 1
+
 // Store is the database facade handed to services.
 type Store struct {
 	Pool *pgxpool.Pool

@@ -24,6 +24,7 @@ type Store interface {
 	CreateExtension(ctx context.Context, e Extension) (Extension, error)
 	UpdateExtension(ctx context.Context, e Extension) (Extension, error)
 	SetExtensionPassword(ctx context.Context, id uuid.UUID, password string) error
+	AllocateExtension(ctx context.Context, e Extension, rangeLow, rangeHigh int) (Extension, error)
 	DeleteExtension(ctx context.Context, id uuid.UUID) error
 
 	ListQueues(ctx context.Context) ([]Queue, error)
@@ -73,6 +74,10 @@ var (
 	ErrValidation = errors.New("validation failed")
 	ErrNotFound   = errors.New("not found")
 	ErrConflict   = errors.New("already exists")
+	// ErrPoolExhausted means every number in the configured range is taken.
+	// Distinct from a conflict: nothing the operator asked for collided, the
+	// deployment has simply run out of numbers and needs a wider range.
+	ErrPoolExhausted = errors.New("no free extension number in the configured range")
 )
 
 // Service is the configuration catalogue.
@@ -104,6 +109,28 @@ func (s *Service) CreateExtension(ctx context.Context, e Extension) (Extension, 
 	}
 	e.ID = uuid.Must(uuid.NewV7())
 	return s.store.CreateExtension(ctx, e)
+}
+
+// AllocateExtension creates a phone on the lowest free number in the pool.
+//
+// This is how an account gets a phone without anybody choosing a number: an
+// operator creating an agent is not deciding on 1042, they are asking for a
+// desk. The caller supplies the range because it is deployment configuration
+// (AICC_EXTENSION_RANGE), and configuration does not belong to this service.
+//
+// Everything checkable is checked before the store opens its transaction —
+// holding the pool lock while discovering that a password is six characters
+// short would make one bad request everybody else's problem.
+func (s *Service) AllocateExtension(ctx context.Context, e Extension,
+	rangeLow, rangeHigh int) (Extension, error) {
+	if rangeHigh < rangeLow {
+		return Extension{}, fmt.Errorf("%w: extension range ends before it starts", ErrValidation)
+	}
+	if err := e.validateApartFromNumber(true); err != nil {
+		return Extension{}, err
+	}
+	e.ID = uuid.Must(uuid.NewV7())
+	return s.store.AllocateExtension(ctx, e, rangeLow, rangeHigh)
 }
 
 // UpdateExtension changes an extension. An empty password leaves it alone, so

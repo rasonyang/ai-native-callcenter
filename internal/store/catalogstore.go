@@ -5,19 +5,86 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
 
 // CatalogStore adapts the generated queries to the catalogue service.
-type CatalogStore struct{ q *queries.Queries }
+//
+// It holds the pool as well as the query set because allocating an extension
+// number is one transaction: the pool lock, the search for a free number and
+// the insert have to be the same unit of work, or the number is stale before
+// it is used.
+type CatalogStore struct {
+	q    *queries.Queries
+	pool *pgxpool.Pool
+}
 
 // Catalog returns the configuration view of the store.
-func (s *Store) Catalog() *CatalogStore { return &CatalogStore{q: s.Queries} }
+func (s *Store) Catalog() *CatalogStore { return &CatalogStore{q: s.Queries, pool: s.Pool} }
+
+// AllocateExtension creates an extension on the lowest free number in the
+// pool, in one transaction.
+//
+// One transaction, because a number handed back to a caller is already stale:
+// between the search and the insert another allocation can take it. The pool
+// lock makes the search and the insert atomic against each other, so parallel
+// callers queue instead of colliding on uq_extensions_number — where the
+// symptom would be a failed request rather than a duplicate row.
+//
+// The lowest free number rather than MAX+1: a number a departing agent gave
+// back is handed out again. That is safe here and only here — no historical
+// row is keyed by an extension, every one names the agent's uuid, and a uuid
+// is never reused (verification F12).
+func (c *CatalogStore) AllocateExtension(ctx context.Context, e catalog.Extension,
+	rangeLow, rangeHigh int) (catalog.Extension, error) {
+	tx, err := c.pool.Begin(ctx)
+	if err != nil {
+		return catalog.Extension{}, fmt.Errorf("allocate extension: %w", err)
+	}
+	// Safe after Commit: pgx answers ErrTxClosed, which nothing acts on.
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := c.q.WithTx(tx)
+
+	if err := qtx.LockExtensionPool(ctx, extensionPoolLockKey); err != nil {
+		return catalog.Extension{}, fmt.Errorf("lock extension pool: %w", err)
+	}
+	number, err := qtx.LowestFreeExtensionNumber(ctx, queries.LowestFreeExtensionNumberParams{
+		RangeLow:  int32(rangeLow),
+		RangeHigh: int32(rangeHigh),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return catalog.Extension{}, catalog.ErrPoolExhausted
+		}
+		return catalog.Extension{}, fmt.Errorf("find a free extension number: %w", err)
+	}
+	e.Number = number
+	e.NameAfterNumber()
+
+	row, err := qtx.CreateExtension(ctx, queries.CreateExtensionParams{
+		ID:          e.ID,
+		Number:      e.Number,
+		Kind:        string(e.Kind),
+		Password:    e.Password,
+		DisplayName: e.DisplayName,
+		IsEnabled:   e.IsEnabled,
+	})
+	if err != nil {
+		return catalog.Extension{}, fmt.Errorf("create extension %s: %w", e.Number, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.Extension{}, fmt.Errorf("commit extension %s: %w", e.Number, err)
+	}
+	return extensionOf(row), nil
+}
 
 //
 // Extensions.

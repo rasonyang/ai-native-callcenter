@@ -49,11 +49,23 @@ func NewExtension() Extension {
 
 func (e *Extension) validate(requirePassword bool) error {
 	e.Number = trim(e.Number)
-	e.DisplayName = trim(e.DisplayName)
-
 	if !digitsOnly(e.Number) {
 		return fmt.Errorf("%w: number must be digits", ErrValidation)
 	}
+	if err := e.validateApartFromNumber(requirePassword); err != nil {
+		return err
+	}
+	e.NameAfterNumber()
+	return nil
+}
+
+// validateApartFromNumber checks everything that can be checked before a
+// number exists. Allocation assigns the number inside its own transaction, so
+// it cannot run the whole of validate up front — and running none of it would
+// hold the pool lock while discovering that the password was too short.
+func (e *Extension) validateApartFromNumber(requirePassword bool) error {
+	e.DisplayName = trim(e.DisplayName)
+
 	switch e.Kind {
 	case KindAgent, KindBot, KindPlain:
 	case "":
@@ -64,10 +76,16 @@ func (e *Extension) validate(requirePassword bool) error {
 	if requirePassword && len(e.Password) < 6 {
 		return fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
 	}
+	return nil
+}
+
+// NameAfterNumber gives an unnamed extension the only name it can be given
+// before anybody has used it. Called once the number is known, which for an
+// allocated extension is not until it is being written.
+func (e *Extension) NameAfterNumber() {
 	if e.DisplayName == "" {
 		e.DisplayName = "Extension " + e.Number
 	}
-	return nil
 }
 
 // Strategy is how a queue picks among the agents staffing it.

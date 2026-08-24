@@ -537,8 +537,26 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      `transfer_to_agent` 进 `support-zh`(ext 7002)→ 1002 接起 → 挂断。
      CDR:`OUTBOUND / ANSWERED / 95002 → 18688886669`,`legs=[BOT 12s, QUEUE support-zh 2s,
      AGENT 1002 5s]`,`bot_sec=12` / `talk_sec=4` / `total=22`,零幽灵行。
-  2. **W11.2 号段分配器**(D2/D3)。`AICC_EXTENSION_RANGE` + 最小空闲号 + advisory lock。
-     F12 已解,不再阻塞。
+  2. ~~**W11.2 号段分配器**(D2/D3)~~ **【已完成 2026-08-24】** `AICC_EXTENSION_RANGE`
+     (默认 `1000-1999`,写进 `.env.example`)+ `CatalogStore.AllocateExtension`。
+     **分配与插入是同一个事务**:单给一个"空闲号"是假的 —— 它在返回的那一刻就可能被别人拿走。
+     事务里先取池锁(`pg_advisory_xact_lock`),再 `generate_series` 找最小空闲号,再插入。
+     **池锁的键必须不同于实例锁**(`0x414943430001` vs `0x41494343`):会话级与事务级 advisory
+     锁共用一个键空间,而本进程终生持有实例锁 —— 复用那个键会让第一次分配永远等自己,
+     无报错、无超时。
+     **配置解析失败直接拒绝启动**,不回落默认值:症状会是"分机发在了没人选的池子里",
+     而一个能用的分机看不出它来自哪个池。
+     **真库测试四条**,含并发一条 —— 它的断言是"八个全部成功",不只是"号码互不相同":
+     没有锁时两个事务读到同一个最小空闲号,失败的那个撞 `uq_extensions_number`,
+     **症状是请求报错而不是重复行**。摘除验证:去掉池锁 → 八个里五个当场
+     `duplicate key value violates unique constraint`。
+     另外三条:**空洞复用**(建 1000-1002、删 1001,下一个必须是 1001 而不是 1003 ——
+     这是 D3 禁止 `MAX+1` 的全部理由)、**池外号码不受影响**(队列的 7002 既不会被发出去、
+     也不会把分配推过头)、**池满回 `ErrPoolExhausted`**(不是冲突:没有任何东西撞上,
+     是这个部署的号段用完了)。
+     顺带把 `Extension.validate` 拆出 `validateApartFromNumber`:分配时号码要到事务里才有,
+     而**握着池锁去发现口令太短**会让一个坏请求变成所有人的问题。
+     **范围止于 service 方法**,没有契约、没有 handler、没有 UI —— 那是 W11.3 的消费者。
   3. **W11.3 Users 写侧**。`POST/PUT /users`(角色 `AGENT|SUPERVISOR|ADMIN`、account 可编辑、
      初始口令、管理员重置)+ 建 AGENT/SUPERVISOR 时自动配一条分机(依赖 2)。
      `/admin/agents` 改名 Users。**`/agents` 花名册、`/agent/*` 自身态、SSE 事件名、presence 枚举、

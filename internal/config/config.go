@@ -122,7 +122,40 @@ type Config struct {
 	OTLPEndpoint string // empty disables trace export
 	ServiceName  string
 
+	// ExtensionRange is the pool an agent's phone number is allocated from,
+	// written "low-high". One var rather than the two the RTP range uses
+	// (AICC_BOT_RTP_PORT_LOW/_HIGH): a range is one decision, and the two-var
+	// form lets half of it be changed on its own. Deliberate divergence —
+	// please do not "make it consistent".
+	//
+	// Kept as written so a typo fails startup rather than silently becoming
+	// the default and allocating out of the wrong pool. Parsed by
+	// ExtensionPool.
+	ExtensionRange string
+
 	Seed string // "" | "demo" | "fresh"
+}
+
+// ExtensionPool is the inclusive number range agent phones are allocated from.
+func (c Config) ExtensionPool() (low, high int, err error) {
+	return parseRange(c.ExtensionRange)
+}
+
+// parseRange reads "low-high". Both ends are inclusive.
+func parseRange(raw string) (low, high int, err error) {
+	lo, hi, ok := strings.Cut(raw, "-")
+	if !ok {
+		return 0, 0, fmt.Errorf("must be written low-high, got %q", raw)
+	}
+	low, err = strconv.Atoi(strings.TrimSpace(lo))
+	if err != nil {
+		return 0, 0, fmt.Errorf("low end of %q is not a number", raw)
+	}
+	high, err = strconv.Atoi(strings.TrimSpace(hi))
+	if err != nil {
+		return 0, 0, fmt.Errorf("high end of %q is not a number", raw)
+	}
+	return low, high, nil
 }
 
 // Load reads configuration from .env (if present) and the environment.
@@ -175,6 +208,7 @@ func Load() (Config, error) {
 		LogDir:                  env("AICC_LOG_DIR", "logs"),
 		OTLPEndpoint:            env("AICC_OTLP_ENDPOINT", ""),
 		ServiceName:             env("AICC_SERVICE_NAME", "aicc"),
+		ExtensionRange:          env("AICC_EXTENSION_RANGE", "1000-1999"),
 		Seed:                    env("AICC_SEED", ""),
 	}
 
@@ -217,6 +251,17 @@ func (c Config) validate() error {
 				"AICC_TRANSCRIBE_ENDPOINT must be set for qwen: the workspace id is "+
 					"part of the hostname, so there is no default that could work"))
 		}
+	}
+	// A range that does not parse must not fall back to the default: the
+	// symptom would be phones allocated out of a pool nobody chose, and
+	// nothing about a working extension says which pool it came from.
+	if low, high, err := c.ExtensionPool(); err != nil {
+		errs = append(errs, fmt.Errorf("AICC_EXTENSION_RANGE %w", err))
+	} else if low < 1 {
+		errs = append(errs, fmt.Errorf("AICC_EXTENSION_RANGE must start at 1 or above, got %d", low))
+	} else if high < low {
+		errs = append(errs, fmt.Errorf(
+			"AICC_EXTENSION_RANGE ends before it starts (%d-%d)", low, high))
 	}
 	switch c.Seed {
 	case "", "demo", "fresh":

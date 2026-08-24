@@ -100,3 +100,29 @@ RETURNING *;
 
 -- name: DeleteDID :execrows
 DELETE FROM dids WHERE id = $1;
+
+-- The allocator takes the lowest free number in the pool, not MAX+1: a number
+-- a departing agent gave back is handed out again, and the pool does not drift
+-- upwards until it runs out of range. Reuse is safe because no history is
+-- keyed by an extension — every historical row names the agent's uuid, which
+-- is never reused (verification F12).
+--
+-- generate_series walks only the configured range, so extensions outside it
+-- (a queue's number, the bot endpoint) are neither returned nor disturbed.
+
+-- name: LowestFreeExtensionNumber :one
+SELECT gs.n::text AS number
+FROM generate_series(sqlc.arg(range_low)::int, sqlc.arg(range_high)::int) AS gs(n)
+WHERE NOT EXISTS (
+    SELECT 1 FROM extensions e WHERE e.number = gs.n::text
+)
+ORDER BY gs.n
+LIMIT 1;
+
+-- Serialises allocation against itself. Without it two transactions read the
+-- same lowest free number and the second one dies on uq_extensions_number:
+-- the symptom is a failed request, not a duplicate row. Transaction-scoped, so
+-- it is released by commit or rollback and cannot be leaked.
+
+-- name: LockExtensionPool :exec
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);

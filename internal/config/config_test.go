@@ -24,6 +24,10 @@ func TestLoadDefaults(t *testing.T) {
 	if !c.IsDev() {
 		t.Error("IsDev() = false, want true")
 	}
+	low, high, err := c.ExtensionPool()
+	if err != nil || low != 1000 || high != 1999 {
+		t.Errorf("ExtensionPool() = %d, %d, %v — want the documented 1000-1999", low, high, err)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -86,8 +90,24 @@ func TestValidate(t *testing.T) {
 			wantErr: "AICC_SEED",
 		},
 		{
+			name: "bad extension range",
+			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
+				ExtensionRange: "1000..1999"},
+			wantErr: "AICC_EXTENSION_RANGE",
+		},
+		{
+			// Refused rather than quietly swapped end for end: an operator who
+			// wrote it backwards meant a range, and guessing which one is how
+			// phones end up in a pool nobody chose.
+			name: "extension range ends before it starts",
+			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
+				ExtensionRange: "1999-1000"},
+			wantErr: "AICC_EXTENSION_RANGE",
+		},
+		{
 			name: "valid",
-			cfg:  Config{Env: "prod", DatabaseURL: "x", DatabaseMaxConns: 4, SessionTTL: time.Hour, Seed: "demo"},
+			cfg: Config{Env: "prod", DatabaseURL: "x", DatabaseMaxConns: 4, SessionTTL: time.Hour,
+				ExtensionRange: "1000-1999", Seed: "demo"},
 		},
 	}
 
