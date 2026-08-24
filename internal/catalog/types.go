@@ -145,8 +145,32 @@ type Queue struct {
 // NewQueue is the shape a create or update body is decoded into. See
 // NewExtension for why the boolean defaults are seeded rather than applied in
 // validate. isAbandonedResumeAllowed is left false, which is its default.
+//
+// The three integers are here for exactly the same reason, and it took a
+// second incident to see it (C33): a default that is not the zero value cannot
+// be applied afterwards either, because validate cannot tell a field the
+// operator omitted from one they sent as 0. The INSERT names every column, so
+// the column defaults never got a turn, and a queue created through the API
+// came out with no RONA wait, an SLA threshold of zero seconds and abandoned
+// callers discarded at once.
+//
+// That half is worse than the boolean half was. A queue created disabled does
+// not work, and not working gets reported. A queue created with a zero SLA
+// threshold runs perfectly and measures the wrong thing — support-zh sat at
+// 0|0|0 in this database, so every SLA figure ever taken from it was against a
+// threshold of zero rather than the twenty seconds the schema says.
+//
+// The same seeding also stops an update from abrading them: a PUT that leaves
+// these fields out now restores the default instead of writing zero, which is
+// how support-zh is believed to have been flattened in the first place.
 func NewQueue() Queue {
-	return Queue{IsEnabled: true, IsRecordingEnabled: true}
+	return Queue{
+		IsEnabled:                true,
+		IsRecordingEnabled:       true,
+		DiscardAbandonedAfterSec: 60,
+		RonaDelaySec:             10,
+		SLAThresholdSec:          20,
+	}
 }
 
 func (q *Queue) validate() error {

@@ -34,6 +34,11 @@ func (c *recordingCatalog) UpdateExtension(_ context.Context, e catalog.Extensio
 	return e, nil
 }
 
+func (c *recordingCatalog) UpdateQueue(_ context.Context, q catalog.Queue) (catalog.Queue, error) {
+	c.queue = q
+	return q, nil
+}
+
 func (c *recordingCatalog) CreateQueue(_ context.Context, q catalog.Queue) (catalog.Queue, error) {
 	c.queue = q
 	return q, nil
@@ -245,4 +250,67 @@ func TestDeletingSomethingThatIsNotThereIsNotFound(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The integer half of the same defect (C33). A default that is not the zero
+// value cannot be applied in validate either — an omitted field and an
+// explicit 0 arrive identically — and the insert names every column, so the
+// column defaults never fire.
+//
+// This half is the worse one. A queue created disabled does not work, and not
+// working gets reported. A queue created with a zero SLA threshold works
+// perfectly and measures the wrong thing: support-zh sat at 0|0|0 in the live
+// database, so every SLA figure taken from it was against zero seconds rather
+// than the twenty the schema declares.
+func TestAnOmittedIntegerTakesTheDeclaredDefault(t *testing.T) {
+	t.Run("a queue created without them gets the schema's numbers", func(t *testing.T) {
+		c := &recordingCatalog{}
+		s := &Server{catalog: c}
+
+		s.CreateQueue(httptest.NewRecorder(), post(`{"name":"support","extNumber":"9100"}`))
+
+		for _, f := range []struct {
+			name string
+			got  int
+			want int
+		}{
+			{"discardAbandonedAfterSec", c.queue.DiscardAbandonedAfterSec, 60},
+			{"ronaDelaySec", c.queue.RonaDelaySec, 10},
+			{"slaThresholdSec", c.queue.SLAThresholdSec, 20},
+		} {
+			if f.got != f.want {
+				t.Errorf("%s = %d, want %d", f.name, f.got, f.want)
+			}
+		}
+	})
+
+	t.Run("an explicit zero still wins", func(t *testing.T) {
+		c := &recordingCatalog{}
+		s := &Server{catalog: c}
+
+		s.CreateQueue(httptest.NewRecorder(), post(
+			`{"name":"support","extNumber":"9100","slaThresholdSec":0,`+
+				`"ronaDelaySec":0,"discardAbandonedAfterSec":0}`))
+
+		if c.queue.SLAThresholdSec != 0 || c.queue.RonaDelaySec != 0 ||
+			c.queue.DiscardAbandonedAfterSec != 0 {
+			t.Errorf("the defaults overrode what the operator sent: %d/%d/%d",
+				c.queue.DiscardAbandonedAfterSec, c.queue.RonaDelaySec, c.queue.SLAThresholdSec)
+		}
+	})
+
+	t.Run("an update that leaves them out no longer flattens them", func(t *testing.T) {
+		// How support-zh is believed to have gone to 0|0|0: the seed wrote it
+		// correctly and a later write through the API left the fields out.
+		c := &recordingCatalog{}
+		s := &Server{catalog: c}
+
+		s.UpdateQueue(httptest.NewRecorder(),
+			post(`{"name":"support-zh","extNumber":"7001"}`), uuid.New())
+
+		if c.queue.SLAThresholdSec != 20 {
+			t.Errorf("slaThresholdSec = %d after an update that omitted it, want 20",
+				c.queue.SLAThresholdSec)
+		}
+	})
 }
