@@ -58,20 +58,17 @@ func (q *Queries) CreateDID(ctx context.Context, arg CreateDIDParams) (Did, erro
 
 const createExtension = `-- name: CreateExtension :one
 
-INSERT INTO extensions (id, number, kind, password, display_name, is_enabled,
-                        queue_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id
+INSERT INTO extensions (id, number, password, display_name, is_enabled)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, number, password, display_name, is_enabled, created_at, updated_at
 `
 
 type CreateExtensionParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Number      string     `json:"number"`
-	Kind        string     `json:"kind"`
-	Password    string     `json:"password"`
-	DisplayName string     `json:"displayName"`
-	IsEnabled   bool       `json:"isEnabled"`
-	QueueID     *uuid.UUID `json:"queueId"`
+	ID          uuid.UUID `json:"id"`
+	Number      string    `json:"number"`
+	Password    string    `json:"password"`
+	DisplayName string    `json:"displayName"`
+	IsEnabled   bool      `json:"isEnabled"`
 }
 
 // SPDX-License-Identifier: Apache-2.0
@@ -79,23 +76,19 @@ func (q *Queries) CreateExtension(ctx context.Context, arg CreateExtensionParams
 	row := q.db.QueryRow(ctx, createExtension,
 		arg.ID,
 		arg.Number,
-		arg.Kind,
 		arg.Password,
 		arg.DisplayName,
 		arg.IsEnabled,
-		arg.QueueID,
 	)
 	var i Extension
 	err := row.Scan(
 		&i.ID,
 		&i.Number,
-		&i.Kind,
 		&i.Password,
 		&i.DisplayName,
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.QueueID,
 	)
 	return i, err
 }
@@ -241,7 +234,7 @@ func (q *Queries) GetDIDByNumber(ctx context.Context, number string) (Did, error
 }
 
 const getExtension = `-- name: GetExtension :one
-SELECT id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id FROM extensions WHERE id = $1
+SELECT id, number, password, display_name, is_enabled, created_at, updated_at FROM extensions WHERE id = $1
 `
 
 func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, error) {
@@ -250,13 +243,11 @@ func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, er
 	err := row.Scan(
 		&i.ID,
 		&i.Number,
-		&i.Kind,
 		&i.Password,
 		&i.DisplayName,
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.QueueID,
 	)
 	return i, err
 }
@@ -329,7 +320,7 @@ func (q *Queries) ListDIDs(ctx context.Context) ([]Did, error) {
 }
 
 const listExtensions = `-- name: ListExtensions :many
-SELECT e.id, e.number, e.kind, e.password, e.display_name, e.is_enabled, e.created_at, e.updated_at, e.queue_id, a.id AS agent_id
+SELECT e.id, e.number, e.password, e.display_name, e.is_enabled, e.created_at, e.updated_at, a.id AS agent_id
 FROM extensions e
 LEFT JOIN agents a ON a.default_extension_id = e.id
 ORDER BY e.number
@@ -338,13 +329,11 @@ ORDER BY e.number
 type ListExtensionsRow struct {
 	ID          uuid.UUID          `json:"id"`
 	Number      string             `json:"number"`
-	Kind        string             `json:"kind"`
 	Password    string             `json:"password"`
 	DisplayName string             `json:"displayName"`
 	IsEnabled   bool               `json:"isEnabled"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
-	QueueID     *uuid.UUID         `json:"queueId"`
 	AgentID     *uuid.UUID         `json:"agentId"`
 }
 
@@ -360,13 +349,11 @@ func (q *Queries) ListExtensions(ctx context.Context) ([]ListExtensionsRow, erro
 		if err := rows.Scan(
 			&i.ID,
 			&i.Number,
-			&i.Kind,
 			&i.Password,
 			&i.DisplayName,
 			&i.IsEnabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.QueueID,
 			&i.AgentID,
 		); err != nil {
 			return nil, err
@@ -566,6 +553,32 @@ func (q *Queries) LowestFreeExtensionNumber(ctx context.Context, arg LowestFreeE
 	return number, err
 }
 
+const lowestFreeQueueNumber = `-- name: LowestFreeQueueNumber :one
+
+SELECT gs.n::text AS ext_number
+FROM generate_series($1::int, $2::int) AS gs(n)
+WHERE NOT EXISTS (
+    SELECT 1 FROM queues q WHERE q.ext_number = gs.n::text
+)
+ORDER BY gs.n
+LIMIT 1
+`
+
+type LowestFreeQueueNumberParams struct {
+	RangeLow  int32 `json:"rangeLow"`
+	RangeHigh int32 `json:"rangeHigh"`
+}
+
+// The queue pool, allocated exactly like the extension pool and for the same
+// reason: whoever adds a queue is asking for a queue, not for 7004. Its numbers
+// live on queues, not in extensions — a queue is dialled, never registered as.
+func (q *Queries) LowestFreeQueueNumber(ctx context.Context, arg LowestFreeQueueNumberParams) (string, error) {
+	row := q.db.QueryRow(ctx, lowestFreeQueueNumber, arg.RangeLow, arg.RangeHigh)
+	var ext_number string
+	err := row.Scan(&ext_number)
+	return ext_number, err
+}
+
 const removeQueueAgent = `-- name: RemoveQueueAgent :execrows
 DELETE FROM queue_agents WHERE queue_id = $1 AND agent_id = $2
 `
@@ -652,39 +665,28 @@ func (q *Queries) UpdateDID(ctx context.Context, arg UpdateDIDParams) (Did, erro
 
 const updateExtension = `-- name: UpdateExtension :one
 UPDATE extensions
-SET kind = $2, display_name = $3, is_enabled = $4,
-    queue_id = $5, updated_at = now()
+SET display_name = $2, is_enabled = $3, updated_at = now()
 WHERE id = $1
-RETURNING id, number, kind, password, display_name, is_enabled, created_at, updated_at, queue_id
+RETURNING id, number, password, display_name, is_enabled, created_at, updated_at
 `
 
 type UpdateExtensionParams struct {
-	ID          uuid.UUID  `json:"id"`
-	Kind        string     `json:"kind"`
-	DisplayName string     `json:"displayName"`
-	IsEnabled   bool       `json:"isEnabled"`
-	QueueID     *uuid.UUID `json:"queueId"`
+	ID          uuid.UUID `json:"id"`
+	DisplayName string    `json:"displayName"`
+	IsEnabled   bool      `json:"isEnabled"`
 }
 
 func (q *Queries) UpdateExtension(ctx context.Context, arg UpdateExtensionParams) (Extension, error) {
-	row := q.db.QueryRow(ctx, updateExtension,
-		arg.ID,
-		arg.Kind,
-		arg.DisplayName,
-		arg.IsEnabled,
-		arg.QueueID,
-	)
+	row := q.db.QueryRow(ctx, updateExtension, arg.ID, arg.DisplayName, arg.IsEnabled)
 	var i Extension
 	err := row.Scan(
 		&i.ID,
 		&i.Number,
-		&i.Kind,
 		&i.Password,
 		&i.DisplayName,
 		&i.IsEnabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.QueueID,
 	)
 	return i, err
 }

@@ -133,12 +133,23 @@ type Config struct {
 	// ExtensionPool.
 	ExtensionRange string
 
+	// QueueRange is the pool a queue's number is allocated from, written
+	// "low-high". Separate from the extension pool because the two are dialled
+	// for different reasons and operators read the leading digit as the answer
+	// to "what am I calling".
+	QueueRange string
+
 	Seed string // "" | "demo" | "fresh"
 }
 
 // ExtensionPool is the inclusive number range agent phones are allocated from.
 func (c Config) ExtensionPool() (low, high int, err error) {
 	return parseRange(c.ExtensionRange)
+}
+
+// QueuePool is the inclusive number range queues are allocated from.
+func (c Config) QueuePool() (low, high int, err error) {
+	return parseRange(c.QueueRange)
 }
 
 // parseRange reads "low-high". Both ends are inclusive.
@@ -209,6 +220,7 @@ func Load() (Config, error) {
 		OTLPEndpoint:            env("AICC_OTLP_ENDPOINT", ""),
 		ServiceName:             env("AICC_SERVICE_NAME", "aicc"),
 		ExtensionRange:          env("AICC_EXTENSION_RANGE", "1000-1999"),
+		QueueRange:              env("AICC_QUEUE_RANGE", "7000-7999"),
 		Seed:                    env("AICC_SEED", ""),
 	}
 
@@ -262,6 +274,13 @@ func (c Config) validate() error {
 	} else if high < low {
 		errs = append(errs, fmt.Errorf(
 			"AICC_EXTENSION_RANGE ends before it starts (%d-%d)", low, high))
+	}
+	if low, high, err := c.QueuePool(); err != nil {
+		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE %w", err))
+	} else if low < 1 {
+		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE must start at 1 or above, got %d", low))
+	} else if high < low {
+		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE ends before it starts (%d-%d)", low, high))
 	}
 	switch c.Seed {
 	case "", "demo", "fresh":

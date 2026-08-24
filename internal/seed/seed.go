@@ -210,8 +210,8 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 			continue
 		}
 		if _, err := st.Pool.Exec(ctx, `
-			INSERT INTO extensions (id, number, kind, password, display_name)
-			VALUES ($1, $2, 'AGENT', $3, $4)
+			INSERT INTO extensions (id, number, password, display_name)
+			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (number) DO NOTHING`,
 			uuid.New(), p.ext, demoPassword, p.display); err != nil {
 			return nil, nil, err

@@ -40,8 +40,7 @@ func poolStore(t *testing.T, maxConns int32) *CatalogStore {
 func allocate(t *testing.T, cat *CatalogStore, low, high int) catalog.Extension {
 	t.Helper()
 	e, err := cat.AllocateExtension(context.Background(), catalog.Extension{
-		ID: uuid.Must(uuid.NewV7()), Kind: catalog.KindAgent,
-		Password: "phone-secret", IsEnabled: true,
+		ID: uuid.Must(uuid.NewV7()), Password: "phone-secret", IsEnabled: true,
 	}, low, high)
 	if err != nil {
 		t.Fatalf("allocate: %v", err)
@@ -86,15 +85,9 @@ func TestNumbersOutsideThePoolAreLeftAlone(t *testing.T) {
 	ctx := context.Background()
 
 	// A queue's number: in the same table, outside the pool.
-	queueID := uuid.Must(uuid.NewV7())
-	if _, err := cat.pool.Exec(ctx, `INSERT INTO queues (id, name, ext_number, display_name)
-		VALUES ($1, 'support', '7002', 'Support')`, queueID); err != nil {
-		t.Fatalf("seed the queue: %v", err)
-	}
 	outside := catalog.Extension{
-		ID: uuid.Must(uuid.NewV7()), Number: "7002", Kind: catalog.KindQueue,
-		QueueID:  &queueID,
-		Password: "queue-secret", DisplayName: "Support queue", IsEnabled: true,
+		ID: uuid.Must(uuid.NewV7()), Number: "7002",
+		Password: "lobby-secret", DisplayName: "Lobby", IsEnabled: true,
 	}
 	if _, err := cat.CreateExtension(ctx, outside); err != nil {
 		t.Fatalf("create the out-of-range extension: %v", err)
@@ -117,7 +110,7 @@ func TestAFullPoolSaysItIsFullRatherThanFailingOnTheConstraint(t *testing.T) {
 	allocate(t, cat, 1000, 1001)
 
 	_, err := cat.AllocateExtension(context.Background(), catalog.Extension{
-		ID: uuid.Must(uuid.NewV7()), Kind: catalog.KindAgent, Password: "phone-secret",
+		ID: uuid.Must(uuid.NewV7()), Password: "phone-secret",
 	}, 1000, 1001)
 	if !errors.Is(err, catalog.ErrPoolExhausted) {
 		t.Errorf("error = %v, want ErrPoolExhausted", err)
@@ -145,8 +138,7 @@ func TestParallelAllocationsAllSucceedAndNoneCollide(t *testing.T) {
 			defer wg.Done()
 			<-start
 			e, err := cat.AllocateExtension(context.Background(), catalog.Extension{
-				ID: uuid.Must(uuid.NewV7()), Kind: catalog.KindAgent,
-				Password: "phone-secret", IsEnabled: true,
+				ID: uuid.Must(uuid.NewV7()), Password: "phone-secret", IsEnabled: true,
 			}, 1000, 1999)
 			numbers[i], errs[i] = e.Number, err
 		}()

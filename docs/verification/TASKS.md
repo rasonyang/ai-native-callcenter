@@ -609,8 +609,21 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      **现场**:BOT 分机绑 flow→201 / 不绑→422 / 改 PLAIN 清空目标 / psql 造矛盾被 CHECK 拒绝;
      收窄后 `BOT` 回 422、live 的 21 行毫发无损、`flow_id` 列已消失;
      **真 SIP 客户端用 reveal 到的口令注册成功(`Registered(UDP)`)—— W11.3 欠的那条话机注册验证随之闭合。**
-     **遗留一笔**:`extensions.queue_id` 与 `queues.ext_number` 是同一件事的两处记录,
-     没有东西保证它们一致(owner 已决不迁 `ext_number`),待 W11.5 或单独一条处理。
+     **`00019` 把分机收回它本来的样子(owner 直裁,选项 C)**:`kind` 与 `queue_id` 双双删除。
+     一个只剩一个合法值的列什么也没分类,而 `queue_id` 从来没有用途 —— 顺着它走能看清整个想法
+     错在哪:**这张表喂的是 `luacc.directory`,也就是 SIP 注册**,一行就是一个话机可以注册的账号
+     (带口令)。队列不是被注册的东西,它是被拨的,`aicc_queue.lua` 经
+     `luacc.queues WHERE ext_number` 找到它,**从不查这张表**。给队列建一行不会让它可达,
+     只会让它的号码可注册 —— 白买一个暴露面。
+     队列号仍归 `queues.ext_number`(那里本来就有唯一约束),改成**从 `AICC_QUEUE_RANGE`
+     (默认 7000-7999)自增**,与分机同一套分配器,共用同一把池锁(两个池、一列写者:
+     建队列和招人一样罕见,而第二把锁是第二件要推理的事)。
+     `POST /extensions` 保留为自动化入口(与 `flowadd` 同例),但**页面去掉了"新建"** ——
+     话机随账号而来。Extensions 页变成只读 + 凭据操作,列显示"已分配/未分配"而不是 kind。
+     **现场**:建队列不给号码 → `extNumber=7000`;`extensions` 只剩
+     `id,number,password,display_name,is_enabled,created_at,updated_at`;
+     **开发库里 14 个无主分机已清掉**(21 → 7,全部有主) —— 它们是手工建的残留,
+     `luacc.directory` 却一直把它们当可注册账号下发。
   5. **W11.5 Numbers**(D7/D8/D9)。方向布尔、`flow_id` CHECK、缺省外呼号。
      **与 W8(trunk 管理面)是同一块地,W8 排在其后**,免得中继号的契约评审和这里的方向列打架。
   6. **W11.6 Bot Flows 加"指向该 flow 的分机"列**(D10,join)。依赖 4。

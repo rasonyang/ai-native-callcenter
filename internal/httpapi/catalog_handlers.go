@@ -25,7 +25,7 @@ type CatalogService interface {
 	ExtensionPassword(ctx context.Context, id uuid.UUID) (string, error)
 
 	Queues(ctx context.Context) ([]catalog.Queue, error)
-	CreateQueue(ctx context.Context, q catalog.Queue) (catalog.Queue, error)
+	CreateQueue(ctx context.Context, q catalog.Queue, rangeLow, rangeHigh int) (catalog.Queue, error)
 	UpdateQueue(ctx context.Context, q catalog.Queue) (catalog.Queue, error)
 	DeleteQueue(ctx context.Context, id uuid.UUID) error
 
@@ -85,7 +85,19 @@ func (s *Server) CreateQueue(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	out, err := s.catalog.CreateQueue(r.Context(), in)
+	// The pool is only consulted when a number has to come out of it; a queue
+	// created with one named needs no range and must not fail for want of one.
+	var low, high int
+	if in.ExtNumber == "" {
+		var err error
+		if low, high, err = s.cfg.QueuePool(); err != nil {
+			slog.ErrorContext(r.Context(), "queue range unusable", "error", err)
+			writeError(w, http.StatusInternalServerError, CodeInternal,
+				"cannot allocate a number", nil)
+			return
+		}
+	}
+	out, err := s.catalog.CreateQueue(r.Context(), in, low, high)
 	s.writeCatalog(w, r, out, err, http.StatusCreated)
 }
 

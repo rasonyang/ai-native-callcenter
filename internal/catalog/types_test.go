@@ -34,19 +34,10 @@ func TestExtensionValidation(t *testing.T) {
 			onCreate: false,
 		},
 		{
-			name:     "unknown kinds are refused",
-			ext:      Extension{Number: "1001", Password: "secret123", Kind: "ROBOT"},
-			onCreate: true,
-			wantErr:  "kind",
-		},
-		{
-			name:     "kind defaults to agent and a name is derived",
+			name:     "an unnamed extension is named after its number",
 			ext:      Extension{Number: "1001", Password: "secret123"},
 			onCreate: true,
 			wantAssert: func(t *testing.T, e Extension) {
-				if e.Kind != KindAgent {
-					t.Errorf("kind = %q, want AGENT", e.Kind)
-				}
 				if e.DisplayName != "Extension 1001" {
 					t.Errorf("displayName = %q", e.DisplayName)
 				}

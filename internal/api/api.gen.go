@@ -271,24 +271,6 @@ func (e ErrorCode) Valid() bool {
 	}
 }
 
-// Defines values for ExtensionKind.
-const (
-	ExtensionKindAGENT ExtensionKind = "AGENT"
-	ExtensionKindQUEUE ExtensionKind = "QUEUE"
-)
-
-// Valid indicates whether the value is a known member of the ExtensionKind enum.
-func (e ExtensionKind) Valid() bool {
-	switch e {
-	case ExtensionKindAGENT:
-		return true
-	case ExtensionKindQUEUE:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for LegKind.
 const (
 	LegKindAGENT   LegKind = "AGENT"
@@ -1168,7 +1150,9 @@ type ErrorResponse struct {
 	Error Error `json:"error"`
 }
 
-// Extension A SIP endpoint the switch will accept a registration for.
+// Extension A number a phone can register at, and the agent it belongs to.
+//
+// Nothing else: a queue is dialled rather than registered as, and reaches its callers through queues.extNumber, which this table never touches.
 type Extension struct {
 	// AgentID The agent whose phone this is. Read here and written by binding the agent to it: the binding lives on the agent so the database can still refuse to delete a phone somebody works at, which is a guard an incident put there.
 	AgentID     *openapi_types.UUID `json:"agentId,omitempty"`
@@ -1176,21 +1160,8 @@ type Extension struct {
 	DisplayName string              `json:"displayName"`
 	ID          openapi_types.UUID  `json:"id"`
 	IsEnabled   bool                `json:"isEnabled"`
-
-	// Kind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
-	//
-	// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
-	Kind   ExtensionKind `json:"kind"`
-	Number string        `json:"number"`
-
-	// QueueID The queue a QUEUE extension reaches.
-	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
+	Number      string              `json:"number"`
 }
-
-// ExtensionKind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
-//
-// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
-type ExtensionKind string
 
 // ExtensionList defines model for ExtensionList.
 type ExtensionList struct {
@@ -1204,24 +1175,14 @@ type ExtensionSecret struct {
 	Password string `json:"password"`
 }
 
-// ExtensionWrite Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
-//
-// The target must match the kind. Changing the kind clears the targets that no longer apply, which is why a form asks before it does so.
+// ExtensionWrite Create or update a phone. An account's phone is allocated when the account is created, so this is the entry for automation and for a handset that belongs to nobody in particular. An empty password leaves an existing one alone.
 type ExtensionWrite struct {
 	DisplayName *string `json:"displayName,omitempty"`
 	IsEnabled   *bool   `json:"isEnabled,omitempty"`
-
-	// Kind What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
-	//
-	// BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
-	Kind   *ExtensionKind `json:"kind,omitempty"`
-	Number string         `json:"number"`
+	Number      string  `json:"number"`
 
 	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch.
 	Password *string `json:"password,omitempty"`
-
-	// QueueID Required for kind QUEUE and refused for kind AGENT: a number reaches a queue or belongs to a person, and a target left behind by a changed kind is a claim nothing honours.
-	QueueID *openapi_types.UUID `json:"queueId,omitempty"`
 }
 
 // Flow A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.
@@ -1537,11 +1498,13 @@ type QueueReportList struct {
 
 // QueueWrite Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300, isEnabled true, isRecordingEnabled true).
 type QueueWrite struct {
-	AnnounceFrequencySec     *int             `json:"announceFrequencySec,omitempty"`
-	AnnounceSound            *string          `json:"announceSound,omitempty"`
-	DiscardAbandonedAfterSec *int             `json:"discardAbandonedAfterSec,omitempty"`
-	DisplayName              *string          `json:"displayName,omitempty"`
-	ExtNumber                string           `json:"extNumber"`
+	AnnounceFrequencySec     *int    `json:"announceFrequencySec,omitempty"`
+	AnnounceSound            *string `json:"announceSound,omitempty"`
+	DiscardAbandonedAfterSec *int    `json:"discardAbandonedAfterSec,omitempty"`
+	DisplayName              *string `json:"displayName,omitempty"`
+
+	// ExtNumber Omit it and the next free number in the queue pool (AICC_QUEUE_RANGE) is allocated — which is what a form should do, because whoever adds a queue is asking for a queue, not for 7004. Supplying one is for a deployment that has to match numbers it does not own.
+	ExtNumber                *string          `json:"extNumber,omitempty"`
 	Hours                    *[]BusinessHours `json:"hours,omitempty"`
 	IsAbandonedResumeAllowed *bool            `json:"isAbandonedResumeAllowed,omitempty"`
 	IsEnabled                *bool            `json:"isEnabled,omitempty"`

@@ -508,7 +508,10 @@ func TestMigrationsRelabelTheKindsThatNoLongerExist(t *testing.T) {
 		t.Fatalf("seed the retired kinds: %v", err)
 	}
 
-	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+	// Stopped at 18 because 19 removes the column this checks: what 18 owes
+	// is that a populated database survives the narrowing, and that is a claim
+	// about 18 alone.
+	if err := goose.UpToContext(ctx, db, "migrations", 18); err != nil {
 		t.Fatalf("migrating a database that still labels phones BOT or PLAIN failed: %v", err)
 	}
 
@@ -531,5 +534,65 @@ func TestMigrationsRelabelTheKindsThatNoLongerExist(t *testing.T) {
 		`INSERT INTO extensions (id, number, kind, password, queue_id)
 		 VALUES (gen_random_uuid(), '1089', 'AGENT', 'x', gen_random_uuid())`); err == nil {
 		t.Error("an AGENT extension was allowed to point at a queue")
+	}
+}
+
+// 00019 removes kind and queue_id from a table that already holds rows.
+//
+// The claim is that nothing else moves: an extension is its number, its
+// password and who it belongs to, and dropping the two columns must leave
+// every binding exactly where it was.
+func TestMigrationsDropTheColumnsWithoutLosingABinding(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 18); err != nil {
+		t.Fatalf("migrating to 18 failed: %v", err)
+	}
+	const (
+		extID   = "88888888-8888-8888-8888-888888888888"
+		userID  = "99999999-9999-9999-9999-999999999999"
+		agentID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO extensions (id, number, kind, password) VALUES ($1, '1088', 'AGENT', 'x')`,
+			[]any{extID}},
+		{`INSERT INTO users (id, username, password_hash, display_name, role)
+		  VALUES ($1, 'probe19', 'x', 'Probe', 'AGENT')`, []any{userID}},
+		{`INSERT INTO agents (id, user_id, callcenter_name, default_extension_id)
+		  VALUES ($1, $2, 'probe19', $3)`, []any{agentID, userID, extID}},
+	} {
+		if _, err := db.ExecContext(ctx, q.sql, q.args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database that already holds bound phones failed: %v", err)
+	}
+
+	var bound string
+	if err := db.QueryRowContext(ctx,
+		`SELECT default_extension_id FROM agents WHERE id = $1`, agentID).Scan(&bound); err != nil {
+		t.Fatalf("read the binding back: %v", err)
+	}
+	if bound != extID {
+		t.Errorf("the binding is now %s; dropping two unrelated columns moved it", bound)
+	}
+
+	// The switch still gets the phone it has always got.
+	var served int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM luacc.directory WHERE number = '1088'`).Scan(&served); err != nil {
+		t.Fatalf("read the directory: %v", err)
+	}
+	if served != 1 {
+		t.Errorf("the directory serves %d rows for 1088; a phone stopped being "+
+			"registerable because two columns it never used went away", served)
 	}
 }

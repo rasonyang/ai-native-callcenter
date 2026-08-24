@@ -29,7 +29,7 @@ type Store interface {
 	DeleteExtension(ctx context.Context, id uuid.UUID) error
 
 	ListQueues(ctx context.Context) ([]Queue, error)
-	CreateQueue(ctx context.Context, q Queue) (Queue, error)
+	CreateQueue(ctx context.Context, q Queue, rangeLow, rangeHigh int) (Queue, error)
 	UpdateQueue(ctx context.Context, q Queue) (Queue, error)
 	DeleteQueue(ctx context.Context, id uuid.UUID) error
 	QueueByID(ctx context.Context, id uuid.UUID) (Queue, error)
@@ -199,12 +199,16 @@ func (s *Service) QueueIDByName(ctx context.Context, name string) (uuid.UUID, bo
 }
 
 // CreateQueue adds a queue and tells the switch to read it.
-func (s *Service) CreateQueue(ctx context.Context, q Queue) (Queue, error) {
+// CreateQueue adds a queue, allocating its number when none was named.
+//
+// The caller supplies the pool because it is deployment configuration
+// (AICC_QUEUE_RANGE), and configuration is not this service's to know.
+func (s *Service) CreateQueue(ctx context.Context, q Queue, rangeLow, rangeHigh int) (Queue, error) {
 	if err := q.validate(); err != nil {
 		return Queue{}, err
 	}
 	q.ID = uuid.Must(uuid.NewV7())
-	created, err := s.store.CreateQueue(ctx, q)
+	created, err := s.store.CreateQueue(ctx, q, rangeLow, rangeHigh)
 	if err != nil {
 		return Queue{}, err
 	}

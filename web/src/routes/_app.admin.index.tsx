@@ -28,7 +28,7 @@ function AdminOverview() {
 
   const enabledDIDs = dids.data?.items.filter((did) => did.isEnabled).length ?? 0
   const withFlow = dids.data?.items.filter((did) => did.flowId).length ?? 0
-  const agentExtensions = extensions.data?.items.filter((e) => e.kind === 'AGENT').length ?? 0
+  const boundExtensions = extensions.data?.items.filter((e) => e.agentId).length ?? 0
 
   return (
     <div className="flex flex-col gap-4">
@@ -38,7 +38,7 @@ function AdminOverview() {
         <KpiCard
           label={t('nav.extensions')}
           value={extensions.data?.items.length ?? '—'}
-          note={t('admin.agentExtensions', { count: agentExtensions })}
+          note={t('admin.boundExtensions', { count: boundExtensions })}
         />
         <KpiCard
           label={t('nav.queues')}

@@ -9,34 +9,22 @@ import (
 	"github.com/google/uuid"
 )
 
-// ExtensionKind classifies what registers at an extension.
-type ExtensionKind string
-
-// Extension kinds.
-const (
-	KindAgent ExtensionKind = "AGENT"
-	KindQueue ExtensionKind = "QUEUE"
-)
-
 // Extension is a SIP endpoint the switch will accept a registration for.
 type Extension struct {
-	ID          uuid.UUID     `json:"id"`
-	Number      string        `json:"number"`
-	Kind        ExtensionKind `json:"kind"`
-	DisplayName string        `json:"displayName"`
-	IsEnabled   bool          `json:"isEnabled"`
-	CreatedAt   time.Time     `json:"createdAt"`
+	ID          uuid.UUID `json:"id"`
+	Number      string    `json:"number"`
+	DisplayName string    `json:"displayName"`
+	IsEnabled   bool      `json:"isEnabled"`
+	CreatedAt   time.Time `json:"createdAt"`
 	// Password is write-only: it is accepted on create and update and never
 	// returned, because the only reader that needs it is the switch. Reading
 	// it back is a separate, audited request.
 	Password string `json:"password,omitempty"`
 
-	// What this number serves, at most one of them, matching Kind.
 	//
 	// AgentID is read-only here: the binding is written from the agent's side,
 	// where the database can still refuse to delete a phone somebody works at.
 	AgentID *uuid.UUID `json:"agentId,omitempty"`
-	QueueID *uuid.UUID `json:"queueId,omitempty"`
 }
 
 // NewExtension is the shape a create or update body is decoded into: the
@@ -73,25 +61,8 @@ func (e *Extension) validate(requirePassword bool) error {
 func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	e.DisplayName = trim(e.DisplayName)
 
-	switch e.Kind {
-	case KindAgent, KindQueue:
-	case "":
-		e.Kind = KindAgent
-	default:
-		return fmt.Errorf("%w: unknown extension kind %q", ErrValidation, e.Kind)
-	}
 	if requirePassword && len(e.Password) < 6 {
 		return fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
-	}
-	// A number serves one thing. The database refuses the contradiction too,
-	// but saying which field is wrong is this layer's job.
-	if e.Kind == KindQueue {
-		if e.QueueID == nil {
-			return fmt.Errorf("%w: a QUEUE extension needs the queue it reaches", ErrValidation)
-		}
-	} else {
-		// A target left behind by a changed kind is a claim nothing honours.
-		e.QueueID = nil
 	}
 	return nil
 }
@@ -223,7 +194,9 @@ func (q *Queue) validate() error {
 			return fmt.Errorf("%w: name cannot contain spaces, @ or quotes", ErrValidation)
 		}
 	}
-	if !digitsOnly(q.ExtNumber) {
+	// Empty means "allocate one": whoever adds a queue is asking for a queue,
+	// not for 7004. A number that is given must still be a number.
+	if q.ExtNumber != "" && !digitsOnly(q.ExtNumber) {
 		return fmt.Errorf("%w: queue extension must be digits", ErrValidation)
 	}
 	if q.Strategy == "" {

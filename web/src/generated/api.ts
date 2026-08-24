@@ -1647,18 +1647,14 @@ export interface components {
             isDuplicate?: boolean;
         };
         /**
-         * @description What an extension is: AGENT a person's phone, QUEUE a number that reaches a queue.
+         * @description A number a phone can register at, and the agent it belongs to.
          *
-         *     BOT and PLAIN were retired (00018). PLAIN was a second spelling of an AGENT extension with nobody bound to it, and BOT could not route anything — a caller reaches a bot through the DID that names its flow, and the extensions table appears nowhere on that path.
-         * @enum {string}
+         *     Nothing else: a queue is dialled rather than registered as, and reaches its callers through queues.extNumber, which this table never touches.
          */
-        ExtensionKind: "AGENT" | "QUEUE";
-        /** @description A SIP endpoint the switch will accept a registration for. */
         Extension: {
             /** Format: uuid */
             id: string;
             number: string;
-            kind: components["schemas"]["ExtensionKind"];
             displayName: string;
             isEnabled: boolean;
             /** Format: date-time */
@@ -1668,29 +1664,14 @@ export interface components {
              * @description The agent whose phone this is. Read here and written by binding the agent to it: the binding lives on the agent so the database can still refuse to delete a phone somebody works at, which is a guard an incident put there.
              */
             agentId?: string;
-            /**
-             * Format: uuid
-             * @description The queue a QUEUE extension reaches.
-             */
-            queueId?: string;
         };
-        /**
-         * @description Create or update an extension. Omitted fields take server defaults (kind AGENT, displayName "Extension <number>", isEnabled true).
-         *
-         *     The target must match the kind. Changing the kind clears the targets that no longer apply, which is why a form asks before it does so.
-         */
+        /** @description Create or update a phone. An account's phone is allocated when the account is created, so this is the entry for automation and for a handset that belongs to nobody in particular. An empty password leaves an existing one alone. */
         ExtensionWrite: {
             number: string;
-            kind?: components["schemas"]["ExtensionKind"];
             displayName?: string;
             isEnabled?: boolean;
             /** @description Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch. */
             password?: string;
-            /**
-             * Format: uuid
-             * @description Required for kind QUEUE and refused for kind AGENT: a number reaches a queue or belongs to a person, and a target left behind by a changed kind is a claim nothing honours.
-             */
-            queueId?: string;
         };
         ExtensionList: {
             items: components["schemas"]["Extension"][];
@@ -1758,7 +1739,8 @@ export interface components {
         QueueWrite: {
             /** @description Switch-safe identifier: no spaces, @ or quotes. */
             name: string;
-            extNumber: string;
+            /** @description Omit it and the next free number in the queue pool (AICC_QUEUE_RANGE) is allocated — which is what a form should do, because whoever adds a queue is asking for a queue, not for 7004. Supplying one is for a deployment that has to match numbers it does not own. */
+            extNumber?: string;
             displayName?: string;
             strategy?: components["schemas"]["Strategy"];
             mohSound?: string;

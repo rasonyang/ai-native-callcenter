@@ -132,13 +132,15 @@ function RoutingPage() {
               onChange={(e) => setEditing({ ...editing, displayName: e.target.value })}
             />
           </Field>
-          <Field label={t('admin.queueExtension')} hint={t('admin.queueExtensionHint')}>
-            <Input
-              disabled={Boolean(editing.id)}
-              value={editing.extNumber ?? ''}
-              onChange={(e) => setEditing({ ...editing, extNumber: e.target.value })}
-            />
-          </Field>
+          {/* Allocated, not typed: whoever adds a queue is asking for a
+              queue, not for 7004. Shown once it exists, and never editable —
+              the switch, the dialplan and every routed call know it by that
+              number. */}
+          {editing.id && (
+            <Field label={t('admin.queueExtension')} hint={t('admin.queueExtensionHint')}>
+              <Input disabled value={editing.extNumber ?? ''} />
+            </Field>
+          )}
           <Field label={t('admin.strategy')}>
             <Select
               value={editing.strategy ?? 'LONGEST_IDLE_AGENT'}

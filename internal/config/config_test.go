@@ -28,6 +28,9 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil || low != 1000 || high != 1999 {
 		t.Errorf("ExtensionPool() = %d, %d, %v — want the documented 1000-1999", low, high, err)
 	}
+	if low, high, err := c.QueuePool(); err != nil || low != 7000 || high != 7999 {
+		t.Errorf("QueuePool() = %d, %d, %v — want the documented 7000-7999", low, high, err)
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -66,33 +69,33 @@ func TestValidate(t *testing.T) {
 	}{
 		{
 			name:    "bad env",
-			cfg:     Config{Env: "staging", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour},
+			cfg:     Config{Env: "staging", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour, ExtensionRange: "1000-1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_ENV",
 		},
 		{
 			name:    "empty database url",
-			cfg:     Config{Env: "dev", DatabaseMaxConns: 1, SessionTTL: time.Hour},
+			cfg:     Config{Env: "dev", DatabaseMaxConns: 1, SessionTTL: time.Hour, ExtensionRange: "1000-1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_DATABASE_URL",
 		},
 		{
 			name:    "zero pool",
-			cfg:     Config{Env: "dev", DatabaseURL: "x", SessionTTL: time.Hour},
+			cfg:     Config{Env: "dev", DatabaseURL: "x", SessionTTL: time.Hour, ExtensionRange: "1000-1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_DATABASE_MAX_CONNS",
 		},
 		{
 			name:    "short session ttl",
-			cfg:     Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Second},
+			cfg:     Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Second, ExtensionRange: "1000-1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_SESSION_TTL",
 		},
 		{
 			name:    "bad seed",
-			cfg:     Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour, Seed: "sample"},
+			cfg:     Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour, Seed: "sample", ExtensionRange: "1000-1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_SEED",
 		},
 		{
 			name: "bad extension range",
 			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
-				ExtensionRange: "1000..1999"},
+				ExtensionRange: "1000..1999", QueueRange: "7000-7999"},
 			wantErr: "AICC_EXTENSION_RANGE",
 		},
 		{
@@ -101,13 +104,13 @@ func TestValidate(t *testing.T) {
 			// phones end up in a pool nobody chose.
 			name: "extension range ends before it starts",
 			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
-				ExtensionRange: "1999-1000"},
+				ExtensionRange: "1999-1000", QueueRange: "7000-7999"},
 			wantErr: "AICC_EXTENSION_RANGE",
 		},
 		{
 			name: "valid",
 			cfg: Config{Env: "prod", DatabaseURL: "x", DatabaseMaxConns: 4, SessionTTL: time.Hour,
-				ExtensionRange: "1000-1999", Seed: "demo"},
+				ExtensionRange: "1000-1999", QueueRange: "7000-7999", Seed: "demo"},
 		},
 	}
 

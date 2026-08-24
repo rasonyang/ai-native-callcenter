@@ -39,7 +39,7 @@ func (c *recordingCatalog) UpdateQueue(_ context.Context, q catalog.Queue) (cata
 	return q, nil
 }
 
-func (c *recordingCatalog) CreateQueue(_ context.Context, q catalog.Queue) (catalog.Queue, error) {
+func (c *recordingCatalog) CreateQueue(_ context.Context, q catalog.Queue, _, _ int) (catalog.Queue, error) {
 	c.queue = q
 	return q, nil
 }

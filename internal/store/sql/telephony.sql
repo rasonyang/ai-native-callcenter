@@ -1,9 +1,8 @@
 -- SPDX-License-Identifier: Apache-2.0
 
 -- name: CreateExtension :one
-INSERT INTO extensions (id, number, kind, password, display_name, is_enabled,
-                        queue_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO extensions (id, number, password, display_name, is_enabled)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: GetExtension :one
@@ -17,8 +16,7 @@ ORDER BY e.number;
 
 -- name: UpdateExtension :one
 UPDATE extensions
-SET kind = $2, display_name = $3, is_enabled = $4,
-    queue_id = $5, updated_at = now()
+SET display_name = $2, is_enabled = $3, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -131,3 +129,16 @@ LIMIT 1;
 
 -- name: LockExtensionPool :exec
 SELECT pg_advisory_xact_lock(sqlc.arg(lock_key)::bigint);
+
+-- The queue pool, allocated exactly like the extension pool and for the same
+-- reason: whoever adds a queue is asking for a queue, not for 7004. Its numbers
+-- live on queues, not in extensions — a queue is dialled, never registered as.
+
+-- name: LowestFreeQueueNumber :one
+SELECT gs.n::text AS ext_number
+FROM generate_series(sqlc.arg(range_low)::int, sqlc.arg(range_high)::int) AS gs(n)
+WHERE NOT EXISTS (
+    SELECT 1 FROM queues q WHERE q.ext_number = gs.n::text
+)
+ORDER BY gs.n
+LIMIT 1;

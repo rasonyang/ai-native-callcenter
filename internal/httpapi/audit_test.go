@@ -315,7 +315,7 @@ func (stubCatalog) UpdateExtension(context.Context, catalog.Extension) (catalog.
 }
 func (stubCatalog) DeleteExtension(context.Context, uuid.UUID) error { return nil }
 func (stubCatalog) Queues(context.Context) ([]catalog.Queue, error)  { return nil, nil }
-func (stubCatalog) CreateQueue(context.Context, catalog.Queue) (catalog.Queue, error) {
+func (stubCatalog) CreateQueue(context.Context, catalog.Queue, int, int) (catalog.Queue, error) {
 	return catalog.Queue{}, nil
 }
 func (stubCatalog) UpdateQueue(context.Context, catalog.Queue) (catalog.Queue, error) {

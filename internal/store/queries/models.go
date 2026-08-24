@@ -127,13 +127,11 @@ type Disposition struct {
 type Extension struct {
 	ID          uuid.UUID          `json:"id"`
 	Number      string             `json:"number"`
-	Kind        string             `json:"kind"`
 	Password    string             `json:"password"`
 	DisplayName string             `json:"displayName"`
 	IsEnabled   bool               `json:"isEnabled"`
 	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
 	UpdatedAt   pgtype.Timestamptz `json:"updatedAt"`
-	QueueID     *uuid.UUID         `json:"queueId"`
 }
 
 type Flow struct {

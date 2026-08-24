@@ -159,7 +159,6 @@ func provisionAgentTx(ctx context.Context, qtx *queries.Queries, userID uuid.UUI
 	in NewAccount) (queries.Agent, queries.Extension, error) {
 	phone, err := allocateExtensionTx(ctx, qtx, catalog.Extension{
 		ID:       uuid.Must(uuid.NewV7()),
-		Kind:     catalog.KindAgent,
 		Password: in.SIPPassword,
 		// Named after the person rather than the number: a directory of
 		// "Extension 1042" tells whoever answers the switch's questions

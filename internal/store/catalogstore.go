@@ -89,7 +89,6 @@ func allocateExtensionTx(ctx context.Context, qtx *queries.Queries,
 	row, err := qtx.CreateExtension(ctx, queries.CreateExtensionParams{
 		ID:          e.ID,
 		Number:      e.Number,
-		Kind:        string(e.Kind),
 		Password:    e.Password,
 		DisplayName: e.DisplayName,
 		IsEnabled:   e.IsEnabled,
@@ -112,10 +111,9 @@ func (c *CatalogStore) ListExtensions(ctx context.Context) ([]catalog.Extension,
 	out := make([]catalog.Extension, 0, len(rows))
 	for _, r := range rows {
 		e := extensionOf(queries.Extension{
-			ID: r.ID, Number: r.Number, Kind: r.Kind, Password: r.Password,
+			ID: r.ID, Number: r.Number, Password: r.Password,
 			DisplayName: r.DisplayName, IsEnabled: r.IsEnabled,
 			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-			QueueID: r.QueueID,
 		})
 		// Joined rather than stored: the binding belongs to the agent, and a
 		// second copy here would be a second thing to keep true.
@@ -129,11 +127,9 @@ func (c *CatalogStore) CreateExtension(ctx context.Context, e catalog.Extension)
 	row, err := c.q.CreateExtension(ctx, queries.CreateExtensionParams{
 		ID:          e.ID,
 		Number:      e.Number,
-		Kind:        string(e.Kind),
 		Password:    e.Password,
 		DisplayName: e.DisplayName,
 		IsEnabled:   e.IsEnabled,
-		QueueID:     e.QueueID,
 	})
 	if err != nil {
 		return catalog.Extension{}, fmt.Errorf("create extension: %w", err)
@@ -156,10 +152,8 @@ func (c *CatalogStore) ExtensionPassword(ctx context.Context, id uuid.UUID) (str
 func (c *CatalogStore) UpdateExtension(ctx context.Context, e catalog.Extension) (catalog.Extension, error) {
 	row, err := c.q.UpdateExtension(ctx, queries.UpdateExtensionParams{
 		ID:          e.ID,
-		Kind:        string(e.Kind),
 		DisplayName: e.DisplayName,
 		IsEnabled:   e.IsEnabled,
-		QueueID:     e.QueueID,
 	})
 	if err != nil {
 		return catalog.Extension{}, fmt.Errorf("update extension: %w", err)
@@ -196,11 +190,9 @@ func extensionOf(r queries.Extension) catalog.Extension {
 	return catalog.Extension{
 		ID:          r.ID,
 		Number:      r.Number,
-		Kind:        catalog.ExtensionKind(r.Kind),
 		DisplayName: r.DisplayName,
 		IsEnabled:   r.IsEnabled,
 		CreatedAt:   r.CreatedAt.Time,
-		QueueID:     r.QueueID,
 	}
 }
 
@@ -228,12 +220,44 @@ func (c *CatalogStore) QueueByID(ctx context.Context, id uuid.UUID) (catalog.Que
 	return queueOf(row), nil
 }
 
-func (c *CatalogStore) CreateQueue(ctx context.Context, q catalog.Queue) (catalog.Queue, error) {
+// CreateQueue adds a queue, allocating its number when none was named.
+//
+// The allocation shares the extension pool's lock rather than taking one of
+// its own. Two pools, one queue of writers: the contention is nil (a queue is
+// created about as often as a person is hired) and a second lock is a second
+// thing to reason about when two of them ever meet.
+func (c *CatalogStore) CreateQueue(ctx context.Context, q catalog.Queue,
+	rangeLow, rangeHigh int) (catalog.Queue, error) {
 	tiers, hours, overflow, err := queueJSON(q)
 	if err != nil {
 		return catalog.Queue{}, err
 	}
-	row, err := c.q.CreateQueue(ctx, queries.CreateQueueParams{
+
+	tx, err := c.pool.Begin(ctx)
+	if err != nil {
+		return catalog.Queue{}, fmt.Errorf("create queue: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := c.q.WithTx(tx)
+
+	if q.ExtNumber == "" {
+		if err := qtx.LockExtensionPool(ctx, extensionPoolLockKey); err != nil {
+			return catalog.Queue{}, fmt.Errorf("lock the number pool: %w", err)
+		}
+		number, err := qtx.LowestFreeQueueNumber(ctx, queries.LowestFreeQueueNumberParams{
+			RangeLow:  int32(rangeLow),
+			RangeHigh: int32(rangeHigh),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return catalog.Queue{}, catalog.ErrPoolExhausted
+			}
+			return catalog.Queue{}, fmt.Errorf("find a free queue number: %w", err)
+		}
+		q.ExtNumber = number
+	}
+
+	row, err := qtx.CreateQueue(ctx, queries.CreateQueueParams{
 		ID:                       q.ID,
 		Name:                     q.Name,
 		ExtNumber:                q.ExtNumber,
@@ -256,6 +280,9 @@ func (c *CatalogStore) CreateQueue(ctx context.Context, q catalog.Queue) (catalo
 	})
 	if err != nil {
 		return catalog.Queue{}, fmt.Errorf("create queue: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.Queue{}, fmt.Errorf("commit queue %s: %w", q.Name, err)
 	}
 	return queueOf(row), nil
 }

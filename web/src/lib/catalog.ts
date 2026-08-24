@@ -4,8 +4,6 @@ import type { components } from '@/generated/api'
 
 import { request } from './api'
 
-export type ExtensionKind = components['schemas']['ExtensionKind']
-
 export type Extension = components['schemas']['Extension']
 /** The write shape: what create and update accept (password lives only here). */
 export type ExtensionWrite = components['schemas']['ExtensionWrite']
