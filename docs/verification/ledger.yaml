@@ -128,20 +128,25 @@ cases:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select count(*) from dids where number='95999'\""
       - "LOG=$(ls -t logs/aicc-*.log | head -1); echo baseline_rejects=$(grep -c 'rejected party transition' \"$LOG\"); echo baseline_cdrs=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); echo rejects_now=$(grep -c 'rejected party transition' \"$LOG\"); echo cdrs_now=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc 'select count(*) from cdrs')"
-      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, hangup_cause, answered_at is null as never_answered from cdrs order by started_at desc limit 1\""
+      - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, hangup_cause, answered_at is null as never_answered, to_number, did from cdrs order by started_at desc limit 1\""
       - "/usr/local/freeswitch/bin/fs_cli -x 'console last 100' | grep aicc_inbound | tail -3"
     expect: |
       第 1 条 = 0
       cdrs_now = baseline_cdrs + 1(被拒话务入账);cdrs 最新行:status=NO_ANSWER,never_answered=t,
-      hangup_cause=UNALLOCATED_NUMBER
+      hangup_cause=UNALLOCATED_NUMBER,**to_number=95999**
+      (2026-08-24 补:本条原先只断言行数与状态、**从不断言号码**,C31 那个洞因此在它眼皮底下
+       PASS 了两天 —— 全库 11 行被拒话务的 to_number 都是空的,而交换机日志同时打着拨的是哪个号。
+       C31 修复后 to_number 才有值,断言也才补得上。did 仍为空是对的:未配置的号码没有 DID 记录。)
       rejects_now = baseline_rejects(无新增;DIALING→RELEASE 是合法边,call.go:69)
       FS console 含 aicc_inbound: "unknown number 95999"
     failure_looks_like: |
       呼叫被拒(人听到忙音,表面正确),但 cdrs 里根本没有行 —— 未应答的 provisional 呼叫
       在 Finish 后没走 InsertCDR,漏记了被拒话务;或者出现 "rejected party transition"
       (状态机把合法的未接释放当非法迁移吞掉)。
+      或者:行数与状态都对,**而 to_number 是空的** —— 运营看得到"有人被拒",看不出他拨的是什么,
+      于是"有人一直打一个停用号"与"有人在扫号"在账本里长得一模一样(C31 的原貌)。
     evidence_dir: docs/verification/artifacts/VC-S1-03/
-    status: PASS  # 2026-08-20 执行:链路重试6次↔6行CDR全部UNALLOCATED_NUMBER入账;rejects差分0;console缓冲不可靠改查日志文件(verdict)
+    status: PASS  # 2026-08-20 执行:链路重试6次↔6行CDR全部UNALLOCATED_NUMBER入账;rejects差分0;console缓冲不可靠改查日志文件(verdict)。⚠ 2026-08-24:collect 与 expect 已补 to_number 断言(C23 回修同批,C31 修复后才可断言),**本条需重跑**才能覆盖新断言 —— 旧 PASS 不代表新断言成立
     refs: ["freeswitch/scripts/aicc_inbound.lua:47", "internal/telephony/call.go:69", "internal/telephony/cdr.go:229"]
 
   # ───────────────────────── S2 bot 交互中主叫挂断 ─────────────────────────
@@ -194,7 +199,7 @@ cases:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select e.number from agents a join users u on u.id=a.user_id join extensions e on e.id=a.default_extension_id where u.username='wei'\""
       - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/login -d '{}' | jq -c '.state // .error.code'"
       - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/agent/ready | jq -c ."
-      - "curl -s -N --max-time 90 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3-sse.log 2>&1 &"
       - "sleep 2; FS=/usr/local/freeswitch/bin/fs_cli; QN=$($FS -x 'callcenter_config queue list' | awk -F'|' '/^support-en@/{print $1; exit}'); echo QN=$QN; $FS -x \"callcenter_config queue list members $QN\""
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/waiting | jq ."
       - "grep -E 'QUEUE_JOINED|QUEUE_COUNT|QUEUE_AGENT_OFFERED' /tmp/vc-s3-sse.log | head -6"
@@ -285,14 +290,14 @@ cases:
       - who: agent
         do: "执行 collect 第 3–5 条判定回访单全链;再执行第 6、7 条(认领/完成)与第 8 条恢复队列"
     collect:
-      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=false')\" | jq -c '.isEnabled'"
-      - "curl -s -N --max-time 120 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3cb-sse.log 2>&1 &"
+      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-admin.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=false')\" | jq -c '.isEnabled'"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s3cb-sse.log 2>&1 &"
       - "sleep 2; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id, status, phone_number, left(message,60) from callbacks order by created_at desc limit 1\""
-      - "grep -c 'CALLBACK_CREATED' /tmp/vc-s3cb-sse.log"
+      - "grep -c '\"type\":\"CALLBACK_CREATED\"' /tmp/vc-s3cb-sse.log"
       - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); echo CB=$CB"
       - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/callbacks/$CB/claim | jq -c '.status'"
-      - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/callbacks/$CB/complete -d '{\"status\":\"DONE\"}' | jq -c '.status'; grep -c 'CALLBACK_UPDATED' /tmp/vc-s3cb-sse.log"
-      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=true')\" | jq -c '.isEnabled'"
+      - "CB=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from callbacks order by created_at desc limit 1\"); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/callbacks/$CB/complete -d '{\"status\":\"DONE\"}' | jq -c '.status'; grep -c '\"type\":\"CALLBACK_UPDATED\"' /tmp/vc-s3cb-sse.log"
+      - "QID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select id from queues where name='support-en'\"); Q=$(curl -s -b /tmp/vc-admin.jar http://127.0.0.1:8080/api/v1/queues | jq -c --arg id \"$QID\" '.items[] | select(.id==$id)'); curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/queues/$QID -d \"$(echo \"$Q\" | jq -c '.isEnabled=true')\" | jq -c '.isEnabled'"
     expect: |
       callbacks 新增 1 行:status=OPEN,phone_number 含 13800000000(或主叫号码兜底),message 非空
       SSE:CALLBACK_CREATED 计数=1;claim 返回 "CLAIMED";complete 返回 "DONE";CALLBACK_UPDATED 计数=2
@@ -302,7 +307,7 @@ cases:
       InsertCallback 失败被 flow.Failed 吞成又一轮对话(actions.go:114-117),
       主叫以为会被回call,实际无人知晓。SSE 计数=0 是唯一外部可见证据。
     evidence_dir: docs/verification/artifacts/VC-S3-04/
-    status: PASS  # 2026-08-21 执行:callbacks OPEN/13800000000/message 非空、CALLBACK_CREATED=1、claim CLAIMED、complete DONE、CALLBACK_UPDATED=2、队列已恢复 is_enabled=t(放行门通过);collect 三处缺陷见 verdict:①队列启停需 ADMIN(主管 403)②grep 裸串把一个 SSE 事件数成两个③--max-time 120 太短
+    status: PASS  # 2026-08-21 执行:callbacks OPEN/13800000000/message 非空、CALLBACK_CREATED=1、claim CLAIMED、complete DONE、CALLBACK_UPDATED=2、队列已恢复 is_enabled=t(放行门通过);collect 三处缺陷见 verdict:①队列启停需 ADMIN(主管 403)②grep 裸串把一个 SSE 事件数成两个③--max-time 120 太短。**2026-08-24 C23 已回修这三处**:队列写操作改用 vc-admin.jar、事件计数改按 '\"type\":\"X\"'、抓流改 1800。expect 里的 1 与 2 本就是**事件**条数(执行时当场折半后写入 verdict),故 expect 不动,现在命令与它对齐了
     refs: ["internal/aicall/actions.go:102", "internal/aicall/actions.go:60", "cmd/aicc/wiring.go:309", "internal/httpapi/ledger_handlers.go:171"]
     note: "本用例同时补 events.md 缺口 CALLBACK_CREATED/UPDATED 与 tables.md callbacks 场景缺口;[已判明 2026-08-20] novanet_support.json 无 transfer 失败分支(global.transitions 仅 result.ok=1 成功边),拒绝后 bot 是否主动提出留言取决于模型对 refusalHint 的跟随(actions.go:58-64)——人工步骤直接说 leave a message, please 最稳。注意 /queues/{id} 是 PUT 全量替换(无 PATCH),启停一律读-改-写(审计 SYS-7)"
 
@@ -320,7 +325,7 @@ cases:
       - who: agent
         do: "执行其余 collect,判定振铃→接通事件链与 ON_CALL"
     collect:
-      - "curl -s -N --max-time 120 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s4-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s4-sse.log 2>&1 &"
       - "sleep 2; grep -oE '\"type\":\"(PARTY_RINGING|QUEUE_AGENT_OFFERED|PARTY_ESTABLISHED|AGENT_AVAILABILITY)\"' /tmp/vc-s4-sse.log | sort | uniq -c"
       - "curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq '.items[0].parties'"
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq '.items[] | select(.username==\"wei\") | {availability, isOnCall}'"
@@ -412,7 +417,7 @@ cases:
         do: "等待录音落账(flush 2s + ingest):执行其余 collect"
     collect:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select number, is_recording_enabled from dids where number='95001'\""
-      - "D=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/dids | jq -c '.items[] | select(.number==\"95001\")'); [ \"$(echo \"$D\" | jq -r '.isRecordingEnabled')\" = \"true\" ] && echo already-enabled || curl -s -b /tmp/vc-sup.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/dids/$(echo \"$D\" | jq -r '.id') -d \"$(echo \"$D\" | jq -c '.isRecordingEnabled=true')\" | jq -c '.isRecordingEnabled'"
+      - "D=$(curl -s -b /tmp/vc-admin.jar http://127.0.0.1:8080/api/v1/dids | jq -c '.items[] | select(.number==\"95001\")'); [ \"$(echo \"$D\" | jq -r '.isRecordingEnabled')\" = \"true\" ] && echo already-enabled || curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/dids/$(echo \"$D\" | jq -r '.id') -d \"$(echo \"$D\" | jq -c '.isRecordingEnabled=true')\" | jq -c '.isRecordingEnabled'"
       - "sleep 8; CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select backend, bucket, size_bytes, duration_sec from recordings where call_id='$CALL_ID'\"; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select has_recording from cdrs where call_id='$CALL_ID'\""
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); RID=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/$CALL_ID/recordings | jq -r '.items[0].id'); curl -s -o /tmp/vc-s4-rec.wav -w '%{http_code} %{content_type} %{size_download}\\n' -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/recordings/$RID/audio"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'recording booked|no recording ingested' \"$LOG\" | tail -3"
@@ -426,7 +431,7 @@ cases:
       (mod_http_cache PUT 成功)但 key 约定(UTC 日期/call_id)与 ingest 侧不一致,
       音频存在于 SeaweedFS 里却永远无人能听;呼叫流程全程无错。
     evidence_dir: docs/verification/artifacts/VC-S4-04/
-    status: PASS  # 2026-08-20 执行:S3/aicc-recordings/58s/下载200 audio-wav字节一致/recording booked
+    status: PASS  # 2026-08-20 执行:S3/aicc-recordings/58s/下载200 audio-wav字节一致/recording booked。⚠ 2026-08-24 C23 回修时发现:本条打开 95001 录音开关的那步用的是**主管会话**,而 `GET/PUT /dids` 同在 ADMIN 组下 —— 该步当时**必然 403、什么也没做**,只是因为录音本来就是开着的,断言才照样成立。已改用 vc-admin.jar。这正是 C23 的原型:一条静默失效的 collect 与一条真正执行过的 collect,在输出上分辨不出来
     refs: ["internal/telephony/cdr.go:107", "internal/telephony/cdr.go:145", "freeswitch/scripts/aicc_inbound.lua:84", "internal/httpapi/recording_handlers.go:81"]
     note: "补 tables.md recordings / quality_reviews 场景缺口的前半;评审(POST /recordings/{id}/reviews)可在本用例后直接追加"
 
@@ -449,7 +454,7 @@ cases:
         do: "执行其余 collect,判定重派与 app 侧痕迹"
     collect:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select s.state, s.reason from agent_states s join agents a on a.id=s.agent_id join users u on u.id=a.user_id where u.username='wei'\""
-      - "curl -s -N --max-time 180 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s5-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s5-sse.log 2>&1 &"
       - "sleep 2; grep -c '\"type\":\"QUEUE_AGENT_OFFERED\"' /tmp/vc-s5-sse.log"
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select event, count(*) from queue_events where call_id='$CALL_ID' group by event order by 1\""
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, missed_reason from cdrs order by started_at desc limit 1\""
@@ -500,7 +505,7 @@ cases:
         do: "执行其余 collect,判定放弃记账三处一致"
     collect:
       - "curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/agent/not-ready -d '{\"reason\":\"BREAK\"}' | jq -c '.state'"
-      - "curl -s -N --max-time 120 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s6-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s6-sse.log 2>&1 &"
       - "sleep 3; grep -E 'QUEUE_LEFT|QUEUE_COUNT' /tmp/vc-s6-sse.log | tail -4"
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select event, wait_ms from queue_events where call_id='$CALL_ID' order by occurred_at\""
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select status, missed_reason, queue_wait_sec from cdrs order by started_at desc limit 1\""
@@ -532,7 +537,7 @@ cases:
       - who: agent
         do: "执行其余 collect,判定保持/取回事件与 tap 暂停"
     collect:
-      - "curl -s -N --max-time 120 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7-sse.log 2>&1 &"
       - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); echo CALL=$CALL"
       - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/hold -o /dev/null -w '%{http_code}\\n'"
       - "sleep 3; CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/retrieve -o /dev/null -w '%{http_code}\\n'"
@@ -624,7 +629,7 @@ cases:
       - who: agent
         do: "执行其余 collect,判定两个方向的 DTMF 事件"
     collect:
-      - "curl -s -N --max-time 90 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7d-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s7d-sse.log 2>&1 &"
       - "CALL=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/dtmf -d '{\"digits\":\"42#\"}' -o /dev/null -w '%{http_code}\\n'"
       - "sleep 3; grep '\"type\":\"PARTY_DTMF\"' /tmp/vc-s7d-sse.log | head -5"
     expect: |
@@ -692,7 +697,7 @@ cases:
         do: "执行其余 collect,按链路逐段判定"
     collect:
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -m1 'live transcription enabled' \"$LOG\""
-      - "curl -s -N --max-time 180 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s9-sse.log 2>&1 &"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s9-sse.log 2>&1 &"
       - "sleep 3; LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'transcription tap attached|tapped stream connected|transcription live' \"$LOG\" | tail -6"
       - "grep '\"type\":\"CALL_TRANSCRIPT\"' /tmp/vc-s9-sse.log | grep '\"isFinal\":false' | head -2; grep '\"type\":\"CALL_TRANSCRIPT\"' /tmp/vc-s9-sse.log | grep '\"isFinal\":true' | grep -i 'quick brown fox' | head -2"
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select seq, speaker, source, provider, agent_id is not null as has_agent, left(content->>'text',40) from transcripts where call_id='$CALL_ID' and source='ASR' order by seq\""
