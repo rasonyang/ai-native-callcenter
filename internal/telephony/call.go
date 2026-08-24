@@ -66,12 +66,15 @@ const (
 // assigning a state anywhere else skips this table and is a defect.
 //
 // The specification is the diagram in docs/design/01-telephony.md §2 (owner,
-// 2026-08-24). This table implements it. The one difference left is shape
-// rather than behaviour — the diagram's IDLE is birth and death, and a party
-// is a channel, so it is born DIALING or RINGING and ends in the terminal
-// RELEASED. QUEUED was considered and withdrawn: a caller waiting in a queue
-// is a channel with music playing, and where the call is belongs to the call
-// (call.Queue, queue_events, queue_wait_sec), not to the leg. Tracked as C56.
+// 2026-08-24). This table implements it, and after C56 the two say the same
+// thing. What differs is shape, not behaviour: the diagram's IDLE is birth and
+// death, and a party is a channel, so it is born DIALING or RINGING and ends
+// in the terminal RELEASED. Two states were considered for the diagram and
+// withdrawn — QUEUED, because a caller waiting in a queue is a channel with
+// music playing and where the call is belongs to the call (call.Queue,
+// queue_events, queue_wait_sec) rather than to the leg; and a separate
+// abandon trigger, because abandoning is a hangup and the cause already says
+// which kind (cdrs.missed_reason reads it).
 // PartyState is on the wire, so do not add a state here without the contract.
 //
 // Deliberately absent: DIALING→RINGING and RINGING→DIALING. A leg does not

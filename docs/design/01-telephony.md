@@ -31,7 +31,7 @@ stateDiagram-v2
     Dialing --> Idle: EventReleased
 
     Ringing --> Talk: EventEstablished
-    Ringing --> Idle: EventReleased / EventAbandoned
+    Ringing --> Idle: EventReleased
 
     Talk --> Held: EventHeld
     Held --> Talk: EventRetrieved
@@ -44,6 +44,8 @@ stateDiagram-v2
 
 The first party is the sole originator (enters `Dialing`); later parties enter `Ringing`. Illegal edges are rejected and logged.
 
+**There is no `EventAbandoned`** (owner's ruling 2026-08-24). Abandoning is a hangup like any other, so it is `EventReleased` carrying the cause — which the ledger already reads: `cdrs.missed_reason` separates `ABANDONED_WAITING`, `ABANDONED_RINGING` and `SHORT_ABANDONED` from that cause today. A trigger of its own would buy no information and add an edge that this table and this diagram would both have to keep in step.
+
 **`Queued` is not a party state** (owner, 2026-08-24, on reviewing this section). A party is a channel, and a caller waiting in a queue is a channel that is up with the switch playing them music — nothing about the leg has changed. Where the call *is* is a fact about the call, and this system already holds it there: `call.Queue` (name, `joinedAt`, `bridgedAt`), the `queue_events` table and the CDR's `queue_wait_sec`. A second copy on the party could only disagree with them.
 
 It also has no producer and no clean owner here. Queueing is mod_callcenter's, observed through `callcenter::info member-queue-start/-end`; no `CHANNEL_*` event ever says "queued". And neither leg fits the shape the state implies: `Queued → Ringing` would need one leg that waits and then rings, whereas a queued caller and the agent's delivery leg are two different channels — the delivery leg is *created* ringing and never existed while the call waited.
@@ -52,16 +54,16 @@ What is lost is only wording: a caller on hold music reads `Dialing`, which is a
 
 **`Dialing → Ringing` is forbidden** (owner's ruling 2026-08-24, on reading the first draft of this diagram, which carried the edge). A leg does not change role mid-life: `Dialing` is the party that placed the call and `Ringing` is a party being offered one, so an edge between them would mean a leg became somebody else. Ringback heard by the caller belongs to the *other* party's `Ringing`, not to a second state for the originator. `RINGING → DIALING` is absent for the same reason.
 
-**Where the implementation stands against this diagram** (recorded 2026-08-24, tracked as **C56** — one open gap; two rows resolved by ruling):
+**Where the implementation stands against this diagram** (recorded 2026-08-24, **C56 closed the same day** — every row ruled; the only difference left is shape, not behaviour):
 
 | Spec | Implemented | |
 |---|---|---|
 | `Idle` as birth and death | no `Idle`; a party is a channel, so it is born already `DIALING`/`RINGING` and ends in `RELEASED`, which is terminal | naming/shape difference, not behaviour: `RELEASED` is the diagram's terminal `Idle` |
 | ~~`Queued`~~ — **removed from the diagram** | absent | **resolved 2026-08-24**: not a party state at all, for the reasons above. The implementation was right; a caller waiting in a queue stays `DIALING` and reaches `TALKING` at the bridge. No code change. |
 | ~~`Dialing → Ringing`~~ — **removed from the diagram** | forbidden | **resolved 2026-08-24**: the first draft of the diagram carried this edge; owner ruled it must be forbidden. The implementation was right and the diagram is amended. No code change. |
-| `EventAbandoned` | absent — every ending is `TriggerRelease` carrying a hangup cause | the one open gap: the cause exists, a distinct trigger does not. `EventQueued` and `EventDestinationBusy` left with `Queued`. |
+| ~~`EventAbandoned`~~ — **removed from the diagram** | absent | **resolved 2026-08-24**: abandoning is a hangup, so `EventReleased` with the cause is the whole of it. The implementation was right. `EventQueued` and `EventDestinationBusy` left with `Queued`. |
 
-`PartyState` is on the wire (`api.*`, `web/src/generated/api.ts`), so any new state is a contract change and goes contract → generate → implement → test, with `make api-breaking`. With `Queued` withdrawn there is nothing left that would need one.
+`PartyState` is on the wire (`api.*`, `web/src/generated/api.ts`), so any new state would be a contract change. Nothing here needs one: the diagram and the transition table now say the same thing, and the table is the implementation of this diagram rather than an approximation of it.
 
 **Agent FSM**:
 

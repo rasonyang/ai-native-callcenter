@@ -16,7 +16,7 @@
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
 > 阶段 0–6 已完成。阶段 7:**W 系列(W1–W9)未开工**;
-> **C 系列已修 45 项、余 4 项 + C32/C14 不复现**(45+4+2 = 51,与条目实数一致)—— C10(已决 defer 第二期)/ C37 / C42 / C56(party FSM 规格与实现的差:`Dialing→Ringing` 与 `Queued` 两处均已裁定为图错代码对,仅余 `EventAbandoned` 一条 trigger 粒度的小缺口,不再涉及契约);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
+> **C 系列已修 46 项、真开 1 项(C37)+ C10 已决 defer 第二期 + C42 已移出另立项目 + C32/C14 不复现**(46+1+1+1+2 = 51,与条目实数一致)—— **真正待办的只有 C37**(派单风暴,参数对策已下发、成因未明,2026-08-24 起有七个样本可查);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
@@ -521,7 +521,20 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   排序 `(occurred_at, id)`,因为同一通的两次移动可能同毫秒,**两次读顺序会变的旅程不是旅程**。
   测试 `TestACallCanBeAskedForItsQueueJourney` **需真实 PostgreSQL**(部分索引与排序 fake 复现不了)。
   **`cdr.go` 那句注释同时改掉了** —— 它现在描述的是事实。
-- **C10** 202 契约核对(SYS-2 源头)——**defer 第二期(§补充 S5,第二期需要)**;本期账本 expect 维持 202
+- **C10(defer 第二期不变,但待办内容已订正 —— 2026-08-24)**
+  202 契约核对(SYS-2 源头)。本期账本 expect 维持 202。
+  **【owner 2026-08-24】**"客户端是通过 SSE 事件的 correlation id 来关联的"——**这是设计意图,不是现状。**
+  **核实结果:该机制目前不存在,一处都没有。**
+  - `hold/retrieve/transfer/dtmf` 的 **202 没有响应体**(契约里该响应只有 description,无 `content`),
+    调用方拿不到任何句柄;
+  - **SSE 信封没有这个字段**:`version / seq / type / occurredAt / callId / callType /
+    partyId / agentId / queueId / payload / userData`,没有请求侧的关联标识;
+  - `middleware.RequestID` 确实挂着(`server.go:118`),但它**只进日志**,既不进响应体也不进事件。
+  故本条第二期的待办由"核对 202 是否合适"订正为:**建立请求↔事件的关联标识** ——
+  202 回一个句柄、事件信封带上同一个句柄,两处都是契约变更;之后才谈得上写那条闭环用例。
+  **202 本身没有问题**:语义就是"收下了,结果稍后由事件送达",契约与实现一致。
+  缺的是让调用方**认得出**那条结果的东西。
+
 - **C11(new,2026-08-20 T3.1 执行发现;2026-08-21 已修并现场复验)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
   通话中探针证明 aicc_bot_sec/aicc_flow_id/aicc_language/aicc_did 四戳都在主叫通道上,挂断后 CDR 仍
   bot_sec=0/flow 空 → 丢失在读回/快照侧(botShare switchevent.go:81 / registry.go:346 / 合并路径);
@@ -1462,7 +1475,13 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **W2.1 表格里"收益最大的一项"至此兑现**:一次漏接从让主叫白等一分钟,变成十五秒。
   证据:`docs/verification/artifacts/VC-S5-01/verdict.md` 末节。
 
-- **C42(new,2026-08-23 做 W7③ 时查明,未决)**
+- **C42(2026-08-24 移出 C 系列 —— 置呼时的写入路径已建成并闭合;呼叫中修改另立项目)**
+  **【owner 2026-08-24】** 本条作为缺陷已了结:契约描述的能力现在真实存在了(置呼时可写)。
+  **剩下的"呼叫中修改"(TAttachUserData 等价物)不再计入 C 系列**,另立项目 ——
+  owner 同时指出该项目还包含 **webhook / 推送给客户** 的需求,规模已超出一条缺陷。
+  `CALL_USER_DATA` 至今零生产者**仍然是对的**:数据只在置呼时给定,没有"变更"可宣告;
+  产生它的正是那个项目。**以下为立案与实现的原始记录,保留不改。**
+- **C42(原始记录:new,2026-08-23 做 W7③ 时查明)**
   **`userData` 是一个永远为空的字段,而契约说它是可以被合并修改的。**
   - `CreateCallRequest` 的字段只有 `callId / kind / to / did / language` —— **建呼叫时设不了**;
   - 全仓没有任何接口能修改它(OpenAPI 里没有一个写操作的请求体提到 `userData`);
@@ -1872,7 +1891,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   工作台若拿它区分"电话转走了"和"通话结束",会判错。
 
 - **C56(new,2026-08-24 owner 给出 party FSM 规格后立案,未修)**
-  **实现的转移表与规格状态图之间有四处差;当日两处裁定为"实现对、图错",余一处缺口、一处形状差。**
+  **实现的转移表与规格状态图之间有四处差;当日全部裁定 —— 三处"实现对、图错",一处形状差。本条已闭合。**
   owner 2026-08-24 给出 party FSM 的 mermaid 状态图并要求"记录在文档中",
   已按原样落进 `docs/design/01-telephony.md` §2,并声明**该图即规格**,
   `internal/telephony/call.go` 的 `partyTransitions` 是它的实现、且是**唯一能移动 party 的东西**
@@ -1882,10 +1901,14 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   | `Idle` 既是起点也是终点 | 无 `Idle`;party 就是一条 channel,出生即 `DIALING`/`RINGING`,终于 `RELEASED`(终态) | **形状差,非行为差** —— `RELEASED` 就是图里那个终止的 `Idle` |
   | ~~`Queued`~~ **已从图中删除** | 没有 | **2026-08-24 已裁定**:owner 复看本节时提出,**它根本不是 party 的状态**。party 就是一条 channel,排队等待的主叫是一条**开着、交换机在放音乐**的 channel —— 腿本身什么都没变。**电话在哪**是呼叫的事实,系统已经记在那里了(`call.Queue` 的 name/joinedAt/bridgedAt、`queue_events` 表、CDR 的 `queue_wait_sec`);在 party 上再存一份只可能与它们不一致。它也**没有生产者**:排队是 mod_callcenter 的事,经 `callcenter::info member-queue-start/-end` 观察,没有任何 `CHANNEL_*` 说得出"已排队"。而且**两条腿哪条都对不上这个形状**:`Queued → Ringing` 需要一条先等待、后响铃的腿,可排队的主叫和派给坐席的那条腿是**两条不同的 channel**,后者**生下来就是 RINGING**,呼叫等待期间它根本不存在。**代价只有措辞**:听着保持音的主叫显示为 `Dialing` 确实别扭 —— 那是既有状态的**命名**问题,不构成新增状态的理由;真要解决也是改名,不是加一个。**实现对、图错,代码一行未动。** |
   | ~~`Dialing → Ringing`~~ **已从图中删除** | **禁止** | **2026-08-24 已裁定**:owner "Dialing → Ringing 是必须禁止的"。首版图带着这条边,与 `call.go` 的 deliberately absent 正面冲突;裁定的结果是**实现对、图错**,图已修订,代码一行未动。理由也一并写进两处:一条腿不会中途换角色 —— DIALING 是发起方,RINGING 是被叫方,这条边意味着一条腿变成了另一个人;主叫听到的回铃属于**对方**那条腿的 RINGING |
-  | `EventAbandoned` | 没有对应 trigger;所有结束都是 `TriggerRelease` 携一个 hangup cause | **仅存的缺口**:原因区分得出来,独立的 trigger 没有。`EventQueued` 与 `EventDestinationBusy` 随 `Queued` 一并退出 —— 目的忙就是一次带该 cause 的 release,与其他所有结束同型 |
-  **`Queued` 退出后,C56 不再需要任何契约变更** —— 仅存的 `EventAbandoned` 是 trigger 粒度,
-  不新增 `PartyState`。`IDLE` 那一行是形状差不是行为差(`RELEASED` 就是图里终止的 `Idle`),
-  同样不动契约。原先写的"整条按一次设计变更处理"因此作废:剩下的是一条小改,不是一次设计变更。
+  | ~~`EventAbandoned`~~ **已从图中删除** | 没有对应 trigger | **2026-08-24 已裁定**:owner"用 EventReleased 替换 EventAbandoned,都是挂断"。放弃就是一次挂断,cause 已经说明是哪一种 —— `cdrs.missed_reason` 今天就在读它,区分 `ABANDONED_WAITING`/`ABANDONED_RINGING`/`SHORT_ABANDONED`。独立 trigger 买不到新信息,只多一条转移表与规格图都要同步的边。**实现对、图错,代码一行未动。** `EventQueued` 与 `EventDestinationBusy` 随 `Queued` 一并退出 |
+  **【已闭合 · 2026-08-24,零代码改动】** 四行全部裁定完毕,**没有一行需要改实现**:
+  三行是图错(`Dialing→Ringing`、`Queued`、`EventAbandoned`),一行是形状差
+  (`IDLE` —— `RELEASED` 就是图里终止的 `Idle`)。
+  **契约一字未动**:退出的三样都不是 `PartyState`。
+  原先写的"整条按一次设计变更处理"作废 —— 它最后是一次**规格订正**,不是一次实现变更。
+  这条的价值也就在这里:**规格图第一版有三处与实现不符,而每一次都是图错**,
+  说明转移表是被现场逼出来的,而图是事后画的。
 
 ### 排序总则
 0. ~~追检①已确认阶段 3/4 可开跑(stale tier 惰性;agent-wei Available/Ready)。~~ **已作废**:两阶段均已跑完。
