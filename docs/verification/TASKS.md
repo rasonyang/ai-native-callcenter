@@ -4,7 +4,7 @@
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
-> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23)**;W3 / W4 / W7 / W8 / W9 / W10 未开工。
+> **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 已完成(2026-08-24)**;W3 / W7 / W8 / W10 未开工;**W9 前置已解除**(见排序总则 3,余一处取舍待 owner 定)。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
 > 阶段 6 起草的 11 条已于同日并入并全部执行完毕;VC-S3-02 与 VC-S13-05 经修复后重跑转绿。
@@ -320,9 +320,37 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   (GET /flows、GET /flows/{id} 含 revisions、POST /flows 新建、PUT /flows/{id} 草稿编辑、
   POST /flows/{id}/publish;装载期校验 internal/flow/load.go 即编辑时校验)→ make api-generate →
   handlers(flows/flow_revisions 已有 store 层,sql/flows.sql)→ UI。CLI flowadd 保留。ADMIN guard。
-- **W4 audit_logs 检索**(D5):**路由 `/admin/audit`**;参考 ui-test admin/audit.tsx(分类过滤由
-  action 前缀派生)。顺序:openapi 契约(GET /audit-logs:分页 + action 前缀/操作者/时间过滤)→
-  generate → handler(读侧 sqlc 新查询)→ UI。ADMIN guard。关闭 tables.md "只写不读"缺口。
+- ~~**W4 audit_logs 检索**(D5)~~ **【已完成 2026-08-24 `f0328b6` + `6158eaa`】**
+  `GET /audit-logs`(ADMIN,最新在前,`actorId`/`actionPrefix`/`from`/`to` + limit-offset)
+  与 `/admin/audit` 页面。契约 → generate → handler → UI,`api-lint`/`api-check`/`api-breaking` 全绿。
+  **过滤按 action 前缀,而不是"派生的分类"**:存下来的 action 就是 `METHOD /route/template`,
+  所以一个字面前缀同时选方法与资源(`DELETE ` 选全部删除,`PUT /api/v1/queues` 选队列编辑)。
+  参考 UI 的分类是从点号命名(`queue.update`)派生的,我们没有那种值 —— **不在存下来的值上面
+  再发明一层分类,那层一定会和它漂移。**
+  **操作者名在读时解析**(LEFT JOIN + COALESCE):账号可以被删除而它做过的事留在账上,
+  行始终保留 `actorId`,所以清理花名册不会抹掉它的账号做过什么;页面在这种行上显示 id 而不是空白 ——
+  空白会被读成"没人做过这件事",而那正是这一行否证的东西。真库测试抓到了第一版把这个 NULL
+  扫进 `string` 的 bug(fake 复现不了)。
+  **⚠ 开工时先修了一个安全缺陷,见下条 C58** —— 不修就等于把一个休眠的泄漏变成可浏览的。
+  `coverage/tables.md` 的"只写不读"缺口随之关闭。
+- **C58(new,2026-08-24 做 W4 时发现,已修 `74cce21`)**
+  **审计行里存着明文的分机 SIP 密码。**
+  `auditTrail` 中间件把请求体原样存进 `audit_logs.detail`,而唯一的守卫是路径前缀
+  `/api/v1/auth/`。契约里带密码字段的请求体有三处:`LoginRequest`(被守卫挡住)与
+  **`ExtensionWrite`(`POST /extensions`、`PUT /extensions/{id}`,没挡住)**。
+  开发库里实测 **4 行**含明文,例:
+  `{"request": "{\"number\":\"1099\",\"password\":\"vc-probe-pass\",…}"}`
+  —— 那是话机的**注册凭据**,拿到就能以该分机注册并接走它的呼叫。
+  **路径前缀正是会过期的那种守卫**:它覆盖 `/auth/` 是因为写它的时候密码在那里,
+  而将来任何带密码的新端点都不在其内。**改为按字段名脱敏、递归到任意深度**
+  (`password`/`secret`/`token`/`apikey`/`credential` 子串匹配,覆盖 `newPassword`、`apiKeyId`)。
+  **用标记而不是删掉键**:"这个字段发过、我们没留"与"这个字段没发过"是两件不同的事,
+  审计不该把它们混同 —— 故写 `"[redacted]"`。
+  **解析不出 JSON 对象的请求体一概不存**:看不懂就担保不了;契约里没有这样的写端点,
+  而畸形请求体本就回 400、根本不会落审计行。
+  现场复验:新建分机落的是 `"password":"[redacted]"`。
+  **已存的 4 行是数据**,归入 owner 那批待定的清理决定,**但标注为凭据、优先级高于其余几项**。
+
 - ~~**W5 D4 记录**~~ **【已完成 2026-08-23】**:决议记进了**设计集**本身
   (`docs/design/03-data.md` 的 `dispositions` 行,带日期与理由:四个词全中心认同,
   胜过谁都对不上账的四百个;因此"恰好这四个"是**契约级**断言,加第五个是要重开的决议、
