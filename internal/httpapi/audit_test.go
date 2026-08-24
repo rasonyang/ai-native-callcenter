@@ -358,3 +358,70 @@ func (stubOutbound) Dial(context.Context, string, string, map[string]string) (uu
 func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
+
+// The audit trail stored request bodies verbatim, and one of those bodies is a
+// phone's SIP registration password. Four rows in the development database hold
+// one in clear text — enough to register as that extension and take its calls.
+//
+// The guard that was there is a path prefix covering /auth/, which is where
+// passwords were when it was written. It said nothing about POST /extensions.
+// A read path over this table would have turned a dormant leak into a
+// browsable one, which is why this is fixed with W4 rather than after it.
+func TestTheAuditTrailKeepsNoSecrets(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want []string
+		gone []string
+	}{
+		{
+			name: "an extension's SIP password",
+			body: `{"number":"1099","password":"vc-probe-pass","displayName":"VC Probe"}`,
+			want: []string{"1099", "VC Probe", "[redacted]"},
+			gone: []string{"vc-probe-pass"},
+		},
+		{
+			name: "any spelling of it",
+			body: `{"newPassword":"a","apiKeyId":"b","refreshToken":"c","clientSecret":"d"}`,
+			gone: []string{`"a"`, `"b"`, `"c"`, `"d"`},
+		},
+		{
+			name: "nested, because userData carries whatever the caller put there",
+			body: `{"to":"13900000000","userData":{"ref":"A-1","password":"deep"}}`,
+			want: []string{"13900000000", "A-1", "[redacted]"},
+			gone: []string{"deep"},
+		},
+		{
+			name: "inside an array",
+			body: `{"items":[{"name":"x","token":"zzz-leaked"}]}`,
+			want: []string{"[redacted]"},
+			gone: []string{"zzz-leaked"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := redactSecrets([]byte(tc.body))
+			if !ok {
+				t.Fatalf("body was dropped: %s", tc.body)
+			}
+			for _, keep := range tc.want {
+				if !strings.Contains(got, keep) {
+					t.Errorf("lost %q from the audit detail: %s", keep, got)
+				}
+			}
+			for _, secret := range tc.gone {
+				if strings.Contains(got, secret) {
+					t.Errorf("secret %s survived into the audit detail: %s", secret, got)
+				}
+			}
+		})
+	}
+
+	// A body that cannot be inspected is not stored. There is no such write
+	// endpoint in the contract, and a body we cannot read is one we cannot
+	// vouch for.
+	for _, body := range []string{``, `not json`, `["a","b"]`, `"scalar"`} {
+		if _, ok := redactSecrets([]byte(body)); ok {
+			t.Errorf("stored a body it could not inspect: %q", body)
+		}
+	}
+}

@@ -5,6 +5,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -38,15 +39,16 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 		}
 
 		// The body is read for the audit detail and handed back untouched.
-		// Credentials never belong in an audit row, so auth requests keep
-		// their bodies to themselves.
+		// Credentials never belong in an audit row: auth requests keep their
+		// bodies to themselves, and everything else is redacted by field name
+		// on the way in.
 		var detail map[string]any
 		if !strings.HasPrefix(r.URL.Path, "/api/v1/auth/") && r.Body != nil {
 			body, err := io.ReadAll(io.LimitReader(r.Body, auditBodyLimit))
 			if err == nil {
 				r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
-				if len(body) > 0 {
-					detail = map[string]any{"request": string(body)}
+				if redacted, ok := redactSecrets(body); ok {
+					detail = map[string]any{"request": redacted}
 				}
 			}
 		}
@@ -75,6 +77,79 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 			s.logAuditFailure(r, err)
 		}
 	})
+}
+
+// redactSecrets prepares a request body for the audit row, replacing the value
+// of any field whose name reads like a secret, at any depth.
+//
+// By field name rather than by path. The guard above this is a path prefix, and
+// a path prefix is the kind of thing that goes stale: it covers /auth/ because
+// that is where passwords were when it was written, and it silently failed to
+// cover POST /extensions, which carries the SIP registration password of a
+// phone. Four rows in the development database hold one in clear text — enough
+// to register as that extension and take its calls. A field-name rule covers
+// the endpoint nobody has written yet.
+//
+// A body that is not a JSON object is not stored at all. It cannot be
+// inspected, so it cannot be vouched for, and there is no such write endpoint
+// in the contract; a malformed body is answered 400 and never reaches an audit
+// row anyway.
+func redactSecrets(body []byte) (string, bool) {
+	if len(body) == 0 {
+		return "", false
+	}
+	var parsed any
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", false
+	}
+	obj, ok := parsed.(map[string]any)
+	if !ok {
+		return "", false
+	}
+	redactInto(obj)
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return "", false
+	}
+	return string(out), true
+}
+
+// redactedValue is what an audit row says instead of a secret. A marker rather
+// than an omission: "this field was sent and we are not keeping it" is a
+// different fact from "this field was not sent", and an audit trail should not
+// blur them.
+const redactedValue = "[redacted]"
+
+func redactInto(node map[string]any) {
+	for key, value := range node {
+		if isSecretField(key) {
+			node[key] = redactedValue
+			continue
+		}
+		switch child := value.(type) {
+		case map[string]any:
+			redactInto(child)
+		case []any:
+			for _, item := range child {
+				if nested, ok := item.(map[string]any); ok {
+					redactInto(nested)
+				}
+			}
+		}
+	}
+}
+
+// isSecretField reads a field name the way an operator would. Substring rather
+// than exact match, so newPassword and apiKeyId are covered without a list of
+// every spelling somebody might choose.
+func isSecretField(name string) bool {
+	lower := strings.ToLower(name)
+	for _, word := range []string{"password", "secret", "token", "apikey", "credential"} {
+		if strings.Contains(lower, word) {
+			return true
+		}
+	}
+	return false
 }
 
 func isMutating(method string) bool {
