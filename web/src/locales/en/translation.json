@@ -488,5 +488,19 @@
     "forward10": "Forward 10 seconds",
     "seek": "Seek within the recording",
     "failed": "The recording could not be loaded."
+  },
+  "audit": {
+    "hint": "Every change that succeeded, newest first.",
+    "occurredAt": "When",
+    "actor": "Actor",
+    "action": "Action",
+    "target": "Target",
+    "detail": "Request",
+    "ip": "IP",
+    "filterPath": "Filter by route, e.g. /api/v1/queues",
+    "allMethods": "All methods",
+    "noEntries": "No changes match these filters.",
+    "deletedAccount": "deleted account",
+    "pageOf": "Page {{page}} of {{pages}} · {{total}} changes"
   }
 }

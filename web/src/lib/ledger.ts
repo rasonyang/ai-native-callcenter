@@ -38,6 +38,23 @@ export type QueueReport = components['schemas']['QueueReport']
 
 export type DailyReport = components['schemas']['DailyReport']
 
+export type AuditEntry = components['schemas']['AuditEntry']
+
+/** Who changed what. A zero field is no constraint. */
+export interface AuditFilter {
+  actorId?: string
+  /**
+   * A literal prefix over "METHOD /route/template", which is what the stored
+   * action is: "DELETE " selects every deletion, "PUT /api/v1/queues" every
+   * queue edit. No category is invented on top of the value.
+   */
+  actionPrefix?: string
+  from?: string
+  to?: string
+  limit?: number
+  offset?: number
+}
+
 export interface CDRFilter {
   status?: string
   did?: string
@@ -64,6 +81,10 @@ export const ledgerApi = {
   /** The caller's own finished calls. The agent is the session, not a filter. */
   myCDRs: (filter: CDRFilter) =>
     request<{ items: CDR[]; total: number }>(`/cdrs/mine${query({ ...filter })}`),
+
+  /** The audit trail. ADMIN only; the server draws that line. */
+  auditLogs: (filter: AuditFilter) =>
+    request<{ items: AuditEntry[]; total: number }>(`/audit-logs${query({ ...filter })}`),
 
   dispositions: () => request<{ items: Disposition[] }>('/dispositions'),
 
@@ -113,6 +134,17 @@ export function useCDRs(filter: CDRFilter) {
   return useQuery({
     queryKey: [...CDRS_KEY, filter],
     queryFn: () => ledgerApi.cdrs(filter),
+    placeholderData: (previous) => previous,
+  })
+}
+
+const AUDIT_KEY = ['audit-logs']
+
+/** Who changed what, newest first. */
+export function useAuditLogs(filter: AuditFilter) {
+  return useQuery({
+    queryKey: [...AUDIT_KEY, filter],
+    queryFn: () => ledgerApi.auditLogs(filter),
     placeholderData: (previous) => previous,
   })
 }

@@ -486,5 +486,19 @@
     "forward10": "前进 10 秒",
     "seek": "在录音中定位",
     "failed": "录音加载失败。"
+  },
+  "audit": {
+    "hint": "每一次成功的变更,最新在前。",
+    "occurredAt": "时间",
+    "actor": "操作者",
+    "action": "动作",
+    "target": "对象",
+    "detail": "请求",
+    "ip": "来源 IP",
+    "filterPath": "按路由过滤,例如 /api/v1/queues",
+    "allMethods": "全部方法",
+    "noEntries": "没有变更符合当前条件。",
+    "deletedAccount": "已删除账号",
+    "pageOf": "第 {{page}} / {{pages}} 页 · 共 {{total}} 次变更"
   }
 }

@@ -72,7 +72,7 @@ export const NAV: NavGroup[] = [
     items: [
       { to: '/admin/cdr', labelKey: 'nav.cdr', icon: FileClock, minRole: 'SUPERVISOR', isReady: true },
       { to: '/admin/reports', labelKey: 'nav.reports', icon: BarChart3, minRole: 'SUPERVISOR', isReady: true },
-      { to: '/admin/audit', labelKey: 'nav.audit', icon: ScrollText, minRole: 'ADMIN', isReady: false },
+      { to: '/admin/audit', labelKey: 'nav.audit', icon: ScrollText, minRole: 'ADMIN', isReady: true },
     ],
   },
 ]
