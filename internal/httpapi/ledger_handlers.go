@@ -336,3 +336,65 @@ func (s *Server) ListCallQueueEvents(w http.ResponseWriter, r *http.Request, cal
 	}
 	writeJSON(w, http.StatusOK, api.QueueEventList{Items: items})
 }
+
+// ListAuditLogs pages the audit trail.
+//
+// The table has been written since the beginning and read by nothing (W4/D5):
+// every mutating request that succeeded is in it, recorded by middleware rather
+// than by each handler, and until now the only way to see any of it was psql.
+// A trail nobody can read is not an answer to "who changed this", it is only a
+// promise that the answer exists somewhere.
+//
+// ADMIN only. The trail names accounts and carries what their requests
+// contained, which is a wider view than supervision needs.
+func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, params api.ListAuditLogsParams) {
+	if s.ledger == nil {
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the audit trail", nil)
+		return
+	}
+	filter := store.AuditFilter{
+		ActorID:      params.ActorID,
+		ActionPrefix: stringOr(params.ActionPrefix),
+		Limit:        intOr(params.Limit, 50),
+		Offset:       intOr(params.Offset, 0),
+	}
+	if params.From != nil {
+		filter.From = *params.From
+	}
+	if params.To != nil {
+		filter.To = *params.To
+	}
+
+	rows, total, err := s.ledger.ListAuditLogs(r.Context(), filter)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot read the audit trail", "error", err)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the audit trail", nil)
+		return
+	}
+
+	items := make([]api.AuditEntry, 0, len(rows))
+	for _, row := range rows {
+		entry := api.AuditEntry{
+			AuditID:    row.ID,
+			OccurredAt: row.OccurredAt,
+			ActorID:    row.ActorID,
+			Action:     row.Action,
+			TargetKind: row.TargetKind,
+			TargetID:   row.TargetID,
+			Detail:     row.Detail,
+		}
+		// Absent rather than empty where there is nothing to say: a deleted
+		// account has no name to resolve, and a request whose peer could not
+		// be determined has no address.
+		if row.ActorUsername != "" {
+			name := row.ActorUsername
+			entry.ActorUsername = &name
+		}
+		if row.IP != "" {
+			ip := row.IP
+			entry.IP = &ip
+		}
+		items = append(items, entry)
+	}
+	writeJSON(w, http.StatusOK, api.AuditEntryList{Items: items, Total: int(total)})
+}

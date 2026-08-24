@@ -1097,3 +1097,78 @@ func (l *LedgerStore) QueueEventsByCall(ctx context.Context, callID uuid.UUID) (
 	}
 	return out, nil
 }
+
+// AuditEntry is one recorded change, with the actor's name resolved.
+type AuditEntry struct {
+	ID            int64
+	OccurredAt    time.Time
+	ActorID       *uuid.UUID
+	ActorUsername string
+	Action        string
+	TargetKind    string
+	TargetID      string
+	Detail        map[string]any
+	IP            string
+}
+
+// AuditFilter narrows the trail. A zero field is no constraint.
+type AuditFilter struct {
+	ActorID      *uuid.UUID
+	ActionPrefix string
+	From, To     time.Time
+	Limit        int
+	Offset       int
+}
+
+// ListAuditLogs pages the audit trail, newest first, with the total matching
+// the filter so a page can say how much it is a page of.
+func (l *LedgerStore) ListAuditLogs(ctx context.Context, f AuditFilter) ([]AuditEntry, int64, error) {
+	prefix := (*string)(nil)
+	if f.ActionPrefix != "" {
+		prefix = &f.ActionPrefix
+	}
+	from, to := stampOrNull(f.From), stampOrNull(f.To)
+
+	rows, err := l.q.ListAuditLogs(ctx, queries.ListAuditLogsParams{
+		Limit: int32(f.Limit), Offset: int32(f.Offset),
+		ActorID: f.ActorID, ActionPrefix: prefix, FromAt: from, ToAt: to,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	total, err := l.q.CountAuditLogs(ctx, queries.CountAuditLogsParams{
+		ActorID: f.ActorID, ActionPrefix: prefix, FromAt: from, ToAt: to,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+
+	out := make([]AuditEntry, 0, len(rows))
+	for _, row := range rows {
+		entry := AuditEntry{
+			ID: row.ID, OccurredAt: row.OccurredAt.Time, ActorID: row.ActorID,
+			ActorUsername: row.ActorUsername, Action: row.Action,
+			TargetKind: row.TargetKind, TargetID: row.TargetID,
+		}
+		if row.IP != nil {
+			entry.IP = row.IP.String()
+		}
+		// A detail that will not unmarshal is reported as empty rather than
+		// failing the page: one unreadable row must not hide every other
+		// change an operator is looking for.
+		if len(row.Detail) > 0 {
+			_ = json.Unmarshal(row.Detail, &entry.Detail)
+		}
+		out = append(out, entry)
+	}
+	return out, total, nil
+}
+
+// stampOrNull renders a zero time as SQL NULL, which the filters read as "no
+// constraint".
+func stampOrNull(t time.Time) pgtype.Timestamptz {
+	if t.IsZero() {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t, Valid: true}
+}

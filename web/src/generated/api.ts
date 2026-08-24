@@ -1135,6 +1135,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/audit-logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Who changed what
+         * @description Every mutating request that succeeded, newest first. Written by middleware rather than by each handler, so a new write endpoint is audited the moment it exists.
+         *
+         *     ADMIN only: the trail names accounts and carries what their requests contained.
+         */
+        get: operations["listAuditLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2064,6 +2086,36 @@ export interface components {
         };
         QueueEventList: {
             items: components["schemas"]["QueueEvent"][];
+        };
+        /** @description One recorded change: who did what to which thing, and from where. */
+        AuditEntry: {
+            /** Format: int64 */
+            auditId: number;
+            /** Format: date-time */
+            occurredAt: string;
+            /**
+             * Format: uuid
+             * @description Absent for an action no signed-in account performed.
+             */
+            actorId?: string;
+            /** @description The account's name at read time. Absent when the account has since been deleted — the row keeps the id either way, so a cleaned-up roster does not erase what its accounts did. */
+            actorUsername?: string;
+            /** @description The method and the route template that matched, e.g. "PUT /api/v1/queues/{queueId}". The route template rather than the path, so the value is stable and greppable and cannot drift from the routing table. */
+            action: string;
+            /** @description What kind of thing was acted on, derived from the last path parameter. Empty where the request named no instance. */
+            targetKind: string;
+            targetId: string;
+            /** @description What the request carried. Fields whose name reads like a secret are stored as "[redacted]" — a marker rather than an omission, because a field that was sent and not kept is a different fact from one that was never sent. */
+            detail: {
+                [key: string]: unknown;
+            };
+            /** @description The peer address the request came from. Absent where it could not be determined. */
+            ip?: string;
+        };
+        AuditEntryList: {
+            items: components["schemas"]["AuditEntry"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
         };
     };
     responses: {
@@ -3997,6 +4049,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueueEventList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listAuditLogs: {
+        parameters: {
+            query?: {
+                /** @description Only this account's actions. */
+                actorId?: string;
+                /** @description Only actions starting with this, matched literally. The action is "METHOD /route/template", so a prefix selects by method, by resource, or by both — "DELETE " for every deletion, "PUT /api/v1/queues" for queue edits. */
+                actionPrefix?: string;
+                /** @description Inclusive lower bound on occurredAt. */
+                from?: string;
+                /** @description Exclusive upper bound on occurredAt. */
+                to?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The matching rows, newest first. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditEntryList"];
                 };
             };
             400: components["responses"]["BadRequest"];

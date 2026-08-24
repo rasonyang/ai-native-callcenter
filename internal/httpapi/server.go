@@ -215,6 +215,11 @@ func (s *Server) router() chi.Router {
 						admin.Put("/queues/{queueId}/agents", op.StaffQueue)
 						admin.Delete("/queues/{queueId}/agents/{agentId}", op.UnstaffQueue)
 
+						// Who changed what. Admin rather than supervision: the
+						// trail names accounts and carries what their requests
+						// contained.
+						admin.Get("/audit-logs", op.ListAuditLogs)
+
 						admin.Get("/dids", op.ListDIDs)
 						admin.Post("/dids", op.CreateDID)
 						admin.Put("/dids/{didId}", op.UpdateDID)

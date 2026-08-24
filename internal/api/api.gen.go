@@ -766,6 +766,38 @@ type AgentWrite struct {
 	UserID *openapi_types.UUID `json:"userId,omitempty"`
 }
 
+// AuditEntry One recorded change: who did what to which thing, and from where.
+type AuditEntry struct {
+	// Action The method and the route template that matched, e.g. "PUT /api/v1/queues/{queueId}". The route template rather than the path, so the value is stable and greppable and cannot drift from the routing table.
+	Action string `json:"action"`
+
+	// ActorID Absent for an action no signed-in account performed.
+	ActorID *openapi_types.UUID `json:"actorId,omitempty"`
+
+	// ActorUsername The account's name at read time. Absent when the account has since been deleted — the row keeps the id either way, so a cleaned-up roster does not erase what its accounts did.
+	ActorUsername *string `json:"actorUsername,omitempty"`
+	AuditID       int64   `json:"auditId"`
+
+	// Detail What the request carried. Fields whose name reads like a secret are stored as "[redacted]" — a marker rather than an omission, because a field that was sent and not kept is a different fact from one that was never sent.
+	Detail map[string]interface{} `json:"detail"`
+
+	// IP The peer address the request came from. Absent where it could not be determined.
+	IP         *string   `json:"ip,omitempty"`
+	OccurredAt time.Time `json:"occurredAt"`
+	TargetID   string    `json:"targetId"`
+
+	// TargetKind What kind of thing was acted on, derived from the last path parameter. Empty where the request named no instance.
+	TargetKind string `json:"targetKind"`
+}
+
+// AuditEntryList defines model for AuditEntryList.
+type AuditEntryList struct {
+	Items []AuditEntry `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
 // Availability The single word that answers: could this agent take a call, and if not, why.
 type Availability string
 
@@ -1640,6 +1672,23 @@ type Unauthorized = ErrorResponse
 // UnprocessableEntity defines model for UnprocessableEntity.
 type UnprocessableEntity = ErrorResponse
 
+// ListAuditLogsParams defines parameters for ListAuditLogs.
+type ListAuditLogsParams struct {
+	// ActorID Only this account's actions.
+	ActorID *openapi_types.UUID `form:"actorId,omitempty" json:"actorId,omitempty"`
+
+	// ActionPrefix Only actions starting with this, matched literally. The action is "METHOD /route/template", so a prefix selects by method, by resource, or by both — "DELETE " for every deletion, "PUT /api/v1/queues" for queue edits.
+	ActionPrefix *string `form:"actionPrefix,omitempty" json:"actionPrefix,omitempty"`
+
+	// From Inclusive lower bound on occurredAt.
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Exclusive upper bound on occurredAt.
+	To     *time.Time `form:"to,omitempty" json:"to,omitempty"`
+	Limit  *int       `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int       `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // ListCallbacksParams defines parameters for ListCallbacks.
 type ListCallbacksParams struct {
 	// Status Omitted or empty returns every status.
@@ -1841,6 +1890,9 @@ type ServerInterface interface {
 	// ForceLogoutAgent Sign somebody else out
 	// (POST /agents/{agentId}/force-logout)
 	ForceLogoutAgent(w http.ResponseWriter, r *http.Request, agentID openapi_types.UUID)
+	// ListAuditLogs Who changed what
+	// (GET /audit-logs)
+	ListAuditLogs(w http.ResponseWriter, r *http.Request, params ListAuditLogsParams)
 	// Login Sign in and receive the session cookie
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -2081,6 +2133,12 @@ func (_ Unimplemented) UpdateAgent(w http.ResponseWriter, r *http.Request, agent
 // ForceLogoutAgent Sign somebody else out
 // (POST /agents/{agentId}/force-logout)
 func (_ Unimplemented) ForceLogoutAgent(w http.ResponseWriter, r *http.Request, agentID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAuditLogs Who changed what
+// (GET /audit-logs)
+func (_ Unimplemented) ListAuditLogs(w http.ResponseWriter, r *http.Request, params ListAuditLogsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2618,6 +2676,104 @@ func (siw *ServerInterfaceWrapper) ForceLogoutAgent(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ForceLogoutAgent(w, r, agentID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAuditLogs operation middleware
+func (siw *ServerInterfaceWrapper) ListAuditLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditLogsParams
+
+	// ------------- Optional query parameter "actorId" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actorId", r.URL.Query(), &params.ActorID, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actorId"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actorId", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actionPrefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actionPrefix", r.URL.Query(), &params.ActionPrefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actionPrefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actionPrefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAuditLogs(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4423,6 +4579,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/{agentId}/force-logout", wrapper.ForceLogoutAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/audit-logs", wrapper.ListAuditLogs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/login", wrapper.Login)

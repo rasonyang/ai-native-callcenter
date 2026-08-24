@@ -42,6 +42,34 @@ func (q *Queries) ClaimCallback(ctx context.Context, arg ClaimCallbackParams) (C
 	return i, err
 }
 
+const countAuditLogs = `-- name: CountAuditLogs :one
+SELECT count(*) FROM audit_logs a
+WHERE ($1::uuid IS NULL OR a.actor_id = $1::uuid)
+  AND ($2::text IS NULL
+       OR a.action LIKE $2::text || '%')
+  AND ($3::timestamptz IS NULL OR a.occurred_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR a.occurred_at < $4::timestamptz)
+`
+
+type CountAuditLogsParams struct {
+	ActorID      *uuid.UUID         `json:"actorId"`
+	ActionPrefix *string            `json:"actionPrefix"`
+	FromAt       pgtype.Timestamptz `json:"fromAt"`
+	ToAt         pgtype.Timestamptz `json:"toAt"`
+}
+
+func (q *Queries) CountAuditLogs(ctx context.Context, arg CountAuditLogsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLogs,
+		arg.ActorID,
+		arg.ActionPrefix,
+		arg.FromAt,
+		arg.ToAt,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCDRs = `-- name: CountCDRs :one
 SELECT count(*) FROM cdrs
 WHERE ($1::timestamptz IS NULL OR started_at >= $1)
@@ -556,6 +584,83 @@ func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscript
 		arg.UtteranceID,
 	)
 	return err
+}
+
+const listAuditLogs = `-- name: ListAuditLogs :many
+SELECT a.id, a.occurred_at, a.actor_id, COALESCE(u.username, '')::text AS actor_username,
+       a.action, a.target_kind, a.target_id, a.detail, a.ip
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE ($3::uuid IS NULL OR a.actor_id = $3::uuid)
+  AND ($4::text IS NULL
+       OR a.action LIKE $4::text || '%')
+  AND ($5::timestamptz IS NULL OR a.occurred_at >= $5::timestamptz)
+  AND ($6::timestamptz IS NULL OR a.occurred_at < $6::timestamptz)
+ORDER BY a.occurred_at DESC, a.id DESC
+LIMIT $1 OFFSET $2
+`
+
+type ListAuditLogsParams struct {
+	Limit        int32              `json:"limit"`
+	Offset       int32              `json:"offset"`
+	ActorID      *uuid.UUID         `json:"actorId"`
+	ActionPrefix *string            `json:"actionPrefix"`
+	FromAt       pgtype.Timestamptz `json:"fromAt"`
+	ToAt         pgtype.Timestamptz `json:"toAt"`
+}
+
+type ListAuditLogsRow struct {
+	ID            int64              `json:"id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurredAt"`
+	ActorID       *uuid.UUID         `json:"actorId"`
+	ActorUsername string             `json:"actorUsername"`
+	Action        string             `json:"action"`
+	TargetKind    string             `json:"targetKind"`
+	TargetID      string             `json:"targetId"`
+	Detail        []byte             `json:"detail"`
+	IP            *netip.Addr        `json:"ip"`
+}
+
+// Newest first, with the actor's name resolved at read time. LEFT JOIN because
+// an account can be deleted while its actions stay recorded — the row keeps the
+// id either way, so a cleaned-up roster does not erase what its accounts did.
+// COALESCE, not a bare cast: the join's NULL is the ordinary case for a deleted
+// account, and empty is what the reader turns back into "no name to show".
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
+	rows, err := q.db.Query(ctx, listAuditLogs,
+		arg.Limit,
+		arg.Offset,
+		arg.ActorID,
+		arg.ActionPrefix,
+		arg.FromAt,
+		arg.ToAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditLogsRow{}
+	for rows.Next() {
+		var i ListAuditLogsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OccurredAt,
+			&i.ActorID,
+			&i.ActorUsername,
+			&i.Action,
+			&i.TargetKind,
+			&i.TargetID,
+			&i.Detail,
+			&i.IP,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCDRs = `-- name: ListCDRs :many

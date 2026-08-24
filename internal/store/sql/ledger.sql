@@ -307,3 +307,29 @@ SELECT occurred_at, queue_id, event, agent_id, wait_ms
 FROM queue_events
 WHERE call_id = $1
 ORDER BY occurred_at, id;
+
+-- name: ListAuditLogs :many
+-- Newest first, with the actor's name resolved at read time. LEFT JOIN because
+-- an account can be deleted while its actions stay recorded — the row keeps the
+-- id either way, so a cleaned-up roster does not erase what its accounts did.
+-- COALESCE, not a bare cast: the join's NULL is the ordinary case for a deleted
+-- account, and empty is what the reader turns back into "no name to show".
+SELECT a.id, a.occurred_at, a.actor_id, COALESCE(u.username, '')::text AS actor_username,
+       a.action, a.target_kind, a.target_id, a.detail, a.ip
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE (sqlc.narg('actor_id')::uuid IS NULL OR a.actor_id = sqlc.narg('actor_id')::uuid)
+  AND (sqlc.narg('action_prefix')::text IS NULL
+       OR a.action LIKE sqlc.narg('action_prefix')::text || '%')
+  AND (sqlc.narg('from_at')::timestamptz IS NULL OR a.occurred_at >= sqlc.narg('from_at')::timestamptz)
+  AND (sqlc.narg('to_at')::timestamptz IS NULL OR a.occurred_at < sqlc.narg('to_at')::timestamptz)
+ORDER BY a.occurred_at DESC, a.id DESC
+LIMIT $1 OFFSET $2;
+
+-- name: CountAuditLogs :one
+SELECT count(*) FROM audit_logs a
+WHERE (sqlc.narg('actor_id')::uuid IS NULL OR a.actor_id = sqlc.narg('actor_id')::uuid)
+  AND (sqlc.narg('action_prefix')::text IS NULL
+       OR a.action LIKE sqlc.narg('action_prefix')::text || '%')
+  AND (sqlc.narg('from_at')::timestamptz IS NULL OR a.occurred_at >= sqlc.narg('from_at')::timestamptz)
+  AND (sqlc.narg('to_at')::timestamptz IS NULL OR a.occurred_at < sqlc.narg('to_at')::timestamptz);
