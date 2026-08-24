@@ -3,9 +3,11 @@
 package telephony
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -851,4 +853,89 @@ func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testin
 	if got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), unanswered); got.BillSec != 0 {
 		t.Errorf("billSec = %d on a dial-out nobody answered, want 0", got.BillSec)
 	}
+}
+
+// warnings captures what the assembler said, so an alarm can be tested for
+// silence as well as for sounding.
+func assemblerLogging(buf *bytes.Buffer) *CDRAssembler {
+	return NewCDRAssembler(&memoryLedger{}, staticQueues{}, nil,
+		slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+}
+
+// The drift warning compared our figure for one leg against the switch's for
+// another, so it fired on every unanswered click-to-dial — a thing that
+// happens all day — with the ledger right every time (C54).
+//
+// An alarm that also rings when nothing is wrong is worse than no alarm, and
+// this one had already cost what the pattern threatens: C49 announced itself
+// in this exact line for two days and went unread, because the same line was
+// firing on calls that were fine. So the fix is to compare like with like, not
+// to quieten it.
+func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
+	agentID := uuid.New()
+
+	t.Run("an unanswered dial-out is silent", func(t *testing.T) {
+		// The agent's own leg auto-answers and the switch bills it for the
+		// whole time the far end rang; we bill the leg facing the carrier,
+		// which never answered, so nothing.
+		var buf bytes.Buffer
+		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CreatedAt: at(0), EndedAt: atPtr(30),
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+					AnsweredAt: atPtr(1), ReleasedAt: atPtr(30), BilledSec: 29},
+				{Role: RoleTarget, Number: "18688886669", ChannelID: "trunk",
+					CreatedAt: at(2), ReleasedAt: atPtr(30)},
+			},
+		})
+		if cdr.BillSec != 0 {
+			t.Errorf("billSec = %d, want 0 — nobody answered", cdr.BillSec)
+		}
+		if strings.Contains(buf.String(), "disagree on billable time") {
+			t.Errorf("the alarm rang on a correct row: %s", buf.String())
+		}
+	})
+
+	t.Run("two extensions talking have no billing claim to check", func(t *testing.T) {
+		var buf bytes.Buffer
+		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeInternal,
+			CreatedAt: at(0), EndedAt: atPtr(30),
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+					AnsweredAt: atPtr(1), ReleasedAt: atPtr(30), BilledSec: 29},
+			},
+		})
+		if _, present := cdr.Tech["switchBillSec"]; present {
+			t.Error("an internal call carries a billing comparison nobody bills for")
+		}
+		if strings.Contains(buf.String(), "disagree on billable time") {
+			t.Errorf("the alarm rang on a call nobody bills: %s", buf.String())
+		}
+	})
+
+	t.Run("the leg C49 was about is still watched", func(t *testing.T) {
+		// An AI outbound this platform placed: the billed leg *is* the
+		// originator, so the alarm still covers the leg C49 was about. C49's
+		// own numbers cannot be replayed — it is fixed and the two now agree —
+		// so the disagreement is made on that same leg: ours is the 21 seconds
+		// since it answered, and the switch is made to say 40.
+		var buf bytes.Buffer
+		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CreatedAt: at(0), EndedAt: atPtr(21),
+			Bot: BotShare{Sec: 21, DID: "95002"},
+			Parties: []PartySnapshot{
+				{Role: RoleOriginator, Number: "18688886669", ChannelID: "customer",
+					AnsweredAt: atPtr(0), ReleasedAt: atPtr(21), BilledSec: 40},
+			},
+		})
+		if cdr.BillSec != 21 {
+			t.Fatalf("billSec = %d, want 21 — the leg we bill is the one we created", cdr.BillSec)
+		}
+		if !strings.Contains(buf.String(), "disagree on billable time") {
+			t.Errorf("the alarm that should have caught C49 no longer rings: %s", buf.String())
+		}
+	})
 }

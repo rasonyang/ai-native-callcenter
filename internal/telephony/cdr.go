@@ -349,12 +349,32 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		// where the switch rounds, so 103.57 seconds is our 103 and its 104.
 		// Beyond that the two are counting different things and somebody
 		// should know which.
-		if originator.BilledSec > 0 {
-			cdr.Tech["switchBillSec"] = originator.BilledSec
-			if drift := cdr.BillSec - originator.BilledSec; drift > billDriftTolerance || drift < -billDriftTolerance {
+		//
+		// Against the leg we billed, not against the caller's. Those are the
+		// same leg on an inbound call and on one this platform placed, and a
+		// different one whenever an agent dialled out: their own phone
+		// auto-answers in front of them, so the switch bills their leg for the
+		// whole time the far end rang, while we bill the leg facing the
+		// carrier — nothing, if nobody picked up. Comparing our figure for one
+		// leg against the switch's for another made this warning fire on every
+		// unanswered click-to-dial, with the ledger right every time (C54).
+		//
+		// It was the third alarm in a week that also rings when nothing is
+		// wrong, and this one had already done the damage the pattern
+		// threatens: C49 — every AI outbound billed at zero — announced itself
+		// in this exact line for two days and went unread, because the same
+		// line was firing on calls that were fine.
+		//
+		// Comparing like with like keeps that alarm rather than muting it: on
+		// an AI outbound the billed leg *is* the originator, so C49 would still
+		// have been caught here. Where nobody is billed at all — two
+		// extensions talking — there is no claim to check.
+		if billed != nil && billed.BilledSec > 0 {
+			cdr.Tech["switchBillSec"] = billed.BilledSec
+			if drift := cdr.BillSec - billed.BilledSec; drift > billDriftTolerance || drift < -billDriftTolerance {
 				a.log.Warn("the ledger and the switch disagree on billable time",
 					"callId", snap.CallID, "billSec", cdr.BillSec,
-					"switchBillSec", originator.BilledSec)
+					"switchBillSec", billed.BilledSec)
 			}
 		}
 	}
