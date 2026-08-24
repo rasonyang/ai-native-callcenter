@@ -535,6 +535,53 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **202 本身没有问题**:语义就是"收下了,结果稍后由事件送达",契约与实现一致。
   缺的是让调用方**认得出**那条结果的东西。
 
+  **【设计已定稿 2026-08-24,与 C42 另立的 webhook / 推送项目一起做,本期不动代码】**
+
+  **命名取 `correlationId`,不取 `requestId`。** 理由不是"更好懂":
+  ①`requestId` 在本仓**已经被占**——`middleware.RequestID`(`server.go:118`)已经在往日志
+  上下文里放一个 requestId,线上再来一个同名不同来源的,比两个名字都糟;
+  ②语义也反了——requestId 通常是**服务端铸**的、给日志用,而这里这个是**客户端铸**的;
+  `correlationId` 说的是"拿来把两样东西系在一起",且是消息/事件系统的既有词
+  (JMS `JMSCorrelationID`、AMQP `correlation-id`、CloudEvents),使用者不用学。
+
+  **① 请求侧:一个可选的头** `X-AICC-Correlation-Id`,客户端自己铸值。
+  **为什么是头不是 body**:`hold/retrieve/answer/hangup/mute/unmute` 今天**没有请求体**,
+  为带一个 id 给它们加 body 等于为所有现存调用方改契约形状;而 `transfer/dtmf` 有 body,
+  那就会出现两种写法。头对**经 `callOp` 的全部八个操作**是同一种写法,与既有 `X-AICC-Csrf` 一致,
+  `oapi-codegen` 直接支持 header param。
+  **不传就什么都不变**(owner 口径)——现有调用方一字不改,事件上也不多出谁都没要的字段。
+
+  **② 响应侧:原样回显同一个头。** 202 **保持无 body**。回显有两个作用:确认收下了、
+  并**确认这个服务端支持关联**(老版本不会回显)。
+
+  **③ 事件侧:信封加一个可选 `correlationId`**,**只打在这次请求预期产生的那一条事件上**,
+  不是那通电话之后的所有事件。
+
+  **④ 中间这一段是难点:事件不是请求发出来的。** 事件由呼叫的 actor 发布、被**交换机的事件**驱动,
+  actor 对那次 HTTP 请求毫无记忆。所以要有寄存处,**键必须是回来的交换机事件也带着的东西**——
+  **channel id + 期待的事件种类**:`Hold(callID, agentID)` 本就经 `handledChannel` 解析出
+  `channelID`,回来的 `CHANNEL_HOLD` 带的正是它。
+  `correlations[key{channelID, KindChannelHold}] = {id, expiresAt}`,在 `transition` 发布前取出。
+  **这不是新模式**:`outbound.arm()`(按 channel 键、带 `expiresAt`、单发)就是同一个形状,复用它。
+  三条规则:**单发**(取出即删,否则下一次无关的 hold 会被贴上陈旧 id);
+  **TTL 30 秒**(交换机的事件通常一秒内回来),**过期就丢**——事件照发、只是不带 id;
+  **同步发布的走直路**——`mute` 的 `PARTY_CHANGED` 在命令路径里同步发出、不经交换机事件,
+  直接挂上即可。统一入口是 `r.Context()`:`callOp` 放进去,协调层取出,同步的直接用、异步的寄存。
+
+  **⑤ 这个设计不解决的事,必须写明**:**"命令被接受、事件永远没来"仍然分不出来。**
+  关联 id 让你认出**来了的**那条,它不会替你产生**没来的**那条。
+  **C37 那部卡死的话机就是这一型**:`+OK`、202,然后什么都没有。
+  要闭合这一半,得在**寄存条目过期时发一条带同一个 correlationId 的失败事件**——
+  那是新增事件类型,影响面大得多。**分两期:先做关联,再看要不要做超时告知。**
+
+  **⑥ 值不值得,如实说**:**本仓自己的前端不需要它**——`useCallActions` 拿到 202 就
+  `invalidateQueries` 重拉快照(`agent.ts:200`,注释写明"状态以交换机为准,所以重取而不是猜"),
+  绕开了这个问题。真正需要它的是**外部 API 使用者**(即 C42 另立的 webhook / 推送项目)
+  与**诊断"接受了但什么也没发生"**。故与那个项目同批做,而不是单独立项。
+
+  **⑦ 工作量**:契约(8 个操作各加一个 header param、信封加一个可选字段、202 加一个响应头)
+  → generate → `callOp` 透传 → 协调层寄存 → 测试。**不改任何现有行为**,不传头就完全等价。
+
 - **C11(new,2026-08-20 T3.1 执行发现;2026-08-21 已修并现场复验)** 转接呼叫的 CDR 组装丢失 bot 份额与队列等待账:
   通话中探针证明 aicc_bot_sec/aicc_flow_id/aicc_language/aicc_did 四戳都在主叫通道上,挂断后 CDR 仍
   bot_sec=0/flow 空 → 丢失在读回/快照侧(botShare switchevent.go:81 / registry.go:346 / 合并路径);
