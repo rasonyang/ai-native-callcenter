@@ -178,31 +178,40 @@ func (q *Queries) CreateQueue(ctx context.Context, arg CreateQueueParams) (Queue
 	return i, err
 }
 
-const deleteDID = `-- name: DeleteDID :exec
+const deleteDID = `-- name: DeleteDID :execrows
 DELETE FROM dids WHERE id = $1
 `
 
-func (q *Queries) DeleteDID(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDID, id)
-	return err
+func (q *Queries) DeleteDID(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDID, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const deleteExtension = `-- name: DeleteExtension :exec
+const deleteExtension = `-- name: DeleteExtension :execrows
 DELETE FROM extensions WHERE id = $1
 `
 
-func (q *Queries) DeleteExtension(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteExtension, id)
-	return err
+func (q *Queries) DeleteExtension(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExtension, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const deleteQueue = `-- name: DeleteQueue :exec
+const deleteQueue = `-- name: DeleteQueue :execrows
 DELETE FROM queues WHERE id = $1
 `
 
-func (q *Queries) DeleteQueue(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteQueue, id)
-	return err
+func (q *Queries) DeleteQueue(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteQueue, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const getDIDByNumber = `-- name: GetDIDByNumber :one
@@ -488,7 +497,7 @@ func (q *Queries) ListQueuesForAgent(ctx context.Context, agentID uuid.UUID) ([]
 	return items, nil
 }
 
-const removeQueueAgent = `-- name: RemoveQueueAgent :exec
+const removeQueueAgent = `-- name: RemoveQueueAgent :execrows
 DELETE FROM queue_agents WHERE queue_id = $1 AND agent_id = $2
 `
 
@@ -497,9 +506,12 @@ type RemoveQueueAgentParams struct {
 	AgentID uuid.UUID `json:"agentId"`
 }
 
-func (q *Queries) RemoveQueueAgent(ctx context.Context, arg RemoveQueueAgentParams) error {
-	_, err := q.db.Exec(ctx, removeQueueAgent, arg.QueueID, arg.AgentID)
-	return err
+func (q *Queries) RemoveQueueAgent(ctx context.Context, arg RemoveQueueAgentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, removeQueueAgent, arg.QueueID, arg.AgentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setQueueAgent = `-- name: SetQueueAgent :exec

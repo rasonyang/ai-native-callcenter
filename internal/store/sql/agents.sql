@@ -17,7 +17,7 @@ SET callcenter_name = $2, is_auto_answer = $3, default_extension_id = $4
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteAgent :exec
+-- name: DeleteAgent :execrows
 DELETE FROM agents WHERE id = $1;
 
 -- The roster: one row per agent with everything a wallboard needs, so the

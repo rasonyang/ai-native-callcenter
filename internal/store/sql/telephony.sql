@@ -20,7 +20,7 @@ RETURNING *;
 -- name: UpdateExtensionPassword :exec
 UPDATE extensions SET password = $2, updated_at = now() WHERE id = $1;
 
--- name: DeleteExtension :exec
+-- name: DeleteExtension :execrows
 DELETE FROM extensions WHERE id = $1;
 
 -- name: CreateQueue :one
@@ -51,7 +51,7 @@ SET display_name = $2, strategy = $3, moh_sound = $4,
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteQueue :exec
+-- name: DeleteQueue :execrows
 DELETE FROM queues WHERE id = $1;
 
 -- name: SetQueueAgent :exec
@@ -60,7 +60,7 @@ VALUES ($1, $2, $3, $4)
 ON CONFLICT (queue_id, agent_id)
 DO UPDATE SET level = excluded.level, position = excluded.position;
 
--- name: RemoveQueueAgent :exec
+-- name: RemoveQueueAgent :execrows
 DELETE FROM queue_agents WHERE queue_id = $1 AND agent_id = $2;
 
 -- name: ListQueueAgents :many
@@ -98,5 +98,5 @@ SET language = $2, flow_id = $3, fallback_queue_id = $4,
 WHERE id = $1
 RETURNING *;
 
--- name: DeleteDID :exec
+-- name: DeleteDID :execrows
 DELETE FROM dids WHERE id = $1;

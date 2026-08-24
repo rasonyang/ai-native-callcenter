@@ -146,10 +146,16 @@ func (a *AgentStore) UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (a
 	return agentConfigOf(row), nil
 }
 
-// DeleteAgent removes an agent identity.
+// DeleteAgent removes an agent identity. Removing nothing is reported as
+// pgx.ErrNoRows, which is this package's word for a 404 — deleting an agent
+// that is not there used to answer 204 (C34).
 func (a *AgentStore) DeleteAgent(ctx context.Context, agentID uuid.UUID) error {
-	if err := a.q.DeleteAgent(ctx, agentID); err != nil {
+	rows, err := a.q.DeleteAgent(ctx, agentID)
+	if err != nil {
 		return fmt.Errorf("delete agent: %w", err)
+	}
+	if rows == 0 {
+		return pgx.ErrNoRows
 	}
 	return nil
 }

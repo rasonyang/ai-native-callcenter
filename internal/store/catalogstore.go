@@ -67,8 +67,23 @@ func (c *CatalogStore) SetExtensionPassword(ctx context.Context, id uuid.UUID, p
 	return c.q.UpdateExtensionPassword(ctx, queries.UpdateExtensionPasswordParams{ID: id, Password: password})
 }
 
+// deleted turns a delete's row count into an answer to the question the API
+// asks: was there anything there? DELETE removing nothing is not an error to
+// PostgreSQL, so without this every delete reported success and the 404 the
+// contract declares was unreachable — an operator who mistyped an id was told
+// the extension was gone (C34).
+func deleted(rows int64, err error) error {
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return catalog.ErrNotFound
+	}
+	return nil
+}
+
 func (c *CatalogStore) DeleteExtension(ctx context.Context, id uuid.UUID) error {
-	return c.q.DeleteExtension(ctx, id)
+	return deleted(c.q.DeleteExtension(ctx, id))
 }
 
 // extensionOf converts a row, dropping the password: it exists for the switch
@@ -171,7 +186,7 @@ func (c *CatalogStore) UpdateQueue(ctx context.Context, q catalog.Queue) (catalo
 }
 
 func (c *CatalogStore) DeleteQueue(ctx context.Context, id uuid.UUID) error {
-	return c.q.DeleteQueue(ctx, id)
+	return deleted(c.q.DeleteQueue(ctx, id))
 }
 
 func queueJSON(q catalog.Queue) (tiers, hours, overflow []byte, err error) {
@@ -247,8 +262,12 @@ func (c *CatalogStore) SetQueueAgent(ctx context.Context, queueID, agentID uuid.
 	})
 }
 
+// RemoveQueueAgent unstaffs an agent. Not being staffed there is a not-found,
+// the same as the queue not existing: the caller asked for a row to go and
+// there was no row.
 func (c *CatalogStore) RemoveQueueAgent(ctx context.Context, queueID, agentID uuid.UUID) error {
-	return c.q.RemoveQueueAgent(ctx, queries.RemoveQueueAgentParams{QueueID: queueID, AgentID: agentID})
+	return deleted(c.q.RemoveQueueAgent(ctx,
+		queries.RemoveQueueAgentParams{QueueID: queueID, AgentID: agentID}))
 }
 
 // CallcenterName resolves an agent's switch-side name.
@@ -310,7 +329,7 @@ func (c *CatalogStore) UpdateDID(ctx context.Context, d catalog.DID) (catalog.DI
 }
 
 func (c *CatalogStore) DeleteDID(ctx context.Context, id uuid.UUID) error {
-	return c.q.DeleteDID(ctx, id)
+	return deleted(c.q.DeleteDID(ctx, id))
 }
 
 func didOf(r queries.Did) catalog.DID {

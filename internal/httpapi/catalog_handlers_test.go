@@ -143,6 +143,11 @@ type deletingCatalog struct {
 }
 
 func (c *deletingCatalog) DeleteExtension(context.Context, uuid.UUID) error { return c.err }
+func (c *deletingCatalog) DeleteQueue(context.Context, uuid.UUID) error     { return c.err }
+func (c *deletingCatalog) DeleteDID(context.Context, uuid.UUID) error       { return c.err }
+func (c *deletingCatalog) UnstaffQueue(context.Context, uuid.UUID, uuid.UUID) error {
+	return c.err
+}
 
 // The database refuses; the operator has to be told what to do about it. A
 // refusal reported as "storage down" — the default for an unrecognised
@@ -204,5 +209,40 @@ func TestAnUnrelatedDeleteFailureIsNotTheBindingConflict(t *testing.T) {
 
 	if w.Code == http.StatusConflict {
 		t.Errorf("an unrelated constraint was reported as the agent binding: %s", w.Body.String())
+	}
+}
+
+// Deleting something that was never there answered 204, and the 404 the
+// contract declares for all five catalogue deletes was unreachable code
+// (C34). An operator who mistypes an id is told the extension is gone.
+func TestDeletingSomethingThatIsNotThereIsNotFound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		call func(*Server, http.ResponseWriter, *http.Request)
+	}{
+		{"extension", func(s *Server, w http.ResponseWriter, r *http.Request) {
+			s.DeleteExtension(w, r, uuid.New())
+		}},
+		{"queue", func(s *Server, w http.ResponseWriter, r *http.Request) {
+			s.DeleteQueue(w, r, uuid.New())
+		}},
+		{"did", func(s *Server, w http.ResponseWriter, r *http.Request) {
+			s.DeleteDID(w, r, uuid.New())
+		}},
+		{"queue staffing", func(s *Server, w http.ResponseWriter, r *http.Request) {
+			s.UnstaffQueue(w, r, uuid.New(), uuid.New())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := &Server{catalog: &deletingCatalog{err: catalog.ErrNotFound}}
+			w := httptest.NewRecorder()
+
+			tc.call(s, w, httptest.NewRequest(http.MethodDelete, "/", nil))
+
+			if w.Code != http.StatusNotFound {
+				t.Errorf("http = %d, want 404 — nothing was removed, so nothing was there (%s)",
+					w.Code, w.Body.String())
+			}
+		})
 	}
 }
