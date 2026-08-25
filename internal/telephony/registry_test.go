@@ -158,31 +158,6 @@ func TestCallEndsWhenEveryLegReleases(t *testing.T) {
 	}
 }
 
-func TestReleasedLegCarriesTransferFlag(t *testing.T) {
-	reg, rec := newTestRegistry(t)
-	callID := uuid.New()
-
-	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh", false, testTime)
-	if err != nil {
-		t.Fatal(err)
-	}
-	call.AddParty("chan-bot", "bot", testTime)
-	call.AddParty("chan-keep", "1001", testTime)
-	for _, ch := range []string{"chan-bot", "chan-keep"} {
-		if err := reg.BindChannel(ch, callID); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	reg.Dispatch(SwitchEvent{Kind: KindChannelHangup, ChannelID: "chan-bot",
-		HangupCause: "NORMAL_CLEARING", TransferredAway: true, OccurredAt: testTime})
-
-	ev := rec.waitFor(t, events.TypePartyReleased)
-	if ev.Payload["isTransferredAway"] != true {
-		t.Errorf("payload = %+v, want isTransferredAway true: a handoff is not a lost call", ev.Payload)
-	}
-}
-
 func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()

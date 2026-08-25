@@ -13,7 +13,7 @@
 | PARTY_ESTABLISHED | internal/telephony/registry.go:336(transition on CHANNEL_ANSWER) | use-event-stream.ts:25 | S1, S4, S7 | [FACT] | payload=role/state(registry.go:405) |
 | PARTY_HELD | internal/telephony/registry.go:338(CHANNEL_HOLD) | use-event-stream.ts:25 | S7 | [FACT] | |
 | PARTY_RETRIEVED | internal/telephony/registry.go:340(CHANNEL_UNHOLD) | use-event-stream.ts:25 | S7 | [FACT] | |
-| PARTY_RELEASED | internal/telephony/registry.go:349(CHANNEL_HANGUP) | use-event-stream.ts:25 | S2, S4, S5, S6 | [FACT] | payload 增 cause / isTransferredAway(registry.go:406-409) |
+| PARTY_RELEASED | internal/telephony/registry.go:349(CHANNEL_HANGUP) | use-event-stream.ts:25 | S2, S4, S5, S6 | [FACT] | payload 增 cause(registry.go)。isTransferredAway 曾在此,2026-08-25 整条删除 —— 无设计条目、无契约、无消费方,且现场实测三条腿全判反(C55 §4) |
 | PARTY_CHANGED | internal/telephony/coordinator.go:555-562(merge,reason=CALL_MERGED);coordinator.go:694-700(mute,payload isMuted) | use-event-stream.ts:25 | S3, S4, S7 | [FACT] | merge 场景 2026-08-18 现场缺陷的修复(coordinator.go:536-544 注释) |
 | PARTY_DTMF | internal/telephony/registry.go:388(ESL DTMF) | 仅通用分发(events.ts:56) | S7(VC-S7-04 已挂,TODO) | [FACT] | 2026-08-20 勘误:已挂 VC-S7-04(双向按键) |
 | CALL_USER_DATA | NOT FOUND | use-event-stream.ts:25(有专门分支) | UNCOVERED | [FACT] | 常量 event.go:38;无 publish 点。userData 实际作为字段搭其它事件下发(registry.go:425),独立事件从未发出 |

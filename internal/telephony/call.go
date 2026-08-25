@@ -222,8 +222,6 @@ type Party struct {
 	AnsweredAt   time.Time
 	ReleasedAt   time.Time
 	ReleaseCause string
-	// TransferredAway marks a leg that ended because the call moved on.
-	TransferredAway bool
 	// IsBotLeg marks the leg the switch dialed towards the AI gateway. A call
 	// that has one and was never handed to a person belongs to the bot's
 	// ledger, not this path's.

@@ -403,7 +403,6 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 		a.transition(party, TriggerRetrieve, ev, events.TypePartyRetrieved)
 	case KindChannelHangup:
 		party.ReleaseCause = ev.HangupCause
-		party.TransferredAway = ev.TransferredAway
 		// Whatever the leg was still bridged to, it is not any more.
 		party.CloseBridge(ev.OccurredAt)
 		party.BilledSec = ev.BilledSec
@@ -522,7 +521,6 @@ func (a *actor) transition(p *Party, trigger PartyTrigger, ev SwitchEvent, event
 	payload := map[string]any{"role": string(p.Role), "state": string(p.State)}
 	if trigger == TriggerRelease {
 		payload["cause"] = p.ReleaseCause
-		payload["isTransferredAway"] = p.TransferredAway
 	}
 	a.publish(eventType, p, payload)
 }

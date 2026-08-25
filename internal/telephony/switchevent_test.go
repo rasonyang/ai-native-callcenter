@@ -93,39 +93,6 @@ func TestNormalizeChannelLifecycle(t *testing.T) {
 				if got.HangupCause != "NORMAL_CLEARING" || got.HangupCauseQ850 != 16 {
 					t.Errorf("cause = %q q850 = %d", got.HangupCause, got.HangupCauseQ850)
 				}
-				if got.TransferredAway {
-					t.Error("TransferredAway = true for a plain hangup")
-				}
-			},
-		},
-		{
-			name: "blind transfer is not a lost call",
-			headers: map[string]string{
-				"Event-Name":                "CHANNEL_HANGUP_COMPLETE",
-				"Unique-ID":                 "019ff973-6b32-7557-b7c4-11b3fdb692f0",
-				"Hangup-Cause":              "NORMAL_CLEARING",
-				"variable_transfer_history": "1786596523:019ff973-7f15:bl_xfer:9196/default/XML",
-			},
-			want: KindChannelHangup,
-			check: func(t *testing.T, got SwitchEvent) {
-				if !got.TransferredAway {
-					t.Error("TransferredAway = false, want true: the call moved on")
-				}
-			},
-		},
-		{
-			name: "refer disposition marks a transfer",
-			headers: map[string]string{
-				"Event-Name":                      "CHANNEL_HANGUP_COMPLETE",
-				"Unique-ID":                       "u1",
-				"Hangup-Cause":                    "NORMAL_CLEARING",
-				"variable_sip_hangup_disposition": "recv_refer",
-			},
-			want: KindChannelHangup,
-			check: func(t *testing.T, got SwitchEvent) {
-				if !got.TransferredAway {
-					t.Error("TransferredAway = false for recv_refer")
-				}
 			},
 		},
 		{

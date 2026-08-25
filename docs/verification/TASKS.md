@@ -361,101 +361,39 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   证据 `docs/verification/artifacts/VC-S15-02/rerun-{click-to-dial,phone-dial}-*.log`。
   **`VC-S15-02` 改判 PASS。C61 关闭。**
 
-- **C62(new,2026-08-25,由 VC-S15-02 重跑顺带看见,未修)**
-  **点击拨号的主叫腿正常挂断,`PARTY_RELEASED` 却报 `isTransferredAway: true`。**
-  同一次重跑里两路对照得很干净:点击拨号 1008→1002 的主叫腿
-  `{"cause":"NORMAL_CLEARING","isTransferredAway":true,…}`,
-  话机直拨 1002→1008 的主叫腿 `{"cause":"NORMAL_CLEARING","isTransferredAway":false,…}`。
-  **两通都是聊完正常挂断,没有任何一方做转接。**
-  **成因**:`transferredAway()`(`switchevent.go:443`)最后一条是
-  `return ev.Variable("transfer_history") != ""` —— 而点击拨号**本来就要**
-  `uuid_transfer` 一次(接起坐席腿后转进 dialplan 去拨目的号),
-  这条腿从那一刻起就永远带着 `transfer_history`。
-  于是**每一通点击拨号的主叫腿,不管怎么结束,都报"被转走了"**。
-  **影响**:订阅方分不清"这条腿被转到别处了"和"这通电话打完了";
-  凡是按这个标志决定要不要收尾(工作台收条、话后处理、报表里的转接率)的地方都会读错。
-  **【2026-08-25 查完。结论比立案时大:这个字段三条规则问的是三个不同问题,
-  而且今天没有任何一方在读它】**
+- **C62(2026-08-25 立案 → 当日删除字段结案。**注意:这是 C55 §4 的重复立案** ——
+  `artifacts/C55/verdict-2026-08-24.md` §4「另记(未修)」2026-08-24 已经记过同一件事,
+  我没查就另立了编号)**
+  **`isTransferredAway` 已从 `PARTY_RELEASED` 载荷整条删除。**
 
-  **① 那条兜底不是为哪个线上问题加的。** `git log -S transfer_history` 只有一条命中:
-  `baec8b7`(m2.1 归一化的批量提交),配套单测叫"blind transfer is not a lost call",
-  用的是文档形状的 header,不是现场取证。**没有事故在它背后。**
+  **决定的依据不是"算得对不对",而是"它凭什么存在"** —— 一开始我跳过了这一步,
+  直接去设计怎么算才准,被 owner 拦下。查源头的结果是**四个都没有**:
+  - **设计文档没有它**。`docs/design/04-api-sse.md:58` 规定 `PARTY_RELEASED` 的
+    switch 事实字段是 `q850Cause` / `sipStatus`,没有这一个。
+    (那两个平时不发是**正常的** —— 正常挂断就是 `NORMAL_CLEARING`,`cause` 已经说了;
+    aicc 重启那种特殊情况下 bot 发的是 SIP `Reason` 头,那是给抓包侧看的,
+    与本事件载荷无关。owner 2026-08-25 澄清,**不是缺口**。)
+  - **契约没有它**。`docs/openapi.json` 命中 0 次。
+  - **Genesys 血统没有它**。`cti-server` 全仓无此字段。
+  - **没有消费方**。前端一处引用都没有;CDR 的 `legs` 是摘要,不含每条腿的结束原因。
+  出处是 `baec8b7`(m2.1 ESL 归一化的批量提交),配一个用文档形状 header 写的单测。
+  **没有需求,没有设计条目,没有事故。**
 
-  **② 读 FreeSWITCH 源码,`transfer_history` 的语义与字段定义相反。**
-  `switch_ivr.c:2310`(`uuid_transfer` 走的就是这里)把它 **`SWITCH_STACK_PUSH` 到被转走的那条
-  channel 上** —— 而那条 channel **不会挂断**,它继续往下走。
-  `switch_ivr_bridge.c:2179/2187`(`uuid_bridge`)更是往**两条**腿上都推一份。
-  所以这个变量的意思是"**这条 channel 这辈子被转接/重桥过**",是一份**历史**(名字就叫 history),
-  **不是**"这条腿因为通话转走了才结束"。
-  于是它必然把这些都误判成 true:
-  - 点击拨号的主叫腿(我们自己要 `uuid_transfer` 一次才能拨出去),不论怎么结束;
-  - 被转接的客户腿 —— 转过去后又聊了十分钟再正常挂断,挂断那一刻仍带着历史。
+  而它的值是错的,现场实测(2026-08-25 21:26,话机 → 95001 → bot → 转人工 →
+  support-en → wei 接起 → 客户挂断,证据 `artifacts/C62/`):
+  - **bot 腿**(真正因通话转走而结束的那条):`NORMAL_CLEARING` / `send_bye` /
+    `Caller-Channel-Transfer-Time = 0`,**没有 `transfer_history`,与普通挂断逐字段同形**
+    —— 交换机不会告诉一条腿"你的对端被转走了" → 报 **false**。
+  - **主叫腿**(活到最后自己挂断):`transfer_history = ARRAY::…bl_xfer…|…uuid_br…`
+    累加两段(`SWITCH_STACK_PUSH`,`switch_ivr.c:2310`) → 报 **true**。
+  - **坐席腿**:也带 `uuid_br` 那份(`switch_ivr_bridge.c:2179/2187` 往两条腿都推)→ 报 **true**。
+  三条 `cause` 全是 `NORMAL_CLEARING`,而标志是 **false / true / true —— 与事实完全相反**。
 
-  **③ 反过来,它对真正"因为通话转走而结束"的那条腿是失灵的。**
-  坐席把客户转进队列:我们 `uuid_transfer` 的是**客户**那条 channel,历史落在客户腿上;
-  真正因此结束的是**坐席**那条腿,而它身上没有历史,报 false。
-  bot 转人工同理 —— 历史落在主叫腿,结束的是 bot 腿。
+  **删除范围**:载荷字段、`Party.TransferredAway`、`SwitchEvent.TransferredAway`、
+  `transferredAway()` 及其三个单测。全仓 `TransferredAway` / `transfer_history` 命中归零。
+  **将来若真有人需要"哪条腿是被留下的"**,交换机侧读不出来,得由我们自己在下达转接时
+  记下被转 channel 当时的桥对端 —— 那时候再按需求做,而不是先留一个错的字段在线上。
 
-  **④ 另外两条规则在本系统里可能从未触发过。**
-  库里 6427 条 CDR:`BLIND_TRANSFER` 0 次、`ATTENDED_TRANSFER` 0 次、
-  hangup_cause 含 TRANSFER 的 0 次。第 1 条(`recv_refer`/`send_refer`)要话机自己发 REFER,
-  而一期的转接全部走我们的 API(`uuid_transfer`),不是 REFER。
-  **也就是说 `isTransferredAway` 今天很可能两个方向都是错的**:
-  该 true 的时候 false,不该 true 的时候 true。
-
-  **⑤ 目前没有任何消费方。** 全仓 `TransferredAway` 只有三处:归一化写入、
-  party 上存一份、`PARTY_RELEASED` 载荷里发出去。CDR 的 `legs` 是摘要(kind/label/durationSec),
-  不含每条腿的结束原因;前端一个引用都没有。**唯一的读者是外部 SSE 订阅方。**
-  所以这是"发在线上的一个字段长期是错的",不是"某个功能坏了"——
-  但它在 `PARTY_RELEASED` 载荷里,我们自己的工作台迟早会读。
-
-  **两个可选处置(待 owner 定)**:
-  - **A 修**:删掉第 3 条兜底(它答的是另一个问题),再补一条真正认得出
-    "我的桥被转走了所以我结束"的判据 —— 需要先现场抓一次真转接看那条腿到底带什么。
-  - **B 撤**:在有人真正需要它之前,把这个字段从载荷里拿掉。
-    发一个已知是错的值,比不发更糟。
-  **【2026-08-25 21:26 现场取证完成 —— 三条腿的判定全反了】**
-  话机 18688886669 拨 95001 → bot 接 → 转人工 → 进 support-en 队列 → wei(1008) 接起 → 客户挂断。
-  同时抓 `CHANNEL_HANGUP_COMPLETE` 原始事件与主管 SSE。
-  证据:`docs/verification/artifacts/C62/bot-to-queue-hangup-events.log`
-  与 `bot-to-queue-party-released.jsonl`。
-
-  **① bot 腿(真正"因为通话转走了才结束"的那条)身上什么都没有。**
-  ```
-  sofia/external/95001   Hangup-Cause = NORMAL_CLEARING
-      sip_hangup_disposition = send_bye
-      Caller-Channel-Transfer-Time = 0
-      (没有 transfer_history,没有 transfer_source,没有任何 refer 痕迹)
-  ```
-  **它的挂断事件与一次普通挂断逐字段同形。** 交换机不会告诉一条腿"你的对端被转走了"。
-  → `isTransferredAway: false`。**该 true 的报了 false。**
-
-  **② 主叫腿(活到最后、自己挂断的那条)带着全部历史,而且是累加的。**
-  ```
-  transfer_history = ARRAY::…:bl_xfer:7001/aicc/XML|:…:uuid_br:<坐席腿>
-      sip_hangup_disposition = recv_bye     ← 客户自己挂的
-  ```
-  两段:第一段是 bot 转队列(`bl_xfer`),第二段是队列桥接坐席(`uuid_br`)。
-  正是源码里 `SWITCH_STACK_PUSH` 的形状。→ `isTransferredAway: true`。**不该 true 的报了 true。**
-
-  **③ 坐席腿也带着 `uuid_br` 那一份** —— `switch_ivr_bridge.c:2179/2187` 往**两条**腿都推,
-  和读源码时的判断一致。正常挂断 → `isTransferredAway: true`。**同样报错。**
-
-  主管流上这通电话的三条 `PARTY_RELEASED`,`cause` 全是 `NORMAL_CLEARING`,而
-  `isTransferredAway` 分别是 **false / true / true** —— **恰好和事实完全相反。**
-
-  **④ 因此 A 的"补一条判据"这条路,在交换机侧是走不通的**:bot 腿身上没有可读的痕迹。
-  但**我们自己知道** —— 转接是我们下的命令(`Adapter.TransferToExtension` /
-  `BridgeToEndpoint` 都明确指定了被转的 channel),协调器也知道那条 channel 当时桥给了谁。
-  所以"这条腿因为通话转走了才结束"是**我们自己的事实**,应当在下达转接时把当时的桥对端标记下来,
-  而不是回过头去问交换机。这比原以为的工作量大。
-
-  **处置选项(待 owner 定,取证已做完)**:
-  - **A′ 自己记**:转接下达时标记被转 channel 的当前桥对端;`transferredAway()` 三条规则里
-    第 3 条删掉(它答的是"这条 channel 被转接过",与字段定义不同),
-    第 1、2 条保留(将来话机自己发 REFER 时仍然对)。
-  - **B 撤**:把 `isTransferredAway` 从 `PARTY_RELEASED` 载荷里拿掉,等真有消费方再按 A′ 做。
-    现状是三条腿全判反,且全仓无人读它。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 

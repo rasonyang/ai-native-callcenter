@@ -219,10 +219,6 @@ type SwitchEvent struct {
 	// variables when the caller's leg hangs up. Zero when the call never
 	// met a bot.
 	Bot BotShare
-	// TransferredAway reports that this leg ended because the call moved on
-	// (blind transfer or REFER), not because the caller dropped.
-	TransferredAway bool
-
 	// DTMF.
 	Digit      string
 	DurationMs int
@@ -413,7 +409,6 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 		if q850, ok := ev.GetInt("variable_hangup_cause_q850"); ok {
 			out.HangupCauseQ850 = int(q850)
 		}
-		out.TransferredAway = transferredAway(ev)
 		out.Bot = botShare(ev)
 		if sec, ok := ev.GetInt("variable_billsec"); ok {
 			out.BilledSec = int(sec)
@@ -440,18 +435,6 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 // transferredAway reports whether a leg ended because the call was transferred
 // rather than dropped. A successful handoff must not be reported as a lost
 // call, so both the SIP disposition and the transfer history are consulted.
-func transferredAway(ev *esl.Event) bool {
-	switch ev.Variable("sip_hangup_disposition") {
-	case "recv_refer", "send_refer":
-		return true
-	}
-	switch strings.ToUpper(ev.GetFirst("Hangup-Cause", "variable_hangup_cause")) {
-	case "BLIND_TRANSFER", "ATTENDED_TRANSFER":
-		return true
-	}
-	return ev.Variable("transfer_history") != ""
-}
-
 func normalizeCustom(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	switch ev.Subclass() {
 	// expire is the same outcome as unregister and the more common one: a
