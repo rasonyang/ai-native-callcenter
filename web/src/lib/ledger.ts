@@ -14,6 +14,8 @@ export type Leg = components['schemas']['Leg']
 
 export type CDRStatus = components['schemas']['CDRStatus']
 
+export type MissedReason = components['schemas']['MissedReason']
+
 export type CDR = components['schemas']['CDR']
 
 export type TranscriptLine = components['schemas']['TranscriptLine']

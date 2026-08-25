@@ -368,6 +368,7 @@
       "SHORT_ABANDONED": "Short abandoned",
       "ABANDONED_RINGING": "Abandoned while ringing",
       "ABANDONED_WAITING": "Abandoned in queue",
+      "AGENTS_DID_NOT_ANSWER": "Agents did not answer",
       "NO_AVAILABLE_AGENT": "No agent available"
     },
     "contained": "contained",

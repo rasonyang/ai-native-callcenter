@@ -466,6 +466,38 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   一个失败不阻断其余),真库测试钉住年龄比较与"已扫过的不再来"。
   **`DECISIONS-pending` 至此没有待决条目。**
 
+- **`missedReason` 词表四层不一致** **【已完成 2026-08-25 `00023`】** —— **契约补枚举 + 删掉一个没人能拿到的理由**。
+  一个 missed reason 要穿过四层、以同一份词表的四种写法存在:装配器决定它(`cdr.go` 的
+  `missedReason`)、`cdrs` 的 CHECK 存它、契约声明它、控制台翻译它。**四层没有一个地方对得上**:
+  代码能给出 5 个值,CHECK 允许 6 个,契约把它写成裸 `string`(什么都不承诺),两份 locale 只译了 4 个。
+  后果是**已经上线的**:`AGENTS_DID_NOT_ANSWER` 自账本建成起就在产,而中英文都没给它名字,
+  于是主管打开"为什么这通电话没人接"的那张报表,读到的是
+  `cdr.missedReasons.AGENTS_DID_NOT_ANSWER` —— 一个 i18n 裸键。**没有任何测试失败**,
+  react-i18next 对不认识的键的回答就是把键本身还回去。
+  处置分两头。**契约补 `MissedReason` 枚举**(照 `CDRStatus` 的样子命名,`$ref` 进 `CDR`),
+  于是 Go 侧拿到 `api.MissedReason` 及其 `Valid()`,TS 侧拿到五值联合,
+  `StatusCell` 的 `status`/`missedReason` 与 `STATUS_COLOR` 一并从 `string` 收紧到枚举 ——
+  再多一个状态就是编译错,而不是一个没人注意的灰点。描述同时改正:
+  原文写"empty when the call was not missed",但 `store.CDR` 带 `omitempty`,空串根本上不了线,
+  枚举也没有 `""` 这个成员,该说的是**缺席**。
+  **`OUT_OF_HOURS` 出局**(`00023`)。它只活在 00005 的 CHECK 和设计 03 里,**没有任何代码决定它** ——
+  本产品不知道一个队列开几点到几点:队列上没有排班、没有日历、也没有哪条 dialplan 会因为来得晚而拒接。
+  留着它比不用更糟:契约现在把这份词表声明成枚举,**词表里的每个值都是对客户端的承诺**
+  (某通电话某天会带着它来),也是控制台欠下的两份翻译。为一个代码给不出的值付这两笔,不值。
+  真做了排班,难的是排班本身,这一行是最后一步而不是第一步,到时随功能一起回来。
+  **改写在收紧 CHECK 之前**,如例。真实部署一行也不可能有 —— 从没有东西写过它 ——
+  但 **CHECK 是关于表的断言,不是关于恰好填了它的代码的断言**,诚实的收紧方式是先让断言为真。
+  `migrate_test` 的 fixture 钉在 v22 插一行 `OUT_OF_HOURS`,把顺序颠倒过来就复现出
+  "is violated by some row"(已实测)。
+  两侧各留一个钉子把词表拉在一起:Go 侧 `TestEveryMissedReasonIsOneTheContractNames`
+  (装配器 ↔ 契约,双向);前端 `src/test/locales.test.ts`(两份 locale ↔ 同一份五值,且互等)。
+  前端为什么不从生成物枚举:`openapi-typescript` 只出类型,运行时已被擦除,没有东西可遍历。
+  **顺手**:`Extension` 的 `required` 里还留着 W11 删掉的 `kind`,`api-lint` 一直在报这条 warning
+  (CLAUDE.md 要求零 warning)。已摘,lint 归零。
+  **未纳入**(仍待 owner):`plan-cdr-anchors.md:185` 记的那个洞 —— 没进过队、也没有坐席腿的
+  `NO_ANSWER`,`missedReason` 为空,账本说不出理由。那是**给词表加值**,与本条"删掉一个多余的值"
+  方向相反,需要先定"未接但没进队"该叫什么,不在本次范围内。
+
 - ~~**W8 trunk(中继号)管理**(§补充 S3)~~ **【已撤销 2026-08-24,owner 直裁;`00021`】**
   **删表 + 只读状态**,而不是管理面。查清的事实:`trunks` 表 0 行、**没有任何 Go/Lua/SQL 读它**、
   `luacc` 里没有 trunks 视图、`aicc_xml.lua` 只服务 directory/dialplan/configuration(仅 callcenter.conf,

@@ -1908,6 +1908,11 @@ export interface components {
          * @enum {string}
          */
         CDRStatus: "ANSWERED" | "NO_ANSWER" | "BUSY" | "FAILED";
+        /**
+         * @description Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.
+         * @enum {string}
+         */
+        MissedReason: "SHORT_ABANDONED" | "ABANDONED_RINGING" | "ABANDONED_WAITING" | "AGENTS_DID_NOT_ANSWER" | "NO_AVAILABLE_AGENT";
         /** @enum {string} */
         LegKind: "TRUNK" | "DIALING" | "BOT" | "QUEUE" | "AGENT";
         /** @description One hop of the call's journey, for the journey summary. */
@@ -1956,8 +1961,7 @@ export interface components {
             totalSec: number;
             status: components["schemas"]["CDRStatus"];
             hangupCause?: string;
-            /** @description Why the caller went unserved; empty when the call was not missed. */
-            missedReason?: string;
+            missedReason?: components["schemas"]["MissedReason"];
             disposition?: string;
             /** @description True when the bot finished the conversation without a human. */
             isContained: boolean;

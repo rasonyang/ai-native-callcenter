@@ -298,6 +298,33 @@ func (e LegKind) Valid() bool {
 	}
 }
 
+// Defines values for MissedReason.
+const (
+	MissedReasonABANDONEDRINGING   MissedReason = "ABANDONED_RINGING"
+	MissedReasonABANDONEDWAITING   MissedReason = "ABANDONED_WAITING"
+	MissedReasonAGENTSDIDNOTANSWER MissedReason = "AGENTS_DID_NOT_ANSWER"
+	MissedReasonNOAVAILABLEAGENT   MissedReason = "NO_AVAILABLE_AGENT"
+	MissedReasonSHORTABANDONED     MissedReason = "SHORT_ABANDONED"
+)
+
+// Valid indicates whether the value is a known member of the MissedReason enum.
+func (e MissedReason) Valid() bool {
+	switch e {
+	case MissedReasonABANDONEDRINGING:
+		return true
+	case MissedReasonABANDONEDWAITING:
+		return true
+	case MissedReasonAGENTSDIDNOTANSWER:
+		return true
+	case MissedReasonNOAVAILABLEAGENT:
+		return true
+	case MissedReasonSHORTABANDONED:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotReadyReason.
 const (
 	NotReadyReasonAFTERCALLWORK NotReadyReason = "AFTER_CALL_WORK"
@@ -845,8 +872,8 @@ type CDR struct {
 	Language    *string `json:"language,omitempty"`
 	Legs        []Leg   `json:"legs"`
 
-	// MissedReason Why the caller went unserved; empty when the call was not missed.
-	MissedReason   *string             `json:"missedReason,omitempty"`
+	// MissedReason Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.
+	MissedReason   *MissedReason       `json:"missedReason,omitempty"`
 	PrimaryAgentID *openapi_types.UUID `json:"primaryAgentId,omitempty"`
 	QueueID        *openapi_types.UUID `json:"queueId,omitempty"`
 
@@ -1315,6 +1342,9 @@ type LoginRequest struct {
 	Password string `json:"password"`
 	Username string `json:"username"`
 }
+
+// MissedReason Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.
+type MissedReason string
 
 // NotReadyReason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
 type NotReadyReason string

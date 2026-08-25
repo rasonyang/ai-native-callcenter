@@ -47,6 +47,26 @@ type QueueDirectory interface {
 // from one who dialled and thought better of it.
 const shortAbandonThreshold = 5 * time.Second
 
+// The whole vocabulary of missed_reason: every value a call can be given, and
+// no others. The reason is derived from what the call recorded, so this list
+// is decided here and nowhere else — the contract's MissedReason enum, the
+// cdrs CHECK and the console's two translations all follow it, and
+// TestEveryMissedReasonIsOneTheContractNames holds them together.
+const (
+	MissedShortAbandoned     = "SHORT_ABANDONED"
+	MissedAbandonedRinging   = "ABANDONED_RINGING"
+	MissedAbandonedWaiting   = "ABANDONED_WAITING"
+	MissedAgentsDidNotAnswer = "AGENTS_DID_NOT_ANSWER"
+	MissedNoAvailableAgent   = "NO_AVAILABLE_AGENT"
+)
+
+// MissedReasons is that vocabulary in full, for the tests that check nothing
+// else can express it.
+var MissedReasons = []string{
+	MissedShortAbandoned, MissedAbandonedRinging, MissedAbandonedWaiting,
+	MissedAgentsDidNotAnswer, MissedNoAvailableAgent,
+}
+
 // CDRAssembler turns finished calls into ledger rows.
 //
 // It hangs off the registry's finish hook and the coordinator's queue events.
@@ -541,7 +561,7 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 			// caller's own departure.
 			if leg.AnsweredAt == nil && leg.ReleasedAt != nil &&
 				!leg.ReleasedAt.Before(queue.LeftAt) {
-				return "ABANDONED_RINGING"
+				return MissedAbandonedRinging
 			}
 		}
 	}
@@ -551,22 +571,22 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 		switch {
 		case queue.Cause == "Timeout":
 			// The queue gave up on the caller, not the reverse.
-			return "NO_AVAILABLE_AGENT"
+			return MissedNoAvailableAgent
 		case !isCallerGone(queue):
 			// Still queued, or removed for a reason that was not theirs, and
 			// phones did ring: the agents are what went wrong here.
 			if len(agentLegs) > 0 {
-				return "AGENTS_DID_NOT_ANSWER"
+				return MissedAgentsDidNotAnswer
 			}
-			return "NO_AVAILABLE_AGENT"
+			return MissedNoAvailableAgent
 		case wait >= 0 && wait < shortAbandonThreshold:
-			return "SHORT_ABANDONED"
+			return MissedShortAbandoned
 		default:
-			return "ABANDONED_WAITING"
+			return MissedAbandonedWaiting
 		}
 	}
 	if len(agentLegs) > 0 {
-		return "AGENTS_DID_NOT_ANSWER"
+		return MissedAgentsDidNotAnswer
 	}
 	return ""
 }

@@ -5124,7 +5124,6 @@
         "required": [
           "id",
           "number",
-          "kind",
           "displayName",
           "isEnabled",
           "createdAt"
@@ -5797,6 +5796,17 @@
           "FAILED"
         ]
       },
+      "MissedReason": {
+        "type": "string",
+        "description": "Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.",
+        "enum": [
+          "SHORT_ABANDONED",
+          "ABANDONED_RINGING",
+          "ABANDONED_WAITING",
+          "AGENTS_DID_NOT_ANSWER",
+          "NO_AVAILABLE_AGENT"
+        ]
+      },
       "LegKind": {
         "type": "string",
         "enum": [
@@ -5916,8 +5926,7 @@
             "type": "string"
           },
           "missedReason": {
-            "type": "string",
-            "description": "Why the caller went unserved; empty when the call was not missed."
+            "$ref": "#/components/schemas/MissedReason"
           },
           "disposition": {
             "type": "string"

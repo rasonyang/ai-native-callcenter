@@ -366,6 +366,7 @@
       "SHORT_ABANDONED": "秒挂",
       "ABANDONED_RINGING": "振铃放弃",
       "ABANDONED_WAITING": "排队放弃",
+      "AGENTS_DID_NOT_ANSWER": "坐席未应答",
       "NO_AVAILABLE_AGENT": "无可用坐席"
     },
     "contained": "机器人闭环",

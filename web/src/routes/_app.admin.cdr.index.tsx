@@ -11,7 +11,8 @@ import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
-  formatDuration, ledgerApi, recordingAudioUrl, useCDRs, type CDRStatus,
+  formatDuration, ledgerApi, recordingAudioUrl, useCDRs,
+  type CDRStatus, type MissedReason,
 } from '@/lib/ledger'
 
 /** The finished-call ledger, filterable, newest first. */
@@ -231,7 +232,9 @@ function PlayCell({ callId, player }: { callId: string; player: RowPlayer }) {
   )
 }
 
-const STATUS_COLOR: Record<string, string> = {
+// Every status the contract can send, so a new one is a type error here
+// rather than a grey dot nobody notices.
+const STATUS_COLOR: Record<CDRStatus, string> = {
   ANSWERED: 'var(--state-available)',
   FAILED: 'var(--state-breach)',
   BUSY: 'var(--state-ringing)',
@@ -239,8 +242,8 @@ const STATUS_COLOR: Record<string, string> = {
 }
 
 function StatusCell(props: {
-  status: string
-  missedReason?: string
+  status: CDRStatus
+  missedReason?: MissedReason
   isContained: boolean
   hasRecording: boolean
 }) {

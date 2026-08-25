@@ -655,3 +655,65 @@ func TestMigrationsGiveAFlowlessNumberTheOnlyShapeItMayHave(t *testing.T) {
 			"comes from would depend on the order rows are read in")
 	}
 }
+
+// 00023 narrows missed_reason, on a database that already holds the value it
+// removes.
+//
+// No deployment can actually hold one — nothing has ever decided OUT_OF_HOURS,
+// which is why it is going — but a CHECK is a claim about a table rather than
+// about the code that filled it, and narrowing one without the rewrite in
+// front is the mistake this file exists to catch. The fixture makes the claim
+// false first, so the rewrite is the thing being tested rather than a
+// statement nobody reaches.
+func TestMigrationsDropAReasonNoCallCanHave(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 22); err != nil {
+		t.Fatalf("migrating to 22 failed: %v", err)
+	}
+	const closed = "77777777-7777-7777-7777-777777777777"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, missed_reason)
+		VALUES ($1, now() - interval '10 seconds', now(), 'INBOUND', 'NO_ANSWER', 'OUT_OF_HOURS')`,
+		closed); err != nil {
+		t.Fatalf("seed a call filed under the departing reason: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database holding OUT_OF_HOURS failed: %v", err)
+	}
+
+	var reason, status *string
+	if err := db.QueryRowContext(ctx,
+		`SELECT missed_reason, status FROM cdrs WHERE call_id = $1`, closed).
+		Scan(&reason, &status); err != nil {
+		t.Fatalf("read the migrated row: %v", err)
+	}
+	if reason != nil {
+		t.Errorf("missed_reason = %q, want none — the word is gone from the vocabulary", *reason)
+	}
+	// The call is still a missed call. Only the reason for it was withdrawn.
+	if status == nil || *status != "NO_ANSWER" {
+		t.Errorf("status = %v, want NO_ANSWER — the migration rewrites the reason, not the verdict", status)
+	}
+
+	// And the narrowed rule holds against psql, not only against the API.
+	for _, reason := range []string{
+		"SHORT_ABANDONED", "ABANDONED_RINGING", "ABANDONED_WAITING",
+		"AGENTS_DID_NOT_ANSWER", "NO_AVAILABLE_AGENT",
+	} {
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, missed_reason)
+			VALUES (gen_random_uuid(), now(), now(), 'INBOUND', 'NO_ANSWER', $1)`, reason); err != nil {
+			t.Errorf("a call could not be filed under %s, which the assembler decides: %v", reason, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, missed_reason)
+		VALUES (gen_random_uuid(), now(), now(), 'INBOUND', 'NO_ANSWER', 'OUT_OF_HOURS')`); err == nil {
+		t.Error("OUT_OF_HOURS was accepted after the migration that removed it")
+	}
+}

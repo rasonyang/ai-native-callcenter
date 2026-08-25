@@ -74,7 +74,12 @@ cdrs(call_id uuid pk, started_at, answered_at, ended_at,
      status varchar check in ('ANSWERED','NO_ANSWER','BUSY','FAILED'),
      hangup_cause text,                                           -- FS Q.850 token (already SCREAMING_SNAKE upstream)
      missed_reason varchar null check in ('SHORT_ABANDONED','ABANDONED_RINGING','ABANDONED_WAITING',
-                                          'AGENTS_DID_NOT_ANSWER','NO_AVAILABLE_AGENT','OUT_OF_HOURS'),
+                                          'AGENTS_DID_NOT_ANSWER','NO_AVAILABLE_AGENT'),
+                                       -- amended 2026-08-25 (00023): OUT_OF_HOURS left the vocabulary.
+                                       -- Nothing decides it — there is no schedule on a queue for it to
+                                       -- read — and the contract now names this list as an enum, where an
+                                       -- undecidable value is a promise to clients and two translations
+                                       -- owed for a call that never comes. It returns with the feature.
      disposition text, is_contained bool, has_recording bool,
      user_data jsonb,      -- business context (ticketId, slots); merge-patched during the call
      tech jsonb,           -- CDR technical tab: sipCallId, codec, IPs (release cause is the hangup_cause column)
