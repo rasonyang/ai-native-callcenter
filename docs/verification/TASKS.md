@@ -3,7 +3,7 @@
 > 前身:TASKS-draft.md(草案),经 owner 两轮决策(DECISIONS-pending.md,2026-08-20)后转正。
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。
-> **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。唯一残留决策:settings 死表处置。
+> **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。~~唯一残留决策:settings 死表处置。~~ **2026-08-24 已决并完成(`00022`,删表 + 录音保留期);`DECISIONS-pending` 已无待决条目。**
 > **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;
 > **W11 管理面闭环已于 2026-08-24 全部完成**(六个子项;过程中 owner 三次收窄原规格);
 > **W8 已撤销**(2026-08-24 owner 直裁:删表 + 只读状态,见条目);W7 / W10 未开工;
