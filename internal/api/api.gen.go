@@ -1474,7 +1474,6 @@ type Queue struct {
 
 	// Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
 	Overflow        Overflow `json:"overflow"`
-	RonaDelaySec    int      `json:"ronaDelaySec"`
 	SLAThresholdSec int      `json:"slaThresholdSec"`
 
 	// Strategy How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.
@@ -1577,7 +1576,6 @@ type QueueWrite struct {
 
 	// Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
 	Overflow        *Overflow `json:"overflow,omitempty"`
-	RonaDelaySec    *int      `json:"ronaDelaySec,omitempty"`
 	SLAThresholdSec *int      `json:"slaThresholdSec,omitempty"`
 
 	// Strategy How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.

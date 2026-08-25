@@ -41,7 +41,11 @@ queues(id uuid pk, ext_number text unique ★,                 -- dialable 7xxx
        sla_threshold_sec int default 20, is_recording_enabled bool default true ★,
        hours jsonb ★,                                        -- [{"weekday":1,"open":"09:00","close":"18:00"}]
        overflow jsonb ★,                                     -- {"type":"BOT_FLOW"|"ANNOUNCE_HANGUP"|"FORWARD", …camelCase…}
-       rona_delay_sec int default 10, is_enabled bool ★)
+       is_enabled bool ★)
+       -- rona_delay_sec was here and was removed (00025, 2026-08-25). mod_callcenter keeps
+       -- the RONA delay on the *agent* (no_answer_delay_time), because an agent tiered into
+       -- two queues can only have one; a per-queue column had nowhere to be delivered and
+       -- nothing ever read it. The delay itself rides agent registration (W2).
 queue_agents(queue_id fk, agent_id fk, level int default 1, position int default 1, pk(queue_id,agent_id))
 dids(id uuid pk, number text unique ★, language varchar ★,   -- BCP 47 lowercase 'en'/'zh' (external standard, see 07 §7)
      flow_id uuid null → flows ON DELETE RESTRICT,            -- every external number answers with a bot flow; null only between `POST /dids` and `flowadd -did` (00003, 00008)

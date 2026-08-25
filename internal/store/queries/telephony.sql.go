@@ -107,11 +107,11 @@ INSERT INTO queues (
     id, name, ext_number, display_name, strategy, moh_sound,
     max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec,
     tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed,
-    rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled
+    sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
-RETURNING id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at
+RETURNING id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at
 `
 
 type CreateQueueParams struct {
@@ -128,7 +128,6 @@ type CreateQueueParams struct {
 	TierRules                []byte    `json:"tierRules"`
 	DiscardAbandonedAfterSec int32     `json:"discardAbandonedAfterSec"`
 	IsAbandonedResumeAllowed bool      `json:"isAbandonedResumeAllowed"`
-	RonaDelaySec             int32     `json:"ronaDelaySec"`
 	SlaThresholdSec          int32     `json:"slaThresholdSec"`
 	IsRecordingEnabled       bool      `json:"isRecordingEnabled"`
 	Hours                    []byte    `json:"hours"`
@@ -151,7 +150,6 @@ func (q *Queries) CreateQueue(ctx context.Context, arg CreateQueueParams) (Queue
 		arg.TierRules,
 		arg.DiscardAbandonedAfterSec,
 		arg.IsAbandonedResumeAllowed,
-		arg.RonaDelaySec,
 		arg.SlaThresholdSec,
 		arg.IsRecordingEnabled,
 		arg.Hours,
@@ -173,7 +171,6 @@ func (q *Queries) CreateQueue(ctx context.Context, arg CreateQueueParams) (Queue
 		&i.TierRules,
 		&i.DiscardAbandonedAfterSec,
 		&i.IsAbandonedResumeAllowed,
-		&i.RonaDelaySec,
 		&i.SlaThresholdSec,
 		&i.IsRecordingEnabled,
 		&i.Hours,
@@ -293,7 +290,7 @@ func (q *Queries) GetExtension(ctx context.Context, id uuid.UUID) (Extension, er
 }
 
 const getQueue = `-- name: GetQueue :one
-SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues WHERE id = $1
+SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues WHERE id = $1
 `
 
 func (q *Queries) GetQueue(ctx context.Context, id uuid.UUID) (Queue, error) {
@@ -313,7 +310,6 @@ func (q *Queries) GetQueue(ctx context.Context, id uuid.UUID) (Queue, error) {
 		&i.TierRules,
 		&i.DiscardAbandonedAfterSec,
 		&i.IsAbandonedResumeAllowed,
-		&i.RonaDelaySec,
 		&i.SlaThresholdSec,
 		&i.IsRecordingEnabled,
 		&i.Hours,
@@ -456,7 +452,7 @@ func (q *Queries) ListQueueAgents(ctx context.Context, queueID uuid.UUID) ([]Lis
 }
 
 const listQueues = `-- name: ListQueues :many
-SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues ORDER BY name
+SELECT id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at FROM queues ORDER BY name
 `
 
 func (q *Queries) ListQueues(ctx context.Context) ([]Queue, error) {
@@ -482,7 +478,6 @@ func (q *Queries) ListQueues(ctx context.Context) ([]Queue, error) {
 			&i.TierRules,
 			&i.DiscardAbandonedAfterSec,
 			&i.IsAbandonedResumeAllowed,
-			&i.RonaDelaySec,
 			&i.SlaThresholdSec,
 			&i.IsRecordingEnabled,
 			&i.Hours,
@@ -502,7 +497,7 @@ func (q *Queries) ListQueues(ctx context.Context) ([]Queue, error) {
 }
 
 const listQueuesForAgent = `-- name: ListQueuesForAgent :many
-SELECT q.id, q.name, q.ext_number, q.display_name, q.strategy, q.moh_sound, q.max_wait_sec, q.max_wait_no_agent_sec, q.announce_sound, q.announce_frequency_sec, q.tier_rules, q.discard_abandoned_after_sec, q.is_abandoned_resume_allowed, q.rona_delay_sec, q.sla_threshold_sec, q.is_recording_enabled, q.hours, q.overflow, q.is_enabled, q.created_at, q.updated_at
+SELECT q.id, q.name, q.ext_number, q.display_name, q.strategy, q.moh_sound, q.max_wait_sec, q.max_wait_no_agent_sec, q.announce_sound, q.announce_frequency_sec, q.tier_rules, q.discard_abandoned_after_sec, q.is_abandoned_resume_allowed, q.sla_threshold_sec, q.is_recording_enabled, q.hours, q.overflow, q.is_enabled, q.created_at, q.updated_at
 FROM queues q
 JOIN queue_agents qa ON qa.queue_id = q.id
 WHERE qa.agent_id = $1
@@ -532,7 +527,6 @@ func (q *Queries) ListQueuesForAgent(ctx context.Context, agentID uuid.UUID) ([]
 			&i.TierRules,
 			&i.DiscardAbandonedAfterSec,
 			&i.IsAbandonedResumeAllowed,
-			&i.RonaDelaySec,
 			&i.SlaThresholdSec,
 			&i.IsRecordingEnabled,
 			&i.Hours,
@@ -764,10 +758,10 @@ SET display_name = $2, strategy = $3, moh_sound = $4,
     max_wait_sec = $5, max_wait_no_agent_sec = $6,
     announce_sound = $7, announce_frequency_sec = $8, tier_rules = $9,
     discard_abandoned_after_sec = $10, is_abandoned_resume_allowed = $11,
-    rona_delay_sec = $12, sla_threshold_sec = $13, is_recording_enabled = $14,
-    hours = $15, overflow = $16, is_enabled = $17, updated_at = now()
+    sla_threshold_sec = $12, is_recording_enabled = $13,
+    hours = $14, overflow = $15, is_enabled = $16, updated_at = now()
 WHERE id = $1
-RETURNING id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at
+RETURNING id, name, ext_number, display_name, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec, tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled, created_at, updated_at
 `
 
 type UpdateQueueParams struct {
@@ -782,7 +776,6 @@ type UpdateQueueParams struct {
 	TierRules                []byte    `json:"tierRules"`
 	DiscardAbandonedAfterSec int32     `json:"discardAbandonedAfterSec"`
 	IsAbandonedResumeAllowed bool      `json:"isAbandonedResumeAllowed"`
-	RonaDelaySec             int32     `json:"ronaDelaySec"`
 	SlaThresholdSec          int32     `json:"slaThresholdSec"`
 	IsRecordingEnabled       bool      `json:"isRecordingEnabled"`
 	Hours                    []byte    `json:"hours"`
@@ -803,7 +796,6 @@ func (q *Queries) UpdateQueue(ctx context.Context, arg UpdateQueueParams) (Queue
 		arg.TierRules,
 		arg.DiscardAbandonedAfterSec,
 		arg.IsAbandonedResumeAllowed,
-		arg.RonaDelaySec,
 		arg.SlaThresholdSec,
 		arg.IsRecordingEnabled,
 		arg.Hours,
@@ -825,7 +817,6 @@ func (q *Queries) UpdateQueue(ctx context.Context, arg UpdateQueueParams) (Queue
 		&i.TierRules,
 		&i.DiscardAbandonedAfterSec,
 		&i.IsAbandonedResumeAllowed,
-		&i.RonaDelaySec,
 		&i.SlaThresholdSec,
 		&i.IsRecordingEnabled,
 		&i.Hours,

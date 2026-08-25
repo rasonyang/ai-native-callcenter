@@ -31,9 +31,9 @@ INSERT INTO queues (
     id, name, ext_number, display_name, strategy, moh_sound,
     max_wait_sec, max_wait_no_agent_sec, announce_sound, announce_frequency_sec,
     tier_rules, discard_abandoned_after_sec, is_abandoned_resume_allowed,
-    rona_delay_sec, sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled
+    sla_threshold_sec, is_recording_enabled, hours, overflow, is_enabled
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
 )
 RETURNING *;
 
@@ -49,8 +49,8 @@ SET display_name = $2, strategy = $3, moh_sound = $4,
     max_wait_sec = $5, max_wait_no_agent_sec = $6,
     announce_sound = $7, announce_frequency_sec = $8, tier_rules = $9,
     discard_abandoned_after_sec = $10, is_abandoned_resume_allowed = $11,
-    rona_delay_sec = $12, sla_threshold_sec = $13, is_recording_enabled = $14,
-    hours = $15, overflow = $16, is_enabled = $17, updated_at = now()
+    sla_threshold_sec = $12, is_recording_enabled = $13,
+    hours = $14, overflow = $15, is_enabled = $16, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

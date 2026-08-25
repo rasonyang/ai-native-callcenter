@@ -49,7 +49,6 @@ function RoutingPage() {
                 isRecordingEnabled: true,
                 maxWaitSec: 300,
                 slaThresholdSec: 20,
-                ronaDelaySec: 10,
                 overflow: { type: 'ANNOUNCE_HANGUP' },
               })
             }

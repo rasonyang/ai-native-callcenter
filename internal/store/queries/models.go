@@ -165,11 +165,12 @@ type LuaccDid struct {
 }
 
 type LuaccDirectory struct {
-	Number       string `json:"number"`
-	Password     string `json:"password"`
-	DisplayName  string `json:"displayName"`
-	IsEnabled    bool   `json:"isEnabled"`
-	IsAutoAnswer bool   `json:"isAutoAnswer"`
+	Number              string `json:"number"`
+	Password            string `json:"password"`
+	DisplayName         string `json:"displayName"`
+	IsEnabled           bool   `json:"isEnabled"`
+	IsAutoAnswer        bool   `json:"isAutoAnswer"`
+	CallcenterAgentName string `json:"callcenterAgentName"`
 }
 
 type LuaccQueue struct {
@@ -217,7 +218,6 @@ type Queue struct {
 	TierRules                []byte             `json:"tierRules"`
 	DiscardAbandonedAfterSec int32              `json:"discardAbandonedAfterSec"`
 	IsAbandonedResumeAllowed bool               `json:"isAbandonedResumeAllowed"`
-	RonaDelaySec             int32              `json:"ronaDelaySec"`
 	SlaThresholdSec          int32              `json:"slaThresholdSec"`
 	IsRecordingEnabled       bool               `json:"isRecordingEnabled"`
 	Hours                    []byte             `json:"hours"`

@@ -771,8 +771,9 @@ const (
 // mirrorRouting hands the switch the guards it will not set for itself.
 //
 // One agent may staff several queues, so these are the agent's own settings
-// rather than any queue's — which is also mod_callcenter's own shape, and the
-// reason queues.rona_delay_sec has never had anywhere to go.
+// rather than any queue's — which is also mod_callcenter's own shape. A
+// per-queue RONA delay has no answer when an agent's two queues disagree,
+// which is why the column that tried to be one was removed (00025).
 func (s *Service) mirrorRouting(name string) {
 	guards := []struct {
 		what string

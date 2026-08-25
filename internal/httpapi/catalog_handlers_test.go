@@ -275,7 +275,6 @@ func TestAnOmittedIntegerTakesTheDeclaredDefault(t *testing.T) {
 			want int
 		}{
 			{"discardAbandonedAfterSec", c.queue.DiscardAbandonedAfterSec, 60},
-			{"ronaDelaySec", c.queue.RonaDelaySec, 10},
 			{"slaThresholdSec", c.queue.SLAThresholdSec, 20},
 		} {
 			if f.got != f.want {
@@ -290,12 +289,11 @@ func TestAnOmittedIntegerTakesTheDeclaredDefault(t *testing.T) {
 
 		s.CreateQueue(httptest.NewRecorder(), post(
 			`{"name":"support","extNumber":"9100","slaThresholdSec":0,`+
-				`"ronaDelaySec":0,"discardAbandonedAfterSec":0}`))
+				`"discardAbandonedAfterSec":0}`))
 
-		if c.queue.SLAThresholdSec != 0 || c.queue.RonaDelaySec != 0 ||
-			c.queue.DiscardAbandonedAfterSec != 0 {
-			t.Errorf("the defaults overrode what the operator sent: %d/%d/%d",
-				c.queue.DiscardAbandonedAfterSec, c.queue.RonaDelaySec, c.queue.SLAThresholdSec)
+		if c.queue.SLAThresholdSec != 0 || c.queue.DiscardAbandonedAfterSec != 0 {
+			t.Errorf("the defaults overrode what the operator sent: %d/%d",
+				c.queue.DiscardAbandonedAfterSec, c.queue.SLAThresholdSec)
 		}
 	})
 

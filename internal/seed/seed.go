@@ -256,8 +256,8 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 		// through.
 		if _, err := st.Pool.Exec(ctx, `
 			INSERT INTO queues (id, name, ext_number, display_name,
-			                    sla_threshold_sec, rona_delay_sec, discard_abandoned_after_sec)
-			VALUES ($1, $2, $3, $4, 20, 10, 60)
+			                    sla_threshold_sec, discard_abandoned_after_sec)
+			VALUES ($1, $2, $3, $4, 20, 60)
 			ON CONFLICT (name) DO NOTHING`,
 			uuid.New(), q.name, q.ext, q.display); err != nil {
 			return nil, nil, err

@@ -140,7 +140,6 @@ type Queue struct {
 	TierRules                TierRules       `json:"tierRules"`
 	DiscardAbandonedAfterSec int             `json:"discardAbandonedAfterSec"`
 	IsAbandonedResumeAllowed bool            `json:"isAbandonedResumeAllowed"`
-	RonaDelaySec             int             `json:"ronaDelaySec"`
 	SLAThresholdSec          int             `json:"slaThresholdSec"`
 	IsRecordingEnabled       bool            `json:"isRecordingEnabled"`
 	Hours                    []BusinessHours `json:"hours"`
@@ -174,7 +173,6 @@ func NewQueue() Queue {
 		IsEnabled:                true,
 		IsRecordingEnabled:       true,
 		DiscardAbandonedAfterSec: 60,
-		RonaDelaySec:             10,
 		SLAThresholdSec:          20,
 	}
 }

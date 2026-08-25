@@ -520,12 +520,20 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      轮不到它数第二次;"两次派单之间约 60 秒"这条也因此没有观测对象。
   ② 21:51:01.846 交换机侧多出一条重复的 `agent-status-change=On Break`(幂等,未查)。
 
-  - **仍未决(须 owner 定)**:`queues.rona_delay_sec` **在交换机里没有位置** ——
+  - ~~**仍未决(须 owner 定)**:`queues.rona_delay_sec`~~ **【2026-08-25 已决:从契约里删掉。
+    W2 至此全部收官】** `rona_delay_sec` **在交换机里没有位置** ——
     `callcenter_config queue list` 的列里根本没有 RONA 延迟,它是**每坐席**的
     `no_answer_delay_time`;一个坐席同时配员两条队列时 per-queue 的值无解,
     这正是 mod_callcenter 把它放在坐席上的原因。所以"下发"这条路走不通,
-    剩下的是**从契约里删**(改契约 + 迁移,spec-first),或者重新定义它的含义。
-    本轮**没有动它**,它仍是死配置。
+    owner 定为**删**(而非重新定义:换一个含义却留着旧名字,读的人仍会以为是 per-queue 的)。
+    **删除范围**(spec-first,契约先行):`docs/openapi.json` 的 `Queue`(required)与
+    `QueueWrite` → `make api-generate` → 迁移 `00025_a_delay_the_switch_has_no_place_for.sql`
+    → `store/sql/telephony.sql` + `sqlc generate` → `catalog/types.go`、`store/catalogstore.go`、
+    `seed/seed.go`、`web/src/routes/_app.admin.routing.tsx`、两处单测 → 设计集 `03-data.md`。
+    全仓命中归零。**这是一次破坏性契约变更**(`ronaDelaySec` 曾是 `Queue` 的 required 属性),
+    `make api-breaking` 如实报 ERR —— 明知而为,理由是留一个会撒谎的字段更糟。
+    **功能不缺**:`no_answer_delay_time=60` 随每坐席参数进交换机(W2,2026-08-23),
+    并已于 2026-08-25 现场实测生效。
 - ~~**W3 flows 管理面**(D3)~~ **【已完成 2026-08-24】** `/admin/bots` 与五个 ADMIN 操作
   (`GET /flows`、`POST /flows`、`GET /flows/{flowId}` 含草稿与修订、`PUT /flows/{flowId}`、
   `POST /flows/{flowId}/publish`)。契约 → generate → store → handlers → UI,

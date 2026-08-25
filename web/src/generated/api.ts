@@ -1742,7 +1742,6 @@ export interface components {
             tierRules: components["schemas"]["TierRules"];
             discardAbandonedAfterSec: number;
             isAbandonedResumeAllowed: boolean;
-            ronaDelaySec: number;
             slaThresholdSec: number;
             isRecordingEnabled: boolean;
             hours: components["schemas"]["BusinessHours"][];
@@ -1765,7 +1764,6 @@ export interface components {
             tierRules?: components["schemas"]["TierRules"];
             discardAbandonedAfterSec?: number;
             isAbandonedResumeAllowed?: boolean;
-            ronaDelaySec?: number;
             slaThresholdSec?: number;
             isRecordingEnabled?: boolean;
             hours?: components["schemas"]["BusinessHours"][];

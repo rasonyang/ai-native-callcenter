@@ -5359,9 +5359,6 @@
           "isAbandonedResumeAllowed": {
             "type": "boolean"
           },
-          "ronaDelaySec": {
-            "type": "integer"
-          },
           "slaThresholdSec": {
             "type": "integer"
           },
@@ -5394,7 +5391,6 @@
           "tierRules",
           "discardAbandonedAfterSec",
           "isAbandonedResumeAllowed",
-          "ronaDelaySec",
           "slaThresholdSec",
           "isRecordingEnabled",
           "hours",
@@ -5444,9 +5440,6 @@
           },
           "isAbandonedResumeAllowed": {
             "type": "boolean"
-          },
-          "ronaDelaySec": {
-            "type": "integer"
           },
           "slaThresholdSec": {
             "type": "integer"
