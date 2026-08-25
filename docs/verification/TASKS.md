@@ -223,9 +223,52 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   起草要点:停机后清空该库(`delete from agents; delete from tiers;`)再启动,
   断言 `added=` 为正、tier 与 agent status 由应用重新建立、且**不出现** S12-03 的
   `failure_looks_like`(app 里人人 READY 而 switch 里谁都不存在)。
-- **T6.10(新)** W7 合入后:events.md 十行缺口关闭 + 为新事件补**最小断言**——优先挂进既有 case 的
-  SSE grep(如 CALL_RECORDING_* 挂 S4-04、SYSTEM_LINK 挂 S12-03、BOT_SESSION_* 挂 S1-01/S2-01),
-  而非新建 10 个 case;PARTY_DIALING/CALL_USER_DATA 若无既有挂点再单独起草。
+- **T6.10(新;2026-08-25 按 W7 收官后的实际清单改写)** W7 合入后为新事件补**最小断言**。
+  **原则不变**:优先挂进既有 case 的 SSE grep,**不为此新建十条 case**。
+  **⚠ 原文的清单已经作废** —— 它写于零生产者还有十个的时候,而 W7 收官后:
+  ```
+  BOT_SESSION_ENDED / BOT_INTERRUPTED   已从契约删除     ← 不必断言,断言就是错的
+  DEVICE_IN_SERVICE                     已改名 DEVICE_REACHABLE,并新增 DEVICE_UNREACHABLE
+  CALL_USER_DATA                        不但有了生产者,还多了 PATCH 与呼入随路数据两个入口
+  BOT_SESSION_STARTED                   保留(它是 bot 那半唯一说了别处没说的话的事件)
+  ```
+  **今天的实情:契约 32 个类型,其中 10 个没有任何 case 提到过**(逐个 grep `ledger.yaml` 得到):
+  ```
+  今年八月新接线 / 改名的(T6.10 的正题)
+    PARTY_DIALING            W7③ 08-23 接线
+    CALL_RECORDING_STARTED   W7① 08-23 接线
+    CALL_RECORDING_STOPPED   W7① 08-23 接线
+    SYSTEM_LINK              W7③c 08-23 接线
+    CALL_USER_DATA           C42② 08-25 接线
+    DEVICE_REACHABLE         W7② 08-25 由 DEVICE_IN_SERVICE 改名
+    BOT_SESSION_STARTED      W7④ 08-25 接线
+  一直有生产者、只是从没有 case 点过名(既有缺口,顺带记下,不是 T6.10 的活)
+    PARTY_RELEASED  PARTY_CHANGED  CALL_CDR
+  ```
+  **挂点**:
+  ```
+  CALL_RECORDING_STARTED/STOPPED  → VC-S4-04(录音)
+  SYSTEM_LINK                     → VC-S12-03(ESL 断连重连)
+  BOT_SESSION_STARTED             → VC-S1-01 / VC-S2-01(AI 通话)
+  PARTY_DIALING                   → 任一分机互拨 case(它是发起腿的第一条事件)
+  DEVICE_REACHABLE                → VC-S13-05,见下
+  CALL_USER_DATA                  → 无既有挂点,单独起草(需要一个写入动作:
+                                    PATCH /calls/{id}/user-data,或带 X-AICC-UD-* 的呼入)
+  ```
+  **VC-S13-05 的 expect 必须改写,这是 T6.10 最具体的一件事。** 它现在的 PASS 判词写着
+  *"DEVICE_REGISTERED 仍为 0,与预期一致(恢复走 IN_SERVICE,分工留给 W7)"* ——
+  **W7 已经把这件分工做完**:`DEVICE_IN_SERVICE` 不存在了,注册恢复发 `DEVICE_REGISTERED`、
+  ping 恢复发 `DEVICE_REACHABLE`、注册消失发 `DEVICE_UNREGISTERED`、ping 断发 `DEVICE_UNREACHABLE`。
+  **证据 2026-08-25 已现场取得**:`flush_inbound_reg 1002` → 管理员 SSE 收到 `DEVICE_UNREGISTERED`;
+  话机三分半后自行重注册 → `DEVICE_REGISTERED`(**该类型自契约写下以来第一次出现在流上**)。
+  **三条今天已有现场证据,起草时应引用而不是重跑**:
+  ```
+  BOT_SESSION_STARTED   真 qwen 通话,载荷带 flowId,且排在两条 PARTY_ESTABLISHED 之后(见 W7④ 条目)
+  DEVICE_REGISTERED     见上
+  CALL_USER_DATA        呼入随路数据全链:X-AICC-UD-* → /api/v1/calls → cdrs.user_data(见 C42④)
+  ```
+  **仍需真机的**:`CALL_RECORDING_*`、`SYSTEM_LINK`、`PARTY_DIALING`、`DEVICE_REACHABLE`,
+  以及 `CALL_USER_DATA` 的 PATCH 入口。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
