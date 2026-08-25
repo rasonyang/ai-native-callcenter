@@ -818,6 +818,105 @@ func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
 	})
 }
 
+// A patch either lands whole or leaves no trace. Half-applied business data is
+// the state this product refuses everywhere else — a screen showing part of a
+// customer's details, and a client that was told the write worked.
+func TestARefusedPatchWritesNothingAndAnnouncesNothing(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	ctx := t.Context()
+	minted := uuid.New()
+	vars := map[string]string{"variable_aicc_call_id": minted.String()}
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": "caller-chan"})))
+	waitFor(t, func() bool { return pub.has(events.TypePartyChanged) })
+
+	// One key short of full.
+	seed := map[string]any{}
+	for i := range UserDataMaxKeys - 1 {
+		seed[fmt.Sprintf("seed%02d", i)] = "v"
+	}
+	if _, _, err := c.PatchUserData(minted, testAgentID, seed); err != nil {
+		t.Fatal(err)
+	}
+	before, err := registry.Snapshot(minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub.reset()
+
+	// Three keys wanting the one remaining place.
+	_, change, err := c.PatchUserData(minted, testAgentID,
+		map[string]any{"alpha": "a", "mike": "m", "zulu": "z"})
+	if !errors.Is(err, ErrUserDataWouldNotFit) {
+		t.Fatalf("err = %v, want ErrUserDataWouldNotFit", err)
+	}
+	// The two that were over the line, not all three. Nothing was written —
+	// the answer says so — but what a client needs back is which keys to give
+	// up for the retry to work, and alpha is not one of them: there was room
+	// for it, and there will be again.
+	if !slices.Equal(change.Dropped, []string{"mike", "zulu"}) {
+		t.Errorf("Dropped = %v, want the two that would not fit", change.Dropped)
+	}
+
+	after, err := registry.Snapshot(minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(before.UserData, after.UserData) {
+		t.Errorf("the call's data changed under a refused patch:\n before %v\n after  %v",
+			before.UserData, after.UserData)
+	}
+	if ev, _, ok := pub.find(events.TypeCallUserData); ok {
+		t.Errorf("a refused patch announced %v", ev.Payload)
+	}
+
+	// One key for the one place is a different answer.
+	result, change, err := c.PatchUserData(minted, testAgentID, map[string]any{"alpha": "a"})
+	if err != nil {
+		t.Fatalf("the last free place was refused: %v", err)
+	}
+	if result["alpha"] != "a" || len(result) != UserDataMaxKeys {
+		t.Errorf("result has %d keys and alpha=%v", len(result), result["alpha"])
+	}
+	if !slices.Equal(change.Changed, []string{"alpha"}) {
+		t.Errorf("Changed = %v", change.Changed)
+	}
+	if !pub.has(events.TypeCallUserData) {
+		t.Error("a patch that landed was not announced")
+	}
+}
+
+// A call id in a path is not authority on its own, so the membership check and
+// the write are one visit to the actor: split, an agent whose leg ended in
+// between would write to a call they had already left.
+func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	ctx := t.Context()
+	minted := uuid.New()
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound",
+		map[string]string{"variable_aicc_call_id": minted.String()}))
+
+	// Nobody has been connected to this call yet, so nobody is on it.
+	if _, _, err := c.PatchUserData(minted, testAgentID, map[string]any{"orderId": "A"}); !errors.Is(err, ErrNotCallParty) {
+		t.Errorf("err = %v, want ErrNotCallParty", err)
+	}
+	if _, _, err := c.PatchUserData(uuid.New(), testAgentID, map[string]any{"orderId": "A"}); !errors.Is(err, ErrCallNotFound) {
+		t.Errorf("err = %v, want ErrCallNotFound for a call that does not exist", err)
+	}
+	if ev, _, ok := pub.find(events.TypeCallUserData); ok {
+		t.Errorf("a refused write announced %v", ev.Payload)
+	}
+}
+
 // capturingPublisher keeps what was published and under which scope.
 type capturingPublisher struct {
 	mu     sync.Mutex

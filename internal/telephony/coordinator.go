@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/google/uuid"
@@ -42,8 +44,11 @@ type AgentLookup interface {
 // Errors returned by call operations.
 var (
 	ErrNotCallParty = errors.New("not a party to this call")
-	ErrNoAgentLeg   = errors.New("no agent leg on this call")
-	ErrInvalidDTMF  = errors.New("not a DTMF sequence")
+	// ErrUserDataWouldNotFit says a patch was refused whole rather than partly
+	// applied: the call has no room left for the keys it wanted to add.
+	ErrUserDataWouldNotFit = errors.New("the call has no room for this business data")
+	ErrNoAgentLeg          = errors.New("no agent leg on this call")
+	ErrInvalidDTMF         = errors.New("not a DTMF sequence")
 	// ErrNotForCallType reports an operation this kind of call does not offer.
 	// One extension calling another is two people on a line, not a call being
 	// handled: there is no third party to pass it to and no queue to put it
@@ -1008,6 +1013,39 @@ func (c *Coordinator) SendDTMF(ctx context.Context, callID, agentID uuid.UUID, d
 		return ErrNotCallParty
 	}
 	return c.adapter.SendDTMF(farEnd, digits)
+}
+
+// PatchUserData merges business data into a call an agent is on, and reports
+// the result along with what moved.
+//
+// The membership check and the patch are one visit to the actor. Split, an
+// agent whose leg ended in between would write to a call they had already left
+// — and the check is the whole of the authority here, because a call id in a
+// path is not one.
+func (c *Coordinator) PatchUserData(callID, agentID uuid.UUID, patch map[string]any) (
+	map[string]any, UserDataChange, error) {
+
+	var (
+		result map[string]any
+		change UserDataChange
+		opErr  error
+	)
+	if err := c.registry.do(callID, func(a *actor) {
+		if !slices.Contains(a.call.AgentIDs(), agentID) {
+			opErr = ErrNotCallParty
+			return
+		}
+		if change, opErr = a.patchUserData(patch); opErr != nil {
+			return
+		}
+		result = maps.Clone(a.call.UserData)
+	}); err != nil {
+		return nil, UserDataChange{}, err
+	}
+	if opErr != nil {
+		return nil, change, opErr
+	}
+	return result, change, nil
 }
 
 // isDTMF reports whether every character is a tone the DTMF alphabet has.

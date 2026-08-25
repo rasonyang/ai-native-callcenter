@@ -1043,8 +1043,8 @@ type CreateCallRequest struct {
 	// To The number to dial.
 	To string `json:"to"`
 
-	// UserData Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch.
-	UserData *map[string]string `json:"userData,omitempty"`
+	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	UserData *UserData `json:"userData,omitempty"`
 }
 
 // CreateCallRequestKind defines model for CreateCallRequest.Kind.
@@ -1156,8 +1156,8 @@ type DialRequest struct {
 	// Destination The number to call once the agent's own leg answers.
 	Destination string `json:"destination"`
 
-	// UserData Business data to attach to the call, on the same terms as POST /calls: flat key/value, values strings, at most 32 keys and 1024 bytes of UTF-8 each, 400 USER_DATA_TOO_LARGE over either limit rather than truncated. Omitted and {} mean the same thing. It never reaches the switch.
-	UserData *map[string]string `json:"userData,omitempty"`
+	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	UserData *UserData `json:"userData,omitempty"`
 }
 
 // DialResponse defines model for DialResponse.
@@ -1401,6 +1401,12 @@ type PartyState string
 // PasswordReset A password an administrator sets on somebody else's account. Every session opened with the old one is revoked, so a reset ends access rather than merely changing what would work next time.
 type PasswordReset struct {
 	Password string `json:"password"`
+}
+
+// PatchUserDataRequest defines model for PatchUserDataRequest.
+type PatchUserDataRequest struct {
+	// UserData An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
+	UserData UserDataPatch `json:"userData"`
 }
 
 // Presence One agent's presence. enteredAt is when this state began, which for WRAP_UP is when the call ended — after-call work has no deadline, it ends when the agent files it.
@@ -1789,6 +1795,21 @@ type UserCreate struct {
 	Username string `json:"username"`
 }
 
+// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+type UserData map[string]string
+
+// UserDataPatch An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
+type UserDataPatch map[string]*string
+
+// UserDataResponse The call's business data after the patch, and what the patch moved. The lists are sorted and name movement only: a key set to the value it already held appears in neither.
+type UserDataResponse struct {
+	ChangedKeys []string `json:"changedKeys"`
+	DeletedKeys []string `json:"deletedKeys"`
+
+	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	UserData UserData `json:"userData"`
+}
+
 // UserList defines model for UserList.
 type UserList struct {
 	Items []User `json:"items"`
@@ -2031,6 +2052,9 @@ type SendCallDTMFJSONRequestBody = DTMFRequest
 // TransferCallJSONRequestBody defines body for TransferCall for application/json ContentType.
 type TransferCallJSONRequestBody = TransferRequest
 
+// PatchUserDataJSONRequestBody defines body for PatchUserData for application/json ContentType.
+type PatchUserDataJSONRequestBody = PatchUserDataRequest
+
 // CreateContactJSONRequestBody defines body for CreateContact for application/json ContentType.
 type CreateContactJSONRequestBody = ContactWrite
 
@@ -2189,6 +2213,9 @@ type ServerInterface interface {
 	// UnmuteCall Unmute the agent's own microphone
 	// (POST /calls/{callId}/unmute)
 	UnmuteCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// PatchUserData Attach business data to a live call
+	// (PATCH /calls/{callId}/user-data)
+	PatchUserData(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
 	// ListCDRs Page the ledger
 	// (GET /cdrs)
 	ListCDRs(w http.ResponseWriter, r *http.Request, params ListCDRsParams)
@@ -2531,6 +2558,12 @@ func (_ Unimplemented) TransferCall(w http.ResponseWriter, r *http.Request, call
 // UnmuteCall Unmute the agent's own microphone
 // (POST /calls/{callId}/unmute)
 func (_ Unimplemented) UnmuteCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PatchUserData Attach business data to a live call
+// (PATCH /calls/{callId}/user-data)
+func (_ Unimplemented) PatchUserData(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3646,6 +3679,32 @@ func (siw *ServerInterfaceWrapper) UnmuteCall(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UnmuteCall(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchUserData operation middleware
+func (siw *ServerInterfaceWrapper) PatchUserData(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callId" -------------
+	var callID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callId", chi.URLParam(r, "callId"), &callID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchUserData(w, r, callID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5157,6 +5216,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/unmute", wrapper.UnmuteCall)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/calls/{callId}/user-data", wrapper.PatchUserData)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cdrs", wrapper.ListCDRs)

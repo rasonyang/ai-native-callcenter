@@ -209,6 +209,11 @@ func (s *Server) router() chi.Router {
 						call.Post("/calls/{callId}/hangup", op.HangupCall)
 						call.Post("/calls/{callId}/transfer", op.TransferCall)
 						call.Post("/calls/{callId}/dtmf", op.SendCallDTMF)
+						// Business data is the agent's to attach as well:
+						// they are the one who learns the order number while
+						// talking, and a system integrating with this rides
+						// such a session.
+						call.Patch("/calls/{callId}/user-data", op.PatchUserData)
 					})
 					private.With(requireSupervisorRole).Get("/calls", op.ListCalls)
 				}

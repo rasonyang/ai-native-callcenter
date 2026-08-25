@@ -446,8 +446,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      **1. 限额下沉**【已做 2026-08-25】—— 见下条。
      **2. `CALL_USER_DATA` 接上现有两个 merge 点**【已做 2026-08-25】—— 见下条。零生产者 5 → 4
      (余 `BOT_SESSION_STARTED/INTERRUPTED/ENDED` 三个与 `DEVICE_REGISTERED`)。
-     **3. `PATCH /calls/{callId}/user-data`** —— 外部系统与坐席的入口;同批把 `userData` 抽成
-     契约共享组件(现在 `CreateCallRequest` 与 `DialRequest` 各写一份,靠散文交叉引用而非 `$ref`)。
+     **3. `PATCH /calls/{callId}/user-data`**【已做 2026-08-25】—— 见下条。
      **4. 呼入随路数据** —— `aicc_ud_*` 通道变量 / `X-AICC-UD-*` SIP 头。
      两个命名空间都是现成的(`aicc_call_id`/`aicc_did`/`aicc_language`/`aicc_extension` 已在用;
      `X-AICC-*` 五个头由 `aicc_inbound.lua:80-86` 设)。
@@ -514,6 +513,36 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **未做现场验证**:要真在通话里看见这条事件,得先有第 3 步的写入端点或第 4 步的呼入随路数据;
   本次的证明是穿过协调器、用真实交换机事件驱动的单测(含并单的两个分支)。
   零生产者 **5 → 4**(余 `BOT_SESSION_STARTED/INTERRUPTED/ENDED` 三个与 `DEVICE_REGISTERED`)。
+
+- **C42 第 3 步:`PATCH /calls/{callId}/user-data` + `userData` 抽成契约共享组件** **【已完成 2026-08-25】** ——
+  通话中才知道的事需要一个入口:后端在电话到达之后才解析出的订单号、坐席边说边开的工单。
+  形状取自血缘参考(`cti-server` 的 `PATCH /v1/calls/{callID}/user-data` → `EventAttachedDataChanged`),
+  **取语义不取 token**。RFC 7386:值替换、`null` 删除、没提到的键不动。
+  **整份落地或一份都不落地 —— 本次唯一真正的取舍。** 第 1 步定的规矩是"能被答复的调用方就答复它",
+  而 PATCH 恰恰有个客户端在等回话。若照第 1 步的丢弃语义走,这会成为**全产品唯一一个半落地的写** ——
+  客户端收到 200、向上游报告成功,而部分状态就这样传播出去。故新增 `Call.planUserDataMerge`
+  (只算不改)与 actor 上的 `patchUserData`:**先读方案,放不下就原样不动、什么也不发**,答 409。
+  拆出 plan 还有个好处:合并里"删除→替换→字典序新增"那套顺序只有一处实现,
+  `MergeUserData` 变成"plan 然后照 plan 施工"六行,严格与宽松两条路共用同一套判断。
+  **400 与 409 的分工**:能脱离这通电话判断的(单值超长、补丁本身超过 32 键)由 handler 先拒,
+  400 且一个字节不写;**只有"这一通电话还有没有位置"要看状态**,那是 409。
+  `params.wouldNotFit` **只列真正越界的那几个键**,不是客户端发来的全部 —— 客户端要的是
+  "去掉哪几个再试就能成",把有位置的那个也列进去等于让它去找一个不存在的问题(用例钉住)。
+  **权限**:挂在 `requireAgentRole` 组内,且**必须是这通电话的当事人** ——
+  成员判定与写入是**同一次 actor 访问**:拆开的话,腿在这中间结束的坐席就能写进一通他已经离开的电话;
+  路径里的 call id 从来不构成授权。外部系统暂时借坐席/服务会话接入(已写进契约描述)。
+  **契约共享组件**(顺带关掉端点评审的发现①):`UserData`(值为字符串)与 `UserDataPatch`
+  (值为 `["string","null"]`,RFC 7386 的删除)各一份定义,`CreateCallRequest` / `DialRequest` /
+  `PatchUserDataRequest` 一律 `$ref`。此前那两处**各写一份 32/1024,靠散文交叉引用**
+  (*"on the same terms as POST /calls"*)—— 改一处漏一处编译不会响。
+  `oapi-codegen` 对 3.1 的可空 map 生成 `map[string]*string`,**正是要的**:
+  JSON 的 `null` 与"没提这个键"是两条不同指令,只有指针分得开(用例钉住 `""` 是值、`null` 才是删)。
+  **`make api-breaking BASE=main` 干净**(新增操作,无破坏性变更)。
+  **现场实测**(真机、真登录会话):不存在的通话 → `404 CALL_NOT_FOUND`;
+  1025 字节的值 → `400 USER_DATA_TOO_LARGE`;33 个键 → `400`。
+  200 与 409 两条路要真通话才走得到,由穿过协调器的单测覆盖(含"被拒的补丁一个字节没改、一条事件没发")。
+  **顺带**:PATCH 天然进审计流(`isMutating` 含 PATCH),于是"谁给哪通电话挂了什么业务数据"有据可查 ——
+  这正是审计要记的东西,不作任何屏蔽(业务数据不是凭据)。
 - **`settings` 死表(§补充的唯一残留)** **【已决并完成 2026-08-24 `00022`】** —— **删表 + 顺手把保留期做了**。
   `settings` 是 key/value 表,0 行、**没有任何 Go/Lua/sqlc 查询碰它**。而本仓的配置答案早已定下:
   `AICC_*` 环境变量、`.env.example` 是唯一登记册(49 条,CLAUDE.md 明文要求与 `config.go` 同步)。

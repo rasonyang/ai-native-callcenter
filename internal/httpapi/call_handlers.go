@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -36,6 +37,121 @@ type CallService interface {
 	// AllWaitingCalls is the same view across every queue, for whoever
 	// watches the whole floor rather than working one line of it.
 	AllWaitingCalls() []telephony.WaitingCall
+	// PatchUserData merges business data into a live call and answers with
+	// the result and what moved. All of the patch lands or none of it does.
+	PatchUserData(callID, agentID uuid.UUID, patch map[string]any) (
+		map[string]any, telephony.UserDataChange, error)
+}
+
+// PatchUserData attaches business data to a call that is already running.
+//
+// The order number a backend resolved after the call arrived, the case the
+// agent opened while talking: things nobody could have known when the call was
+// placed, which is the only reason this exists separately from the userData
+// the two dial endpoints already take.
+//
+// RFC 7386, so null removes a key. That is why the patch's values are
+// *string here and plain strings on the way in: a JSON null and an absent key
+// are different instructions, and only a pointer can tell them apart.
+func (s *Server) PatchUserData(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	agentID, ok := s.agentIDFor(w, r)
+	if !ok {
+		return
+	}
+	var req api.PatchUserDataRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	// The shape of the patch is refused here, where refusing costs nothing and
+	// the answer is exact: a value too long, or more keys than a call may hold
+	// at all. What cannot be judged without the call — whether *this* call has
+	// room — is the merge's to refuse, and it does so without writing.
+	if err := checkUserDataPatch(req.UserData); err != nil {
+		writeError(w, http.StatusBadRequest, CodeUserDataTooLarge, err.Error(),
+			map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
+		return
+	}
+
+	patch := make(map[string]any, len(req.UserData))
+	for k, v := range req.UserData {
+		if v == nil {
+			patch[k] = nil
+			continue
+		}
+		patch[k] = *v
+	}
+
+	result, change, err := s.calls.PatchUserData(callID, agentID, patch)
+	switch {
+	case err == nil:
+	case errors.Is(err, telephony.ErrCallNotFound):
+		writeError(w, http.StatusNotFound, CodeCallNotFound, "no such call", nil)
+		return
+	case errors.Is(err, telephony.ErrNotCallParty):
+		writeError(w, http.StatusForbidden, CodeNotCallParty, "you are not on this call", nil)
+		return
+	case errors.Is(err, telephony.ErrUserDataWouldNotFit):
+		// wouldNotFit names the keys that were over the line, which is what a
+		// client needs to build a retry that works — not every key it sent.
+		// Nothing was written either way, and the message says so.
+		writeError(w, http.StatusConflict, CodeUserDataTooLarge,
+			"this call has no room for all of these keys, and none of them were written",
+			map[string]any{"maxKeys": userDataMaxKeys, "wouldNotFit": change.Dropped})
+		return
+	default:
+		slog.ErrorContext(r.Context(), "patching business data failed", "error", err, "callId", callID)
+		writeError(w, http.StatusInternalServerError, CodeInternal, "could not attach the business data", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, api.UserDataResponse{
+		UserData:    userDataForWire(result),
+		ChangedKeys: emptyIfNil(change.Changed),
+		DeletedKeys: emptyIfNil(change.Deleted),
+	})
+}
+
+// userDataForWire narrows the call's map to the contract's shape. Values are
+// strings by contract and by every path that writes them; anything else could
+// only come from a future writer that broke that rule, and rendering it with
+// %v here would let it out onto the wire looking legitimate.
+func userDataForWire(data map[string]any) api.UserData {
+	out := make(api.UserData, len(data))
+	for k, v := range data {
+		if s, ok := v.(string); ok {
+			out[k] = s
+		}
+	}
+	return out
+}
+
+// emptyIfNil keeps a required array out of the response as [] rather than
+// null: the contract says the field is always there, and a client iterating it
+// should not have to check.
+func emptyIfNil(keys []string) []string {
+	if keys == nil {
+		return []string{}
+	}
+	return keys
+}
+
+// checkUserDataPatch applies the same bounds as checkUserData to a patch,
+// where a null value is a deletion rather than a value to measure.
+func checkUserDataPatch(patch api.UserDataPatch) error {
+	if len(patch) > userDataMaxKeys {
+		return fmt.Errorf("userData has %d keys, at most %d are accepted",
+			len(patch), userDataMaxKeys)
+	}
+	for k, v := range patch {
+		if v == nil {
+			continue
+		}
+		if len(*v) > userDataMaxValueBytes {
+			return fmt.Errorf("userData[%q] is %d bytes, at most %d are accepted",
+				k, len(*v), userDataMaxValueBytes)
+		}
+	}
+	return nil
 }
 
 // ListMyCalls lists the calls the caller is currently a party to.

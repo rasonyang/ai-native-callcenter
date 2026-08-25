@@ -468,26 +468,38 @@ func (c *Call) MergeUserData(patch map[string]any) UserDataChange {
 	if c.UserData == nil {
 		c.UserData = map[string]any{}
 	}
-	var out UserDataChange
-
-	// Deletions first: they cost nothing and can only make room.
-	for k, v := range patch {
-		if v != nil {
-			continue
-		}
-		if _, ok := c.UserData[k]; ok {
-			delete(c.UserData, k)
-			out.Deleted = append(out.Deleted, k)
-		}
+	plan := c.planUserDataMerge(patch)
+	for _, k := range plan.Deleted {
+		delete(c.UserData, k)
 	}
+	for _, k := range plan.Changed {
+		c.UserData[k] = patch[k]
+	}
+	return plan
+}
+
+// planUserDataMerge works out what a patch would do without doing it.
+//
+// Split out so that a caller who must refuse rather than partly apply — a
+// request with somebody waiting on the answer — can ask first and leave the
+// call untouched. Deciding and doing in one pass would leave that caller with
+// only two options, both wrong: apply and then report the loss, or unpick a
+// map it has already changed.
+func (c *Call) planUserDataMerge(patch map[string]any) UserDataChange {
+	var plan UserDataChange
+	room := UserDataMaxKeys - len(c.UserData)
 
 	var additions []string
 	for k, v := range patch {
 		if v == nil {
+			if _, ok := c.UserData[k]; ok {
+				plan.Deleted = append(plan.Deleted, k)
+				room++
+			}
 			continue
 		}
 		if size, ok := userDataValueSize(v); !ok || size > UserDataMaxValueBytes {
-			out.Dropped = append(out.Dropped, k)
+			plan.Dropped = append(plan.Dropped, k)
 			continue
 		}
 		old, exists := c.UserData[k]
@@ -498,25 +510,24 @@ func (c *Call) MergeUserData(patch map[string]any) UserDataChange {
 		// A replacement keeps its place in the map, so it needs no room; it
 		// only needs to be saying something new.
 		if !sameUserDataValue(old, v) {
-			c.UserData[k] = v
-			out.Changed = append(out.Changed, k)
+			plan.Changed = append(plan.Changed, k)
 		}
 	}
 
 	slices.Sort(additions)
 	for _, k := range additions {
-		if len(c.UserData) >= UserDataMaxKeys {
-			out.Dropped = append(out.Dropped, k)
+		if room <= 0 {
+			plan.Dropped = append(plan.Dropped, k)
 			continue
 		}
-		c.UserData[k] = patch[k]
-		out.Changed = append(out.Changed, k)
+		plan.Changed = append(plan.Changed, k)
+		room--
 	}
 
-	slices.Sort(out.Changed)
-	slices.Sort(out.Deleted)
-	slices.Sort(out.Dropped)
-	return out
+	slices.Sort(plan.Changed)
+	slices.Sort(plan.Deleted)
+	slices.Sort(plan.Dropped)
+	return plan
 }
 
 // userDataValueSize measures a value the way the bound is written: in bytes,

@@ -1291,6 +1291,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calls/{callId}/user-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Attach business data to a live call
+         * @description Merges business data into a call that is already running — an order number a backend resolved after the call arrived, a case the agent opened while talking. RFC 7386 semantics: a value replaces the key, null removes it, keys the patch does not mention are left alone. Requires the AGENT role and being a party to the call; a system integrating with this rides such a session. The whole patch applies or none of it does: if it would take the call past 32 keys the call is left exactly as it was and the answer is 409, naming the keys that would not fit. Data that moved is announced to everyone on the call as CALL_USER_DATA.
+         */
+        patch: operations["patchUserData"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1611,10 +1631,7 @@ export interface components {
         DialRequest: {
             /** @description The number to call once the agent's own leg answers. */
             destination: string;
-            /** @description Business data to attach to the call, on the same terms as POST /calls: flat key/value, values strings, at most 32 keys and 1024 bytes of UTF-8 each, 400 USER_DATA_TOO_LARGE over either limit rather than truncated. Omitted and {} mean the same thing. It never reaches the switch. */
-            userData?: {
-                [key: string]: string;
-            };
+            userData?: components["schemas"]["UserData"];
         };
         DialResponse: {
             /** Format: uuid */
@@ -1635,10 +1652,7 @@ export interface components {
             did?: string;
             /** @description Overrides the DID's language when set. */
             language?: string;
-            /** @description Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch. */
-            userData?: {
-                [key: string]: string;
-            };
+            userData?: components["schemas"]["UserData"];
         };
         CreateCallResponse: {
             /** Format: uuid */
@@ -1902,6 +1916,23 @@ export interface components {
         FlowPublish: {
             /** @description Why this revision was published; kept with the snapshot. */
             note?: string;
+        };
+        /** @description Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch. */
+        UserData: {
+            [key: string]: string;
+        };
+        /** @description An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied. */
+        UserDataPatch: {
+            [key: string]: string | null;
+        };
+        PatchUserDataRequest: {
+            userData: components["schemas"]["UserDataPatch"];
+        };
+        /** @description The call's business data after the patch, and what the patch moved. The lists are sorted and name movement only: a key set to the value it already held appears in neither. */
+        UserDataResponse: {
+            userData: components["schemas"]["UserData"];
+            changedKeys: string[];
+            deletedKeys: string[];
         };
         /**
          * @description How the call concluded. There is no MISSED status: abandonment is a missedReason on an ANSWERED row, because the bot answered first.
@@ -4647,6 +4678,38 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    patchUserData: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                callId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchUserDataRequest"];
+            };
+        };
+        responses: {
+            /** @description The call’s business data after the patch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserDataResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
         };
     };

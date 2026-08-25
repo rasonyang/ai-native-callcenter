@@ -299,6 +299,10 @@ func (stubCalls) WaitingCalls([]uuid.UUID) []telephony.WaitingCall {
 	return nil
 }
 func (stubCalls) AllWaitingCalls() []telephony.WaitingCall { return nil }
+func (stubCalls) PatchUserData(uuid.UUID, uuid.UUID, map[string]any) (
+	map[string]any, telephony.UserDataChange, error) {
+	return nil, telephony.UserDataChange{}, telephony.ErrCallNotFound
+}
 
 type stubCatalog struct{}
 

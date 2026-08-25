@@ -261,25 +261,40 @@ func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 		return int(f), ok
 	}
 
-	// Both request schemas carry the field today. When they are folded into
-	// one shared UserData component this loop simply has one entry.
-	for _, name := range []string{"CreateCallRequest", "DialRequest"} {
-		userData := dig(doc, "components", "schemas", name, "properties", "userData")
+	// One definition each for the two shapes: what a call may be given, and
+	// the patch that changes it. The request schemas $ref these rather than
+	// restating them, which is what stops the numbers drifting apart between
+	// the endpoints as well as away from Go.
+	for _, name := range []string{"UserData", "UserDataPatch"} {
+		userData := dig(doc, "components", "schemas", name)
 		if userData == nil {
-			t.Fatalf("%s has no userData property in the contract", name)
+			t.Fatalf("%s is not a component in the contract", name)
 		}
 		keys, ok := number(dig(userData, "maxProperties"))
 		if !ok {
-			t.Errorf("%s.userData states no maxProperties, so the contract promises no bound at all", name)
+			t.Errorf("%s states no maxProperties, so the contract promises no bound at all", name)
 		} else if keys != telephony.UserDataMaxKeys {
-			t.Errorf("%s.userData allows %d keys, the merge allows %d", name, keys, telephony.UserDataMaxKeys)
+			t.Errorf("%s allows %d keys, the merge allows %d", name, keys, telephony.UserDataMaxKeys)
 		}
 		bytes, ok := number(dig(userData, "additionalProperties", "maxLength"))
 		if !ok {
-			t.Errorf("%s.userData states no value maxLength", name)
+			t.Errorf("%s states no value maxLength", name)
 		} else if bytes != telephony.UserDataMaxValueBytes {
-			t.Errorf("%s.userData allows %d-byte values, the merge allows %d",
+			t.Errorf("%s allows %d-byte values, the merge allows %d",
 				name, bytes, telephony.UserDataMaxValueBytes)
+		}
+	}
+
+	// And the endpoints point at those components rather than carrying their
+	// own copy — the drift this extraction exists to end.
+	for _, ref := range []struct{ schema, want string }{
+		{"CreateCallRequest", "#/components/schemas/UserData"},
+		{"DialRequest", "#/components/schemas/UserData"},
+		{"PatchUserDataRequest", "#/components/schemas/UserDataPatch"},
+	} {
+		got := dig(doc, "components", "schemas", ref.schema, "properties", "userData", "$ref")
+		if got != ref.want {
+			t.Errorf("%s.userData is %v, want a $ref to %s", ref.schema, got, ref.want)
 		}
 	}
 }

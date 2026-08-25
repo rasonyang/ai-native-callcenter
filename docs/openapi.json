@@ -4057,6 +4057,73 @@
           }
         }
       }
+    },
+    "/calls/{callId}/user-data": {
+      "patch": {
+        "operationId": "patchUserData",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Attach business data to a live call",
+        "description": "Merges business data into a call that is already running — an order number a backend resolved after the call arrived, a case the agent opened while talking. RFC 7386 semantics: a value replaces the key, null removes it, keys the patch does not mention are left alone. Requires the AGENT role and being a party to the call; a system integrating with this rides such a session. The whole patch applies or none of it does: if it would take the call past 32 keys the call is left exactly as it was and the answer is 409, naming the keys that would not fit. Data that moved is announced to everyone on the call as CALL_USER_DATA.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchUserDataRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The call’s business data after the patch.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserDataResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5010,13 +5077,7 @@
             "description": "The number to call once the agent's own leg answers."
           },
           "userData": {
-            "type": "object",
-            "description": "Business data to attach to the call, on the same terms as POST /calls: flat key/value, values strings, at most 32 keys and 1024 bytes of UTF-8 each, 400 USER_DATA_TOO_LARGE over either limit rather than truncated. Omitted and {} mean the same thing. It never reaches the switch.",
-            "additionalProperties": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "maxProperties": 32
+            "$ref": "#/components/schemas/UserData"
           }
         },
         "required": [
@@ -5063,13 +5124,7 @@
             "description": "Overrides the DID's language when set."
           },
           "userData": {
-            "type": "object",
-            "description": "Business data to attach to the call, carried to the agent's screen on the event envelope and written to the call's ledger row. Flat key/value only: values are strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated. Omitted and {} mean the same thing: no business data. It never reaches the switch.",
-            "additionalProperties": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "maxProperties": 32
+            "$ref": "#/components/schemas/UserData"
           }
         },
         "required": [
@@ -5785,6 +5840,64 @@
             "description": "Why this revision was published; kept with the snapshot."
           }
         }
+      },
+      "UserData": {
+        "type": "object",
+        "description": "Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.",
+        "additionalProperties": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "maxProperties": 32
+      },
+      "UserDataPatch": {
+        "type": "object",
+        "description": "An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.",
+        "additionalProperties": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 1024
+        },
+        "maxProperties": 32
+      },
+      "PatchUserDataRequest": {
+        "type": "object",
+        "properties": {
+          "userData": {
+            "$ref": "#/components/schemas/UserDataPatch"
+          }
+        },
+        "required": [
+          "userData"
+        ]
+      },
+      "UserDataResponse": {
+        "type": "object",
+        "description": "The call's business data after the patch, and what the patch moved. The lists are sorted and name movement only: a key set to the value it already held appears in neither.",
+        "properties": {
+          "userData": {
+            "$ref": "#/components/schemas/UserData"
+          },
+          "changedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "deletedKeys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "userData",
+          "changedKeys",
+          "deletedKeys"
+        ]
       },
       "CDRStatus": {
         "type": "string",

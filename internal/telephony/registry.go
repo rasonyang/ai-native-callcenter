@@ -501,6 +501,25 @@ func (a *actor) transition(p *Party, trigger PartyTrigger, ev SwitchEvent, event
 }
 
 // publish emits a domain event carrying enough context for a screen pop.
+// patchUserData is mergeUserData for a caller who can be answered.
+//
+// All of the patch lands or none of it does. A request has somebody waiting on
+// the reply, and half-applied business data is the state this product refuses
+// everywhere else: a screen showing part of a customer's details, and a caller
+// who was told it worked. So the plan is read first, and a patch that would
+// not fit whole leaves the call exactly as it was — nothing written, nothing
+// announced — naming the keys that were the problem.
+//
+// The plan is then computed a second time inside the merge. Thirty-two keys
+// twice is not worth a way of applying a plan that could be stale by the time
+// it is applied.
+func (a *actor) patchUserData(patch map[string]any) (UserDataChange, error) {
+	if plan := a.call.planUserDataMerge(patch); len(plan.Dropped) > 0 {
+		return plan, ErrUserDataWouldNotFit
+	}
+	return a.mergeUserData(patch), nil
+}
+
 // mergeUserData applies the patch and tells the call about it.
 //
 // Silent when nothing moved. A merge that sets a key to the value it already
