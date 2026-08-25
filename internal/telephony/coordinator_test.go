@@ -1751,6 +1751,70 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		}
 	})
 
+	// A click-to-dial leg is raised at user/<ext>@domain and the directory
+	// resolves that to the contact the browser registered under, so the
+	// created channel's destination is a registration token — and the token
+	// is rightly refused, which left the event announcing an agent dialling
+	// nobody. Verbatim from the live call in artifacts/C61: wei's leg came up
+	// as sofia/internal/6p2g7hjk@… with wei dialling 1002.
+	t.Run("a call this application placed says what it dialled", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{
+				"variable_dialed_user":      agentExtension,
+				"variable_aicc_destination": "1002",
+				"Caller-Destination-Number": "6p2g7hjk",
+				// Click-to-dial presents the destination on the agent's own
+				// leg so their phone displays who they are calling. Nothing
+				// may read the caller id as the caller here.
+				"Caller-Caller-ID-Number": "1002",
+			}))
+
+		ev, _, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("no PARTY_DIALING")
+		}
+		body, err := json.Marshal(ev.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(body), `"toNumber":"1002"`) {
+			t.Errorf("payload = %s; the destination was the request's own argument "+
+				"and the workbench still was not told it", body)
+		}
+		if got := ev.Payload["fromNumber"]; got != agentExtension {
+			t.Errorf("fromNumber = %v, want %s", got, agentExtension)
+		}
+	})
+
+	// The same event published from the FSM carries role and state
+	// (registry.go transition()); this one did not, so a subscriber reading
+	// payload.state had to know which code path raised its event.
+	t.Run("it is shaped like every other party event", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{"variable_dialed_user": agentExtension}))
+
+		ev, _, ok := pub.find(events.TypePartyDialing)
+		if !ok {
+			t.Fatal("no PARTY_DIALING")
+		}
+		if got := ev.Payload["role"]; got != string(RoleOriginator) {
+			t.Errorf("role = %v, want %s", got, RoleOriginator)
+		}
+		if got := ev.Payload["state"]; got != string(PartyDialing) {
+			t.Errorf("state = %v, want %s", got, PartyDialing)
+		}
+	})
+
 	t.Run("a leg that answers a call is ringing, not dialling", func(t *testing.T) {
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
@@ -1773,6 +1837,94 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 				t.Error("the delivery leg announced itself as dialling; the agent is " +
 					"being rung, not ringing somebody")
 			}
+		}
+	})
+}
+
+// An agent being rung is told who is calling them, and the leg they are being
+// rung on carries the wrong answer twice over: a click-to-dial sets
+// origination_caller_id_number to the destination so the placing agent's phone
+// displays who they are dialling, and the callee's own directory entry puts
+// their effective_caller_id_number on the leg raised towards them. On the live
+// 1008→1002 call in artifacts/C61 both pointed at 1002 and the payload read
+// {"fromNumber":"1002","toNumber":"1002","extensionNumber":"1002"} — the agent
+// being rung was told they were being rung by themselves (C61).
+func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
+	t.Run("the caller is the leg that started the call", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+		minted := uuid.New().String()
+
+		// wei's leg: placed by click-to-dial, so it presents the destination
+		// as its own caller id.
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "outbound",
+			map[string]string{
+				"variable_aicc_call_id":     minted,
+				"variable_dialed_user":      "1008",
+				"variable_aicc_destination": "1002",
+				"Caller-Caller-ID-Number":   "1002",
+			}))
+		// ben's leg, raised towards him: everything on it says 1002.
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{
+				"variable_dialed_user":            agentExtension,
+				"variable_aicc_parent_channel":    "caller-chan",
+				"variable_cc_member_session_uuid": "caller-chan",
+				"Caller-ANI":                      agentExtension,
+				"Caller-Caller-ID-Number":         agentExtension,
+			}))
+
+		ev, _, ok := pub.find(events.TypePartyRinging)
+		if !ok {
+			t.Fatal("the agent was never rung")
+		}
+		if got := ev.Payload["fromNumber"]; got != "1008" {
+			t.Errorf("fromNumber = %v, want 1008 — the agent is being told they are "+
+				"being rung by %v, which is their own number", got, got)
+		}
+	})
+
+	// The delivery-leg case, which is the one a queue actually produces: the
+	// customer waiting in the queue is the call's originator, and their number
+	// is what the agent's screen has to pop with.
+	t.Run("a queue delivery names the customer", func(t *testing.T) {
+		registry := NewRegistry(nullPublisher{})
+		t.Cleanup(registry.Shutdown)
+		pub := &capturingPublisher{}
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "customer-chan", "inbound",
+			map[string]string{
+				"variable_aicc_call_id": uuid.New().String(),
+				"Caller-ANI":            "13800138000",
+			}))
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{
+				"variable_dialed_user":            agentExtension,
+				"variable_cc_member_session_uuid": "customer-chan",
+				"Caller-ANI":                      agentExtension,
+			}))
+
+		ev, _, ok := pub.find(events.TypePartyRinging)
+		if !ok {
+			t.Fatal("the agent was never rung")
+		}
+		if got := ev.Payload["fromNumber"]; got != "13800138000" {
+			t.Errorf("fromNumber = %v, want the customer's number", got)
+		}
+	})
+
+	// The "second leg outran its caller" path: the leg towards the agent
+	// reaches the application before the caller's own leg does, so there is no
+	// originator to ask and the leg's own ANI is all there is.
+	t.Run("with no originator on the books it falls back to the leg", func(t *testing.T) {
+		if got := orNumber("", "13800138000"); got != "13800138000" {
+			t.Errorf("orNumber = %q, want the fallback", got)
+		}
+		if got := orNumber("1008", "1002"); got != "1008" {
+			t.Errorf("orNumber = %q, want the call's own answer", got)
 		}
 	})
 }

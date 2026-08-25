@@ -463,6 +463,24 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 	}
 }
 
+// The agent's leg is raised at user/<ext>@domain, and the directory resolves
+// that to whatever contact their browser registered under — so the created
+// channel's destination is a registration token, and PARTY_DIALING, right to
+// refuse a token as a number, announced an agent dialling nobody. The
+// destination was never in doubt on this path: it is this call's own
+// argument, so it rides the leg rather than being read back off it (C61).
+func TestDialPutsTheNumberItDialledOnTheLeg(t *testing.T) {
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+	if _, err := s.Dial(context.Background(), "1008", "1002", nil, "agent-1008"); err != nil {
+		t.Fatal(err)
+	}
+	if got := sw.lastOriginate().vars["aicc_destination"]; got != "1002" {
+		t.Errorf("aicc_destination = %q, want 1002 — the switch cannot be asked, it "+
+			"only knows the contact token the browser registered under", got)
+	}
+}
+
 // A call nobody answers never reaches the bridge to the bot, and the DID was
 // only stamped there. So an AI outbound that rang out was written down with
 // neither the number dialled nor the number it was dialled from, and an

@@ -456,6 +456,9 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		userData     map[string]any
 		isOriginator bool
 		ownNumber    string
+		// Who the other end will see as the caller. Read off the call, not
+		// off the leg: see the PARTY_RINGING payload below.
+		originatorNumber string
 	)
 
 	err := c.registry.Do(callID, func(call *Call) {
@@ -478,6 +481,9 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
 		isOriginator = p.Role == RoleOriginator
 		ownNumber = p.Number
+		if o := call.Originator(); o != nil {
+			originatorNumber = o.Number
+		}
 	})
 	if err != nil || partyID == uuid.Nil {
 		return
@@ -508,7 +514,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			PartyID:  &partyID,
 			AgentID:  dialingAgent,
 			UserData: userData,
-			Payload:  dialingPayload(ownNumber, ev.DestinationNumber),
+			Payload:  dialingPayload(ownNumber, dialedDestination(ev)),
 		}, scope)
 	}
 
@@ -529,7 +535,26 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 			AgentID:  &agentID,
 			UserData: userData,
 			Payload: map[string]any{
-				"fromNumber": ev.ANI,
+				// The number of the leg that started this call, not the ANI
+				// on the leg being rung. An agent is told who is calling
+				// them, and the leg carries the wrong answer to that in two
+				// different ways at once: a click-to-dial sets
+				// origination_caller_id_number to the *destination* so the
+				// placing agent's phone displays who they are dialling, and
+				// that display value propagates; and the callee's own
+				// directory entry puts their effective_caller_id_number on
+				// the leg raised towards them. On a live 1008→1002 call both
+				// point at 1002, and the payload read
+				// {"fromNumber":"1002","toNumber":"1002",
+				// "extensionNumber":"1002"} — the agent being rung was told
+				// they were being rung by themselves (C61, artifacts/C61).
+				//
+				// The call knows. Its originator is on the books before any
+				// leg towards an agent exists, and its number is the one a
+				// person would answer with. ev.ANI stays as the fallback for
+				// the "second leg outran its caller" path, where there is no
+				// originator to ask yet.
+				"fromNumber": orNumber(originatorNumber, ev.ANI),
 				// The extension the leg was attributed to, not the address the
 				// switch dialled: a browser softphone's destination is the
 				// random contact user it registered under, and telling an
@@ -561,11 +586,43 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 // nothing. Left out, the callee's own number arrives moments later with their
 // leg; sent, it is a wrong answer that looks like a right one.
 func dialingPayload(ownNumber, destination string) map[string]any {
-	payload := map[string]any{"fromNumber": ownNumber}
+	// role and state exactly as transition() renders them (registry.go). A
+	// PARTY_DIALING published from here and one published from the FSM are
+	// the same kind of event, and a subscriber that reads payload.state
+	// should not have to know which code path raised it.
+	payload := map[string]any{
+		"role":       string(RoleOriginator),
+		"state":      string(PartyDialing),
+		"fromNumber": ownNumber,
+	}
 	if isDialledNumber(destination) {
 		payload["toNumber"] = destination
 	}
 	return payload
+}
+
+// dialedDestination is the number a call was placed towards.
+//
+// A leg an agent dials from their own phone carries it where it belongs, in
+// the switch's own destination. A leg *we* raised does not: click-to-dial
+// originates at user/<ext>@domain, the directory resolves that to whatever
+// contact the browser registered under, and the destination on the created
+// channel is a registration token. So the placer says what it dialled, and
+// what it says wins — it is the request's own argument, and nothing the
+// switch does to the dial string can corrupt it.
+func dialedDestination(ev SwitchEvent) string {
+	if placed := ev.Raw.Variable("aicc_destination"); placed != "" {
+		return placed
+	}
+	return ev.DestinationNumber
+}
+
+// orNumber picks the first number that is present.
+func orNumber(preferred, fallback string) string {
+	if preferred != "" {
+		return preferred
+	}
+	return fallback
 }
 
 // isDialledNumber reports whether the switch's destination is something a

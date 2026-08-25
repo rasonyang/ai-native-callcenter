@@ -225,6 +225,18 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
 		// Who placed it: an originated leg carries no directory lookup, so
 		// without this the agent is missing from their own call's record.
 		"aicc_extension": agentExtension,
+		// The number this call is *for*. The switch cannot be asked: a
+		// click-to-dial raises the agent's leg at `user/1008@domain`, the
+		// directory resolves that to the contact the browser registered
+		// under, and the leg is created with Caller-Destination-Number
+		// = "6p2g7hjk" — the registration token, not a number anyone dialled
+		// (measured live, artifacts/C61). PARTY_DIALING is right to refuse a
+		// token, and was therefore announcing an agent dialling nobody. The
+		// destination was never in doubt here — it is the request's own
+		// argument — so it travels with the leg instead of being guessed off
+		// it. A leg an agent dials from their own phone carries the real
+		// number in the usual place and needs none of this.
+		"aicc_destination": destination,
 		// What this call is, decided where the destination is still known:
 		// to the switch every originated leg is simply outbound.
 		"aicc_call_type": callTypeFor(destination),

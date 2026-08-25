@@ -305,42 +305,49 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   改成 marshal 后断 `"deletedKeys":[]`,突变(去掉 `orEmpty`)才终于变红。
   **今天第二次栽在"断在内存值上而不是断在线上"**(第一次是 `escapeOriginateValue`
   那个带空格的 originate 变量,单测全绿而真机全挂)。
-- **C61(new,2026-08-25,由 VC-S15-02 执行发现,未查)**
+- **C61(new,2026-08-25,由 VC-S15-02 执行发现;2026-08-25 当日查清并修复)**
   **`PARTY_DIALING` 的载荷少了 `toNumber`,而且形状与其余 `PARTY_*` 不一致。**
-  真人工 1008→1002 的内部呼叫,主管流上那条事件的载荷是 `{"fromNumber":"1008"}` ——
-  **没有 `toNumber`**,而目的号 `1002` 全是数字、`isDialledNumber` 应当放行。
-  所以**不是判定函数的问题**,是 `PARTY_DIALING` 发出的那一刻
-  `ev.DestinationNumber`(`Caller-Destination-Number`)为空。**为什么为空,未查明。**
-  另:载荷里也没有 `role` / `state`,而 `transition()` 发出的每一条 `PARTY_*` 都带这两样
-  (`payload := map[string]any{"role":…, "state":…}`)—— `PARTY_DIALING` 走的是协调器里
-  另一条 publish 路径(`coordinator.go:504`),两条路径发出的同族事件形状不同。
-  **影响**:坐席工作台拿不到"我正在拨的号",而这正是 `PARTY_DIALING` 存在的用途之一
-  (在对方接起之前就把这通电话显示出来)。
-  **不降低 expect 让用例通过** —— `VC-S15-02` 维持 FAIL,查清再重跑。
-  **【2026-08-25 查证进展:排除两条,另查出一条同族的】**
-  **排除①**:`isDialledNumber` 没问题 —— `1002` 全是数字,该放行。
-  **排除②**:"呼入腿的 `Caller-Destination-Number` 本来就是空的"——**不成立,实测有值**。
-  让交换机给自己发一个 INVITE 造出形状相同的呼入腿:
+  真人 1008→1002 的内部呼叫,主管流上那条事件的载荷是 `{"fromNumber":"1008"}` ——
+  **没有 `toNumber`**,而目的号 `1002` 全是数字。
+  另:载荷里也没有 `role` / `state`,而 `transition()` 发出的每一条 `PARTY_*` 都带这两样。
+  **影响**:坐席工作台拿不到"我正在拨的号",而这正是 `PARTY_DIALING` 存在的用途之一。
+
+  **【查清了。此前记在这里的两条推断都错了,一并更正】**
+  当时写的"排除②:实测呼入腿的 `Caller-Destination-Number` 有值"**量错了对象** ——
+  我用 loopback 造的是一条**呼入**腿,而出问题的那通电话的主叫腿是**呼出**的。
+  应用日志坐实了它是点击拨号:
+  `click-to-dial placed callId=01a038e3-… agentExtension=1008 destination=1002`。
+  当时还写"`aicc_internal` 不设 `origination_caller_id_*`,b 腿本应继承 1008" ——
+  点击拨号根本不走那条路,这句话对这通电话不成立。
+
+  **实测(2026-08-25 20:46,真人 1008→1002 点击拨号,通话中 `uuid_dump`,
+  证据 `docs/verification/artifacts/C61/live-click-to-dial-1008-to-1002.txt`):**
   ```
-  sofia/internal/0000000000@192.168.31.55  dir=inbound
-      Caller-Destination-Number = 1002
-      variable_sip_req_user     = 1002
-      variable_sip_to_user      = 1002
+  a 腿(wei):sofia/internal/6p2g7hjk@a938adlah5pl.invalid   Call-Direction: outbound
+      Caller-Caller-ID-Number = 6p2g7hjk      Caller-ANI = 1002
+  b 腿(ben):sofia/internal/1002@192.168.31.55:55663
+      Caller-ANI = 1002    variable_effective_caller_id_number = 1002
   ```
-  故 `ev.DestinationNumber` 在 `CHANNEL_CREATE` 上**是有值的**,`dialingPayload` 本应带上 `toNumber`。
-  三个 `c.addParty(...)` 调用点传的都是触发它的那个 `ev`,没有第四条路。**为什么落空,仍未查明。**
-  **同族的第三条(新发现)**:同一通电话的 `PARTY_RINGING` 载荷是
-  `{"extensionNumber":"1002","fromNumber":"1002","toNumber":"1002"}` ——
-  **三个字段全是被叫自己的号**,`fromNumber` 本该是主叫 1008。
-  **被响的坐席被告知"是自己在响自己"。**
-  这正是账本里记着、并且**已经为 `PARTY_DIALING` 修过**的那个形状
-  (原文:"②`1002→1008` 报 `{from:1002,to:1002}`(自己的号出现两次)");
-  当时的根因是"照搬了 `PARTY_RINGING` 的号码对",而**`PARTY_RINGING` 自己这一侧看来没修**。
-  `fromNumber` 取的是 `ev.ANI`(`coordinator.go:532`),即被叫腿上的主叫号 ——
-  `aicc_internal` 不设 `origination_caller_id_*`,b 腿本应继承 a 腿的
-  `effective_caller_id_number`(wei 的 directory 里是 1008)。**实际取到 1002,原因未查。**
-  **下一步需要一次真机拨号并同时抓原始 ESL** —— 我用 loopback 造的腿主叫号是 `0000000000`,
-  形状不同,证不了这一条;必须是坐席话机自己发的 INVITE。
+  **根因①(缺 `toNumber`)**:点击拨号的主叫腿是我们 originate 出来的,拨的是
+  `user/1008@domain`,directory 解析成浏览器注册时的 contact —— 建腿那一刻
+  `Caller-Destination-Number` 就是 **`6p2g7hjk`** 这个注册令牌。
+  `isDialledNumber` 拒收令牌是**对的**(账本里"doskp0mj"那条就是它),
+  于是这条事件宣告了"坐席在拨一个不存在的号"。
+  **判定函数没错,取数的地方错了** —— 目的号是这次请求自己的入参,从头到尾没含糊过。
+  **根因②(`PARTY_RINGING` 三个字段全是被叫自己的号)**:被叫腿上 `Caller-ANI` = 1002。
+  这通电话里有**两条**路都指向 1002:点击拨号把 `origination_caller_id_number` 设成了
+  **目的号**(好让主叫坐席的话机显示"我在拨谁"),以及被叫自己 directory 里的
+  `effective_caller_id_number`。**究竟哪一条起的作用没有单独证过**,也不必证 ——
+  修法是不再读这条腿的 ANI。
+
+  **修法(已落)**:
+  ① `outbound.Dial` 随 originate 带上 `aicc_destination=<destination>`;
+     `dialedDestination(ev)` 优先读它,读不到再退回 `Caller-Destination-Number`
+     (坐席自己从话机拨的腿,真号就在那里,不需要这一层)。
+  ② `PARTY_DIALING` 补 `role=ORIGINATOR` / `state=DIALING`,与 `transition()` 逐字一致。
+  ③ `PARTY_RINGING.fromNumber` 改读**这通电话主叫 party 的号**,而不是被叫腿上的 ANI;
+     "第二条腿跑在主叫前面"那条路上还没有主叫 party,保留 `ev.ANI` 兜底。
+  单测四处变异全部转红(含队列派发这条路)。**`VC-S15-02` 待真机重跑改判。**
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
