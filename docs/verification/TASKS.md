@@ -703,9 +703,29 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   前端为什么不从生成物枚举:`openapi-typescript` 只出类型,运行时已被擦除,没有东西可遍历。
   **顺手**:`Extension` 的 `required` 里还留着 W11 删掉的 `kind`,`api-lint` 一直在报这条 warning
   (CLAUDE.md 要求零 warning)。已摘,lint 归零。
-  **未纳入**(仍待 owner):`plan-cdr-anchors.md:185` 记的那个洞 —— 没进过队、也没有坐席腿的
-  `NO_ANSWER`,`missedReason` 为空,账本说不出理由。那是**给词表加值**,与本条"删掉一个多余的值"
-  方向相反,需要先定"未接但没进队"该叫什么,不在本次范围内。
+  ~~**未纳入**(仍待 owner):`plan-cdr-anchors.md:185` 记的那个洞~~
+  **【已决 2026-08-25,owner 选 A:不加值,把边界写明白】**
+  **先查了洞里到底掉进什么,而不是先造词**:171 行,拆开看根本不是一件事 ——
+  ```
+  OUTBOUND  123 行   我们打出去没打通（对方忙 / 没人接 / 我们自己放弃）
+  INTERNAL   25 行   分机之间没接通
+  INBOUND    23 行   ← 只有这些可能算"未接来电"
+     UNALLOCATED_NUMBER  12   打到本部署不服务的号码，无坐席、无 DID、没见过 bot
+     ORIGINATOR_CANCEL   11   有坐席、没进队列 —— 直拨分机，主叫在坐席接起前自己挂了
+  ```
+  **148 行压根没有"未被服务的主叫"。** `missedReason` 回答的是"这位主叫想找人,为什么没找到",
+  五个现有值全是**来电排队旅程上的位置**;一通我们打出去的电话不在那条旅程上。
+  它为什么结束,`hangup_cause` 已经说得**更准**(`USER_BUSY` / `NO_ANSWER` / `ORIGINATOR_CANCEL` /
+  `UNALLOCATED_NUMBER`)——**在一个精确的答案旁边放一个含糊的,不是改进**。
+  剩下 23 行来电也不给名字:`UNALLOCATED_NUMBER` 那 12 行呼叫中心没做错任何事、
+  也没有任何队列或坐席参与;`ORIGINATOR_CANCEL` 那 11 行若命名为"主叫挂断",
+  **会和 `SHORT_ABANDONED` / `ABANDONED_WAITING` 撞车** —— 都是"主叫自己走了",
+  **词表里出现两种说同一件事的方式,正是 `DEVICE_IN_SERVICE` 的病根**。
+  **落地**:契约的 `MissedReason` 描述写明这条边界(它只描述一条旅程,不在旅程上的通话该字段**故意缺席**,
+  且**统计未接必须数这个字段,绝不能数 `NO_ANSWER`**);`missedReason()` 末尾那个 `return ""`
+  从"兜底"改成**有注释的裁定**,并由 `TestACallThatNeverSoughtAPersonHasNoMissedReason` 钉住四种形态。
+  **报表无需改动** —— `ReportOverview` / `ReportByQueue` / `ReportDaily` 早就是
+  `missed_reason IN (三个 ABANDONED*)`,本来就没数 `NO_ANSWER`(实测:33 放弃 vs 229 个 `NO_ANSWER`)。
 
 - ~~**W8 trunk(中继号)管理**(§补充 S3)~~ **【已撤销 2026-08-24,owner 直裁;`00021`】**
   **删表 + 只读状态**,而不是管理面。查清的事实:`trunks` 表 0 行、**没有任何 Go/Lua/SQL 读它**、

@@ -233,6 +233,50 @@ func TestTheDurationsMeasureTheCallRatherThanPartitionIt(t *testing.T) {
 	}
 }
 
+// A call that never sought a person has no missed reason, and the silence is
+// the answer.
+//
+// The vocabulary describes one journey — an inbound caller who wanted a person
+// — and an outbound call, a call between two extensions, or an inbound call to
+// a number nobody serves was never on it. Why those ended is the hangup cause,
+// which says it exactly; a second, vaguer answer beside a precise one is not
+// an improvement, and naming a caller who abandoned a direct extension would
+// collide with SHORT_ABANDONED and ABANDONED_WAITING, which already mean the
+// caller left.
+func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		callType events.CallType
+		cause    string
+	}{
+		{"an outbound call to a busy number", events.CallTypeOutbound, "USER_BUSY"},
+		{"an outbound call nobody picked up", events.CallTypeOutbound, "NO_ANSWER"},
+		{"an internal call that ended unanswered", events.CallTypeInternal, "NORMAL_CLEARING"},
+		{"an inbound call to a number nobody serves", events.CallTypeInbound, "UNALLOCATED_NUMBER"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
+				CallID:    uuid.New(),
+				CallType:  tt.callType,
+				CreatedAt: at(0),
+				EndedAt:   atPtr(20),
+				Parties: []PartySnapshot{{
+					Role: RoleOriginator, Number: "13800138000", ChannelID: "chan-a",
+					CreatedAt: at(0), ReleasedAt: atPtr(20), ReleaseCause: tt.cause,
+				}},
+			})
+			if cdr.Status != store.CDRStatusNoAnswer {
+				t.Fatalf("status = %s, want NO_ANSWER", cdr.Status)
+			}
+			if cdr.MissedReason != "" {
+				t.Errorf("missedReason = %q, want none — this caller never sought a "+
+					"person, and %s already says why the call ended",
+					cdr.MissedReason, tt.cause)
+			}
+		})
+	}
+}
+
 // Missed-reason precedence, caller phase first, from recorded facts only.
 func TestMissedReasons(t *testing.T) {
 	agentID := uuid.New()

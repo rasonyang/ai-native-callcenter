@@ -588,6 +588,23 @@ func (a *CDRAssembler) missedReason(snap Snapshot, agentLegs []*PartySnapshot) s
 	if len(agentLegs) > 0 {
 		return MissedAgentsDidNotAnswer
 	}
+	// Nothing, and that is the answer rather than the absence of one (owner
+	// directive 2026-08-25).
+	//
+	// This vocabulary describes one journey: an inbound caller who wanted a
+	// person. A call that never queued and never rang an agent was never on
+	// it — an outbound call this platform placed, a call between two
+	// extensions, an inbound call to a number nobody serves, a caller who hung
+	// up on a direct extension before it was picked up. Of the 171 such rows
+	// in the live ledger, 148 are outbound or internal.
+	//
+	// They did not go unserved; they did not go. Why they ended is the hangup
+	// cause, which says it exactly — USER_BUSY, NO_ANSWER, ORIGINATOR_CANCEL,
+	// UNALLOCATED_NUMBER — and inventing a missedReason for them would put a
+	// second, vaguer answer beside a precise one. Naming the caller who
+	// abandoned a direct extension would be worse still: SHORT_ABANDONED and
+	// ABANDONED_WAITING already mean "the caller left", and a vocabulary with
+	// two ways to say one thing is the defect DEVICE_IN_SERVICE was.
 	return ""
 }
 

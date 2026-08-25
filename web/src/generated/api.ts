@@ -1941,6 +1941,8 @@ export interface components {
         CDRStatus: "ANSWERED" | "NO_ANSWER" | "BUSY" | "FAILED";
         /**
          * @description Why the caller went unserved, decided from recorded facts rather than a hangup cause, caller's own phase first. Absent when the call was not missed — there is no empty member.
+         *
+         *     It describes one journey: an inbound caller who wanted a person. Every value is a place on that journey, so the field is deliberately absent on the calls that were never on it — an outbound call this platform placed, a call between two extensions, and an inbound call that never reached a queue or an agent (a number this deployment does not serve, or a caller who hung up on a direct extension before it was picked up). Those did not go unserved; they did not go. Why they ended is hangupCause, which says it exactly, and a NO_ANSWER row with no missedReason is that and not a gap. Counting missed calls therefore means counting this field, never counting NO_ANSWER.
          * @enum {string}
          */
         MissedReason: "SHORT_ABANDONED" | "ABANDONED_RINGING" | "ABANDONED_WAITING" | "AGENTS_DID_NOT_ANSWER" | "NO_AVAILABLE_AGENT";
