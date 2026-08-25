@@ -309,30 +309,7 @@ func (a *Adapter) Originate(partyID uuid.UUID, endpoint string, vars map[string]
 	for k, v := range vars {
 		all[k] = v
 	}
-	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &park()", renderVars(all), endpoint))
-}
-
-// TrackExternalCall tells mod_callcenter that an agent is busy on a call it
-// did not dispatch, so its queues stop offering them one until this leg ends.
-//
-// The module only knows about calls it placed: for anything else agents.state
-// stays Waiting and a queue will happily ring a phone that is already talking.
-// external_calls_count is the field it keeps for this, and
-// skip-agents-with-external-calls consults it by default; nothing was writing
-// it. callcenter_track owns the increment, the decrement on hangup and the
-// state hook that guarantees it — measured: the count goes 0 → 1 on the
-// broadcast and back to 0 when the leg ends.
-//
-// Broadcast rather than an originate variable, and that is not a style
-// choice. execute_on_answer would need "callcenter_track <name>" inside the
-// originate's {…} block, where a space ends the block — the call then dies
-// before it routes with a Parse Error and DESTINATION_OUT_OF_ORDER, found by
-// trying it. The :: form carries the argument with no space at all.
-//
-// An agent the module does not recognise costs a warning in its log and
-// nothing else, so this never has to be the reason a call fails.
-func (a *Adapter) TrackExternalCall(channelID, callcenterName string) error {
-	return a.exec("uuid_broadcast %s callcenter_track::%s aleg", channelID, callcenterName)
+	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &park()", renderOriginateVars(all), endpoint))
 }
 
 // StartRecording and StopRecording control a call's recording.
@@ -466,6 +443,52 @@ func (a *Adapter) exec(format string, args ...any) error {
 
 // renderVars renders channel variables in the switch's braces syntax, sorted
 // so a command is reproducible and testable.
+// escapeOriginateValue makes one value safe to put inside an originate's {…}
+// block. Every dynamic value goes through it; none is ever concatenated raw.
+//
+// The rules are the switch's, read from separate_string_char_delim: a
+// backslash copies the next character verbatim, a single quote toggles quoting
+// when it has a partner later in the string, and the delimiter only separates
+// outside quotes. So:
+//
+//   - A quote is escaped rather than quoted around. Left alone it would open a
+//     quoted run and swallow the comma that ends the pair.
+//   - A value holding a space, a tab or a comma is wrapped in single quotes.
+//     Unwrapped, the space ends the block: the switch answers Parse Error and
+//     the call dies with DESTINATION_OUT_OF_ORDER before it routes, which is
+//     what shipping "callcenter_track agent-wei" unquoted did.
+//   - Braces are removed, not escaped. The block's extent is found by counting
+//     them before any of this is consulted, so there is no escape that helps —
+//     a stray brace ends the block wherever it appears.
+//   - An empty value becomes ” so the key still arrives. Bare, the pair has
+//     no "=" half to split on and the switch drops it without a word.
+func escapeOriginateValue(v string) string {
+	v = strings.NewReplacer("{", "", "}", "").Replace(v)
+	if v == "" {
+		return "''"
+	}
+	escaped := strings.ReplaceAll(v, "'", `\'`)
+	if strings.ContainsAny(v, " \t,") {
+		return "'" + escaped + "'"
+	}
+	return escaped
+}
+
+// renderOriginateVars renders the block for a raw originate line, escaping
+// every value.
+//
+// Separate from renderVars because only this grammar can be quoted: the
+// inline transfer of BridgeToEndpoint is itself inside single quotes, where an
+// embedded one ends the outer quoting and the remainder runs as an inline
+// application (found live).
+func renderOriginateVars(vars map[string]string) string {
+	escaped := make(map[string]string, len(vars))
+	for k, v := range vars {
+		escaped[k] = escapeOriginateValue(v)
+	}
+	return renderVars(escaped)
+}
+
 func renderVars(vars map[string]string) string {
 	keys := make([]string, 0, len(vars))
 	for k := range vars {
@@ -475,12 +498,13 @@ func renderVars(vars map[string]string) string {
 
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		// Values are joined bare because this block rides in two different
-		// grammars: a raw originate line, where a quoted value would be
-		// legal, and the single-quoted inline transfer of BridgeToEndpoint,
-		// where an embedded quote ends the outer quoting and the remainder
-		// is executed as an inline application (both failure shapes found
-		// live). Callers keep values free of spaces, commas and quotes.
+		// Joined bare. This block rides in two grammars and only one of
+		// them can be quoted: the single-quoted inline transfer of
+		// BridgeToEndpoint, where an embedded quote ends the outer quoting
+		// and the remainder is executed as an inline application (found
+		// live). A raw originate line can quote, and does —
+		// renderOriginateVars wraps this. Callers reaching here keep values
+		// free of spaces, commas and quotes.
 		parts = append(parts, k+"="+vars[k])
 	}
 	return strings.Join(parts, ",")

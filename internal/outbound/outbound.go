@@ -27,9 +27,6 @@ type Switch interface {
 	Originate(partyID uuid.UUID, endpoint string, vars map[string]string) (string, error)
 	BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error
 	TransferToExtension(channelID, extension, context string) error
-	// TrackExternalCall marks an agent busy on a call the queues did not
-	// place, so they stop offering while it lasts.
-	TrackExternalCall(channelID, callcenterName string) error
 	Endpoint(extensionNumber string) string
 }
 
@@ -239,6 +236,26 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
 		"absolute_codec_string": "PCMU",
 	}
 	// Tell mod_callcenter this agent is on a call, so its queues stop offering
+	// them one while it lasts.
+	//
+	// The module only knows about calls it placed: for anything else
+	// agents.state stays Waiting and a queue rings a phone that is already
+	// talking. The phone then says no — 486, which costs a busy delay, or 480
+	// on its slot race, which the module counts as a call the agent failed to
+	// answer. external_calls_count is the field it keeps for exactly this and
+	// skip-agents-with-external-calls reads it by default; nothing was filling
+	// it in. callcenter_track owns the increment, the decrement on hangup and
+	// the state hook behind it — we only have to name the agent.
+	//
+	// On answer rather than on origination: a leg that rang out is not a call
+	// the agent is on, and taking them out of the queues for it would cost
+	// them calls they could have taken. The value has a space in it and is
+	// escaped on the way into the block; an agent the module does not know
+	// costs a warning in its log and nothing else.
+	if callcenterName != "" {
+		vars["execute_on_answer"] = "callcenter_track " + callcenterName
+	}
+	// Tell mod_callcenter this agent is on a call, so its queues stop offering
 	// them one.
 	//
 	// A call the agent placed themselves is invisible to the module: it only
@@ -280,17 +297,6 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
 	}
 
 	s.arm(agentLeg.String(), func() {
-		// The agent is on a call now. Said on answer rather than on
-		// origination: a leg that rang out is not a call they are on, and
-		// taking them out of the queues for it would cost them calls they
-		// could have taken. mod_callcenter puts the count back itself when
-		// this leg ends.
-		if callcenterName != "" {
-			if err := s.sw.TrackExternalCall(agentLeg.String(), callcenterName); err != nil {
-				s.log.Warn("could not tell the switch this agent is on a call",
-					"agent", callcenterName, "callId", callID, "error", err)
-			}
-		}
 		if err := s.sw.TransferToExtension(agentLeg.String(), destination, "aicc"); err != nil {
 			s.log.Error("click-to-dial transfer failed",
 				"callId", callID, "destination", destination, "error", err)

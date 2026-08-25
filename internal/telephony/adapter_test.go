@@ -60,6 +60,67 @@ func newTestAdapter() (*Adapter, *fakeCommander) {
 
 // The exact command strings are the contract with FreeSWITCH: several of them
 // encode failures that are silent at runtime, so they are asserted literally.
+// Every dynamic value entering an originate's {…} block goes through
+// escapeOriginateValue, and nothing is concatenated raw. The rules are the
+// switch's own, read from separate_string_char_delim.
+func TestEscapeOriginateValue(t *testing.T) {
+	// The switch's escape character, spelled once so the table below reads.
+	const BS = "\\"
+
+	tests := []struct {
+		name, in, want string
+	}{
+		{
+			// The ordinary case pays nothing. Quoting everything would work
+			// and would make every command harder to read at 3am.
+			name: "a plain value is left alone",
+			in:   "agent-wei", want: "agent-wei",
+		},
+		{
+			// The one that took production down: unquoted, the space ends the
+			// block and the call dies before it routes.
+			name: "a space is quoted",
+			in:   "callcenter_track agent-wei", want: "'callcenter_track agent-wei'",
+		},
+		{
+			// A comma is the separator between pairs, so an unquoted one
+			// splits a value into a pair that means nothing.
+			name: "a comma is quoted",
+			in:   "PCMU,PCMA", want: "'PCMU,PCMA'",
+		},
+		{
+			// Escaped, not wrapped: a lone quote with a partner later opens a
+			// quoted run and swallows the comma that ends the pair. A
+			// backslash makes the switch copy it verbatim instead.
+			name: "a quote is escaped rather than quoted around",
+			in:   "O'Brien", want: "O" + BS + "'Brien",
+		},
+		{
+			name: "a value with both is quoted and its quote escaped",
+			in:   "Sean O'Brien", want: "'Sean O" + BS + "'Brien'",
+		},
+		{
+			// Bare, the pair has no "=" half to split on and the switch drops
+			// the key without a word. Empty and present beats absent.
+			name: "an empty value still arrives",
+			in:   "", want: "''",
+		},
+		{
+			// Removed, not escaped: the block's extent is found by counting
+			// braces before any of this is consulted, so no escape helps.
+			name: "braces are removed because nothing can escape them",
+			in:   "a{b}c", want: "abc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := escapeOriginateValue(tt.in); got != tt.want {
+				t.Errorf("escapeOriginateValue(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCommandStrings(t *testing.T) {
 	partyID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3d")
 
@@ -138,17 +199,20 @@ func TestCommandStrings(t *testing.T) {
 			want: "uuid_transfer chan-1 'm:^:bridge:{absolute_codec_string=PCMU,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d,sip_h_X-AICC-Call-ID=abc}sofia/gateway/aicc_bot/95011' inline",
 		},
 		{
-			// :: and not a space. "callcenter_track agent-wei" as an
-			// originate variable ends the {…} block at the space: the switch
-			// answers Parse Error and the call dies with
-			// DESTINATION_OUT_OF_ORDER before it routes, which is how the
-			// first version of this was found — every unit test passed,
-			// because they asserted the map and not the line.
-			name: "tracking an external call carries the agent with no space",
+			// A value with a space is single-quoted, or the space ends the
+			// block: the switch answers Parse Error and the call dies with
+			// DESTINATION_OUT_OF_ORDER before it routes. Shipped once,
+			// exactly like this, and every unit test passed because they
+			// asserted the map and not the line.
+			name: "an originate value holding a space is quoted",
 			act: func(a *Adapter) error {
-				return a.TrackExternalCall("chan-1", "agent-wei")
+				_, err := a.Originate(partyID, "user/1008@aicc.test",
+					map[string]string{"execute_on_answer": "callcenter_track agent-wei"})
+				return err
 			},
-			want: "uuid_broadcast chan-1 callcenter_track::agent-wei aleg",
+			want: "originate {execute_on_answer='callcenter_track agent-wei'," +
+				"ignore_early_media=true,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d}" +
+				"user/1008@aicc.test &park()",
 		},
 		{
 			name: "hangup defaults to a normal cause",
