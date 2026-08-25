@@ -459,9 +459,46 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      (`ListQueueMembers` / `ShowChannels` / `LoadPresence` / `OnLost`)。
      摘除验证:只发重连那一半 → 用例报"只宣告了 1 条,两个方向各要一条";
      只会报"回来了"的事件分不清重连与首次启动。零生产者 6 → 5。
-  ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
-  events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
+  ④ ~~BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖,W7 内单独架构评审~~
+  **【已完成 2026-08-25;三个只留一个,owner 定】** 见下条。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
+
+- **W7 ④收官:留 `BOT_SESSION_STARTED`,删另两个,打断改走指标** **【已完成 2026-08-25,owner 定】** ——
+  **"需单独架构评审"这个前提又是失效的(第四次同型)**:`OrchestratorConfig` 里早有
+  `AnnounceCallback func(store.Callback)` —— **"aicall 经回调通知事件流、不引 Hub 依赖"的现成样板**,
+  `wiring.go` 还配了 `callbackPublisher` 这个 hub 窄切片。要评的那个问题,先例已经答了。
+  **三个事件逐个查完,只有一个说了别处没说的话:**
+  **`BOT_SESSION_ENDED` 真冗余** —— bot 腿**是一个 party**(`coordinator.go` 的 `p.IsBotLeg`),
+  它那一半结束时 `PARTY_RELEASED` 就在那一刻发出,**受众完全相同**(该腿无坐席 → 主管与管理员);
+  外加 `CALL_CDR` 带着 `botSec` / `isContained` / `botReason`。再发一个是同一件事说第二遍。
+  **`BOT_INTERRUPTED` 独一份,但事件流不是它该去的地方** —— 见下。
+  **`BOT_SESSION_STARTED` 不冗余,它和 `PARTY_ESTABLISHED` 说的不是一件事**:
+  UAS 回 200 OK、RTP 通 → 交换机看到 bot 腿接通 → `PARTY_ESTABLISHED`;
+  **之后**才建 provider 会话、`session.Start()`。**中间会失败**(`EventTypeFailed` → `rescueCaller()`),
+  而那时从事件流上看,"腿通了对话没起来、主叫被救进队列"和"bot 正常聊两句就转人工"**长得一模一样**;
+  bot 阶段也没有 `CALL_TRANSCRIPTION_STATE`(那个由 `streamin` 驱动,属坐席阶段的媒体旁路)。
+  载荷带 `flowId`(**流程的库内 uuid,不是 spec 里的 slug** —— 那是账本行会带的、
+  flows 管理面用的键,slug 跟过去哪儿也去不了);作用域 `Scope{}` 零值 = 主管与管理员,
+  **不是广播**:callback 会出现在每一块能处理它的屏幕上,这一条是关于某一通电话的、供监管观看。
+  **打断改走指标 `aicc_bot_interruptions_total{reason}`。** 查清的现状是:
+  **今天基本上不知道 bot 被打断过** —— 无指标、无 CDR 字段、无 SSE,而**日志是反的**:
+  `bargeIn()` 里被 guard 忽略的那次写了 `Debug`,**真正的打断一条日志都没有**;
+  `onBargeIn()` 那条 `Info` 前面有 `if a.armed == nil || !a.isLineSpoken` 的闸,
+  **只有"再见说完之后"的打断才记**。转写也推不出来:provider 侧截断历史后 bot 那句确实短一截,
+  但**转写里没有任何标记说这里被打断了**,一句被截短的话和一句本来就短的话分不开。
+  唯一可靠的痕迹 `playedMs` 只作为参数传给了 provider、没落到任何地方。
+  **而这是运营要看的数**,更要紧的是:**barge guard 那条不变量(800ms、线路回声)今天没有任何数据能验证** ——
+  调宽调窄看不出效果。指标问的是"打断率是多少、变了没有",一条一条的事件回答不了它;
+  事件问的是"现在这通正在被打断",而今天前端没有任何 bot 实时视图。故指标 + 在真打断处补一条 `Info`。
+  **计数点的正确性由既有两条用例守住**:`TestSpeechDetectedImmediatelyAfterSpeakingIsIgnored` 与
+  `TestSpeechDetectedAfterTheGuardInterrupts` —— 计数与日志就在 `s.emit(EventTypeBargeIn)` 之前一行,
+  guard 内的语音在那之前就 `return` 了。本仓没有读 OTel 计数器的测试先例(每个 counter 都同样未测),
+  不为这一个单建 metric reader 骨架。
+  `make api-breaking` **无破坏性变更**(枚举减值 + 新增组件)。
+  **现场实测**(真 AI 通话,qwen,`loopback/95001/public` 静音手把):管理员 SSE 上收到
+  `event: BOT_SESSION_STARTED`,载荷 `{"flowId":"019ffd60-…"}`,
+  **且它排在两条 `PARTY_ESTABLISHED` 之后** —— 正是这条事件存在的理由:腿先通,对话后起。
+  零生产者 **4 → 0**;契约的 `SseEventType` 同时少了两个永不到来的名字。
 
 - **W7 ②收官:设备事件词表按轴收敛(`REACHABLE`/`UNREACHABLE` 一对;补订 `sofia::expire`)** **【已完成 2026-08-25,owner 定的词表】** ——
   **`DEVICE_REGISTERED` 零生产者的根因不是"漏了一跳",是它的名字被占用了,而占用它的那个事件在说反话。**

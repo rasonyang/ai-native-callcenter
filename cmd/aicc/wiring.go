@@ -355,21 +355,45 @@ func botConfig(
 	backendBase string,
 	profile provider.Profile,
 	announce func(store.Callback),
+	announceBot func(callID, flowID uuid.UUID),
 	callData aicall.CallDataSource,
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
-		UAS:              uas,
-		Catalog:          catalogSvc,
-		Flows:            flows,
-		Switch:           sw,
-		Ledger:           ledger,
-		Transcripts:      transcripts,
-		BackendBase:      backendBase,
-		Profile:          profile,
-		AnnounceCallback: announce,
+		UAS:                uas,
+		Catalog:            catalogSvc,
+		Flows:              flows,
+		Switch:             sw,
+		Ledger:             ledger,
+		Transcripts:        transcripts,
+		BackendBase:        backendBase,
+		Profile:            profile,
+		AnnounceCallback:   announce,
+		AnnounceBotSession: announceBot,
 		// A call the bot finishes alone writes the only ledger row it will
 		// ever have, so the business data has to reach the bot too.
 		CallData: callData,
+	}
+}
+
+// announceBotSession tells the live event stream that a conversation has
+// actually begun on a call.
+//
+// Call-scoped and addressed to no agent, which under a default-deny hub means
+// supervisors and administrators — the whole audience there is, because a call
+// the bot is answering has nobody else on it. By the time a person joins, this
+// has already happened.
+//
+// It is the one thing the bot's half has to say that nothing else says. Its
+// leg answering is PARTY_ESTABLISHED, and the model session is opened after
+// that: it can fail, the caller is rescued to a queue, and from the stream
+// alone that was indistinguishable from a bot that talked and handed over.
+func announceBotSession(ctx context.Context, pub callbackPublisher) func(callID, flowID uuid.UUID) {
+	return func(callID, flowID uuid.UUID) {
+		pub.Publish(ctx, events.Event{
+			Type:    events.TypeBotSessionStarted,
+			CallID:  &callID,
+			Payload: map[string]any{"flowId": flowID},
+		}, events.Scope{})
 	}
 }
 

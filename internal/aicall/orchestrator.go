@@ -97,6 +97,11 @@ type OrchestratorConfig struct {
 	// AnnounceCallback tells the live event stream about a callback the bot
 	// just created; nil means nobody is watching.
 	AnnounceCallback func(callback store.Callback)
+	// AnnounceBotSession tells the live event stream that the conversation on
+	// a call has actually begun — which the bot leg answering does not say,
+	// because the model session is opened after that and can fail. Nil means
+	// nobody is watching.
+	AnnounceBotSession func(callID, flowID uuid.UUID)
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
 	// Profile is the provider this deployment runs, resolved at startup. The
@@ -332,6 +337,14 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 	log.Info("ai conversation started", "flowId", spec.ID,
 		"provider", profile.Name, "language", language)
+	// Only now. Everything before this point could still have ended with the
+	// caller being rescued to a queue without a word being said to them.
+	if announce := o.cfg.AnnounceBotSession; announce != nil {
+		// The flow's database identity rather than the slug in the spec: it is
+		// what the ledger row will carry and what the flows screen is keyed
+		// by, so a client can follow it to the revision that answered.
+		announce(ledgerCallID, *did.FlowID)
+	}
 
 	o.drive(ctx, session, runtime, actions, recorder, log)
 	// The call is over. Whatever was waiting for a closing line to be heard

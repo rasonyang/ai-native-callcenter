@@ -511,6 +511,14 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 			s.log.Warn("could not tell the model it was interrupted", "error", err)
 		}
 	}
+	// Said out loud here and nowhere else. The line above this one used to be
+	// the only place an interruption was mentioned, and it was the *ignored*
+	// case — a Debug line for speech that turned out to be echo — so the
+	// interruptions that happened left no trace at all and the ones that did
+	// not left one.
+	s.log.Info("the caller took the floor back",
+		"reason", string(reason), "playedMs", playedMs, "wasGenerating", isSpeaking)
+	obs.RecordBotInterruption(string(reason))
 	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason)})
 }
 

@@ -69,11 +69,23 @@ const (
 	TypeDeviceUnregistered Type = "DEVICE_UNREGISTERED"
 	TypeDeviceReachable    Type = "DEVICE_REACHABLE"
 	TypeDeviceUnreachable  Type = "DEVICE_UNREACHABLE"
-	TypeBotSessionStarted  Type = "BOT_SESSION_STARTED"
-	TypeBotInterrupted     Type = "BOT_INTERRUPTED"
-	TypeBotSessionEnded    Type = "BOT_SESSION_ENDED"
-	TypeCallbackCreated    Type = "CALLBACK_CREATED"
-	TypeCallbackUpdated    Type = "CALLBACK_UPDATED"
+	// The bot's half of a call has one thing to say that nothing else says:
+	// that the conversation actually started. PARTY_ESTABLISHED on the bot leg
+	// means the SIP leg answered, and the model session is opened after that
+	// and can fail — the caller is rescued to a queue, and from the stream
+	// alone that looked exactly like a bot which talked and handed over.
+	//
+	// There is no ENDED to match it and no INTERRUPTED beside it, deliberately.
+	// The bot leg is a party, so its end is already PARTY_RELEASED to the same
+	// audience, and the CDR carries botSec, isContained and the bot's own
+	// reason; a second word for it would be a second announcement of one fact.
+	// Barge-in is a rate to watch rather than a thing to watch happen, so it is
+	// a metric (aicc_bot_interruptions_total) — one event per interruption
+	// answers "is it happening now", which nothing asks, and not "how often",
+	// which is the question tuning the barge guard depends on.
+	TypeBotSessionStarted Type = "BOT_SESSION_STARTED"
+	TypeCallbackCreated   Type = "CALLBACK_CREATED"
+	TypeCallbackUpdated   Type = "CALLBACK_UPDATED"
 )
 
 // System events describe the server itself.

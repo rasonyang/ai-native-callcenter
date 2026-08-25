@@ -2259,7 +2259,7 @@ export interface components {
          * @description Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control. DEVICE_* report a phone on two independent axes and name one transition each: REGISTERED/UNREGISTERED say whether a SIP registration exists, REACHABLE/UNREACHABLE whether the registered phone still answers the switch's OPTIONS ping. A registered phone that stops answering is the agent-side failure that matters most — it looks exactly like a working one — so it has a name of its own rather than borrowing UNREGISTERED.
          * @enum {string}
          */
-        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "CALL_TRANSCRIPT" | "CALL_TRANSCRIPTION_STATE" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_REACHABLE" | "DEVICE_UNREACHABLE" | "BOT_SESSION_STARTED" | "BOT_INTERRUPTED" | "BOT_SESSION_ENDED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
+        SseEventType: "PARTY_DIALING" | "PARTY_RINGING" | "PARTY_ESTABLISHED" | "PARTY_HELD" | "PARTY_RETRIEVED" | "PARTY_RELEASED" | "PARTY_CHANGED" | "PARTY_DTMF" | "CALL_USER_DATA" | "CALL_RECORDING_STARTED" | "CALL_RECORDING_STOPPED" | "CALL_CDR" | "CALL_TRANSCRIPT" | "CALL_TRANSCRIPTION_STATE" | "QUEUE_JOINED" | "QUEUE_LEFT" | "QUEUE_COUNT" | "QUEUE_AGENT_OFFERED" | "AGENT_LOGGED_IN" | "AGENT_LOGGED_OUT" | "AGENT_READY" | "AGENT_NOT_READY" | "AGENT_AVAILABILITY" | "DEVICE_REGISTERED" | "DEVICE_UNREGISTERED" | "DEVICE_REACHABLE" | "DEVICE_UNREACHABLE" | "BOT_SESSION_STARTED" | "CALLBACK_CREATED" | "CALLBACK_UPDATED" | "SYSTEM_LINK" | "SYSTEM_RESET";
         /** @description One envelope on the event stream. Call events repeat enough context (callType, userData) for a screen-pop without further requests. In SSE framing the envelope is the data: line, the event: line carries type, and the id: line carries seq. */
         SseEvent: {
             version: number;
@@ -2291,6 +2291,14 @@ export interface components {
         /** @description Payload of CALLBACK_CREATED and CALLBACK_UPDATED. */
         SseCallbackEventPayload: {
             callback: components["schemas"]["Callback"];
+        };
+        /** @description Payload of BOT_SESSION_STARTED: the conversation is running, which is not the same as the bot's leg being up. The leg answers first and the model session is opened afterwards, and it can fail — the caller is then rescued to a queue. Until this arrives, a caller on an answered bot leg may be talking to nothing. */
+        SseBotSessionStartedPayload: {
+            /**
+             * Format: uuid
+             * @description The published flow revision answering this call. Not otherwise knowable while the call is running; the ledger only says so afterwards.
+             */
+            flowId: string;
         };
         /** @description Payload of CALL_USER_DATA: the call's business data changed, and these are the keys that moved. The resulting data itself is on the envelope's userData, as it is on every call event — this names what is different about it, so a screen can highlight the change without diffing. Both lists are sorted, and a key set to the value it already held appears in neither: what is announced here is movement, not merely that a write arrived. */
         SseCallUserDataPayload: {

@@ -6873,8 +6873,6 @@
           "DEVICE_REACHABLE",
           "DEVICE_UNREACHABLE",
           "BOT_SESSION_STARTED",
-          "BOT_INTERRUPTED",
-          "BOT_SESSION_ENDED",
           "CALLBACK_CREATED",
           "CALLBACK_UPDATED",
           "SYSTEM_LINK",
@@ -6946,6 +6944,20 @@
         },
         "required": [
           "callback"
+        ]
+      },
+      "SseBotSessionStartedPayload": {
+        "type": "object",
+        "description": "Payload of BOT_SESSION_STARTED: the conversation is running, which is not the same as the bot's leg being up. The leg answers first and the model session is opened afterwards, and it can fail — the caller is then rescued to a queue. Until this arrives, a caller on an answered bot leg may be talking to nothing.",
+        "properties": {
+          "flowId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The published flow revision answering this call. Not otherwise knowable while the call is running; the ledger only says so afterwards."
+          }
+        },
+        "required": [
+          "flowId"
         ]
       },
       "SseCallUserDataPayload": {

@@ -303,6 +303,7 @@ func run() error {
 			cfg.BotBackendBase,
 			profile,
 			announceCallback(ctx, hub),
+			announceBotSession(ctx, hub),
 			outboundSvc.Data(),
 		))
 		if err != nil {

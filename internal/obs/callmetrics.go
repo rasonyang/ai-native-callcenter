@@ -28,6 +28,7 @@ var (
 	jitterFilled     metric.Int64Counter
 	providerFirstAud metric.Int64Histogram
 	providerErrors   metric.Int64Counter
+	botInterruptions metric.Int64Counter
 
 	transcribeFramesDropped metric.Int64Counter
 	transcribeFramesSent    metric.Int64Counter
@@ -67,6 +68,11 @@ func init() {
 		metric.WithExplicitBucketBoundaries(100, 200, 300, 400, 500, 700, 900, 1200, 1600, 2000, 3000))
 	providerErrors, _ = meter.Int64Counter("aicc_provider_ws_errors_total",
 		metric.WithDescription("Provider sessions that ended on an error rather than a hangup."))
+	botInterruptions, _ = meter.Int64Counter("aicc_bot_interruptions_total",
+		metric.WithDescription("Times a caller took the floor back from the bot, by what "+
+			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
+			"it is line echo and was ignored — which makes this the only measurement of "+
+			"whether that guard is set right."))
 	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
 		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
 	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
@@ -116,6 +122,24 @@ func RecordProviderFirstAudio(provider string, ms int64) {
 	}
 	providerFirstAud.Record(context.Background(), ms,
 		metric.WithAttributes(attribute.String("provider", provider)))
+}
+
+// RecordBotInterruption counts a caller taking the floor back from the bot.
+//
+// A rate rather than an occurrence, which is why it is here and not on the
+// event stream: what an operator asks is whether interruptions are climbing —
+// a bot that has grown too talkative, a turn detector that has grown too
+// eager — and no single interruption answers that. It is also the only
+// evidence that exists for whether the barge-in guard is set right: speech
+// inside the guard is line echo and is ignored before this is reached, so a
+// guard set too wide shows up here as interruptions that stopped being
+// counted, and one set too narrow as a bot interrupting itself.
+func RecordBotInterruption(reason string) {
+	if botInterruptions == nil {
+		return
+	}
+	botInterruptions.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason", reason)))
 }
 
 // RecordProviderError counts a session that ended badly. A rise here is the

@@ -503,6 +503,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		"http://127.0.0.1:8080",
 		provider.Profile{Name: "openai"},
 		func(store.Callback) {},
+		func(uuid.UUID, uuid.UUID) {},
 		outbound.NewCallData(),
 	)
 
@@ -547,6 +548,39 @@ func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
 	if !pub.scopes[0].IsBroadcast {
 		t.Errorf("scope = %+v, want a broadcast — a default-deny hub delivers "+
 			"an unaddressed callback to nobody but supervisors", pub.scopes[0])
+	}
+}
+
+// The start of a conversation is the call's, and nobody on the call is an
+// agent — so it goes to whoever sees everything, which is the whole audience
+// there is at that moment.
+//
+// Not a broadcast, unlike a callback: a callback appears on every screen that
+// can act on one, and this is a fact about one call that supervision watches.
+func TestTheStartOfAConversationIsAnnouncedToSupervision(t *testing.T) {
+	pub := &recordingPublisher{}
+	callID, flowID := uuid.New(), uuid.New()
+
+	announceBotSession(t.Context(), pub)(callID, flowID)
+
+	if len(pub.events) != 1 {
+		t.Fatalf("published %d events, want 1", len(pub.events))
+	}
+	ev := pub.events[0]
+	if ev.Type != events.TypeBotSessionStarted {
+		t.Errorf("published %s, want BOT_SESSION_STARTED", ev.Type)
+	}
+	if ev.CallID == nil || *ev.CallID != callID {
+		t.Errorf("callId = %v, want %s", ev.CallID, callID)
+	}
+	// The flow's database identity, which is what the ledger row will carry
+	// and what the flows screen is keyed by — a slug would lead nowhere.
+	if ev.Payload["flowId"] != flowID {
+		t.Errorf("flowId = %v, want %s", ev.Payload["flowId"], flowID)
+	}
+	if sc := pub.scopes[0]; sc.IsBroadcast || len(sc.AgentIDs) != 0 || sc.QueueID != nil {
+		t.Errorf("scope = %+v, want the zero value — this call has no agent on it, "+
+			"and a broadcast would put every bot call on every agent's screen", sc)
 	}
 }
 

@@ -500,8 +500,6 @@ const (
 	SSEEventTypeAGENTLOGGEDOUT         SSEEventType = "AGENT_LOGGED_OUT"
 	SSEEventTypeAGENTNOTREADY          SSEEventType = "AGENT_NOT_READY"
 	SSEEventTypeAGENTREADY             SSEEventType = "AGENT_READY"
-	SSEEventTypeBOTINTERRUPTED         SSEEventType = "BOT_INTERRUPTED"
-	SSEEventTypeBOTSESSIONENDED        SSEEventType = "BOT_SESSION_ENDED"
 	SSEEventTypeBOTSESSIONSTARTED      SSEEventType = "BOT_SESSION_STARTED"
 	SSEEventTypeCALLBACKCREATED        SSEEventType = "CALLBACK_CREATED"
 	SSEEventTypeCALLBACKUPDATED        SSEEventType = "CALLBACK_UPDATED"
@@ -543,10 +541,6 @@ func (e SSEEventType) Valid() bool {
 	case SSEEventTypeAGENTNOTREADY:
 		return true
 	case SSEEventTypeAGENTREADY:
-		return true
-	case SSEEventTypeBOTINTERRUPTED:
-		return true
-	case SSEEventTypeBOTSESSIONENDED:
 		return true
 	case SSEEventTypeBOTSESSIONSTARTED:
 		return true
