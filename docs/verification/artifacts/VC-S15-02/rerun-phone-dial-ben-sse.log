@@ -1,0 +1,44 @@
+id: 18700034
+event: DEVICE_REGISTERED
+data: {"version":1,"seq":18700034,"type":"DEVICE_REGISTERED","occurredAt":"2026-08-25T13:04:07.130663Z","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"availability":"WRAP_UP","displayName":"Ben Liu","extensionNumber":"1002","reason":"AFTER_CALL_WORK","state":"NOT_READY","wrapUpCallId":"01a03904-2f15-7d65-b4ea-2a1108fbd4ff"}}
+
+: hb
+
+: hb
+
+: hb
+
+id: 18700036
+event: PARTY_DIALING
+data: {"version":1,"seq":18700036,"type":"PARTY_DIALING","occurredAt":"2026-08-25T13:04:42.725991Z","callId":"01a03905-e4e5-7e34-9ed3-32b420f6baf7","callType":"INTERNAL","partyId":"01a03905-e4e5-7ebd-9678-a74eeb99cf84","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"fromNumber":"1002","role":"ORIGINATOR","state":"DIALING","toNumber":"1008"}}
+
+id: 18700037
+event: AGENT_AVAILABILITY
+data: {"version":1,"seq":18700037,"type":"AGENT_AVAILABILITY","occurredAt":"2026-08-25T13:04:42.733133Z","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"availability":"ON_CALL","displayName":"Ben Liu","extensionNumber":"1002","reason":"AFTER_CALL_WORK","state":"NOT_READY","wrapUpCallId":"01a03904-2f15-7d65-b4ea-2a1108fbd4ff"}}
+
+: hb
+
+id: 18700041
+event: PARTY_ESTABLISHED
+data: {"version":1,"seq":18700041,"type":"PARTY_ESTABLISHED","occurredAt":"2026-08-25T13:05:00.864267Z","callId":"01a03905-e4e5-7e34-9ed3-32b420f6baf7","callType":"INTERNAL","partyId":"01a03905-e4e5-7ebd-9678-a74eeb99cf84","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"role":"ORIGINATOR","state":"TALKING"}}
+
+: hb
+
+id: 18700042
+event: PARTY_RELEASED
+data: {"version":1,"seq":18700042,"type":"PARTY_RELEASED","occurredAt":"2026-08-25T13:05:20.148138Z","callId":"01a03905-e4e5-7e34-9ed3-32b420f6baf7","callType":"INTERNAL","partyId":"01a03905-e4e5-7ebd-9678-a74eeb99cf84","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"cause":"NORMAL_CLEARING","isTransferredAway":false,"role":"ORIGINATOR","state":"RELEASED"}}
+
+id: 18700043
+event: AGENT_AVAILABILITY
+data: {"version":1,"seq":18700043,"type":"AGENT_AVAILABILITY","occurredAt":"2026-08-25T13:05:20.151963Z","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"availability":"WRAP_UP","displayName":"Ben Liu","extensionNumber":"1002","reason":"AFTER_CALL_WORK","state":"NOT_READY","wrapUpCallId":"01a03904-2f15-7d65-b4ea-2a1108fbd4ff"}}
+
+id: 18700044
+event: AGENT_NOT_READY
+data: {"version":1,"seq":18700044,"type":"AGENT_NOT_READY","occurredAt":"2026-08-25T13:05:20.16393Z","agentId":"7d8e39b9-98d6-4ac9-889a-72bf7aca4699","payload":{"availability":"WRAP_UP","displayName":"Ben Liu","extensionNumber":"1002","reason":"AFTER_CALL_WORK","state":"NOT_READY","wrapUpCallId":"01a03905-e4e5-7e34-9ed3-32b420f6baf7"}}
+
+id: 18700046
+event: CALL_CDR
+data: {"version":1,"seq":18700046,"type":"CALL_CDR","occurredAt":"2026-08-25T13:05:20.167971Z","callId":"01a03905-e4e5-7e34-9ed3-32b420f6baf7","callType":"INTERNAL","payload":{"answeredAt":"2026-08-25T13:05:00.832802Z","endedAt":"2026-08-25T13:05:20.122791Z"}}
+
+: hb
+

@@ -347,7 +347,38 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ② `PARTY_DIALING` 补 `role=ORIGINATOR` / `state=DIALING`,与 `transition()` 逐字一致。
   ③ `PARTY_RINGING.fromNumber` 改读**这通电话主叫 party 的号**,而不是被叫腿上的 ANI;
      "第二条腿跑在主叫前面"那条路上还没有主叫 party,保留 `ev.ANI` 兜底。
-  单测四处变异全部转红(含队列派发这条路)。**`VC-S15-02` 待真机重跑改判。**
+  单测四处变异全部转红(含队列派发这条路)。
+
+  **【已闭环 2026-08-25 21:04–21:05,两种拨法各跑一遍,`expect` 一字未改】**
+  ① **点击拨号 1008→1002**(令牌腿这条路):
+     `PARTY_DIALING` = `{"fromNumber":"1008","toNumber":"1002","role":"ORIGINATOR","state":"DIALING"}`;
+     `PARTY_RINGING` = `{"extensionNumber":"1002","fromNumber":"1008","toNumber":"1002"}`。
+  ② **话机直拨 1002→1008**(目的号本来就在 `Caller-Destination-Number` 里,验没把原路径改坏):
+     `PARTY_DIALING` = `{"fromNumber":"1002","toNumber":"1008",…}`;
+     `PARTY_RINGING` = `{"extensionNumber":"1008","fromNumber":"1002","toNumber":"1008"}`。
+  两路顺序都是 `DIALING → RINGING → ESTABLISHED×2 → RELEASED×2`,
+  两名坐席各 3 条 `PARTY_*`、`partyId` 去重各 1 个,角色各为自己那条腿的。
+  证据 `docs/verification/artifacts/VC-S15-02/rerun-{click-to-dial,phone-dial}-*.log`。
+  **`VC-S15-02` 改判 PASS。C61 关闭。**
+
+- **C62(new,2026-08-25,由 VC-S15-02 重跑顺带看见,未修)**
+  **点击拨号的主叫腿正常挂断,`PARTY_RELEASED` 却报 `isTransferredAway: true`。**
+  同一次重跑里两路对照得很干净:点击拨号 1008→1002 的主叫腿
+  `{"cause":"NORMAL_CLEARING","isTransferredAway":true,…}`,
+  话机直拨 1002→1008 的主叫腿 `{"cause":"NORMAL_CLEARING","isTransferredAway":false,…}`。
+  **两通都是聊完正常挂断,没有任何一方做转接。**
+  **成因**:`transferredAway()`(`switchevent.go:443`)最后一条是
+  `return ev.Variable("transfer_history") != ""` —— 而点击拨号**本来就要**
+  `uuid_transfer` 一次(接起坐席腿后转进 dialplan 去拨目的号),
+  这条腿从那一刻起就永远带着 `transfer_history`。
+  于是**每一通点击拨号的主叫腿,不管怎么结束,都报"被转走了"**。
+  **影响**:订阅方分不清"这条腿被转到别处了"和"这通电话打完了";
+  凡是按这个标志决定要不要收尾(工作台收条、话后处理、报表里的转接率)的地方都会读错。
+  **待查**:`transfer_history` 非空这条兜底是为哪个场景加的 ——
+  前两条(`sip_hangup_disposition = recv_refer|send_refer`、
+  `Hangup-Cause = BLIND_TRANSFER|ATTENDED_TRANSFER`)看着已经覆盖了真转接;
+  若确实需要,至少要能区分"这条腿自己被转走"与"这条腿转过别人"。
+  **不要顺手删** —— 先查清它当初挡住的是什么。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
