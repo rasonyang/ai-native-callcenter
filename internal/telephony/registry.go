@@ -188,16 +188,37 @@ func (r *Registry) SnapshotAll() []Snapshot {
 // Do runs fn against a call inside its actor, the only safe way to mutate it
 // from outside.
 func (r *Registry) Do(callID uuid.UUID, fn func(*Call)) error {
+	return r.do(callID, func(a *actor) { fn(a.call) })
+}
+
+// do is Do for the callers that need to announce what they changed as well as
+// change it. Publishing is the actor's, not the call's — it is where the
+// audience of an event is decided — so a mutation that has to be announced
+// runs here and mutates through a.call.
+func (r *Registry) do(callID uuid.UUID, fn func(*actor)) error {
 	r.mu.RLock()
 	a, ok := r.byCall[callID]
 	r.mu.RUnlock()
 	if !ok {
 		return ErrCallNotFound
 	}
-	if !a.postSync(func(a *actor) { fn(a.call) }) {
+	if !a.postSync(fn) {
 		return ErrCallNotFound
 	}
 	return nil
+}
+
+// MergeUserData applies a patch to a call's business data and announces what
+// moved, in one visit to the actor.
+//
+// The two are one operation on purpose. A merge that is not announced leaves
+// every screen on the call holding data the call no longer has, and the only
+// way to be sure that never happens is for a caller to have no way of doing
+// the first without the second.
+func (r *Registry) MergeUserData(callID uuid.UUID, patch map[string]any) (UserDataChange, error) {
+	var change UserDataChange
+	err := r.do(callID, func(a *actor) { change = a.mergeUserData(patch) })
+	return change, err
 }
 
 // Owns reports whether a channel is already bound to a call.
@@ -480,6 +501,31 @@ func (a *actor) transition(p *Party, trigger PartyTrigger, ev SwitchEvent, event
 }
 
 // publish emits a domain event carrying enough context for a screen pop.
+// mergeUserData applies the patch and tells the call about it.
+//
+// Silent when nothing moved. A merge that sets a key to the value it already
+// holds is not news, and the case that makes this matter is the ordinary one:
+// two calls becoming one merges the absorbed half's business data into the
+// kept half, and on a consultation transfer that is very often the identical
+// data. Announced anyway, every consultation would report a change nobody
+// made, on the event a screen uses to decide something is worth showing.
+//
+// Call-scoped — published with no party — because business data belongs to the
+// conversation rather than to a leg of it. On a call nobody has answered yet
+// that reaches supervisors and administrators only, which is the whole
+// audience there is at that moment.
+func (a *actor) mergeUserData(patch map[string]any) UserDataChange {
+	change := a.call.MergeUserData(patch)
+	if change.IsEmpty() {
+		return change
+	}
+	a.publish(events.TypeCallUserData, nil, map[string]any{
+		"changedKeys": change.Changed,
+		"deletedKeys": change.Deleted,
+	})
+	return change
+}
+
 func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 	if a.registry.pub == nil {
 		return

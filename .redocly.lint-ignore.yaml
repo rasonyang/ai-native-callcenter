@@ -3,6 +3,7 @@
 docs/openapi.json:
   no-unused-components:
     - '#/components/schemas/SseCallbackEventPayload'
+    - '#/components/schemas/SseCallUserDataPayload'
     - '#/components/schemas/SseSystemResetPayload'
     - '#/components/schemas/SseTranscriptPayload'
     - '#/components/schemas/SseTranscriptionStatePayload'

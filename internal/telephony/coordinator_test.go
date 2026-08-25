@@ -6,6 +6,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -685,6 +687,137 @@ func TestTheSurvivingCallKeepsItsOwnBusinessData(t *testing.T) {
 	}
 }
 
+// The call is told when its business data moves, and told nothing when it did
+// not.
+//
+// Note the publisher: a call event goes out through the *registry's*, because
+// the audience of an event is the actor's to decide. Handing the capturing one
+// to the coordinator alone would make every assertion below pass without the
+// event ever being published.
+func TestTheCallIsToldWhenItsBusinessDataMoves(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+	ctx := t.Context()
+	minted := uuid.New()
+	vars := map[string]string{"variable_aicc_call_id": minted.String()}
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+
+	// Nobody has answered yet, so the only audience is the one that sees
+	// everything — which is a decided audience, not an absent one.
+	change, err := registry.MergeUserData(minted, map[string]any{"orderId": "A-4471", "ticketId": "T-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(change.Changed) != 2 {
+		t.Fatalf("merge reported %+v", change)
+	}
+	ev, scope, ok := pub.find(events.TypeCallUserData)
+	if !ok {
+		t.Fatal("business data was attached to the call and nothing was announced")
+	}
+	if ev.PartyID != nil {
+		t.Error("announced against a party; business data belongs to the call, not a leg of it")
+	}
+	if ev.CallID == nil || *ev.CallID != minted {
+		t.Errorf("announced call %v, want %s", ev.CallID, minted)
+	}
+	if len(scope.AgentIDs) != 0 {
+		t.Errorf("addressed to %v; no agent is on this call yet", scope.AgentIDs)
+	}
+	if ev.UserData["orderId"] != "A-4471" {
+		t.Errorf("the envelope carries %v, want the resulting data", ev.UserData)
+	}
+	changed, _ := ev.Payload["changedKeys"].([]string)
+	if !slices.Equal(changed, []string{"orderId", "ticketId"}) {
+		t.Errorf("changedKeys = %v, want [orderId ticketId] sorted", ev.Payload["changedKeys"])
+	}
+	if deleted, _ := ev.Payload["deletedKeys"].([]string); len(deleted) != 0 {
+		t.Errorf("deletedKeys = %v, want none", deleted)
+	}
+
+	// And a write that changes nothing says nothing. A consultation transfer
+	// merges the same data back onto the call it came from; reported, every
+	// one of those would announce a change nobody made.
+	before := len(pub.all())
+	if _, err := registry.MergeUserData(minted, map[string]any{"orderId": "A-4471"}); err != nil {
+		t.Fatal(err)
+	}
+	if after := len(pub.all()); after != before {
+		t.Errorf("%d event(s) published for a write that moved nothing", after-before)
+	}
+}
+
+// Two calls becoming one is where the "only what moved" rule earns its keep.
+//
+// The kept call's agents are the ones with no other way of knowing: the moved
+// agents are told their call has a new identity by PARTY_CHANGED, which
+// carries the whole resulting map, but nobody who was already on the surviving
+// call hears anything unless this fires. And on a consultation transfer the
+// absorbed half very often carries the same data it was given from this call
+// in the first place — announced, every consultation would report a change
+// nobody made.
+func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
+	newlyMerged := func(t *testing.T, keptData, absorbedData map[string]any) *capturingPublisher {
+		t.Helper()
+		pub := &capturingPublisher{}
+		registry := NewRegistry(pub)
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		ctx := t.Context()
+		minted := uuid.New()
+		vars := map[string]string{"variable_aicc_call_id": minted.String()}
+		c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+		c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+			map[string]string{"variable_dialed_user": agentExtension}))
+
+		absorbed, ok := registry.CallForChannel("agent-chan")
+		if !ok {
+			t.Fatal("the agent's leg was never put on a call of its own")
+		}
+		if _, err := registry.MergeUserData(minted, keptData); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := registry.MergeUserData(absorbed, absorbedData); err != nil {
+			t.Fatal(err)
+		}
+		pub.reset()
+
+		c.Handle(ctx, raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+			merged(vars, map[string]string{"Other-Leg-Unique-ID": "caller-chan"})))
+		waitFor(t, func() bool { return pub.has(events.TypePartyChanged) })
+		return pub
+	}
+
+	t.Run("data the surviving call did not have", func(t *testing.T) {
+		pub := newlyMerged(t,
+			map[string]any{"ticketId": "T-1"},
+			map[string]any{"orderId": "A-4471"})
+
+		ev, scope, ok := pub.find(events.TypeCallUserData)
+		if !ok {
+			t.Fatal("the call gained business data from the half it absorbed and said nothing")
+		}
+		changed, _ := ev.Payload["changedKeys"].([]string)
+		if !slices.Equal(changed, []string{"orderId"}) {
+			t.Errorf("changedKeys = %v, want [orderId] — ticketId was already there", ev.Payload["changedKeys"])
+		}
+		// Everyone on the conversation, which by now includes the moved leg.
+		if len(scope.AgentIDs) != 1 || scope.AgentIDs[0] != testAgentID {
+			t.Errorf("addressed to %v, want the agents on the call", scope.AgentIDs)
+		}
+	})
+
+	t.Run("the same data coming back", func(t *testing.T) {
+		same := map[string]any{"ticketId": "T-1", "orderId": "A-4471"}
+		pub := newlyMerged(t, same, maps.Clone(same))
+		if ev, _, ok := pub.find(events.TypeCallUserData); ok {
+			t.Errorf("a consultation carrying identical data announced %v", ev.Payload)
+		}
+	})
+}
+
 // capturingPublisher keeps what was published and under which scope.
 type capturingPublisher struct {
 	mu     sync.Mutex
@@ -698,6 +831,20 @@ func (p *capturingPublisher) Publish(_ context.Context, ev events.Event, sc even
 	p.events = append(p.events, ev)
 	p.scopes = append(p.scopes, sc)
 	return ev
+}
+
+// reset forgets what came before, so a test can assert on one act alone.
+func (p *capturingPublisher) reset() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.events, p.scopes = nil, nil
+}
+
+// all is a copy of everything published so far, for counting.
+func (p *capturingPublisher) all() []events.Event {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.events)
 }
 
 func (p *capturingPublisher) has(t events.Type) bool {

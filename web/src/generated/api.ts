@@ -2261,6 +2261,13 @@ export interface components {
         SseCallbackEventPayload: {
             callback: components["schemas"]["Callback"];
         };
+        /** @description Payload of CALL_USER_DATA: the call's business data changed, and these are the keys that moved. The resulting data itself is on the envelope's userData, as it is on every call event — this names what is different about it, so a screen can highlight the change without diffing. Both lists are sorted, and a key set to the value it already held appears in neither: what is announced here is movement, not merely that a write arrived. */
+        SseCallUserDataPayload: {
+            /** @description Keys that were added or given a new value. */
+            changedKeys: string[];
+            /** @description Keys that were removed. */
+            deletedKeys: string[];
+        };
         /** @description Payload of QUEUE_JOINED: a caller entered the queue named on the envelope's queueId. */
         SseQueueJoinedPayload: {
             queueName: string;

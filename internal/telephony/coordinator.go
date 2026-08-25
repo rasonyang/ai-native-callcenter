@@ -686,10 +686,7 @@ func (c *Coordinator) applyCallData(ctx context.Context, callID uuid.UUID) {
 	if len(data) == 0 {
 		return
 	}
-	var change UserDataChange
-	_ = c.registry.Do(callID, func(call *Call) {
-		change = call.MergeUserData(data)
-	})
+	change, _ := c.registry.MergeUserData(callID, data)
 	// The request that placed this call was answered long before now, so
 	// nobody is left to refuse: what the bounds would not take is said here or
 	// nowhere. It should not happen — the endpoints check the same limits
@@ -744,7 +741,8 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 		movedUserData = call.UserData
 	})
 
-	err := c.registry.Do(keep, func(call *Call) {
+	err := c.registry.do(keep, func(a *actor) {
+		call := a.call
 		for _, p := range moved {
 			if call.PartyByChannel(p.ChannelID) != nil {
 				continue
@@ -762,7 +760,7 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 		// order number on some calls and not others, for a reason nobody
 		// could see. Merge rather than replace: the kept call's own data is
 		// not somebody else's to overwrite.
-		movedData = call.MergeUserData(movedUserData)
+		movedData = a.mergeUserData(movedUserData)
 		// One conversation has one originator: the earliest inbound leg.
 		// Both provisional calls named their own first leg the originator,
 		// and keeping two makes the CDR's from-number a coin toss.
@@ -795,9 +793,10 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 // different identity now.
 //
 // A merge is the one thing that changes a live call's id under a client that
-// is already holding it. The absorbed call is retired without a word, and
-// nothing is published for the kept call afterwards, so an agent's cockpit
-// keeps the id it last read — which is the dead one. Observed live
+// is already holding it. The absorbed call is retired without a word, and what
+// the merge does publish is addressed to the kept call — which an agent whose
+// leg just moved does not yet know they are on — so their cockpit keeps the id
+// it last read, which is the dead one. Observed live
 // (2026-08-18): PARTY_ESTABLISHED carried the pre-merge id, the client
 // refetched on it and raced the merge, and every CALL_TRANSCRIPT after that
 // arrived under the kept id and was dropped by the panel as belonging to

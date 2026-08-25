@@ -444,7 +444,8 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      却因 `extension` 在本仓是分机而改名);我们这边 `CALL_USER_DATA` 已经是该事件的本地名字。
      四步拆解(owner 2026-08-25 认可的顺序):
      **1. 限额下沉**【已做 2026-08-25】—— 见下条。
-     **2. `CALL_USER_DATA` 接上现有两个 merge 点** —— 不依赖任何新入口,今天就能发。
+     **2. `CALL_USER_DATA` 接上现有两个 merge 点**【已做 2026-08-25】—— 见下条。零生产者 5 → 4
+     (余 `BOT_SESSION_STARTED/INTERRUPTED/ENDED` 三个与 `DEVICE_REGISTERED`)。
      **3. `PATCH /calls/{callId}/user-data`** —— 外部系统与坐席的入口;同批把 `userData` 抽成
      契约共享组件(现在 `CreateCallRequest` 与 `DialRequest` 各写一份,靠散文交叉引用而非 `$ref`)。
      **4. 呼入随路数据** —— `aicc_ud_*` 通道变量 / `X-AICC-UD-*` SIP 头。
@@ -455,6 +456,16 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      **`calldata.go` 那句"business data deliberately does not travel through the switch"不构成阻挡** ——
      它讲的是**呼出**:我们手上有请求,把业务数据塞进交换机是白白多一处泄露。呼入没有我们的请求可依附,
      数据是坐着 SIP 头进来的,**它到的时候就已经在交换机日志里了**,读它不新增暴露。两个方向,两条规则。
+  ③c ~~SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)~~ **【已做 2026-08-23】** ——
+     两个方向都发(`{isUp:true|false}`),**广播作用域**:交换机没了是坐席既看不见、
+     也绕不过去的那种故障(不响、按什么都没反应),而在此之前唯一的迹象就是"什么都不再发生了"。
+     `esl.Link.OnLost` 这个钩子**写好从没被调用** —— 本周第四个同型的
+     (`ListQueueMembers` / `ShowChannels` / `LoadPresence` / `OnLost`)。
+     摘除验证:只发重连那一半 → 用例报"只宣告了 1 条,两个方向各要一条";
+     只会报"回来了"的事件分不清重连与首次启动。零生产者 6 → 5。
+  ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
+  events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
+  合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
 - **C42 第 1 步:userData 的限额下沉到领域层** **【已完成 2026-08-25】** ——
   32 键 / 每值 1024 字节这条限额原先**只活在 HTTP handler 里**(`checkUserData`)。
   今天没事,因为 HTTP 是唯一入口;但上面第 2–4 步接的每一个新来源(通道变量、REFER 上下文、
@@ -476,16 +487,33 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   另加一条契约对账(`TestTheUserDataBoundsAreTheOnesTheContractStates`):
   Go 常量与 `docs/openapi.json` 里两处 `maxProperties` / `maxLength` 必须相等 ——
   把契约改成 64 键,该用例立刻失败(已实测)。
-  ③c ~~SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)~~ **【已做 2026-08-23】** ——
-     两个方向都发(`{isUp:true|false}`),**广播作用域**:交换机没了是坐席既看不见、
-     也绕不过去的那种故障(不响、按什么都没反应),而在此之前唯一的迹象就是"什么都不再发生了"。
-     `esl.Link.OnLost` 这个钩子**写好从没被调用** —— 本周第四个同型的
-     (`ListQueueMembers` / `ShowChannels` / `LoadPresence` / `OnLost`)。
-     摘除验证:只发重连那一半 → 用例报"只宣告了 1 条,两个方向各要一条";
-     只会报"回来了"的事件分不清重连与首次启动。零生产者 6 → 5。
-  ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
-  events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
-  合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
+
+- **C42 第 2 步:`CALL_USER_DATA` 接上现有两个 merge 点** **【已完成 2026-08-25】** ——
+  **这个类型零生产者的真实原因,一直是看漏了一处变更。** 原判词"数据只在置呼时给定,没有变更可宣告"
+  只对了一半:置呼那次确实只是种子,但 **`merge()` 的转接并单是一次真真正正的变更** ——
+  被吸收那半的 `userData` 并进保留的那半,自这段代码写下之日就在跑。
+  而**保留那半上原本就在的坐席今天什么都收不到**:`PARTY_CHANGED` 只发给腿被移动的那个坐席
+  (作用域就一个人),它捎带的整张 userData 也只到那一个人手里。
+  另一半的坐席手上的电话凭空多了业务数据,没有任何东西告诉他们。这才是缺口。
+  **合并与宣告做成一次动作**:新增 `Registry.MergeUserData` 与 actor 上的 `mergeUserData`,
+  在同一次 actor 访问里合并并发布 —— 调用方**没有办法只做前一半**。
+  合不上的原因很简单:合并了不宣告,等于让这通电话上的每块屏幕继续拿着它已经没有的数据。
+  为此加了未导出的 `Registry.do(callID, func(*actor))`,`Do` 转调它 ——
+  发布是 actor 的事(受众在那里决定),`*Call` 上没有、也不该有发布能力。
+  **载荷是 `changedKeys` / `deletedKeys`,不是整张表** —— 信封本来就带整张 `userData`
+  (`events.Event.UserData`,每条通话事件都带),载荷只说**哪几个键动了**,屏幕不必自己 diff。
+  这也正是血缘参考的形状(`cti-server` 的 `PayloadAttachedDataChanged`:
+  *"the envelope carries the complete resulting map; the payload names what moved"*)。
+  **通话作用域(`publish(t, nil, …)`)** —— 业务数据是关于这通对话的,不是关于某条腿的,
+  故整通电话的听众都收得到,与"腿事件私有于其坐席"不冲突(那条指令的两个例外之一就是 `CALL_*`)。
+  置呼那次发布时还没有坐席应答,受众落到 `Scope` 零值 —— **主管与管理员**,那一刻**全部的听众**。
+  **第 1 步的 `IsEmpty()` 在这里兑现**:协商转接常常把同一份数据原样并回来,
+  照发的话每一次协商都会报出一个没人做过的变更。反向验证:去掉那道判断,两条用例同时失败(已实测)。
+  契约同批加 `SseCallUserDataPayload`(并登记进 `.redocly.lint-ignore.yaml`,
+  与其余七个 `Sse*Payload` 同例 —— 它们按约定关联、lint 视为未使用)。
+  **未做现场验证**:要真在通话里看见这条事件,得先有第 3 步的写入端点或第 4 步的呼入随路数据;
+  本次的证明是穿过协调器、用真实交换机事件驱动的单测(含并单的两个分支)。
+  零生产者 **5 → 4**(余 `BOT_SESSION_STARTED/INTERRUPTED/ENDED` 三个与 `DEVICE_REGISTERED`)。
 - **`settings` 死表(§补充的唯一残留)** **【已决并完成 2026-08-24 `00022`】** —— **删表 + 顺手把保留期做了**。
   `settings` 是 key/value 表,0 行、**没有任何 Go/Lua/sqlc 查询碰它**。而本仓的配置答案早已定下:
   `AICC_*` 环境变量、`.env.example` 是唯一登记册(49 条,CLAUDE.md 明文要求与 `config.go` 同步)。
@@ -1927,8 +1955,12 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **【owner 2026-08-24】** 本条作为缺陷已了结:契约描述的能力现在真实存在了(置呼时可写)。
   **剩下的"呼叫中修改"(TAttachUserData 等价物)不再计入 C 系列**,另立项目 ——
   owner 同时指出该项目还包含 **webhook / 推送给客户** 的需求,规模已超出一条缺陷。
-  `CALL_USER_DATA` 至今零生产者**仍然是对的**:数据只在置呼时给定,没有"变更"可宣告;
-  产生它的正是那个项目。**以下为立案与实现的原始记录,保留不改。**
+  ~~`CALL_USER_DATA` 至今零生产者**仍然是对的**:数据只在置呼时给定,没有"变更"可宣告。~~
+  **⚠ 这半句 2026-08-25 已被推翻。** "数据只在置呼时给定"当时就不完整:**转接并单是一次真实的变更**
+  —— `coordinator.go` 的 `merge()` 把被吸收那半的 `userData` 并进保留的那半,自它写下之日就在跑。
+  保留那半上已有的坐席**今天完全不知道自己手上的电话多了业务数据**:`PARTY_CHANGED` 只发给腿被移动的坐席。
+  所以"没有变更可宣告"是**看漏了一处变更**,不是事实。已于 `CALL_USER_DATA` 接线时补上(见下)。
+  **以下为立案与实现的原始记录,保留不改。**
 - **C42(原始记录:new,2026-08-23 做 W7③ 时查明)**
   **`userData` 是一个永远为空的字段,而契约说它是可以被合并修改的。**
   - `CreateCallRequest` 的字段只有 `callId / kind / to / did / language` —— **建呼叫时设不了**;
