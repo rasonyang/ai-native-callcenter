@@ -45,12 +45,16 @@ type Config struct {
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
 	// OutboundEndpoint renders a destination number into a dial string for
-	// the AI outbound leg. The loopback form pins the dialplan (/XML)
-	// because a loopback b-leg inherits the a-leg's, and an inherited
-	// "inline" reads the number as an application name (found live:
-	// "Invalid Application 1007").
-	// (%s = the number). A trunked deployment sets sofia/gateway/<gw>/%s;
-	// the default loops back into the local dialplan.
+	// the AI outbound leg, %s standing for the number: sofia/gateway/<gw>/%s.
+	//
+	// There is no default, and loopback is not one of the shapes this takes.
+	// Which endpoint reaches a carrier is a fact about the deployment, and a
+	// value that is right for one is wrong for the next; unset, placing an AI
+	// outbound call is refused and says why (outbound.Config.withDefaults).
+	// Routing it through the dialplan with loopback — which is what used to be
+	// here — looks like it works and does not: the A leg the call is pinned to
+	// is the loopback's own, gone by the time the bot has anything to say
+	// about the caller, so no stamp and no transfer can find the channel (C47).
 	OutboundEndpoint string
 	// OutboundCallerID is presented on click-to-dial customer legs.
 	OutboundCallerID string

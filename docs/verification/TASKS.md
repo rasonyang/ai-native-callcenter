@@ -6,7 +6,7 @@
 > **D1–D7 全部已决**;实现任务在阶段 7 的 **W 系列**(W1–W10)。~~唯一残留决策:settings 死表处置。~~ **2026-08-24 已决并完成(`00022`,删表 + 录音保留期);`DECISIONS-pending` 已无待决条目。**
 > **W1 / W2 / W2.1 / W5 / W6 已完成(2026-08-23);W4 / W3 已完成(2026-08-24)**;
 > **W11 管理面闭环已于 2026-08-24 全部完成**(六个子项;过程中 owner 三次收窄原规格);
-> **W8 已撤销**(2026-08-24 owner 直裁:删表 + 只读状态,见条目);W7 / W10 未开工;
+> **W8 已撤销**(2026-08-24 owner 直裁:删表 + 只读状态,见条目);**W10 已完成**(2026-08-25;实质早由 C47 达成,见条目);**W7 未开工**;
 > **W9 已撤销**(2026-08-25 owner 直裁:账号保留;理由见条目 —— 一期只支持浏览器话机,原生/硬话机是后期,那部样本不能先删)。
 >
 > **当前状态(2026-08-23)**:账本 **39 case —— 39 PASS / 0 FAIL / 0 TODO。全部执行完毕。**
@@ -18,7 +18,7 @@
 > **VC-S12-01 已于 2026-08-23 转 PASS**:C26(bot 腿死后主叫活下来)与 C36 两半
 > (按交换机成员表重建等待名单、收养重启期间排队的主叫)均已修并现场证实。
 > **VC-S14-01 已于 2026-08-23 修复并现场重跑转绿**(C29 可选布尔取默认值;C30 删分机由外键 RESTRICT 挡住并回 409)。
-> 阶段 0–6 已完成。阶段 7:**W1–W6 与 W11 已完成,W8 / W9 已撤销,W7 / W10 未开工**(此行原写"W1–W9 未开工",是 v1 发布时的笔误,2026-08-24 更正);
+> 阶段 0–6 已完成。阶段 7:**W1–W6、W10、W11 已完成,W8 / W9 已撤销,W7 未开工**(此行原写"W1–W9 未开工",是 v1 发布时的笔误,2026-08-24 更正);
 > **C 系列已修 47 项、真开 1 项(C57)+ C10 已决 defer 第二期 + C42 已移出另立项目 + C32/C14 不复现**(47+1+1+1+2 = 52,与条目实数一致)—— **唯一待办是 C57**(CDR 时长字段是否构成划分;owner 已决:立案,以后再查)。C37 于 2026-08-24 查明成因(web-sip-phone 的 RESET 出路只有一个后台定时器)并由该仓修复,aicc 侧零改动;**遗留一个已知缺口:486 不计入 `max_no_answer`,交换机侧对持续拒绝的话机没有兜底**(见条目五);**C34 已于 2026-08-24 现场闭合**(实为四个接口在说谎,见条目);**C1 两半均已修**(后半 2026-08-24,但重跑 VC-S3-02 前仍须重造场景,否则假通过);**C24 已于 2026-08-24 现场闭合**(修它的是 08-22 的 aicc context 三连,见条目);**C32 已不再复现**(原因未证明,守卫为 VC-S14-04);**C14 在 qwen 路径上不复现**(配置变了,不是同配置下消失;openai 路径未测)。
 > 上一行的 "4 PASS / 1 FAIL / 23 TODO" 是 v1 发布时的**输入基线**,作为历史保留不改。
 
@@ -866,10 +866,29 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   - lua 里的裸 SQL 与写死的 domain 字面量漏改会编译通过、单测全绿、真机注册失败 ——
     每一步都要过一遍 `luacc.*` 视图与 `freeswitch/scripts/*.lua`。
 
-- **W10(new,owner 直裁 2026-08-22)** **生产禁用 `loopback`。** AI 外呼路径目前默认
-  `AICC_OUTBOUND_ENDPOINT=loopback/%s/aicc/XML`(本次已把 `default` 改成 `aicc`,但 loopback 本身还在)。
-  真实部署把它设成自己的中继 `sofia/gateway/<gw>/%s` 即可绕开,**但代码不该以 loopback 为默认形态** ——
-  应改成 click-to-dial 已在用的那套:originate + park,应答后 `uuid_transfer` 进 aicc 拨号方案。
+- ~~**W10(new,owner 直裁 2026-08-22)** 生产禁用 `loopback`。~~
+  **【已完成 2026-08-25 —— 但实情是:实质早由 C47 达成,W10 只剩文档清欠 + 一项裁定】**
+  **裁令的前提在它写下之后就失效了**,与 C42 同型:2026-08-22 直裁时默认值确实是
+  `loopback/%s/aicc/XML`;**C47 把它删了** —— `outbound.Config.withDefaults` 现在写着
+  *"No default, deliberately"*,未设值时**拒绝置呼并说明原因**,`outbound_test.go:367` 的判词
+  也是 *"there is no loopback default any more"*。故"代码不该以 loopback 为默认形态"这一条,
+  **在本条被翻出来之前就已经成立了**。
+  **本次真正做的事:清掉两处仍在教人用 loopback 的文档。**
+  `.env.example` 的 outbound 段**叠着两段互相矛盾的说明** —— 前一段写
+  *"The default loops back into the local dialplan, which is what dev wants"*,
+  后一段写 *"There is no default"*。前者描述的是 C47 已经删掉的默认值,已删。
+  `internal/config/config.go` 的 `OutboundEndpoint` 注释尾巴同病(*"the default loops back…"*),
+  已改写为与 `withDefaults` 一致。CLAUDE.md 要求这两处与代码同步,而此前**登记册在和代码自己的注释打架**。
+  **第二半(改成 originate + park + `uuid_transfer`)按原样保留,不做。** 裁令给它的理由是"借此摆脱
+  loopback",而 loopback 已由另一条路摆脱:AI 外呼现在**把客户腿直接 originate 到运营商端点**,
+  这条腿作为 A 腿**一直活着**,bot 由 `BridgeToEndpoint` 桥上来 —— 没有会消失的 loopback A 腿,
+  所以 `uuid_transfer` 打在 `customerLeg` 上是有效的(AI 转人工今天走的正是这条,
+  靠 `X-AICC-Channel-ID` 携带客户通道)。而 inline 桥接有一条正面理由:
+  目标固定、**五个 `X-AICC-*` 头随桥一起过去**;改成 `uuid_transfer` 进拨号方案,
+  就得让 Lua 把这套头重建一遍 —— 纯粹的下坡路。**这是记录在案的建议,owner 可推翻。**
+  **其余 loopback 出现处已扫过,均无需改动**:注释、demo 压测手把
+  (`{aicc_harness=true}loopback/95001`,容器内、故意为之)、ACL 说明。
+  demo/dev 均未设 `AICC_OUTBOUND_ENDPOINT` —— demo 只做呼入,未设即拒绝正是对的。
   相关约定同批落地(已生效):**所有交换机命令的 context 默认 `aicc`**
   (`adapter.go` `TransferToExtension`、`outbound.go`、两个 lua 的 `transfer … XML aicc`);
   **用户目录的默认 context 也是 `aicc`**(`aicc_xml.lua`)。见设计 01 §7 **D6a**。
