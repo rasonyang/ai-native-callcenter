@@ -286,7 +286,8 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     `max_no_answer=2` / `no_answer_delay_time=60` / `reject_delay_time=60` / `busy_delay_time=60`;
     补写了 `max_no_answer` 与 `busy_delay_time` 两个 setter(另两个此前有 setter 无调用方)。
     **`agent-originate-timeout` 是全局参数**,由 `aicc_xml.lua` 的 `<settings>` 下发,60 → **15 秒**。
-    连带:`reject_delay_time=60` 正是 **C37**(被拒的派单 70 毫秒一次空转三分钟)的直接对策,
+    连带:~~`reject_delay_time=60` 正是 **C37**(被拒的派单 70 毫秒一次空转三分钟)的直接对策,~~
+    **⚠ 2026-08-25 实测推翻:它对被拒的派单不生效(见 C59)。原文保留如下,**
     该条状态随之改为"参数已改,待复现验证"。
   - **`27be54c` 应用侧的消费**:`KindQueueAgentStatus`(此前归一化后被丢弃)→
     交换机把坐席置 `On Break` = **通知**,应用据此 `RingNoAnswer` → NOT_READY(SYSTEM) +
@@ -1891,8 +1892,9 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **与 C36 同源但后果独立**:即使收养修好,这个忙等循环仍会让一名坐席在整通电话里
   既接不到、也不显示为忙。**只观察到一次**(重启后的状态下),机制未独立复现 ——
   若要处理,先补一条能稳定重现它的用例。
-  **【2026-08-23 参数已改,待复现验证】** W2.1 随 `mirrorRegistration` 下发了
-  `reject_delay_time=60`(此前是 0 = 立即重试),这正是本条的直接对策:被拒之后要等一分钟才会再派。
+  ~~**【2026-08-23 参数已改,待复现验证】** W2.1 随 `mirrorRegistration` 下发了
+  `reject_delay_time=60`(此前是 0 = 立即重试),这正是本条的直接对策:被拒之后要等一分钟才会再派。~~
+  **【2026-08-25 实测:这条对策不成立。`reject_delay_time` 对被拒的派单根本不生效。】** 见下条。
   **但本条不改判为"已修"** —— 触发条件(那条挂死的 INVITE)本身还没弄清,
   而且没有能稳定重现它的用例。下次遇到时先看重试间隔是不是变成了 60 秒。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
@@ -2614,6 +2616,38 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   行为变化只发生在"跨重启收养"这一条路上。
   **难在验证**:要真机重现得在 bot 说话与坐席接起之间重启应用 —— 单测可覆盖读取与填充,
   现场验证要专门安排一次。**先立案,不擅自动手。**
+
+- **C59(new,2026-08-25 实测,由「486 不计入 max_no_answer」查出)**
+  **`max_no_answer` 不计 486 —— 属实;但更要紧的是 `reject_delay_time` 也不生效,拒绝派单是 10 次/秒的空转。**
+  **无人手把**:给一个探针坐席 `probe-busy` 把 contact 指到 `error/USER_BUSY`
+  (每次派单立刻以 cause 17 被拒,不需要真话机、不需要人),`max_no_answer=2`,挂进 `support-en`
+  (该队列此时只有 On Break 的 agent-wei,不受干扰),然后往 7001 送一位主叫。
+  **实测结果:**
+  ```
+  mod_callcenter.c:2139  Agent probe-busy Origination Canceled : USER_BUSY
+  mod_callcenter.c:1180  Updated Agent probe-busy set state = Waiting
+  no_answer_count = 0        ← 被拒 1300+ 次,计数器纹丝不动
+  status          = Available ← 从未被踢出轮转
+  ```
+  **①`max_no_answer` 不计 486 —— 原记载属实。** 在 mod_callcenter 的词汇里被拒是
+  *"Origination Canceled"*,坐席直接回 `Waiting`,`no_answer_count` 不加。
+  **②`reject_delay_time` 同样不生效 —— 这是新发现,而且推翻了账本原有的判断。**
+  账本自 2026-08-23 起写着 *"`reject_delay_time=60` 正是本条的直接对策:被拒之后要等一分钟才会再派"*。
+  实测:
+  ```
+  reject_delay_time=1   → 22 秒内 ~220 次   (约 10 次/秒)
+  reject_delay_time=60  → 22 秒内  217 次   (约 10 次/秒,一模一样)
+  ```
+  **60 秒的延迟一秒也没生效。** 因为 mod_callcenter 只把"腿接通了、对方拒绝"当作 rejection;
+  "根本没建起腿"(cause 17 从 originate 直接回来)走的是另一条分支,两个参数都不管。
+  **与 C37 现场吻合**:那次是真浏览器话机回真 486,记录是"簇内约 70ms 一次、三分钟 42 次拒绝",
+  同一个形状。当时 `reject_delay_time=0`,于是结论写成"把它调成 60 就好了" —— **调了,没用。**
+  **影响**:一部持续回 486 的话机会让它所在队列的派单以 10 次/秒空转,直到主叫放弃;
+  该坐席**既接不到电话、也不显示为忙**,而交换机侧没有任何机制把他踢出去。
+  **不修,先立案** —— 修法要么在 mod_callcenter 之外(应用侧数拒绝次数、达阈值把坐席置 On Break),
+  要么改 mod_callcenter 的行为(上游)。前者是本仓能做的,但要先定"多少次算持续拒绝";
+  **属于产品决策,留给 owner**。
+  **探针已清理**:`tier del` + `agent del`,`callcenter_config agent list` 里已无 `probe-busy`。
 
 - **重启的善后:BYE 带 Reason + 两条 WARN;兜底链已现场验证** **【2026-08-25;含一处我自己的更正】**
   **owner 直裁**:aicc 重启时 bot 应发带 `Reason` 的 SIP BYE(`SIP;cause=503;text="Service Restart"`
