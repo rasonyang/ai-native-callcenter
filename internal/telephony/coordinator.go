@@ -353,7 +353,7 @@ func (c *Coordinator) reidentify(ctx context.Context, ev SwitchEvent) {
 		// the one that brings the call into being, and both are equally
 		// likely. Attaching in only one of the two places would make the
 		// business data depend on which channel the switch announced first.
-		c.applyCallData(minted)
+		c.applyCallData(ctx, minted)
 	}
 	c.merge(ctx, minted, bound)
 }
@@ -430,7 +430,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 	// call is minted from the switch's own event, so this is the first moment
 	// anything can hold it — and holding it on the call is what puts it on
 	// the event envelope and, through the snapshot, into the ledger row.
-	c.applyCallData(callID)
+	c.applyCallData(ctx, callID)
 
 	_ = call
 	if err := c.registry.BindChannel(ev.ChannelID, callID); err != nil {
@@ -678,7 +678,7 @@ func (c *Coordinator) agentDidNotAnswer(ctx context.Context, ev SwitchEvent) {
 //
 // Read rather than taken: the bot's own session reads the same entry, and on a
 // call the bot finishes alone that read is the one that reaches the ledger.
-func (c *Coordinator) applyCallData(callID uuid.UUID) {
+func (c *Coordinator) applyCallData(ctx context.Context, callID uuid.UUID) {
 	if c.callData == nil {
 		return
 	}
@@ -695,7 +695,7 @@ func (c *Coordinator) applyCallData(callID uuid.UUID) {
 	// nowhere. It should not happen — the endpoints check the same limits
 	// before accepting — which is exactly why it is worth an error if it does.
 	if len(change.Dropped) > 0 {
-		slog.Error("business data did not fit onto the call it was placed with",
+		slog.ErrorContext(ctx, "business data did not fit onto the call it was placed with",
 			"callId", callID, "droppedKeys", change.Dropped,
 			"maxKeys", UserDataMaxKeys, "maxValueBytes", UserDataMaxValueBytes)
 	}
