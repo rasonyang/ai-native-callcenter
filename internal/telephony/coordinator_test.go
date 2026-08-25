@@ -5,6 +5,7 @@ package telephony
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -614,6 +615,73 @@ func TestAMergeTellsTheMovedAgentTheCallHasANewIdentity(t *testing.T) {
 	}
 	if ev.Payload["reason"] != "CALL_MERGED" {
 		t.Errorf("reason = %v, want CALL_MERGED", ev.Payload["reason"])
+	}
+}
+
+// Two calls becoming one is the only place a drop is expected rather than a
+// sign that something upstream forgot to check: each half is within the bound
+// and together they can be twice it.
+//
+// What must hold is whose data survives. The kept call has been carrying its
+// own business data since it started; the absorbed half's is arriving now. If
+// room runs out it is the arriving keys that fall, in a fixed order, and never
+// a key the surviving call already had — otherwise a caller's order number
+// would vanish from the conversation it belongs to, and which one vanished
+// would depend on which leg the switch happened to announce first.
+func TestTheSurvivingCallKeepsItsOwnBusinessData(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, &capturingPublisher{})
+
+	ctx := t.Context()
+	minted := uuid.New()
+	vars := map[string]string{"variable_aicc_call_id": minted.String()}
+
+	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
+		map[string]string{"variable_dialed_user": agentExtension}))
+
+	absorbed, ok := registry.CallForChannel("agent-chan")
+	if !ok {
+		t.Fatal("the agent's leg was never put on a call of its own")
+	}
+
+	// One key short of full on the half that survives, four arriving.
+	kept := map[string]any{}
+	for i := range UserDataMaxKeys - 1 {
+		kept[fmt.Sprintf("kept%02d", i)] = "v"
+	}
+	if err := registry.Do(minted, func(call *Call) { call.MergeUserData(kept) }); err != nil {
+		t.Fatal(err)
+	}
+	arriving := map[string]any{"delta": "d", "alpha": "a", "charlie": "c", "bravo": "b"}
+	if err := registry.Do(absorbed, func(call *Call) { call.MergeUserData(arriving) }); err != nil {
+		t.Fatal(err)
+	}
+
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
+		merged(vars, map[string]string{"Other-Leg-Unique-ID": "caller-chan"})))
+	waitFor(t, func() bool {
+		snap, err := registry.Snapshot(minted)
+		return err == nil && len(snap.UserData) == UserDataMaxKeys
+	})
+
+	snap, err := registry.Snapshot(minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k := range kept {
+		if _, ok := snap.UserData[k]; !ok {
+			t.Errorf("%s was evicted from the call that already carried it", k)
+		}
+	}
+	if _, ok := snap.UserData["alpha"]; !ok {
+		t.Error("the one arriving key there was room for did not arrive; " +
+			"additions are supposed to go in sorted order")
+	}
+	for _, k := range []string{"bravo", "charlie", "delta"} {
+		if _, ok := snap.UserData[k]; ok {
+			t.Errorf("%s got in past the bound of %d keys", k, UserDataMaxKeys)
+		}
 	}
 }
 

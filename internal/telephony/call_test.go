@@ -4,6 +4,9 @@ package telephony
 
 import (
 	"errors"
+	"fmt"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +192,132 @@ func TestMergeUserData(t *testing.T) {
 	}
 	if c.UserData["customerName"] != "Wei" {
 		t.Errorf("customerName = %v", c.UserData["customerName"])
+	}
+}
+
+// What a merge reports is what a screen will be told, so it has to be movement
+// and not merely a patch having arrived.
+//
+// The case that matters is the transfer merge: two calls become one and the
+// data of the absorbed half is merged into the kept half, which on a
+// consultation transfer is very often the same data it already holds. Reported
+// as changes, every one of those would announce a change nobody made.
+func TestAMergeReportsOnlyWhatMoved(t *testing.T) {
+	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c.MergeUserData(map[string]any{"ticketId": "T-1", "intent": "billing"})
+
+	same := c.MergeUserData(map[string]any{"ticketId": "T-1"})
+	if !same.IsEmpty() {
+		t.Errorf("setting a key to the value it already holds reported %+v", same)
+	}
+	absent := c.MergeUserData(map[string]any{"neverThere": nil})
+	if !absent.IsEmpty() {
+		t.Errorf("deleting a key that was not there reported %+v", absent)
+	}
+
+	moved := c.MergeUserData(map[string]any{
+		"intent":   "refund", // a real replacement
+		"orderId":  "A-4471", // an addition
+		"ticketId": nil,      // a real deletion
+	})
+	if !slices.Equal(moved.Changed, []string{"intent", "orderId"}) {
+		t.Errorf("Changed = %v, want [intent orderId]", moved.Changed)
+	}
+	if !slices.Equal(moved.Deleted, []string{"ticketId"}) {
+		t.Errorf("Deleted = %v, want [ticketId]", moved.Deleted)
+	}
+	if len(moved.Dropped) != 0 {
+		t.Errorf("Dropped = %v, want none", moved.Dropped)
+	}
+}
+
+// A value over the bound is refused whole. Truncating would put half an order
+// number on an agent's screen with nothing to say the other half existed.
+func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
+	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c.MergeUserData(map[string]any{"note": "the short one"})
+
+	got := c.MergeUserData(map[string]any{
+		"note":  strings.Repeat("x", UserDataMaxValueBytes+1),
+		"other": strings.Repeat("y", UserDataMaxValueBytes),
+	})
+	if !slices.Equal(got.Dropped, []string{"note"}) {
+		t.Errorf("Dropped = %v, want [note]", got.Dropped)
+	}
+	if c.UserData["note"] != "the short one" {
+		t.Errorf("note = %v; a dropped replacement overwrote the value it could not replace", c.UserData["note"])
+	}
+	// Exactly at the bound is inside it.
+	if !slices.Equal(got.Changed, []string{"other"}) {
+		t.Errorf("Changed = %v, want [other] — the bound is inclusive", got.Changed)
+	}
+
+	// Bytes, not characters: four Chinese characters are twelve bytes.
+	c2 := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	overInBytes := strings.Repeat("客", UserDataMaxValueBytes/3+1)
+	if len([]rune(overInBytes)) > UserDataMaxValueBytes {
+		t.Fatal("the fixture is over the bound in characters too, so it proves nothing")
+	}
+	if got := c2.MergeUserData(map[string]any{"note": overInBytes}); len(got.Dropped) != 1 {
+		t.Errorf("a value inside the bound in characters but over it in bytes was accepted: %+v", got)
+	}
+}
+
+// Which additions survive a full call has to be the same every run. Left to
+// map iteration the same patch against the same call keeps a different pair
+// each time, and nobody outside could tell why.
+func TestTheKeysThatSurviveAFullCallAreAlwaysTheSameOnes(t *testing.T) {
+	fill := func() *Call {
+		c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+		seed := map[string]any{}
+		for i := range UserDataMaxKeys - 1 {
+			seed[fmt.Sprintf("seed%02d", i)] = "v"
+		}
+		c.MergeUserData(seed)
+		return c
+	}
+
+	first := fill().MergeUserData(map[string]any{"zulu": "z", "alpha": "a", "mike": "m"})
+	for range 20 {
+		got := fill().MergeUserData(map[string]any{"zulu": "z", "alpha": "a", "mike": "m"})
+		if !slices.Equal(got.Changed, first.Changed) || !slices.Equal(got.Dropped, first.Dropped) {
+			t.Fatalf("the same patch kept %v and dropped %v, then %v and %v",
+				first.Changed, first.Dropped, got.Changed, got.Dropped)
+		}
+	}
+	if !slices.Equal(first.Changed, []string{"alpha"}) {
+		t.Errorf("Changed = %v, want [alpha] — additions go in sorted order", first.Changed)
+	}
+	if !slices.Equal(first.Dropped, []string{"mike", "zulu"}) {
+		t.Errorf("Dropped = %v, want [mike zulu]", first.Dropped)
+	}
+}
+
+// Deleting is always free, and a key the call already carries is never evicted
+// to make room for a new one: data a call has carried since it started is not
+// a later patch's to displace.
+func TestAFullCallStillTakesADeleteAndAReplacement(t *testing.T) {
+	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	seed := map[string]any{}
+	for i := range UserDataMaxKeys {
+		seed[fmt.Sprintf("seed%02d", i)] = "v"
+	}
+	c.MergeUserData(seed)
+	if len(c.UserData) != UserDataMaxKeys {
+		t.Fatalf("the fixture holds %d keys, want %d", len(c.UserData), UserDataMaxKeys)
+	}
+
+	// Replacing in place needs no room.
+	if got := c.MergeUserData(map[string]any{"seed00": "changed"}); !slices.Equal(got.Changed, []string{"seed00"}) {
+		t.Errorf("a full call refused a replacement: %+v", got)
+	}
+	// A patch that frees a key and asks for one nets zero and fits.
+	got := c.MergeUserData(map[string]any{"seed01": nil, "orderId": "A-4471"})
+	if !slices.Equal(got.Deleted, []string{"seed01"}) || !slices.Equal(got.Changed, []string{"orderId"}) {
+		t.Errorf("delete-then-add on a full call reported %+v", got)
+	}
+	if len(got.Dropped) != 0 {
+		t.Errorf("Dropped = %v; deletions run first precisely so this fits", got.Dropped)
 	}
 }
 

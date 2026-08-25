@@ -3,6 +3,7 @@
 package telephony
 
 import (
+	"encoding/json"
 	"fmt"
 	"maps"
 	"slices"
@@ -408,19 +409,143 @@ func (c *Call) AnsweredAt() time.Time {
 	return first
 }
 
-// MergeUserData applies an RFC 7386 style merge patch: null removes a key,
-// any other value replaces it.
-func (c *Call) MergeUserData(patch map[string]any) {
+// The bounds on a call's business data, as the contract states them
+// (`UserData` in docs/openapi.json: maxProperties 32, values maxLength 1024).
+//
+// They live here rather than in the HTTP layer because they are a fact about
+// what a call may carry, not about how one request happened to arrive. Every
+// other way in — a channel variable on an inbound call, a REFER's context, a
+// tool the bot calls — reaches this method and nothing else, and a limit only
+// the HTTP handler knew would be a limit those paths silently walked past.
+const (
+	UserDataMaxKeys       = 32
+	UserDataMaxValueBytes = 1024
+)
+
+// UserDataChange reports what a merge actually did, in sorted order.
+//
+// Changed and Deleted name real movement: a key set to the value it already
+// holds is in neither, and so is a delete of a key that was not there. What is
+// announced to a screen has to be something that moved, or a transfer that
+// carries identical data across would report a change nobody made.
+//
+// Dropped names what the bounds refused. It is separate from the other two
+// because it is the caller's to act on: a request can answer 400, a phone call
+// cannot, so the paths that cannot refuse log it instead.
+type UserDataChange struct {
+	Changed []string
+	Deleted []string
+	Dropped []string
+}
+
+// IsEmpty reports that the merge moved nothing at all.
+func (u UserDataChange) IsEmpty() bool {
+	return len(u.Changed) == 0 && len(u.Deleted) == 0
+}
+
+// MergeUserData applies an RFC 7386 style merge patch — null removes a key,
+// any other value replaces it — within the bounds above.
+//
+// The order is deletions, then replacements, then additions, and it is the
+// order that makes the result predictable rather than an accident of map
+// iteration:
+//
+//   - Deletions are always free. Removing a key cannot breach a bound, so a
+//     patch that deletes two and adds two nets zero and always fits.
+//   - A key the call already carries is never evicted to make room for a new
+//     one. Business data a call has been carrying since it started is not
+//     something a later patch gets to displace.
+//   - Additions go in **sorted** order until the key bound is reached, and the
+//     rest are dropped. Which ones survive has to be the same on every run:
+//     unsorted, the same patch against the same call would keep a different
+//     pair each time, and nobody could tell from the outside why.
+//
+// A value over the byte bound is dropped whole, never truncated — half a
+// customer's order number on a screen, with no sign the other half was ever
+// sent, is worse than a gap. A replacement that is dropped leaves the old
+// value standing.
+func (c *Call) MergeUserData(patch map[string]any) UserDataChange {
 	if c.UserData == nil {
 		c.UserData = map[string]any{}
 	}
+	var out UserDataChange
+
+	// Deletions first: they cost nothing and can only make room.
 	for k, v := range patch {
-		if v == nil {
-			delete(c.UserData, k)
+		if v != nil {
 			continue
 		}
-		c.UserData[k] = v
+		if _, ok := c.UserData[k]; ok {
+			delete(c.UserData, k)
+			out.Deleted = append(out.Deleted, k)
+		}
 	}
+
+	var additions []string
+	for k, v := range patch {
+		if v == nil {
+			continue
+		}
+		if size, ok := userDataValueSize(v); !ok || size > UserDataMaxValueBytes {
+			out.Dropped = append(out.Dropped, k)
+			continue
+		}
+		old, exists := c.UserData[k]
+		if !exists {
+			additions = append(additions, k)
+			continue
+		}
+		// A replacement keeps its place in the map, so it needs no room; it
+		// only needs to be saying something new.
+		if !sameUserDataValue(old, v) {
+			c.UserData[k] = v
+			out.Changed = append(out.Changed, k)
+		}
+	}
+
+	slices.Sort(additions)
+	for _, k := range additions {
+		if len(c.UserData) >= UserDataMaxKeys {
+			out.Dropped = append(out.Dropped, k)
+			continue
+		}
+		c.UserData[k] = patch[k]
+		out.Changed = append(out.Changed, k)
+	}
+
+	slices.Sort(out.Changed)
+	slices.Sort(out.Deleted)
+	slices.Sort(out.Dropped)
+	return out
+}
+
+// userDataValueSize measures a value the way the bound is written: in bytes,
+// because a Chinese character is three where an English one is one, and the
+// bound is about what is stored and shipped.
+//
+// Values are strings by contract, which is the only case that costs nothing to
+// measure. Anything else is sized by what it would become on the wire and in
+// the ledger's jsonb — and something that cannot be encoded at all cannot
+// reach either, so it is refused rather than stored.
+func userDataValueSize(v any) (int, bool) {
+	if s, ok := v.(string); ok {
+		return len(s), true
+	}
+	encoded, err := json.Marshal(v)
+	if err != nil {
+		return 0, false
+	}
+	return len(encoded), true
+}
+
+// sameUserDataValue answers whether a replacement is really a replacement.
+// Strings are the contract's values and compare directly; anything else is
+// read as different, which errs towards announcing a change that did not
+// happen rather than swallowing one that did.
+func sameUserDataValue(old, new any) bool {
+	oldStr, oldOK := old.(string)
+	newStr, newOK := new.(string)
+	return oldOK && newOK && oldStr == newStr
 }
 
 // Finish moves the call towards its terminal state once no leg remains.

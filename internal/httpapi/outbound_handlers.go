@@ -12,6 +12,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 // OutboundService places calls on request.
@@ -105,11 +106,18 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
 }
 
-// Business data is carried to a screen and into a ledger row, so it is bounded
-// where it arrives rather than wherever it first fails to fit.
+// The bounds are the call's, not this layer's: telephony.MergeUserData holds
+// the same two numbers, because every other way business data reaches a call —
+// an inbound channel variable, a REFER, a tool the bot calls — goes through
+// there and never through here.
+//
+// What differs is the answer. A request can be refused, so this checks first
+// and returns 400 with nothing written; a phone call cannot be refused, so the
+// merge drops what will not fit and reports it. Same limits, and the caller
+// that has a client to answer to is the one that answers.
 const (
-	userDataMaxKeys       = 32
-	userDataMaxValueBytes = 1024
+	userDataMaxKeys       = telephony.UserDataMaxKeys
+	userDataMaxValueBytes = telephony.UserDataMaxValueBytes
 )
 
 // checkUserData refuses what will not fit. Refusing is the point: truncating
@@ -118,6 +126,11 @@ const (
 //
 // Bytes, not characters: the limit is about what is stored and shipped, and a
 // Chinese value is three bytes a character where an English one is one.
+//
+// It counts the keys in the request, which is the resulting call's key count
+// only because both endpoints here place a new call. A write against a call
+// that already carries data would have to check the total instead, or it would
+// answer 201 to a patch the merge then silently trimmed.
 func checkUserData(data map[string]string) error {
 	if len(data) > userDataMaxKeys {
 		return fmt.Errorf("userData has %d keys, at most %d are accepted",

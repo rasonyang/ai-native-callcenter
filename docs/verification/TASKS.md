@@ -428,14 +428,54 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      故目的号**只在它是数字时才发** —— 不发,被叫自己的号几秒后随他的腿就到;
      发了,那是个**长着正确答案样子的错误答案**。
      ③第三轮三通全对,`PARTY_DIALING` 在每条 party 的最前,发起腿只进它自己坐席的流。
-  ③b **CALL_USER_DATA** —— **做不了,而且原因不是"还没接线"(2026-08-23 查明,立案 C42)**。
-     `userData` **没有任何写入路径**:`CreateCallRequest` 里没有这个字段、没有任何接口能改它、
-     `MergeUserData` **只有测试在调用**(`grep` 全仓可证)。它是一个挂在 Call 与快照/CDR 上、
-     随每条事件信封下发、契约里写着 *"merge-patched, survives transfers"*、
-     而**生产中永远为空**的字段。**没有变更就没有变更事件可发** ——
-     补一个 publish 点等于为一个不存在的功能伪造生产者。
-     要做就得先有**改 userData 的能力**(契约 + handler + 协调层),那是产品决策不是接线任务,
-     **留给 owner 定**:要么建这条写入路径,要么把它从契约里摘掉。
+  ③b **CALL_USER_DATA** —— ~~做不了,而且原因不是"还没接线"(2026-08-23 查明,立案 C42):
+     `userData` 没有任何写入路径,`CreateCallRequest` 里没有这个字段、没有任何接口能改它、
+     `MergeUserData` 只有测试在调用。**留给 owner 定**:要么建这条写入路径,要么把它从契约里摘掉。~~
+     **⚠ 上面这段自 2026-08-23 起就是错的,2026-08-25 更正。** 写入路径**当天就建好了** ——
+     `b0990f8`(`POST /calls` 带 userData)与 `587f143`(`/calls/dial` 同样带),
+     两个提交与本条同日落地;`MergeUserData` 今天有**两个生产调用方**
+     (`coordinator.go:690` 的 `applyCallData` 种子、`:754` 的转接并单)。条目写下后没人回来改它,
+     于是这个"待 owner 定的产品决策"在账本上多挂了两天,而它早就不是决策了。
+     **owner 2026-08-25 裁定:userData 必须有,否则 orderId / ticketId 这类随路数据无处可进;
+     参考 Genesys 的 `RequestAttachUserData`。** 血缘参考 `~/workspaces/cc/cti-server` 已给出形状:
+     `PATCH /v1/calls/{callID}/user-data`(RFC 7386 merge patch,200 回整张结果表)
+     → `EventAttachedDataChanged`,payload 只带 `changed_keys` / `deleted_keys`(信封本就带整张表)。
+     **取语义不取 token**(07-naming §5.2;先例是 `switchData` —— 明写"the Genesys Extensions analog"
+     却因 `extension` 在本仓是分机而改名);我们这边 `CALL_USER_DATA` 已经是该事件的本地名字。
+     四步拆解(owner 2026-08-25 认可的顺序):
+     **1. 限额下沉**【已做 2026-08-25】—— 见下条。
+     **2. `CALL_USER_DATA` 接上现有两个 merge 点** —— 不依赖任何新入口,今天就能发。
+     **3. `PATCH /calls/{callId}/user-data`** —— 外部系统与坐席的入口;同批把 `userData` 抽成
+     契约共享组件(现在 `CreateCallRequest` 与 `DialRequest` 各写一份,靠散文交叉引用而非 `$ref`)。
+     **4. 呼入随路数据** —— `aicc_ud_*` 通道变量 / `X-AICC-UD-*` SIP 头。
+     两个命名空间都是现成的(`aicc_call_id`/`aicc_did`/`aicc_language`/`aicc_extension` 已在用;
+     `X-AICC-*` 五个头由 `aicc_inbound.lua:80-86` 设)。
+     **开工前须实测两件事**:①本部署的 ESL 订阅收不收自定义 `variable_*`;
+     ②从上游进来的头要不要扩 `export_vars`(该行现在只导出三个)才能到 bot 腿上。
+     **`calldata.go` 那句"business data deliberately does not travel through the switch"不构成阻挡** ——
+     它讲的是**呼出**:我们手上有请求,把业务数据塞进交换机是白白多一处泄露。呼入没有我们的请求可依附,
+     数据是坐着 SIP 头进来的,**它到的时候就已经在交换机日志里了**,读它不新增暴露。两个方向,两条规则。
+- **C42 第 1 步:userData 的限额下沉到领域层** **【已完成 2026-08-25】** ——
+  32 键 / 每值 1024 字节这条限额原先**只活在 HTTP handler 里**(`checkUserData`)。
+  今天没事,因为 HTTP 是唯一入口;但上面第 2–4 步接的每一个新来源(通道变量、REFER 上下文、
+  bot 的写入工具)**没有一个会经过那个 handler**,第一个接上去的就会静默绕开限额。
+  故常量移进 `internal/telephony`(它是关于**一通电话能携带什么**的事实,不是关于某个请求怎么到达的),
+  `MergeUserData` 就地设界并改为返回 `UserDataChange{Changed, Deleted, Dropped}`。
+  **两种回答,同一套限额**:请求可以被拒绝,HTTP 照旧先检查后 400、一个字节都不写;
+  **一通电话不能被拒绝**,故合并丢弃放不下的键并报告,由调用方记日志。
+  三条判断写进注释并各有测试钉住:
+  ①**Changed 必须是真的动了** —— 设成原值不算、删不存在的键不算。否则第 2 步一落地,
+  转接并单(常常并入一模一样的数据)会发一串没人做过的变更。
+  ②**顺序是删除 → 就地替换 → 新增**,新增按**字典序**填到上限为止:删除永远免费(只会腾地方);
+  已在的键**永不被新键挤掉**(电话从头带到现在的业务数据,不是后来的补丁能顶掉的);
+  排序是为了可预测 —— 不排,同一个补丁打在同一通电话上每次留下的是不同的两个键,外面看不出为什么。
+  ③**超长的值整个丢弃,绝不截断**,被丢弃的替换让旧值留在原位。
+  两处调用方各自处理丢弃:种子那处是 `Error`(端点已经查过同样的限额,真发生说明上游漏了);
+  **并单那处是 `Warn` 且是唯一预期会丢的地方** —— 两通各自合规的电话并起来可以是上限的两倍。
+  反向验证两条:去掉新增的排序 → 确定性用例复现随机结果;去掉等值判断 → 无变更用例报出假变更。
+  另加一条契约对账(`TestTheUserDataBoundsAreTheOnesTheContractStates`):
+  Go 常量与 `docs/openapi.json` 里两处 `maxProperties` / `maxLength` 必须相等 ——
+  把契约改成 64 键,该用例立刻失败(已实测)。
   ③c ~~SYSTEM_LINK(挂 esl.Link 断连/重连,S12 语义)~~ **【已做 2026-08-23】** ——
      两个方向都发(`{isUp:true|false}`),**广播作用域**:交换机没了是坐席既看不见、
      也绕不过去的那种故障(不响、按什么都没反应),而在此之前唯一的迹象就是"什么都不再发生了"。

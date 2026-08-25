@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 // recordingOutbound keeps the dial request the handler built.
@@ -220,4 +223,63 @@ type dialerPresence struct{ stubAgents }
 
 func (dialerPresence) Presence(uuid.UUID) agents.Presence {
 	return agents.Presence{ExtensionNumber: "1008"}
+}
+
+// The bounds are written down twice — once in the contract, once as the Go
+// constants the merge enforces — and nothing but this joins them.
+//
+// The contract states them per request schema (`maxProperties` and the value
+// `maxLength`); telephony.MergeUserData is where they are actually applied, to
+// every source of business data and not only to these two endpoints. Change
+// one and the other goes quietly out of step: a client told it may send 64
+// keys would have half of them dropped without being refused.
+func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.json"))
+	if err != nil {
+		t.Fatalf("read the contract: %v", err)
+	}
+	// Walked generically rather than decoded into a shape: `additionalProperties`
+	// is a schema on this field and a bare `true` on others (FlowSpec), and a
+	// typed decode of the whole document fails on the ones this test is not
+	// about.
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("parse the contract: %v", err)
+	}
+	dig := func(v any, path ...string) any {
+		for _, key := range path {
+			m, ok := v.(map[string]any)
+			if !ok {
+				return nil
+			}
+			v = m[key]
+		}
+		return v
+	}
+	number := func(v any) (int, bool) {
+		f, ok := v.(float64)
+		return int(f), ok
+	}
+
+	// Both request schemas carry the field today. When they are folded into
+	// one shared UserData component this loop simply has one entry.
+	for _, name := range []string{"CreateCallRequest", "DialRequest"} {
+		userData := dig(doc, "components", "schemas", name, "properties", "userData")
+		if userData == nil {
+			t.Fatalf("%s has no userData property in the contract", name)
+		}
+		keys, ok := number(dig(userData, "maxProperties"))
+		if !ok {
+			t.Errorf("%s.userData states no maxProperties, so the contract promises no bound at all", name)
+		} else if keys != telephony.UserDataMaxKeys {
+			t.Errorf("%s.userData allows %d keys, the merge allows %d", name, keys, telephony.UserDataMaxKeys)
+		}
+		bytes, ok := number(dig(userData, "additionalProperties", "maxLength"))
+		if !ok {
+			t.Errorf("%s.userData states no value maxLength", name)
+		} else if bytes != telephony.UserDataMaxValueBytes {
+			t.Errorf("%s.userData allows %d-byte values, the merge allows %d",
+				name, bytes, telephony.UserDataMaxValueBytes)
+		}
+	}
 }

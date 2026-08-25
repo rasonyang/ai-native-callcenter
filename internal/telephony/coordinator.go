@@ -686,9 +686,19 @@ func (c *Coordinator) applyCallData(callID uuid.UUID) {
 	if len(data) == 0 {
 		return
 	}
+	var change UserDataChange
 	_ = c.registry.Do(callID, func(call *Call) {
-		call.MergeUserData(data)
+		change = call.MergeUserData(data)
 	})
+	// The request that placed this call was answered long before now, so
+	// nobody is left to refuse: what the bounds would not take is said here or
+	// nowhere. It should not happen — the endpoints check the same limits
+	// before accepting — which is exactly why it is worth an error if it does.
+	if len(change.Dropped) > 0 {
+		slog.Error("business data did not fit onto the call it was placed with",
+			"callId", callID, "droppedKeys", change.Dropped,
+			"maxKeys", UserDataMaxKeys, "maxValueBytes", UserDataMaxValueBytes)
+	}
 }
 
 // tapAgentLeg starts transcription on whichever of the bridged channels is an
@@ -726,6 +736,7 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 	var movedQueue QueueFacts
 	var movedBot BotShare
 	var movedUserData map[string]any
+	var movedData UserDataChange
 	_ = c.registry.Do(absorb, func(call *Call) {
 		moved = append(moved, call.Parties...)
 		movedQueue = call.Queue
@@ -751,7 +762,7 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 		// order number on some calls and not others, for a reason nobody
 		// could see. Merge rather than replace: the kept call's own data is
 		// not somebody else's to overwrite.
-		call.MergeUserData(movedUserData)
+		movedData = call.MergeUserData(movedUserData)
 		// One conversation has one originator: the earliest inbound leg.
 		// Both provisional calls named their own first leg the originator,
 		// and keeping two makes the CDR's from-number a coin toss.
@@ -759,6 +770,16 @@ func (c *Coordinator) merge(ctx context.Context, keep, absorb uuid.UUID) {
 	})
 	if err != nil {
 		return
+	}
+	// Two calls each within the bound can merge to twice it, so this is the
+	// one place a drop is expected rather than a sign something upstream
+	// failed to check. It is still worth saying loudly: business data the
+	// caller gave one half of the conversation is not on the half that
+	// survived, and no request is left to be told so.
+	if len(movedData.Dropped) > 0 {
+		slog.WarnContext(ctx, "business data did not survive two calls becoming one",
+			"keptCallId", keep, "absorbedCallId", absorb,
+			"droppedKeys", movedData.Dropped, "maxKeys", UserDataMaxKeys)
 	}
 	for _, p := range moved {
 		if err := c.registry.BindChannel(p.ChannelID, keep); err != nil {
