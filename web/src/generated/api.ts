@@ -1978,7 +1978,11 @@ export interface components {
             agentIds?: string[];
             /** Format: uuid */
             primaryAgentId?: string;
-            /** @description Seconds spent ringing an agent. For an answered call, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer. */
+            /**
+             * @description Seconds spent ringing an agent. For an answered call, from the answering leg's creation to its bridge; for one nobody answered, from the first leg dialled to the last one released — a queue that re-offers dials a fresh leg each time, so no single leg holds the answer.
+             *
+             *     Not a segment of the call to be added to the others: on a queued call it lies inside queueWaitSec, and on a call that never queued there is no queue window for it to lie inside, so it overlaps whatever else was happening. See totalSec.
+             */
             ringSec: number;
             /** @description Seconds the caller spent with the bot, ending when they actually left it — after any closing sentence has finished playing, not when the transfer was decided. */
             botSec: number;
@@ -1988,7 +1992,11 @@ export interface components {
             talkSec: number;
             /** @description Billable seconds: answeredAt to endedAt. This is the carrier's number, not the agent's — a call the bot answered and nobody took is still billed. 0 when the call was never answered, and 0 between two extensions, which nobody charges for. */
             billSec: number;
-            /** @description Seconds from startedAt to endedAt, the whole life of the call including the time before it was answered. Not the billable duration; see billSec. */
+            /**
+             * @description Seconds from startedAt to endedAt, the whole life of the call including the time before it was answered. Not the billable duration; see billSec.
+             *
+             *     The other durations do not partition this one. botSec, queueWaitSec, ringSec and talkSec each measure a stretch of the call in its own terms and those stretches overlap — ringing happens inside the queue's window, most obviously — so subtracting them from totalSec to find unaccounted time yields a number that means nothing. Adding them can exceed totalSec on a perfectly ordinary call. The three the caller passes through in order — botSec, queueWaitSec, talkSec — are consecutive and do fit.
+             */
             totalSec: number;
             status: components["schemas"]["CDRStatus"];
             hangupCause?: string;

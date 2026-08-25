@@ -148,7 +148,21 @@ func atPtr(sec int) *time.Time      { t := at(sec); return &t }
 func idPtr(id uuid.UUID) *uuid.UUID { return &id }
 
 // The full journey: bot, queue, agent — every duration lands in its own column.
-func TestAssembleAnsweredCallSplitsTheDurations(t *testing.T) {
+// The durations are measurements of a call, not a partition of it. They
+// overlap, and this fixture is where that has always been visible: bot 30 +
+// wait 20 + ring 5 + talk 50 is 105 on a call that lasted 100.
+//
+// Ringing happens *inside* the queue's window — mod_callcenter dials agents
+// while the member waits — so ring is a sub-interval of wait rather than a
+// segment after it. The test used to be called "SplitsTheDurations", which
+// claimed the opposite of what its own numbers say, and a query built on that
+// claim (total − bot − wait − ring − talk > 20, hunting for legs torn down
+// early) returned four perfectly ordinary calls (C57).
+//
+// So the assertion below is deliberate: the four exceed the whole. Anyone
+// making them add up has changed what these fields mean and should say so
+// here first.
+func TestTheDurationsMeasureTheCallRatherThanPartitionIt(t *testing.T) {
 	agentID := uuid.New()
 	queueID := uuid.New()
 	flowID := uuid.New()
@@ -199,6 +213,23 @@ func TestAssembleAnsweredCallSplitsTheDurations(t *testing.T) {
 	}
 	if cdr.MissedReason != "" {
 		t.Errorf("an answered call carries missed reason %q", cdr.MissedReason)
+	}
+
+	// The overlap, stated. Ring is inside wait, so the four cannot be summed
+	// and nothing downstream may assume they can.
+	if sum := cdr.BotSec + cdr.QueueWaitSec + cdr.RingSec + cdr.TalkSec; sum != 105 {
+		t.Errorf("the four durations sum to %d, want 105 on a 100-second call — "+
+			"they measure overlapping stretches and were never a partition", sum)
+	}
+	if cdr.RingSec > cdr.QueueWaitSec {
+		t.Errorf("ring %ds is longer than the wait %ds it happened inside",
+			cdr.RingSec, cdr.QueueWaitSec)
+	}
+	// What is true of them: the phases the caller passed through in order do
+	// fit, because those are sequential. Ring is the one that is not a phase.
+	if seq := cdr.BotSec + cdr.QueueWaitSec + cdr.TalkSec; seq > cdr.TotalSec {
+		t.Errorf("bot+wait+talk = %d exceeds the call's %d seconds; those three "+
+			"are consecutive stretches and must fit", seq, cdr.TotalSec)
 	}
 }
 
