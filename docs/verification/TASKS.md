@@ -414,8 +414,48 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     "我的桥被转走了所以我结束"的判据 —— 需要先现场抓一次真转接看那条腿到底带什么。
   - **B 撤**:在有人真正需要它之前,把这个字段从载荷里拿掉。
     发一个已知是错的值,比不发更糟。
-  **现场取证方式**(A 的前置):话机拨 95001 走 bot,要求转人工,同时抓主管流 ——
-  bot 腿的 `PARTY_RELEASED` 载荷就是答案。
+  **【2026-08-25 21:26 现场取证完成 —— 三条腿的判定全反了】**
+  话机 18688886669 拨 95001 → bot 接 → 转人工 → 进 support-en 队列 → wei(1008) 接起 → 客户挂断。
+  同时抓 `CHANNEL_HANGUP_COMPLETE` 原始事件与主管 SSE。
+  证据:`docs/verification/artifacts/C62/bot-to-queue-hangup-events.log`
+  与 `bot-to-queue-party-released.jsonl`。
+
+  **① bot 腿(真正"因为通话转走了才结束"的那条)身上什么都没有。**
+  ```
+  sofia/external/95001   Hangup-Cause = NORMAL_CLEARING
+      sip_hangup_disposition = send_bye
+      Caller-Channel-Transfer-Time = 0
+      (没有 transfer_history,没有 transfer_source,没有任何 refer 痕迹)
+  ```
+  **它的挂断事件与一次普通挂断逐字段同形。** 交换机不会告诉一条腿"你的对端被转走了"。
+  → `isTransferredAway: false`。**该 true 的报了 false。**
+
+  **② 主叫腿(活到最后、自己挂断的那条)带着全部历史,而且是累加的。**
+  ```
+  transfer_history = ARRAY::…:bl_xfer:7001/aicc/XML|:…:uuid_br:<坐席腿>
+      sip_hangup_disposition = recv_bye     ← 客户自己挂的
+  ```
+  两段:第一段是 bot 转队列(`bl_xfer`),第二段是队列桥接坐席(`uuid_br`)。
+  正是源码里 `SWITCH_STACK_PUSH` 的形状。→ `isTransferredAway: true`。**不该 true 的报了 true。**
+
+  **③ 坐席腿也带着 `uuid_br` 那一份** —— `switch_ivr_bridge.c:2179/2187` 往**两条**腿都推,
+  和读源码时的判断一致。正常挂断 → `isTransferredAway: true`。**同样报错。**
+
+  主管流上这通电话的三条 `PARTY_RELEASED`,`cause` 全是 `NORMAL_CLEARING`,而
+  `isTransferredAway` 分别是 **false / true / true** —— **恰好和事实完全相反。**
+
+  **④ 因此 A 的"补一条判据"这条路,在交换机侧是走不通的**:bot 腿身上没有可读的痕迹。
+  但**我们自己知道** —— 转接是我们下的命令(`Adapter.TransferToExtension` /
+  `BridgeToEndpoint` 都明确指定了被转的 channel),协调器也知道那条 channel 当时桥给了谁。
+  所以"这条腿因为通话转走了才结束"是**我们自己的事实**,应当在下达转接时把当时的桥对端标记下来,
+  而不是回过头去问交换机。这比原以为的工作量大。
+
+  **处置选项(待 owner 定,取证已做完)**:
+  - **A′ 自己记**:转接下达时标记被转 channel 的当前桥对端;`transferredAway()` 三条规则里
+    第 3 条删掉(它答的是"这条 channel 被转接过",与字段定义不同),
+    第 1、2 条保留(将来话机自己发 REFER 时仍然对)。
+  - **B 撤**:把 `isTransferredAway` 从 `PARTY_RELEASED` 载荷里拿掉,等真有消费方再按 A′ 做。
+    现状是三条腿全判反,且全仓无人读它。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
