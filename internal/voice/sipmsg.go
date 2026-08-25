@@ -295,18 +295,22 @@ func appendTag(header, tag string) string {
 // can end looks identical on the wire: the conversation reaching its goodbye,
 // the process being restarted, a crash.
 //
-// Measured on this deployment (2026-08-25), and worth knowing before relying
-// on it: the headers do go out correctly — a SIP trace shows both, above
-// Content-Length — and **FreeSWITCH does not act on them**. The bot leg still
-// hangs up NORMAL_CLEARING, and aicc_inbound.lua's warning reads
-// originate_disposition, which is how the *dial* went and says SUCCESS. What
-// actually tells a restart from a bot that finished is the aicc_bot_finished
-// stamp, and that already existed.
+// The reader these are for is the capture, not the switch (owner directive
+// 2026-08-25). A SIP capture — Homer or anything else recording the
+// signalling — has the BYE and nothing else: it cannot see this process's
+// logs, its ledger or its channel variables. A bare BYE there is
+// indistinguishable from a caller hanging up, so "were these three hundred
+// calls cut by a deploy?" is a question the capture cannot answer. With the
+// Reason it is a search.
 //
-// So this is honest signalling rather than a mechanism anything here depends
-// on: it is what RFC 3326 is for, it costs two lines, and a proxy or a peer
-// that does read Reason gets the truth instead of a bare goodbye. Do not build
-// on it without checking the far end first.
+// Measured on this deployment (2026-08-25), because the far end's behaviour is
+// worth knowing before anything is built on it: the headers do go out
+// correctly — a SIP trace shows both, above Content-Length — and FreeSWITCH
+// does not act on them. The bot leg still hangs up NORMAL_CLEARING, and
+// aicc_inbound.lua's warning reads originate_disposition, which reports how
+// the dial went and says SUCCESS. What tells a restart from a bot that
+// finished, inside this system, is the aicc_bot_finished stamp, and that
+// already existed. Nothing here depends on the switch reading Reason.
 type byeReason struct {
 	// SIPCause and SIPText are the protocol's own answer (503, 480…).
 	SIPCause int
