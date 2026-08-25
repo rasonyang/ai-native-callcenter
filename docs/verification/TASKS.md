@@ -2710,7 +2710,28 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   (`switch_channel.c:3512`,`CHANNEL_PROGRESS` 之后、`CCS_RINGING` 之前)。
   **响了没人接不漏计数**:减一挂在 `cc_hook_state_run` 的 `CS_HANGUP` 上,放弃的振铃腿照样减。
   **真机实测**:`前 count=0 → 振铃中 count=1 → 挂断后 count=0`(无人接起)。
-  **仍未做:A2(分机直拨 / 坐席互打)。**
+  **A2(分机直拨 / 坐席互打)** **【已完成 2026-08-25 `00024`】** —— 见下条。
+  **A2 落地形状(2026-08-25)**:两侧两个机制,因为**方向决定了变量走哪条路**。
+  **实测的分界线**:directory 的 `<variables>` 只到达**用户自己抬起的通道**(他话机发的 INVITE),
+  **到不了朝他抬起的那条腿** —— originate 到 `user/1002` 的腿上,`user_context`、`aicc_managed`、
+  `aicc_extension` 一个都没有(逐个 `uuid_getvar` 读过)。于是:
+  ```
+  主叫侧(坐席自己拨)  directory <variables> 里 execute_on_ring    ← 不碰 dial-string,队列派单路径零影响
+  被叫侧(坐席被拨)    aicc_internal 里 aicc_track.lua 查名字,
+                      bridge ${aicc_bleg_vars}user/$1@domain      ← {} 前缀只落被叫腿
+  ```
+  `luacc.directory` 加 `callcenter_agent_name`(`00024`;视图本来就 join 了 `agents`,一列的事)。
+  **Down 必须 DROP 重建而不是 REPLACE** —— PostgreSQL 能给视图加列、不能删列;
+  而 DROP 会丢掉受限 Lua 角色的 SELECT 授权,故显式补回,并用 `pg_roles` 判存在:
+  没跑过 `lua_role.sql` 的部署本来就没有那条授权,不该为此让回滚失败。
+  **现场实测**:
+  ```
+  user_data 1008 var execute_on_ring  →  callcenter_track agent-wei      主叫侧渲染正确
+  内部呼叫 1008,被叫侧 agent-wei      →  前 0 / 振铃中 1 / 挂断后 0      被叫侧生效
+  反向验证:拆掉 ${aicc_bleg_vars}     →  振铃中 count=0                  确认计数来自它
+  ```
+  demo 打包无需改动:`entrypoint.d/10-aicc.sh` 用 `scripts/*.lua` 通配拷贝。
+
   **⚠ 并已排除一条看似更优雅的路(owner 提出并自行否掉)**:把
   `execute_on_ring='callcenter_track …'` 编进 **user 级 dial-string**,让它覆盖所有 `user/` 解析。
   **不能这么做,因为 mod_callcenter 派单用的 contact 正是 `user/1008@domain`** ——

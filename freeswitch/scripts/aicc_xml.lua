@@ -73,6 +73,34 @@ local function directory_document(domain, row)
     auto_answer = '        <variable name="sip_auto_answer" value="true"/>\n'
   end
 
+  -- Tell mod_callcenter this agent is busy the moment a call they placed
+  -- starts ringing, so its queues stop offering them one until it ends.
+  --
+  -- The module only tracks what it dispatched: a call an agent makes leaves
+  -- agents.state at Waiting, and a queue then rings a phone that is already
+  -- engaged. The phone says no — 486, which costs a busy delay, or 480 on its
+  -- slot race, which the module counts as a call they failed to answer.
+  --
+  -- Here rather than in the dial-string, and that distinction is measured.
+  -- These variables reach a channel the user themselves raises — their phone's
+  -- own INVITE — and not one raised towards them: a leg originated at
+  -- user/1002 carries none of user_context, aicc_managed or aicc_extension.
+  -- The dial-string is the opposite, and it is what mod_callcenter's own
+  -- agent contact resolves through, so putting this there would count the
+  -- queue's own dispatches and let a decrement that lagged by an instant skip
+  -- an agent on the residue of their own previous offer.
+  --
+  -- On ring, because a ringing phone is already engaged and that is the window
+  -- worth closing. A ring nobody answers costs nothing: mod_callcenter's own
+  -- state hook puts the count back when the leg ends, answered or not.
+  local track = ""
+  local agent = row.callcenter_agent_name
+  if agent ~= nil and agent ~= "" then
+    track = string.format(
+      '        <variable name="execute_on_ring" value="callcenter_track %s"/>\n',
+      escape(agent))
+  end
+
   return string.format([[<?xml version="1.0" encoding="UTF-8" standalone="no"?>
 <document type="freeswitch/xml">
   <section name="directory">
@@ -90,14 +118,14 @@ local function directory_document(domain, row)
           <variable name="effective_caller_id_number" value="%s"/>
           <variable name="aicc_managed" value="true"/>
           <variable name="aicc_extension" value="%s"/>
-%s        </variables>
+%s%s        </variables>
       </user>
     </domain>
   </section>
 </document>]],
     escape(domain), escape(row.number), escape(row.password),
     escape(row.display_name ~= "" and row.display_name or row.number),
-    escape(row.number), escape(row.number), auto_answer)
+    escape(row.number), escape(row.number), auto_answer, track)
 end
 
 local function handle_directory(params)
@@ -109,7 +137,8 @@ local function handle_directory(params)
   if dbh == nil then return nil end
 
   local found = nil
-  dbh:query("SELECT number, password, display_name, is_auto_answer FROM luacc.directory WHERE number = "
+  dbh:query("SELECT number, password, display_name, is_auto_answer, callcenter_agent_name " ..
+    "FROM luacc.directory WHERE number = "
     .. quote(user), function(row)
       found = row
     end)

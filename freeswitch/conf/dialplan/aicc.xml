@@ -68,6 +68,17 @@
       continue_on_fail is false on purpose. An internal call nobody answers is
       an internal call nobody answered; there is no voicemail to fall into and
       no successor leg to write a second record for.
+
+      aicc_track.lua names the agent being called, so mod_callcenter stops
+      offering them queue calls while their phone rings. It has to be a script
+      because only the database knows which agent is at an extension, and it
+      has to be here because the leg this decorates is raised *towards* that
+      agent: a directory entry's variables reach the channels a user raises,
+      never the ones raised at them (measured). The caller's own leg is covered
+      by their directory entry for the same reason, from the other side.
+
+      aicc_bleg_vars is the {…} prefix it builds, empty for an extension no
+      agent works at — which leaves the bridge string exactly as it was.
     -->
     <extension name="aicc_internal">
       <condition field="destination_number" expression="^(10[0-9][0-9])$">
@@ -77,7 +88,8 @@
         <action application="set" data="continue_on_fail=false"/>
         <action application="set" data="call_timeout=30"/>
         <action application="set" data="ringback=${us-ring}"/>
-        <action application="bridge" data="user/$1@${domain_name}"/>
+        <action application="lua" data="aicc_track.lua $1"/>
+        <action application="bridge" data="${aicc_bleg_vars}user/$1@${domain_name}"/>
       </condition>
     </extension>
 
