@@ -292,11 +292,21 @@ func appendTag(header, tag string) string {
 // Reason headers.
 //
 // Without it a BYE says only that the call is over, and every way a bot leg
-// can end looks identical from the switch: the conversation reaching its
-// goodbye, the process being restarted, a crash. aicc_inbound.lua reads
-// originate_disposition to decide what to tell whoever is looking at 3am and
-// gets "unknown"; the CDR's cause is no better. Two headers cost nothing and
-// FreeSWITCH maps the Q.850 one onto the hangup cause it records.
+// can end looks identical on the wire: the conversation reaching its goodbye,
+// the process being restarted, a crash.
+//
+// Measured on this deployment (2026-08-25), and worth knowing before relying
+// on it: the headers do go out correctly — a SIP trace shows both, above
+// Content-Length — and **FreeSWITCH does not act on them**. The bot leg still
+// hangs up NORMAL_CLEARING, and aicc_inbound.lua's warning reads
+// originate_disposition, which is how the *dial* went and says SUCCESS. What
+// actually tells a restart from a bot that finished is the aicc_bot_finished
+// stamp, and that already existed.
+//
+// So this is honest signalling rather than a mechanism anything here depends
+// on: it is what RFC 3326 is for, it costs two lines, and a proxy or a peer
+// that does read Reason gets the truth instead of a bare goodbye. Do not build
+// on it without checking the far end first.
 type byeReason struct {
 	// SIPCause and SIPText are the protocol's own answer (503, 480…).
 	SIPCause int
@@ -310,9 +320,11 @@ type byeReason struct {
 // byeReasonRestart is the bot leg ending because this process is going away.
 //
 // It is a service restart and nothing to do with the caller or the
-// conversation, which is exactly what the switch needs to know: the dialplan
-// keeps such a caller alive (continue_on_fail) and hands them to a person,
-// and it can only tell this apart from a bot that finished by what it is told.
+// conversation. The caller is not left behind either way: the dialplan sets
+// continue_on_fail on the bridge for exactly this, and hands them to the
+// number's fallback queue — verified end to end on 2026-08-25 by killing the
+// process three seconds into a conversation and watching the switch transfer
+// the caller to 7001.
 var byeReasonRestart = byeReason{
 	SIPCause: 503, SIPText: "Service Restart",
 	Q850Cause: 41, Q850Text: "Temporary failure",

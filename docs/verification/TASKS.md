@@ -2608,6 +2608,35 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **难在验证**:要真机重现得在 bot 说话与坐席接起之间重启应用 —— 单测可覆盖读取与填充,
   现场验证要专门安排一次。**先立案,不擅自动手。**
 
+- **重启的善后:BYE 带 Reason + 两条 WARN;兜底链已现场验证** **【2026-08-25;含一处我自己的更正】**
+  **owner 直裁**:aicc 重启时 bot 应发带 `Reason` 的 SIP BYE(`SIP;cause=503;text="Service Restart"`
+  与 `Q.850;cause=41;text="Temporary failure"`),其余情况 **WARN 即可**。
+  **实现前查清的现状**:BYE **本来就在发**(`UAS.Stop` → `d.Stop()` → `sendBye`),缺的只是 Reason;
+  而关停**一条日志都没有** —— N 通在途通话就那么从内存里消失。
+  已加:`byeReason` + `StopWithReason`,只挂在重启那条 BYE 上(普通道别长出 Reason 即用例失败);
+  两条 WARN(要结束的对话数 + 在途通话的 callId 清单)。
+  **明确不做的两件**:①**关停时不补写 CDR** —— `cdr.go:104` 记着代价:两条路抢插同一行,
+  *"settled silently by whichever insert lost the primary key"*;**行只在通话真结束时写**。
+  ②**不在 Go 侧把主叫救进兜底队列** —— 拨号方案已经在做,位置比我们好,
+  `continue_on_fail` 存在的理由就是它(我一度提议在 `Stop()` 里调 `rescueCaller()`,是重复实现,owner 拨回)。
+  **现场验证(owner 指定补做)**:kill 掉进程于 bot 腿桥上后 3 秒,FreeSWITCH 自己的日志:
+  ```
+  EXECUTE loopback/95001-b transfer(7001 XML aicc)
+  Transfer loopback/95001-b to XML[7001@aicc]
+  EXECUTE loopback/95001-b lua(aicc_queue.lua 7001)
+  setVariable(aicc_queue, support-en)      ← 主叫进了兜底队列,录音跟随转接
+  ```
+  **主叫确实被送到兜底队列。** 上一轮实验失败是手把的问题(`&playback(silence_stream://…)`
+  的 A 腿先结束了),换成 `&park()` 就走通了。
+  **⚠ 但同一次验证推翻了我在提交信息里写的两句话,记在这里免得后人照着信:**
+  ①**`aicc_inbound.lua` 的告警读的是 `originate_disposition`** —— 那是**拨号**怎么样,
+  实测记的是 `SUCCESS` 而不是我说的 `unknown`;**Reason 头对这行日志毫无影响**。
+  ②**FreeSWITCH 没有把 `Q.850;cause=41` 映射成挂断原因** —— SIP trace 证明两条 Reason
+  **格式正确地上了线**(在 `Content-Length` 之上),而交换机侧仍记 `NORMAL_CLEARING`。
+  **真正区分"重启"与"bot 聊完了"的是 `aicc_bot_finished` 这个印**,它本来就在。
+  所以 Reason 头的定位是**诚实的信令**(RFC 3326 就是干这个的,两行的代价,
+  中间的代理或对端若读它就拿到真相),**不是本仓任何逻辑依赖的机制**。代码注释已按实测改写。
+
   **附带的方法论(原文保留,值得单独记)**:那次误判里我**从头到尾没查 `audit_logs`**,
   而坐席按了什么逐条记在那里。**先看系统自己记下了什么,再去推断。**
   对照组是 `bill_sec` —— 它有 `billDriftTolerance` 拿交换机自己的 `billsec` 对账,
