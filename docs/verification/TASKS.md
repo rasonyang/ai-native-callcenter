@@ -287,7 +287,8 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     补写了 `max_no_answer` 与 `busy_delay_time` 两个 setter(另两个此前有 setter 无调用方)。
     **`agent-originate-timeout` 是全局参数**,由 `aicc_xml.lua` 的 `<settings>` 下发,60 → **15 秒**。
     连带:~~`reject_delay_time=60` 正是 **C37**(被拒的派单 70 毫秒一次空转三分钟)的直接对策,~~
-    **⚠ 2026-08-25 实测推翻:它对被拒的派单不生效(见 C59)。原文保留如下,**
+    **⚠ 2026-08-25 订正:C37 那种 486 吃的是 `busy_delay_time`,不是 `reject_delay_time`;
+    两者都是 60,所以对策成立,但原文点错了参数(见 C59)。原文保留如下,**
     该条状态随之改为"参数已改,待复现验证"。
   - **`27be54c` 应用侧的消费**:`KindQueueAgentStatus`(此前归一化后被丢弃)→
     交换机把坐席置 `On Break` = **通知**,应用据此 `RingNoAnswer` → NOT_READY(SYSTEM) +
@@ -1894,7 +1895,9 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   若要处理,先补一条能稳定重现它的用例。
   ~~**【2026-08-23 参数已改,待复现验证】** W2.1 随 `mirrorRegistration` 下发了
   `reject_delay_time=60`(此前是 0 = 立即重试),这正是本条的直接对策:被拒之后要等一分钟才会再派。~~
-  **【2026-08-25 实测:这条对策不成立。`reject_delay_time` 对被拒的派单根本不生效。】** 见下条。
+  **【2026-08-25 订正两次,以此为准】** 第一版我写"这条对策不成立",**错了**;
+  但原文也不全对:**486 吃的是 `busy_delay_time` 而不是 `reject_delay_time`**,两者都由 W2.1 下发为 60,
+  所以结果上被拒的派单确实被限到一分钟一次。见 C59。
   **但本条不改判为"已修"** —— 触发条件(那条挂死的 INVITE)本身还没弄清,
   而且没有能稳定重现它的用例。下次遇到时先看重试间隔是不是变成了 60 秒。
   证据:`docs/verification/artifacts/VC-S12-01/verdict.md`。
@@ -2617,8 +2620,48 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **难在验证**:要真机重现得在 bot 说话与坐席接起之间重启应用 —— 单测可覆盖读取与填充,
   现场验证要专门安排一次。**先立案,不擅自动手。**
 
-- **C59(new,2026-08-25 实测,由「486 不计入 max_no_answer」查出)**
-  **`max_no_answer` 不计 486 —— 属实;但更要紧的是 `reject_delay_time` 也不生效,拒绝派单是 10 次/秒的空转。**
+- **C59 —— ⚠ 我 2026-08-25 的第一版结论是错的,当日读源码后自行推翻。以下是订正后的版本。**
+  **错在哪**:我说"`reject_delay_time` 对被拒的派单不生效,是 10 次/秒的空转"。
+  **10 次/秒是我自己造出来的** —— 手工建的探针坐席 `busy_delay_time=0`,而
+  **486 走的根本不是 reject 分支,是 busy 分支**。真实坐席 `busy_delay_time=60`(应用镜像下发)。
+  ```
+  probe-busy  busy_delay_time=0   → 25 秒 217 次
+  probe-busy  busy_delay_time=60  → 25 秒   1 次     ← 重测
+  ```
+  **交换机侧的兜底一直在,是我的手把没有它。**
+  **源码为准**(`mod_callcenter.c:2141-2189`,`switch (cause)`):
+  ```
+  USER_BUSY / CIRCUIT_CONGESTION (486)  → busy_delay_time      不计 no_answer_count
+  CALL_REJECTED (603)                    → reject_delay_time    不计 no_answer_count
+  LOSE_RACE / ORIGINATOR_CANCEL          → 无延迟              不计
+  USER_NOT_REGISTERED                    → 固定 5 秒           不计
+  default(超时无人接)                    → no_answer_delay_time  ★ no_answer_count++
+                                            并在 >= max_no_answer 时把坐席置为
+                                            agent_no_answer_status,并发
+                                            CC-Action: agent-max-no-answer 事件
+  ```
+  **所以"486 不计入 `max_no_answer`"属实,而且是设计如此** —— 忙、拒接、没人接是三件事,
+  mod_callcenter 分得清清楚楚,只有第三件才算"没接"。**这不是缺口,是我们没说清自己是哪一件。**
+  **真正的缺陷在我们这边(owner 2026-08-25 提出的方向,查证成立)**:
+  坐席在响铃时按"拒接",工作台调的是 `actions.hangup.mutate(callId)`
+  → `/calls/{id}/hangup` → `Coordinator.Hangup` → **`uuid_kill <坐席腿> NORMAL_CLEARING`**
+  → 落进 mod_callcenter 的 **`default:` 分支** → **`no_answer_count++`**。
+  **`max_no_answer=2`,于是坐席主动拒两次就被当成"老是不接电话"踢出轮转。**
+  **修法就是 owner 说的那句**:响铃中被明确拒绝时,`uuid_kill <uuid> CALL_REJECTED` ——
+  落进 `CALL_REJECTED` 分支,吃 `reject_delay_time`(已是 60),**不计数**。
+  比我上一版提的"应用侧数拒绝次数 + 达阈值置 On Break"**简洁且可靠得多**:
+  **计数 mod_callcenter 本来就在做**,我们要做的只是**把发生的事说对**;
+  不需要新计数器、不需要定阈值、不需要给 `NotReadyReason` 加值。
+  是"拒接"还是"挂断"**由服务端从腿的状态判定**(未应答即拒接),不看客户端传什么 ——
+  与本仓"路径里的 call id 不构成授权"同理。
+  **web-sip-phone 侧已经是对的,而且早就知道这套语义**(`src/offscreen/call-session.ts:85`):
+  *"verified against FreeSWITCH mod_callcenter — 486 maps to USER_BUSY and does not count
+  toward max_no_answer"*;它**只在坐席真的在通话中才回 486**,槽位竞态回 **480**,理由写得很准:
+  *"a switch that routes 486 to its busy timer would both misreport the agent as busy and
+  apply the wrong penalty"*。**话机从不用 486/603 表示"坐席拒接"** —— 拒接走我们的 HTTP。
+  **顺带记一条**:话机的 480 落在 `default:` 分支,**同样会 `no_answer_count++`**。
+  那是亚秒级竞态,坐席什么都没做却被记一次未接。**未修,只记录。**
+  **探针已清理**。
   **无人手把**:给一个探针坐席 `probe-busy` 把 contact 指到 `error/USER_BUSY`
   (每次派单立刻以 cause 17 被拒,不需要真话机、不需要人),`max_no_answer=2`,挂进 `support-en`
   (该队列此时只有 On Break 的 agent-wei,不受干扰),然后往 7001 送一位主叫。
