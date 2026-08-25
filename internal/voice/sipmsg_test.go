@@ -148,7 +148,7 @@ func Test487CarriesTheInviteCSeq(t *testing.T) {
 func TestByeReversesTheRouteSetAndTargetsTheContact(t *testing.T) {
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
 	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
-		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact()))
+		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReason{}))
 
 	if !strings.HasPrefix(bye, "BYE sip:10.0.0.8:5060 SIP/2.0") {
 		t.Errorf("BYE is not addressed to the peer's Contact:\n%s", bye)
@@ -168,6 +168,37 @@ func TestByeReversesTheRouteSetAndTargetsTheContact(t *testing.T) {
 	}
 	if !strings.Contains(bye, `To: "Caller" <sip:1001@10.0.0.8>;tag=remote-9`) {
 		t.Errorf("To does not carry the remote party:\n%s", bye)
+	}
+	// An ordinary goodbye explains nothing, because there is nothing to
+	// explain: the conversation ended the way conversations end.
+	if strings.Contains(bye, "Reason:") {
+		t.Errorf("a plain BYE carries a Reason it has no reason for:\n%s", bye)
+	}
+}
+
+// A restart is not the caller hanging up and not the bot finishing, and the
+// switch has no way to tell those apart unless it is told.
+//
+// aicc_inbound.lua keeps a caller alive when the bot leg vanishes and hands
+// them to a person, and logs which vanishing it was from what the switch
+// recorded — "unknown" being what it gets when the BYE says nothing.
+// FreeSWITCH maps the Q.850 reason onto the hangup cause, so this is also what
+// makes the ledger able to tell a restart from a goodbye.
+func TestAByeSentBecauseWeAreRestartingSaysSo(t *testing.T) {
+	msg, _ := parseSIP([]byte(inviteFromSwitch))
+	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
+		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReasonRestart))
+
+	if !strings.Contains(bye, `Reason: SIP;cause=503;text="Service Restart"`) {
+		t.Errorf("the SIP reason is missing or malformed:\n%s", bye)
+	}
+	if !strings.Contains(bye, `Reason: Q.850;cause=41;text="Temporary failure"`) {
+		t.Errorf("the Q.850 reason is missing or malformed:\n%s", bye)
+	}
+	// Headers belong above the body, and a BYE has none — Content-Length is
+	// the last line, so anything after it is outside the message.
+	if strings.Index(bye, "Reason:") > strings.Index(bye, "Content-Length:") {
+		t.Errorf("the Reason headers are below Content-Length:\n%s", bye)
 	}
 }
 

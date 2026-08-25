@@ -267,6 +267,25 @@ func (r *Registry) Shutdown() {
 	}
 	r.mu.Unlock()
 
+	// What we are taking with us, before we take it.
+	//
+	// The calls themselves are the switch's and survive: a caller in a queue
+	// is held by the queue and is adopted back on the next connect, and a
+	// caller bridged to an agent goes on talking to them. What ends here is
+	// this process's account of them — parties, timings, the bot's share —
+	// and no ledger row is written for a call that has not ended, because it
+	// has not ended. Said out loud because the alternative is a restart that
+	// takes an unknown number of live calls out of view without a word, and a
+	// log that cannot be reconciled afterwards.
+	if len(actors) > 0 {
+		ids := make([]string, 0, len(actors))
+		for _, a := range actors {
+			ids = append(ids, a.call.CallID.String())
+		}
+		slog.Warn("shutting down with calls in flight",
+			"calls", len(actors), "callIds", ids)
+	}
+
 	for _, a := range actors {
 		a.stop()
 	}

@@ -102,9 +102,12 @@ type Dialog struct {
 	// rtcp is nil when reporting is disabled or its port could not be bound.
 	// It is created after the dialog is already visible to other goroutines,
 	// so it lives under the mutex.
-	rtcp        *RTCPSession
-	isStopped   bool
-	isByeSent   bool
+	rtcp      *RTCPSession
+	isStopped bool
+	isByeSent bool
+	// byeReason rides the BYE this dialog sends, when there is something to
+	// say beyond the call being over. Zero means an ordinary goodbye.
+	byeReason   byeReason
 	isAcked     bool
 	isRemoteBye bool
 	sipConn     *net.UDPConn
@@ -169,17 +172,32 @@ func (d *Dialog) sendBye() {
 		return
 	}
 	d.isByeSent = true
-	conn, addr := d.sipConn, d.sipAddr
+	conn, addr, reason := d.sipConn, d.sipAddr, d.byeReason
 	d.mu.Unlock()
 
 	if conn == nil || addr == nil {
 		return
 	}
 	bye := buildBye(d.CallID, d.FromHeader, d.ToHeader, d.LocalTag,
-		d.LocalIP, d.LocalSIPPort, d.RecordRoutes, d.RemoteContact)
+		d.LocalIP, d.LocalSIPPort, d.RecordRoutes, d.RemoteContact, reason)
 	if _, err := conn.WriteToUDP(bye, addr); err == nil {
-		d.log.Info("sip bye sent", "callId", d.CallID)
+		d.log.Info("sip bye sent", "callId", d.CallID,
+			"sipCause", reason.SIPCause, "q850Cause", reason.Q850Cause)
 	}
+}
+
+// StopWithReason ends the dialog and says why on the BYE.
+//
+// The reason has to be set before the BYE goes out and there is only one BYE,
+// so this is Stop with the answer attached rather than a way to change it
+// afterwards.
+func (d *Dialog) StopWithReason(reason byeReason) {
+	d.mu.Lock()
+	if !d.isByeSent {
+		d.byeReason = reason
+	}
+	d.mu.Unlock()
+	d.Stop()
 }
 
 // Stop ends the call and releases its media. It is idempotent.
@@ -297,8 +315,19 @@ func (u *UAS) Stop() {
 	u.usedPorts = map[int]bool{}
 	u.mu.Unlock()
 
+	// Every conversation still running ends with a BYE that says why. The
+	// caller is not hanging up and the bot has not finished with them: this
+	// process is going away, and that is a different thing for the switch to
+	// know. aicc_inbound.lua keeps such a caller alive and hands them to a
+	// person; without the reason it cannot tell this from a bot that reached
+	// its goodbye, and neither can the CDR.
+	if len(dialogs) > 0 {
+		slog.Warn("ending conversations in progress: this process is restarting",
+			"calls", len(dialogs),
+			"sipCause", byeReasonRestart.SIPCause, "q850Cause", byeReasonRestart.Q850Cause)
+	}
 	for _, d := range dialogs {
-		d.Stop()
+		d.StopWithReason(byeReasonRestart)
 	}
 	if u.conn != nil {
 		_ = u.conn.Close()

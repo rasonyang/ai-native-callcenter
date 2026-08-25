@@ -288,8 +288,52 @@ func appendTag(header, tag string) string {
 // buildBye ends a dialog we accepted. From and To swap relative to the INVITE,
 // the Route set is the Record-Route set reversed, and the request goes to the
 // peer's Contact.
+// byeReason is why a dialog is being ended, carried on the BYE as RFC 3326
+// Reason headers.
+//
+// Without it a BYE says only that the call is over, and every way a bot leg
+// can end looks identical from the switch: the conversation reaching its
+// goodbye, the process being restarted, a crash. aicc_inbound.lua reads
+// originate_disposition to decide what to tell whoever is looking at 3am and
+// gets "unknown"; the CDR's cause is no better. Two headers cost nothing and
+// FreeSWITCH maps the Q.850 one onto the hangup cause it records.
+type byeReason struct {
+	// SIPCause and SIPText are the protocol's own answer (503, 480…).
+	SIPCause int
+	SIPText  string
+	// Q850Cause and Q850Text are the telephony answer, which is the one the
+	// switch turns into a hangup cause. 41 is temporary failure.
+	Q850Cause int
+	Q850Text  string
+}
+
+// byeReasonRestart is the bot leg ending because this process is going away.
+//
+// It is a service restart and nothing to do with the caller or the
+// conversation, which is exactly what the switch needs to know: the dialplan
+// keeps such a caller alive (continue_on_fail) and hands them to a person,
+// and it can only tell this apart from a bot that finished by what it is told.
+var byeReasonRestart = byeReason{
+	SIPCause: 503, SIPText: "Service Restart",
+	Q850Cause: 41, Q850Text: "Temporary failure",
+}
+
+func (r byeReason) headers() string {
+	if r.SIPCause == 0 && r.Q850Cause == 0 {
+		return ""
+	}
+	var out strings.Builder
+	if r.SIPCause != 0 {
+		fmt.Fprintf(&out, "Reason: SIP;cause=%d;text=%q\r\n", r.SIPCause, r.SIPText)
+	}
+	if r.Q850Cause != 0 {
+		fmt.Fprintf(&out, "Reason: Q.850;cause=%d;text=%q\r\n", r.Q850Cause, r.Q850Text)
+	}
+	return out.String()
+}
+
 func buildBye(callID, fromHeader, toHeader, localTag, localIP string,
-	localPort int, recordRoutes []string, remoteContact string) []byte {
+	localPort int, recordRoutes []string, remoteContact string, reason byeReason) []byte {
 
 	target := extractURI(fromHeader)
 	if remoteContact != "" {
@@ -312,10 +356,11 @@ func buildBye(callID, fromHeader, toHeader, localTag, localIP string,
 			"To: %s\r\n"+
 			"Call-ID: %s\r\n"+
 			"CSeq: 1 BYE\r\n"+
+			"%s"+
 			"Content-Length: 0\r\n"+
 			"\r\n",
 		target, localIP, localPort, branch, routes.String(),
-		appendTag(toHeader, localTag), fromHeader, callID)
+		appendTag(toHeader, localTag), fromHeader, callID, reason.headers())
 }
 
 var dtmfSignalPattern = regexp.MustCompile(`(?i)Signal\s*=\s*([0-9A-D#*])`)
