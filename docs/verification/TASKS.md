@@ -36,7 +36,12 @@
 >
 > **于是本文件唯一的真待办只剩两条**(均已在各自条目里写明,不重复):
 > **W2 的现场重跑**(2026-08-23 落地三个提交,条目自记"现场重跑待做",RONA 全链至今未在真机上验)、
-> **C14 未修**(切 qwen 后不复现,但丢弃策略一行没动、openai 路径未测 —— 是配置变了,不是修好了)。
+> ~~**C14 未修**~~ **【2026-08-25 owner 定:同 L2–L5 处置,从本文件结案,另起任务】** ——
+> **这不是"已修"**:丢弃策略一行没动,现状 0 丢帧是因为部署换了 provider(qwen),
+> 不是同配置下修好了,openai 路径从未测过。详见 C14 条目末尾。
+>
+> **至此本文件无待办。** 账本 41/41 PASS,W 系列全部收官(W2 的 `rona_delay_sec` 于 2026-08-25
+> 按 owner 决定从契约删除,迁移 `00025`),C1–C62 全部有结论。
 
 ## 0. CallType 判定口径与呼叫能力(owner 直裁,2026-08-20)
 
@@ -1400,7 +1405,8 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   PARTY_RINGING 的 `toNumber` 与 `extensionNumber` 都改用它。回归测试
   `TestARingingLegNamesTheExtensionNotTheContactToken` 以实测那个 `"g7bih4lv"` 为原型,
   摘掉修复即报出该 token。**S4-01 的该条款可转正**(下次重跑时核)。
-- **C14(new,2026-08-20 T3.4 执行发现,FAIL 立案;2026-08-23 复测【在 qwen 路径上不复现】,未修)**
+- **C14(new,2026-08-20 T3.4 执行发现,FAIL 立案;2026-08-23 复测【在 qwen 路径上不复现】;
+  2026-08-25 owner 定:从本文件结案,另起任务处理 —— **这不表示已修**,含义见本条末尾)**
   ASR tap 摄取路径丢帧:一通 ~23s 的转写
   HUMAN_AGENT 丢 46/1146(4.0%)、CUSTOMER 丢 78/1084(7.2%)("transcribe: audio was dropped",
   pump.go:226),识别文本随之崩坏(fox 句 → "Butro focus jobs owing the lazy workin")。pump 计数器
@@ -1421,6 +1427,14 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   过了就是按定义在落后)、`maxSendMs`(最慢那一次;平均值恰好会藏住那个一口气清空两秒队列的卡顿)。
   这条诊断的测试在打第一通电话之前就抓到了我自己的错:第一版 `dropRuns` 在"驱逐一帧后重试成功"时清零 ——
   而那次重试**必然成功** —— 于是一次卡顿会被记成每帧一次,**那个数字会长得像个答案**。
+  **【2026-08-25 owner 定:结案并移出本文件】** 与 L2–L5 同一种处置 ——
+  **不是"已修",是"不在本文件的待办里"**。原样保留三条事实,供接手的人判断:
+  ① 丢弃策略、队列深度、`dsWriteWait`/`oaWriteWait` **一行没改**;
+  ② 现状为 0 丢帧,是因为**部署换了 provider**(qwen 裸二进制 16 kHz vs openai base64+JSON 24 kHz),
+     **不是同配置下修好了**;
+  ③ **openai 路径是否仍丢帧从未测过**(要花 OpenAI 的钱)。
+  真要收这条,入口是 `diag(transcribe)` 留下的三个计数(`dropRuns` / `slowSends` / `maxSendMs`),
+  以及一次 openai 路径上的 VC-S9-01。
 - **C15(new,2026-08-20 T3.5 执行发现,即时根因;2026-08-20 已修并上线 b174a5c)** click-to-dial 从未能工作:outbound.go:164 设
   `origination_caller_id_name = "Dial "+destination`(带空格),renderVars(adapter.go:309-321)不对值
   加引号 → FS originate `{…}` 段 "Parse Error!" → DESTINATION_OUT_OF_ORDER(fs 日志 19:02/19:04 两次实证,
