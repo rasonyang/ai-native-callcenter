@@ -174,6 +174,11 @@ type SwitchEvent struct {
 	DestinationNumber string // dialed number
 	CallerIDName      string
 	Context           string
+	// UserData is business data the call arrived carrying — an order or ticket
+	// this conversation is about, put on the INVITE by an upstream or on the
+	// channel by our own dialplan. Read on creation only, because that is when
+	// it arrives. Empty on every other kind of event.
+	UserData map[string]any
 	// CallTypeHint is the type stamped by whoever placed the call, for the
 	// cases the switch's own view cannot decide: every leg we originate is
 	// "outbound" to the switch, whether it reaches an extension down the hall
@@ -252,6 +257,54 @@ var Subscriptions = []string{
 	"mod_audio_stream::play",
 }
 
+// The two prefixes business data may arrive under on a call the switch is
+// bringing in, and the only two.
+//
+//   - inboundHeaderPrefix is what an upstream put on the INVITE. FreeSWITCH
+//     parses every X-header it receives into sip_h_<name>, so
+//     "X-AICC-UD-orderId" arrives here as "sip_h_X-AICC-UD-orderId" and needs
+//     no dialplan work at all — measured on a real SIP round trip into this
+//     switch, on the receiving leg, which is a different channel from the one
+//     that sent it.
+//   - inboundVarPrefix is what our own dialplan put there, after looking the
+//     caller up. Set by aicc_inbound.lua, or by anything else in the dialplan
+//     that knows something about this call.
+//
+// Case survives both, so the key is the name with the prefix taken off and
+// nothing else: aicc_ud_orderId is orderId, not orderid.
+const (
+	inboundHeaderPrefix = "variable_sip_h_X-AICC-UD-"
+	inboundVarPrefix    = "variable_aicc_ud_"
+)
+
+// inboundUserData reads the business data a call brought with it.
+//
+// Our own dialplan wins a collision. An upstream's header is a claim made by
+// whoever placed the call; a variable this deployment's dialplan set is the
+// answer this deployment worked out, and it is set later and knows more.
+func inboundUserData(ev *esl.Event) map[string]any {
+	var out map[string]any
+	take := func(name, prefix string) (string, bool) {
+		if len(name) <= len(prefix) || !strings.EqualFold(name[:len(prefix)], prefix) {
+			return "", false
+		}
+		return name[len(prefix):], true
+	}
+	for _, prefix := range []string{inboundHeaderPrefix, inboundVarPrefix} {
+		for name, value := range ev.Headers() {
+			key, ok := take(name, prefix)
+			if !ok || value == "" {
+				continue
+			}
+			if out == nil {
+				out = map[string]any{}
+			}
+			out[key] = value
+		}
+	}
+	return out
+}
+
 // Normalize converts a raw event, reporting false for events this application
 // does not consume.
 func Normalize(ev *esl.Event) (SwitchEvent, bool) {
@@ -313,6 +366,10 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	switch ev.Name() {
 	case "CHANNEL_CREATE":
 		out.Kind = KindChannelCreate
+		// Only here. The data arrives with the call and does not change while
+		// it runs, so reading it once is enough — and this is the one scan of
+		// a whole event's headers in the hot path.
+		out.UserData = inboundUserData(ev)
 	case "CHANNEL_ANSWER":
 		out.Kind = KindChannelAnswer
 	case "CHANNEL_PARK":

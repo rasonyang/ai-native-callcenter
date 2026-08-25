@@ -447,11 +447,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      **2. `CALL_USER_DATA` 接上现有两个 merge 点**【已做 2026-08-25】—— 见下条。零生产者 5 → 4
      (余 `BOT_SESSION_STARTED/INTERRUPTED/ENDED` 三个与 `DEVICE_REGISTERED`)。
      **3. `PATCH /calls/{callId}/user-data`**【已做 2026-08-25】—— 见下条。
-     **4. 呼入随路数据** —— `aicc_ud_*` 通道变量 / `X-AICC-UD-*` SIP 头。
-     两个命名空间都是现成的(`aicc_call_id`/`aicc_did`/`aicc_language`/`aicc_extension` 已在用;
-     `X-AICC-*` 五个头由 `aicc_inbound.lua:80-86` 设)。
-     **开工前须实测两件事**:①本部署的 ESL 订阅收不收自定义 `variable_*`;
-     ②从上游进来的头要不要扩 `export_vars`(该行现在只导出三个)才能到 bot 腿上。
+     **4. 呼入随路数据**【已做 2026-08-25】—— 见下条。两件前置实测均已完成且均通过。
      **`calldata.go` 那句"business data deliberately does not travel through the switch"不构成阻挡** ——
      它讲的是**呼出**:我们手上有请求,把业务数据塞进交换机是白白多一处泄露。呼入没有我们的请求可依附,
      数据是坐着 SIP 头进来的,**它到的时候就已经在交换机日志里了**,读它不新增暴露。两个方向,两条规则。
@@ -543,6 +539,41 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   200 与 409 两条路要真通话才走得到,由穿过协调器的单测覆盖(含"被拒的补丁一个字节没改、一条事件没发")。
   **顺带**:PATCH 天然进审计流(`isMutating` 含 PATCH),于是"谁给哪通电话挂了什么业务数据"有据可查 ——
   这正是审计要记的东西,不作任何屏蔽(业务数据不是凭据)。
+
+- **C42 第 4 步:呼入随路数据(`X-AICC-UD-*` / `aicc_ud_*`)** **【已完成 2026-08-25;C42 四步收官】** ——
+  **两件前置实测先做,结果改变了设计。**
+  **①ESL 订阅收不收自定义 `variable_*` —— 收。** 用本仓 `telephony.Subscriptions` 一模一样的订阅集连上去:
+  `originate {aicc_ud_orderId=A-4471}…` → `CHANNEL_CREATE` 上 `variable_aicc_ud_orderId = A-4471`,
+  两条腿都带、一直带到 `CHANNEL_HANGUP_COMPLETE`,**大小写原样保留**(`orderId` 没被压成小写)。
+  **②上游进来的头到不到 —— 到,而且不必扩 `export_vars`。** 做了一次真正的 SIP 往返
+  (从 internal profile 发带 `X-AICC-UD-*` 的 INVITE 打回本机),看**接收侧那条腿**:
+  `direction=inbound`、**另一个 UUID**、带着 `variable_sip_h_X-AICC-UD-orderId`。
+  ⚠ 第一次跑漏了这一步:只看变量名的话,"我为了发头而设的变量"与"收到头后解析出的变量"**同名**,
+  分不开;必须靠 `Call-Direction` 加完整 UUID 才算数据。
+  **于是人工路径一行 Lua 都不用改**:呼入腿的 `CHANNEL_CREATE` 上那个变量,
+  就躺在应用**今天就在读**的那个事件里。
+  **提取放在 `Normalize`**,不放协调器 —— CLAUDE.md 明写它是"raw FS 事件变成域事件的唯一地方";
+  协调器里现存的 `ev.Raw.Variable` 是**已记录的漂移,不是可以延续的先例**。
+  `SwitchEvent` 加 `UserData`,**只在 `CHANNEL_CREATE` 上扫**(数据随通话到达、通话中不变,
+  读一次就够;这也是热路径上唯一一次整事件表头扫描)。
+  **两个前缀,一条规则**:`sip_h_X-AICC-UD-` 是上游的主张,`aicc_ud_` 是我们自己查库后写下的答案;
+  **冲突时我们的赢** —— 它设得更晚、知道得更多(反向验证:调换收集顺序,冲突用例立刻失败)。
+  键名就是去掉前缀,不做任何大小写映射(实测已证)。
+  **合并点在 `applyCallData` 之后**,顺序是故意的:两者可以对同一通电话都触发
+  (我们发起的外呼腿一样会走 dialplan,一样可能被设上 `aicc_ud_*`),按 RFC 7386 后写的赢,
+  而交换机是更近的权威 —— dialplan 做决定时正看着这通电话,那时置呼请求早已答复完毕。
+  **丢弃记 `Warn` 而非 `Error`**(与置呼那条相反):从线上来的数据出自本部署管不着的地方,
+  比一通电话装得下的更多是**该预期的流量**,不是上游漏检的迹象。**电话照接** ——
+  为一个上游话多就把客户拒之门外,是另一回事。
+  **全链路现场实测**(这是第 2、3 步都欠着的那一步):带 `X-AICC-UD-orderId` / `-ticketId` 的
+  INVITE 打进 7001 队列 → 主管视图 `/api/v1/calls` 上两条腿都带
+  `{"orderId":"A-4471","ticketId":"T-9"}` → 挂断后 PostgreSQL 的 `cdrs.user_data` 落的是同一份。
+  **SIP 头 → 通道变量 → 注册表里的通话 → API → 账本,整条链闭合。**
+  **本步不含 bot 腿转发,理由是查出来的**:`flow.NewEngine` 只拿到 `caller`/`entry`/`did`,
+  **flow 变量里根本没有 userData**,bot 在对话中用不上它。把头转发到 bot 腿只会喂给一个读不到它的消费者。
+  等 flow 能消费再接,那时 `aicc_inbound.lua` 扩 `sip_h_X-AICC-UD-*` 即可(能力已在②中证明)。
+  **仍然开着的一处接缝**:`aicall/orchestrator.go:281` 是 `facts.userData = CallData(...)` 直接赋值,
+  不走 `MergeUserData`,绕开限额;今天无害(数据都过了端点的 `checkUserData`),但形状正是第 1 步要堵的那种。
 - **`settings` 死表(§补充的唯一残留)** **【已决并完成 2026-08-24 `00022`】** —— **删表 + 顺手把保留期做了**。
   `settings` 是 key/value 表,0 行、**没有任何 Go/Lua/sqlc 查询碰它**。而本仓的配置答案早已定下:
   `AICC_*` 环境变量、`.env.example` 是唯一登记册(49 条,CLAUDE.md 明文要求与 `config.go` 同步)。

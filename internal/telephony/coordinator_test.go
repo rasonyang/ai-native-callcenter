@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -915,6 +916,98 @@ func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
 	if ev, _, ok := pub.find(events.TypeCallUserData); ok {
 		t.Errorf("a refused write announced %v", ev.Payload)
 	}
+}
+
+// A call can arrive already knowing what it is about.
+//
+// Two ways in, both measured against this switch before any of this was
+// written: an upstream puts X-AICC-UD-<key> on the INVITE and FreeSWITCH
+// parses it into sip_h_X-AICC-UD-<key> on the receiving leg, or our own
+// dialplan sets aicc_ud_<key> after looking the caller up. Either way it is a
+// channel variable on CHANNEL_CREATE by the time this application sees it, and
+// the human path needs no dialplan work at all.
+func TestACallCanArriveCarryingBusinessData(t *testing.T) {
+	arrive := func(t *testing.T, vars map[string]string) (Snapshot, *capturingPublisher) {
+		t.Helper()
+		pub := &capturingPublisher{}
+		registry := NewRegistry(pub)
+		c := NewCoordinator(registry, nil, oneAgent{}, pub)
+
+		minted := uuid.New()
+		vars["variable_aicc_call_id"] = minted.String()
+		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
+		waitFor(t, func() bool { _, err := registry.Snapshot(minted); return err == nil })
+
+		snap, err := registry.Snapshot(minted)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return snap, pub
+	}
+
+	t.Run("from an upstream's SIP headers", func(t *testing.T) {
+		snap, pub := arrive(t, map[string]string{
+			"variable_sip_h_X-AICC-UD-orderId":  "A-4471",
+			"variable_sip_h_X-AICC-UD-ticketId": "T-9",
+			// Not ours, and not touched: the prefix is the whole of the rule.
+			"variable_sip_h_X-Other-Thing": "leave me alone",
+		})
+		if snap.UserData["orderId"] != "A-4471" || snap.UserData["ticketId"] != "T-9" {
+			t.Errorf("userData = %v", snap.UserData)
+		}
+		if len(snap.UserData) != 2 {
+			t.Errorf("userData = %v, want only the two X-AICC-UD headers", snap.UserData)
+		}
+		// Case survives: orderId, never orderid. A screen shows these labels.
+		if _, wrong := snap.UserData["orderid"]; wrong {
+			t.Error("the key was lowercased on the way in")
+		}
+		// And the call says so, so a supervisor watching sees it arrive.
+		if ev, _, ok := pub.find(events.TypeCallUserData); !ok {
+			t.Error("a call arrived carrying business data and nothing was announced")
+		} else if changed, _ := ev.Payload["changedKeys"].([]string); !slices.Equal(
+			changed, []string{"orderId", "ticketId"}) {
+			t.Errorf("changedKeys = %v", ev.Payload["changedKeys"])
+		}
+	})
+
+	t.Run("from our own dialplan", func(t *testing.T) {
+		snap, _ := arrive(t, map[string]string{"variable_aicc_ud_orderId": "A-4471"})
+		if snap.UserData["orderId"] != "A-4471" {
+			t.Errorf("userData = %v", snap.UserData)
+		}
+	})
+
+	// The dialplan looked the caller up and knows better than the claim that
+	// rode in with the call.
+	t.Run("our dialplan wins a collision", func(t *testing.T) {
+		snap, _ := arrive(t, map[string]string{
+			"variable_sip_h_X-AICC-UD-orderId": "what the caller claimed",
+			"variable_aicc_ud_orderId":         "what we looked up",
+		})
+		if snap.UserData["orderId"] != "what we looked up" {
+			t.Errorf("orderId = %v", snap.UserData["orderId"])
+		}
+	})
+
+	// A phone call cannot be refused, so what will not fit is dropped and the
+	// call goes through. The alternative is turning a customer away because
+	// somebody upstream was verbose.
+	t.Run("more than a call may hold still connects", func(t *testing.T) {
+		vars := map[string]string{
+			"variable_aicc_ud_note": strings.Repeat("x", UserDataMaxValueBytes+1),
+		}
+		for i := range UserDataMaxKeys + 5 {
+			vars[fmt.Sprintf("variable_aicc_ud_k%02d", i)] = "v"
+		}
+		snap, _ := arrive(t, vars)
+		if len(snap.UserData) != UserDataMaxKeys {
+			t.Errorf("the call carries %d keys, want the bound of %d", len(snap.UserData), UserDataMaxKeys)
+		}
+		if _, kept := snap.UserData["note"]; kept {
+			t.Error("an oversize value was stored rather than dropped")
+		}
+	})
 }
 
 // capturingPublisher keeps what was published and under which scope.

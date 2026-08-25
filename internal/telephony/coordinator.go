@@ -359,6 +359,7 @@ func (c *Coordinator) reidentify(ctx context.Context, ev SwitchEvent) {
 		// likely. Attaching in only one of the two places would make the
 		// business data depend on which channel the switch announced first.
 		c.applyCallData(ctx, minted)
+		c.applyInboundUserData(ctx, minted, ev)
 	}
 	c.merge(ctx, minted, bound)
 }
@@ -436,6 +437,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 	// anything can hold it — and holding it on the call is what puts it on
 	// the event envelope and, through the snapshot, into the ledger row.
 	c.applyCallData(ctx, callID)
+	c.applyInboundUserData(ctx, callID, ev)
 
 	_ = call
 	if err := c.registry.BindChannel(ev.ChannelID, callID); err != nil {
@@ -699,6 +701,36 @@ func (c *Coordinator) applyCallData(ctx context.Context, callID uuid.UUID) {
 	if len(change.Dropped) > 0 {
 		slog.ErrorContext(ctx, "business data did not fit onto the call it was placed with",
 			"callId", callID, "droppedKeys", change.Dropped,
+			"maxKeys", UserDataMaxKeys, "maxValueBytes", UserDataMaxValueBytes)
+	}
+}
+
+// applyInboundUserData attaches the business data the call arrived carrying.
+//
+// After applyCallData, deliberately. Both can fire for one call — an outbound
+// leg this application placed still runs through a dialplan that may set
+// aicc_ud_* on it — and the later merge is the one that stands. The switch is
+// the nearer authority: whatever the dialplan decided, it decided while
+// looking at this call, after the request that placed it had already been
+// answered.
+//
+// Nothing here can be refused. There is a phone call in progress and no
+// request left to answer, so what will not fit is dropped and said out loud.
+// A warning rather than an error, unlike the placed-call path: business data
+// arriving over the wire comes from somewhere this deployment does not
+// control, and more of it than a call may hold is traffic to expect, not a
+// sign that something upstream forgot to check.
+func (c *Coordinator) applyInboundUserData(ctx context.Context, callID uuid.UUID, ev SwitchEvent) {
+	if len(ev.UserData) == 0 {
+		return
+	}
+	change, err := c.registry.MergeUserData(callID, ev.UserData)
+	if err != nil {
+		return
+	}
+	if len(change.Dropped) > 0 {
+		slog.WarnContext(ctx, "business data the call arrived with did not fit",
+			"callId", callID, "channelId", ev.ChannelID, "droppedKeys", change.Dropped,
 			"maxKeys", UserDataMaxKeys, "maxValueBytes", UserDataMaxValueBytes)
 	}
 }
