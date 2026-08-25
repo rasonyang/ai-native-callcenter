@@ -247,13 +247,22 @@ func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
 	// it in. callcenter_track owns the increment, the decrement on hangup and
 	// the state hook behind it — we only have to name the agent.
 	//
-	// On answer rather than on origination: a leg that rang out is not a call
-	// the agent is on, and taking them out of the queues for it would cost
-	// them calls they could have taken. The value has a space in it and is
-	// escaped on the way into the block; an agent the module does not know
-	// costs a warning in its log and nothing else.
+	// On ring, not on answer: a phone that is ringing is already engaged, and
+	// the window this closes is a queue offering a second call into it — which
+	// is exactly when the phone says 486, or 480 on its slot race. Waiting for
+	// the answer leaves that window open for the whole of the ringing.
+	//
+	// A leg that rings out and is never answered costs nothing: the decrement
+	// hangs off CS_HANGUP, so an abandoned ring puts the count back like any
+	// other ending. execute_on_media would not do — with early media ignored
+	// on this path it fires at answer anyway (switch_channel.c:3900), which is
+	// the same moment under a different name.
+	//
+	// The value has a space in it and is escaped on the way into the block; an
+	// agent the module does not know costs a warning in its log and nothing
+	// else.
 	if callcenterName != "" {
-		vars["execute_on_answer"] = "callcenter_track " + callcenterName
+		vars["execute_on_ring"] = "callcenter_track " + callcenterName
 	}
 	// Tell mod_callcenter this agent is on a call, so its queues stop offering
 	// them one.

@@ -207,10 +207,10 @@ func TestCommandStrings(t *testing.T) {
 			name: "an originate value holding a space is quoted",
 			act: func(a *Adapter) error {
 				_, err := a.Originate(partyID, "user/1008@aicc.test",
-					map[string]string{"execute_on_answer": "callcenter_track agent-wei"})
+					map[string]string{"execute_on_ring": "callcenter_track agent-wei"})
 				return err
 			},
-			want: "originate {execute_on_answer='callcenter_track agent-wei'," +
+			want: "originate {execute_on_ring='callcenter_track agent-wei'," +
 				"ignore_early_media=true,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d}" +
 				"user/1008@aicc.test &park()",
 		},

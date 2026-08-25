@@ -251,9 +251,9 @@ func TestAnAgentsOwnCallIsTrackedSoQueuesLeaveThemAlone(t *testing.T) {
 	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, "agent-wei"); err != nil {
 		t.Fatal(err)
 	}
-	got := sw.lastOriginate().vars["execute_on_answer"]
+	got := sw.lastOriginate().vars["execute_on_ring"]
 	if got != "callcenter_track agent-wei" {
-		t.Errorf("execute_on_answer = %q, want callcenter_track naming the agent", got)
+		t.Errorf("execute_on_ring = %q, want callcenter_track naming the agent", got)
 	}
 }
 
@@ -266,8 +266,8 @@ func TestADialGoesOutEvenWhenTheSwitchHasNoNameForTheAgent(t *testing.T) {
 	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, ""); err != nil {
 		t.Fatalf("the dial was refused because the agent had no callcenter name: %v", err)
 	}
-	if got, tracked := sw.lastOriginate().vars["execute_on_answer"]; tracked {
-		t.Errorf("execute_on_answer = %q, want nothing to track", got)
+	if got, tracked := sw.lastOriginate().vars["execute_on_ring"]; tracked {
+		t.Errorf("execute_on_ring = %q, want nothing to track", got)
 	}
 	answer(s, sw.lastOriginate().partyID.String())
 	waitTransfers(t, sw, 1)

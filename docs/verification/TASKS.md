@@ -2700,7 +2700,28 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ```
   名字 `agent-wei` 也对上了 —— 这点是特意断言的,因为 `callcenter_track`
   对不认识的坐席**只记 WARN 不报错**,拼错会静默失效。
-  **仍未做:A2(分机直拨 / 坐席互打)。** 那条腿由拨号方案桥出去,Lua 手上只有分机号,
+  **【2026-08-25 改为 `execute_on_ring`,owner 提出】** 原先挂在 `execute_on_answer` 上,
+  要等坐席接起才占用 —— **而一部正在响铃的话机就已经在忙了**,队列往里再派一通,
+  正是话机回 486(或槽位竞态回 480)的那一刻。等应答等于把窗口整个敞开着。
+  **`execute_on_media` 不合适**(owner 原提议):源码里它在早媒体建立时触发,
+  而**本仓两条路都不产生早媒体**(`aicc_internal` 用 `ringback=${us-ring}` 的本地回铃,
+  originate 一律 `ignore_early_media=true`),于是它退回 `switch_channel.c:3900` 的兜底、
+  在应答时才跑 —— **换了个名字,一点没提前**。真正的响铃钩子是 `execute_on_ring`
+  (`switch_channel.c:3512`,`CHANNEL_PROGRESS` 之后、`CCS_RINGING` 之前)。
+  **响了没人接不漏计数**:减一挂在 `cc_hook_state_run` 的 `CS_HANGUP` 上,放弃的振铃腿照样减。
+  **真机实测**:`前 count=0 → 振铃中 count=1 → 挂断后 count=0`(无人接起)。
+  **仍未做:A2(分机直拨 / 坐席互打)。**
+  **⚠ 并已排除一条看似更优雅的路(owner 提出并自行否掉)**:把
+  `execute_on_ring='callcenter_track …'` 编进 **user 级 dial-string**,让它覆盖所有 `user/` 解析。
+  **不能这么做,因为 mod_callcenter 派单用的 contact 正是 `user/1008@domain`** ——
+  它的解析走的就是那条 dial-string,于是**队列自己派的腿也会被计数**。
+  单次派单无碍(选人在前、计数在后),但 `max_no_answer` 的重派与 ring-all 的并发派单
+  依赖"挂断减一"与"下一次选人"的先后:**减一慢一步,坐席就被自己上一次派单的残值排除掉**。
+  **队列自己的派单路径不该依赖我们塞进去的计数器。**
+  被叫侧若要做,用同一个机制换个位置 —— `{}` 前缀挂在 `aicc_internal` 的 bridge 目标上
+  (`bridge {execute_on_ring=…}user/$1@${domain_name}`),只落被叫腿,不碰 dial-string;
+  代价是 agent name 要在拨号方案里解析,`aicc_internal` 得落到一小段 Lua,
+  且 `luacc.directory` 仍需加列。单独一轮。 那条腿由拨号方案桥出去,Lua 手上只有分机号,
   而 `luacc` 三个视图里 `directory` 只有 `number, password, display_name, is_enabled, is_auto_answer`
   ——**给不出 agent name**。要做得给 `luacc.directory` 加一列,那是 **Go↔Lua 契约变更**,单独立案;
   先看 A1 落地后 `external_calls_count` 的实际数据,再判 A2 还剩多少价值。
