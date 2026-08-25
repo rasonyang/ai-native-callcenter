@@ -246,6 +246,80 @@ func TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo(t *testing.T)
 	}
 }
 
+// A caller adopted across a restart brings the bot's half of the call with
+// them, because it is stamped on the channel and the channel is the switch's.
+//
+// Without this the AI phase disappears from the ledger while its transcript
+// sits in the database proving it happened — bot_sec 0, no flow, no BOT leg in
+// the journey, on a call that spent most of its life with a bot. Seen on
+// 01a02dc8: ten transcript lines, and the application restarted three seconds
+// after the last of them (C58).
+func TestAnAdoptedCallerBringsTheBotsHalfOfTheCallWithThem(t *testing.T) {
+	joined := time.Now().Add(-90 * time.Second).Truncate(time.Second).UTC()
+	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
+	flowID := uuid.MustParse("019ffd60-d8db-736b-a1eb-b005dda34d28")
+
+	c, _ := reconcileFixture(t, channelSaying(map[string]string{
+		"aicc_call_id":     callID.String(),
+		"aicc_language":    "en",
+		"aicc_bot_sec":     "28",
+		"aicc_flow_id":     flowID.String(),
+		"aicc_did":         "95002",
+		"aicc_bot_summary": "wants a refund",
+		"aicc_bot_reason":  "Caller asked for a person",
+	}, map[string][]string{
+		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
+	}))
+
+	c.ReconcileWaiting(context.Background())
+
+	snap, err := c.registry.Snapshot(callID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if snap.Bot.Sec != 28 {
+		t.Errorf("botSec = %d, want the 28 seconds stamped on the channel", snap.Bot.Sec)
+	}
+	if snap.Bot.FlowID == nil || *snap.Bot.FlowID != flowID {
+		t.Errorf("flowId = %v, want %s", snap.Bot.FlowID, flowID)
+	}
+	if snap.Bot.Summary != "wants a refund" || snap.Bot.Reason != "Caller asked for a person" {
+		t.Errorf("summary=%q reason=%q", snap.Bot.Summary, snap.Bot.Reason)
+	}
+	// IsStamped is what decides who writes the ledger row. A caller in a queue
+	// got there by being handed on, and the duration is stamped just before
+	// that — so this is the one thing the adoption must not lose.
+	if !snap.Bot.HandedOver() {
+		t.Error("the adopted call does not know the bot handed it over, so the human " +
+			"path will not write the row the bot is waiting for it to write")
+	}
+}
+
+// A caller who never met a bot is adopted without inventing one for them.
+func TestAnAdoptedCallerWhoNeverMetABotHasNoBotPhase(t *testing.T) {
+	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
+	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
+
+	c, _ := reconcileFixture(t, channelSaying(map[string]string{
+		"aicc_call_id": callID.String(),
+	}, map[string][]string{
+		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
+	}))
+
+	c.ReconcileWaiting(context.Background())
+
+	snap, err := c.registry.Snapshot(callID)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if !snap.Bot.IsZero() {
+		t.Errorf("bot = %+v, want nothing at all", snap.Bot)
+	}
+	if snap.Bot.HandedOver() {
+		t.Error("a call with no bot reads as handed over by one")
+	}
+}
+
 // A channel that cannot name its call is left alone. Minting an id here would
 // orphan the recording and the transcript that already carry the real one.
 func TestAChannelThatCannotNameItsCallIsNotAdopted(t *testing.T) {

@@ -128,20 +128,40 @@ func (b *BotShare) Merge(other BotShare) {
 }
 
 func botShare(ev *esl.Event) BotShare {
+	return botShareFrom(ev.Variable)
+}
+
+// botShareFrom reads the bot's share from wherever the channel's variables can
+// be got at: an event carries them, and a channel can be asked for them one at
+// a time long afterwards.
+//
+// Both are needed because a restart separates the two. The bot's stamps live
+// on the caller's channel, which belongs to the switch and outlives this
+// process, so a caller adopted from a queue after a restart still has them —
+// but no event will ever carry them again, and read only from events the bot's
+// whole phase vanishes from that call's ledger row (C58).
+//
+// IsStamped follows aicc_bot_sec alone. The dialplan exports the DID and the
+// language to every leg it dials towards the bot, so those say only that a
+// call met one; the duration is written when the caller is handed to a person
+// and at no other time, which is the question this answers.
+func botShareFrom(get func(string) string) BotShare {
 	var out BotShare
-	if sec, ok := ev.GetInt("variable_aicc_bot_sec"); ok {
-		out.Sec = int(sec)
-		out.IsStamped = true
+	if raw := get("aicc_bot_sec"); raw != "" {
+		if sec, err := strconv.Atoi(raw); err == nil {
+			out.Sec = sec
+			out.IsStamped = true
+		}
 	}
-	if raw := ev.Get("variable_aicc_flow_id"); raw != "" {
+	if raw := get("aicc_flow_id"); raw != "" {
 		if parsed, err := uuid.Parse(raw); err == nil {
 			out.FlowID = &parsed
 		}
 	}
-	out.DID = ev.Get("variable_aicc_did")
-	out.Queue = ev.Get("variable_aicc_queue")
-	out.Summary = ev.Get("variable_aicc_bot_summary")
-	out.Reason = ev.Get("variable_aicc_bot_reason")
+	out.DID = get("aicc_did")
+	out.Queue = get("aicc_queue")
+	out.Summary = get("aicc_bot_summary")
+	out.Reason = get("aicc_bot_reason")
 	return out
 }
 

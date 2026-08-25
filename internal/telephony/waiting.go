@@ -402,8 +402,26 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 	if startedAt.IsZero() {
 		startedAt = member.JoinedAt
 	}
+	// The bot's share, read back off the channel it was stamped on.
+	//
+	// This process has no memory of the conversation — it was not running for
+	// it — but the switch kept the channel and the stamps are still on it.
+	// Without this the AI phase disappears from the call's ledger row while
+	// its transcript sits in the database proving it happened: bot_sec 0,
+	// flow_id null, no BOT leg in the journey, on a call that spent half its
+	// life talking to a bot (C58, seen on 01a02dc8 — the application restarted
+	// three seconds after the last line the bot spoke).
+	//
+	// Being in a queue at all is what makes this sound: the caller got here by
+	// being handed on, and the duration is stamped just before that happens.
+	bot := botShareFrom(func(name string) string {
+		value, _ := c.adapter.ChannelVariable(member.ChannelID, name)
+		return value
+	})
+
 	_ = c.registry.Do(parsed, func(call *Call) {
 		call.CreatedAt = startedAt
+		call.Bot.Merge(bot)
 		party := call.AddParty(member.ChannelID, member.Number, startedAt)
 		// They answered long before this: a caller cannot be held in a queue
 		// without having been. That is a billing fact and it is all this
