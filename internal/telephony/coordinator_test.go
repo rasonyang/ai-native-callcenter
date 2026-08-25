@@ -4,6 +4,7 @@ package telephony
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -734,8 +735,18 @@ func TestTheCallIsToldWhenItsBusinessDataMoves(t *testing.T) {
 	if !slices.Equal(changed, []string{"orderId", "ticketId"}) {
 		t.Errorf("changedKeys = %v, want [orderId ticketId] sorted", ev.Payload["changedKeys"])
 	}
-	if deleted, _ := ev.Payload["deletedKeys"].([]string); len(deleted) != 0 {
-		t.Errorf("deletedKeys = %v, want none", deleted)
+	// Asserted on the wire, not on the map. A nil []string type-asserts as
+	// []string and has length zero, so an in-process check passes while the
+	// subscriber receives "deletedKeys": null — which is what a real one got
+	// until VC-S15-01 was run against a live call. The contract requires both
+	// lists on every one of these, and a client iterating one should not have
+	// to check it first.
+	wire, err := json.Marshal(ev.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(wire), `"deletedKeys":[]`) {
+		t.Errorf("payload on the wire is %s, want deletedKeys as an empty array", wire)
 	}
 
 	// And a write that changes nothing says nothing. A consultation transfer

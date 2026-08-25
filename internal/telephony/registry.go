@@ -565,11 +565,25 @@ func (a *actor) mergeUserData(patch map[string]any) UserDataChange {
 	if change.IsEmpty() {
 		return change
 	}
+	// Both lists always, as arrays. The contract requires them and a client
+	// iterating one should not have to check first — a nil slice marshals to
+	// null, and a patch that only added keys was sending "deletedKeys": null
+	// to a subscriber the contract had promised an array (found by running
+	// VC-S15-01 against a live call, 2026-08-25). The HTTP answer had the same
+	// guard from the start; the event did not.
 	a.publish(events.TypeCallUserData, nil, map[string]any{
-		"changedKeys": change.Changed,
-		"deletedKeys": change.Deleted,
+		"changedKeys": orEmpty(change.Changed),
+		"deletedKeys": orEmpty(change.Deleted),
 	})
 	return change
+}
+
+// orEmpty renders a list the contract requires as [] rather than null.
+func orEmpty(keys []string) []string {
+	if keys == nil {
+		return []string{}
+	}
+	return keys
 }
 
 func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {

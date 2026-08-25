@@ -1604,7 +1604,7 @@ cases:
       也就跟着变成一句可疑的话:事件流从"发生了什么的记录"降级成轮询触发器。
       代码照跑、单测照绿,没有任何东西会红。
     evidence_dir: docs/verification/artifacts/VC-S15-01/
-    status: TODO
+    status: PASS  # 2026-08-25 执行(真人工内部呼叫 1008→1002,通话中连打五次 PATCH)。核心断言成立:**SSE 恰好 2 条 CALL_USER_DATA,不是 5 条** —— 把 orderId 设成它已有的值回 changedKeys=[] deletedKeys=[]、删不存在的键同样两空,两次都没有发出任何事件;载荷只有 changedKeys/deletedKeys 而信封带整张 userData;挂断后 cdrs.user_data={"orderId":"A-4471"}。⚠ **同时抓出一处契约违规并当场修掉**:载荷里的两个列表是 nil slice,编码成 `"deletedKeys":null`,而契约把它们标为 required 的数组 —— 客户端 `for (const k of payload.deletedKeys)` 会炸。HTTP 响应从一开始就有 emptyIfNil 这道闸,**事件没有**。已加 orEmpty 并补断言。**那条断言第一版也是错的**:它断在 `ev.Payload["deletedKeys"].([]string)` 上,而 nil []string 的类型断言照样成立、长度也是 0 —— 差别只在 JSON 编码之后。改成 marshal 后断 `"deletedKeys":[]`,突变(去掉 orEmpty)才终于变红。**又一次"断在内存值上而不是断在线上"**,与 escapeOriginateValue 那次同型
     refs: ["internal/telephony/call.go:266", "internal/telephony/registry.go:190", "internal/httpapi/call_handlers.go:45", "docs/openapi.json"]
     note: "呼入随路数据那条入口(X-AICC-UD-* → cdrs.user_data)已于 2026-08-25 现场验过全链,证据见 C42④ 条目;本条覆盖的是 PATCH 这条入口与**只宣告真变更**这条规则"
 
@@ -1645,6 +1645,6 @@ cases:
       当时的补法是把作用域放宽,那**掩盖了病因并制造了这个界面缺陷**;
       指令自 2026-08-22 起是:腿事件私有于其坐席,**不得为了救一条缺失的事件而放宽作用域**。
     evidence_dir: docs/verification/artifacts/VC-S15-02/
-    status: TODO
+    status: FAIL  # 2026-08-25 执行(同一通 1008→1002,响三秒后接起)。**两条核心断言成立**:主管流上主叫腿的第一条事件确实是 PARTY_DIALING(顺序 DIALING → RINGING → ESTABLISHED×2 → RELEASED×2);wei 自己的流上只有 3 条 PARTY_* 且 partyId 去重后**恰好 1 个** —— 腿事件私有于其坐席这条指令成立,2026-08-18 那个"被响的坐席看到主叫那条腿"的形态不复现。**但 toNumber 那条不成立**:载荷是 {"fromNumber":"1008"},**没有 toNumber**,而目的号 1002 全是数字、isDialledNumber 应当放行。故不是判定函数的问题,是 PARTY_DIALING 发出的那一刻 ev.DestinationNumber(Caller-Destination-Number)为空。**未查明为什么**,也**不降低 expect 让它通过** —— 立案见 TASKS「C61」。载荷里也没有 role/state,与其余 PARTY_* 事件的形状不一致,同案待查
     refs: ["internal/telephony/registry.go:483", "internal/telephony/call.go:325", "CLAUDE.md"]
     note: "DEVICE_REACHABLE / DEVICE_UNREACHABLE 不在本条:它们由 OPTIONS ping 驱动,需要话机保持注册却停止应答 ping(拔网线或防火墙丢包),与本条的人工步骤不同型,待单独起草"

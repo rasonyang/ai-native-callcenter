@@ -292,6 +292,31 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   且目的号**只在它是数字时才发**(浏览器话机的随机 contact 令牌不是号码)。
   两条都给了 `failure_looks_like`,写的是 2026-08-18 与 2026-08-22 两次真实事故的形态。
   **账本 case 数 39 → 41。**
+  **【已执行 2026-08-25,真人工内部呼叫 1008→1002】** `VC-S15-01` **PASS**、`VC-S15-02` **FAIL**。
+  两条都当场产出了起草时想要的那种东西 —— **一个新缺陷,和一个未查明的不一致**。
+
+- **执行 VC-S15-01/02 抓出的两件事(2026-08-25)**
+  **① 契约违规,已当场修掉**:`CALL_USER_DATA` 的载荷里两个列表是 nil slice,
+  编码成 `"deletedKeys":null`,而契约把它们标为 **required 的数组** ——
+  客户端 `for (const k of payload.deletedKeys)` 会炸。
+  **HTTP 响应从一开始就有 `emptyIfNil` 这道闸,事件没有**;已加 `orEmpty`。
+  **⚠ 补的那条断言第一版也是错的**:它断在 `ev.Payload["deletedKeys"].([]string)` 上,
+  而 **nil `[]string` 的类型断言照样成立、长度也是 0** —— 差别只在 JSON 编码之后。
+  改成 marshal 后断 `"deletedKeys":[]`,突变(去掉 `orEmpty`)才终于变红。
+  **今天第二次栽在"断在内存值上而不是断在线上"**(第一次是 `escapeOriginateValue`
+  那个带空格的 originate 变量,单测全绿而真机全挂)。
+- **C61(new,2026-08-25,由 VC-S15-02 执行发现,未查)**
+  **`PARTY_DIALING` 的载荷少了 `toNumber`,而且形状与其余 `PARTY_*` 不一致。**
+  真人工 1008→1002 的内部呼叫,主管流上那条事件的载荷是 `{"fromNumber":"1008"}` ——
+  **没有 `toNumber`**,而目的号 `1002` 全是数字、`isDialledNumber` 应当放行。
+  所以**不是判定函数的问题**,是 `PARTY_DIALING` 发出的那一刻
+  `ev.DestinationNumber`(`Caller-Destination-Number`)为空。**为什么为空,未查明。**
+  另:载荷里也没有 `role` / `state`,而 `transition()` 发出的每一条 `PARTY_*` 都带这两样
+  (`payload := map[string]any{"role":…, "state":…}`)—— `PARTY_DIALING` 走的是协调器里
+  另一条 publish 路径(`coordinator.go:504`),两条路径发出的同族事件形状不同。
+  **影响**:坐席工作台拿不到"我正在拨的号",而这正是 `PARTY_DIALING` 存在的用途之一
+  (在对方接起之前就把这通电话显示出来)。
+  **不降低 expect 让用例通过** —— `VC-S15-02` 维持 FAIL,查清再重跑。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
