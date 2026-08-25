@@ -92,14 +92,22 @@ type actor struct {
 //
 // isMinted records the identity's provenance: minted means the dialplan chose
 // this id before any leg existed, and a merge keeps it.
-func (r *Registry) CreateCall(ctx context.Context, callID uuid.UUID, callType events.CallType, language string, isMinted bool) (*Call, error) {
+func (r *Registry) CreateCall(ctx context.Context, callID uuid.UUID, callType events.CallType,
+	language string, isMinted bool, at time.Time) (*Call, error) {
 	r.mu.Lock()
 	if _, exists := r.byCall[callID]; exists {
 		r.mu.Unlock()
 		return nil, errors.New("call already exists")
 	}
 
-	call := NewCall(callID, callType, time.Now().UTC())
+	// The switch's clock, not ours. answeredAt and endedAt already come from
+	// the event that reported them, and a startedAt read from time.Now() put
+	// the one timestamp the others are measured against on a different clock —
+	// so a call could answer before it started (measured: sixty-four rows,
+	// tens of milliseconds on inbound, where the switch answers the caller
+	// before its event reaches this process), and every total_sec in the
+	// ledger carried that skew.
+	call := NewCall(callID, callType, at)
 	call.Language = language
 	call.IsMintedID = isMinted
 	a := &actor{

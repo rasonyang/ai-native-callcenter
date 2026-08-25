@@ -352,7 +352,7 @@ func (c *Coordinator) reidentify(ctx context.Context, ev SwitchEvent) {
 	// The minted call may not exist yet: this channel's event is the first
 	// place the id appears. Create it so the provisional facts have a home.
 	if _, err := c.registry.CreateCall(ctx, minted, callTypeOf(ev),
-		ev.Raw.Variable("aicc_language"), true); err == nil {
+		ev.Raw.Variable("aicc_language"), true, ev.OccurredAt); err == nil {
 		slog.DebugContext(ctx, "minted call created on reidentify", "callId", minted)
 		// Here too: whichever of a call's legs names the minted id first is
 		// the one that brings the call into being, and both are equally
@@ -421,7 +421,8 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		callID = uuid.Must(uuid.NewV7())
 	}
 
-	call, err := c.registry.CreateCall(ctx, callID, callTypeOf(ev), ev.Raw.Variable("aicc_language"), isMinted)
+	call, err := c.registry.CreateCall(ctx, callID, callTypeOf(ev),
+		ev.Raw.Variable("aicc_language"), isMinted, ev.OccurredAt)
 	if err != nil {
 		// Another leg of the same call adopted it first, which is the normal
 		// race between two channels of one conversation.

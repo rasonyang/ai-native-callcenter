@@ -387,7 +387,15 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 	}
 	language, _ := c.adapter.ChannelVariable(member.ChannelID, "aicc_language")
 
-	if _, err := c.registry.CreateCall(ctx, parsed, callType, language, true); err != nil {
+	// They answered long before this — a caller cannot be held in a queue
+	// without having been — so the call begins where the switch says it did,
+	// not where this process noticed it.
+	startedAt := member.StartedAt
+	if startedAt.IsZero() {
+		startedAt = member.JoinedAt
+	}
+
+	if _, err := c.registry.CreateCall(ctx, parsed, callType, language, true, startedAt); err != nil {
 		// Already there is not a failure: two queues reporting the same caller,
 		// or a second reconcile, both land here.
 		return
@@ -398,10 +406,6 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 		return
 	}
 
-	startedAt := member.StartedAt
-	if startedAt.IsZero() {
-		startedAt = member.JoinedAt
-	}
 	// The bot's share, read back off the channel it was stamped on.
 	//
 	// This process has no memory of the conversation — it was not running for
@@ -420,7 +424,6 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 	})
 
 	_ = c.registry.Do(parsed, func(call *Call) {
-		call.CreatedAt = startedAt
 		call.Bot.Merge(bot)
 		party := call.AddParty(member.ChannelID, member.Number, startedAt)
 		// They answered long before this: a caller cannot be held in a queue

@@ -271,7 +271,7 @@ func TestAWaitingCallCarriesTheCallItBelongsTo(t *testing.T) {
 	ctx := context.Background()
 
 	callID := uuid.New()
-	if _, err := c.registry.CreateCall(ctx, callID, events.CallTypeInbound, "zh", true); err != nil {
+	if _, err := c.registry.CreateCall(ctx, callID, events.CallTypeInbound, "zh", true, testTime); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.registry.BindChannel("caller-1", callID); err != nil {

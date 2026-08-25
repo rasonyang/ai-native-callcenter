@@ -1025,7 +1025,7 @@ func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
 
 	ctx := t.Context()
 	callID := uuid.New()
-	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true); err != nil {
+	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1052,6 +1052,42 @@ func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
 				t.Errorf("sent  %s\nwant  %s", got, tt.want)
 			}
 		})
+	}
+}
+
+// A call begins when the switch says it did, on the same clock as everything
+// measured against it.
+//
+// answeredAt and endedAt have always come from the event that reported them.
+// startedAt came from time.Now() at the moment this process got round to
+// creating the record, which put the one timestamp the others are measured
+// against on a different clock — and on an inbound call the switch answers the
+// caller before its event reaches us, so the call answered before it started.
+// Sixty-four rows in the live ledger, and every total_sec carried the skew.
+func TestACallBeginsWhenTheSwitchSaysItDid(t *testing.T) {
+	registry := NewRegistry(nullPublisher{})
+	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+
+	// A switch clock well away from ours, so a startedAt taken from time.Now()
+	// cannot pass by accident.
+	switchTime := testTime.Add(-2 * time.Hour)
+	minted := uuid.New()
+	ev := raw("CHANNEL_CREATE", "caller-chan", "inbound",
+		map[string]string{"variable_aicc_call_id": minted.String()})
+	ev.OccurredAt = switchTime
+
+	c.Handle(t.Context(), ev)
+	waitFor(t, func() bool { _, err := registry.Snapshot(minted); return err == nil })
+
+	snap, err := registry.Snapshot(minted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.CreatedAt.Equal(switchTime) {
+		t.Errorf("the call begins at %s, want the switch's %s — a startedAt on our "+
+			"own clock is the one timestamp answeredAt and endedAt are measured "+
+			"against, and they come from the switch", snap.CreatedAt, switchTime)
 	}
 }
 
@@ -1453,7 +1489,7 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 
 	agentID := testAgentID
 	internalID := uuid.New()
-	call, err := registry.CreateCall(ctx, internalID, events.CallTypeInternal, "en", true)
+	call, err := registry.CreateCall(ctx, internalID, events.CallTypeInternal, "en", true, testTime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1481,7 +1517,7 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 	// which is how we know the type check let it through rather than that the
 	// operation happened to fail.
 	inboundID := uuid.New()
-	if _, err := registry.CreateCall(ctx, inboundID, events.CallTypeInbound, "en", true); err != nil {
+	if _, err := registry.CreateCall(ctx, inboundID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
 	_ = registry.Do(inboundID, func(call *Call) {
@@ -1508,7 +1544,7 @@ func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
 
 	wei, ben := uuid.New(), uuid.New()
 	callID := uuid.New()
-	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true); err != nil {
+	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
 	_ = registry.Do(callID, func(call *Call) {
