@@ -2662,6 +2662,49 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **顺带记一条**:话机的 480 落在 `default:` 分支,**同样会 `no_answer_count++`**。
   那是亚秒级竞态,坐席什么都没做却被记一次未接。**未修,只记录。**
   **探针已清理**。
+- **C59 的另一半:坐席自己打的电话,交换机根本不知道** **【已修 2026-08-25 `c7202ec`;owner 提出的方向】**
+  mod_callcenter **只知道自己派出去的通话**。click-to-dial 对它完全不可见:`agents.state` 仍是 `Waiting`,
+  于是队列照样去响一部正在通话的话机 —— 话机(正确地)说不:486 走 busy 分支吃一个延迟,
+  **或者槽位竞态回 480,落进 `default:` 被记成"坐席没接"**,两次就 `max_no_answer` 踢人。
+  **`external_calls_count` 正是模块为这件事保留的字段**,`skip-agents-with-external-calls`
+  **默认开着**(`mod_callcenter.c:584` 的 `SWITCH_TRUE`)—— 只是**从来没人往里写数,这道闸一次都没生效过**。
+  `callcenter_track` 负责加一、挂断减一、以及保证减一的 state hook;我们只要把坐席的名字说出来。
+  **在应答时说,不在发起时说** —— 响了没人接的腿不是坐席正在通的电话,为它把人摘出队列,
+  等于让他白白错过本可以接的单。
+  **⚠ 第一版把它写成不带引号的 `execute_on_answer=callcenter_track agent-wei` 塞进 originate 的
+  `{…}` 块,空格提前终结了块:每一通 click-to-dial 都以 `Parse Error` +
+  `DESTINATION_OUT_OF_ORDER` 死在路由之前,而所有单测全绿** ——
+  因为它们断言的是**代码构造出的 map**,不是**送到交换机的那一行**。
+  **owner 指出正确做法是 `{…}` 里用单引号包住带空格的值**(`origination_caller_id_name='John Doe'`),
+  并要求新增统一的 `escapeOriginateValue()`,所有动态值必经它。已按 `separate_string_char_delim`
+  的实际规则实现(`\` 是转义元字符、`'` 成对时切换引号态、分隔符只在引号外生效):
+  ```
+  普通值          → 原样            引号/逗号/空格都没有,不必付代价
+  含空格/制表/逗号 → '包住'
+  含单引号        → 转义成 \'       落单的引号会开启引号态、吞掉结尾那个逗号
+  空串            → ''              裸着没有 = 右半可分,交换机会一声不吭丢掉这个键
+  含花括号        → 删掉            块的边界是先数花括号定出来的,任何转义都够不着
+  ```
+  只有 originate 这套语法能加引号,故 `renderOriginateVars` 与 `renderVars` 分开:
+  `BridgeToEndpoint` 的 inline transfer 本身就在单引号里,再来一个就把外层引号终结了。
+  **测试改成断在"线"上**:适配器用例钉整条 originate 命令字符串,
+  `escapeOriginateValue` 另有七例的表(普通/空格/逗号/引号/两者/空串/花括号)。
+  **真实人工端到端验证(2026-08-25,owner 操作,浏览器话机 1008 → 软电话 1002,两通)**:
+  ```
+  18:24:06  click-to-dial placed            agentExtension=1008 destination=1002
+  18:24:07  Tracking this call for agent agent-wei          ← 坐席接起才触发,不是发起时
+  18:24:11  Tracked call ... ended, decreasing external_calls_count
+  （第二通 18:25:20 / 18:25:27 同样）
+  轮询到的计数 0 → 0 → 0 → 1 → 0,结束后 status=Available state=Waiting,无残留
+  无 Parse Error
+  ```
+  名字 `agent-wei` 也对上了 —— 这点是特意断言的,因为 `callcenter_track`
+  对不认识的坐席**只记 WARN 不报错**,拼错会静默失效。
+  **仍未做:A2(分机直拨 / 坐席互打)。** 那条腿由拨号方案桥出去,Lua 手上只有分机号,
+  而 `luacc` 三个视图里 `directory` 只有 `number, password, display_name, is_enabled, is_auto_answer`
+  ——**给不出 agent name**。要做得给 `luacc.directory` 加一列,那是 **Go↔Lua 契约变更**,单独立案;
+  先看 A1 落地后 `external_calls_count` 的实际数据,再判 A2 还剩多少价值。
+
   **【已修 2026-08-25;owner 定的统一口径】** `uuid_kill` 的 cause 由**腿自己的状态**决定
   (`Party.HangupCause`),三条,一条规则:
   ```
