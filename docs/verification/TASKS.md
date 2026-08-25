@@ -317,6 +317,30 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **影响**:坐席工作台拿不到"我正在拨的号",而这正是 `PARTY_DIALING` 存在的用途之一
   (在对方接起之前就把这通电话显示出来)。
   **不降低 expect 让用例通过** —— `VC-S15-02` 维持 FAIL,查清再重跑。
+  **【2026-08-25 查证进展:排除两条,另查出一条同族的】**
+  **排除①**:`isDialledNumber` 没问题 —— `1002` 全是数字,该放行。
+  **排除②**:"呼入腿的 `Caller-Destination-Number` 本来就是空的"——**不成立,实测有值**。
+  让交换机给自己发一个 INVITE 造出形状相同的呼入腿:
+  ```
+  sofia/internal/0000000000@192.168.31.55  dir=inbound
+      Caller-Destination-Number = 1002
+      variable_sip_req_user     = 1002
+      variable_sip_to_user      = 1002
+  ```
+  故 `ev.DestinationNumber` 在 `CHANNEL_CREATE` 上**是有值的**,`dialingPayload` 本应带上 `toNumber`。
+  三个 `c.addParty(...)` 调用点传的都是触发它的那个 `ev`,没有第四条路。**为什么落空,仍未查明。**
+  **同族的第三条(新发现)**:同一通电话的 `PARTY_RINGING` 载荷是
+  `{"extensionNumber":"1002","fromNumber":"1002","toNumber":"1002"}` ——
+  **三个字段全是被叫自己的号**,`fromNumber` 本该是主叫 1008。
+  **被响的坐席被告知"是自己在响自己"。**
+  这正是账本里记着、并且**已经为 `PARTY_DIALING` 修过**的那个形状
+  (原文:"②`1002→1008` 报 `{from:1002,to:1002}`(自己的号出现两次)");
+  当时的根因是"照搬了 `PARTY_RINGING` 的号码对",而**`PARTY_RINGING` 自己这一侧看来没修**。
+  `fromNumber` 取的是 `ev.ANI`(`coordinator.go:532`),即被叫腿上的主叫号 ——
+  `aicc_internal` 不设 `origination_caller_id_*`,b 腿本应继承 a 腿的
+  `effective_caller_id_number`(wei 的 directory 里是 1008)。**实际取到 1002,原因未查。**
+  **下一步需要一次真机拨号并同时抓原始 ESL** —— 我用 loopback 造的腿主叫号是 `0000000000`,
+  形状不同,证不了这一条;必须是坐席话机自己发的 INVITE。
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 
