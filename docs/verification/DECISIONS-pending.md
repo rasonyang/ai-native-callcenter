@@ -62,5 +62,5 @@ action 前缀派生);**路由定为 `/admin/audit`**(owner 指定)。落 TASKS W
 | S1 | W3 flows 管理面范围 | **UI 也要上传/编辑 spec**(不止查看+publish) | TASKS W3:契约含 POST /flows、PUT /flows/{id}(草稿)、POST /flows/{id}/publish |
 | S2 | qwen realtime 是否支持模型自带转写 | **支持**(owner 确认:response.text.delta 流式返回文本片段) | TASKS W1:两个 stock profile 都默认开;实现期以 AICC_LIVE_PROVIDER_TEST 复核 |
 | S3 | trunks 死表处置 | ~~需要:中继号要管理~~ → **2026-08-24 撤回:删表,只做只读状态**(owner 直裁) | **W8 撤销**;`00021` 删表,中继状态经 `sofia status` 只读呈现在 Overview。理由:网关定义在交换机自己的 sofia profile XML 里、profile 加载时读取,应用不写那个文件 —— 要让一行变成网关,得再加 `luacc.trunks` 视图、让 `aicc_xml.lua` 接管 configuration 的 sofia 部分、每次改动 rescan,为一个单机部署只有一个、部署时配一次的东西。而 **D6 已经定了 gateway 是系统级配置**,一个编辑它的界面正说反了,且兑现不了承诺(W11.1 改名时仓内只能改一半)。settings 表仍未决(唯一残留) |
-| S4 | 非 seed 账号清理 | **清理;只保留 wei、agent、supervisor、admin;seed 名单(demoPeople)一起改**(2026-08-20 补充:删 amy/ben 两行,seed 不再建回) | TASKS **W9**;ben 是第 2 坐席——清理排在阶段 3–6 之后;S11-02 的 amy 依赖随 W9 改写 |
+| S4 | 非 seed 账号清理 | ~~清理;只保留 wei、agent、supervisor、admin;seed 名单一起改~~ **【2026-08-25 owner 改裁:账号保留,W9 整项撤销】** —— 一期生产只支持 web-sip-phone Chrome 扩展,原生 SIP 话机(含硬话机)是后期;本机那部原生软电话是下一期那类终端在今天的唯一样本,不能在支持它之前先删掉验证它的能力 | TASKS **W9 已撤销**;`demoPeople` 不动;S11-02 的 amy 依赖无需改写 |
 | S5 | C10(202/204 契约核对) | **放第二期,第二期需要** | TASKS C10 标记 defer;本期账本 expect 维持 202 |
