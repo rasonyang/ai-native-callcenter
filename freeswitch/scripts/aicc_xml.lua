@@ -93,6 +93,14 @@ local function directory_document(domain, row)
   -- On ring, because a ringing phone is already engaged and that is the window
   -- worth closing. A ring nobody answers costs nothing: mod_callcenter's own
   -- state hook puts the count back when the leg ends, answered or not.
+  --
+  -- Only execute_on_ring. A leg that answers 183 with SDP and never sends 180
+  -- goes down mark_pre_answered and this never fires (sofia.c:7607); adding
+  -- execute_on_pre_answer to cover it would run callcenter_track twice on the
+  -- ordinary 180-then-183, because switch_channel_execute_on does not clear
+  -- the variable and CF_RING_READY only guards a second 180. The count would
+  -- balance and stop meaning anything. Agent phones send 180; 183-only is
+  -- carrier and IVR behaviour.
   local track = ""
   local agent = row.callcenter_agent_name
   if agent ~= nil and agent ~= "" then

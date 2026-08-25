@@ -2731,6 +2731,33 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   反向验证:拆掉 ${aicc_bleg_vars}     →  振铃中 count=0                  确认计数来自它
   ```
   demo 打包无需改动:`entrypoint.d/10-aicc.sh` 用 `scripts/*.lua` 通配拷贝。
+  **主叫侧端到端(2026-08-25,owner 手动,1008 → 1002,两通)**:
+  ```
+  19:13:18.772  Tracking ... agent-wei   ← 主叫腿,directory <variables> 来的
+  19:13:20.002  Tracking ... agent-ben   ← 被叫腿,bridge {} 前缀来的
+  19:13:29.9    两个 Tracked ... ended, decreasing
+  通话中读到 agent-wei=1 agent-ben=1;挂断后两边归 0、state=Waiting
+  ```
+  **两个坐席、两条不同路径、同一通电话**,名字各自对上;1.23 秒的间隔正是主叫腿先起、
+  拨号方案再桥出被叫腿的顺序。
+  **【已知盲区:只回 183 而从不回 180 的被叫,`execute_on_ring` 不触发】**(owner 2026-08-25 定:记录,不改)
+  源码对应关系(`sofia.c:7607` 的 `nua_callstate_proceeding`):
+  ```
+  180 Ringing      → mark_ring_ready      → execute_on_ring
+  182 Queued       → mark_ring_ready      → execute_on_ring
+  183 带 SDP       → mark_pre_answered    → execute_on_pre_answer + execute_on_media   ← 不触发 ring
+  183 不带 SDP     → 什么都不触发
+  200 OK           → execute_on_answer(+ !CF_EARLY_MEDIA 时补 execute_on_media)
+  ```
+  **不用"两个变量都挂"来补,因为会计两次**:`switch_channel_execute_on()` **跑完不清变量**
+  (销毁的是临时快照,通道变量原封不动),而 `CF_RING_READY` 那道一次性闸只挡第二次 180,
+  挡不住随后的 183 —— 那是另一条路径、另一个 flag、另一个变量前缀。
+  于是 180→183 会让 `callcenter_track` 跑两次、`external_calls_count` 期间读到 2。
+  净值平衡(两个 state hook 各减一),`> 0` 的判断也不受影响,
+  **但计数从此不再等于"这个坐席身上有几通队列外的电话",出问题时无法对账**;
+  且两个 hook 任一没跑成,残值就永久留下。
+  **本部署不受影响**:三条路的被叫都是坐席话机(浏览器 SIP.js / 原生软电话),实测都回 180;
+  只回 183 是运营商中继与 IVR 的形态。真要防,该让 `callcenter_track` 幂等 —— 那是上游的事。
 
   **⚠ 并已排除一条看似更优雅的路(owner 提出并自行否掉)**:把
   `execute_on_ring='callcenter_track …'` 编进 **user 级 dial-string**,让它覆盖所有 `user/` 解析。

@@ -20,6 +20,16 @@
 -- Sets aicc_bleg_vars to a {…} prefix, or to nothing when the extension
 -- belongs to no agent — which is most of them. An unset variable expands to
 -- empty, so the bridge string is unchanged in that case.
+--
+-- execute_on_ring, and only that one. A callee that answers 183 with SDP and
+-- never sends 180 goes down mark_pre_answered instead and this never fires
+-- (sofia.c:7607). Setting execute_on_pre_answer as well would cover it and
+-- cost more than it is worth: switch_channel_execute_on does not clear the
+-- variable after running, and CF_RING_READY only guards a second 180, so a
+-- 180-then-183 would run callcenter_track twice. The two decrements balance,
+-- but the count would stop meaning "how many calls this agent is on" and
+-- could not be used to reconcile anything. Every phone an agent uses here
+-- sends 180; 183-only is what carriers and IVRs do.
 
 local session = session
 if session == nil then return end
