@@ -138,6 +138,19 @@ func TestCommandStrings(t *testing.T) {
 			want: "uuid_transfer chan-1 'm:^:bridge:{absolute_codec_string=PCMU,origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d,sip_h_X-AICC-Call-ID=abc}sofia/gateway/aicc_bot/95011' inline",
 		},
 		{
+			// :: and not a space. "callcenter_track agent-wei" as an
+			// originate variable ends the {…} block at the space: the switch
+			// answers Parse Error and the call dies with
+			// DESTINATION_OUT_OF_ORDER before it routes, which is how the
+			// first version of this was found — every unit test passed,
+			// because they asserted the map and not the line.
+			name: "tracking an external call carries the agent with no space",
+			act: func(a *Adapter) error {
+				return a.TrackExternalCall("chan-1", "agent-wei")
+			},
+			want: "uuid_broadcast chan-1 callcenter_track::agent-wei aleg",
+		},
+		{
 			name: "hangup defaults to a normal cause",
 			act:  func(a *Adapter) error { return a.Hangup("chan-1", "") },
 			want: "uuid_kill chan-1 NORMAL_CLEARING",

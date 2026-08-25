@@ -917,6 +917,23 @@ func (s *Service) AgentAtExtension(extensionNumber string) (uuid.UUID, bool) {
 	return s.extensionHolderLocked(extensionNumber)
 }
 
+// CallcenterNameFor is the switch's own name for an agent, empty when there is
+// none to be had.
+//
+// The reverse of AgentByCallcenterName, and needed for the same reason from
+// the other side: a command aimed at mod_callcenter has to name the agent the
+// way mod_callcenter knows them. Empty rather than an error, because every
+// caller so far is decorating a command that must go out either way — a
+// click-to-dial does not fail because the switch could not be told whose call
+// it is.
+func (s *Service) CallcenterNameFor(ctx context.Context, agentID uuid.UUID) string {
+	profile, err := s.store.AgentProfile(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	return profile.CallcenterName
+}
+
 // AgentByCallcenterName resolves the switch's own name for an agent.
 func (s *Service) AgentByCallcenterName(name string) (uuid.UUID, bool) {
 	s.mu.Lock()

@@ -199,12 +199,37 @@ func oversizedValue() string {
 
 type recordingDialer struct {
 	stubOutbound
-	userData map[string]string
+	userData       map[string]string
+	callcenterName string
 }
 
-func (d *recordingDialer) Dial(_ context.Context, _, _ string, userData map[string]string) (uuid.UUID, error) {
-	d.userData = userData
+func (d *recordingDialer) Dial(_ context.Context, _, _ string, userData map[string]string,
+	callcenterName string) (uuid.UUID, error) {
+	d.userData, d.callcenterName = userData, callcenterName
 	return uuid.New(), nil
+}
+
+// The handler is where the agent's switch-side name comes from, so this is
+// where a dial that forgot it would go unnoticed.
+func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
+	dialer := &recordingDialer{}
+	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/dial",
+		strings.NewReader(`{"destination":"13912345678"}`))
+	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
+		UserID: uuid.New(), Role: auth.RoleAgent,
+	}))
+	w := httptest.NewRecorder()
+	s.DialCall(w, r)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.callcenterName != "agent-probe" {
+		t.Errorf("dialled with callcenterName %q, want the switch's name for this agent — "+
+			"without it mod_callcenter keeps offering them queue calls mid-conversation",
+			dialer.callcenterName)
+	}
 }
 
 type dialerDirectory struct{}
@@ -220,6 +245,8 @@ func (dialerDirectory) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, er
 // dialerPresence is stubAgents with a phone: click-to-dial refuses an agent
 // who is not signed in at one.
 type dialerPresence struct{ stubAgents }
+
+func (dialerPresence) CallcenterNameFor(context.Context, uuid.UUID) string { return "agent-probe" }
 
 func (dialerPresence) Presence(uuid.UUID) agents.Presence {
 	return agents.Presence{ExtensionNumber: "1008"}

@@ -266,6 +266,7 @@ func (stubAgents) NotReady(context.Context, uuid.UUID, agents.Reason) (agents.Pr
 	return agents.Presence{}, nil
 }
 func (stubAgents) Presence(uuid.UUID) agents.Presence                   { return agents.Presence{} }
+func (stubAgents) CallcenterNameFor(context.Context, uuid.UUID) string  { return "" }
 func (stubAgents) Roster(context.Context) ([]agents.RosterEntry, error) { return nil, nil }
 func (stubAgents) CreateAgent(context.Context, agents.AgentConfig) (agents.AgentConfig, error) {
 	return agents.AgentConfig{}, nil
@@ -362,7 +363,7 @@ func (stubContacts) Delete(context.Context, uuid.UUID) error { return nil }
 
 type stubOutbound struct{}
 
-func (stubOutbound) Dial(context.Context, string, string, map[string]string) (uuid.UUID, error) {
+func (stubOutbound) Dial(context.Context, string, string, map[string]string, string) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, error) {

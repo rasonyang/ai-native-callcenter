@@ -18,7 +18,7 @@ import (
 // OutboundService places calls on request.
 type OutboundService interface {
 	Dial(ctx context.Context, agentExtension, destination string,
-		userData map[string]string) (uuid.UUID, error)
+		userData map[string]string, callcenterName string) (uuid.UUID, error)
 	DialAI(ctx context.Context, req outbound.AIDialRequest) (uuid.UUID, error)
 }
 
@@ -50,7 +50,10 @@ func (s *Server) DialCall(w http.ResponseWriter, r *http.Request) {
 		}
 		userData = *req.UserData
 	}
-	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination, userData)
+	// The switch's own name for this agent, so mod_callcenter can be told they
+	// are on a call and stop offering them queue calls while they are.
+	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination,
+		userData, s.agents.CallcenterNameFor(r.Context(), agentID))
 	if err != nil {
 		writeOutboundError(w, err)
 		return

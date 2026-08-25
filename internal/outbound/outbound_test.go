@@ -116,6 +116,25 @@ type fakeSwitch struct {
 	originates []originated
 	bridges    []bridged
 	transfers  []transferred
+	tracked    []tracked
+}
+
+type tracked struct{ channelID, callcenterName string }
+
+func (f *fakeSwitch) TrackExternalCall(channelID, callcenterName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tracked = append(f.tracked, tracked{channelID, callcenterName})
+	return nil
+}
+
+func (f *fakeSwitch) lastTracked() (tracked, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.tracked) == 0 {
+		return tracked{}, false
+	}
+	return f.tracked[len(f.tracked)-1], true
 }
 
 func (f *fakeSwitch) TransferToExtension(channelID, extension, context string) error {
@@ -232,11 +251,72 @@ func waitBridges(t *testing.T, sw *fakeSwitch, want int) {
 
 // Click-to-dial rings the agent first and bridges out only on their answer,
 // with the minted call id riding every leg.
+// A call the agent placed themselves has to be visible to mod_callcenter, or
+// its queues go on offering them calls while they are already talking.
+//
+// The module only tracks what it dispatched: agents.state stays Waiting for
+// anything else, and the phone is left to say no — 486, which costs a busy
+// delay, or 480 on the slot race, which the module counts as a call the agent
+// failed to answer. external_calls_count is the field it keeps for this and
+// skip-agents-with-external-calls reads it by default; nothing was writing it.
+//
+// The name is asserted, not just that something was tracked: callcenter_track
+// logs a warning and does nothing for an agent it cannot find, so a wrong name
+// fails silently and leaves exactly the behaviour this removes.
+func TestAnAgentsOwnCallIsTrackedSoQueuesLeaveThemAlone(t *testing.T) {
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+
+	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, "agent-wei"); err != nil {
+		t.Fatal(err)
+	}
+	// Nothing yet: the phone is still ringing, and a leg that rings out is not
+	// a call the agent is on. Taking them out of the queues for it would cost
+	// them calls they could have taken.
+	if got, tracked := sw.lastTracked(); tracked {
+		t.Fatalf("tracked %+v before the agent picked up", got)
+	}
+
+	leg := sw.lastOriginate().partyID.String()
+	answer(s, leg)
+	waitTransfers(t, sw, 1)
+
+	got, tracked := sw.lastTracked()
+	if !tracked {
+		t.Fatal("the agent answered and the switch was never told they are on a call")
+	}
+	if got.callcenterName != "agent-wei" {
+		t.Errorf("tracked as %q, want the switch's own name for the agent", got.callcenterName)
+	}
+	if got.channelID != leg {
+		t.Errorf("tracked channel %q, want the agent's leg %q", got.channelID, leg)
+	}
+}
+
+// An agent the switch has no name for still gets their call. Decorating a
+// command is not a reason to refuse one.
+func TestADialGoesOutEvenWhenTheSwitchHasNoNameForTheAgent(t *testing.T) {
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+
+	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, ""); err != nil {
+		t.Fatalf("the dial was refused because the agent had no callcenter name: %v", err)
+	}
+	answer(s, sw.lastOriginate().partyID.String())
+	waitTransfers(t, sw, 1)
+	if got, tracked := sw.lastTracked(); tracked {
+		t.Errorf("tracked %+v with no name to track by", got)
+	}
+	if sw.transferCount() != 1 {
+		t.Error("the call did not go through")
+	}
+}
+
 func TestDialIsAgentFirst(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	callID, err := s.Dial(context.Background(), "1001", "13912345678", nil)
+	callID, err := s.Dial(context.Background(), "1001", "13912345678", nil, "agent-1001")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +366,7 @@ func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	if _, err := s.Dial(context.Background(), "1001", "13912345678", nil); err != nil {
+	if _, err := s.Dial(context.Background(), "1001", "13912345678", nil, "agent-1001"); err != nil {
 		t.Fatal(err)
 	}
 	leg := sw.lastOriginate().partyID.String()
@@ -413,7 +493,7 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 	} {
 		sw := &fakeSwitch{}
 		s := testService(t, sw, nil)
-		if _, err := s.Dial(context.Background(), "1008", tc.destination, nil); err != nil {
+		if _, err := s.Dial(context.Background(), "1008", tc.destination, nil, "agent-1008"); err != nil {
 			t.Fatal(err)
 		}
 		if got := sw.lastOriginate().vars["aicc_call_type"]; got != tc.want {
@@ -462,7 +542,7 @@ func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T)
 			IsEnabled: true, AllowInbound: true}},
 		nil, nil, slog.New(slog.DiscardHandler))
 
-	_, err := svc.Dial(context.Background(), "1001", "18688886669", nil)
+	_, err := svc.Dial(context.Background(), "1001", "18688886669", nil, "agent-1001")
 	if !errors.Is(err, ErrNoDefaultOutbound) {
 		t.Fatalf("error = %v, want ErrNoDefaultOutbound", err)
 	}

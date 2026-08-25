@@ -312,6 +312,29 @@ func (a *Adapter) Originate(partyID uuid.UUID, endpoint string, vars map[string]
 	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &park()", renderVars(all), endpoint))
 }
 
+// TrackExternalCall tells mod_callcenter that an agent is busy on a call it
+// did not dispatch, so its queues stop offering them one until this leg ends.
+//
+// The module only knows about calls it placed: for anything else agents.state
+// stays Waiting and a queue will happily ring a phone that is already talking.
+// external_calls_count is the field it keeps for this, and
+// skip-agents-with-external-calls consults it by default; nothing was writing
+// it. callcenter_track owns the increment, the decrement on hangup and the
+// state hook that guarantees it — measured: the count goes 0 → 1 on the
+// broadcast and back to 0 when the leg ends.
+//
+// Broadcast rather than an originate variable, and that is not a style
+// choice. execute_on_answer would need "callcenter_track <name>" inside the
+// originate's {…} block, where a space ends the block — the call then dies
+// before it routes with a Parse Error and DESTINATION_OUT_OF_ORDER, found by
+// trying it. The :: form carries the argument with no space at all.
+//
+// An agent the module does not recognise costs a warning in its log and
+// nothing else, so this never has to be the reason a call fails.
+func (a *Adapter) TrackExternalCall(channelID, callcenterName string) error {
+	return a.exec("uuid_broadcast %s callcenter_track::%s aleg", channelID, callcenterName)
+}
+
 // StartRecording and StopRecording control a call's recording.
 func (a *Adapter) StartRecording(channelID, path string) error {
 	return a.exec("uuid_record %s start %s", channelID, path)

@@ -28,6 +28,9 @@ type AgentService interface {
 	Ready(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
 	NotReady(ctx context.Context, agentID uuid.UUID, reason agents.Reason) (agents.Presence, error)
 	Presence(agentID uuid.UUID) agents.Presence
+	// CallcenterNameFor is the switch's own name for an agent, for the
+	// commands that have to name them the way mod_callcenter knows them.
+	CallcenterNameFor(ctx context.Context, agentID uuid.UUID) string
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 
 	// EndWrapUp completes after-call work; WrapUpCall names the call it was
