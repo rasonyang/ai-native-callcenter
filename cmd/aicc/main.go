@@ -427,13 +427,20 @@ func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *tele
 			}
 
 			switch ev.Kind {
-			case telephony.KindDeviceRegistered, telephony.KindDeviceUnregistered:
-				agentSvc.ObserveDevice(ctx, ev.Extension, ev.Registered, ev.Registered)
+			case telephony.KindDeviceRegistered:
+				agentSvc.ObserveDevice(ctx, ev.Extension, agents.SignalRegistered)
+			case telephony.KindDeviceUnregistered:
+				agentSvc.ObserveDevice(ctx, ev.Extension, agents.SignalUnregistered)
 			case telephony.KindDeviceState:
-				// A phone that stops answering keepalives is still registered:
-				// this is the signal that separates a live agent from a
-				// crashed browser tab.
-				agentSvc.ObserveDevice(ctx, ev.Extension, true, ev.Registered)
+				// The other axis. A phone that stops answering keepalives is
+				// still registered — that is what separates a live agent from
+				// a crashed browser tab, and why it is not the same signal as
+				// unregistering.
+				signal := agents.SignalReachable
+				if !ev.Registered {
+					signal = agents.SignalUnreachable
+				}
+				agentSvc.ObserveDevice(ctx, ev.Extension, signal)
 			default:
 				coordinator.Handle(ctx, ev)
 			}

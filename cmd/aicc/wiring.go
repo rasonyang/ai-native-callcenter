@@ -44,7 +44,7 @@ type presenceWiring interface {
 	AttachStaffing(agents.Staffing)
 	AttachWrapUps(agents.WrapUpLedger)
 	SyncSwitch(ctx context.Context)
-	ObserveDevice(ctx context.Context, extensionNumber string, isRegistered, isInService bool)
+	ObserveDevice(ctx context.Context, extensionNumber string, signal agents.DeviceSignal)
 	// NoteDevice records a phone without mirroring it, for the pass that has
 	// to happen before presence is sent to the switch.
 	NoteDevice(extensionNumber string, isRegistered, isInService bool)
@@ -203,7 +203,15 @@ func (c composition) onSwitchConnected(ctx context.Context) {
 	// Again, now out loud: the same observations, published this time, so a
 	// phone that changed while we were away reaches the screens watching it.
 	for _, reg := range regs {
-		c.Agents.ObserveDevice(ctx, reg.Extension, true, reg.IsReachable)
+		// Reachability is the whole of what this pass has to say: every
+		// endpoint the switch listed is registered by definition, so the
+		// question left is whether it is answering, and that is the axis with
+		// a name for both answers.
+		signal := agents.SignalReachable
+		if !reg.IsReachable {
+			signal = agents.SignalUnreachable
+		}
+		c.Agents.ObserveDevice(ctx, reg.Extension, signal)
 	}
 	c.Log.InfoContext(ctx, "registrations reconciled", "endpoints", len(regs))
 }

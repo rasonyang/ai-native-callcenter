@@ -511,8 +511,9 @@ const (
 	SSEEventTypeCALLTRANSCRIPT         SSEEventType = "CALL_TRANSCRIPT"
 	SSEEventTypeCALLTRANSCRIPTIONSTATE SSEEventType = "CALL_TRANSCRIPTION_STATE"
 	SSEEventTypeCALLUSERDATA           SSEEventType = "CALL_USER_DATA"
-	SSEEventTypeDEVICEINSERVICE        SSEEventType = "DEVICE_IN_SERVICE"
+	SSEEventTypeDEVICEREACHABLE        SSEEventType = "DEVICE_REACHABLE"
 	SSEEventTypeDEVICEREGISTERED       SSEEventType = "DEVICE_REGISTERED"
+	SSEEventTypeDEVICEUNREACHABLE      SSEEventType = "DEVICE_UNREACHABLE"
 	SSEEventTypeDEVICEUNREGISTERED     SSEEventType = "DEVICE_UNREGISTERED"
 	SSEEventTypePARTYCHANGED           SSEEventType = "PARTY_CHANGED"
 	SSEEventTypePARTYDIALING           SSEEventType = "PARTY_DIALING"
@@ -565,9 +566,11 @@ func (e SSEEventType) Valid() bool {
 		return true
 	case SSEEventTypeCALLUSERDATA:
 		return true
-	case SSEEventTypeDEVICEINSERVICE:
+	case SSEEventTypeDEVICEREACHABLE:
 		return true
 	case SSEEventTypeDEVICEREGISTERED:
+		return true
+	case SSEEventTypeDEVICEUNREACHABLE:
 		return true
 	case SSEEventTypeDEVICEUNREGISTERED:
 		return true
@@ -1664,13 +1667,13 @@ type SSEEvent struct {
 	// Seq Global order. Echo the last seen value as Last-Event-ID to resume.
 	Seq int64 `json:"seq"`
 
-	// Type Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.
+	// Type Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control. DEVICE_* report a phone on two independent axes and name one transition each: REGISTERED/UNREGISTERED say whether a SIP registration exists, REACHABLE/UNREACHABLE whether the registered phone still answers the switch's OPTIONS ping. A registered phone that stops answering is the agent-side failure that matters most — it looks exactly like a working one — so it has a name of its own rather than borrowing UNREGISTERED.
 	Type     SSEEventType            `json:"type"`
 	UserData *map[string]interface{} `json:"userData,omitempty"`
 	Version  int                     `json:"version"`
 }
 
-// SSEEventType Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.
+// SSEEventType Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control. DEVICE_* report a phone on two independent axes and name one transition each: REGISTERED/UNREGISTERED say whether a SIP registration exists, REACHABLE/UNREACHABLE whether the registered phone still answers the switch's OPTIONS ping. A registered phone that stops answering is the agent-side failure that matters most — it looks exactly like a working one — so it has a name of its own rather than borrowing UNREGISTERED.
 type SSEEventType string
 
 // StaffQueueRequest defines model for StaffQueueRequest.

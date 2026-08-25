@@ -407,8 +407,9 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
      而这两样信封本来就带着。两条反向摘除验证:去掉两条宣告 → 用例超时;
      改成带路径的腿事件 → 报"录音被当成某条腿的事"并揪出路径外泄。
      零生产者 8 → 6。
-  ② ~~DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice(main.go:399-405),补区分发布~~
-  **已做(C28,2026-08-22)**;`DEVICE_REGISTERED` 仍无生产者 —— 恢复走的是 `DEVICE_IN_SERVICE`;
+  ② ~~DEVICE_REGISTERED/UNREGISTERED——信号已达 ObserveDevice,补区分发布~~
+  **已做(C28,2026-08-22)**;~~`DEVICE_REGISTERED` 仍无生产者 —— 恢复走的是 `DEVICE_IN_SERVICE`~~
+  **【2026-08-25 收官,owner 定的词表】** 见下条"设备词表按轴收敛"。
   ③ ~~PARTY_DIALING(addParty 时对 originator 腿宣告)~~ **【已做 2026-08-23】** ——
      发起腿(`Role == ORIGINATOR`)在 `addParty` 时宣告 `PARTY_DIALING`,
      **作用域严格照"腿事件私有于其坐席"办**:有坐席只发他本人,无坐席(主叫自己的腿)
@@ -461,6 +462,45 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ④ BOT_SESSION_STARTED/INTERRUPTED/ENDED——需给 aicall 引入 Hub 依赖(现无 Publish 调用,
   events.md 实证),**W7 内单独架构评审**(经 orchestrator 回调转发可避免直接依赖)。
   合入后:events.md 十行缺口关闭 + T6.10 补最小断言。
+
+- **W7 ②收官:设备事件词表按轴收敛(`REACHABLE`/`UNREACHABLE` 一对;补订 `sofia::expire`)** **【已完成 2026-08-25,owner 定的词表】** ——
+  **`DEVICE_REGISTERED` 零生产者的根因不是"漏了一跳",是它的名字被占用了,而占用它的那个事件在说反话。**
+  一部话机活在**两条独立的轴**上:有没有 SIP 注册;注册着的话机答不答交换机的 OPTIONS ping。
+  四种迁移,契约只给了三个名字,于是 `ObserveDevice` 只拿到两个布尔**结果**、看不见是哪条轴动了:
+  ```
+  注册上来        → 发 DEVICE_IN_SERVICE     ← 错,是另一条轴的话
+  注销            → 发 DEVICE_UNREGISTERED   ← 对
+  ping 恢复       → 发 DEVICE_IN_SERVICE     ← 对
+  注册着但 ping 断 → 发 DEVICE_UNREGISTERED   ← 错,话机还注册着
+  ```
+  **四种迁移里有两种被安上了说反话的名字**,而说反的那两种正是最要命的:
+  `ObserveDevice` 自己的注释写着 *"a crashed browser tab looks exactly like a working one,
+  so an agent can sit in ready while every call to them fails"* ——
+  **代码知道这是最要命的一种故障,然后在事件名里把它扔掉了。**
+  **owner 2026-08-25 定的词表**(每条轴每个方向一个名字):
+  `DEVICE_REGISTERED` / `DEVICE_UNREGISTERED`(注册轴)、
+  `DEVICE_REACHABLE` / `DEVICE_UNREACHABLE`(可达轴,后者新增、前者由 `DEVICE_IN_SERVICE` 改名)。
+  **`IN_SERVICE` 的隐病是它没有对偶** —— 反面只能从另一条轴借 `UNREGISTERED`,这正是说反话的来源。
+  两条支持它的实证:①**`DEVICE_UNREACHABLE` 这个词本仓早就在用** ——
+  `agents/state.go:59` 的 `AvailDeviceUnreachable`,且已在契约的 `Availability` 枚举里;
+  `service.go` 的注释还记着 C28 时发现的 *"announced as DEVICE_IN_SERVICE and carried
+  DEVICE_UNREACHABLE in its payload"* —— **载荷里早就写着,只有类型名没跟上**。
+  ②新名字与代码保存的状态同构:`deviceState{isRegistered, isInService}` 两个布尔、两条轴。
+  **实现**:`ObserveDevice` 的两个布尔换成 `DeviceSignal`(四值)——
+  **哪条轴动了只有调用方知道**,到了状态那层就只是一对布尔,而两种不同的迁移能算出同一对。
+  `NoteDevice` 保持布尔不变:它设状态、不发事件,收状态是对的。
+  **补订 `sofia::expire`**(`Subscriptions` + `normalizeCustom`)——
+  `sofia::unregister` 只在话机**主动**发 `REGISTER Expires:0` 时来,
+  **被杀掉的浏览器标签从不告别**,注册就那么静静过期。此前**注册轴会一直撒谎**,
+  是可达轴(ping 断)在替它兜底。反向验证:摘掉订阅,用例报"normalized but never subscribed"。
+  **"连续 ping timeout"那个"连续"不由我们数** —— profile 上 `all-reg-options-ping=true`,
+  交换机判完才发 `sip_user_state`;再数一遍会得到第二个真相,且必然对不齐。
+  **`make api-breaking` 0 error / 2 warning**(响应枚举减值在本仓是 warning),门禁通过。
+  **现场实测,一去一回都拿到了**:`flush_inbound_reg 1002` → 管理员 SSE 上
+  `event: DEVICE_UNREGISTERED`(载荷 `extensionNumber:1002`);话机三分半后自行重注册 →
+  `event: DEVICE_REGISTERED` —— **这是这个类型自契约写下以来第一次真的出现在流上**。
+  换在旧代码里,这两条会分别是 `DEVICE_UNREGISTERED`(碰巧对)与 `DEVICE_IN_SERVICE`(错)。
+  1002 已自行恢复注册且 `Ping-Status: Reachable`,环境无遗留。
 - **C42 第 1 步:userData 的限额下沉到领域层** **【已完成 2026-08-25】** ——
   32 键 / 每值 1024 字节这条限额原先**只活在 HTTP handler 里**(`checkUserData`)。
   今天没事,因为 HTTP 是唯一入口;但上面第 2–4 步接的每一个新来源(通道变量、REFER 上下文、

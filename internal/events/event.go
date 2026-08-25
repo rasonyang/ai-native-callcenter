@@ -45,18 +45,30 @@ const (
 
 // Queue, agent, device, bot and callback scopes.
 const (
-	TypeQueueJoined        Type = "QUEUE_JOINED"
-	TypeQueueLeft          Type = "QUEUE_LEFT"
-	TypeQueueCount         Type = "QUEUE_COUNT"
-	TypeQueueAgentOffered  Type = "QUEUE_AGENT_OFFERED"
-	TypeAgentLoggedIn      Type = "AGENT_LOGGED_IN"
-	TypeAgentLoggedOut     Type = "AGENT_LOGGED_OUT"
-	TypeAgentReady         Type = "AGENT_READY"
-	TypeAgentNotReady      Type = "AGENT_NOT_READY"
-	TypeAgentAvailability  Type = "AGENT_AVAILABILITY"
+	TypeQueueJoined       Type = "QUEUE_JOINED"
+	TypeQueueLeft         Type = "QUEUE_LEFT"
+	TypeQueueCount        Type = "QUEUE_COUNT"
+	TypeQueueAgentOffered Type = "QUEUE_AGENT_OFFERED"
+	TypeAgentLoggedIn     Type = "AGENT_LOGGED_IN"
+	TypeAgentLoggedOut    Type = "AGENT_LOGGED_OUT"
+	TypeAgentReady        Type = "AGENT_READY"
+	TypeAgentNotReady     Type = "AGENT_NOT_READY"
+	TypeAgentAvailability Type = "AGENT_AVAILABILITY"
+	// A phone lives on two independent axes and each transition has a name of
+	// its own. REGISTERED/UNREGISTERED say whether a SIP registration exists;
+	// REACHABLE/UNREACHABLE say whether the registered phone still answers the
+	// switch's OPTIONS ping.
+	//
+	// IN_SERVICE used to stand where REACHABLE stands, and it had no opposite:
+	// a phone that stopped answering was announced as UNREGISTERED, which was
+	// a claim about the other axis and not true. That is the failure that
+	// matters most here — a dead browser tab is still registered and looks
+	// exactly like a working one, so its agent sits in ready while every call
+	// rings out — and it now says what it is.
 	TypeDeviceRegistered   Type = "DEVICE_REGISTERED"
 	TypeDeviceUnregistered Type = "DEVICE_UNREGISTERED"
-	TypeDeviceInService    Type = "DEVICE_IN_SERVICE"
+	TypeDeviceReachable    Type = "DEVICE_REACHABLE"
+	TypeDeviceUnreachable  Type = "DEVICE_UNREACHABLE"
 	TypeBotSessionStarted  Type = "BOT_SESSION_STARTED"
 	TypeBotInterrupted     Type = "BOT_INTERRUPTED"
 	TypeBotSessionEnded    Type = "BOT_SESSION_ENDED"

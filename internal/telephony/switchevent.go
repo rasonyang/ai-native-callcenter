@@ -245,7 +245,8 @@ var Subscriptions = []string{
 	"CHANNEL_CREATE", "CHANNEL_ANSWER", "CHANNEL_PARK", "CHANNEL_BRIDGE",
 	"CHANNEL_UNBRIDGE", "CHANNEL_HOLD", "CHANNEL_UNHOLD",
 	"CHANNEL_HANGUP_COMPLETE", "DTMF", "RECORD_START", "RECORD_STOP",
-	"CUSTOM", "sofia::register", "sofia::unregister", "sofia::sip_user_state",
+	"CUSTOM", "sofia::register", "sofia::unregister", "sofia::expire",
+	"sofia::sip_user_state",
 	"callcenter::info",
 	// mod_audio_stream reports on the media tap it runs for us. Without these
 	// the module is a thing we command and never hear from: a stream that
@@ -433,10 +434,15 @@ func transferredAway(ev *esl.Event) bool {
 
 func normalizeCustom(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	switch ev.Subclass() {
-	case "sofia::register", "sofia::unregister":
+	// expire is the same outcome as unregister and the more common one: a
+	// phone says goodbye by sending REGISTER with Expires: 0, and a browser
+	// tab that is killed says nothing at all — its registration simply lapses.
+	// Without this the registration axis went on believing that phone was
+	// there, and only the OPTIONS ping caught up, on the other axis.
+	case "sofia::register", "sofia::unregister", "sofia::expire":
 		out.Kind = KindDeviceRegistered
 		out.Registered = true
-		if ev.Subclass() == "sofia::unregister" {
+		if ev.Subclass() != "sofia::register" {
 			out.Kind = KindDeviceUnregistered
 			out.Registered = false
 		}

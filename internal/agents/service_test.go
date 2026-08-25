@@ -257,7 +257,7 @@ func TestReadyMirrorsAvailableToTheSwitch(t *testing.T) {
 	// events and the reconcile on connect both land here. Signing in without
 	// it would be an agent at a phone nothing has ever heard from, which is
 	// unreachable by the same rule the wallboard uses.
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -337,7 +337,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	// The phone is known good before sign-in, as it is in production: an agent
 	// at a phone nothing has heard from is unreachable, and would be mirrored
 	// On Break whatever they had chosen.
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -382,7 +382,7 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 	svc, _, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +394,7 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 	}
 
 	// The phone goes away. The agent has chosen nothing — they are still READY.
-	svc.ObserveDevice(ctx, "1001", false, true)
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
 
 	if got := svc.Presence(agentID); got.CurrentState() != StateReady {
 		t.Errorf("state = %s, want READY — losing a phone is not a decision to stop taking calls", got.CurrentState())
@@ -418,7 +418,7 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 	}
 
 	// And back again.
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	last = ""
 	for _, c := range sw.commands {
 		if strings.HasPrefix(c, "status agent-1001 ") {
@@ -429,8 +429,64 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 		t.Errorf("the switch was last told %q after the phone came back, want Available", last)
 	}
 	types = pub.types()
-	if got := types[len(types)-1]; got != events.TypeDeviceInService {
-		t.Errorf("the phone's return was announced as %s, want %s", got, events.TypeDeviceInService)
+	if got := types[len(types)-1]; got != events.TypeDeviceRegistered {
+		t.Errorf("the phone's return was announced as %s, want %s", got, events.TypeDeviceRegistered)
+	}
+}
+
+// The two axes have four names between them and each one says which axis moved.
+//
+// Before, four transitions shared three names and two of them lied: a phone
+// that registered was announced as DEVICE_IN_SERVICE — a claim about
+// reachability — and a registered phone that stopped answering the switch's
+// ping was announced as DEVICE_UNREGISTERED, which is a claim about the other
+// axis and is not true. The second is the one that matters: a dead browser tab
+// is still registered and looks exactly like a working one.
+func TestEachDeviceSignalIsAnnouncedUnderItsOwnName(t *testing.T) {
+	for _, tt := range []struct {
+		signal DeviceSignal
+		want   events.Type
+	}{
+		{SignalRegistered, events.TypeDeviceRegistered},
+		{SignalUnregistered, events.TypeDeviceUnregistered},
+		{SignalReachable, events.TypeDeviceReachable},
+		{SignalUnreachable, events.TypeDeviceUnreachable},
+	} {
+		t.Run(string(tt.signal), func(t *testing.T) {
+			svc, _, _, pub, agentID := newTestService(t)
+			ctx := context.Background()
+			if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+				t.Fatal(err)
+			}
+			svc.ObserveDevice(ctx, "1001", tt.signal)
+
+			types := pub.types()
+			if got := types[len(types)-1]; got != tt.want {
+				t.Errorf("%s was announced as %s, want %s", tt.signal, got, tt.want)
+			}
+		})
+	}
+}
+
+// Reachability implies registration, which is the whole reason UNREACHABLE is
+// not UNREGISTERED: only a registered phone is pinged at all. A phone that has
+// stopped answering is still one an agent could be signed in at, and the
+// remedy is different — reconnect the tab, not sign in again.
+func TestAnUnreachablePhoneIsStillARegisteredOne(t *testing.T) {
+	svc, _, _, _, agentID := newTestService(t)
+	ctx := context.Background()
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.ObserveDevice(ctx, "1001", SignalUnreachable)
+	if p := svc.Presence(agentID); !p.IsRegistered || p.IsDeviceInService {
+		t.Errorf("registered=%v inService=%v, want registered but out of service",
+			p.IsRegistered, p.IsDeviceInService)
+	}
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+	if p := svc.Presence(agentID); p.IsRegistered {
+		t.Error("an unregistered phone still reads as registered")
 	}
 }
 
@@ -444,13 +500,13 @@ func TestDeviceObservationAffectsAvailability(t *testing.T) {
 	if _, err := svc.Ready(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if got := svc.Presence(agentID).Availability(); got != AvailReady {
 		t.Errorf("availability = %s, want READY", got)
 	}
 
 	// The phone stops answering keepalives while still registered.
-	svc.ObserveDevice(ctx, "1001", true, false)
+	svc.ObserveDevice(ctx, "1001", SignalUnreachable)
 	if got := svc.Presence(agentID).Availability(); got != AvailDeviceUnreachable {
 		t.Errorf("availability = %s, want DEVICE_UNREACHABLE", got)
 	}
@@ -466,7 +522,7 @@ func TestRosterResolvesAvailability(t *testing.T) {
 	if _, err := svc.Ready(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	svc.SetOnCall(ctx, agentID, true)
 
 	rows, err := svc.Roster(ctx)
@@ -532,7 +588,7 @@ func TestLoginAdoptsAlreadyKnownDeviceState(t *testing.T) {
 	ctx := context.Background()
 
 	// The reconciliation on connect saw this phone before anyone signed in.
-	svc.ObserveDevice(ctx, "1001", true, true)
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
@@ -584,7 +640,7 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
 			t.Fatalf("login: %v", err)
 		}
-		svc.ObserveDevice(t.Context(), "1008", true, true)
+		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
@@ -609,7 +665,7 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
 			t.Fatalf("login: %v", err)
 		}
-		svc.ObserveDevice(t.Context(), "1008", true, true)
+		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
@@ -640,7 +696,7 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 		// The phone goes. We mirror On Break on purpose — the switch must not
 		// keep offering — while their READY stands, because losing a phone
 		// says nothing about their intent (C28).
-		svc.ObserveDevice(t.Context(), "1008", false, false)
+		svc.ObserveDevice(t.Context(), "1008", SignalUnregistered)
 
 		got, err := svc.RingNoAnswer(t.Context(), agentID)
 		if err != nil {

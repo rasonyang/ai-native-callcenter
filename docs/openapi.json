@@ -6843,7 +6843,7 @@
       },
       "SseEventType": {
         "type": "string",
-        "description": "Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control.",
+        "description": "Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, SYSTEM_* stream-control. DEVICE_* report a phone on two independent axes and name one transition each: REGISTERED/UNREGISTERED say whether a SIP registration exists, REACHABLE/UNREACHABLE whether the registered phone still answers the switch's OPTIONS ping. A registered phone that stops answering is the agent-side failure that matters most — it looks exactly like a working one — so it has a name of its own rather than borrowing UNREGISTERED.",
         "enum": [
           "PARTY_DIALING",
           "PARTY_RINGING",
@@ -6870,7 +6870,8 @@
           "AGENT_AVAILABILITY",
           "DEVICE_REGISTERED",
           "DEVICE_UNREGISTERED",
-          "DEVICE_IN_SERVICE",
+          "DEVICE_REACHABLE",
+          "DEVICE_UNREACHABLE",
           "BOT_SESSION_STARTED",
           "BOT_INTERRUPTED",
           "BOT_SESSION_ENDED",

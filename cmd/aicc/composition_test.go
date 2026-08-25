@@ -87,12 +87,14 @@ func (f *fakeAgents) NoteDevice(ext string, _, _ bool) {
 	f.noted = append(f.noted, ext)
 	f.steps = append(f.steps, "note:"+ext)
 }
-func (f *fakeAgents) ObserveDevice(_ context.Context, ext string, isRegistered, isInService bool) {
+func (f *fakeAgents) ObserveDevice(_ context.Context, ext string, signal agents.DeviceSignal) {
 	f.steps = append(f.steps, "observe:"+ext)
-	if !isRegistered {
+	if signal == agents.SignalUnregistered {
 		return
 	}
-	f.observed = append(f.observed, telephony.Registration{Extension: ext, IsReachable: isInService})
+	f.observed = append(f.observed, telephony.Registration{
+		Extension: ext, IsReachable: signal != agents.SignalUnreachable,
+	})
 }
 
 type fakeCatalog struct {

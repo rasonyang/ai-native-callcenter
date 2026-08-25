@@ -408,6 +408,61 @@ func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
 	}
 }
 
+// DeviceSignal is what the switch just said about a phone.
+//
+// A phone lives on two independent axes — whether it holds a SIP registration,
+// and whether the registration still answers the switch's OPTIONS ping — and
+// each of the four transitions is its own signal. Which one arrived is
+// something only the caller knows: by the time it reaches state it is a pair
+// of booleans, and two different transitions can produce the same pair.
+type DeviceSignal string
+
+const (
+	// SignalRegistered is a REGISTER: the phone is here.
+	SignalRegistered DeviceSignal = "REGISTERED"
+	// SignalUnregistered is the registration going away, whether the phone
+	// said so (REGISTER with Expires: 0) or simply let it lapse. A browser tab
+	// that is killed never says goodbye, so the lapse is the common one.
+	SignalUnregistered DeviceSignal = "UNREGISTERED"
+	// SignalReachable is the OPTIONS ping answered.
+	SignalReachable DeviceSignal = "REACHABLE"
+	// SignalUnreachable is the switch giving up on the ping. How many
+	// timeouts that takes is the switch's decision and it has already made it
+	// by the time this arrives — counting again here would be a second
+	// opinion nobody asked for, and one that could disagree.
+	SignalUnreachable DeviceSignal = "UNREACHABLE"
+)
+
+// state is what the signal means for the pair of booleans presence keeps.
+//
+// Reachability implies registration: only a registered phone is pinged at all,
+// which is exactly why UNREACHABLE is not UNREGISTERED. A phone that has just
+// registered is taken to be reachable until a ping says otherwise — the
+// alternative is starting every phone off as broken.
+func (d DeviceSignal) state() (isRegistered, isInService bool) {
+	switch d {
+	case SignalRegistered, SignalReachable:
+		return true, true
+	case SignalUnreachable:
+		return true, false
+	default:
+		return false, false
+	}
+}
+
+func (d DeviceSignal) eventType() events.Type {
+	switch d {
+	case SignalRegistered:
+		return events.TypeDeviceRegistered
+	case SignalReachable:
+		return events.TypeDeviceReachable
+	case SignalUnreachable:
+		return events.TypeDeviceUnreachable
+	default:
+		return events.TypeDeviceUnregistered
+	}
+}
+
 // ObserveDevice records what the switch reports about a phone.
 //
 // A registered phone that stops answering keepalives is the agent-side failure
@@ -439,7 +494,9 @@ func (s *Service) NoteDevice(extensionNumber string, isRegistered, isInService b
 	}
 }
 
-func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, isRegistered, isInService bool) {
+func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, signal DeviceSignal) {
+	isRegistered, isInService := signal.state()
+
 	s.mu.Lock()
 	s.devices[extensionNumber] = deviceState{isRegistered: isRegistered, isInService: isInService}
 
@@ -472,16 +529,15 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, isR
 	// online who never answers.
 	s.mirrorStatus(profile, snapshot)
 
-	// Name the event for what happened. Publishing the in-service type in both
-	// directions meant the event announcing a phone's death was called
-	// DEVICE_IN_SERVICE and carried DEVICE_UNREACHABLE in its payload — a
-	// consumer filtering on type was told the opposite of the truth, and the
-	// contract's DEVICE_UNREGISTERED had no producer at all.
-	t := events.TypeDeviceInService
-	if !isRegistered || !isInService {
-		t = events.TypeDeviceUnregistered
-	}
-	s.publish(ctx, t, profile, snapshot)
+	// The event is the signal. It used to be derived from the resulting pair
+	// of booleans instead, which cannot tell the axes apart: a phone that
+	// registered and a phone that came back from being unreachable both
+	// compute to (true, true), so both were announced as DEVICE_IN_SERVICE and
+	// DEVICE_REGISTERED had no producer at all. Worse in the other direction —
+	// a registered phone that stopped answering computes to (true, false) and
+	// was announced as DEVICE_UNREGISTERED, a claim about the other axis that
+	// was simply untrue. The caller knows which signal arrived; it says so.
+	s.publish(ctx, signal.eventType(), profile, snapshot)
 }
 
 // Presence returns an agent's live presence.

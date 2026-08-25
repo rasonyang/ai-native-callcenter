@@ -225,6 +225,27 @@ func TestNormalizeSofiaRegistration(t *testing.T) {
 	if !ok || got.Kind != KindDeviceUnregistered || got.Registered {
 		t.Errorf("unregister mapped to %+v", got)
 	}
+
+	// A registration that simply lapses is the same outcome and the commoner
+	// one: a phone says goodbye by sending REGISTER with Expires: 0, and a
+	// browser tab that is killed says nothing at all. Unsubscribed, the
+	// registration axis went on believing that phone was there and only the
+	// OPTIONS ping ever caught up — on the other axis, under another name.
+	// The subclass carries from-user rather than username.
+	got, ok = Normalize(event(map[string]string{
+		"Event-Name":     "CUSTOM",
+		"Event-Subclass": "sofia::expire",
+		"from-user":      "1008",
+	}))
+	if !ok || got.Kind != KindDeviceUnregistered || got.Registered {
+		t.Errorf("expire mapped to %+v, want an unregistration", got)
+	}
+	if got.Extension != "1008" {
+		t.Errorf("Extension = %q, want the phone whose registration lapsed", got.Extension)
+	}
+	if !slices.Contains(Subscriptions, "sofia::expire") {
+		t.Error("sofia::expire is normalized but never subscribed to, so it can never arrive")
+	}
 }
 
 func TestNormalizeDeviceStateFromOptionsPing(t *testing.T) {
