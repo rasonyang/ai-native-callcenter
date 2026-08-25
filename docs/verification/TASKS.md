@@ -471,7 +471,7 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   队列侧另有一处不一致待一并处理:support-zh 的 `rona_delay_sec`/`sla_threshold_sec`/
   `discard_abandoned_after_sec` 均为 0,而 support-en 是 10/20/60,seed 两边不同口径。
 
-  **【2026-08-23 落地,三个提交;现场重跑待做】**
+  **【2026-08-23 落地,三个提交;现场重跑已于 2026-08-25 21:50 完成 —— 见本条末尾】**
   - **`cbf0391` 交换机侧的守卫**:四个**每坐席**参数随 `mirrorRegistration` 一并下发 ——
     `max_no_answer=2` / `no_answer_delay_time=60` / `reject_delay_time=60` / `busy_delay_time=60`;
     补写了 `max_no_answer` 与 `busy_delay_time` 两个 setter(另两个此前有 setter 无调用方)。
@@ -504,6 +504,22 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
     而经 API 建的队列会拿到 0(C33),两条本该一样的队列因此按"从哪扇门进来"分了岔。
     ⚠ 这动了 **C33 的现场证据**:support-zh 那行不再是受害者,C33 的证据以
     `VC-S12-01/verdict.md` 里抄下的读数为准。
+  **【2026-08-25 21:50 现场重跑完成】** 参数先直读交换机确认:agent-wei
+  `contact={leg_timeout=15}user/1008@…`、`max_no_answer=2`、`reject_delay_time=60`、
+  `busy_delay_time=60`、`no_answer_delay_time=60`、`wrap_up_time=0`。
+  RONA 全链 **13 毫秒内闭合**,顺序正是 W2.1 那条硬约束要的样子 ——
+  交换机 `bridge-agent-fail NO_ANSWER`(.050)→ **应用先转移状态**(.063)→
+  `AGENT_NOT_READY`/SYSTEM 上流(.070)→ 交换机 On Break 在**最后**(.071)。
+  **振铃 14.32 秒**(CDR `ring_sec=14`),C41 的 `{leg_timeout=15}` 现场生效(08-23 还是 59 秒)。
+  CDR `95002|NO_ANSWER|ABANDONED_WAITING|queue_wait_sec=105|agent_ids=1`,
+  `queue_events` JOINED=1 OFFERED=1 ABANDONED=1 无 BRIDGED。VC-S5-01 全部 expect 满足。
+  证据 `artifacts/VC-S5-01/rerun-2026-08-25-*`。
+  **由此产生两条小尾巴(不影响 W2 判定)**:
+  ① **VC-S5-01 的 expect 文字要改** —— 它写"第二次响完 `max_no_answer=2` 满才摘出路由",
+     实际**一次漏接就摘**:应用拥有状态转移,`max_no_answer=2` 只是交换机侧兜底,
+     轮不到它数第二次;"两次派单之间约 60 秒"这条也因此没有观测对象。
+  ② 21:51:01.846 交换机侧多出一条重复的 `agent-status-change=On Break`(幂等,未查)。
+
   - **仍未决(须 owner 定)**:`queues.rona_delay_sec` **在交换机里没有位置** ——
     `callcenter_config queue list` 的列里根本没有 RONA 延迟,它是**每坐席**的
     `no_answer_delay_time`;一个坐席同时配员两条队列时 per-queue 的值无解,

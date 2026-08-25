@@ -1,0 +1,11 @@
+listening …
+21:50:25.628 CC  Action=member-queue-start Queue=support-zh Member-UUID=01a0392f-bf52-7eab-8e19-3ecf3bf37cf5 Member-CID-Number=18688886669 Member-Session-UUID=01a0392f-83a1-78b3-93d3-662a5026e2ac
+21:50:25.628 CC  Action=members-count Queue=support-zh
+21:50:25.730 CC  Action=agent-state-change Agent=agent-wei Agent-State=Receiving
+21:50:25.730 CC  Action=agent-offering Queue=support-zh Agent=agent-wei Member-UUID=01a0392f-bf52-7eab-8e19-3ecf3bf37cf5 Member-CID-Number=18688886669 Agent-System=single_box Member-Session-UUID=01a0392f-83a1-78b3-93d3-662a5026e2ac
+21:50:40.050 CC  Action=bridge-agent-fail Queue=support-zh Agent=agent-wei Hangup-Cause=NO_ANSWER Member-UUID=01a0392f-bf52-7eab-8e19-3ecf3bf37cf5 Member-CID-Number=18688886669 Agent-System=single_box Member-Session-UUID=01a0392f-83a1-78b3-93d3-662a5026e2ac
+21:50:40.050 CC  Action=agent-state-change Agent=agent-wei Agent-State=Waiting
+21:50:40.071 CC  Action=agent-status-change Agent=agent-wei Agent-Status=On Break
+21:51:01.846 CC  Action=agent-status-change Agent=agent-wei Agent-Status=On Break
+21:52:11.355 CC  Action=member-queue-end Queue=support-zh Member-UUID=01a0392f-bf52-7eab-8e19-3ecf3bf37cf5 Member-CID-Number=18688886669 Cause=Cancel Member-Session-UUID=01a0392f-83a1-78b3-93d3-662a5026e2ac
+21:52:11.355 CC  Action=members-count Queue=support-zh
