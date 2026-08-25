@@ -269,6 +269,29 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   ```
   **仍需真机的**:`CALL_RECORDING_*`、`SYSTEM_LINK`、`PARTY_DIALING`、`DEVICE_REACHABLE`,
   以及 `CALL_USER_DATA` 的 PATCH 入口。
+  **【已起草 2026-08-25】** 按原则办:**六个挂进既有 case,两个另起**,一条新 case 都没为单个类型建。
+  ```
+  BOT_SESSION_STARTED              → VC-S1-01   加抓流 + 顺序断言(必须排在两条 PARTY_ESTABLISHED 之后)
+  CALL_RECORDING_STARTED/STOPPED   → VC-S4-04   加抓流 + 断言载荷里没有文件路径
+  SYSTEM_LINK                      → VC-S12-03  加抓流(必须早于重启)+ 两个方向各一条
+  DEVICE_REGISTERED/UNREGISTERED   → VC-S13-05  **改写**,见下
+  CALL_USER_DATA                   → VC-S15-01(新)
+  PARTY_DIALING                    → VC-S15-02(新)
+  ```
+  新起的两条并入新场景段 **S15「事件流的名字与作用域」**,段头写明这一节的理由:
+  **事件流是本产品唯一没有编译器的接口** —— 少发一条、发错一个名字、发早发晚,代码照跑、单测照绿。
+  **VC-S13-05 的改写是最要紧的一处**:它原本 PASS 的判词写着"恢复走 IN_SERVICE 而非 DEVICE_REGISTERED,
+  后者仍无生产者" —— **照原文重跑今天会得到一次假失败**,因为 IN_SERVICE 这个名字已从契约删除。
+  已改为断言 `DEVICE_UNREGISTERED → DEVICE_REGISTERED`,并要求 `DEVICE_IN_SERVICE` 计数为 **0**;
+  同时写明本条只走**注册轴**,可达轴(`DEVICE_REACHABLE`/`UNREACHABLE`)由 OPTIONS ping 驱动,
+  需要话机**保持注册却停止应答 ping**(拔网线或防火墙丢包),与本条人工步骤不同型,**待单独起草**。
+  **VC-S15-01 钉的是"只宣告真变更"**:三次 PATCH(写两个键 / 把一个设成它已有的值 / 删一个键),
+  断言 SSE **恰好 2 条而不是 3 条** —— 中间那次什么都没动,所以什么都不说。
+  **VC-S15-02 钉的是 PARTY_DIALING 的载荷方向与作用域**:发起腿的号码对是"这条腿自己的号 + 它要拨的目的号",
+  不是被叫视角那一对(照搬会把坐席自己打出去的电话显示成对方打进来的);
+  且目的号**只在它是数字时才发**(浏览器话机的随机 contact 令牌不是号码)。
+  两条都给了 `failure_looks_like`,写的是 2026-08-18 与 2026-08-22 两次真实事故的形态。
+  **账本 case 数 39 → 41。**
 
 ### ⚠ 计划缺口(2026-08-22 owner 提问暴露)—— 新并入的 11 条没有执行阶段
 

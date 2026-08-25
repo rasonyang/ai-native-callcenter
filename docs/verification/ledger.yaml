@@ -62,19 +62,34 @@ cases:
     layer: signaling
     precondition: "/tmp/aicc 已用 deploy/dev/restart.sh 启动;$LOG 含 'voice provider selected' 与 'ai voice leg listening';软电话(分机 1000 或外部 SIP)可拨 95001"
     steps:
+      - who: agent
+        do: "先开抓流:执行 collect 第 1 条(拨号前必须已在抓,BOT_SESSION_STARTED 在通话前几秒就发出)"
       - who: human
         do: "用软电话拨 95001,听到 bot 开始说话后保持通话不挂断"
       - who: agent
-        do: "在通话保持期间执行 collect,判定 bot 腿与主叫腿状态"
+        do: "在通话保持期间执行其余 collect,判定 bot 腿与主叫腿状态"
     collect:
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s1-sse.log 2>&1 &"
       - "/usr/local/freeswitch/bin/fs_cli -x 'show channels' | cat"
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls | jq ."
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'ai conversation started|ai call bridged' \"$LOG\" | tail -5"
+      - "grep -c '\"type\":\"BOT_SESSION_STARTED\"' /tmp/vc-s1-sse.log; grep -A1 '^event: BOT_SESSION_STARTED' /tmp/vc-s1-sse.log | grep '^data:' | head -1"
+      - "grep -nE '^event: (PARTY_ESTABLISHED|BOT_SESSION_STARTED)' /tmp/vc-s1-sse.log | head -4   # T6.10:顺序才是这条事件的理由"
     expect: |
       fs_cli show channels:恰好 2 个通道 —— 主叫腿(dest 95001)+ 出向 bot 腿(sofia/gateway/aicc_bot/95001),均 state=CS_EXCHANGE_MEDIA
       GET /calls:恰好 1 个呼叫;state=RUNNING;language="en";parties 含 role=ORIGINATOR state=TALKING 的主叫腿与 isBotLeg=true 的 bot 腿
       $LOG 含一行 "ai conversation started" 且字段 provider=<AICC_PROVIDER 启动值> language=en flowId=<novanet 流 slug>
       $LOG 含 "ai call bridged" 且 law=PCMU 或 PCMA、isPassthrough 与 provider 匹配(openai=true)
+      【T6.10 新增,2026-08-25】SSE 恰好 1 条 **BOT_SESSION_STARTED**,载荷带 flowId(流程的库内 uuid,
+      不是 spec 里的 slug —— 那是账本行会带的、flows 管理面用的键),作用域为主管/管理员
+      (bot 通话上没有坐席,那一刻全部的听众就是他们)。
+      **且它排在两条 PARTY_ESTABLISHED 之后** —— 这就是这条事件存在的全部理由:
+      腿接通(PARTY_ESTABLISHED)只说 SIP 腿通了,provider 会话是在那之后才建的、而且**可能失败**
+      (EventTypeFailed → rescueCaller,主叫被救进队列);没有这条事件时,
+      "腿通了对话没起来"和"bot 正常聊两句就转人工"在流上长得一模一样。
+      **现场证据 2026-08-25 已取得**(真 qwen 通话,静音手把打 95001):
+      seq 17200009/17200010 两条 PARTY_ESTABLISHED,随后 17200011 BOT_SESSION_STARTED
+      载荷 {"flowId":"019ffd60-d8db-736b-a1eb-b005dda34d28"}。
     failure_looks_like: |
       show channels 有 2 个通道、caller 能听到 bot(一切"正常"),但 GET /calls 出现 2 个呼叫
       (minted 与 provisional 未合并,reidentify 失效)—— 界面与账本随后都按两通电话记,且无任何报错。
@@ -411,6 +426,8 @@ cases:
     steps:
       - who: agent
         do: "查证/打开录音开关:执行 collect 第 1、2 条"
+      - who: agent
+        do: "开抓流:执行 collect 第 3 条(录音开始的宣告在接通那一刻就发出,拨号前必须已在抓)"
       - who: human
         do: "拨 95001,和 bot 说两句(或转人工聊两句),挂断"
       - who: agent
@@ -418,14 +435,21 @@ cases:
     collect:
       - "docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select number, is_recording_enabled from dids where number='95001'\""
       - "D=$(curl -s -b /tmp/vc-admin.jar http://127.0.0.1:8080/api/v1/dids | jq -c '.items[] | select(.number==\"95001\")'); [ \"$(echo \"$D\" | jq -r '.isRecordingEnabled')\" = \"true\" ] && echo already-enabled || curl -s -b /tmp/vc-admin.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PUT http://127.0.0.1:8080/api/v1/dids/$(echo \"$D\" | jq -r '.id') -d \"$(echo \"$D\" | jq -c '.isRecordingEnabled=true')\" | jq -c '.isRecordingEnabled'"
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s4rec-sse.log 2>&1 &"
       - "sleep 8; CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select backend, bucket, size_bytes, duration_sec from recordings where call_id='$CALL_ID'\"; docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select has_recording from cdrs where call_id='$CALL_ID'\""
       - "CALL_ID=$(docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select call_id from cdrs order by started_at desc limit 1\"); RID=$(curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/calls/$CALL_ID/recordings | jq -r '.items[0].id'); curl -s -o /tmp/vc-s4-rec.wav -w '%{http_code} %{content_type} %{size_download}\\n' -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/recordings/$RID/audio"
       - "LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'recording booked|no recording ingested' \"$LOG\" | tail -3"
+      - "grep -c '\"type\":\"CALL_RECORDING_STARTED\"' /tmp/vc-s4rec-sse.log; grep -c '\"type\":\"CALL_RECORDING_STOPPED\"' /tmp/vc-s4rec-sse.log; grep -A1 '^event: CALL_RECORDING_STARTED' /tmp/vc-s4rec-sse.log | grep '^data:' | head -1"
     expect: |
       recordings 恰好 1 行:backend=S3,bucket=aicc-recordings,size_bytes>44(不止 WAV 头),duration_sec≥1
       cdrs.has_recording=t
       音频下载:HTTP 200,content_type 含 audio,size_download=size_bytes
       日志含 "recording booked"(而非 "no recording ingested")
+      【T6.10 新增,2026-08-25】SSE 各恰好 1 条 **CALL_RECORDING_STARTED** 与 **CALL_RECORDING_STOPPED**,
+      **且载荷里没有任何文件路径** —— 那是交换机自己磁盘上的路径,浏览器拿着没用,
+      录音按 call_id 走 recordings API 取;屏幕要的只是"发生了、什么时候",而这两样信封本来就带着。
+      两条都是**通话作用域**(publish 时不带 party):这通电话在不在录音是关于**通话**的事,
+      不是关于某条腿的,所以整通电话的听众都收得到。
     failure_looks_like: |
       日志 "no recording ingested ... reason=<404>" 且 recordings 无行 —— 交换机确实录了
       (mod_http_cache PUT 成功)但 key 约定(UTC 日期/call_id)与 ingest 侧不一致,
@@ -938,20 +962,31 @@ cases:
     layer: signaling
     precondition: "无进行中呼叫;wei 已签入 READY;允许重启 FreeSWITCH(会中断所有注册约 5–15 秒)"
     steps:
+      - who: agent
+        do: "先开抓流:执行 collect 第 1 条。断连的那条 SYSTEM_LINK 必须在**断连之前**就在抓 ——
+          它是这条 case 唯一一个事后补不回来的证据"
       - who: human
         do: "重启 FreeSWITCH:在终端执行 sudo /usr/local/freeswitch/bin/freeswitch -stop 后重新启动其 LaunchDaemon/前台进程(按本机启动方式;这是唯一无法脚本化的特权动作)"
       - who: agent
-        do: "执行 collect,判定 ESL 重连后的三项重建(agents/tiers/registrations)"
+        do: "执行其余 collect,判定 ESL 重连后的三项重建(agents/tiers/registrations)"
     collect:
+      - "curl -s -N --max-time 1800 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s12-sse.log 2>&1 &"
       - "sleep 45; LOG=$(ls -t logs/aicc-*.log | head -1); grep -E 'agent presence mirrored to the switch|registrations reconciled|staffing (reconciled|already matched)' \"$LOG\" | tail -6"
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config tier list' | awk -F'|' 'NR>1 && NF>=5 {print $2\"|\"$1}' | grep agent-wei"
       - "curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq '.items[] | select(.username==\"wei\") | {availability, isRegistered}'"
+      - "grep -A1 '^event: SYSTEM_LINK' /tmp/vc-s12-sse.log | grep '^data:' | jq -c '.payload'   # T6.10:两个方向各一条,isUp 先 false 后 true"
     expect: |
       日志(新连接后)依次出现:"agent presence mirrored to the switch"(agents=签入数)、
       "agent staffing reconciled" 或 "agent staffing already matched"、"registrations reconciled"
       switch 侧重建完成:agent-wei status="Available",tier agent-wei|support-en@<domain> 存在
       roster:wei isRegistered=true(浏览器话机重注册后),availability=READY
+      【T6.10 新增,2026-08-25】SSE 出现 **两条 SYSTEM_LINK**,载荷依次 {"isUp":false} 与 {"isUp":true},
+      **广播作用域**:交换机没了是坐席既看不见、也绕不过去的那种故障(不响、按什么都没反应),
+      而在此之前唯一的迹象就是"什么都不再发生了"。
+      **两个方向都要有** —— 只发"回来了"的那一半,分不清重连与首次启动;
+      这正是 W7③c 起草时的反向验证(只发一半 → 用例报"只宣告了 1 条,两个方向各要一条")。
+      ⚠ 抓流必须早于重启:断连那条事后无从补取,而它恰恰是这条 case 最难得的证据。
     failure_looks_like: |
       FS 重启后 fs_cli agent list 为空且日志无 "mirrored" —— OnConnect 钩子没跑
       (esl.Link 重连成功但钩子未注册/未触发),坐席在 app 里全是 READY,
@@ -1207,7 +1242,7 @@ cases:
       - "grep -c '\"type\":\"DEVICE_UNREGISTERED\"' /tmp/vc-s13dev-sse.log; grep -c '\"type\":\"AGENT_NOT_READY\"' /tmp/vc-s13dev-sse.log"
       - "/usr/local/freeswitch/bin/fs_cli -x 'callcenter_config agent list' | grep agent-wei | awk -F'|' '{print $6}'"
       - "sleep 20; curl -s -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/agents | jq -c '.items[]|select(.username==\"wei\")|{state,availability,isRegistered}'"
-      - "grep -c '\"type\":\"DEVICE_IN_SERVICE\"' /tmp/vc-s13dev-sse.log"
+      - "grep -c '\"type\":\"DEVICE_REGISTERED\"' /tmp/vc-s13dev-sse.log; grep -c '\"type\":\"DEVICE_REACHABLE\"' /tmp/vc-s13dev-sse.log; grep -c '\"type\":\"DEVICE_IN_SERVICE\"' /tmp/vc-s13dev-sse.log   # 第三条必须为 0:该名字已从契约删除(W7②)"
     expect: |
       失联后:
         registrations 中 1008 消失
@@ -1227,9 +1262,24 @@ cases:
         **C28 已修**:ObserveDevice 现在调 mirrorStatus,CallcenterStatus 也把可达性读进映射
         (READY + 话机不可达 → On Break)。故本轮预期 agent-wei 为 **On Break**
       恢复后:
-        roster 回到 availability=READY、isRegistered=true;SSE 出现 DEVICE_IN_SERVICE
-          (service.go:409 的 publish 点;恢复走 IN_SERVICE 而非 DEVICE_REGISTERED ——
-           后者仍无生产者,两者的分工待 W7 定语义)
+        roster 回到 availability=READY、isRegistered=true
+        SSE 出现 **DEVICE_REGISTERED**(计数 ≥1),且 **DEVICE_IN_SERVICE 计数为 0**
+          【2026-08-25 改写,W7② 落地】原文写的是"恢复走 IN_SERVICE 而非 DEVICE_REGISTERED,
+          后者仍无生产者,两者的分工待 W7 定语义" —— **W7 已把这件分工做完,且 IN_SERVICE 这个名字
+          已从契约删除**,照原文执行会得到一次假失败。
+          现在一部话机活在**两条独立的轴**上,四个迁移各有各的名字:
+            注册出现 → DEVICE_REGISTERED      注册消失 → DEVICE_UNREGISTERED
+            ping 通 → DEVICE_REACHABLE        ping 断 → DEVICE_UNREACHABLE
+          IN_SERVICE 的病根是**它没有对偶**:反面只能从另一条轴借 UNREGISTERED,
+          于是"注册着但不再应答"被说成"没注册"——四个迁移里两个在说反话。
+          本条走的是**注册轴**(扩展 Sign Out 让注册消失、重新注册让它回来),
+          故断言 DEVICE_UNREGISTERED → DEVICE_REGISTERED;
+          可达轴(DEVICE_REACHABLE / UNREACHABLE)由 OPTIONS ping 驱动,不在本条覆盖范围,
+          需要另起一条(拔网线或让话机停止应答 ping 而保持注册)。
+          **现场证据已于 2026-08-25 取得**:`sofia profile internal flush_inbound_reg 1002`
+          → 管理员 SSE 收到 `DEVICE_UNREGISTERED`(载荷带 extensionNumber);
+          话机约三分半后自行重注册 → 收到 `DEVICE_REGISTERED` ——
+          **该类型自契约写下以来第一次真的出现在流上**。
         switch 侧 agent-wei 回到 **Available**(镜像跟着可达性一起回来)
     failure_looks_like: |
       标签页关了、注册没了,而 roster 里 wei 依旧 READY/Available、switch 里也依旧 Available ——
@@ -1509,3 +1559,92 @@ cases:
       起草时即为'已知会通过'。两通电话预期各产 1 行,故 cdr_now - cdr_baseline = 2。它的价值不在发现新问题,而在把当日修的 C15/C17/C18/C25
       与计费锚点固化成回归断言——这些都是改一行就会静默退化的东西。
       **若执行时出现 C24 的多余行**(例如某一通没被接起),按 C24 处理,不改本用例 expect"
+
+  # ───────────────────────── S15 事件流的名字与作用域(T6.10,2026-08-25 起草) ─────────────────────────
+  #
+  # 事件流是本产品唯一没有编译器的接口:少发一条、发错一个名字、发早发晚,
+  # 代码照跑、单测照绿。本节的两条是给那些**没有既有挂点**的类型准备的;
+  # 其余六个已挂进 VC-S1-01(BOT_SESSION_STARTED)、VC-S4-04(CALL_RECORDING_*)、
+  # VC-S12-03(SYSTEM_LINK)、VC-S13-05(DEVICE_REGISTERED/UNREGISTERED)。
+
+  - id: VC-S15-01
+    scenario: S15
+    layer: api
+    precondition: "wei 已签入 READY 且在一通进行中的电话上(任意一型皆可,内部呼叫最省事);/tmp/vc-wei.jar 与 /tmp/vc-sup.jar 均有效"
+    steps:
+      - who: agent
+        do: "开抓流并记下 callId:执行 collect 第 1、2 条"
+      - who: agent
+        do: "对同一通电话连打三次 PATCH:一次写入两个键、一次把其中一个设成**它已有的值**、一次删一个键。执行 collect 第 3–5 条"
+      - who: agent
+        do: "判定:执行其余 collect"
+    collect:
+      - "curl -s -N --max-time 600 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s15-sse.log 2>&1 &"
+      - "CID=$(curl -s -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/calls/mine | jq -r '.items[0].callId'); echo \"$CID\" > /tmp/vc-s15-callid; echo \"$CID\""
+      - "CID=$(cat /tmp/vc-s15-callid); curl -s -o /dev/null -w '%{http_code}\\n' -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PATCH http://127.0.0.1:8080/api/v1/calls/$CID/user-data -d '{\"userData\":{\"orderId\":\"A-4471\",\"ticketId\":\"T-9\"}}'"
+      - "CID=$(cat /tmp/vc-s15-callid); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PATCH http://127.0.0.1:8080/api/v1/calls/$CID/user-data -d '{\"userData\":{\"orderId\":\"A-4471\"}}' | jq -c '{changedKeys,deletedKeys}'"
+      - "CID=$(cat /tmp/vc-s15-callid); curl -s -b /tmp/vc-wei.jar -H 'X-AICC-Csrf: 1' -H 'Content-Type: application/json' -X PATCH http://127.0.0.1:8080/api/v1/calls/$CID/user-data -d '{\"userData\":{\"ticketId\":null}}' | jq -c '{userData,changedKeys,deletedKeys}'"
+      - "grep -c '\"type\":\"CALL_USER_DATA\"' /tmp/vc-s15-sse.log; grep -A1 '^event: CALL_USER_DATA' /tmp/vc-s15-sse.log | grep '^data:' | jq -c '{payload,userData}'"
+      - "CID=$(cat /tmp/vc-s15-callid); docker exec -i aicc-postgres psql -U aicc -d aicc -Atc \"select user_data from cdrs where call_id='$CID'\"   # 挂断后再执行"
+    expect: |
+      三次 PATCH 分别 200/200/200。
+      第二次(把 orderId 设成它已有的值)回 changedKeys=[] deletedKeys=[] ——
+        **设成原值不算变更**;这不是小事:协商转接常常把同一份数据原样并回来,
+        照发的话每一次协商都会报出一个没人做过的变更。
+      第三次回 userData 只剩 orderId,deletedKeys=["ticketId"]。
+      **SSE 恰好 2 条 CALL_USER_DATA,不是 3 条** —— 中间那次什么都没动,所以什么都不说。
+      载荷只有 changedKeys / deletedKeys,**不带数据本身**:信封的 userData 已经带着整张结果表
+      (每条通话事件都带),载荷只说哪几个键动了,屏幕不必自己 diff。
+      作用域是**整通电话**(publish 时不带 party):业务数据是关于这通对话的,不是关于某条腿的
+      —— 这正是"腿事件私有于其坐席"那条指令的两个既定例外之一。
+      挂断后 cdrs.user_data = {"orderId":"A-4471"}。
+    failure_looks_like: |
+      三条 CALL_USER_DATA 而不是两条 —— 一次没人做过的变更被宣告了出去。
+      订阅方从此分不出"这真的变了"和"有人想让我重查",而 PARTY_* 载荷里的 state
+      也就跟着变成一句可疑的话:事件流从"发生了什么的记录"降级成轮询触发器。
+      代码照跑、单测照绿,没有任何东西会红。
+    evidence_dir: docs/verification/artifacts/VC-S15-01/
+    status: TODO
+    refs: ["internal/telephony/call.go:266", "internal/telephony/registry.go:190", "internal/httpapi/call_handlers.go:45", "docs/openapi.json"]
+    note: "呼入随路数据那条入口(X-AICC-UD-* → cdrs.user_data)已于 2026-08-25 现场验过全链,证据见 C42④ 条目;本条覆盖的是 PATCH 这条入口与**只宣告真变更**这条规则"
+
+  - id: VC-S15-02
+    scenario: S15
+    layer: app-state
+    precondition: "wei 签入 1008 且 READY;ben 签入 1002 且 READY;两部话机都在注册且 Ping-Status=Reachable"
+    steps:
+      - who: agent
+        do: "开抓流:执行 collect 第 1 条"
+      - who: human
+        do: "从 1008 拨 1002,让它响三秒以上再接起,聊两句,挂断"
+      - who: agent
+        do: "判定:执行其余 collect"
+    collect:
+      - "curl -s -N --max-time 600 -b /tmp/vc-sup.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s15b-sse.log 2>&1 &"
+      - "grep -nE '^event: PARTY_(DIALING|RINGING|ESTABLISHED|RELEASED)' /tmp/vc-s15b-sse.log"
+      - "grep -A1 '^event: PARTY_DIALING' /tmp/vc-s15b-sse.log | grep '^data:' | jq -c '{partyId,agentId,payload}'"
+      - "curl -s -N --max-time 600 -b /tmp/vc-wei.jar http://127.0.0.1:8080/api/v1/events > /tmp/vc-s15b-wei.log 2>&1 &   # 第二轮:换成坐席自己的会话再拨一次,验作用域"
+      - "grep -cE '^event: PARTY_' /tmp/vc-s15b-wei.log; grep -A1 '^event: PARTY_' /tmp/vc-s15b-wei.log | grep '^data:' | jq -r '.partyId' | sort -u | wc -l"
+    expect: |
+      主管流上,主叫腿的**第一条事件是 PARTY_DIALING**,不是 PARTY_ESTABLISHED。
+      **这条 case 的来历**:2026-08-22 owner 读一通 1002→1008 的完整流时问出来的 ——
+      主叫 party 的第一次出现就是 PARTY_ESTABLISHED,它的 DIALING 从未被宣告。
+      发起腿确实以 DIALING 创建(call.go:209),只是没有事件说过。订阅方(如坐席自己的工作台)
+      要靠它才能在对方接起之前知道这条腿存在。
+      载荷:role=ORIGINATOR、state=DIALING;
+      **fromNumber 是这条腿自己的号、toNumber 是它要拨的目的号** —— 不是 PARTY_RINGING 那个被叫视角
+      的号码对(那是"谁在响你、响你哪个分机",在被叫腿上对,在发起腿上正好倒过来:
+      读出来会是"被拨的号在拨号",坐席工作台会把自己打出去的电话显示成对方打进来的);
+      **且目的号只在它是数字时才发** —— 浏览器话机注册时的随机 contact 令牌(如 doskp0mj)
+      不是号码,发出去是个长着正确答案样子的错误答案。
+      坐席自己的流上:**只有他自己那条 party 的事件**(partyId 去重后恰好 1 个) ——
+      一个坐席工作一条腿,同事的腿不是他的事。两个坐席各看三条关于自己的,而不是六条关于两人的。
+    failure_looks_like: |
+      坐席流上出现两个不同的 partyId —— 工作台分不出哪条 party 是自己的,
+      于是被响的坐席被显示成"正在呼出"、看到的是主叫那条腿(2026-08-18 真实事故的形态)。
+      当时的补法是把作用域放宽,那**掩盖了病因并制造了这个界面缺陷**;
+      指令自 2026-08-22 起是:腿事件私有于其坐席,**不得为了救一条缺失的事件而放宽作用域**。
+    evidence_dir: docs/verification/artifacts/VC-S15-02/
+    status: TODO
+    refs: ["internal/telephony/registry.go:483", "internal/telephony/call.go:325", "CLAUDE.md"]
+    note: "DEVICE_REACHABLE / DEVICE_UNREACHABLE 不在本条:它们由 OPTIONS ping 驱动,需要话机保持注册却停止应答 ping(拔网线或防火墙丢包),与本条的人工步骤不同型,待单独起草"
