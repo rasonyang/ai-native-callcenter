@@ -248,6 +248,16 @@ func (a *Adapter) SendDTMF(channelID, digits string) error {
 }
 
 // Hangup ends one leg with an explicit cause.
+//
+// The cause is not decoration and the caller does not get to pick it freely:
+// Party.HangupCause decides it from the leg's own state, because the switch
+// acts on the difference. mod_callcenter reads a cause it does not recognise
+// as a leg that failed to answer, so a declined call ended under
+// NORMAL_CLEARING was counted against the agent as one they ignored.
+//
+// The empty-string default stays NORMAL_CLEARING for the same reason it
+// always did — a missing cause must not fail a hangup — but nothing in this
+// package relies on it any more.
 func (a *Adapter) Hangup(channelID, cause string) error {
 	if cause == "" {
 		cause = "NORMAL_CLEARING"

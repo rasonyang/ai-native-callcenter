@@ -265,6 +265,39 @@ func (p *Party) apply(trigger PartyTrigger, at time.Time) error {
 // IsActive reports whether this leg still exists on the switch.
 func (p *Party) IsActive() bool { return p.State != PartyReleased }
 
+// HangupCause is the reason to end this leg with, in the switch's vocabulary.
+//
+// One rule, three answers, and the switch acts on the difference — this is not
+// decoration (owner directive 2026-08-25):
+//
+//   - The conversation is up: an ordinary goodbye, NORMAL_CLEARING.
+//   - Not up yet and this leg started the call: the caller changed their mind,
+//     ORIGINATOR_CANCEL.
+//   - Not up yet and this leg was the one being called: they were rung and
+//     said no, CALL_REJECTED.
+//
+// What it costs to get wrong, measured against this switch: mod_callcenter
+// counts a leg that ends in any cause it does not recognise as one that failed
+// to answer, so an agent declining a ringing call under NORMAL_CLEARING — what
+// this sent before — had no_answer_count incremented, and with max_no_answer
+// at 2 was benched after two declines as though they had been ignoring the
+// phone. Under CALL_REJECTED the count stays at 0 and only reject_delay_time
+// applies; under ORIGINATOR_CANCEL neither does.
+//
+// TALKING rather than answeredAt is the test for "up", and the difference is
+// the auto-answer phone: it picks up in front of nobody, and a leg that
+// answered is not a conversation. A party reaches TALKING on the bridge.
+func (p *Party) HangupCause() string {
+	switch {
+	case p.State == PartyTalking || p.State == PartyHeld:
+		return "NORMAL_CLEARING"
+	case p.Role == RoleOriginator:
+		return "ORIGINATOR_CANCEL"
+	default:
+		return "CALL_REJECTED"
+	}
+}
+
 // Call is the aggregate: one conversation, one or more parties, one identity
 // that survives every transfer.
 type Call struct {

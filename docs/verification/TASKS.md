@@ -2662,6 +2662,29 @@ G-A5→VC-S13-03、G-A6→VC-S13-05、G-B1→VC-S13-04、G-C2→VC-S14-01、G-C5
   **顺带记一条**:话机的 480 落在 `default:` 分支,**同样会 `no_answer_count++`**。
   那是亚秒级竞态,坐席什么都没做却被记一次未接。**未修,只记录。**
   **探针已清理**。
+  **【已修 2026-08-25;owner 定的统一口径】** `uuid_kill` 的 cause 由**腿自己的状态**决定
+  (`Party.HangupCause`),三条,一条规则:
+  ```
+  通话已建立（TALKING / HELD）        → NORMAL_CLEARING
+  未建立 · 这条腿是主叫（ORIGINATOR） → ORIGINATOR_CANCEL   主叫改主意了
+  未建立 · 这条腿是被叫（TARGET）     → CALL_REJECTED       被响了，说不
+  ```
+  **判据是 TALKING 而不是 answeredAt**,差别就是自动应答话机:它在没人的情况下接起,
+  **一条应答了的腿不等于一通对话**;party 是在 bridge 时进 TALKING 的。
+  click-to-dial 的坐席腿会自己应答,坐席在对方接起前挂断是**取消自己的呼叫**,不是结束对话。
+  **由服务端从腿的状态判定,不看请求说什么** —— 工作台那个按钮响铃时显示"拒接"、接通后显示"挂断",
+  但按下去是同一个端点;何况客户端本来就不是"交换机看到了什么"的权威。
+  **真机对照(2026-08-25)**:
+  ```
+  uuid_kill <响铃中的坐席腿> CALL_REJECTED    → no_answer_count=0  status=Available
+  uuid_kill <响铃中的坐席腿> NORMAL_CLEARING  → no_answer_count=2  status=On Break  ← 今天的行为
+  ```
+  cause 原样传到 mod_callcenter,`max_no_answer=2` 于是**主动拒两次就被踢出轮转**。
+  用例:`TestALegSaysWhyItIsEnding`(七种组合)、
+  `TestALegThatAnsweredItselfHasNotStartedAConversation`(自动应答不算已建立)、
+  `TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves`(经真 Adapter 断言线上那条 `uuid_kill` 全文)。
+  反向验证:把非 TALKING 的分支统一回 NORMAL_CLEARING,三条用例全红。
+  `adapter.Hangup` 只有这一个调用方;bot 那侧走的是自己的 SIP BYE,不经 `uuid_kill`。
   **无人手把**:给一个探针坐席 `probe-busy` 把 contact 指到 `error/USER_BUSY`
   (每次派单立刻以 cause 17 被拒,不需要真话机、不需要人),`max_no_answer=2`,挂进 `support-en`
   (该队列此时只有 On Break 的 agent-wei,不受干扰),然后往 7001 送一位主叫。

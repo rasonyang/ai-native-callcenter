@@ -1010,6 +1010,51 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 	})
 }
 
+// The cause on the wire is the one the leg's state calls for, and it is read
+// from that state rather than from the request.
+//
+// The cockpit's one button says "decline" while a call rings and "hang up"
+// once it is up, but both press the same endpoint — and a client is not the
+// authority on what the switch saw anyway. Sending NORMAL_CLEARING for a
+// decline is what had mod_callcenter counting it as a call the agent ignored.
+func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
+	adapter, cmd := newTestAdapter()
+	registry := NewRegistry(nullPublisher{})
+	t.Cleanup(registry.Shutdown)
+	c := NewCoordinator(registry, adapter, oneAgent{}, nullPublisher{})
+
+	ctx := t.Context()
+	callID := uuid.New()
+	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tt := range []struct {
+		name  string
+		state PartyState
+		want  string
+	}{
+		{"declining a ringing call", PartyRinging, "uuid_kill agent-chan CALL_REJECTED"},
+		{"hanging up a call in progress", PartyTalking, "uuid_kill agent-chan NORMAL_CLEARING"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := registry.Do(callID, func(call *Call) {
+				call.Parties = nil
+				p := call.AddParty("agent-chan", "1008", testTime)
+				p.Role, p.State, p.AgentID = RoleTarget, tt.state, idPtr(testAgentID)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Hangup(ctx, callID, testAgentID); err != nil {
+				t.Fatalf("Hangup() error = %v", err)
+			}
+			if got := cmd.last(); got != tt.want {
+				t.Errorf("sent  %s\nwant  %s", got, tt.want)
+			}
+		})
+	}
+}
+
 // capturingPublisher keeps what was published and under which scope.
 type capturingPublisher struct {
 	mu     sync.Mutex

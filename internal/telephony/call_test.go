@@ -321,6 +321,56 @@ func TestAFullCallStillTakesADeleteAndAReplacement(t *testing.T) {
 	}
 }
 
+// Ending a leg says why, and the three whys are not interchangeable.
+//
+// Measured against this switch: mod_callcenter reads a cause it does not
+// recognise as a leg that failed to answer, so an agent declining a ringing
+// call under NORMAL_CLEARING had no_answer_count incremented and, at
+// max_no_answer 2, was benched after two declines as though they had ignored
+// the phone. CALL_REJECTED leaves the count at 0; ORIGINATOR_CANCEL costs
+// nothing at all.
+func TestALegSaysWhyItIsEnding(t *testing.T) {
+	tests := []struct {
+		name  string
+		role  PartyRole
+		state PartyState
+		want  string
+	}{
+		// Up. Whoever hangs up, it is a goodbye.
+		{"an agent hangs up a call in progress", RoleTarget, PartyTalking, "NORMAL_CLEARING"},
+		{"an agent hangs up while the caller is on hold", RoleTarget, PartyHeld, "NORMAL_CLEARING"},
+		{"the originator hangs up a call in progress", RoleOriginator, PartyTalking, "NORMAL_CLEARING"},
+
+		// Not up, and this leg was being called: they were rung and said no.
+		{"an agent declines a ringing call", RoleTarget, PartyRinging, "CALL_REJECTED"},
+		{"an agent declines before their phone even rang", RoleTarget, PartyDialing, "CALL_REJECTED"},
+
+		// Not up, and this leg started it: they changed their mind.
+		{"the caller gives up before it is answered", RoleOriginator, PartyDialing, "ORIGINATOR_CANCEL"},
+		{"the caller gives up while it rings", RoleOriginator, PartyRinging, "ORIGINATOR_CANCEL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := &Party{Role: tt.role, State: tt.state}
+			if got := p.HangupCause(); got != tt.want {
+				t.Errorf("%s/%s ends with %s, want %s", tt.role, tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+// An auto-answer phone picks up in front of nobody, so answering is not the
+// test for whether a conversation is up — being bridged is, which is what
+// TALKING means. A click-to-dial leg answers itself the moment it is
+// originated; the agent hanging up before the far end picks up is cancelling
+// their own call, not ending a conversation.
+func TestALegThatAnsweredItselfHasNotStartedAConversation(t *testing.T) {
+	p := &Party{Role: RoleOriginator, State: PartyDialing, AnsweredAt: testTime}
+	if got := p.HangupCause(); got != "ORIGINATOR_CANCEL" {
+		t.Errorf("cause = %s, want ORIGINATOR_CANCEL — the leg answered, nobody talked", got)
+	}
+}
+
 func TestFinishRequiresAllPartiesReleased(t *testing.T) {
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	a := c.AddParty("chan-a", "+86138", testTime)

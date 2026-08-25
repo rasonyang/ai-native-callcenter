@@ -1097,12 +1097,40 @@ func isDTMF(digits string) bool {
 }
 
 // Hangup ends the agent's leg, which ends the conversation for them.
+//
+// The cause is the leg's own to name (Party.HangupCause): declining a ringing
+// call, cancelling one they placed and hanging up a conversation are three
+// different things, and the switch treats them differently. It is read from
+// the leg's state rather than from anything the request said — the cockpit
+// knows whether its button says "decline" or "hang up", but a client is not
+// the authority on what the switch saw.
 func (c *Coordinator) Hangup(ctx context.Context, callID, agentID uuid.UUID) error {
-	channelID, err := c.agentChannel(callID, agentID)
+	channelID, cause, err := c.agentLegAndCause(callID, agentID)
 	if err != nil {
 		return err
 	}
-	return c.adapter.Hangup(channelID, "NORMAL_CLEARING")
+	return c.adapter.Hangup(channelID, cause)
+}
+
+// agentLegAndCause finds the agent's leg and the cause its ending deserves, in
+// one visit: the state that decides the cause is the state the leg is in now.
+func (c *Coordinator) agentLegAndCause(callID, agentID uuid.UUID) (string, string, error) {
+	var channelID, cause string
+	err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.IsActive() && p.AgentID != nil && *p.AgentID == agentID {
+				channelID, cause = p.ChannelID, p.HangupCause()
+				return
+			}
+		}
+	})
+	if err != nil {
+		return "", "", err
+	}
+	if channelID == "" {
+		return "", "", ErrNoAgentLeg
+	}
+	return channelID, cause, nil
 }
 
 // Transfer sends the caller to another extension or queue and drops the agent
