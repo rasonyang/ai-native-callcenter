@@ -216,7 +216,6 @@ func (s *Server) router() chi.Router {
 						call.Post("/calls/{callId}/retrieve", op.RetrieveCall)
 						call.Post("/calls/{callId}/mute", op.MuteCall)
 						call.Post("/calls/{callId}/unmute", op.UnmuteCall)
-						call.Post("/calls/{callId}/hangup", op.HangupCall)
 						call.Post("/calls/{callId}/transfer", op.TransferCall)
 						call.Post("/calls/{callId}/dtmf", op.SendCallDTMF)
 						// Business data is the agent's to attach as well:
@@ -366,6 +365,19 @@ func (s *Server) router() chi.Router {
 					machine.Use(s.requireSessionOrAPIKey)
 					machine.Use(s.auditTrail)
 					machine.Post("/calls", op.CreateCall)
+				})
+			}
+
+			// Ending a call belongs here for the same reason as placing one: a
+			// system that dials must be able to stop what it started, and the
+			// call it placed has no agent on it for an agent's rule to reach.
+			// No role middleware — the handler decides, because an agent ends
+			// their own leg and everybody else ends the call.
+			if s.calls != nil {
+				short.Group(func(machine chi.Router) {
+					machine.Use(s.requireSessionOrAPIKey)
+					machine.Use(s.auditTrail)
+					machine.Post("/calls/{callId}/hangup", op.HangupCall)
 				})
 			}
 		})

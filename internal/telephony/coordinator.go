@@ -55,6 +55,11 @@ var (
 	// back into, so transferring, holding and retrieving it mean nothing
 	// (owner's ruling, 2026-08-20).
 	ErrNotForCallType = errors.New("not available on this kind of call")
+	// ErrNoExtensionLeg means the call has no leg at a phone of ours to hang
+	// up. Its own answer rather than ErrNotCallParty: "you are not on this
+	// call" is the truth an agent needs, and it is simply wrong told to a
+	// supervisor, who was never going to be.
+	ErrNoExtensionLeg = errors.New("the call has no leg at an extension")
 )
 
 // Coordinator turns switch events into calls and carries out call control.
@@ -483,8 +488,16 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		// dialled (C31). Eleven such rows, and the switch knew the whole time
 		// — aicc_inbound logs "unknown number 95009 from …" as it rejects.
 		p.OtherNumber = otherNumber(ev)
+		// Where this leg is, before and apart from whose it is. A phone this
+		// platform manages says so on the leg itself, which is what lets a
+		// call placed for an agent who never signed in still be recorded as a
+		// call an agent's phone placed.
+		p.ExtensionNumber = managedExtensionOf(ev)
 		if isAgentLeg {
 			p.AgentID = &agentID
+			if p.ExtensionNumber == "" {
+				p.ExtensionNumber = agentExtension
+			}
 		}
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
@@ -1190,6 +1203,35 @@ func (c *Coordinator) Hangup(ctx context.Context, callID, agentID uuid.UUID) err
 	return c.adapter.Hangup(channelID, cause)
 }
 
+// EndCall ends a call for a caller who has no leg of their own to leave, by
+// hanging up the leg at the extension.
+//
+// Not the same operation as Hangup with a different argument. An agent hangs up
+// *their leg*, named by who they are; somebody with no leg has nobody to name,
+// so the leg is found by the call instead. What follows is identical either
+// way — the bridge collapses and the switch releases the far end, exactly as
+// when the person at that phone hangs up. One kill, no bookkeeping about the
+// other end.
+func (c *Coordinator) EndCall(ctx context.Context, callID uuid.UUID) error {
+	var channelID, cause string
+	if err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.IsActive() && p.ChannelID != "" && p.ExtensionNumber != "" {
+				channelID, cause = p.ChannelID, p.HangupCause()
+				return
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	if channelID == "" {
+		return ErrNoExtensionLeg
+	}
+	slog.InfoContext(ctx, "ending a call at its extension leg",
+		"callId", callID, "channelId", channelID, "cause", cause)
+	return c.adapter.Hangup(channelID, cause)
+}
+
 // agentLegAndCause finds the agent's leg and the cause its ending deserves, in
 // one visit: the state that decides the cause is the state the leg is in now.
 func (c *Coordinator) agentLegAndCause(callID, agentID uuid.UUID) (string, string, error) {
@@ -1299,6 +1341,23 @@ func (c *Coordinator) agentChannel(callID, agentID uuid.UUID) (string, error) {
 		return "", ErrNoAgentLeg
 	}
 	return channelID, nil
+}
+
+// managedExtensionOf reports the extension a leg is at, when the leg says so
+// itself.
+//
+// Two places stamp it and both mean the same thing. Our own originate sets
+// aicc_extension because an originated leg gets no directory lookup and would
+// otherwise not say who placed it (`outbound.go`); the directory sets it on a
+// phone's own INVITE (`aicc_xml.lua`). Either way it is this platform saying
+// "this leg is at a phone we manage" — a fact about the phone, true whether or
+// not anybody is signed in at it, which is exactly what presence cannot say.
+//
+// Deliberately not a lookup. Asking the agent service would reintroduce the
+// dependency this exists to break, and the leg is the more direct witness:
+// nothing else sets this variable.
+func managedExtensionOf(ev SwitchEvent) string {
+	return ev.Raw.Variable("aicc_extension")
 }
 
 // agentForLeg reports whether a new leg is being delivered to a signed-in

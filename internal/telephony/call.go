@@ -217,6 +217,19 @@ type Party struct {
 	Number      string
 	OtherNumber string
 	AgentID     *uuid.UUID
+	// ExtensionNumber is the extension this leg is at, when it is at a phone
+	// this platform manages. Set from what the leg itself says — our own
+	// originate stamps aicc_extension, and the directory stamps it on a
+	// phone's own INVITE — so it is a fact about the phone and holds whether
+	// or not anybody is signed in there.
+	//
+	// AgentID answers a different question: *whose* phone it is, which only
+	// presence can say. The two came apart the day a system could place a call
+	// for an agent who never signed into this application, and conflating them
+	// cost that call its talk time and its leg record: the ledger asks "did an
+	// agent's phone place this?" and was reading "is the originator a known
+	// agent?" instead.
+	ExtensionNumber string
 
 	CreatedAt    time.Time
 	AnsweredAt   time.Time
@@ -624,9 +637,12 @@ type PartySnapshot struct {
 	Number      string     `json:"number,omitempty"`
 	OtherNumber string     `json:"otherNumber,omitempty"`
 	AgentID     *uuid.UUID `json:"agentId,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	AnsweredAt  *time.Time `json:"answeredAt,omitempty"`
-	ReleasedAt  *time.Time `json:"releasedAt,omitempty"`
+	// ExtensionNumber is the phone this leg is at, when it is one of ours; see
+	// Party.ExtensionNumber for why it is not the same question as AgentID.
+	ExtensionNumber string     `json:"extensionNumber,omitempty"`
+	CreatedAt       time.Time  `json:"createdAt"`
+	AnsweredAt      *time.Time `json:"answeredAt,omitempty"`
+	ReleasedAt      *time.Time `json:"releasedAt,omitempty"`
 	// ReleaseCause is the switch's word for why the leg ended.
 	ReleaseCause string `json:"releaseCause,omitempty"`
 	IsBotLeg     bool   `json:"isBotLeg,omitempty"`
@@ -662,19 +678,20 @@ func (c *Call) Snapshot() Snapshot {
 	}
 	for _, p := range c.Parties {
 		ps := PartySnapshot{
-			PartyID:      p.PartyID,
-			ChannelID:    p.ChannelID,
-			Role:         p.Role,
-			State:        p.State,
-			Number:       p.Number,
-			OtherNumber:  p.OtherNumber,
-			AgentID:      p.AgentID,
-			CreatedAt:    p.CreatedAt,
-			ReleaseCause: p.ReleaseCause,
-			IsBotLeg:     p.IsBotLeg,
-			IsMuted:      p.IsMuted,
-			Bridges:      slices.Clone(p.Bridges),
-			BilledSec:    p.BilledSec,
+			PartyID:         p.PartyID,
+			ChannelID:       p.ChannelID,
+			Role:            p.Role,
+			State:           p.State,
+			Number:          p.Number,
+			OtherNumber:     p.OtherNumber,
+			AgentID:         p.AgentID,
+			ExtensionNumber: p.ExtensionNumber,
+			CreatedAt:       p.CreatedAt,
+			ReleaseCause:    p.ReleaseCause,
+			IsBotLeg:        p.IsBotLeg,
+			IsMuted:         p.IsMuted,
+			Bridges:         slices.Clone(p.Bridges),
+			BilledSec:       p.BilledSec,
 		}
 		if !p.AnsweredAt.IsZero() {
 			answered := p.AnsweredAt

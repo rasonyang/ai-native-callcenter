@@ -468,6 +468,66 @@ func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
 	}
 }
 
+// The same call, placed by a system for an agent who never signed into this
+// application: the phone is on the desk and registered, presence has never
+// heard of them.
+//
+// The ledger's question is whether an agent's phone placed the call, and it
+// was reading whether the originator is an agent it can name. Those coincided
+// until third-party dialling existed. When they came apart the row lost its
+// talk time and its leg record — 86 answered seconds written as talkSec 0,
+// with a DIALING leg at the agent's own extension in place of the trunk it
+// actually reached (measured live 2026-08-26). Every such call would report as
+// no conversation at all.
+//
+// Attribution is a separate question and stays unanswered here, which is the
+// decision: agentIds is empty because presence genuinely does not know who was
+// on this phone. What must not be empty is what the call itself did.
+func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.T) {
+	snap := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(30),
+		Parties: []PartySnapshot{
+			// No AgentID: nobody is signed in at 1008. ExtensionNumber is what
+			// the leg itself carries, and it is true regardless.
+			{Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "chan-agent",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(30),
+				Bridges: []BridgeSpan{{OtherChannelID: "chan-out", StartedAt: at(8), EndedAt: at(30)}}},
+			{Role: RoleTarget, Number: "18688886669", ChannelID: "chan-out",
+				CreatedAt: at(2), AnsweredAt: atPtr(8), ReleasedAt: atPtr(30),
+				Bridges: []BridgeSpan{{OtherChannelID: "chan-agent", StartedAt: at(8), EndedAt: at(30)}}},
+		},
+	}
+
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+	if got.Status != store.CDRStatusAnswered {
+		t.Errorf("status = %q, want ANSWERED", got.Status)
+	}
+	if got.TalkSec != 22 {
+		t.Errorf("talkSec = %d, want 22 — the conversation happened whether or not "+
+			"anyone was signed in at the phone", got.TalkSec)
+	}
+	if got.RingSec != 6 {
+		t.Errorf("ringSec = %d, want 6 (dialled at 2, answered at 8)", got.RingSec)
+	}
+	if len(got.Legs) != 1 || got.Legs[0].Kind != "TRUNK" || got.Legs[0].Label != "18688886669" {
+		t.Errorf("legs = %+v, want one TRUNK leg for the number dialled — a DIALING leg "+
+			"at the agent's own extension is the shape this had when the call was "+
+			"read as nobody's", got.Legs)
+	}
+	// Not knowing who was on the phone is the v1 answer and must not become a
+	// panic: the branch this now enters used to dereference the agent id it
+	// was guaranteed by the very condition that let it in.
+	if len(got.AgentIDs) != 0 {
+		t.Errorf("agentIds = %v, want none — presence cannot say who was at that phone",
+			got.AgentIDs)
+	}
+	if got.PrimaryAgentID != nil {
+		t.Errorf("primaryAgentId = %v, want none", got.PrimaryAgentID)
+	}
+}
+
 // A call the agent placed is still their call, and whether it was answered is
 // decided on the leg dialled out: the agent's own leg auto-answers in front of
 // them, and reading that as an answer recorded every unanswered dial-out as a

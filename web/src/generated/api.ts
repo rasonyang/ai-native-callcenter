@@ -497,8 +497,12 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Hang up the caller's own leg
-         * @description Requires the AGENT role and being a party to the call.
+         * Hang up
+         * @description What is hung up depends on what the caller has.
+         *
+         *     An agent has a leg on the call and ends that leg: they leave the conversation, and whether the call itself survives is the switch's business. They must be a party to it — a call id in the path is never authority on its own.
+         *
+         *     A supervisor, an administrator and an API-key caller have no leg of their own, so the leg is found by the call instead: the one at the extension, hung up exactly as if the person at that phone had. The bridge collapses and the switch releases the far end. They may do this to any call, which is how a call placed by a system for an agent who never signed in gets ended — nobody is a party to it, so nobody could end it through an agent's rule. A call with no leg at an extension answers 409.
          */
         post: operations["hangupCall"];
         delete?: never;
@@ -3308,6 +3312,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];
         };

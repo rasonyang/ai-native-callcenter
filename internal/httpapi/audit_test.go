@@ -294,6 +294,7 @@ func (stubCalls) Retrieve(context.Context, uuid.UUID, uuid.UUID) error { return 
 func (stubCalls) Mute(context.Context, uuid.UUID, uuid.UUID) error     { return nil }
 func (stubCalls) Unmute(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
 func (stubCalls) Hangup(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
+func (stubCalls) EndCall(context.Context, uuid.UUID) error             { return nil }
 func (stubCalls) SendDTMF(context.Context, uuid.UUID, uuid.UUID, string) error {
 	return nil
 }
