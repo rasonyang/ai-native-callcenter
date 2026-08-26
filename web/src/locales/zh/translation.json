@@ -47,7 +47,8 @@
     "extensions": "分机",
     "numbers": "号码",
     "callbacks": "回访任务",
-    "agentIdentities": "坐席与话机"
+    "agentIdentities": "坐席与话机",
+    "webhooks": "Webhook"
   },
   "roles": {
     "AGENT": "坐席",
@@ -598,5 +599,34 @@
     "resetPassword": "重设口令",
     "resetTitle": "为 {{username}} 设置口令",
     "resetHint": "用旧口令建立的会话会全部结束。"
+  },
+  "webhooks": {
+    "title": "Webhook",
+    "description": "结束的通话被送往哪里，以及是否送达。订阅通过 API 创建，本页只做查看。",
+    "name": "名称",
+    "url": "回调地址",
+    "filter": "过滤条件",
+    "token": "令牌",
+    "state": "状态",
+    "enabled": "已启用",
+    "paused": "已停用",
+    "tokenSet": "已配置",
+    "tokenNone": "无",
+    "everyCall": "全部通话",
+    "none": "暂无订阅。请通过 API 创建。",
+    "deliveriesFor": "近期投递 — {{name}}",
+    "noDeliveries": "尚未向该订阅发送过任何内容。",
+    "at": "入队时间",
+    "call": "通话",
+    "revision": "版本",
+    "status": "投递状态",
+    "attempts": "尝试",
+    "code": "状态码",
+    "lastError": "最后错误",
+    "statuses": {
+      "PENDING": "待投递",
+      "DELIVERED": "已送达",
+      "FAILED": "已失败"
+    }
   }
 }

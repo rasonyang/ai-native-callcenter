@@ -37,6 +37,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
+	"github.com/rasonyang/ai-native-callcenter/internal/webhook"
 	"github.com/rasonyang/ai-native-callcenter/web"
 )
 
@@ -343,6 +344,7 @@ func run() error {
 			recordings,
 			st.Ledger(),
 			outboundSvc,
+			st.Webhooks(),
 			spa,
 		)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -359,6 +361,16 @@ func run() error {
 	go serve(srv, "http")
 
 	go purgeSessions(ctx, authSvc)
+
+	// CDR delivery to whoever subscribed. The enqueue rides in the ledger's
+	// own transaction, so this only drains what is already durable — every
+	// slow thing (a timeout, a backoff, somebody else's outage) lives here and
+	// nowhere near the call path.
+	webhookWorker := webhook.New(st.Webhooks(), webhookMetrics{}, slog.Default())
+	go webhookWorker.Run(ctx)
+	go webhook.NewSweeper(st.Webhooks(),
+		cfg.WebhookDeliveredRetentionDays, cfg.WebhookFailedRetentionDays,
+		slog.Default()).Run(ctx)
 
 	// Recording retention. Off unless AICC_RECORDING_RETENTION_DAYS says
 	// otherwise, so upgrading into this feature deletes nothing until somebody
@@ -516,4 +528,17 @@ func (r seqReserver) ReserveSeqBlock(ctx context.Context, name string, size int6
 		BlockSize: size,
 		Name:      name,
 	})
+}
+
+// webhookMetrics reports settled deliveries to the one place instrument names
+// live. A thin adapter rather than an import of obs inside the worker, so the
+// worker stays testable without a meter.
+type webhookMetrics struct{}
+
+func (webhookMetrics) DeliverySucceeded(subscriptionID uuid.UUID) {
+	obs.WebhookDelivered(subscriptionID.String())
+}
+
+func (webhookMetrics) DeliveryFailed(subscriptionID uuid.UUID) {
+	obs.WebhookFailed(subscriptionID.String())
 }

@@ -47,7 +47,8 @@
     "callbacks": "Callbacks",
     "agentIdentities": "Agents & Phones",
     "myCalls": "My Calls",
-    "contacts": "Contacts"
+    "contacts": "Contacts",
+    "webhooks": "Webhooks"
   },
   "roles": {
     "AGENT": "Agent",
@@ -601,5 +602,34 @@
     "resetPassword": "Reset password",
     "resetTitle": "Set a password for {{username}}",
     "resetHint": "Every session opened with the old password is ended."
+  },
+  "webhooks": {
+    "title": "Webhooks",
+    "description": "Where finished calls are sent, and whether they arrived. Subscriptions are created through the API; this page reads them.",
+    "name": "Name",
+    "url": "Endpoint",
+    "filter": "Filter",
+    "token": "Token",
+    "state": "State",
+    "enabled": "Enabled",
+    "paused": "Paused",
+    "tokenSet": "Set",
+    "tokenNone": "None",
+    "everyCall": "Every call",
+    "none": "No subscriptions. Create one through the API.",
+    "deliveriesFor": "Recent deliveries — {{name}}",
+    "noDeliveries": "Nothing has been sent to this subscriber yet.",
+    "at": "Queued",
+    "call": "Call",
+    "revision": "Rev",
+    "status": "Status",
+    "attempts": "Tries",
+    "code": "Code",
+    "lastError": "Last error",
+    "statuses": {
+      "PENDING": "Pending",
+      "DELIVERED": "Delivered",
+      "FAILED": "Failed"
+    }
   }
 }

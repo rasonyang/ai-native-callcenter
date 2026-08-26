@@ -717,3 +717,88 @@ func TestMigrationsDropAReasonNoCallCanHave(t *testing.T) {
 		t.Error("OUT_OF_HOURS was accepted after the migration that removed it")
 	}
 }
+
+// 00026 adds no column to an existing table and rewrites nothing, so the usual
+// "did the rewrite run before the constraint" question does not arise. What a
+// populated run does check is the thing inspection cannot: that the new tables
+// can actually be created and used on a database with history, and that the
+// constraints they carry hold — a CHECK spelled wrongly and a unique key on
+// the wrong columns both look fine in the file.
+//
+// The unique key is the one worth exercising by hand, because it is what makes
+// a corrected CDR a second delivery rather than a conflict, and getting it
+// wrong would only show up as a customer silently never receiving the
+// correction.
+func TestTheDeliveryOutboxAcceptsACorrectionAndRefusesADuplicate(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 25); err != nil {
+		t.Fatalf("migrating to 25 failed: %v", err)
+	}
+	// History, so this is not a fresh-database run.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status)
+		VALUES ('33333333-3333-3333-3333-333333333333', now(), now(), 'INBOUND', 'ANSWERED')`,
+	); err != nil {
+		t.Fatalf("seed a pre-migration call: %v", err)
+	}
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with history failed: %v", err)
+	}
+
+	const sub = "44444444-4444-4444-4444-444444444444"
+	const call = "33333333-3333-3333-3333-333333333333"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO webhook_subscriptions (subscription_id, name, url)
+		VALUES ($1, 'crm', 'https://crm.example.com/cdr')`, sub); err != nil {
+		t.Fatalf("seed a subscription: %v", err)
+	}
+
+	insert := func(revision int, deliveryID string) error {
+		_, err := db.ExecContext(ctx, `
+			INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload)
+			VALUES ($1, $2, $3, $4, '{}')`, deliveryID, sub, call, revision)
+		return err
+	}
+
+	if err := insert(1, "55555555-5555-5555-5555-555555555555"); err != nil {
+		t.Fatalf("the first delivery was refused: %v", err)
+	}
+	// The correction: same subscription, same call, a later revision.
+	if err := insert(2, "66666666-6666-6666-6666-666666666666"); err != nil {
+		t.Fatalf("a corrected CDR could not be enqueued as revision 2: %v — the unique key is "+
+			"on the wrong columns, and a customer would never receive a correction", err)
+	}
+	// The same revision twice is what the key exists to refuse: without it a
+	// re-write of an unchanged CDR would post the customer a duplicate.
+	if err := insert(2, "77777777-7777-7777-7777-777777777777"); err == nil {
+		t.Error("the same revision was enqueued twice; the customer would receive a duplicate")
+	}
+
+	// A status outside the vocabulary is refused rather than stored, so a
+	// typo in the worker cannot leave a row no claim query will ever find.
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO webhook_deliveries (delivery_id, subscription_id, call_id, revision, payload, status)
+		VALUES ('88888888-8888-8888-8888-888888888888', $1, $2, 3, '{}', 'SENT')`, sub, call)
+	if err == nil {
+		t.Error("status 'SENT' was accepted; the CHECK is not doing its job")
+	}
+
+	// Deleting the subscription takes its deliveries with it: the rows are
+	// about a destination that no longer exists.
+	if _, err := db.ExecContext(ctx,
+		`DELETE FROM webhook_subscriptions WHERE subscription_id = $1`, sub); err != nil {
+		t.Fatalf("delete the subscription: %v", err)
+	}
+	var left int
+	if err := db.QueryRowContext(ctx,
+		`SELECT count(*) FROM webhook_deliveries WHERE subscription_id = $1`, sub).Scan(&left); err != nil {
+		t.Fatalf("count orphans: %v", err)
+	}
+	if left != 0 {
+		t.Errorf("%d deliveries outlived their subscription", left)
+	}
+}

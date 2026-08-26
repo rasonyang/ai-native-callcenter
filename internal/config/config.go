@@ -160,6 +160,18 @@ type Config struct {
 	// deleting audio because nobody set a number.
 	RecordingRetentionDays int
 
+	// WebhookRetention bounds the delivery outbox. Two windows, because the
+	// rows are read at different ages: a delivered one is checked within hours
+	// of a customer asking "did you send it", a failed one weeks later by
+	// somebody reconciling a month and finding a gap.
+	//
+	// On by default, unlike recording retention — those are irreplaceable
+	// customer audio and deleting any unasked would be wrong, while these are
+	// operational exhaust that grows with every call forever. Zero keeps that
+	// kind of row for good.
+	WebhookDeliveredRetentionDays int
+	WebhookFailedRetentionDays    int
+
 	Seed string // "" | "demo" | "fresh"
 }
 
@@ -244,7 +256,10 @@ func Load() (Config, error) {
 		ExtensionRange:          env("AICC_EXTENSION_RANGE", "1000-1999"),
 		QueueRange:              env("AICC_QUEUE_RANGE", "7000-7999"),
 		RecordingRetentionDays:  envInt("AICC_RECORDING_RETENTION_DAYS", 0),
-		Seed:                    env("AICC_SEED", ""),
+
+		WebhookDeliveredRetentionDays: envInt("AICC_WEBHOOK_RETENTION_DELIVERED_DAYS", 7),
+		WebhookFailedRetentionDays:    envInt("AICC_WEBHOOK_RETENTION_FAILED_DAYS", 30),
+		Seed:                          env("AICC_SEED", ""),
 	}
 
 	return c, c.validate()
@@ -304,6 +319,11 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE must start at 1 or above, got %d", low))
 	} else if high < low {
 		errs = append(errs, fmt.Errorf("AICC_QUEUE_RANGE ends before it starts (%d-%d)", low, high))
+	}
+	if c.WebhookDeliveredRetentionDays < 0 || c.WebhookFailedRetentionDays < 0 {
+		errs = append(errs, fmt.Errorf(
+			"AICC_WEBHOOK_RETENTION_*_DAYS must be 0 or more, got %d and %d",
+			c.WebhookDeliveredRetentionDays, c.WebhookFailedRetentionDays))
 	}
 	if c.RecordingRetentionDays < 0 {
 		errs = append(errs, fmt.Errorf(
