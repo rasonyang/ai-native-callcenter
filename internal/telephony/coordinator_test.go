@@ -44,6 +44,13 @@ func raw(name, channelID, direction string, extra map[string]string) SwitchEvent
 		"Caller-Caller-ID-Number":   "13800138000",
 		"Caller-Destination-Number": "95012",
 		"Hangup-Cause":              "NORMAL_CLEARING",
+		// The context a carrier's call really arrives in. Without it an
+		// inbound leg computes as INTERNAL (callTypeOf), which no caller off a
+		// trunk ever is — the fixture was simply quieter about it than
+		// production, and the day transcription began asking what kind of call
+		// it was, every tap test started modelling a colleague ringing a
+		// colleague.
+		"Caller-Context": "public",
 	}
 	for k, v := range extra {
 		headers[k] = v
@@ -177,6 +184,15 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal("condition not reached in time")
+}
+
+// settle gives an actor-per-call registry the same window waitFor gives it, for
+// the assertions that are about something not happening. A check made the
+// instant after Handle returns would pass against a change that merely made the
+// work later rather than stopping it.
+func settle(t *testing.T) {
+	t.Helper()
+	time.Sleep(250 * time.Millisecond)
 }
 
 // oneAgent is a directory with a single signed-in agent, so a leg dialed at
@@ -353,6 +369,75 @@ func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
 	if !ok || len(got) != 1 || got[0] != testAgentID {
 		t.Errorf("audience = %v (announced=%v), want just %s — a transcript with "+
 			"no audience never reaches the agent it is about", got, ok, testAgentID)
+	}
+}
+
+// A transcript is a record of what was said to the people this business
+// serves, so a call with no customer on it is not transcribed (owner directive
+// 2026-08-26).
+//
+// Before this, every bridged agent leg was tapped whatever the call was. Two
+// colleagues ringing each other opened an ingest stream, and because a
+// transcript actor is only ever created by the bot path, that stream was
+// refused for want of one and reported three times over — as a warning, as a
+// module error and, twelve seconds later, as a tap that never connected. None
+// of which was true of the call: nothing was wrong with it, it simply had
+// nothing to transcribe.
+//
+// The gate is written as the two types that carry a customer rather than as
+// the one that does not, so CONSULT is covered the day it starts being
+// emitted. It cannot be exercised here: callTypeOf accepts only the first
+// three as a hint (design 01 reserves CONSULT for the consult-transfer
+// roadmap), so a CONSULT hint falls through to the direction guess and the
+// call is created INBOUND. Asserting it would be asserting on a value this
+// coordinator cannot currently produce.
+func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
+	for _, tc := range []struct {
+		hint     string
+		wantTaps bool
+	}{
+		{"INBOUND", true},
+		{"OUTBOUND", true},
+		{"INTERNAL", false},
+	} {
+		t.Run(tc.hint, func(t *testing.T) {
+			registry := NewRegistry(nullPublisher{})
+			c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
+			taps := newRecordingTapper()
+			c.AttachTaps(taps)
+
+			ctx := t.Context()
+			minted := uuid.New().String()
+			callerChan, agentChan := "caller-chan", "agent-chan"
+			vars := map[string]string{
+				"variable_aicc_call_id":   minted,
+				"variable_aicc_language":  "en",
+				"variable_aicc_call_type": tc.hint,
+			}
+
+			c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))
+			c.Handle(ctx, raw("CHANNEL_ANSWER", callerChan, "inbound", vars))
+			c.Handle(ctx, raw("CHANNEL_CREATE", agentChan, "outbound",
+				map[string]string{"variable_dialed_user": agentExtension}))
+			c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
+				merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
+
+			if tc.wantTaps {
+				waitFor(t, func() bool {
+					attached, _, _, _ := taps.snapshot()
+					return len(attached) > 0
+				})
+				return
+			}
+			// Nothing to wait for, so the absence is given the same window the
+			// presence gets: a gate that merely reordered the attach would
+			// pass an immediate check.
+			settle(t)
+			if attached, _, _, _ := taps.snapshot(); len(attached) != 0 {
+				t.Errorf("a %s call was tapped on %v — there is no customer on it to "+
+					"transcribe, and the stream is refused for want of an actor", tc.hint, attached)
+			}
+		})
 	}
 }
 

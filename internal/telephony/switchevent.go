@@ -475,8 +475,15 @@ func normalizeCustom(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	case "mod_audio_stream::error":
 		out.Kind = KindAudioStreamError
 		// The module puts its complaint in the body; the header carries only
-		// which channel it was about.
+		// which channel it was about. Which this read the header for anyway,
+		// and reported every tap failure as error="" — the one field an
+		// operator would act on, empty on every occurrence (found live
+		// 2026-08-26). Headers first because a future subclass may grow one,
+		// body as what the module actually sends today.
 		out.Cause = ev.GetFirst("Error", "error", "Reply-Text")
+		if out.Cause == "" {
+			out.Cause = strings.TrimSpace(ev.Body)
+		}
 		return out, true
 
 	case "callcenter::info":
