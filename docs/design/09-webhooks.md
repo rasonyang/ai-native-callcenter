@@ -379,7 +379,41 @@ SCREAMING_SNAKE for `status`.
 
 ---
 
-## 11. What this design no longer needs
+## 11. Frontend: a window, not a workbench
+
+**Owner decision, 2026-08-26: the screen lives under the System group, and it is read-only.**
+
+`/admin/webhooks`, ADMIN, alongside `/admin/cdr`, `/admin/reports` and `/admin/audit`
+(`web/src/lib/nav.ts:80-92`). It belongs there rather than under Manage for the same reason the
+audit trail does: Manage is where an operator changes how calls are handled — queues, numbers,
+extensions, bots — and a webhook subscription changes nothing about a call. It is an account of
+what the platform is doing and whether it is working.
+
+What it shows:
+
+- the subscriptions, with `isEnabled`, the URL, and the filter as configured;
+- per subscription, its recent deliveries — status, attempt count, last status code, last error;
+- `authToken` **never**, on any screen. It is write-only at the contract (§8) and the UI cannot
+  display what it is not served.
+
+What it does not do: create, edit, enable, disable or delete. Those go through the API by an
+administrator's session. This mirrors flows, where `internal/httpapi` serves the resource and
+the repository is content that `aicc flowadd` was the only way in for a while — a read-only
+screen that tells the truth ships sooner than an editor, and nothing about the editor is harder
+to add later.
+
+> **The consequence, stated so nobody discovers it in a demo:** with no editor, the first
+> subscription of a deployment is created by an API call an operator makes themselves. If that
+> proves awkward, the cheap answer is a CLI subcommand on the model of `aicc flowadd` rather
+> than rushing the editor.
+
+Design-system rules apply as written in `web/CLAUDE.md` — 13px base, borders not shadows,
+tabular-nums for the attempt counts and status codes, `nav.webhooks` in both `en` and `zh`, no
+hardcoded user-facing strings.
+
+---
+
+## 12. What this design no longer needs
 
 Recorded because the previous draft carried them and their absence is the point:
 
@@ -394,17 +428,17 @@ Recorded because the previous draft carried them and their absence is the point:
 
 ---
 
-## 12. Sizing, honestly
+## 13. Sizing, honestly
 
 Smaller than the generic design by a wide margin, and still not a patch: two tables with a
 migration exercised against a populated database, a new sqlc file, a six-operation contract
 resource, a transactional change to the path every finished call takes, a delivery worker with
-retry semantics, and a retention sweeper. A milestone's worth of work, where the generic
-version was two.
+retry semantics, a retention sweeper, and a read-only screen. A milestone's worth of work,
+where the generic version was two.
 
 ---
 
-## 13. Nothing is open
+## 14. Nothing is open
 
 Every question this design raised has been answered by the owner on 2026-08-26:
 
@@ -418,5 +452,7 @@ Every question this design raised has been answered by the owner on 2026-08-26:
 | Retention | `FAILED` 30 days, `DELIVERED` 7, `PENDING` never |
 | Authentication outward | the customer's own bearer token, no HMAC |
 | Configuration role | ADMIN; `AICC_API_KEY` must not reach it |
+| Screen | `/admin/webhooks`, under the System group |
+| Screen scope | read-only; creation and editing go through the API |
 
 The design is ready to implement. First step is `docs/openapi.json`, not the migration.
