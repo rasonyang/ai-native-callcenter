@@ -80,6 +80,7 @@ type Server struct {
 	recordings  RecordingStreamer
 	auditor     Auditor
 	outbound    OutboundService
+	webhooks    WebhookService
 	spa         http.Handler
 }
 
@@ -111,6 +112,9 @@ type Deps struct {
 	Auditor Auditor
 	// Outbound places calls; nil hides the dial endpoints.
 	Outbound OutboundService
+	// Webhooks tells a customer's own system about finished calls; nil hides
+	// the subscription endpoints.
+	Webhooks WebhookService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -135,6 +139,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		recordings:  deps.Recordings,
 		auditor:     deps.Auditor,
 		outbound:    deps.Outbound,
+		webhooks:    deps.Webhooks,
 		spa:         deps.SPA,
 	}
 }
@@ -345,6 +350,24 @@ func (s *Server) router() chi.Router {
 					private.Post("/contacts", op.CreateContact)
 					private.Put("/contacts/{contactId}", op.UpdateContact)
 					private.Delete("/contacts/{contactId}", op.DeleteContact)
+				}
+
+				// Where finished calls are sent is administration, the same
+				// kind of decision as defining a queue or a number — and it
+				// stays inside the session-only group deliberately. The API
+				// key places and ends calls; letting it also choose where
+				// every finished call goes would mean a leaked one can
+				// exfiltrate the lot (design 09 §10).
+				if s.webhooks != nil {
+					private.Group(func(admin chi.Router) {
+						admin.Use(requireRole(auth.RoleAdmin))
+						admin.Get("/webhook-subscriptions", op.ListWebhookSubscriptions)
+						admin.Post("/webhook-subscriptions", op.CreateWebhookSubscription)
+						admin.Get("/webhook-subscriptions/{subscriptionId}", op.GetWebhookSubscription)
+						admin.Put("/webhook-subscriptions/{subscriptionId}", op.UpdateWebhookSubscription)
+						admin.Delete("/webhook-subscriptions/{subscriptionId}", op.DeleteWebhookSubscription)
+						admin.Get("/webhook-subscriptions/{subscriptionId}/deliveries", op.ListWebhookDeliveries)
+					})
 				}
 
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", op.GetSystemHealth)

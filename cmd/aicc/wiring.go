@@ -299,6 +299,7 @@ func apiDeps(
 	recordings httpapi.RecordingStreamer,
 	auditor httpapi.Auditor,
 	outboundSvc httpapi.OutboundService,
+	webhooks httpapi.WebhookService,
 	spa http.Handler,
 ) httpapi.Deps {
 	return httpapi.Deps{
@@ -317,6 +318,7 @@ func apiDeps(
 		Recordings:  recordings,
 		Auditor:     auditor,
 		Outbound:    outboundSvc,
+		Webhooks:    webhooks,
 		SPA:         spa,
 	}
 }

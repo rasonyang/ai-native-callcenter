@@ -1301,6 +1301,78 @@ export interface paths {
         patch: operations["patchUserData"];
         trace?: never;
     };
+    "/webhook-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All webhook subscriptions
+         * @description Requires ADMIN. Tokens are not included.
+         */
+        get: operations["listWebhookSubscriptions"];
+        put?: never;
+        /**
+         * Create a webhook subscription
+         * @description Requires ADMIN. Deliberately out of reach of AICC_API_KEY: that credential places and ends calls, and letting it also choose where the platform sends finished calls would let a leaked key exfiltrate every one of them (design 09 §10).
+         */
+        post: operations["createWebhookSubscription"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhook-subscriptions/{subscriptionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One webhook subscription
+         * @description Requires ADMIN.
+         */
+        get: operations["getWebhookSubscription"];
+        /**
+         * Update a webhook subscription
+         * @description Requires ADMIN. Omitting authToken leaves the stored one alone.
+         */
+        put: operations["updateWebhookSubscription"];
+        post?: never;
+        /**
+         * Delete a webhook subscription
+         * @description Requires ADMIN. Its deliveries go with it.
+         */
+        delete: operations["deleteWebhookSubscription"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/webhook-subscriptions/{subscriptionId}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent deliveries for a subscription
+         * @description Newest first, for diagnosing what a subscriber was told and what came back. Requires ADMIN.
+         */
+        get: operations["listWebhookDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2445,6 +2517,77 @@ export interface components {
             state: string;
             /** @description Whether the switch would place a call through it now. A NOREG gateway is dialable as it stands — an IP trunk never registers by design — so registration is not the question. */
             isUp: boolean;
+        };
+        /** @description A place finished calls are delivered to. authToken is never returned: the customer supplied it and already has it, so there is nothing to hand back (design 09 §8). */
+        WebhookSubscription: {
+            /** Format: uuid */
+            subscriptionId: string;
+            /** @description Operator-facing label. A list of URLs is unreadable. */
+            name: string;
+            /**
+             * Format: uri
+             * @description Where deliveries are POSTed. HTTPS.
+             */
+            url: string;
+            filter: components["schemas"]["WebhookFilter"];
+            /** @description False stops deliveries without losing the subscription or its history, which is what an operator wants when a customer's endpoint is down. */
+            isEnabled: boolean;
+            /** @description Whether a token is configured. The token itself is never served; this says only whether there is one, so a screen can show a subscription that would reach an endpoint with no credential at all. */
+            hasAuthToken: boolean;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        /** @description Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5). */
+        WebhookFilter: {
+            callType?: components["schemas"]["CallType"][];
+            did?: string[];
+            queueId?: string[];
+            /** @description CDR status: ANSWERED, NO_ANSWER, BUSY, FAILED. */
+            status?: string[];
+            /** @description Calls the bot handled without ever reaching a person. */
+            isContained?: boolean[];
+        };
+        /** @description Create or update a subscription. authToken is write-only: send it to set or replace it, omit it to leave it as it is, send an empty string to clear it. */
+        WebhookSubscriptionWrite: {
+            name: string;
+            /** Format: uri */
+            url: string;
+            filter?: components["schemas"]["WebhookFilter"];
+            /** @description The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8). */
+            authToken?: string;
+            isEnabled?: boolean;
+        };
+        WebhookSubscriptionList: {
+            items: components["schemas"]["WebhookSubscription"][];
+        };
+        /** @description One attempt-set at delivering one revision of one call's CDR to one subscription. */
+        WebhookDelivery: {
+            /**
+             * Format: uuid
+             * @description Travels to the customer as X-AICC-Webhook-Id; their deduplication key.
+             */
+            deliveryId: string;
+            /** Format: uuid */
+            callId: string;
+            /** @description 1 for the first delivery of a call. A later, fuller CDR replacing one already sent produces revision 2, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order. */
+            revision: number;
+            /** @enum {string} */
+            status: "PENDING" | "DELIVERED" | "FAILED";
+            attemptCount: number;
+            /** Format: date-time */
+            nextAttemptAt: string;
+            /** @description Absent until an attempt has been made. */
+            lastStatusCode?: number;
+            lastError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            deliveredAt?: string;
+        };
+        WebhookDeliveryList: {
+            items: components["schemas"]["WebhookDelivery"][];
         };
     };
     responses: {
@@ -4686,6 +4829,168 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
+        };
+    };
+    listWebhookSubscriptions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every subscription. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscriptionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createWebhookSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookSubscriptionWrite"];
+            };
+        };
+        responses: {
+            /** @description The stored subscription, without its token. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscription"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getWebhookSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The subscription, without its token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscription"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateWebhookSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookSubscriptionWrite"];
+            };
+        };
+        responses: {
+            /** @description The stored subscription, without its token. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookSubscription"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteWebhookSubscription: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gone. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    listWebhookDeliveries: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                subscriptionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The most recent deliveries. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebhookDeliveryList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
 }

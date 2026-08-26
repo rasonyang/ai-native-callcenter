@@ -32,6 +32,8 @@ var (
 
 	transcribeFramesDropped metric.Int64Counter
 	transcribeFramesSent    metric.Int64Counter
+
+	webhookDeliveries metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -73,6 +75,9 @@ func init() {
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
 			"it is line echo and was ignored — which makes this the only measurement of "+
 			"whether that guard is set right."))
+	webhookDeliveries, _ = meter.Int64Counter("aicc_webhook_deliveries_total",
+		metric.WithDescription("CDR deliveries that settled, by outcome. FAILED means the "+
+			"retry schedule ran out and that call was never told to that subscriber."))
 	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
 		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
 	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
@@ -174,4 +179,23 @@ func RecordTranscribeAudio(provider, speaker string, sent, dropped int64) {
 	if transcribeFramesDropped != nil && dropped > 0 {
 		transcribeFramesDropped.Add(ctx, dropped, attrs)
 	}
+}
+
+// WebhookDelivered and WebhookFailed settle one CDR delivery.
+//
+// Labelled by subscription rather than counted in one total, because the
+// question an operator has is never "how many failed" but "which subscriber is
+// broken" — a single figure that rises when one customer's endpoint goes down
+// tells them something happened and not where.
+func WebhookDelivered(subscriptionID string) { countWebhook(subscriptionID, "DELIVERED") }
+func WebhookFailed(subscriptionID string)    { countWebhook(subscriptionID, "FAILED") }
+
+func countWebhook(subscriptionID, outcome string) {
+	if webhookDeliveries == nil {
+		return
+	}
+	webhookDeliveries.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("subscriptionId", subscriptionID),
+		attribute.String("outcome", outcome),
+	))
 }

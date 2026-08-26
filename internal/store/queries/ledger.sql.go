@@ -318,7 +318,7 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 	return err
 }
 
-const insertCDR = `-- name: InsertCDR :exec
+const insertCDR = `-- name: InsertCDR :execrows
 
 INSERT INTO cdrs (
     call_id, started_at, answered_at, ended_at, call_type, language,
@@ -413,8 +413,14 @@ type InsertCDRParams struct {
 // A later ending means more of the call is known, so that row wins. The rule
 // is monotone, which is what keeps this safe as an upsert: a row can only ever
 // be replaced by one that reaches further, never flip back.
-func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) error {
-	_, err := q.db.Exec(ctx, insertCDR,
+//
+// :execrows rather than :exec, because the caller has to know whether the
+// ledger actually changed. A webhook delivery is queued off the back of this
+// (design 09 §2), and queueing one for a write that changed nothing would post
+// the customer a duplicate of a CDR they already hold. Zero rows is the
+// conflict clause declining; one is a real insert or a real replacement.
+func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertCDR,
 		arg.CallID,
 		arg.StartedAt,
 		arg.AnsweredAt,
@@ -444,7 +450,10 @@ func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) error {
 		arg.Tech,
 		arg.Legs,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const insertCallback = `-- name: InsertCallback :one

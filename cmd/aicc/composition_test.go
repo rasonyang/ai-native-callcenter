@@ -478,6 +478,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		fakeStreamer{},
 		&store.LedgerStore{},
 		&outbound.Service{},
+		&store.WebhookStore{},
 		http.NewServeMux(),
 	)
 

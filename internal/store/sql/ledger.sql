@@ -1,6 +1,6 @@
 -- SPDX-License-Identifier: Apache-2.0
 
--- name: InsertCDR :exec
+-- name: InsertCDR :execrows
 --
 -- One row per call, written by whichever path saw the call end — and, where
 -- both did, by the one that saw more of it.
@@ -17,6 +17,12 @@
 -- A later ending means more of the call is known, so that row wins. The rule
 -- is monotone, which is what keeps this safe as an upsert: a row can only ever
 -- be replaced by one that reaches further, never flip back.
+--
+-- :execrows rather than :exec, because the caller has to know whether the
+-- ledger actually changed. A webhook delivery is queued off the back of this
+-- (design 09 §2), and queueing one for a write that changed nothing would post
+-- the customer a duplicate of a CDR they already hold. Zero rows is the
+-- conflict clause declining; one is a real insert or a real replacement.
 INSERT INTO cdrs (
     call_id, started_at, answered_at, ended_at, call_type, language,
     from_number, to_number, did, flow_id, queue_id,

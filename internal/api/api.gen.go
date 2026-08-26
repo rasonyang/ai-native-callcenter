@@ -724,6 +724,27 @@ func (e UserStatus) Valid() bool {
 	}
 }
 
+// Defines values for WebhookDeliveryStatus.
+const (
+	WebhookDeliveryStatusDELIVERED WebhookDeliveryStatus = "DELIVERED"
+	WebhookDeliveryStatusFAILED    WebhookDeliveryStatus = "FAILED"
+	WebhookDeliveryStatusPENDING   WebhookDeliveryStatus = "PENDING"
+)
+
+// Valid indicates whether the value is a known member of the WebhookDeliveryStatus enum.
+func (e WebhookDeliveryStatus) Valid() bool {
+	switch e {
+	case WebhookDeliveryStatusDELIVERED:
+		return true
+	case WebhookDeliveryStatusFAILED:
+		return true
+	case WebhookDeliveryStatusPENDING:
+		return true
+	default:
+		return false
+	}
+}
+
 // Agent One agent's configuration, as administration stores it. Presence is not part of it — the roster carries that.
 type Agent struct {
 	AgentID            openapi_types.UUID  `json:"agentId"`
@@ -1851,6 +1872,86 @@ type WaitingCallList struct {
 	Items []WaitingCall `json:"items"`
 }
 
+// WebhookDelivery One attempt-set at delivering one revision of one call's CDR to one subscription.
+type WebhookDelivery struct {
+	AttemptCount int                `json:"attemptCount"`
+	CallID       openapi_types.UUID `json:"callId"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	DeliveredAt  *time.Time         `json:"deliveredAt,omitempty"`
+
+	// DeliveryID Travels to the customer as X-AICC-Webhook-Id; their deduplication key.
+	DeliveryID openapi_types.UUID `json:"deliveryId"`
+	LastError  *string            `json:"lastError,omitempty"`
+
+	// LastStatusCode Absent until an attempt has been made.
+	LastStatusCode *int      `json:"lastStatusCode,omitempty"`
+	NextAttemptAt  time.Time `json:"nextAttemptAt"`
+
+	// Revision 1 for the first delivery of a call. A later, fuller CDR replacing one already sent produces revision 2, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order.
+	Revision int                   `json:"revision"`
+	Status   WebhookDeliveryStatus `json:"status"`
+}
+
+// WebhookDeliveryStatus defines model for WebhookDelivery.Status.
+type WebhookDeliveryStatus string
+
+// WebhookDeliveryList defines model for WebhookDeliveryList.
+type WebhookDeliveryList struct {
+	Items []WebhookDelivery `json:"items"`
+}
+
+// WebhookFilter Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5).
+type WebhookFilter struct {
+	CallType *[]CallType `json:"callType,omitempty"`
+	DID      *[]string   `json:"did,omitempty"`
+
+	// IsContained Calls the bot handled without ever reaching a person.
+	IsContained *[]bool               `json:"isContained,omitempty"`
+	QueueID     *[]openapi_types.UUID `json:"queueId,omitempty"`
+
+	// Status CDR status: ANSWERED, NO_ANSWER, BUSY, FAILED.
+	Status *[]string `json:"status,omitempty"`
+}
+
+// WebhookSubscription A place finished calls are delivered to. authToken is never returned: the customer supplied it and already has it, so there is nothing to hand back (design 09 §8).
+type WebhookSubscription struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// Filter Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5).
+	Filter WebhookFilter `json:"filter"`
+
+	// HasAuthToken Whether a token is configured. The token itself is never served; this says only whether there is one, so a screen can show a subscription that would reach an endpoint with no credential at all.
+	HasAuthToken bool `json:"hasAuthToken"`
+
+	// IsEnabled False stops deliveries without losing the subscription or its history, which is what an operator wants when a customer's endpoint is down.
+	IsEnabled bool `json:"isEnabled"`
+
+	// Name Operator-facing label. A list of URLs is unreadable.
+	Name           string             `json:"name"`
+	SubscriptionID openapi_types.UUID `json:"subscriptionId"`
+	UpdatedAt      time.Time          `json:"updatedAt"`
+
+	// URL Where deliveries are POSTed. HTTPS.
+	URL string `json:"url"`
+}
+
+// WebhookSubscriptionList defines model for WebhookSubscriptionList.
+type WebhookSubscriptionList struct {
+	Items []WebhookSubscription `json:"items"`
+}
+
+// WebhookSubscriptionWrite Create or update a subscription. authToken is write-only: send it to set or replace it, omit it to leave it as it is, send an empty string to clear it.
+type WebhookSubscriptionWrite struct {
+	// AuthToken The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8).
+	AuthToken *string `json:"authToken,omitempty"`
+
+	// Filter Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5).
+	Filter    *WebhookFilter `json:"filter,omitempty"`
+	IsEnabled *bool          `json:"isEnabled,omitempty"`
+	Name      string         `json:"name"`
+	URL       string         `json:"url"`
+}
+
 // WrapUp One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary.
 type WrapUp struct {
 	AgentID          openapi_types.UUID `json:"agentId"`
@@ -2016,6 +2117,11 @@ type GetReportQueuesParams struct {
 	To   *time.Time `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// ListWebhookDeliveriesParams defines parameters for ListWebhookDeliveries.
+type ListWebhookDeliveriesParams struct {
+	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // AgentLoginJSONRequestBody defines body for AgentLogin for application/json ContentType.
 type AgentLoginJSONRequestBody = AgentLoginRequest
 
@@ -2096,6 +2202,12 @@ type UpdateUserJSONRequestBody = UserUpdate
 
 // ResetUserPasswordJSONRequestBody defines body for ResetUserPassword for application/json ContentType.
 type ResetUserPasswordJSONRequestBody = PasswordReset
+
+// CreateWebhookSubscriptionJSONRequestBody defines body for CreateWebhookSubscription for application/json ContentType.
+type CreateWebhookSubscriptionJSONRequestBody = WebhookSubscriptionWrite
+
+// UpdateWebhookSubscriptionJSONRequestBody defines body for UpdateWebhookSubscription for application/json ContentType.
+type UpdateWebhookSubscriptionJSONRequestBody = WebhookSubscriptionWrite
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -2330,6 +2442,24 @@ type ServerInterface interface {
 	// ResetUserPassword Set an account's password
 	// (POST /users/{userId}/password)
 	ResetUserPassword(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID)
+	// ListWebhookSubscriptions All webhook subscriptions
+	// (GET /webhook-subscriptions)
+	ListWebhookSubscriptions(w http.ResponseWriter, r *http.Request)
+	// CreateWebhookSubscription Create a webhook subscription
+	// (POST /webhook-subscriptions)
+	CreateWebhookSubscription(w http.ResponseWriter, r *http.Request)
+	// DeleteWebhookSubscription Delete a webhook subscription
+	// (DELETE /webhook-subscriptions/{subscriptionId})
+	DeleteWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID)
+	// GetWebhookSubscription One webhook subscription
+	// (GET /webhook-subscriptions/{subscriptionId})
+	GetWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID)
+	// UpdateWebhookSubscription Update a webhook subscription
+	// (PUT /webhook-subscriptions/{subscriptionId})
+	UpdateWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID)
+	// ListWebhookDeliveries Recent deliveries for a subscription
+	// (GET /webhook-subscriptions/{subscriptionId}/deliveries)
+	ListWebhookDeliveries(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID, params ListWebhookDeliveriesParams)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -2795,6 +2925,42 @@ func (_ Unimplemented) UpdateUser(w http.ResponseWriter, r *http.Request, userID
 // ResetUserPassword Set an account's password
 // (POST /users/{userId}/password)
 func (_ Unimplemented) ResetUserPassword(w http.ResponseWriter, r *http.Request, userID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWebhookSubscriptions All webhook subscriptions
+// (GET /webhook-subscriptions)
+func (_ Unimplemented) ListWebhookSubscriptions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateWebhookSubscription Create a webhook subscription
+// (POST /webhook-subscriptions)
+func (_ Unimplemented) CreateWebhookSubscription(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteWebhookSubscription Delete a webhook subscription
+// (DELETE /webhook-subscriptions/{subscriptionId})
+func (_ Unimplemented) DeleteWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetWebhookSubscription One webhook subscription
+// (GET /webhook-subscriptions/{subscriptionId})
+func (_ Unimplemented) GetWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateWebhookSubscription Update a webhook subscription
+// (PUT /webhook-subscriptions/{subscriptionId})
+func (_ Unimplemented) UpdateWebhookSubscription(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListWebhookDeliveries Recent deliveries for a subscription
+// (GET /webhook-subscriptions/{subscriptionId}/deliveries)
+func (_ Unimplemented) ListWebhookDeliveries(w http.ResponseWriter, r *http.Request, subscriptionID openapi_types.UUID, params ListWebhookDeliveriesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4967,6 +5133,154 @@ func (siw *ServerInterfaceWrapper) ResetUserPassword(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListWebhookSubscriptions operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookSubscriptions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhookSubscriptions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateWebhookSubscription operation middleware
+func (siw *ServerInterfaceWrapper) CreateWebhookSubscription(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateWebhookSubscription(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteWebhookSubscription operation middleware
+func (siw *ServerInterfaceWrapper) DeleteWebhookSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscriptionId" -------------
+	var subscriptionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscriptionId", chi.URLParam(r, "subscriptionId"), &subscriptionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscriptionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteWebhookSubscription(w, r, subscriptionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetWebhookSubscription operation middleware
+func (siw *ServerInterfaceWrapper) GetWebhookSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscriptionId" -------------
+	var subscriptionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscriptionId", chi.URLParam(r, "subscriptionId"), &subscriptionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscriptionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetWebhookSubscription(w, r, subscriptionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateWebhookSubscription operation middleware
+func (siw *ServerInterfaceWrapper) UpdateWebhookSubscription(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscriptionId" -------------
+	var subscriptionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscriptionId", chi.URLParam(r, "subscriptionId"), &subscriptionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscriptionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateWebhookSubscription(w, r, subscriptionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListWebhookDeliveries operation middleware
+func (siw *ServerInterfaceWrapper) ListWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "subscriptionId" -------------
+	var subscriptionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "subscriptionId", chi.URLParam(r, "subscriptionId"), &subscriptionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "subscriptionId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListWebhookDeliveriesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListWebhookDeliveries(w, r, subscriptionID, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -5310,6 +5624,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/users/{userId}/password", wrapper.ResetUserPassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/webhook-subscriptions", wrapper.ListWebhookSubscriptions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/webhook-subscriptions", wrapper.CreateWebhookSubscription)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/webhook-subscriptions/{subscriptionId}", wrapper.DeleteWebhookSubscription)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/webhook-subscriptions/{subscriptionId}", wrapper.GetWebhookSubscription)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/webhook-subscriptions/{subscriptionId}", wrapper.UpdateWebhookSubscription)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/webhook-subscriptions/{subscriptionId}/deliveries", wrapper.ListWebhookDeliveries)
 	})
 
 	return r

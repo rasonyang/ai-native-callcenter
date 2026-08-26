@@ -73,6 +73,10 @@
     {
       "name": "system",
       "description": "Operational introspection."
+    },
+    {
+      "name": "webhooks",
+      "description": "CDR delivery to a customer's own system. A subscription names an endpoint; every finished call whose CDR matches its filter is delivered there. Read-only over HTTP for now on the screens (design 09 §11); the write operations here are how a subscription is created."
     }
   ],
   "paths": {
@@ -4083,6 +4087,295 @@
           }
         }
       }
+    },
+    "/webhook-subscriptions": {
+      "get": {
+        "operationId": "listWebhookSubscriptions",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "All webhook subscriptions",
+        "description": "Requires ADMIN. Tokens are not included.",
+        "responses": {
+          "200": {
+            "description": "Every subscription.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscriptionList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Create a webhook subscription",
+        "description": "Requires ADMIN. Deliberately out of reach of AICC_API_KEY: that credential places and ends calls, and letting it also choose where the platform sends finished calls would let a leaked key exfiltrate every one of them (design 09 §10).",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSubscriptionWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The stored subscription, without its token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/webhook-subscriptions/{subscriptionId}": {
+      "get": {
+        "operationId": "getWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "One webhook subscription",
+        "description": "Requires ADMIN.",
+        "parameters": [
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The subscription, without its token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscription"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "put": {
+        "operationId": "updateWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Update a webhook subscription",
+        "description": "Requires ADMIN. Omitting authToken leaves the stored one alone.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookSubscriptionWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored subscription, without its token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookSubscription"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteWebhookSubscription",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Delete a webhook subscription",
+        "description": "Requires ADMIN. Its deliveries go with it.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Gone."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/webhook-subscriptions/{subscriptionId}/deliveries": {
+      "get": {
+        "operationId": "listWebhookDeliveries",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "Recent deliveries for a subscription",
+        "description": "Newest first, for diagnosing what a subscriber was told and what came back. Requires ADMIN.",
+        "parameters": [
+          {
+            "name": "subscriptionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The most recent deliveries.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookDeliveryList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -7287,6 +7580,211 @@
           "address",
           "state",
           "isUp"
+        ]
+      },
+      "WebhookSubscription": {
+        "type": "object",
+        "description": "A place finished calls are delivered to. authToken is never returned: the customer supplied it and already has it, so there is nothing to hand back (design 09 §8).",
+        "properties": {
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Operator-facing label. A list of URLs is unreadable."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "Where deliveries are POSTed. HTTPS."
+          },
+          "filter": {
+            "$ref": "#/components/schemas/WebhookFilter"
+          },
+          "isEnabled": {
+            "type": "boolean",
+            "description": "False stops deliveries without losing the subscription or its history, which is what an operator wants when a customer's endpoint is down."
+          },
+          "hasAuthToken": {
+            "type": "boolean",
+            "description": "Whether a token is configured. The token itself is never served; this says only whether there is one, so a screen can show a subscription that would reach an endpoint with no credential at all."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "subscriptionId",
+          "name",
+          "url",
+          "filter",
+          "isEnabled",
+          "hasAuthToken",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "WebhookFilter": {
+        "type": "object",
+        "description": "Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5).",
+        "properties": {
+          "callType": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CallType"
+            }
+          },
+          "did": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "queueId": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "status": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "CDR status: ANSWERED, NO_ANSWER, BUSY, FAILED."
+          },
+          "isContained": {
+            "type": "array",
+            "items": {
+              "type": "boolean"
+            },
+            "description": "Calls the bot handled without ever reaching a person."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WebhookSubscriptionWrite": {
+        "type": "object",
+        "description": "Create or update a subscription. authToken is write-only: send it to set or replace it, omit it to leave it as it is, send an empty string to clear it.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 120
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+          },
+          "filter": {
+            "$ref": "#/components/schemas/WebhookFilter"
+          },
+          "authToken": {
+            "type": "string",
+            "maxLength": 1024,
+            "writeOnly": true,
+            "description": "The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8)."
+          },
+          "isEnabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "name",
+          "url"
+        ]
+      },
+      "WebhookSubscriptionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookSubscription"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "WebhookDelivery": {
+        "type": "object",
+        "description": "One attempt-set at delivering one revision of one call's CDR to one subscription.",
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Travels to the customer as X-AICC-Webhook-Id; their deduplication key."
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "description": "1 for the first delivery of a call. A later, fuller CDR replacing one already sent produces revision 2, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PENDING",
+              "DELIVERED",
+              "FAILED"
+            ]
+          },
+          "attemptCount": {
+            "type": "integer"
+          },
+          "nextAttemptAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastStatusCode": {
+            "type": "integer",
+            "description": "Absent until an attempt has been made."
+          },
+          "lastError": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deliveredAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "deliveryId",
+          "callId",
+          "revision",
+          "status",
+          "attemptCount",
+          "nextAttemptAt",
+          "createdAt"
+        ]
+      },
+      "WebhookDeliveryList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WebhookDelivery"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       }
     }

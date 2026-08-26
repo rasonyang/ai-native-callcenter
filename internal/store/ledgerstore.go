@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -21,10 +22,15 @@ import (
 // LedgerStore persists what calls leave behind: the CDR, the transcript, the
 // artifacts. It is written once per call at retirement and read by everything
 // after the fact — the explorer, reports, the wallboard's history.
-type LedgerStore struct{ q *queries.Queries }
+type LedgerStore struct {
+	q *queries.Queries
+	// pool is here for the one write that is not a single statement: a CDR and
+	// the webhook deliveries it owes have to land together or not at all.
+	pool *pgxpool.Pool
+}
 
 // Ledger returns the call ledger.
-func (s *Store) Ledger() *LedgerStore { return &LedgerStore{q: s.Queries} }
+func (s *Store) Ledger() *LedgerStore { return &LedgerStore{q: s.Queries, pool: s.Pool} }
 
 // CDR is one finished call. Field vocabulary follows the naming spec; the
 // enum values are byte-identical to what the API serves.
@@ -138,7 +144,7 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		agentIDs = []uuid.UUID{}
 	}
 
-	return l.q.InsertCDR(ctx, queries.InsertCDRParams{
+	params := queries.InsertCDRParams{
 		CallID:         cdr.CallID,
 		StartedAt:      stamp(cdr.StartedAt),
 		AnsweredAt:     stamp(cdr.AnsweredAt),
@@ -167,6 +173,27 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		UserData:       userData,
 		Tech:           tech,
 		Legs:           legs,
+	}
+
+	// The row and the deliveries it owes go together. A CDR that exists with
+	// no delivery queued is a call the customer is never told about, with
+	// nothing anywhere recording the omission — which is the failure this
+	// transaction exists to prevent (design 09 §2).
+	//
+	// The enqueue runs only when the write actually changed the ledger. This
+	// upsert declines when an existing row already saw more of the call, and
+	// queueing off a write that changed nothing would post the customer a
+	// duplicate of a CDR they already hold.
+	if l.pool == nil {
+		_, err := l.q.InsertCDR(ctx, params)
+		return err
+	}
+	return txFor(ctx, l.pool, func(q *queries.Queries) error {
+		written, err := q.InsertCDR(ctx, params)
+		if err != nil || written == 0 {
+			return err
+		}
+		return enqueueFor(ctx, q, cdr)
 	})
 }
 

@@ -302,6 +302,32 @@ type User struct {
 	LastLoginAt  pgtype.Timestamptz `json:"lastLoginAt"`
 }
 
+type WebhookDelivery struct {
+	DeliveryID     uuid.UUID          `json:"deliveryId"`
+	SubscriptionID uuid.UUID          `json:"subscriptionId"`
+	CallID         uuid.UUID          `json:"callId"`
+	Revision       int32              `json:"revision"`
+	Payload        []byte             `json:"payload"`
+	Status         string             `json:"status"`
+	AttemptCount   int32              `json:"attemptCount"`
+	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
+	LastStatusCode *int32             `json:"lastStatusCode"`
+	LastError      string             `json:"lastError"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	DeliveredAt    pgtype.Timestamptz `json:"deliveredAt"`
+}
+
+type WebhookSubscription struct {
+	SubscriptionID uuid.UUID          `json:"subscriptionId"`
+	Name           string             `json:"name"`
+	URL            string             `json:"url"`
+	Filter         []byte             `json:"filter"`
+	AuthToken      string             `json:"authToken"`
+	IsEnabled      bool               `json:"isEnabled"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type WrapUp struct {
 	CallID           uuid.UUID          `json:"callId"`
 	AgentID          uuid.UUID          `json:"agentId"`

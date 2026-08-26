@@ -1,6 +1,6 @@
 import {
   Activity, BarChart3, Bot, BookUser, FileClock, Headphones, LayoutDashboard,
-  ListChecks, Phone, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users,
+  ListChecks, Phone, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users, Webhook,
 } from 'lucide-react'
 
 
@@ -89,6 +89,10 @@ export const NAV: NavGroup[] = [
       // The trail names accounts and carries what their requests contained,
       // which is administration rather than supervision.
       { to: '/admin/audit', labelKey: 'nav.audit', icon: ScrollText, roles: ['ADMIN'], isReady: true },
+      // Where finished calls are sent, and whether they arrived. Here rather
+      // than under Manage for the reason the audit trail is: Manage changes how
+      // calls are handled, and a subscription changes nothing about a call.
+      { to: '/admin/webhooks', labelKey: 'nav.webhooks', icon: Webhook, roles: ['ADMIN'], isReady: true },
     ],
   },
 ]
