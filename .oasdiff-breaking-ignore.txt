@@ -1,0 +1,8 @@
+# Breaking changes accepted by review, each pinned to the one change it covers.
+# The repo's precedent for a pinned exception is .redocly.lint-ignore.yaml; this
+# is the same idea for the breaking-change gate, and every line needs a reason.
+#
+# 2026-08-26 — POST /calls/dial folded into POST /calls {kind: AGENT_OUTBOUND}.
+# Design 04-api-sse.md always specified one kind-discriminated endpoint; the
+# separate dial path was drift. The only client is this repo's own SPA.
+api path removed without deprecation POST /calls/dial

@@ -31,6 +31,13 @@ type AgentService interface {
 	// CallcenterNameFor is the switch's own name for an agent, for the
 	// commands that have to name them the way mod_callcenter knows them.
 	CallcenterNameFor(ctx context.Context, agentID uuid.UUID) string
+	// DeviceAtExtension and AgentAtExtension ask about a phone rather than
+	// about a person. Registration is a fact about the phone and outlives its
+	// agent logging out, which is what lets a call be placed for somebody who
+	// is on the floor but never signed into this application; who is signed in
+	// there, if anybody, is the separate question.
+	DeviceAtExtension(extensionNumber string) (isRegistered, isInService, isKnown bool)
+	AgentAtExtension(extensionNumber string) (agentID uuid.UUID, ok bool)
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 
 	// EndWrapUp completes after-call work; WrapUpCall names the call it was
@@ -341,15 +348,26 @@ func (s *Server) router() chi.Router {
 					private.Delete("/contacts/{contactId}", op.DeleteContact)
 				}
 
-				if s.outbound != nil {
-					// An agent dials out as themselves; placing an AI call
-					// is an operations decision.
-					private.With(requireAgentRole).Post("/calls/dial", op.DialCall)
-					private.With(requireSupervisorRole).Post("/calls", op.CreateCall)
-				}
-
 				private.With(requireRole(auth.RoleAdmin)).Get("/system/health", op.GetSystemHealth)
 			})
+
+			// Placing a call is the one operation a system integrates with
+			// from outside a browser — a CRM dialling for an agent whose
+			// phone is registered but who never signed in here — so it is
+			// mounted apart from the session-only group and accepts the API
+			// key as well.
+			//
+			// No role middleware: the route serves two kinds with two
+			// different answers (an agent places their own click-to-dial, an
+			// AI call is an operations decision), so the check is the
+			// handler's and lives beside the kind it guards.
+			if s.outbound != nil {
+				short.Group(func(machine chi.Router) {
+					machine.Use(s.requireSessionOrAPIKey)
+					machine.Use(s.auditTrail)
+					machine.Post("/calls", op.CreateCall)
+				})
+			}
 		})
 
 		// Long-lived stream: no timeout, it ends with the client connection.

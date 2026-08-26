@@ -159,10 +159,15 @@ export type WaitingCall = components['schemas']['WaitingCall']
 export const callApi = {
   mine: () => request<components['schemas']['CallList']>('/calls/mine'),
   waiting: () => request<components['schemas']['WaitingCallList']>('/calls/waiting'),
+  /**
+   * Click-to-dial. The agent's own phone is raised first, so no extension is
+   * named: the server uses the one they signed in at, and an agent may name
+   * no other.
+   */
   dial: (destination: string) =>
-    request<components['schemas']['DialResponse']>('/calls/dial', {
+    request<components['schemas']['CreateCallResponse']>('/calls', {
       method: 'POST',
-      body: JSON.stringify({ destination }),
+      body: JSON.stringify({ kind: 'AGENT_OUTBOUND', to: destination }),
     }),
   answer: (callId: string) => request<void>(`/calls/${callId}/answer`, { method: 'POST' }),
   hold: (callId: string) => request<void>(`/calls/${callId}/hold`, { method: 'POST' }),

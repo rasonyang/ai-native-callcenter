@@ -910,6 +910,26 @@ func (s *Service) extensionHolderLocked(extensionNumber string) (uuid.UUID, bool
 	return uuid.Nil, false
 }
 
+// DeviceAtExtension reports what the switch last said about a phone, whether
+// or not anybody is signed in at it.
+//
+// Registration is a fact about the phone, not about the person: NoteDevice and
+// ObserveDevice record it for every endpoint the switch lists, and neither
+// asks whether an agent is logged in there. That is what makes it the right
+// question for a call placed by a system on behalf of an agent who never
+// signed into this application — presence would answer "nobody", and the phone
+// is on the desk regardless.
+//
+// isKnown separates "the switch says this phone is not registered" from "we
+// have never heard about this extension"; a caller that conflates them
+// refuses every call made before the first registration sweep.
+func (s *Service) DeviceAtExtension(extensionNumber string) (isRegistered, isInService, isKnown bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d, ok := s.devices[extensionNumber]
+	return d.isRegistered, d.isInService, ok
+}
+
 // AgentAtExtension reports which agent is signed in at an extension, so a leg
 // being delivered there can be attributed to them.
 func (s *Service) AgentAtExtension(extensionNumber string) (uuid.UUID, bool) {

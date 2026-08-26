@@ -44,7 +44,7 @@ re-runs `softphoneSimulate('on-call')` immediately before reading.
 | Hold / Resume | topbar + grid → `POST …/hold` · `…/retrieve` | unchanged | **pass** `T` `B` |
 | Transfer | topbar + grid → `POST …/transfer` | unchanged; grid cell now fills its column | **pass** `T` `B` |
 | Hang up | topbar + grid → `POST …/hangup` | unchanged; both are now solid red | **pass** `T` `B` |
-| Outbound dial | Dial card → `POST /calls/dial` | unchanged, **and** added to the topbar keypad popover | **pass** `T` `B` |
+| Outbound dial | Dial card → `POST /calls` (`AGENT_OUTBOUND`) | unchanged, **and** added to the topbar keypad popover | **pass** `T` `B` |
 | Keypad composes a number | Dial card popover | unchanged; extracted to `components/keypad.tsx` and reused in the topbar | **pass** `T` `B` |
 | Callbacks list + View all | `GET /callbacks` | unchanged; added an open-count to the title slot | **pass** `T` |
 | Caller card (number, DID, badges, userData) | `GET /calls/mine` | unchanged | **pass** `T` |

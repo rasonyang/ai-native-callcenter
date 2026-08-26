@@ -89,6 +89,7 @@ The settings a deployment almost always changes:
 | `AICC_RECORDING_DIR`, `AICC_RECORDING_BACKEND` | Recording is off until the spool directory is set |
 | `AICC_SECURE_COOKIES` | `true` wherever the interface is served over HTTPS, or the session cookie is never sent back |
 | `AICC_METRICS_ADDR` | Loopback by default. That listener has no authentication of its own. |
+| `AICC_API_KEY` | Only if a system places calls without a browser session. Unset leaves that path closed. |
 
 ## In front of it
 
@@ -152,6 +153,10 @@ normally touch FreeSWITCH — but the release notes say when it does.
 - [ ] The event socket unreachable from outside the host — ESL is a shell on
       the switch, and its ACL is the only thing standing in front of it.
 - [ ] The SIP UAS reachable from the switch and nowhere else.
+- [ ] `AICC_API_KEY` unset unless something integrates with `POST /calls`, and
+      long and random where it is set. It is one shared secret with no
+      per-integrator identity behind it, so a leak is rotated by restarting
+      every instance with a new value and there is no way to revoke one caller.
 - [ ] Provider keys in the environment, never in the database, never in a flow.
 - [ ] Provider concurrency quota raised to match the traffic. It is an external
       limit and no amount of local capacity substitutes for it.

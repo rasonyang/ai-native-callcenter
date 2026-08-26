@@ -63,8 +63,19 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 
 		var actorID *uuid.UUID
 		if identity, ok := identityFrom(r.Context()); ok {
-			id := identity.UserID
-			actorID = &id
+			if isMachine(identity) {
+				// No person did this, so the actor column stays null rather
+				// than carrying a user id nobody can look up. The row would
+				// then be indistinguishable from one with no actor at all,
+				// which is why the key says so in the detail instead.
+				if detail == nil {
+					detail = map[string]any{}
+				}
+				detail["actor"] = identity.Username
+			} else {
+				id := identity.UserID
+				actorID = &id
+			}
 		}
 
 		action := r.Method + " " + routePattern(r)
