@@ -483,8 +483,16 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		// dialled (C31). Eleven such rows, and the switch knew the whole time
 		// — aicc_inbound logs "unknown number 95009 from …" as it rejects.
 		p.OtherNumber = otherNumber(ev)
+		// Where this leg is, before and apart from whose it is. A phone this
+		// platform manages says so on the leg itself, which is what lets a
+		// call placed for an agent who never signed in still be recorded as a
+		// call an agent's phone placed.
+		p.ExtensionNumber = managedExtensionOf(ev)
 		if isAgentLeg {
 			p.AgentID = &agentID
+			if p.ExtensionNumber == "" {
+				p.ExtensionNumber = agentExtension
+			}
 		}
 		p.IsBotLeg = isBotLeg(ev)
 		partyID, callType, userData = p.PartyID, call.CallType, call.UserData
@@ -1299,6 +1307,23 @@ func (c *Coordinator) agentChannel(callID, agentID uuid.UUID) (string, error) {
 		return "", ErrNoAgentLeg
 	}
 	return channelID, nil
+}
+
+// managedExtensionOf reports the extension a leg is at, when the leg says so
+// itself.
+//
+// Two places stamp it and both mean the same thing. Our own originate sets
+// aicc_extension because an originated leg gets no directory lookup and would
+// otherwise not say who placed it (`outbound.go`); the directory sets it on a
+// phone's own INVITE (`aicc_xml.lua`). Either way it is this platform saying
+// "this leg is at a phone we manage" — a fact about the phone, true whether or
+// not anybody is signed in at it, which is exactly what presence cannot say.
+//
+// Deliberately not a lookup. Asking the agent service would reintroduce the
+// dependency this exists to break, and the leg is the more direct witness:
+// nothing else sets this variable.
+func managedExtensionOf(ev SwitchEvent) string {
+	return ev.Raw.Variable("aicc_extension")
 }
 
 // agentForLeg reports whether a new leg is being delivered to a signed-in
