@@ -2185,6 +2185,59 @@ screen consumes it**, and none is built. `/supervisor/quality` stays `isReady:fa
 (`web/src/lib/nav.ts:49`). The live panel ships for `/agent` only; the same component
 renders the finished transcript on `/admin/cdr/$callId`, which supervisors already reach.
 
+**D20 — a call with no customer on it is not transcribed. SETTLED by owner directive
+(2026-08-26). Landed the same day.**
+
+`[FACT]` `tapAgentLeg` (`coordinator.go:804`) tapped every bridged agent leg whatever
+the call was, D18 having settled *which* leg without ever asking *which calls*. Two
+colleagues ringing each other therefore opened an ingest stream. The rule is now stated
+positively — a tap goes on only where the call is `INBOUND` or `OUTBOUND` — so `CONSULT`
+is excluded on the day it starts being emitted rather than quietly acquiring a tap.
+`callTypeOf` accepts only the first three as a hint (design 01 reserves `CONSULT`), so
+that arm is unreachable today and is asserted as such rather than tested.
+
+**D21 — a human-only call has no transcript actor, so D18 is half-implemented.
+`OPEN`. Found live 2026-08-26; not scheduled.**
+
+`[FACT]` `Registry.For` — the only thing that creates a transcript actor — has exactly
+one caller in the repository, `internal/aicall/ledger.go:222`. A call reaches an actor by
+having had a bot phase and by no other route; `Registry.SetAudience`'s own comment already
+records this as settled fact ("the bot phase creates the actor and a switch-only call
+never has one"). D18 put click-to-dial and direct-extension calls in scope for
+transcription and changed the *trigger* to `CHANNEL_BRIDGE` to cover them — the tap half
+shipped, the actor half never did.
+
+`[MEASURED]` Three click-to-dial calls placed 2026-08-26 (wei/1008 → `18688886669` twice,
+→ `1002` once). Every one attached a tap; every one was refused at the ingest for want of
+an actor. The two PSTN calls are exactly the case D18 and D20 both say should be
+transcribed, and neither was.
+
+*What closing it costs, which is why it is not a bug fix:* the human path would have to
+call `Registry.For`, which opens a recognition session per call — real provider spend on
+every agent call rather than only on calls the bot touched — and brings with it the
+`answeredAt` anchor (there is no bot answer to anchor on), the audience announcement, and
+actor retirement for calls that never pass through `aicall`'s ledger. It is a milestone
+item, not a patch.
+
+*Until it is done*, a human-only INBOUND/OUTBOUND call still attaches a tap that is then
+refused. That refusal is now reported once rather than three times (D22) and is otherwise
+harmless: no call, CDR or recording is affected.
+
+**D22 — one fault is reported once. SETTLED (2026-08-26). Landed the same day.**
+
+`[FACT]` A refused stream was announced three times: the ingest's own warning, then
+`mod_audio_stream`'s error as the socket closed under it, then — twelve seconds later —
+the watchdog's "a tap was attached but never connected", which was not true of it. It had
+connected and been turned away. `serve` returned before `arrived`, so the expectation
+stayed armed. Both refusal paths now disarm it (`refused`), leaving the reason logged
+where the decision was made.
+
+`[FACT]` The same event's `error` field was empty on every occurrence: `Normalize` read
+the module's complaint from a header while its own comment said the module puts it in the
+body. It now falls back to the body, and an error that still arrives with no reason is
+said in words rather than printed as `error=""` — a field blank every single time reads
+as a logging fault rather than as the module's silence.
+
 ---
 
 ## Appendix A — module map

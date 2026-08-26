@@ -222,6 +222,15 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	case KindAudioStreamDisconnected:
 		slog.InfoContext(ctx, "the media tap disconnected", "channelId", ev.ChannelID)
 	case KindAudioStreamError:
+		// An empty cause is said in words rather than printed as error="".
+		// The module does not always give one, and a field that is blank on
+		// every occurrence reads as a logging fault rather than as the
+		// module's silence.
+		if ev.Cause == "" {
+			slog.ErrorContext(ctx, "the media tap reported an error and gave no reason",
+				"channelId", ev.ChannelID)
+			break
+		}
 		slog.ErrorContext(ctx, "the media tap reported an error",
 			"channelId", ev.ChannelID, "error", ev.Cause)
 	}
@@ -801,11 +810,22 @@ func (c *Coordinator) applyInboundUserData(ctx context.Context, callID uuid.UUID
 // per-registration token bearing no resemblance to their extension, so digit
 // matching works for a desk phone and fails silently for every browser agent —
 // which is all of them in this design.
+//
+// Only a call with a customer on it is transcribed (owner directive
+// 2026-08-26): a transcript is a record of what was said to the people this
+// business serves, and two colleagues talking to each other are not that.
+// Stated as the two types that have a customer rather than as the ones that do
+// not, so CONSULT — reserved for the consult-transfer roadmap and not emitted
+// yet (01 §CallType) — is excluded the day it starts arriving instead of
+// quietly acquiring a tap nobody asked for.
 func (c *Coordinator) tapAgentLeg(callID uuid.UUID, channels ...string) {
 	if c.taps == nil {
 		return
 	}
 	_ = c.registry.Do(callID, func(call *Call) {
+		if call.CallType != events.CallTypeInbound && call.CallType != events.CallTypeOutbound {
+			return
+		}
 		for _, channelID := range channels {
 			if channelID == "" {
 				continue

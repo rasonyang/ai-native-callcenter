@@ -287,10 +287,13 @@ type metadata struct {
 }
 
 func (s *Server) serve(conn *websocket.Conn, claim Claim) {
+	key := claim.CallID.String() + "|" + claim.Channel
+
 	actor, ok := s.cfg.Transcripts.Lookup(claim.CallID)
 	if !ok {
 		s.log.Warn("transcription ingest has no transcript actor for this call",
-			"callId", claim.CallID)
+			"callId", claim.CallID, "channelId", claim.Channel)
+		s.refused(key)
 		conn.Close()
 		return
 	}
@@ -302,11 +305,12 @@ func (s *Server) serve(conn *websocket.Conn, claim Claim) {
 		log:   s.log,
 		cfg:   s.cfg,
 	}
-	key := claim.CallID.String() + "|" + claim.Channel
 	s.mu.Lock()
 	if prev := s.sessions[key]; prev != nil {
 		s.mu.Unlock()
-		s.log.Warn("a stream is already open for this channel", "callId", claim.CallID)
+		s.log.Warn("a stream is already open for this channel",
+			"callId", claim.CallID, "channelId", claim.Channel)
+		s.refused(key)
 		conn.Close()
 		return
 	}
@@ -403,7 +407,19 @@ func (s *Server) Expect(c Claim) {
 }
 
 // arrived cancels the expectation: the stream connected.
-func (s *Server) arrived(key string) {
+func (s *Server) arrived(key string) { s.stopExpecting(key) }
+
+// refused cancels the expectation for a stream that did dial back and was
+// turned away here.
+//
+// The reason has already been logged where the decision was made; what this
+// prevents is the watchdog reporting the same stream twelve seconds later as
+// one that never connected. That is a different fault with a different cause —
+// the switch never dialled back at all — and an operator who reads both
+// accounts of one event goes looking for a network problem that is not there.
+func (s *Server) refused(key string) { s.stopExpecting(key) }
+
+func (s *Server) stopExpecting(key string) {
 	s.mu.Lock()
 	if timer := s.pending[key]; timer != nil {
 		timer.Stop()

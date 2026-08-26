@@ -438,6 +438,40 @@ func TestTheMediaTapsOwnEventsAreUnderstood(t *testing.T) {
 	}
 }
 
+// Where the module's complaint actually is. The reader took it from a header
+// while its own comment said the module puts it in the body, so every tap
+// failure was reported as error="" — the one field an operator would act on,
+// empty on every occurrence (found live 2026-08-26, three click-to-dial calls).
+func TestTheMediaTapsComplaintIsReadFromWhereTheModulePutsIt(t *testing.T) {
+	t.Run("the body, which is what the module sends", func(t *testing.T) {
+		ev, ok := Normalize(esl.NewEvent(map[string]string{
+			"Event-Name":     "CUSTOM",
+			"Event-Subclass": "mod_audio_stream::error",
+			"Unique-ID":      "chan-a",
+		}, "  websocket connect failed\n"))
+		if !ok {
+			t.Fatal("the error event was not understood")
+		}
+		if ev.Cause != "websocket connect failed" {
+			t.Errorf("cause = %q, want the module's complaint from the body", ev.Cause)
+		}
+	})
+
+	// A header still wins where one exists: a future subclass may grow one,
+	// and the body is the fallback rather than the replacement.
+	t.Run("a header outranks the body", func(t *testing.T) {
+		ev, _ := Normalize(esl.NewEvent(map[string]string{
+			"Event-Name":     "CUSTOM",
+			"Event-Subclass": "mod_audio_stream::error",
+			"Unique-ID":      "chan-a",
+			"Error":          "connection refused",
+		}, "something else"))
+		if ev.Cause != "connection refused" {
+			t.Errorf("cause = %q, want the header", ev.Cause)
+		}
+	})
+}
+
 // Subscribing is half of it: an event we understand but never asked for never
 // arrives.
 func TestTheMediaTapsEventsAreSubscribedTo(t *testing.T) {
