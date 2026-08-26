@@ -7,6 +7,28 @@
 set -e
 
 cd "$(dirname "$0")/../.."
+
+# The SPA first, because it is served from inside the binary (go:embed
+# web/dist) and go build will happily embed a stale one. Skipping this step
+# costs a debugging session rather than a compile error: on 2026-08-26 a
+# removed endpoint had already been replaced everywhere in web/src, and the
+# browser went on calling the old one from a bundle built the day before —
+# the failure looked like a bug in the new code and was not.
+#
+# Set AICC_SKIP_WEB_BUILD=1 to leave web/dist alone, for the loop where the
+# Vite dev server is serving the frontend and only Go is changing.
+#
+# Quiet on success, whole output on failure: the bundler narrates its plugin
+# configuration on every run, which would bury the one line this script exists
+# to print — but a build that broke has to say why.
+if [ "${AICC_SKIP_WEB_BUILD:-0}" != "1" ]; then
+  if ! web_out=$(cd web && npm run build 2>&1); then
+    printf '%s\n' "$web_out" >&2
+    echo "the SPA did not build; the binary would have embedded a stale one" >&2
+    exit 1
+  fi
+fi
+
 go build -o /tmp/aicc ./cmd/aicc
 
 pkill -f /tmp/aicc 2>/dev/null || true

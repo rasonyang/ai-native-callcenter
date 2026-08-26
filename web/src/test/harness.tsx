@@ -314,7 +314,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
         return json({ items, total: items.length })
       }
       if (path === '/callbacks') return json({ items: [] })
-      if (path === '/calls/dial') return json({ callId: CALL_ID })
+      if (path === '/calls') return json({ callId: CALL_ID })
       if (path.startsWith('/agent/')) return json(backend.presence)
       return json({ items: [] })
     }),

@@ -331,8 +331,14 @@ export interface paths {
         get: operations["listCalls"];
         put?: never;
         /**
-         * Place a platform call (AI outbound)
-         * @description Originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Idempotent by client-minted callId. Requires SUPERVISOR.
+         * Place a call
+         * @description One entry point for every call the platform places, told apart by kind.
+         *
+         *     AI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Requires SUPERVISOR.
+         *
+         *     AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.
+         *
+         *     Idempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.
          */
         post: operations["createCall"];
         delete?: never;
@@ -375,26 +381,6 @@ export interface paths {
         get: operations["listWaitingCalls"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/calls/dial": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Click-to-dial
-         * @description Rings the signed-in agent's own phone first; the destination is dialed when the agent answers. Requires the AGENT role, an agent profile and a signed-in phone.
-         */
-        post: operations["dialCall"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1628,29 +1614,25 @@ export interface components {
             /** @description The tones to emit, in order. 0-9, A-D, * and # are the only DTMF symbols there are. */
             digits: string;
         };
-        DialRequest: {
-            /** @description The number to call once the agent's own leg answers. */
-            destination: string;
-            userData?: components["schemas"]["UserData"];
-        };
-        DialResponse: {
-            /** Format: uuid */
-            callId: string;
-        };
-        /** @description Ask the platform to place a call. AI_OUTBOUND is the only kind so far. */
+        /** @description Ask the platform to place a call. Which fields apply depends on kind. */
         CreateCallRequest: {
             /**
              * Format: uuid
              * @description Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
              */
             callId?: string;
-            /** @enum {string} */
-            kind: "AI_OUTBOUND";
+            /**
+             * @description AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
+             * @enum {string}
+             */
+            kind: "AI_OUTBOUND" | "AGENT_OUTBOUND";
             /** @description The number to dial. */
             to: string;
-            /** @description The DID whose flow and caller id the call uses. */
+            /** @description AI_OUTBOUND only: the DID whose flow and caller id the call uses. */
             did?: string;
-            /** @description Overrides the DID's language when set. */
+            /** @description AGENT_OUTBOUND only: the extension whose phone is raised first. A signed-in agent may leave it out — the phone they signed in at is used — and may not name another's. A supervisor or an API-key caller has no phone of their own, so they must name one. */
+            extensionNumber?: string;
+            /** @description AI_OUTBOUND only: overrides the DID's language when set. */
             language?: string;
             userData?: components["schemas"]["UserData"];
         };
@@ -3126,6 +3108,7 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
         };
     };
     listMyCalls: {
@@ -3171,35 +3154,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             500: components["responses"]["InternalError"];
-        };
-    };
-    dialCall: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DialRequest"];
-            };
-        };
-        responses: {
-            /** @description The call is being placed. */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DialResponse"];
-                };
-            };
-            400: components["responses"]["BadRequest"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            409: components["responses"]["Conflict"];
-            502: components["responses"]["BadGateway"];
         };
     };
     answerCall: {

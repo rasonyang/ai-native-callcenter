@@ -11,74 +11,60 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
 // OutboundService places calls on request.
 type OutboundService interface {
-	Dial(ctx context.Context, agentExtension, destination string,
-		userData map[string]string, callcenterName string) (uuid.UUID, error)
+	Dial(ctx context.Context, req outbound.AgentDialRequest) (uuid.UUID, error)
 	DialAI(ctx context.Context, req outbound.AIDialRequest) (uuid.UUID, error)
 }
 
-// DialCall places a click-to-dial call: the agent's own phone rings first, and
-// the destination is dialled only once they pick up.
-func (s *Server) DialCall(w http.ResponseWriter, r *http.Request) {
-	identity, _ := identityFrom(r.Context())
-	agentID, err := s.agentDir.AgentIDForUser(r, identity.UserID)
-	if err != nil {
-		writeError(w, http.StatusForbidden, CodeForbidden, "no agent profile", nil)
-		return
-	}
-	presence := s.agents.Presence(agentID)
-	if presence.ExtensionNumber == "" {
-		writeError(w, http.StatusConflict, CodeConflict, "sign in to a phone first", nil)
-		return
-	}
-
-	var req api.DialRequest
-	if !decode(w, r, &req) {
-		return
-	}
-	var userData map[string]string
-	if req.UserData != nil {
-		if err := checkUserData(*req.UserData); err != nil {
-			writeError(w, http.StatusBadRequest, CodeUserDataTooLarge, err.Error(),
-				map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
-			return
-		}
-		userData = *req.UserData
-	}
-	// The switch's own name for this agent, so mod_callcenter can be told they
-	// are on a call and stop offering them queue calls while they are.
-	callID, err := s.outbound.Dial(r.Context(), presence.ExtensionNumber, req.Destination,
-		userData, s.agents.CallcenterNameFor(r.Context(), agentID))
-	if err != nil {
-		writeOutboundError(w, err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, api.DialResponse{CallID: callID})
-}
-
-// CreateCall places an AI outbound call.
+// CreateCall places a call: one entry point, told apart by kind.
+//
+// Both kinds create an OUTBOUND call and both are idempotent by a
+// client-minted callId, so what actually differs is who is raised first — the
+// customer, to be handed to the bot, or an agent's phone, to be joined to the
+// customer once they pick up. That is a parameter, not an endpoint, which is
+// what design 04 said before the click-to-dial path grew one of its own.
 func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 	var req api.CreateCallRequest
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.Kind != api.CreateCallRequestKindAIOUTBOUND {
-		writeError(w, http.StatusBadRequest, CodeValidationFailed, "kind must be AI_OUTBOUND",
-			map[string]any{"allowed": []string{string(api.CreateCallRequestKindAIOUTBOUND)}})
+	if !req.Kind.Valid() {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "unknown kind",
+			map[string]any{"allowed": []string{
+				string(api.CreateCallRequestKindAIOUTBOUND),
+				string(api.CreateCallRequestKindAGENTOUTBOUND),
+			}})
 		return
 	}
-
 	if req.UserData != nil {
 		if err := checkUserData(*req.UserData); err != nil {
 			writeError(w, http.StatusBadRequest, CodeUserDataTooLarge, err.Error(),
 				map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
 			return
 		}
+	}
+
+	switch req.Kind {
+	case api.CreateCallRequestKindAIOUTBOUND:
+		s.createAICall(w, r, req)
+	case api.CreateCallRequestKindAGENTOUTBOUND:
+		s.createAgentCall(w, r, req)
+	}
+}
+
+// createAICall originates the customer leg and hands whoever answers to the
+// bot running the DID's flow. Placing one is an operations decision, so it
+// asks for SUPERVISOR — a role check the router used to make, and which moved
+// in here when the two kinds became one route with two answers.
+func (s *Server) createAICall(w http.ResponseWriter, r *http.Request, req api.CreateCallRequest) {
+	if !s.hasRole(w, r, auth.RoleSupervisor) {
+		return
 	}
 
 	dial := outbound.AIDialRequest{To: req.To}
@@ -99,14 +85,150 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, outbound.ErrAlreadyPlaced) {
 			// The retry did its job: the call exists. Point at it.
-			isDuplicate := true
-			writeJSON(w, http.StatusOK, api.CreateCallResponse{CallID: callID, IsDuplicate: &isDuplicate})
+			writeDuplicate(w, callID)
 			return
 		}
 		writeOutboundError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
+}
+
+// createAgentCall places a click-to-dial: an agent's phone is raised first and
+// the destination is dialled when that leg answers.
+//
+// Who may name which phone is the whole of the authorization here. An agent
+// dials from the phone they signed in at and may name no other, which is the
+// same rule their call-control operations follow — a signed-in identity acts
+// as itself. A supervisor and the API key have no phone of their own, so they
+// must say which one to raise, and the phone is checked against the switch
+// rather than against presence: a system integrating with this places calls
+// for agents who are on the floor with a registered phone and never signed
+// into this application at all, and presence has nothing to say about them.
+func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api.CreateCallRequest) {
+	identity, _ := identityFrom(r.Context())
+
+	var extension, callcenterName string
+	switch {
+	case req.ExtensionNumber == nil || *req.ExtensionNumber == "":
+		// No extension named: the caller means their own, so they had better
+		// have one.
+		agentID, ok := s.signedInAgent(r, identity)
+		if !ok {
+			writeError(w, http.StatusBadRequest, CodeValidationFailed,
+				"name the extension to dial from", nil)
+			return
+		}
+		presence := s.agents.Presence(agentID)
+		if presence.ExtensionNumber == "" {
+			writeError(w, http.StatusConflict, CodeConflict, "sign in to a phone first", nil)
+			return
+		}
+		extension = presence.ExtensionNumber
+		// The switch's own name for this agent, so mod_callcenter can be told
+		// they are on a call and stop offering them queue calls while they are.
+		callcenterName = s.agents.CallcenterNameFor(r.Context(), agentID)
+
+	default:
+		extension = *req.ExtensionNumber
+		if agentID, ok := s.signedInAgent(r, identity); ok &&
+			!identity.Role.AtLeast(auth.RoleSupervisor) {
+			// An agent naming a phone may only name their own. Rejected
+			// rather than quietly redirected: a cockpit that sent the wrong
+			// extension has a bug, and dialling from the right one anyway
+			// would hide it.
+			if s.agents.Presence(agentID).ExtensionNumber != extension {
+				writeError(w, http.StatusForbidden, CodeForbidden,
+					"an agent dials from their own phone", nil)
+				return
+			}
+		}
+		if !s.isPhoneReachable(w, extension) {
+			return
+		}
+		// Somebody may still be signed in at the named phone; if they are,
+		// their queues need telling just the same.
+		if agentID, ok := s.agents.AgentAtExtension(extension); ok {
+			callcenterName = s.agents.CallcenterNameFor(r.Context(), agentID)
+		}
+	}
+
+	dial := outbound.AgentDialRequest{
+		AgentExtension: extension,
+		To:             req.To,
+		CallcenterName: callcenterName,
+	}
+	if req.UserData != nil {
+		dial.UserData = *req.UserData
+	}
+	if req.CallID != nil {
+		dial.CallID = *req.CallID
+	}
+
+	callID, err := s.outbound.Dial(r.Context(), dial)
+	if err != nil {
+		if errors.Is(err, outbound.ErrAlreadyPlaced) {
+			writeDuplicate(w, callID)
+			return
+		}
+		writeOutboundError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
+}
+
+// hasRole answers the role question the router no longer can, because one
+// route now serves two operations with two different answers.
+func (s *Server) hasRole(w http.ResponseWriter, r *http.Request, want auth.Role) bool {
+	identity, ok := identityFrom(r.Context())
+	if !ok || !identity.Role.AtLeast(want) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "insufficient role",
+			map[string]any{"requiredRole": string(want)})
+		return false
+	}
+	return true
+}
+
+// signedInAgent resolves the agent profile behind a request, if there is one.
+// The API key has no user and therefore never has one.
+func (s *Server) signedInAgent(r *http.Request, identity auth.Identity) (uuid.UUID, bool) {
+	if isMachine(identity) {
+		return uuid.Nil, false
+	}
+	agentID, err := s.agentDir.AgentIDForUser(r, identity.UserID)
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return agentID, true
+}
+
+// isPhoneReachable refuses a call at a phone that cannot take it, and says
+// which way it cannot.
+//
+// An extension the switch has never mentioned is refused as unknown rather
+// than as unregistered: the two are different mistakes — a typo in an
+// integration versus a phone that is switched off — and an operator reading
+// the error has to be able to tell them apart.
+func (s *Server) isPhoneReachable(w http.ResponseWriter, extension string) bool {
+	isRegistered, isInService, isKnown := s.agents.DeviceAtExtension(extension)
+	switch {
+	case !isKnown:
+		writeError(w, http.StatusConflict, CodeConflict, "no such phone", nil)
+		return false
+	case !isRegistered:
+		writeError(w, http.StatusConflict, CodeConflict, "the phone is not registered", nil)
+		return false
+	case !isInService:
+		writeError(w, http.StatusConflict, CodeConflict, "the phone is not answering", nil)
+		return false
+	}
+	return true
+}
+
+// writeDuplicate answers a retry that named a call already placed.
+func writeDuplicate(w http.ResponseWriter, callID uuid.UUID) {
+	isDuplicate := true
+	writeJSON(w, http.StatusOK, api.CreateCallResponse{CallID: callID, IsDuplicate: &isDuplicate})
 }
 
 // The bounds are the call's, not this layer's: telephony.MergeUserData holds

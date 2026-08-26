@@ -192,21 +192,65 @@ func isDialable(number string) bool {
 	return true
 }
 
+// AgentDialRequest is a click-to-dial: which phone to raise, and what to dial
+// from it once somebody picks up.
+type AgentDialRequest struct {
+	// CallID makes retries idempotent; zero mints a fresh identity.
+	CallID uuid.UUID
+	// AgentExtension is the phone raised first.
+	AgentExtension string
+	// To is the number dialled once that phone answers.
+	To string
+	// CallcenterName is the switch's own name for the agent at that phone, so
+	// its queues can be told they are busy. Empty when nobody is signed in
+	// there — a call placed for an agent who never logged into this
+	// application still goes out, it simply has no queue membership to guard.
+	CallcenterName string
+	// UserData is business data to carry into the call and its ledger row.
+	UserData map[string]string
+}
+
 // Dial is click-to-dial: ring the agent first, and only dial out once the
-// agent leg is up. The agent clicked, so their leg auto-answers; the answered
-// leg is then transferred into the dialplan at the destination, which routes
-// it the same way a phone dialling that number would be routed — no second
-// copy of the routing rules here, and no loopback legs to trace.
-func (s *Service) Dial(ctx context.Context, agentExtension, destination string,
-	userData map[string]string, callcenterName string) (uuid.UUID, error) {
+// agent leg is up. The answered leg is then transferred into the dialplan at
+// the destination, which routes it the same way a phone dialling that number
+// would be routed — no second copy of the routing rules here, and no loopback
+// legs to trace.
+//
+// The agent's phone auto-answers, whoever asked for the call. That is
+// obviously right when the agent clicked, and it is a deliberate choice when a
+// system placed the call for them (owner directive 2026-08-26): this is
+// preview dialing, where the phone going live is the notification. An agent
+// whose phone should ring instead would need a second mode, and there is no
+// call for one yet.
+func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, error) {
+	agentExtension, destination := req.AgentExtension, req.To
+	userData, callcenterName := req.UserData, req.CallcenterName
 	if !isDialable(destination) || !isDialable(agentExtension) {
 		return uuid.Nil, ErrBadNumber
 	}
+
+	callID := req.CallID
+	if callID == uuid.Nil {
+		callID = uuid.Must(uuid.NewV7())
+	} else {
+		// The same idempotency record DialAI uses, and for a sharper reason
+		// here: the caller is a system that retries on a timeout, and a
+		// retried click-to-dial raises the agent's phone a second time while
+		// they are still talking on the first one.
+		if done, err := s.hasCDR(ctx, callID); err != nil {
+			return uuid.Nil, err
+		} else if done {
+			return callID, ErrAlreadyPlaced
+		}
+		if s.isLive != nil && s.isLive(callID) {
+			return callID, ErrAlreadyPlaced
+		}
+	}
+
 	if err := s.limiter.Take(ctx); err != nil {
 		return uuid.Nil, err
 	}
 
-	callID := uuid.Must(uuid.NewV7())
 	agentLeg := uuid.New()
 
 	// Before the originate, for the same reason as an AI call: the agent's

@@ -58,12 +58,14 @@ api-check: api-lint ## CI gate: contract lints and committed generated code matc
 		|| { git status --short -- internal/api web/src/generated; echo 'untracked generated files'; exit 1; }
 
 BASE ?= main
+# Breaking changes that were reviewed and accepted, one pinned line each.
+API_BREAKING_IGNORE ?= .oasdiff-breaking-ignore.txt
 
 .PHONY: api-breaking
 api-breaking: ## Fail on undeclared breaking API changes vs BASE (default main)
 	@base_spec=$$(mktemp); \
 	if git show $(BASE):docs/openapi.json > $$base_spec 2>/dev/null; then \
-		go tool oasdiff breaking --fail-on ERR $$base_spec docs/openapi.json; status=$$?; \
+		go tool oasdiff breaking --fail-on ERR --err-ignore $(API_BREAKING_IGNORE) $$base_spec docs/openapi.json; status=$$?; \
 	else \
 		echo "no contract on $(BASE); nothing to compare"; status=0; \
 	fi; \

@@ -36,7 +36,13 @@ func placeCall(t *testing.T, body string) (*httptest.ResponseRecorder, *recordin
 	dialer := &recordingOutbound{}
 	s := &Server{outbound: dialer}
 	w := httptest.NewRecorder()
-	s.CreateCall(w, httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(body)))
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(body))
+	// Placing an AI call is an operations decision, and the role check for it
+	// now lives in the handler rather than on the route.
+	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
+		UserID: uuid.New(), Role: auth.RoleSupervisor,
+	}))
+	s.CreateCall(w, r)
 	return w, dialer
 }
 
@@ -162,28 +168,20 @@ func errorCodeOf(t *testing.T, w *httptest.ResponseRecorder) string {
 // same limits, same carrier — because two ways of saying the same thing is
 // how a second scheme starts.
 func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
-	dial := func(body string) (*httptest.ResponseRecorder, *recordingDialer) {
-		dialer := &recordingDialer{}
-		s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
-		w := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/calls/dial", strings.NewReader(body))
-		req = req.WithContext(contextWithIdentity(req.Context(), auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}))
-		s.DialCall(w, req)
-		return w, dialer
-	}
-
-	w, dialer := dial(`{"destination":"18688886669","userData":{"orderId":"9999000000000000"}}`)
+	w, dialer := agentDial(t, agentIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":{"orderId":"9999000000000000"}}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
-	if len(dialer.userData) == 0 {
+	if len(dialer.got.UserData) == 0 {
 		t.Fatal("the dial carried no business data at all")
 	}
-	if got := dialer.userData["orderId"]; got != "9999000000000000" {
+	if got := dialer.got.UserData["orderId"]; got != "9999000000000000" {
 		t.Errorf("orderId = %q", got)
 	}
 
-	w, _ = dial(`{"destination":"18688886669","userData":` + oversizedValue() + `}`)
+	w, _ = agentDial(t, agentIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":`+oversizedValue()+`}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("an oversized value returned %d, want 400", w.Code)
 	}
@@ -199,36 +197,168 @@ func oversizedValue() string {
 
 type recordingDialer struct {
 	stubOutbound
-	userData       map[string]string
-	callcenterName string
+	got outbound.AgentDialRequest
 }
 
-func (d *recordingDialer) Dial(_ context.Context, _, _ string, userData map[string]string,
-	callcenterName string) (uuid.UUID, error) {
-	d.userData, d.callcenterName = userData, callcenterName
+func (d *recordingDialer) Dial(_ context.Context, req outbound.AgentDialRequest) (uuid.UUID, error) {
+	d.got = req
 	return uuid.New(), nil
+}
+
+func agentIdentity() auth.Identity {
+	return auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}
+}
+
+// agentDial places a click-to-dial as whoever the identity says, against a
+// stub where extension 1008 is the signed-in agent's phone and 1009 is a
+// registered phone with nobody signed in at it.
+func agentDial(t *testing.T, identity auth.Identity, body string) (*httptest.ResponseRecorder, *recordingDialer) {
+	t.Helper()
+	dialer := &recordingDialer{}
+	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(body))
+	r = r.WithContext(contextWithIdentity(r.Context(), identity))
+	w := httptest.NewRecorder()
+	s.CreateCall(w, r)
+	return w, dialer
 }
 
 // The handler is where the agent's switch-side name comes from, so this is
 // where a dial that forgot it would go unnoticed.
 func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
-	dialer := &recordingDialer{}
-	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/dial",
-		strings.NewReader(`{"destination":"13912345678"}`))
-	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleAgent,
-	}))
-	w := httptest.NewRecorder()
-	s.DialCall(w, r)
-
+	w, dialer := agentDial(t, agentIdentity(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
-	if dialer.callcenterName != "agent-probe" {
+	if dialer.got.CallcenterName != "agent-probe" {
 		t.Errorf("dialled with callcenterName %q, want the switch's name for this agent — "+
 			"without it mod_callcenter keeps offering them queue calls mid-conversation",
-			dialer.callcenterName)
+			dialer.got.CallcenterName)
+	}
+	if dialer.got.AgentExtension != "1008" {
+		t.Errorf("raised %q, want the phone the agent signed in at", dialer.got.AgentExtension)
+	}
+}
+
+// The requirement this whole path exists for: a system places the call, the
+// agent's phone is registered, and nobody has signed into this application.
+// Presence has nothing to say about such an agent, so the phone is what is
+// asked about.
+func TestASystemDialsForAnAgentWhoNeverSignedIn(t *testing.T) {
+	w, dialer := agentDial(t, machineIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.AgentExtension != "1009" {
+		t.Errorf("raised %q, want the extension the request named", dialer.got.AgentExtension)
+	}
+	// Nobody is signed in there, so there is no queue membership to guard and
+	// nothing for mod_callcenter to be told. Empty is the answer, not a gap.
+	if dialer.got.CallcenterName != "" {
+		t.Errorf("callcenterName = %q, want empty for a phone nobody is signed in at",
+			dialer.got.CallcenterName)
+	}
+}
+
+// Without an extension there is no phone to raise, and the API key has none of
+// its own to fall back on. Refused rather than guessed.
+func TestASystemMustSayWhichPhoneToRaise(t *testing.T) {
+	w, _ := agentDial(t, machineIdentity(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+}
+
+// A phone that cannot take the call is refused before it is rung, and the
+// refusal says which way it cannot: an extension nobody has ever registered is
+// a typo in the integration, a phone that is switched off is an operations
+// problem, and an operator reading the error has to tell them apart.
+func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
+	for _, tc := range []struct {
+		name, extension, want string
+	}{
+		{"never seen", "1999", "no such phone"},
+		{"not registered", "1010", "the phone is not registered"},
+		{"not answering", "1011", "the phone is not answering"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, dialer := agentDial(t, machineIdentity(),
+				`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"`+tc.extension+`"}`)
+			if w.Code != http.StatusConflict {
+				t.Fatalf("http = %d: %s", w.Code, w.Body)
+			}
+			if !strings.Contains(w.Body.String(), tc.want) {
+				t.Errorf("message = %s, want %q", w.Body, tc.want)
+			}
+			if dialer.got.AgentExtension != "" {
+				t.Error("the phone was rung anyway")
+			}
+		})
+	}
+}
+
+// An agent acts as themselves. A cockpit that sent somebody else's extension
+// has a bug, and dialling from the right phone anyway would hide it.
+func TestAnAgentMayNotDialFromAnotherAgentsPhone(t *testing.T) {
+	w, dialer := agentDial(t, agentIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.AgentExtension != "" {
+		t.Error("somebody else's phone was rung")
+	}
+}
+
+// Naming their own phone is not the same mistake, and is allowed: a client
+// that fills the field in from its own presence is being explicit, not
+// overreaching.
+func TestAnAgentMayNameTheirOwnPhone(t *testing.T) {
+	w, dialer := agentDial(t, agentIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1008"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.AgentExtension != "1008" {
+		t.Errorf("raised %q", dialer.got.AgentExtension)
+	}
+}
+
+// Placing an AI call is an operations decision, and the route no longer guards
+// it — one path now serves two kinds with two different answers, so the check
+// moved into the handler and this is what keeps it there.
+func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
+	dialer := &recordingOutbound{}
+	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls",
+		strings.NewReader(`{"kind":"AI_OUTBOUND","to":"18600000000","did":"95012"}`))
+	r = r.WithContext(contextWithIdentity(r.Context(), agentIdentity()))
+	w := httptest.NewRecorder()
+	s.CreateCall(w, r)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.To != "" {
+		t.Error("the call went out anyway")
+	}
+}
+
+// A retry from a system that timed out must not raise the agent's phone a
+// second time while they are still talking on the first call, so the
+// client-minted id is carried through to the service that keeps the record.
+func TestAClickToDialCarriesTheClientMintedIDThroughToTheService(t *testing.T) {
+	callID := uuid.New()
+	w, dialer := agentDial(t, machineIdentity(),
+		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009","callId":"`+
+			callID.String()+`"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.CallID != callID {
+		t.Errorf("callId = %v, want the one the client minted (%v) — without it a "+
+			"retried dial rings the agent again", dialer.got.CallID, callID)
 	}
 }
 
@@ -242,14 +372,34 @@ func (dialerDirectory) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, er
 	return nil, nil
 }
 
-// dialerPresence is stubAgents with a phone: click-to-dial refuses an agent
-// who is not signed in at one.
+// dialerPresence is stubAgents with a floor of phones: 1008 is where the
+// signed-in agent sits, 1009 is registered with nobody signed in at it, 1010
+// is known but unregistered and 1011 is registered but not answering.
 type dialerPresence struct{ stubAgents }
 
 func (dialerPresence) CallcenterNameFor(context.Context, uuid.UUID) string { return "agent-probe" }
 
 func (dialerPresence) Presence(uuid.UUID) agents.Presence {
 	return agents.Presence{ExtensionNumber: "1008"}
+}
+
+func (dialerPresence) DeviceAtExtension(extension string) (isRegistered, isInService, isKnown bool) {
+	switch extension {
+	case "1008", "1009":
+		return true, true, true
+	case "1010":
+		return false, false, true
+	case "1011":
+		return true, false, true
+	}
+	return false, false, false
+}
+
+func (dialerPresence) AgentAtExtension(extension string) (uuid.UUID, bool) {
+	if extension == "1008" {
+		return uuid.New(), true
+	}
+	return uuid.Nil, false
 }
 
 // The bounds are written down twice — once in the contract, once as the Go
@@ -316,7 +466,6 @@ func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 	// own copy — the drift this extraction exists to end.
 	for _, ref := range []struct{ schema, want string }{
 		{"CreateCallRequest", "#/components/schemas/UserData"},
-		{"DialRequest", "#/components/schemas/UserData"},
 		{"PatchUserDataRequest", "#/components/schemas/UserDataPatch"},
 	} {
 		got := dig(doc, "components", "schemas", ref.schema, "properties", "userData", "$ref")

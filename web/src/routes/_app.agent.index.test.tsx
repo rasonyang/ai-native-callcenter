@@ -340,8 +340,8 @@ describe('dial out', () => {
       expect(api.commands).toContainEqual(
         expect.objectContaining({
           method: 'POST',
-          path: '/calls/dial',
-          body: { destination: '95011' },
+          path: '/calls',
+          body: { kind: 'AGENT_OUTBOUND', to: '95011' },
         }),
       ),
     )

@@ -265,8 +265,14 @@ func (stubAgents) Ready(context.Context, uuid.UUID) (agents.Presence, error) {
 func (stubAgents) NotReady(context.Context, uuid.UUID, agents.Reason) (agents.Presence, error) {
 	return agents.Presence{}, nil
 }
-func (stubAgents) Presence(uuid.UUID) agents.Presence                   { return agents.Presence{} }
-func (stubAgents) CallcenterNameFor(context.Context, uuid.UUID) string  { return "" }
+func (stubAgents) Presence(uuid.UUID) agents.Presence                  { return agents.Presence{} }
+func (stubAgents) CallcenterNameFor(context.Context, uuid.UUID) string { return "" }
+
+// A phone the switch has never mentioned, which is what an extension nobody
+// named looks like. Stubs that want a reachable one override this.
+func (stubAgents) DeviceAtExtension(string) (bool, bool, bool) { return false, false, false }
+func (stubAgents) AgentAtExtension(string) (uuid.UUID, bool)   { return uuid.Nil, false }
+
 func (stubAgents) Roster(context.Context) ([]agents.RosterEntry, error) { return nil, nil }
 func (stubAgents) CreateAgent(context.Context, agents.AgentConfig) (agents.AgentConfig, error) {
 	return agents.AgentConfig{}, nil
@@ -363,7 +369,7 @@ func (stubContacts) Delete(context.Context, uuid.UUID) error { return nil }
 
 type stubOutbound struct{}
 
-func (stubOutbound) Dial(context.Context, string, string, map[string]string, string) (uuid.UUID, error) {
+func (stubOutbound) Dial(context.Context, outbound.AgentDialRequest) (uuid.UUID, error) {
 	return uuid.Nil, nil
 }
 func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, error) {

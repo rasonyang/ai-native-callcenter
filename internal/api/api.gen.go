@@ -180,12 +180,15 @@ func (e CompleteCallbackRequestStatus) Valid() bool {
 
 // Defines values for CreateCallRequestKind.
 const (
-	CreateCallRequestKindAIOUTBOUND CreateCallRequestKind = "AI_OUTBOUND"
+	CreateCallRequestKindAGENTOUTBOUND CreateCallRequestKind = "AGENT_OUTBOUND"
+	CreateCallRequestKindAIOUTBOUND    CreateCallRequestKind = "AI_OUTBOUND"
 )
 
 // Valid indicates whether the value is a known member of the CreateCallRequestKind enum.
 func (e CreateCallRequestKind) Valid() bool {
 	switch e {
+	case CreateCallRequestKindAGENTOUTBOUND:
+		return true
 	case CreateCallRequestKindAIOUTBOUND:
 		return true
 	default:
@@ -1031,16 +1034,21 @@ type ContactWrite struct {
 	Tags        *[]string `json:"tags,omitempty"`
 }
 
-// CreateCallRequest Ask the platform to place a call. AI_OUTBOUND is the only kind so far.
+// CreateCallRequest Ask the platform to place a call. Which fields apply depends on kind.
 type CreateCallRequest struct {
 	// CallID Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
 	CallID *openapi_types.UUID `json:"callId,omitempty"`
 
-	// DID The DID whose flow and caller id the call uses.
-	DID  *string               `json:"did,omitempty"`
+	// DID AI_OUTBOUND only: the DID whose flow and caller id the call uses.
+	DID *string `json:"did,omitempty"`
+
+	// ExtensionNumber AGENT_OUTBOUND only: the extension whose phone is raised first. A signed-in agent may leave it out — the phone they signed in at is used — and may not name another's. A supervisor or an API-key caller has no phone of their own, so they must name one.
+	ExtensionNumber *string `json:"extensionNumber,omitempty"`
+
+	// Kind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
 	Kind CreateCallRequestKind `json:"kind"`
 
-	// Language Overrides the DID's language when set.
+	// Language AI_OUTBOUND only: overrides the DID's language when set.
 	Language *string `json:"language,omitempty"`
 
 	// To The number to dial.
@@ -1050,7 +1058,7 @@ type CreateCallRequest struct {
 	UserData *UserData `json:"userData,omitempty"`
 }
 
-// CreateCallRequestKind defines model for CreateCallRequest.Kind.
+// CreateCallRequestKind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
 type CreateCallRequestKind string
 
 // CreateCallResponse defines model for CreateCallResponse.
@@ -1152,20 +1160,6 @@ type DailyReport struct {
 // DailyReportList defines model for DailyReportList.
 type DailyReportList struct {
 	Items []DailyReport `json:"items"`
-}
-
-// DialRequest defines model for DialRequest.
-type DialRequest struct {
-	// Destination The number to call once the agent's own leg answers.
-	Destination string `json:"destination"`
-
-	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
-	UserData *UserData `json:"userData,omitempty"`
-}
-
-// DialResponse defines model for DialResponse.
-type DialResponse struct {
-	CallID openapi_types.UUID `json:"callId"`
 }
 
 // Disposition One word an agent can file a call under. The code is stable; the label is what agents read and is the operator's to change.
@@ -2046,9 +2040,6 @@ type CompleteCallbackJSONRequestBody = CompleteCallbackRequest
 // CreateCallJSONRequestBody defines body for CreateCall for application/json ContentType.
 type CreateCallJSONRequestBody = CreateCallRequest
 
-// DialCallJSONRequestBody defines body for DialCall for application/json ContentType.
-type DialCallJSONRequestBody = DialRequest
-
 // SendCallDTMFJSONRequestBody defines body for SendCallDTMF for application/json ContentType.
 type SendCallDTMFJSONRequestBody = DTMFRequest
 
@@ -2168,12 +2159,9 @@ type ServerInterface interface {
 	// ListCalls Every live call
 	// (GET /calls)
 	ListCalls(w http.ResponseWriter, r *http.Request)
-	// CreateCall Place a platform call (AI outbound)
+	// CreateCall Place a call
 	// (POST /calls)
 	CreateCall(w http.ResponseWriter, r *http.Request)
-	// DialCall Click-to-dial
-	// (POST /calls/dial)
-	DialCall(w http.ResponseWriter, r *http.Request)
 	// ListMyCalls The calls the caller is a party to
 	// (GET /calls/mine)
 	ListMyCalls(w http.ResponseWriter, r *http.Request)
@@ -2468,15 +2456,9 @@ func (_ Unimplemented) ListCalls(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// CreateCall Place a platform call (AI outbound)
+// CreateCall Place a call
 // (POST /calls)
 func (_ Unimplemented) CreateCall(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusNotImplemented)
-}
-
-// DialCall Click-to-dial
-// (POST /calls/dial)
-func (_ Unimplemented) DialCall(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3299,20 +3281,6 @@ func (siw *ServerInterfaceWrapper) CreateCall(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateCall(w, r)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// DialCall operation middleware
-func (siw *ServerInterfaceWrapper) DialCall(w http.ResponseWriter, r *http.Request) {
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DialCall(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5174,9 +5142,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls", wrapper.CreateCall)
-	})
-	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/calls/dial", wrapper.DialCall)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/calls/mine", wrapper.ListMyCalls)

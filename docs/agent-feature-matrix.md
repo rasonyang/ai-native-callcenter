@@ -38,7 +38,7 @@ Two hard facts frame everything below:
 | 13 | Left card hold / retrieve | `hold` / `retrieve` | `/hold` · `/retrieve` | `routes/_app.agent.index.tsx:112` |
 | 14 | Left card transfer popover | `transfer` | `/transfer` | `routes/_app.agent.index.tsx:140` |
 | 15 | Left card hangup | `hangup` | `/hangup` | `routes/_app.agent.index.tsx:124` |
-| 16 | Dial card: number input + "Dial" | `useMutation(callApi.dial)` | `POST /calls/dial` | `routes/_app.agent.index.tsx:193` |
+| 16 | Dial card: number input + "Dial" | `useMutation(callApi.dial)` | `POST /calls` (`AGENT_OUTBOUND`) | `routes/_app.agent.index.tsx:193` |
 | 17 | Dial card: keypad popover `0-9 * #` | `KeypadButton` → appends to the input | none (composes a number) | `routes/_app.agent.index.tsx:238` |
 | 18 | Callbacks card (open list) + "View all" link | `useCallbacks('OPEN')` | `GET /callbacks` | `routes/_app.agent.index.tsx:272` |
 | 19 | Caller card: number, dialled DID, badges, `userData` | `CallerCard` | `GET /calls/mine` | `routes/_app.agent.index.tsx:311` |
@@ -95,7 +95,7 @@ executes it over ESL. That is by design and is not a gap.
 | Conference | rendered `disabled` | none | **needs UI, rendered disabled** — no backend capability |
 | In-call DTMF send | popover, no-op | none at inventory time | **built this round** — `POST /calls/{id}/dtmf`, `uuid_send_dtmf`. Ours works; the reference's is a no-op |
 | Keypad → compose an outbound number | in the bar's dial popover | in the page's Dial card | **needs wiring** — add the same popover to the topbar bar, reusing `callApi.dial` |
-| Outbound dial | mock | `POST /calls/dial` | **keep** |
+| Outbound dial | mock | `POST /calls` (`AGENT_OUTBOUND`) | **keep** |
 | Presence switch (ready / not-ready / sign out) | mock | four endpoints | **keep** |
 | Time-in-state / call timers | mock | browser-derived | **keep** |
 | Queue subscription (my queue list) | mock array | none for an agent | **reference-only, no data source** |

@@ -4,7 +4,7 @@
     "title": "AI Native Call Center API",
     "version": "1.0.0",
     "summary": "REST and SSE surface of the AI-native call center.",
-    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
+    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. A system integrating without a browser authenticates instead with the X-AICC-Api-Key header, on the operations whose security says so. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -993,12 +993,15 @@
         "tags": [
           "calls"
         ],
-        "summary": "Place a platform call (AI outbound)",
-        "description": "Originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Idempotent by client-minted callId. Requires SUPERVISOR.",
+        "summary": "Place a call",
+        "description": "One entry point for every call the platform places, told apart by kind.\n\nAI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Requires SUPERVISOR.\n\nAGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.\n\nIdempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.",
         "security": [
           {
             "cookieSession": [],
             "csrfHeader": []
+          },
+          {
+            "apiKeyHeader": []
           }
         ],
         "requestBody": {
@@ -1046,6 +1049,9 @@
           },
           "502": {
             "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1105,59 +1111,6 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
-          }
-        }
-      }
-    },
-    "/calls/dial": {
-      "post": {
-        "operationId": "dialCall",
-        "tags": [
-          "calls"
-        ],
-        "summary": "Click-to-dial",
-        "description": "Rings the signed-in agent's own phone first; the destination is dialed when the agent answers. Requires the AGENT role, an agent profile and a signed-in phone.",
-        "security": [
-          {
-            "cookieSession": [],
-            "csrfHeader": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DialRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "The call is being placed.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DialResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "502": {
-            "$ref": "#/components/responses/BadGateway"
           }
         }
       }
@@ -4139,6 +4092,12 @@
         "in": "header",
         "name": "X-AICC-Csrf",
         "description": "Anti-CSRF header required on every mutating request (any method other than GET, HEAD, OPTIONS). Any non-empty value passes; requiring a custom header forces a CORS preflight on cross-origin callers. Missing header: 403 FORBIDDEN."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-AICC-Api-Key",
+        "description": "Shared secret (AICC_API_KEY) for a system placing calls without a browser session. It authenticates the deployment's integrator, not a person, and is accepted only on the operations that say so. A request carrying it needs no session cookie and no X-AICC-Csrf header — CSRF protects a cookie, and this caller sends none. Unset AICC_API_KEY leaves the machine path closed."
       }
     },
     "responses": {
@@ -5069,36 +5028,9 @@
           "digits"
         ]
       },
-      "DialRequest": {
-        "type": "object",
-        "properties": {
-          "destination": {
-            "type": "string",
-            "description": "The number to call once the agent's own leg answers."
-          },
-          "userData": {
-            "$ref": "#/components/schemas/UserData"
-          }
-        },
-        "required": [
-          "destination"
-        ]
-      },
-      "DialResponse": {
-        "type": "object",
-        "properties": {
-          "callId": {
-            "type": "string",
-            "format": "uuid"
-          }
-        },
-        "required": [
-          "callId"
-        ]
-      },
       "CreateCallRequest": {
         "type": "object",
-        "description": "Ask the platform to place a call. AI_OUTBOUND is the only kind so far.",
+        "description": "Ask the platform to place a call. Which fields apply depends on kind.",
         "properties": {
           "callId": {
             "type": "string",
@@ -5108,8 +5040,10 @@
           "kind": {
             "type": "string",
             "enum": [
-              "AI_OUTBOUND"
-            ]
+              "AI_OUTBOUND",
+              "AGENT_OUTBOUND"
+            ],
+            "description": "AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND."
           },
           "to": {
             "type": "string",
@@ -5117,11 +5051,15 @@
           },
           "did": {
             "type": "string",
-            "description": "The DID whose flow and caller id the call uses."
+            "description": "AI_OUTBOUND only: the DID whose flow and caller id the call uses."
+          },
+          "extensionNumber": {
+            "type": "string",
+            "description": "AGENT_OUTBOUND only: the extension whose phone is raised first. A signed-in agent may leave it out — the phone they signed in at is used — and may not name another's. A supervisor or an API-key caller has no phone of their own, so they must name one."
           },
           "language": {
             "type": "string",
-            "description": "Overrides the DID's language when set."
+            "description": "AI_OUTBOUND only: overrides the DID's language when set."
           },
           "userData": {
             "$ref": "#/components/schemas/UserData"

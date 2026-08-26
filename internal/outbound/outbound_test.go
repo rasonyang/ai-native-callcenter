@@ -248,7 +248,7 @@ func TestAnAgentsOwnCallIsTrackedSoQueuesLeaveThemAlone(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, "agent-wei"); err != nil {
+	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "13912345678", CallcenterName: "agent-wei"}); err != nil {
 		t.Fatal(err)
 	}
 	got := sw.lastOriginate().vars["execute_on_ring"]
@@ -263,7 +263,7 @@ func TestADialGoesOutEvenWhenTheSwitchHasNoNameForTheAgent(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	if _, err := s.Dial(context.Background(), "1008", "13912345678", nil, ""); err != nil {
+	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "13912345678", CallcenterName: ""}); err != nil {
 		t.Fatalf("the dial was refused because the agent had no callcenter name: %v", err)
 	}
 	if got, tracked := sw.lastOriginate().vars["execute_on_ring"]; tracked {
@@ -277,7 +277,7 @@ func TestDialIsAgentFirst(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	callID, err := s.Dial(context.Background(), "1001", "13912345678", nil, "agent-1001")
+	callID, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1001", To: "13912345678", CallcenterName: "agent-1001"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
-	if _, err := s.Dial(context.Background(), "1001", "13912345678", nil, "agent-1001"); err != nil {
+	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1001", To: "13912345678", CallcenterName: "agent-1001"}); err != nil {
 		t.Fatal(err)
 	}
 	leg := sw.lastOriginate().partyID.String()
@@ -401,6 +401,49 @@ func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
 	}
 }
 
+// The same guard on the click-to-dial path, where it protects something more
+// visible than a duplicate ledger row: a system that timed out and retried
+// would otherwise raise the agent's phone a second time while they are still
+// talking on the first call.
+func TestAClickToDialIsIdempotentAgainstTheLedger(t *testing.T) {
+	callID := uuid.New()
+	sw := &fakeSwitch{}
+	s := testService(t, sw, map[uuid.UUID]bool{callID: true})
+
+	got, err := s.Dial(context.Background(), AgentDialRequest{
+		CallID: callID, AgentExtension: "1009", To: "13912345678",
+	})
+	if err != ErrAlreadyPlaced {
+		t.Fatalf("err = %v, want ErrAlreadyPlaced", err)
+	}
+	if got != callID {
+		t.Errorf("callID = %v, want the retry to be pointed at the call it named", got)
+	}
+	if len(sw.originates) != 0 {
+		t.Error("the agent's phone was rung a second time for a call already placed")
+	}
+}
+
+// Without a client-minted id there is nothing to be idempotent against, and
+// the call still has to go out: a browser that clicks dial mints no id.
+func TestAClickToDialWithoutAnIDStillGoesOut(t *testing.T) {
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+
+	callID, err := s.Dial(context.Background(), AgentDialRequest{
+		AgentExtension: "1009", To: "13912345678",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callID == uuid.Nil {
+		t.Error("the call was placed without an identity")
+	}
+	if len(sw.originates) != 1 {
+		t.Errorf("originates = %d, want the agent's phone rung once", len(sw.originates))
+	}
+}
+
 // A pinned loopback dies with DESTINATION_OUT_OF_ORDER before routing (found
 // live): the G.711 pin may only ride legs that leave through sofia.
 func TestCodecPinNeverRidesLoopbackLegs(t *testing.T) {
@@ -454,7 +497,7 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 	} {
 		sw := &fakeSwitch{}
 		s := testService(t, sw, nil)
-		if _, err := s.Dial(context.Background(), "1008", tc.destination, nil, "agent-1008"); err != nil {
+		if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: tc.destination, CallcenterName: "agent-1008"}); err != nil {
 			t.Fatal(err)
 		}
 		if got := sw.lastOriginate().vars["aicc_call_type"]; got != tc.want {
@@ -472,7 +515,7 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 func TestDialPutsTheNumberItDialledOnTheLeg(t *testing.T) {
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
-	if _, err := s.Dial(context.Background(), "1008", "1002", nil, "agent-1008"); err != nil {
+	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "1002", CallcenterName: "agent-1008"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := sw.lastOriginate().vars["aicc_destination"]; got != "1002" {
@@ -521,7 +564,7 @@ func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T)
 			IsEnabled: true, AllowInbound: true}},
 		nil, nil, slog.New(slog.DiscardHandler))
 
-	_, err := svc.Dial(context.Background(), "1001", "18688886669", nil, "agent-1001")
+	_, err := svc.Dial(context.Background(), AgentDialRequest{AgentExtension: "1001", To: "18688886669", CallcenterName: "agent-1001"})
 	if !errors.Is(err, ErrNoDefaultOutbound) {
 		t.Fatalf("error = %v, want ErrNoDefaultOutbound", err)
 	}

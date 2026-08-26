@@ -268,8 +268,8 @@ describe('dialler', () => {
       expect(api.commands).toContainEqual(
         expect.objectContaining({
           method: 'POST',
-          path: '/calls/dial',
-          body: { destination: '95011' },
+          path: '/calls',
+          body: { kind: 'AGENT_OUTBOUND', to: '95011' },
         }),
       ),
     )
@@ -291,7 +291,7 @@ describe('dialler', () => {
     )
     // No second call may be placed from inside a live one.
     expect(within(pad).queryByRole('button', { name: /^dial$/i })).toBeNull()
-    expect(api.commands.some((c) => c.path === '/calls/dial')).toBe(false)
+    expect(api.commands.some((c) => c.method === 'POST' && c.path === '/calls')).toBe(false)
   })
 
   // On a call the agent placed, the number they dialled is on their own leg;
