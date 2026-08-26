@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 )
@@ -177,4 +179,120 @@ func (a *recordingAuditor) Audit(_ context.Context, actorID *uuid.UUID, _, _, _ 
 	detail map[string]any, _ string) error {
 	a.actorID, a.detail = actorID, detail
 	return nil
+}
+
+// endingCalls records what was ended and how.
+type endingCalls struct {
+	stubCalls
+	endedCall uuid.UUID
+	agentLeg  uuid.UUID
+}
+
+func (c *endingCalls) EndCall(_ context.Context, callID uuid.UUID) error {
+	c.endedCall = callID
+	return nil
+}
+
+func (c *endingCalls) Hangup(_ context.Context, callID, _ uuid.UUID) error {
+	c.agentLeg = callID
+	return nil
+}
+
+// hangupAs sends a hangup with whatever credential the caller supplies, through
+// the real routing table so the route's own middleware is under test too.
+func hangupAs(t *testing.T, callID uuid.UUID, dir AgentDirectory,
+	decorate func(*http.Request)) (*httptest.ResponseRecorder, *endingCalls) {
+	t.Helper()
+	calls := &endingCalls{}
+	srv := New(config.Config{APIKey: "s3cret", SessionCookie: "aicc_session"}, Deps{
+		Calls:    calls,
+		Agents:   dialerPresence{},
+		AgentDir: dir,
+		Outbound: &keyedDialer{},
+	})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
+	decorate(r)
+	w := httptest.NewRecorder()
+	srv.router().ServeHTTP(w, r)
+	return w, calls
+}
+
+// noAgents is a directory where nobody has an agent profile, which is what a
+// supervisor account and the API key both look like.
+type noAgents struct{}
+
+func (noAgents) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
+}
+func (noAgents) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) { return nil, nil }
+
+// A system that dials must be able to stop what it started. Nothing else can:
+// the call it placed carries no agent id, so every agent is NOT_CALL_PARTY on
+// it, and before this the only way to end one was fs_cli (measured live
+// 2026-08-26 while verifying third-party dialling).
+func TestASystemCanEndTheCallItPlaced(t *testing.T) {
+	callID := uuid.New()
+	w, calls := hangupAs(t, callID, noAgents{}, func(r *http.Request) {
+		r.Header.Set(apiKeyHeader, "s3cret")
+	})
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if calls.endedCall != callID {
+		t.Errorf("ended %v, want the call named in the path", calls.endedCall)
+	}
+	if calls.agentLeg != uuid.Nil {
+		t.Error("an agent's leg was hung up on behalf of a caller who has none")
+	}
+}
+
+// The same rule reaches the supervisor, whose refusal was the same defect wearing
+// different clothes: hangup asked for an agent profile, and supervision is not
+// staffed on the floor.
+func TestASupervisorCanEndACallTheyAreNotOn(t *testing.T) {
+	callID := uuid.New()
+	calls := &endingCalls{}
+	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: noAgents{}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
+	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
+		UserID: uuid.New(), Role: auth.RoleSupervisor,
+	}))
+	w := httptest.NewRecorder()
+	srv.HangupCall(w, r, callID)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if calls.endedCall != callID {
+		t.Errorf("ended %v, want the call named in the path", calls.endedCall)
+	}
+	if calls.agentLeg != uuid.Nil {
+		t.Error("an agent's leg was hung up on behalf of a caller who has none")
+	}
+}
+
+// An agent still leaves their own leg rather than ending the conversation. They
+// have one to leave, and a caller handed back to a queue is still on a call —
+// widening this to end the call would drop the customer every time an agent
+// stepped out.
+func TestAnAgentStillEndsOnlyTheirOwnLeg(t *testing.T) {
+	callID := uuid.New()
+	calls := &endingCalls{}
+	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: dialerDirectory{}}
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
+	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
+		UserID: uuid.New(), Role: auth.RoleAgent,
+	}))
+	w := httptest.NewRecorder()
+	srv.HangupCall(w, r, callID)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if calls.agentLeg != callID {
+		t.Errorf("hung up %v, want the agent's own leg on this call", calls.agentLeg)
+	}
+	if calls.endedCall != uuid.Nil {
+		t.Error("an agent stepping out ended the whole conversation")
+	}
 }

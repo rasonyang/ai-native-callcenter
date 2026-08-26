@@ -55,6 +55,11 @@ var (
 	// back into, so transferring, holding and retrieving it mean nothing
 	// (owner's ruling, 2026-08-20).
 	ErrNotForCallType = errors.New("not available on this kind of call")
+	// ErrNoExtensionLeg means the call has no leg at a phone of ours to hang
+	// up. Its own answer rather than ErrNotCallParty: "you are not on this
+	// call" is the truth an agent needs, and it is simply wrong told to a
+	// supervisor, who was never going to be.
+	ErrNoExtensionLeg = errors.New("the call has no leg at an extension")
 )
 
 // Coordinator turns switch events into calls and carries out call control.
@@ -1195,6 +1200,35 @@ func (c *Coordinator) Hangup(ctx context.Context, callID, agentID uuid.UUID) err
 	if err != nil {
 		return err
 	}
+	return c.adapter.Hangup(channelID, cause)
+}
+
+// EndCall ends a call for a caller who has no leg of their own to leave, by
+// hanging up the leg at the extension.
+//
+// Not the same operation as Hangup with a different argument. An agent hangs up
+// *their leg*, named by who they are; somebody with no leg has nobody to name,
+// so the leg is found by the call instead. What follows is identical either
+// way — the bridge collapses and the switch releases the far end, exactly as
+// when the person at that phone hangs up. One kill, no bookkeeping about the
+// other end.
+func (c *Coordinator) EndCall(ctx context.Context, callID uuid.UUID) error {
+	var channelID, cause string
+	if err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.IsActive() && p.ChannelID != "" && p.ExtensionNumber != "" {
+				channelID, cause = p.ChannelID, p.HangupCause()
+				return
+			}
+		}
+	}); err != nil {
+		return err
+	}
+	if channelID == "" {
+		return ErrNoExtensionLeg
+	}
+	slog.InfoContext(ctx, "ending a call at its extension leg",
+		"callId", callID, "channelId", channelID, "cause", cause)
 	return c.adapter.Hangup(channelID, cause)
 }
 

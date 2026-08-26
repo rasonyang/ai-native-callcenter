@@ -26,6 +26,10 @@ type CallService interface {
 	Mute(ctx context.Context, callID, agentID uuid.UUID) error
 	Unmute(ctx context.Context, callID, agentID uuid.UUID) error
 	Hangup(ctx context.Context, callID, agentID uuid.UUID) error
+	// EndCall ends the whole conversation, for a caller with no leg of their
+	// own to leave. Hangup is the agent's operation and takes an agent; this
+	// one takes none, because there is nobody on the call to name.
+	EndCall(ctx context.Context, callID uuid.UUID) error
 	Transfer(ctx context.Context, callID, agentID uuid.UUID, destination string) error
 	SendDTMF(ctx context.Context, callID, agentID uuid.UUID, digits string) error
 	CallsForAgent(agentID uuid.UUID) []telephony.Snapshot
@@ -224,8 +228,37 @@ func (s *Server) UnmuteCall(w http.ResponseWriter, r *http.Request, callID uuid.
 	s.callOp(w, r, callID, s.calls.Unmute)
 }
 
+// HangupCall ends a leg or a call, depending on what the caller has.
+//
+// An agent has a leg and ends that; a supervisor, an administrator and the API
+// key have none, so the only ending available to them is the call's. One verb
+// rather than two, because "hang up" is what both are asking for and the
+// difference is entirely in what the asker is holding — the same reading that
+// makes an agent's dial and a system's dial one POST /calls.
+//
+// Ending any call rather than only ones the caller placed. The key already
+// acts as a supervisor, and a supervisor may end any call on the floor; a
+// narrower rule would need every call to record who ordered it, which nothing
+// does today. It is worth saying out loud: this widens what a leaked key can
+// do from placing calls to ending them.
 func (s *Server) HangupCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
-	s.callOp(w, r, callID, s.calls.Hangup)
+	identity, ok := identityFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return
+	}
+	// An agent is anybody with a leg, so the profile decides this rather than
+	// the role: a supervisor who is also staffed as an agent and is on the
+	// call leaves their own leg, which is what they meant.
+	if _, isAgent := s.signedInAgent(r, identity); isAgent {
+		s.callOp(w, r, callID, s.calls.Hangup)
+		return
+	}
+	if !identity.Role.AtLeast(auth.RoleSupervisor) {
+		writeError(w, http.StatusForbidden, CodeForbidden, "this account is not an agent", nil)
+		return
+	}
+	s.callResult(w, r, callID, s.calls.EndCall(r.Context(), callID))
 }
 
 func (s *Server) SendCallDTMF(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
@@ -265,14 +298,24 @@ func (s *Server) callOp(w http.ResponseWriter, r *http.Request, callID uuid.UUID
 	if !ok {
 		return
 	}
+	s.callResult(w, r, callID, run(r.Context(), callID, agentID))
+}
 
-	switch err := run(r.Context(), callID, agentID); {
+// callResult turns what the switch said into the one answer every call
+// operation gives. Split from callOp because not every such operation is an
+// agent's: ending a call takes no agent, and it still owes the caller the same
+// vocabulary of failures.
+func (s *Server) callResult(w http.ResponseWriter, r *http.Request, callID uuid.UUID, err error) {
+	switch {
 	case err == nil:
 		w.WriteHeader(http.StatusAccepted)
 	case errors.Is(err, telephony.ErrCallNotFound):
 		writeError(w, http.StatusNotFound, CodeCallNotFound, "no such call", nil)
 	case errors.Is(err, telephony.ErrNoAgentLeg), errors.Is(err, telephony.ErrNotCallParty):
 		writeError(w, http.StatusForbidden, CodeNotCallParty, "you are not on this call", nil)
+	case errors.Is(err, telephony.ErrNoExtensionLeg):
+		writeError(w, http.StatusConflict, CodeConflict,
+			"this call has no leg at an extension to hang up", nil)
 	case errors.Is(err, telephony.ErrNotForCallType):
 		writeError(w, http.StatusConflict, CodeOperationNotAllowedForCallType,
 			"this is not available on an internal call", nil)

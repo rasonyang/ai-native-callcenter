@@ -2174,7 +2174,7 @@ type ServerInterface interface {
 	// SendCallDTMF Send DTMF tones to the other party
 	// (POST /calls/{callId}/dtmf)
 	SendCallDTMF(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
-	// HangupCall Hang up the caller's own leg
+	// HangupCall Hang up
 	// (POST /calls/{callId}/hangup)
 	HangupCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
 	// HoldCall Hold the caller's own leg
@@ -2486,7 +2486,7 @@ func (_ Unimplemented) SendCallDTMF(w http.ResponseWriter, r *http.Request, call
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// HangupCall Hang up the caller's own leg
+// HangupCall Hang up
 // (POST /calls/{callId}/hangup)
 func (_ Unimplemented) HangupCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
