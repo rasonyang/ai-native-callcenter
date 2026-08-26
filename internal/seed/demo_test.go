@@ -238,8 +238,8 @@ func TestSeedingLeavesAnExistingBindingAndStaffingAlone(t *testing.T) {
 	}
 	var otherExt uuid.UUID
 	if err := st.Pool.QueryRow(ctx, `
-		INSERT INTO extensions (id, number, kind, password, display_name)
-		VALUES ($1, '1009', 'AGENT', 'x', 'Wei elsewhere') RETURNING id`, uuid.New()).
+		INSERT INTO extensions (id, number, password, display_name)
+		VALUES ($1, '1009', 'x', 'Wei elsewhere') RETURNING id`, uuid.New()).
 		Scan(&otherExt); err != nil {
 		t.Fatal(err)
 	}

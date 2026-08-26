@@ -18,6 +18,37 @@ jobs:
   go:
     name: go
     runs-on: ubuntu-latest
+
+    # PostgreSQL, because a large part of this suite needs one and silently
+    # passed without it. Eight test files call scratchDB, which skips when
+    # AICC_TEST_DATABASE_URL is unset — including the migration tests, which
+    # CLAUDE.md calls the point at which a migration counts as reviewed. They
+    # had never run here. On 2026-08-24 a migration dropped extensions.kind and
+    # a seed test that still inserted it went on being green for two days,
+    # because it was not being run at all.
+    #
+    # Same major version as deploy/dev and the demo stack: a suite that
+    # exercises real SQL on a different server is testing a different database.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: aicc
+          POSTGRES_PASSWORD: aicc
+          POSTGRES_DB: aicc
+        ports: ['5432:5432']
+        # The job must not start migrating before the server can answer.
+        options: >-
+          --health-cmd "pg_isready -U aicc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # scratchDB uses this to create a throwaway database per test, so it is
+      # an administrative connection rather than the one an application uses.
+      AICC_TEST_DATABASE_URL: postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable
+
     steps:
       - uses: actions/checkout@v4
 
