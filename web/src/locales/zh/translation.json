@@ -316,6 +316,7 @@
     "copy": "复制",
     "copied": "已复制",
     "passwordNewHint": "生成后只显示这一次，离开表单就看不到了。现在复制。",
+    "passwordMintedHint": "只显示这一次，离开表单就看不到了。现在复制 —— 保存后它就生效，旧口令随即失效。",
     "passwordExistingHint": "这里不显示。复制会读回它并记入审计；重设会替换它，旧口令立刻失效。",
     "resetPassword": "重设",
     "assignedTo": "归属坐席",

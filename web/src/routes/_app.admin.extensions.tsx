@@ -141,8 +141,31 @@ function ExtensionsPage() {
               onChange={(e) => setEditing({ ...editing, displayName: e.target.value })}
             />
           </Field>
-          {editing.id ? (
-            <Field label={t('admin.password')} hint={t('admin.passwordExistingHint')}>
+          {/* One field for both cases. A minted secret looks the same whether
+              it was generated for a new phone or reset on an existing one —
+              and it has to be shown either way: a reset that draws nothing
+              reads as a dead button, while the credential it staged is real
+              and lands on the next save. */}
+          <Field
+            label={t('admin.password')}
+            hint={
+              hasMinted
+                ? editing.id
+                  ? t('admin.passwordMintedHint')
+                  : t('admin.passwordNewHint')
+                : editing.id
+                  ? t('admin.passwordExistingHint')
+                  : t('admin.passwordNewHint')
+            }
+          >
+            {hasMinted ? (
+              <span className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-sm">
+                  {minted.current}
+                </code>
+                <CopyButton key={minted.current} value={minted.current ?? ''} />
+              </span>
+            ) : editing.id ? (
               <span className="flex gap-2">
                 <Button
                   type="button"
@@ -165,38 +188,20 @@ function ExtensionsPage() {
                   {t('admin.resetPassword')}
                 </Button>
               </span>
-            </Field>
-          ) : (
-            <Field label={t('admin.password')} hint={t('admin.passwordNewHint')}>
-              {hasMinted ? (
-                <span className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-sm">
-                    {minted.current}
-                  </code>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void navigator.clipboard.writeText(minted.current ?? '')}
-                  >
-                    {t('admin.copy')}
-                  </Button>
-                </span>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    minted.current = generateSIPPassword()
-                    setHasMinted(true)
-                  }}
-                >
-                  {t('admin.generate')}
-                </Button>
-              )}
-            </Field>
-          )}
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  minted.current = generateSIPPassword()
+                  setHasMinted(true)
+                }}
+              >
+                {t('admin.generate')}
+              </Button>
+            )}
+          </Field>
           <Field label={t('admin.enabled')}>
             <Select
               value={String(editing.isEnabled ?? true)}
@@ -217,6 +222,34 @@ function ExtensionsPage() {
 }
 
 /**
+ * Puts a secret on the clipboard and says so.
+ *
+ * The confirmation is the whole point: a credential copies silently, so a
+ * button that does not change is indistinguishable from one that did nothing,
+ * and the reader's next move is to select the text by hand. It stays
+ * confirmed — re-copying the same string has nothing new to report.
+ */
+function CopyButton({ value }: { value: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={!value}
+      onClick={() => {
+        if (!value) return
+        void navigator.clipboard.writeText(value)
+        setCopied(true)
+      }}
+    >
+      {copied ? t('admin.copied') : t('admin.copy')}
+    </Button>
+  )
+}
+
+/**
  * What a phone was given, shown once and on request.
  *
  * Fetched only when asked, never carried by the list: the read is recorded in
@@ -233,7 +266,6 @@ function RevealPassword({
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
   const { data, isPending, isError, error } = useQuery({
     queryKey: ['catalog', 'extensions', extension.id, 'password'],
     queryFn: () => catalogApi.extensionPassword(extension.id),
@@ -261,18 +293,7 @@ function RevealPassword({
                   ? describeError(error, t)
                   : data?.password}
             </code>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!data?.password}
-              onClick={() => {
-                if (!data?.password) return
-                void navigator.clipboard.writeText(data.password)
-                setCopied(true)
-              }}
-            >
-              {copied ? t('admin.copied') : t('admin.copy')}
-            </Button>
+            <CopyButton key={data?.password} value={data?.password ?? ''} />
           </div>
 
           <div className="mt-3 flex justify-end">

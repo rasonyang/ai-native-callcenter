@@ -318,6 +318,7 @@
     "copy": "Copy",
     "copied": "Copied",
     "passwordNewHint": "Generated, shown once, and gone when you leave this form. Copy it now.",
+    "passwordMintedHint": "Shown once only; leave the form and it is gone. Copy it now — it takes effect on save, and the old one stops working.",
     "passwordExistingHint": "Not shown here. Copy reads it back and records that it was read; Reset replaces it and the old one stops working at once.",
     "resetPassword": "Reset",
     "assignedTo": "Agent",
