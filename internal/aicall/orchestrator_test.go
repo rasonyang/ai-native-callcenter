@@ -785,3 +785,33 @@ func TestNothingArmedRunsOnceTheCallHasEnded(t *testing.T) {
 		t.Errorf("transferred a channel whose call had ended: %v", got)
 	}
 }
+
+// The model is offered the number's own queue, not every queue there is.
+//
+// Offered the whole catalogue, a model on a Chinese call picked support-zh —
+// a real queue, correctly reasoned, and staffed by nobody who works the number
+// that was dialled. The caller sat on hold music while the agent for that line
+// waited in another queue. The number is where an operator said which agents
+// answer it; there is nothing for the model to choose.
+func TestATransferIsOfferedTheNumbersOwnQueue(t *testing.T) {
+	o := testOrchestrator(t, &fakeSwitch{})
+	queues, err := o.cfg.Catalog.Queues(t.Context())
+	if err != nil {
+		t.Fatalf("read queues: %v", err)
+	}
+	if len(queues) < 2 {
+		t.Fatalf("the fixture needs more than one queue, has %d", len(queues))
+	}
+
+	got := o.queueNames(t.Context(), &queues[1].ID)
+	if len(got) != 1 || got[0] != queues[1].Name {
+		t.Errorf("queue names = %v, want only %q", got, queues[1].Name)
+	}
+
+	// With no queue on the number there is nothing better to go on, so the
+	// model chooses among real queues rather than inventing one.
+	got = o.queueNames(t.Context(), nil)
+	if len(got) != len(queues) {
+		t.Errorf("queue names = %v, want every queue when the number names none", got)
+	}
+}

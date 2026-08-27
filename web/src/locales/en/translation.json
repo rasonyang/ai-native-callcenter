@@ -287,7 +287,7 @@
     "botFlow": "Bot flow",
     "fallbackQueue": "Fallback queue",
     "noFallbackQueue": "None",
-    "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
+    "fallbackQueueHint": "This number's queue for people: where the bot transfers callers who ask for one, and where they go when the bot cannot take the call at all (provider outage, no capacity, gateway down).",
     "description": "Description",
     "overviewHint": "What is configured, and whether the parts you cannot see are alive.",
     "queuesNote": "{{count}} enabled",

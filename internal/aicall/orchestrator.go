@@ -302,7 +302,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		facts:         facts,
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase),
-		o.queueNames(ctx), log)
+		o.queueNames(ctx, did.FallbackQueueID), log)
 
 	profile := o.cfg.Profile
 	model, err := o.cfg.Sessions(profile, log)
@@ -490,15 +490,36 @@ func (o *Orchestrator) findDID(ctx context.Context, number string) (catalog.DID,
 }
 
 // findQueue resolves a flow's queue name to the queue.
-// queueNames is what a transfer may name, offered to the model as an enum.
-// Disabled queues are included: the tool refuses them with a reason the bot
-// can explain ("we are closed"), which is a better conversation than a model
-// that cannot name the queue the caller is asking for.
-func (o *Orchestrator) queueNames(ctx context.Context) []string {
+// queueNames is what a transfer on this number may name, offered to the model
+// as an enum.
+//
+// The number's own queue when it has one, and nothing else. A caller on a
+// mobile-support line asking for a person wants that line's agents, and the
+// number is where an operator said which those are — the model has no way to
+// know and no business guessing. Offered the whole catalogue it guessed
+// reasonably and wrongly: on a Chinese call it picked support-zh, a real queue
+// staffed by nobody who works this number, and the caller waited on hold music
+// for an agent who was sitting in another queue.
+//
+// Every queue only when the number names none. Then there is nothing better to
+// go on, and a model choosing among real queues still beats one inventing a
+// name.
+//
+// Disabled queues are included either way: the tool refuses them with a reason
+// the bot can explain ("we are closed"), which is a better conversation than a
+// model that cannot name the queue the caller is asking for.
+func (o *Orchestrator) queueNames(ctx context.Context, fallbackQueueID *uuid.UUID) []string {
 	queues, err := o.cfg.Catalog.Queues(ctx)
 	if err != nil {
 		o.log.Error("read queues", "error", err)
 		return nil
+	}
+	if fallbackQueueID != nil {
+		for _, queue := range queues {
+			if queue.ID == *fallbackQueueID {
+				return []string{queue.Name}
+			}
+		}
 	}
 	names := make([]string, 0, len(queues))
 	for _, queue := range queues {

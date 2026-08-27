@@ -285,7 +285,7 @@
     "botFlow": "机器人流程",
     "fallbackQueue": "兜底队列",
     "noFallbackQueue": "无",
-    "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
+    "fallbackQueueHint": "这个号码的人工队列：机器人转人工时转到这里，机器人完全接不了时（模型故障、容量不足、网关不可达）也转到这里。",
     "description": "说明",
     "overviewHint": "平台已配置了哪些内容，以及看不见的部分是否正常。",
     "queuesNote": "{{count}} 个已启用",
