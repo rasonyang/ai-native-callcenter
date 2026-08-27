@@ -301,7 +301,8 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		recorder:      recorder,
 		facts:         facts,
 	}
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase),
+		o.queueNames(ctx), log)
 
 	profile := o.cfg.Profile
 	model, err := o.cfg.Sessions(profile, log)
@@ -478,6 +479,23 @@ func (o *Orchestrator) findDID(ctx context.Context, number string) (catalog.DID,
 }
 
 // findQueue resolves a flow's queue name to the queue.
+// queueNames is what a transfer may name, offered to the model as an enum.
+// Disabled queues are included: the tool refuses them with a reason the bot
+// can explain ("we are closed"), which is a better conversation than a model
+// that cannot name the queue the caller is asking for.
+func (o *Orchestrator) queueNames(ctx context.Context) []string {
+	queues, err := o.cfg.Catalog.Queues(ctx)
+	if err != nil {
+		o.log.Error("read queues", "error", err)
+		return nil
+	}
+	names := make([]string, 0, len(queues))
+	for _, queue := range queues {
+		names = append(names, queue.Name)
+	}
+	return names
+}
+
 func (o *Orchestrator) findQueue(ctx context.Context, name string) (catalog.Queue, bool) {
 	queues, err := o.cfg.Catalog.Queues(ctx)
 	if err != nil {

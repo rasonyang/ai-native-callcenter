@@ -171,6 +171,8 @@ func TestTransferWaitsForTheBridgeLineToPlay(t *testing.T) {
 	}
 }
 
+// With nowhere to fall back to, an unknown queue is still a refusal — but it
+// is the last resort, not the first answer. See the test below.
 func TestTransferToAnUnknownQueueIsARefusalNotAnError(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
@@ -189,6 +191,44 @@ func TestTransferToAnUnknownQueueIsARefusalNotAnError(t *testing.T) {
 	}
 	if len(sw.recordedTransfers()) != 0 {
 		t.Error("a refused transfer still moved the caller")
+	}
+}
+
+// A caller who asked for a person gets one, even when the bot named a queue
+// that is not there.
+//
+// The model invented "customer_service" on a deployment whose queues are
+// support-en, support-zh and wt_queue: the transfer was refused, the flow
+// announced a handover anyway and the line dropped, having promised a call
+// back that nobody would make. The queue argument is an enum of the real
+// queues now, so this is the narrow path — but on it, the number's own
+// fallback queue is a better answer than turning the caller away over an
+// argument the bot got wrong.
+func TestAnUnknownQueueFallsBackToTheNumbersOwnQueue(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, session, _ := testActions(t, sw)
+
+	queues, err := actions.orchestrator.cfg.Catalog.Queues(t.Context())
+	if err != nil {
+		t.Fatalf("read queues: %v", err)
+	}
+	support := queues[0]
+	actions.fallbackQueue = &support.ID
+
+	result, err := actions.TransferToAgent(t.Context(), flow.TransferRequest{
+		Queue: "customer_service", Reason: "X", Summary: "s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsOK {
+		t.Fatalf("result = %+v, want the caller put through to the fallback queue", result)
+	}
+
+	actions.onPlaybackDone(session.currentTurn() + 1)
+	if got := sw.recordedTransfers(); len(got) != 1 ||
+		got[0] != "caller-channel-1→"+support.ExtNumber {
+		t.Errorf("transfers = %v, want the caller moved to %s", got, support.ExtNumber)
 	}
 }
 
@@ -317,7 +357,7 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.recorder = recorder
@@ -407,7 +447,7 @@ func TestReachingATerminalPhaseIsContainment(t *testing.T) {
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
 	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	moved := engine.OnNoInput()
 	if moved == "" || !engine.IsTerminal() {
@@ -563,7 +603,7 @@ func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 		orchestrator: o, session: session, log: log, callerChannel: "caller-channel-1",
 	}
 	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	o.afterMove(engine.OnNoInput(), session, runtime, actions, log)
 	actions.onPlaybackDone(session.currentTurn() + 1)

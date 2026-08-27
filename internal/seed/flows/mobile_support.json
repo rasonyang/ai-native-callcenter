@@ -42,6 +42,11 @@
       {
         "on": "TOOL_RESULT",
         "tool": "transfer_to_agent",
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
         "target": "finish_transfer"
       },
       {

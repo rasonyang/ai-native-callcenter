@@ -119,7 +119,14 @@ type Actions interface {
 }
 
 // builtinSchemas describes the built-ins to the model, in the call's language.
-func builtinSchemas(lang string) map[string]Tool {
+//
+// queues are the names the deployment actually has. They become the enum of
+// transfer_to_agent's queue argument, because a free-form string is a name the
+// model has to invent: asked to put a caller through, one wrote
+// "customer_service" — a plausible queue that existed nowhere, so the transfer
+// was refused and the caller was told an agent would ring back. Design 02 §6
+// specified the enum; it was lost in the writing.
+func builtinSchemas(lang string, queues []string) map[string]Tool {
 	isZH := lang == LangZH
 
 	transferDescription := "Hand the caller to a human agent. Call this as soon as it is " +
@@ -140,16 +147,7 @@ func builtinSchemas(lang string) map[string]Tool {
 		ToolTransferToAgent: {
 			name:        ToolTransferToAgent,
 			Description: Text{EN: transferDescription, ZH: transferDescription},
-			Parameters: json.RawMessage(`{
-				"type": "object",
-				"properties": {
-					"queue": {"type": "string", "description": "Which queue to transfer to"},
-					"reason": {"type": "string", "description": "Why the caller needs a person"},
-					"summary": {"type": "string", "description": "What the conversation established, in the caller's language, at most 600 characters"},
-					"slots": {"type": "object", "description": "Everything collected so far"}
-				},
-				"required": ["queue", "reason", "summary"]
-			}`),
+			Parameters:  transferParameters(queues),
 		},
 		ToolTakeMessage: {
 			name:        ToolTakeMessage,
@@ -174,4 +172,31 @@ func builtinSchemas(lang string) map[string]Tool {
 			}`),
 		},
 	}
+}
+
+// transferParameters is transfer_to_agent's schema, with the queues this
+// deployment has as the enum of the queue argument.
+//
+// Named queues only when there are some: an enum of nothing is a schema no
+// argument can satisfy, and a deployment with no queues configured should let
+// the tool run and be refused with a reason, not fail to be called at all.
+func transferParameters(queues []string) json.RawMessage {
+	queueProperty := `{"type": "string", "description": "Which queue to transfer to"}`
+	if len(queues) > 0 {
+		encoded, err := json.Marshal(queues)
+		if err == nil {
+			queueProperty = `{"type": "string", "description": "Which queue to transfer to",` +
+				`"enum": ` + string(encoded) + `}`
+		}
+	}
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"queue": ` + queueProperty + `,
+			"reason": {"type": "string", "description": "Why the caller needs a person"},
+			"summary": {"type": "string", "description": "What the conversation established, in the caller's language, at most 600 characters"},
+			"slots": {"type": "object", "description": "Everything collected so far"}
+		},
+		"required": ["queue", "reason", "summary"]
+	}`)
 }

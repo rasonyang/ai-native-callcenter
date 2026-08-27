@@ -32,7 +32,11 @@ type Runtime struct {
 }
 
 // NewRuntime prepares the tools for one call.
-func NewRuntime(engine *Engine, actions Actions, backend *Backend, log *slog.Logger) *Runtime {
+//
+// queues are the names this deployment has, offered to the model as the only
+// answers transfer_to_agent's queue argument accepts.
+func NewRuntime(engine *Engine, actions Actions, backend *Backend,
+	queues []string, log *slog.Logger) *Runtime {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -41,7 +45,7 @@ func NewRuntime(engine *Engine, actions Actions, backend *Backend, log *slog.Log
 		actions:  actions,
 		backend:  backend,
 		log:      log.With("flowId", engine.Spec().ID),
-		builtins: builtinSchemas(engine.Lang()),
+		builtins: builtinSchemas(engine.Lang(), queues),
 	}
 }
 
@@ -163,8 +167,15 @@ func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output 
 	}
 
 	output = result.asToolOutput()
-	r.log.Info("tool ran", "tool", name, "node", r.engine.NodeID(),
-		"isOk", result.IsOK, "movedTo", newNode)
+	// The reason, not just the verdict: a refusal that logs only isOk=false
+	// leaves the operator with a bot that would not put the caller through and
+	// no way to learn why without reading the transcript table.
+	fields := []any{"tool", name, "node", r.engine.NodeID(),
+		"isOk", result.IsOK, "movedTo", newNode}
+	if !result.IsOK && result.Error != "" {
+		fields = append(fields, "error", result.Error)
+	}
+	r.log.Info("tool ran", fields...)
 	return output, newNode
 }
 

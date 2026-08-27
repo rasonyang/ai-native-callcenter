@@ -56,7 +56,7 @@ func testRuntime(t *testing.T, actions *fakeActions, backendURL string) *Runtime
 		map[string]any{"caller": "13800138000"},
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	return NewRuntime(engine, actions, NewBackend(backendURL),
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		[]string{"support-en"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
 func decodeOutput(t *testing.T, output string) map[string]any {
@@ -95,7 +95,7 @@ func TestToolDescriptionsFollowTheCallLanguage(t *testing.T) {
 	engine := NewEngine(loadTestFlow(t), "zh", nil,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	r := NewRuntime(engine, &fakeActions{}, nil,
-		slog.New(slog.NewTextHandler(io.Discard, nil)))
+		[]string{"support-zh"}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	for _, tool := range r.Tools() {
 		if tool.Name == ToolTransferToAgent && !strings.Contains(tool.Description, "转接") {
@@ -324,4 +324,66 @@ func contains(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// The model is told which queues exist, so it cannot invent one.
+//
+// transfer_to_agent's queue argument was a bare string described as "which
+// queue to transfer to", and nothing anywhere named the deployment's queues.
+// Asked to put a caller through, a model wrote "customer_service" — entirely
+// plausible, and present in no call centre this code has ever run in. Design
+// 02 §6 specified the enum from the start.
+func TestTheModelIsOfferedOnlyTheQueuesThatExist(t *testing.T) {
+	engine := NewEngine(loadTestFlow(t), "en", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := NewRuntime(engine, &fakeActions{}, nil,
+		[]string{"support-en", "support-zh"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	var parameters map[string]any
+	for _, tool := range r.Tools() {
+		if tool.Name != ToolTransferToAgent {
+			continue
+		}
+		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+			t.Fatalf("the transfer schema is not JSON: %v", err)
+		}
+	}
+	if parameters == nil {
+		t.Fatal("transfer_to_agent was not offered at all")
+	}
+
+	properties, _ := parameters["properties"].(map[string]any)
+	queue, _ := properties["queue"].(map[string]any)
+	got, _ := queue["enum"].([]any)
+	if len(got) != 2 || got[0] != "support-en" || got[1] != "support-zh" {
+		t.Errorf("queue enum = %v, want exactly the deployment's queues", got)
+	}
+}
+
+// A deployment with no queues configured still gets a callable tool: an enum
+// of nothing is a schema no argument satisfies, and the refusal the tool would
+// answer with names a reason the bot can explain.
+func TestWithNoQueuesTheTransferToolIsStillCallable(t *testing.T) {
+	engine := NewEngine(loadTestFlow(t), "en", nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := NewRuntime(engine, &fakeActions{}, nil, nil,
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	for _, tool := range r.Tools() {
+		if tool.Name != ToolTransferToAgent {
+			continue
+		}
+		var parameters map[string]any
+		if err := json.Unmarshal(tool.Parameters, &parameters); err != nil {
+			t.Fatalf("the transfer schema is not JSON: %v", err)
+		}
+		properties, _ := parameters["properties"].(map[string]any)
+		queue, _ := properties["queue"].(map[string]any)
+		if _, hasEnum := queue["enum"]; hasEnum {
+			t.Error("an empty enum was offered, which no argument could satisfy")
+		}
+		return
+	}
+	t.Fatal("transfer_to_agent was not offered at all")
 }
