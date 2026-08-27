@@ -673,13 +673,19 @@ describe('after-call work', () => {
  * queue's own promise rather than a number invented in the browser.
  */
 describe('my queue', () => {
-  it('lists who is waiting, longest wait first, with their queue', async () => {
+  // The queues are the rows, not the callers. An agent staffing a quiet line
+  // and an agent staffing none at all both have nobody waiting; listing only
+  // the waiting callers showed them the same empty card, and the second only
+  // found out they were on no queue when a call never arrived.
+  it('lists the queues it works, with how many are waiting in each', async () => {
     await renderCockpit({
       waiting: [
         waitingFixture({ fromNumber: '+8613700990011', queueDisplayName: 'Billing' }),
         waitingFixture({
           callId: '00000000-0000-4000-8000-0000000000w2',
           fromNumber: '+14085550166',
+          queueId: '00000000-0000-4000-8000-0000000000q2',
+          queueName: 'support-en',
           queueDisplayName: 'Support EN',
           joinedAt: new Date(Date.now() - 47_000).toISOString(),
         }),
@@ -689,12 +695,33 @@ describe('my queue', () => {
     const list = await screen.findByRole('list', { name: /my queue/i })
     const rows = within(list).getAllByRole('listitem')
     expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent('+8613700990011')
     expect(rows[0]).toHaveTextContent('Billing')
+    expect(rows[0]).toHaveTextContent('1')
+    expect(rows[1]).toHaveTextContent('Support EN')
     expect(screen.getByText('2 waiting')).toBeInTheDocument()
   })
 
-  it('marks a wait past the queue’s own target', async () => {
+  it('shows a queue nobody is waiting in as zero, not as an absence', async () => {
+    await renderCockpit({
+      waiting: [],
+      staffedQueues: [
+        {
+          queueId: '00000000-0000-4000-8000-0000000000q1',
+          name: 'support-zh',
+          displayName: 'Billing',
+          slaThresholdSec: 20,
+        },
+      ],
+    })
+
+    const list = await screen.findByRole('list', { name: /my queue/i })
+    const row = within(list).getByRole('listitem')
+    expect(row).toHaveTextContent('Billing')
+    expect(row).toHaveTextContent('0')
+    expect(screen.getByText('0 waiting')).toBeInTheDocument()
+  })
+
+  it('marks a wait past the queue\u2019s own target', async () => {
     await renderCockpit({
       waiting: [
         waitingFixture({
@@ -708,9 +735,9 @@ describe('my queue', () => {
     expect(wait).toHaveStyle({ color: 'var(--state-breach)' })
   })
 
-  it('says so when nobody is waiting', async () => {
-    await renderCockpit({ waiting: [] })
-    expect(await screen.findByText(/nobody is waiting in your queues/i)).toBeInTheDocument()
+  it('says so when the agent is on no queue at all', async () => {
+    await renderCockpit({ waiting: [], staffedQueues: [] })
+    expect(await screen.findByText(/not on any queue/i)).toBeInTheDocument()
   })
 })
 

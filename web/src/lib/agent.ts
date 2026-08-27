@@ -125,7 +125,7 @@ export function useMyCalls(enabled: boolean) {
       try {
         return await callApi.mine()
       } catch (error) {
-        if (error instanceof ApiError && error.status === 403) return { items: [] }
+        if (error instanceof ApiError && error.status === 403) return { items: [], queues: [] }
         throw error
       }
     },
@@ -186,7 +186,11 @@ export function useWaitingCalls(enabled: boolean) {
       try {
         return await callApi.waiting()
       } catch (error) {
-        if (error instanceof ApiError && error.status === 403) return { items: [] }
+        // A reader with no queue view of their own still gets the shape the
+        // card expects: no queues, nobody waiting.
+        if (error instanceof ApiError && error.status === 403) {
+          return { items: [], queues: [] }
+        }
         throw error
       }
     },

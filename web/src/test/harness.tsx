@@ -11,7 +11,7 @@ import type { ComponentProps, ReactElement } from 'react'
 import { vi } from 'vitest'
 
 import i18n from '@/lib/i18n'
-import type { CallSnapshot, CurrentWrapUp, Presence, WaitingCall } from '@/lib/api'
+import type { CallSnapshot, CurrentWrapUp, Presence, StaffedQueue, WaitingCall } from '@/lib/api'
 import type { Contact } from '@/lib/contacts'
 import type { CDR, RecordingRow } from '@/lib/ledger'
 import type { AgentToday, Disposition } from '@/lib/ledger'
@@ -39,6 +39,13 @@ export interface Backend {
   calls: CallSnapshot[]
   /** Callers queued in the agent's own queues. */
   waiting: WaitingCall[]
+  /**
+   * The queues the agent staffs. Defaults to the ones the waiting callers are
+   * in, so a test that only cares about the line itself need not name them —
+   * but a test about staffing can, including the empty list that says the
+   * agent is on no queue at all.
+   */
+  staffedQueues: StaffedQueue[]
   /** The wrap-up vocabulary the server offers. */
   dispositions: Disposition[]
   /** The agent's own numbers for the day. */
@@ -95,6 +102,21 @@ export function waitingFixture(overrides: Partial<WaitingCall> = {}): WaitingCal
     joinedAt: new Date(Date.now() - 12_000).toISOString(),
     ...overrides,
   }
+}
+
+/** The queues implied by a set of waiting callers, in first-seen order. */
+function queuesBehind(waiting: WaitingCall[]): StaffedQueue[] {
+  const seen = new Map<string, StaffedQueue>()
+  for (const call of waiting) {
+    if (seen.has(call.queueId)) continue
+    seen.set(call.queueId, {
+      queueId: call.queueId,
+      name: call.queueName,
+      displayName: call.queueDisplayName,
+      slaThresholdSec: call.slaThresholdSec,
+    })
+  }
+  return [...seen.values()]
 }
 
 /** The vocabulary an installation ships with. */
@@ -230,6 +252,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     presence: initial.presence ?? presenceFixture(),
     calls: initial.calls ?? [],
     waiting: initial.waiting ?? [],
+    staffedQueues: initial.staffedQueues ?? queuesBehind(initial.waiting ?? []),
     dispositions: initial.dispositions ?? [],
     today: initial.today ?? todayFixture(),
     currentWrapUp: initial.currentWrapUp ?? null,
@@ -300,7 +323,9 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
         return json({ items: backend.recordings })
       }
       if (path === '/calls/mine') return json({ items: backend.calls })
-      if (path === '/calls/waiting') return json({ items: backend.waiting })
+      if (path === '/calls/waiting') {
+        return json({ items: backend.waiting, queues: backend.staffedQueues })
+      }
       if (path.startsWith('/cdrs/mine')) {
         return json({ items: backend.myCDRs, total: backend.myCDRs.length })
       }

@@ -376,7 +376,7 @@ export interface paths {
         };
         /**
          * Callers waiting in queue
-         * @description The live waiting line, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. An agent sees the queues they are staffed on — the same rule that decides which queue events reach their event stream. A supervisor works no line and sees every queue, as they do on GET /calls.
+         * @description The live waiting line, longest wait first, together with the queues it is drawn from. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. An agent sees the queues they are staffed on — the same rule that decides which queue events reach their event stream. A supervisor works no line and sees every queue, as they do on GET /calls. The queues are listed even when empty: an agent staffing a quiet line and an agent staffing none at all are different situations, and a list of waiting callers cannot tell them apart.
          */
         get: operations["listWaitingCalls"];
         put?: never;
@@ -1660,6 +1660,16 @@ export interface components {
         CallList: {
             items: components["schemas"]["CallSnapshot"][];
         };
+        /** @description A queue the reader works, whether or not anybody is waiting in it. An agent's own line; every queue for a supervisor. */
+        StaffedQueue: {
+            /** Format: uuid */
+            queueId: string;
+            /** @description Switch-safe identifier: no spaces, @ or quotes. */
+            name: string;
+            displayName: string;
+            /** @description The queue's answer target; a wait past it is a breach. 0 means none is configured. */
+            slaThresholdSec: number;
+        };
         /** @description A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next. */
         WaitingCall: {
             /** Format: uuid */
@@ -1681,6 +1691,8 @@ export interface components {
         };
         WaitingCallList: {
             items: components["schemas"]["WaitingCall"][];
+            /** @description The queues the reader works, listed whether or not anybody is waiting in them. A line with nobody in it is an answer, not an absence. */
+            queues: components["schemas"]["StaffedQueue"][];
         };
         TransferRequest: {
             /** @description Queue extension or dialable number. */
@@ -3289,7 +3301,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Who is waiting, and since when. */
+            /** @description Who is waiting, since when, and the queues they are waiting in. */
             200: {
                 headers: {
                     [name: string]: unknown;

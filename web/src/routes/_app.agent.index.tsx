@@ -21,7 +21,7 @@ import {
   myParty, otherParty, useCallActions, useCurrentWrapUp, useElapsedSec,
   useIsWrapUpPending, useMyCalls, usePresence, usePresenceActions, useWaitingCalls,
 } from '@/lib/agent'
-import { callApi, type CallSnapshot, type WaitingCall } from '@/lib/api'
+import { callApi, type CallSnapshot, type StaffedQueue, type WaitingCall } from '@/lib/api'
 import { useContactFor } from '@/lib/contacts'
 import {
   useCallbacks, useDispositions, useMyCDRs, useMyDay, type WrapUp,
@@ -490,8 +490,14 @@ function KeypadButton({
 }
 
 /**
- * The line the agent is working: who is waiting in their queues, longest wait
- * first, which is the order the switch will serve them in.
+ * The lines the agent is working: one row per queue they staff, with how many
+ * callers are in it and how long the one at the front has waited.
+ *
+ * The queues are listed even when nobody is waiting, because a zero is an
+ * answer. Listing only the waiting callers made a quiet line and no line at
+ * all render identically — an agent who had never been staffed anywhere read
+ * the same "nobody is waiting in your queues" as one whose queue was simply
+ * idle, and only found out when a call never came.
  *
  * The wait turns red past the queue's own SLA threshold rather than past a
  * number invented here — a queue that promises twenty seconds and one that
@@ -500,12 +506,13 @@ function KeypadButton({
 function QueueCard({ signedIn }: { signedIn: boolean }) {
   const { t } = useTranslation()
   const { data, isPending } = useWaitingCalls(signedIn)
-  const items = data?.items ?? []
+  const waiting = data?.items ?? []
+  const queues = data?.queues ?? []
 
   return (
     <Card
       title={t('agent.myQueue')}
-      aside={<span className="tabular">{t('agent.waitingCount', { count: items.length })}</span>}
+      aside={<span className="tabular">{t('agent.waitingCount', { count: waiting.length })}</span>}
       className="min-h-0 flex-1"
       bodyClassName="min-h-0 flex-1 overflow-y-auto"
     >
@@ -513,12 +520,16 @@ function QueueCard({ signedIn }: { signedIn: boolean }) {
         <Empty text={t('agent.signInPrompt')} />
       ) : isPending ? (
         <Empty text={t('common.loading')} />
-      ) : items.length === 0 ? (
-        <Empty text={t('agent.queueEmpty')} />
+      ) : queues.length === 0 ? (
+        <Empty text={t('agent.noQueuesStaffed')} />
       ) : (
         <ul aria-label={t('agent.myQueue')} className="-mx-4 divide-y">
-          {items.map((waiting) => (
-            <WaitingRow key={waiting.callId} waiting={waiting} />
+          {queues.map((queue) => (
+            <QueueRow
+              key={queue.queueId}
+              queue={queue}
+              waiting={waiting.filter((call) => call.queueId === queue.queueId)}
+            />
           ))}
         </ul>
       )}
@@ -526,22 +537,31 @@ function QueueCard({ signedIn }: { signedIn: boolean }) {
   )
 }
 
-function WaitingRow({ waiting }: { waiting: WaitingCall }) {
-  const waitedSec = useElapsedSec(waiting.joinedAt)
-  const isBreached = waiting.slaThresholdSec > 0 && waitedSec > waiting.slaThresholdSec
+function QueueRow({ queue, waiting }: { queue: StaffedQueue; waiting: WaitingCall[] }) {
+  const { t } = useTranslation()
+  // The front of the line is the longest wait, which is who the queue serves
+  // next; the list arrives in that order, so it is the first of this queue's.
+  const front = waiting[0]
+  const waitedSec = useElapsedSec(front?.joinedAt)
+  const isBreached = queue.slaThresholdSec > 0 && waitedSec > queue.slaThresholdSec
 
   return (
     <li className="flex h-9 items-center gap-2 px-4">
-      <span className="tabular min-w-0 flex-1 truncate text-sm">{waiting.fromNumber}</span>
-      <span className="truncate text-xs text-muted-foreground">
-        {waiting.queueDisplayName || waiting.queueName}
+      <span className="min-w-0 flex-1 truncate text-sm">
+        {queue.displayName || queue.name}
       </span>
-      <span
-        className="tabular w-12 shrink-0 text-right text-sm"
-        style={isBreached ? { color: 'var(--state-breach)' } : undefined}
-      >
-        {formatDuration(waitedSec, { padMinutes: true })}
-      </span>
+      {front ? (
+        <span
+          className="tabular w-12 shrink-0 text-right text-sm"
+          style={isBreached ? { color: 'var(--state-breach)' } : undefined}
+          title={t('agent.longestWait')}
+        >
+          {formatDuration(waitedSec, { padMinutes: true })}
+        </span>
+      ) : (
+        <span className="w-12 shrink-0" />
+      )}
+      <span className="tabular w-6 shrink-0 text-right text-sm">{waiting.length}</span>
     </li>
   )
 }

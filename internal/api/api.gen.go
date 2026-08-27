@@ -1702,6 +1702,18 @@ type StaffQueueRequest struct {
 	Position *int `json:"position,omitempty"`
 }
 
+// StaffedQueue A queue the reader works, whether or not anybody is waiting in it. An agent's own line; every queue for a supervisor.
+type StaffedQueue struct {
+	DisplayName string `json:"displayName"`
+
+	// Name Switch-safe identifier: no spaces, @ or quotes.
+	Name    string             `json:"name"`
+	QueueID openapi_types.UUID `json:"queueId"`
+
+	// SLAThresholdSec The queue's answer target; a wait past it is a breach. 0 means none is configured.
+	SLAThresholdSec int `json:"slaThresholdSec"`
+}
+
 // Strategy How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.
 type Strategy string
 
@@ -1870,6 +1882,9 @@ type WaitingCall struct {
 // WaitingCallList defines model for WaitingCallList.
 type WaitingCallList struct {
 	Items []WaitingCall `json:"items"`
+
+	// Queues The queues the reader works, listed whether or not anybody is waiting in them. A line with nobody in it is an answer, not an absence.
+	Queues []StaffedQueue `json:"queues"`
 }
 
 // WebhookDelivery One attempt-set at delivering one revision of one call's CDR to one subscription.
