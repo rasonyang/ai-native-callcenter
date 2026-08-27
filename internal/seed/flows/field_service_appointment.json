@@ -1,0 +1,351 @@
+{
+  "id": "field_service_appointment",
+  "specVersion": "v2",
+  "entry": "field_service_appointment",
+  "initialNode": "welcome",
+  "global": {
+    "persona": {
+      "zh": "你是星讯上门服务预约热线的语音助手,负责上门维修服务的预约、改期和确认。",
+      "en": "You are the voice assistant of the StarCom field-service hotline, handling on-site visit booking, rescheduling and confirmation."
+    },
+    "rules": {
+      "zh": [
+        "这是电话语音对话:每次只说一两句短句,口语化,不用任何列表、符号或书面格式。",
+        "全程讲普通话。预约单号、时间要清晰读出。",
+        "不要闲聊、不要回答与上门服务预约无关的问题,礼貌把话题带回业务。",
+        "用户任何时候说“人工”、“转接客服”或按 0,立即调用 transfer_to_agent,工具返回后按提示播报转接话术。",
+        "预约时间、单号等信息必须来自工具返回,严禁编造。工具返回里的 hint 字段是给你的流程提示,照做。",
+        "用户明确表达要结束通话,立即调用 hangup_call,工具返回后再道别。"
+      ],
+      "en": [
+        "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
+        "Speak English throughout. Tool results may contain Chinese (slots, addresses) — always announce them in English, translating naturally. Read appointment numbers and times clearly.",
+        "Politely steer off-topic questions back to appointment services.",
+        "Whenever the caller asks for an agent or presses 0, call transfer_to_agent immediately, then announce the transfer script per the hint.",
+        "Appointment times and numbers must come from tool results — never invent them. The hint field is your flow guidance; follow it.",
+        "When the caller clearly wants to end the call, call hangup_call immediately, then say goodbye."
+      ]
+    },
+    "voice": "longanqian",
+    "fallbackTarget": "need_transfer",
+    "maxTurns": 30,
+    "alwaysAllowedTools": [
+      "transfer_to_agent",
+      "hangup"
+    ],
+    "apiBaseEnv": "DEMO_API_BASE",
+    "transitions": [
+      {
+        "on": "TOOL_RESULT",
+        "tool": "transfer_to_agent",
+        "target": "finish_transfer"
+      },
+      {
+        "on": "TOOL_RESULT",
+        "tool": "hangup",
+        "target": "finish"
+      }
+    ]
+  },
+  "nodes": {
+    "welcome": {
+      "instruction": {
+        "zh": "开场说:“星讯上门服务热线,语音助手为您服务。”然后立即调用 appt_lookup 查询本机号码是否已有预约,不要先问用户问题。",
+        "en": "Open with: \"Welcome to the StarCom field-service hotline.\" Then immediately call appt_lookup to check whether this number already has an appointment — do not ask questions first."
+      },
+      "tools": [
+        "appt_lookup"
+      ],
+      "transitions": [
+        {
+          "on": "TOOL_RESULT",
+          "tool": "appt_lookup",
+          "condition": {
+            "slot": "result.found",
+            "op": "EQ",
+            "value": "1"
+          },
+          "target": "manage"
+        },
+        {
+          "on": "TOOL_RESULT",
+          "tool": "appt_lookup",
+          "condition": {
+            "slot": "result.found",
+            "op": "EQ",
+            "value": "0"
+          },
+          "target": "book",
+          "priority": 1
+        }
+      ]
+    },
+    "book": {
+      "instruction": {
+        "zh": "本机号码暂无预约:问用户需要维修什么设备、上门地址,然后调用 appt_slots 获取两个可选时段,播报后让用户二选一(也可按1或按2)。信息齐全(设备、地址、时段)后复述一遍并确认,再调用 appt_book 创建预约。每一项都必须是用户明确说出的内容,严禁自行猜测填入。",
+        "en": "No appointment on this number: ask which device needs service and the visit address, then call appt_slots and announce the two available slots in English, letting the caller pick one (or press 1 or 2). Once device, address and slot are all explicit, restate them and confirm, then call appt_book. Every value must come from the caller — never guess."
+      },
+      "tools": [
+        "appt_slots",
+        "appt_book"
+      ],
+      "transitions": [
+        {
+          "on": "TOOL_RESULT",
+          "tool": "appt_book",
+          "condition": {
+            "slot": "result.ok",
+            "op": "EQ",
+            "value": "1"
+          },
+          "target": "done_book"
+        }
+      ]
+    },
+    "manage": {
+      "instruction": {
+        "zh": "已查到预约:{slots.appt_lookup.item},时间 {slots.appt_lookup.slot},地址 {slots.appt_lookup.address}。向用户播报并问:是确认按这个时间上门,还是需要改期?确认:调用 appt_confirm。改期:先调用 appt_slots 获取两个新时段播报让用户选,用户明确选择后调用 appt_reschedule。",
+        "en": "Found an appointment: {slots.appt_lookup.item}, time {slots.appt_lookup.slot}, address {slots.appt_lookup.address} (announce in English). Ask whether to confirm this visit time or reschedule. Confirm: call appt_confirm. Reschedule: call appt_slots first, announce the two new slots, and call appt_reschedule after an explicit choice."
+      },
+      "tools": [
+        "appt_confirm",
+        "appt_slots",
+        "appt_reschedule"
+      ],
+      "transitions": [
+        {
+          "on": "TOOL_RESULT",
+          "tool": "appt_confirm",
+          "condition": {
+            "slot": "result.confirmed",
+            "op": "EQ",
+            "value": "1"
+          },
+          "target": "done_confirm"
+        },
+        {
+          "on": "TOOL_RESULT",
+          "tool": "appt_reschedule",
+          "condition": {
+            "slot": "result.ok",
+            "op": "EQ",
+            "value": "1"
+          },
+          "target": "done_reschedule"
+        }
+      ]
+    },
+    "done_book": {
+      "instruction": {
+        "zh": "预约成功:预约号 {slots.appt_book.appt_id},上门时间 {slots.appt_book.slot}。向用户播报预约号(逐位)与时间,提醒保持电话畅通。然后问还有其它需要吗;没有则调用 hangup_call。",
+        "en": "Appointment created: number {slots.appt_book.appt_id}, visit time {slots.appt_book.slot}. Announce the number digit by digit and the time in English; remind the caller to keep the phone reachable. Then ask if there is anything else; if not, call hangup_call."
+      },
+      "tools": []
+    },
+    "done_confirm": {
+      "instruction": {
+        "zh": "已为用户确认预约,上门时间 {slots.appt_confirm.slot}。播报确认结果,提醒工程师上门前会先电话联系。然后问还有其它需要吗;没有则调用 hangup_call。",
+        "en": "Appointment confirmed for {slots.appt_confirm.slot}. Announce the confirmation and mention the engineer will call before arriving. Then ask if there is anything else; if not, call hangup_call."
+      },
+      "tools": []
+    },
+    "done_reschedule": {
+      "instruction": {
+        "zh": "改期成功:预约号 {slots.appt_reschedule.appt_id},新的上门时间 {slots.appt_reschedule.slot}。向用户播报新时间。然后问还有其它需要吗;没有则调用 hangup_call。",
+        "en": "Rescheduled: appointment {slots.appt_reschedule.appt_id}, new visit time {slots.appt_reschedule.slot}. Announce the new time in English. Then ask if there is anything else; if not, call hangup_call."
+      },
+      "tools": []
+    },
+    "need_transfer": {
+      "instruction": {
+        "zh": "当前问题无法继续自助处理:向用户简短道歉说明,立即调用 transfer_to_agent。",
+        "en": "This cannot proceed via self-service: apologize briefly, then immediately call transfer_to_agent."
+      },
+      "tools": []
+    },
+    "finish_transfer": {
+      "instruction": {
+        "zh": "播报固定转接话术:“稍后会有人工客服与您联系,请留意来电。感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
+        "en": "Announce the fixed transfer script: \"An agent will call you back shortly, please keep your phone available. Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+      },
+      "tools": [],
+      "isTerminal": true
+    },
+    "finish": {
+      "instruction": {
+        "zh": "道别:“感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
+        "en": "Say goodbye: \"Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+      },
+      "tools": [],
+      "isTerminal": true
+    }
+  },
+  "tools": {
+    "appt_lookup": {
+      "description": {
+        "zh": "按本机来电号码查询已有的上门服务预约。进线后先调用一次。",
+        "en": "Look up an existing field-service appointment by the caller's number. Call once right after the call starts."
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "http": {
+        "path": "/api/appt/get",
+        "body": {
+          "phone": "{slots.caller}"
+        },
+        "successWhen": {
+          "path": "retCode",
+          "equals": "000000"
+        },
+        "errorFrom": "retMsg",
+        "result": {
+          "found": "data.found",
+          "appt_id": "data.appt_id",
+          "item": "data.item",
+          "slot": "data.slot",
+          "address": "data.address"
+        }
+      }
+    },
+    "appt_slots": {
+      "description": {
+        "zh": "查询最近两个可预约的上门时段。",
+        "en": "Fetch the next two available visit time slots."
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "http": {
+        "path": "/api/appt/slots",
+        "successWhen": {
+          "path": "retCode",
+          "equals": "000000"
+        },
+        "errorFrom": "retMsg",
+        "result": {
+          "slot1": "data.slot1",
+          "slot2": "data.slot2"
+        }
+      }
+    },
+    "appt_book": {
+      "description": {
+        "zh": "创建上门服务预约。须先用 appt_slots 播报两个时段并让用户二选一。",
+        "en": "Create a field-service appointment. Announce the two slots from appt_slots first and let the caller pick one."
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date_choice": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "用户选择的时段 / the slot picked (1 or 2)"
+          },
+          "item": {
+            "type": "string",
+            "description": "报修设备与问题 / the device and issue"
+          },
+          "address": {
+            "type": "string",
+            "description": "上门地址 / visit address"
+          }
+        },
+        "required": [
+          "date_choice",
+          "item",
+          "address"
+        ]
+      },
+      "http": {
+        "path": "/api/appt/book",
+        "body": {
+          "phone": "{slots.caller}",
+          "date_choice": "{args.date_choice}",
+          "item": "{args.item}",
+          "address": "{args.address}"
+        },
+        "successWhen": {
+          "path": "retCode",
+          "equals": "000000"
+        },
+        "errorFrom": "retMsg",
+        "result": {
+          "appt_id": "data.appt_id",
+          "slot": "data.slot"
+        }
+      }
+    },
+    "appt_reschedule": {
+      "description": {
+        "zh": "修改已有预约的上门时段。须先用 appt_slots 播报两个时段并让用户二选一。",
+        "en": "Move an existing appointment to a new slot. Announce the two slots from appt_slots first and let the caller pick one."
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "date_choice": {
+            "type": "string",
+            "enum": [
+              "1",
+              "2"
+            ],
+            "description": "用户选择的新时段 / the new slot picked (1 or 2)"
+          }
+        },
+        "required": [
+          "date_choice"
+        ]
+      },
+      "http": {
+        "path": "/api/appt/reschedule",
+        "body": {
+          "phone": "{slots.caller}",
+          "date_choice": "{args.date_choice}"
+        },
+        "successWhen": {
+          "path": "retCode",
+          "equals": "000000"
+        },
+        "errorFrom": "retMsg",
+        "result": {
+          "appt_id": "data.appt_id",
+          "slot": "data.slot"
+        }
+      }
+    },
+    "appt_confirm": {
+      "description": {
+        "zh": "确认已有预约按原时段执行(用户明确说确认后调用)。",
+        "en": "Confirm the existing appointment as scheduled (call only after the caller explicitly confirms)."
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "http": {
+        "path": "/api/appt/confirm",
+        "body": {
+          "phone": "{slots.caller}"
+        },
+        "successWhen": {
+          "path": "retCode",
+          "equals": "000000"
+        },
+        "errorFrom": "retMsg",
+        "result": {
+          "confirmed": "data.confirmed",
+          "slot": "data.slot"
+        }
+      }
+    }
+  }
+}
