@@ -645,8 +645,25 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 
 场景是：**坐席没有登录平台，但话机在线**，客户的系统替他发起外呼。
 
-- [ ] **86. 先让一部话机注册但不签入**（或用主管把该坐席强制签出）
-- [ ] **87. 用 key 发起外呼**
+- [x] **86. 先让一部话机注册但不签入**（或用主管把该坐席强制签出）
+      话机注册着不等于坐席签出了 —— 两边分别确认，扩展开着而平台显示 READY 的话，这一步没成立：
+
+      ```sh
+      /usr/local/freeswitch/bin/fs_cli -x "sofia status profile internal reg" | grep -c "1001@"
+      curl -s -b /tmp/wt-admin.jar http://127.0.0.1:8080/api/v1/agents   # 该坐席应为 LOGGED_OUT
+      ```
+
+      还签着入就用 API 强制签出（走查表允许，等同于第 45 步在界面上做的）：
+
+      ```sh
+      AID=$(curl -s -b /tmp/wt-admin.jar http://127.0.0.1:8080/api/v1/agents | python3 -c "
+      import json,sys
+      for a in json.load(sys.stdin)['items']:
+          if a.get('extensionNumber')=='1001': print(a['agentId'])")
+      curl -s -X POST -b /tmp/wt-admin.jar -H 'X-AICC-Csrf: 1' \
+        "http://127.0.0.1:8080/api/v1/agents/$AID/force-logout"
+      ```
+- [x] **87. 用 key 发起外呼**
 
       ```sh
       CALL=$(uuidgen)
@@ -665,13 +682,13 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
       两种是不同的错，一个是集成里写错了号，一个是运维问题。
       两种都值得试一次：`9999`（号根本不存在）和一个存在但没注册的分机，报错必须不一样，
       否则集成方分不清该改代码还是该去开机。
-- [ ] **90. 通话中用同一个 `callId` 再发一次**
+- [x] **90. 通话中用同一个 `callId` 再发一次**
       期望：**200** 且 `"isDuplicate": true`，话机**不会被第二次拉起**。
       这是超时重试的保护：客户系统重发不该让坐席的电话再响一次。
-- [ ] **91. 用 key 挂断**
+- [x] **91. 用 key 挂断**
       `curl -s -X POST http://127.0.0.1:8080/api/v1/calls/$CALL/hangup -H "X-AICC-Api-Key: $KEY"`
       期望：**202**，两条腿都在一秒内释放。
-- [ ] **92. 挂断后看这一通的 CDR**
+- [x] **92. 挂断后看这一通的 CDR**
       期望：`callType` 为 OUTBOUND，**`talk_sec` 与 `bill_sec` 一致**（不是 0），
       `legs` 是 `TRUNK|<对方号码>`，`userData` 里有你传的 `ticketId`。
 
