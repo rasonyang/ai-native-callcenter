@@ -293,8 +293,19 @@ cd ~/workspaces/github/ai-native-callcenter
       走查时实际验的是分机之间：1008 把通话转给 1001，转成了。
 - [x] **35. 挂断后填写「处理结果」和小结 → 完成**
       期望：状态从 *话后处理* 回到 *示闲*。今日统计里「接听通话」加一。
-- [ ] **36. 在「外呼」里输入一个外线号码 → 拨打**
+- [x] **36. 在「外呼」里输入一个外线号码 → 拨打**
       期望：提示「正在外呼 —— 将先接通您的话机」。**先响自己的话机**，接起后才拨对方。对方看到的主叫是第 21 步设的缺省外呼号码。
+      主叫号对不上时，先看交换机到底用了什么，再怀疑应用：
+
+      ```sh
+      grep origination_caller_id /usr/local/freeswitch/log/freeswitch.log | tail -2
+      ```
+
+      备注：2026-08-27 走查时对方看到的是 95001 而不是设好的 95555。应用侧是对的 ——
+      它按缺省外呼号码把 `effective_caller_id_number` 设在坐席腿上；但**外线那条腿是交换机的 dialplan 建的**，
+      本机那条模拟中继写死了 `origination_caller_id_number=$${pstn_gateway_caller_id}`（`vars.xml` 里是 95001），
+      悄悄盖掉了平台的选择。发货的 demo 栈没有这个硬编码，是本机开发配置的问题；
+      已把 `conf/dialplan/aicc/00_pstn_gateway.xml` 改成透传（备份 `.bak-20260827`）。
 
 ### 我的通话 · 客户 · 回访任务 · `/agent/calls` · `/agent/contacts` · `/agent/callbacks`
 
