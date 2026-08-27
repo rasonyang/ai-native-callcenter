@@ -296,3 +296,49 @@ func TestAnAgentStillEndsOnlyTheirOwnLeg(t *testing.T) {
 		t.Error("an agent stepping out ended the whole conversation")
 	}
 }
+
+// A machine is never told to refresh a session it cannot have.
+//
+// An API key reaching a session-only endpoint used to be answered
+// SESSION_EXPIRED, which to an integration reads as "log in again" — and it
+// has nothing to log in with, so it retries that forever. The boundary itself
+// is the point of the 401 and does not move: a key that can place calls must
+// not reach the configuration saying where call records are sent.
+func TestAnAPIKeyOnASessionEndpointIsNotToldToRefreshItsSession(t *testing.T) {
+	srv := New(config.Config{SessionCookie: "aicc_session", APIKey: "the-key"}, Deps{})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/webhook-subscriptions", nil)
+	r.Header.Set(apiKeyHeader, "the-key")
+	w := httptest.NewRecorder()
+	srv.requireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("an API key reached a session-only endpoint")
+	})).ServeHTTP(w, r)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401: %s", w.Code, w.Body)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != string(CodeInvalidCredentials) {
+		t.Errorf("code = %q, want %q", body.Error.Code, CodeInvalidCredentials)
+	}
+
+	// A browser with no cookie is still told its session is the problem,
+	// because for a browser it is.
+	plain := httptest.NewRequest(http.MethodGet, "/api/v1/webhook-subscriptions", nil)
+	w = httptest.NewRecorder()
+	srv.requireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).
+		ServeHTTP(w, plain)
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Error.Code != string(CodeSessionExpired) {
+		t.Errorf("code = %q, want %q for a browser", body.Error.Code, CodeSessionExpired)
+	}
+}

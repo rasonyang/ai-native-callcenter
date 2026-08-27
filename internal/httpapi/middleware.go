@@ -50,6 +50,17 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 
 		cookie, err := r.Cookie(s.cfg.SessionCookie)
 		if err != nil || cookie.Value == "" {
+			// A caller holding an API key has no session and never will, so
+			// "session expired" reads to them as an instruction to refresh one
+			// that does not exist — a machine follows it forever. Say instead
+			// that the credential they did present is not the one this
+			// endpoint takes. The status stays 401: what is missing is a
+			// credential this route accepts, not permission.
+			if r.Header.Get(apiKeyHeader) != "" {
+				writeError(w, http.StatusUnauthorized, CodeInvalidCredentials,
+					"this endpoint takes a browser session; an API key cannot reach it", nil)
+				return
+			}
 			writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 			return
 		}

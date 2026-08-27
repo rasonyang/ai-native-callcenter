@@ -618,20 +618,28 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 AICC_API_KEY=$(openssl rand -hex 32)   # 记下这个值
 ```
 
-下面命令里的 `$KEY` 就是它。
+已经配过就直接读出来，下面命令里的 `$KEY` 就是它：
+
+```sh
+KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
+```
 
 ### 5.1 鉴权
 
-- [ ] **83. 不带任何凭据**
+- [x] **83. 不带任何凭据**
       `curl -s -X POST http://127.0.0.1:8080/api/v1/calls -d '{}'`
       期望：**403**，`missing X-AICC-Csrf header`。
-- [ ] **84. 带一把错的 key**
+- [x] **84. 带一把错的 key**
       期望：**401**，错误码 `INVALID_CREDENTIALS`（不是 `SESSION_EXPIRED`——机器读到后者
       会去刷新一个从不存在的会话）。
-- [ ] **85. 用 key 去读 webhook 订阅**
+- [x] **85. 用 key 去读 webhook 订阅**
       `curl -s -H "X-AICC-Api-Key: $KEY" http://127.0.0.1:8080/api/v1/webhook-subscriptions`
-      期望：**401**。这把 key 能打电话，但**够不到**「往哪里推数据」的配置——否则泄露一把
-      key 就能把全部通话记录导去别处。
+      期望：**401**，错误码 `INVALID_CREDENTIALS`。这把 key 能打电话，但**够不到**「往哪里推数据」的
+      配置——否则泄露一把 key 就能把全部通话记录导去别处。
+      备注：2026-08-27 走查时这里回的是 `SESSION_EXPIRED` —— 正是上一步专门写下的那条理由：
+      拿 key 的机器永远不会有会话，却被告知「会话过期了」，于是它会去刷一个不存在的会话，一直刷。
+      已改成 `INVALID_CREDENTIALS`，状态码和边界都没动；**浏览器没带 cookie 时仍然是 `SESSION_EXPIRED`**，
+      因为对浏览器来说那句话是真的。
 
 ### 5.2 外呼与挂断
 
@@ -650,11 +658,13 @@ AICC_API_KEY=$(openssl rand -hex 32)   # 记下这个值
       ```
 
       期望：**201**。那部话机**自动摘机**，然后拨对方。坐席没登录也照样能打。
-- [ ] **88. 不给 `extensionNumber`**
+- [x] **88. 不给 `extensionNumber`**
       期望：**400**，`name the extension to dial from`。key 没有自己的话机，不会替你猜。
-- [ ] **89. 给一个从没注册过的分机号**
+- [x] **89. 给一个从没注册过的分机号**
       期望：**409**，`no such phone`。话机关着的会说 `the phone is not registered`——
       两种是不同的错，一个是集成里写错了号，一个是运维问题。
+      两种都值得试一次：`9999`（号根本不存在）和一个存在但没注册的分机，报错必须不一样，
+      否则集成方分不清该改代码还是该去开机。
 - [ ] **90. 通话中用同一个 `callId` 再发一次**
       期望：**200** 且 `"isDuplicate": true`，话机**不会被第二次拉起**。
       这是超时重试的保护：客户系统重发不该让坐席的电话再响一次。
