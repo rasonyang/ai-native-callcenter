@@ -6,7 +6,7 @@ import { KeyRound, Pencil, Trash2 } from 'lucide-react'
 import { Dialog, Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { describeError } from '@/lib/errors'
@@ -28,7 +28,7 @@ function ExtensionsPage() {
   const { data, isPending, isError, error } = useExtensions()
   const { saveExtension, deleteExtension } = useCatalogMutations()
   const users = useUsers()
-  const [editing, setEditing] = useState<ExtensionDraft | null>(null)
+  const [editing, setEditing] = useRecordForm<ExtensionDraft>(saveExtension)
   const [revealing, setRevealing] = useState<Extension | null>(null)
   // The freshly minted password lives here and nowhere else: not in form
   // state, not in an input's value, not in anything a draft or a devtools

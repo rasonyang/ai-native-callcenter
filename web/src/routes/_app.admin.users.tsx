@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { KeyRound, Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import type { Role } from '@/lib/api'
@@ -34,7 +34,7 @@ function UsersAdmin() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useUsers()
   const { create, update, resetPassword } = useUserMutations()
-  const [editing, setEditing] = useState<UserDraft | null>(null)
+  const [editing, setEditing] = useRecordForm<UserDraft>(create, update)
   const [resetting, setResetting] = useState<User | null>(null)
   const [newPassword, setNewPassword] = useState('')
 

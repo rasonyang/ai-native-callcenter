@@ -424,41 +424,73 @@ func (c *CatalogStore) ListDIDs(ctx context.Context) ([]catalog.DID, error) {
 	return out, nil
 }
 
+// CreateDID writes a number, taking the default-outbound flag off whoever
+// held it if this one claims it. See writeDIDTx for why that is not a refusal.
 func (c *CatalogStore) CreateDID(ctx context.Context, d catalog.DID) (catalog.DID, error) {
-	row, err := c.q.CreateDID(ctx, queries.CreateDIDParams{
-		ID:                 d.ID,
-		Number:             d.Number,
-		Language:           d.Language,
-		FlowID:             d.FlowID,
-		FallbackQueueID:    d.FallbackQueueID,
-		IsRecordingEnabled: d.IsRecordingEnabled,
-		Description:        d.Description,
-		IsEnabled:          d.IsEnabled,
-		AllowInbound:       d.AllowInbound,
-		AllowOutbound:      d.AllowOutbound,
-		IsDefaultOutbound:  d.IsDefaultOutbound,
+	return c.writeDIDTx(ctx, d, func(qtx *queries.Queries) (queries.Did, error) {
+		return qtx.CreateDID(ctx, queries.CreateDIDParams{
+			ID:                 d.ID,
+			Number:             d.Number,
+			Language:           d.Language,
+			FlowID:             d.FlowID,
+			FallbackQueueID:    d.FallbackQueueID,
+			IsRecordingEnabled: d.IsRecordingEnabled,
+			Description:        d.Description,
+			IsEnabled:          d.IsEnabled,
+			AllowInbound:       d.AllowInbound,
+			AllowOutbound:      d.AllowOutbound,
+			IsDefaultOutbound:  d.IsDefaultOutbound,
+		})
 	})
-	if err != nil {
-		return catalog.DID{}, fmt.Errorf("create did: %w", err)
-	}
-	return didOf(row), nil
 }
 
 func (c *CatalogStore) UpdateDID(ctx context.Context, d catalog.DID) (catalog.DID, error) {
-	row, err := c.q.UpdateDID(ctx, queries.UpdateDIDParams{
-		ID:                 d.ID,
-		Language:           d.Language,
-		FlowID:             d.FlowID,
-		FallbackQueueID:    d.FallbackQueueID,
-		IsRecordingEnabled: d.IsRecordingEnabled,
-		Description:        d.Description,
-		IsEnabled:          d.IsEnabled,
-		AllowInbound:       d.AllowInbound,
-		AllowOutbound:      d.AllowOutbound,
-		IsDefaultOutbound:  d.IsDefaultOutbound,
+	return c.writeDIDTx(ctx, d, func(qtx *queries.Queries) (queries.Did, error) {
+		return qtx.UpdateDID(ctx, queries.UpdateDIDParams{
+			ID:                 d.ID,
+			Language:           d.Language,
+			FlowID:             d.FlowID,
+			FallbackQueueID:    d.FallbackQueueID,
+			IsRecordingEnabled: d.IsRecordingEnabled,
+			Description:        d.Description,
+			IsEnabled:          d.IsEnabled,
+			AllowInbound:       d.AllowInbound,
+			AllowOutbound:      d.AllowOutbound,
+			IsDefaultOutbound:  d.IsDefaultOutbound,
+		})
 	})
+}
+
+// writeDIDTx runs one number's write with the default-outbound flag settled
+// first.
+//
+// Marking a number the default one is a choice among numbers, not a property
+// of this one alone: there is exactly one, and the partial unique index says
+// so. Left to the operator, claiming it means remembering to go and clear the
+// number that has it — and forgetting reads as "that identifier is already in
+// use", which points at the number rather than at the flag. So the claim moves
+// it, in the same transaction that takes it.
+func (c *CatalogStore) writeDIDTx(ctx context.Context, d catalog.DID,
+	write func(*queries.Queries) (queries.Did, error)) (catalog.DID, error) {
+	tx, err := c.pool.Begin(ctx)
 	if err != nil {
-		return catalog.DID{}, fmt.Errorf("update did: %w", err)
+		return catalog.DID{}, fmt.Errorf("write did %s: %w", d.Number, err)
+	}
+	// Safe after Commit: pgx answers ErrTxClosed, which nothing acts on.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	qtx := c.q.WithTx(tx)
+	if d.IsDefaultOutbound {
+		if err := qtx.ClearDefaultOutbound(ctx, d.ID); err != nil {
+			return catalog.DID{}, fmt.Errorf("clear default outbound: %w", err)
+		}
+	}
+	row, err := write(qtx)
+	if err != nil {
+		return catalog.DID{}, fmt.Errorf("write did %s: %w", d.Number, err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return catalog.DID{}, fmt.Errorf("commit did %s: %w", d.Number, err)
 	}
 	return didOf(row), nil
 }

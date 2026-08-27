@@ -6,7 +6,7 @@ import { Pencil, Plus, Users, X } from 'lucide-react'
 import { Dialog } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
@@ -34,7 +34,7 @@ function RoutingPage() {
   const { t } = useTranslation()
   const { data, isPending, isError, error } = useQueues()
   const { saveQueue, deleteQueue } = useCatalogMutations()
-  const [editing, setEditing] = useState<QueueDraft | null>(null)
+  const [editing, setEditing] = useRecordForm<QueueDraft>(saveQueue)
   const [staffing, setStaffing] = useState<Queue | null>(null)
 
   const rows = data?.items ?? []

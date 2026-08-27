@@ -1,10 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useState } from 'react'
 import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
@@ -30,7 +29,7 @@ function NumbersPage() {
   const flows = useFlows()
   const { data: queues } = useQueues()
   const { saveDID, deleteDID } = useCatalogMutations()
-  const [editing, setEditing] = useState<DIDDraft | null>(null)
+  const [editing, setEditing] = useRecordForm<DIDDraft>(saveDID)
 
   const rows = data?.items ?? []
   const queueOptions = [
@@ -50,7 +49,21 @@ function NumbersPage() {
         actions={
           <Button
             size="sm"
-            onClick={() => setEditing({ language: 'en', isEnabled: true, isRecordingEnabled: true })}
+            // Every boolean the server defaults is seeded here, allowInbound
+            // included. An absent key is not false to a decoder: the body is
+            // read into catalog.NewDID(), which is inbound, so a form that
+            // simply never mentioned the field had a number the operator saw
+            // unticked saved as one callers can reach — and refused for want
+            // of the flow that answers it, naming a field the form said was
+            // off. The checkbox now starts where the server does.
+            onClick={() =>
+              setEditing({
+                language: 'en',
+                isEnabled: true,
+                isRecordingEnabled: true,
+                allowInbound: true,
+              })
+            }
           >
             <Plus />
             {t('admin.addNumber')}
