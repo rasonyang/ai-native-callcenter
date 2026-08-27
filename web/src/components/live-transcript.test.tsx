@@ -166,6 +166,23 @@ describe('LiveTranscript', () => {
     expect(rows[2]).toContain('third')
   })
 
+  // A tool line's content holds the tool's name, not text. Reading only text
+  // rendered the row as "requested " — the sentence with the one word that
+  // carried its meaning missing, twice per transfer.
+  it('names the tool a bot line called, from the snapshot and from the stream', async () => {
+    const { emit } = renderPanel({ items: [
+      { seq: 1, occurredAt: new Date().toISOString(), speaker: 'BOT', kind: 'TOOL_CALL',
+        content: { name: 'transfer_to_agent', args: '{}' }, offsetMs: 0,
+        source: 'MODEL', utteranceId: 'u-1' },
+    ] })
+
+    expect(await screen.findByText(/requested transfer_to_agent/)).toBeInTheDocument()
+
+    emit(final(2, 'transfer_to_agent', { speaker: 'BOT', kind: 'TOOL_RESULT' }))
+    await waitFor(() =>
+      expect(screen.getByText(/transfer_to_agent answered/)).toBeInTheDocument())
+  })
+
   it('drops buffered lines the snapshot already carried, and keeps the ones it did not', async () => {
     // A line that arrives before the snapshot resolves and is also in it must
     // appear once; subscribing first is only safe because this holds.
