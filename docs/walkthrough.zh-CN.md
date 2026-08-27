@@ -465,17 +465,49 @@ go run ./cmd/aicc-mockbackend -addr 127.0.0.1:8770
 v2 是**加载期校验**——写错的东西在 `flowadd` 就被拒，不会等到通话中才发作。
 每一条都改坏一处再 `flowadd`，看它拒不拒、错误说不说得清。
 
-- [ ] **54. 算子写错**（`"op": "SORTA_EQ"`）
+一次跑完六条，不用手改六个文件（`-slug` 让它们各自落地，不会覆盖正式流程）：
+
+```sh
+mkdir -p /tmp/wtflow && python3 - <<'PY'
+import json, io, copy
+base = json.load(io.open('internal/seed/flows/mobile_support.json', encoding='utf-8'))
+cases = {
+  'wt_bad_op':      lambda d: d['nodes']['welcome']['transitions'][0]['condition'].update(op='SORTA_EQ'),
+  'wt_bad_target':  lambda d: d['nodes']['welcome']['transitions'][0].update(target='nowhere_at_all'),
+  'wt_bad_tool':    lambda d: d['nodes']['welcome'].update(tools=['repair_status', 'no_such_tool']),
+  'wt_bad_initial': lambda d: d.update(initialNode='missing'),
+  'wt_no_persona':  lambda d: d['global'].pop('persona', None),
+  'wt_orphan':      lambda d: d['nodes'].update(nobody_gets_here={'instruction': {'zh': '没人到得了这里。', 'en': 'Nobody can reach this.'}, 'tools': []}),
+}
+for name, mutate in cases.items():
+    d = copy.deepcopy(base); d['id'] = name; mutate(d)
+    io.open(f'/tmp/wtflow/{name}.json', 'w', encoding='utf-8').write(json.dumps(d, ensure_ascii=False, indent=2))
+PY
+
+for f in wt_bad_op wt_bad_target wt_bad_tool wt_bad_initial wt_no_persona wt_orphan; do
+  printf '\n=== %s ===\n' "$f"; /tmp/aicc flowadd -file /tmp/wtflow/$f.json -slug $f 2>&1 | tail -2
+done
+```
+
+走完把它们删掉：
+
+```sh
+docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) psql -U aicc -d aicc \
+  -c "delete from flow_revisions where flow_id in (select id from flows where slug like 'wt_%');
+      delete from flows where slug like 'wt_%';"
+```
+
+- [x] **54. 算子写错**（`"op": "SORTA_EQ"`）
       期望：拒绝，`phase welcome transition 0: unknown operator "SORTA_EQ"` —— 点名是哪个阶段的第几条转移。
-- [ ] **55. 转移指向不存在的阶段**
+- [x] **55. 转移指向不存在的阶段**
       期望：拒绝，`... targets "nowhere_at_all", which is not a phase in this flow`。
-- [ ] **56. 阶段允许了不存在的工具**
+- [x] **56. 阶段允许了不存在的工具**
       期望：拒绝，`phase "welcome" allows unknown tool "no_such_tool"`。
-- [ ] **57. `initialNode` 指向不存在的阶段**
+- [x] **57. `initialNode` 指向不存在的阶段**
       期望：拒绝，`initialNode "missing" is not a phase in this flow`。
-- [ ] **58. 删掉 `global.persona`**
+- [x] **58. 删掉 `global.persona`**
       期望：拒绝，`global.persona is empty, so the model has no character to adopt`。
-- [ ] **59. 加一个孤立阶段（没有任何转移指向它）**
+- [x] **59. 加一个孤立阶段（没有任何转移指向它）**
       期望：**不拒绝，能发布**。这是有意的，见上面第 17 步——由编辑器提醒，不由服务端拦。
 
 ### 4.2 Designer 标签页
