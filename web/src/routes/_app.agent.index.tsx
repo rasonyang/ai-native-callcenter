@@ -5,7 +5,7 @@ import type { ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
   ArrowRightLeft, Grid3x3, Mic, MicOff, Pause, Phone, PhoneOff, PhoneOutgoing,
-  Play, Timer, Users,
+  Play, Timer,
 } from 'lucide-react'
 import { Popover } from 'radix-ui'
 
@@ -210,10 +210,11 @@ function CallPanel({ call }: { call: CallSnapshot }) {
           </Button>
         </div>
       ) : (
-        // Six controls in the reference's 3×2 grid. Five are wired; conference
-        // is present and disabled with the reason on the tooltip, because a
-        // missing button reads as a missing feature and a fake one is worse
-        // than either.
+        // Five controls in a 3×2 grid, hang up spanning the row it shares with
+        // the keypad. A sixth cell held a disabled Conference button for a
+        // while, tooltipped with the reason; the owner's answer was that the
+        // product does not want conferencing at all, and a control for a
+        // feature nobody is waiting for is just a dead key on the panel.
         <div
           role="group"
           aria-label={t('call.controls')}
@@ -239,17 +240,10 @@ function CallPanel({ call }: { call: CallSnapshot }) {
             {isHeld ? <Play /> : <Pause />}
           </CallActionButton>
           <TransferButton callId={call.callId} disabled={isInternal} />
-          <CallActionButton
-            disabled
-            label={t('call.conference')}
-            title={t('call.conferenceUnavailable')}
-          >
-            <Users />
-          </CallActionButton>
           <DTMFButton callId={call.callId} />
           <Button
             variant="destructive"
-            className="w-full"
+            className="col-span-2 w-full"
             title={t('call.hangup')}
             aria-label={t('call.hangup')}
             onClick={() => actions.hangup.mutate(call.callId)}

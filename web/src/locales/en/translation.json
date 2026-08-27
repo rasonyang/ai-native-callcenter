@@ -209,8 +209,6 @@
     "accept": "Accept",
     "decline": "Decline",
     "mute": "Mute",
-    "conference": "Conference",
-    "conferenceUnavailable": "Conferencing is not available: the platform has no endpoint that adds a third party.",
     "controls": "Call controls",
     "unmute": "Unmute",
     "dtmf": "Keypad tones",

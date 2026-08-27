@@ -43,27 +43,26 @@ async function renderCockpit(backend: Partial<Backend> = {}) {
 const onCall = { calls: [callFixture('TALKING')], presence: presenceFixture({ availability: 'ON_CALL' }) }
 
 describe('control grid', () => {
-  it('shows all six controls', async () => {
+  it('shows the five controls, every one of them wired', async () => {
     await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
-    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^conference$/i, /^keypad$/i, /hang up/i]) {
+    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
       expect(within(grid).getByRole('button', { name })).toBeVisible()
     }
-    expect(within(grid).getAllByRole('button')).toHaveLength(6)
+    expect(within(grid).getAllByRole('button')).toHaveLength(5)
   })
 
-  it('disables only conference, the one with no endpoint, and says why', async () => {
+  // The grid used to carry a sixth, disabled key for conferencing. The product
+  // does not want conferencing, so it is not a gap being tracked — it is a
+  // control that should never have been drawn.
+  it('offers nothing the agent cannot use', async () => {
     await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
     const disabled = within(grid)
       .getAllByRole('button')
       .filter((b) => (b as HTMLButtonElement).disabled)
-      .map((b) => b.getAttribute('aria-label'))
-    expect(disabled).toEqual(['Conference'])
-    expect(within(grid).getByRole('button', { name: /^conference$/i })).toHaveAttribute(
-      'title',
-      expect.stringMatching(/no endpoint/i),
-    )
+    expect(disabled).toEqual([])
+    expect(within(grid).queryByRole('button', { name: /conference/i })).toBeNull()
   })
 
   it('mutes and unmutes the agent', async () => {
@@ -801,8 +800,8 @@ describe('the transcript panel does not disturb the cockpit', () => {
     expect(await screen.findByText('Live transcript')).toBeInTheDocument()
 
     const grid = await screen.findByRole('group', { name: /call controls/i })
-    expect(within(grid).getAllByRole('button')).toHaveLength(6)
-    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^conference$/i, /^keypad$/i, /hang up/i]) {
+    expect(within(grid).getAllByRole('button')).toHaveLength(5)
+    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
       expect(within(grid).getByRole('button', { name })).toBeVisible()
     }
   })

@@ -207,8 +207,6 @@
     "accept": "接听",
     "decline": "拒接",
     "mute": "静音",
-    "conference": "会议",
-    "conferenceUnavailable": "暂不支持会议：平台没有可加入第三方的接口。",
     "controls": "通话控制",
     "unmute": "取消静音",
     "dtmf": "按键音",
