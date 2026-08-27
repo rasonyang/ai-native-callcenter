@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { KeyRound, Plus } from 'lucide-react'
+import { KeyRound, Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
@@ -121,18 +121,23 @@ function UsersAdmin() {
               <Td align="right">
                 <span className="flex justify-end gap-1">
                   <Button
-                    size="sm"
+                    size="icon-sm"
                     variant="ghost"
+                    title={t('users.resetPassword')}
                     onClick={() => {
                       setResetting(user)
                       setNewPassword('')
                     }}
                   >
                     <KeyRound />
-                    {t('users.resetPassword')}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditing({ ...user })}>
-                    {t('common.edit')}
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    title={t('common.edit')}
+                    onClick={() => setEditing({ ...user })}
+                  >
+                    <Pencil />
                   </Button>
                 </span>
               </Td>

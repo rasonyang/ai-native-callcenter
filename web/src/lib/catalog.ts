@@ -24,6 +24,9 @@ export type DIDDraft = Partial<DID & DIDWrite>
 
 export type QueueAgent = components['schemas']['QueueAgent']
 
+/** One staffing write. Position is the queue's own order, not the agent's id. */
+export type StaffChange = { queueID: string; agentID: string; position?: number }
+
 export const EXTENSIONS_KEY = ['catalog', 'extensions'] as const
 export const QUEUES_KEY = ['catalog', 'queues'] as const
 export const DIDS_KEY = ['catalog', 'dids'] as const
@@ -86,6 +89,17 @@ export function useDIDs() {
   return useQuery({ queryKey: DIDS_KEY, queryFn: catalogApi.dids })
 }
 
+/** Who staffs one queue. Keyed under the queue so a staffing write can name it. */
+export const queueAgentsKey = (queueID: string) => ['catalog', 'queues', queueID, 'agents'] as const
+
+export function useQueueAgents(queueID: string | undefined) {
+  return useQuery({
+    queryKey: queueAgentsKey(queueID ?? ''),
+    queryFn: () => catalogApi.queueAgents(queueID ?? ''),
+    enabled: Boolean(queueID),
+  })
+}
+
 /** Mutations that refresh their own list, since the server may normalize. */
 export function useCatalogMutations() {
   const queryClient = useQueryClient()
@@ -110,6 +124,19 @@ export function useCatalogMutations() {
     deleteQueue: useMutation({
       mutationFn: catalogApi.deleteQueue,
       onSuccess: after(QUEUES_KEY),
+    }),
+    // Staffing writes reach the switch's tiers, not just the database, so the
+    // roster is refetched rather than patched in place: what came back is what
+    // the switch was told.
+    staffQueue: useMutation({
+      mutationFn: ({ queueID, agentID, position }: StaffChange) =>
+        catalogApi.staffQueue(queueID, agentID, 1, position),
+      onSuccess: (_data, { queueID }) => after(queueAgentsKey(queueID))(),
+    }),
+    unstaffQueue: useMutation({
+      mutationFn: ({ queueID, agentID }: StaffChange) =>
+        catalogApi.unstaffQueue(queueID, agentID),
+      onSuccess: (_data, { queueID }) => after(queueAgentsKey(queueID))(),
     }),
     saveDID: useMutation({
       mutationFn: ({ id, ...body }: DIDDraft) =>

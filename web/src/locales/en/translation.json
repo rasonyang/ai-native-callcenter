@@ -16,7 +16,8 @@
     "delete": "Delete",
     "previous": "Previous",
     "next": "Next",
-    "viewAll": "View all"
+    "viewAll": "View all",
+    "close": "Close"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -89,7 +90,7 @@
     "INVALID_CREDENTIALS": "Incorrect username or password.",
     "SESSION_EXPIRED": "Your session has expired. Please sign in again.",
     "FORBIDDEN": "You do not have permission to do that.",
-    "VALIDATION_FAILED": "Please check the highlighted fields.",
+    "VALIDATION_FAILED": "Some fields did not pass validation; check each one.",
     "NOT_FOUND": "Not found.",
     "CONFLICT": "That change conflicts with the current state.",
     "USER_SUSPENDED": "This account is suspended.",
@@ -339,7 +340,16 @@
     "trunk": "Trunk {{name}}",
     "trunks": "Trunks",
     "noTrunks": "none — the switch reports no gateway",
-    "boundExtensions": "{{count}} with an agent"
+    "boundExtensions": "{{count}} with an agent",
+    "staff": "Agents",
+    "staffTitle": "Agents on {{name}}",
+    "staffHint": "Added and removed on the switch straight away; the next call is offered to this list.",
+    "staffedAgents": "Assigned agents",
+    "noneStaffed": "Nobody yet. A call routed here has no one to go to.",
+    "addStaff": "Add agent…",
+    "allStaffed": "Every agent is already on this queue",
+    "staffAdd": "Add",
+    "unstaff": "Take off the queue"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",

@@ -16,7 +16,8 @@
     "delete": "删除",
     "previous": "上一页",
     "next": "下一页",
-    "viewAll": "查看全部"
+    "viewAll": "查看全部",
+    "close": "关闭"
   },
   "auth": {
     "signInTitle": "登录",
@@ -89,7 +90,7 @@
     "INVALID_CREDENTIALS": "用户名或密码不正确。",
     "SESSION_EXPIRED": "登录已过期，请重新登录。",
     "FORBIDDEN": "您没有执行该操作的权限。",
-    "VALIDATION_FAILED": "请检查标红的字段。",
+    "VALIDATION_FAILED": "有字段没通过校验，请逐项检查。",
     "NOT_FOUND": "未找到。",
     "CONFLICT": "该操作与当前状态冲突。",
     "USER_SUSPENDED": "该账号已被停用。",
@@ -337,7 +338,16 @@
     "trunk": "中继 {{name}}",
     "trunks": "中继",
     "noTrunks": "无 —— 交换机没有报告任何网关",
-    "boundExtensions": "{{count}} 台有主"
+    "boundExtensions": "{{count}} 台有主",
+    "staff": "坐席",
+    "staffTitle": "{{name}} 的坐席",
+    "staffHint": "增减立即下发到交换机，下一通电话就按新的名单派。",
+    "staffedAgents": "已配备坐席",
+    "noneStaffed": "还没有人。打到这个队列的电话没人可接。",
+    "addStaff": "添加坐席…",
+    "allStaffed": "所有坐席都已在这个队列里",
+    "staffAdd": "添加",
+    "unstaff": "移出队列"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",

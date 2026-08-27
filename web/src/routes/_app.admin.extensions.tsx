@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { KeyRound, Trash2 } from 'lucide-react'
+import { KeyRound, Pencil, Trash2 } from 'lucide-react'
 import { Dialog, Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
@@ -90,12 +90,21 @@ function ExtensionsPage() {
                 {/* Laid out rather than left to inline baselines, which put
                     the middle button a few pixels below its neighbours. */}
                 <span className="flex items-center justify-end gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => setRevealing(row)}>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    title={t('admin.reveal')}
+                    onClick={() => setRevealing(row)}
+                  >
                     <KeyRound />
-                    {t('admin.reveal')}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
-                    {t('common.edit')}
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    title={t('common.edit')}
+                    onClick={() => setEditing(row)}
+                  >
+                    <Pencil />
                   </Button>
                   <ConfirmDelete
                     label={t('admin.deleteExtensionConfirm', { number: row.number })}
@@ -315,7 +324,7 @@ export function ConfirmDelete({ label, onConfirm }: { label: string; onConfirm: 
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button size="sm" variant="ghost" title={t('common.delete')}>
+        <Button size="icon-sm" variant="ghost" title={t('common.delete')}>
           <Trash2 />
         </Button>
       </Popover.Trigger>

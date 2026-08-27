@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
@@ -95,8 +95,13 @@ function NumbersPage() {
               </Td>
               <Td className="text-xs text-muted-foreground">{row.description || '—'}</Td>
               <Td align="right">
-                <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
-                  {t('common.edit')}
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  title={t('common.edit')}
+                  onClick={() => setEditing(row)}
+                >
+                  <Pencil />
                 </Button>
                 <ConfirmDelete
                   label={t('admin.deleteNumberConfirm', { number: row.number })}

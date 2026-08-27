@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog } from '@/components/record-dialog'
@@ -130,8 +130,13 @@ function ContactsPage() {
                 {row.lastCallAt ? dateFormat.format(new Date(row.lastCallAt)) : t('contacts.never')}
               </Td>
               <Td align="right">
-                <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
-                  {t('common.edit')}
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  title={t('common.edit')}
+                  onClick={() => setEditing(row)}
+                >
+                  <Pencil />
                 </Button>
                 <ConfirmDelete
                   label={t('contacts.deleteConfirm', { name: row.name || row.phoneNumber })}
