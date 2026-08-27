@@ -172,8 +172,10 @@ function NumbersPage() {
                 />
                 {t('admin.allowOutbound')}
               </label>
+              {/* Indented under the box it depends on: this is not a third
+                  direction, it is a property of dialling out. */}
               {editing.allowOutbound && (
-                <label className="flex items-center gap-2 text-sm">
+                <label className="ml-6 flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
                     checked={editing.isDefaultOutbound ?? false}
