@@ -232,7 +232,9 @@
     "botContained": "机器人闭环率",
     "containedOf": "{{count}} 通",
     "avgWait": "平均排队等待",
-    "acrossQueueCalls": "共 {{count}} 通队列通话"
+    "acrossQueueCalls": "共 {{count}} 通队列通话",
+    "inQueue": "队列内",
+    "waitingNow": "正在等待接听"
   },
   "admin": {
     "extensionsHint": "交换机接受注册的端点。话机随它归属的账号一并创建。",

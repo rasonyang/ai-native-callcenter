@@ -234,7 +234,9 @@
     "botContained": "Bot contained",
     "containedOf": "{{count}} calls",
     "avgWait": "Avg queue wait",
-    "acrossQueueCalls": "across {{count}} queue calls"
+    "acrossQueueCalls": "across {{count}} queue calls",
+    "inQueue": "In queue",
+    "waitingNow": "waiting to be answered"
   },
   "admin": {
     "extensionsHint": "Endpoints the switch accepts a registration for. A phone is created with the account it belongs to.",
