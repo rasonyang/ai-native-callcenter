@@ -223,8 +223,6 @@
     "rightNow": "当前",
     "devicesUnreachable": "话机不可达",
     "registeredButSilent": "已注册但无响应",
-    "streamClients": "在线控制台",
-    "consolesConnected": "事件流连接数",
     "agentStates": "坐席状态",
     "nobodySignedIn": "暂无坐席签入。",
     "callsToday": "今日通话",

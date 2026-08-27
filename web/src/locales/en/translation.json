@@ -225,8 +225,6 @@
     "rightNow": "right now",
     "devicesUnreachable": "Phones unreachable",
     "registeredButSilent": "registered but not answering",
-    "streamClients": "Consoles live",
-    "consolesConnected": "event streams connected",
     "agentStates": "Agent states",
     "nobodySignedIn": "Nobody is signed in yet.",
     "callsToday": "Calls today",

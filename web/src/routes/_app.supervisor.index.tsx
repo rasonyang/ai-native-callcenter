@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
 
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
@@ -9,7 +8,7 @@ import { VolumeTrend } from '@/components/volume-trend'
 import { requireRole } from '@/lib/guards'
 import { StatusDot } from '@/components/status-pill'
 import { AVAILABILITY_COLOR, useRoster } from '@/lib/agent'
-import { api, type Availability } from '@/lib/api'
+import { type Availability } from '@/lib/api'
 import { formatDuration, useOverview } from '@/lib/ledger'
 
 /**
@@ -28,7 +27,6 @@ export const Route = createFileRoute('/_app/supervisor/')({
 function Wallboard() {
   const { t } = useTranslation()
   const { data: roster } = useRoster(true)
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
   // Today's ledger numbers; refreshed by CALL_CDR events on the stream.
   const { data: today } = useOverview()
 
@@ -47,7 +45,13 @@ function Wallboard() {
     <>
       <PageHeader title={t('nav.wallboard')} />
 
-      <div className="mb-4 grid grid-cols-4 gap-4">
+      {/* Three cards, not four. The fourth counted live event streams, read
+          from /system/health — which is ADMIN-only, so on the one page whose
+          only reader is a supervisor it answered 403 and the card showed an
+          em dash to everybody, always. The number itself is platform
+          plumbing rather than the floor, and the administrator's overview
+          already carries it. */}
+      <div className="mb-4 grid grid-cols-3 gap-4">
         <KpiCard
           label={t('wallboard.agentsAvailable')}
           value={`${available} / ${signedIn}`}
@@ -59,11 +63,6 @@ function Wallboard() {
           value={unreachable}
           note={t('wallboard.registeredButSilent')}
           tone={unreachable > 0 ? '--state-breach' : undefined}
-        />
-        <KpiCard
-          label={t('wallboard.streamClients')}
-          value={health.data?.sseClients ?? '—'}
-          note={t('wallboard.consolesConnected')}
         />
       </div>
 
