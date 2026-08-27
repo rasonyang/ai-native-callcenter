@@ -170,8 +170,8 @@
     },
     "finish_transfer": {
       "instruction": {
-        "zh": "播报固定转接话术:“稍后会有人工客服与您联系,请留意来电。感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
-        "en": "Announce the fixed transfer script: \"An agent will call you back shortly, please keep your phone available. Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+        "zh": "播报固定转接话术:“好的,正在为您转接人工客服,请不要挂机,稍等片刻。”说完就会接通,不要再问问题,也不要说再见。",
+        "en": "Announce the fixed transfer script: \"Certainly — I am putting you through to an agent now. Please stay on the line.\" You are connected right after that; ask no further questions and do not say goodbye."
       },
       "tools": [],
       "isTerminal": true
