@@ -401,10 +401,29 @@ cd ~/workspaces/github/ai-native-callcenter
       备注：走查表原文写的是「人工通话段目前没有转写（`docs/design/08-transcription.md` D21 未完成）」。
       2026-08-27 走查实测**人工段已经有转写了** —— 通话中日志里能看到 `transcription tap attached` /
       `transcription live`，CDR 详情页也确实列出了 Agent 与 Customer 的对话。D21 已经落地，期望按实际改写。
-- [ ] **52. 找一通内线通话（坐席拨另一个分机）**
+- [x] **52. 找一通内线通话（坐席拨另一个分机）**
       期望：类型为 *内线*，**计费时长为 0** —— 两个分机之间通话不计费。
-- [ ] **53. 报表，切换今天 / 近 7 天 / 近 30 天**
+      要一次看全部，直接问账本：
+
+      ```sh
+      curl -s -b /tmp/wt-admin.jar "http://127.0.0.1:8080/api/v1/cdrs?limit=200" | python3 -c "
+      import json,sys
+      for c in json.load(sys.stdin)['items']:
+          if c['callType']=='INTERNAL': print(c['fromNumber'],'→',c['toNumber'],'talk',c['talkSec'],'bill',c['billSec'])"
+      ```
+
+      关键是 `talkSec` 有值而 `billSec` 为 0 —— 两个都是 0 只能说明没人接，证明不了「不计费」。
+- [x] **53. 报表，切换今天 / 近 7 天 / 近 30 天**
       期望：通话量、接听、放弃、机器人闭环率、平均机器人时长按窗口重算；下方按队列和按日期分列。
+      「今天」那一档的数字应当和班长看板对得上。
+      用接口复核时注意**区间是半开的**：`to` 传的是次日零点，不是当天
+      （`_app.admin.reports.tsx` 的 `windowRange`）。`from` 和 `to` 传同一天会一条都查不到，
+      那是查法不对，不是报表算错。
+
+      ```sh
+      curl -s -b /tmp/wt-admin.jar \
+        "http://127.0.0.1:8080/api/v1/reports/overview?from=2026-08-27&to=2026-08-28"
+      ```
 
 ---
 
