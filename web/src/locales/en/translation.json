@@ -153,7 +153,10 @@
     "wrapUpNoNote": "No note.",
     "wrapUpBlocks": "Finish the wrap-up first.",
     "wrapUpsConfirmed": "Wrap-ups confirmed",
-    "ofOpened": "{{confirmed}}/{{opened}}"
+    "ofOpened": "{{confirmed}}/{{opened}}",
+    "callId": "Call ID",
+    "callIdCopied": "Call ID copied",
+    "copyCallId": "Copy the call ID"
   },
   "supervisor": {
     "agent": "Agent",

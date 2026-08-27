@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import {
-  ArrowRightLeft, Grid3x3, Mic, MicOff, Pause, Phone, PhoneOff, PhoneOutgoing,
+  ArrowRightLeft, Copy, Grid3x3, Mic, MicOff, Pause, Phone, PhoneOff, PhoneOutgoing,
   Play, Timer,
 } from 'lucide-react'
 import { Popover } from 'radix-ui'
@@ -623,6 +623,11 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
   const mine = call ? myParty(call, presence?.agentId) : undefined
   const number = other?.number ?? mine?.otherNumber ?? lastCall.number
   const { contact } = useContactFor(number)
+  // The live call's id while there is one, the call just finished afterwards:
+  // the agent quoting it into a ticket is usually doing that during wrap-up,
+  // after the caller has gone. It changes when the next call arrives, which is
+  // exactly when it should stop being the one on screen.
+  const callID = call?.callId ?? lastCall.callId
 
   if (!call && !number) {
     return (
@@ -661,6 +666,11 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
               {subline.join(' · ')}
             </div>
           )}
+          {/* Under whatever identifies the caller — the number and company
+              where a contact is known, the number itself where it is not —
+              and above the notes. One component either way: the id belongs to
+              the call, not to whether the book happens to know who rang. */}
+          {callID && <CallID callID={callID} />}
         </div>
         {/* On a call the useful clock is when it started; afterwards it is
             when this customer was last spoken to, which is the number an
@@ -694,6 +704,63 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
       )}
     </section>
   )
+}
+
+/**
+ * The call's own id, short enough to sit on one line and copied in full.
+ *
+ * What reaches the clipboard and the tooltip is the whole uuid; the ellipsis
+ * is a rendering of it and nothing else ever reads the shortened form. An
+ * agent pasting an id into a ticket that silently lost sixteen characters
+ * would be quoting a call nobody can find.
+ *
+ * The confirmation is inline rather than a toast: this codebase has no toast
+ * layer, and the one it does have for copied credentials — the label changing
+ * where the click happened — says the same thing without a second system.
+ */
+function CallID({ callID }: { callID: string }) {
+  const { t } = useTranslation()
+  const [isCopied, setIsCopied] = useState(false)
+
+  // A new call is a new id, so a confirmation left over from the last one
+  // would be claiming this one had been copied.
+  useEffect(() => setIsCopied(false), [callID])
+
+  useEffect(() => {
+    if (!isCopied) return
+    const timer = setTimeout(() => setIsCopied(false), 2_000)
+    return () => clearTimeout(timer)
+  }, [isCopied])
+
+  return (
+    <button
+      type="button"
+      // The whole uuid, on the element the pointer is already over.
+      title={callID}
+      aria-label={t('agent.copyCallId')}
+      className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+      onClick={() => {
+        void navigator.clipboard.writeText(callID)
+        setIsCopied(true)
+      }}
+    >
+      <span>{isCopied ? t('agent.callIdCopied') : t('agent.callId')}</span>
+      <span className="tabular">{shortenID(callID)}</span>
+      <Copy className="size-3 shrink-0" aria-hidden="true" />
+    </button>
+  )
+}
+
+/**
+ * A uuid as `xxxxxxxx-xxxx…xxxx`: the first two groups, which is where v7's
+ * timestamp lives and what makes two ids from the same shift tell apart, and
+ * the last four characters for a spot check against the full value.
+ *
+ * Anything that is not the shape this expects is left alone rather than cut
+ * blindly, so a malformed id reads as wrong instead of reading as fine.
+ */
+function shortenID(id: string): string {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(id) ? `${id.slice(0, 13)}…${id.slice(-4)}` : id
 }
 
 /** Call type, language and queue — the badges that fit beside a heading. */

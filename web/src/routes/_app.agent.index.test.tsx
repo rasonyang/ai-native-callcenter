@@ -745,6 +745,47 @@ describe('my queue', () => {
  * exact number: greeting a customer by somebody else's name is worse than
  * greeting an unknown number.
  */
+describe('the call id on the caller card', () => {
+  // Shown short and copied whole. An agent pasting an id into a ticket that
+  // silently lost sixteen characters would be quoting a call nobody can find.
+  it('shows it shortened, copies the whole uuid, and says it copied', async () => {
+    // userEvent installs its own clipboard; asking it what landed there tests
+    // the same thing a person would check after pressing the button.
+    const user = userEvent.setup()
+    await renderCockpit(onCall)
+    const button = await screen.findByRole('button', { name: /copy the call id/i })
+
+    expect(button).toHaveTextContent('00000000-0000…00c1')
+    expect(button).not.toHaveTextContent(CALL_ID)
+    // The whole value is on the element the pointer is already over.
+    expect(button).toHaveAttribute('title', CALL_ID)
+
+    await user.click(button)
+    expect(await navigator.clipboard.readText()).toBe(CALL_ID)
+    await waitFor(() => expect(button).toHaveTextContent(/call id copied/i))
+  })
+
+  // Wrap-up is when the id gets quoted into a ticket, and by then the caller
+  // has gone: a card that dropped it at the hangup would drop it exactly when
+  // the agent reaches for it.
+  it('keeps the id through wrap-up, after the caller has hung up', async () => {
+    await renderCockpit({
+      calls: [],
+      contacts: [],
+      myCDRs: [cdrFixture({ callId: CALL_ID, fromNumber: '+8613700990011' })],
+    })
+
+    const button = await screen.findByRole('button', { name: /copy the call id/i })
+    expect(button).toHaveAttribute('title', CALL_ID)
+  })
+
+  it('says nothing when there is no call to name', async () => {
+    await renderCockpit({ calls: [], contacts: [], myCDRs: [] })
+    expect(await screen.findByText(/no caller identified yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /copy the call id/i })).toBeNull()
+  })
+})
+
 describe('the caller card', () => {
   // The customer stays on the card after they hang up: the agent is still
   // working that call, and a card that emptied itself at the hangup would take

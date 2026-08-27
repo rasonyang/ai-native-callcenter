@@ -151,7 +151,10 @@
     "wrapUpNoNote": "没有小结。",
     "wrapUpBlocks": "请先完成话后处理。",
     "wrapUpsConfirmed": "手动填写率",
-    "ofOpened": "{{confirmed}}/{{opened}}"
+    "ofOpened": "{{confirmed}}/{{opened}}",
+    "callId": "通话 ID",
+    "callIdCopied": "通话 ID 已复制",
+    "copyCallId": "复制通话 ID"
   },
   "supervisor": {
     "agent": "坐席",
