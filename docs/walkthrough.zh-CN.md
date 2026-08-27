@@ -251,6 +251,12 @@ cd ~/workspaces/github/ai-native-callcenter
       ④ 五个移植流程的 `transfer_to_agent` 转移**没有 `result.ok` 条件**，转接被拒也照样进 `finish_transfer`，
       播报「稍后会有人工客服与您联系」再挂断 —— 对来电者说了一句没人会兑现的话。已加上条件
       （`novanet_support` 本来就是对的，是移植时漏了）。
+      修完再打一通，队列名对了、`isOk=true` 了，**还是没转成**：五个移植流程的 `finish_transfer` 都标了
+      `isTerminal`，而「到达终止阶段」会 arm 一个挂断动作 —— arm 是后来者覆盖前者，于是它顶掉了
+      `transfer_to_agent` 刚 arm 的转接。机器人说完「稍后会有人工客服与您联系」就把人挂了，一个都没转过去。
+      ⑤ 现在的规则是：**终止阶段遇到已经 arm 的动作就不插手**。一个阶段之所以是终止的，通常正是因为
+      把我们带到这里的那个工具已经在结束这通电话了 —— 转接把人交出去，挂断说再见。
+      `TestATerminalTransferPhaseDoesNotHangUpOnTheCallerInstead` 盯着它。
 - [ ] **31. 接听后看「当前通话」**
       期望：显示主叫号码与开始时间。若这个号码在客户库里，客户卡片一并显示；不在则显示「尚未识别来电客户」。
 - [ ] **32. 依次点保持 → 恢复 → 静音 → 取消静音**

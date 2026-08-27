@@ -424,6 +424,17 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 		log.Warn("could not update instructions", "error", err)
 	}
 	if runtime.Engine().IsTerminal() {
+		// Unless the tool that moved us here already armed the call's ending.
+		// A phase is usually terminal *because* of that tool — transfer_to_agent
+		// lands in a "we're putting you through" phase, hangup in a goodbye —
+		// and arming replaces whatever was armed before. So the flow's own
+		// ending displaced the transfer: the bot said an agent would be with
+		// them, then hung up on them instead of putting them through.
+		if actions.isArmed() {
+			log.Info("flow reached a terminal phase; the armed action ends the call",
+				"node", moved)
+			return
+		}
 		log.Info("flow reached a terminal phase; the call ends after the closing line",
 			"node", moved)
 		// The flow concluding the call is containment, exactly like the

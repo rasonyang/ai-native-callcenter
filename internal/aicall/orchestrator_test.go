@@ -482,6 +482,105 @@ const driveFlow = `{
 	}
 }`
 
+// A flow whose transfer phase is terminal still puts the caller through.
+//
+// The five ported flows all mark their "we're putting you through" phase
+// isTerminal, and terminality arms the call's ending — which replaced the
+// transfer the tool had just armed. The caller heard "an agent will be with
+// you shortly" and was then hung up on, having been transferred nowhere.
+// arming is last-one-wins by design, so the rule lives where the two meet:
+// a terminal phase that arrives on top of an armed action leaves it alone.
+func TestATerminalTransferPhaseDoesNotHangUpOnTheCallerInstead(t *testing.T) {
+	sw := &fakeSwitch{}
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, sw)
+	spec, err := flow.Load([]byte(terminalHandoffFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
+	}
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	actions.recorder = recorder
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		o.drive(t.Context(), session, runtime, actions, recorder, log)
+	}()
+
+	model.events <- provider.Event{
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_1",
+		ToolName: flow.ToolTransferToAgent,
+		ToolArgs: `{"queue":"support","reason":"BILLING","summary":"needs help"}`,
+	}
+
+	// Wait for the tool to have been answered: the phase move, and with it the
+	// terminal rule this test is about, happens on the way out of that.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		model.mu.Lock()
+		answered := len(model.toolResults)
+		model.mu.Unlock()
+		if answered > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The closing line plays out.
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for len(sw.recordedTransfers()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := sw.recordedTransfers(); len(got) != 1 || got[0] != "chan-9→7001" {
+		t.Fatalf("transfers = %v, want the caller put through to 7001", got)
+	}
+	// And the ledger says transferred, not hung up on.
+	if recorder.endReason != "TRANSFER" {
+		t.Errorf("endReason = %q, want TRANSFER", recorder.endReason)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drive did not return after the call ended")
+	}
+}
+
+// driveFlow's handoff phase, as the ported flows write it: terminal.
+const terminalHandoffFlow = `{
+	"id": "terminal-handoff-test",
+	"specVersion": "v2",
+	"initialNode": "welcome",
+	"global": {
+		"persona": "You answer the phone.",
+		"alwaysAllowedTools": ["transfer_to_agent", "hangup"],
+		"transitions": [
+			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",
+			 "condition": {"slot": "result.ok", "op": "EQ", "value": "1"},
+			 "target": "handoff"}
+		]
+	},
+	"nodes": {
+		"welcome": {"instruction": "Greet the caller.", "tools": []},
+		"handoff": {"instruction": "Announce the transfer.", "tools": [], "isTerminal": true}
+	}
+}`
+
 // A deployment must not start the AI leg without having chosen a provider:
 // the choice is made once, at startup, so a missing one is a configuration
 // error rather than a call that fails when the phone rings.

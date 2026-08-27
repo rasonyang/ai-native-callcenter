@@ -206,6 +206,13 @@ func (a *callActions) arm(_ context.Context, action func()) {
 	})
 }
 
+// isArmed reports whether an action is already waiting for the closing line.
+func (a *callActions) isArmed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.armed != nil
+}
+
 // disarm drops whatever was waiting to be spoken over, because the call it
 // belonged to has ended. The cap that exists to rescue a closing line that
 // never finishes cannot tell that case from a caller who hung up in the middle
