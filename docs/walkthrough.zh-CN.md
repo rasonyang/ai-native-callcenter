@@ -694,21 +694,40 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 
 ### 5.3 CDR 推送
 
-- [ ] **93. 起一个能收 POST 的地址**（任何能打印请求的都行，如 `nc -l 9111`）
-- [ ] **94. 建一个订阅指向它**（命令见第 24 步）
-- [ ] **95. 打一通电话并挂断，等几秒**
+- [x] **93. 起一个能收 POST 的地址**（任何能打印请求的都行，如 `nc -l 9111`）
+- [x] **94. 建一个订阅指向它**（命令见第 24 步）
+- [x] **95. 打一通电话并挂断，等几秒**
       期望：那个地址收到一个 POST，头里有 `Authorization: Bearer <你填的 authToken>` 和
       `X-AICC-Webhook-Id`，body 里 `deliveryId` 与该头**一致**，`revision: 1`，
       `cdr` 是账本里那一行（含 `userData`）。
-- [ ] **96. 建一个过滤条件为 `{"callType":["INBOUND"]}` 的订阅，再打一通外呼**
+- [x] **96. 建一个过滤条件为 `{"callType":["INBOUND"]}` 的订阅，再打一通外呼**
       期望：该订阅**没有任何投递记录**——不是「入队了没发」，是压根没入队。
-- [ ] **97. 把订阅地址改成一个不存在的端口，再打一通**
+- [x] **97. 把订阅地址改成一个不存在的端口，再打一通**
       期望：投递进入重试，Webhook 页能看到尝试次数在涨、最后错误有内容；
       六次之后变 `FAILED`，应用日志里有一条 WARN 点名是哪通电话。
+
+      注意：六次的间隔是 10s / 1m / 5m / 30m / 2h / 6h，**走完要八个多小时**——
+      这一步别真等。24 步建的订阅在 9111 上没人听的那一夜就是现成的样本：
+      次日 Webhook 页里前一天的投递都是 `FAILED`、`attemptCount: 6`，日志里对应
+      `msg="giving up on a webhook delivery" … callId=…`。只要看到「尝试次数在涨、最后错误
+      是 connection refused」就算进入重试了。
+
+      ```sh
+      grep -h 'giving up on a webhook delivery' logs/aicc-*.log | tail
+      ```
+
+      顺带记一笔（2026-08-28）：话机没上线时用 key 外呼，账本里除了那通 `NO_ANSWER` 的
+      通话，还多出一条 `fromNumber` 与 `toNumber` 都是外线号码、腿是 `DIALING`、0 秒的
+      OUTBOUND 记录，两条都推送出去了。多出来的那条是什么、该不该存在，记在待办里。
 
 ---
 
 ## 走查记下的待办
+
+- **话机离线时的外呼多出一条 CDR**：`POST /calls` 拨一部没注册的话机，账本里出现两条
+  OUTBOUND——正常那条 `NO_ANSWER`（腿 `DIALING 1001`），另一条 `callId` 不同、
+  `fromNumber` = `toNumber` = 外线号、腿 `DIALING <外线号>`、0 秒。订阅了 OUTBOUND 的
+  客户系统会收到两次。先弄清那条从哪来（像是外线腿被当成了独立通话），再决定删还是合并。
 
 走查中发现、当场没修的问题。修掉一条就把它从这里删掉，并把对应步骤的「备注」改成事实。
 
