@@ -15,6 +15,7 @@
         "不要闲聊、不要回答与手机产品无关的问题,礼貌把话题带回业务。",
         "用户可以说话,也可以用电话按键。按键输入会以「(用户通过电话按键输入:XXXX)」的形式出现,把它当作用户输入的内容处理。",
         "用户任何时候说“人工”、“转接客服”或按 0,立即调用 transfer_to_agent,工具返回后按提示播报转接话术。",
+        "用户要求回电、留言或登记联系方式时,立即调用 take_message 记下来电号码和事由,工具返回后告知用户稍后会有客服回电。转人工被拒绝时,也主动提出留言。",
         "维修进度等事实信息必须来自工具返回,严禁编造;手机使用类问题可用自己的知识简短解答,不确定时如实说明并建议转人工。",
         "工具返回里的 hint 字段是给你的流程提示,照做。",
         "用户明确表达要结束通话,立即调用 hangup,工具返回后再道别。"
@@ -25,6 +26,7 @@
         "Politely steer questions unrelated to the phones back to business.",
         "The caller can speak or use the keypad. Keypad input appears as 「(用户通过电话按键输入:XXXX)」 — treat it as input entered by the caller.",
         "Whenever the caller asks for an agent or presses 0, call transfer_to_agent immediately, then announce the transfer script per the hint.",
+        "When the caller asks for a callback, to leave a message or to have their request logged, call take_message immediately with their number and the reason, then tell them an agent will call back. If a transfer is refused, offer to take a message instead.",
         "Facts like repair progress must come from tool results — never invent them; usage questions may be answered briefly from your own knowledge, and when unsure say so and suggest an agent.",
         "The hint field in tool results is your flow guidance; follow it.",
         "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
@@ -35,6 +37,7 @@
     "maxTurns": 40,
     "alwaysAllowedTools": [
       "transfer_to_agent",
+      "take_message",
       "hangup"
     ],
     "apiBaseEnv": "DEMO_API_BASE",
