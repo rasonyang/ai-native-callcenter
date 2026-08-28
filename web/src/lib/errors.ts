@@ -26,9 +26,12 @@ export function describeError(error: unknown, t: TFunction): string {
  * text under the one input the server actually refused.
  */
 export function fieldErrorText(error: unknown, field: string, t: TFunction): string | undefined {
-  if (!(error instanceof ApiError) || error.code !== 'VALIDATION_FAILED') return undefined
+  if (!(error instanceof ApiError)) return undefined
+  // A conflict that names a field (a phone number that already has a contact)
+  // belongs on that field just as a validation failure does.
+  if (error.code !== 'VALIDATION_FAILED' && error.code !== 'CONFLICT') return undefined
   if (error.params.field !== field || typeof error.params.rule !== 'string') return undefined
   return t(`errors.rules.${error.params.rule}`, {
-    defaultValue: t('errors.VALIDATION_FAILED'),
+    defaultValue: t(`errors.${error.code}`),
   })
 }

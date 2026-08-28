@@ -9,7 +9,7 @@ import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import {
   describeRule,
   locateNodes,
@@ -284,7 +284,7 @@ function FlowDesigner() {
         }
       >
         <p className="text-xs text-muted-foreground">{t('bots.publishHint')}</p>
-        <Field label={t('bots.note')}>
+        <Field label={t('bots.note')} error={fieldErrorText(publish.error, 'note', t)}>
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} />
         </Field>
       </RecordDialog>

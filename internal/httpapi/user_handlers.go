@@ -79,17 +79,17 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if !usernamePattern.MatchString(username) || len(username) > 64 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a username is letters, digits, dot, underscore and hyphen",
-			map[string]any{"field": "username"})
+			map[string]any{"field": "username", "rule": "USERNAME_CHARSET"})
 		return
 	}
 	if !auth.Role(in.Role).Valid() {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"unknown role", map[string]any{"field": "role"})
+			"unknown role", map[string]any{"field": "role", "rule": "UNKNOWN_ROLE"})
 		return
 	}
 	if len(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a password is at least 8 characters", map[string]any{"field": "password"})
+			"a password is at least 8 characters", map[string]any{"field": "password", "rule": "PASSWORD_MIN_8"})
 		return
 	}
 
@@ -155,17 +155,17 @@ func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request, userID uuid.
 	if !usernamePattern.MatchString(username) || len(username) > 64 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a username is letters, digits, dot, underscore and hyphen",
-			map[string]any{"field": "username"})
+			map[string]any{"field": "username", "rule": "USERNAME_CHARSET"})
 		return
 	}
 	if !auth.Role(in.Role).Valid() {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"unknown role", map[string]any{"field": "role"})
+			"unknown role", map[string]any{"field": "role", "rule": "UNKNOWN_ROLE"})
 		return
 	}
 	if in.Status != api.UserStatusACTIVE && in.Status != api.UserStatusSUSPENDED {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"unknown status", map[string]any{"field": "status"})
+			"unknown status", map[string]any{"field": "status", "rule": "UNKNOWN_STATUS"})
 		return
 	}
 	displayName := strings.TrimSpace(deref(in.DisplayName))
@@ -212,7 +212,7 @@ func (s *Server) ResetUserPassword(w http.ResponseWriter, r *http.Request, userI
 	}
 	if len(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a password is at least 8 characters", map[string]any{"field": "password"})
+			"a password is at least 8 characters", map[string]any{"field": "password", "rule": "PASSWORD_MIN_8"})
 		return
 	}
 	// Asked for first, so resetting an account that is not there is a 404

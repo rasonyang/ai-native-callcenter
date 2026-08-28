@@ -112,7 +112,7 @@ func (s *Server) CreateFlow(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimSpace(in.Slug)
 	if !slugPattern.MatchString(slug) || len(slug) > 64 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a slug is lowercase letters, digits, hyphen and underscore", map[string]any{"field": "slug"})
+			"a slug is lowercase letters, digits, hyphen and underscore", map[string]any{"field": "slug", "rule": "SLUG_CHARSET"})
 		return
 	}
 	name, ok := flowName(w, in.Name)
@@ -179,7 +179,7 @@ func (s *Server) PublishFlow(w http.ResponseWriter, r *http.Request, flowID uuid
 	}
 	if len(note) > 200 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"the note is longer than 200 characters", map[string]any{"field": "note"})
+			"the note is longer than 200 characters", map[string]any{"field": "note", "rule": "NOTE_TOO_LONG"})
 		return
 	}
 
@@ -218,7 +218,7 @@ func flowName(w http.ResponseWriter, raw string) (string, bool) {
 	name := strings.TrimSpace(raw)
 	if name == "" || len(name) > 120 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a flow needs a name of at most 120 characters", map[string]any{"field": "name"})
+			"a flow needs a name of at most 120 characters", map[string]any{"field": "name", "rule": "NAME_TOO_LONG"})
 		return "", false
 	}
 	return name, true
