@@ -696,6 +696,18 @@ func (l *LedgerStore) ClaimCallback(ctx context.Context, id, userID uuid.UUID) (
 	return callbackFromRow(row), nil
 }
 
+// ReleaseCallback puts a CLAIMED callback back in the pool. Only the holder
+// may let it go: the row is updated only while they are the one on it, so a
+// colleague cannot quietly take it away and a stale screen cannot reopen a
+// callback somebody has since finished.
+func (l *LedgerStore) ReleaseCallback(ctx context.Context, id, userID uuid.UUID) (Callback, error) {
+	row, err := l.q.ReleaseCallback(ctx, queries.ReleaseCallbackParams{ID: id, HandledBy: &userID})
+	if err != nil {
+		return Callback{}, err
+	}
+	return callbackFromRow(row), nil
+}
+
 // HandleCallback closes a callback as done or dismissed.
 func (l *LedgerStore) HandleCallback(ctx context.Context, id uuid.UUID, status string, handledBy uuid.UUID) (Callback, error) {
 	row, err := l.q.HandleCallback(ctx, queries.HandleCallbackParams{

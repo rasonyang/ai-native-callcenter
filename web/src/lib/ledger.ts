@@ -107,6 +107,9 @@ export const ledgerApi = {
   claimCallback: (id: string) =>
     request<Callback>(`/callbacks/${id}/claim`, { method: 'POST' }),
 
+  releaseCallback: (id: string) =>
+    request<Callback>(`/callbacks/${id}/release`, { method: 'POST' }),
+
   completeCallback: (id: string, status: 'DONE' | 'DISMISSED') =>
     request<Callback>(`/callbacks/${id}/complete`, {
       method: 'POST',
@@ -202,6 +205,7 @@ export function useCallbackMutations() {
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: CALLBACKS_KEY })
   return {
     claim: useMutation({ mutationFn: ledgerApi.claimCallback, onSuccess: invalidate, onError: invalidate }),
+    release: useMutation({ mutationFn: ledgerApi.releaseCallback, onSuccess: invalidate, onError: invalidate }),
     complete: useMutation({
       mutationFn: ({ id, status }: { id: string; status: 'DONE' | 'DISMISSED' }) =>
         ledgerApi.completeCallback(id, status),

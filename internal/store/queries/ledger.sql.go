@@ -1157,6 +1157,35 @@ func (q *Queries) QueueEventsByCall(ctx context.Context, callID *uuid.UUID) ([]Q
 	return items, nil
 }
 
+const releaseCallback = `-- name: ReleaseCallback :one
+UPDATE callbacks
+SET status = 'OPEN', handled_by = NULL
+WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at
+`
+
+type ReleaseCallbackParams struct {
+	ID        uuid.UUID  `json:"id"`
+	HandledBy *uuid.UUID `json:"handledBy"`
+}
+
+func (q *Queries) ReleaseCallback(ctx context.Context, arg ReleaseCallbackParams) (Callback, error) {
+	row := q.db.QueryRow(ctx, releaseCallback, arg.ID, arg.HandledBy)
+	var i Callback
+	err := row.Scan(
+		&i.ID,
+		&i.CallID,
+		&i.QueueID,
+		&i.PhoneNumber,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.HandledBy,
+		&i.HandledAt,
+	)
+	return i, err
+}
+
 const reportAgentToday = `-- name: ReportAgentToday :one
 WITH bounds AS (
     SELECT $1::timestamptz AS from_at, $2::timestamptz AS to_at

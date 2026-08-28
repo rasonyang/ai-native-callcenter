@@ -167,6 +167,12 @@ SET status = 'CLAIMED', handled_by = $2
 WHERE id = $1 AND status = 'OPEN'
 RETURNING *;
 
+-- name: ReleaseCallback :one
+UPDATE callbacks
+SET status = 'OPEN', handled_by = NULL
+WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2
+RETURNING *;
+
 -- name: ReportOverview :one
 SELECT
     count(*)                                                          AS total_calls,

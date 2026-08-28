@@ -3545,6 +3545,60 @@
         }
       }
     },
+    "/callbacks/{callbackId}/release": {
+      "post": {
+        "operationId": "releaseCallback",
+        "tags": [
+          "callbacks"
+        ],
+        "summary": "Put a claimed callback back in the pool",
+        "description": "Returns a CLAIMED callback to OPEN so somebody else can pick it up. Only the user who holds it may let it go; anyone else — and a callback not currently claimed — gets a conflict. Publishes CALLBACK_UPDATED on the event stream.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callbackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The callback, open again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Callback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/contacts": {
       "get": {
         "operationId": "listContacts",

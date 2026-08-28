@@ -422,9 +422,13 @@
     "status": "状态",
     "empty": "暂无回访任务，机器人会把留言汇集到这里。",
     "claim": "认领",
-    "markDone": "完成",
-    "dismiss": "取消",
-    "byYou": "（我）"
+    "markDone": "完成——已经回拨过了",
+    "dismiss": "作废——不需要回拨",
+    "byYou": "（我）",
+    "callBack": "回拨",
+    "release": "放回回拨池",
+    "claimedByOther": "别人在处理",
+    "ringing": "正在振铃你的话机…"
   },
   "reports": {
     "hint": "基于已结束通话的统计。",

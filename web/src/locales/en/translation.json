@@ -424,9 +424,13 @@
     "status": "Status",
     "empty": "Nothing to call back. The bot will fill this list.",
     "claim": "Claim",
-    "markDone": "Done",
-    "dismiss": "Dismiss",
-    "byYou": "by you"
+    "markDone": "Done — I called them back",
+    "dismiss": "Dismiss — no call needed",
+    "byYou": "by you",
+    "callBack": "Call back",
+    "release": "Put back in the pool",
+    "claimedByOther": "Someone else is on it",
+    "ringing": "Ringing your phone…"
   },
   "reports": {
     "hint": "Aggregates over finished calls.",

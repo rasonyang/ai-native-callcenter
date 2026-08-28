@@ -2283,6 +2283,9 @@ type ServerInterface interface {
 	// CompleteCallback Close a callback
 	// (POST /callbacks/{callbackId}/complete)
 	CompleteCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID)
+	// ReleaseCallback Put a claimed callback back in the pool
+	// (POST /callbacks/{callbackId}/release)
+	ReleaseCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID)
 	// ListCalls Every live call
 	// (GET /calls)
 	ListCalls(w http.ResponseWriter, r *http.Request)
@@ -2592,6 +2595,12 @@ func (_ Unimplemented) ClaimCallback(w http.ResponseWriter, r *http.Request, cal
 // CompleteCallback Close a callback
 // (POST /callbacks/{callbackId}/complete)
 func (_ Unimplemented) CompleteCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleaseCallback Put a claimed callback back in the pool
+// (POST /callbacks/{callbackId}/release)
+func (_ Unimplemented) ReleaseCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3434,6 +3443,32 @@ func (siw *ServerInterfaceWrapper) CompleteCallback(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteCallback(w, r, callbackID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleaseCallback operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callbackId" -------------
+	var callbackID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callbackId", chi.URLParam(r, "callbackId"), &callbackID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callbackId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseCallback(w, r, callbackID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5465,6 +5500,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/callbacks/{callbackId}/complete", wrapper.CompleteCallback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/callbacks/{callbackId}/release", wrapper.ReleaseCallback)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/calls", wrapper.ListCalls)
