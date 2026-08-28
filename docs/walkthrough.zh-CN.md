@@ -516,13 +516,23 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 
 - [ ] **60. 打开 `field_service_appointment`（9 个阶段）**
       期望：右侧阶段图把 9 个阶段和它们之间的转移都画出来，不重叠、不出框。
-- [ ] **61. 在右图点一个阶段**
+      实际（2026-08-28 09:40，browser-harness 量的）：9 个阶段都在，但三处不达标——
+      ① 转移标签**重叠**两处：`appt_lookup · found = 1` 压着 `found = 0`，
+      `appt_confirm · confirmed = 1` 压着 `appt_reschedule · ok = 1`（同一节点分叉的两条边，
+      标签都放在中点，x 差 40px，文字宽 180px）；
+      ② **出框**：画板 728×712，容器 670×618，`done_book` 右边被裁掉一截，最下一行
+      `finish_transfer / finish / need_transfer` 要滚动才看得到；
+      ③ `global.transitions`（转人工→`finish_transfer`、挂断→`finish`）和 `fallbackTarget`
+      （→`need_transfer`）**没有画**，这三个阶段在图上没有任何进入的边，像孤立节点。
+- [x] **61. 在右图点一个阶段**
       期望：左侧 JSON 滚到并高亮该阶段的定义。
-- [ ] **62. 把光标放进左侧某个阶段的 JSON 里**
+- [x] **62. 把光标放进左侧某个阶段的 JSON 里**
       期望：右图对应的阶段被选中。**双向联动**，不是只有一个方向。
 - [ ] **63. 看终止阶段（`finish` / `finish_transfer`）**
       期望：在图上与普通阶段可区分（`isTerminal`）。
-- [ ] **64. 故意打错一个字符**
+      实际（2026-08-28）：`finish` / `finish_transfer` 右上角有个 ■，边框略深一点
+      （`border-foreground/40`）。能分，但很淡——是否够用，由人眼定。
+- [x] **64. 故意打错一个字符**
       期望：立刻提示「不是合法的 JSON」，阶段图不崩，保存被拦下。
 
 ### 4.3 Tools 标签页
