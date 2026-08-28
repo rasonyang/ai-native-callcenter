@@ -562,6 +562,7 @@
     "refused": "The server refused this spec:",
     "unreachable": "No transition reaches: {{nodes}}. The call can never get there.",
     "specEditor": "Flow spec JSON",
+    "anyPhase": "Any phase",
     "terminal": "Terminal phase",
     "revisions_one": "{{count}} revision",
     "revisions_other": "{{count}} revisions",

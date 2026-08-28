@@ -560,6 +560,7 @@
     "refused": "服务端拒绝了这份配置：",
     "unreachable": "没有任何转移能到达：{{nodes}}。通话永远走不到那里。",
     "specEditor": "流程配置 JSON",
+    "anyPhase": "任一阶段",
     "terminal": "终止阶段",
     "revisions_other": "{{count}} 个版本",
     "revision": "版本",

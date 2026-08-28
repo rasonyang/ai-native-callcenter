@@ -514,7 +514,7 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 
 左边是 JSON 编辑器，右边是阶段图，两边联动。
 
-- [ ] **60. 打开 `field_service_appointment`（9 个阶段）**
+- [x] **60. 打开 `field_service_appointment`（9 个阶段）**
       期望：右侧阶段图把 9 个阶段和它们之间的转移都画出来，不重叠、不出框。
       实际（2026-08-28 09:40，browser-harness 量的）：9 个阶段都在，但三处不达标——
       ① 转移标签**重叠**两处：`appt_lookup · found = 1` 压着 `found = 0`，
@@ -524,6 +524,9 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
       `finish_transfer / finish / need_transfer` 要滚动才看得到；
       ③ `global.transitions`（转人工→`finish_transfer`、挂断→`finish`）和 `fallbackTarget`
       （→`need_transfer`）**没有画**，这三个阶段在图上没有任何进入的边，像孤立节点。
+      三处当天修掉：同一节点分叉的标签按序上下错开一行；画板按容器等比缩小（最小 0.6，
+      再小就滚动）；全局转移和兜底画成从上方落入目标的**虚线**边，标签 `Any phase · …` /
+      `Fallback phase`。修后复量：8 条标签零重叠，9 个阶段一屏可见。
 - [x] **61. 在右图点一个阶段**
       期望：左侧 JSON 滚到并高亮该阶段的定义。
 - [x] **62. 把光标放进左侧某个阶段的 JSON 里**
