@@ -119,7 +119,7 @@
       "OVERFLOW_NEEDS_TARGET": "这种溢出方式需要一个去向。",
       "PASSWORD_MIN_8": "至少 8 个字符。",
       "PASSWORD_TOO_SHORT": "至少 6 个字符。",
-      "PHONE_INVALID": "不是可用的电话号码。",
+      "PHONE_INVALID": "2 到 32 位数字，可带一个前导 +。",
       "PHONE_TAKEN": "这个号码已有联系人。",
       "POSITION_MIN": "级别和顺位从 1 开始。",
       "REQUIRED": "必填。",
