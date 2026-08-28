@@ -609,7 +609,8 @@
       "transfer_to_agent": "Hand the caller to a queue of people. Always allowed; may refuse when the queue is closed.",
       "take_message": "Record a callback request for an agent to return.",
       "hangup": "End the call once the caller is done."
-    }
+    },
+    "required": "Required"
   },
   "users": {
     "hint": "Who uses this product, and what each of them was given.",

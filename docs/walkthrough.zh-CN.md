@@ -553,7 +553,7 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 - [x] **66. 看任一 HTTP 工具的明细**
       期望：请求路径、参数（JSON Schema）、**结果槽位映射**（`result` 把响应里的字段映射成 `{slots.x.y}`）都能看到。
       实际（2026-08-28）：路径、结果映射都在；「参数」列只列参数名（`address, date_choice, item`），
-      不展开 Schema 的类型和说明。看得出有哪些参数，看不出每个是什么——记为待办。
+      不展开 Schema 的类型和说明。已修：每个参数一行——名字、类型、必填 `*`、可选值、说明。
 - [x] **67. 确认三个内置工具的呈现**
       期望：`transfer_to_agent`、`take_message`、`hangup` 与 HTTP 工具区分开——它们没有 HTTP 路径，由平台自己实现。
       实际（2026-08-28）：Tools 页原本**根本不列**内置工具，只有流程自己声明的五个。当天修：
@@ -775,9 +775,6 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 ---
 
 ## 走查记下的待办
-
-- **Tools 页的「参数」列只有名字**：`tool.parameters` 是完整的 JSON Schema（类型、说明、必填），
-  页面只 `Object.keys` 了一下。要么展开成小表，要么点开看——现在设计流程的人得回 JSON 里找。
 
 - **话机离线时的外呼多出一条 CDR**：`POST /calls` 拨一部没注册的话机，账本里出现两条
   OUTBOUND——正常那条 `NO_ANSWER`（腿 `DIALING 1001`），另一条 `callId` 不同、

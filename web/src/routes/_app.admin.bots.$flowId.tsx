@@ -21,6 +21,7 @@ import {
   useFlow,
   useFlowMutations,
   type FlowSpec,
+  type FlowTool,
   type SpecLang,
 } from '@/lib/flows'
 import { requireRole } from '@/lib/guards'
@@ -767,8 +768,8 @@ function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
             <Td className="py-2 align-top font-mono text-xs">
               {tool.http?.method ?? 'POST'} {tool.http?.path ?? '—'}
             </Td>
-            <Td className="py-2 align-top font-mono text-xs text-muted-foreground">
-              {Object.keys(tool.parameters?.properties ?? {}).join(', ') || '—'}
+            <Td className="py-2 align-top text-xs text-muted-foreground">
+              <Parameters tool={tool} />
             </Td>
             <Td className="py-2 align-top font-mono text-xs text-muted-foreground">
               {Object.entries(tool.http?.result ?? {})
@@ -779,6 +780,37 @@ function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         ))}
       </TBody>
     </DataTable>
+  )
+}
+
+/**
+ * The tool's arguments as the schema states them — name, type, whether the
+ * model must supply it, what it means, which values it may take. Listing only
+ * the names sent the reader back into the JSON for everything that mattered.
+ */
+function Parameters({ tool }: { tool: FlowTool }) {
+  const { t } = useTranslation()
+  const properties = Object.entries(tool.parameters?.properties ?? {})
+  if (properties.length === 0) return <>—</>
+  const required = new Set(tool.parameters?.required ?? [])
+  return (
+    <ul className="grid gap-1">
+      {properties.map(([name, p]) => (
+        <li key={name}>
+          <span className="font-mono text-foreground">{name}</span>
+          {p.type && <span className="ml-1 font-mono">{p.type}</span>}
+          {required.has(name) && (
+            <span className="ml-1 text-primary" title={t('bots.required')}>
+              *
+            </span>
+          )}
+          {p.enum && p.enum.length > 0 && (
+            <span className="ml-1 font-mono">{p.enum.map(String).join(' | ')}</span>
+          )}
+          {p.description && <span className="block">{p.description}</span>}
+        </li>
+      ))}
+    </ul>
   )
 }
 
