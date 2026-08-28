@@ -582,7 +582,6 @@
     "httpPath": "HTTP call",
     "parameters": "Parameters",
     "resultSlots": "Result → slots",
-    "noTools": "This flow declares no tools of its own; the built-ins still apply.",
     "persona": "Persona",
     "rules": "Rules",
     "runtime": "Runtime",
@@ -590,7 +589,13 @@
     "providerDefault": "Provider default",
     "maxTurns": "Max turns",
     "fallbackTarget": "Fallback phase",
-    "alwaysAllowed": "Always allowed"
+    "alwaysAllowed": "Always allowed",
+    "builtinTool": "Built in — implemented by the platform, no HTTP call",
+    "builtin": {
+      "transfer_to_agent": "Hand the caller to a queue of people. Always allowed; may refuse when the queue is closed.",
+      "take_message": "Record a callback request for an agent to return.",
+      "hangup": "End the call once the caller is done."
+    }
   },
   "users": {
     "hint": "Who uses this product, and what each of them was given.",

@@ -18,7 +18,7 @@
         "套餐、价格、单号信息必须来自工具返回,严禁编造。工具返回里的 hint 字段是给你的流程提示,照做。",
         "办理类操作前必须完整复述变更内容并获得用户明确确认。",
         "不要向用户透露登记的完整电话号码。",
-        "用户明确表达要结束通话,立即调用 hangup_call,工具返回后再道别。"
+        "用户明确表达要结束通话,立即调用 hangup,工具返回后再道别。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
@@ -29,7 +29,7 @@
         "Plans, prices and order numbers must come from tool results — never invent them. The hint field is your flow guidance; follow it.",
         "Before any transaction, restate the full change and get explicit confirmation.",
         "Never disclose the full registered phone number.",
-        "When the caller clearly wants to end the call, call hangup_call immediately, then say goodbye."
+        "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
       ]
     },
     "voice": "longanqian",
@@ -159,8 +159,8 @@
     },
     "done": {
       "instruction": {
-        "zh": "变更受理成功:受理单号 {slots.bb_change.order_no},{slots.bb_change.effective}。向用户逐位播报受理单号并说明生效时间。然后问还需要其它服务吗;不需要则调用 hangup_call。",
-        "en": "Change accepted: order number {slots.bb_change.order_no}, {slots.bb_change.effective} (announce in English, e.g. \"effective from the next billing cycle\"). Read the order number digit by digit. Then ask if there is anything else; if not, call hangup_call."
+        "zh": "变更受理成功:受理单号 {slots.bb_change.order_no},{slots.bb_change.effective}。向用户逐位播报受理单号并说明生效时间。然后问还需要其它服务吗;不需要则调用 hangup。",
+        "en": "Change accepted: order number {slots.bb_change.order_no}, {slots.bb_change.effective} (announce in English, e.g. \"effective from the next billing cycle\"). Read the order number digit by digit. Then ask if there is anything else; if not, call hangup."
       },
       "tools": [
         "bb_account",

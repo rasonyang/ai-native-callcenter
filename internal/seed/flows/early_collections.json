@@ -16,7 +16,7 @@
         "只与机主本人沟通账单信息;对方表示不是机主本人时,不透露任何账单细节,礼貌结束通话。",
         "账单金额、逾期天数必须来自工具返回,严禁编造。工具返回里的 hint 字段是给你的流程提示,照做。",
         "用户任何时候要求人工,立即调用 transfer_to_agent;用户对账单有异议时不要争辩,记录异议并转专员。",
-        "用户明确表达要结束通话,立即调用 hangup_call,工具返回后再道别。"
+        "用户明确表达要结束通话,立即调用 hangup,工具返回后再道别。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
@@ -25,7 +25,7 @@
         "Discuss bill details only with the account owner; if the answerer is not the owner, disclose nothing and end the call politely.",
         "Bill amounts and overdue days must come from tool results — never invent them. The hint field is your flow guidance; follow it.",
         "Whenever the caller asks for an agent, call transfer_to_agent; if the caller disputes the bill, never argue — record the dispute and hand over to a specialist.",
-        "When the caller clearly wants to end the call, call hangup_call immediately, then say goodbye."
+        "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
       ]
     },
     "voice": "longanqian",
@@ -57,8 +57,8 @@
   "nodes": {
     "greet": {
       "instruction": {
-        "zh": "开场说:“您好,这里是星联宽带客服。”确认对方是机主本人后(只报号码后4位),立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,礼貌致歉并调用 hangup_call。",
-        "en": "Open with: \"Hello, this is NovaNet Broadband customer service.\" Confirm you are speaking with the account owner (mention only the last 4 digits of the number), then immediately call bill_lookup. If the answerer is not the owner: disclose nothing, apologize and call hangup_call."
+        "zh": "开场说:“您好,这里是星联宽带客服。”确认对方是机主本人后(只报号码后4位),立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,礼貌致歉并调用 hangup。",
+        "en": "Open with: \"Hello, this is NovaNet Broadband customer service.\" Confirm you are speaking with the account owner (mention only the last 4 digits of the number), then immediately call bill_lookup. If the answerer is not the owner: disclose nothing, apologize and call hangup."
       },
       "tools": [
         "bill_lookup"
@@ -89,8 +89,8 @@
     },
     "remind": {
       "instruction": {
-        "zh": "友好提醒:您有一笔 {slots.bill_lookup.amount} 元的账单,应缴日期是 {slots.bill_lookup.due_date},目前已过期 {slots.bill_lookup.days_overdue} 天,可能是忘记缴了。询问用户大概什么时候方便处理。用户给出时间:复述确认后调用 promise_record 记录。用户表示已缴、金额不对或有其它异议:不要争辩,简要确认异议内容后调用 dispute_record 记录。用户明确拒绝沟通:不纠缠,提醒可通过营业厅或线上渠道处理,调用 hangup_call。",
-        "en": "Friendly reminder: there is a bill of {slots.bill_lookup.amount} yuan due on {slots.bill_lookup.due_date}, now {slots.bill_lookup.days_overdue} days overdue — likely just an oversight (translate dates to English naturally). Ask when it would be convenient to settle it. If the caller gives a time: restate it, confirm, and call promise_record. If they say it is wrong, already paid, or dispute anything: do not argue — summarize the dispute briefly and call dispute_record. If they refuse to engage: do not push; mention the app or service centers, then call hangup_call."
+        "zh": "友好提醒:您有一笔 {slots.bill_lookup.amount} 元的账单,应缴日期是 {slots.bill_lookup.due_date},目前已过期 {slots.bill_lookup.days_overdue} 天,可能是忘记缴了。询问用户大概什么时候方便处理。用户给出时间:复述确认后调用 promise_record 记录。用户表示已缴、金额不对或有其它异议:不要争辩,简要确认异议内容后调用 dispute_record 记录。用户明确拒绝沟通:不纠缠,提醒可通过营业厅或线上渠道处理,调用 hangup。",
+        "en": "Friendly reminder: there is a bill of {slots.bill_lookup.amount} yuan due on {slots.bill_lookup.due_date}, now {slots.bill_lookup.days_overdue} days overdue — likely just an oversight (translate dates to English naturally). Ask when it would be convenient to settle it. If the caller gives a time: restate it, confirm, and call promise_record. If they say it is wrong, already paid, or dispute anything: do not argue — summarize the dispute briefly and call dispute_record. If they refuse to engage: do not push; mention the app or service centers, then call hangup."
       },
       "tools": [
         "promise_record",
@@ -121,8 +121,8 @@
     },
     "promised": {
       "instruction": {
-        "zh": "已记录付款安排:用用户自己刚才说的时间复述确认(如“好的,那就等您本周五处理”),并提醒可以通过手机营业厅或线下网点缴费。然后感谢配合,调用 hangup_call 结束。",
-        "en": "Payment arrangement recorded: confirm using the caller's own words (e.g. \"Great, we'll expect it by this Friday then\"), and mention the mobile app or service centers for payment. Thank them and call hangup_call."
+        "zh": "已记录付款安排:用用户自己刚才说的时间复述确认(如“好的,那就等您本周五处理”),并提醒可以通过手机营业厅或线下网点缴费。然后感谢配合,调用 hangup 结束。",
+        "en": "Payment arrangement recorded: confirm using the caller's own words (e.g. \"Great, we'll expect it by this Friday then\"), and mention the mobile app or service centers for payment. Thank them and call hangup."
       },
       "tools": []
     },
@@ -135,8 +135,8 @@
     },
     "no_bill": {
       "instruction": {
-        "zh": "本机号码没有查到逾期账单:向用户致歉说明可能是系统信息更新延迟,感谢理解,调用 hangup_call 结束。",
-        "en": "No overdue bill found for this number: apologize — it may be a system update delay — thank them for their understanding and call hangup_call."
+        "zh": "本机号码没有查到逾期账单:向用户致歉说明可能是系统信息更新延迟,感谢理解,调用 hangup 结束。",
+        "en": "No overdue bill found for this number: apologize — it may be a system update delay — thank them for their understanding and call hangup."
       },
       "tools": []
     },

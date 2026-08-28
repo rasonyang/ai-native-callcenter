@@ -531,7 +531,7 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
       期望：左侧 JSON 滚到并高亮该阶段的定义。
 - [x] **62. 把光标放进左侧某个阶段的 JSON 里**
       期望：右图对应的阶段被选中。**双向联动**，不是只有一个方向。
-- [ ] **63. 看终止阶段（`finish` / `finish_transfer`）**
+- [x] **63. 看终止阶段（`finish` / `finish_transfer`）**
       期望：在图上与普通阶段可区分（`isTerminal`）。
       实际（2026-08-28）：`finish` / `finish_transfer` 右上角有个 ■，边框略深一点
       （`border-foreground/40`）。能分，但很淡——是否够用，由人眼定。
@@ -540,25 +540,34 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 
 ### 4.3 Tools 标签页
 
-- [ ] **65. 打开 `field_service_appointment` 的 Tools**
+- [x] **65. 打开 `field_service_appointment` 的 Tools**
       期望：5 个工具都列出：`appt_lookup` `appt_slots` `appt_book` `appt_reschedule` `appt_confirm`。
-- [ ] **66. 看任一 HTTP 工具的明细**
+- [x] **66. 看任一 HTTP 工具的明细**
       期望：请求路径、参数（JSON Schema）、**结果槽位映射**（`result` 把响应里的字段映射成 `{slots.x.y}`）都能看到。
-- [ ] **67. 确认三个内置工具的呈现**
+      实际（2026-08-28）：路径、结果映射都在；「参数」列只列参数名（`address, date_choice, item`），
+      不展开 Schema 的类型和说明。看得出有哪些参数，看不出每个是什么——记为待办。
+- [x] **67. 确认三个内置工具的呈现**
       期望：`transfer_to_agent`、`take_message`、`hangup` 与 HTTP 工具区分开——它们没有 HTTP 路径，由平台自己实现。
-- [ ] **68. 看 `alwaysAllowedTools`**
+      实际（2026-08-28）：Tools 页原本**根本不列**内置工具，只有流程自己声明的五个。当天修：
+      三个内置工具排在表头，「HTTP 调用」一栏写「内置 — 由平台实现，没有 HTTP 调用」。
+- [x] **68. 看 `alwaysAllowedTools`**
       期望：转人工和挂断在**每个阶段**都可用，不受阶段允许列表限制。这是设计要求：无论走到哪一步，要人工都不该被挡。
 
 ### 4.4 Persona & rules 标签页
 
-- [ ] **69. 打开任一流程的 Persona**
+- [x] **69. 打开任一流程的 Persona**
       期望：人设与规则**中英双语都在**，按当前界面语言显示对应的一份。
-- [ ] **70. 切换界面语言到 English**
+- [x] **70. 切换界面语言到 English**
       期望：显示英文那一份，不是中文原文，也不是机器翻译。
-- [ ] **71. 看 `voice`**
+      实际（2026-08-28）：页面自己的 EN / 中文 开关只在打开时跟一次界面语言，之后切界面语言
+      人设不跟着变。当天修：界面语言一变，开关跟着变；手点开关仍可临时看另一份。
+      顺带发现：移植的五个流程里规则写的是「调用 `hangup_call`」，而内置工具叫 `hangup`——
+      模型被指向一个不存在的工具名。种子文件已全部改成 `hangup`，`mobile_support` 已重新发布到 95012；
+      其余四个流程数据库里的副本仍是旧措辞，下次 `flowadd` 时自然更新。
+- [x] **71. 看 `voice`**
       期望：显示流程自己配的音色（移植后是 `longanqian`）；没配时显示「provider 默认」。
       音色**随流程发布**，不是环境变量——同一个部署里不同 bot 可以有不同声音。
-- [ ] **72. 看 `maxTurns` 与 `fallbackTarget`**
+- [x] **72. 看 `maxTurns` 与 `fallbackTarget`**
       期望：都能看到。前者是防模型打转的上限，后者是「聊丢了」时的去处。
 
 ### 4.5 History 标签页
@@ -743,6 +752,9 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 ---
 
 ## 走查记下的待办
+
+- **Tools 页的「参数」列只有名字**：`tool.parameters` 是完整的 JSON Schema（类型、说明、必填），
+  页面只 `Object.keys` 了一下。要么展开成小表，要么点开看——现在设计流程的人得回 JSON 里找。
 
 - **话机离线时的外呼多出一条 CDR**：`POST /calls` 拨一部没注册的话机，账本里出现两条
   OUTBOUND——正常那条 `NO_ANSWER`（腿 `DIALING 1001`），另一条 `callId` 不同、

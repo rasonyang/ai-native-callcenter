@@ -17,7 +17,7 @@
         "用户任何时候说“人工”、“转接客服”或按 0,立即调用 transfer_to_agent,工具返回后按提示播报转接话术。",
         "维修进度等事实信息必须来自工具返回,严禁编造;手机使用类问题可用自己的知识简短解答,不确定时如实说明并建议转人工。",
         "工具返回里的 hint 字段是给你的流程提示,照做。",
-        "用户明确表达要结束通话,立即调用 hangup_call,工具返回后再道别。"
+        "用户明确表达要结束通话,立即调用 hangup,工具返回后再道别。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
@@ -27,7 +27,7 @@
         "Whenever the caller asks for an agent or presses 0, call transfer_to_agent immediately, then announce the transfer script per the hint.",
         "Facts like repair progress must come from tool results — never invent them; usage questions may be answered briefly from your own knowledge, and when unsure say so and suggest an agent.",
         "The hint field in tool results is your flow guidance; follow it.",
-        "When the caller clearly wants to end the call, call hangup_call immediately, then say goodbye."
+        "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
       ]
     },
     "voice": "longanqian",
@@ -91,8 +91,8 @@
     },
     "repair_report": {
       "instruction": {
-        "zh": "维修单查询结果:设备 {slots.repair_status.device},当前状态 {slots.repair_status.status},{slots.repair_status.eta}。向用户播报后问“请问还需要其它服务吗?”可以继续解答使用问题,或查询其它维修单(再次调用 repair_status,以最新返回为准);结束时调用 hangup_call。",
-        "en": "Repair lookup result: device {slots.repair_status.device}, status {slots.repair_status.status}, {slots.repair_status.eta}. Announce it in English (translate the Chinese fields naturally), then ask \"Anything else I can help you with?\" You may keep answering usage questions or check another repair order (call repair_status again; trust the latest result). To end, call hangup_call."
+        "zh": "维修单查询结果:设备 {slots.repair_status.device},当前状态 {slots.repair_status.status},{slots.repair_status.eta}。向用户播报后问“请问还需要其它服务吗?”可以继续解答使用问题,或查询其它维修单(再次调用 repair_status,以最新返回为准);结束时调用 hangup。",
+        "en": "Repair lookup result: device {slots.repair_status.device}, status {slots.repair_status.status}, {slots.repair_status.eta}. Announce it in English (translate the Chinese fields naturally), then ask \"Anything else I can help you with?\" You may keep answering usage questions or check another repair order (call repair_status again; trust the latest result). To end, call hangup."
       },
       "tools": [
         "repair_status"

@@ -49,6 +49,12 @@ function FlowDesigner() {
   const [name, setName] = useState('')
   const [text, setText] = useState('')
   const [lang, setLang] = useState<SpecLang>(i18n.language.startsWith('zh') ? 'zh' : 'en')
+  // A reader who switches the interface to Chinese wants the Chinese copy of
+  // the persona too; the toggle above the editor is for looking at the other
+  // one on purpose, and holds until the interface language moves again.
+  useEffect(() => {
+    setLang(i18n.language.startsWith('zh') ? 'zh' : 'en')
+  }, [i18n.language])
   const [selected, setSelected] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [note, setNote] = useState('')
@@ -720,6 +726,13 @@ function PhaseGraph({
 
 // --- The other tabs ---------------------------------------------------------
 
+/**
+ * The tools every flow has without declaring them, implemented by the platform
+ * rather than by an HTTP call — listed so a reader sees the whole vocabulary
+ * the model can use, not just the part this flow added.
+ */
+const BUILTIN_TOOLS = ['transfer_to_agent', 'take_message', 'hangup'] as const
+
 function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
   const { t } = useTranslation()
   const tools = Object.entries(spec.tools ?? {})
@@ -734,7 +747,17 @@ function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         <Th>{t('bots.resultSlots')}</Th>
       </THead>
       <TBody>
-        {tools.length === 0 && <TableMessage colSpan={5}>{t('bots.noTools')}</TableMessage>}
+        {BUILTIN_TOOLS.map((toolName) => (
+          <Tr key={toolName} className="h-auto">
+            <Td className="py-2 align-top font-mono text-xs font-medium">{toolName}</Td>
+            <Td className="max-w-72 py-2 align-top text-muted-foreground">
+              {t(`bots.builtin.${toolName}`)}
+            </Td>
+            <Td className="py-2 align-top text-xs text-muted-foreground" colSpan={3}>
+              {t('bots.builtinTool')}
+            </Td>
+          </Tr>
+        ))}
         {tools.map(([toolName, tool]) => (
           <Tr key={toolName} className="h-auto">
             <Td className="py-2 align-top font-mono text-xs font-medium">{toolName}</Td>
