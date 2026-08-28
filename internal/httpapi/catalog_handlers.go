@@ -222,7 +222,18 @@ func (s *Server) writeCatalogError(w http.ResponseWriter, r *http.Request, err e
 		writeError(w, http.StatusConflict, CodeExtensionAssignedToAgent,
 			"an agent has that extension as their phone; unbind them before deleting it", nil)
 	case errors.Is(err, catalog.ErrValidation):
-		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(), nil)
+		// The refusal names its field and rule so the form can highlight the
+		// input it belongs to; the message stays for API callers reading raw
+		// responses.
+		var invalid *catalog.ValidationError
+		var params map[string]any
+		if errors.As(err, &invalid) {
+			params = map[string]any{"rule": invalid.Rule}
+			if invalid.Field != "" {
+				params["field"] = invalid.Field
+			}
+		}
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(), params)
 	case errors.Is(err, catalog.ErrNotFound):
 		writeError(w, http.StatusNotFound, CodeNotFound, "not found", nil)
 	case isUniqueViolation(err):

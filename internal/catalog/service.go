@@ -73,8 +73,31 @@ type AgentNames interface {
 // Errors returned by the service.
 var (
 	ErrValidation = errors.New("validation failed")
-	ErrNotFound   = errors.New("not found")
-	ErrConflict   = errors.New("already exists")
+)
+
+// ValidationError names which field failed and by which rule, so a form can
+// put the refusal on the input it belongs to instead of a sentence at the
+// bottom true of nothing on screen. Field is the wire name ("" when the
+// failure is nobody's field, like a misconfigured extension range); Rule is a
+// stable code the UI translates. It unwraps to ErrValidation so every
+// existing errors.Is check still holds.
+type ValidationError struct {
+	Field string
+	Rule  string
+	msg   string
+}
+
+func (e *ValidationError) Error() string { return "validation failed: " + e.msg }
+func (e *ValidationError) Unwrap() error { return ErrValidation }
+
+// invalid builds a ValidationError.
+func invalid(field, rule, msg string) error {
+	return &ValidationError{Field: field, Rule: rule, msg: msg}
+}
+
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("already exists")
 	// ErrPoolExhausted means every number in the configured range is taken.
 	// Distinct from a conflict: nothing the operator asked for collided, the
 	// deployment has simply run out of numbers and needs a wider range.
@@ -125,7 +148,7 @@ func (s *Service) CreateExtension(ctx context.Context, e Extension) (Extension, 
 func (s *Service) AllocateExtension(ctx context.Context, e Extension,
 	rangeLow, rangeHigh int) (Extension, error) {
 	if rangeHigh < rangeLow {
-		return Extension{}, fmt.Errorf("%w: extension range ends before it starts", ErrValidation)
+		return Extension{}, invalid("", "EXTENSION_RANGE_INVERTED", "extension range ends before it starts")
 	}
 	if err := e.validateApartFromNumber(true); err != nil {
 		return Extension{}, err
@@ -534,7 +557,7 @@ func (s *Service) desiredByAgent(ctx context.Context) (map[string]map[string]Que
 // StaffQueue puts an agent on a queue, in the database and on the switch.
 func (s *Service) StaffQueue(ctx context.Context, queueID, agentID uuid.UUID, level, position int) error {
 	if level < 1 || position < 1 {
-		return fmt.Errorf("%w: level and position start at 1", ErrValidation)
+		return invalid("position", "POSITION_MIN", "level and position start at 1")
 	}
 	queue, err := s.store.QueueByID(ctx, queueID)
 	if err != nil {

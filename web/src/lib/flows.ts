@@ -52,10 +52,17 @@ export interface FlowNode {
   isTerminal?: boolean
 }
 
+/** One argument the model fills in: a JSON Schema property, the parts a reader wants. */
+export interface FlowParameter {
+  type?: string
+  description?: string
+  enum?: Array<string | number>
+}
+
 export interface FlowTool {
   description?: FlowText
   parameters?: {
-    properties?: Record<string, { type?: string }>
+    properties?: Record<string, FlowParameter>
     required?: string[]
   }
   http?: {

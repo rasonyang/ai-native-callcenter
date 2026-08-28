@@ -8,7 +8,7 @@ import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import type { Role } from '@/lib/api'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { useUserMutations, useUsers, type User, type UserDraft } from '@/lib/users'
 
@@ -154,7 +154,7 @@ function UsersAdmin() {
         error={saveError ? describeError(saveError, t) : undefined}
         onSubmit={submit}
       >
-        <Field label={t('users.username')} hint={isNew ? t('users.usernameHint') : undefined}>
+        <Field label={t('users.username')} error={fieldErrorText(saveError, 'username', t)} hint={isNew ? t('users.usernameHint') : undefined}>
           <Input
             value={editing?.username ?? ''}
             onChange={(e) => setEditing({ ...editing, username: e.target.value })}
@@ -166,7 +166,7 @@ function UsersAdmin() {
             onChange={(e) => setEditing({ ...editing, displayName: e.target.value })}
           />
         </Field>
-        <Field label={t('users.role')} hint={isNew ? t('users.roleHint') : undefined}>
+        <Field label={t('users.role')} error={fieldErrorText(saveError, 'role', t)} hint={isNew ? t('users.roleHint') : undefined}>
           <Select
             value={editing?.role ?? 'AGENT'}
             onChange={(role) => setEditing({ ...editing, role: role as Role })}
@@ -174,7 +174,7 @@ function UsersAdmin() {
           />
         </Field>
         {isNew ? (
-          <Field label={t('users.initialPassword')} hint={t('users.passwordHint')}>
+          <Field label={t('users.initialPassword')} error={fieldErrorText(saveError, 'password', t)} hint={t('users.passwordHint')}>
             <Input
               type="password"
               autoComplete="new-password"
@@ -183,7 +183,7 @@ function UsersAdmin() {
             />
           </Field>
         ) : (
-          <Field label={t('users.status')} hint={t('users.statusHint')}>
+          <Field label={t('users.status')} error={fieldErrorText(saveError, 'status', t)} hint={t('users.statusHint')}>
             <Select
               value={editing?.status ?? 'ACTIVE'}
               onChange={(status) =>
@@ -214,7 +214,7 @@ function UsersAdmin() {
         }}
       >
         <p className="text-xs text-muted-foreground">{t('users.resetHint')}</p>
-        <Field label={t('users.newPassword')} hint={t('users.passwordHint')}>
+        <Field label={t('users.newPassword')} error={fieldErrorText(resetPassword.error, 'password', t)} hint={t('users.passwordHint')}>
           <Input
             type="password"
             autoComplete="new-password"

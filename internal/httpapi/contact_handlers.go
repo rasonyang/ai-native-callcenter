@@ -116,12 +116,12 @@ func (s *Server) writeContactError(w http.ResponseWriter, r *http.Request, err e
 	switch {
 	case errors.Is(err, store.ErrContactInvalid):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(),
-			map[string]any{"field": "phoneNumber"})
+			map[string]any{"field": "phoneNumber", "rule": "PHONE_INVALID"})
 	case errors.Is(err, store.ErrContactNotFound):
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such contact", nil)
 	case errors.Is(err, store.ErrContactExists):
 		writeError(w, http.StatusConflict, CodeConflict,
-			"that phone number already has a contact", map[string]any{"field": "phoneNumber"})
+			"that phone number already has a contact", map[string]any{"field": "phoneNumber", "rule": "PHONE_TAKEN"})
 	default:
 		slog.ErrorContext(r.Context(), "contact write failed", "error", err)
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot save the contact", nil)

@@ -105,7 +105,32 @@
     "AGENT_NOT_LOGGED_IN": "您尚未签入。",
     "CALL_NOT_FOUND": "该通话已结束。",
     "NOT_CALL_PARTY": "您不在该通话中。",
-    "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。"
+    "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。",
+    "rules": {
+      "DEFAULT_NEEDS_OUTBOUND": "只有能呼出的号码才能设为默认外呼号码。",
+      "DIGITS_ONLY": "只能是数字。",
+      "DIRECTION_REQUIRED": "号码要能呼入、能呼出，至少占一样。",
+      "EXTENSION_RANGE_INVERTED": "分机号段起止颠倒，检查 AICC_EXTENSION_RANGE。",
+      "FLOW_REQUIRED": "可呼入的号码需要指定应答它的机器人流程。",
+      "LANGUAGE_SUBTAG": "用 en、zh 这样的短代码。",
+      "NAME_CHARSET": "不能含空格、@ 或引号。",
+      "NAME_TOO_LONG": "最多 120 个字符。",
+      "NOTE_TOO_LONG": "最多 200 个字符。",
+      "OVERFLOW_NEEDS_TARGET": "这种溢出方式需要一个去向。",
+      "PASSWORD_MIN_8": "至少 8 个字符。",
+      "PASSWORD_TOO_SHORT": "至少 6 个字符。",
+      "PHONE_INVALID": "不是可用的电话号码。",
+      "PHONE_TAKEN": "这个号码已有联系人。",
+      "POSITION_MIN": "级别和顺位从 1 开始。",
+      "REQUIRED": "必填。",
+      "SLUG_CHARSET": "只能是小写字母、数字、连字符和下划线。",
+      "UNKNOWN_OVERFLOW_TYPE": "请选择列出的溢出方式之一。",
+      "UNKNOWN_ROLE": "请选择列出的角色之一。",
+      "UNKNOWN_STATUS": "请选择列出的状态之一。",
+      "UNKNOWN_STRATEGY": "请选择列出的策略之一。",
+      "USERNAME_CHARSET": "只能是字母、数字、点、下划线和连字符。",
+      "WEEKDAY_RANGE": "星期只能是 0 到 6。"
+    }
   },
   "availability": {
     "READY": "示闲",
@@ -606,7 +631,8 @@
       "transfer_to_agent": "把来电转给人工队列。任何阶段都可用；队列关闭时可能拒绝。",
       "take_message": "登记一条回访请求，由坐席回拨。",
       "hangup": "来电办完后结束通话。"
-    }
+    },
+    "required": "必填"
   },
   "users": {
     "hint": "谁在用这个产品，以及每个人被配了什么。",

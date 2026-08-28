@@ -260,7 +260,17 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 	}
 
 	vars := map[string]string{
-		"aicc_call_id":                 callID.String(),
+		"aicc_call_id": callID.String(),
+		// The identity crosses the bridge with the leg. The trunk leg the
+		// dialplan raises next inherits aicc_call_id, so it is adopted into
+		// this call the moment it exists — not merged later at the bridge,
+		// which a failed originate never reaches. Without this, a dial whose
+		// agent leg died before bridging left the trunk leg on a provisional
+		// call of its own, and the ledger showed two OUTBOUND rows for one
+		// click (walkthrough, 2026-08-28). One name only: inside an originate
+		// {…} block a comma separates variables, so a two-name export_vars
+		// would be cut in half.
+		"export_vars":                  "aicc_call_id",
 		"sip_auto_answer":              "true",
 		"origination_caller_id_number": destination,
 		// No space in the name: it travels inside an originate {…} block,

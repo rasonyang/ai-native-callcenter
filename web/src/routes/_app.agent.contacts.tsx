@@ -9,7 +9,7 @@ import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { useContactMutations, useContacts, type Contact } from '@/lib/contacts'
 
@@ -175,7 +175,7 @@ function ContactsPage() {
           error={saveError ? describeError(saveError, t) : undefined}
           onSubmit={save}
         >
-          <Field label={t('contacts.number')} hint={t('contacts.numberHint')}>
+          <Field label={t('contacts.number')} error={fieldErrorText(saveError, 'phoneNumber', t)} hint={t('contacts.numberHint')}>
             <Input
               autoFocus
               className="tabular"

@@ -10,7 +10,7 @@ import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { useUsers } from '@/lib/users'
 import {
@@ -152,7 +152,7 @@ function RoutingPage() {
           error={saveQueue.isError ? describeError(saveQueue.error, t) : undefined}
           onSubmit={() => saveQueue.mutate(editing, { onSuccess: () => setEditing(null) })}
         >
-          <Field label={t('admin.queueName')} hint={t('admin.queueNameHint')}>
+          <Field label={t('admin.queueName')} error={fieldErrorText(saveQueue.error, 'name', t)} hint={t('admin.queueNameHint')}>
             <Input
               autoFocus
               disabled={Boolean(editing.id)}
@@ -175,7 +175,7 @@ function RoutingPage() {
               <Input disabled value={editing.extNumber ?? ''} />
             </Field>
           )}
-          <Field label={t('admin.strategy')}>
+          <Field label={t('admin.strategy')} error={fieldErrorText(saveQueue.error, 'strategy', t)}>
             <Select
               value={editing.strategy ?? 'LONGEST_IDLE_AGENT'}
               onChange={(v) => setEditing({ ...editing, strategy: v as Strategy })}
@@ -206,7 +206,7 @@ function RoutingPage() {
             />
           </Field>
           {editing.overflow?.type !== 'ANNOUNCE_HANGUP' && (
-            <Field label={t('admin.overflowTarget')} hint={t('admin.overflowTargetHint')}>
+            <Field label={t('admin.overflowTarget')} error={fieldErrorText(saveQueue.error, 'overflow.target', t)} hint={t('admin.overflowTargetHint')}>
               <Input
                 value={editing.overflow?.target ?? ''}
                 onChange={(e) =>

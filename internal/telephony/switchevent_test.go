@@ -552,7 +552,7 @@ func TestBotShareMergesAcrossLegs(t *testing.T) {
 	got := BotShare{DID: "95001"}
 	// What the caller's leg carries a conversation later.
 	got.Merge(BotShare{
-		Sec: 42, FlowID: &flow, DID: "95001",
+		Sec: 42, FlowID: &flow, FlowSlug: "mobile_support", DID: "95001",
 		Summary: "billing question", Reason: "AGENT_REQUESTED",
 	})
 
@@ -561,6 +561,9 @@ func TestBotShareMergesAcrossLegs(t *testing.T) {
 	}
 	if got.FlowID == nil || *got.FlowID != flow {
 		t.Errorf("FlowID = %v, want %v", got.FlowID, flow)
+	}
+	if got.FlowSlug != "mobile_support" {
+		t.Errorf("FlowSlug = %q, want mobile_support — the name arrives with the tally", got.FlowSlug)
 	}
 	if got.Summary != "billing question" || got.Reason != "AGENT_REQUESTED" {
 		t.Errorf("summary/reason = %q/%q, want them carried over", got.Summary, got.Reason)

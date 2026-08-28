@@ -106,20 +106,32 @@ export function useRecordForm<T>(...attempts: Array<{ reset: () => void }>) {
 export function Field({
   label,
   hint,
+  error,
   children,
 }: {
   label: string
   hint?: string
+  /** The server's refusal of this field, rendered on it rather than at the bottom. */
+  error?: string
   children: ReactNode
 }) {
   const generatedID = useId()
-  const child = isValidElement<{ id?: string }>(children) ? children : undefined
+  const child = isValidElement<{ id?: string; 'aria-invalid'?: boolean }>(children)
+    ? children
+    : undefined
   const controlID = child?.props.id ?? generatedID
 
   return (
     <div className="space-y-1">
       <Label htmlFor={child ? controlID : undefined}>{label}</Label>
-      {child ? cloneElement(child, { id: controlID }) : children}
+      {child
+        ? cloneElement(child, { id: controlID, ...(error ? { 'aria-invalid': true } : {}) })
+        : children}
+      {error && (
+        <p role="alert" className="text-xs" style={{ color: 'var(--state-breach)' }}>
+          {error}
+        </p>
+      )}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
   )

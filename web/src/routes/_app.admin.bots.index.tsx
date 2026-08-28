@@ -8,7 +8,7 @@ import { Field, Input, RecordDialog } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { useDIDs } from '@/lib/catalog'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { useFlowMutations, useFlows, starterSpec, type Flow } from '@/lib/flows'
 import { requireRole } from '@/lib/guards'
 
@@ -129,14 +129,14 @@ function BotFlowsPage() {
         error={create.isError ? describeError(create.error, t) : undefined}
         onSubmit={submit}
       >
-        <Field label={t('bots.slug')} hint={t('bots.slugHint')}>
+        <Field label={t('bots.slug')} error={fieldErrorText(create.error, 'slug', t)} hint={t('bots.slugHint')}>
           <Input
             value={draft?.slug ?? ''}
             onChange={(e) => setDraft({ slug: e.target.value, name: draft?.name ?? '' })}
             placeholder="novanet_support"
           />
         </Field>
-        <Field label={t('bots.name')}>
+        <Field label={t('bots.name')} error={fieldErrorText(create.error, 'name', t)}>
           <Input
             value={draft?.name ?? ''}
             onChange={(e) => setDraft({ slug: draft?.slug ?? '', name: e.target.value })}

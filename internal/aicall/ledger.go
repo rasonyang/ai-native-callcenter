@@ -258,6 +258,9 @@ func (a *callActions) stampBotShare(facts *callFacts) {
 	if facts.flowID != nil {
 		a.stampChannel("aicc_flow_id", facts.flowID.String())
 	}
+	if facts.flowSlug != "" {
+		a.stampChannel("aicc_flow_slug", facts.flowSlug)
+	}
 	a.stampChannel("aicc_did", facts.did)
 }
 

@@ -105,7 +105,32 @@
     "AGENT_NOT_LOGGED_IN": "You are not signed in.",
     "CALL_NOT_FOUND": "That call has already ended.",
     "NOT_CALL_PARTY": "You are not on that call.",
-    "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against."
+    "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against.",
+    "rules": {
+      "DEFAULT_NEEDS_OUTBOUND": "Only a number that can place calls can be the default one.",
+      "DIGITS_ONLY": "Digits only.",
+      "DIRECTION_REQUIRED": "A number must take calls, place them, or both.",
+      "EXTENSION_RANGE_INVERTED": "The extension range ends before it starts; fix AICC_EXTENSION_RANGE.",
+      "FLOW_REQUIRED": "A number callers can reach needs the flow it answers with.",
+      "LANGUAGE_SUBTAG": "A short subtag such as en or zh.",
+      "NAME_CHARSET": "No spaces, @ or quotes.",
+      "NAME_TOO_LONG": "At most 120 characters.",
+      "NOTE_TOO_LONG": "At most 200 characters.",
+      "OVERFLOW_NEEDS_TARGET": "This overflow needs a target.",
+      "PASSWORD_MIN_8": "At least 8 characters.",
+      "PASSWORD_TOO_SHORT": "At least 6 characters.",
+      "PHONE_INVALID": "Not a usable phone number.",
+      "PHONE_TAKEN": "That phone number already has a contact.",
+      "POSITION_MIN": "Level and position start at 1.",
+      "REQUIRED": "Required.",
+      "SLUG_CHARSET": "Lowercase letters, digits, hyphen and underscore.",
+      "UNKNOWN_OVERFLOW_TYPE": "Pick one of the listed overflow types.",
+      "UNKNOWN_ROLE": "Pick one of the listed roles.",
+      "UNKNOWN_STATUS": "Pick one of the listed statuses.",
+      "UNKNOWN_STRATEGY": "Pick one of the listed strategies.",
+      "USERNAME_CHARSET": "Letters, digits, dot, underscore and hyphen.",
+      "WEEKDAY_RANGE": "Weekday must be 0 to 6."
+    }
   },
   "availability": {
     "READY": "Ready",
@@ -609,7 +634,8 @@
       "transfer_to_agent": "Hand the caller to a queue of people. Always allowed; may refuse when the queue is closed.",
       "take_message": "Record a callback request for an agent to return.",
       "hangup": "End the call once the caller is done."
-    }
+    },
+    "required": "Required"
   },
   "users": {
     "hint": "Who uses this product, and what each of them was given.",

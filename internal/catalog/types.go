@@ -45,7 +45,7 @@ func NewExtension() Extension {
 func (e *Extension) validate(requirePassword bool) error {
 	e.Number = trim(e.Number)
 	if !digitsOnly(e.Number) {
-		return fmt.Errorf("%w: number must be digits", ErrValidation)
+		return invalid("number", "DIGITS_ONLY", "number must be digits")
 	}
 	if err := e.validateApartFromNumber(requirePassword); err != nil {
 		return err
@@ -62,7 +62,7 @@ func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	e.DisplayName = trim(e.DisplayName)
 
 	if requirePassword && len(e.Password) < 6 {
-		return fmt.Errorf("%w: password must be at least 6 characters", ErrValidation)
+		return invalid("password", "PASSWORD_TOO_SHORT", "password must be at least 6 characters")
 	}
 	return nil
 }
@@ -183,25 +183,25 @@ func (q *Queue) validate() error {
 	q.DisplayName = trim(q.DisplayName)
 
 	if q.Name == "" {
-		return fmt.Errorf("%w: name is required", ErrValidation)
+		return invalid("name", "REQUIRED", "name is required")
 	}
 	// The name reaches the switch as part of a queue identifier, so it stays
 	// to characters that survive that trip unambiguously.
 	for _, r := range q.Name {
 		if r == '@' || r == ' ' || r == '\'' {
-			return fmt.Errorf("%w: name cannot contain spaces, @ or quotes", ErrValidation)
+			return invalid("name", "NAME_CHARSET", "name cannot contain spaces, @ or quotes")
 		}
 	}
 	// Empty means "allocate one": whoever adds a queue is asking for a queue,
 	// not for 7004. A number that is given must still be a number.
 	if q.ExtNumber != "" && !digitsOnly(q.ExtNumber) {
-		return fmt.Errorf("%w: queue extension must be digits", ErrValidation)
+		return invalid("extNumber", "DIGITS_ONLY", "queue extension must be digits")
 	}
 	if q.Strategy == "" {
 		q.Strategy = StrategyLongestIdle
 	}
 	if !strategies[q.Strategy] {
-		return fmt.Errorf("%w: unknown strategy %q", ErrValidation, q.Strategy)
+		return invalid("strategy", "UNKNOWN_STRATEGY", fmt.Sprintf("unknown strategy %q", q.Strategy))
 	}
 	switch q.Overflow.Type {
 	case "":
@@ -209,14 +209,14 @@ func (q *Queue) validate() error {
 	case OverflowAnnounceHangup:
 	case OverflowBotFlow, OverflowForward:
 		if trim(q.Overflow.Target) == "" {
-			return fmt.Errorf("%w: overflow %s needs a target", ErrValidation, q.Overflow.Type)
+			return invalid("overflow.target", "OVERFLOW_NEEDS_TARGET", fmt.Sprintf("overflow %s needs a target", q.Overflow.Type))
 		}
 	default:
-		return fmt.Errorf("%w: unknown overflow type %q", ErrValidation, q.Overflow.Type)
+		return invalid("overflow.type", "UNKNOWN_OVERFLOW_TYPE", fmt.Sprintf("unknown overflow type %q", q.Overflow.Type))
 	}
 	for _, h := range q.Hours {
 		if h.Weekday < 0 || h.Weekday > 6 {
-			return fmt.Errorf("%w: weekday must be 0 to 6", ErrValidation)
+			return invalid("hours", "WEEKDAY_RANGE", "weekday must be 0 to 6")
 		}
 	}
 	if q.MohSound == "" {
@@ -289,25 +289,25 @@ func (d *DID) validate() error {
 	d.Description = trim(d.Description)
 
 	if !digitsOnly(d.Number) {
-		return fmt.Errorf("%w: number must be digits", ErrValidation)
+		return invalid("number", "DIGITS_ONLY", "number must be digits")
 	}
 	if d.Language == "" {
 		d.Language = "en"
 	}
 	if len(d.Language) > 8 {
-		return fmt.Errorf("%w: language must be a short subtag such as en or zh", ErrValidation)
+		return invalid("language", "LANGUAGE_SUBTAG", "language must be a short subtag such as en or zh")
 	}
 	// The database refuses each of these too. Saying which field is wrong,
 	// and why, is this layer's job — a CHECK constraint's name is not an
 	// answer anybody can act on.
 	if !d.AllowInbound && !d.AllowOutbound {
-		return fmt.Errorf("%w: a number must take calls, place them, or both", ErrValidation)
+		return invalid("allowInbound", "DIRECTION_REQUIRED", "a number must take calls, place them, or both")
 	}
 	if d.AllowInbound && d.FlowID == nil {
-		return fmt.Errorf("%w: a number callers can reach needs the flow it answers with", ErrValidation)
+		return invalid("flowId", "FLOW_REQUIRED", "a number callers can reach needs the flow it answers with")
 	}
 	if d.IsDefaultOutbound && !d.AllowOutbound {
-		return fmt.Errorf("%w: a number that cannot place calls cannot be the default one", ErrValidation)
+		return invalid("isDefaultOutbound", "DEFAULT_NEEDS_OUTBOUND", "a number that cannot place calls cannot be the default one")
 	}
 	return nil
 }

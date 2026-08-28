@@ -286,6 +286,9 @@ func TestDialIsAgentFirst(t *testing.T) {
 	if first.endpoint != "user/1001@test" {
 		t.Errorf("first leg went to %q, want the agent", first.endpoint)
 	}
+	if first.vars["export_vars"] != "aicc_call_id" {
+		t.Errorf("export_vars = %q, want aicc_call_id — the trunk leg inherits the call id at the bridge, or a failed dial writes two rows", first.vars["export_vars"])
+	}
 	if first.vars["aicc_call_id"] != callID.String() {
 		t.Error("the agent leg does not carry the minted call id")
 	}
