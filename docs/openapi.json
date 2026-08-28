@@ -5449,6 +5449,11 @@
             "type": "string",
             "description": "AI_OUTBOUND only: overrides the DID's language when set."
           },
+          "callbackId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it."
+          },
           "userData": {
             "$ref": "#/components/schemas/UserData"
           }
@@ -6663,6 +6668,24 @@
           "handledAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "lastAttemptCallId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The most recent call placed from this callback."
+          },
+          "lastAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When that call was placed; once it ends, when it ended."
+          },
+          "lastAttemptStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CDRStatus"
+              }
+            ],
+            "description": "How that call went, absent while it is still up."
           }
         },
         "required": [

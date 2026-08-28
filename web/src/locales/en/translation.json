@@ -430,7 +430,17 @@
     "callBack": "Call back",
     "release": "Put back in the pool",
     "claimedByOther": "Someone else is on it",
-    "ringing": "Ringing your phone…"
+    "ringing": "Ringing your phone…",
+    "lastAttempt": "Called {{when}} · {{outcome}}",
+    "attempt": {
+      "IN_PROGRESS": "on the phone now",
+      "ANSWERED": "answered",
+      "NO_ANSWER": "no answer",
+      "BUSY": "busy",
+      "FAILED": "failed",
+      "ABANDONED": "hung up before answer",
+      "CANCELLED": "cancelled"
+    }
   },
   "reports": {
     "hint": "Aggregates over finished calls.",

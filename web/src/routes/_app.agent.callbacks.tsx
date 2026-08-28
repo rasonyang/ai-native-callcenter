@@ -37,7 +37,9 @@ function CallbacksPage() {
   // Click-to-dial from the row: the agent's own phone rings first, then the
   // customer. The callback stays CLAIMED — whether the call kept the promise
   // is for the agent to say afterwards, not for the dial to assume.
-  const dial = useMutation({ mutationFn: callApi.dial })
+  const dial = useMutation({
+    mutationFn: (row: Callback) => callApi.dialForCallback(row.id, row.phoneNumber),
+  })
 
   const rows = data?.items ?? []
   const timeFormat = new Intl.DateTimeFormat(i18n.language, {
@@ -92,6 +94,7 @@ function CallbacksPage() {
               </Td>
               <Td>
                 <StatusPill callback={row} isMine={row.handledBy === user?.userId} />
+                <LastAttempt callback={row} format={timeFormat} />
               </Td>
               <Td align="right">
                 <RowActions
@@ -99,7 +102,7 @@ function CallbacksPage() {
                   isMine={row.handledBy === user?.userId}
                   isDialing={dial.isPending}
                   onClaim={() => claim.mutate(row.id)}
-                  onCallBack={() => dial.mutate(row.phoneNumber)}
+                  onCallBack={() => dial.mutate(row)}
                   onRelease={() => release.mutate(row.id)}
                   onComplete={(status) => complete.mutate({ id: row.id, status })}
                 />
@@ -117,6 +120,26 @@ const STATUS_COLOR: Record<CallbackStatus, string> = {
   CLAIMED: 'var(--state-oncall)',
   DONE: 'var(--state-available)',
   DISMISSED: 'var(--state-offline)',
+}
+
+/**
+ * What happened the last time somebody rang from this row. A dial is not a
+ * kept promise — no answer, busy, "call me later" all leave the callback
+ * open — so the outcome sits under the status for the agent to read before
+ * deciding, rather than closing the row for them.
+ */
+function LastAttempt({ callback, format }: { callback: Callback; format: Intl.DateTimeFormat }) {
+  const { t } = useTranslation()
+  if (!callback.lastAttemptAt) return null
+  const when = format.format(new Date(callback.lastAttemptAt))
+  const outcome = callback.lastAttemptStatus
+    ? t(`callbacks.attempt.${callback.lastAttemptStatus}`, { defaultValue: callback.lastAttemptStatus })
+    : t('callbacks.attempt.IN_PROGRESS')
+  return (
+    <span className="mt-0.5 block text-xs text-muted-foreground">
+      {t('callbacks.lastAttempt', { when, outcome })}
+    </span>
+  )
 }
 
 function StatusPill({ callback, isMine }: { callback: Callback; isMine: boolean }) {

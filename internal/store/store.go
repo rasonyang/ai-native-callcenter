@@ -39,6 +39,10 @@ type Store struct {
 	Pool *pgxpool.Pool
 	// Queries is the sqlc-generated query set bound to the pool.
 	Queries *queries.Queries
+	// OnCallbackSettled, when set, is told about every callback whose last
+	// attempt just learned how it went — from a CDR landing. The store cannot
+	// reach the event stream, so whoever wires it up hands in the announcer.
+	OnCallbackSettled func(Callback)
 }
 
 // Open creates the pool, verifies connectivity and takes the single-instance

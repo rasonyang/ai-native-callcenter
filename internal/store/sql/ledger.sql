@@ -173,6 +173,18 @@ SET status = 'OPEN', handled_by = NULL
 WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2
 RETURNING *;
 
+-- name: MarkCallbackAttempt :one
+UPDATE callbacks
+SET last_attempt_call_id = $2, last_attempt_at = now(), last_attempt_status = NULL
+WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $3
+RETURNING *;
+
+-- name: SettleCallbackAttempt :many
+UPDATE callbacks
+SET last_attempt_status = $2, last_attempt_at = $3
+WHERE last_attempt_call_id = $1
+RETURNING *;
+
 -- name: ReportOverview :one
 SELECT
     count(*)                                                          AS total_calls,

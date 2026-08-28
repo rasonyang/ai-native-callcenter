@@ -428,7 +428,17 @@
     "callBack": "回拨",
     "release": "放回回拨池",
     "claimedByOther": "别人在处理",
-    "ringing": "正在振铃你的话机…"
+    "ringing": "正在振铃你的话机…",
+    "lastAttempt": "{{when}} 回拨过 · {{outcome}}",
+    "attempt": {
+      "IN_PROGRESS": "通话中",
+      "ANSWERED": "已接通",
+      "NO_ANSWER": "未接",
+      "BUSY": "占线",
+      "FAILED": "失败",
+      "ABANDONED": "接通前挂断",
+      "CANCELLED": "已取消"
+    }
   },
   "reports": {
     "hint": "基于已结束通话的统计。",

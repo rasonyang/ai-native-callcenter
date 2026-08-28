@@ -399,6 +399,19 @@ func announceBotSession(ctx context.Context, pub callbackPublisher) func(callID,
 	}
 }
 
+// settledCallback tells the live event stream that a callback's last attempt
+// has an outcome — a call placed from the row has ended, and the row now says
+// whether anybody answered.
+func settledCallback(ctx context.Context, pub callbackPublisher) func(store.Callback) {
+	return func(callback store.Callback) {
+		pub.Publish(ctx, events.Event{
+			Type:    events.TypeCallbackUpdated,
+			CallID:  callback.CallID,
+			Payload: map[string]any{"callback": callback},
+		}, events.Scope{IsBroadcast: true})
+	}
+}
+
 // callbackPublisher is the slice of the event hub the bot's announcement uses.
 type callbackPublisher interface {
 	Publish(ctx context.Context, ev events.Event, scope events.Scope) events.Event

@@ -125,6 +125,9 @@ func run() error {
 
 	authSvc := auth.NewService(st.Queries, cfg.SessionTTL)
 	hub := events.NewHub(events.NewSequence(seqReserver{st}, "events"))
+	// A callback learns how its last attempt went when that call's CDR lands;
+	// every screen that can act on one is told the same moment.
+	st.OnCallbackSettled = settledCallback(ctx, hub)
 	hub.OnDropped = func(sub events.Subscriber) {
 		slog.Warn("sse subscriber dropped", "userId", sub.UserID)
 	}

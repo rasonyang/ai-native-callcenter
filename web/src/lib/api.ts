@@ -172,6 +172,15 @@ export const callApi = {
       method: 'POST',
       body: JSON.stringify({ kind: 'AGENT_OUTBOUND', to: destination }),
     }),
+  /**
+   * The same dial, made to keep a callback: the call is noted on the callback
+   * before the phone rings and its outcome is copied back when it ends.
+   */
+  dialForCallback: (callbackId: string, destination: string) =>
+    request<components['schemas']['CreateCallResponse']>('/calls', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'AGENT_OUTBOUND', to: destination, callbackId }),
+    }),
   answer: (callId: string) => request<void>(`/calls/${callId}/answer`, { method: 'POST' }),
   hold: (callId: string) => request<void>(`/calls/${callId}/hold`, { method: 'POST' }),
   retrieve: (callId: string) => request<void>(`/calls/${callId}/retrieve`, { method: 'POST' }),

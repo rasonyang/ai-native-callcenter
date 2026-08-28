@@ -1742,6 +1742,11 @@ export interface components {
             extensionNumber?: string;
             /** @description AI_OUTBOUND only: overrides the DID's language when set. */
             language?: string;
+            /**
+             * Format: uuid
+             * @description AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it.
+             */
+            callbackId?: string;
             userData?: components["schemas"]["UserData"];
         };
         CreateCallResponse: {
@@ -2196,6 +2201,18 @@ export interface components {
             handledBy?: string;
             /** Format: date-time */
             handledAt?: string;
+            /**
+             * Format: uuid
+             * @description The most recent call placed from this callback.
+             */
+            lastAttemptCallId?: string;
+            /**
+             * Format: date-time
+             * @description When that call was placed; once it ends, when it ended.
+             */
+            lastAttemptAt?: string;
+            /** @description How that call went, absent while it is still up. */
+            lastAttemptStatus?: components["schemas"]["CDRStatus"];
         };
         CallbackList: {
             items: components["schemas"]["Callback"][];

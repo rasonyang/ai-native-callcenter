@@ -996,12 +996,21 @@ type Callback struct {
 	HandledAt *time.Time          `json:"handledAt,omitempty"`
 
 	// HandledBy The user working or having closed the callback.
-	HandledBy   *openapi_types.UUID `json:"handledBy,omitempty"`
-	ID          openapi_types.UUID  `json:"id"`
-	Message     string              `json:"message"`
-	PhoneNumber string              `json:"phoneNumber"`
-	QueueID     *openapi_types.UUID `json:"queueId,omitempty"`
-	Status      CallbackStatus      `json:"status"`
+	HandledBy *openapi_types.UUID `json:"handledBy,omitempty"`
+	ID        openapi_types.UUID  `json:"id"`
+
+	// LastAttemptAt When that call was placed; once it ends, when it ended.
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+
+	// LastAttemptCallID The most recent call placed from this callback.
+	LastAttemptCallID *openapi_types.UUID `json:"lastAttemptCallId,omitempty"`
+
+	// LastAttemptStatus How that call went, absent while it is still up.
+	LastAttemptStatus *CDRStatus          `json:"lastAttemptStatus,omitempty"`
+	Message           string              `json:"message"`
+	PhoneNumber       string              `json:"phoneNumber"`
+	QueueID           *openapi_types.UUID `json:"queueId,omitempty"`
+	Status            CallbackStatus      `json:"status"`
 }
 
 // CallbackList defines model for CallbackList.
@@ -1059,6 +1068,9 @@ type ContactWrite struct {
 type CreateCallRequest struct {
 	// CallID Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
 	CallID *openapi_types.UUID `json:"callId,omitempty"`
+
+	// CallbackID AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it.
+	CallbackID *openapi_types.UUID `json:"callbackId,omitempty"`
 
 	// DID AI_OUTBOUND only: the DID whose flow and caller id the call uses.
 	DID *string `json:"did,omitempty"`
