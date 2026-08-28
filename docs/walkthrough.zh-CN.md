@@ -779,7 +779,13 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 - **话机离线时的外呼多出一条 CDR**：`POST /calls` 拨一部没注册的话机，账本里出现两条
   OUTBOUND——正常那条 `NO_ANSWER`（腿 `DIALING 1001`），另一条 `callId` 不同、
   `fromNumber` = `toNumber` = 外线号、腿 `DIALING <外线号>`、0 秒。订阅了 OUTBOUND 的
-  客户系统会收到两次。先弄清那条从哪来（像是外线腿被当成了独立通话），再决定删还是合并。
+  客户系统会收到两次。
+  根因（2026-08-28 从日志查实）：坐席腿 originate 带了 `aicc_call_id` 但没有 export，
+  拨号计划 bridge 中继时 B-leg 什么都没继承，被当成新通话临时收养；这次坐席腿又恰好
+  originate 失败，两腿从未 bridge，临时通话没被并掉，单独落了账。
+  已修（待真机验证）：originate 变量加 `export_vars=aicc_call_id`，中继腿一出生就带着
+  同一个 call id，直接并进原通话。**验法**：关掉话机注册，用 key 外呼一次，账本应只有
+  一条 `NO_ANSWER`；再开回话机打一通正常的，中继腿仍在同一条 CDR 里。
 
 走查中发现、当场没修的问题。修掉一条就把它从这里删掉，并把对应步骤的「备注」改成事实。
 
