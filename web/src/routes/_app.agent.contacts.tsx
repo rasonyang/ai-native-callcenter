@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,14 +36,13 @@ function ContactsPage() {
   const { t, i18n } = useTranslation()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(0)
-  const [editing, setEditing] = useState<ContactDraft | null>(null)
-
   const { data, isPending, isError, error } = useContacts({
     q: search || undefined,
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
   })
   const { create, update, remove } = useContactMutations()
+  const [editing, setEditing] = useRecordForm<ContactDraft>(create, update)
 
   const rows = data?.items ?? []
   const total = data?.total ?? 0
@@ -130,8 +129,13 @@ function ContactsPage() {
                 {row.lastCallAt ? dateFormat.format(new Date(row.lastCallAt)) : t('contacts.never')}
               </Td>
               <Td align="right">
-                <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
-                  {t('common.edit')}
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  title={t('common.edit')}
+                  onClick={() => setEditing(row)}
+                >
+                  <Pencil />
                 </Button>
                 <ConfirmDelete
                   label={t('contacts.deleteConfirm', { name: row.name || row.phoneNumber })}

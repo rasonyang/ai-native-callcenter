@@ -88,6 +88,14 @@ INSERT INTO dids (id, number, language, flow_id, fallback_queue_id,
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
+-- Move the default-outbound flag off whoever holds it. Run in the same
+-- transaction as the write that claims it: "make this the default" is a
+-- single choice, and uq_dids_default_outbound would otherwise report the
+-- second one as a duplicate number, which is not what went wrong.
+-- name: ClearDefaultOutbound :exec
+UPDATE dids SET is_default_outbound = false
+WHERE is_default_outbound AND id <> $1;
+
 -- name: GetDIDByNumber :one
 SELECT * FROM dids WHERE number = $1;
 

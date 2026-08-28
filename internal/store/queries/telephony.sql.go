@@ -12,6 +12,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearDefaultOutbound = `-- name: ClearDefaultOutbound :exec
+UPDATE dids SET is_default_outbound = false
+WHERE is_default_outbound AND id <> $1
+`
+
+// Move the default-outbound flag off whoever holds it. Run in the same
+// transaction as the write that claims it: "make this the default" is a
+// single choice, and uq_dids_default_outbound would otherwise report the
+// second one as a duplicate number, which is not what went wrong.
+func (q *Queries) ClearDefaultOutbound(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, clearDefaultOutbound, id)
+	return err
+}
+
 const createDID = `-- name: CreateDID :one
 INSERT INTO dids (id, number, language, flow_id, fallback_queue_id,
                   is_recording_enabled, description, is_enabled, allow_inbound, allow_outbound, is_default_outbound)

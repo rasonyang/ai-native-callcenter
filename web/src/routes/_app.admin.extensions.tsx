@@ -2,11 +2,11 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { KeyRound, Trash2 } from 'lucide-react'
+import { KeyRound, Pencil, Trash2 } from 'lucide-react'
 import { Dialog, Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
-import { Field, Input, RecordDialog, Select } from '@/components/record-dialog'
+import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { describeError } from '@/lib/errors'
@@ -28,7 +28,7 @@ function ExtensionsPage() {
   const { data, isPending, isError, error } = useExtensions()
   const { saveExtension, deleteExtension } = useCatalogMutations()
   const users = useUsers()
-  const [editing, setEditing] = useState<ExtensionDraft | null>(null)
+  const [editing, setEditing] = useRecordForm<ExtensionDraft>(saveExtension)
   const [revealing, setRevealing] = useState<Extension | null>(null)
   // The freshly minted password lives here and nowhere else: not in form
   // state, not in an input's value, not in anything a draft or a devtools
@@ -90,12 +90,21 @@ function ExtensionsPage() {
                 {/* Laid out rather than left to inline baselines, which put
                     the middle button a few pixels below its neighbours. */}
                 <span className="flex items-center justify-end gap-1">
-                  <Button size="sm" variant="ghost" onClick={() => setRevealing(row)}>
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    title={t('admin.reveal')}
+                    onClick={() => setRevealing(row)}
+                  >
                     <KeyRound />
-                    {t('admin.reveal')}
                   </Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditing(row)}>
-                    {t('common.edit')}
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    title={t('common.edit')}
+                    onClick={() => setEditing(row)}
+                  >
+                    <Pencil />
                   </Button>
                   <ConfirmDelete
                     label={t('admin.deleteExtensionConfirm', { number: row.number })}
@@ -141,8 +150,31 @@ function ExtensionsPage() {
               onChange={(e) => setEditing({ ...editing, displayName: e.target.value })}
             />
           </Field>
-          {editing.id ? (
-            <Field label={t('admin.password')} hint={t('admin.passwordExistingHint')}>
+          {/* One field for both cases. A minted secret looks the same whether
+              it was generated for a new phone or reset on an existing one —
+              and it has to be shown either way: a reset that draws nothing
+              reads as a dead button, while the credential it staged is real
+              and lands on the next save. */}
+          <Field
+            label={t('admin.password')}
+            hint={
+              hasMinted
+                ? editing.id
+                  ? t('admin.passwordMintedHint')
+                  : t('admin.passwordNewHint')
+                : editing.id
+                  ? t('admin.passwordExistingHint')
+                  : t('admin.passwordNewHint')
+            }
+          >
+            {hasMinted ? (
+              <span className="flex items-center gap-2">
+                <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-sm">
+                  {minted.current}
+                </code>
+                <CopyButton key={minted.current} value={minted.current ?? ''} />
+              </span>
+            ) : editing.id ? (
               <span className="flex gap-2">
                 <Button
                   type="button"
@@ -165,38 +197,20 @@ function ExtensionsPage() {
                   {t('admin.resetPassword')}
                 </Button>
               </span>
-            </Field>
-          ) : (
-            <Field label={t('admin.password')} hint={t('admin.passwordNewHint')}>
-              {hasMinted ? (
-                <span className="flex items-center gap-2">
-                  <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-sm">
-                    {minted.current}
-                  </code>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => void navigator.clipboard.writeText(minted.current ?? '')}
-                  >
-                    {t('admin.copy')}
-                  </Button>
-                </span>
-              ) : (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    minted.current = generateSIPPassword()
-                    setHasMinted(true)
-                  }}
-                >
-                  {t('admin.generate')}
-                </Button>
-              )}
-            </Field>
-          )}
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  minted.current = generateSIPPassword()
+                  setHasMinted(true)
+                }}
+              >
+                {t('admin.generate')}
+              </Button>
+            )}
+          </Field>
           <Field label={t('admin.enabled')}>
             <Select
               value={String(editing.isEnabled ?? true)}
@@ -217,6 +231,34 @@ function ExtensionsPage() {
 }
 
 /**
+ * Puts a secret on the clipboard and says so.
+ *
+ * The confirmation is the whole point: a credential copies silently, so a
+ * button that does not change is indistinguishable from one that did nothing,
+ * and the reader's next move is to select the text by hand. It stays
+ * confirmed — re-copying the same string has nothing new to report.
+ */
+function CopyButton({ value }: { value: string }) {
+  const { t } = useTranslation()
+  const [copied, setCopied] = useState(false)
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={!value}
+      onClick={() => {
+        if (!value) return
+        void navigator.clipboard.writeText(value)
+        setCopied(true)
+      }}
+    >
+      {copied ? t('admin.copied') : t('admin.copy')}
+    </Button>
+  )
+}
+
+/**
  * What a phone was given, shown once and on request.
  *
  * Fetched only when asked, never carried by the list: the read is recorded in
@@ -233,7 +275,6 @@ function RevealPassword({
   onClose: () => void
 }) {
   const { t } = useTranslation()
-  const [copied, setCopied] = useState(false)
   const { data, isPending, isError, error } = useQuery({
     queryKey: ['catalog', 'extensions', extension.id, 'password'],
     queryFn: () => catalogApi.extensionPassword(extension.id),
@@ -261,18 +302,7 @@ function RevealPassword({
                   ? describeError(error, t)
                   : data?.password}
             </code>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!data?.password}
-              onClick={() => {
-                if (!data?.password) return
-                void navigator.clipboard.writeText(data.password)
-                setCopied(true)
-              }}
-            >
-              {copied ? t('admin.copied') : t('admin.copy')}
-            </Button>
+            <CopyButton key={data?.password} value={data?.password ?? ''} />
           </div>
 
           <div className="mt-3 flex justify-end">
@@ -294,7 +324,7 @@ export function ConfirmDelete({ label, onConfirm }: { label: string; onConfirm: 
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
-        <Button size="sm" variant="ghost" title={t('common.delete')}>
+        <Button size="icon-sm" variant="ghost" title={t('common.delete')}>
           <Trash2 />
         </Button>
       </Popover.Trigger>

@@ -88,8 +88,13 @@ function QueueRow({ queue, staffedCount }: { queue: Queue; staffedCount?: number
       <Td align="right" className="tabular">
         {formatDuration(queue.slaThresholdSec)}
       </Td>
+      {/* Zero is not a duration here, it is the absence of one. Formatted
+          like any other number it read "0:00" — a queue that waits no time at
+          all, which is the exact opposite of the queue that waits forever.
+          The administrator's own list has always said so; this one did not,
+          and the two pages disagreed about the same row. */}
       <Td align="right" className="tabular">
-        {formatDuration(queue.maxWaitSec)}
+        {queue.maxWaitSec > 0 ? formatDuration(queue.maxWaitSec) : t('admin.noLimit')}
       </Td>
       <Td>
         <span className="inline-flex items-center gap-1.5 text-sm">

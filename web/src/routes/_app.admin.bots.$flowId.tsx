@@ -11,9 +11,17 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
 import { describeError } from '@/lib/errors'
 import {
-  describeRule, locateNodes, sameSpec, specProblems,
-  textFor, textListFor, unreachableNodes, useFlow, useFlowMutations,
-  type FlowSpec, type SpecLang,
+  describeRule,
+  locateNodes,
+  sameSpec,
+  specProblems,
+  textFor,
+  textListFor,
+  unreachableNodes,
+  useFlow,
+  useFlowMutations,
+  type FlowSpec,
+  type SpecLang,
 } from '@/lib/flows'
 import { requireRole } from '@/lib/guards'
 import { cn } from '@/lib/utils'
@@ -41,6 +49,12 @@ function FlowDesigner() {
   const [name, setName] = useState('')
   const [text, setText] = useState('')
   const [lang, setLang] = useState<SpecLang>(i18n.language.startsWith('zh') ? 'zh' : 'en')
+  // A reader who switches the interface to Chinese wants the Chinese copy of
+  // the persona too; the toggle above the editor is for looking at the other
+  // one on purpose, and holds until the interface language moves again.
+  useEffect(() => {
+    setLang(i18n.language.startsWith('zh') ? 'zh' : 'en')
+  }, [i18n.language])
   const [selected, setSelected] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [note, setNote] = useState('')
@@ -76,13 +90,14 @@ function FlowDesigner() {
     return () => clearTimeout(timer)
   }, [text])
 
-  const nodeRanges = useMemo(
-    () => locateNodes(text, Object.keys(spec.nodes ?? {})),
-    [text, spec],
-  )
+  const nodeRanges = useMemo(() => locateNodes(text, Object.keys(spec.nodes ?? {})), [text, spec])
   const orphans = useMemo(() => unreachableNodes(spec), [spec])
   const dateFormat = useMemo(
-    () => new Intl.DateTimeFormat(i18n.language, { dateStyle: 'medium', timeStyle: 'short' }),
+    () =>
+      new Intl.DateTimeFormat(i18n.language, {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }),
     [i18n.language],
   )
 
@@ -98,8 +113,7 @@ function FlowDesigner() {
   // the server's key order rather than the author's, and comparing the text
   // would leave every saved flow marked unsaved — and Publish, which wants a
   // clean draft, permanently disabled.
-  const isDirty =
-    name !== data.flow.name || parseError !== null || !sameSpec(spec, data.draftSpec)
+  const isDirty = name !== data.flow.name || parseError !== null || !sameSpec(spec, data.draftSpec)
 
   const onSave = () => {
     if (parseError) return
@@ -399,6 +413,39 @@ const NODE_H = 92
 const COL_GAP = 240
 const ROW_GAP = 168
 const PAD = 20
+const LABEL_H = 18
+const GLOBAL_DROP = 28
+const MIN_SCALE = 0.6
+const LABEL =
+  'absolute z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border bg-card px-1.5 text-xs leading-4 text-muted-foreground'
+
+type Edge = {
+  /** null: a global rule, which every phase can fire. */
+  from: string | null
+  to: string
+  label: string
+  index: number
+  count: number
+}
+
+/** The arrows the global rules and the fallback add, one per target entry. */
+function globalEdges(spec: FlowSpec, anyPhase: string, fallback: string): Edge[] {
+  const nodes = spec.nodes ?? {}
+  const rules: Array<{ to: string; label: string }> = (spec.global?.transitions ?? [])
+    .filter((rule) => rule.target && nodes[rule.target])
+    .map((rule) => ({
+      to: rule.target as string,
+      label: `${anyPhase} · ${describeRule(rule)}`,
+    }))
+  const fb = spec.global?.fallbackTarget
+  if (fb && nodes[fb]) rules.push({ to: fb, label: fallback })
+  const perTarget: Record<string, number> = {}
+  return rules.map((rule) => {
+    const index = perTarget[rule.to] ?? 0
+    perTarget[rule.to] = index + 1
+    return { from: null, ...rule, index, count: 0 }
+  })
+}
 
 /**
  * Phases in the order a call reaches them, laid out downwards: the entry phase
@@ -435,8 +482,10 @@ function layout(spec: FlowSpec) {
 
   const globalTargets = [
     ...new Set(
-      [...(spec.global?.transitions ?? []).map((r) => r.target), spec.global?.fallbackTarget]
-        .filter((id): id is string => Boolean(id) && Boolean(nodes[id as string])),
+      [
+        ...(spec.global?.transitions ?? []).map((r) => r.target),
+        spec.global?.fallbackTarget,
+      ].filter((id): id is string => Boolean(id) && Boolean(nodes[id as string])),
     ),
   ].filter((id) => !placed.has(id))
   globalTargets.forEach((id) => placed.add(id))
@@ -477,125 +526,212 @@ function PhaseGraph({
   const nodes = spec.nodes ?? {}
   const orphaned = new Set(orphans)
 
-  const edges = Object.entries(nodes).flatMap(([from, node]) =>
-    (node.transitions ?? []).map((rule, index, all) => ({
-      from,
-      to: rule.target ?? '',
-      label: describeRule(rule),
-      index,
-      count: all.length,
-    })),
-  )
+  // Every arrow the loader would follow, including the ones no phase owns:
+  // the global rules and the fallback reach their target from *any* phase, so
+  // they are drawn entering the target alone, dashed, rather than from one
+  // node that would be a lie about where the call came from. Without them the
+  // phases only the global rules reach look orphaned, which is the opposite of
+  // what they are — they are the phases every path can end in.
+  const edges: Edge[] = [
+    ...Object.entries(nodes).flatMap(([from, node]) =>
+      (node.transitions ?? []).map((rule, index, all) => ({
+        from,
+        to: rule.target ?? '',
+        label: describeRule(rule),
+        index,
+        count: all.length,
+      })),
+    ),
+    ...globalEdges(spec, t('bots.anyPhase'), t('bots.fallbackTarget')),
+  ]
+
+  // The graph is laid out at one size and shrunk to fit its box, so a nine-
+  // phase flow is seen whole instead of being cut at the right edge and
+  // finished below the fold. Scrolling stays for a flow too wide to shrink
+  // legibly.
+  const box = useRef<HTMLDivElement | null>(null)
+  const [scale, setScale] = useState(1)
+  useEffect(() => {
+    const el = box.current
+    if (!el) return
+    const fit = () => {
+      const s = Math.min(
+        1,
+        (el.clientWidth - 2) / board.width,
+        (el.clientHeight - 2) / board.height,
+      )
+      setScale(Math.max(MIN_SCALE, s))
+    }
+    fit()
+    const observer = new ResizeObserver(fit)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [board.width, board.height])
 
   return (
-    <div className="h-[620px] overflow-auto rounded-md border bg-background">
-      <div className="relative" style={{ width: board.width, height: board.height }}>
-        <svg className="absolute inset-0" width={board.width} height={board.height}>
-          <defs>
-            <marker
-              id="phase-arrow"
-              viewBox="0 0 8 8"
-              refX="7"
-              refY="4"
-              markerWidth="7"
-              markerHeight="7"
-              orient="auto-start-reverse"
-            >
-              <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--muted-foreground)" />
-            </marker>
-          </defs>
+    <div ref={box} className="h-[620px] overflow-auto rounded-md border bg-background">
+      <div style={{ width: board.width * scale, height: board.height * scale }}>
+        <div
+          className="relative origin-top-left"
+          style={{
+            width: board.width,
+            height: board.height,
+            transform: `scale(${scale})`,
+          }}
+        >
+          <svg className="absolute inset-0" width={board.width} height={board.height}>
+            <defs>
+              <marker
+                id="phase-arrow"
+                viewBox="0 0 8 8"
+                refX="7"
+                refY="4"
+                markerWidth="7"
+                markerHeight="7"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 8 4 L 0 8 z" fill="var(--muted-foreground)" />
+              </marker>
+            </defs>
+            {edges.map((edge, i) => {
+              const to = board.at[edge.to]
+              if (!to) return null
+              const tx = to.x + NODE_W / 2 + (edge.from === null ? edge.index * 40 : 0)
+              const ty = to.y - 4
+              if (edge.from === null) {
+                // From nowhere in particular: a short dashed drop into the phase.
+                return (
+                  <path
+                    key={i}
+                    d={`M ${tx} ${ty - GLOBAL_DROP} L ${tx} ${ty}`}
+                    stroke="var(--muted-foreground)"
+                    strokeWidth="1.2"
+                    strokeDasharray="3 3"
+                    fill="none"
+                    markerEnd="url(#phase-arrow)"
+                  />
+                )
+              }
+              const from = board.at[edge.from]
+              if (!from) return null
+              const sx = from.x + NODE_W / 2 + (edge.index - (edge.count - 1) / 2) * 40
+              const sy = from.y + NODE_H
+              return (
+                <path
+                  key={i}
+                  d={`M ${sx} ${sy} C ${sx} ${sy + 40}, ${tx} ${ty - 40}, ${tx} ${ty}`}
+                  stroke="var(--muted-foreground)"
+                  strokeWidth="1.2"
+                  fill="none"
+                  markerEnd="url(#phase-arrow)"
+                />
+              )
+            })}
+          </svg>
+
           {edges.map((edge, i) => {
-            const from = board.at[edge.from]
             const to = board.at[edge.to]
-            if (!from || !to) return null
+            if (!to || !edge.label) return null
+            if (edge.from === null) {
+              return (
+                <span
+                  key={`label-${i}`}
+                  className={cn(LABEL, 'border-dashed')}
+                  style={{
+                    left: to.x + NODE_W / 2 + edge.index * 40,
+                    top: to.y - 4 - GLOBAL_DROP - LABEL_H / 2,
+                  }}
+                >
+                  {edge.label}
+                </span>
+              )
+            }
+            const from = board.at[edge.from]
+            if (!from) return null
             const sx = from.x + NODE_W / 2 + (edge.index - (edge.count - 1) / 2) * 40
-            const sy = from.y + NODE_H
-            const tx = to.x + NODE_W / 2
-            const ty = to.y - 4
+            // Sibling labels leave the same node 40px apart and are wider than
+            // that, so at one height they sit on each other. Each takes its own
+            // line instead, in the order its arrow leaves the node.
+            const stagger = (edge.index - (edge.count - 1) / 2) * (LABEL_H + 4)
             return (
-              <path
-                key={i}
-                d={`M ${sx} ${sy} C ${sx} ${sy + 40}, ${tx} ${ty - 40}, ${tx} ${ty}`}
-                stroke="var(--muted-foreground)"
-                strokeWidth="1.2"
-                fill="none"
-                markerEnd="url(#phase-arrow)"
-              />
+              <span
+                key={`label-${i}`}
+                className={LABEL}
+                style={{
+                  left: (sx + to.x + NODE_W / 2) / 2,
+                  top: (from.y + NODE_H + to.y) / 2 + stagger,
+                }}
+              >
+                {edge.label}
+              </span>
             )
           })}
-        </svg>
 
-        {edges.map((edge, i) => {
-          const from = board.at[edge.from]
-          const to = board.at[edge.to]
-          if (!from || !to || !edge.label) return null
-          const sx = from.x + NODE_W / 2 + (edge.index - (edge.count - 1) / 2) * 40
-          return (
-            <span
-              key={`label-${i}`}
-              className="absolute z-10 -translate-x-1/2 -translate-y-1/2 whitespace-nowrap rounded-md border bg-card px-1.5 text-xs leading-4 text-muted-foreground"
-              style={{
-                left: (sx + to.x + NODE_W / 2) / 2,
-                top: (from.y + NODE_H + to.y) / 2,
-              }}
-            >
-              {edge.label}
-            </span>
-          )
-        })}
-
-        {Object.entries(nodes).map(([id, node]) => {
-          const position = board.at[id]
-          if (!position) return null
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => onSelect(id)}
-              className={cn(
-                'absolute overflow-hidden rounded-md border bg-card p-2.5 text-left',
-                node.isTerminal && 'border-foreground/40',
-                orphaned.has(id) && 'border-dashed',
-                selected === id && 'border-primary',
-              )}
-              style={{ left: position.x, top: position.y, width: NODE_W, height: NODE_H }}
-            >
-              <span className="flex items-center gap-1.5">
-                {id === spec.initialNode && (
-                  <Play className="size-3 shrink-0 text-muted-foreground" />
+          {Object.entries(nodes).map(([id, node]) => {
+            const position = board.at[id]
+            if (!position) return null
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onSelect(id)}
+                className={cn(
+                  'absolute overflow-hidden rounded-md border bg-card p-2.5 text-left',
+                  node.isTerminal && 'border-foreground/40',
+                  orphaned.has(id) && 'border-dashed',
+                  selected === id && 'border-primary',
                 )}
-                <span className="truncate font-mono text-[13px] font-medium">{id}</span>
-                {node.isTerminal && (
-                  <span
-                    className="ml-auto shrink-0 text-xs text-muted-foreground"
-                    title={t('bots.terminal')}
-                  >
-                    ■
-                  </span>
-                )}
-              </span>
-              <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                {textFor(node.instruction, lang)}
-              </span>
-              <span className="mt-1 flex flex-wrap gap-1">
-                {(node.tools ?? []).map((tool) => (
-                  <span
-                    key={tool}
-                    className="rounded-md border px-1 font-mono text-xs leading-4 text-muted-foreground"
-                  >
-                    {tool}
-                  </span>
-                ))}
-              </span>
-            </button>
-          )
-        })}
+                style={{
+                  left: position.x,
+                  top: position.y,
+                  width: NODE_W,
+                  height: NODE_H,
+                }}
+              >
+                <span className="flex items-center gap-1.5">
+                  {id === spec.initialNode && (
+                    <Play className="size-3 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="truncate font-mono text-[13px] font-medium">{id}</span>
+                  {node.isTerminal && (
+                    <span
+                      className="ml-auto shrink-0 text-xs text-muted-foreground"
+                      title={t('bots.terminal')}
+                    >
+                      ■
+                    </span>
+                  )}
+                </span>
+                <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                  {textFor(node.instruction, lang)}
+                </span>
+                <span className="mt-1 flex flex-wrap gap-1">
+                  {(node.tools ?? []).map((tool) => (
+                    <span
+                      key={tool}
+                      className="rounded-md border px-1 font-mono text-xs leading-4 text-muted-foreground"
+                    >
+                      {tool}
+                    </span>
+                  ))}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
 }
 
 // --- The other tabs ---------------------------------------------------------
+
+/**
+ * The tools every flow has without declaring them, implemented by the platform
+ * rather than by an HTTP call — listed so a reader sees the whole vocabulary
+ * the model can use, not just the part this flow added.
+ */
+const BUILTIN_TOOLS = ['transfer_to_agent', 'take_message', 'hangup'] as const
 
 function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
   const { t } = useTranslation()
@@ -611,7 +747,17 @@ function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         <Th>{t('bots.resultSlots')}</Th>
       </THead>
       <TBody>
-        {tools.length === 0 && <TableMessage colSpan={5}>{t('bots.noTools')}</TableMessage>}
+        {BUILTIN_TOOLS.map((toolName) => (
+          <Tr key={toolName} className="h-auto">
+            <Td className="py-2 align-top font-mono text-xs font-medium">{toolName}</Td>
+            <Td className="max-w-72 py-2 align-top text-muted-foreground">
+              {t(`bots.builtin.${toolName}`)}
+            </Td>
+            <Td className="py-2 align-top text-xs text-muted-foreground" colSpan={3}>
+              {t('bots.builtinTool')}
+            </Td>
+          </Tr>
+        ))}
         {tools.map(([toolName, tool]) => (
           <Tr key={toolName} className="h-auto">
             <Td className="py-2 align-top font-mono text-xs font-medium">{toolName}</Td>

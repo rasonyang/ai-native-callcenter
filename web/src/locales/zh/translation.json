@@ -16,7 +16,8 @@
     "delete": "删除",
     "previous": "上一页",
     "next": "下一页",
-    "viewAll": "查看全部"
+    "viewAll": "查看全部",
+    "close": "关闭"
   },
   "auth": {
     "signInTitle": "登录",
@@ -89,7 +90,7 @@
     "INVALID_CREDENTIALS": "用户名或密码不正确。",
     "SESSION_EXPIRED": "登录已过期，请重新登录。",
     "FORBIDDEN": "您没有执行该操作的权限。",
-    "VALIDATION_FAILED": "请检查标红的字段。",
+    "VALIDATION_FAILED": "有字段没通过校验，请逐项检查。",
     "NOT_FOUND": "未找到。",
     "CONFLICT": "该操作与当前状态冲突。",
     "USER_SUSPENDED": "该账号已被停用。",
@@ -130,7 +131,8 @@
     "keypad": "拨号键盘",
     "myQueue": "我的队列",
     "waitingCount_other": "{{count}} 人等待",
-    "queueEmpty": "所属队列暂无人等待。",
+    "noQueuesStaffed": "你不在任何队列里，队列来电不会派给你。",
+    "longestWait": "最长等待",
     "dialled": "拨入 {{number}}",
     "started": "开始于",
     "wrapUp": "话后处理",
@@ -149,7 +151,10 @@
     "wrapUpNoNote": "没有小结。",
     "wrapUpBlocks": "请先完成话后处理。",
     "wrapUpsConfirmed": "手动填写率",
-    "ofOpened": "{{confirmed}}/{{opened}}"
+    "ofOpened": "{{confirmed}}/{{opened}}",
+    "callId": "通话 ID",
+    "callIdCopied": "通话 ID 已复制",
+    "copyCallId": "复制通话 ID"
   },
   "supervisor": {
     "agent": "坐席",
@@ -205,8 +210,6 @@
     "accept": "接听",
     "decline": "拒接",
     "mute": "静音",
-    "conference": "会议",
-    "conferenceUnavailable": "暂不支持会议：平台没有可加入第三方的接口。",
     "controls": "通话控制",
     "unmute": "取消静音",
     "dtmf": "按键音",
@@ -220,8 +223,6 @@
     "rightNow": "当前",
     "devicesUnreachable": "话机不可达",
     "registeredButSilent": "已注册但无响应",
-    "streamClients": "在线控制台",
-    "consolesConnected": "事件流连接数",
     "agentStates": "坐席状态",
     "nobodySignedIn": "暂无坐席签入。",
     "callsToday": "今日通话",
@@ -231,7 +232,9 @@
     "botContained": "机器人闭环率",
     "containedOf": "{{count}} 通",
     "avgWait": "平均排队等待",
-    "acrossQueueCalls": "共 {{count}} 通队列通话"
+    "acrossQueueCalls": "共 {{count}} 通队列通话",
+    "inQueue": "队列内",
+    "waitingNow": "正在等待接听"
   },
   "admin": {
     "extensionsHint": "交换机接受注册的端点。话机随它归属的账号一并创建。",
@@ -283,7 +286,7 @@
     "botFlow": "机器人流程",
     "fallbackQueue": "兜底队列",
     "noFallbackQueue": "无",
-    "fallbackQueueHint": "机器人无法接听时使用：模型故障、容量不足、网关不可达。",
+    "fallbackQueueHint": "这个号码的人工队列：机器人转人工时转到这里，机器人完全接不了时（模型故障、容量不足、网关不可达）也转到这里。",
     "description": "说明",
     "overviewHint": "平台已配置了哪些内容，以及看不见的部分是否正常。",
     "queuesNote": "{{count}} 个已启用",
@@ -316,15 +319,16 @@
     "copy": "复制",
     "copied": "已复制",
     "passwordNewHint": "生成后只显示这一次，离开表单就看不到了。现在复制。",
+    "passwordMintedHint": "只显示这一次，离开表单就看不到了。现在复制 —— 保存后它就生效，旧口令随即失效。",
     "passwordExistingHint": "这里不显示。复制会读回它并记入审计；重设会替换它，旧口令立刻失效。",
     "resetPassword": "重设",
     "assignedTo": "归属坐席",
     "unassigned": "无人",
     "direction": "方向",
-    "directionHint": "号码要么能被打进来、要么能打出去，或者两者都行。能被打进来的，得有一个机器人流程来接。",
-    "allowInbound": "可呼入",
-    "allowOutbound": "可呼出",
-    "isDefaultOutbound": "外呼未指定号码时用它",
+    "directionHint": "两项至少选一项。接听呼入的号码，得有一个机器人流程来接。",
+    "allowInbound": "接听呼入电话",
+    "allowOutbound": "发起呼出电话",
+    "isDefaultOutbound": "作为缺省外呼号码",
     "defaultOutboundMark": "· 缺省",
     "directions": {
       "both": "呼入 · 呼出",
@@ -336,7 +340,16 @@
     "trunk": "中继 {{name}}",
     "trunks": "中继",
     "noTrunks": "无 —— 交换机没有报告任何网关",
-    "boundExtensions": "{{count}} 台有主"
+    "boundExtensions": "{{count}} 台有主",
+    "staff": "坐席",
+    "staffTitle": "{{name}} 的坐席",
+    "staffHint": "增减立即下发到交换机，下一通电话就按新的名单派。",
+    "staffedAgents": "已配备坐席",
+    "noneStaffed": "还没有人。打到这个队列的电话没人可接。",
+    "addStaff": "添加坐席…",
+    "allStaffed": "所有坐席都已在这个队列里",
+    "staffAdd": "添加",
+    "unstaff": "移出队列"
   },
   "cdr": {
     "hint": "所有已结束的通话，最新在前。",
@@ -409,9 +422,23 @@
     "status": "状态",
     "empty": "暂无回访任务，机器人会把留言汇集到这里。",
     "claim": "认领",
-    "markDone": "完成",
-    "dismiss": "取消",
-    "byYou": "（我）"
+    "markDone": "完成——已经回拨过了",
+    "dismiss": "作废——不需要回拨",
+    "byYou": "（我）",
+    "callBack": "回拨",
+    "release": "放回回拨池",
+    "claimedByOther": "别人在处理",
+    "ringing": "正在振铃你的话机…",
+    "lastAttempt": "{{when}} 回拨过 · {{outcome}}",
+    "attempt": {
+      "IN_PROGRESS": "通话中",
+      "ANSWERED": "已接通",
+      "NO_ANSWER": "未接",
+      "BUSY": "占线",
+      "FAILED": "失败",
+      "ABANDONED": "接通前挂断",
+      "CANCELLED": "已取消"
+    }
   },
   "reports": {
     "hint": "基于已结束通话的统计。",
@@ -547,6 +574,7 @@
     "refused": "服务端拒绝了这份配置：",
     "unreachable": "没有任何转移能到达：{{nodes}}。通话永远走不到那里。",
     "specEditor": "流程配置 JSON",
+    "anyPhase": "任一阶段",
     "terminal": "终止阶段",
     "revisions_other": "{{count}} 个版本",
     "revision": "版本",
@@ -565,7 +593,6 @@
     "httpPath": "HTTP 调用",
     "parameters": "参数",
     "resultSlots": "结果 → 槽位",
-    "noTools": "这个流程没有自己的工具；内置工具依然可用。",
     "persona": "人设",
     "rules": "规则",
     "runtime": "运行参数",
@@ -573,7 +600,13 @@
     "providerDefault": "供应商默认",
     "maxTurns": "最大轮次",
     "fallbackTarget": "兜底阶段",
-    "alwaysAllowed": "始终可用"
+    "alwaysAllowed": "始终可用",
+    "builtinTool": "内置 — 由平台实现，没有 HTTP 调用",
+    "builtin": {
+      "transfer_to_agent": "把来电转给人工队列。任何阶段都可用；队列关闭时可能拒绝。",
+      "take_message": "登记一条回访请求，由坐席回拨。",
+      "hangup": "来电办完后结束通话。"
+    }
   },
   "users": {
     "hint": "谁在用这个产品，以及每个人被配了什么。",

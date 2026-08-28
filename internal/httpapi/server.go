@@ -339,6 +339,7 @@ func (s *Server) router() chi.Router {
 					private.Group(func(anyRole chi.Router) {
 						anyRole.Get("/callbacks", op.ListCallbacks)
 						anyRole.Post("/callbacks/{callbackId}/claim", op.ClaimCallback)
+						anyRole.Post("/callbacks/{callbackId}/release", op.ReleaseCallback)
 						anyRole.Post("/callbacks/{callbackId}/complete", op.CompleteCallback)
 					})
 				}

@@ -1,6 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useQuery } from '@tanstack/react-query'
 
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
@@ -8,8 +7,8 @@ import { QueuePerformance } from '@/components/queue-performance'
 import { VolumeTrend } from '@/components/volume-trend'
 import { requireRole } from '@/lib/guards'
 import { StatusDot } from '@/components/status-pill'
-import { AVAILABILITY_COLOR, useRoster } from '@/lib/agent'
-import { api, type Availability } from '@/lib/api'
+import { AVAILABILITY_COLOR, useRoster, useWaitingCalls } from '@/lib/agent'
+import { type Availability } from '@/lib/api'
 import { formatDuration, useOverview } from '@/lib/ledger'
 
 /**
@@ -28,11 +27,14 @@ export const Route = createFileRoute('/_app/supervisor/')({
 function Wallboard() {
   const { t } = useTranslation()
   const { data: roster } = useRoster(true)
-  const health = useQuery({ queryKey: ['health'], queryFn: api.health, retry: false })
+  // Every queue's waiting callers: /calls/waiting answers a supervisor with
+  // the whole floor, the same split ListCalls makes.
+  const { data: queueDepth } = useWaitingCalls(true)
   // Today's ledger numbers; refreshed by CALL_CDR events on the stream.
   const { data: today } = useOverview()
 
   const agents = roster?.items ?? []
+  const waiting = queueDepth?.items ?? []
   const byAvailability = agents.reduce<Record<string, number>>((acc, row) => {
     acc[row.availability] = (acc[row.availability] ?? 0) + 1
     return acc
@@ -47,6 +49,12 @@ function Wallboard() {
     <>
       <PageHeader title={t('nav.wallboard')} />
 
+      {/* The fourth card used to count live event streams, read from
+          /system/health — ADMIN-only, so on the one page whose only reader is
+          a supervisor it answered 403 and showed an em dash to everybody,
+          always. Callers waiting took its place: that is the floor, it moves
+          minute to minute, and it is the number a supervisor opens this page
+          for. */}
       <div className="mb-4 grid grid-cols-4 gap-4">
         <KpiCard
           label={t('wallboard.agentsAvailable')}
@@ -61,9 +69,10 @@ function Wallboard() {
           tone={unreachable > 0 ? '--state-breach' : undefined}
         />
         <KpiCard
-          label={t('wallboard.streamClients')}
-          value={health.data?.sseClients ?? '—'}
-          note={t('wallboard.consolesConnected')}
+          label={t('wallboard.inQueue')}
+          value={waiting.length}
+          note={t('wallboard.waitingNow')}
+          tone={waiting.length > 0 ? '--state-ringing' : undefined}
         />
       </div>
 
@@ -98,7 +107,10 @@ function Wallboard() {
         />
       </div>
 
-      <div className="mb-4 grid grid-cols-[1fr_520px] items-start gap-4">
+      {/* Halves, not 1fr + 520px. Six columns never fitted 520px, so the
+          panel scrolled sideways and the queue's own name — the column that
+          says which row you are reading — was the first to go. */}
+      <div className="mb-4 grid grid-cols-2 items-start gap-4 [&>*]:min-w-0">
         <VolumeTrend days={7} />
         <QueuePerformance />
       </div>

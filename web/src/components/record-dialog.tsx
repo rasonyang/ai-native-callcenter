@@ -1,6 +1,6 @@
 import { Dialog } from 'radix-ui'
 import { useTranslation } from 'react-i18next'
-import { cloneElement, isValidElement, useId } from 'react'
+import { cloneElement, isValidElement, useId, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 
 import { Button } from '@/components/ui/button'
@@ -67,6 +67,32 @@ export function RecordDialog({
       </Dialog.Portal>
     </Dialog.Root>
   )
+}
+
+/**
+ * The record a form is editing, with the last attempt's refusal forgotten
+ * whenever the form opens or closes.
+ *
+ * A mutation remembers its failure until the next one is fired, and these
+ * dialogs read that state directly. So a refusal survived the form it belonged
+ * to: cancel a number the server would not take, press Add again, and the
+ * empty form opened already carrying "some fields did not pass validation" —
+ * a sentence true of nothing on screen, and pointing at fields the reader had
+ * not filled in yet. Opening is a new attempt and has nothing to report yet.
+ *
+ * A drop-in for useState: only a transition into or out of "no record" clears
+ * anything, so editing a field mid-form leaves the error from that form's own
+ * failed save where it is.
+ */
+export function useRecordForm<T>(...attempts: Array<{ reset: () => void }>) {
+  const [editing, set] = useState<T | null>(null)
+  const setEditing = (next: T | null) => {
+    if ((editing === null) !== (next === null)) {
+      for (const attempt of attempts) attempt.reset()
+    }
+    set(next)
+  }
+  return [editing, setEditing] as const
 }
 
 /**

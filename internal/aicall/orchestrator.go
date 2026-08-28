@@ -301,7 +301,8 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		recorder:      recorder,
 		facts:         facts,
 	}
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase),
+		o.queueNames(ctx, did.FallbackQueueID), log)
 
 	profile := o.cfg.Profile
 	model, err := o.cfg.Sessions(profile, log)
@@ -423,6 +424,17 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 		log.Warn("could not update instructions", "error", err)
 	}
 	if runtime.Engine().IsTerminal() {
+		// Unless the tool that moved us here already armed the call's ending.
+		// A phase is usually terminal *because* of that tool — transfer_to_agent
+		// lands in a "we're putting you through" phase, hangup in a goodbye —
+		// and arming replaces whatever was armed before. So the flow's own
+		// ending displaced the transfer: the bot said an agent would be with
+		// them, then hung up on them instead of putting them through.
+		if actions.isArmed() {
+			log.Info("flow reached a terminal phase; the armed action ends the call",
+				"node", moved)
+			return
+		}
 		log.Info("flow reached a terminal phase; the call ends after the closing line",
 			"node", moved)
 		// The flow concluding the call is containment, exactly like the
@@ -478,6 +490,44 @@ func (o *Orchestrator) findDID(ctx context.Context, number string) (catalog.DID,
 }
 
 // findQueue resolves a flow's queue name to the queue.
+// queueNames is what a transfer on this number may name, offered to the model
+// as an enum.
+//
+// The number's own queue when it has one, and nothing else. A caller on a
+// mobile-support line asking for a person wants that line's agents, and the
+// number is where an operator said which those are — the model has no way to
+// know and no business guessing. Offered the whole catalogue it guessed
+// reasonably and wrongly: on a Chinese call it picked support-zh, a real queue
+// staffed by nobody who works this number, and the caller waited on hold music
+// for an agent who was sitting in another queue.
+//
+// Every queue only when the number names none. Then there is nothing better to
+// go on, and a model choosing among real queues still beats one inventing a
+// name.
+//
+// Disabled queues are included either way: the tool refuses them with a reason
+// the bot can explain ("we are closed"), which is a better conversation than a
+// model that cannot name the queue the caller is asking for.
+func (o *Orchestrator) queueNames(ctx context.Context, fallbackQueueID *uuid.UUID) []string {
+	queues, err := o.cfg.Catalog.Queues(ctx)
+	if err != nil {
+		o.log.Error("read queues", "error", err)
+		return nil
+	}
+	if fallbackQueueID != nil {
+		for _, queue := range queues {
+			if queue.ID == *fallbackQueueID {
+				return []string{queue.Name}
+			}
+		}
+	}
+	names := make([]string, 0, len(queues))
+	for _, queue := range queues {
+		names = append(names, queue.Name)
+	}
+	return names
+}
+
 func (o *Orchestrator) findQueue(ctx context.Context, name string) (catalog.Queue, bool) {
 	queues, err := o.cfg.Catalog.Queues(ctx)
 	if err != nil {

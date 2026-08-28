@@ -43,27 +43,26 @@ async function renderCockpit(backend: Partial<Backend> = {}) {
 const onCall = { calls: [callFixture('TALKING')], presence: presenceFixture({ availability: 'ON_CALL' }) }
 
 describe('control grid', () => {
-  it('shows all six controls', async () => {
+  it('shows the five controls, every one of them wired', async () => {
     await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
-    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^conference$/i, /^keypad$/i, /hang up/i]) {
+    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
       expect(within(grid).getByRole('button', { name })).toBeVisible()
     }
-    expect(within(grid).getAllByRole('button')).toHaveLength(6)
+    expect(within(grid).getAllByRole('button')).toHaveLength(5)
   })
 
-  it('disables only conference, the one with no endpoint, and says why', async () => {
+  // The grid used to carry a sixth, disabled key for conferencing. The product
+  // does not want conferencing, so it is not a gap being tracked — it is a
+  // control that should never have been drawn.
+  it('offers nothing the agent cannot use', async () => {
     await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
     const disabled = within(grid)
       .getAllByRole('button')
       .filter((b) => (b as HTMLButtonElement).disabled)
-      .map((b) => b.getAttribute('aria-label'))
-    expect(disabled).toEqual(['Conference'])
-    expect(within(grid).getByRole('button', { name: /^conference$/i })).toHaveAttribute(
-      'title',
-      expect.stringMatching(/no endpoint/i),
-    )
+    expect(disabled).toEqual([])
+    expect(within(grid).queryByRole('button', { name: /conference/i })).toBeNull()
   })
 
   it('mutes and unmutes the agent', async () => {
@@ -673,13 +672,19 @@ describe('after-call work', () => {
  * queue's own promise rather than a number invented in the browser.
  */
 describe('my queue', () => {
-  it('lists who is waiting, longest wait first, with their queue', async () => {
+  // The queues are the rows, not the callers. An agent staffing a quiet line
+  // and an agent staffing none at all both have nobody waiting; listing only
+  // the waiting callers showed them the same empty card, and the second only
+  // found out they were on no queue when a call never arrived.
+  it('lists the queues it works, with how many are waiting in each', async () => {
     await renderCockpit({
       waiting: [
         waitingFixture({ fromNumber: '+8613700990011', queueDisplayName: 'Billing' }),
         waitingFixture({
           callId: '00000000-0000-4000-8000-0000000000w2',
           fromNumber: '+14085550166',
+          queueId: '00000000-0000-4000-8000-0000000000q2',
+          queueName: 'support-en',
           queueDisplayName: 'Support EN',
           joinedAt: new Date(Date.now() - 47_000).toISOString(),
         }),
@@ -689,12 +694,33 @@ describe('my queue', () => {
     const list = await screen.findByRole('list', { name: /my queue/i })
     const rows = within(list).getAllByRole('listitem')
     expect(rows).toHaveLength(2)
-    expect(rows[0]).toHaveTextContent('+8613700990011')
     expect(rows[0]).toHaveTextContent('Billing')
+    expect(rows[0]).toHaveTextContent('1')
+    expect(rows[1]).toHaveTextContent('Support EN')
     expect(screen.getByText('2 waiting')).toBeInTheDocument()
   })
 
-  it('marks a wait past the queue’s own target', async () => {
+  it('shows a queue nobody is waiting in as zero, not as an absence', async () => {
+    await renderCockpit({
+      waiting: [],
+      staffedQueues: [
+        {
+          queueId: '00000000-0000-4000-8000-0000000000q1',
+          name: 'support-zh',
+          displayName: 'Billing',
+          slaThresholdSec: 20,
+        },
+      ],
+    })
+
+    const list = await screen.findByRole('list', { name: /my queue/i })
+    const row = within(list).getByRole('listitem')
+    expect(row).toHaveTextContent('Billing')
+    expect(row).toHaveTextContent('0')
+    expect(screen.getByText('0 waiting')).toBeInTheDocument()
+  })
+
+  it('marks a wait past the queue\u2019s own target', async () => {
     await renderCockpit({
       waiting: [
         waitingFixture({
@@ -708,9 +734,9 @@ describe('my queue', () => {
     expect(wait).toHaveStyle({ color: 'var(--state-breach)' })
   })
 
-  it('says so when nobody is waiting', async () => {
-    await renderCockpit({ waiting: [] })
-    expect(await screen.findByText(/nobody is waiting in your queues/i)).toBeInTheDocument()
+  it('says so when the agent is on no queue at all', async () => {
+    await renderCockpit({ waiting: [], staffedQueues: [] })
+    expect(await screen.findByText(/not on any queue/i)).toBeInTheDocument()
   })
 })
 
@@ -719,6 +745,47 @@ describe('my queue', () => {
  * exact number: greeting a customer by somebody else's name is worse than
  * greeting an unknown number.
  */
+describe('the call id on the caller card', () => {
+  // Shown short and copied whole. An agent pasting an id into a ticket that
+  // silently lost sixteen characters would be quoting a call nobody can find.
+  it('shows it shortened, copies the whole uuid, and says it copied', async () => {
+    // userEvent installs its own clipboard; asking it what landed there tests
+    // the same thing a person would check after pressing the button.
+    const user = userEvent.setup()
+    await renderCockpit(onCall)
+    const button = await screen.findByRole('button', { name: /copy the call id/i })
+
+    expect(button).toHaveTextContent('00000000-0000…00c1')
+    expect(button).not.toHaveTextContent(CALL_ID)
+    // The whole value is on the element the pointer is already over.
+    expect(button).toHaveAttribute('title', CALL_ID)
+
+    await user.click(button)
+    expect(await navigator.clipboard.readText()).toBe(CALL_ID)
+    await waitFor(() => expect(button).toHaveTextContent(/call id copied/i))
+  })
+
+  // Wrap-up is when the id gets quoted into a ticket, and by then the caller
+  // has gone: a card that dropped it at the hangup would drop it exactly when
+  // the agent reaches for it.
+  it('keeps the id through wrap-up, after the caller has hung up', async () => {
+    await renderCockpit({
+      calls: [],
+      contacts: [],
+      myCDRs: [cdrFixture({ callId: CALL_ID, fromNumber: '+8613700990011' })],
+    })
+
+    const button = await screen.findByRole('button', { name: /copy the call id/i })
+    expect(button).toHaveAttribute('title', CALL_ID)
+  })
+
+  it('says nothing when there is no call to name', async () => {
+    await renderCockpit({ calls: [], contacts: [], myCDRs: [] })
+    expect(await screen.findByText(/no caller identified yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /copy the call id/i })).toBeNull()
+  })
+})
+
 describe('the caller card', () => {
   // The customer stays on the card after they hang up: the agent is still
   // working that call, and a card that emptied itself at the hangup would take
@@ -774,8 +841,8 @@ describe('the transcript panel does not disturb the cockpit', () => {
     expect(await screen.findByText('Live transcript')).toBeInTheDocument()
 
     const grid = await screen.findByRole('group', { name: /call controls/i })
-    expect(within(grid).getAllByRole('button')).toHaveLength(6)
-    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^conference$/i, /^keypad$/i, /hang up/i]) {
+    expect(within(grid).getAllByRole('button')).toHaveLength(5)
+    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
       expect(within(grid).getByRole('button', { name })).toBeVisible()
     }
   })

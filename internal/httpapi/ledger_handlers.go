@@ -186,6 +186,25 @@ func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.U
 	writeJSON(w, http.StatusOK, callback)
 }
 
+// ReleaseCallback hands a claimed callback back to the pool.
+func (s *Server) ReleaseCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	identity, _ := identityFrom(r.Context())
+
+	callback, err := s.ledger.ReleaseCallback(r.Context(), id, identity.UserID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Not claimed, or claimed by somebody else: either way it is not
+			// this caller's to let go of.
+			writeError(w, http.StatusConflict, CodeConflict, "the callback is not yours to release", nil)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot release the callback", nil)
+		return
+	}
+	s.publishCallback(r, events.TypeCallbackUpdated, callback)
+	writeJSON(w, http.StatusOK, callback)
+}
+
 // completeCallbackRequest closes a callback.
 type completeCallbackRequest struct {
 	// Status is DONE or DISMISSED.

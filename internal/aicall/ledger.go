@@ -70,14 +70,19 @@ func (r *callRecorder) say(speaker, text string) {
 }
 
 // toolCall records the model asking for something.
+//
+// The name is both the line's text and part of its content. The ledger reads
+// the content; the live stream carries only text, and a tool line whose text
+// was empty reached the cockpit as "requested " and " answered" — the sentence
+// with the one word that carried its meaning missing.
 func (r *callRecorder) toolCall(name, args string) {
-	r.add(store.SpeakerBot, store.TranscriptKindToolCall, "",
+	r.add(store.SpeakerBot, store.TranscriptKindToolCall, name,
 		map[string]any{"name": name, "args": args})
 }
 
 // toolResult records what the tool answered.
 func (r *callRecorder) toolResult(name, output string) {
-	r.add(store.SpeakerBot, store.TranscriptKindToolResult, "",
+	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name,
 		map[string]any{"name": name, "output": output})
 }
 

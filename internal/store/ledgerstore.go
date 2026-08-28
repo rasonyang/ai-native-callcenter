@@ -27,10 +27,15 @@ type LedgerStore struct {
 	// pool is here for the one write that is not a single statement: a CDR and
 	// the webhook deliveries it owes have to land together or not at all.
 	pool *pgxpool.Pool
+	// onCallbackSettled announces a callback whose attempt just ended; see
+	// Store.OnCallbackSettled.
+	onCallbackSettled func(Callback)
 }
 
 // Ledger returns the call ledger.
-func (s *Store) Ledger() *LedgerStore { return &LedgerStore{q: s.Queries, pool: s.Pool} }
+func (s *Store) Ledger() *LedgerStore {
+	return &LedgerStore{q: s.Queries, pool: s.Pool, onCallbackSettled: s.OnCallbackSettled}
+}
 
 // CDR is one finished call. Field vocabulary follows the naming spec; the
 // enum values are byte-identical to what the API serves.
@@ -188,13 +193,33 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		_, err := l.q.InsertCDR(ctx, params)
 		return err
 	}
-	return txFor(ctx, l.pool, func(q *queries.Queries) error {
+	// A callback that was dialled from learns how the call went in the same
+	// write. Announced only once the transaction holds: a screen told about
+	// an outcome the ledger then rolled back would show a call that never
+	// happened.
+	var settled []Callback
+	err = txFor(ctx, l.pool, func(q *queries.Queries) error {
 		written, err := q.InsertCDR(ctx, params)
 		if err != nil || written == 0 {
 			return err
 		}
+		rows, err := q.SettleCallbackAttempt(ctx, queries.SettleCallbackAttemptParams{
+			LastAttemptCallID: &cdr.CallID, LastAttemptStatus: &cdr.Status, LastAttemptAt: stamp(cdr.EndedAt),
+		})
+		if err != nil {
+			return err
+		}
+		for _, row := range rows {
+			settled = append(settled, callbackFromRow(row))
+		}
 		return enqueueFor(ctx, q, cdr)
 	})
+	if err == nil && l.onCallbackSettled != nil {
+		for _, cb := range settled {
+			l.onCallbackSettled(cb)
+		}
+	}
+	return err
 }
 
 // CDRFilter narrows a ledger listing. Zero values mean "any".
@@ -643,6 +668,11 @@ type Callback struct {
 	CreatedAt   time.Time  `json:"createdAt"`
 	HandledBy   *uuid.UUID `json:"handledBy,omitempty"`
 	HandledAt   *time.Time `json:"handledAt,omitempty"`
+	// The last call placed to keep this callback, and how it went. Status
+	// stays empty while that call is still up.
+	LastAttemptCallID *uuid.UUID `json:"lastAttemptCallId,omitempty"`
+	LastAttemptAt     *time.Time `json:"lastAttemptAt,omitempty"`
+	LastAttemptStatus string     `json:"lastAttemptStatus,omitempty"`
 }
 
 // Callback statuses.
@@ -696,6 +726,32 @@ func (l *LedgerStore) ClaimCallback(ctx context.Context, id, userID uuid.UUID) (
 	return callbackFromRow(row), nil
 }
 
+// ReleaseCallback puts a CLAIMED callback back in the pool. Only the holder
+// may let it go: the row is updated only while they are the one on it, so a
+// colleague cannot quietly take it away and a stale screen cannot reopen a
+// callback somebody has since finished.
+func (l *LedgerStore) ReleaseCallback(ctx context.Context, id, userID uuid.UUID) (Callback, error) {
+	row, err := l.q.ReleaseCallback(ctx, queries.ReleaseCallbackParams{ID: id, HandledBy: &userID})
+	if err != nil {
+		return Callback{}, err
+	}
+	return callbackFromRow(row), nil
+}
+
+// MarkCallbackAttempt notes on a callback that a call is being placed to
+// keep it. Only its holder may: the row is updated only while CLAIMED by
+// userID, so a dial from a stale screen — or for a callback somebody else
+// took — is refused rather than recorded against the wrong person's work.
+func (l *LedgerStore) MarkCallbackAttempt(ctx context.Context, id, callID, userID uuid.UUID) (Callback, error) {
+	row, err := l.q.MarkCallbackAttempt(ctx, queries.MarkCallbackAttemptParams{
+		ID: id, LastAttemptCallID: &callID, HandledBy: &userID,
+	})
+	if err != nil {
+		return Callback{}, err
+	}
+	return callbackFromRow(row), nil
+}
+
 // HandleCallback closes a callback as done or dismissed.
 func (l *LedgerStore) HandleCallback(ctx context.Context, id uuid.UUID, status string, handledBy uuid.UUID) (Callback, error) {
 	row, err := l.q.HandleCallback(ctx, queries.HandleCallbackParams{
@@ -717,6 +773,14 @@ func callbackFromRow(row queries.Callback) Callback {
 	if row.HandledAt.Valid {
 		at := row.HandledAt.Time
 		cb.HandledAt = &at
+	}
+	cb.LastAttemptCallID = row.LastAttemptCallID
+	if row.LastAttemptAt.Valid {
+		at := row.LastAttemptAt.Time
+		cb.LastAttemptAt = &at
+	}
+	if row.LastAttemptStatus != nil {
+		cb.LastAttemptStatus = *row.LastAttemptStatus
 	}
 	return cb
 }

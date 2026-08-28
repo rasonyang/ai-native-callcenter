@@ -14,6 +14,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -168,20 +169,35 @@ func (s *Server) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 }
 
 // ListWaitingCalls lists the callers waiting in the queues this agent staffs,
-// or every queue for a supervisor.
+// or every queue for a supervisor, along with the queues themselves.
 //
 // An agent's queues come from their staffing, not from the request: they work
 // the line they are on, and the same rule already decides which queue events
 // reach their event stream. A supervisor works no line and watches all of
 // them, which is the same split ListCalls already makes.
+//
+// The queues ride along because the waiting callers cannot stand in for them.
+// An agent on a quiet line and an agent on no line at all both have nothing
+// waiting, and a cockpit that renders only the callers tells them apart by
+// showing the same emptiness for both — which is how a staffing mistake goes
+// unnoticed until a call never arrives.
 func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
 	id, ok := identityFrom(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
+	queues, err := s.catalog.Queues(r.Context())
+	if err != nil {
+		slog.ErrorContext(r.Context(), "cannot read the queues", "error", err)
+		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read your queues", nil)
+		return
+	}
 	if id.Role.AtLeast(auth.RoleSupervisor) {
-		writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.AllWaitingCalls()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"items":  s.calls.AllWaitingCalls(),
+			"queues": staffedQueues(queues, nil),
+		})
 		return
 	}
 
@@ -195,7 +211,39 @@ func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read your queues", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": s.calls.WaitingCalls(queueIDs)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items":  s.calls.WaitingCalls(queueIDs),
+		"queues": staffedQueues(queues, queueIDs),
+	})
+}
+
+// staffedQueues renders the queues a reader works, in the catalogue's own
+// order. A nil filter means every queue, which is what a supervisor watches;
+// otherwise only the ids given, and a staffed queue the catalogue no longer
+// has is simply absent rather than a row with no name.
+func staffedQueues(queues []catalog.Queue, only []uuid.UUID) []api.StaffedQueue {
+	var wanted map[uuid.UUID]bool
+	if only != nil {
+		wanted = make(map[uuid.UUID]bool, len(only))
+		for _, id := range only {
+			wanted[id] = true
+		}
+	}
+	// Never nil: the contract says this array is always present, and an agent
+	// on no queue at all is exactly the case the field exists to report.
+	out := make([]api.StaffedQueue, 0, len(queues))
+	for _, q := range queues {
+		if wanted != nil && !wanted[q.ID] {
+			continue
+		}
+		out = append(out, api.StaffedQueue{
+			QueueID:         q.ID,
+			Name:            q.Name,
+			DisplayName:     q.DisplayName,
+			SLAThresholdSec: q.SLAThresholdSec,
+		})
+	}
+	return out
 }
 
 // ListCalls lists every live call, for supervision.

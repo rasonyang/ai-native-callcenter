@@ -152,7 +152,7 @@ function AgentRow({ row }: { row: RosterEntry }) {
         {row.state !== 'LOGGED_OUT' && (
           <Popover.Root>
             <Popover.Trigger asChild>
-              <Button size="sm" variant="ghost" title={t('supervisor.forceLogout')}>
+              <Button size="icon-sm" variant="ghost" title={t('supervisor.forceLogout')}>
                 <LogOut />
               </Button>
             </Popover.Trigger>

@@ -15,7 +15,7 @@
         "不要闲聊、不要回答与上门服务预约无关的问题,礼貌把话题带回业务。",
         "用户任何时候说“人工”、“转接客服”或按 0,立即调用 transfer_to_agent,工具返回后按提示播报转接话术。",
         "预约时间、单号等信息必须来自工具返回,严禁编造。工具返回里的 hint 字段是给你的流程提示,照做。",
-        "用户明确表达要结束通话,立即调用 hangup_call,工具返回后再道别。"
+        "用户明确表达要结束通话,立即调用 hangup,工具返回后再道别。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
@@ -23,7 +23,7 @@
         "Politely steer off-topic questions back to appointment services.",
         "Whenever the caller asks for an agent or presses 0, call transfer_to_agent immediately, then announce the transfer script per the hint.",
         "Appointment times and numbers must come from tool results — never invent them. The hint field is your flow guidance; follow it.",
-        "When the caller clearly wants to end the call, call hangup_call immediately, then say goodbye."
+        "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
       ]
     },
     "voice": "longanqian",
@@ -38,6 +38,11 @@
       {
         "on": "TOOL_RESULT",
         "tool": "transfer_to_agent",
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
         "target": "finish_transfer"
       },
       {
@@ -137,22 +142,22 @@
     },
     "done_book": {
       "instruction": {
-        "zh": "预约成功:预约号 {slots.appt_book.appt_id},上门时间 {slots.appt_book.slot}。向用户播报预约号(逐位)与时间,提醒保持电话畅通。然后问还有其它需要吗;没有则调用 hangup_call。",
-        "en": "Appointment created: number {slots.appt_book.appt_id}, visit time {slots.appt_book.slot}. Announce the number digit by digit and the time in English; remind the caller to keep the phone reachable. Then ask if there is anything else; if not, call hangup_call."
+        "zh": "预约成功:预约号 {slots.appt_book.appt_id},上门时间 {slots.appt_book.slot}。向用户播报预约号(逐位)与时间,提醒保持电话畅通。然后问还有其它需要吗;没有则调用 hangup。",
+        "en": "Appointment created: number {slots.appt_book.appt_id}, visit time {slots.appt_book.slot}. Announce the number digit by digit and the time in English; remind the caller to keep the phone reachable. Then ask if there is anything else; if not, call hangup."
       },
       "tools": []
     },
     "done_confirm": {
       "instruction": {
-        "zh": "已为用户确认预约,上门时间 {slots.appt_confirm.slot}。播报确认结果,提醒工程师上门前会先电话联系。然后问还有其它需要吗;没有则调用 hangup_call。",
-        "en": "Appointment confirmed for {slots.appt_confirm.slot}. Announce the confirmation and mention the engineer will call before arriving. Then ask if there is anything else; if not, call hangup_call."
+        "zh": "已为用户确认预约,上门时间 {slots.appt_confirm.slot}。播报确认结果,提醒工程师上门前会先电话联系。然后问还有其它需要吗;没有则调用 hangup。",
+        "en": "Appointment confirmed for {slots.appt_confirm.slot}. Announce the confirmation and mention the engineer will call before arriving. Then ask if there is anything else; if not, call hangup."
       },
       "tools": []
     },
     "done_reschedule": {
       "instruction": {
-        "zh": "改期成功:预约号 {slots.appt_reschedule.appt_id},新的上门时间 {slots.appt_reschedule.slot}。向用户播报新时间。然后问还有其它需要吗;没有则调用 hangup_call。",
-        "en": "Rescheduled: appointment {slots.appt_reschedule.appt_id}, new visit time {slots.appt_reschedule.slot}. Announce the new time in English. Then ask if there is anything else; if not, call hangup_call."
+        "zh": "改期成功:预约号 {slots.appt_reschedule.appt_id},新的上门时间 {slots.appt_reschedule.slot}。向用户播报新时间。然后问还有其它需要吗;没有则调用 hangup。",
+        "en": "Rescheduled: appointment {slots.appt_reschedule.appt_id}, new visit time {slots.appt_reschedule.slot}. Announce the new time in English. Then ask if there is anything else; if not, call hangup."
       },
       "tools": []
     },
@@ -165,8 +170,8 @@
     },
     "finish_transfer": {
       "instruction": {
-        "zh": "播报固定转接话术:“稍后会有人工客服与您联系,请留意来电。感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
-        "en": "Announce the fixed transfer script: \"An agent will call you back shortly, please keep your phone available. Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+        "zh": "播报固定转接话术:“好的,正在为您转接人工客服,请不要挂机,稍等片刻。”说完就会接通,不要再问问题,也不要说再见。",
+        "en": "Announce the fixed transfer script: \"Certainly — I am putting you through to an agent now. Please stay on the line.\" You are connected right after that; ask no further questions and do not say goodbye."
       },
       "tools": [],
       "isTerminal": true

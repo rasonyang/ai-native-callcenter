@@ -17,7 +17,7 @@ const claimCallback = `-- name: ClaimCallback :one
 UPDATE callbacks
 SET status = 'CLAIMED', handled_by = $2
 WHERE id = $1 AND status = 'OPEN'
-RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
 `
 
 type ClaimCallbackParams struct {
@@ -38,6 +38,9 @@ func (q *Queries) ClaimCallback(ctx context.Context, arg ClaimCallbackParams) (C
 		&i.CreatedAt,
 		&i.HandledBy,
 		&i.HandledAt,
+		&i.LastAttemptCallID,
+		&i.LastAttemptAt,
+		&i.LastAttemptStatus,
 	)
 	return i, err
 }
@@ -266,7 +269,7 @@ const handleCallback = `-- name: HandleCallback :one
 UPDATE callbacks
 SET status = $2, handled_by = $3, handled_at = now()
 WHERE id = $1
-RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
 `
 
 type HandleCallbackParams struct {
@@ -288,6 +291,9 @@ func (q *Queries) HandleCallback(ctx context.Context, arg HandleCallbackParams) 
 		&i.CreatedAt,
 		&i.HandledBy,
 		&i.HandledAt,
+		&i.LastAttemptCallID,
+		&i.LastAttemptAt,
+		&i.LastAttemptStatus,
 	)
 	return i, err
 }
@@ -459,7 +465,7 @@ func (q *Queries) InsertCDR(ctx context.Context, arg InsertCDRParams) (int64, er
 const insertCallback = `-- name: InsertCallback :one
 INSERT INTO callbacks (id, call_id, queue_id, phone_number, message)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
 `
 
 type InsertCallbackParams struct {
@@ -489,6 +495,9 @@ func (q *Queries) InsertCallback(ctx context.Context, arg InsertCallbackParams) 
 		&i.CreatedAt,
 		&i.HandledBy,
 		&i.HandledAt,
+		&i.LastAttemptCallID,
+		&i.LastAttemptAt,
+		&i.LastAttemptStatus,
 	)
 	return i, err
 }
@@ -811,7 +820,7 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 }
 
 const listCallbacks = `-- name: ListCallbacks :many
-SELECT id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at FROM callbacks
+SELECT id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status FROM callbacks
 WHERE ($1::text = '' OR status = $1)
 ORDER BY created_at DESC
 LIMIT $3 OFFSET $2
@@ -842,6 +851,9 @@ func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([
 			&i.CreatedAt,
 			&i.HandledBy,
 			&i.HandledAt,
+			&i.LastAttemptCallID,
+			&i.LastAttemptAt,
+			&i.LastAttemptStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -1078,6 +1090,39 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 	return items, nil
 }
 
+const markCallbackAttempt = `-- name: MarkCallbackAttempt :one
+UPDATE callbacks
+SET last_attempt_call_id = $2, last_attempt_at = now(), last_attempt_status = NULL
+WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $3
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
+`
+
+type MarkCallbackAttemptParams struct {
+	ID                uuid.UUID  `json:"id"`
+	LastAttemptCallID *uuid.UUID `json:"lastAttemptCallId"`
+	HandledBy         *uuid.UUID `json:"handledBy"`
+}
+
+func (q *Queries) MarkCallbackAttempt(ctx context.Context, arg MarkCallbackAttemptParams) (Callback, error) {
+	row := q.db.QueryRow(ctx, markCallbackAttempt, arg.ID, arg.LastAttemptCallID, arg.HandledBy)
+	var i Callback
+	err := row.Scan(
+		&i.ID,
+		&i.CallID,
+		&i.QueueID,
+		&i.PhoneNumber,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.HandledBy,
+		&i.HandledAt,
+		&i.LastAttemptCallID,
+		&i.LastAttemptAt,
+		&i.LastAttemptStatus,
+	)
+	return i, err
+}
+
 const markRecordingDeleted = `-- name: MarkRecordingDeleted :exec
 UPDATE recordings SET deleted_at = now() WHERE id = $1 AND deleted_at IS NULL
 `
@@ -1155,6 +1200,38 @@ func (q *Queries) QueueEventsByCall(ctx context.Context, callID *uuid.UUID) ([]Q
 		return nil, err
 	}
 	return items, nil
+}
+
+const releaseCallback = `-- name: ReleaseCallback :one
+UPDATE callbacks
+SET status = 'OPEN', handled_by = NULL
+WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
+`
+
+type ReleaseCallbackParams struct {
+	ID        uuid.UUID  `json:"id"`
+	HandledBy *uuid.UUID `json:"handledBy"`
+}
+
+func (q *Queries) ReleaseCallback(ctx context.Context, arg ReleaseCallbackParams) (Callback, error) {
+	row := q.db.QueryRow(ctx, releaseCallback, arg.ID, arg.HandledBy)
+	var i Callback
+	err := row.Scan(
+		&i.ID,
+		&i.CallID,
+		&i.QueueID,
+		&i.PhoneNumber,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.HandledBy,
+		&i.HandledAt,
+		&i.LastAttemptCallID,
+		&i.LastAttemptAt,
+		&i.LastAttemptStatus,
+	)
+	return i, err
 }
 
 const reportAgentToday = `-- name: ReportAgentToday :one
@@ -1405,6 +1482,52 @@ func (q *Queries) ReportOverview(ctx context.Context, arg ReportOverviewParams) 
 		&i.AvgBotSec,
 	)
 	return i, err
+}
+
+const settleCallbackAttempt = `-- name: SettleCallbackAttempt :many
+UPDATE callbacks
+SET last_attempt_status = $2, last_attempt_at = $3
+WHERE last_attempt_call_id = $1
+RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
+`
+
+type SettleCallbackAttemptParams struct {
+	LastAttemptCallID *uuid.UUID         `json:"lastAttemptCallId"`
+	LastAttemptStatus *string            `json:"lastAttemptStatus"`
+	LastAttemptAt     pgtype.Timestamptz `json:"lastAttemptAt"`
+}
+
+func (q *Queries) SettleCallbackAttempt(ctx context.Context, arg SettleCallbackAttemptParams) ([]Callback, error) {
+	rows, err := q.db.Query(ctx, settleCallbackAttempt, arg.LastAttemptCallID, arg.LastAttemptStatus, arg.LastAttemptAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Callback{}
+	for rows.Next() {
+		var i Callback
+		if err := rows.Scan(
+			&i.ID,
+			&i.CallID,
+			&i.QueueID,
+			&i.PhoneNumber,
+			&i.Message,
+			&i.Status,
+			&i.CreatedAt,
+			&i.HandledBy,
+			&i.HandledAt,
+			&i.LastAttemptCallID,
+			&i.LastAttemptAt,
+			&i.LastAttemptStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateCDRHasRecording = `-- name: UpdateCDRHasRecording :exec

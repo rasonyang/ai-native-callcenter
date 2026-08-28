@@ -50,15 +50,18 @@ type AuditLog struct {
 }
 
 type Callback struct {
-	ID          uuid.UUID          `json:"id"`
-	CallID      *uuid.UUID         `json:"callId"`
-	QueueID     *uuid.UUID         `json:"queueId"`
-	PhoneNumber string             `json:"phoneNumber"`
-	Message     string             `json:"message"`
-	Status      string             `json:"status"`
-	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
-	HandledBy   *uuid.UUID         `json:"handledBy"`
-	HandledAt   pgtype.Timestamptz `json:"handledAt"`
+	ID                uuid.UUID          `json:"id"`
+	CallID            *uuid.UUID         `json:"callId"`
+	QueueID           *uuid.UUID         `json:"queueId"`
+	PhoneNumber       string             `json:"phoneNumber"`
+	Message           string             `json:"message"`
+	Status            string             `json:"status"`
+	CreatedAt         pgtype.Timestamptz `json:"createdAt"`
+	HandledBy         *uuid.UUID         `json:"handledBy"`
+	HandledAt         pgtype.Timestamptz `json:"handledAt"`
+	LastAttemptCallID *uuid.UUID         `json:"lastAttemptCallId"`
+	LastAttemptAt     pgtype.Timestamptz `json:"lastAttemptAt"`
+	LastAttemptStatus *string            `json:"lastAttemptStatus"`
 }
 
 type Cdr struct {

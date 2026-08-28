@@ -16,7 +16,8 @@
     "delete": "Delete",
     "previous": "Previous",
     "next": "Next",
-    "viewAll": "View all"
+    "viewAll": "View all",
+    "close": "Close"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -89,7 +90,7 @@
     "INVALID_CREDENTIALS": "Incorrect username or password.",
     "SESSION_EXPIRED": "Your session has expired. Please sign in again.",
     "FORBIDDEN": "You do not have permission to do that.",
-    "VALIDATION_FAILED": "Please check the highlighted fields.",
+    "VALIDATION_FAILED": "Some fields did not pass validation; check each one.",
     "NOT_FOUND": "Not found.",
     "CONFLICT": "That change conflicts with the current state.",
     "USER_SUSPENDED": "This account is suspended.",
@@ -131,7 +132,8 @@
     "myQueue": "My queue",
     "waitingCount_one": "{{count}} waiting",
     "waitingCount_other": "{{count}} waiting",
-    "queueEmpty": "Nobody is waiting in your queues.",
+    "noQueuesStaffed": "You are not on any queue, so queued calls are not offered to you.",
+    "longestWait": "Longest wait",
     "dialled": "Dialled {{number}}",
     "started": "Started",
     "wrapUp": "After-call work",
@@ -151,7 +153,10 @@
     "wrapUpNoNote": "No note.",
     "wrapUpBlocks": "Finish the wrap-up first.",
     "wrapUpsConfirmed": "Wrap-ups confirmed",
-    "ofOpened": "{{confirmed}}/{{opened}}"
+    "ofOpened": "{{confirmed}}/{{opened}}",
+    "callId": "Call ID",
+    "callIdCopied": "Call ID copied",
+    "copyCallId": "Copy the call ID"
   },
   "supervisor": {
     "agent": "Agent",
@@ -207,8 +212,6 @@
     "accept": "Accept",
     "decline": "Decline",
     "mute": "Mute",
-    "conference": "Conference",
-    "conferenceUnavailable": "Conferencing is not available: the platform has no endpoint that adds a third party.",
     "controls": "Call controls",
     "unmute": "Unmute",
     "dtmf": "Keypad tones",
@@ -222,8 +225,6 @@
     "rightNow": "right now",
     "devicesUnreachable": "Phones unreachable",
     "registeredButSilent": "registered but not answering",
-    "streamClients": "Consoles live",
-    "consolesConnected": "event streams connected",
     "agentStates": "Agent states",
     "nobodySignedIn": "Nobody is signed in yet.",
     "callsToday": "Calls today",
@@ -233,7 +234,9 @@
     "botContained": "Bot contained",
     "containedOf": "{{count}} calls",
     "avgWait": "Avg queue wait",
-    "acrossQueueCalls": "across {{count}} queue calls"
+    "acrossQueueCalls": "across {{count}} queue calls",
+    "inQueue": "In queue",
+    "waitingNow": "waiting to be answered"
   },
   "admin": {
     "extensionsHint": "Endpoints the switch accepts a registration for. A phone is created with the account it belongs to.",
@@ -285,7 +288,7 @@
     "botFlow": "Bot flow",
     "fallbackQueue": "Fallback queue",
     "noFallbackQueue": "None",
-    "fallbackQueueHint": "Used when the bot cannot take the call: provider outage, no capacity, gateway down.",
+    "fallbackQueueHint": "This number's queue for people: where the bot transfers callers who ask for one, and where they go when the bot cannot take the call at all (provider outage, no capacity, gateway down).",
     "description": "Description",
     "overviewHint": "What is configured, and whether the parts you cannot see are alive.",
     "queuesNote": "{{count}} enabled",
@@ -318,15 +321,16 @@
     "copy": "Copy",
     "copied": "Copied",
     "passwordNewHint": "Generated, shown once, and gone when you leave this form. Copy it now.",
+    "passwordMintedHint": "Shown once only; leave the form and it is gone. Copy it now — it takes effect on save, and the old one stops working.",
     "passwordExistingHint": "Not shown here. Copy reads it back and records that it was read; Reset replaces it and the old one stops working at once.",
     "resetPassword": "Reset",
     "assignedTo": "Agent",
     "unassigned": "nobody",
     "direction": "Direction",
-    "directionHint": "A number must take calls, place them, or both. One callers can reach answers with a bot flow.",
-    "allowInbound": "Callers can reach it",
-    "allowOutbound": "Calls can go out from it",
-    "isDefaultOutbound": "Use it when an outbound call names no number",
+    "directionHint": "At least one of the two. A number that receives calls answers with a bot flow.",
+    "allowInbound": "Receive inbound calls",
+    "allowOutbound": "Make outbound calls",
+    "isDefaultOutbound": "Use as the default outbound number",
     "defaultOutboundMark": "· default",
     "directions": {
       "both": "In · Out",
@@ -338,7 +342,16 @@
     "trunk": "Trunk {{name}}",
     "trunks": "Trunks",
     "noTrunks": "none — the switch reports no gateway",
-    "boundExtensions": "{{count}} with an agent"
+    "boundExtensions": "{{count}} with an agent",
+    "staff": "Agents",
+    "staffTitle": "Agents on {{name}}",
+    "staffHint": "Added and removed on the switch straight away; the next call is offered to this list.",
+    "staffedAgents": "Assigned agents",
+    "noneStaffed": "Nobody yet. A call routed here has no one to go to.",
+    "addStaff": "Add agent…",
+    "allStaffed": "Every agent is already on this queue",
+    "staffAdd": "Add",
+    "unstaff": "Take off the queue"
   },
   "cdr": {
     "hint": "Every finished call, newest first.",
@@ -411,9 +424,23 @@
     "status": "Status",
     "empty": "Nothing to call back. The bot will fill this list.",
     "claim": "Claim",
-    "markDone": "Done",
-    "dismiss": "Dismiss",
-    "byYou": "by you"
+    "markDone": "Done — I called them back",
+    "dismiss": "Dismiss — no call needed",
+    "byYou": "by you",
+    "callBack": "Call back",
+    "release": "Put back in the pool",
+    "claimedByOther": "Someone else is on it",
+    "ringing": "Ringing your phone…",
+    "lastAttempt": "Called {{when}} · {{outcome}}",
+    "attempt": {
+      "IN_PROGRESS": "on the phone now",
+      "ANSWERED": "answered",
+      "NO_ANSWER": "no answer",
+      "BUSY": "busy",
+      "FAILED": "failed",
+      "ABANDONED": "hung up before answer",
+      "CANCELLED": "cancelled"
+    }
   },
   "reports": {
     "hint": "Aggregates over finished calls.",
@@ -549,6 +576,7 @@
     "refused": "The server refused this spec:",
     "unreachable": "No transition reaches: {{nodes}}. The call can never get there.",
     "specEditor": "Flow spec JSON",
+    "anyPhase": "Any phase",
     "terminal": "Terminal phase",
     "revisions_one": "{{count}} revision",
     "revisions_other": "{{count}} revisions",
@@ -568,7 +596,6 @@
     "httpPath": "HTTP call",
     "parameters": "Parameters",
     "resultSlots": "Result → slots",
-    "noTools": "This flow declares no tools of its own; the built-ins still apply.",
     "persona": "Persona",
     "rules": "Rules",
     "runtime": "Runtime",
@@ -576,7 +603,13 @@
     "providerDefault": "Provider default",
     "maxTurns": "Max turns",
     "fallbackTarget": "Fallback phase",
-    "alwaysAllowed": "Always allowed"
+    "alwaysAllowed": "Always allowed",
+    "builtinTool": "Built in — implemented by the platform, no HTTP call",
+    "builtin": {
+      "transfer_to_agent": "Hand the caller to a queue of people. Always allowed; may refuse when the queue is closed.",
+      "take_message": "Record a callback request for an agent to return.",
+      "hangup": "End the call once the caller is done."
+    }
   },
   "users": {
     "hint": "Who uses this product, and what each of them was given.",

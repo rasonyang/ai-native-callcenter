@@ -79,12 +79,20 @@ func runFlowAdd(args []string) error {
 		if err != nil {
 			return fmt.Errorf("number %s: %w", *didNumber, err)
 		}
+		// Every column the update writes, carried over from the row itself.
+		// UpdateDID rewrites the whole row, so a field left out is not left
+		// alone — it is written as Go's zero value. Omitting the direction
+		// flags set both to false, which the dids_go_somewhere CHECK refuses,
+		// and this command could not point any number at a flow at all.
 		if _, err := st.Queries.UpdateDID(ctx, queries.UpdateDIDParams{
 			ID: did.ID, Language: did.Language, FlowID: &id,
 			FallbackQueueID:    did.FallbackQueueID,
 			IsRecordingEnabled: did.IsRecordingEnabled,
 			Description:        did.Description,
 			IsEnabled:          did.IsEnabled,
+			AllowInbound:       did.AllowInbound,
+			AllowOutbound:      did.AllowOutbound,
+			IsDefaultOutbound:  did.IsDefaultOutbound,
 		}); err != nil {
 			return fmt.Errorf("assign flow to %s: %w", *didNumber, err)
 		}

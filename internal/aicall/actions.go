@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 )
 
@@ -53,13 +54,16 @@ type callActions struct {
 // TransferToAgent checks the queue can take the caller, then arms the
 // transfer to run once the bridge line has been heard.
 func (a *callActions) TransferToAgent(ctx context.Context, request flow.TransferRequest) (flow.Result, error) {
-	queue, ok := a.orchestrator.findQueue(ctx, request.Queue)
+	queue, ok := a.queueForTransfer(ctx, request.Queue)
 	if !ok {
 		// The refusal is a conversation, not an error: the bot explains and
 		// offers what it can still do.
+		a.log.Warn("transfer refused: no queue to send the caller to",
+			"asked", request.Queue, "hasFallback", a.fallbackQueue != nil)
 		return flow.Failed("QUEUE_UNKNOWN", a.refusalHint()), nil
 	}
 	if !queue.IsEnabled {
+		a.log.Warn("transfer refused: the queue is disabled", "queue", queue.Name)
 		return flow.Failed("QUEUE_CLOSED", a.refusalHint()), nil
 	}
 	if a.callerChannel == "" {
@@ -104,6 +108,38 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 	})
 
 	return flow.Succeeded(map[string]any{"queue": queue.Name}, ""), nil
+}
+
+// queueForTransfer resolves where the caller is being put through.
+//
+// The name the model gave, when the deployment has it. Otherwise the number's
+// own fallback queue: the caller asked for a person, and refusing them over an
+// argument the bot itself got wrong serves nobody. The queue argument is an
+// enum of the real queues now, so this is the narrow path — a flow written
+// against another deployment's queue names, or a queue deleted mid-call — but
+// it is the path where a caller would otherwise be dropped.
+func (a *callActions) queueForTransfer(ctx context.Context, name string) (catalog.Queue, bool) {
+	if queue, ok := a.orchestrator.findQueue(ctx, name); ok {
+		return queue, true
+	}
+	if a.fallbackQueue == nil {
+		return catalog.Queue{}, false
+	}
+	queues, err := a.orchestrator.cfg.Catalog.Queues(ctx)
+	if err != nil {
+		a.log.Error("read queues", "error", err)
+		return catalog.Queue{}, false
+	}
+	for _, queue := range queues {
+		if queue.ID != *a.fallbackQueue {
+			continue
+		}
+		a.log.Warn("the model named a queue this deployment does not have; "+
+			"using the number's fallback queue",
+			"asked", name, "using", queue.Name)
+		return queue, true
+	}
+	return catalog.Queue{}, false
 }
 
 // TakeMessage records what the caller wants passed on as an OPEN callback,
@@ -168,6 +204,13 @@ func (a *callActions) arm(_ context.Context, action func()) {
 			armed()
 		}
 	})
+}
+
+// isArmed reports whether an action is already waiting for the closing line.
+func (a *callActions) isArmed() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.armed != nil
 }
 
 // disarm drops whatever was waiting to be spoken over, because the call it

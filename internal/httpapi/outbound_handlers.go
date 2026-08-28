@@ -9,10 +9,13 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
@@ -165,6 +168,32 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		dial.CallID = *req.CallID
 	}
 
+	// A dial made to keep a callback is written on the callback before the
+	// phone rings, under an id minted here so the two can be joined when the
+	// call's CDR lands. The write doubles as the check that the caller holds
+	// the callback: nobody else's promise gets a call recorded against it.
+	var kept *store.Callback
+	if req.CallbackID != nil {
+		if s.ledger == nil || isMachine(identity) {
+			writeError(w, http.StatusBadRequest, CodeValidationFailed,
+				"a callback is kept by a signed-in agent", nil)
+			return
+		}
+		if dial.CallID == uuid.Nil {
+			dial.CallID = uuid.New()
+		}
+		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, identity.UserID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusConflict, CodeConflict, "claim the callback before calling back", nil)
+				return
+			}
+			writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot note the callback attempt", nil)
+			return
+		}
+		kept = &callback
+	}
+
 	callID, err := s.outbound.Dial(r.Context(), dial)
 	if err != nil {
 		if errors.Is(err, outbound.ErrAlreadyPlaced) {
@@ -173,6 +202,9 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		}
 		writeOutboundError(w, err)
 		return
+	}
+	if kept != nil {
+		s.publishCallback(r, events.TypeCallbackUpdated, *kept)
 	}
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
 }

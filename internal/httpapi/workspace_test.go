@@ -18,6 +18,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -134,11 +135,17 @@ func TestTheOpenRecordSurvivesAReload(t *testing.T) {
 // the same rule that decides which queue events reach their event stream.
 func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
 	staffed := []uuid.UUID{uuid.New(), uuid.New()}
+	somebody_elses := uuid.New()
 	calls := &waitingCalls{answer: []telephony.WaitingCall{
 		{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
 	}}
 	srv := New(config.Config{}, Deps{
 		Agents: &recordingAgents{}, AgentDir: staffedAgent{queues: staffed}, Calls: calls,
+		Catalog: queueCatalogStub{queues: []catalog.Queue{
+			{ID: staffed[0], Name: "support-en", DisplayName: "Support EN", SLAThresholdSec: 20},
+			{ID: staffed[1], Name: "billing", DisplayName: "Billing", SLAThresholdSec: 30},
+			{ID: somebody_elses, Name: "sales", DisplayName: "Sales", SLAThresholdSec: 45},
+		}},
 	})
 
 	w := httptest.NewRecorder()
@@ -155,6 +162,12 @@ func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
 			QueueName  string `json:"queueName"`
 			FromNumber string `json:"fromNumber"`
 		} `json:"items"`
+		Queues []struct {
+			QueueID         uuid.UUID `json:"queueId"`
+			Name            string    `json:"name"`
+			DisplayName     string    `json:"displayName"`
+			SLAThresholdSec int       `json:"slaThresholdSec"`
+		} `json:"queues"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
@@ -163,7 +176,26 @@ func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
 		body.Items[0].FromNumber != "13800138000" {
 		t.Errorf("items = %+v, want the waiting caller with their queue", body.Items)
 	}
+	// Both staffed queues, including the one nobody is waiting in — a quiet
+	// line is an answer, and the cockpit cannot tell it from no line at all
+	// unless it is named. The queue this agent does not staff stays out.
+	if len(body.Queues) != 2 ||
+		body.Queues[0].QueueID != staffed[0] || body.Queues[1].QueueID != staffed[1] {
+		t.Fatalf("queues = %+v, want exactly the two the agent staffs", body.Queues)
+	}
+	if body.Queues[1].DisplayName != "Billing" || body.Queues[1].SLAThresholdSec != 30 {
+		t.Errorf("queues[1] = %+v, want the queue's own name and answer target", body.Queues[1])
+	}
 }
+
+// A queue an agent staffs is named even when the catalogue lists others: the
+// waiting line is theirs, and so is the list of lines it is drawn from.
+type queueCatalogStub struct {
+	stubCatalog
+	queues []catalog.Queue
+}
+
+func (q queueCatalogStub) Queues(context.Context) ([]catalog.Queue, error) { return q.queues, nil }
 
 // The agent's own day is theirs: the endpoint takes no agent, so there is
 // nothing to point at a colleague, and the aggregates over somebody else's day
@@ -265,6 +297,11 @@ func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
 	// A directory that would refuse: a supervisor is nobody's agent.
 	srv := New(config.Config{}, Deps{
 		Agents: &recordingAgents{}, AgentDir: noAgentDir{}, Calls: calls,
+		Catalog: queueCatalogStub{queues: []catalog.Queue{
+			{ID: staffed[0], Name: "support-en", DisplayName: "Support EN"},
+			{ID: uuid.New(), Name: "support-zh", DisplayName: "Support ZH"},
+			{ID: uuid.New(), Name: "sales", DisplayName: "Sales"},
+		}},
 	})
 
 	w := httptest.NewRecorder()
@@ -286,12 +323,20 @@ func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
 		Items []struct {
 			QueueName string `json:"queueName"`
 		} `json:"items"`
+		Queues []struct {
+			Name string `json:"name"`
+		} `json:"queues"`
 	}
 	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
 		t.Fatal(err)
 	}
 	if len(body.Items) != 2 {
 		t.Errorf("items = %+v, want both queues", body.Items)
+	}
+	// Every queue there is, not only the ones with somebody in them: a
+	// supervisor watches the floor, and an empty line is part of it.
+	if len(body.Queues) != 3 {
+		t.Errorf("queues = %+v, want every queue in the catalogue", body.Queues)
 	}
 }
 

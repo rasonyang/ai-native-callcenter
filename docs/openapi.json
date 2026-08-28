@@ -1095,10 +1095,10 @@
           "calls"
         ],
         "summary": "Callers waiting in queue",
-        "description": "The live waiting line, longest wait first. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. An agent sees the queues they are staffed on — the same rule that decides which queue events reach their event stream. A supervisor works no line and sees every queue, as they do on GET /calls.",
+        "description": "The live waiting line, longest wait first, together with the queues it is drawn from. Moves on QUEUE_JOINED, QUEUE_LEFT and QUEUE_COUNT. An agent sees the queues they are staffed on — the same rule that decides which queue events reach their event stream. A supervisor works no line and sees every queue, as they do on GET /calls. The queues are listed even when empty: an agent staffing a quiet line and an agent staffing none at all are different situations, and a list of waiting callers cannot tell them apart.",
         "responses": {
           "200": {
-            "description": "Who is waiting, and since when.",
+            "description": "Who is waiting, since when, and the queues they are waiting in.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3545,6 +3545,60 @@
         }
       }
     },
+    "/callbacks/{callbackId}/release": {
+      "post": {
+        "operationId": "releaseCallback",
+        "tags": [
+          "callbacks"
+        ],
+        "summary": "Put a claimed callback back in the pool",
+        "description": "Returns a CLAIMED callback to OPEN so somebody else can pick it up. Only the user who holds it may let it go; anyone else — and a callback not currently claimed — gets a conflict. Publishes CALLBACK_UPDATED on the event stream.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callbackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The callback, open again.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Callback"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/contacts": {
       "get": {
         "operationId": "listContacts",
@@ -5235,6 +5289,33 @@
           "items"
         ]
       },
+      "StaffedQueue": {
+        "type": "object",
+        "description": "A queue the reader works, whether or not anybody is waiting in it. An agent's own line; every queue for a supervisor.",
+        "properties": {
+          "queueId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "Switch-safe identifier: no spaces, @ or quotes."
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "slaThresholdSec": {
+            "type": "integer",
+            "description": "The queue's answer target; a wait past it is a breach. 0 means none is configured."
+          }
+        },
+        "required": [
+          "queueId",
+          "name",
+          "displayName",
+          "slaThresholdSec"
+        ]
+      },
       "WaitingCall": {
         "type": "object",
         "description": "A caller waiting in a queue: joined and not yet bridged to anybody. Ordered longest wait first, which is who the queue serves next.",
@@ -5294,10 +5375,18 @@
             "items": {
               "$ref": "#/components/schemas/WaitingCall"
             }
+          },
+          "queues": {
+            "type": "array",
+            "description": "The queues the reader works, listed whether or not anybody is waiting in them. A line with nobody in it is an answer, not an absence.",
+            "items": {
+              "$ref": "#/components/schemas/StaffedQueue"
+            }
           }
         },
         "required": [
-          "items"
+          "items",
+          "queues"
         ]
       },
       "TransferRequest": {
@@ -5359,6 +5448,11 @@
           "language": {
             "type": "string",
             "description": "AI_OUTBOUND only: overrides the DID's language when set."
+          },
+          "callbackId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it."
           },
           "userData": {
             "$ref": "#/components/schemas/UserData"
@@ -6574,6 +6668,24 @@
           "handledAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "lastAttemptCallId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The most recent call placed from this callback."
+          },
+          "lastAttemptAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When that call was placed; once it ends, when it ended."
+          },
+          "lastAttemptStatus": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/CDRStatus"
+              }
+            ],
+            "description": "How that call went, absent while it is still up."
           }
         },
         "required": [

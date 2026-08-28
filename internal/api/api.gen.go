@@ -996,12 +996,21 @@ type Callback struct {
 	HandledAt *time.Time          `json:"handledAt,omitempty"`
 
 	// HandledBy The user working or having closed the callback.
-	HandledBy   *openapi_types.UUID `json:"handledBy,omitempty"`
-	ID          openapi_types.UUID  `json:"id"`
-	Message     string              `json:"message"`
-	PhoneNumber string              `json:"phoneNumber"`
-	QueueID     *openapi_types.UUID `json:"queueId,omitempty"`
-	Status      CallbackStatus      `json:"status"`
+	HandledBy *openapi_types.UUID `json:"handledBy,omitempty"`
+	ID        openapi_types.UUID  `json:"id"`
+
+	// LastAttemptAt When that call was placed; once it ends, when it ended.
+	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
+
+	// LastAttemptCallID The most recent call placed from this callback.
+	LastAttemptCallID *openapi_types.UUID `json:"lastAttemptCallId,omitempty"`
+
+	// LastAttemptStatus How that call went, absent while it is still up.
+	LastAttemptStatus *CDRStatus          `json:"lastAttemptStatus,omitempty"`
+	Message           string              `json:"message"`
+	PhoneNumber       string              `json:"phoneNumber"`
+	QueueID           *openapi_types.UUID `json:"queueId,omitempty"`
+	Status            CallbackStatus      `json:"status"`
 }
 
 // CallbackList defines model for CallbackList.
@@ -1059,6 +1068,9 @@ type ContactWrite struct {
 type CreateCallRequest struct {
 	// CallID Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
 	CallID *openapi_types.UUID `json:"callId,omitempty"`
+
+	// CallbackID AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it.
+	CallbackID *openapi_types.UUID `json:"callbackId,omitempty"`
 
 	// DID AI_OUTBOUND only: the DID whose flow and caller id the call uses.
 	DID *string `json:"did,omitempty"`
@@ -1702,6 +1714,18 @@ type StaffQueueRequest struct {
 	Position *int `json:"position,omitempty"`
 }
 
+// StaffedQueue A queue the reader works, whether or not anybody is waiting in it. An agent's own line; every queue for a supervisor.
+type StaffedQueue struct {
+	DisplayName string `json:"displayName"`
+
+	// Name Switch-safe identifier: no spaces, @ or quotes.
+	Name    string             `json:"name"`
+	QueueID openapi_types.UUID `json:"queueId"`
+
+	// SLAThresholdSec The queue's answer target; a wait past it is a breach. 0 means none is configured.
+	SLAThresholdSec int `json:"slaThresholdSec"`
+}
+
 // Strategy How a queue picks among the agents staffing it, in platform vocabulary; the switch spelling is a boundary translation.
 type Strategy string
 
@@ -1870,6 +1894,9 @@ type WaitingCall struct {
 // WaitingCallList defines model for WaitingCallList.
 type WaitingCallList struct {
 	Items []WaitingCall `json:"items"`
+
+	// Queues The queues the reader works, listed whether or not anybody is waiting in them. A line with nobody in it is an answer, not an absence.
+	Queues []StaffedQueue `json:"queues"`
 }
 
 // WebhookDelivery One attempt-set at delivering one revision of one call's CDR to one subscription.
@@ -2268,6 +2295,9 @@ type ServerInterface interface {
 	// CompleteCallback Close a callback
 	// (POST /callbacks/{callbackId}/complete)
 	CompleteCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID)
+	// ReleaseCallback Put a claimed callback back in the pool
+	// (POST /callbacks/{callbackId}/release)
+	ReleaseCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID)
 	// ListCalls Every live call
 	// (GET /calls)
 	ListCalls(w http.ResponseWriter, r *http.Request)
@@ -2577,6 +2607,12 @@ func (_ Unimplemented) ClaimCallback(w http.ResponseWriter, r *http.Request, cal
 // CompleteCallback Close a callback
 // (POST /callbacks/{callbackId}/complete)
 func (_ Unimplemented) CompleteCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReleaseCallback Put a claimed callback back in the pool
+// (POST /callbacks/{callbackId}/release)
+func (_ Unimplemented) ReleaseCallback(w http.ResponseWriter, r *http.Request, callbackID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3419,6 +3455,32 @@ func (siw *ServerInterfaceWrapper) CompleteCallback(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CompleteCallback(w, r, callbackID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReleaseCallback operation middleware
+func (siw *ServerInterfaceWrapper) ReleaseCallback(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callbackId" -------------
+	var callbackID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callbackId", chi.URLParam(r, "callbackId"), &callbackID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callbackId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReleaseCallback(w, r, callbackID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5450,6 +5512,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/callbacks/{callbackId}/complete", wrapper.CompleteCallback)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/callbacks/{callbackId}/release", wrapper.ReleaseCallback)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/calls", wrapper.ListCalls)

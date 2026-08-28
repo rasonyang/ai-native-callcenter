@@ -171,6 +171,8 @@ func TestTransferWaitsForTheBridgeLineToPlay(t *testing.T) {
 	}
 }
 
+// With nowhere to fall back to, an unknown queue is still a refusal — but it
+// is the last resort, not the first answer. See the test below.
 func TestTransferToAnUnknownQueueIsARefusalNotAnError(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
@@ -189,6 +191,44 @@ func TestTransferToAnUnknownQueueIsARefusalNotAnError(t *testing.T) {
 	}
 	if len(sw.recordedTransfers()) != 0 {
 		t.Error("a refused transfer still moved the caller")
+	}
+}
+
+// A caller who asked for a person gets one, even when the bot named a queue
+// that is not there.
+//
+// The model invented "customer_service" on a deployment whose queues are
+// support-en, support-zh and wt_queue: the transfer was refused, the flow
+// announced a handover anyway and the line dropped, having promised a call
+// back that nobody would make. The queue argument is an enum of the real
+// queues now, so this is the narrow path — but on it, the number's own
+// fallback queue is a better answer than turning the caller away over an
+// argument the bot got wrong.
+func TestAnUnknownQueueFallsBackToTheNumbersOwnQueue(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, session, _ := testActions(t, sw)
+
+	queues, err := actions.orchestrator.cfg.Catalog.Queues(t.Context())
+	if err != nil {
+		t.Fatalf("read queues: %v", err)
+	}
+	support := queues[0]
+	actions.fallbackQueue = &support.ID
+
+	result, err := actions.TransferToAgent(t.Context(), flow.TransferRequest{
+		Queue: "customer_service", Reason: "X", Summary: "s",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.IsOK {
+		t.Fatalf("result = %+v, want the caller put through to the fallback queue", result)
+	}
+
+	actions.onPlaybackDone(session.currentTurn() + 1)
+	if got := sw.recordedTransfers(); len(got) != 1 ||
+		got[0] != "caller-channel-1→"+support.ExtNumber {
+		t.Errorf("transfers = %v, want the caller moved to %s", got, support.ExtNumber)
 	}
 }
 
@@ -317,7 +357,7 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.recorder = recorder
@@ -407,7 +447,7 @@ func TestReachingATerminalPhaseIsContainment(t *testing.T) {
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
 	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	moved := engine.OnNoInput()
 	if moved == "" || !engine.IsTerminal() {
@@ -439,6 +479,105 @@ const driveFlow = `{
 	"nodes": {
 		"welcome": {"instruction": "Greet the caller.", "tools": []},
 		"handoff": {"instruction": "Announce the transfer.", "tools": []}
+	}
+}`
+
+// A flow whose transfer phase is terminal still puts the caller through.
+//
+// The five ported flows all mark their "we're putting you through" phase
+// isTerminal, and terminality arms the call's ending — which replaced the
+// transfer the tool had just armed. The caller heard "an agent will be with
+// you shortly" and was then hung up on, having been transferred nowhere.
+// arming is last-one-wins by design, so the rule lives where the two meet:
+// a terminal phase that arrives on top of an armed action leaves it alone.
+func TestATerminalTransferPhaseDoesNotHangUpOnTheCallerInstead(t *testing.T) {
+	sw := &fakeSwitch{}
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, sw)
+	spec, err := flow.Load([]byte(terminalHandoffFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
+	}
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	actions.recorder = recorder
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		o.drive(t.Context(), session, runtime, actions, recorder, log)
+	}()
+
+	model.events <- provider.Event{
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_1",
+		ToolName: flow.ToolTransferToAgent,
+		ToolArgs: `{"queue":"support","reason":"BILLING","summary":"needs help"}`,
+	}
+
+	// Wait for the tool to have been answered: the phase move, and with it the
+	// terminal rule this test is about, happens on the way out of that.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		model.mu.Lock()
+		answered := len(model.toolResults)
+		model.mu.Unlock()
+		if answered > 0 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The closing line plays out.
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+
+	deadline = time.Now().Add(2 * time.Second)
+	for len(sw.recordedTransfers()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := sw.recordedTransfers(); len(got) != 1 || got[0] != "chan-9→7001" {
+		t.Fatalf("transfers = %v, want the caller put through to 7001", got)
+	}
+	// And the ledger says transferred, not hung up on.
+	if recorder.endReason != "TRANSFER" {
+		t.Errorf("endReason = %q, want TRANSFER", recorder.endReason)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drive did not return after the call ended")
+	}
+}
+
+// driveFlow's handoff phase, as the ported flows write it: terminal.
+const terminalHandoffFlow = `{
+	"id": "terminal-handoff-test",
+	"specVersion": "v2",
+	"initialNode": "welcome",
+	"global": {
+		"persona": "You answer the phone.",
+		"alwaysAllowedTools": ["transfer_to_agent", "hangup"],
+		"transitions": [
+			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",
+			 "condition": {"slot": "result.ok", "op": "EQ", "value": "1"},
+			 "target": "handoff"}
+		]
+	},
+	"nodes": {
+		"welcome": {"instruction": "Greet the caller.", "tools": []},
+		"handoff": {"instruction": "Announce the transfer.", "tools": [], "isTerminal": true}
 	}
 }`
 
@@ -563,7 +702,7 @@ func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 		orchestrator: o, session: session, log: log, callerChannel: "caller-channel-1",
 	}
 	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	o.afterMove(engine.OnNoInput(), session, runtime, actions, log)
 	actions.onPlaybackDone(session.currentTurn() + 1)
@@ -644,5 +783,35 @@ func TestNothingArmedRunsOnceTheCallHasEnded(t *testing.T) {
 	actions.onPlaybackDone(session.currentTurn() + 1)
 	if got := sw.recordedTransfers(); len(got) != 0 {
 		t.Errorf("transferred a channel whose call had ended: %v", got)
+	}
+}
+
+// The model is offered the number's own queue, not every queue there is.
+//
+// Offered the whole catalogue, a model on a Chinese call picked support-zh —
+// a real queue, correctly reasoned, and staffed by nobody who works the number
+// that was dialled. The caller sat on hold music while the agent for that line
+// waited in another queue. The number is where an operator said which agents
+// answer it; there is nothing for the model to choose.
+func TestATransferIsOfferedTheNumbersOwnQueue(t *testing.T) {
+	o := testOrchestrator(t, &fakeSwitch{})
+	queues, err := o.cfg.Catalog.Queues(t.Context())
+	if err != nil {
+		t.Fatalf("read queues: %v", err)
+	}
+	if len(queues) < 2 {
+		t.Fatalf("the fixture needs more than one queue, has %d", len(queues))
+	}
+
+	got := o.queueNames(t.Context(), &queues[1].ID)
+	if len(got) != 1 || got[0] != queues[1].Name {
+		t.Errorf("queue names = %v, want only %q", got, queues[1].Name)
+	}
+
+	// With no queue on the number there is nothing better to go on, so the
+	// model chooses among real queues rather than inventing one.
+	got = o.queueNames(t.Context(), nil)
+	if len(got) != len(queues) {
+		t.Errorf("queue names = %v, want every queue when the number names none", got)
 	}
 }

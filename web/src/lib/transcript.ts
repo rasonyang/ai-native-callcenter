@@ -49,7 +49,10 @@ function lineFromRow(row: TranscriptLine): Line {
     utteranceId: row.utteranceId || `seq-${row.seq}`,
     speaker: row.speaker,
     kind: row.kind,
-    text: String(row.content?.text ?? ''),
+    // A tool line's content has no text: what it holds is the tool's name and
+    // its arguments or result. Reading only text rendered every tool row as
+    // "requested " with nothing after it.
+    text: String(row.content?.text ?? row.content?.name ?? ''),
     isFinal: true,
     seq: row.seq,
     agentId: row.agentId,

@@ -156,6 +156,9 @@ export type CallSnapshot = components['schemas']['CallSnapshot']
 /** A caller waiting in a queue this agent staffs. */
 export type WaitingCall = components['schemas']['WaitingCall']
 
+/** A queue the reader works, listed whether or not anybody is waiting in it. */
+export type StaffedQueue = components['schemas']['StaffedQueue']
+
 export const callApi = {
   mine: () => request<components['schemas']['CallList']>('/calls/mine'),
   waiting: () => request<components['schemas']['WaitingCallList']>('/calls/waiting'),
@@ -168,6 +171,15 @@ export const callApi = {
     request<components['schemas']['CreateCallResponse']>('/calls', {
       method: 'POST',
       body: JSON.stringify({ kind: 'AGENT_OUTBOUND', to: destination }),
+    }),
+  /**
+   * The same dial, made to keep a callback: the call is noted on the callback
+   * before the phone rings and its outcome is copied back when it ends.
+   */
+  dialForCallback: (callbackId: string, destination: string) =>
+    request<components['schemas']['CreateCallResponse']>('/calls', {
+      method: 'POST',
+      body: JSON.stringify({ kind: 'AGENT_OUTBOUND', to: destination, callbackId }),
     }),
   answer: (callId: string) => request<void>(`/calls/${callId}/answer`, { method: 'POST' }),
   hold: (callId: string) => request<void>(`/calls/${callId}/hold`, { method: 'POST' }),
