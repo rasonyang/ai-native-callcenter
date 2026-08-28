@@ -639,6 +639,37 @@ func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
 	}
 }
 
+// A transferred call's BOT leg names the flow, exactly as the bot names it on
+// the row it writes for a call it kept. One flow, one label, whichever path
+// wrote the row — the walkthrough found the same flow reading "mobile_support"
+// on one call and "" on the next.
+func TestTheBotLegOfATransferredCallNamesTheFlow(t *testing.T) {
+	flow := uuid.New()
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(60),
+		Bot: BotShare{Sec: 20, FlowID: &flow, FlowSlug: "mobile_support", DID: "95012", IsStamped: true},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "18688886669", AnsweredAt: atPtr(0), ReleasedAt: atPtr(60)},
+		},
+	}
+
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
+
+	var bot *store.Leg
+	for i := range cdr.Legs {
+		if cdr.Legs[i].Kind == "BOT" {
+			bot = &cdr.Legs[i]
+		}
+	}
+	if bot == nil {
+		t.Fatalf("no BOT leg in %+v", cdr.Legs)
+	}
+	if bot.Label != "mobile_support" {
+		t.Errorf("BOT leg label = %q, want mobile_support", bot.Label)
+	}
+}
+
 // A queue that timed the caller out, after the bot had served them, is equally
 // not an answered call.
 func TestABotServedCallThatTimedOutInQueueIsMissed(t *testing.T) {

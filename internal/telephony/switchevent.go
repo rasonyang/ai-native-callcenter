@@ -65,12 +65,15 @@ const (
 // handing the call to a person: its part of the eventual CDR. The channel
 // variable names stop at this boundary.
 type BotShare struct {
-	Sec     int
-	FlowID  *uuid.UUID
-	DID     string
-	Queue   string
-	Summary string
-	Reason  string
+	Sec    int
+	FlowID *uuid.UUID
+	// FlowSlug names the flow for a reader; the ledger's BOT leg is labelled
+	// with it, as the bot's own row labels it when it writes the row itself.
+	FlowSlug string
+	DID      string
+	Queue    string
+	Summary  string
+	Reason   string
 	// IsStamped records that the bot wrote its share onto the caller's
 	// channel, which it does when it hands the call to a person and at no
 	// other time. It is not the same as any field being set: the dialplan
@@ -109,6 +112,9 @@ func (b *BotShare) Merge(other BotShare) {
 	}
 	if b.FlowID == nil {
 		b.FlowID = other.FlowID
+	}
+	if b.FlowSlug == "" {
+		b.FlowSlug = other.FlowSlug
 	}
 	if b.DID == "" {
 		b.DID = other.DID
@@ -158,6 +164,7 @@ func botShareFrom(get func(string) string) BotShare {
 			out.FlowID = &parsed
 		}
 	}
+	out.FlowSlug = get("aicc_flow_slug")
 	out.DID = get("aicc_did")
 	out.Queue = get("aicc_queue")
 	out.Summary = get("aicc_bot_summary")

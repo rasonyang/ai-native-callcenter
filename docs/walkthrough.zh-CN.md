@@ -625,6 +625,8 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
       队列里唯一的坐席就是打电话的自己，所以听到排队音，挂断后账本是
       `BOT 145s → QUEUE wt_queue 153s (BREAK_OUT)`、`NO_ANSWER`。
       「队列没人时转成留言」这一半没验到：队列有人签入、只是忙，不算没人。
+      这通的 BOT 腿 `label` 当时是空的（bot 交接后由 telephony 路写行，只知道 flowId 不知道名字）；
+      已修：bot 交接时把 `aicc_flow_slug` 一并打到通道上，两条路写出来的 BOT 腿现在都叫流程名。
 - [x] **82. 挂断后去通话记录看这一通**
       期望：轨迹显示 *机器人 → …*，`bot_sec` 有值；机器人说过的话有转写。
       实际（2026-08-28）：`legs: [BOT mobile_support 92s]`、`botSec: 92`、`hasRecording: true`；
@@ -773,10 +775,6 @@ KEY=$(grep '^AICC_API_KEY=' .env | cut -d= -f2)
 ---
 
 ## 走查记下的待办
-
-- **BOT 腿的 `label` 时有时无**：同一条 `mobile_support`，第一通 CDR 的 BOT 腿 `label` 是 `mobile_support`，
-  转人工的第二通是空串。查 `internal/telephony/cdr.go` 交接后拼腿的地方——bot 交出去的通话由那条路写行，
-  它拿不到流程 slug。
 
 - **Tools 页的「参数」列只有名字**：`tool.parameters` 是完整的 JSON Schema（类型、说明、必填），
   页面只 `Object.keys` 了一下。要么展开成小表，要么点开看——现在设计流程的人得回 JSON 里找。

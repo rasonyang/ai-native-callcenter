@@ -636,7 +636,10 @@ func isCallerGone(queue QueueFacts) bool {
 func buildLegs(snap Snapshot, originator *PartySnapshot, agentLegs []*PartySnapshot, botSec int) []store.Leg {
 	var legs []store.Leg
 	if botSec > 0 || snap.Bot.FlowID != nil {
-		legs = append(legs, store.Leg{Kind: "BOT", DurationSec: botSec})
+		// Labelled with the flow, as the bot labels the row it writes itself.
+		// Unlabelled, the same flow read one way on a contained call and
+		// another on a transferred one.
+		legs = append(legs, store.Leg{Kind: "BOT", Label: snap.Bot.FlowSlug, DurationSec: botSec})
 	}
 	if !snap.Queue.JoinedAt.IsZero() {
 		leg := store.Leg{Kind: "QUEUE", Label: snap.Queue.Name}
