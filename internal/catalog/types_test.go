@@ -210,3 +210,21 @@ func TestDIDValidation(t *testing.T) {
 		})
 	}
 }
+
+// The refusal names its field and rule, which is what lets a form highlight
+// the input instead of printing a sentence at the bottom about nothing in
+// particular (walkthrough step 11).
+func TestAValidationFailureNamesItsFieldAndRule(t *testing.T) {
+	d := DID{Number: "95001", AllowInbound: false, AllowOutbound: false}
+	err := d.validate()
+	var invalid *ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("error is not a *ValidationError: %v", err)
+	}
+	if invalid.Field != "allowInbound" || invalid.Rule != "DIRECTION_REQUIRED" {
+		t.Errorf("field/rule = %q/%q, want allowInbound/DIRECTION_REQUIRED", invalid.Field, invalid.Rule)
+	}
+	if !errors.Is(err, ErrValidation) {
+		t.Error("a ValidationError must still be ErrValidation to every existing check")
+	}
+}

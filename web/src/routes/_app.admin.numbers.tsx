@@ -7,7 +7,7 @@ import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { useFlows } from '@/lib/flows'
 import { requireRole } from '@/lib/guards'
 import { useCatalogMutations, useDIDs, useQueues, type DIDDraft } from '@/lib/catalog'
@@ -135,7 +135,7 @@ function NumbersPage() {
           error={saveDID.isError ? describeError(saveDID.error, t) : undefined}
           onSubmit={() => saveDID.mutate(editing, { onSuccess: () => setEditing(null) })}
         >
-          <Field label={t('admin.number')}>
+          <Field label={t('admin.number')} error={fieldErrorText(saveDID.error, 'number', t)}>
             <Input
               autoFocus
               disabled={Boolean(editing.id)}
@@ -145,7 +145,10 @@ function NumbersPage() {
           </Field>
           {/* Two checkboxes rather than a choice: a number that both takes
               calls and places them is ordinary. */}
-          <Field label={t('admin.direction')} hint={t('admin.directionHint')}>
+          <Field label={t('admin.direction')} error={
+              fieldErrorText(saveDID.error, 'allowInbound', t) ??
+              fieldErrorText(saveDID.error, 'isDefaultOutbound', t)
+            } hint={t('admin.directionHint')}>
             <span className="flex flex-col gap-1.5 pt-1">
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -189,7 +192,7 @@ function NumbersPage() {
             </span>
           </Field>
           {editing.allowInbound && (
-            <Field label={t('admin.botFlow')} hint={t('admin.botFlowHint')}>
+            <Field label={t('admin.botFlow')} error={fieldErrorText(saveDID.error, 'flowId', t)} hint={t('admin.botFlowHint')}>
               <Select
                 value={editing.flowId ?? ''}
                 onChange={(id) => setEditing({ ...editing, flowId: id === '' ? undefined : id })}
@@ -200,7 +203,7 @@ function NumbersPage() {
               />
             </Field>
           )}
-          <Field label={t('admin.language')} hint={t('admin.languageHint')}>
+          <Field label={t('admin.language')} error={fieldErrorText(saveDID.error, 'language', t)} hint={t('admin.languageHint')}>
             <Select
               value={editing.language ?? 'en'}
               onChange={(language) => setEditing({ ...editing, language })}

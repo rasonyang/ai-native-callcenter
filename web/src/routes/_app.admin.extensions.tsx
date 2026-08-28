@@ -9,7 +9,7 @@ import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
 import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
-import { describeError } from '@/lib/errors'
+import { describeError, fieldErrorText } from '@/lib/errors'
 import { useUsers } from '@/lib/users'
 import { requireRole } from '@/lib/guards'
 import {
@@ -157,6 +157,7 @@ function ExtensionsPage() {
               and lands on the next save. */}
           <Field
             label={t('admin.password')}
+            error={fieldErrorText(saveExtension.error, 'password', t)}
             hint={
               hasMinted
                 ? editing.id

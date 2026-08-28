@@ -139,9 +139,10 @@ cd ~/workspaces/github/ai-native-callcenter
       备注：2026-08-27 走查发现报错文案原本是「请检查标红的字段」，而表单**没有任何标红** ——
       `RecordDialog`/`Field` 根本没有字段级错误的位置，`writeCatalogError` 也不带 `params.field`，
       服务端那句具体原因（`name cannot contain spaces, @ or quotes`）被 `describeError` 丢掉了。
-      当场只把文案改成不再承诺标红。完整修法是结构化字段错误（catalog 17 处校验 + `Field` 组件 +
-      每条规则的文案），**待办**。顺带记一处漂移：`web/src/lib/errors.ts` 的注释说「后端只发码和参数，
-      从不发成句的话」，而 catalog 发的正是成句的英文。
+      当场只把文案改成不再承诺标红。2026-08-28 修完整版：catalog 17 处校验换成
+      `ValidationError{field, rule}`，`writeCatalogError` 把两者放进 `params`，`Field` 组件加
+      error 态（`aria-invalid` + 输入框下一行红字），文案按 rule 本地化，号码/队列/分机三个
+      表单接上——名称带空格保存，红字就落在名称框下面。`errors.ts` 那句漂移的注释也一并改了。
 - [x] **12. 正常建一个队列，不填队列分机**
       期望：系统**自动从号段分配**一个。建完后这个号**再也改不了** —— 提示明说：交换机和每一通被路由的电话都靠它认这个队列。
 - [x] **13. 设置最长等待为 `0`**
@@ -581,11 +582,7 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 
 走查中发现、当场没修的问题。修掉一条就把它从这里删掉，并把对应步骤的「备注」改成事实。
 
-- **表单没有字段级错误**（第 11 步，2026-08-27）。校验失败时只有对话框底部一句笼统的话，
-  服务端那句具体原因被丢掉，读的人不知道是哪个字段错在哪。
-  牵涉：`internal/catalog` 17 处 `ErrValidation` 各带上字段名 → `writeCatalogError` 填
-  `params.field`（用户处理器已有这个约定，前端没读）→ `Field` 加错误态 → 每条规则一条文案。
-  顺带修掉一处漂移：`web/src/lib/errors.ts` 的注释说后端「从不发成句的话」，而 catalog 发的正是成句的英文。
+（2026-08-28 清零：五条全部修毕，事实都写回了对应步骤。）
 
 ## 已知的边界
 
