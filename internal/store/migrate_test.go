@@ -802,3 +802,53 @@ func TestTheDeliveryOutboxAcceptsACorrectionAndRefusesADuplicate(t *testing.T) {
 		t.Errorf("%d deliveries outlived their subscription", left)
 	}
 }
+
+// 00028 puts stored contact numbers into the dialable form, and only where
+// that treads on nobody: a row whose normalized form another contact already
+// holds is left alone, and so is a row that is not a number at all.
+func TestMigrationsNormalizeContactNumbersWithoutMergingPeople(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	if err := goose.UpToContext(ctx, db, "migrations", 27); err != nil {
+		t.Fatalf("migrating to 27 failed: %v", err)
+	}
+	seed := func(id, number string) {
+		t.Helper()
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO contacts (id, phone_number) VALUES ($1, $2)`, id, number); err != nil {
+			t.Fatalf("seed %s: %v", number, err)
+		}
+	}
+	const decorated = "88888888-0000-0000-0000-000000000001"
+	const collider = "88888888-0000-0000-0000-000000000002"
+	const holder = "88888888-0000-0000-0000-000000000003"
+	const lettered = "88888888-0000-0000-0000-000000000004"
+	seed(decorated, "186-8888 (6666)")
+	seed(collider, "137-0000-0000") // normalizes onto the number holder owns
+	seed(holder, "13700000000")
+	seed(lettered, "abc")
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database holding decorated numbers failed: %v", err)
+	}
+
+	want := map[string]string{
+		decorated: "18688886666",
+		collider:  "137-0000-0000",
+		holder:    "13700000000",
+		lettered:  "abc",
+	}
+	for id, number := range want {
+		var got string
+		if err := db.QueryRowContext(ctx,
+			`SELECT phone_number FROM contacts WHERE id = $1`, id).Scan(&got); err != nil {
+			t.Fatalf("read %s: %v", id, err)
+		}
+		if got != number {
+			t.Errorf("contact %s holds %q, want %q", id, got, number)
+		}
+	}
+}

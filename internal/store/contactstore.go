@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"time"
 
@@ -64,15 +65,31 @@ var (
 	ErrContactInvalid  = errors.New("invalid contact")
 )
 
-// normalize trims what people type and refuses the one thing a contact cannot
-// do without.
+// contactPhonePattern is what a stored number looks like: an optional leading
+// + and 2 to 32 digits. Two, not a phone-plan minimum, because this book also
+// holds internal extensions and short codes — 1001 and 95012 are callers too.
+var contactPhonePattern = regexp.MustCompile(`^\+?[0-9]{2,32}$`)
+
+// phoneSeparators is the formatting people paste along with a number.
+var phoneSeparators = strings.NewReplacer(" ", "", "-", "", "(", "", ")", "", ".", "")
+
+// normalize trims what people type and puts the phone number into the one
+// form everything else uses.
+//
+// Stored numbers are dialable and match what the trunk presents as ANI, so
+// separators are stripped rather than refused — "186-8888 6666" is a number,
+// just a decorated one. What remains must be +?digits: uniqueness, the
+// caller-card lookup and click-to-dial all compare this column literally, and
+// a letter in it can never match or ring anything. (No +86 folding: this
+// machine's trunk presents bare national numbers; folding is a per-deployment
+// question and belongs where the trunk is configured.)
 func (w ContactWrite) normalize() (ContactWrite, error) {
-	w.PhoneNumber = strings.TrimSpace(w.PhoneNumber)
+	w.PhoneNumber = phoneSeparators.Replace(strings.TrimSpace(w.PhoneNumber))
 	if w.PhoneNumber == "" {
 		return w, errors.New("phoneNumber is required")
 	}
-	if len(w.PhoneNumber) > 32 {
-		return w, errors.New("phoneNumber is too long")
+	if !contactPhonePattern.MatchString(w.PhoneNumber) {
+		return w, errors.New("phoneNumber must be 2 to 32 digits, with an optional leading +")
 	}
 	if w.Tags != nil {
 		cleaned := make([]string, 0, len(*w.Tags))
