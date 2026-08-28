@@ -562,9 +562,16 @@ docker exec -i $(docker ps --format '{{.Names}}' | grep -i postgres | head -1) p
 
 前面五小节都是在看流程长什么样。**bot 的能力最终只有一通电话能证明。**
 
-- [ ] **76. 把 `mobile_support` 绑到一个号码上**
+- [x] **76. 把 `mobile_support` 绑到一个号码上**
       「号码」页编辑一个可呼入的号码（如 95012），机器人流程选 `mobile_support`，语言中文。
-- [ ] **77. 确认 mock 后端在跑**（前置第三项），并且应用是在它之后启动的
+- [x] **77. 确认 mock 后端在跑**（前置第三项），并且应用是在它之后启动的
+
+      ```sh
+      lsof -nP -iTCP:8770 -sTCP:LISTEN                 # 有一行 aicc-mock
+      ps -o lstart= -p $(pgrep -f aicc-mockbackend); ps -o lstart= -p $(pgrep -f '/tmp/aicc$')
+      # 后一个时间必须晚于前一个；.env 里 AICC_BOT_BACKEND_BASE=http://127.0.0.1:8770
+      curl -s -X POST 127.0.0.1:8770/api/repair/status -d '{"rmaNo":"RMA1001"}'   # retCode 000000
+      ```
 - [ ] **78. 用坐席话机拨那个号码**，对机器人说「我要查维修进度，单号 RMA1001」
       期望：机器人**先用中文问候**，问清单号后回答「星讯 X1 手机，维修中，已更换屏幕总成，
       正在整机测试，预计 2 个工作日内寄出」。
