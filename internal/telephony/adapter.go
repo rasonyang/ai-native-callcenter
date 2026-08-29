@@ -321,20 +321,44 @@ func (a *Adapter) StopRecording(channelID, path string) error {
 	return a.exec("uuid_record %s stop %s", channelID, path)
 }
 
+// ObserverVar is the channel variable that marks a supervisor's monitoring
+// leg. The coordinator drops every event carrying it: the leg is scaffolding
+// around a conversation, not a party to it.
+const ObserverVar = "aicc_observer"
+
 // Eavesdrop lets a supervisor listen to, whisper into, or join a call. No
 // conference module is involved, which matters because this build does not
 // have one.
-func (a *Adapter) Eavesdrop(supervisorPartyID uuid.UUID, supervisorExtension, targetChannelID, mode string) (string, error) {
+//
+// targetChannelID must be the *agent's* leg, because the whisper flags are
+// named from its point of view: eavesdrop_whisper_bleg mixes the supervisor
+// into the audio the target leg hears (mod_dptools → ED_MUX_WRITE), so it is
+// what "whisper to the agent" means; eavesdrop_whisper_aleg mixes into what the
+// target says (ED_MUX_READ), which is the far end hearing the supervisor. BARGE
+// is both. The eavesdrop_bridge_* variables are not used: they only choose
+// which sides the supervisor hears and default to both.
+//
+// The leg is stamped ObserverVar so it is never adopted as a party, and never
+// aicc_call_id, which would make it one. The X-AICC-* headers ride the INVITE
+// for the supervisor's phone to show what the call is.
+func (a *Adapter) Eavesdrop(supervisorPartyID uuid.UUID, supervisorExtension, targetChannelID, mode string, callID uuid.UUID, agentExtension string) (string, error) {
 	vars := map[string]string{
-		"origination_uuid": supervisorPartyID.String(),
-		"sip_auto_answer":  "true",
+		"origination_uuid":             supervisorPartyID.String(),
+		"sip_auto_answer":              "true",
+		"ignore_early_media":           "true",
+		"originate_timeout":            "15",
+		"origination_caller_id_name":   mode,
+		"origination_caller_id_number": agentExtension,
+		"sip_h_X-AICC-Session-Type":    mode,
+		"sip_h_X-AICC-Call-Id":         callID.String(),
+		ObserverVar:                    mode,
 	}
 	switch mode {
 	case "WHISPER":
 		vars["eavesdrop_whisper_bleg"] = "true"
 	case "BARGE":
-		vars["eavesdrop_bridge_aleg"] = "true"
-		vars["eavesdrop_bridge_bleg"] = "true"
+		vars["eavesdrop_whisper_aleg"] = "true"
+		vars["eavesdrop_whisper_bleg"] = "true"
 	}
 	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &eavesdrop(%s)",
 		renderVars(vars), a.Endpoint(supervisorExtension), targetChannelID))

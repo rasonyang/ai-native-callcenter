@@ -78,7 +78,10 @@ type RosterEntry struct {
 	EnteredAt    time.Time    `json:"enteredAt"`
 	WrapUpCallID *uuid.UUID   `json:"wrapUpCallId,omitempty"`
 	IsOnCall     bool         `json:"isOnCall"`
-	IsRegistered bool         `json:"isRegistered"`
+	// CurrentCallID names the call while IsOnCall holds: a supervisor's
+	// monitor request is made against it.
+	CurrentCallID *uuid.UUID `json:"currentCallId,omitempty"`
+	IsRegistered  bool       `json:"isRegistered"`
 
 	// Configuration. Extension is the phone the agent is signed in at right
 	// now; DefaultExtension is the one bound to them, which survives sign-out
@@ -391,8 +394,9 @@ func (s *Service) RingNoAnswer(ctx context.Context, agentID uuid.UUID) (Presence
 }
 
 // SetOnCall records that an agent is on a call, which outranks their presence
-// when the roster is read.
-func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool) {
+// when the roster is read, and which call it is, which is what the roster
+// hands a supervisor who wants to listen in.
+func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool, callID uuid.UUID) {
 	s.mu.Lock()
 	p := s.presenceLocked(agentID)
 	if p.IsOnCall == onCall {
@@ -400,6 +404,11 @@ func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
 		return
 	}
 	p.IsOnCall = onCall
+	p.CurrentCallID = nil
+	if onCall && callID != uuid.Nil {
+		id := callID
+		p.CurrentCallID = &id
+	}
 	snapshot := *p
 	s.mu.Unlock()
 
@@ -651,6 +660,10 @@ func (s *Service) Roster(ctx context.Context) ([]RosterEntry, error) {
 		}
 		rows[i].Availability = p.Availability()
 		rows[i].IsOnCall = p.IsOnCall
+		if p.IsOnCall && p.CurrentCallID != nil {
+			id := *p.CurrentCallID
+			rows[i].CurrentCallID = &id
+		}
 		rows[i].IsRegistered = p.IsRegistered
 	}
 	return rows, nil
@@ -953,6 +966,21 @@ func (s *Service) CallcenterNameFor(ctx context.Context, agentID uuid.UUID) stri
 		return ""
 	}
 	return profile.CallcenterName
+}
+
+// BoundExtensionFor is the phone configuration binds to an agent identity,
+// which is where somebody who is not signed in can still be reached. A
+// supervisor is the case that needs it: they supervise without staffing a
+// queue, so presence has no phone for them, and their own desk is the only
+// phone they should be listening from.
+//
+// Empty when the account has no agent identity or no phone bound to it.
+func (s *Service) BoundExtensionFor(ctx context.Context, agentID uuid.UUID) string {
+	profile, err := s.store.AgentProfile(ctx, agentID)
+	if err != nil {
+		return ""
+	}
+	return profile.ExtensionNumber
 }
 
 // AgentByCallcenterName resolves the switch's own name for an agent.

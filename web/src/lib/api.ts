@@ -89,6 +89,8 @@ export type Availability = components['schemas']['Availability']
 export type Presence = components['schemas']['Presence']
 
 export type RosterEntry = components['schemas']['RosterEntry']
+export type MonitorMode = components['schemas']['MonitorMode']
+export type MonitorRequest = components['schemas']['MonitorRequest']
 
 /** What an agent confirms for the call they just finished. */
 export type WrapUpRequest = components['schemas']['WrapUpRequest']
@@ -196,5 +198,15 @@ export const callApi = {
     request<void>(`/calls/${callId}/dtmf`, {
       method: 'POST',
       body: JSON.stringify({ digits }),
+    }),
+  /**
+   * Supervision: raise the supervisor's phone against an agent's leg. The
+   * agent is named because an internal call carries two; the phone is named
+   * unless the supervisor is signed in as an agent.
+   */
+  monitor: (callId: string, body: MonitorRequest) =>
+    request<void>(`/calls/${callId}/monitor`, {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 }

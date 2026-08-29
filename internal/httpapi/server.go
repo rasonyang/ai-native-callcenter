@@ -31,6 +31,10 @@ type AgentService interface {
 	// CallcenterNameFor is the switch's own name for an agent, for the
 	// commands that have to name them the way mod_callcenter knows them.
 	CallcenterNameFor(ctx context.Context, agentID uuid.UUID) string
+	// BoundExtensionFor is the phone configuration binds to an agent identity.
+	// A supervisor is not signed in anywhere, so this is the only phone that
+	// is theirs to be reached at.
+	BoundExtensionFor(ctx context.Context, agentID uuid.UUID) string
 	// DeviceAtExtension and AgentAtExtension ask about a phone rather than
 	// about a person. Registration is a fact about the phone and outlives its
 	// agent logging out, which is what lets a call be placed for somebody who
@@ -230,6 +234,9 @@ func (s *Server) router() chi.Router {
 						call.Patch("/calls/{callId}/user-data", op.PatchUserData)
 					})
 					private.With(requireSupervisorRole).Get("/calls", op.ListCalls)
+					// Listening in is supervision, and it is done from a phone
+					// the handler resolves rather than from a leg on the call.
+					private.With(requireSupervisorRole).Post("/calls/{callId}/monitor", op.MonitorCall)
 				}
 
 				// A transcript is readable by both roles, so it is mounted

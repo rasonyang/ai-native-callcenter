@@ -41,7 +41,7 @@ func (p *presenceCalls) AgentByCallcenterName(name string) (uuid.UUID, bool) {
 // The switch's own name for the agent behind agentExtension.
 const agentCallcenterName = "agent-1001"
 
-func (p *presenceCalls) SetOnCall(_ context.Context, _ uuid.UUID, onCall bool) {
+func (p *presenceCalls) SetOnCall(_ context.Context, _ uuid.UUID, onCall bool, _ uuid.UUID) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if onCall {

@@ -8,6 +8,7 @@ import {
   callApi,
   type Availability,
   type CallSnapshot,
+  type MonitorRequest,
   type NotReadyReason,
   type WrapUpRequest,
 } from './api'
@@ -82,6 +83,19 @@ export function useRoster(enabled: boolean) {
     enabled,
     queryFn: agentApi.roster,
     staleTime: 5_000,
+  })
+}
+
+/**
+ * Listen to, whisper into or join an agent's call. The phone it rings is the
+ * supervisor's own, resolved by the server — there is nothing to ask and
+ * nothing to remember. A second call ends the leg the first one raised, which
+ * is how a mode is changed.
+ */
+export function useMonitorCall() {
+  return useMutation({
+    mutationFn: ({ callId, ...body }: { callId: string } & MonitorRequest) =>
+      callApi.monitor(callId, body),
   })
 }
 

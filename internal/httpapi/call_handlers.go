@@ -32,6 +32,10 @@ type CallService interface {
 	// one takes none, because there is nobody on the call to name.
 	EndCall(ctx context.Context, callID uuid.UUID) error
 	Transfer(ctx context.Context, callID, agentID uuid.UUID, destination string) error
+	// Monitor attaches a supervisor's phone to an agent's leg on a call, in
+	// one of the api.MonitorMode modes. ErrNoAgentLeg when the agent is not
+	// on the call.
+	Monitor(ctx context.Context, callID, agentID uuid.UUID, supervisorExtension, mode string) error
 	SendDTMF(ctx context.Context, callID, agentID uuid.UUID, digits string) error
 	CallsForAgent(agentID uuid.UUID) []telephony.Snapshot
 	AllCalls() []telephony.Snapshot
@@ -333,6 +337,69 @@ func (s *Server) TransferCall(w http.ResponseWriter, r *http.Request, callID uui
 	s.callOp(w, r, callID, func(ctx context.Context, callID, agentID uuid.UUID) error {
 		return s.calls.Transfer(ctx, callID, agentID, req.Destination)
 	})
+}
+
+// MonitorCall lets a supervisor listen to, whisper into or join an agent's
+// call from their own phone.
+//
+// The phone is resolved, never named: it is the one they are signed in at when
+// they also work as an agent, else the one bound to their agent identity in
+// configuration. Asking the caller which phone to ring would let a supervisor
+// raise somebody else's handset and put a live conversation into it, and it is
+// a question the platform can already answer.
+func (s *Server) MonitorCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
+	var req api.MonitorRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed body", nil)
+		return
+	}
+	if !req.Mode.Valid() {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"mode must be LISTEN, WHISPER or BARGE", map[string]any{"field": "mode"})
+		return
+	}
+	if req.AgentID == uuid.Nil {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"agentId is required", map[string]any{"field": "agentId"})
+		return
+	}
+	identity, ok := identityFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return
+	}
+	supervisorID, ok := s.signedInAgent(r, identity)
+	if !ok {
+		writeError(w, http.StatusConflict, CodeConflict,
+			"this account has no phone; bind one to it first", nil)
+		return
+	}
+	// Listening to yourself is a feedback loop, not supervision.
+	if supervisorID == req.AgentID {
+		writeError(w, http.StatusConflict, CodeConflict, "you cannot monitor your own call", nil)
+		return
+	}
+	// Where they are signed in beats where they are configured: a supervisor
+	// who took a seat on the floor is at that seat.
+	extension := s.agents.Presence(supervisorID).ExtensionNumber
+	if extension == "" {
+		extension = s.agents.BoundExtensionFor(r.Context(), supervisorID)
+	}
+	if extension == "" {
+		writeError(w, http.StatusConflict, CodeConflict,
+			"this account has no phone; bind one to it first", nil)
+		return
+	}
+	if !s.isPhoneReachable(w, extension) {
+		return
+	}
+
+	err := s.calls.Monitor(r.Context(), callID, req.AgentID, extension, string(req.Mode))
+	if errors.Is(err, telephony.ErrNoAgentLeg) {
+		writeError(w, http.StatusConflict, CodeConflict, "the agent is not on this call", nil)
+		return
+	}
+	s.callResult(w, r, callID, err)
 }
 
 // callOp runs one call operation on behalf of the calling agent. The call id

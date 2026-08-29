@@ -73,7 +73,10 @@ type Presence struct {
 	WrapUpCallID *uuid.UUID
 
 	// Observed facts, not intentions.
-	IsOnCall          bool
+	IsOnCall bool
+	// CurrentCallID is the call the live leg is on, set with IsOnCall and
+	// cleared with it. It is what a supervisor's monitor request names.
+	CurrentCallID     *uuid.UUID
 	IsRegistered      bool
 	IsDeviceInService bool
 }

@@ -328,6 +328,27 @@ func (e MissedReason) Valid() bool {
 	}
 }
 
+// Defines values for MonitorMode.
+const (
+	MonitorModeBARGE   MonitorMode = "BARGE"
+	MonitorModeLISTEN  MonitorMode = "LISTEN"
+	MonitorModeWHISPER MonitorMode = "WHISPER"
+)
+
+// Valid indicates whether the value is a known member of the MonitorMode enum.
+func (e MonitorMode) Valid() bool {
+	switch e {
+	case MonitorModeBARGE:
+		return true
+	case MonitorModeLISTEN:
+		return true
+	case MonitorModeWHISPER:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NotReadyReason.
 const (
 	NotReadyReasonAFTERCALLWORK NotReadyReason = "AFTER_CALL_WORK"
@@ -1378,6 +1399,18 @@ type LoginRequest struct {
 // It describes one journey: an inbound caller who wanted a person. Every value is a place on that journey, so the field is deliberately absent on the calls that were never on it — an outbound call this platform placed, a call between two extensions, and an inbound call that never reached a queue or an agent (a number this deployment does not serve, or a caller who hung up on a direct extension before it was picked up). Those did not go unserved; they did not go. Why they ended is hangupCause, which says it exactly, and a NO_ANSWER row with no missedReason is that and not a gap. Counting missed calls therefore means counting this field, never counting NO_ANSWER.
 type MissedReason string
 
+// MonitorMode LISTEN: the supervisor hears both sides and is heard by nobody. WHISPER: the agent also hears the supervisor. BARGE: both parties hear the supervisor.
+type MonitorMode string
+
+// MonitorRequest defines model for MonitorRequest.
+type MonitorRequest struct {
+	// AgentID Whose leg to attach to. A call may carry two agents (an internal call), so the leg is always named.
+	AgentID openapi_types.UUID `json:"agentId"`
+
+	// Mode LISTEN: the supervisor hears both sides and is heard by nobody. WHISPER: the agent also hears the supervisor. BARGE: both parties hear the supervisor.
+	Mode MonitorMode `json:"mode"`
+}
+
 // NotReadyReason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
 type NotReadyReason string
 
@@ -1645,6 +1678,9 @@ type RosterEntry struct {
 
 	// CallcenterName The identifier the switch knows this agent by.
 	CallcenterName string `json:"callcenterName"`
+
+	// CurrentCallID The live call the agent's leg is on, present while isOnCall is true. What a supervisor's monitor request names.
+	CurrentCallID *openapi_types.UUID `json:"currentCallId,omitempty"`
 
 	// DefaultExtensionID The extension bound to this agent in configuration. Unlike extensionNumber it survives sign-out, and it is what administration edits.
 	DefaultExtensionID *openapi_types.UUID `json:"defaultExtensionId,omitempty"`
@@ -2176,6 +2212,9 @@ type CreateCallJSONRequestBody = CreateCallRequest
 // SendCallDTMFJSONRequestBody defines body for SendCallDTMF for application/json ContentType.
 type SendCallDTMFJSONRequestBody = DTMFRequest
 
+// MonitorCallJSONRequestBody defines body for MonitorCall for application/json ContentType.
+type MonitorCallJSONRequestBody = MonitorRequest
+
 // TransferCallJSONRequestBody defines body for TransferCall for application/json ContentType.
 type TransferCallJSONRequestBody = TransferRequest
 
@@ -2322,6 +2361,9 @@ type ServerInterface interface {
 	// HoldCall Hold the caller's own leg
 	// (POST /calls/{callId}/hold)
 	HoldCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// MonitorCall Listen to, whisper into or join an agent's call
+	// (POST /calls/{callId}/monitor)
+	MonitorCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
 	// MuteCall Mute the agent's own microphone
 	// (POST /calls/{callId}/mute)
 	MuteCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
@@ -2661,6 +2703,12 @@ func (_ Unimplemented) HangupCall(w http.ResponseWriter, r *http.Request, callID
 // HoldCall Hold the caller's own leg
 // (POST /calls/{callId}/hold)
 func (_ Unimplemented) HoldCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// MonitorCall Listen to, whisper into or join an agent's call
+// (POST /calls/{callId}/monitor)
+func (_ Unimplemented) MonitorCall(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3641,6 +3689,32 @@ func (siw *ServerInterfaceWrapper) HoldCall(w http.ResponseWriter, r *http.Reque
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.HoldCall(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// MonitorCall operation middleware
+func (siw *ServerInterfaceWrapper) MonitorCall(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "callId" -------------
+	var callID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "callId", chi.URLParam(r, "callId"), &callID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "callId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.MonitorCall(w, r, callID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5539,6 +5613,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/hold", wrapper.HoldCall)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/calls/{callId}/monitor", wrapper.MonitorCall)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/calls/{callId}/mute", wrapper.MuteCall)

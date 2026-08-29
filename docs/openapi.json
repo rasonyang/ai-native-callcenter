@@ -1551,6 +1551,72 @@
         }
       }
     },
+    "/calls/{callId}/monitor": {
+      "post": {
+        "operationId": "monitorCall",
+        "tags": [
+          "calls"
+        ],
+        "summary": "Listen to, whisper into or join an agent's call",
+        "description": "Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. Requires SUPERVISOR. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.",
+        "security": [
+          {
+            "cookieSession": [],
+            "csrfHeader": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "callId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MonitorRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The switch accepted the command; the supervisor's phone answers by itself."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/calls/{callId}/recordings": {
       "get": {
         "operationId": "listCallRecordings",
@@ -4853,6 +4919,11 @@
           "isOnCall": {
             "type": "boolean"
           },
+          "currentCallId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The live call the agent's leg is on, present while isOnCall is true. What a supervisor's monitor request names."
+          },
           "isRegistered": {
             "type": "boolean"
           },
@@ -5414,6 +5485,32 @@
         },
         "required": [
           "digits"
+        ]
+      },
+      "MonitorMode": {
+        "type": "string",
+        "enum": [
+          "LISTEN",
+          "WHISPER",
+          "BARGE"
+        ],
+        "description": "LISTEN: the supervisor hears both sides and is heard by nobody. WHISPER: the agent also hears the supervisor. BARGE: both parties hear the supervisor."
+      },
+      "MonitorRequest": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/MonitorMode"
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Whose leg to attach to. A call may carry two agents (an internal call), so the leg is always named."
+          }
+        },
+        "required": [
+          "mode",
+          "agentId"
         ]
       },
       "CreateCallRequest": {
