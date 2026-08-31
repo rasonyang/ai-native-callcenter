@@ -17,11 +17,15 @@ package httpapi
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"os"
 	"reflect"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -135,7 +139,7 @@ var untranslatable = map[string]string{
 // one they cannot.
 func TestOneErrorCodeIsSpelledTheSameEverywhere(t *testing.T) {
 	contract := contractErrorCodes(t)
-	goConstants := goErrorCodes()
+	goConstants := goErrorCodes(t)
 
 	compare(t, "the contract", contract, "internal/httpapi/errors.go", goConstants)
 
@@ -184,25 +188,63 @@ func contractErrorCodes(t *testing.T) []string {
 	return codes
 }
 
-// goErrorCodes reads the constants through the type system rather than by
-// parsing the file: every ErrorCode-typed constant this package exports to
-// itself is one the server can write.
-func goErrorCodes() []string {
-	// The values are what reaches the wire, and the wire is what the other
-	// three lists hold.
-	return []string{
-		string(CodeInvalidCredentials), string(CodeSessionExpired), string(CodeForbidden),
-		string(CodeAgentRequired), string(CodeAgentImpersonationNotAllowed),
-		string(CodeInsufficientScope), string(CodeValidationFailed),
-		string(CodeUserDataTooLarge), string(CodeNotFound), string(CodeMethodNotAllowed),
-		string(CodeConflict), string(CodeExtensionInUse), string(CodeExtensionAssignedToAgent),
-		string(CodeExtensionPoolExhausted), string(CodeLastAdmin),
-		string(CodeAgentAlreadyLoggedIn), string(CodeAgentNotLoggedIn),
-		string(CodeAgentNotInWrapUp), string(CodeCallNotFound), string(CodeNotCallParty),
-		string(CodeOperationNotAllowedForCallType), string(CodeUserSuspended),
-		string(CodeSwitchDown), string(CodeStorageDown), string(CodeRateLimited),
-		string(CodeInternal),
+// goErrorCodes reads every ErrorCode constant out of errors.go, by parsing it.
+//
+// Parsed rather than listed here. A hand-copied list would be a third place to
+// forget a code, and it would fail in exactly the way this assertion exists to
+// prevent: add CodeQuotaExceeded to errors.go, use it in a handler, forget the
+// contract — the contract does not have it, this list does not have it, the
+// translations do not have it, and every comparison passes while the wire
+// emits a code the contract does not declare and the screen says "Unexpected
+// error". errors.go is hand-written with no generator behind it, which is the
+// whole reason ruling 4 asked for this assertion.
+//
+// The parsing approach is the one routes_test.go already uses on server.go.
+func goErrorCodes(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "errors.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse errors.go: %v", err)
 	}
+
+	var codes []string
+	for _, decl := range file.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		// Only the block that declares ErrorCode values: the type is written
+		// once, on the first spec, and carries down the block.
+		isErrorCode := false
+		for _, spec := range gen.Specs {
+			value, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
+			if ident, ok := value.Type.(*ast.Ident); ok {
+				isErrorCode = ident.Name == "ErrorCode"
+			}
+			if !isErrorCode {
+				continue
+			}
+			for _, v := range value.Values {
+				lit, ok := v.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
+				}
+				unquoted, err := strconv.Unquote(lit.Value)
+				if err != nil {
+					t.Fatalf("unquote %s: %v", lit.Value, err)
+				}
+				codes = append(codes, unquoted)
+			}
+		}
+	}
+	if len(codes) == 0 {
+		t.Fatal("errors.go declares no ErrorCode constants; the parse found nothing")
+	}
+	return codes
 }
 
 func translationErrorCodes(t *testing.T, locale string) []string {

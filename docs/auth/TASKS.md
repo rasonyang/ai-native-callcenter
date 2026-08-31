@@ -141,6 +141,7 @@
       吊销过的 Key 留在列表里；状态两个值；无「允许 Agents」列。Browser Harness 全流程见 RESULTS.md
 - [x] ⑦ CI 检查 —— `internal/httpapi/contract_gate_test.go`，三条齐全，**每条都做了反证**（注入缺陷 → 断言失败 → 还原）。
       a/b/c 三条 + `TestTheUntranslatableKeysAreStillThere` + `TestEveryContractOperationHasASecurityRow`（91 = 91）。
+      (b) 的 `errors.go` 那条腿用 `go/parser` 解析，**不是手抄**——初版抄了一遍，等于自己守自己的副本，见 RESULTS.md。
       裁定 4 的 4 个漏译已在 `47491ee` 单独补齐——先平账，再装秤。
 - [ ] **REVOKED 终态的首次真实执行（人工门）**
 

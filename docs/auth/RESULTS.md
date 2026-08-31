@@ -693,3 +693,18 @@ API_KEY      | live-check-crm | 807b2164-bd6b-47e9-9286-39a1ca831cea | t        
 
 `[FACT]` 裁定 4 要求先补齐 4 个漏译再装断言，已单独一个提交（`47491ee`）：`USER_DATA_TOO_LARGE` / `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE` / `LAST_ADMIN` / `EXTENSION_POOL_EXHAUSTED`。
 `[INFERENCE]` **先把账平了，再装那个不许它再次失衡的秤**——反过来做，第一次 CI 红的会是一个与本次改动无关的历史欠账。
+
+---
+
+## 2026-08-31 — ⑦(b) 的一处真实缺口：手抄的那条腿
+
+`[FACT]` `contract_gate_test.go` 初版里的 `goErrorCodes()` **把 26 个常量手抄了一遍**。三方对齐于是变成了：契约 ↔ 翻译（真的）、契约 ↔ 我抄的那份（假的）。
+
+`[INFERENCE]` 走一遍失败路径：有人往 `errors.go` 加 `CodeQuotaExceeded` 并在 handler 里用上，忘了改契约。契约没有它、我抄的列表没有它、翻译没有它——**三方比较全部通过**，而线上发出的是一个契约没声明的码，界面显示「未知错误」。这正是裁定 4 点名要防的那件事（"`errors.go` 是手写且无 CI 兜底，不加这条断言，新增的 4 个码明天照样会漏"）。
+
+`[FACT]` 当时的反证只删了 `zh` 的 `LAST_ADMIN`——那验的是**翻译那条腿**，不是这条。**一次反证只证明它验到的那条路径。**
+
+`[FACT]` 改法：用 `go/parser` 解析 `errors.go`，取 `ErrorCode` 类型 const 块里的字面量（`routes_test.go:36-73` 解析 `server.go` 的同一手法）。
+`[FACT]` 补的反证：往 `errors.go` 加一个 `CodeQuotaExceeded`，断言 FAIL —— `internal/httpapi/errors.go has QUOTA_EXCEEDED and the contract does not`。还原后通过。
+
+`[INFERENCE]` 记在这里而不只是改掉：这与 ②a 的假对勾是同一个形状——**一个看起来在守着的检查，实际守的是它自己的副本**。
