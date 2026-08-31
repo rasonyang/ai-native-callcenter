@@ -150,7 +150,12 @@ func (s *Server) UpdateAPIKey(w http.ResponseWriter, r *http.Request, keyID uuid
 	}
 
 	key, err := s.keys.Update(r.Context(), keyID, name, scopes)
-	if err != nil {
+	switch {
+	case errors.Is(err, store.ErrKeyAlreadyRevoked):
+		writeError(w, http.StatusConflict, CodeConflict,
+			"a revoked key cannot be edited", nil)
+		return
+	case err != nil:
 		writeKeyLookupError(w, r, err)
 		return
 	}

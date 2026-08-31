@@ -182,7 +182,7 @@ const updateAPIKey = `-- name: UpdateAPIKey :one
 UPDATE api_keys
 SET name   = coalesce($2, name),
     scopes = coalesce($3::text[], scopes)
-WHERE id = $1
+WHERE id = $1 AND status = 'ENABLED'
 RETURNING id, name, key_hash, key_prefix, status, scopes, created_at, created_by, last_used_at, revoked_at
 `
 
@@ -192,6 +192,14 @@ type UpdateAPIKeyParams struct {
 	Scopes []string  `json:"scopes"`
 }
 
+// A revoked key is not edited. It is a historical record: the audit trail
+// names it, and rows from months ago say what it did — with the capabilities
+// it held at the time. Letting its scopes be rewritten afterwards makes those
+// rows describe a key that never existed, which is the one table nothing may
+// falsify. The contract says so too ("A revoked key cannot be edited"), and
+// the condition lives in the WHERE rather than in a caller's if, for the same
+// reason revocation's does: a rule enforced where the row is touched cannot be
+// bypassed by a second caller who forgot it.
 func (q *Queries) UpdateAPIKey(ctx context.Context, arg UpdateAPIKeyParams) (ApiKey, error) {
 	row := q.db.QueryRow(ctx, updateAPIKey, arg.ID, arg.Name, arg.Scopes)
 	var i ApiKey

@@ -120,26 +120,32 @@ function KeysPage() {
                 <StatusPill status={key.status} />
               </Td>
               <Td align="right">
-                <span className="flex items-center justify-end gap-1">
-                  <Button
-                    size="icon-sm"
-                    variant="ghost"
-                    title={t('common.edit')}
-                    disabled={revoked}
-                    onClick={() => setEditing({ id: key.id, name: key.name, scopes: key.scopes })}
-                  >
-                    <Pencil />
-                  </Button>
-                  {/* Revoked keys stay in the list: a revoked key is what an
-                      audit row from last month refers to, and a list that hid
-                      them would leave that row pointing at nothing. */}
-                  {!revoked && (
+                {/* A revoked key has no actions, so it is given none.
+                    Rendering a permanently disabled pencil would be furniture:
+                    it can never become usable, it invites a click that does
+                    nothing, and a column of grey icons beside every dead row
+                    says less than an empty column does.
+
+                    Revoked keys do stay in the list — a revoked key is what an
+                    audit row from last month refers to, and hiding them would
+                    leave that row pointing at nothing. It is the actions that
+                    go, not the record. */}
+                {!revoked && (
+                  <span className="flex items-center justify-end gap-1">
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      title={t('common.edit')}
+                      onClick={() => setEditing({ id: key.id, name: key.name, scopes: key.scopes })}
+                    >
+                      <Pencil />
+                    </Button>
                     <ConfirmRevoke
                       label={t('keys.revokeConfirm', { name: key.name })}
                       onConfirm={() => revokeKey.mutate(key.id)}
                     />
-                  )}
-                </span>
+                  </span>
+                )}
               </Td>
             </Tr>
             )

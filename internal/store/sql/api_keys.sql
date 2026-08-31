@@ -25,11 +25,19 @@ SELECT * FROM api_keys WHERE id = $1;
 -- name: ListAPIKeys :many
 SELECT * FROM api_keys ORDER BY created_at DESC;
 
+-- A revoked key is not edited. It is a historical record: the audit trail
+-- names it, and rows from months ago say what it did — with the capabilities
+-- it held at the time. Letting its scopes be rewritten afterwards makes those
+-- rows describe a key that never existed, which is the one table nothing may
+-- falsify. The contract says so too ("A revoked key cannot be edited"), and
+-- the condition lives in the WHERE rather than in a caller's if, for the same
+-- reason revocation's does: a rule enforced where the row is touched cannot be
+-- bypassed by a second caller who forgot it.
 -- name: UpdateAPIKey :one
 UPDATE api_keys
 SET name   = coalesce(sqlc.narg('name'), name),
     scopes = coalesce(sqlc.narg('scopes')::text[], scopes)
-WHERE id = $1
+WHERE id = $1 AND status = 'ENABLED'
 RETURNING *;
 
 -- Revocation is terminal, and this is where that is true rather than in a

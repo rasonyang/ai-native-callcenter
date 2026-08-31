@@ -771,3 +771,21 @@ API_KEY      | live-check-crm | 807b2164-bd6b-47e9-9286-39a1ca831cea | t        
 
 `[FACT]` 改完截图，发现中文「已吊销」在药丸里**折成两行**（「已吊 / 销」），把那一行撑到比别的行高。加 `whitespace-nowrap` 修掉，实测三行高度均为 36px（与设计系统的 36px 行高一致）。
 `[INFERENCE]` 这一条是**看了图才发现的**——`tsc`、`oxlint`、单元测试、乃至读 DOM 属性都不会报它。与 `common.done` 那次同源：有些缺陷只在渲染出来的像素上存在。
+
+### 服务器违反了自己的契约：已吊销的 Key 还能被编辑
+
+`[FACT]` owner 指出吊销后铅笔图标还在。查契约，`PATCH /api-keys/{keyId}` 的 description 白纸黑字写着 **"A revoked key cannot be edited."**，`409` 也早已在 responses 里声明。**所以这不是设计问题，是服务器没做到它自己承诺的事。**
+
+`[FACT]` 实测复现（真服务器）：对一把已吊销的 Key `PATCH {"name":"EDITED-AFTER-REVOKE","scopes":["users:write","keys:manage"]}` → **200**，能力从 `calls:*` 被改写成了 `users:write keys:manage`。
+
+`[INFERENCE]` **这不是外观问题。** 审计行说这把 Key 做过事；它记录在案的能力可以被事后改写，于是几个月前那些行描述的是一把从未存在过的 Key——而那是唯一不许伪造的一张表。`api_keys` 的行之所以不许硬删，理由与此完全相同（迁移 `00029` 的注释），却漏了「也不许改」这一半。
+
+`[FACT]` 修法：条件写进 SQL 的 `WHERE id = $1 AND status = 'ENABLED'`，与吊销同一手法；store 区分「不存在」与「已吊销」，handler 回 **409 CONFLICT**。
+`[INFERENCE]` 写在 `WHERE` 里而不是调用方的 `if` 里，理由和吊销那次一样：**一条在触碰行的地方生效的规则，不会被第二个忘了它的调用方绕过。**
+
+`[FACT]` 新增 `TestARevokedKeyCannotBeEdited`，并做了反证：把 SQL 里的 `AND status = 'ENABLED'` 拿掉 → FAIL，两条断言都点名（`status = 200, want 409` 和 `scopes = [keys:manage] — 这把已吊销的 Key 获得了签发其它 Key 的能力`）。还原后通过。
+`[INFERENCE]` 断言里**除了状态码还查了库里的值**：只断言 409，一个「先写库再回错」的实现照样能过。
+
+`[FACT]` UI 同步：吊销的行**不再渲染任何操作按钮**（此前是一个永远 disabled 的铅笔）。一个永远不会变成可用的禁用控件是家具——它招来一次什么也不会发生的点击，而一整列灰图标比一列空白说的更少。实测吊销行 `actions: 0`，启用行 `actions: 2`。
+
+`[FACT]` 开发库里留下了一行 `EDITED-AFTER-REVOKE`（能力显示为 `keys:manage users:write`），那是这次复现留下的痕迹。它已吊销、认证不了，也**再也改不动了**——按设计没有硬删，就留着。

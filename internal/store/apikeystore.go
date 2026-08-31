@@ -150,6 +150,11 @@ func (s *APIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 // Status is not here. The only status change is revocation, it is terminal,
 // and it has an operation of its own — a PATCH that could also flip a key
 // back on would make "revoked" a state rather than an ending.
+//
+// A revoked key is refused with ErrKeyAlreadyRevoked. Terminal has to mean
+// that nothing about the key changes afterwards: its scopes are what audit
+// rows from months ago refer to, and rewriting them would make those rows
+// describe a key that never existed.
 func (s *APIKeyStore) Update(ctx context.Context, id uuid.UUID, name *string, scopes *[]string) (APIKey, error) {
 	arg := queries.UpdateAPIKeyParams{ID: id, Name: name}
 	if scopes != nil {
@@ -159,7 +164,16 @@ func (s *APIKeyStore) Update(ctx context.Context, id uuid.UUID, name *string, sc
 		}
 	}
 	row, err := s.q.UpdateAPIKey(ctx, arg)
-	if err != nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		// No row matched: either it does not exist, or it is revoked and the
+		// query refused it. Ask which, so the caller can tell a wrong id from
+		// a stale screen.
+		if _, getErr := s.q.GetAPIKey(ctx, id); getErr == nil {
+			return APIKey{}, ErrKeyAlreadyRevoked
+		}
+		return APIKey{}, pgx.ErrNoRows
+	case err != nil:
 		return APIKey{}, err
 	}
 	return apiKeyFrom(row), nil

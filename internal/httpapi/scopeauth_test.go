@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -573,4 +574,50 @@ func (d dbDirectory) UserIDForAgent(r *http.Request, agentID uuid.UUID) (uuid.UU
 		return uuid.Nil, err
 	}
 	return agent.UserID, nil
+}
+
+// ---------------------------------------------------------------------------
+// 吊销是终态：终态意味着此后关于这把 Key 的一切都不再变。
+// ---------------------------------------------------------------------------
+
+// 契约写着 "A revoked key cannot be edited"，而服务器曾经照改不误——
+// 一次 PATCH 就能把一把已吊销 Key 的能力从 calls:* 改写成
+// users:write + keys:manage，返回 200。
+//
+// 这不是外观问题。审计行说这把 Key 做过事，而它记录在案的能力可以被事后
+// 改成别的，于是几个月前那些行描述的是一把从未存在过的 Key——那是唯一
+// 不许伪造的一张表。
+func TestARevokedKeyCannotBeEdited(t *testing.T) {
+	f := newFixture(t)
+	admin := f.seedAdmin()
+	id, _ := f.issueKey(admin, "history:read:all")
+
+	if got := f.do(call{method: http.MethodPost, path: "/api-keys/" + id + "/revoke",
+		cookie: admin}); got.status != http.StatusOK {
+		t.Fatalf("revoke: status %d body %.200s", got.status, got.body)
+	}
+
+	got := f.do(call{method: http.MethodPatch, path: "/api-keys/" + id, cookie: admin,
+		body: map[string]any{"name": "edited-after-revoke", "scopes": []string{"keys:manage"}}})
+	if got.status != http.StatusConflict {
+		t.Errorf("status = %d (%s), want 409 — the contract says a revoked key "+
+			"cannot be edited; body %.200s", got.status, got.code, got.body)
+	}
+
+	// 而且真的没改。断言状态码不够：一个先写库再回错的实现照样能过。
+	after := f.do(call{method: http.MethodGet, path: "/api-keys/" + id, cookie: admin})
+	var key struct {
+		Name   string   `json:"name"`
+		Scopes []string `json:"scopes"`
+	}
+	if err := json.Unmarshal(after.body, &key); err != nil {
+		t.Fatalf("read the key back: %v", err)
+	}
+	if key.Name == "edited-after-revoke" {
+		t.Error("the name was rewritten anyway")
+	}
+	if slices.Contains(key.Scopes, "keys:manage") {
+		t.Errorf("scopes = %v — a revoked key gained the ability to issue further keys, "+
+			"and every audit row naming it now describes a key that never existed", key.Scopes)
+	}
 }
