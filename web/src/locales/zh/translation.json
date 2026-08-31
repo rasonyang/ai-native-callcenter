@@ -92,6 +92,7 @@
     "FORBIDDEN": "您没有执行该操作的权限。",
     "VALIDATION_FAILED": "有字段没通过校验，请逐项检查。",
     "NOT_FOUND": "未找到。",
+    "METHOD_NOT_ALLOWED": "该端点不接受此请求方法。",
     "CONFLICT": "该操作与当前状态冲突。",
     "USER_SUSPENDED": "该账号已被停用。",
     "SWITCH_DOWN": "无法连接话务交换机。",

@@ -1421,7 +1421,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];

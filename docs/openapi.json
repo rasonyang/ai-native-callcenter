@@ -4,7 +4,7 @@
     "title": "AI Native Call Center API",
     "version": "1.0.0",
     "summary": "REST and SSE surface of the AI-native call center.",
-    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. A system integrating without a browser authenticates instead with the X-AICC-Api-Key header, on the operations whose security says so. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
+    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. A system integrating without a browser authenticates instead with the X-AICC-Api-Key header, on the operations whose security says so. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend. That holds for the router's own refusals too: a path this contract does not declare is 404 NOT_FOUND and a method it does not declare on a path it does is 405 METHOD_NOT_ALLOWED, both in the envelope — never the SPA's index.html, which a client cannot tell from a successful response.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -4622,6 +4622,7 @@
           "VALIDATION_FAILED",
           "USER_DATA_TOO_LARGE",
           "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
           "CONFLICT",
           "EXTENSION_IN_USE",
           "EXTENSION_ASSIGNED_TO_AGENT",

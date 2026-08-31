@@ -210,6 +210,7 @@ const (
 	ErrorCodeINTERNAL                       ErrorCode = "INTERNAL"
 	ErrorCodeINVALIDCREDENTIALS             ErrorCode = "INVALID_CREDENTIALS"
 	ErrorCodeLASTADMIN                      ErrorCode = "LAST_ADMIN"
+	ErrorCodeMETHODNOTALLOWED               ErrorCode = "METHOD_NOT_ALLOWED"
 	ErrorCodeNOTCALLPARTY                   ErrorCode = "NOT_CALL_PARTY"
 	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
 	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
@@ -248,6 +249,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeINVALIDCREDENTIALS:
 		return true
 	case ErrorCodeLASTADMIN:
+		return true
+	case ErrorCodeMETHODNOTALLOWED:
 		return true
 	case ErrorCodeNOTCALLPARTY:
 		return true

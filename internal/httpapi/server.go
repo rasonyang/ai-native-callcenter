@@ -168,6 +168,29 @@ func (s *Server) router() chi.Router {
 	op := s.apiWrapper()
 
 	r.Route("/api/v1", func(v1 chi.Router) {
+		// The API answers its own misses, in the envelope, before the SPA
+		// fallback can.
+		//
+		// chi propagates a parent's NotFound into every subrouter that has
+		// none of its own (Mux.updateSubRoutes), so the r.NotFound(spa) at
+		// the bottom of this function would otherwise answer an unknown
+		// /api/v1 path with index.html and a 200 — which a client library
+		// cannot tell from success: it either dies parsing HTML as JSON,
+		// with an error that names nothing real, or believes the call
+		// worked. This repository has been bitten once already, by a
+		// contract operation that had no route (see routes_test.go).
+		// Claiming the handlers here means the propagation skips this
+		// subtree, and the SPA keeps every path outside it.
+		v1.NotFound(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusNotFound, CodeNotFound,
+				"no such endpoint", map[string]any{"path": r.URL.Path})
+		})
+		v1.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed,
+				"the endpoint does not take this method",
+				map[string]any{"method": r.Method, "path": r.URL.Path})
+		})
+
 		// Request-scoped routes carry a timeout; the event stream must not.
 		v1.Group(func(short chi.Router) {
 			short.Use(middleware.Timeout(30 * time.Second))

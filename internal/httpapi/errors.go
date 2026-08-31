@@ -27,6 +27,11 @@ const (
 	// request was refused.
 	CodeUserDataTooLarge ErrorCode = "USER_DATA_TOO_LARGE"
 	CodeNotFound         ErrorCode = "NOT_FOUND"
+	// CodeMethodNotAllowed answers the router's own refusal, so that a
+	// wrong method lands in the same envelope as everything else. Without
+	// it chi replies 405 with an empty body and no content type, and the
+	// contract's promise that errors *always* use the envelope is false.
+	CodeMethodNotAllowed ErrorCode = "METHOD_NOT_ALLOWED"
 	CodeConflict         ErrorCode = "CONFLICT"
 	CodeExtensionInUse   ErrorCode = "EXTENSION_IN_USE"
 	// CodeExtensionAssignedToAgent refuses to delete an extension somebody

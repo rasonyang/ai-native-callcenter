@@ -92,6 +92,7 @@
     "FORBIDDEN": "You do not have permission to do that.",
     "VALIDATION_FAILED": "Some fields did not pass validation; check each one.",
     "NOT_FOUND": "Not found.",
+    "METHOD_NOT_ALLOWED": "The endpoint does not take this method.",
     "CONFLICT": "That change conflicts with the current state.",
     "USER_SUSPENDED": "This account is suspended.",
     "SWITCH_DOWN": "The telephony switch is unreachable.",
