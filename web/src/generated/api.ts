@@ -194,13 +194,13 @@ export interface paths {
         };
         /**
          * The live roster
-         * @description Every agent with their presence, device registration and on-call flag. Requires SUPERVISOR.
+         * @description Every agent with their presence, device registration and on-call flag.
          */
         get: operations["listAgents"];
         put?: never;
         /**
          * Give a user an agent identity
-         * @description Creates the agent identity behind an account and binds their phone. Requires ADMIN.
+         * @description Creates the agent identity behind an account and binds their phone.
          */
         post: operations["createAgent"];
         delete?: never;
@@ -219,13 +219,13 @@ export interface paths {
         get?: never;
         /**
          * Rewrite an agent's configuration
-         * @description Rebinds the phone, renames the switch identifier, or changes wrap-up. Requires ADMIN.
+         * @description Rebinds the phone, renames the switch identifier, or changes wrap-up.
          */
         put: operations["updateAgent"];
         post?: never;
         /**
          * Remove an agent identity
-         * @description The account remains; it simply stops being an agent, and any presence is dropped. Requires ADMIN.
+         * @description The account remains; it simply stops being an agent, and any presence is dropped.
          */
         delete: operations["deleteAgent"];
         options?: never;
@@ -242,13 +242,13 @@ export interface paths {
         };
         /**
          * Accounts
-         * @description Every account, with the agent identity and phone each one has. Requires ADMIN.
+         * @description Every account, with the agent identity and phone each one has.
          */
         get: operations["listUsers"];
         put?: never;
         /**
          * Create an account
-         * @description Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint. Requires ADMIN.
+         * @description Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint.
          */
         post: operations["createUser"];
         delete?: never;
@@ -267,7 +267,7 @@ export interface paths {
         get?: never;
         /**
          * Edit an account
-         * @description Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer. Requires ADMIN.
+         * @description Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer.
          */
         put: operations["updateUser"];
         post?: never;
@@ -288,7 +288,7 @@ export interface paths {
         put?: never;
         /**
          * Set an account's password
-         * @description An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked. Requires ADMIN.
+         * @description An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked.
          */
         post: operations["resetUserPassword"];
         delete?: never;
@@ -308,7 +308,7 @@ export interface paths {
         put?: never;
         /**
          * Sign somebody else out
-         * @description How an abandoned phone stops absorbing calls. Requires SUPERVISOR.
+         * @description How an abandoned phone stops absorbing calls.
          */
         post: operations["forceLogoutAgent"];
         delete?: never;
@@ -326,7 +326,7 @@ export interface paths {
         };
         /**
          * Every live call
-         * @description The supervision view. Requires SUPERVISOR.
+         * @description The supervision view.
          */
         get: operations["listCalls"];
         put?: never;
@@ -334,9 +334,7 @@ export interface paths {
          * Place a call
          * @description One entry point for every call the platform places, told apart by kind.
          *
-         *     AI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Requires SUPERVISOR.
-         *
-         *     AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.
+         *     AI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.
          *
          *     Idempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.
          */
@@ -562,7 +560,7 @@ export interface paths {
         put?: never;
         /**
          * Listen to, whisper into or join an agent's call
-         * @description Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. Requires SUPERVISOR. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.
+         * @description Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.
          */
         post: operations["monitorCall"];
         delete?: never;
@@ -600,7 +598,11 @@ export interface paths {
         };
         /**
          * A call's transcript, from a cursor
-         * @description Requires AGENT and involvement in the call; SUPERVISOR and ADMIN pass unconditionally. Subscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.
+         * @description What was said on the call, live or finished.
+         *
+         *     history:read:own reaches the subject's own calls, including ones that have ended — a transcript is a record of a call, and which screen wanted it is not the contract's business. history:read:all reaches anybody's.
+         *
+         *     Subscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.
          */
         get: operations["getCallTranscript"];
         put?: never;
@@ -618,10 +620,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * A call's quality reviews
-         * @description Requires SUPERVISOR.
-         */
+        /** A call's quality reviews */
         get: operations["listCallReviews"];
         put?: never;
         post?: never;
@@ -638,15 +637,12 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * All extensions
-         * @description Requires ADMIN.
-         */
+        /** All extensions */
         get: operations["listExtensions"];
         put?: never;
         /**
          * Create an extension
-         * @description Password is required here and never returned. Requires ADMIN.
+         * @description Password is required here and never returned.
          */
         post: operations["createExtension"];
         delete?: never;
@@ -665,13 +661,13 @@ export interface paths {
         get?: never;
         /**
          * Update an extension
-         * @description An empty password keeps the current one. Requires ADMIN.
+         * @description An empty password keeps the current one.
          */
         put: operations["updateExtension"];
         post?: never;
         /**
          * Delete an extension
-         * @description Requires ADMIN. Refused with 409 EXTENSION_ASSIGNED_TO_AGENT while an agent has the extension as their phone: deleting it would unbind them silently, and the next registration their phone attempts would fail with nothing in the application to say why. Unbind the agent first.
+         * @description Refused with 409 EXTENSION_ASSIGNED_TO_AGENT while an agent has the extension as their phone: deleting it would unbind them silently, and the next registration their phone attempts would fail with nothing in the application to say why. Unbind the agent first.
          */
         delete: operations["deleteExtension"];
         options?: never;
@@ -690,7 +686,7 @@ export interface paths {
          * Read a phone's SIP password
          * @description The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.
          *
-         *     Every read is recorded in the audit trail, including who asked and which phone. Requires ADMIN.
+         *     Every read is recorded in the audit trail, including who asked and which phone.
          */
         get: operations["revealExtensionPassword"];
         put?: never;
@@ -710,14 +706,11 @@ export interface paths {
         };
         /**
          * All queues
-         * @description Reading the queues is supervision: it answers who is covering what right now. Requires SUPERVISOR.
+         * @description Reading the queues is supervision: it answers who is covering what right now.
          */
         get: operations["listQueues"];
         put?: never;
-        /**
-         * Create a queue
-         * @description Requires ADMIN.
-         */
+        /** Create a queue */
         post: operations["createQueue"];
         delete?: never;
         options?: never;
@@ -733,16 +726,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Update a queue
-         * @description Requires ADMIN.
-         */
+        /** Update a queue */
         put: operations["updateQueue"];
         post?: never;
-        /**
-         * Delete a queue
-         * @description Requires ADMIN.
-         */
+        /** Delete a queue */
         delete: operations["deleteQueue"];
         options?: never;
         head?: never;
@@ -756,14 +743,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * A queue's staffing
-         * @description Requires SUPERVISOR.
-         */
+        /** A queue's staffing */
         get: operations["listQueueAgents"];
         /**
          * Put an agent on the queue
-         * @description Idempotent: staffing an already-staffed agent updates level and position. Requires ADMIN.
+         * @description Idempotent: staffing an already-staffed agent updates level and position.
          */
         put: operations["staffQueue"];
         post?: never;
@@ -783,10 +767,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /**
-         * Take an agent off the queue
-         * @description Requires ADMIN.
-         */
+        /** Take an agent off the queue */
         delete: operations["unstaffQueue"];
         options?: never;
         head?: never;
@@ -800,16 +781,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * All DIDs
-         * @description Requires ADMIN.
-         */
+        /** All DIDs */
         get: operations["listDIDs"];
         put?: never;
-        /**
-         * Create a DID
-         * @description Requires ADMIN.
-         */
+        /** Create a DID */
         post: operations["createDID"];
         delete?: never;
         options?: never;
@@ -825,16 +800,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /**
-         * Update a DID
-         * @description Requires ADMIN.
-         */
+        /** Update a DID */
         put: operations["updateDID"];
         post?: never;
-        /**
-         * Delete a DID
-         * @description Requires ADMIN.
-         */
+        /** Delete a DID */
         delete: operations["deleteDID"];
         options?: never;
         head?: never;
@@ -850,13 +819,13 @@ export interface paths {
         };
         /**
          * All flows
-         * @description Identity and publication state of every flow, by name. Requires ADMIN.
+         * @description Identity and publication state of every flow, by name.
          */
         get: operations["listFlows"];
         put?: never;
         /**
          * Create a flow
-         * @description Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it. Requires ADMIN.
+         * @description Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it.
          */
         post: operations["createFlow"];
         delete?: never;
@@ -872,14 +841,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * One flow, its draft and its revisions
-         * @description Requires ADMIN.
-         */
+        /** One flow, its draft and its revisions */
         get: operations["getFlow"];
         /**
          * Replace the draft
-         * @description Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems. Requires ADMIN.
+         * @description Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems.
          */
         put: operations["updateFlowDraft"];
         post?: never;
@@ -900,7 +866,7 @@ export interface paths {
         put?: never;
         /**
          * Publish the draft
-         * @description Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on. Requires ADMIN.
+         * @description Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on.
          */
         post: operations["publishFlow"];
         delete?: never;
@@ -918,7 +884,7 @@ export interface paths {
         };
         /**
          * Page the ledger
-         * @description Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected. Requires SUPERVISOR.
+         * @description Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected.
          */
         get: operations["listCDRs"];
         put?: never;
@@ -958,7 +924,7 @@ export interface paths {
         };
         /**
          * One finished call, with everything it left behind
-         * @description CDR, transcript and recordings in one round trip. Requires SUPERVISOR.
+         * @description CDR, transcript and recordings in one round trip.
          */
         get: operations["getCDR"];
         put?: never;
@@ -1000,7 +966,9 @@ export interface paths {
         put?: never;
         /**
          * Score a recording
-         * @description Records a quality review against the recording, attributed to the signed-in reviewer. Requires SUPERVISOR.
+         * @description Records a quality review against the recording, attributed to the subject who wrote it.
+         *
+         *     **The one operation with no apiKeyBearer branch.** A review is a person's judgement of another person's work, and reviewer_id has to name somebody who can be asked about it; a key acting for an agent would attribute the judgement to the agent being judged. This is not the web application being privileged — a supervisor's session token reaches it from curl exactly as it does from the browser. Reading reviews (GET /calls/{callId}/reviews) has a key branch like everything else.
          */
         post: operations["createRecordingReview"];
         delete?: never;
@@ -1018,7 +986,7 @@ export interface paths {
         };
         /**
          * KPI aggregates
-         * @description The window defaults to today (local midnight to midnight). Requires SUPERVISOR.
+         * @description The window defaults to today (local midnight to midnight).
          */
         get: operations["getReportOverview"];
         put?: never;
@@ -1038,7 +1006,7 @@ export interface paths {
         };
         /**
          * Per-queue aggregates
-         * @description The window defaults to today. Requires SUPERVISOR.
+         * @description The window defaults to today.
          */
         get: operations["getReportQueues"];
         put?: never;
@@ -1058,7 +1026,7 @@ export interface paths {
         };
         /**
          * Per-day aggregates
-         * @description The window defaults to today. Requires SUPERVISOR.
+         * @description The window defaults to today.
          */
         get: operations["getReportDaily"];
         put?: never;
@@ -1246,7 +1214,7 @@ export interface paths {
         };
         /**
          * Stream and trunk introspection
-         * @description Stream counters and the trunks the switch holds. Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.
+         * @description Stream counters and the trunks the switch holds. Liveness and readiness live on the separate operations listener, outside this contract.
          */
         get: operations["getSystemHealth"];
         put?: never;
@@ -1350,13 +1318,15 @@ export interface paths {
         };
         /**
          * All webhook subscriptions
-         * @description Requires ADMIN. Tokens are not included.
+         * @description Tokens are not included.
          */
         get: operations["listWebhookSubscriptions"];
         put?: never;
         /**
          * Create a webhook subscription
-         * @description Requires ADMIN. Deliberately out of reach of AICC_API_KEY: that credential places and ends calls, and letting it also choose where the platform sends finished calls would let a leaked key exfiltrate every one of them (design 09 §10).
+         * @description Where finished calls are sent. Reachable by any subject holding config:write, a key included.
+         *
+         *     This was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from "can the key reach it" to "was this key granted config:write", which is the question a scope exists to answer.
          */
         post: operations["createWebhookSubscription"];
         delete?: never;
@@ -1372,20 +1342,21 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * One webhook subscription
-         * @description Requires ADMIN.
-         */
+        /** One webhook subscription */
         get: operations["getWebhookSubscription"];
         /**
          * Update a webhook subscription
-         * @description Requires ADMIN. Omitting authToken leaves the stored one alone.
+         * @description Where finished calls are sent. Reachable by any subject holding config:write, a key included.
+         *
+         *     This was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from "can the key reach it" to "was this key granted config:write", which is the question a scope exists to answer.
          */
         put: operations["updateWebhookSubscription"];
         post?: never;
         /**
          * Delete a webhook subscription
-         * @description Requires ADMIN. Its deliveries go with it.
+         * @description Where finished calls are sent. Reachable by any subject holding config:write, a key included.
+         *
+         *     This was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from "can the key reach it" to "was this key granted config:write", which is the question a scope exists to answer.
          */
         delete: operations["deleteWebhookSubscription"];
         options?: never;
@@ -1402,11 +1373,105 @@ export interface paths {
         };
         /**
          * Recent deliveries for a subscription
-         * @description Newest first, for diagnosing what a subscriber was told and what came back. Requires ADMIN.
+         * @description Newest first, for diagnosing what a subscriber was told and what came back.
          */
         get: operations["listWebhookDeliveries"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/openapi.json": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * This contract
+         * @description The OpenAPI document this deployment implements, served by the deployment itself.
+         *
+         *     Unauthenticated, deliberately: the contract is public documentation, and the person who most needs to read it is the integrator who has not been issued a credential yet. A product whose API is the product ships its own manual.
+         */
+        get: operations["getOpenAPI"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * All API keys
+         * @description Keys are how a system authenticates. Each carries its own scopes, so a key issued for one integration cannot do another's work.
+         */
+        get: operations["listAPIKeys"];
+        put?: never;
+        /**
+         * Issue an API key
+         * @description Issues a key and returns its secret **once**. Store it now; it cannot be read back.
+         */
+        post: operations["createAPIKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-keys/{keyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * One API key
+         * @description Never carries the secret or its digest.
+         */
+        get: operations["getAPIKey"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Rename a key or change its scopes
+         * @description Revocation is not here — it is terminal, so it has an operation of its own. A revoked key cannot be edited.
+         */
+        patch: operations["updateAPIKey"];
+        trace?: never;
+    };
+    "/api-keys/{keyId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke a key
+         * @description Terminal and irreversible: the key stops authenticating immediately and can never be enabled again. Revoking an already revoked key is answered 409 rather than pretended to succeed — an operator who runs this twice should learn that the first one worked. The row stays, because the audit trail names it.
+         */
+        post: operations["revokeAPIKey"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1421,7 +1486,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -2675,6 +2740,51 @@ export interface components {
         };
         WebhookDeliveryList: {
             items: components["schemas"]["WebhookDelivery"][];
+        };
+        /**
+         * @description ENABLED keys authenticate; REVOKED is terminal and irreversible. There is no third state and no hard delete: a key that ever authenticated is named in the audit trail, and a row that can vanish makes that trail unreadable.
+         * @enum {string}
+         */
+        APIKeyStatus: "ENABLED" | "REVOKED";
+        /** @description An API key as it can be read back. The secret is returned once, by the create operation, and never again — this shape carries only the prefix, which is what a person recognises a key by. */
+        APIKey: {
+            /** Format: uuid */
+            id: string;
+            /** @description What this key is for, in the operator's words. */
+            name: string;
+            /** @description The leading, non-secret part of the key, for display and for recognising it in a list. It identifies nothing on its own: authentication looks the key up by the SHA-256 of the whole secret. */
+            keyPrefix: string;
+            status: components["schemas"]["APIKeyStatus"];
+            /** @description Exactly what this key may do. Names come from x-scopes at the root of this document. */
+            scopes: string[];
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description When this key last authenticated. Null until it has.
+             */
+            lastUsedAt?: string | null;
+            /** Format: date-time */
+            revokedAt?: string | null;
+        };
+        APIKeyList: {
+            items: components["schemas"]["APIKey"][];
+        };
+        /** @description What a key is created with. */
+        APIKeyWrite: {
+            name: string;
+            /** @description Names from x-scopes. An unknown name is refused rather than ignored: a key silently missing a capability fails later, somewhere else, for a reason nobody can see. */
+            scopes: string[];
+        };
+        /** @description What a key can be changed to. Status is not here: the only status change is revocation, which is terminal and has its own operation. */
+        APIKeyUpdate: {
+            name?: string;
+            scopes?: string[];
+        };
+        /** @description The created key, plus its secret. **This is the only time the secret is ever returned.** It is stored as a SHA-256 digest, so nothing — not this API, not the database, not an administrator — can produce it again. A lost key is revoked and reissued. */
+        APIKeyCreated: components["schemas"]["APIKey"] & {
+            /** @description The credential, to be sent as `Authorization: Bearer <secret>`. */
+            secret: string;
         };
     };
     responses: {
@@ -5136,6 +5246,164 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getOpenAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The contract, as JSON. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+        };
+    };
+    listAPIKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every key, secrets excluded. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["APIKeyWrite"];
+            };
+        };
+        responses: {
+            /** @description The key, and its secret, for the only time. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKeyCreated"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKey"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    updateAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["APIKeyUpdate"];
+            };
+        };
+        responses: {
+            /** @description The key as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKey"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    revokeAPIKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                keyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The revoked key. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIKey"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
