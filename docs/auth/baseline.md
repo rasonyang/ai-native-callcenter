@@ -336,6 +336,12 @@
 4. **补齐 4 个漏译**（单独小提交），并在 ⑦ 加一条对齐断言：契约 `ErrorCode` enum ≡ `internal/httpapi/errors.go` 常量 ≡ 两份 `translation.json` 的 `errors` 键。`errors.go` 是手写且无 CI 兜底，不加这条断言，新增的 4 个码明天照样会漏。
 5. **P5 解除**（owner，2026-08-31）：webhook-subscriptions 对 API Key 的封锁**取消**。持有 `webhooks:write` scope 的 Key 可以配置投递目标。原禁令的前提是"只有一把万能钥匙"，per-key scope 让它消失——只持 `calls:create` 的 Key 泄漏本就碰不到 webhook。**须同步改写三处成文依据**，不能只改代码：`internal/httpapi/server.go:363-368` 的注释、`docs/design/09-webhooks.md:370,454`、`docs/openapi.json:4247` 的 operation description。
 6. **P1 / P2 / P3 纳入正式条目**（owner，2026-08-31）：不再是复核建议，是 §2 / §4 的必做项。见 `docs/auth/TASKS.md`。
+7. **O1–O4 减法全部采纳**（owner，2026-08-31，依据 `docs/api-first-audit.md` §二）。**这四条修改的是已批准的 §1，以此裁定为准**：
+   - **O1**：Key 查找改为 `WHERE key_hash = $1` 一次索引命中，照抄 `internal/store/sql/sessions.sql:8-13`。短前缀列**保留但只用于展示**，不建索引。**取消"按前缀取行 + 常量时间比较"**——按 hash 直查时没有东西需要常量时间比较。
+   - **O2**：**取消 `last_used_at` 的内存节流**，每次直接写。无测量支撑的优化，且与 `CLAUDE.md` 那条"没跑基准就不许有性能主张"同源。
+   - **O3**：**v1 取消每把 Key 的"允许代理 Agents"列表**。持 `agent:act` scope 即可代理任意坐席。`AGENT_NOT_ALLOWED` **不进错误码枚举**——新增码由 4 个减为 **3** 个（`AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`）。以后要加是纯加法（一个可空列，NULL = 全部）。
+   - **O4**：状态由三态减为两态 **`ENABLED / REVOKED`**。`DISABLED` 是听起来有用、然后没人用的状态；以后要加是一次 CHECK 放宽。
+   - **O5**（scope 粒度 10–14 个资源级）落在 `2.0b`，不在此裁定里定死具体词表。
 
 ---
 

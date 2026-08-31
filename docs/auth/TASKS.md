@@ -22,6 +22,7 @@
 - [x] 0.9 4 项待决问题已裁定（owner 2026-08-31，见 `baseline.md` §0 待决问题 — 已裁定）
 - [x] 0.10 产品定位复核 "UI is optional. API is the product."（`baseline.md` §17，P1–P9）
 - [x] 0.11 P5 裁定：**解除** webhook 对 API Key 的封锁；P1/P2/P3 纳入 §2/§4 正式条目（owner 2026-08-31）
+- [x] 0.12 O1–O4 减法采纳（owner 2026-08-31）：hash 直查、去节流、砍允许代理列表、两态。**覆盖已批准的 §1 对应条目**
 - [x] **§0 完成，人工门已通过**（`baseline.md` §0 裁定 1–6 + §17）
 
 ## §1 决策
@@ -31,7 +32,7 @@
 ## §2 契约变更（先于代码，单独一次提交）
 
 - [ ] 2.0 实测 `x-scopes` 的放置层级（根 / `components` / scheme 内），`make api-lint` 零新增 warning
-- [ ] 2.0b 定 scope 命名法并写进 §4 禁止事项：`资源:动作[:范围]`，**不得出现角色名**（P3）
+- [ ] 2.0b 定 scope 命名法与词表：`资源:动作[:范围]`，**不得出现角色名**（P3）；目标 **10–14 个资源级**，只在行为真的不同处分 `:own`/`:all`（O5）
 - [ ] 2.1 `securitySchemes`：页面 Token 与 API Key 两种 scheme，共用同一 scope 词表
 - [ ] 2.2 85 个 operation 逐个补 `security` + scopes；Bearer 那一支**不带** `csrfHeader`（P4）
 - [ ] 2.2b `/events` 补 Bearer 支持并在契约声明（P1，正式条目——事件流是产品实时面的全部，不是附注）
@@ -39,7 +40,7 @@
 - [ ] 2.2d `quality_reviews` 打分 operation 的 description 写明能力不对称的理由（P8）
 - [ ] 2.2e webhook-subscriptions 六条改为可由 `webhooks:write` scope 到达；同步改写三处成文依据：`server.go:363-368` 注释、`docs/design/09-webhooks.md:370,454`、`docs/openapi.json:4247`（P5 解除）
 - [ ] 2.3 新增端点：`GET/POST /api-keys`、`GET /api-keys/{id}`、`PATCH /api-keys/{id}`、`POST /api-keys/{id}/revoke`
-- [ ] 2.4 错误码 enum 补 `AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `AGENT_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`（22 → 26）
+- [ ] 2.4 错误码 enum 补 **3** 个：`AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`（`AGENT_NOT_ALLOWED` 随 O3 取消）
 - [ ] 2.5 `make api-lint` 零 error/warning 增量；`make api-breaking` 通过
 - [ ] **2.6 人工批准契约**
 
@@ -58,9 +59,9 @@
 
 - [ ] ②a 生成代码：`make api-generate` + scope 常量生成步骤，产物落 `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts`（裁定 1b，Makefile 无需改）
 - [ ] ③ AuthContext（`Subject` / `AgentID` / `Scopes`）+ scope 中间件；删除 14 处路由级角色守卫与 **6** 处 handler 外角色判定（5 处在 `internal/httpapi`，第 6 处是 `internal/events/hub.go:28` `IsSupervisor`，P2）；删除 `isMachine` / `machineIdentity` 及其 3 个下游分支；重述 `mayReadTranscript` 的按屏幕规则为能力（P7）
-- [ ] ④ API Key 存储（迁移 `00029_*` + `internal/store/sql/api_keys.sql`）与 4 个端点；`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
+- [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
 - [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
-- [ ] ⑥ Admin UI：API Keys 页 + `nav.ts` 条目
+- [ ] ⑥ Admin UI：API Keys 页 + `nav.ts` 条目（列表列去掉「允许 Agents」，状态只有两个值）
 - [ ] ⑦ CI 检查（同一文件三条断言）：
       a. 路由表中任一路由在契约中无 scope 声明即失败（排除 `/metrics`、`/healthz`、`/readyz`、SPA fallback，理由显式登记）
       b. 契约 `ErrorCode` enum ≡ `internal/httpapi/errors.go` 常量 ≡ 两份 `translation.json` 的 `errors` 键（裁定 4）
