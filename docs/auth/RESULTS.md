@@ -297,3 +297,52 @@ ADMIN      (19) 全部（+ audit:read config:write keys:manage users:write）
 `[FACT]` `ecf368f` 与 `3436dd9` 两个提交**构建是红的**：`internal/api/api.gen.go` 的 `ServerInterface` 多了 6 个方法，`internal/httpapi/api_server.go:19` 的编译期断言失败，直到 ④ 给 `Server` 装上 handler。
 
 `[FACT]` 这是 CLAUDE.md 明说的设计意图（"a new spec operation breaks the build until the server grows its method — that is the point"），且 §5 规定的提交切分（①契约 ②生成代码 … ④端点）**必然**产生这个窗口。分支上的中间提交红、PR 头绿，是常规做法。若不可接受，替代方案是把 6 个新 operation 从 ① 拆走、随 ④ 一起进契约——代价是契约变更不再是"单独一次提交"。
+
+---
+
+## 2026-08-31 — §3 测试先行：九条用例已写，在基线上按预期失败
+
+`[FACT]` 文件 `internal/httpapi/scopeauth_test.go`。跑在**真实的 PostgreSQL 与真实的路由树**上：`store.Open` + `Migrate` 建一次性库、`auth.NewService` 真会话、`POST /auth/login` 真登录拿 cookie、`s.router()` 真路由。**鉴权链上没有 mock。** 电话服务用既有的 `stubAgents`，因为真的那个要一台 FreeSWITCH——这条界线是刻意的，被测的是授权不是交换机。
+
+`[FACT]` 基线执行方式：`git worktree` 检出 `main`（构建绿的那个基线），把测试文件拷进去跑。当前分支的构建是红的（编译期断言等 ④），在红树上跑测试证明不了任何事。
+
+```
+git worktree add <tmp>/baseline main
+cp internal/httpapi/scopeauth_test.go <tmp>/baseline/internal/httpapi/
+AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run …
+```
+
+### 失败形态（逐条）
+
+| # | 用例 | 基线结果 | 形态 |
+|---|---|---|---|
+| 1 | `TestAKeyActingForAnAgentDrivesThatAgentsPresence` | **FAIL** | `POST /api-keys` → 404，端点不存在 |
+| 2 | `TestAKeyWithNoAgentHeaderCannotActForOne` | **FAIL** | 同上 |
+| 3 | `TestAKeyWithNoAgentStillReadsWhatItsScopeAllows` | **FAIL** | 同上 |
+| 4 | `TestASessionMayNeverActForAnotherAgent` | **FAIL** | `GET /auth/me` 带 `X-AICC-Agent-ID` → **200**。基线**静默忽略**这个头——今天无害（没人读它），但正是这条断言存在的理由 |
+| 5 | `TestARevokedKeyStopsAuthenticatingAndStopsBeingTouched` | **FAIL** | `POST /api-keys` → 404 |
+| 6 | `TestAnAgentCannotHearSomebodyElsesCall` | **PASS** | 见下 |
+| 7 | `TestAKeyMissingTheScopeIsToldWhichWayItFailed` | **FAIL** | `POST /api-keys` → 404 |
+| 8 | `TestTheSecretIsReturnedOnceAndStoredNever` | **FAIL** | `POST /api-keys` → 404 |
+| 9 | `TestAKeyCanSubscribeToTheEventStream` | **FAIL** | `POST /api-keys` → 404 |
+
+**8 条按预期失败，1 条今天就通过。**
+
+`[FACT]` 第 6 条 `TestAnAgentCannotHearSomebodyElsesCall` 在基线上 **PASS**——`internal/httpapi/recording_handlers.go:33-51` `mayHearCall` 已经拦住了。§3 的表把它列成"预期 403 / 失败形态 200"，事实是它今天就 403。**如实记录：这一条不是失败先行的用例，是回归护栏**——③ 删掉 5 处 handler 内角色判定时，`mayHearCall` 是其中之一，这条断言的作用是保证重写之后它还拦得住。
+
+### §3.3 表格修正（以 §0-7 清单与契约为准）
+
+| 原表 | 修正 | 依据 |
+|---|---|---|
+| "header 指定不在允许列表的坐席 → `AGENT_NOT_ALLOWED`" | **删除** | O3 取消了允许代理列表 |
+| — | **新增**"Key 带 Bearer 订阅 `/events`" | P1 转正式条目 |
+| `/agent/ready` 预期 **202** | 改为 **200** | 契约 `.paths["/agent/ready"].post.responses` 只有 200/401/403/409/500/503 |
+| header 写作 `AICC-Agent-ID` | 改为 `X-AICC-Agent-ID` | 裁定 9 |
+| "任意端点"（第 5 行） | 定为 `GET /auth/me` | 这条规则与端点无关；挑一个永远挂载的，免得 404 掩盖真正的断言 |
+
+九条路径全部在 §0-7 的契约清单里，无其它偏差。
+
+### 两处刻意的取舍
+
+- `[INFERENCE]` **播种直写 SQL，不走写端点**（`insertCDR` / `insertRecordingFor`）。被测的是读端点的授权，让它依赖写端点的授权就把两件事绑在一起了；写端点自己的授权由第 8 条和 ⑦ 的断言管。
+- `[FACT]` **第 3 条附带了基数断言**：`items` 至少 1 行，并在失败信息里写明"空集会因为错误的理由让这条断言通过"。第 8 条同理先断言 `api_keys` 有列，再逐列查明文。
