@@ -44,13 +44,13 @@
 - [x] 2.3 新增 5 个端点（路径参数为 `keyId`）。`PATCH` 改为改名/调 scopes——两态之下唯一的状态变更是吊销，而吊销是终态、有自己的端点
 - [x] 2.4 错误码 22 → 26（含上一提交的 `METHOD_NOT_ALLOWED`）
 - [x] 2.5 `make api-lint` 0 error 0 warning（10 条钉住）；`make api-breaking` exit 0
-- [ ] **2.6 人工批准契约** ← 当前位置。附带一个流程问题：① 与 ② 的构建是红的（编译期断言等 ④ 的 handler），需确认可接受
+- [x] **2.6 契约已批准**（owner 2026-08-31）；中间提交构建红，owner 确认可接受
 
 ## §3 测试先行
 
-- [ ] 3.1 用例表按裁定重算：原 9 条**删 1**（`AGENT_NOT_ALLOWED`，随 O3 取消）、**加 1**（Key 带 Bearer 订阅 `/events`，收到其代理坐席的 `PARTY_*`，P1）= **9 条**；header 一律 `X-AICC-Agent-ID`
-- [ ] 3.2 确认全部在当前基线上按预期失败，失败形态记入 RESULTS.md
-- [ ] 3.3 表中端点路径与 §0-7 清单的差异修正记录在案
+- [x] 3.1 九条用例已写：`internal/httpapi/scopeauth_test.go`，真库 + 真路由 + 真鉴权中间件
+- [x] 3.2 基线（`main` worktree）执行：**8 条按预期失败，1 条今天就通过**（`mayHearCall` 已拦住，改列为回归护栏）。形态逐条记入 RESULTS.md
+- [x] 3.3 五处修正已记：删 `AGENT_NOT_ALLOWED` 行、加 `/events` 行、`/agent/ready` 202→200、header 改 `X-AICC-Agent-ID`、第 5 行「任意端点」定为 `GET /auth/me`
 
 ## §4 禁止事项
 
@@ -59,7 +59,7 @@
 
 ## 实现（§5 提交切分的工作面，编号沿用提交序号）
 
-- [ ] ②a 生成代码：`make api-generate` + scope 常量生成步骤，产物落 `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts`（裁定 1b，Makefile 无需改）
+- [x] ②a 生成代码：`make api-generate` + scope 常量生成步骤，产物落 `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts`（裁定 1b，Makefile 无需改）
 - [ ] ③ AuthContext（`Subject` / `AgentID` / `Scopes`）+ scope 中间件；删除 14 处路由级角色守卫与 **6** 处 handler 外角色判定（5 处在 `internal/httpapi`，第 6 处是 `internal/events/hub.go:28` `IsSupervisor`，P2）；删除 `isMachine` / `machineIdentity` 及其 3 个下游分支；重述 `mayReadTranscript` 的按屏幕规则为能力（P7）
 - [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
 - [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
