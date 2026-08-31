@@ -363,3 +363,19 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 `[INFERENCE]` 第 1 条是最要紧的：**一个假的对勾比没有对勾更坏**——它会让 ⑥ 在写创建表单时以为常量已经生成好，直到 import 失败才发现。⑥ 的"scopes 从生成的常量枚举取，不手写"直接依赖 ②b。
 
 `[INFERENCE]` 教训记在这里：勾选的粒度不能大于验证的粒度。②a 原本是一条复合项（"`make api-generate` + scope 常量生成步骤"），跑完前半就整条勾了。此后凡复合项一律拆开。
+
+---
+
+## 2026-08-31 — §4.1 禁止事项 N1 落文字（无代码变更）
+
+`[FACT]` 规则全文写在 `docs/auth/TASKS.md` §4 「N1 — scope 不得是角色的别名」；同一裁定在 `docs/design/07-naming.md:75` 落了一行 `API scopes` ruling（07 是 CLAUDE.md 指定的强制命名规范，scope 名是它此前未覆盖的一类名字）。
+
+### 字面照抄 P3 会当场自相矛盾
+
+`[FACT]` P3 的原话是「不得出现角色名」（`RESULTS.md:136`、`baseline.md:373`、`baseline.md:400`），并且拿 `agent:*` 当反例。
+`[FACT]` 但 owner 定稿的 19 个词表里有 **3 个**以 `agent` 开头：`agent:read` / `agent:act` / `agent:manage`（`docs/openapi.json` 根级 `x-scopes`），而 `AGENT` 正是三个角色之一。
+`[INFERENCE]` 照字面写下这条禁止事项，正式条目第一天就否掉词表的 3/19，将来任何机械检查都会在这 3 条上失败。**按 P3 真正要防的东西措辞**：资源段必须指一个领域资源，且任何 scope 都不得等价于「某角色的全部能力」改个名。
+
+`[FACT]` 按这个判据，那 3 个是合规的：`agent` 指的是**坐席资源**（在线状态与坐席身份）而不是 `AGENT` 角色——`agent:read`/`agent:act` 只触及主体自己的坐席身份（裁定 8 修正 3 拆出 `agent:manage` 就是为了这个），三者相加也不是 `AGENT` 角色的能力集（该角色另持 `calls:control`、`calls:create`、`calls:read:own`、`contacts:read`、`contacts:write`、`history:read:own` 共 8 个）。被禁掉的是 `supervisor:*`、`admin:*`、`role:agent` 这类：没有资源，只有人格。
+
+`[FACT]` 本步**不引入机械检查**——⑦ 的三条断言不含这一条，N1 是文字规则，给 ③–⑥ 逐条对照用。
