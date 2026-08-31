@@ -379,3 +379,39 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 `[FACT]` 按这个判据，那 3 个是合规的：`agent` 指的是**坐席资源**（在线状态与坐席身份）而不是 `AGENT` 角色——`agent:read`/`agent:act` 只触及主体自己的坐席身份（裁定 8 修正 3 拆出 `agent:manage` 就是为了这个），三者相加也不是 `AGENT` 角色的能力集（该角色另持 `calls:control`、`calls:create`、`calls:read:own`、`contacts:read`、`contacts:write`、`history:read:own` 共 8 个）。被禁掉的是 `supervisor:*`、`admin:*`、`role:agent` 这类：没有资源，只有人格。
 
 `[FACT]` 本步**不引入机械检查**——⑦ 的三条断言不含这一条，N1 是文字规则，给 ③–⑥ 逐条对照用。
+
+---
+
+## 2026-08-31 — ②b scope 常量生成（`c03080d`）
+
+`[FACT]` 两个既有生成器都不产出 scope，A5 已记：`grep -c -i securit internal/api/api.gen.go` = 0，`web/src/generated/api.ts` 中 `security`/`scopes` 命中 0。契约里 `scopes` 只作为请求体字段出现（`api.gen.go:815/837/857/865` 全是 `[]string`，`api.ts:2759/2777/2782` 全是 `string[]`）——**类型是有的，词表是没有的**。
+
+`[FACT]` 新增 `scripts/gen-scopes.mjs`，由 `scripts/api-generate.sh` 末尾调用（唯一生成入口不变），读 `docs/openapi.json` 根级 `x-scopes`，产出：
+
+| 产物 | 内容 |
+|---|---|
+| `internal/api/scopes.gen.go` | 19 个 untyped string 常量（`ScopeCallsReadOwn = "calls:read:own"`）+ `AllScopes []string` + `ScopeDescriptions map[string]string` + `IsScope(name string) bool` |
+| `web/src/generated/scopes.ts` | `type Scope` 19 支联合 + `SCOPES: readonly Scope[]` + `SCOPE_DESCRIPTIONS: Record<Scope, string>` |
+
+`[INFERENCE]` **常量用 untyped string 而不是具名 `Scope` 类型**：契约生成的请求体字段是 `[]string`，具名类型会在每个调用点上加一次转换，换不到任何东西。TS 那边相反——`Scope` 联合类型是白拿的编译期检查，且 `SCOPE_DESCRIPTIONS: Record<Scope, string>` 靠它保证不漏。
+
+`[INFERENCE]` **说明一起生成，不只是名字**。⑥ 的创建表单要给每个 scope 配一句人话；那句话手写就是第二份词表，迟早跟契约漂开。这正是 ②b 存在的理由，只生成名字等于把问题挪到 ⑥。
+
+### 验证形态
+
+`[FACT]` **确定性**：连跑 `scripts/api-generate.sh` 两次，两个产物 `diff` 均无输出（名字 `sort()` 后再发射）。api-check 会重新生成再 diff，不稳定的输出会让 CI 随机红。
+`[FACT]` **编译**：`go build ./internal/api/` 通过，`go vet ./internal/api/` 通过，`gofmt -l internal/api/` 空。（**全树仍是红的**——`internal/httpapi/api_server.go:19` 等 ④，与本步无关。）
+`[FACT]` **前端**：`web/` 下 `tsc --noEmit` exit 0，`oxlint src/generated/scopes.ts` exit 0。
+`[FACT]` **四个守卫逐个验过会挡**（在临时目录用改过的契约副本跑）：
+
+| 输入 | 报错 |
+|---|---|
+| 无 `x-scopes` | `root x-scopes is missing or empty — there is no vocabulary to generate from` |
+| `x-scopes: {}` | 同上 |
+| `"Supervisor:All"` | `is not 资源:动作[:范围] (lowercase, 2–3 colon-separated segments)` |
+| 说明为空串 | `has no description` |
+
+`[FACT]` **api-check 确实覆盖了这两个新产物**（裁定 1b 成立，`Makefile` 未动）：往契约 `x-scopes` 加一个 `tests:probe` 后 `make api-check` **exit 2**，diff 同时点出 `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts`；提交后再跑 **exit 0**。
+`[INFERENCE]` 注意 api-check 的语义是"先重新生成再 diff"——手改产物文件不会被它抓到（会被覆盖），被抓的是**契约改了而生成代码没跟着提交**。这与 `api.gen.go` 的情形一模一样，不是新的弱点。
+
+`[FACT]` 名字形状检查（`^[a-z]+(:[a-z]+){1,2}$`）是**生成器的自保**，不是 N1 的机械化：一个带大写或空格的名字会推出坏掉的 Go 标识符。N1 的语义判据（不得是角色的别名）按 §4.1 的裁定**不做机械检查**。

@@ -29,7 +29,7 @@
 | §2 契约变更 | ✅ 完成，人工门已过 | `ecf368f` 契约 / `3436dd9` 生成代码 |
 | §3 测试先行 | ✅ 8 条按预期失败 + 1 条回归护栏 | `40aed73` |
 | §4 禁止事项 | ✅ N1 已写入（§4） | — |
-| ②b scope 常量生成 | ⬜ **未做**（见下方更正） | — |
+| ②b scope 常量生成 | ✅ 生成器 + 两个产物,api-check 已覆盖 | `c03080d` |
 | ③ AuthContext + 删守卫 | ⬜ 未开始 | — |
 | ④ Key 存储与端点 | ⬜ 未开始（**做完构建才转绿**） | — |
 | ⑤ 审计 4 列 | ⬜ 未开始 | — |
@@ -106,10 +106,11 @@
 ## 实现（§5 提交切分的工作面，编号沿用提交序号）
 
 - [x] ②a `make api-generate`：`internal/api/api.gen.go` + `web/src/generated/api.ts` 已重新生成（`3436dd9`）
-- [ ] ②b **scope 常量生成步骤——未做**（2026-08-31 核对时发现 ②a 曾被错误地整条勾掉）。
-      `[FACT]` `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts` **都不存在**，`scripts/api-generate.sh` 里 `scope` 命中 0 次。
-      要做的：在 `scripts/api-generate.sh` 加一段读 `docs/openapi.json` 的 `x-scopes`，写出 Go 常量与 TS 联合类型；产物落在现有 generated 目录，`Makefile:56-58` 的 diff 列表因此无需改动（裁定 1b）。
-      ⑥ 的创建表单"从生成常量枚举取，不手写"依赖它。
+- [x] ②b scope 常量生成：`scripts/gen-scopes.mjs`（由 `scripts/api-generate.sh` 调用）读根级 `x-scopes`，写出
+      `internal/api/scopes.gen.go`（常量 + `AllScopes` + `ScopeDescriptions` + `IsScope`）与
+      `web/src/generated/scopes.ts`（`Scope` 联合类型 + `SCOPES` + `SCOPE_DESCRIPTIONS`）。
+      **说明一并生成**——⑥ 的表单要给每个 scope 配标签，手写标签就是第二份词表。
+      产物在 `make api-check` 已 diff 的两个目录内，`Makefile` 未改（裁定 1b）。验证形态见 RESULTS.md。
 - [ ] ③ AuthContext（`Subject` / `AgentID` / `Scopes`）+ scope 中间件；删除 14 处路由级角色守卫与 **6** 处 handler 外角色判定（5 处在 `internal/httpapi`，第 6 处是 `internal/events/hub.go:28` `IsSupervisor`，P2）；删除 `isMachine` / `machineIdentity` 及其 3 个下游分支；重述 `mayReadTranscript` 的按屏幕规则为能力（P7）
 - [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
 - [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
