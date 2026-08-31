@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useMemo, useRef, useState } from 'react'
-import { Ban, Pencil } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Ban, ChevronDown, ChevronRight, Pencil } from 'lucide-react'
 import { Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
@@ -210,13 +210,26 @@ function KeysPage() {
 }
 
 /**
- * The vocabulary, from the contract.
+ * The vocabulary, from the contract, grouped by the resource each scope names.
  *
  * Both the names and the sentences beside them are generated from
- * docs/openapi.json's `x-scopes` (web/src/generated/scopes.ts). Typing them
- * out here would be a second vocabulary that drifts the first time a scope is
+ * docs/openapi.json's `x-scopes` (web/src/generated/scopes.ts). Typing them out
+ * here would be a second vocabulary that drifts the first time a scope is
  * added — and the day it drifts, this form offers capabilities the server does
  * not know and refuses the ones it does.
+ *
+ * The grouping is derived the same way, from the names themselves: a scope is
+ * `resource:action[:range]` (docs/auth/TASKS.md §4 N1), so its first segment is
+ * the resource and no list of groups has to be maintained here either. A
+ * resource nobody has written a label for still gets a group, headed by its own
+ * name — a new capability must never be one that quietly fails to appear.
+ *
+ * There is no select-all across groups, and that is deliberate. A key holding
+ * every scope can issue further keys (keys:manage) and reset passwords
+ * (users:write): it is the master credential this whole model exists to
+ * replace, and putting it one click away would bring AICC_API_KEY back. Per
+ * group is a different question — "does this integration touch calls at all?" —
+ * and that one is worth answering in one click.
  */
 function ScopePicker({
   selected,
@@ -225,33 +238,135 @@ function ScopePicker({
   selected: string[]
   onChange: (next: string[]) => void
 }) {
-  const toggle = (scope: Scope) =>
+  const { t } = useTranslation()
+
+  const groups = useMemo(() => {
+    const byResource = new Map<string, Scope[]>()
+    for (const scope of SCOPES) {
+      const resource = scope.split(':')[0]
+      byResource.set(resource, [...(byResource.get(resource) ?? []), scope])
+    }
+    return [...byResource].map(([resource, scopes]) => ({ resource, scopes }))
+  }, [])
+
+  // Open where there is something to see. A form being edited starts showing
+  // what the key already holds; a new one starts closed, which is what turns
+  // twenty rows into ten.
+  const [open, setOpen] = useState<string[]>(() =>
+    groups.filter((g) => g.scopes.some((s) => selected.includes(s))).map((g) => g.resource),
+  )
+
+  const setMany = (scopes: Scope[], checked: boolean) =>
     onChange(
-      selected.includes(scope) ? selected.filter((s) => s !== scope) : [...selected, scope].toSorted(),
+      checked
+        ? [...new Set([...selected, ...scopes])].toSorted()
+        : selected.filter((s) => !scopes.includes(s as Scope)),
     )
 
   return (
-    <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
-      {SCOPES.map((scope) => (
-        <label
-          key={scope}
-          className="flex cursor-pointer items-start gap-2 rounded-sm p-1 hover:bg-muted"
-        >
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={selected.includes(scope)}
-            onChange={() => toggle(scope)}
-          />
-          <span className="min-w-0">
-            <span className="block font-mono text-xs">{scope}</span>
-            <span className="block text-xs text-muted-foreground">
-              {SCOPE_DESCRIPTIONS[scope]}
-            </span>
-          </span>
-        </label>
-      ))}
+    <div className="max-h-72 divide-y overflow-y-auto rounded-md border">
+      {groups.map(({ resource, scopes }) => {
+        const chosen = scopes.filter((s) => selected.includes(s))
+        const isOpen = open.includes(resource)
+        return (
+          <div key={resource}>
+            <div className="flex items-center gap-2 px-2 py-1.5">
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+                aria-expanded={isOpen}
+                onClick={() =>
+                  setOpen(
+                    isOpen ? open.filter((r) => r !== resource) : [...open, resource],
+                  )
+                }
+              >
+                {isOpen ? (
+                  <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="font-mono text-xs">{resource}</span>
+                {/* The label is UI copy for a grouping the names already imply,
+                    so a resource with no wording falls back to its own name
+                    rather than to a blank. */}
+                <span className="truncate text-xs text-muted-foreground">
+                  {t(`keys.resources.${resource}`, { defaultValue: '' })}
+                </span>
+                <span className="tabular ml-auto shrink-0 text-xs text-muted-foreground">
+                  {chosen.length > 0 ? `${chosen.length}/${scopes.length}` : scopes.length}
+                </span>
+              </button>
+              <GroupToggle
+                label={t('keys.selectGroup', { resource })}
+                checked={chosen.length === scopes.length}
+                partial={chosen.length > 0 && chosen.length < scopes.length}
+                onChange={(checked) => setMany(scopes, checked)}
+              />
+            </div>
+            {isOpen && (
+              <div className="space-y-1 border-t px-2 py-1.5">
+                {scopes.map((scope) => (
+                  <label
+                    key={scope}
+                    className="flex cursor-pointer items-start gap-2 rounded-sm p-1 hover:bg-muted"
+                  >
+                    <input
+                      type="checkbox"
+                      className="mt-0.5"
+                      checked={selected.includes(scope)}
+                      onChange={() => setMany([scope], !selected.includes(scope))}
+                    />
+                    <span className="min-w-0">
+                      <span className="block font-mono text-xs">{scope}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {SCOPE_DESCRIPTIONS[scope]}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
     </div>
+  )
+}
+
+/**
+ * A group's own checkbox, which is three-valued: none, some, all.
+ *
+ * "Some" has to look different from "none" or a collapsed group with two of
+ * its six scopes ticked reads as untouched, and the reader opens it to find
+ * out — which is the scanning this grouping exists to save.
+ */
+function GroupToggle({
+  label,
+  checked,
+  partial,
+  onChange,
+}: {
+  label: string
+  checked: boolean
+  partial: boolean
+  onChange: (checked: boolean) => void
+}) {
+  const ref = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = partial
+  }, [partial])
+
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      aria-label={label}
+      title={label}
+      className="shrink-0 cursor-pointer"
+      checked={checked}
+      onChange={(e) => onChange(e.target.checked)}
+    />
   )
 }
 

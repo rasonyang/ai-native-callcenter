@@ -731,6 +731,19 @@
     "issuedTitle": "{{name}} 已签发",
     "secret": "密钥",
     "secretHint": "只在这里出现这一次。库里只存它的摘要，谁也没法再把它算出来——丢了就吊销重发。",
-    "howToSend": "怎么发送"
+    "howToSend": "怎么发送",
+    "resources": {
+      "agent": "坐席身份与状态",
+      "audit": "审计轨迹",
+      "calls": "通话：控制、发起、观察",
+      "config": "平台配置",
+      "contacts": "客户资料",
+      "history": "已结束通话的记录",
+      "keys": "API Key 本身",
+      "quality": "质检打分",
+      "reports": "坐席区的聚合数据",
+      "users": "账号与角色"
+    },
+    "selectGroup": "勾选 {{resource}} 的全部能力"
   }
 }

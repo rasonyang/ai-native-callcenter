@@ -708,3 +708,30 @@ API_KEY      | live-check-crm | 807b2164-bd6b-47e9-9286-39a1ca831cea | t        
 `[FACT]` 补的反证：往 `errors.go` 加一个 `CodeQuotaExceeded`，断言 FAIL —— `internal/httpapi/errors.go has QUOTA_EXCEEDED and the contract does not`。还原后通过。
 
 `[INFERENCE]` 记在这里而不只是改掉：这与 ②a 的假对勾是同一个形状——**一个看起来在守着的检查，实际守的是它自己的副本**。
+
+---
+
+## 2026-08-31 — ⑥ 的能力选择器改成按资源分组（owner 提出）
+
+`[FACT]` 20 个 scope 装在一个滚动框里，一屏看不完。owner 问能不能全选、或者按分类选。
+
+### 裁定：分组 + 组内全选，**不做全局全选**
+
+`[INFERENCE]` **全选在权限表单上是反模式**。勾满全部 scope 的那把 Key 同时持有 `keys:manage`（能再签发别的 Key）与 `users:write`（能重置密码、改角色）——那正是一把万能钥匙，是这次重构删掉的 `AICC_API_KEY` 换个样子回来。让它一键可得，等于把它请回来。**这里的麻烦是特性。**
+`[INFERENCE]` 分组减少的是**翻找的成本**，不是**决定的成本**：组标题上的「本组全选」回答的是「这个集成要不要碰通话」，那是个真实的问题；全局全选回答的是「要不要全都给它」，那个问题的正确答案几乎总是「不」。
+
+`[FACT]` **分组是从名字推出来的，不是列出来的**：scope 是 `资源:动作[:范围]`（N1），取第一段即资源。所以这里同样没有需要维护的清单——新加一个资源的 scope 会自动出现一个新组。没写标签的资源用它自己的名字当标题，**新能力绝不会因为没人写文案而悄悄不出现**。
+
+`[FACT]` 组标题的 checkbox 是三态的（none / some / all）。`[INFERENCE]` "some" 必须与 "none" 长得不一样——否则一个收起的组里勾了 2/6，读起来跟没碰过一样，读者只好展开去看，而那正是分组要省掉的翻找。
+
+### 浏览器上实测
+
+`[FACT]` 弹窗里可见的 checkbox 从 **20 个变成 10 个**（10 个收起的组）：`agent 3` / `audit 1` / `calls 6` / `config 2` / `contacts 2` / `history 2` / `keys 1` / `quality 1` / `reports 1` / `users 1`。
+`[FACT]` 点 `calls` 组的一个 checkbox → 组标题变 `6/6`。展开后取消 `calls:monitor` → 标题变 `5/6`，组 checkbox 变为 `checked=false, indeterminate=true`。
+`[FACT]` 提交后落库的正是那 5 个：`calls:control calls:create calls:create:ai calls:read:all calls:read:own`。
+`[FACT]` 中文界面逐组核对，标签正常，无字面量漏出。试验 Key 已吊销。
+
+### 一个被拒绝的选项，记下来
+
+`[FACT]` 另一个候选是「预设模板」（一键勾出「CRM 坐席代理」那 8 个）。**没做。**
+`[INFERENCE]` 一个叫「坐席代理」的预设，勾出来的恰好就是 `AGENT` 角色的 grant——**那是把角色模型从前端后门放回来**。技术上无害（存库的仍是一个个 scope，没有任何代码分支在预设上），但它会让人重新按人格思考，而 N1 的整条规则就是为了防这个形状。要做需要 owner 明确裁定。

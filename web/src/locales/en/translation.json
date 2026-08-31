@@ -734,6 +734,19 @@
     "issuedTitle": "{{name}} is issued",
     "secret": "Secret",
     "secretHint": "This is the only time it is shown. It is stored as a digest, so nobody can produce it again — a lost key is revoked and reissued.",
-    "howToSend": "How to send it"
+    "howToSend": "How to send it",
+    "resources": {
+      "agent": "Agent identity and presence",
+      "audit": "The audit trail",
+      "calls": "Calls: control, placing, watching",
+      "config": "Platform configuration",
+      "contacts": "The customer record book",
+      "history": "What happened on finished calls",
+      "keys": "API keys themselves",
+      "quality": "Quality review",
+      "reports": "Aggregates over the floor",
+      "users": "Accounts and roles"
+    },
+    "selectGroup": "Select every {{resource}} capability"
   }
 }
