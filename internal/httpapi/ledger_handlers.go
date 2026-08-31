@@ -439,6 +439,20 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, params ap
 			ip := row.IP
 			entry.IP = &ip
 		}
+		// Which credential asked, and as whom. Absent on rows written before
+		// keys were a managed credential: the shared secret they were written
+		// by had no identity to name, and inventing one now would be a
+		// forgery in the one table nobody may forge.
+		if row.SubjectKind != "" {
+			kind := api.AuditEntrySubjectKind(row.SubjectKind)
+			entry.SubjectKind = &kind
+			entry.SubjectID = row.SubjectID
+			if row.SubjectName != "" {
+				name := row.SubjectName
+				entry.SubjectName = &name
+			}
+		}
+		entry.AgentID = row.AgentID
 		items = append(items, entry)
 	}
 	writeJSON(w, http.StatusOK, api.AuditEntryList{Items: items, Total: int(total)})

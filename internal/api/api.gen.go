@@ -55,6 +55,24 @@ func (e AgentState) Valid() bool {
 	}
 }
 
+// Defines values for AuditEntrySubjectKind.
+const (
+	AuditEntrySubjectKindAPIKEY AuditEntrySubjectKind = "API_KEY"
+	AuditEntrySubjectKindUSER   AuditEntrySubjectKind = "USER"
+)
+
+// Valid indicates whether the value is a known member of the AuditEntrySubjectKind enum.
+func (e AuditEntrySubjectKind) Valid() bool {
+	switch e {
+	case AuditEntrySubjectKindAPIKEY:
+		return true
+	case AuditEntrySubjectKindUSER:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Availability.
 const (
 	AvailabilityDEVICEUNREACHABLE Availability = "DEVICE_UNREACHABLE"
@@ -947,7 +965,10 @@ type AuditEntry struct {
 
 	// ActorUsername The account's name at read time. Absent when the account has since been deleted — the row keeps the id either way, so a cleaned-up roster does not erase what its accounts did.
 	ActorUsername *string `json:"actorUsername,omitempty"`
-	AuditID       int64   `json:"auditId"`
+
+	// AgentID The agent identity the request acted as. Present where a key named one in X-AICC-Agent-ID, and where a signed-in account has one — it is the difference between "Mina went ready" and "the CRM put Mina ready", which is the question an audit trail is read to answer.
+	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
+	AuditID int64               `json:"auditId"`
 
 	// Detail What the request carried. Fields whose name reads like a secret are stored as "[redacted]" — a marker rather than an omission, because a field that was sent and not kept is a different fact from one that was never sent.
 	Detail map[string]interface{} `json:"detail"`
@@ -955,11 +976,23 @@ type AuditEntry struct {
 	// IP The peer address the request came from. Absent where it could not be determined.
 	IP         *string   `json:"ip,omitempty"`
 	OccurredAt time.Time `json:"occurredAt"`
-	TargetID   string    `json:"targetId"`
+
+	// SubjectID The subject within its kind: a user id, or a key id. The two are different spaces, which is why subjectKind is read with it and never inferred from it.
+	SubjectID *openapi_types.UUID `json:"subjectId,omitempty"`
+
+	// SubjectKind What authenticated the request: a person with a browser session, or a system holding an API key. Absent on rows written before keys were a managed credential, where the old shared secret had no identity to name.
+	SubjectKind *AuditEntrySubjectKind `json:"subjectKind,omitempty"`
+
+	// SubjectName The account name or the key name, snapshotted when the row was written. Snapshotted rather than joined, because a revoked key and a deleted account must both still be nameable here.
+	SubjectName *string `json:"subjectName,omitempty"`
+	TargetID    string  `json:"targetId"`
 
 	// TargetKind What kind of thing was acted on, derived from the last path parameter. Empty where the request named no instance.
 	TargetKind string `json:"targetKind"`
 }
+
+// AuditEntrySubjectKind What authenticated the request: a person with a browser session, or a system holding an API key. Absent on rows written before keys were a managed credential, where the old shared secret had no identity to name.
+type AuditEntrySubjectKind string
 
 // AuditEntryList defines model for AuditEntryList.
 type AuditEntryList struct {

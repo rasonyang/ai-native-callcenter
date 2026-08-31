@@ -4,7 +4,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -185,9 +184,14 @@ func TestWithoutAKeyTheSessionRulesStillApply(t *testing.T) {
 	}
 }
 
-// The key is the deployment's own credential, not a person's, so the audit row
-// carries no user id — a made-up one would look like somebody to a reader
-// chasing who placed a call. It says what it was instead.
+// The key is not a person, so the audit row carries no user id — a made-up
+// one would look like somebody to a reader chasing who placed a call. It says
+// what it actually was in columns of its own.
+//
+// Those columns are the point. Before them the only way to record "a key did
+// this" was a word buried in the detail jsonb, which is a fact stored where
+// nothing can filter on it: an operator asking "what has the CRM been doing"
+// had a full-text search and a hope.
 func TestTheKeyIsAuditedAsItselfRatherThanAsAUser(t *testing.T) {
 	recorder := &recordingAuditor{}
 	dialer := &keyedDialer{}
@@ -207,24 +211,27 @@ func TestTheKeyIsAuditedAsItselfRatherThanAsAUser(t *testing.T) {
 	if recorder.actorID != nil {
 		t.Errorf("actor = %v, want null — no user placed this call", recorder.actorID)
 	}
-	detail, err := json.Marshal(recorder.detail)
-	if err != nil {
-		t.Fatalf("encode detail: %v", err)
+	if recorder.subject.Kind != string(SubjectKey) {
+		t.Errorf("subjectKind = %q, want %s", recorder.subject.Kind, SubjectKey)
 	}
-	if !strings.Contains(string(detail), "crm-integration") {
-		t.Errorf("detail = %s, want it to name the key — otherwise the row is "+
-			"indistinguishable from one with no actor at all", detail)
+	if recorder.subject.Name != "crm-integration" {
+		t.Errorf("subjectName = %q, want the key's own name — otherwise the row "+
+			"is indistinguishable from one with no actor at all", recorder.subject.Name)
+	}
+	if recorder.subject.ID == nil {
+		t.Error("subjectId is null; the row cannot be traced back to which key it was")
 	}
 }
 
 type recordingAuditor struct {
 	actorID *uuid.UUID
+	subject store.AuditSubject
 	detail  map[string]any
 }
 
-func (a *recordingAuditor) Audit(_ context.Context, actorID *uuid.UUID, _, _, _ string,
+func (a *recordingAuditor) Audit(_ context.Context, who store.AuditSubject, _, _, _ string,
 	detail map[string]any, _ string) error {
-	a.actorID, a.detail = actorID, detail
+	a.actorID, a.subject, a.detail = who.ActorID, who, detail
 	return nil
 }
 

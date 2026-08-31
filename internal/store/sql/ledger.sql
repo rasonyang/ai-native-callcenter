@@ -147,8 +147,9 @@ INSERT INTO queue_events (occurred_at, call_id, queue_id, event, agent_id, wait_
 VALUES ($1, $2, $3, $4, $5, $6);
 
 -- name: InsertAuditLog :exec
-INSERT INTO audit_logs (actor_id, action, target_kind, target_id, detail, ip)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO audit_logs (actor_id, action, target_kind, target_id, detail, ip,
+                        subject_kind, subject_id, subject_name, agent_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: UpdateCDRHasRecording :exec
 UPDATE cdrs SET has_recording = true WHERE call_id = $1;
@@ -338,8 +339,14 @@ ORDER BY occurred_at, id;
 -- id either way, so a cleaned-up roster does not erase what its accounts did.
 -- COALESCE, not a bare cast: the join's NULL is the ordinary case for a deleted
 -- account, and empty is what the reader turns back into "no name to show".
+-- subject_name is read straight off the row rather than joined: it was
+-- snapshotted at write time so a revoked key, or a deleted account, still has
+-- a name here. actor_username keeps its join, because that is the field the
+-- shipped response already carries and its behaviour must not change.
 SELECT a.id, a.occurred_at, a.actor_id, COALESCE(u.username, '')::text AS actor_username,
-       a.action, a.target_kind, a.target_id, a.detail, a.ip
+       a.action, a.target_kind, a.target_id, a.detail, a.ip,
+       COALESCE(a.subject_kind, '')::text AS subject_kind, a.subject_id,
+       a.subject_name, a.agent_id
 FROM audit_logs a
 LEFT JOIN users u ON u.id = a.actor_id
 WHERE (sqlc.narg('actor_id')::uuid IS NULL OR a.actor_id = sqlc.narg('actor_id')::uuid)

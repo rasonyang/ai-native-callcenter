@@ -2641,6 +2641,23 @@ export interface components {
             actorId?: string;
             /** @description The account's name at read time. Absent when the account has since been deleted — the row keeps the id either way, so a cleaned-up roster does not erase what its accounts did. */
             actorUsername?: string;
+            /**
+             * @description What authenticated the request: a person with a browser session, or a system holding an API key. Absent on rows written before keys were a managed credential, where the old shared secret had no identity to name.
+             * @enum {string}
+             */
+            subjectKind?: "USER" | "API_KEY";
+            /**
+             * Format: uuid
+             * @description The subject within its kind: a user id, or a key id. The two are different spaces, which is why subjectKind is read with it and never inferred from it.
+             */
+            subjectId?: string;
+            /** @description The account name or the key name, snapshotted when the row was written. Snapshotted rather than joined, because a revoked key and a deleted account must both still be nameable here. */
+            subjectName?: string;
+            /**
+             * Format: uuid
+             * @description The agent identity the request acted as. Present where a key named one in X-AICC-Agent-ID, and where a signed-in account has one — it is the difference between "Mina went ready" and "the CRM put Mina ready", which is the question an audit trail is read to answer.
+             */
+            agentId?: string;
             /** @description The method and the route template that matched, e.g. "PUT /api/v1/queues/{queueId}". The route template rather than the path, so the value is stable and greppable and cannot drift from the routing table. */
             action: string;
             /** @description What kind of thing was acted on, derived from the last path parameter. Empty where the request named no instance. */

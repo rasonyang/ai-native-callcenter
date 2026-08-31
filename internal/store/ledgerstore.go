@@ -942,7 +942,7 @@ func (l *LedgerStore) InsertQueueEvent(ctx context.Context, occurredAt time.Time
 }
 
 // Audit records an administrative action against who did it.
-func (l *LedgerStore) Audit(ctx context.Context, actorID *uuid.UUID,
+func (l *LedgerStore) Audit(ctx context.Context, who AuditSubject,
 	action, targetKind, targetID string, detail map[string]any, ip string) error {
 	encoded, err := marshalOr(detail, "{}")
 	if err != nil {
@@ -953,10 +953,23 @@ func (l *LedgerStore) Audit(ctx context.Context, actorID *uuid.UUID,
 		addr = &parsed
 	}
 	return l.q.InsertAuditLog(ctx, queries.InsertAuditLogParams{
-		ActorID: actorID, Action: action,
+		ActorID: who.ActorID, Action: action,
 		TargetKind: targetKind, TargetID: targetID,
 		Detail: encoded, IP: addr,
+		SubjectKind: nullableText(who.Kind), SubjectID: who.ID,
+		SubjectName: who.Name, AgentID: who.AgentID,
 	})
+}
+
+// nullableText keeps an unset subject out of the column as NULL rather than
+// as an empty string: a row written before keys existed and a row whose
+// subject is genuinely unknown are the same fact, and both are "nothing here"
+// rather than "a kind whose name is the empty string".
+func nullableText(v string) *string {
+	if v == "" {
+		return nil
+	}
+	return &v
 }
 
 //
@@ -1201,6 +1214,32 @@ type AuditEntry struct {
 	TargetID      string
 	Detail        map[string]any
 	IP            string
+
+	// Who authenticated, and as whom. SubjectKind is USER or API_KEY;
+	// SubjectID lives in that kind's own id space, which is why the kind is
+	// read alongside it and never inferred. SubjectName was snapshotted at
+	// write time so a revoked key and a deleted account are both still
+	// nameable. AgentID is the agent identity the request acted as — the
+	// difference between "Mina went ready" and "the CRM put Mina ready".
+	SubjectKind string
+	SubjectID   *uuid.UUID
+	SubjectName string
+	AgentID     *uuid.UUID
+}
+
+// AuditSubject is who a recorded action is attributed to. It travels with the
+// action rather than being derived from it: by the time the row is written,
+// the request has finished and there is nothing left to ask.
+type AuditSubject struct {
+	// ActorID is the user account, and keeps its original meaning exactly —
+	// nil where no signed-in account made the request. Ruling 3: this column
+	// is not repurposed, because GET /audit-logs already returns it.
+	ActorID *uuid.UUID
+
+	Kind    string
+	ID      *uuid.UUID
+	Name    string
+	AgentID *uuid.UUID
 }
 
 // AuditFilter narrows the trail. A zero field is no constraint.
@@ -1241,6 +1280,8 @@ func (l *LedgerStore) ListAuditLogs(ctx context.Context, f AuditFilter) ([]Audit
 			ID: row.ID, OccurredAt: row.OccurredAt.Time, ActorID: row.ActorID,
 			ActorUsername: row.ActorUsername, Action: row.Action,
 			TargetKind: row.TargetKind, TargetID: row.TargetID,
+			SubjectKind: row.SubjectKind, SubjectID: row.SubjectID,
+			SubjectName: row.SubjectName, AgentID: row.AgentID,
 		}
 		if row.IP != nil {
 			entry.IP = row.IP.String()

@@ -21,8 +21,10 @@ type SubjectKind string
 const (
 	// SubjectUser is a person, authenticated by the session cookie.
 	SubjectUser SubjectKind = "USER"
-	// SubjectKey is a system, authenticated by a bearer API key.
-	SubjectKey SubjectKind = "KEY"
+	// SubjectKey is a system, authenticated by a bearer API key. The value is
+	// API_KEY, not KEY: it is stored in audit_logs.subject_kind and read by
+	// people, and "KEY" beside "USER" reads like a kind of person.
+	SubjectKey SubjectKind = "API_KEY"
 )
 
 // AuthContext is who is making a request and what they may do. It is built
