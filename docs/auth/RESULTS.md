@@ -628,3 +628,68 @@ API_KEY      | live-check-crm | 807b2164-bd6b-47e9-9286-39a1ca831cea | t        
 `[FACT]` 服务端日志里没有与本次改动相关的 error/warn（只有既有的 webhook 投递失败，目标 `127.0.0.1:9111` 没起）。
 
 `[FACT]` 两把试验 Key 都已吊销，未留启用状态的凭证。
+
+---
+
+## 2026-08-31 — ⑥ Admin API Keys 页（`ee72b18`）
+
+`[FACT]` `web/src/routes/_app.admin.keys.tsx` + `web/src/lib/keys.ts`，`nav.ts` 挂在 **System** 组下，`requireRole(ADMIN)`。
+`[INFERENCE]` 放 System 而不是 Manage，理由与审计日志同源：Manage 改的是通话怎么被处理，而一把 Key 不改变任何一通电话——它改变的是**谁可以要求平台去处理**。
+
+`[FACT]` 创建表单的 **20** 个能力项（名字 + 那句人话）全部来自 `web/src/generated/scopes.ts`，即 ②b 生成的、源自契约 `x-scopes` 的那份。浏览器上实测：弹窗里 `input[type=checkbox]` 数量 = 20。
+`[INFERENCE]` 这就是 ②b 的兑现。手写这 20 行就是第二份词表，加一个 scope 的那天表单会继续提供昨天那份——而 `calls:create:ai` 恰好在 ⑥ 之前一天才加进来，它是自动出现在表单里的。
+
+`[FACT]` 明文存在 `useRef`，不进表单 state、不进 query 缓存；弹窗写明"只出现这一次…丢了就吊销重发"。
+`[FACT]` 吊销像删除一样就地确认；**吊销过的 Key 留在列表里**（上个月那条审计行指的就是它）；状态列只有两个值；**没有「允许 Agents」列**（O3）。
+
+### Browser Harness 上的完整流程
+
+| 步骤 | 结果 |
+|---|---|
+| 列表 | 6 列（名称/前缀/能力/最后使用/状态/操作），既有 Key 正常渲染 |
+| 签发（勾 `calls:create:ai`） | 弹窗显示明文一次 + `Authorization: Bearer …` 用法 |
+| 用这把 Key 打 `POST /calls` (AI_OUTBOUND) | **403 `INSUFFICIENT_SCOPE`，点名 `calls:create`** |
+| 改名 + 改 scopes（PATCH） | 列表当场更新为 `ui-check-renamed` / `contacts:read history:read:all` |
+| 吊销 | 行变 REVOKED，操作列少一个按钮；那把 Key 随即 401 |
+| 中文界面 | 表头/状态/描述逐项核对，**无字面量漏出** |
+
+`[INFERENCE]` 第三行是个值得记的确认：只持 `calls:create:ai` 到不了 `POST /calls`——`calls:create` 才是到达 operation 的那一个，`:ai` 是那一半额外要的。报错按顺序点名先缺的那个，正确。
+
+`[FACT]` 顺手补了 `common.done`——它在真实页面上以字面量 `common.done` 露出来过，是 Browser Harness 看出来的，`tsc`/`oxlint`/单元测试都不会报。
+
+---
+
+## 2026-08-31 — ⑦ 契约门三条断言（`ee21e58`）
+
+`[FACT]` `internal/httpapi/contract_gate_test.go`，随 `go test -race ./...` 在 `ci.yml` 自动执行，不需要动 workflow（§0-10 的推断成立）。
+
+| 断言 | 内容 |
+|---|---|
+| (a) `TestEveryMountedRouteDeclaresItsAuthorization` | 走 `chi.Walk`，每条 `/api/v1` 路由都要在 `api.OperationSecurityByRoute` 里，且要有一支凭证够得着。4 个排除项在 `notTheAPI` 里各带理由 |
+| (b) `TestOneErrorCodeIsSpelledTheSameEverywhere` | 契约 enum ≡ `errors.go` 常量 ≡ 两份 `translation.json`。另有 `TestTheUntranslatableKeysAreStillThere` |
+| (c) `TestASystemCanReachWhatAPersonCan` | 没有 Bearer 支的 operation 必须在 `browserOnly` 白名单里（2 个，各带理由）；且白名单不许比它豁免的东西活得久 |
+
+`[FACT]` 另加 `TestEveryContractOperationHasASecurityRow`：生成表的 operation 数 ≡ `api.ServerInterface` 的方法数（**91 = 91**）。
+
+### 三条都做了反证 —— 通过的断言在证明它抓得住之前不算数
+
+| 注入的缺陷 | 断言的反应 |
+|---|---|
+| `server.go` 加一条契约外的 `GET /secret-backdoor` | (a) FAIL：`mounted and not declared in the contract: GET /secret-backdoor` |
+| 删掉 `zh` 的 `LAST_ADMIN` | (b) FAIL：`the contract has LAST_ADMIN and web/src/locales/zh/translation.json does not` |
+| 拿掉 `createRecordingReview` 的豁免 | (c) FAIL：`reachable by a browser session and by nothing else: createRecordingReview (POST /recordings/{recordingId}/reviews)` |
+
+`[FACT]` 全部还原后重跑，五条断言均通过。
+
+### 两处登记的例外
+
+`[FACT]` `notTheAPI` 4 条：`GET /metrics` / `/healthz` / `/readyz`（在 `AICC_METRICS_ADDR` 那个独立监听上，契约的 description 自己声明了这个例外）、`GET /*`（SPA 兜底，它是本 API 的一个消费者而不是它的一部分）。
+`[FACT]` `untranslatable` 2 条：`UNKNOWN`（前端 `describeError` 的 `defaultValue` 兜底）、`rules`（`errors.rules.<RULE>` 的嵌套表，由 `fieldErrorText` 按 `rule` 参数查，不是错误码）。
+`[INFERENCE]` 登记而不是宽松比较：**宽松的比较正是漏译能藏身的地方**。所以另有一条断言盯着这两个键还在——兜底悄悄消失会让界面直接显示原始 key，而 (b) 还会继续通过。
+
+`[FACT]` 删掉了 `workspace_test.go` 里的 `TestEveryRouteIsInTheContract`——(a) 是它的完整版（多查一条"有凭证够得着"），两条测同一件事只会让人不知道该改哪条。
+
+### ⑦ 之前的那一小步
+
+`[FACT]` 裁定 4 要求先补齐 4 个漏译再装断言，已单独一个提交（`47491ee`）：`USER_DATA_TOO_LARGE` / `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE` / `LAST_ADMIN` / `EXTENSION_POOL_EXHAUSTED`。
+`[INFERENCE]` **先把账平了，再装那个不许它再次失衡的秤**——反过来做，第一次 CI 红的会是一个与本次改动无关的历史欠账。

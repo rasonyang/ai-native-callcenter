@@ -32,8 +32,8 @@
 | ③ AuthContext + 删守卫 | ✅ 完成 | `a1fa378` |
 | ④ Key 存储与端点 | ✅ 完成，**构建已转绿** | `0793e32` |
 | ⑤ 审计 4 列 | ✅ 完成，§3 九条全过 | `e605235` |
-| ⑥ Admin UI | ⬜ 未开始 | — |
-| ⑦ CI 三条断言 | ⬜ 未开始 | — |
+| ⑥ Admin UI | ✅ 完成，Browser Harness 走通全流程 | `ee72b18` |
+| ⑦ CI 三条断言 | ✅ 完成，三条都做了反证 | `47491ee` `ee21e58` |
 
 **本任务之外、同分支上的两个提交**：`9c01e2f` 修 V1/V2（API 自答 404/405，构建绿、测试全过）、`f676276`/`b219244` 等文档裁定。全部记在 `docs/api-first-audit.md` 的处置表。
 
@@ -125,11 +125,12 @@
       `GET /openapi.json` 由 `docs/embed.go` 提供。**构建在此转绿。**
 - [x] ⑤ 审计四列（迁移 `00030`）：`subject_kind` / `subject_id` / `subject_name` / `agent_id`，`actor_id` 未动，既有行已回填，
       `migrate_test` 有 fixture。契约 `AuditEntry` 加 4 个可选字段（纯加法，oasdiff exit 0）。**§3 九条全过。**
-- [ ] ⑥ Admin UI：API Keys 页 + `nav.ts` 条目（列表列去掉「允许 Agents」，状态只有两个值）
-- [ ] ⑦ CI 检查（同一文件三条断言）：
-      a. 路由表中任一路由在契约中无 scope 声明即失败（排除 `/metrics`、`/healthz`、`/readyz`、SPA fallback，理由显式登记）
-      b. 契约 `ErrorCode` enum ≡ `internal/httpapi/errors.go` 常量 ≡ 两份 `translation.json` 的 `errors` 键（裁定 4）
-      c. 每个 operation 的 `security` 都有一支 Bearer——白名单例外仅 P8（P9 验收判据）
+- [x] ⑥ Admin UI：`/admin/keys`（System 组，ADMIN）+ `nav.ts` 条目 + `nav.test.ts` 钉住。
+      表单 20 个能力项来自生成的 `scopes.ts`（②b 的兑现）；明文只显示一次；吊销就地确认；
+      吊销过的 Key 留在列表里；状态两个值；无「允许 Agents」列。Browser Harness 全流程见 RESULTS.md
+- [x] ⑦ CI 检查 —— `internal/httpapi/contract_gate_test.go`，三条齐全，**每条都做了反证**（注入缺陷 → 断言失败 → 还原）。
+      a/b/c 三条 + `TestTheUntranslatableKeysAreStillThere` + `TestEveryContractOperationHasASecurityRow`（91 = 91）。
+      裁定 4 的 4 个漏译已在 `47491ee` 单独补齐——先平账，再装秤。
 - [ ] **REVOKED 终态的首次真实执行（人工门）**
 
 ## §5 提交与记录
@@ -141,5 +142,5 @@
 - [x] ③ AuthContext + 中间件 + 角色守卫删除 —— `a1fa378`（**不是零行为变化**：9 处已裁定的 `config:read` 拓宽、act-as 头改为拒绝、webhook 对 Key 解封；收窄 0）
 - [x] ④ API Key 存储与端点 —— `0793e32`
 - [x] ⑤ 审计 —— `e605235`
-- [ ] ⑥ Admin UI
-- [ ] ⑦ CI 检查
+- [x] ⑥ Admin UI —— `ee72b18`
+- [x] ⑦ CI 检查 —— `ee21e58`
