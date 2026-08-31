@@ -32,19 +32,19 @@
 
 ## §2 契约变更（先于代码，单独一次提交）
 
-- [ ] 2.0 实测 `x-scopes` 的放置层级（根 / `components` / scheme 内），`make api-lint` 零新增 warning
+- [x] 2.0 `x-scopes` 三种放法 lint 均干净；选**根级**（两种 scheme 共用，放进其一会让另一个变二等）
 - [x] 2.0b scope 词表已定稿：**16 个**，`资源:动作[:范围]`，不得出现角色名，`users:write` 单列（`baseline.md` 裁定 8）
-- [ ] 2.1 `securitySchemes`：页面 Token 与 API Key 两种 scheme，共用同一 scope 词表
-- [ ] 2.2 85 个 operation 逐个补 `security` + scopes；Bearer 那一支**不带** `csrfHeader`（P4）
-- [ ] 2.2b `/events` 补 Bearer 支持并在契约声明（P1，正式条目——事件流是产品实时面的全部，不是附注）
-- [ ] 2.2c 改写 `docs/openapi.json:7` 的浏览器优先措辞为两种对等凭证（P6）
-- [ ] 2.2d `quality_reviews` 打分 operation 的 description 写明能力不对称的理由（P8）
-- [ ] 2.2e webhook-subscriptions 六条改为可由 `webhooks:write` scope 到达；同步改写三处成文依据：`server.go:363-368` 注释、`docs/design/09-webhooks.md:370,454`、`docs/openapi.json:4247`（P5 解除）
-- [ ] 2.2f 新增 `GET /openapi.json`：契约自己 serve 自己，免鉴权（V3）。`[FACT]` 落地手法照抄 `web/embed.go:16`——加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），因为 `go:embed` 不能用 `..` 跨目录，而 `docs/` 不是 Go 包。零构建步骤，与 SPA 的做法同源
-- [ ] 2.3 新增端点：`GET/POST /api-keys`、`GET /api-keys/{id}`、`PATCH /api-keys/{id}`、`POST /api-keys/{id}/revoke`
-- [ ] 2.4 错误码 enum 补 **3** 个：`AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`（`AGENT_NOT_ALLOWED` 随 O3 取消）
-- [ ] 2.5 `make api-lint` 零 error/warning 增量；`make api-breaking` 通过
-- [ ] **2.6 人工批准契约**
+- [x] 2.1 `cookieSession` + `csrfHeader` + 新 `apiKeyBearer`（`http`/`bearer`）；`apiKeyHeader` 移除；根级 `x-scopes` 19 个
+- [x] 2.2 **91** 个 operation 全部显式 `security`；全局 `security` 移除；Bearer 支不带 `csrfHeader`；描述里 48 处 `Requires ROLE` 清零
+- [x] 2.2b `/events` 已有 Bearer 支，`calls:read:own` 为下限、`calls:read:all` 拓宽投递（P1 / P2）
+- [x] 2.2c `info.description` 重写为两种对等凭证，并明说 web 应用只是消费者（P6）
+- [x] 2.2d 打分 operation 写明理由：页面 token ≠ UI，读评分照样有 Bearer 支（P8）
+- [x] 2.2e webhook 配置改为 `config:write` 可达；design 09 两处 + 契约描述已改写。**`server.go:363-368` 的注释留到 ③**——它描述的代码此刻还没变，现在改会让注释说谎
+- [x] 2.2f 新增 `GET /openapi.json`：契约自己 serve 自己，免鉴权（V3）。`[FACT]` 落地手法照抄 `web/embed.go:16`——加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），因为 `go:embed` 不能用 `..` 跨目录，而 `docs/` 不是 Go 包。零构建步骤，与 SPA 的做法同源
+- [x] 2.3 新增 5 个端点（路径参数为 `keyId`）。`PATCH` 改为改名/调 scopes——两态之下唯一的状态变更是吊销，而吊销是终态、有自己的端点
+- [x] 2.4 错误码 22 → 26（含上一提交的 `METHOD_NOT_ALLOWED`）
+- [x] 2.5 `make api-lint` 0 error 0 warning（10 条钉住）；`make api-breaking` exit 0
+- [ ] **2.6 人工批准契约** ← 当前位置。附带一个流程问题：① 与 ② 的构建是红的（编译期断言等 ④ 的 handler），需确认可接受
 
 ## §3 测试先行
 

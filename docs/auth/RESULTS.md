@@ -246,3 +246,54 @@ owner 裁定：`GET /openapi.json`（跑起来的部署 serve 自己的契约）
 `[INFERENCE]` 这决定了 `role → scopes` 的推导输入：**不是守卫的标签，而是按 rank 的可达性**。R 的 grant = 所有"rank ≤ R 即可达"的 operation 的 scope 之并。这样构造出来的 ③ **按定义是行为保持的**，而每一处偏离都变成可枚举的——目前只有两处：P7（转写历史，已裁定）与上面的 `config:read` 拓宽。
 
 `[FACT]` `baseline.md` §0-3 的表如实记录了守卫标签，但**推导输入是可达性而非标签**，此处补正。
+
+---
+
+## 2026-08-31 — §2 契约完成（`ecf368f` 契约 / `3436dd9` 生成代码），停在 2.6 人工门
+
+### 数字
+
+`[FACT]` operation **91** 个（85 既有 + `getOpenAPI` + 5 个 API Key），**91 个全部显式声明 `security`**；全局 `security` 已移除——漏声明就是漏了，由 ⑦ 的断言抓，而不是悄悄继承兜底。
+`[FACT]` 词表 **19** 个（根级 `x-scopes`）。错误码 22 → **26**。描述里 48 处 `Requires ROLE` 清零。
+`[FACT]` `make api-lint` **0 error 0 warning**（10 条钉住的例外）；`make api-breaking BASE=main` **exit 0**——移除 `apiKeyHeader` scheme、移除全局 `security`、重写 85 个 operation 的 `security`，oasdiff 全部未判为 ERR。
+
+### 自检抓到的一处未经裁定的提权 → 词表 18 → 19
+
+`[FACT]` `docs/auth/scopemap.py` 的自检枚举"某角色 rank 低于该 operation 今天的下限，却持有它全部 scope"，抓到 **11** 条，其中 2 条不是已裁定的 `config:read`：
+- `forceLogoutAgent`（下限 SUPERVISOR）—— `AGENT` 的 grant 必然含 `agent:act`（`/agent/ready` 就要它），于是**坐席顺带能把同事踢下线**。
+- `listAgents`（下限 SUPERVISOR）—— `agent:read` 同理让坐席读到整张花名册。
+
+`[INFERENCE]` 粗粒度的 `agent:*` 把"管自己"和"管别人"合成了一个开关——与 owner 否决 `users:write` 并进 `config:write` 是同一个形状。拆出 **`agent:manage`**（读花名册 + 强制登出别人）；`agent:read` / `agent:act` 从此只触及主体自己的坐席身份。修正后自检剩 **9 条拓宽，全部是已裁定的 `config:read`；收窄 0 条**。
+
+`[FACT]` **这是脚本抓到的，不是人眼看出来的。** 把推导写成可重跑的自检，是它值钱的地方——`python3 docs/auth/scopemap.py` 随时可复查。
+
+### role → scopes（机械推导，非拍脑袋）
+
+```
+AGENT      (8)  agent:act agent:read calls:control calls:create calls:read:own
+                contacts:read contacts:write history:read:own
+SUPERVISOR (15) 上列 + agent:manage calls:monitor calls:read:all config:read
+                history:read:all quality:review reports:read
+ADMIN      (19) 全部（+ audit:read config:write keys:manage users:write）
+```
+
+### P9 白名单：只有 2 个 operation 没有 Bearer 支
+
+| operation | 理由 |
+|---|---|
+| `POST /auth/logout` | 会话机制，Key 没有会话可结束。不是能力不对称 |
+| `POST /recordings/{recordingId}/reviews` | P8：人对人的判断，`reviewer_id` 必须指向能被问责的人。**不是 UI 特权**——班长的 session token 用 curl 一样能打；读评分（`GET /calls/{callId}/reviews`）照样有 Bearer 支 |
+
+另有 2 个匿名 operation：`POST /auth/login`、`GET /openapi.json`。
+`[INFERENCE]` ⑦ 的断言 (a) 必须检查 **`security` 键存在**，而不是 scope 数组非空——`getMe` / `logout` 是"已认证但不需要特定能力"，声明为空数组是正确的。
+
+### 两个执行决定（记录，非裁定）
+
+- `[INFERENCE]` **`X-AICC-Agent-ID` 不声明为 operation 的 header 参数**，只写在 `apiKeyBearer` 的 scheme 描述里。理由：仓库的先例是 `X-AICC-Csrf` —— 凭证呈递方式属于 securityScheme 而非 parameter；且声明为 parameter 会让 oapi-codegen 给几十个 handler 加 params 结构体，在 ③ 里制造大量与授权无关的签名改动。
+- `[FACT]` **`GET /openapi.json` 没有 4XX**，`operation-4xx-response` 在 `.redocly.lint-ignore.yaml` 里钉了一条带理由的例外。它免鉴权、无参数，内容在编译期就嵌进二进制（`go:embed` 缺文件是编译错误而非运行时 404）——为了让 linter 闭嘴而声明一个不会发生的 404，是在唯一真相源里写假话。
+
+### 待人工确认的流程问题
+
+`[FACT]` `ecf368f` 与 `3436dd9` 两个提交**构建是红的**：`internal/api/api.gen.go` 的 `ServerInterface` 多了 6 个方法，`internal/httpapi/api_server.go:19` 的编译期断言失败，直到 ④ 给 `Server` 装上 handler。
+
+`[FACT]` 这是 CLAUDE.md 明说的设计意图（"a new spec operation breaks the build until the server grows its method — that is the point"），且 §5 规定的提交切分（①契约 ②生成代码 … ④端点）**必然**产生这个窗口。分支上的中间提交红、PR 头绿，是常规做法。若不可接受，替代方案是把 6 个新 operation 从 ① 拆走、随 ④ 一起进契约——代价是契约变更不再是"单独一次提交"。
