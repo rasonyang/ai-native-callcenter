@@ -337,6 +337,8 @@ export interface paths {
          *     AI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.
          *
          *     Idempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.
+         *
+         *     Authorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai.
          */
         post: operations["createCall"];
         delete?: never;

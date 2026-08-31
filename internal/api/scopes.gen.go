@@ -29,6 +29,9 @@ const (
 	// ScopeCallsCreate — Place a call.
 	ScopeCallsCreate = "calls:create"
 
+	// ScopeCallsCreateAI — Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.
+	ScopeCallsCreateAI = "calls:create:ai"
+
 	// ScopeCallsMonitor — Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.
 	ScopeCallsMonitor = "calls:monitor"
 
@@ -77,6 +80,7 @@ var AllScopes = []string{
 	ScopeAuditRead,
 	ScopeCallsControl,
 	ScopeCallsCreate,
+	ScopeCallsCreateAI,
 	ScopeCallsMonitor,
 	ScopeCallsReadAll,
 	ScopeCallsReadOwn,
@@ -100,6 +104,7 @@ var ScopeDescriptions = map[string]string{
 	ScopeAuditRead:      "Read the audit trail.",
 	ScopeCallsControl:   "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
 	ScopeCallsCreate:    "Place a call.",
+	ScopeCallsCreateAI:  "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
 	ScopeCallsMonitor:   "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
 	ScopeCallsReadAll:   "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
 	ScopeCallsReadOwn:   "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",

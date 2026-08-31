@@ -63,32 +63,30 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 // createAICall originates the customer leg and hands whoever answers to the
 // bot running the DID's flow.
 //
-// ⚠ This check needs an owner ruling, and it is behaviour-preserving until it
-// gets one. One operation carries one scope in the contract, but this route
+// The second scope is checked here rather than declared in the contract's
+// security block because one operation carries one scope and this route
 // serves two kinds of call with two different answers: click-to-dial is an
-// agent's own work, while starting a bot on a number is an operations
-// decision. The baseline said so with a SUPERVISOR check inside this handler
-// — which is precisely the shape scopemap.py could not see, because it read
-// the routing table's guards and this one is not there. So calls:create alone
-// would hand every agent the ability to launch outbound bot campaigns, an
-// escalation nobody ruled on.
+// agent's own work, starting a bot on a number is an operations decision.
+// calls:create reaches the operation; calls:create:ai reaches this half of
+// it, and the contract says so in the operation's own description (owner
+// ruling, 2026-08-31).
 //
-// config:read is asked for in the meantime because it is exactly the set that
-// could do this yesterday (supervisors and administrators, never agents) and
-// it is not arbitrary: an AI call picks a DID and runs the flow published
-// behind it, and this is the capability to see those. It is still the wrong
-// shape — a create guarded by a read — and the real answer is either a scope
-// of its own in the contract or a ruling that calls:create covers both kinds.
-// Recorded in docs/auth/RESULTS.md; ⑦ must not ship over it.
+// The scope exists because the baseline's rule was a SUPERVISOR check inside
+// this handler — exactly the shape docs/auth/scopemap.py cannot see, since it
+// reads the routing table's guards and this one was never there. Letting
+// calls:create alone through would have handed every agent the ability to
+// launch outbound bot campaigns, an escalation nobody ruled on. The script
+// now carries a HANDLER_CHECKS table so the next one of these is in the
+// derivation rather than outside it.
 func (s *Server) createAICall(w http.ResponseWriter, r *http.Request, req api.CreateCallRequest) {
 	ac, ok := mustAuth(w, r)
 	if !ok {
 		return
 	}
-	if !ac.Has(api.ScopeConfigRead) {
+	if !ac.Has(api.ScopeCallsCreateAI) {
 		writeError(w, http.StatusForbidden, CodeInsufficientScope,
-			"placing an AI call reaches a number and the flow published behind it",
-			map[string]any{"requiredScope": api.ScopeConfigRead})
+			"starting the bot on a number is not the same act as placing a call",
+			map[string]any{"requiredScope": api.ScopeCallsCreateAI})
 		return
 	}
 

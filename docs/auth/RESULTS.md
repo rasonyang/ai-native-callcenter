@@ -538,3 +538,29 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 ### 一处被重写的旧断言
 
 `[FACT]` `TestTheKeyIsAuditedAsItselfRatherThanAsAUser` 原本断言 "detail 的 jsonb 里出现 api-key 这个词"。那是四列不存在时的权宜之计，⑤ 之后改为断言 `subject_kind` / `subject_name` / `subject_id` 三个列。**要求没变，检查的地方变了**——原来的写法把一个事实存在了没法过滤的地方。
+
+---
+
+## 2026-08-31 — ③b 裁定：第 20 个 scope `calls:create:ai`（owner）
+
+`[FACT]` 裁定：**加 `calls:create:ai`**，词表 19 → **20**。`calls:create` 到达 operation；`kind=AI_OUTBOUND` 这一半另要 `calls:create:ai`。SUPERVISOR / ADMIN 持有，AGENT 不持有——与基线上那个 handler 内 SUPERVISOR 检查的集合完全相同。
+
+`[INFERENCE]` **那半条检查留在 handler 里，不进契约的 `security`**：一个 operation 只能带一个 scope，而这条路由服务两种 kind、两个答案。契约在 `POST /calls` 的 description 里写明了这一点，词表里也写明了"Required in addition to calls:create for kind=AI_OUTBOUND"。把它写进 `security` 会让点击外呼也要这个 scope，那是另一个 bug。
+
+`[FACT]` `make api-lint` 0 error 0 warning；`make api-breaking BASE=main` **exit 0**（加一个 scope 是纯加法）。
+
+### `scopemap.py` 学会了看 handler 内的判定
+
+`[FACT]` 新增 `HANDLER_CHECKS` 表，与 `OPS` 同格式，合并进 `role_scopes()` / `widenings()` / `narrowings()`；打印基数时分开计（`operation 91 个，handler 内判定 1 个`）。
+`[INFERENCE]` 这才是这次事故的正解。**漏掉 `createAICall` 不是眼睛不好，是脚本的输入里根本没有它**——它读路由表的守卫，而这条判定从来不在路由表上。列在 `HANDLER_CHECKS` 里，下一个同类判定就会进推导，而不是留在推导之外等着被发现。
+`[FACT]` 修正后自检：**拓宽 9 条，全部是已裁定的 `config:read`；收窄 0 条。** AGENT 8 / SUPERVISOR 16 / ADMIN 20。
+
+### 生成器的一处命名修正
+
+`[FACT]` `scripts/gen-scopes.mjs` 原来朴素地 PascalCase，`calls:create:ai` 会生成 `ScopeCallsCreateAi`——违反 07-naming §2（Go 名里首字母缩写全大写）。加了 `INITIALISMS` 集合，与 `oapi-codegen.yaml` 的 `additional-initialisms` 对齐，现在是 `ScopeCallsCreateAI`。**两个生成器把同一个词拼成同一个样子。**
+
+### 一条新断言，当场抓到一次漏改
+
+`[FACT]` 新增 `TestALoginsGrantIsTheDerivedOne`：钉住 AGENT 8 / SUPERVISOR 16 / ADMIN 20、词表 20，并单独断言 AGENT **不**持有 `calls:create:ai` 而 SUPERVISOR / ADMIN 持有。
+`[FACT]` **它第一次跑就失败了**——上一批改动里有一个 python 脚本在中途 assert 失败，后面三处编辑（`grants.go`、`outbound_handlers.go`、`outbound_handlers_test.go`）根本没执行，而当时 `go build` / `go vet` / `go test` 全绿，因为旧的 `config:read` 检查还在原地、行为没变。
+`[INFERENCE]` **一次不改变行为的漏改，是测试套件抓不到的**——除非有人把"应该变成什么"写下来。这条断言就是那个"写下来"。

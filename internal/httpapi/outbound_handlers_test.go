@@ -220,7 +220,7 @@ func agentSubject() AuthContext {
 func keySubject() AuthContext {
 	return AuthContext{
 		Kind: SubjectKey, SubjectID: uuid.New(), SubjectName: "crm-integration",
-		scopes: []string{api.ScopeCallsCreate, api.ScopeConfigRead},
+		scopes: []string{api.ScopeCallsCreate, api.ScopeCallsCreateAI},
 	}
 }
 

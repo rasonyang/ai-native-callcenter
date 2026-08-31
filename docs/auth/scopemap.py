@@ -19,6 +19,7 @@ VOCAB = {
     "calls:read:all":   "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
     "calls:control":    "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
     "calls:create":     "Place a call.",
+    "calls:create:ai":  "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
     "calls:monitor":    "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
     "agent:read":       "Read this subject's own agent presence and the wrap-up vocabulary.",
     "agent:act":        "Drive this subject's own agent presence: sign in and out, ready, not ready, wrap up.",
@@ -72,6 +73,10 @@ OPS = {
     "sendCallDTMF":             (["calls:control"], A, True),
     "patchUserData":            (["calls:control"], A, True),
     "hangupCall":               (["calls:control"], N, True),
+    # AI_OUTBOUND 还要 calls:create:ai，那半条检查在 handler 里(一个 operation
+    # 只能带一个 scope,而这条路由服务两种 kind)。初稿把下限记成 N 是漏了
+    # handler 内的判定——createAICall 在基线上就要 SUPERVISOR,而本文件的
+    # 自检只读路由表守卫,看不见它(owner 2026-08-31 裁定,补上第 20 个 scope)。
     "createCall":               (["calls:create"], N, True),
     "monitorCall":              (["calls:monitor"], S, True),
 
@@ -159,14 +164,36 @@ OPS = {
     "revokeAPIKey":             (["keys:manage"], D, True),
 }
 
+# handler 内部的授权判定,格式与 OPS 相同。
+#
+# 一个 operation 只能带一个 scope,但有的路由服务两件事、两个答案。这些
+# 判定不在路由表上,所以本脚本的自检**看不见它们**——2026-08-31 就是这样
+# 漏掉了 createAICall 的 SUPERVISOR 检查,差点把「发起外呼机器人」顺手发给
+# 每个坐席。列在这里,是为了让推导包含它们,也为了下次有人加同类判定时,
+# 第一反应是"要不要在这里也写一行"。
+#
+# 键写成 "operationId(条件)",因为它不是一个 operation——脚本打印基数时
+# 与 OPS 分开计。
+HANDLER_CHECKS = {
+    "createCall(kind=AI_OUTBOUND)": (["calls:create", "calls:create:ai"], S, True),
+}
+
 RANK = {ANON: 0, N: 1, A: 1, S: 2, D: 3}
 
+
+def all_checks():
+    """OPS 与 HANDLER_CHECKS 合起来,才是这个产品实际做的全部授权判定。"""
+    merged = dict(OPS)
+    merged.update(HANDLER_CHECKS)
+    return merged
+
+
 def role_scopes():
-    """R 的 grant = 所有 rank <= R 即可达的 operation 的 scope 之并。"""
+    """R 的 grant = 所有 rank <= R 即可达的判定的 scope 之并。"""
     out = {}
     for role, r in (("AGENT", 1), ("SUPERVISOR", 2), ("ADMIN", 3)):
         s = set()
-        for op, (scopes, floor, _) in OPS.items():
+        for op, (scopes, floor, _) in all_checks().items():
             if floor == ANON:
                 continue
             if RANK[floor] <= r:
@@ -177,7 +204,7 @@ def role_scopes():
 def widenings():
     """今天够不着、改完却够得着的 (operation, 角色)。每一条都必须是被裁定过的。"""
     g, out = role_scopes(), []
-    for op, (sc, floor, _) in sorted(OPS.items()):
+    for op, (sc, floor, _) in sorted(all_checks().items()):
         if floor == ANON or not sc:
             continue
         for role, r in (("AGENT", 1), ("SUPERVISOR", 2), ("ADMIN", 3)):
@@ -189,7 +216,7 @@ def widenings():
 def narrowings():
     """今天够得着、改完却够不着的。必须为空——那是回归，不是设计。"""
     g, out = role_scopes(), []
-    for op, (sc, floor, _) in sorted(OPS.items()):
+    for op, (sc, floor, _) in sorted(all_checks().items()):
         if floor == ANON:
             continue
         for role, r in (("AGENT", 1), ("SUPERVISOR", 2), ("ADMIN", 3)):
@@ -199,9 +226,10 @@ def narrowings():
 
 
 if __name__ == "__main__":
-    unknown = set(s for sc, _, _ in OPS.values() for s in sc) - set(VOCAB)
+    unknown = set(s for sc, _, _ in all_checks().values() for s in sc) - set(VOCAB)
     assert not unknown, f"词表外的 scope: {unknown}"
-    print(f"词表 {len(VOCAB)} 个，operation {len(OPS)} 个\n")
+    print(f"词表 {len(VOCAB)} 个，operation {len(OPS)} 个，"
+          f"handler 内判定 {len(HANDLER_CHECKS)} 个\n")
     for role, sc in role_scopes().items():
         print(f"{role} ({len(sc)}): {' '.join(sc)}")
 

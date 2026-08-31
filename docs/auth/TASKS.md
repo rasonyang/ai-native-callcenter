@@ -14,10 +14,10 @@
 - **数据库要起着**：`docker compose -f deploy/dev/docker-compose.yml up -d`，然后
   `AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable'`。
 - **先读这三份再动手**：`docs/auth/baseline.md`（§0 事实 + 全部裁定 1–9 及其修正）、`docs/auth/RESULTS.md`（证据账本，含每一步的失败形态）、`docs/api-first-audit.md`（V1–V8 违反项、O1–O5 减法及处置）。`CLAUDE.md` 里那条 owner directive **"UI is optional. API is the product."** 是本任务全部决策的依据。
-- **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 19 个 scope、role→scopes，并自检拓宽与收窄。拓宽必须**只**剩 9 条 `config:read`（裁定 8 修正 2），收窄必须为 0。
+- **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 20 个 scope、role→scopes，并自检拓宽与收窄。拓宽必须**只**剩 9 条 `config:read`（裁定 8 修正 2），收窄必须为 0。
 - **勾选的粒度不能大于验证的粒度。** 复合项一律拆开——②a 曾因为跑完前半就整条勾掉，谎报了一个没写的生成器（见 ②b）。
 
-**人工门**：§0 结论 ✅、§2 契约 ✅、REVOKED 终态的首次真实执行 ⬜、**③b AI 外呼的能力待裁定** ⬜。
+**人工门**：§0 结论 ✅、§2 契约 ✅、③b AI 外呼能力 ✅（20 个 scope）、REVOKED 终态的首次真实执行 ⬜。
 
 ## 进度概览（2026-08-31）
 
@@ -29,7 +29,7 @@
 | §3 测试先行 | ✅ 8 条按预期失败 + 1 条回归护栏 | `40aed73` |
 | §4 禁止事项 | ✅ N1 已写入（§4） | — |
 | ②b scope 常量生成 | ✅ 生成器 + 两个产物,api-check 已覆盖 | `c03080d` |
-| ③ AuthContext + 删守卫 | ✅ 完成（⚠ 留一处待裁定，见 ④ 上方） | `a1fa378` |
+| ③ AuthContext + 删守卫 | ✅ 完成 | `a1fa378` |
 | ④ Key 存储与端点 | ✅ 完成，**构建已转绿** | `0793e32` |
 | ⑤ 审计 4 列 | ✅ 完成，§3 九条全过 | `e605235` |
 | ⑥ Admin UI | ⬜ 未开始 | — |
@@ -115,10 +115,10 @@
       14 处路由级守卫、6 处 handler 外角色判定（含 `events` 包的 `IsSupervisor` → `SeesEveryCall`）、`isMachine` / `machineIdentity` +
       3 个下游、`requireSessionOrAPIKey`、`AICC_API_KEY` / `X-AICC-Api-Key` 全部删除；`mayReadTranscript` 改判 `history:read:all`（P7）。
       验证形态与行为差异见 RESULTS.md。
-- [ ] ③b **待裁定：AI 外呼的能力**。`createAICall` 今天要 SUPERVISOR，检查在 handler 里，`scopemap.py` 看不见，
-      所以它把 `createCall` 的下限记成了「任何已认证」。照契约的 `calls:create` 直接放行 = 把外呼机器人发给每个坐席。
-      ③ 暂用 `config:read` 保住原行为并在代码里标了 ⚠。**两个选项**：契约给它一个自己的 scope（重开 §2），
-      或裁定 `calls:create` 覆盖两种 kind。**⑦ 不得在此之上收工。**
+- [x] ③b **已裁定（owner 2026-08-31）：加第 20 个 scope `calls:create:ai`**。`calls:create` 到达 operation，
+      `AI_OUTBOUND` 这一半另要 `calls:create:ai`——一个 operation 只能带一个 scope，而这条路由服务两种 kind，
+      所以那半条检查在 handler 里，契约在 operation 的 description 里写明。SUPERVISOR / ADMIN 持有，AGENT 不持有。
+      `scopemap.py` 加了 `HANDLER_CHECKS` 表，好让下一个同类判定进推导而不是留在推导之外。
 - [x] ④ API Key 存储与端点（迁移 `00029`）。两态、hash 直查、prefix 不建索引、`last_used_at` 无节流、无允许代理列表。
       吊销的终态写在 SQL 的 `WHERE` 里——吊销过的 Key 查不出来，于是被拒的请求也碰不到它的 `last_used_at`。
       未知 scope 拒绝而非忽略（`api.IsScope`）。裁定 2：三列仍装 user id，靠 `UserIDForAgent` + `AuthContext.ActorUserID`。

@@ -12,6 +12,7 @@ export type Scope =
     | 'audit:read'
     | 'calls:control'
     | 'calls:create'
+    | 'calls:create:ai'
     | 'calls:monitor'
     | 'calls:read:all'
     | 'calls:read:own'
@@ -34,6 +35,7 @@ export const SCOPES: readonly Scope[] = [
     'audit:read',
     'calls:control',
     'calls:create',
+    'calls:create:ai',
     'calls:monitor',
     'calls:read:all',
     'calls:read:own',
@@ -57,6 +59,7 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
     'audit:read': "Read the audit trail.",
     'calls:control': "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
     'calls:create': "Place a call.",
+    'calls:create:ai': "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
     'calls:monitor': "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
     'calls:read:all': "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
     'calls:read:own': "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",

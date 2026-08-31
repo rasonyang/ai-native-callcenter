@@ -6,6 +6,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -200,6 +201,46 @@ func TestClientIP(t *testing.T) {
 		r.RemoteAddr = tt.remote
 		if got := clientIP(r); got != tt.want {
 			t.Errorf("clientIP(%q) = %q, want %q", tt.remote, got, tt.want)
+		}
+	}
+}
+
+// The grant a login hands out is derived, not invented: docs/auth/scopemap.py
+// computes each role's set from what that role could reach before scopes
+// existed, and this pins the result so the two cannot drift in silence.
+//
+// The AI-outbound scope is called out on its own because it is the one that
+// bit: it is enforced inside a handler rather than by the contract's security
+// block, so nothing in the routing table would have shown an agent quietly
+// gaining the ability to launch outbound bot campaigns.
+func TestALoginsGrantIsTheDerivedOne(t *testing.T) {
+	for _, tc := range []struct {
+		role auth.Role
+		want int
+	}{
+		{auth.RoleAgent, 8},
+		{auth.RoleSupervisor, 16},
+		{auth.RoleAdmin, 20},
+	} {
+		got := grantedScopes(tc.role)
+		if len(got) != tc.want {
+			t.Errorf("%s holds %d scopes, want %d: %v\n"+
+				"Run `python3 docs/auth/scopemap.py` — it prints the derivation "+
+				"and enumerates every widening and narrowing against the baseline.",
+				tc.role, len(got), tc.want, got)
+		}
+	}
+	if len(api.AllScopes) != 20 {
+		t.Errorf("the vocabulary has %d scopes, want 20", len(api.AllScopes))
+	}
+
+	if slices.Contains(grantedScopes(auth.RoleAgent), api.ScopeCallsCreateAI) {
+		t.Error("an agent holds calls:create:ai — starting the bot on a number is " +
+			"an operations decision, not an agent's click-to-dial")
+	}
+	for _, role := range []auth.Role{auth.RoleSupervisor, auth.RoleAdmin} {
+		if !slices.Contains(grantedScopes(role), api.ScopeCallsCreateAI) {
+			t.Errorf("%s does not hold calls:create:ai, which they could do before", role)
 		}
 	}
 }

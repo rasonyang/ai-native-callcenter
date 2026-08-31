@@ -37,9 +37,19 @@ for (const name of names) {
   }
 }
 
-// "calls:read:own" -> "ScopeCallsReadOwn"
+// Initialisms stay fully capitalized in a Go name (docs/design/07-naming.md
+// §2): calls:create:ai is ScopeCallsCreateAI, not ScopeCallsCreateAi. The list
+// mirrors additional-initialisms in oapi-codegen.yaml, so the two generators
+// spell the same word the same way.
+const INITIALISMS = new Set(['ai', 'cdr', 'cdrs', 'did', 'dids', 'dtmf', 'id', 'ids', 'sip', 'sse', 'url'])
+
+// "calls:read:own" -> "ScopeCallsReadOwn"; "calls:create:ai" -> "ScopeCallsCreateAI"
 const goIdent = (name) =>
-  'Scope' + name.split(':').map((s) => s[0].toUpperCase() + s.slice(1)).join('')
+  'Scope' +
+  name
+    .split(':')
+    .map((s) => (INITIALISMS.has(s) ? s.toUpperCase() : s[0].toUpperCase() + s.slice(1)))
+    .join('')
 
 const idents = new Map()
 for (const name of names) {

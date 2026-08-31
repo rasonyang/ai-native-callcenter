@@ -56,6 +56,7 @@ var agentScopes = sorted([]string{
 // the roster — and reading the configuration those screens link to.
 var supervisorScopes = sorted(append([]string{
 	api.ScopeAgentManage,
+	api.ScopeCallsCreateAI,
 	api.ScopeCallsMonitor,
 	api.ScopeCallsReadAll,
 	api.ScopeConfigRead,
