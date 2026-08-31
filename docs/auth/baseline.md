@@ -358,7 +358,7 @@
    keys:manage         audit:read
    ```
 
-   共 **18** 个。
+   共 **19** 个（含修正 3）。
 
    **修正 1（owner，2026-08-31，映射 85 个 operation 时发现）**：初稿 16 个**没有联系人的位置**。联系人不是平台配置，是坐席边接电话边改的客户数据（今天三个角色都能改）。把它并进 `config:*` 会强迫 `AGENT` 的 grant 含 `config:write`，于是坐席顺带能建队列、改流程、改号码——**与 owner 否决"`users:write` 并进 `config:write`"是同一个形状**。故加 `contacts:read` / `contacts:write`，16 → 18。
 
@@ -366,7 +366,13 @@
 
    **`users:write` 单列**，不并进 `config:write`：创建账号是**唯一的提权路径**。持 `config:write` 的 Key 泄漏是"改了配置"；持 `users:write` 的 Key 泄漏是"建一个 ADMIN，拿到一切"。两者爆炸半径差一个数量级，不共用一个开关。
 
+   **修正 3（2026-08-31，映射时的自检抓到）——`agent:manage`，18 → 19**：粗粒度的 `agent:act` 把"管自己的示忙示闲"和"把同事踢下线"合成了一个开关。因为 `AGENT` 的 grant 必然含 `agent:act`（`/agent/ready` 就要它），坐席会**顺带获得 force-logout 同事的能力**——今天那是班长专属。同理 `agent:read` 会让坐席读到整张花名册。这是**未经裁定的提权**，不是可接受的拓宽，故拆出 `agent:manage`（读花名册 + 强制登出别人）。`agent:read` / `agent:act` 从此只触及主体自己的坐席身份。
+
+   `[FACT]` 这一处是 `docs/auth/scopemap.py` 的自检抓到的，不是人眼看出来的——它枚举"某角色 rank 低于该 operation 今天的下限，却持有它全部 scope"的组合。修正后自检只剩 9 条，全部是已裁定的 `config:read`。
+
    **命名法**（§4 禁止事项）：`资源:动作[:范围]`，**不得出现角色名**。`role → scopes` 只是给页面登录用的便利映射，不是模型本身。
+
+   **推导方式**：`role → scopes` 不是拍脑袋定的。R 的 grant = 所有"今天 rank ≤ R 即可达"的 operation 的 scope 之并（`docs/auth/scopemap.py`）。这样构造出来的映射按定义是行为保持的，每一处偏离都能被自检枚举——目前拓宽 9 条（全部 `config:read`，修正 2）、收窄 0 条。
 9. **act-as 的 header 名改为 `X-AICC-Agent-ID`**（owner，2026-08-31），**覆盖 §1 写的 `AICC-Agent-ID`**。理由：仓库现有的自定义 header 全带 `X-` 前缀（`X-AICC-Csrf`、`X-AICC-Api-Key`、SIP 的 `X-AICC-Channel-ID`），一致性在这里比 RFC 6648 那条"不建议新 header 用 X- 前缀"的建议更值钱——两种拼法并存会让集成方每次都要想一下哪个带哪个不带。**此条是 §0 的漏记，不是 §1 的冲突**：baseline §16 第 13/15 行照抄了 §1 的 `AICC-Agent-ID`，没有比对仓库惯例。
 
 ---

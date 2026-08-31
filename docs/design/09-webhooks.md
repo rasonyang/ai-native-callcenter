@@ -288,12 +288,16 @@ Content-Type: application/json
 
 | | direction | who holds it | who checks it |
 |---|---|---|---|
-| `AICC_API_KEY` (`X-AICC-Api-Key`) | **inbound** — their system calls us | the customer | us |
+| an API key (`Authorization: Bearer`) | **inbound** — their system calls us | the customer | us |
 | `webhook_subscriptions.auth_token` | **outbound** — we call their system | us, per subscription | the customer |
 
-Sending our inbound key outward would hand the credential that places and ends calls to a third
-party and leave it in their access logs. The column is theirs, they choose the value, and
-nothing in the platform ever populates it from `AICC_API_KEY`.
+Sending our inbound key outward would hand a working credential to a third party and leave it in
+their access logs. The column is theirs, they choose the value, and nothing in the platform ever
+populates it from a key of ours.
+
+(Amended 2026-08-31: the inbound side used to be the single `AICC_API_KEY` shared secret in
+`X-AICC-Api-Key`. It is now a per-integration key with its own scopes, presented as
+`Authorization: Bearer`. The direction rule is unchanged and is the point of the table.)
 
 ### What is given up, said plainly
 
@@ -367,12 +371,24 @@ Spec-first: `docs/openapi.json` before any code.
 | `DELETE /webhook-subscriptions/{subscriptionId}` | delete, cascading its deliveries |
 | `GET /webhook-subscriptions/{subscriptionId}/deliveries` | recent attempts, for diagnosis |
 
-**Role: ADMIN, and deliberately not reachable by `AICC_API_KEY`.** The key is the credential
-for placing and ending calls — the customer's system doing its job. Configuring where the
-platform sends data is administration, the same kind of decision as defining a queue or a DID,
-which this repository already puts behind `requireRole(auth.RoleAdmin)` (`server.go:195`).
-Letting the dialling credential also redirect outbound data would mean a leaked key can
-exfiltrate every finished call to an endpoint of the attacker's choosing.
+**Scope: `config:write`, reachable by an API key that holds it (amended 2026-08-31).**
+
+This section previously read: *"ADMIN, and deliberately not reachable by `AICC_API_KEY`"* — the
+key being the credential for placing and ending calls, and letting the dialling credential also
+redirect outbound data meaning a leaked key could exfiltrate every finished call to an endpoint of
+the attacker's choosing.
+
+**That reasoning assumed one all-powerful key, and the unified auth model removed the assumption.**
+Every key now carries exactly the scopes it was issued with; a key issued for dialling holds
+`calls:create` and cannot reach these operations at all. The risk did not disappear — it moved from
+*"can the key reach it"* to *"was this key granted `config:write`"*, which is the question a scope
+exists to answer. Under **UI is optional, API is the product**, choosing where a deployment sends
+its own finished calls is exactly the kind of thing an integration configures.
+
+See `docs/auth/baseline.md` §17 P5 and `docs/api-first-audit.md`. Historical note: the ban lived in
+three places — this section, the table in §12, and the operation descriptions in `docs/openapi.json`
+— and all three were rewritten together, because leaving one behind would make the code look like
+a bug to the next reader.
 
 Naming per 07: `subscriptionId` / `subscription_id`, `isEnabled`, `authToken`, `createdAt`,
 SCREAMING_SNAKE for `status`.
@@ -451,7 +467,7 @@ Every question this design raised has been answered by the owner on 2026-08-26:
 | Failure signal | a metric **and** a WARN |
 | Retention | `FAILED` 30 days, `DELIVERED` 7, `PENDING` never |
 | Authentication outward | the customer's own bearer token, no HMAC |
-| Configuration role | ADMIN; `AICC_API_KEY` must not reach it |
+| Configuration scope | `config:write`; an API key holding it may configure subscriptions (amended 2026-08-31, §10) |
 | Screen | `/admin/webhooks`, under the System group |
 | Screen scope | read-only; creation and editing go through the API |
 
