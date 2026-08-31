@@ -17,7 +17,8 @@
     "previous": "上一页",
     "next": "下一页",
     "viewAll": "查看全部",
-    "close": "关闭"
+    "close": "关闭",
+    "done": "完成"
   },
   "auth": {
     "signInTitle": "登录",
@@ -49,7 +50,8 @@
     "numbers": "号码",
     "callbacks": "回访任务",
     "agentIdentities": "坐席与话机",
-    "webhooks": "Webhook"
+    "webhooks": "Webhook",
+    "keys": "API Key"
   },
   "roles": {
     "AGENT": "坐席",
@@ -701,5 +703,30 @@
       "DELIVERED": "已送达",
       "FAILED": "已失败"
     }
+  },
+  "keys": {
+    "title": "API Key",
+    "description": "系统用来认证的凭证。每一把只持有签发时给定的能力，并且可以单独吊销。",
+    "issue": "签发 Key",
+    "edit": "编辑 Key",
+    "name": "名称",
+    "nameHint": "谁持有它——写集成的名字，不是配置它的人。",
+    "prefix": "前缀",
+    "scopes": "能力",
+    "scopesHint": "这把 Key 能做的全部事情。一把没有能力的 Key 能通过认证，但什么也够不着。",
+    "noScopes": "无",
+    "lastUsed": "最后使用",
+    "status": "状态",
+    "statuses": {
+      "ENABLED": "启用",
+      "REVOKED": "已吊销"
+    },
+    "none": "还没有签发过 Key。",
+    "revoke": "吊销",
+    "revokeConfirm": "吊销 {{name}}？这一步不可撤销——正在用它的东西会立刻停止工作，要恢复只能重新签发一把新的。",
+    "issuedTitle": "{{name}} 已签发",
+    "secret": "密钥",
+    "secretHint": "只在这里出现这一次。库里只存它的摘要，谁也没法再把它算出来——丢了就吊销重发。",
+    "howToSend": "怎么发送"
   }
 }

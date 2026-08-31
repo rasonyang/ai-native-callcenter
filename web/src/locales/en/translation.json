@@ -17,7 +17,8 @@
     "previous": "Previous",
     "next": "Next",
     "viewAll": "View all",
-    "close": "Close"
+    "close": "Close",
+    "done": "Done"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -49,7 +50,8 @@
     "agentIdentities": "Agents & Phones",
     "myCalls": "My Calls",
     "contacts": "Contacts",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "keys": "API Keys"
   },
   "roles": {
     "AGENT": "Agent",
@@ -704,5 +706,30 @@
       "DELIVERED": "Delivered",
       "FAILED": "Failed"
     }
+  },
+  "keys": {
+    "title": "API Keys",
+    "description": "The credentials a system authenticates with. Each key holds exactly the capabilities it was issued with, and is revoked on its own.",
+    "issue": "Issue key",
+    "edit": "Edit key",
+    "name": "Name",
+    "nameHint": "What holds this key — the integration, not the person who set it up.",
+    "prefix": "Prefix",
+    "scopes": "Capabilities",
+    "scopesHint": "Exactly what this key may do. A key with none authenticates and can reach nothing.",
+    "noScopes": "none",
+    "lastUsed": "Last used",
+    "status": "Status",
+    "statuses": {
+      "ENABLED": "Enabled",
+      "REVOKED": "Revoked"
+    },
+    "none": "No keys have been issued.",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke {{name}}? This cannot be undone — anything using it stops working at once, and a replacement is a new key.",
+    "issuedTitle": "{{name}} is issued",
+    "secret": "Secret",
+    "secretHint": "This is the only time it is shown. It is stored as a digest, so nobody can produce it again — a lost key is revoked and reissued.",
+    "howToSend": "How to send it"
   }
 }
