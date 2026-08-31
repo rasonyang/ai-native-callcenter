@@ -66,7 +66,7 @@ func TestSequenceDegradesWhenStorageFails(t *testing.T) {
 
 func TestPublishStampsEnvelope(t *testing.T) {
 	h, _ := newTestHub()
-	sub, _, _ := h.Subscribe(Subscriber{IsSupervisor: true}, 0)
+	sub, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	defer sub.Close()
 
 	out := h.Publish(context.Background(), Event{Type: TypePartyRinging}, Scope{})
@@ -101,7 +101,7 @@ func TestScopingByIdentity(t *testing.T) {
 	}{
 		{
 			name: "supervisor sees everything",
-			who:  Subscriber{IsSupervisor: true},
+			who:  Subscriber{SeesEveryCall: true},
 			sc:   Scope{AgentIDs: []uuid.UUID{agentA}},
 			want: true,
 		},
@@ -140,7 +140,7 @@ func TestScopingByIdentity(t *testing.T) {
 		},
 		{
 			name: "supervisor sees an event with no audience set",
-			who:  Subscriber{IsSupervisor: true},
+			who:  Subscriber{SeesEveryCall: true},
 			sc:   Scope{},
 			want: true,
 		},
@@ -159,13 +159,13 @@ func TestScopingByIdentity(t *testing.T) {
 		},
 		{
 			name: "client type filter narrows further",
-			who:  Subscriber{IsSupervisor: true, Types: []Type{TypeAgentReady}},
+			who:  Subscriber{SeesEveryCall: true, Types: []Type{TypeAgentReady}},
 			ev:   Event{Type: TypePartyRinging},
 			want: false,
 		},
 		{
 			name: "client type filter keeps requested types",
-			who:  Subscriber{IsSupervisor: true, Types: []Type{TypeAgentReady}},
+			who:  Subscriber{SeesEveryCall: true, Types: []Type{TypeAgentReady}},
 			ev:   Event{Type: TypeAgentReady},
 			want: true,
 		},
@@ -187,7 +187,7 @@ func TestResumeReplaysAfterLastEventID(t *testing.T) {
 	first := h.Publish(ctx, Event{Type: TypeAgentReady}, Scope{})
 	second := h.Publish(ctx, Event{Type: TypeAgentNotReady}, Scope{})
 
-	sub, replay, reset := h.Subscribe(Subscriber{IsSupervisor: true}, first.Seq)
+	sub, replay, reset := h.Subscribe(Subscriber{SeesEveryCall: true}, first.Seq)
 	defer sub.Close()
 
 	if reset {
@@ -203,20 +203,20 @@ func TestResumeBeyondRingRequestsReset(t *testing.T) {
 	h.Publish(context.Background(), Event{Type: TypeAgentReady}, Scope{})
 
 	// A resume point older than anything retained.
-	sub, replay, reset := h.Subscribe(Subscriber{IsSupervisor: true}, 0)
+	sub, replay, reset := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	defer sub.Close()
 	if reset || replay != nil {
 		t.Fatal("fresh subscribe should neither reset nor replay")
 	}
 
-	sub2, _, reset2 := h.Subscribe(Subscriber{IsSupervisor: true}, -5)
+	sub2, _, reset2 := h.Subscribe(Subscriber{SeesEveryCall: true}, -5)
 	defer sub2.Close()
 	if reset2 {
 		t.Error("non-positive Last-Event-ID should start a fresh stream, not a reset")
 	}
 
 	h2, _ := newTestHub()
-	sub3, _, reset3 := h2.Subscribe(Subscriber{IsSupervisor: true}, 42)
+	sub3, _, reset3 := h2.Subscribe(Subscriber{SeesEveryCall: true}, 42)
 	defer sub3.Close()
 	if !reset3 {
 		t.Error("reset = false, want true when the ring cannot serve the resume point")
@@ -228,7 +228,7 @@ func TestSlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 	var droppedFor int
 	h.OnDropped = func(Subscriber) { droppedFor++ }
 
-	sub, _, _ := h.Subscribe(Subscriber{IsSupervisor: true}, 0)
+	sub, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	ctx := context.Background()
 
 	// Never read from sub.C: overflow the buffer.
@@ -249,7 +249,7 @@ func TestSlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 
 func TestCloseIsIdempotent(t *testing.T) {
 	h, _ := newTestHub()
-	sub, _, _ := h.Subscribe(Subscriber{IsSupervisor: true}, 0)
+	sub, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	sub.Close()
 	sub.Close() // must not panic on a double close
 	if h.SubscriberCount() != 0 {
@@ -310,7 +310,7 @@ func TestReplayStillGivesSupervisorsEverything(t *testing.T) {
 	first := h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{agent}})
 	h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{uuid.New()}})
 
-	sub, replay, _ := h.Subscribe(Subscriber{IsSupervisor: true}, first.Seq-1)
+	sub, replay, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, first.Seq-1)
 	defer sub.Close()
 	if len(replay) != 2 {
 		t.Errorf("supervisor replay = %d events, want 2", len(replay))

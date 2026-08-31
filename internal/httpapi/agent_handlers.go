@@ -15,7 +15,6 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -54,19 +53,13 @@ func presenceOf(agentID uuid.UUID, p agents.Presence) api.Presence {
 	return out
 }
 
-// agentIDFor resolves the caller's own agent identity.
+// agentIDFor resolves the agent identity this request acts as.
+//
+// It used to ask the database, once per call site, thirteen times over. The
+// answer is resolved during authentication now and this is a field read; what
+// survives is the refusal, which requireAgent owns.
 func (s *Server) agentIDFor(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
-	id, ok := identityFrom(r.Context())
-	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
-		return uuid.Nil, false
-	}
-	agentID, err := s.agentDir.AgentIDForUser(r, id.UserID)
-	if err != nil {
-		writeError(w, http.StatusForbidden, CodeForbidden, "this account is not an agent", nil)
-		return uuid.Nil, false
-	}
-	return agentID, true
+	return requireAgent(w, r)
 }
 
 func (s *Server) AgentLogin(w http.ResponseWriter, r *http.Request) {
@@ -365,6 +358,3 @@ func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, agentID u
 		writeError(w, http.StatusInternalServerError, CodeInternal, "unexpected error", nil)
 	}
 }
-
-// requireAgentRole is a readability alias at the route table.
-var requireAgentRole = requireRole(auth.RoleAgent)

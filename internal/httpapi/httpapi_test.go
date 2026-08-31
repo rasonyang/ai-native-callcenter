@@ -3,10 +3,15 @@
 package httpapi
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 )
 
@@ -34,31 +39,109 @@ func TestRoleAtLeast(t *testing.T) {
 	}
 }
 
-func TestRequireRoleRejectsAndPasses(t *testing.T) {
-	handler := requireRole(auth.RoleSupervisor)(http.HandlerFunc(
-		func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
+// contextWithIdentity builds the AuthContext the authentication middleware
+// would have built for a signed-in account, so a handler test exercises the
+// handler rather than the door.
+//
+// The optional agent id is what the middleware resolves from the account's
+// agent binding: pass one where the account takes calls, and leave it out
+// where it does not — an administrator, or a supervisor who is not staffed.
+// It is a parameter rather than a lookup because these tests call handlers
+// directly and never pass through authentication.
+func contextWithIdentity(ctx context.Context, id auth.Identity, agentID ...uuid.UUID) context.Context {
+	ac := AuthContext{
+		Kind:        SubjectUser,
+		SubjectID:   id.UserID,
+		SubjectName: id.Username,
+		User:        id,
+		scopes:      grantedScopes(id.Role),
+	}
+	if len(agentID) > 0 {
+		ac.AgentID = agentID[0]
+	}
+	return contextWithAuth(ctx, ac)
+}
+
+// The contract decides who may reach an operation, and it is read at the
+// route rather than guessed: a route the contract does not declare is refused
+// rather than let through, and a subject missing the scope is told which one.
+func TestTheContractDecidesWhoReachesAnOperation(t *testing.T) {
+	reached := false
+	handler := (&Server{}).enforceContract(http.HandlerFunc(
+		func(w http.ResponseWriter, _ *http.Request) {
+			reached = true
+			w.WriteHeader(http.StatusOK)
+		}))
 
 	tests := []struct {
-		name     string
-		identity *auth.Identity
-		want     int
+		name    string
+		pattern string
+		method  string
+		auth    *AuthContext
+		want    int
+		code    ErrorCode
 	}{
-		{"no identity", nil, http.StatusForbidden},
-		{"agent rejected", &auth.Identity{Role: auth.RoleAgent}, http.StatusForbidden},
-		{"supervisor allowed", &auth.Identity{Role: auth.RoleSupervisor}, http.StatusOK},
-		{"admin allowed", &auth.Identity{Role: auth.RoleAdmin}, http.StatusOK},
+		{
+			name: "a route the contract does not declare fails closed",
+			// Not in the contract at any method: guessing here is how a hole
+			// opens quietly.
+			pattern: "/api/v1/not-in-the-contract", method: http.MethodGet,
+			auth: &AuthContext{Kind: SubjectUser, scopes: api.AllScopes},
+			want: http.StatusInternalServerError, code: CodeInternal,
+		},
+		{
+			name:    "an anonymous operation needs nothing",
+			pattern: "/api/v1/auth/login", method: http.MethodPost,
+			auth: nil, want: http.StatusOK,
+		},
+		{
+			name:    "a subject without the scope is told which one",
+			pattern: "/api/v1/cdrs", method: http.MethodGet,
+			auth: &AuthContext{Kind: SubjectUser, scopes: grantedScopes(auth.RoleAgent)},
+			want: http.StatusForbidden, code: CodeInsufficientScope,
+		},
+		{
+			name:    "a subject with it passes",
+			pattern: "/api/v1/cdrs", method: http.MethodGet,
+			auth: &AuthContext{Kind: SubjectUser, scopes: grantedScopes(auth.RoleSupervisor)},
+			want: http.StatusOK,
+		},
+		{
+			name:    "a key cannot reach an operation with no bearer alternative",
+			pattern: "/api/v1/auth/logout", method: http.MethodPost,
+			auth: &AuthContext{Kind: SubjectKey, scopes: api.AllScopes},
+			want: http.StatusUnauthorized, code: CodeInvalidCredentials,
+		},
+		{
+			name:    "a mutating session request without the CSRF header is refused",
+			pattern: "/api/v1/auth/logout", method: http.MethodPost,
+			auth: &AuthContext{Kind: SubjectUser, scopes: api.AllScopes},
+			want: http.StatusForbidden, code: CodeForbidden,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodGet, "/", nil)
-			if tt.identity != nil {
-				ctx := contextWithIdentity(r.Context(), *tt.identity)
-				r = r.WithContext(ctx)
+			reached = false
+			r := httptest.NewRequest(tt.method, tt.pattern, nil)
+			rctx := chi.NewRouteContext()
+			rctx.RoutePatterns = []string{tt.pattern}
+			ctx := context.WithValue(r.Context(), chi.RouteCtxKey, rctx)
+			if tt.auth != nil {
+				ctx = contextWithAuth(ctx, *tt.auth)
 			}
 			w := httptest.NewRecorder()
-			handler.ServeHTTP(w, r)
+			handler.ServeHTTP(w, r.WithContext(ctx))
+
 			if w.Code != tt.want {
-				t.Errorf("status = %d, want %d", w.Code, tt.want)
+				t.Fatalf("status = %d, want %d: %s", w.Code, tt.want, w.Body)
+			}
+			if tt.code != "" {
+				if code := errorCodeOf(t, w); code != string(tt.code) {
+					t.Errorf("code = %q, want %q", code, tt.code)
+				}
+			}
+			if (w.Code == http.StatusOK) != reached {
+				t.Errorf("reached the handler = %v on status %d", reached, w.Code)
 			}
 		})
 	}

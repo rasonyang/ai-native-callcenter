@@ -21,7 +21,21 @@ const (
 	CodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS"
 	CodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
 	CodeForbidden          ErrorCode = "FORBIDDEN"
-	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
+	// CodeAgentRequired is not a denial. The operation works through an
+	// agent identity — a presence change, a leg of a call, an agent's own
+	// history — and the credential has none: an administrator who takes no
+	// calls, or a key that named no agent. Distinct from FORBIDDEN, which
+	// would send the caller looking for a permission to add.
+	CodeAgentRequired ErrorCode = "AGENT_REQUIRED"
+	// CodeAgentImpersonationNotAllowed refuses X-AICC-Agent-ID on a browser
+	// session. An account is bound to at most one agent identity, so the
+	// header could only ever mean "act as somebody else".
+	CodeAgentImpersonationNotAllowed ErrorCode = "AGENT_IMPERSONATION_NOT_ALLOWED"
+	// CodeInsufficientScope names what is missing. FORBIDDEN says only that
+	// the answer is no, which leaves a caller unable to tell a capability
+	// they were never granted from a rule about this particular row.
+	CodeInsufficientScope ErrorCode = "INSUFFICIENT_SCOPE"
+	CodeValidationFailed  ErrorCode = "VALIDATION_FAILED"
 	// CodeUserDataTooLarge refuses business data rather than truncating it:
 	// a screen showing half a customer's details is worse than one saying the
 	// request was refused.

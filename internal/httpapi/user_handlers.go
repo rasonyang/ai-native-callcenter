@@ -361,8 +361,8 @@ func (s *Server) RevealExtensionPassword(w http.ResponseWriter, r *http.Request,
 	// still a disclosure, and the log line says so loudly.
 	if s.auditor != nil {
 		var actorID *uuid.UUID
-		if identity, ok := identityFrom(r.Context()); ok {
-			id := identity.UserID
+		if ac, ok := authFrom(r.Context()); ok && ac.Kind == SubjectUser {
+			id := ac.SubjectID
 			actorID = &id
 		}
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)

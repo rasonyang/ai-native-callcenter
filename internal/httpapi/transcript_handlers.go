@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -82,20 +81,23 @@ func (s *Server) GetCallTranscript(w http.ResponseWriter, r *http.Request, callI
 	})
 }
 
-// mayReadTranscript answers who can see a conversation. A supervisor or an
-// administrator can see any of them, as they can everywhere else; an agent can
-// see the calls they are actually on, because a call id in the path is never
-// authority on its own.
+// mayReadTranscript answers who can see a conversation.
+//
+// It used to be written by screen — "a supervisor or an administrator can see
+// any of them" — which is a sentence about who sits where, not about what a
+// credential may do, and it had no answer at all for a system holding a key.
+// The rule is a capability now: history:read:all reads any conversation, and
+// without it a subject reads the calls their own agent identity is on,
+// because a call id in the path is never authority on its own.
 func (s *Server) mayReadTranscript(w http.ResponseWriter, r *http.Request, callID uuid.UUID) bool {
-	id, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return false
 	}
-	if id.Role.AtLeast(auth.RoleSupervisor) {
+	if ac.Has(api.ScopeHistoryReadAll) {
 		return true
 	}
-	agentID, ok := s.agentIDFor(w, r)
+	agentID, ok := requireAgent(w, r)
 	if !ok {
 		return false
 	}

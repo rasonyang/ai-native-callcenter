@@ -119,17 +119,6 @@ type Config struct {
 	SessionCookie string
 	SecureCookies bool
 
-	// APIKey authenticates a system that places calls without a browser
-	// session — a CRM clicking dial for an agent whose phone is registered
-	// but who never signed into this application.
-	//
-	// Empty leaves that path closed, and empty is what the loader gives an
-	// unset variable, so a deployment that never names a key cannot acquire
-	// one by accident. It is one shared secret, not a managed credential:
-	// there is no per-integrator identity behind it and rotating it means
-	// restarting with a new value.
-	APIKey string
-
 	LogLevel string
 	// LogDir receives one log file per process start, named by start time,
 	// so any run can be analysed after the fact. Empty disables the file.
@@ -248,7 +237,6 @@ func Load() (Config, error) {
 		SessionTTL:              envDuration("AICC_SESSION_TTL", 12*time.Hour),
 		SessionCookie:           env("AICC_SESSION_COOKIE", "aicc_session"),
 		SecureCookies:           envBool("AICC_SECURE_COOKIES", false),
-		APIKey:                  env("AICC_API_KEY", ""),
 		LogLevel:                env("AICC_LOG_LEVEL", "info"),
 		LogDir:                  env("AICC_LOG_DIR", "logs"),
 		OTLPEndpoint:            env("AICC_OTLP_ENDPOINT", ""),

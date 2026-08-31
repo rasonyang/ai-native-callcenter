@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -62,11 +61,34 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 }
 
 // createAICall originates the customer leg and hands whoever answers to the
-// bot running the DID's flow. Placing one is an operations decision, so it
-// asks for SUPERVISOR — a role check the router used to make, and which moved
-// in here when the two kinds became one route with two answers.
+// bot running the DID's flow.
+//
+// ⚠ This check needs an owner ruling, and it is behaviour-preserving until it
+// gets one. One operation carries one scope in the contract, but this route
+// serves two kinds of call with two different answers: click-to-dial is an
+// agent's own work, while starting a bot on a number is an operations
+// decision. The baseline said so with a SUPERVISOR check inside this handler
+// — which is precisely the shape scopemap.py could not see, because it read
+// the routing table's guards and this one is not there. So calls:create alone
+// would hand every agent the ability to launch outbound bot campaigns, an
+// escalation nobody ruled on.
+//
+// config:read is asked for in the meantime because it is exactly the set that
+// could do this yesterday (supervisors and administrators, never agents) and
+// it is not arbitrary: an AI call picks a DID and runs the flow published
+// behind it, and this is the capability to see those. It is still the wrong
+// shape — a create guarded by a read — and the real answer is either a scope
+// of its own in the contract or a ruling that calls:create covers both kinds.
+// Recorded in docs/auth/RESULTS.md; ⑦ must not ship over it.
 func (s *Server) createAICall(w http.ResponseWriter, r *http.Request, req api.CreateCallRequest) {
-	if !s.hasRole(w, r, auth.RoleSupervisor) {
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	if !ac.Has(api.ScopeConfigRead) {
+		writeError(w, http.StatusForbidden, CodeInsufficientScope,
+			"placing an AI call reaches a number and the flow published behind it",
+			map[string]any{"requiredScope": api.ScopeConfigRead})
 		return
 	}
 
@@ -109,19 +131,22 @@ func (s *Server) createAICall(w http.ResponseWriter, r *http.Request, req api.Cr
 // for agents who are on the floor with a registered phone and never signed
 // into this application at all, and presence has nothing to say about them.
 func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api.CreateCallRequest) {
-	identity, _ := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
 
 	var extension, callcenterName string
 	switch {
 	case req.ExtensionNumber == nil || *req.ExtensionNumber == "":
 		// No extension named: the caller means their own, so they had better
 		// have one.
-		agentID, ok := s.signedInAgent(r, identity)
-		if !ok {
+		if !ac.IsAgent() {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed,
 				"name the extension to dial from", nil)
 			return
 		}
+		agentID := ac.AgentID
 		presence := s.agents.Presence(agentID)
 		if presence.ExtensionNumber == "" {
 			writeError(w, http.StatusConflict, CodeConflict, "sign in to a phone first", nil)
@@ -134,13 +159,16 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 
 	default:
 		extension = *req.ExtensionNumber
-		if agentID, ok := s.signedInAgent(r, identity); ok &&
-			!identity.Role.AtLeast(auth.RoleSupervisor) {
-			// An agent naming a phone may only name their own. Rejected
-			// rather than quietly redirected: a cockpit that sent the wrong
-			// extension has a bug, and dialling from the right one anyway
-			// would hide it.
-			if s.agents.Presence(agentID).ExtensionNumber != extension {
+		// An agent naming a phone may only name their own. Somebody who may
+		// see the whole floor's calls is naming a phone on purpose and is
+		// taken at their word; that is the same line calls:read:all draws
+		// everywhere else, and it is the capability rather than the rank that
+		// draws it now.
+		if ac.IsAgent() && !ac.Has(api.ScopeCallsReadAll) {
+			// Rejected rather than quietly redirected: a cockpit that sent
+			// the wrong extension has a bug, and dialling from the right one
+			// anyway would hide it.
+			if s.agents.Presence(ac.AgentID).ExtensionNumber != extension {
 				writeError(w, http.StatusForbidden, CodeForbidden,
 					"an agent dials from their own phone", nil)
 				return
@@ -174,7 +202,7 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 	// the callback: nobody else's promise gets a call recorded against it.
 	var kept *store.Callback
 	if req.CallbackID != nil {
-		if s.ledger == nil || isMachine(identity) {
+		if s.ledger == nil || ac.Kind != SubjectUser {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed,
 				"a callback is kept by a signed-in agent", nil)
 			return
@@ -182,7 +210,7 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		if dial.CallID == uuid.Nil {
 			dial.CallID = uuid.New()
 		}
-		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, identity.UserID)
+		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, ac.SubjectID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusConflict, CodeConflict, "claim the callback before calling back", nil)
@@ -207,31 +235,6 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		s.publishCallback(r, events.TypeCallbackUpdated, *kept)
 	}
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
-}
-
-// hasRole answers the role question the router no longer can, because one
-// route now serves two operations with two different answers.
-func (s *Server) hasRole(w http.ResponseWriter, r *http.Request, want auth.Role) bool {
-	identity, ok := identityFrom(r.Context())
-	if !ok || !identity.Role.AtLeast(want) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "insufficient role",
-			map[string]any{"requiredRole": string(want)})
-		return false
-	}
-	return true
-}
-
-// signedInAgent resolves the agent profile behind a request, if there is one.
-// The API key has no user and therefore never has one.
-func (s *Server) signedInAgent(r *http.Request, identity auth.Identity) (uuid.UUID, bool) {
-	if isMachine(identity) {
-		return uuid.Nil, false
-	}
-	agentID, err := s.agentDir.AgentIDForUser(r, identity.UserID)
-	if err != nil {
-		return uuid.Nil, false
-	}
-	return agentID, true
 }
 
 // isPhoneReachable refuses a call at a phone that cannot take it, and says

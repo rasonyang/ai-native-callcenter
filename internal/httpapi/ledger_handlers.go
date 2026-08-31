@@ -169,9 +169,15 @@ func (s *Server) ListCallbacks(w http.ResponseWriter, r *http.Request, params ap
 
 // ClaimCallback marks a callback as being worked by the caller.
 func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	identity, _ := identityFrom(r.Context())
-
-	callback, err := s.ledger.ClaimCallback(r.Context(), id, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	// The subject id, which for a signed-in account is the user id this
+	// column has always held. Commit ④ moves the three callback columns onto
+	// the agent identity (ruling 2); until then no key authenticates at all,
+	// so nothing but a user id can reach here.
+	callback, err := s.ledger.ClaimCallback(r.Context(), id, ac.SubjectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Either it does not exist or someone claimed it first; to the
@@ -188,9 +194,11 @@ func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.U
 
 // ReleaseCallback hands a claimed callback back to the pool.
 func (s *Server) ReleaseCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	identity, _ := identityFrom(r.Context())
-
-	callback, err := s.ledger.ReleaseCallback(r.Context(), id, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	callback, err := s.ledger.ReleaseCallback(r.Context(), id, ac.SubjectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Not claimed, or claimed by somebody else: either way it is not
@@ -223,8 +231,11 @@ func (s *Server) CompleteCallback(w http.ResponseWriter, r *http.Request, id uui
 		return
 	}
 
-	identity, _ := identityFrom(r.Context())
-	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, ac.SubjectID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "no such callback", nil)

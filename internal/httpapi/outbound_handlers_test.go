@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -37,8 +38,8 @@ func placeCall(t *testing.T, body string) (*httptest.ResponseRecorder, *recordin
 	s := &Server{outbound: dialer}
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(body))
-	// Placing an AI call is an operations decision, and the role check for it
-	// now lives in the handler rather than on the route.
+	// Placing an AI call is an operations decision, and the check for it lives
+	// in the handler rather than on the route.
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
 		UserID: uuid.New(), Role: auth.RoleSupervisor,
 	}))
@@ -168,7 +169,7 @@ func errorCodeOf(t *testing.T, w *httptest.ResponseRecorder) string {
 // same limits, same carrier — because two ways of saying the same thing is
 // how a second scheme starts.
 func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
-	w, dialer := agentDial(t, agentIdentity(),
+	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":{"orderId":"9999000000000000"}}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -180,7 +181,7 @@ func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
 		t.Errorf("orderId = %q", got)
 	}
 
-	w, _ = agentDial(t, agentIdentity(),
+	w, _ = agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":`+oversizedValue()+`}`)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("an oversized value returned %d, want 400", w.Code)
@@ -205,19 +206,33 @@ func (d *recordingDialer) Dial(_ context.Context, req outbound.AgentDialRequest)
 	return uuid.New(), nil
 }
 
-func agentIdentity() auth.Identity {
-	return auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}
+// agentSubject is a signed-in agent: an account with an agent identity and an
+// agent's grant.
+func agentSubject() AuthContext {
+	return AuthContext{
+		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "mina",
+		AgentID: uuid.New(), scopes: grantedScopes(auth.RoleAgent),
+	}
+}
+
+// keySubject is a system holding a key: no agent identity of its own, and the
+// scopes to place a call of either kind.
+func keySubject() AuthContext {
+	return AuthContext{
+		Kind: SubjectKey, SubjectID: uuid.New(), SubjectName: "crm-integration",
+		scopes: []string{api.ScopeCallsCreate, api.ScopeConfigRead},
+	}
 }
 
 // agentDial places a click-to-dial as whoever the identity says, against a
 // stub where extension 1008 is the signed-in agent's phone and 1009 is a
 // registered phone with nobody signed in at it.
-func agentDial(t *testing.T, identity auth.Identity, body string) (*httptest.ResponseRecorder, *recordingDialer) {
+func agentDial(t *testing.T, ac AuthContext, body string) (*httptest.ResponseRecorder, *recordingDialer) {
 	t.Helper()
 	dialer := &recordingDialer{}
 	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(body))
-	r = r.WithContext(contextWithIdentity(r.Context(), identity))
+	r = r.WithContext(contextWithAuth(r.Context(), ac))
 	w := httptest.NewRecorder()
 	s.CreateCall(w, r)
 	return w, dialer
@@ -226,7 +241,7 @@ func agentDial(t *testing.T, identity auth.Identity, body string) (*httptest.Res
 // The handler is where the agent's switch-side name comes from, so this is
 // where a dial that forgot it would go unnoticed.
 func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
-	w, dialer := agentDial(t, agentIdentity(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
+	w, dialer := agentDial(t, agentSubject(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
@@ -245,7 +260,7 @@ func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
 // Presence has nothing to say about such an agent, so the phone is what is
 // asked about.
 func TestASystemDialsForAnAgentWhoNeverSignedIn(t *testing.T) {
-	w, dialer := agentDial(t, machineIdentity(),
+	w, dialer := agentDial(t, keySubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -264,7 +279,7 @@ func TestASystemDialsForAnAgentWhoNeverSignedIn(t *testing.T) {
 // Without an extension there is no phone to raise, and the API key has none of
 // its own to fall back on. Refused rather than guessed.
 func TestASystemMustSayWhichPhoneToRaise(t *testing.T) {
-	w, _ := agentDial(t, machineIdentity(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
+	w, _ := agentDial(t, keySubject(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
@@ -283,7 +298,7 @@ func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
 		{"not answering", "1011", "the phone is not answering"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w, dialer := agentDial(t, machineIdentity(),
+			w, dialer := agentDial(t, keySubject(),
 				`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"`+tc.extension+`"}`)
 			if w.Code != http.StatusConflict {
 				t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -301,7 +316,7 @@ func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
 // An agent acts as themselves. A cockpit that sent somebody else's extension
 // has a bug, and dialling from the right phone anyway would hide it.
 func TestAnAgentMayNotDialFromAnotherAgentsPhone(t *testing.T) {
-	w, dialer := agentDial(t, agentIdentity(),
+	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -315,7 +330,7 @@ func TestAnAgentMayNotDialFromAnotherAgentsPhone(t *testing.T) {
 // that fills the field in from its own presence is being explicit, not
 // overreaching.
 func TestAnAgentMayNameTheirOwnPhone(t *testing.T) {
-	w, dialer := agentDial(t, agentIdentity(),
+	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1008"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -326,14 +341,18 @@ func TestAnAgentMayNameTheirOwnPhone(t *testing.T) {
 }
 
 // Placing an AI call is an operations decision, and the route no longer guards
-// it — one path now serves two kinds with two different answers, so the check
-// moved into the handler and this is what keeps it there.
+// it — one path serves two kinds with two different answers, so the check
+// lives in the handler and this is what keeps it there.
+//
+// calls:create alone is not enough, which is the whole point: the contract can
+// give this operation one scope, and an agent holds it for their own
+// click-to-dial. Starting a bot on a number is not the same act.
 func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
 	dialer := &recordingOutbound{}
 	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls",
 		strings.NewReader(`{"kind":"AI_OUTBOUND","to":"18600000000","did":"95012"}`))
-	r = r.WithContext(contextWithIdentity(r.Context(), agentIdentity()))
+	r = r.WithContext(contextWithAuth(r.Context(), agentSubject()))
 	w := httptest.NewRecorder()
 	s.CreateCall(w, r)
 
@@ -350,7 +369,7 @@ func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
 // client-minted id is carried through to the service that keeps the record.
 func TestAClickToDialCarriesTheClientMintedIDThroughToTheService(t *testing.T) {
 	callID := uuid.New()
-	w, dialer := agentDial(t, machineIdentity(),
+	w, dialer := agentDial(t, keySubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009","callId":"`+
 			callID.String()+`"}`)
 	if w.Code != http.StatusCreated {

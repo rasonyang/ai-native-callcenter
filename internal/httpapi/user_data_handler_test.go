@@ -38,7 +38,7 @@ func patchUserData(t *testing.T, calls *patchingCalls, body string) *httptest.Re
 		strings.NewReader(body))
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
 		UserID: uuid.New(), Role: auth.RoleAgent,
-	}))
+	}, uuid.New()))
 	w := httptest.NewRecorder()
 	s.PatchUserData(w, r, uuid.New())
 	return w

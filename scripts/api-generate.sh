@@ -6,6 +6,7 @@
 #   web/src/generated/api.ts     TypeScript types (openapi-typescript)
 #   internal/api/scopes.gen.go   Go scope constants        (scripts/gen-scopes.mjs)
 #   web/src/generated/scopes.ts  TS scope union + labels   (scripts/gen-scopes.mjs)
+#   internal/api/opsecurity.gen.go  per-operation security (scripts/gen-opsecurity.mjs)
 #
 # This script is the single generation entry point — `make api-generate` and
 # `go generate ./internal/api` both land here, so the committed output is
@@ -30,4 +31,9 @@ web/node_modules/.bin/openapi-typescript docs/openapi.json -o web/src/generated/
 # so it is generated here from the same contract, into the same two directories
 # `make api-check` already diffs.
 node scripts/gen-scopes.mjs
-gofmt -w internal/api/scopes.gen.go
+
+# Each operation's own `security` block, as a table the router obeys. Without
+# it the contract's authorization rules would be JSON nobody executes.
+node scripts/gen-opsecurity.mjs
+
+gofmt -w internal/api/scopes.gen.go internal/api/opsecurity.gen.go

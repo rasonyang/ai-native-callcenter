@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
@@ -47,7 +48,16 @@ func serveEventsWith(t *testing.T, hub *events.Hub, id auth.Identity, dir AgentD
 
 	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{Hub: hub, AgentDir: dir})
 
-	ctx, cancel := context.WithCancel(contextWithIdentity(context.Background(), id))
+	// The agent identity the authentication middleware would have resolved
+	// from this account's binding — the same directory the real one asks.
+	agentID := []uuid.UUID{}
+	if dir != nil {
+		if resolved, err := dir.AgentIDForUser(
+			httptest.NewRequest(http.MethodGet, "/", nil), id.UserID); err == nil {
+			agentID = append(agentID, resolved)
+		}
+	}
+	ctx, cancel := context.WithCancel(contextWithIdentity(context.Background(), id, agentID...))
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/events", nil).WithContext(ctx)
 	if lastEventID != "" {
 		r.Header.Set("Last-Event-ID", lastEventID)
@@ -57,7 +67,10 @@ func serveEventsWith(t *testing.T, hub *events.Hub, id auth.Identity, dir AgentD
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		srv.apiWrapper().StreamEvents(w, r)
+		// Called the way it is mounted: by hand, outside the generated
+		// wrapper, because an EventSource must not be answered with a
+		// rejected parameter.
+		srv.StreamEvents(w, r, api.StreamEventsParams{})
 	}()
 
 	// Give the handler time to subscribe before publishing, then to write.

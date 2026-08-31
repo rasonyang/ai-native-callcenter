@@ -4,99 +4,282 @@ package httpapi
 
 import (
 	"context"
-	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 )
 
-type contextKey int
-
-const identityKey contextKey = iota
-
-// csrfHeader must accompany every mutating request. Requiring a custom header
-// makes the request non-simple, so a cross-origin caller is stopped by the
-// browser's preflight; SameSite=Lax on the cookie is the second layer.
+// csrfHeader must accompany a mutating request made with the session cookie.
+// Requiring a custom header makes the request non-simple, so a cross-origin
+// caller is stopped by the browser's preflight; SameSite=Lax on the cookie is
+// the second layer.
+//
+// It is asked of the cookie and only of the cookie. That header exists to
+// protect a credential the browser attaches by itself; a key is presented
+// deliberately on every request and has no cookie to abuse. Which operations
+// want it is not decided here — the contract says so operation by operation
+// (NeedsCSRF), and this server obeys the contract.
 const csrfHeader = "X-AICC-Csrf"
 
-// identityFrom returns the authenticated identity carried by ctx.
-func identityFrom(ctx context.Context) (auth.Identity, bool) {
-	id, ok := ctx.Value(identityKey).(auth.Identity)
-	return id, ok
+// actAsAgentHeader names the agent a key is working as. A key belongs to a
+// system, not to a person, so the agent it acts for is a fact about the
+// request rather than about the credential.
+//
+// A session may never send it. An account is already bound to at most one
+// agent identity, so the header could only ever mean "act as somebody else",
+// and that is not a capability this product has.
+const actAsAgentHeader = "X-AICC-Agent-ID"
+
+// bearerPrefix is the one credential presentation an API key uses. There is
+// no X-AICC-Api-Key header any more: a bearer token is what every HTTP client
+// already knows how to send, and the contract declares it as http/bearer.
+const bearerPrefix = "Bearer "
+
+// KeySubject is an authenticated API key: who it is and what it may do.
+// Scopes come from the key's own grant, written down when it was issued —
+// a key's capabilities are never derived from a role.
+type KeySubject struct {
+	KeyID   uuid.UUID
+	Name    string
+	Scopes  []string
+	AgentID uuid.UUID
 }
 
-// contextWithIdentity attaches an authenticated identity to ctx.
-func contextWithIdentity(ctx context.Context, id auth.Identity) context.Context {
-	return context.WithValue(ctx, identityKey, id)
+// KeyAuthenticator resolves a presented secret into the key that holds it,
+// and records that the key was used. Any error means the credential does not
+// authenticate; the caller is told INVALID_CREDENTIALS and nothing more,
+// because "revoked" and "never existed" are the same answer to whoever is
+// holding a secret they should not have.
+//
+// Nil until commit ④ installs the store-backed implementation. A deployment
+// without one simply has no keys, and says so with the same 401.
+type KeyAuthenticator interface {
+	AuthenticateKey(ctx context.Context, secret string) (KeySubject, error)
 }
 
-// requireSession authenticates the session cookie and rejects unauthenticated
-// requests. It also enforces the CSRF header on mutating methods.
-func (s *Server) requireSession(next http.Handler) http.Handler {
+// authenticate resolves the request's credential into an AuthContext.
+//
+// One middleware for both kinds. The old pair — requireSession, and a
+// requireSessionOrAPIKey bolted onto the two routes a machine was allowed to
+// reach — encoded "which credentials may reach this route" in the routing
+// table, where the contract could not see it. It is the contract's answer
+// now (enforceContract), and this function's only job is to say who is
+// asking.
+func (s *Server) authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet, http.MethodHead, http.MethodOptions:
-		default:
-			if r.Header.Get(csrfHeader) == "" {
-				writeError(w, http.StatusForbidden, CodeForbidden,
-					"missing "+csrfHeader+" header", nil)
+		if secret, ok := bearerSecret(r); ok {
+			ac, done := s.authenticateKey(w, r, secret)
+			if done {
 				return
 			}
+			next.ServeHTTP(w, r.WithContext(contextWithAuth(r.Context(), ac)))
+			return
+		}
+		ac, done := s.authenticateSession(w, r)
+		if done {
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(contextWithAuth(r.Context(), ac)))
+	})
+}
+
+// bearerSecret returns the secret presented in the Authorization header.
+//
+// A presented bearer is answered on its own terms and never falls back to the
+// cookie: a caller who sent a key meant to authenticate with it, and letting
+// them continue into the session path would answer "no session" to what is
+// really a bad credential.
+func bearerSecret(r *http.Request) (string, bool) {
+	h := r.Header.Get("Authorization")
+	if len(h) <= len(bearerPrefix) || !strings.EqualFold(h[:len(bearerPrefix)], bearerPrefix) {
+		return "", false
+	}
+	return strings.TrimSpace(h[len(bearerPrefix):]), true
+}
+
+// authenticateSession authenticates the browser session cookie. done reports
+// that the response has already been written.
+func (s *Server) authenticateSession(w http.ResponseWriter, r *http.Request) (ac AuthContext, done bool) {
+	cookie, err := r.Cookie(s.cfg.SessionCookie)
+	if err != nil || cookie.Value == "" {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return AuthContext{}, true
+	}
+
+	id, err := s.auth.Authenticate(r.Context(), cookie.Value)
+	switch {
+	case errors.Is(err, auth.ErrSessionExpired):
+		s.clearSessionCookie(w)
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "session expired", nil)
+		return AuthContext{}, true
+	case errors.Is(err, auth.ErrUserSuspended):
+		writeError(w, http.StatusForbidden, CodeUserSuspended, "user suspended", nil)
+		return AuthContext{}, true
+	case err != nil:
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot verify session", nil)
+		return AuthContext{}, true
+	}
+
+	// A person acts as themselves. The header is a key's way of naming the
+	// agent it works for; a session sending it is asking to be somebody else,
+	// and it is refused loudly rather than ignored. Ignoring it is what the
+	// baseline did, and a silently discarded authorization header is the kind
+	// of thing that is harmless until the day something reads it.
+	if r.Header.Get(actAsAgentHeader) != "" {
+		writeError(w, http.StatusForbidden, CodeAgentImpersonationNotAllowed,
+			"a signed-in account acts as itself; "+actAsAgentHeader+" belongs to an API key",
+			map[string]any{"header": actAsAgentHeader})
+		return AuthContext{}, true
+	}
+
+	ac = AuthContext{
+		Kind:        SubjectUser,
+		SubjectID:   id.UserID,
+		SubjectName: id.Username,
+		User:        id,
+		scopes:      grantedScopes(id.Role),
+	}
+	// The agent identity behind the account, resolved once. Thirteen call
+	// sites used to look it up for themselves; a handler now reads a field.
+	// An account with no agent keeps uuid.Nil, which is not an error here —
+	// only an operation that acts as an agent refuses it, and it says
+	// AGENT_REQUIRED when it does.
+	if s.agentDir != nil {
+		if agentID, err := s.agentDir.AgentIDForUser(r, id.UserID); err == nil {
+			ac.AgentID = agentID
+		}
+	}
+	return ac, false
+}
+
+// authenticateKey authenticates a bearer API key and resolves the agent it
+// is acting for.
+func (s *Server) authenticateKey(w http.ResponseWriter, r *http.Request, secret string) (ac AuthContext, done bool) {
+	if s.keys == nil || secret == "" {
+		writeError(w, http.StatusUnauthorized, CodeInvalidCredentials, "bad API key", nil)
+		return AuthContext{}, true
+	}
+	subject, err := s.keys.AuthenticateKey(r.Context(), secret)
+	if err != nil {
+		// INVALID_CREDENTIALS rather than SESSION_EXPIRED: the code is what
+		// an integration branches on, and told its session expired it would
+		// go and refresh one it never had.
+		writeError(w, http.StatusUnauthorized, CodeInvalidCredentials, "bad API key", nil)
+		return AuthContext{}, true
+	}
+
+	ac = AuthContext{
+		Kind:        SubjectKey,
+		SubjectID:   subject.KeyID,
+		SubjectName: subject.Name,
+		AgentID:     subject.AgentID,
+		scopes:      subject.Scopes,
+	}
+	if raw := r.Header.Get(actAsAgentHeader); raw != "" {
+		agentID, err := uuid.Parse(raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, CodeValidationFailed,
+				actAsAgentHeader+" is not an identifier", map[string]any{"field": actAsAgentHeader})
+			return AuthContext{}, true
+		}
+		ac.AgentID = agentID
+	}
+	return ac, false
+}
+
+// enforceContract is the authorization gate, and it reads the contract.
+//
+// It runs inside the generated wrapper, which is the first moment chi has
+// resolved the route pattern — so the operation can be looked up by what it
+// is rather than by a guard somebody remembered to place beside it. Every
+// rule it applies (which credentials reach this operation, which scopes each
+// must carry, whether the cookie needs a CSRF header) comes from
+// docs/openapi.json, generated into api.OperationSecurityByRoute.
+//
+// That is the whole point of the change: the contract is the product, so the
+// contract is what the server obeys. A route whose authorization lives in
+// server.go is a rule the published API cannot state.
+func (s *Server) enforceContract(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want, ok := api.SecurityForRoute(contractRoute(r))
+		if !ok {
+			// Fail closed. A route with no contract entry is a routing table
+			// that has drifted from the contract, and guessing is how a hole
+			// opens quietly. TestEveryRouteIsInTheContract makes this
+			// unreachable; this is what happens if it ever is not.
+			writeError(w, http.StatusInternalServerError, CodeInternal,
+				"this route declares no security in the contract", nil)
+			return
+		}
+		if want.IsAnonymous {
+			next.ServeHTTP(w, r)
+			return
 		}
 
-		cookie, err := r.Cookie(s.cfg.SessionCookie)
-		if err != nil || cookie.Value == "" {
-			// A caller holding an API key has no session and never will, so
-			// "session expired" reads to them as an instruction to refresh one
-			// that does not exist — a machine follows it forever. Say instead
-			// that the credential they did present is not the one this
-			// endpoint takes. The status stays 401: what is missing is a
-			// credential this route accepts, not permission.
-			if r.Header.Get(apiKeyHeader) != "" {
-				writeError(w, http.StatusUnauthorized, CodeInvalidCredentials,
-					"this endpoint takes a browser session; an API key cannot reach it", nil)
-				return
-			}
+		ac, ok := authFrom(r.Context())
+		if !ok {
 			writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 			return
 		}
 
-		id, err := s.auth.Authenticate(r.Context(), cookie.Value)
-		switch {
-		case errors.Is(err, auth.ErrSessionExpired):
-			s.clearSessionCookie(w)
-			writeError(w, http.StatusUnauthorized, CodeSessionExpired, "session expired", nil)
-			return
-		case errors.Is(err, auth.ErrUserSuspended):
-			writeError(w, http.StatusForbidden, CodeUserSuspended, "user suspended", nil)
-			return
-		case err != nil:
-			writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot verify session", nil)
+		need := want.SessionScopes
+		if ac.Kind == SubjectKey {
+			need = want.KeyScopes
+		}
+		if need == nil {
+			// The credential has no alternative on this operation at all.
+			// 401, not 403: what is missing is a credential this operation
+			// takes, not permission. And it is said in words a machine can
+			// act on — "session expired" would send an integration off to
+			// refresh a session it never had.
+			writeError(w, http.StatusUnauthorized, CodeInvalidCredentials,
+				"this operation does not take "+credentialName(ac.Kind), nil)
 			return
 		}
 
-		next.ServeHTTP(w, r.WithContext(contextWithIdentity(r.Context(), id)))
+		if want.NeedsCSRF && ac.Kind == SubjectUser && r.Header.Get(csrfHeader) == "" {
+			writeError(w, http.StatusForbidden, CodeForbidden,
+				"missing "+csrfHeader+" header", nil)
+			return
+		}
+
+		for _, scope := range need {
+			if !ac.Has(scope) {
+				// INSUFFICIENT_SCOPE, not FORBIDDEN: it names what to fix.
+				// A caller told only "forbidden" cannot tell a missing
+				// capability from a rule about this particular row.
+				writeError(w, http.StatusForbidden, CodeInsufficientScope,
+					"this credential does not hold "+scope,
+					map[string]any{"requiredScope": scope})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 
-// requireRole rejects identities below want.
-func requireRole(want auth.Role) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			id, ok := identityFrom(r.Context())
-			if !ok || !id.Role.AtLeast(want) {
-				writeError(w, http.StatusForbidden, CodeForbidden, "insufficient role", map[string]any{
-					"requiredRole": string(want),
-				})
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+// contractRoute is the contract's key for the route chi matched: the pattern
+// with the server's own /api/v1 prefix removed, because the contract's paths
+// are relative to it.
+func contractRoute(r *http.Request) (method, path string) {
+	pattern := chi.RouteContext(r.Context()).RoutePattern()
+	return r.Method, strings.TrimPrefix(pattern, apiPrefix)
+}
+
+// apiPrefix is where the contract's paths are mounted.
+const apiPrefix = "/api/v1"
+
+func credentialName(kind SubjectKind) string {
+	if kind == SubjectKey {
+		return "an API key"
 	}
+	return "a browser session"
 }
 
 // clientIP extracts the peer address, preferring the proxy header only when
@@ -109,69 +292,36 @@ func clientIP(r *http.Request) string {
 	return strings.Trim(host, "[]")
 }
 
-// apiKeyHeader carries the shared secret a system authenticates with when it
-// has no browser and therefore no session cookie.
-const apiKeyHeader = "X-AICC-Api-Key"
-
-// machineUsername names the API key in an audit row. There is one key and no
-// per-integrator identity behind it, so this is as specific as the truth gets.
-const machineUsername = "api-key"
-
-// machineIdentity is who a request authenticated by the API key is.
+// requireAgent resolves the agent identity a request acts as, writing the
+// refusal itself when there is none.
 //
-// SUPERVISOR because the key is the deployment's own credential, held by
-// whoever configured the server, and every operation it can reach is one a
-// supervisor may perform. It is not ADMIN: configuring the platform is a
-// person's job and a leaked key should not be able to rewrite the directory.
-//
-// UserID stays nil, which is the honest answer — no user did this — and is
-// what isMachine reads to keep a made-up user id out of the audit trail.
-func machineIdentity() auth.Identity {
-	return auth.Identity{
-		Username:    machineUsername,
-		DisplayName: "API key",
-		Role:        auth.RoleSupervisor,
+// This replaced agentIDFor, which asked the database on every call site. The
+// answer is in the AuthContext now; what is left is the refusal, and it says
+// AGENT_REQUIRED rather than FORBIDDEN — the caller is not being denied a
+// capability, they are being told this operation works through an agent
+// identity and the credential has none.
+func requireAgent(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	ac, ok := authFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return uuid.Nil, false
 	}
+	if !ac.IsAgent() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"this operation acts through an agent identity and this credential has none", nil)
+		return uuid.Nil, false
+	}
+	return ac.AgentID, true
 }
 
-// isMachine reports whether an identity is the API key rather than a person.
-// A real identity always carries the user's id; only the synthesized one is
-// nil, so the check needs no extra field on the wire type /auth/me returns.
-func isMachine(id auth.Identity) bool { return id.UserID == uuid.Nil }
-
-// requireSessionOrAPIKey authenticates a request that a system may place
-// without signing in, falling back to the ordinary session rules when no key
-// is presented.
-//
-// A presented key is answered on its own terms and never falls through: a
-// caller who sent the wrong secret meant to authenticate with it, and letting
-// them continue into the session path would answer "no session" to what is
-// really a bad credential.
-//
-// No CSRF header is asked of the key path. That header exists to make a
-// cross-origin request non-simple so the browser preflights it, which protects
-// a caller whose credential travels automatically — a cookie. This one sends
-// its credential deliberately on every request and has no cookie to abuse.
-func (s *Server) requireSessionOrAPIKey(next http.Handler) http.Handler {
-	session := s.requireSession(next)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		presented := r.Header.Get(apiKeyHeader)
-		if presented == "" {
-			session.ServeHTTP(w, r)
-			return
-		}
-		// Configured-empty means the machine path was never opened, and the
-		// config loader gives an unset variable exactly that. Checking it
-		// before the compare keeps an unconfigured deployment from accepting
-		// an empty header as a match.
-		if s.cfg.APIKey == "" ||
-			subtle.ConstantTimeCompare([]byte(presented), []byte(s.cfg.APIKey)) != 1 {
-			// INVALID_CREDENTIALS rather than SESSION_EXPIRED: the code is
-			// what an integration branches on, and told its session expired
-			// it would go and refresh one it never had.
-			writeError(w, http.StatusUnauthorized, CodeInvalidCredentials, "bad API key", nil)
-			return
-		}
-		next.ServeHTTP(w, r.WithContext(contextWithIdentity(r.Context(), machineIdentity())))
-	})
+// mustAuth is for the handlers that always run behind authentication. The
+// second return is kept so a caller can still refuse rather than panic on a
+// context that somehow carries nothing.
+func mustAuth(w http.ResponseWriter, r *http.Request) (AuthContext, bool) {
+	ac, ok := authFrom(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
+		return AuthContext{}, false
+	}
+	return ac, true
 }

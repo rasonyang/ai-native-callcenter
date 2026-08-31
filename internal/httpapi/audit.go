@@ -62,19 +62,22 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 		}
 
 		var actorID *uuid.UUID
-		if identity, ok := identityFrom(r.Context()); ok {
-			if isMachine(identity) {
-				// No person did this, so the actor column stays null rather
-				// than carrying a user id nobody can look up. The row would
-				// then be indistinguishable from one with no actor at all,
-				// which is why the key says so in the detail instead.
+		if ac, ok := authFrom(r.Context()); ok {
+			switch ac.Kind {
+			case SubjectUser:
+				id := ac.SubjectID
+				actorID = &id
+			default:
+				// A key id is not a user id, and actor_id is the user
+				// column. Writing one into the other would let two
+				// identifier spaces share a column with nothing to tell
+				// them apart, so the key says who it was in the detail
+				// instead — until commit ⑤ gives the trail its own subject
+				// columns and this stops being a workaround.
 				if detail == nil {
 					detail = map[string]any{}
 				}
-				detail["actor"] = identity.Username
-			} else {
-				id := identity.UserID
-				actorID = &id
+				detail["actor"] = ac.SubjectName
 			}
 		}
 
