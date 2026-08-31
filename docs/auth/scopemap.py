@@ -1,19 +1,25 @@
 # SPDX-License-Identifier: Apache-2.0
-"""§2 的 scope 映射 —— operation → scopes，以及 role → scopes 的推导。
+"""The scope map: operation -> scopes, and the derivation of role -> scopes.
 
-这个文件是**推导的记录**，不是运行时代码：契约里的 89 个 security 块由它生成一次，
-之后契约就是唯一真相源。留在仓库里是因为 role → scopes 不是拍脑袋定的，而是从
-"今天按 rank 谁能到达"机械推出来的，而那个推导需要能被复查、被重跑。
+This file is a *record of a derivation*, not runtime code. It generated the
+contract's security blocks once; the contract has been the source of truth ever
+since. It stays in the repository because role -> scopes was not decided by
+opinion — it was derived mechanically from who could reach what before scopes
+existed — and a derivation is worth nothing unless it can be re-checked and
+re-run.
 
-关键事实：角色守卫是**下限**不是**匹配**（auth.Role.AtLeast 按 roleRank 比大小），
-所以 requireAgentRole 不拒绝任何持有有效会话的人。推导的输入因此是可达性而不是
-守卫标签。照这个构造出来的 role → scopes 按定义是行为保持的，每一处偏离都能被
-下面的自检枚举出来。
+The load-bearing fact: a role guard was a *lower bound*, not a match
+(auth.Role.AtLeast compares rank), so requireAgentRole turned nobody away who
+held a valid session. The input to the derivation is therefore reachability,
+not the guard's label. A role -> scopes map built this way is behaviour-
+preserving by construction, and every departure from it is enumerated by the
+self-check below.
 
-    python3 docs/auth/scopemap.py     # 打印词表、role→scopes、拓宽与收窄
+    python3 docs/auth/scopemap.py     # prints the vocabulary, role -> scopes,
+                                      # and every widening and narrowing
 """
 
-# 词表：名 -> 说明（进契约的 x-scopes）
+# The vocabulary: name -> description, as it appears in the contract x-scopes.
 VOCAB = {
     "calls:read:own":   "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
     "calls:read:all":   "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
@@ -37,17 +43,19 @@ VOCAB = {
     "audit:read":       "Read the audit trail.",
 }
 
-# operationId -> (scopes, 今天按 rank 的可达下限, 是否有 Bearer 支)
-# 下限：AGENT = 任何有会话的人（AtLeast 是下限不是匹配）；SUP / ADMIN 同理；NONE = 任何已认证
+# operationId -> (scopes, the rank floor that could reach it before scopes,
+#                 whether it has a bearer alternative)
+# The floor is a lower bound, not a match: AGENT means anyone holding a session,
+# SUPERVISOR and ADMIN likewise, NONE means any authenticated caller.
 A, S, D, N, ANON = "AGENT", "SUPERVISOR", "ADMIN", "NONE", "ANON"
 
 OPS = {
-    # 认证本身
-    "login":                    ([], ANON, False),   # 匿名
-    "logout":                   ([], N, False),      # 会话机制，Key 没有会话可结束
-    "getMe":                    ([], N, True),       # Bearer 支返回 Key 主体
+    # Authentication itself.
+    "login":                    ([], ANON, False),   # anonymous
+    "logout":                   ([], N, False),      # a session mechanism: a key has no session to end
+    "getMe":                    ([], N, True),       # the bearer alternative answers with the key as subject
 
-    # 坐席
+    # Agents.
     "getAgentPresence":         (["agent:read"], A, True),
     "getAgentWrapUp":           (["agent:read"], A, True),
     "listDispositions":         (["agent:read"], N, True),
@@ -59,7 +67,7 @@ OPS = {
     "agentWrapUp":              (["agent:act"], A, True),
     "forceLogoutAgent":         (["agent:manage"], S, True),
 
-    # 在线通话
+    # Live calls.
     "listMyCalls":              (["calls:read:own"], A, True),
     "listWaitingCalls":         (["calls:read:own"], A, True),
     "streamEvents":             (["calls:read:own"], N, True),
@@ -73,20 +81,22 @@ OPS = {
     "sendCallDTMF":             (["calls:control"], A, True),
     "patchUserData":            (["calls:control"], A, True),
     "hangupCall":               (["calls:control"], N, True),
-    # AI_OUTBOUND 还要 calls:create:ai，那半条检查在 handler 里(一个 operation
-    # 只能带一个 scope,而这条路由服务两种 kind)。初稿把下限记成 N 是漏了
-    # handler 内的判定——createAICall 在基线上就要 SUPERVISOR,而本文件的
-    # 自检只读路由表守卫,看不见它(owner 2026-08-31 裁定,补上第 20 个 scope)。
+    # AI_OUTBOUND additionally requires calls:create:ai, and that half of the
+    # check lives in the handler: one operation carries one scope, and this
+    # route serves two kinds of call. The first draft recorded the floor as N,
+    # which missed the in-handler decision — createAICall asked for SUPERVISOR
+    # on the baseline, and this script only reads the routing table's guards,
+    # so it could not see it. (Owner ruling 2026-08-31, adding the 20th scope.)
     "createCall":               (["calls:create"], N, True),
     "monitorCall":              (["calls:monitor"], S, True),
 
-    # 回呼：还没发生的通话上的工作
+    # Callbacks: work on a call that has not happened yet.
     "listCallbacks":            (["calls:read:own"], N, True),
     "claimCallback":            (["calls:control"], N, True),
     "releaseCallback":          (["calls:control"], N, True),
     "completeCallback":         (["calls:control"], N, True),
 
-    # 历史
+    # History.
     "listMyCDRs":               (["history:read:own"], A, True),
     "getMyDay":                 (["history:read:own"], A, True),
     "getCallTranscript":        (["history:read:own"], N, True),
@@ -99,17 +109,17 @@ OPS = {
     "getReportQueues":          (["reports:read"], S, True),
     "getReportDaily":           (["reports:read"], S, True),
 
-    # 质检
+    # Quality review.
     "listCallReviews":          (["quality:review"], S, True),
-    "createRecordingReview":    (["quality:review"], S, False),  # P8：人的判断必须归属到人
+    "createRecordingReview":    (["quality:review"], S, False),  # P8: a human judgement is attributed to a human
 
-    # 联系人
+    # Contacts.
     "listContacts":             (["contacts:read"], N, True),
     "createContact":            (["contacts:write"], N, True),
     "updateContact":            (["contacts:write"], N, True),
     "deleteContact":            (["contacts:write"], N, True),
 
-    # 配置——读
+    # Configuration: reading.
     "listQueues":               (["config:read"], S, True),
     "listQueueAgents":          (["config:read"], S, True),
     "listExtensions":           (["config:read"], D, True),
@@ -122,7 +132,7 @@ OPS = {
     "getWebhookSubscription":   (["config:read"], D, True),
     "listWebhookDeliveries":    (["config:read"], D, True),
 
-    # 配置——写
+    # Configuration: writing.
     "createExtension":          (["config:write"], D, True),
     "updateExtension":          (["config:write"], D, True),
     "deleteExtension":          (["config:write"], D, True),
@@ -141,22 +151,22 @@ OPS = {
     "createAgent":              (["config:write"], D, True),
     "updateAgent":              (["config:write"], D, True),
     "deleteAgent":              (["config:write"], D, True),
-    "createWebhookSubscription":(["config:write"], D, True),   # P5 解除
+    "createWebhookSubscription":(["config:write"], D, True),   # P5 lifted
     "updateWebhookSubscription":(["config:write"], D, True),
     "deleteWebhookSubscription":(["config:write"], D, True),
 
-    # 账号
+    # Accounts.
     "createUser":               (["users:write"], D, True),
     "updateUser":               (["users:write"], D, True),
     "resetUserPassword":        (["users:write"], D, True),
 
-    # 审计
+    # Audit.
     "listAuditLogs":            (["audit:read"], D, True),
 
-    # 新增：契约自己 serve 自己
+    # New: the contract serves itself.
     "getOpenAPI":               ([], ANON, False),
 
-    # 新增：Key 管理
+    # New: key management.
     "listAPIKeys":              (["keys:manage"], D, True),
     "createAPIKey":             (["keys:manage"], D, True),
     "getAPIKey":                (["keys:manage"], D, True),
@@ -164,16 +174,18 @@ OPS = {
     "revokeAPIKey":             (["keys:manage"], D, True),
 }
 
-# handler 内部的授权判定,格式与 OPS 相同。
+# Authorization decisions made inside a handler, in the same shape as OPS.
 #
-# 一个 operation 只能带一个 scope,但有的路由服务两件事、两个答案。这些
-# 判定不在路由表上,所以本脚本的自检**看不见它们**——2026-08-31 就是这样
-# 漏掉了 createAICall 的 SUPERVISOR 检查,差点把「发起外呼机器人」顺手发给
-# 每个坐席。列在这里,是为了让推导包含它们,也为了下次有人加同类判定时,
-# 第一反应是"要不要在这里也写一行"。
+# One operation carries one scope, but some routes serve two things with two
+# different answers. Those decisions are not on the routing table, so this
+# script's self-check *cannot see them* — which is how the SUPERVISOR check in
+# createAICall was missed on 2026-08-31, nearly handing every agent the ability
+# to launch outbound bot campaigns. They are listed here so the derivation
+# includes them, and so that the next person adding one of these asks first
+# whether it needs a line here too.
 #
-# 键写成 "operationId(条件)",因为它不是一个 operation——脚本打印基数时
-# 与 OPS 分开计。
+# The key is written "operationId(condition)" because it is not an operation:
+# the script counts these separately when it prints cardinalities.
 HANDLER_CHECKS = {
     "createCall(kind=AI_OUTBOUND)": (["calls:create", "calls:create:ai"], S, True),
 }
@@ -182,14 +194,14 @@ RANK = {ANON: 0, N: 1, A: 1, S: 2, D: 3}
 
 
 def all_checks():
-    """OPS 与 HANDLER_CHECKS 合起来,才是这个产品实际做的全部授权判定。"""
+    """OPS and HANDLER_CHECKS together are every authorization decision made."""
     merged = dict(OPS)
     merged.update(HANDLER_CHECKS)
     return merged
 
 
 def role_scopes():
-    """R 的 grant = 所有 rank <= R 即可达的判定的 scope 之并。"""
+    """A role's grant is the union of the scopes of every decision it could reach."""
     out = {}
     for role, r in (("AGENT", 1), ("SUPERVISOR", 2), ("ADMIN", 3)):
         s = set()
@@ -202,7 +214,7 @@ def role_scopes():
     return out
 
 def widenings():
-    """今天够不着、改完却够得着的 (operation, 角色)。每一条都必须是被裁定过的。"""
+    """(operation, role) pairs newly reachable. Every one must have been ruled on."""
     g, out = role_scopes(), []
     for op, (sc, floor, _) in sorted(all_checks().items()):
         if floor == ANON or not sc:
@@ -214,7 +226,7 @@ def widenings():
 
 
 def narrowings():
-    """今天够得着、改完却够不着的。必须为空——那是回归，不是设计。"""
+    """Pairs that stop being reachable. Must be empty: that is a regression, not a design."""
     g, out = role_scopes(), []
     for op, (sc, floor, _) in sorted(all_checks().items()):
         if floor == ANON:
@@ -227,17 +239,17 @@ def narrowings():
 
 if __name__ == "__main__":
     unknown = set(s for sc, _, _ in all_checks().values() for s in sc) - set(VOCAB)
-    assert not unknown, f"词表外的 scope: {unknown}"
-    print(f"词表 {len(VOCAB)} 个，operation {len(OPS)} 个，"
-          f"handler 内判定 {len(HANDLER_CHECKS)} 个\n")
+    assert not unknown, f"scopes outside the vocabulary: {unknown}"
+    print(f"{len(VOCAB)} scopes, {len(OPS)} operations, "
+          f"{len(HANDLER_CHECKS)} in-handler decisions\n")
     for role, sc in role_scopes().items():
         print(f"{role} ({len(sc)}): {' '.join(sc)}")
 
-    print("\n拓宽（已裁定：全部且仅为 config:read，baseline 裁定 8 修正 2）:")
+    print("\nWidenings (ruled on: all of them, and only config:read — baseline ruling 8, revision 2):")
     for op, floor, role, sc in widenings():
-        print(f"  {op:26} 下限={floor:10} {role} 持有 {sc}")
-    assert all(sc == ["config:read"] for *_, sc in widenings()), "出现了未裁定的拓宽"
+        print(f"  {op:26} floor={floor:10} {role} holds {sc}")
+    assert all(sc == ["config:read"] for *_, sc in widenings()), "a widening nobody ruled on"
 
-    print(f"\n收窄: {narrowings() or '无'}")
-    assert not narrowings(), "有角色丢了今天够得着的东西"
-    print("\n自检通过。")
+    print(f"\nNarrowings: {narrowings() or 'none'}")
+    assert not narrowings(), "a role lost something it could reach before"
+    print("\nSelf-check passed.")

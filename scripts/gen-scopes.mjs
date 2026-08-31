@@ -30,7 +30,7 @@ const names = Object.keys(vocab).sort()
 const NAME_RE = /^[a-z]+(:[a-z]+){1,2}$/
 for (const name of names) {
   if (!NAME_RE.test(name)) {
-    throw new Error(`${CONTRACT}: scope "${name}" is not 资源:动作[:范围] (lowercase, 2–3 colon-separated segments)`)
+    throw new Error(`${CONTRACT}: scope "${name}" is not resource:action[:range] (lowercase, 2–3 colon-separated segments)`)
   }
   if (typeof vocab[name] !== 'string' || vocab[name].trim() === '') {
     throw new Error(`${CONTRACT}: scope "${name}" has no description`)

@@ -11,8 +11,10 @@ docs/openapi.json:
     - '#/components/schemas/SseQueueJoinedPayload'
     - '#/components/schemas/SseQueueLeftPayload'
     - '#/components/schemas/SseQueueCountPayload'
-  # GET /openapi.json 没有 4XX,因为它真的没有失败的方式:免鉴权、无参数、
-  # 内容在编译期就嵌进了二进制(go:embed,缺文件是编译错误而不是运行时 404)。
-  # 为了让 linter 闭嘴而声明一个不会发生的 404,是在唯一真相源里写一句假话。
+  # GET /openapi.json has no 4XX because it genuinely has no way to fail: no
+  # credential, no parameters, and its body is embedded at compile time
+  # (go:embed — a missing file is a build error, not a runtime 404). Declaring
+  # a 404 that cannot happen, to quiet the linter, would be writing something
+  # untrue in the one document that is the source of truth.
   operation-4xx-response:
     - '#/paths/~1openapi.json/get/responses'
