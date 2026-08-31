@@ -153,7 +153,7 @@ keys:manage         audit:read
 | # | 处置 | 落在哪 |
 |---|---|---|
 | V1 V2 | ~~`/api/v1` 子路由挂 JSON 版 `NotFound` / `MethodNotAllowed`~~ | **已修 `9c01e2f`**（独立提交，不在认证任务的 7 个提交里）|
-| V3 | `GET /openapi.json`（`docs/embed.go` 照抄 `web/embed.go`） | **并进 §2 的契约提交**，`docs/auth/TASKS.md` `2.2f` |
-| V4–V8 | 已在 `docs/auth/TASKS.md` 排好（`2.2b` `2.2c` `2.2` `③`） | 认证任务内 |
+| V3 | ~~`GET /openapi.json`（`docs/embed.go` 照抄 `web/embed.go`）~~ | **已落地**：契约 `ecf368f`，handler + embed `0793e32`。实测免鉴权 200 / 275,468 字节 |
+| V4–V8 | ~~已在 `docs/auth/TASKS.md` 排好（`2.2b` `2.2c` `2.2` `③`）~~ | **全部落地**：契约 `ecf368f`，角色守卫删除与 `events` 包去角色化 `a1fa378` |
 | O1 O2 O3 O4 | ~~改 §1 的实现细节~~ | **已采纳 `657cd13`**：hash 直查、去节流、砍允许代理列表（新码 4 → 3）、两态 |
-| O5 | 采纳 10–14 个资源级 scope 词表 | §2 `2.0b`，尚未开工 |
+| O5 | ~~采纳 10–14 个资源级 scope 词表~~ | **已定稿并落地**：最终 **20** 个（16 → 18 加 `contacts:*` → 19 加 `agent:manage` → 20 加 `calls:create:ai`）。契约 `ecf368f`，生成常量 `c03080d` |

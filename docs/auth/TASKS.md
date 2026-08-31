@@ -7,17 +7,28 @@
 
 ## 怎么接着做
 
+**①–⑦ 全部完成。只剩一个人工门：REVOKED 终态的首次真实执行。**
+它的证据已经在 `docs/auth/RESULTS.md` 的「在跑着的 dev stack 上真实执行」一节里
+（吊销 → 401 → `last_used_at` 一个字没动 → 重复吊销 409），**门本身由 owner 勾**。
+
 新会话在仓库根目录说一句 **「继续 docs/auth/TASKS.md」** 即可。要点：
 
-- **分支 `docs/auth-baseline`**。第一个未勾选项就是当前位置。
-- **构建是绿的**（④ 起）。`go test -race ./...` 全过，`internal/httpapi/scopeauth_test.go` 的九条用例全部通过。`ecf368f`–`a1fa378` 那五个中间提交是红的，那是 spec-first 的设计意图（`CLAUDE.md`：*a new spec operation breaks the build until the server grows its method — that is the point*），owner 已确认。
+- **分支 `docs/auth-baseline`，构建是绿的。** `go build` / `go vet` / `gofmt` / `go test -race ./...` /
+  `make api-check` / `make api-breaking` / `tsc` / `oxlint` / `npm run test` 全通过。
+  `ecf368f`–`a1fa378` 那五个中间提交是红的，那是 spec-first 的设计意图
+  （`CLAUDE.md`：*a new spec operation breaks the build until the server grows its method — that is the point*）。
 - **数据库要起着**：`docker compose -f deploy/dev/docker-compose.yml up -d`，然后
   `AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable'`。
-- **先读这三份再动手**：`docs/auth/baseline.md`（§0 事实 + 全部裁定 1–9 及其修正）、`docs/auth/RESULTS.md`（证据账本，含每一步的失败形态）、`docs/api-first-audit.md`（V1–V8 违反项、O1–O5 减法及处置）。`CLAUDE.md` 里那条 owner directive **"UI is optional. API is the product."** 是本任务全部决策的依据。
-- **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 20 个 scope、role→scopes，并自检拓宽与收窄。拓宽必须**只**剩 9 条 `config:read`（裁定 8 修正 2），收窄必须为 0。
-- **勾选的粒度不能大于验证的粒度。** 复合项一律拆开——②a 曾因为跑完前半就整条勾掉，谎报了一个没写的生成器（见 ②b）。
-
-**人工门**：§0 结论 ✅、§2 契约 ✅、③b AI 外呼能力 ✅（20 个 scope）、REVOKED 终态的首次真实执行 ⬜。
+- **先读这三份再动手**：`docs/auth/baseline.md`（§0 事实 + 全部裁定）、`docs/auth/RESULTS.md`（证据账本）、
+  `docs/api-first-audit.md`（V1–V8 / O1–O5，已全部结清）。`CLAUDE.md` 里那条 owner directive
+  **"UI is optional. API is the product."** 是本任务全部决策的依据。
+- **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 20 个 scope、role→scopes，并自检拓宽与收窄。
+  拓宽必须**只**剩 9 条 `config:read`，收窄必须为 0。**handler 内的授权判定要登记进 `HANDLER_CHECKS`**
+  ——脚本读不到路由表以外的东西，`createAICall` 就是这样漏掉过一次。
+- **契约门在 `internal/httpapi/contract_gate_test.go`**：路由都声明授权、错误码四处拼法一致、
+  没有只有浏览器够得着的 operation。加路由、加错误码、加 operation 都会撞上它。
+- **勾选的粒度不能大于验证的粒度。** 复合项一律拆开——②a 曾因为跑完前半就整条勾掉，谎报了一个没写的生成器。
+- **通过的断言在证明它抓得住之前不算数。** ⑦ 的三条都注入过缺陷验证，见 RESULTS.md。
 
 ## 进度概览（2026-08-31）
 
