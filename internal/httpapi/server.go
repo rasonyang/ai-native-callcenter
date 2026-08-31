@@ -85,7 +85,7 @@ type Server struct {
 	auditor     Auditor
 	outbound    OutboundService
 	webhooks    WebhookService
-	keys        KeyAuthenticator
+	keys        KeyService
 	spa         http.Handler
 }
 
@@ -121,9 +121,10 @@ type Deps struct {
 	// the subscription endpoints.
 	Webhooks WebhookService
 	// Keys authenticates bearer API keys and owns the key management
-	// endpoints; nil means the deployment issues none and every bearer is
-	// answered with the same 401. Installed by commit ④.
-	Keys KeyAuthenticator
+	// endpoints. Nil means the deployment issues none, every bearer is
+	// answered with the same 401, and the /api-keys operations are not
+	// mounted — the same shape every other optional dependency here has.
+	Keys KeyService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler

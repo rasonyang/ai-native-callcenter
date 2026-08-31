@@ -111,7 +111,8 @@ func TestWhatTheCustomersEndpointReceives(t *testing.T) {
 	if code, ok := st.delivered[d.DeliveryID]; !ok || code != http.StatusOK {
 		t.Fatalf("delivered = %d, ok = %v, want 200", code, ok)
 	}
-	// Their credential, not ours. AICC_API_KEY points the other way and must
+	// Their credential, not ours. This deployment's own API keys point the
+	// other way and must
 	// never travel outward.
 	if gotAuth != "Bearer their-token" {
 		t.Errorf("Authorization = %q, want the subscription's own token", gotAuth)

@@ -143,6 +143,7 @@ func (s *Server) authenticateSession(w http.ResponseWriter, r *http.Request) (ac
 		SubjectID:   id.UserID,
 		SubjectName: id.Username,
 		User:        id,
+		ActorUserID: id.UserID,
 		scopes:      grantedScopes(id.Role),
 	}
 	// The agent identity behind the account, resolved once. Thirteen call
@@ -189,6 +190,14 @@ func (s *Server) authenticateKey(w http.ResponseWriter, r *http.Request, secret 
 			return AuthContext{}, true
 		}
 		ac.AgentID = agentID
+	}
+	// The person behind the agent the key is working as. Resolved here so the
+	// handlers that record who did something read a field rather than each
+	// asking the directory in their own way.
+	if ac.AgentID != uuid.Nil && s.agentDir != nil {
+		if userID, err := s.agentDir.UserIDForAgent(r, ac.AgentID); err == nil {
+			ac.ActorUserID = userID
+		}
 	}
 	return ac, false
 }

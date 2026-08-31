@@ -29,7 +29,9 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
 
 const scopeTestDSNEnv = "AICC_TEST_DATABASE_URL"
@@ -78,6 +80,8 @@ func newFixture(t *testing.T) *fixture {
 		Auditor:  st.Ledger(),
 		Accounts: st.Accounts(),
 		Contacts: st.Contacts(),
+		Keys:     APIKeys{APIKeyStore: st.APIKeys()},
+		Hub:      events.NewHub(events.NewSequence(dbSeq{st}, "events")),
 	})
 	f := &fixture{t: t, server: httptest.NewServer(srv.router()), st: st}
 	t.Cleanup(f.server.Close)
@@ -156,6 +160,13 @@ func (f *fixture) signIn(username string) string {
 	}
 	f.t.Fatalf("login %s set no session cookie", username)
 	return ""
+}
+
+// dbSeq 是事件序号的真实来源，和 main 里那个是同一条 SQL。
+type dbSeq struct{ st *store.Store }
+
+func (s dbSeq) ReserveSeqBlock(ctx context.Context, name string, size int64) (int64, error) {
+	return s.st.Queries.ReserveSeqBlock(ctx, queries.ReserveSeqBlockParams{Name: name, BlockSize: size})
 }
 
 // call 是这些用例唯一的请求出口，好让"带什么凭证"永远是显式的。
@@ -554,4 +565,12 @@ func (d dbDirectory) QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.
 		ids[i] = row.ID
 	}
 	return ids, nil
+}
+
+func (d dbDirectory) UserIDForAgent(r *http.Request, agentID uuid.UUID) (uuid.UUID, error) {
+	agent, err := d.st.Queries.GetAgent(r.Context(), agentID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return agent.UserID, nil
 }

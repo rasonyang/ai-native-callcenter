@@ -38,6 +38,19 @@ type AgentStateLog struct {
 	ExitedAt  pgtype.Timestamptz `json:"exitedAt"`
 }
 
+type ApiKey struct {
+	ID         uuid.UUID          `json:"id"`
+	Name       string             `json:"name"`
+	KeyHash    []byte             `json:"keyHash"`
+	KeyPrefix  string             `json:"keyPrefix"`
+	Status     string             `json:"status"`
+	Scopes     []string           `json:"scopes"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+	CreatedBy  *uuid.UUID         `json:"createdBy"`
+	LastUsedAt pgtype.Timestamptz `json:"lastUsedAt"`
+	RevokedAt  pgtype.Timestamptz `json:"revokedAt"`
+}
+
 type AuditLog struct {
 	ID         int64              `json:"id"`
 	OccurredAt pgtype.Timestamptz `json:"occurredAt"`

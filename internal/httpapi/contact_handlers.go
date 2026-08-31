@@ -53,7 +53,7 @@ func (s *Server) CreateContact(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	contact, err := s.contacts.Create(r.Context(), contactWriteFrom(in), &ac.SubjectID)
+	contact, err := s.contacts.Create(r.Context(), contactWriteFrom(in), ac.actorOrNil())
 	s.writeContact(w, r, contact, err, http.StatusCreated)
 }
 
@@ -67,7 +67,7 @@ func (s *Server) UpdateContact(w http.ResponseWriter, r *http.Request, contactID
 	if !ok {
 		return
 	}
-	contact, err := s.contacts.Update(r.Context(), contactID, contactWriteFrom(in), &ac.SubjectID)
+	contact, err := s.contacts.Update(r.Context(), contactID, contactWriteFrom(in), ac.actorOrNil())
 	s.writeContact(w, r, contact, err, http.StatusOK)
 }
 

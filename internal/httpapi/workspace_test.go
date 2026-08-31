@@ -358,3 +358,11 @@ func (noAgentDir) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
 func (noAgentDir) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) {
 	return nil, errors.New("not an agent")
 }
+
+func (staffedAgent) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (noAgentDir) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
+}

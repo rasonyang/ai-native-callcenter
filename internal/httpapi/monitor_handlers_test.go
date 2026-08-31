@@ -150,3 +150,7 @@ func TestMonitorRefusals(t *testing.T) {
 		t.Errorf("monitoring yourself: http = %d, want 409", w.Code)
 	}
 }
+
+func (oneAgentDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}

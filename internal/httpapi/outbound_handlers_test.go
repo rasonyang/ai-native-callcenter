@@ -497,3 +497,7 @@ func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 		}
 	}
 }
+
+func (dialerDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}

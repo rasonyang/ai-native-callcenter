@@ -146,7 +146,7 @@ func (s *Server) CreateRecordingReview(w http.ResponseWriter, r *http.Request, r
 	review, err := s.ledger.InsertQualityReview(r.Context(), store.QualityReview{
 		RecordingID: rec.ID,
 		CallID:      rec.CallID,
-		ReviewerID:  ac.SubjectID,
+		ReviewerID:  ac.ActorUserID,
 		Scores:      req.Scores,
 		TotalScore:  req.TotalScore,
 		Notes:       req.Notes,

@@ -254,3 +254,7 @@ func TestACallbackReachesAnAgentWhoIsOnNothing(t *testing.T) {
 		t.Error("an agent on no call never saw the callback")
 	}
 }
+
+func (f fixedAgent) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}

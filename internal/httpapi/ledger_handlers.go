@@ -173,11 +173,16 @@ func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.U
 	if !ok {
 		return
 	}
-	// The subject id, which for a signed-in account is the user id this
-	// column has always held. Commit ④ moves the three callback columns onto
-	// the agent identity (ruling 2); until then no key authenticates at all,
-	// so nothing but a user id can reach here.
-	callback, err := s.ledger.ClaimCallback(r.Context(), id, ac.SubjectID)
+	// handled_by has always held a user id and still does. A key working as
+	// an agent writes that agent's person, so a promise is kept by somebody a
+	// colleague can go and ask — that a key placed the request is the audit
+	// trail's business, not this column's (ruling 2).
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is claimed by a person; name the agent this key works for", nil)
+		return
+	}
+	callback, err := s.ledger.ClaimCallback(r.Context(), id, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Either it does not exist or someone claimed it first; to the
@@ -198,7 +203,12 @@ func (s *Server) ReleaseCallback(w http.ResponseWriter, r *http.Request, id uuid
 	if !ok {
 		return
 	}
-	callback, err := s.ledger.ReleaseCallback(r.Context(), id, ac.SubjectID)
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is released by the person holding it", nil)
+		return
+	}
+	callback, err := s.ledger.ReleaseCallback(r.Context(), id, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Not claimed, or claimed by somebody else: either way it is not
@@ -235,7 +245,12 @@ func (s *Server) CompleteCallback(w http.ResponseWriter, r *http.Request, id uui
 	if !ok {
 		return
 	}
-	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, ac.SubjectID)
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is completed by the person holding it", nil)
+		return
+	}
+	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "no such callback", nil)

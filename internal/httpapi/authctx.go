@@ -63,6 +63,22 @@ type AuthContext struct {
 	// call yours?" ask about the account instead of the agent.
 	AgentID uuid.UUID
 
+	// ActorUserID is the person this request's work is recorded against.
+	//
+	// Three columns predate keys and mean "a user did this":
+	// callbacks.handled_by, contacts.updated_by, quality_reviews.reviewer_id.
+	// A key working as an agent writes that agent's person into them, so the
+	// columns keep meaning exactly what they always meant and no key id ever
+	// enters the user id space (ruling 2). It is uuid.Nil for a key naming no
+	// agent, which those columns take as "nobody" — they are provenance, not
+	// authorization.
+	//
+	// For a session it is the signed-in account, which is SubjectID. The
+	// separate field is not redundancy: it is the difference between "who
+	// authenticated" and "whose work this is", and collapsing them is what
+	// would let a key id be written where a person is expected.
+	ActorUserID uuid.UUID
+
 	// scopes is what this subject may do, sorted and deduplicated.
 	scopes []string
 }
@@ -91,4 +107,20 @@ func authFrom(ctx context.Context) (AuthContext, bool) {
 // contextWithAuth attaches an AuthContext to ctx.
 func contextWithAuth(ctx context.Context, ac AuthContext) context.Context {
 	return context.WithValue(ctx, authKey, ac)
+}
+
+// IsActingForAPerson reports whether this request has a person to record its
+// work against: a signed-in account, or a key naming the agent it works for.
+// A key that named nobody has not.
+func (a AuthContext) IsActingForAPerson() bool { return a.ActorUserID != uuid.Nil }
+
+// actorOrNil is ActorUserID for a nullable provenance column: nil rather than
+// a zero uuid, so "nobody" is stored as nothing and not as an id that looks
+// like an account.
+func (a AuthContext) actorOrNil() *uuid.UUID {
+	if a.ActorUserID == uuid.Nil {
+		return nil
+	}
+	id := a.ActorUserID
+	return &id
 }

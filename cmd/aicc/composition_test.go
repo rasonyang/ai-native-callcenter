@@ -19,6 +19,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -479,6 +480,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&store.LedgerStore{},
 		&outbound.Service{},
 		&store.WebhookStore{},
+		httpapi.APIKeys{APIKeyStore: &store.APIKeyStore{}},
 		http.NewServeMux(),
 	)
 

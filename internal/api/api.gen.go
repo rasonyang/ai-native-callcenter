@@ -2104,7 +2104,7 @@ type WebhookSubscriptionList struct {
 
 // WebhookSubscriptionWrite Create or update a subscription. authToken is write-only: send it to set or replace it, omit it to leave it as it is, send an empty string to clear it.
 type WebhookSubscriptionWrite struct {
-	// AuthToken The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8).
+	// AuthToken The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not one of this deployment's own API keys, which point the other way and must never be used here (design 09 §8).
 	AuthToken *string `json:"authToken,omitempty"`
 
 	// Filter Which finished calls this subscription wants. A key present means the CDR's field must be one of the listed values; keys are ANDed; an absent key does not constrain, so {} means every call. Deliberately not an expression language: the keys are a closed list checked when the subscription is written, because a filter validated at delivery time is discovered as a customer receiving silence (design 09 §5).

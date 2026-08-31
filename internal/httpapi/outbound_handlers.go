@@ -202,7 +202,7 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 	// the callback: nobody else's promise gets a call recorded against it.
 	var kept *store.Callback
 	if req.CallbackID != nil {
-		if s.ledger == nil || ac.Kind != SubjectUser {
+		if s.ledger == nil || !ac.IsActingForAPerson() {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed,
 				"a callback is kept by a signed-in agent", nil)
 			return
@@ -210,7 +210,7 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		if dial.CallID == uuid.Nil {
 			dial.CallID = uuid.New()
 		}
-		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, ac.SubjectID)
+		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, ac.ActorUserID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				writeError(w, http.StatusConflict, CodeConflict, "claim the callback before calling back", nil)

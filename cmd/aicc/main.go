@@ -348,6 +348,7 @@ func run() error {
 			st.Ledger(),
 			outboundSvc,
 			st.Webhooks(),
+			httpapi.APIKeys{APIKeyStore: st.APIKeys()},
 			spa,
 		)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -475,6 +476,14 @@ func (d agentDirectory) AgentIDForUser(r *http.Request, userID uuid.UUID) (uuid.
 		return uuid.Nil, err
 	}
 	return agent.ID, nil
+}
+
+func (d agentDirectory) UserIDForAgent(r *http.Request, agentID uuid.UUID) (uuid.UUID, error) {
+	agent, err := d.st.Queries.GetAgent(r.Context(), agentID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return agent.UserID, nil
 }
 
 func (d agentDirectory) QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.UUID, error) {

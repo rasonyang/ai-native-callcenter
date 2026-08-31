@@ -2707,7 +2707,7 @@ export interface components {
             /** Format: uri */
             url: string;
             filter?: components["schemas"]["WebhookFilter"];
-            /** @description The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8). */
+            /** @description The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not one of this deployment's own API keys, which point the other way and must never be used here (design 09 §8). */
             authToken?: string;
             isEnabled?: boolean;
         };

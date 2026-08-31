@@ -18,9 +18,17 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
-// AgentDirectory resolves the agent behind a signed-in user.
+// AgentDirectory resolves the agent behind a signed-in user, and the person
+// behind an agent identity.
 type AgentDirectory interface {
 	AgentIDForUser(r *http.Request, userID uuid.UUID) (uuid.UUID, error)
+	// UserIDForAgent is the other direction, and it exists because three
+	// columns record who did something as a *user* id — callbacks.handled_by,
+	// contacts.updated_by, quality_reviews.reviewer_id. A key working as agent
+	// X writes X's person into them, so the column keeps meaning what it
+	// always meant; that a key did it is the audit trail's business, recorded
+	// separately (ruling 2).
+	UserIDForAgent(r *http.Request, agentID uuid.UUID) (uuid.UUID, error)
 	// QueuesForAgent lists the queues the agent staffs. The event stream needs
 	// it to decide which queue-scoped events reach this subscriber.
 	QueuesForAgent(r *http.Request, agentID uuid.UUID) ([]uuid.UUID, error)

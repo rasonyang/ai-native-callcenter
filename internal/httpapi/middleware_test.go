@@ -17,6 +17,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
 // stubKeys is the key store the authentication middleware talks to. It is a
@@ -35,6 +36,25 @@ func (k stubKeys) AuthenticateKey(_ context.Context, presented string) (KeySubje
 		return KeySubject{}, errors.New("no such key")
 	}
 	return k.subject, nil
+}
+
+// The management half. These tests are about the door, not about issuing
+// keys — the real store is exercised end to end by scopeauth_test.go against
+// a real database — so this half refuses rather than pretends.
+var errNotAKeyStore = errors.New("this stub issues no keys")
+
+func (stubKeys) Issue(context.Context, string, []string, *uuid.UUID) (store.APIKey, string, error) {
+	return store.APIKey{}, "", errNotAKeyStore
+}
+func (stubKeys) Get(context.Context, uuid.UUID) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
+}
+func (stubKeys) List(context.Context) ([]store.APIKey, error) { return nil, errNotAKeyStore }
+func (stubKeys) Update(context.Context, uuid.UUID, *string, *[]string) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
+}
+func (stubKeys) Revoke(context.Context, uuid.UUID) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
 }
 
 // aKey is a key holding exactly the scopes named, under a name a reader of the
@@ -58,7 +78,7 @@ func (d *keyedDialer) Dial(context.Context, outbound.AgentDialRequest) (uuid.UUI
 	return uuid.New(), nil
 }
 
-func keyedServer(t *testing.T, keys KeyAuthenticator) (http.Handler, *keyedDialer) {
+func keyedServer(t *testing.T, keys KeyService) (http.Handler, *keyedDialer) {
 	t.Helper()
 	dialer := &keyedDialer{}
 	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{
@@ -370,4 +390,8 @@ func TestAKeyIsNotToldToRefreshASessionItCannotHave(t *testing.T) {
 	if code := errorCodeOf(t, w); code != string(CodeSessionExpired) {
 		t.Errorf("code = %q, want SESSION_EXPIRED for a browser", code)
 	}
+}
+
+func (noAgents) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
 }
