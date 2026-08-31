@@ -349,15 +349,20 @@
    calls:control       calls:create
    calls:monitor                          # 监听/耳语/强插，强能力单列
    agent:read          agent:act
+   contacts:read       contacts:write     # 客户数据，不是平台配置（修正 1）
    history:read:own    history:read:all   # CDR + 录音 + 转写 + /reports/me 合一
    reports:read                           # 队列/总览/日报
-   quality:review                         # 不授予 Key（§17 P8）
+   quality:review                         # 写不授予 Key（§17 P8）
    config:read         config:write       # 分机/队列/号码/流程/webhook
    users:write                            # 账号、角色、重置密码
    keys:manage         audit:read
    ```
 
-   共 **16** 个。`[INFERENCE]` 我先前说的"10–14 个"是目标不是计数——逐条映射 89 个 operation，忠实的分法落在 22 个左右；把 CDR / 录音 / 转写 / `/reports/me` 合并成一对 `history:read:*`、把配置类合并成 `config:*`，才收到 16。取粗的理由：scope 的价值在于**默认最小**，前提是数量少到人愿意逐个想；22 个勾选框的结果是集成方全勾，模型退化成仪式。
+   共 **18** 个。
+
+   **修正 1（owner，2026-08-31，映射 85 个 operation 时发现）**：初稿 16 个**没有联系人的位置**。联系人不是平台配置，是坐席边接电话边改的客户数据（今天三个角色都能改）。把它并进 `config:*` 会强迫 `AGENT` 的 grant 含 `config:write`，于是坐席顺带能建队列、改流程、改号码——**与 owner 否决"`users:write` 并进 `config:write`"是同一个形状**。故加 `contacts:read` / `contacts:write`，16 → 18。
+
+   **修正 2（owner，2026-08-31）——一处刻意的行为拓宽**：粗粒度的 `config:read` 把队列（今天 `SUPERVISOR` 可读）与分机/号码/流程/webhook/账号名单（今天只有 `ADMIN`）合到了一起。班长的墙板要读队列，所以 `SUPERVISOR` 的 grant 必须含 `config:read`，他因此**顺带获得读另一半的能力**。接受，理由：那里没有凭证（分机密码是单独的 `config:write`），班长是受信任的内部员工，而拆出第 19 个名字会开"按资源拆 `config`"的口子。**这是行为变更，不是重构**——`docs/auth/TASKS.md` 的 ③ 不得把它混进"无行为变化"的那一提交。`[INFERENCE]` 我先前说的"10–14 个"是目标不是计数——逐条映射 89 个 operation，忠实的分法落在 22 个左右；把 CDR / 录音 / 转写 / `/reports/me` 合并成一对 `history:read:*`、把配置类合并成 `config:*`，才收到 16。取粗的理由：scope 的价值在于**默认最小**，前提是数量少到人愿意逐个想；22 个勾选框的结果是集成方全勾，模型退化成仪式。
 
    **`users:write` 单列**，不并进 `config:write`：创建账号是**唯一的提权路径**。持 `config:write` 的 Key 泄漏是"改了配置"；持 `users:write` 的 Key 泄漏是"建一个 ADMIN，拿到一切"。两者爆炸半径差一个数量级，不共用一个开关。
 

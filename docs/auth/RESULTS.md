@@ -226,3 +226,23 @@ owner 裁定：`GET /openapi.json`（跑起来的部署 serve 自己的契约）
 **§3 用例表随之重算**：原 9 条删 1（`AGENT_NOT_ALLOWED`，随 O3 取消）、加 1（Key 订阅 `/events`，P1）= **9 条**；header 一律写 `X-AICC-Agent-ID`。
 
 **§0 至此无任何遗留待裁项。** §2 的第一个动作是 `2.0`：实测 `x-scopes` 的放置层级。
+
+---
+
+## 2026-08-31 — §2 开工：裁定 8 修正为 18 个 scope，并记下一处刻意的行为拓宽
+
+`[FACT]` **2.0 完成**：`x-scopes` 放在根级 / `components` 级 / scheme 内，三种放法 `npx @redocly/cli lint` **都通过，warning 数均为 9 = 基线 9**。位置是设计选择，不是约束。**选根级**：§1 要求两种 scheme 共用同一词表，放进其中一个 scheme 会让另一个变二等；`components` 按规范是"可被 `$ref` 的具名对象"的容器，而词表不可 `$ref`。根级紧挨全局 `security`，是读者会去看的地方。
+
+**裁定 8 修正 1 — 词表 16 → 18**（owner）。逐条映射 85 个 operation 时发现**联系人无处可归**。它不是平台配置，是坐席边接电话边改的客户数据（`internal/httpapi/server.go:354-361`，今天三个角色都能改）。并进 `config:*` 会强迫 `AGENT` 的 grant 含 `config:write` → 坐席顺带能建队列、改流程、改号码。`[INFERENCE]` 与 owner 否决"`users:write` 并进 `config:write`"是同一个形状，故加 `contacts:read` / `contacts:write`。
+
+**裁定 8 修正 2 — 一处刻意的行为拓宽**（owner）。粗粒度 `config:read` 合并了队列读（今天 `SUPERVISOR`）与分机/号码/流程/webhook/账号名单读（今天 `ADMIN`）。班长墙板要读队列 → `SUPERVISOR` 的 grant 必须含 `config:read` → 顺带能读另一半。接受：那里没有凭证（分机密码是单独的 `config:write`），且拆出 `queues:read` 会开"按资源拆 `config`"的口子。
+
+`[FACT]` **这是行为变更，不是重构。** §5 要求重构与行为变更不混一提交，所以 ③ 那一提交不得把它裹进"无行为变化"里——拓宽要么单独提交，要么在提交信息里显式点名。
+
+### 一条 §0 应当抓到而没抓到的事实：角色守卫是**下限**，不是**匹配**
+
+`[FACT]` `auth.Role.AtLeast` 用 `roleRank` 比大小（`internal/auth/auth.go:32-38`，`AGENT=1 < SUPERVISOR=2 < ADMIN=3`），`internal/httpapi/httpapi_test.go:20-26` 的用例直接写着 "supervisor meets agent"、"admin meets everything"。因此 `requireAgentRole` **不拒绝任何持有有效会话的人**——`/agent/*` 上真正的闸门是 `agentIDFor`（`agent_handlers.go:57-70`），不是角色。
+
+`[INFERENCE]` 这决定了 `role → scopes` 的推导输入：**不是守卫的标签，而是按 rank 的可达性**。R 的 grant = 所有"rank ≤ R 即可达"的 operation 的 scope 之并。这样构造出来的 ③ **按定义是行为保持的**，而每一处偏离都变成可枚举的——目前只有两处：P7（转写历史，已裁定）与上面的 `config:read` 拓宽。
+
+`[FACT]` `baseline.md` §0-3 的表如实记录了守卫标签，但**推导输入是可达性而非标签**，此处补正。
