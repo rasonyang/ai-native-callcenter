@@ -1,6 +1,0 @@
-### t+0 immediately after 202
-01a021f5-0cd3-74ee-a5f3-bc713b7819dc  dir=inbound  name=sofia/external/18688886669@192.168.31.5  state=CS_EXECUTE  dest=1007  app=bridge
-01a021f7-668f-7655-b434-61b305442ca7  dir=outbound  name=sofia/internal/1007@192.168.31.55:61162  state=CS_EXCHANGE_MEDIA  dest=1007  app=
-
-### call parties
-{"callId":"01a021f5-0ce9-7403-a820-4659a425b02c","callType":"INBOUND","parties":[{"role":"ORIGINATOR","state":"TALKING","number":"18688886669","otherNumber":"1007"},{"role":"TARGET","state":"RELEASED","number":"95001","otherNumber":"18688886669"},{"role":"TARGET","state":"RELEASED","number":"1008","otherNumber":"18688886669"},{"role":"TARGET","state":"TALKING","number":"1007","otherNumber":"18688886669"}]}

@@ -1,8 +1,0 @@
-id: 6800099
-event: AGENT_NOT_READY
-data: {"version":1,"seq":6800099,"type":"AGENT_NOT_READY","occurredAt":"2026-08-20T04:42:21.134493Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"NOT_READY","displayName":"Wei","extensionNumber":"1008","reason":"LUNCH","state":"NOT_READY"}}
-
-id: 6800100
-event: AGENT_NOT_READY
-data: {"version":1,"seq":6800100,"type":"AGENT_NOT_READY","occurredAt":"2026-08-20T04:42:22.181142Z","agentId":"807b2164-bd6b-47e9-9286-39a1ca831cea","payload":{"availability":"NOT_READY","displayName":"Wei","extensionNumber":"1008","reason":"TRAINING","state":"NOT_READY"}}
-

@@ -1,8 +1,0 @@
-=== collect#8 恢复队列(ADMIN 会话) ===
-{"name":"support-en","isEnabled":true}
-=== 放行门:DB 实测 ===
-support-en|t
-=== 队列在交换机侧仍在 ===
-support-en@192.168.31.55
-=== 恢复 wei 为 READY ===
-{"state":"READY","availability":"READY"}

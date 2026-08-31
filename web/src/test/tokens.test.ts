@@ -7,7 +7,8 @@ import { compile } from 'tailwindcss'
  * Guards on the token layer, asserted against the real compiled stylesheet.
  *
  * Both invariants below were live defects found by measuring the running app
- * against the reference (see `docs/ui-spec.md`, pass 2), and neither is
+ * against the reference (the UI measurement pass whose write-up has since
+ * been removed from the repository), and neither is
  * visible in a component test: jsdom implements no `@layer` at all — a layered
  * rule simply does not apply there — so the cascade has to be checked on the
  * compiled CSS instead. The rendered result is verified in a real browser; the

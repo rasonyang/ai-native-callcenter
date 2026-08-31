@@ -1,5 +1,11 @@
 # 实现方案:answer 归对账,bridge 归通话
 
+> **2026-08-31 — 本文引用的 `docs/verification/artifacts/` 已删除。**
+> 那个目录(138 个文件,原始日志/SSE 抓包/verdict)在仓库瘦身中整体移除;**判定与结论未改动**。
+> 文中的 artifacts 路径按历史记录读:它们说明那次验证的证据当时收在哪里,不是现存文件。
+> 要取回原件:`git log --diff-filter=D -- docs/verification/artifacts/`。
+
+
 > 起因:2026-08-21 CDR 设计审查。owner 定的模型 ——
 > **answer(交换机应答)用于运营商对账;bridge(双向通话建立)用于判断坐席是否真的通过话。**
 > owner 已裁:**保持(hold)期间 talk 继续计。**

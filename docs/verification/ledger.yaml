@@ -1,4 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
+#
+# ── 2026-08-31:证据文件已删除,判定未动 ──────────────────────────────
+# 本文件每条 case 的 `evidence_dir:` 指向 docs/verification/artifacts/,那个目录
+# 已在本次仓库瘦身中整体移除(138 个文件 / 764K 的原始日志、SSE 抓包与 verdict)。
+# 保留的是**结论**:每条的 status、执行日期与那段说明,以及 refs 指向的代码行——
+# 后者才是判定今天还成不成立的检验方式。
+# `evidence_dir` 字段刻意不删:它记录的是那次跑的证据收在哪里,是运行记录的一部分。
+# 要取回原件:git log --diff-filter=D -- docs/verification/artifacts/
+# 新的验证跑请重新收证,不要把这些历史路径当成现存文件。
+#
 # 验证账本(S1–S14)。只读分析产物;所有 collect 命令针对第 0 部分的 dev 环境:
 #   app=/tmp/aicc(:8080,重启只用 deploy/dev/restart.sh)、DB=docker exec -i aicc-postgres、
 #   FreeSWITCH=宿主原生(fs_cli)、ESL=127.0.0.1:18021、转写摄取 ws=127.0.0.1:8090。

@@ -1,5 +1,11 @@
 # 验证与跟进任务清单(正式版 v1,released 2026-08-20)
 
+> **2026-08-31 — 本文引用的 `docs/verification/artifacts/` 已删除。**
+> 那个目录(138 个文件,原始日志/SSE 抓包/verdict)在仓库瘦身中整体移除;**判定与结论未改动**。
+> 文中的 artifacts 路径按历史记录读:它们说明那次验证的证据当时收在哪里,不是现存文件。
+> 要取回原件:`git log --diff-filter=D -- docs/verification/artifacts/`。
+
+
 > 前身:TASKS-draft.md(草案),经 owner 两轮决策(DECISIONS-pending.md,2026-08-20)后转正。
 > 输入:docs/verification/ledger.yaml(28 case:4 PASS / 1 FAIL / 23 TODO)+ ledger-audit.md(逐 case 审计,
 > 含 §0.1 追检)+ coverage/*。基线:HEAD a6ff7b9。

@@ -1,9 +1,0 @@
-=== 1 ===
-2026-08-22T00:00:00Z 2026-08-23T00:00:00Z
-=== 2 overview ===
-{"totalCalls":0,"answeredCalls":0,"abandonedCalls":0,"containedCalls":0,"queueCalls":0,"answeredWithinSla":0,"avgWaitSec":0,"avgTalkSec":0,"avgBotSec":0}
-=== 3 cdrs ===
-0|0|0|0|0
-=== 4 queues report ===
-[]
-=== 5 cdrs by queue ===

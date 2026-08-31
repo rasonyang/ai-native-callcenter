@@ -1,8 +1,0 @@
-== guard 1: wei double login ==
-409 "AGENT_ALREADY_LOGGED_IN"
-== guard 2: amy takes wei extension ==
-WEIEXT=1008
-amy-auth=200
-"EXTENSION_IN_USE"
-== guard 3: amy ready while not logged in ==
-"AGENT_NOT_LOGGED_IN"

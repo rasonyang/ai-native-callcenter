@@ -1,6 +1,0 @@
-baseline_at=2026-08-21T02:29:39Z
-cdr_total=6183
-cdr_phantom_outbound=47
-log=logs/aicc-20260821-102646.log
-baseline_rejects=0
-0

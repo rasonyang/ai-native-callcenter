@@ -1,7 +1,0 @@
-### wei /calls/mine during ringing
-{"count":1,"items":[{"callId":"01a02229-924b-7acc-90f6-d1e123f55967","callType":"INBOUND","parties":[{"role":"ORIGINATOR","state":"TALKING","number":"18688886669","otherNumber":"95001"},{"role":"TARGET","state":"RELEASED","number":"95001","otherNumber":"18688886669"},{"role":"TARGET","state":"RINGING","number":"1008","otherNumber":"18688886669"}]}]}
-### supervisor /calls
-{"count":1,"ids":["01a02229-924b-7acc-90f6-d1e123f55967"]}
-### fs channels
-01a02229-9231-781d-aae2-ea684cd5bc2a  dir=inbound  name=sofia/external/18688886669@192.168.31.5  state=CS_EXECUTE
-01a02229-d871-77b7-b23d-b403911d2f2c  dir=outbound  name=sofia/internal/6tvfd94q@h1g35a77eac3.invalid  state=CS_CONSUME_MEDIA

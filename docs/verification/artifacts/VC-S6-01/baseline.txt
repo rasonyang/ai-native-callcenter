@@ -1,7 +1,0 @@
-=== collect#1 摘除坐席 ===
-{"state":"NOT_READY","availability":"NOT_READY","reason":"BREAK"}
-=== 确认 support-en 无 READY 坐席 ===
-support-en@192.168.31.55 | agent-wei | Ready
-{"username":"uiagent","state":"READY","availability":"DEVICE_UNREACHABLE"}
-=== baseline ===
-cdr_total=6191

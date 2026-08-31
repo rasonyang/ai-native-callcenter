@@ -1,6 +1,0 @@
-=== collect#1 停用 support-en(读-改-写全量 PUT) ===
-before isEnabled=true
-{"name":null,"isEnabled":null}
-=== baseline ===
-callbacks=2
-cdrs=6195

@@ -1,5 +1,11 @@
 # 数据表覆盖清单(tables.md)
 
+> **2026-08-31 — 本文引用的 `docs/verification/artifacts/` 已删除。**
+> 那个目录(138 个文件,原始日志/SSE 抓包/verdict)在仓库瘦身中整体移除;**判定与结论未改动**。
+> 文中的 artifacts 路径按历史记录读:它们说明那次验证的证据当时收在哪里,不是现存文件。
+> 要取回原件:`git log --diff-filter=D -- docs/verification/artifacts/`。
+
+
 来源:`internal/store/migrations/00001–00013` 的全部 CREATE TABLE / CREATE VIEW(注意 `disposition_categories` 由 00010 创建、00012 删除,当前 schema 不含它;`goose_db_version` 由 goose 自建)。写/读路径给 sqlc 源(`internal/store/sql/*.sql`)行号 + 关键 Go 调用方;API handler 给 `internal/httpapi` 行号;UI 页面给 `web/src/routes|components` 文件。
 
 | 表 | 写路径 | 读路径 | API handler | UI 页面 | 覆盖场景 | 证据等级 | 备注 |
