@@ -91,9 +91,22 @@ function KeysPage() {
           {!isPending && !isError && rows.length === 0 && (
             <TableMessage colSpan={6}>{t('keys.none')}</TableMessage>
           )}
-          {rows.map((key) => (
-            <Tr key={key.id}>
-              <Td className="font-medium">{key.name}</Td>
+          {rows.map((key) => {
+            const revoked = key.status === 'REVOKED'
+            return (
+            // A revoked key is a fact about the whole row, not about one cell.
+            // Before this the only signals were a small pill and a missing
+            // icon, so a dead credential and a live one read identically at a
+            // glance — which is the wrong way round: the list is scanned to
+            // find what is still working.
+            //
+            // Receding rather than shouting. It is not an error and not a
+            // deletion: no red, no strikethrough, no tinted background (all
+            // three are banned or wrong here) — the row simply drops to
+            // secondary text, which is the Offline semantic this design system
+            // already uses for something that is no longer live.
+            <Tr key={key.id} className={revoked ? 'text-muted-foreground' : undefined}>
+              <Td className={revoked ? undefined : 'font-medium'}>{key.name}</Td>
               <Td className="font-mono text-xs text-muted-foreground">{key.keyPrefix}…</Td>
               <Td className="text-xs text-muted-foreground">
                 {key.scopes.length === 0 ? t('keys.noScopes') : key.scopes.join(' ')}
@@ -112,7 +125,7 @@ function KeysPage() {
                     size="icon-sm"
                     variant="ghost"
                     title={t('common.edit')}
-                    disabled={key.status === 'REVOKED'}
+                    disabled={revoked}
                     onClick={() => setEditing({ id: key.id, name: key.name, scopes: key.scopes })}
                   >
                     <Pencil />
@@ -120,7 +133,7 @@ function KeysPage() {
                   {/* Revoked keys stay in the list: a revoked key is what an
                       audit row from last month refers to, and a list that hid
                       them would leave that row pointing at nothing. */}
-                  {key.status === 'ENABLED' && (
+                  {!revoked && (
                     <ConfirmRevoke
                       label={t('keys.revokeConfirm', { name: key.name })}
                       onConfirm={() => revokeKey.mutate(key.id)}
@@ -129,7 +142,8 @@ function KeysPage() {
                 </span>
               </Td>
             </Tr>
-          ))}
+            )
+          })}
         </TBody>
       </DataTable>
 
@@ -417,7 +431,9 @@ function StatusPill({ status }: { status: APIKey['status'] }) {
   const enabled = status === 'ENABLED'
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs"
+      // nowrap because a pill is one word: Chinese 已吊销 wrapped to two lines
+      // inside it and pushed the row taller than every other row in the table.
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs"
       style={{ color: enabled ? 'var(--state-available)' : 'var(--text-secondary)' }}
     >
       <span
