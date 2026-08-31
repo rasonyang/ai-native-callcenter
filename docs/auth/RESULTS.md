@@ -415,3 +415,69 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 `[INFERENCE]` 注意 api-check 的语义是"先重新生成再 diff"——手改产物文件不会被它抓到（会被覆盖），被抓的是**契约改了而生成代码没跟着提交**。这与 `api.gen.go` 的情形一模一样，不是新的弱点。
 
 `[FACT]` 名字形状检查（`^[a-z]+(:[a-z]+){1,2}$`）是**生成器的自保**，不是 N1 的机械化：一个带大写或空格的名字会推出坏掉的 Go 标识符。N1 的语义判据（不得是角色的别名）按 §4.1 的裁定**不做机械检查**。
+
+---
+
+## 2026-08-31 — ③ AuthContext + scope 中间件（`a1fa378`）
+
+### 形状：授权改成读契约，而不是照着契约再写一遍
+
+`[FACT]` oapi-codegen 对 `security` **一个字都不生成**：`grep -c -i securit internal/api/api.gen.go` = **0**，在补完 91 个 operation 的 security 之后重新生成，仍然是 0。
+`[INFERENCE]` 于是只有两条路：在 `server.go` 里手写 91 处 `requireScope(...)`（把刚删掉的维护问题原样重建），或者把契约生成成一张表让服务器查。选后者。
+
+`[FACT]` `scripts/gen-opsecurity.mjs` → `internal/api/opsecurity.gen.go`：**91** 条，键为 `"METHOD /契约路径"`，值含 `SessionScopes` / `KeyScopes` / `NeedsCSRF` / `IsAnonymous`。
+`[INFERENCE]` **不能是一张扁平的 scope 表**：operation 之间的差别不只是要哪些 scope，还有**收不收这种凭证**。`nil` 与空切片是两个答案——`nil` 表示这类凭证在这个 operation 上根本没有分支（P9 白名单的 2 条），空表示"认证过就够了"。
+
+`[FACT]` **落点是生成 wrapper 的 `HandlerMiddlewares`**。先做的 5 分钟 spike 证明：在 wrapper 内部 `chi.RouteContext(r).RoutePattern()` 已经解析完毕，嵌套 `Route`/`Group` 下返回完整模式（`POST /api/v1/calls/2f1c/answer` → `/api/v1/calls/{callId}/answer`）。这是整个方案的承重假设，先验证再动手。
+`[FACT]` 查不到的路由**失败关闭**（500 INTERNAL），并由 `TestEveryRouteIsInTheContract` 走 `chi.Walk` 保证它不可达。
+
+### 删掉了什么
+
+| 项 | 数 | 去向 |
+|---|---|---|
+| 路由级角色守卫 | 14 处 | 契约的 `security` |
+| handler 外角色判定 | 6 处 | 能力判定（第 6 处是 `internal/events/hub.go` `IsSupervisor` → `SeesEveryCall`） |
+| `isMachine` / `machineIdentity` + 3 个下游 | — | `AuthContext.Kind` |
+| `requireSessionOrAPIKey` / `requireSession` | 2 | 一个 `authenticate` |
+| `AICC_API_KEY` / `X-AICC-Api-Key` | — | 无迁移路径（§1 明文即重发） |
+
+`[FACT]` `SeesEveryCall` 是**已解析的能力**，不是 scope 字符串：`internal/events` 至此不知道这个产品有角色，也不知道有 scope。
+`[FACT]` `AgentID` 在认证时解析一次，替掉 13 处各查各的；无坐席身份时回 **`AGENT_REQUIRED`**（新码），语义是"这个操作走坐席身份，而这个凭证没有"，不是"你缺个权限"。
+
+### ⚠ 一处未裁定的提权，被拦下了而不是被放过
+
+`[FACT]` `createAICall` 今天要 **SUPERVISOR**，而这个检查写在 handler 里（`outbound_handlers.go`），**不在路由表上**——`scopemap.py` 读的是路由表的守卫，因此把 `createCall` 的下限记成了 `N`（任何已认证）。
+`[INFERENCE]` 契约给 `POST /calls` 的 scope 是 `calls:create`，而 `AGENT` 持有它（自己的点击外呼要）。**照契约直接放行，等于把"发起外呼机器人"的能力顺手发给每个坐席**——形状与 `agent:manage` 那次一模一样，只是这次自检脚本看不见。
+`[FACT]` 处置：**保住原行为**，改判 `config:read`——那恰好就是昨天能做这件事的那批人（SUPERVISOR + ADMIN，从不含 AGENT），且不算胡诌：AI 外呼要挑一个 DID、跑它背后已发布的 flow，`config:read` 正是看见这两样东西的能力。
+`[INFERENCE]` **但形状仍不对**——用一个读能力守一个写操作。真正的答案是二选一：契约给它一个自己的 scope（意味着重开 §2），或者裁定 `calls:create` 就该覆盖两种 kind。**⑦ 不得在此之上收工。**
+
+`[FACT]` 另一处同源但已裁定的：`createAgentCall` 里"坐席只能报自己的分机"，原判据是 `!Role.AtLeast(SUPERVISOR)`，改判 `!ac.Has(calls:read:all)`——集合完全相同。
+
+### 行为差异（不是零，如实列出）
+
+`[FACT]` 拓宽 **9** 处已裁定的 `config:read`（`scopemap.py` 自检的输出即回执）+ webhook 配置对 Key 解封（P5，已裁定）。
+`[FACT]` `X-AICC-Agent-ID` 从**静默忽略**改为 403 拒绝（§3 第 4 条断言）。
+`[FACT]` 收窄 **0** 处。
+`[INFERENCE]` 因此 §5 里"③ 是重构，无行为变化"这句话不准确，提交信息里如实写了差异，没有沿用那句话。
+
+### 验证形态
+
+`[FACT]` 分支树仍然是红的（`internal/httpapi/api_server.go:19` 缺 6 个方法，等 ④）。为了让 ③ 能被真正跑一遍，临时加了一个 `//go:build tempstubs` 的桩文件跑测试，**提交前已删除**（`git show --stat` 中没有它）。
+`[FACT]` `go build -tags tempstubs ./...` 通过；`go vet -tags tempstubs ./...` **0 条**；`gofmt -l internal/ cmd/` **空**。
+`[FACT]` `go test -tags tempstubs -race -count=1 ./...` 全树只剩 **8 条**失败，全部是 ④ 的工作面：
+
+| 失败 | 归属 |
+|---|---|
+| §3 的 7 条 Key 用例（`POST /api-keys` → 404） | ④ |
+| `TestEveryHTTPDependencyIsPlumbed`（`httpapi.Deps.Keys` 未接线） | ④ |
+
+`[FACT]` **§3 第 4 条 `TestASessionMayNeverActForAnotherAgent` 由 FAIL 转 PASS**（基线上是 200，现在 `AGENT_IMPERSONATION_NOT_ALLOWED`）；第 6 条回归护栏 `TestAnAgentCannotHearSomebodyElsesCall` 仍 PASS。
+`[FACT]` `make api-check` **exit 0**；`web` 下 `tsc --noEmit` exit 0、`oxlint .` 无新增（3 条既有 warning）。
+
+### 顺带修正的两处文档漂移
+
+`[FACT]` `docs/design/04-api-sse.md:18` 那段"Machine access (2026-08-26)"描述的正是被删掉的模型，已改写；同段"Roles gate route groups (middleware)"也已改写——角色现在只决定登录时授予哪些 scope。
+
+### 一个既有缺口（不是本次引入，留给 ⑦b）
+
+`[FACT]` 契约的 `ErrorCode` 26 个，两份 `translation.json` 的 `errors` 各 24 个：本次新增的 3 个键已补齐，但仍**缺 4 个**（`EXTENSION_POOL_EXHAUSTED` / `LAST_ADMIN` / `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE` / `USER_DATA_TOO_LARGE`），另**多 2 个**（`UNKNOWN` / `rules`）。裁定 4 的三方对齐断言（⑦b）会抓到它。

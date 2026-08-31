@@ -18,7 +18,7 @@
 - **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 19 个 scope、role→scopes，并自检拓宽与收窄。拓宽必须**只**剩 9 条 `config:read`（裁定 8 修正 2），收窄必须为 0。
 - **勾选的粒度不能大于验证的粒度。** 复合项一律拆开——②a 曾因为跑完前半就整条勾掉，谎报了一个没写的生成器（见 ②b）。
 
-**人工门**：§0 结论 ✅、§2 契约 ✅、REVOKED 终态的首次真实执行 ⬜。
+**人工门**：§0 结论 ✅、§2 契约 ✅、REVOKED 终态的首次真实执行 ⬜、**③b AI 外呼的能力待裁定** ⬜。
 
 ## 进度概览（2026-08-31）
 
@@ -30,7 +30,7 @@
 | §3 测试先行 | ✅ 8 条按预期失败 + 1 条回归护栏 | `40aed73` |
 | §4 禁止事项 | ✅ N1 已写入（§4） | — |
 | ②b scope 常量生成 | ✅ 生成器 + 两个产物,api-check 已覆盖 | `c03080d` |
-| ③ AuthContext + 删守卫 | ⬜ 未开始 | — |
+| ③ AuthContext + 删守卫 | ✅ 完成（⚠ 留一处待裁定，见 ④ 上方） | `a1fa378` |
 | ④ Key 存储与端点 | ⬜ 未开始（**做完构建才转绿**） | — |
 | ⑤ 审计 4 列 | ⬜ 未开始 | — |
 | ⑥ Admin UI | ⬜ 未开始 | — |
@@ -111,7 +111,15 @@
       `web/src/generated/scopes.ts`（`Scope` 联合类型 + `SCOPES` + `SCOPE_DESCRIPTIONS`）。
       **说明一并生成**——⑥ 的表单要给每个 scope 配标签，手写标签就是第二份词表。
       产物在 `make api-check` 已 diff 的两个目录内，`Makefile` 未改（裁定 1b）。验证形态见 RESULTS.md。
-- [ ] ③ AuthContext（`Subject` / `AgentID` / `Scopes`）+ scope 中间件；删除 14 处路由级角色守卫与 **6** 处 handler 外角色判定（5 处在 `internal/httpapi`，第 6 处是 `internal/events/hub.go:28` `IsSupervisor`，P2）；删除 `isMachine` / `machineIdentity` 及其 3 个下游分支；重述 `mayReadTranscript` 的按屏幕规则为能力（P7）
+- [x] ③ AuthContext + scope 中间件。**授权改成读契约**：`scripts/gen-opsecurity.mjs` 把 91 个 operation 的 `security` 生成成
+      `api.OperationSecurityByRoute`，`enforceContract` 装在生成 wrapper 的 `HandlerMiddlewares` 上（chi 刚解析完路由的一刻）。
+      14 处路由级守卫、6 处 handler 外角色判定（含 `events` 包的 `IsSupervisor` → `SeesEveryCall`）、`isMachine` / `machineIdentity` +
+      3 个下游、`requireSessionOrAPIKey`、`AICC_API_KEY` / `X-AICC-Api-Key` 全部删除；`mayReadTranscript` 改判 `history:read:all`（P7）。
+      验证形态与行为差异见 RESULTS.md。
+- [ ] ③b **待裁定：AI 外呼的能力**。`createAICall` 今天要 SUPERVISOR，检查在 handler 里，`scopemap.py` 看不见，
+      所以它把 `createCall` 的下限记成了「任何已认证」。照契约的 `calls:create` 直接放行 = 把外呼机器人发给每个坐席。
+      ③ 暂用 `config:read` 保住原行为并在代码里标了 ⚠。**两个选项**：契约给它一个自己的 scope（重开 §2），
+      或裁定 `calls:create` 覆盖两种 kind。**⑦ 不得在此之上收工。**
 - [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
 - [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
 - [ ] ⑥ Admin UI：API Keys 页 + `nav.ts` 条目（列表列去掉「允许 Agents」，状态只有两个值）
@@ -127,7 +135,7 @@
 
 - [x] ① 契约 —— `ecf368f`
 - [x] ② 生成代码 —— `3436dd9`（scope 常量那半还欠着，见 ②b）
-- [ ] ③ AuthContext + 中间件 + 角色守卫删除（重构，无行为变化）
+- [x] ③ AuthContext + 中间件 + 角色守卫删除 —— `a1fa378`（**不是零行为变化**：9 处已裁定的 `config:read` 拓宽、act-as 头改为拒绝、webhook 对 Key 解封；收窄 0）
 - [ ] ④ API Key 存储与端点
 - [ ] ⑤ 审计
 - [ ] ⑥ Admin UI
