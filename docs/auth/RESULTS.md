@@ -162,3 +162,20 @@
 - P3 → `2.0b` 定命名法 + `4.1` 追加禁止事项"scope 名里不得出现角色名"
 
 **§0 至此无遗留待决项，人工门通过。** 下一步 §2 契约变更（单独一次提交，完成后再过一次人工门）。
+
+---
+
+## 2026-08-31 — 产品定位写入 CLAUDE.md + 全产品 API-first 复核
+
+`[FACT]` "UI is optional. API is the product." 已作为 owner directive 写入 `CLAUDE.md`「What this is」节。全产品复核产出 `docs/api-first-audit.md`（V1–V8 违反项、O1–O5 过度设计项）。
+
+**新发现的两个真实缺陷（不在认证任务面上，实测确认）**：
+- `[FACT]` **V1**：`GET /api/v1/<未知路径>` → **200 text/html**（SPA index）。成因是 `server.go:428-430` 的 `r.NotFound(s.spa.ServeHTTP)` 经 chi `mux.go:214-218` `updateSubRoutes` 传播进了 `/api/v1` 子树。集成方拼错路径拿到 200 + HTML。仓库已被咬过一次（`routes_test.go:30-35` 记录）。
+- `[FACT]` **V2**：`DELETE /api/v1/auth/login` → **405，空 body、空 Content-Type**，不是错误信封。契约 `docs/openapi.json:7` 写的是 "Errors **always** use the single envelope"——这个 always 现在是假的。
+- `[FACT]` **V3**：无任何端点 serve 契约（`grep openapi|redoc|swagger` 只命中一条注释）。SPA 嵌进了二进制，契约没有。
+
+**对已批准 §1 的三条减法建议（需 owner 确认）**：
+- `[FACT]` **O1**：§1 的"按前缀取行 + 常量时间比较"比仓库现成做法复杂。`internal/store/sql/sessions.sql:8-13` 已经是 `WHERE token_hash = $1` 一次索引命中；按 hash 直查时没有东西需要常量时间比较。建议短前缀列只用于展示，查找照抄 sessions。
+- `[INFERENCE]` **O2**：`last_used_at` 内存节流是无测量支撑的优化，且与 `CLAUDE.md` 那条"没跑基准就不许有性能主张"的 directive 同源。建议去掉，每次直接写。
+- `[INFERENCE]` **O3**：每把 Key 的"允许代理 Agents"列表是架在 scope 之上的第二条授权轴，单集成客户的答案永远是 `*`。建议 v1 砍掉，`AGENT_NOT_ALLOWED` 不进枚举（新码 4 → 3）。以后补是纯加法。
+- `[INFERENCE]` **O5**：scope 词表建议 10–14 个资源级，只在行为真的不同处分 `:own`/`:all`。粒度过细会让集成方一次勾满，模型退化成仪式。
