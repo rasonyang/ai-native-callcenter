@@ -5,6 +5,19 @@
 第一个未勾选项即当前位置。证据写入 `docs/auth/RESULTS.md`（追加，不改历史条目）。
 本任务独立于 `TASKS.md` / `RESULTS.md`（仓库根的既有账本）。
 
+## 怎么接着做
+
+新会话在仓库根目录说一句 **「继续 docs/auth/TASKS.md」** 即可。要点：
+
+- **分支 `docs/auth-baseline`**。第一个未勾选项就是当前位置。
+- **构建现在是红的，这是预期的。** `internal/httpapi/api_server.go:19` 的编译期断言缺 6 个方法（`getOpenAPI` + 5 个 API Key），到 **④** 装上 handler 才转绿。先跑 `go build` 会看到它——不是事故，是 spec-first 的设计意图（`CLAUDE.md`：*a new spec operation breaks the build until the server grows its method — that is the point*）。owner 已确认中间提交可红：分支上红、PR 头绿。
+- **要跑测试，得先有一棵绿树。** `internal/httpapi/scopeauth_test.go` 的九条用例在红树上跑不出任何结论。基线验证用 `git worktree add <tmp> main` 检出 `main`，把测试文件拷进去跑（`AICC_TEST_DATABASE_URL` 见下）。
+- **数据库要起着**：`docker compose -f deploy/dev/docker-compose.yml up -d`，然后
+  `AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable'`。
+- **先读这三份再动手**：`docs/auth/baseline.md`（§0 事实 + 全部裁定 1–9 及其修正）、`docs/auth/RESULTS.md`（证据账本，含每一步的失败形态）、`docs/api-first-audit.md`（V1–V8 违反项、O1–O5 减法及处置）。`CLAUDE.md` 里那条 owner directive **"UI is optional. API is the product."** 是本任务全部决策的依据。
+- **`python3 docs/auth/scopemap.py`** 随时可重跑：打印 19 个 scope、role→scopes，并自检拓宽与收窄。拓宽必须**只**剩 9 条 `config:read`（裁定 8 修正 2），收窄必须为 0。
+- **勾选的粒度不能大于验证的粒度。** 复合项一律拆开——②a 曾因为跑完前半就整条勾掉，谎报了一个没写的生成器（见 ②b）。
+
 **人工门**：§0 结论 ✅、§2 契约 ✅、REVOKED 终态的首次真实执行 ⬜。
 
 ## 进度概览（2026-08-31）
