@@ -346,3 +346,20 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 
 - `[INFERENCE]` **播种直写 SQL，不走写端点**（`insertCDR` / `insertRecordingFor`）。被测的是读端点的授权，让它依赖写端点的授权就把两件事绑在一起了；写端点自己的授权由第 8 条和 ⑦ 的断言管。
 - `[FACT]` **第 3 条附带了基数断言**：`items` 至少 1 行，并在失败信息里写明"空集会因为错误的理由让这条断言通过"。第 8 条同理先断言 `api_keys` 有列，再逐列查明文。
+
+---
+
+## 2026-08-31 — 核对游标：`TASKS.md` 漂了四处，其中一处是假的对勾
+
+`[FACT]` 逐条核对 `docs/auth/TASKS.md` 与仓库实际状态，发现四处不一致。已全部更正，并在文件顶部加了进度概览表。
+
+| # | 漂移 | 事实 |
+|---|---|---|
+| 1 | **②a 被整条勾掉，声称 scope 常量生成步骤已做** | `[FACT]` `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts` **都不存在**；`grep -c scope scripts/api-generate.sh` = **0**。实际只做了 `make api-generate`。已拆成 ②a（已做）与 **②b（未做）** |
+| 2 | `0.13` / `2.0b` 写"词表 16 个" | 实际 **19** 个：初稿 16 → 18（加 `contacts:*`，owner 裁定）→ 19（加 `agent:manage`，自检抓到未裁定的提权） |
+| 3 | §5 的 ①② 未勾，但已提交 | ① = `ecf368f`，② = `3436dd9` |
+| 4 | 顶部没有"一眼看完"的进度视图 | 加了进度概览表，每阶段附落地提交哈希 |
+
+`[INFERENCE]` 第 1 条是最要紧的：**一个假的对勾比没有对勾更坏**——它会让 ⑥ 在写创建表单时以为常量已经生成好，直到 import 失败才发现。⑥ 的"scopes 从生成的常量枚举取，不手写"直接依赖 ②b。
+
+`[INFERENCE]` 教训记在这里：勾选的粒度不能大于验证的粒度。②a 原本是一条复合项（"`make api-generate` + scope 常量生成步骤"），跑完前半就整条勾了。此后凡复合项一律拆开。

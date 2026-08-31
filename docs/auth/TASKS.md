@@ -5,7 +5,27 @@
 第一个未勾选项即当前位置。证据写入 `docs/auth/RESULTS.md`（追加，不改历史条目）。
 本任务独立于 `TASKS.md` / `RESULTS.md`（仓库根的既有账本）。
 
-**人工门**：§0 结论、§2 契约、REVOKED 终态的首次真实执行。
+**人工门**：§0 结论 ✅、§2 契约 ✅、REVOKED 终态的首次真实执行 ⬜。
+
+## 进度概览（2026-08-31）
+
+| 阶段 | 状态 | 落地提交 |
+|---|---|---|
+| §0 源码研究 | ✅ 完成，人工门已过 | `2d33ca1` `293db19` `657cd13` `f676276` `365d763` `b219244` `c10648a` |
+| §1 决策 | ✅ 无工作项（O1–O4、裁定 8–9 覆盖了原 §1 若干条） | — |
+| §2 契约变更 | ✅ 完成，人工门已过 | `ecf368f` 契约 / `3436dd9` 生成代码 |
+| §3 测试先行 | ✅ 8 条按预期失败 + 1 条回归护栏 | `40aed73` |
+| §4 禁止事项 | 🟡 4.1 未写入 | — |
+| ②b scope 常量生成 | ⬜ **未做**（见下方更正） | — |
+| ③ AuthContext + 删守卫 | ⬜ 未开始 | — |
+| ④ Key 存储与端点 | ⬜ 未开始（**做完构建才转绿**） | — |
+| ⑤ 审计 4 列 | ⬜ 未开始 | — |
+| ⑥ Admin UI | ⬜ 未开始 | — |
+| ⑦ CI 三条断言 | ⬜ 未开始 | — |
+
+**本任务之外、同分支上的两个提交**：`9c01e2f` 修 V1/V2（API 自答 404/405，构建绿、测试全过）、`f676276`/`b219244` 等文档裁定。全部记在 `docs/api-first-audit.md` 的处置表。
+
+**当前构建：红**。`internal/httpapi/api_server.go:19` 缺 6 个方法，到 ④ 才转绿；owner 已确认中间提交可红。
 
 ---
 
@@ -23,7 +43,8 @@
 - [x] 0.10 产品定位复核 "UI is optional. API is the product."（`baseline.md` §17，P1–P9）
 - [x] 0.11 P5 裁定：**解除** webhook 对 API Key 的封锁；P1/P2/P3 纳入 §2/§4 正式条目（owner 2026-08-31）
 - [x] 0.12 O1–O4 减法采纳（owner 2026-08-31）：hash 直查、去节流、砍允许代理列表、两态。**覆盖已批准的 §1 对应条目**
-- [x] 0.13 scope 词表定稿 16 个、`users:write` 单列、act-as header 改 `X-AICC-Agent-ID`（`baseline.md` 裁定 8–9）。**§0 无遗留待裁项**
+- [x] 0.13 scope 词表定稿、`users:write` 单列、act-as header 改 `X-AICC-Agent-ID`（`baseline.md` 裁定 8–9）。**§0 无遗留待裁项**
+- [x] 0.14 词表两次修正：初稿 16 → **18**（加 `contacts:*`，owner 裁定）→ **19**（加 `agent:manage`，`scopemap.py` 自检抓到未裁定的提权）
 - [x] **§0 完成，人工门已通过**（`baseline.md` §0 裁定 1–6 + §17）
 
 ## §1 决策
@@ -33,7 +54,7 @@
 ## §2 契约变更（先于代码，单独一次提交）
 
 - [x] 2.0 `x-scopes` 三种放法 lint 均干净；选**根级**（两种 scheme 共用，放进其一会让另一个变二等）
-- [x] 2.0b scope 词表已定稿：**16 个**，`资源:动作[:范围]`，不得出现角色名，`users:write` 单列（`baseline.md` 裁定 8）
+- [x] 2.0b scope 词表已定稿：**19 个**，`资源:动作[:范围]`，不得出现角色名，`users:write` 与 `agent:manage` 单列（`baseline.md` 裁定 8 及其三处修正）
 - [x] 2.1 `cookieSession` + `csrfHeader` + 新 `apiKeyBearer`（`http`/`bearer`）；`apiKeyHeader` 移除；根级 `x-scopes` 19 个
 - [x] 2.2 **91** 个 operation 全部显式 `security`；全局 `security` 移除；Bearer 支不带 `csrfHeader`；描述里 48 处 `Requires ROLE` 清零
 - [x] 2.2b `/events` 已有 Bearer 支，`calls:read:own` 为下限、`calls:read:all` 拓宽投递（P1 / P2）
@@ -59,7 +80,11 @@
 
 ## 实现（§5 提交切分的工作面，编号沿用提交序号）
 
-- [x] ②a 生成代码：`make api-generate` + scope 常量生成步骤，产物落 `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts`（裁定 1b，Makefile 无需改）
+- [x] ②a `make api-generate`：`internal/api/api.gen.go` + `web/src/generated/api.ts` 已重新生成（`3436dd9`）
+- [ ] ②b **scope 常量生成步骤——未做**（2026-08-31 核对时发现 ②a 曾被错误地整条勾掉）。
+      `[FACT]` `internal/api/scopes.gen.go` 与 `web/src/generated/scopes.ts` **都不存在**，`scripts/api-generate.sh` 里 `scope` 命中 0 次。
+      要做的：在 `scripts/api-generate.sh` 加一段读 `docs/openapi.json` 的 `x-scopes`，写出 Go 常量与 TS 联合类型；产物落在现有 generated 目录，`Makefile:56-58` 的 diff 列表因此无需改动（裁定 1b）。
+      ⑥ 的创建表单"从生成常量枚举取，不手写"依赖它。
 - [ ] ③ AuthContext（`Subject` / `AgentID` / `Scopes`）+ scope 中间件；删除 14 处路由级角色守卫与 **6** 处 handler 外角色判定（5 处在 `internal/httpapi`，第 6 处是 `internal/events/hub.go:28` `IsSupervisor`，P2）；删除 `isMachine` / `machineIdentity` 及其 3 个下游分支；重述 `mayReadTranscript` 的按屏幕规则为能力（P7）
 - [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
 - [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
@@ -74,8 +99,8 @@
 
 不混提交：重构与行为变更分开。
 
-- [ ] ① 契约
-- [ ] ② 生成代码
+- [x] ① 契约 —— `ecf368f`
+- [x] ② 生成代码 —— `3436dd9`（scope 常量那半还欠着，见 ②b）
 - [ ] ③ AuthContext + 中间件 + 角色守卫删除（重构，无行为变化）
 - [ ] ④ API Key 存储与端点
 - [ ] ⑤ 审计
