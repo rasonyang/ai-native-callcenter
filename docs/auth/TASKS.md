@@ -39,6 +39,7 @@
 - [ ] 2.2c 改写 `docs/openapi.json:7` 的浏览器优先措辞为两种对等凭证（P6）
 - [ ] 2.2d `quality_reviews` 打分 operation 的 description 写明能力不对称的理由（P8）
 - [ ] 2.2e webhook-subscriptions 六条改为可由 `webhooks:write` scope 到达；同步改写三处成文依据：`server.go:363-368` 注释、`docs/design/09-webhooks.md:370,454`、`docs/openapi.json:4247`（P5 解除）
+- [ ] 2.2f 新增 `GET /openapi.json`：契约自己 serve 自己，免鉴权（V3）。`[FACT]` 落地手法照抄 `web/embed.go:16`——加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），因为 `go:embed` 不能用 `..` 跨目录，而 `docs/` 不是 Go 包。零构建步骤，与 SPA 的做法同源
 - [ ] 2.3 新增端点：`GET/POST /api-keys`、`GET /api-keys/{id}`、`PATCH /api-keys/{id}`、`POST /api-keys/{id}/revoke`
 - [ ] 2.4 错误码 enum 补 **3** 个：`AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`（`AGENT_NOT_ALLOWED` 随 O3 取消）
 - [ ] 2.5 `make api-lint` 零 error/warning 增量；`make api-breaking` 通过

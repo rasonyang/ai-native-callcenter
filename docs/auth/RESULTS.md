@@ -196,3 +196,13 @@ owner 裁定，依据 `docs/api-first-audit.md` §二。**这四条修改的是�
 `[INFERENCE]` O1 的理由值得单独记：**同一个代码库里 `sessions` 已经解决过同一个问题**，而且解法更简单（`GetSessionByTokenHash`）。§1 的设计不是错，是没看现成的。按 hash 查时要么这行存在、要么不存在，SHA-256 不可逆，索引查找不泄漏可用于时序攻击的信息——"常量时间比较"没有对象。
 
 O5（scope 词表 10–14 个资源级）落在 `2.0b`，此处不定死具体词表。
+
+---
+
+## 2026-08-31 — V3 并进 §2
+
+owner 裁定：`GET /openapi.json`（跑起来的部署 serve 自己的契约）不单独提交，**并进 §2 的契约提交**，列为 `2.2f`。按 spec-first 它需要一个新 operation，本就不能绕过契约先写代码。
+
+`[FACT]` 落地手法已确认，避免 §2 开工时踩坑：加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），照抄 `web/embed.go:16` 嵌 SPA 的做法。**不能写 `//go:embed docs/openapi.json`**——`go:embed` 的模式不允许 `..` 跨目录，而 `docs/` 目前不是 Go 包。这个仓库已经用 `web/` 这个包解决过同一个问题，零构建步骤。
+
+`[INFERENCE]` 端点免鉴权：契约是公开文档，而一个还没拿到凭证的集成方正是最需要读它的人。Redoc 文档页是可选的第二步，不进 v1。

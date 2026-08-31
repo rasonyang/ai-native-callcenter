@@ -43,7 +43,11 @@ GET /api/v1/auth/login/x   -> 200 "text/html; charset=utf-8"  <!doctype html>…
 
 契约只存在于 git 仓库里。一个拿到部署实例的集成方无法从产品本身发现 API——这相当于产品出厂不带说明书。SPA 是嵌进二进制的（`go:embed all:dist`），契约却不是。
 
-`[INFERENCE]` 修法：`go:embed docs/openapi.json` + `GET /api/v1/openapi.json`（免鉴权，它本来就是公开文档）。要文档页的话再加一个 Redoc 单页（Redoc 从 CDN 加载，或一并嵌入）。前者是十几行。
+**处置：并进 §2 的契约提交**（owner，2026-08-31），作为 `2.2f`。按 spec-first 它需要一个新 operation，不能绕过契约先写代码。
+
+`[FACT]` 落地手法已确认：加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），照抄 `web/embed.go:16` 嵌 SPA 的做法。**不能直接 `//go:embed docs/openapi.json`**——`go:embed` 的模式不允许 `..` 跨目录，而 `docs/` 目前不是 Go 包；这个仓库已经用 `web/` 这个包解决过同一个问题。零构建步骤。
+
+`[INFERENCE]` 端点免鉴权：契约本来就是公开文档，而且一个还没拿到凭证的集成方正是最需要读它的人。要文档页的话再加一个 Redoc 单页，但那是可选的第二步。
 
 ### V4 — `/events` 只认 cookie，机器订阅不到事件流
 
@@ -149,7 +153,7 @@ keys:manage         audit:read
 | # | 处置 | 落在哪 |
 |---|---|---|
 | V1 V2 | ~~`/api/v1` 子路由挂 JSON 版 `NotFound` / `MethodNotAllowed`~~ | **已修 `9c01e2f`**（独立提交，不在认证任务的 7 个提交里）|
-| V3 | `go:embed docs/openapi.json` + `GET /api/v1/openapi.json` | 独立小提交；需要一个新 operation → 走 §2 |
+| V3 | `GET /openapi.json`（`docs/embed.go` 照抄 `web/embed.go`） | **并进 §2 的契约提交**，`docs/auth/TASKS.md` `2.2f` |
 | V4–V8 | 已在 `docs/auth/TASKS.md` 排好（`2.2b` `2.2c` `2.2` `③`） | 认证任务内 |
 | O1 O2 O3 O4 | ~~改 §1 的实现细节~~ | **已采纳 `657cd13`**：hash 直查、去节流、砍允许代理列表（新码 4 → 3）、两态 |
 | O5 | 采纳 10–14 个资源级 scope 词表 | §2 `2.0b`，尚未开工 |
