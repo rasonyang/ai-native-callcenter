@@ -564,3 +564,67 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 `[FACT]` 新增 `TestALoginsGrantIsTheDerivedOne`：钉住 AGENT 8 / SUPERVISOR 16 / ADMIN 20、词表 20，并单独断言 AGENT **不**持有 `calls:create:ai` 而 SUPERVISOR / ADMIN 持有。
 `[FACT]` **它第一次跑就失败了**——上一批改动里有一个 python 脚本在中途 assert 失败，后面三处编辑（`grants.go`、`outbound_handlers.go`、`outbound_handlers_test.go`）根本没执行，而当时 `go build` / `go vet` / `go test` 全绿，因为旧的 `config:read` 检查还在原地、行为没变。
 `[INFERENCE]` **一次不改变行为的漏改，是测试套件抓不到的**——除非有人把"应该变成什么"写下来。这条断言就是那个"写下来"。
+
+---
+
+## 2026-08-31 — 在跑着的 dev stack 上真实执行（③④⑤ + ③b）
+
+`[FACT]` 依据 owner 那条"绿的测试套件不是验证"。`/tmp/aicc` 起在 8080，PostgreSQL 是**带着历史的那个开发库**，不是测试用的一次性库。
+
+### 迁移第一次对着真实历史跑
+
+`[FACT]` `goose_db_version`：29 与 30 均 `is_applied = t`，时间戳 `2026-08-31 06:56:48`。
+`[FACT]` 回填结果（762 行既有审计行）：
+
+| subject_kind | 行数 | 有 subject_id | 有 subject_name |
+|---|---|---|---|
+| `USER` | 739 | 739 | 736 |
+| `NULL` | 23 | 0 | 0 |
+
+`[INFERENCE]` **736 而不是 739 是对的**：3 行的账号此后被删了，join 找不到用户名，快照就写空——这正是"名字要快照"要处理的那种行，而不是缺陷。23 行无 subject 的是老共享密钥（或更早）写的，保持空白，没有被编造身份。
+
+### Key 的完整生命周期（curl，真服务器）
+
+| # | 动作 | 结果 |
+|---|---|---|
+| 1 | 会话签发 Key（`history:read:all` + `agent:act`） | 201，`secret` 只出现这一次，`keyPrefix=fo7xW73a` |
+| 2 | 签发时带未知 scope `supervisor:all` | 422 `VALIDATION_FAILED`，`params.allowed` 列出全部 20 个 |
+| 3 | Key 读 `GET /cdrs` | **200** |
+| 4 | Key 读 `GET /queues`（缺 `config:read`） | **403 `INSUFFICIENT_SCOPE`**，`params.requiredScope=config:read` |
+| 5 | Key 带 `X-AICC-Agent-ID` 打 `POST /agent/ready` | **200**，`agent_states` 里 wei 真的变成 `READY` |
+| 6 | Key 不带该头打同一端点 | **403 `AGENT_REQUIRED`** |
+| 7 | 会话带该头打 `GET /auth/me` | **403 `AGENT_IMPERSONATION_NOT_ALLOWED`** |
+| 8 | Key 带 `calls:read:own` 订阅 `/events` | **200 `text/event-stream`**；只带 `history:read:all` 的那把是 403 |
+| 9 | `GET /api-keys` | 两把都在（含 REVOKED 的），响应里没有 `secret` / `keyHash` / `key_hash` |
+| 10 | 免鉴权 `GET /openapi.json` | **200**，275,468 字节，`application/json` |
+
+`[FACT]` 第 5 步写下的审计行，正是 ⑤ 存在的理由：
+
+```
+subject_kind | subject_name   | agent_id                             | actor_null | action
+API_KEY      | live-check-crm | 807b2164-bd6b-47e9-9286-39a1ca831cea | t          | POST /api/v1/agent/ready
+```
+
+`[INFERENCE]` 这一行读出来是「**CRM 把 wei 置成了示闲**」。改之前它只能是一个 actor 为空、"api-key" 埋在 jsonb 里的行。
+
+### REVOKED 终态 —— 人工门的证据
+
+`[FACT]` 吊销前 `last_used_at = 2026-08-31 06:59:33.118958+00`。
+`[FACT]` `POST /api-keys/{id}/revoke` → **200**，`status=REVOKED`，`revokedAt=…06:59:33.195436`。
+`[FACT]` 用同一把 Key 再打 `GET /cdrs` → **401 `INVALID_CREDENTIALS`**。
+`[FACT]` 那次被拒之后再读 `last_used_at`：**`2026-08-31 06:59:33.118958+00`，一个字没动**。
+`[INFERENCE]` 这是"状态条件写在 SQL 的 WHERE 里"唯一能被观察到的后果：**被拒的请求不算一次使用**。若是查出来再拒，这个值会往前跳，运维看着一把已经吊销的 Key"还在用"。
+`[FACT]` 再吊销一次 → **409 `CONFLICT` "the key is already revoked"**，`revoked_at` 未被改写。
+
+**⬜ 这一段是 REVOKED 人工门的证据，门本身由 owner 勾。**
+
+### SPA（Browser Harness，按 owner 的规矩，不用 devtools MCP）
+
+`[FACT]` `admin / aicc@12345` 登录成功 → `/admin`。管理端逐屏无错、有数据：`/admin/users` 21 行、`/admin/extensions` 9 行、`/admin/audit` 50 行、`/admin/routing` 3 行、`/admin/numbers` 7 行、`/admin/bots` 7 行。（`/admin/queues` 是 Not Found——它本来就不是路由，nav 里的「Queues & Routing」指向 `/admin/routing`。）
+`[FACT]` `wei / aicc@12345` 登录 → `/agent` 坐席台。11 个 agent 作用域的 operation 全部成功：`auth/me`、`agent/presence`、`callbacks`、`dispositions`、`cdrs/mine`、`agent/wrap-up`、`calls/mine`、`calls/waiting`、`reports/me`、`contacts`。
+`[FACT]` 事件流已连接（页面上的提示语："Live updates from the server are connected"）。
+`[FACT]` 页面自己的 fetch 打过去：`POST /agent/not-ready` 200、`POST /agent/ready` 200、**同一请求去掉 `X-AICC-Csrf` → 403 `FORBIDDEN` "missing X-AICC-Csrf header"**。
+`[INFERENCE]` 最后这条要紧：CSRF 的要求现在来自契约的 `NeedsCSRF`，不再来自"方法是不是 GET"的硬编码判断——真实浏览器上行为不变。
+`[FACT]` 服务端日志里没有与本次改动相关的 error/warn（只有既有的 webhook 投递失败，目标 `127.0.0.1:9111` 没起）。
+
+`[FACT]` 两把试验 Key 都已吊销，未留启用状态的凭证。
