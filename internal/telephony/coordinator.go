@@ -10,6 +10,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -34,7 +35,9 @@ type AgentLookup interface {
 	// has already stopped offering to them, and what it means for their
 	// presence is ours to decide, not something to report back.
 	BenchForNoAnswer(ctx context.Context, agentID uuid.UUID)
-	SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool)
+	// SetOnCall records whether an agent's leg is live, and on which call:
+	// the roster names the call so a supervisor can monitor it.
+	SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool, callID uuid.UUID)
 	// BeginAfterCallWork starts an agent's wrap-up for the call whose agent
 	// leg just ended. Fire and forget: a call is over whether or not presence
 	// could be recorded, so this reports nothing back to the switch path.
@@ -91,6 +94,12 @@ type Coordinator struct {
 	// knows: the switch reports a count, and a call in a queue looks like any
 	// other call from the registry's side.
 	waiting *WaitingLine
+
+	// observers are the supervisor legs listening in, keyed by the phone each
+	// one rings. They are no part of any call, so the registry cannot hold
+	// them and this is the only place that knows they exist.
+	observerMu sync.Mutex
+	observers  map[string]string
 }
 
 // Audiences records who may see a call's live transcript. Nil leaves every
@@ -203,6 +212,14 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 	if isHarnessLeg(ev) {
 		return
 	}
+	if isObserverLeg(ev) {
+		// Not a party, so nothing here handles it — except its ending, which
+		// is what frees the supervisor's phone for the next mode.
+		if ev.Kind == KindChannelHangup {
+			c.forgetObserver(ev.ChannelID)
+		}
+		return
+	}
 
 	switch ev.Kind {
 	case KindChannelCreate:
@@ -302,7 +319,7 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		// Off the call first: being on one outranks wrap-up when availability
 		// is derived, so the other order would show the agent as still
 		// talking to somebody who has hung up.
-		c.agents.SetOnCall(ctx, ended.agentID, false)
+		c.agents.SetOnCall(ctx, ended.agentID, false, ended.callID)
 		// After-call work is for a conversation that happened. A leg that
 		// rang and was never answered — a decline, a phone nobody picked up —
 		// left the agent nothing to write up.
@@ -327,6 +344,14 @@ type endedLeg struct {
 func isHarnessLeg(ev SwitchEvent) bool {
 	return ev.Raw.Variable("aicc_harness") == "true" &&
 		strings.HasSuffix(ev.ChannelName, "-a")
+}
+
+// isObserverLeg recognizes a supervisor's monitoring leg (Adapter.Eavesdrop).
+// It listens to a conversation without being part of it: adopting it would
+// make the supervisor a party, put them in the CDR and let EndCall hang up
+// the listener instead of the call.
+func isObserverLeg(ev SwitchEvent) bool {
+	return ev.Raw.Variable(ObserverVar) != ""
 }
 
 // isBotLeg recognizes the leg the switch dialed towards the AI gateway: an
@@ -590,7 +615,7 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 
 	// Whichever way the leg was raised, the agent is on a call now.
 	if isAgentLeg {
-		c.agents.SetOnCall(ctx, agentID, true)
+		c.agents.SetOnCall(ctx, agentID, true, callID)
 	}
 }
 
@@ -1304,6 +1329,92 @@ func (c *Coordinator) CallsForAgent(agentID uuid.UUID) []Snapshot {
 		}
 	}
 	return out
+}
+
+// Monitor attaches a supervisor's phone to an agent's live leg on a call:
+// LISTEN, WHISPER or BARGE (Adapter.Eavesdrop). The agent must still hold a
+// leg on the call — ErrNoAgentLeg otherwise, which is what "not on a call"
+// looks like from here.
+//
+// The supervisor's leg is deliberately not a party: it carries no call id,
+// the coordinator ignores its events (isObserverLeg) and it reaches neither
+// the stream nor the CDR. Who listened to whom is the audit log's.
+func (c *Coordinator) Monitor(ctx context.Context, callID, agentID uuid.UUID, supervisorExtension, mode string) error {
+	// A supervisor has one phone, so they hold one monitoring leg. Changing
+	// mode is a new eavesdrop — the flags are read once, when the application
+	// starts — and two legs at one handset would mean the second never
+	// answers, or answers over the first. Ending the old one is what "switch
+	// to whisper" means, and it is done here rather than left to the
+	// supervisor hanging up their own phone first.
+	c.endObserverAt(ctx, supervisorExtension)
+
+	var channelID, agentExtension string
+	err := c.registry.Do(callID, func(call *Call) {
+		for _, p := range call.Parties {
+			if p.IsActive() && p.AgentID != nil && *p.AgentID == agentID {
+				channelID, agentExtension = p.ChannelID, p.ExtensionNumber
+				return
+			}
+		}
+	})
+	if err != nil {
+		return err
+	}
+	if channelID == "" {
+		return ErrNoAgentLeg
+	}
+	observerID := uuid.Must(uuid.NewV7())
+	c.rememberObserver(supervisorExtension, observerID.String())
+	slog.InfoContext(ctx, "supervisor joining a call",
+		"callId", callID, "agentId", agentID, "channelId", channelID,
+		"mode", mode, "supervisorExtension", supervisorExtension, "observerId", observerID)
+	_, err = c.adapter.Eavesdrop(observerID, supervisorExtension, channelID, mode, callID, agentExtension)
+	return err
+}
+
+// The supervisor legs in flight, by the phone each one rings. A supervisor
+// has one phone and therefore at most one of these; the map is keyed by the
+// phone rather than by the person because the phone is what cannot be in two
+// conversations at once.
+func (c *Coordinator) rememberObserver(extension, channelID string) {
+	c.observerMu.Lock()
+	defer c.observerMu.Unlock()
+	if c.observers == nil {
+		c.observers = map[string]string{}
+	}
+	c.observers[extension] = channelID
+}
+
+func (c *Coordinator) forgetObserver(channelID string) {
+	c.observerMu.Lock()
+	defer c.observerMu.Unlock()
+	for extension, held := range c.observers {
+		if held == channelID {
+			delete(c.observers, extension)
+			return
+		}
+	}
+}
+
+// endObserverAt hangs up the monitoring leg at a phone, if one is up. A leg
+// the supervisor already hung up is gone from the switch and its hangup event
+// has usually cleared the entry; the kill is sent anyway and its refusal
+// ignored, because the alternative is refusing the new mode over a leg that no
+// longer exists.
+func (c *Coordinator) endObserverAt(ctx context.Context, extension string) {
+	c.observerMu.Lock()
+	channelID := c.observers[extension]
+	delete(c.observers, extension)
+	c.observerMu.Unlock()
+	if channelID == "" {
+		return
+	}
+	slog.InfoContext(ctx, "ending the supervisor's previous monitoring leg",
+		"extension", extension, "channelId", channelID)
+	if err := c.adapter.Hangup(channelID, "NORMAL_CLEARING"); err != nil {
+		slog.DebugContext(ctx, "the previous monitoring leg was already gone",
+			"channelId", channelID, "error", err)
+	}
 }
 
 // AllCalls returns every live call, for supervision.

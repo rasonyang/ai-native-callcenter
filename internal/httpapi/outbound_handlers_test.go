@@ -379,6 +379,10 @@ type dialerPresence struct{ stubAgents }
 
 func (dialerPresence) CallcenterNameFor(context.Context, uuid.UUID) string { return "agent-probe" }
 
+// The phone bound in configuration, which is where a supervisor who staffs no
+// queue is reached.
+func (dialerPresence) BoundExtensionFor(context.Context, uuid.UUID) string { return "1009" }
+
 func (dialerPresence) Presence(uuid.UUID) agents.Presence {
 	return agents.Presence{ExtensionNumber: "1008"}
 }

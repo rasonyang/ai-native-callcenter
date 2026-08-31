@@ -551,6 +551,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/calls/{callId}/monitor": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Listen to, whisper into or join an agent's call
+         * @description Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. Requires SUPERVISOR. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.
+         */
+        post: operations["monitorCall"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/calls/{callId}/recordings": {
         parameters: {
             query?: never;
@@ -1516,6 +1536,11 @@ export interface components {
             /** Format: date-time */
             enteredAt: string;
             isOnCall: boolean;
+            /**
+             * Format: uuid
+             * @description The live call the agent's leg is on, present while isOnCall is true. What a supervisor's monitor request names.
+             */
+            currentCallId?: string;
             isRegistered: boolean;
             /** @description The identifier the switch knows this agent by. */
             callcenterName: string;
@@ -1721,6 +1746,19 @@ export interface components {
         DTMFRequest: {
             /** @description The tones to emit, in order. 0-9, A-D, * and # are the only DTMF symbols there are. */
             digits: string;
+        };
+        /**
+         * @description LISTEN: the supervisor hears both sides and is heard by nobody. WHISPER: the agent also hears the supervisor. BARGE: both parties hear the supervisor.
+         * @enum {string}
+         */
+        MonitorMode: "LISTEN" | "WHISPER" | "BARGE";
+        MonitorRequest: {
+            mode: components["schemas"]["MonitorMode"];
+            /**
+             * Format: uuid
+             * @description Whose leg to attach to. A call may carry two agents (an internal call), so the leg is always named.
+             */
+            agentId: string;
         };
         /** @description Ask the platform to place a call. Which fields apply depends on kind. */
         CreateCallRequest: {
@@ -3566,6 +3604,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    monitorCall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                callId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MonitorRequest"];
+            };
+        };
+        responses: {
+            /** @description The switch accepted the command; the supervisor's phone answers by itself. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
             503: components["responses"]["ServiceUnavailable"];

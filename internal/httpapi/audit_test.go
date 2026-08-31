@@ -267,6 +267,7 @@ func (stubAgents) NotReady(context.Context, uuid.UUID, agents.Reason) (agents.Pr
 }
 func (stubAgents) Presence(uuid.UUID) agents.Presence                  { return agents.Presence{} }
 func (stubAgents) CallcenterNameFor(context.Context, uuid.UUID) string { return "" }
+func (stubAgents) BoundExtensionFor(context.Context, uuid.UUID) string { return "" }
 
 // A phone the switch has never mentioned, which is what an extension nobody
 // named looks like. Stubs that want a reachable one override this.
@@ -295,6 +296,9 @@ func (stubCalls) Mute(context.Context, uuid.UUID, uuid.UUID) error     { return 
 func (stubCalls) Unmute(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
 func (stubCalls) Hangup(context.Context, uuid.UUID, uuid.UUID) error   { return nil }
 func (stubCalls) EndCall(context.Context, uuid.UUID) error             { return nil }
+func (stubCalls) Monitor(context.Context, uuid.UUID, uuid.UUID, string, string) error {
+	return nil
+}
 func (stubCalls) SendDTMF(context.Context, uuid.UUID, uuid.UUID, string) error {
 	return nil
 }

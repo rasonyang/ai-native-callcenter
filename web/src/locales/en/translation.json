@@ -193,6 +193,16 @@
     "actions": "Actions",
     "forceLogout": "Force sign-out",
     "forceLogoutConfirm": "Sign {{name}} out? Their phone stops receiving calls immediately.",
+    "monitor": {
+      "LISTEN": "Monitor — listen silently",
+      "WHISPER": "Whisper — heard by the agent only",
+      "BARGE": "Barge — join the call",
+      "LISTENHint": "Your phone answers by itself and you hear both sides of {{name}}'s call. Nobody hears you.",
+      "WHISPERHint": "Your phone answers by itself; {{name}} hears you, the customer does not.",
+      "BARGEHint": "Your phone answers by itself and both {{name}} and the customer hear you.",
+      "yourPhoneHint": "It rings your own phone. Starting another mode ends the one running — you never hang up first.",
+      "start": "Start"
+    },
     "noAgents": "No agents configured yet.",
     "name": "Name",
     "ext": "Ext.",

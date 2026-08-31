@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
 import { useState } from 'react'
-import { LogOut, Search } from 'lucide-react'
+import { Headphones, LogOut, Mic, PhoneCall, Search } from 'lucide-react'
 import { Popover } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
@@ -14,8 +14,8 @@ import {
 } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useElapsedSec, useForceLogout, useRoster } from '@/lib/agent'
-import type { Availability, RosterEntry } from '@/lib/api'
+import { useElapsedSec, useForceLogout, useMonitorCall, useRoster } from '@/lib/agent'
+import type { Availability, MonitorMode, RosterEntry } from '@/lib/api'
 import { formatDuration } from '@/lib/utils'
 
 /** Filter options, in the order the wallboard stacks them. */
@@ -149,6 +149,7 @@ function AgentRow({ row }: { row: RosterEntry }) {
         )}
       </Td>
       <Td align="right">
+        {row.isOnCall && row.currentCallId && <MonitorButtons row={row} />}
         {row.state !== 'LOGGED_OUT' && (
           <Popover.Root>
             <Popover.Trigger asChild>
@@ -187,5 +188,100 @@ function AgentRow({ row }: { row: RosterEntry }) {
         )}
       </Td>
     </Tr>
+  )
+}
+
+/** The three ways into a call, in order of how much the agent notices. */
+const MONITOR_MODES: { mode: MonitorMode; Icon: typeof Headphones }[] = [
+  { mode: 'LISTEN', Icon: Headphones },
+  { mode: 'WHISPER', Icon: Mic },
+  { mode: 'BARGE', Icon: PhoneCall },
+]
+
+/**
+ * Listen / whisper / barge. Rendered only while the agent is on a call: with
+ * no leg to attach to there is nothing to offer, and a row of greyed icons
+ * would only say so at length.
+ *
+ * One click is the whole gesture — the phone that rings is the supervisor's
+ * own and the server knows which it is. The popover exists to say what the
+ * mode does before it happens, and to carry a refusal when the switch has one.
+ */
+function MonitorButtons({ row }: { row: RosterEntry }) {
+  const { t } = useTranslation()
+  const monitor = useMonitorCall()
+  const [mode, setMode] = useState<MonitorMode | null>(null)
+  const callId = row.currentCallId
+
+  const start = () => {
+    if (!mode || !callId) return
+    monitor.mutate(
+      { callId, mode, agentId: row.agentId },
+      { onSuccess: () => setMode(null) },
+    )
+  }
+
+  return (
+    <Popover.Root
+      open={mode !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          setMode(null)
+          monitor.reset()
+        }
+      }}
+    >
+      <Popover.Anchor asChild>
+        <span className="inline-flex">
+          {MONITOR_MODES.map(({ mode: m, Icon }) => (
+            <Button
+              key={m}
+              size="icon-sm"
+              variant="ghost"
+              disabled={!callId}
+              aria-pressed={mode === m}
+              title={t(`supervisor.monitor.${m}`)}
+              onClick={() => setMode(m)}
+            >
+              <Icon />
+            </Button>
+          ))}
+        </span>
+      </Popover.Anchor>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={4}
+          className="z-50 w-72 rounded-md border bg-popover p-3 text-sm shadow-md"
+        >
+          {mode && (
+            <>
+              <p className="mb-1 font-medium">{t(`supervisor.monitor.${mode}`)}</p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                {t(`supervisor.monitor.${mode}Hint`, { name: row.displayName })}
+              </p>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {t('supervisor.monitor.yourPhoneHint')}
+              </p>
+              {monitor.isError && (
+                <p className="mb-3 text-xs" style={{ color: 'var(--state-breach)' }}>
+                  {describeError(monitor.error, t)}
+                </p>
+              )}
+              <div className="flex justify-end gap-2">
+                <Popover.Close asChild>
+                  <Button size="sm" variant="ghost">
+                    {t('common.cancel')}
+                  </Button>
+                </Popover.Close>
+                <Button size="sm" disabled={monitor.isPending} onClick={start}>
+                  {t('supervisor.monitor.start')}
+                </Button>
+              </div>
+            </>
+          )}
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   )
 }

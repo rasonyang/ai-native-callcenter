@@ -191,6 +191,16 @@
     "actions": "操作",
     "forceLogout": "强制签出",
     "forceLogoutConfirm": "确认将 {{name}} 签出？其话机将立即停止接听来电。",
+    "monitor": {
+      "LISTEN": "监听——静默旁听",
+      "WHISPER": "耳语——仅坐席可听见",
+      "BARGE": "强插——加入通话",
+      "LISTENHint": "你的话机会自动接听，可听到 {{name}} 通话的双方；任何人都听不到你。",
+      "WHISPERHint": "你的话机会自动接听；{{name}} 能听到你，客户听不到。",
+      "BARGEHint": "你的话机会自动接听，{{name}} 和客户都能听到你。",
+      "yourPhoneHint": "将呼叫你自己的话机。切换到其他模式会自动结束当前这条，无需先挂断。",
+      "start": "开始"
+    },
     "noAgents": "尚未配置坐席。",
     "name": "姓名",
     "ext": "分机",

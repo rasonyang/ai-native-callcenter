@@ -523,7 +523,7 @@ func TestRosterResolvesAvailability(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	svc.SetOnCall(ctx, agentID, true)
+	svc.SetOnCall(ctx, agentID, true, uuid.New())
 
 	rows, err := svc.Roster(ctx)
 	if err != nil {

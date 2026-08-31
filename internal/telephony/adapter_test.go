@@ -264,17 +264,38 @@ func TestEavesdropModes(t *testing.T) {
 		contains string
 	}{
 		{"LISTEN", "&eavesdrop(chan-target)"},
+		// Heard by the agent whose leg is eavesdropped: bleg is the audio
+		// written towards the target leg.
 		{"WHISPER", "eavesdrop_whisper_bleg=true"},
-		{"BARGE", "eavesdrop_bridge_aleg=true"},
+		// Heard by both: what the target hears and what it says.
+		{"BARGE", "eavesdrop_whisper_aleg=true"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
 			a, c := newTestAdapter()
-			if _, err := a.Eavesdrop(partyID, "1099", "chan-target", tt.mode); err != nil {
+			callID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3e")
+			if _, err := a.Eavesdrop(partyID, "1099", "chan-target", tt.mode, callID, "1001"); err != nil {
 				t.Fatalf("Eavesdrop() error = %v", err)
 			}
 			if !strings.Contains(c.last(), tt.contains) {
 				t.Errorf("command %q does not contain %q", c.last(), tt.contains)
+			}
+			if tt.mode == "LISTEN" && strings.Contains(c.last(), "eavesdrop_whisper") {
+				t.Errorf("a silent listener must not be heard: %q", c.last())
+			}
+			if tt.mode == "BARGE" && !strings.Contains(c.last(), "eavesdrop_whisper_bleg=true") {
+				t.Errorf("barge must reach the agent too: %q", c.last())
+			}
+			if strings.Contains(c.last(), "eavesdrop_bridge_") {
+				t.Errorf("eavesdrop_bridge_* only picks what the supervisor hears and must not be set: %q", c.last())
+			}
+			if strings.Contains(c.last(), "aicc_call_id") {
+				t.Errorf("the supervisor's leg must never carry the call id, or it becomes a party: %q", c.last())
+			}
+			for _, want := range []string{ObserverVar + "=" + tt.mode, "sip_h_X-AICC-Call-Id=" + callID.String(), "origination_caller_id_number=1001", "user/1099@"} {
+				if !strings.Contains(c.last(), want) {
+					t.Errorf("command %q does not contain %q", c.last(), want)
+				}
 			}
 			if !strings.Contains(c.last(), "sip_auto_answer=true") {
 				t.Error("a supervisor's own phone must answer without them picking up")
