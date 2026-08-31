@@ -6,6 +6,19 @@ The `PROVISIONAL`s that remain are mine to settle at implementation (§17's defi
 and of those only D15 is genuinely undecided. No application code changed.** ·
 Author: agent session
 
+> **Amendment 2026-08-31 — read every authorization claim below as dated.** This is a
+> gap analysis, and its `[FACT]` lines cite the code as it stood on 2026-08-16/17. The
+> authorization model has since been rebuilt: there are no route-level role guards left,
+> so `requireSupervisorRole` at `server.go:207-210` and the phrases "SUPERVISOR-gated" and
+> "supervisors and admins pass unconditionally" name a mechanism that no longer exists.
+> The findings are not corrected in place — a dated record that gets edited stops being
+> evidence — so what shipped is stated once, here, and 04 §2/§3 is authoritative:
+> `GET /calls/{callId}/transcript` and `GET /cdrs/{callId}` are reached with
+> `history:read:own`, and `history:read:all` is the widening that turns "the calls this
+> subject's agent identity was on" into "anyone's". The *substance* of D8 survived intact
+> — an agent on the call may read that call's transcript, a non-party may not — but it is
+> now a capability the contract states rather than a rank the router checked.
+
 > ## What is settled, and what the experiments found
 >
 > **Owner decisions (2026-08-16).** A6 constrains the conversational path only, so an

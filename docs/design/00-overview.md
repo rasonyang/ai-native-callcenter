@@ -53,17 +53,28 @@ Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 0
 | `internal/config` | env-based config (AICC_* vars), validation | — |
 | `internal/obs` | slog setup, OTel init (traces+metrics), /metrics | config |
 | `internal/store` | sqlc-generated queries, repositories, embedded goose migrations, tx helpers, seq hi/lo | config |
-| `internal/events` | event envelope, global seq, in-memory ring, SSE hub (fan-out, per-connection role/agent filters) | store |
+| `internal/events` | event envelope, global seq, in-memory ring, SSE hub (fan-out; delivery is scoped per subscriber by their agent identity, their staffed queues and a resolved `SeesEveryCall` capability — the hub is handed the answer, never a role or a scope name) | store |
 | `internal/esl` | minimal ESL inbound client: auth, `event plain` subscribe, FIFO api replies, reconnect/backoff | — |
 | `internal/media` | shared audio primitives: PCM16 frames, G.711 LUT codecs, resamplers, buffer pools | — |
 | `internal/voice` | SIP UAS, SDP, RTP/RTCP, jitter buffer, DTMF (golang-bot port) | media |
-| `internal/provider` | `VoiceSession` interface; `openai`, `qwen` clients; `mockprovider` for tests/load | media |
+| `internal/provider` | one OpenAI-Realtime client × `Profile` (`openai`, `qwen` are profiles, not clients); `VoiceSession` is the seam to `aicall` | media |
+| `internal/mockprovider` | a stand-in Realtime **server** for load testing, reached through `AICC_PROVIDER_ENDPOINT` like a real one — not an in-process fake (`cmd/aicc-mockprovider`) | provider, media |
+| `internal/loadgen` | the load generator's SIP UAC and run loop (`cmd/aicc-loadgen`) | media, voice |
 | `internal/flow` | Flow DSL v1: schema, validation, engine (hint steering), HTTP tool runner | — |
 | `internal/telephony` | FS adapter (command vocabulary), event normalization, call registry + per-call actors, call/party FSMs, callcenter sync, recording control, originate/transfer/eavesdrop ops | esl, store, events |
 | `internal/agents` | agent state service (login/ready/ACW/RONA), device in_service observation | telephony, store, events |
 | `internal/aicall` | AI session manager: voice leg + provider session + flow engine per call; barge-in & long-call policy; executes transfer_to_agent/take_message via telephony | voice, provider, flow, telephony, store, events, media |
 | `internal/recording` | storage abstraction (fs / S3-compatible), key naming, retention job | store, config |
-| `internal/httpapi` | chi router, handlers, cookie sessions, CSRF, SSE endpoint, SPA embed/serving | all services (never imported by anyone) |
+| `internal/api` | **generated** from `docs/openapi.json`: request/response types, `ServerInterface`, the routing wrapper, `OperationSecurityByRoute`, the scope vocabulary (`scopes.gen.go`). `DO NOT EDIT` | — |
+| `internal/auth` | password hashing (argon2id), users, revocable cookie sessions, API keys (SHA-256 lookup, issue/revoke), `Role` and the `role → scopes` grant map | store |
+| `internal/catalog` | the configuration a call centre runs on: extensions, queues, the numbers that reach them, who staffs what | — (its own repository interfaces) |
+| `internal/outbound` | originating calls: an agent's click-to-dial and the AI's outbound leg, plus the per-DID rate limiter | catalog, telephony |
+| `internal/transcript` | the order of a call's conversation — one actor serialising transcript rows and their events | store, events |
+| `internal/transcribe` | speech recognition on a human leg (DashScope / OpenAI Realtime transcription) | — |
+| `internal/streamin` | receives the audio the switch taps from an agent's leg and feeds it to transcription | telephony, transcribe, transcript, events, store, obs |
+| `internal/webhook` | delivers finished calls to a customer's own system: subscriptions, signed delivery, retries, retention | store |
+| `internal/seed` | `AICC_SEED=demo` fills an empty installation deterministically; `fresh` removes exactly that again | auth, store |
+| `internal/httpapi` | chi router mounted through the generated wrapper, handlers, the two credentials (cookie sessions + `Authorization: Bearer` API keys) and the single scope middleware that applies the contract's `security`, CSRF, SSE endpoint, SPA embed/serving, `GET /openapi.json` | all services (never imported by anyone) |
 
 Rules: dependencies point downward only (httpapi at top, store/media/esl at bottom); `internal/voice` and `internal/provider` never import `telephony` (they are driven by `aicall`); nothing imports `httpapi`; FS raw event names never escape `telephony` (normalization boundary, same rule as cti-server).
 
@@ -82,7 +93,7 @@ Frontend: react 19, @tanstack/react-router + react-query, tailwindcss 4, shadcn/
 - **Naming**: [07-naming.md](07-naming.md) is normative for every identifier in every layer (Go `CallID` ↔ JSON `callId` ↔ TS `callId` ↔ DB `call_id`); CI-enforced.
 - **Logging**: slog JSON, every log in a call context carries `call_id`/`party_id`/`agent_id`; trace_id correlated via OTel handler.
 - **OTel**: spans on REST handlers, ESL commands, provider turns (see 02 §8), DB via pgx tracer; metrics listed in 06 §6.
-- **Config**: env vars `AICC_*` with `.env` file support for dev; full table in the deployment doc. Key defaults for this dev env: `AICC_ESL_ADDR=127.0.0.1:18021`, `AICC_SIP_LISTEN=:6060`, `AICC_RTP_PORT_MIN/MAX=40000/40999`, `AICC_HTTP_ADDR=:8080`. Provider API keys env-only (never DB).
+- **Config**: env vars `AICC_*` with `.env` file support for dev; full table in the deployment doc. Key defaults for this dev env: `AICC_ESL_ADDR=127.0.0.1:18021`, `AICC_SIP_LISTEN=:6060`, `AICC_RTP_PORT_MIN/MAX=40000/40999`, `AICC_HTTP_ADDR=:8080`. Provider API keys env-only (never DB) — those are credentials *this* system presents to a vendor. The keys integrations present to *us* are the opposite direction and live in the `api_keys` table, issued and revoked through the API (04 §2, 03 §2).
 - **Licensing**: Apache-2.0. All reference code (cti-server, golang-bot, java-bot, web-sip-phone, ui-test, and the pipecat PR #3859 transport) is owner-authored — confirmed 2026-08-13 — so the ported SIP/RTP code needs no third-party attribution; the old BSD header in golang-bot's `codecs.go` is not carried over. `NOTICE` stays minimal (project + copyright line). Source files carry `// SPDX-License-Identifier: Apache-2.0`. During the port, any line actually translated from pion's samplebuilder (vs merely modeled on its design) gets an MIT attribution comment — MIT/BSD deps are Apache-compatible and live as Go modules with their own license files; no GPL-family deps anywhere.
 
 ## 6. Phase 3 delivery milestones (each ends with a short report, per workflow)

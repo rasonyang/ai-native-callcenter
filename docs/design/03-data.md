@@ -15,6 +15,23 @@ users(id uuid pk, username citext unique, password_hash text, display_name text,
       status varchar check in ('ACTIVE','SUSPENDED') default 'ACTIVE',
       created_at, last_login_at)
 sessions(id uuid pk, user_id fk, token_hash bytea, ip inet, created_at, expires_at)   -- revocable cookie sessions
+api_keys(id uuid pk, name varchar(120), key_hash bytea unique, key_prefix varchar(16),
+         status varchar check in ('ENABLED','REVOKED') default 'ENABLED',
+         scopes text[], created_at, created_by uuid, last_used_at, revoked_at)   -- 00029, 2026-08-31
+                                   -- the second credential (04 §2). What it replaces was one shared
+                                   -- secret in AICC_API_KEY, sent as X-AICC-Api-Key, reaching two
+                                   -- operations while standing in for a supervisor nobody could name.
+                                   -- Only the SHA-256 is stored, so authentication is a lookup on
+                                   -- key_hash and nothing here can produce the secret again: a lost
+                                   -- key is revoked and reissued, never recovered. key_prefix is for
+                                   -- display and is deliberately not indexed — a lookup by prefix is
+                                   -- a lookup by something readable off a screenshot.
+                                   -- Two states, and REVOKED is terminal: ck_api_keys_revoked_at
+                                   -- keeps the two halves of that fact from disagreeing, and both the
+                                   -- revoke and the edit carry `AND status = 'ENABLED'` in their own
+                                   -- WHERE rather than in a caller's if. There is no hard delete —
+                                   -- a key that ever authenticated is named in the audit trail, and a
+                                   -- row that can vanish makes that trail unreadable.
 agents(id uuid pk, user_id uuid unique fk,
        is_auto_answer bool default false, default_extension_id uuid null fk)   -- wrap_up_time_sec dropped in 00012: after-call work has no deadline
 agent_states(agent_id pk fk, state varchar check in ('LOGGED_OUT','NOT_READY','READY'),
@@ -52,10 +69,14 @@ dids(id uuid pk, number text unique ★, language varchar ★,   -- BCP 47 lower
                                                               -- target: NOT NULL; blocked on a /flows read endpoint + DID form picker (see m4-cleanup-findings.md)
      fallback_queue_id uuid null ★,                           -- only for "the bot cannot run": provider outage, capacity
      is_recording_enabled bool ★, description text, is_enabled bool ★)
-trunks(id uuid pk, name text unique,
-       direction varchar check in ('INBOUND','OUTBOUND','BIDIRECTIONAL'),
-       max_channels int, config jsonb,                        -- camelCase keys: proxy, isRegister, username, …
-       is_enabled bool)                                       -- rendered to sofia gateway include + rescan (01 §7)
+-- trunks(...) was here and is GONE (00021, 2026-08-25). Zero rows in every deployment:
+-- nothing ever wrote to it and nothing could have read it into effect. A gateway is
+-- defined in the switch's own sofia profile XML and read when that profile loads, so
+-- turning a row here into a gateway would have needed a luacc.trunks view, an aicc_xml.lua
+-- that served the sofia section, and a profile rescan per edit — switch work for a thing a
+-- single-host deployment has one of and configures once. What replaced it is the half that
+-- was real: the trunk's *live state*, read from the switch and shown in /system/health.
+-- Reading that needs no table.
 ```
 
 **Flows**
@@ -68,7 +89,14 @@ Spec = **DSL v2** (v1 re-keyed to lowerCamelCase per 07 §7: `specVersion`, `ini
 
 **Calls & artifacts**
 ```sql
-live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- recovery only; row deleted at call end
+live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- DESIGNED, NEVER MIGRATED (see below)
+                                   -- Amended 2026-08-31: this table does not exist. `rg live_calls .`
+                                   -- matches this file and the audits that noticed (08 §G-17,
+                                   -- docs/verification/plan-cdr-anchors.md). The registry's snapshot
+                                   -- is in memory only, so a restart mid-call loses the in-flight
+                                   -- tail — accepted, and the same thing that happens to the bot
+                                   -- transcript. Left written down rather than deleted: it is a
+                                   -- design that was never built, not a table somebody dropped.
 cdrs(call_id uuid pk, started_at, answered_at, ended_at,
      call_type varchar check in ('INBOUND','OUTBOUND','CONSULT','INTERNAL'),  -- Genesys-style, caller-perspective; immutable across transfers
      language varchar,                                            -- 'en'/'zh'
@@ -98,6 +126,13 @@ recordings(id uuid pk, call_id fk, backend varchar check in ('FS','S3'), bucket 
            format varchar default 'WAV', created_at, deleted_at)
 quality_reviews(id uuid pk, recording_id fk, call_id, reviewer_id fk,
                 scores jsonb, total_score smallint, notes text, created_at)
+                                   -- reviewer_id is NOT NULL and means a person who can be asked
+                                   -- about the score. That is why POST /recordings/{id}/reviews is
+                                   -- one of the two operations with no Bearer alternative (04 §2) —
+                                   -- not a UI privilege: a supervisor's session cookie reaches it
+                                   -- from curl just as well, and reading the scores back
+                                   -- (GET /calls/{callId}/reviews) has a Bearer alternative like
+                                   -- everything else.
                                    -- DECIDED 2026-08-20 (D1): the review UI is deferred to the
                                    -- next phase. The API is complete and keeps its contract
                                    -- (POST /recordings/{id}/reviews, ListCallReviews), and the
@@ -108,14 +143,39 @@ quality_reviews(id uuid pk, recording_id fk, call_id, reviewer_id fk,
                                    -- docs/verification/coverage/tables.md, where the row is
                                    -- marked UNCOVERED for the same reason.
 callbacks(id uuid pk, call_id, queue_id, phone_number text, message text,
-          status varchar check in ('OPEN','DONE','DISMISSED'), created_at, handled_by, handled_at)
+          status varchar check in ('OPEN','CLAIMED','DONE','DISMISSED'),   -- CLAIMED added 00006
+          created_at, handled_by, handled_at,
+          last_attempt_call_id uuid, last_attempt_at, last_attempt_status varchar)   -- 00027
+                                   -- ringing the customer is not the same as keeping the promise, so
+                                   -- a dial does not close the callback — it is noted on it. The
+                                   -- call's id is written at once and its CDR status copied back when
+                                   -- it lands, so the row reads "tried at 10:42, no answer" and stays
+                                   -- in the pool. handled_by follows the *agent's* user id (never a
+                                   -- key id): the column has always meant a person, and "it was a key
+                                   -- that asked" is the audit row's job, not this column's.
 queue_events(id bigserial, occurred_at, call_id, queue_id,
              event varchar check in ('JOINED','LEFT','OFFERED','BRIDGED','ABANDONED'),
              agent_id uuid, wait_ms int)                          -- SL/abandon source
 audit_logs(id bigserial, occurred_at, actor_id, action varchar,   -- 'QUEUE_UPDATED','FLOW_PUBLISHED','AGENT_FORCE_LOGOUT',…
-           target_kind text, target_id text, detail jsonb, ip inet)
+           target_kind text, target_id text, detail jsonb, ip inet,
+           subject_kind varchar check in ('USER','API_KEY'), subject_id uuid,
+           subject_name text, agent_id uuid)                      -- 00030, 2026-08-31
+                                   -- actor_id still means what it always meant, the user account
+                                   -- behind a request, and was deliberately not repurposed: changing
+                                   -- what a shipped field means while keeping its name and type is a
+                                   -- break no diff tool can see. The four new columns say the two
+                                   -- things a key made possible — what authenticated, and the agent
+                                   -- identity it acted as. A row that once read "actor null, and the
+                                   -- word api-key buried in detail jsonb" now reads "the CRM put wei
+                                   -- ready". subject_name is a snapshot on purpose: a revoked key
+                                   -- must still be nameable, and joining to a table for a name is how
+                                   -- a trail turns into blanks.
+                                   -- Backfill: every pre-existing row was a person's (nothing else
+                                   -- could act); rows with a null actor keep a null subject, which is
+                                   -- the honest answer rather than an invented one.
 -- Agent workspace (00010–00012, 2026-08-19)
-dispositions(code varchar pk, label text, position int, is_enabled bool)
+disposition_categories(code varchar pk, label text, position int)   -- RESOLVED / FOLLOW_UP / OTHER, seeded
+dispositions(code varchar pk, category_code fk, label text, position int, is_enabled bool)
                                    -- seeded by the migration with the four the directive names
                                    -- (RESOLVED, FOLLOW_UP_REQUIRED, NO_ANSWER, OTHER): an
                                    -- installation with no vocabulary cannot complete a wrap-up at
@@ -144,14 +204,23 @@ wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
                                    -- somebody renames a word.
 contacts(id uuid pk, phone_number text unique, name text, company text, email text,
          tags text[], notes text, created_at, updated_at, updated_by)
+                                   -- updated_by follows the *agent's* user id, and is NULL when the
+                                   -- subject has no agent identity. A key id never goes here: this
+                                   -- column has one meaning and it is a person. Which credential
+                                   -- asked is the audit row's to say (subject_kind/subject_name).
                                    -- uq_contacts_phone_number: the number is how a caller is
                                    -- identified, so two records for one number would make the
                                    -- cockpit's lookup a coin toss. last_call_at is read from cdrs
                                    -- (either side), never stored.
 agent_states.wrap_up_call_id uuid  -- which call the after-call work is for, so what an agent files
                                    -- lands on that call and not on whichever one they take next
-settings(key text pk, value jsonb, updated_at)                    -- org, locale default, retentionDays, …
+-- settings(key, value, updated_at) was here and is GONE (00022, 2026-08-25). Also never
+-- written to. Configuration has one home in this product and it is not the database: every
+-- setting is an AICC_* environment variable with .env.example as the registry. The one
+-- entry with a designed reader, retentionDays, shipped in that same change as
+-- AICC_RECORDING_RETENTION_DAYS. recordings.deleted_at is untouched and stays load-bearing.
 seq_blocks(name text pk, value bigint)                            -- SSE hi/lo blocks (100k)
+webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; DDL and rationale in 09 §4
 ```
 
 ## 3. CDR semantics (from cti-server, extended)
@@ -196,7 +265,7 @@ Key rule (both backends): `recordings/YYYY/MM/DD/<call_id>.wav` (UTC date of cal
 **M5.1 amendments — the seed completes the demo (live-verified in the compose stack):**
 
 - **The flow ships inside the binary.** `internal/seed/flows/novanet_support.json` (moved from `deploy/seed/`, so `go:embed` can reach it) is published by the seeder and pointed at by **95001 (`en`) and 95002 (`zh`)**, each falling back to the queue of its language. This replaces the M4.8 note that seeded numbers stay out of the `dids` table: `dids.flow_id` is NOT NULL, so a number can only exist once a flow does — and a demo that cannot take a call is not a demo. The same file is still the one `aicc flowadd -file` reads. `95011→queue direct` from the original plan is not representable and is dropped.
-- **The cast grew by two.** Administration and supervision are role-gated, so a demo seeded with agents only hid most of the product: `admin` (ADMIN) and `sam` (SUPERVISOR) join `amy`/`ben`/`cara`. Extensions carry the documented password as their SIP password rather than a random one — an unregisterable softphone is not a demo either. There is no forced-change flag: the schema has no such column, and the demo dataset is opt-in.
+- **The cast grew by two.** Administration and supervision need accounts that hold those roles, so a demo seeded with agents only hid most of the product: `admin` (ADMIN) and `sam` (SUPERVISOR) join `amy`/`ben`/`cara`. Extensions carry the documented password as their SIP password rather than a random one — an unregisterable softphone is not a demo either. There is no forced-change flag: the schema has no such column, and the demo dataset is opt-in.
 
 **Amendment — the seed is a way back in (owner directive 2026-08-19).** The cast is now `admin` / `supervisor` / `wei` / `amy` / `ben`, the usernames are the roles, and one password opens all of them and their extensions: `aicc@12345`. Two changes of substance behind it:
 
