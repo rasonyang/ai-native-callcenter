@@ -11,7 +11,7 @@
 
 ## 一、违反准则的
 
-### V1 — 未知的 `/api/v1/*` 路径返回 `200 text/html` ★最严重 — **已修 `eee71b4`**
+### V1 — 未知的 `/api/v1/*` 路径返回 `200 text/html` ★最严重 — **已修 `9c01e2f`**
 
 `[FACT]` 实测（`New(cfg, Deps{SPA: …})` + `router()`，`httptest`）：
 
@@ -27,15 +27,15 @@ GET /api/v1/auth/login/x   -> 200 "text/html; charset=utf-8"  <!doctype html>…
 
 `[FACT]` 这个仓库**已经被它咬过一次**：`internal/httpapi/routes_test.go:30-35` 记着 `GetCallTranscript` 有 handler、有契约条目、没有路由，"in the running product the transcript snapshot returned the SPA's index.html with a 200, the panel's fetch failed to parse it, and the whole backfill half of the feature was dead. Nothing failed."——当时补的是"每个 operation 都必须被路由"的测试，**没有补兜底本身**。
 
-**已修**（`eee71b4`）：在 `/api/v1` 子路由上认领 `NotFound`——子树自己有了 handler，chi 的传播就跳过它，而 SPA 继续拥有子树之外的每一个路径。`internal/httpapi/fallback_test.go` 钉住三件事：未知 API 路径回 404 信封、子树之外的深链接仍归 SPA、方法不匹配回 405 信封。
+**已修**（`9c01e2f`）：在 `/api/v1` 子路由上认领 `NotFound`——子树自己有了 handler，chi 的传播就跳过它，而 SPA 继续拥有子树之外的每一个路径。`internal/httpapi/fallback_test.go` 钉住三件事：未知 API 路径回 404 信封、子树之外的深链接仍归 SPA、方法不匹配回 405 信封。
 
-### V2 — 方法不匹配返回 `405` 空 body，不带 `Content-Type`，不是错误信封 — **已修 `eee71b4`**
+### V2 — 方法不匹配返回 `405` 空 body，不带 `Content-Type`，不是错误信封 — **已修 `9c01e2f`**
 
 `[FACT]` 实测：`DELETE /api/v1/auth/login -> 405 ""`，空 Content-Type、空 body。走的是 chi 默认的 `methodNotAllowedHandler`（`mux.go:411-418`）。
 
 `[FACT]` 契约的承诺（`docs/openapi.json:7`）：*"Errors always use the single envelope `{"error": {code, message, params}}`"*。**"always" 现在是假的。**
 
-**已修**（`eee71b4`）：同 V1 挂 `MethodNotAllowed`。`METHOD_NOT_ALLOWED` 已进契约 `ErrorCode` 枚举（22 → 23，`make api-breaking` exit 0）与两份 `translation.json`；`docs/openapi.json` 第一段那句 "always" 现在把兜底行为也写了进去，让它名副其实。
+**已修**（`9c01e2f`）：同 V1 挂 `MethodNotAllowed`。`METHOD_NOT_ALLOWED` 已进契约 `ErrorCode` 枚举（22 → 23，`make api-breaking` exit 0）与两份 `translation.json`；`docs/openapi.json` 第一段那句 "always" 现在把兜底行为也写了进去，让它名副其实。
 
 ### V3 — 跑起来的部署拿不到契约
 
@@ -148,9 +148,8 @@ keys:manage         audit:read
 
 | # | 处置 | 落在哪 |
 |---|---|---|
-| V1 V2 | ~~`/api/v1` 子路由挂 JSON 版 `NotFound` / `MethodNotAllowed`~~ | **已修 `eee71b4`**（独立提交，不在认证任务的 7 个提交里）|
+| V1 V2 | ~~`/api/v1` 子路由挂 JSON 版 `NotFound` / `MethodNotAllowed`~~ | **已修 `9c01e2f`**（独立提交，不在认证任务的 7 个提交里）|
 | V3 | `go:embed docs/openapi.json` + `GET /api/v1/openapi.json` | 独立小提交；需要一个新 operation → 走 §2 |
 | V4–V8 | 已在 `docs/auth/TASKS.md` 排好（`2.2b` `2.2c` `2.2` `③`） | 认证任务内 |
-| O1 O2 O3 | 改 §1 的实现细节：hash 直查、去节流、砍允许列表（错误码 4 → 3） | **需 owner 确认**，因为改的是已批准的 §1 |
-| O4 | 三态改两态 | **需 owner 确认**，优先级低 |
+| O1 O2 O3 O4 | ~~改 §1 的实现细节~~ | **已采纳 `657cd13`**：hash 直查、去节流、砍允许代理列表（新码 4 → 3）、两态 |
 | O5 | 采纳 10–14 个资源级 scope 词表 | §2 `2.0b`，尚未开工 |
