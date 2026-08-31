@@ -2,8 +2,10 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Regenerates every artifact derived from docs/openapi.json (the API contract):
-#   internal/api/api.gen.go   Go types + chi ServerInterface (oapi-codegen)
-#   web/src/generated/api.ts  TypeScript types (openapi-typescript)
+#   internal/api/api.gen.go      Go types + chi ServerInterface (oapi-codegen)
+#   web/src/generated/api.ts     TypeScript types (openapi-typescript)
+#   internal/api/scopes.gen.go   Go scope constants        (scripts/gen-scopes.mjs)
+#   web/src/generated/scopes.ts  TS scope union + labels   (scripts/gen-scopes.mjs)
 #
 # This script is the single generation entry point — `make api-generate` and
 # `go generate ./internal/api` both land here, so the committed output is
@@ -22,3 +24,10 @@ gofmt -w internal/api/api.gen.go
 
 mkdir -p web/src/generated
 web/node_modules/.bin/openapi-typescript docs/openapi.json -o web/src/generated/api.ts
+
+# The scope vocabulary. Neither generator above emits it — oapi-codegen and
+# openapi-typescript both ignore `security` and the root `x-scopes` extension —
+# so it is generated here from the same contract, into the same two directories
+# `make api-check` already diffs.
+node scripts/gen-scopes.mjs
+gofmt -w internal/api/scopes.gen.go
