@@ -246,7 +246,9 @@ function ScopePicker({
       const resource = scope.split(':')[0]
       byResource.set(resource, [...(byResource.get(resource) ?? []), scope])
     }
-    return [...byResource].map(([resource, scopes]) => ({ resource, scopes }))
+    return [...byResource]
+      .map(([resource, scopes]) => ({ resource, scopes }))
+      .toSorted((a, b) => rank(a.resource) - rank(b.resource))
   }, [])
 
   // Open where there is something to see. A form being edited starts showing
@@ -332,6 +334,45 @@ function ScopePicker({
       })}
     </div>
   )
+}
+
+/**
+ * The order the groups appear in: what a key is most often issued for, first.
+ *
+ * This is a judgement, not a measurement — nothing here counts what keys
+ * actually hold, and if that ever becomes a number this list is what it should
+ * replace. The judgement is about why the key path exists at all: a system with
+ * no browser places and ends calls and follows the event stream (calls), often
+ * as an agent whose phone is registered but who never signed in here (agent),
+ * looking the caller up as it goes (contacts). Then the integrations that read
+ * what happened (history, reports), then the ones that change the platform
+ * (config). The rest are occasional.
+ *
+ * The two that can escalate privilege end up last, which is not a coincidence
+ * worth hiding: users:write is the one path to a role and keys:manage issues
+ * further credentials. Rarely wanted and furthest from an idle click is the
+ * right place for both.
+ *
+ * A resource missing from this list is not an error and does not disappear: it
+ * sorts to the end, in the order the vocabulary lists it. Adding a scope must
+ * never require editing this file for the capability to be reachable.
+ */
+const GROUP_ORDER = [
+  'calls',
+  'agent',
+  'contacts',
+  'history',
+  'reports',
+  'config',
+  'quality',
+  'audit',
+  'users',
+  'keys',
+]
+
+function rank(resource: string): number {
+  const at = GROUP_ORDER.indexOf(resource)
+  return at === -1 ? GROUP_ORDER.length : at
 }
 
 /**
