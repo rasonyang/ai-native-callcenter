@@ -112,6 +112,10 @@
     "CALL_NOT_FOUND": "That call has already ended.",
     "NOT_CALL_PARTY": "You are not on that call.",
     "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against.",
+    "USER_DATA_TOO_LARGE": "The call has no room for this business data: at most {{maxKeys}} keys, {{maxValueBytes}} bytes each. Nothing was written.",
+    "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "This kind of call does not offer that.",
+    "LAST_ADMIN": "This would leave nobody able to administer the platform.",
+    "EXTENSION_POOL_EXHAUSTED": "There are no free extension numbers left in the pool.",
     "rules": {
       "DEFAULT_NEEDS_OUTBOUND": "Only a number that can place calls can be the default one.",
       "DIGITS_ONLY": "Digits only.",

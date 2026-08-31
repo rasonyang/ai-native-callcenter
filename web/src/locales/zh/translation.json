@@ -112,6 +112,10 @@
     "CALL_NOT_FOUND": "该通话已结束。",
     "NOT_CALL_PARTY": "您不在该通话中。",
     "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。",
+    "USER_DATA_TOO_LARGE": "这通电话装不下这些业务数据：最多 {{maxKeys}} 个键，每个值 {{maxValueBytes}} 字节。一个都没有写入。",
+    "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "这种通话没有这个功能。",
+    "LAST_ADMIN": "这一步会让平台没有人能管理。",
+    "EXTENSION_POOL_EXHAUSTED": "分机号池里没有空号了。",
     "rules": {
       "DEFAULT_NEEDS_OUTBOUND": "只有能呼出的号码才能设为默认外呼号码。",
       "DIGITS_ONLY": "只能是数字。",
