@@ -206,3 +206,23 @@ owner 裁定：`GET /openapi.json`（跑起来的部署 serve 自己的契约）
 `[FACT]` 落地手法已确认，避免 §2 开工时踩坑：加一个 `docs/embed.go`（`package docs` + `//go:embed openapi.json`），照抄 `web/embed.go:16` 嵌 SPA 的做法。**不能写 `//go:embed docs/openapi.json`**——`go:embed` 的模式不允许 `..` 跨目录，而 `docs/` 目前不是 Go 包。这个仓库已经用 `web/` 这个包解决过同一个问题，零构建步骤。
 
 `[INFERENCE]` 端点免鉴权：契约是公开文档，而一个还没拿到凭证的集成方正是最需要读它的人。Redoc 文档页是可选的第二步，不进 v1。
+
+---
+
+## 2026-08-31 — scope 词表定稿、`users:write` 单列、act-as header 更名
+
+**裁定 8 — scope 词表 16 个**（owner）。契约可见、改动是破坏性变更，故在 §2 开工前定死。全表见 `baseline.md` 裁定 8。
+
+`[INFERENCE]` 我先前说的"10–14 个"是目标不是计数：逐条映射 89 个 operation，忠实的分法落在 **22** 个左右（每个资源各自一对 `:own`/`:all`，配置类按资源拆开）。把 CDR / 录音 / 转写 / `/reports/me` 合并成一对 `history:read:*`、配置类合并成 `config:*`，才收到 16。取粗的理由：scope 的价值在于**默认最小**，前提是数量少到人愿意逐个想；22 个勾选框的结果是集成方全勾，模型退化成仪式。
+
+`[INFERENCE]` **`users:write` 单列**，不并进 `config:write`：创建账号是**唯一的提权路径**。持 `config:write` 的 Key 泄漏是"改了配置"；持 `users:write` 的 Key 泄漏是"建一个 ADMIN，拿到一切"。爆炸半径差一个数量级，不共用一个开关。
+
+**裁定 9 — act-as header 改 `X-AICC-Agent-ID`**，覆盖 §1 写的 `AICC-Agent-ID`。
+
+`[FACT]` 仓库现有的自定义 header 全带 `X-` 前缀：`X-AICC-Csrf`（`internal/httpapi/middleware.go:24`）、`X-AICC-Api-Key`（`:114`）、SIP 的 `X-AICC-Channel-ID`。`[INFERENCE]` 一致性在这里比 RFC 6648 "不建议新 header 用 X- 前缀"的建议更值钱——两种拼法并存会让集成方每次都要想一下哪个带哪个不带。
+
+`[FACT]` **这是 §0 的漏记，不是 §1 的冲突**：`baseline.md` §16 第 13/15 行照抄了 §1 的 `AICC-Agent-ID`，没有把它和仓库惯例比对。§0 的决策校验表应当抓到这一条而没有抓到。
+
+**§3 用例表随之重算**：原 9 条删 1（`AGENT_NOT_ALLOWED`，随 O3 取消）、加 1（Key 订阅 `/events`，P1）= **9 条**；header 一律写 `X-AICC-Agent-ID`。
+
+**§0 至此无任何遗留待裁项。** §2 的第一个动作是 `2.0`：实测 `x-scopes` 的放置层级。

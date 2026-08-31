@@ -23,6 +23,7 @@
 - [x] 0.10 产品定位复核 "UI is optional. API is the product."（`baseline.md` §17，P1–P9）
 - [x] 0.11 P5 裁定：**解除** webhook 对 API Key 的封锁；P1/P2/P3 纳入 §2/§4 正式条目（owner 2026-08-31）
 - [x] 0.12 O1–O4 减法采纳（owner 2026-08-31）：hash 直查、去节流、砍允许代理列表、两态。**覆盖已批准的 §1 对应条目**
+- [x] 0.13 scope 词表定稿 16 个、`users:write` 单列、act-as header 改 `X-AICC-Agent-ID`（`baseline.md` 裁定 8–9）。**§0 无遗留待裁项**
 - [x] **§0 完成，人工门已通过**（`baseline.md` §0 裁定 1–6 + §17）
 
 ## §1 决策
@@ -32,7 +33,7 @@
 ## §2 契约变更（先于代码，单独一次提交）
 
 - [ ] 2.0 实测 `x-scopes` 的放置层级（根 / `components` / scheme 内），`make api-lint` 零新增 warning
-- [ ] 2.0b 定 scope 命名法与词表：`资源:动作[:范围]`，**不得出现角色名**（P3）；目标 **10–14 个资源级**，只在行为真的不同处分 `:own`/`:all`（O5）
+- [x] 2.0b scope 词表已定稿：**16 个**，`资源:动作[:范围]`，不得出现角色名，`users:write` 单列（`baseline.md` 裁定 8）
 - [ ] 2.1 `securitySchemes`：页面 Token 与 API Key 两种 scheme，共用同一 scope 词表
 - [ ] 2.2 85 个 operation 逐个补 `security` + scopes；Bearer 那一支**不带** `csrfHeader`（P4）
 - [ ] 2.2b `/events` 补 Bearer 支持并在契约声明（P1，正式条目——事件流是产品实时面的全部，不是附注）
@@ -47,7 +48,7 @@
 
 ## §3 测试先行
 
-- [ ] 3.1 写下 9 条用例 + 第 10 条：Key 带 Bearer 订阅 `/events`，收到其代理坐席的 `PARTY_*`（P1）
+- [ ] 3.1 用例表按裁定重算：原 9 条**删 1**（`AGENT_NOT_ALLOWED`，随 O3 取消）、**加 1**（Key 带 Bearer 订阅 `/events`，收到其代理坐席的 `PARTY_*`，P1）= **9 条**；header 一律 `X-AICC-Agent-ID`
 - [ ] 3.2 确认全部在当前基线上按预期失败，失败形态记入 RESULTS.md
 - [ ] 3.3 表中端点路径与 §0-7 清单的差异修正记录在案
 

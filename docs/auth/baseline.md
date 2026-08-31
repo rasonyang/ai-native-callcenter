@@ -341,7 +341,28 @@
    - **O2**：**取消 `last_used_at` 的内存节流**，每次直接写。无测量支撑的优化，且与 `CLAUDE.md` 那条"没跑基准就不许有性能主张"同源。
    - **O3**：**v1 取消每把 Key 的"允许代理 Agents"列表**。持 `agent:act` scope 即可代理任意坐席。`AGENT_NOT_ALLOWED` **不进错误码枚举**——新增码由 4 个减为 **3** 个（`AGENT_REQUIRED` / `AGENT_IMPERSONATION_NOT_ALLOWED` / `INSUFFICIENT_SCOPE`）。以后要加是纯加法（一个可空列，NULL = 全部）。
    - **O4**：状态由三态减为两态 **`ENABLED / REVOKED`**。`DISABLED` 是听起来有用、然后没人用的状态；以后要加是一次 CHECK 放宽。
-   - **O5**（scope 粒度 10–14 个资源级）落在 `2.0b`，不在此裁定里定死具体词表。
+   - **O5**：scope 词表**取粗粒度 16 个**，见下方裁定 8。
+8. **scope 词表定稿（owner，2026-08-31）**——契约可见、改动是破坏性变更，故在 §2 开工前定死：
+
+   ```
+   calls:read:own      calls:read:all
+   calls:control       calls:create
+   calls:monitor                          # 监听/耳语/强插，强能力单列
+   agent:read          agent:act
+   history:read:own    history:read:all   # CDR + 录音 + 转写 + /reports/me 合一
+   reports:read                           # 队列/总览/日报
+   quality:review                         # 不授予 Key（§17 P8）
+   config:read         config:write       # 分机/队列/号码/流程/webhook
+   users:write                            # 账号、角色、重置密码
+   keys:manage         audit:read
+   ```
+
+   共 **16** 个。`[INFERENCE]` 我先前说的"10–14 个"是目标不是计数——逐条映射 89 个 operation，忠实的分法落在 22 个左右；把 CDR / 录音 / 转写 / `/reports/me` 合并成一对 `history:read:*`、把配置类合并成 `config:*`，才收到 16。取粗的理由：scope 的价值在于**默认最小**，前提是数量少到人愿意逐个想；22 个勾选框的结果是集成方全勾，模型退化成仪式。
+
+   **`users:write` 单列**，不并进 `config:write`：创建账号是**唯一的提权路径**。持 `config:write` 的 Key 泄漏是"改了配置"；持 `users:write` 的 Key 泄漏是"建一个 ADMIN，拿到一切"。两者爆炸半径差一个数量级，不共用一个开关。
+
+   **命名法**（§4 禁止事项）：`资源:动作[:范围]`，**不得出现角色名**。`role → scopes` 只是给页面登录用的便利映射，不是模型本身。
+9. **act-as 的 header 名改为 `X-AICC-Agent-ID`**（owner，2026-08-31），**覆盖 §1 写的 `AICC-Agent-ID`**。理由：仓库现有的自定义 header 全带 `X-` 前缀（`X-AICC-Csrf`、`X-AICC-Api-Key`、SIP 的 `X-AICC-Channel-ID`），一致性在这里比 RFC 6648 那条"不建议新 header 用 X- 前缀"的建议更值钱——两种拼法并存会让集成方每次都要想一下哪个带哪个不带。**此条是 §0 的漏记，不是 §1 的冲突**：baseline §16 第 13/15 行照抄了 §1 的 `AICC-Agent-ID`，没有比对仓库惯例。
 
 ---
 
