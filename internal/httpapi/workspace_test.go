@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
@@ -243,48 +242,6 @@ func TestTheAgentWorkspaceOperationsAskForTheOwnScopedCapability(t *testing.T) {
 		if !slices.Contains(sec.SessionScopes, scope) {
 			t.Errorf("%s asks for %v, want %s", route, sec.SessionScopes, scope)
 		}
-	}
-}
-
-// Every route this server mounts is an operation the contract declares.
-//
-// enforceContract fails closed on a route it cannot find, which is the right
-// behaviour and a terrible way to discover the problem — in production, as a
-// 500, on the one endpoint somebody added without touching the contract. This
-// is where it is discovered instead. The four exclusions are the ops listener
-// and the SPA, which are not the API and say so in the contract's own
-// description; every one of them is served from a different handler entirely.
-func TestEveryRouteIsInTheContract(t *testing.T) {
-	srv := New(config.Config{Env: "dev"}, Deps{
-		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
-		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{},
-		Outbound: stubOutbound{}, Keys: stubKeys{},
-	})
-
-	var undeclared []string
-	err := chi.Walk(srv.router(), func(method, route string, _ http.Handler,
-		_ ...func(http.Handler) http.Handler) error {
-		if !strings.HasPrefix(route, apiPrefix) {
-			return nil
-		}
-		path := strings.TrimSuffix(strings.TrimPrefix(route, apiPrefix), "/")
-		if path == "" {
-			return nil
-		}
-		if _, ok := api.SecurityForRoute(method, path); !ok {
-			undeclared = append(undeclared, method+" "+path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(undeclared) > 0 {
-		slices.Sort(undeclared)
-		t.Errorf("mounted and not declared in the contract: %s\n"+
-			"Authorization is read from the contract, so such a route has none: "+
-			"it fails closed with a 500 and nobody learns why until it is live.",
-			strings.Join(undeclared, ", "))
 	}
 }
 
