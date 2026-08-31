@@ -481,3 +481,60 @@ AICC_TEST_DATABASE_URL=… go test -C <tmp>/baseline ./internal/httpapi/ -run �
 ### 一个既有缺口（不是本次引入，留给 ⑦b）
 
 `[FACT]` 契约的 `ErrorCode` 26 个，两份 `translation.json` 的 `errors` 各 24 个：本次新增的 3 个键已补齐，但仍**缺 4 个**（`EXTENSION_POOL_EXHAUSTED` / `LAST_ADMIN` / `OPERATION_NOT_ALLOWED_FOR_CALL_TYPE` / `USER_DATA_TOO_LARGE`），另**多 2 个**（`UNKNOWN` / `rules`）。裁定 4 的三方对齐断言（⑦b）会抓到它。
+
+---
+
+## 2026-08-31 — ④ API Key 存储与端点（`0793e32`）：**构建转绿**
+
+`[FACT]` `go build ./...` 通过。`internal/httpapi/api_server.go:19` 的编译期断言自 `ecf368f` 起红了 5 个提交，到这里补齐 6 个方法（`getOpenAPI` + 5 个 API Key）后转绿。分支上中间提交红、PR 头绿，与 2.6 记录的预期一致。
+
+### 表与查找（O1 / O2 / O4 落地）
+
+`[FACT]` 迁移 `00029_a_key_is_a_credential_with_a_name.sql`：`api_keys(id, name, key_hash bytea UNIQUE, key_prefix, status, scopes text[], created_at, created_by, last_used_at, revoked_at)`，两个 CHECK——状态只能是 `ENABLED`/`REVOKED`，且 `(status = 'REVOKED') = (revoked_at IS NOT NULL)`（一个事实的两半不许互相矛盾）。
+`[FACT]` 查找 `WHERE key_hash = $1 AND status = 'ENABLED'`（O1，照抄 `sessions.sql:8-13`）。
+`[INFERENCE]` **状态条件写在 SQL 里而不是应用层**，这才让 REVOKED 在唯一要紧的地方成为终态：吊销过的 Key 不是"查出来再被拒"，而是**根本查不出来**——于是被拒的请求也就碰不到它的 `last_used_at`。§3 第 5 条断言的正是这个（`after != before` 即失败）。
+`[FACT]` `RevokeAPIKey` 的 `WHERE id = $1 AND status = 'ENABLED'`：重复吊销匹配不到行 → `ErrKeyAlreadyRevoked` → **409**，而不是静默 200 移动 `revoked_at`。
+`[FACT]` `last_used_at` 每次直写，无节流（O2）。`key_prefix` 只用于展示、**不建索引**、从不用来找行。
+`[INFERENCE]` 按前缀查等于按截图上能读到的东西查——这就是 O1 取消"前缀取行 + 常量时间比较"之后剩下的唯一正确形状。
+
+### 明文
+
+`[FACT]` 32 字节 `crypto/rand` → `base64.RawURLEncoding`，立即取 SHA-256 存库。§3 第 8 条逐列扫描 `api_keys`：无一列装明文；`length(key_hash) = 32`；`GET /api-keys` 与 `GET /api-keys/{id}` 的响应里没有 `secret`、`keyHash`、`key_hash`。
+
+### 未知 scope 拒绝而不是忽略
+
+`[FACT]` `checkedScopes` 用 ②b 生成的 `api.IsScope`，未知名字 → 422 并列出 `unknown` 与 `allowed`。
+`[INFERENCE]` 存下来会让运维以为这把 Key 有一个它没有的能力，然后在别处、以一个没人能联系回这张表单的理由失败。词表来自契约的 `x-scopes`，所以这条校验不可能与 operation 实际要的东西漂开。
+
+### 裁定 2 的落地形状
+
+`[FACT]` 三个归属列**仍然装 user id**：`AgentDirectory` 新增 `UserIDForAgent`，`AuthContext` 新增 `ActorUserID`（会话 = 本人；Key 代理坐席 X = X 绑定的 `users.id`；Key 未代理 = `uuid.Nil`）。
+`[INFERENCE]` **"谁认证的"与"这是谁干的活"是两回事**，合并它们正是会把 key id 写进 user id 空间的那一步——而 baseline §0-11 已记：四列都没有指向 `users` 的外键，数据库不会拒绝，风险是沉默的。
+`[FACT]` callbacks 三条在无人可归属时回 `AGENT_REQUIRED`（列语义不许留空）；`contacts.updated_by` 可空，写 `NULL`。
+
+### 清干净的旧模型
+
+`[FACT]` `AICC_API_KEY` / `X-AICC-Api-Key` 的最后残留一并删除：`.env.example`（改写成"这里没有 API Key 设置了"）、`deploy/README.md` 两处（含上线检查单那条"泄漏只能靠重启轮换、没法单独吊销"）、契约里 webhook `authToken` 说明中的那句反向引用。
+
+---
+
+## 2026-08-31 — ⑤ 审计的四列（`e605235`）
+
+`[FACT]` 迁移 `00030_the_trail_says_who_and_as_whom.sql`：`subject_kind` / `subject_id` / `subject_name` / `agent_id`，两个部分索引，一个 CHECK（`USER` / `API_KEY`）。**`actor_id` 一个字未动**（裁定 3）。
+`[FACT]` `SubjectKey` 的值定为 **`API_KEY`** 而不是 `KEY`——它进 `subject_kind` 列、被人读，`KEY` 与 `USER` 并排像是一种人。
+`[FACT]` `subject_name` 是**写入时快照**，读取时不 join：Key 会被吊销、账号会被删除，为一个名字去 join 是账本变成空白的原因。`actor_username` 保留原来的 join，因为那是已发布字段，行为不能变。
+`[FACT]` 回填：既有行全部来自人（在此之前没有别的东西能动手）；老共享密钥写的行 `actor_id` 为空，回填后 subject 仍为空。
+`[INFERENCE]` 给它编一个身份，是在唯一不许伪造的表里伪造。
+
+`[FACT]` **migrate_test 加了 fixture** `TestMigrationsKeepTheAuditTrailsHistory`：先迁到 29，播 2 行有 actor + 1 行无 actor，再迁完，断言 2 / 1。空库测不出这两半中的任何一半——约束若装在回填之前会 "is violated by some row"，而回填若悄悄没生效会让一年的审计说没人干过。
+
+`[FACT]` 契约按 spec-first 先改：`AuditEntry` 加 4 个可选字段，`make api-lint` 0 error 0 warning，`make api-breaking BASE=main` **exit 0**（纯加法）。
+
+### 全绿
+
+`[FACT]` `go build ./...` / `go vet ./...` / `gofmt -l internal/ cmd/` / `go test -race -count=1 ./...` **全部通过**；`make api-check` exit 0；`web` 下 `tsc --noEmit` exit 0。
+`[FACT]` **§3 九条全部 PASS**（基线上 8 条按预期失败的那些，现在逐条通过）。
+
+### 一处被重写的旧断言
+
+`[FACT]` `TestTheKeyIsAuditedAsItselfRatherThanAsAUser` 原本断言 "detail 的 jsonb 里出现 api-key 这个词"。那是四列不存在时的权宜之计，⑤ 之后改为断言 `subject_kind` / `subject_name` / `subject_id` 三个列。**要求没变，检查的地方变了**——原来的写法把一个事实存在了没法过滤的地方。

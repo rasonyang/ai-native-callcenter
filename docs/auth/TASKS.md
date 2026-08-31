@@ -10,8 +10,7 @@
 新会话在仓库根目录说一句 **「继续 docs/auth/TASKS.md」** 即可。要点：
 
 - **分支 `docs/auth-baseline`**。第一个未勾选项就是当前位置。
-- **构建现在是红的，这是预期的。** `internal/httpapi/api_server.go:19` 的编译期断言缺 6 个方法（`getOpenAPI` + 5 个 API Key），到 **④** 装上 handler 才转绿。先跑 `go build` 会看到它——不是事故，是 spec-first 的设计意图（`CLAUDE.md`：*a new spec operation breaks the build until the server grows its method — that is the point*）。owner 已确认中间提交可红：分支上红、PR 头绿。
-- **要跑测试，得先有一棵绿树。** `internal/httpapi/scopeauth_test.go` 的九条用例在红树上跑不出任何结论。基线验证用 `git worktree add <tmp> main` 检出 `main`，把测试文件拷进去跑（`AICC_TEST_DATABASE_URL` 见下）。
+- **构建是绿的**（④ 起）。`go test -race ./...` 全过，`internal/httpapi/scopeauth_test.go` 的九条用例全部通过。`ecf368f`–`a1fa378` 那五个中间提交是红的，那是 spec-first 的设计意图（`CLAUDE.md`：*a new spec operation breaks the build until the server grows its method — that is the point*），owner 已确认。
 - **数据库要起着**：`docker compose -f deploy/dev/docker-compose.yml up -d`，然后
   `AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable'`。
 - **先读这三份再动手**：`docs/auth/baseline.md`（§0 事实 + 全部裁定 1–9 及其修正）、`docs/auth/RESULTS.md`（证据账本，含每一步的失败形态）、`docs/api-first-audit.md`（V1–V8 违反项、O1–O5 减法及处置）。`CLAUDE.md` 里那条 owner directive **"UI is optional. API is the product."** 是本任务全部决策的依据。
@@ -31,14 +30,14 @@
 | §4 禁止事项 | ✅ N1 已写入（§4） | — |
 | ②b scope 常量生成 | ✅ 生成器 + 两个产物,api-check 已覆盖 | `c03080d` |
 | ③ AuthContext + 删守卫 | ✅ 完成（⚠ 留一处待裁定，见 ④ 上方） | `a1fa378` |
-| ④ Key 存储与端点 | ⬜ 未开始（**做完构建才转绿**） | — |
-| ⑤ 审计 4 列 | ⬜ 未开始 | — |
+| ④ Key 存储与端点 | ✅ 完成，**构建已转绿** | `0793e32` |
+| ⑤ 审计 4 列 | ✅ 完成，§3 九条全过 | `e605235` |
 | ⑥ Admin UI | ⬜ 未开始 | — |
 | ⑦ CI 三条断言 | ⬜ 未开始 | — |
 
 **本任务之外、同分支上的两个提交**：`9c01e2f` 修 V1/V2（API 自答 404/405，构建绿、测试全过）、`f676276`/`b219244` 等文档裁定。全部记在 `docs/api-first-audit.md` 的处置表。
 
-**当前构建：红**。`internal/httpapi/api_server.go:19` 缺 6 个方法，到 ④ 才转绿；owner 已确认中间提交可红。
+**当前构建：绿**（④ `0793e32` 起）。`go build` / `go vet` / `gofmt` / `go test -race ./...` / `make api-check` 全通过，§3 九条全过。
 
 ---
 
@@ -120,8 +119,12 @@
       所以它把 `createCall` 的下限记成了「任何已认证」。照契约的 `calls:create` 直接放行 = 把外呼机器人发给每个坐席。
       ③ 暂用 `config:read` 保住原行为并在代码里标了 ⚠。**两个选项**：契约给它一个自己的 scope（重开 §2），
       或裁定 `calls:create` 覆盖两种 kind。**⑦ 不得在此之上收工。**
-- [ ] ④ API Key 存储与 4 个端点。按裁定 7：状态 **`ENABLED / REVOKED`** 两态；查找 `WHERE key_hash = $1`（照抄 `sessions.sql:8-13`），短前缀列只用于展示、不建索引；`last_used_at` 每次直接写、**无节流**；**无允许代理 Agents 列表**。`callbacks.handled_by` / `contacts.updated_by` 改为跟随 `AgentID`（裁定 2）
-- [ ] ⑤ 审计：**新增** `subject_kind` / `subject_id` / `subject_name` / `agent_id` 4 列，`actor_id` 不动，回填既有行（裁定 3）
+- [x] ④ API Key 存储与端点（迁移 `00029`）。两态、hash 直查、prefix 不建索引、`last_used_at` 无节流、无允许代理列表。
+      吊销的终态写在 SQL 的 `WHERE` 里——吊销过的 Key 查不出来，于是被拒的请求也碰不到它的 `last_used_at`。
+      未知 scope 拒绝而非忽略（`api.IsScope`）。裁定 2：三列仍装 user id，靠 `UserIDForAgent` + `AuthContext.ActorUserID`。
+      `GET /openapi.json` 由 `docs/embed.go` 提供。**构建在此转绿。**
+- [x] ⑤ 审计四列（迁移 `00030`）：`subject_kind` / `subject_id` / `subject_name` / `agent_id`，`actor_id` 未动，既有行已回填，
+      `migrate_test` 有 fixture。契约 `AuditEntry` 加 4 个可选字段（纯加法，oasdiff exit 0）。**§3 九条全过。**
 - [ ] ⑥ Admin UI：API Keys 页 + `nav.ts` 条目（列表列去掉「允许 Agents」，状态只有两个值）
 - [ ] ⑦ CI 检查（同一文件三条断言）：
       a. 路由表中任一路由在契约中无 scope 声明即失败（排除 `/metrics`、`/healthz`、`/readyz`、SPA fallback，理由显式登记）
@@ -136,7 +139,7 @@
 - [x] ① 契约 —— `ecf368f`
 - [x] ② 生成代码 —— `3436dd9`（scope 常量那半还欠着，见 ②b）
 - [x] ③ AuthContext + 中间件 + 角色守卫删除 —— `a1fa378`（**不是零行为变化**：9 处已裁定的 `config:read` 拓宽、act-as 头改为拒绝、webhook 对 Key 解封；收窄 0）
-- [ ] ④ API Key 存储与端点
-- [ ] ⑤ 审计
+- [x] ④ API Key 存储与端点 —— `0793e32`
+- [x] ⑤ 审计 —— `e605235`
 - [ ] ⑥ Admin UI
 - [ ] ⑦ CI 检查
