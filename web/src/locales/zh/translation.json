@@ -17,7 +17,8 @@
     "previous": "上一页",
     "next": "下一页",
     "viewAll": "查看全部",
-    "close": "关闭"
+    "close": "关闭",
+    "done": "完成"
   },
   "auth": {
     "signInTitle": "登录",
@@ -49,7 +50,8 @@
     "numbers": "号码",
     "callbacks": "回访任务",
     "agentIdentities": "坐席与话机",
-    "webhooks": "Webhook"
+    "webhooks": "Webhook",
+    "keys": "API Key"
   },
   "roles": {
     "AGENT": "坐席",
@@ -90,8 +92,12 @@
     "INVALID_CREDENTIALS": "用户名或密码不正确。",
     "SESSION_EXPIRED": "登录已过期，请重新登录。",
     "FORBIDDEN": "您没有执行该操作的权限。",
+    "AGENT_REQUIRED": "该操作通过坐席身份进行，此账号没有坐席身份。",
+    "AGENT_IMPERSONATION_NOT_ALLOWED": "已登录的账号只能以自己的身份操作。",
+    "INSUFFICIENT_SCOPE": "此凭证不具备 {{requiredScope}} 能力。",
     "VALIDATION_FAILED": "有字段没通过校验，请逐项检查。",
     "NOT_FOUND": "未找到。",
+    "METHOD_NOT_ALLOWED": "该端点不接受此请求方法。",
     "CONFLICT": "该操作与当前状态冲突。",
     "USER_SUSPENDED": "该账号已被停用。",
     "SWITCH_DOWN": "无法连接话务交换机。",
@@ -106,6 +112,10 @@
     "CALL_NOT_FOUND": "该通话已结束。",
     "NOT_CALL_PARTY": "您不在该通话中。",
     "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。",
+    "USER_DATA_TOO_LARGE": "这通电话装不下这些业务数据：最多 {{maxKeys}} 个键，每个值 {{maxValueBytes}} 字节。一个都没有写入。",
+    "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "这种通话没有这个功能。",
+    "LAST_ADMIN": "这一步会让平台没有人能管理。",
+    "EXTENSION_POOL_EXHAUSTED": "分机号池里没有空号了。",
     "rules": {
       "DEFAULT_NEEDS_OUTBOUND": "只有能呼出的号码才能设为默认外呼号码。",
       "DIGITS_ONLY": "只能是数字。",
@@ -697,5 +707,43 @@
       "DELIVERED": "已送达",
       "FAILED": "已失败"
     }
+  },
+  "keys": {
+    "title": "API Key",
+    "description": "系统用来认证的凭证。每一把只持有签发时给定的能力，并且可以单独吊销。",
+    "issue": "签发 Key",
+    "edit": "编辑 Key",
+    "name": "名称",
+    "nameHint": "谁持有它——写集成的名字，不是配置它的人。",
+    "prefix": "前缀",
+    "scopes": "能力",
+    "scopesHint": "这把 Key 能做的全部事情。一把没有能力的 Key 能通过认证，但什么也够不着。",
+    "noScopes": "无",
+    "lastUsed": "最后使用",
+    "status": "状态",
+    "statuses": {
+      "ENABLED": "启用",
+      "REVOKED": "已吊销"
+    },
+    "none": "还没有签发过 Key。",
+    "revoke": "吊销",
+    "revokeConfirm": "吊销 {{name}}？这一步不可撤销——正在用它的东西会立刻停止工作，要恢复只能重新签发一把新的。",
+    "issuedTitle": "{{name}} 已签发",
+    "secret": "密钥",
+    "secretHint": "只在这里出现这一次。库里只存它的摘要，谁也没法再把它算出来——丢了就吊销重发。",
+    "howToSend": "怎么发送",
+    "resources": {
+      "agent": "坐席身份与状态",
+      "audit": "审计轨迹",
+      "calls": "通话：控制、发起、观察",
+      "config": "平台配置",
+      "contacts": "客户资料",
+      "history": "已结束通话的记录",
+      "keys": "API Key 本身",
+      "quality": "质检打分",
+      "reports": "坐席区的聚合数据",
+      "users": "账号与角色"
+    },
+    "selectGroup": "勾选 {{resource}} 的全部能力"
   }
 }

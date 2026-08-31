@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
@@ -186,9 +185,8 @@ func (s *Server) ListMyCalls(w http.ResponseWriter, r *http.Request) {
 // showing the same emptiness for both — which is how a staffing mistake goes
 // unnoticed until a call never arrives.
 func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
-	id, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
 	queues, err := s.catalog.Queues(r.Context())
@@ -197,7 +195,10 @@ func (s *Server) ListWaitingCalls(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read your queues", nil)
 		return
 	}
-	if id.Role.AtLeast(auth.RoleSupervisor) {
+	// Every line, or the lines this subject works. calls:read:all is what
+	// says which — the same capability GET /calls asks for, rather than a
+	// rank that happened to sit above the guard.
+	if ac.Has(api.ScopeCallsReadAll) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"items":  s.calls.AllWaitingCalls(),
 			"queues": staffedQueues(queues, nil),
@@ -294,20 +295,17 @@ func (s *Server) UnmuteCall(w http.ResponseWriter, r *http.Request, callID uuid.
 // does today. It is worth saying out loud: this widens what a leaked key can
 // do from placing calls to ending them.
 func (s *Server) HangupCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) {
-	identity, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
-	// An agent is anybody with a leg, so the profile decides this rather than
-	// the role: a supervisor who is also staffed as an agent and is on the
-	// call leaves their own leg, which is what they meant.
-	if _, isAgent := s.signedInAgent(r, identity); isAgent {
+	// An agent is anybody with a leg, so the agent identity decides this: a
+	// supervisor who is also staffed as an agent and is on the call leaves
+	// their own leg, which is what they meant. A subject with no agent
+	// identity — an administrator, or a system that placed the call — ends
+	// the call itself.
+	if ac.IsAgent() {
 		s.callOp(w, r, callID, s.calls.Hangup)
-		return
-	}
-	if !identity.Role.AtLeast(auth.RoleSupervisor) {
-		writeError(w, http.StatusForbidden, CodeForbidden, "this account is not an agent", nil)
 		return
 	}
 	s.callResult(w, r, callID, s.calls.EndCall(r.Context(), callID))
@@ -363,17 +361,19 @@ func (s *Server) MonitorCall(w http.ResponseWriter, r *http.Request, callID uuid
 			"agentId is required", map[string]any{"field": "agentId"})
 		return
 	}
-	identity, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
-	supervisorID, ok := s.signedInAgent(r, identity)
-	if !ok {
+	// Listening in is done from a phone, and the phone is the one bound to
+	// the listener's own agent identity. calls:monitor already said they may;
+	// this says they have somewhere to hear it.
+	if !ac.IsAgent() {
 		writeError(w, http.StatusConflict, CodeConflict,
 			"this account has no phone; bind one to it first", nil)
 		return
 	}
+	supervisorID := ac.AgentID
 	// Listening to yourself is a feedback loop, not supervision.
 	if supervisorID == req.AgentID {
 		writeError(w, http.StatusConflict, CodeConflict, "you cannot monitor your own call", nil)
@@ -444,6 +444,3 @@ func (s *Server) callResult(w http.ResponseWriter, r *http.Request, callID uuid.
 		writeError(w, http.StatusInternalServerError, CodeInternal, "the switch rejected the request", nil)
 	}
 }
-
-// requireSupervisorRole is a readability alias at the route table.
-var requireSupervisorRole = requireRole(auth.RoleSupervisor)

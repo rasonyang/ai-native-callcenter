@@ -14,12 +14,45 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
 // Auditor records who did what to which thing.
 type Auditor interface {
-	Audit(ctx context.Context, actorID *uuid.UUID,
+	Audit(ctx context.Context, who store.AuditSubject,
 		action, targetKind, targetID string, detail map[string]any, ip string) error
+}
+
+// auditSubject is who to record a request against.
+//
+// actorId keeps its original meaning exactly — the signed-in account, absent
+// where there is none — because GET /audit-logs already returns it and
+// changing what a shipped field means while keeping its name and type is a
+// break no diff tool can see. The subject columns are the new information:
+// which credential asked, and which agent identity it acted as.
+func auditSubject(r *http.Request) store.AuditSubject {
+	ac, ok := authFrom(r.Context())
+	if !ok {
+		return store.AuditSubject{}
+	}
+	who := store.AuditSubject{
+		Kind: string(ac.Kind),
+		Name: ac.SubjectName,
+	}
+	if ac.SubjectID != uuid.Nil {
+		id := ac.SubjectID
+		who.ID = &id
+	}
+	if ac.Kind == SubjectUser && ac.SubjectID != uuid.Nil {
+		id := ac.SubjectID
+		who.ActorID = &id
+	}
+	if ac.AgentID != uuid.Nil {
+		agentID := ac.AgentID
+		who.AgentID = &agentID
+	}
+	return who
 }
 
 // auditBodyLimit bounds how much of a request lands in the audit detail.
@@ -61,28 +94,12 @@ func (s *Server) auditTrail(next http.Handler) http.Handler {
 			return
 		}
 
-		var actorID *uuid.UUID
-		if identity, ok := identityFrom(r.Context()); ok {
-			if isMachine(identity) {
-				// No person did this, so the actor column stays null rather
-				// than carrying a user id nobody can look up. The row would
-				// then be indistinguishable from one with no actor at all,
-				// which is why the key says so in the detail instead.
-				if detail == nil {
-					detail = map[string]any{}
-				}
-				detail["actor"] = identity.Username
-			} else {
-				id := identity.UserID
-				actorID = &id
-			}
-		}
-
 		action := r.Method + " " + routePattern(r)
 		targetKind, targetID := targetFrom(r)
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
 
-		if err := s.auditor.Audit(r.Context(), actorID, action, targetKind, targetID, detail, ip); err != nil {
+		if err := s.auditor.Audit(r.Context(), auditSubject(r),
+			action, targetKind, targetID, detail, ip); err != nil {
 			// The action already happened; losing its audit row is worth a
 			// loud log line but not a failed response.
 			s.logAuditFailure(r, err)

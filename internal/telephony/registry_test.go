@@ -373,7 +373,7 @@ func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 		{name: "an agent on another call", wantSaw: false,
 			who: events.Subscriber{AgentID: ptr(uuid.New())}},
 		{name: "a supervisor", wantSaw: true,
-			who: events.Subscriber{IsSupervisor: true}},
+			who: events.Subscriber{SeesEveryCall: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hub := events.NewHub(events.NewSequence(seqStub{}, "events"))

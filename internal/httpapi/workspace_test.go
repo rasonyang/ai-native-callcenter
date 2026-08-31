@@ -8,15 +8,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
@@ -85,7 +84,7 @@ func agentRequest(method, target, body string) *http.Request {
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
 	}
 	return r.WithContext(contextWithIdentity(r.Context(),
-		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}))
+		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}, uuid.New()))
 }
 
 // Nothing is required any more: the record already exists with a disposition
@@ -197,84 +196,51 @@ type queueCatalogStub struct {
 
 func (q queueCatalogStub) Queues(context.Context) ([]catalog.Queue, error) { return q.queues, nil }
 
-// The agent's own day is theirs: the endpoint takes no agent, so there is
-// nothing to point at a colleague, and the aggregates over somebody else's day
-// stay behind the supervisor guard on /reports.
+// The agent's own day is theirs, and the contract is where that is written
+// down now: /reports/me asks for the own-scoped capability, while the
+// aggregates over everybody's day ask for the floor-wide ones.
+//
+// This used to walk the routing table looking for a role guard. There are no
+// role guards any more — an operation's authorization is a property of the
+// operation, not of where somebody mounted it — so the assertion moved to the
+// place that actually decides.
 func TestTheDayIsTheCallersOwn(t *testing.T) {
-	srv := New(config.Config{Env: "dev"}, Deps{
-		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
-		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{},
-		Outbound: stubOutbound{},
-	})
-
-	guard := reflect.ValueOf(requireAgentRole).Pointer()
-	supervisor := reflect.ValueOf(requireSupervisorRole).Pointer()
-	var guarded, supervised bool
-	err := chi.Walk(srv.router(), func(method, route string, _ http.Handler,
-		middlewares ...func(http.Handler) http.Handler) error {
-		if method+" "+route != "GET /api/v1/reports/me" {
-			return nil
-		}
-		for _, mw := range middlewares {
-			switch reflect.ValueOf(mw).Pointer() {
-			case guard:
-				guarded = true
-			case supervisor:
-				supervised = true
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
+	mine, ok := api.SecurityForRoute(http.MethodGet, "/reports/me")
+	if !ok {
+		t.Fatal("GET /reports/me is not in the contract")
 	}
-	if !guarded {
-		t.Error("GET /reports/me is not behind the agent guard, yet it answers from " +
-			"the session's agent identity")
+	if !slices.Contains(mine.SessionScopes, api.ScopeHistoryReadOwn) {
+		t.Errorf("scopes = %v, want history:read:own — it answers from the "+
+			"caller's own agent identity", mine.SessionScopes)
 	}
-	if supervised {
-		t.Error("GET /reports/me is behind the supervisor guard; an agent could not " +
-			"read their own day")
+	for _, wider := range []string{api.ScopeHistoryReadAll, api.ScopeReportsRead} {
+		if slices.Contains(mine.SessionScopes, wider) {
+			t.Errorf("scopes = %v, want no %s — an agent could not read their own day",
+				mine.SessionScopes, wider)
+		}
 	}
 }
 
-// The workspace routes are the agent's own, and each is guarded as such: an
-// endpoint that answers "my calls" or "my queues" from the session identity is
-// only safe while the session is an agent's.
-func TestTheAgentWorkspaceRoutesAreAgentOnly(t *testing.T) {
-	srv := New(config.Config{Env: "dev"}, Deps{
-		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
-		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{},
-		Outbound: stubOutbound{},
-	})
-
-	want := map[string]bool{
-		"POST /api/v1/agent/wrap-up": false,
-		"GET /api/v1/calls/waiting":  false,
-		"GET /api/v1/cdrs/mine":      false,
+// The workspace operations answer "my calls", "my queues", "my day" from the
+// subject's own agent identity, so each asks for an own-scoped capability and
+// none of them asks for a floor-wide one. An operation that answered from the
+// caller's agent identity while demanding the floor-wide scope would be a
+// screen only supervisors could open to see nothing.
+func TestTheAgentWorkspaceOperationsAskForTheOwnScopedCapability(t *testing.T) {
+	want := map[string]string{
+		"POST /agent/wrap-up": api.ScopeAgentAct,
+		"GET /calls/waiting":  api.ScopeCallsReadOwn,
+		"GET /cdrs/mine":      api.ScopeHistoryReadOwn,
 	}
-	guard := reflect.ValueOf(requireAgentRole).Pointer()
-
-	err := chi.Walk(srv.router(), func(method, route string, _ http.Handler,
-		middlewares ...func(http.Handler) http.Handler) error {
-		key := method + " " + route
-		if _, watched := want[key]; !watched {
-			return nil
+	for route, scope := range want {
+		method, path, _ := strings.Cut(route, " ")
+		sec, ok := api.SecurityForRoute(method, path)
+		if !ok {
+			t.Errorf("%s is not in the contract", route)
+			continue
 		}
-		for _, mw := range middlewares {
-			if reflect.ValueOf(mw).Pointer() == guard {
-				want[key] = true
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for route, guarded := range want {
-		if !guarded {
-			t.Errorf("%s is not behind the agent guard — it answers from the "+
-				"session's agent identity, which a non-agent session does not have", route)
+		if !slices.Contains(sec.SessionScopes, scope) {
+			t.Errorf("%s asks for %v, want %s", route, sec.SessionScopes, scope)
 		}
 	}
 }
@@ -348,4 +314,12 @@ func (noAgentDir) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
 }
 func (noAgentDir) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) {
 	return nil, errors.New("not an agent")
+}
+
+func (staffedAgent) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (noAgentDir) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
 }

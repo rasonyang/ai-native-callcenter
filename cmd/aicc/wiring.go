@@ -300,6 +300,7 @@ func apiDeps(
 	auditor httpapi.Auditor,
 	outboundSvc httpapi.OutboundService,
 	webhooks httpapi.WebhookService,
+	keys httpapi.KeyService,
 	spa http.Handler,
 ) httpapi.Deps {
 	return httpapi.Deps{
@@ -319,6 +320,7 @@ func apiDeps(
 		Auditor:     auditor,
 		Outbound:    outboundSvc,
 		Webhooks:    webhooks,
+		Keys:        keys,
 		SPA:         spa,
 	}
 }

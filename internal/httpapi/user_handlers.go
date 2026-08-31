@@ -360,13 +360,8 @@ func (s *Server) RevealExtensionPassword(w http.ResponseWriter, r *http.Request,
 	// Recorded before the answer leaves: a disclosure whose record failed is
 	// still a disclosure, and the log line says so loudly.
 	if s.auditor != nil {
-		var actorID *uuid.UUID
-		if identity, ok := identityFrom(r.Context()); ok {
-			id := identity.UserID
-			actorID = &id
-		}
 		ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-		if err := s.auditor.Audit(r.Context(), actorID,
+		if err := s.auditor.Audit(r.Context(), auditSubject(r),
 			"GET "+routePattern(r), "extension", extensionID.String(), nil, ip); err != nil {
 			s.logAuditFailure(r, err)
 		}

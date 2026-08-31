@@ -12,7 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -22,18 +22,21 @@ type RecordingStreamer interface {
 }
 
 // mayHearCall authorizes access to a call's audio, writing the refusal
-// itself. Supervisors review anyone's calls; an agent replays only the calls
-// they were on, which is the same line /cdrs/mine draws.
+// itself. history:read:all hears anyone's call; without it a subject replays
+// only the calls their agent identity was on, which is the same line
+// /cdrs/mine draws.
+//
+// The contract asks for history:read:own to reach the operation at all, so
+// this is the widening rather than the whole rule.
 func (s *Server) mayHearCall(w http.ResponseWriter, r *http.Request, callID uuid.UUID) bool {
-	id, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return false
 	}
-	if id.Role.AtLeast(auth.RoleSupervisor) {
+	if ac.Has(api.ScopeHistoryReadAll) {
 		return true
 	}
-	agentID, ok := s.agentIDFor(w, r)
+	agentID, ok := requireAgent(w, r)
 	if !ok {
 		return false
 	}
@@ -132,11 +135,18 @@ func (s *Server) CreateRecordingReview(w http.ResponseWriter, r *http.Request, r
 		return
 	}
 
-	identity, _ := identityFrom(r.Context())
+	// A score is a person's judgement and reviewer_id must point at somebody
+	// who can be asked about it. The contract enforces that by giving this
+	// operation no bearer alternative at all — a key cannot reach it, whatever
+	// scopes it holds — so the subject here is always a user.
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
 	review, err := s.ledger.InsertQualityReview(r.Context(), store.QualityReview{
 		RecordingID: rec.ID,
 		CallID:      rec.CallID,
-		ReviewerID:  identity.UserID,
+		ReviewerID:  ac.ActorUserID,
 		Scores:      req.Scores,
 		TotalScore:  req.TotalScore,
 		Notes:       req.Notes,

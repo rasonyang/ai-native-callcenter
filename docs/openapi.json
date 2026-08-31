@@ -4,7 +4,7 @@
     "title": "AI Native Call Center API",
     "version": "1.0.0",
     "summary": "REST and SSE surface of the AI-native call center.",
-    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\nAuthentication is an HttpOnly session cookie issued by POST /auth/login. Every mutating request must also carry the X-AICC-Csrf header with any non-empty value. A system integrating without a browser authenticates instead with the X-AICC-Api-Key header, on the operations whose security says so. Errors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the frontend.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
+    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around. The embedded web application is one consumer of this contract, with no route and no capability of its own.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\n**Authorization is scopes, not roles.** Every operation declares the scopes it needs; the vocabulary is x-scopes at the root of this document and nothing else defines it. Two credentials carry those scopes and neither is the norm: a person signs in at a browser and gets a session cookie (POST /auth/login), whose scopes are derived from the account's role — the role itself never reaches the wire; a system presents an API key as `Authorization: Bearer <key>` and carries exactly the scopes it was issued with. A key may act for an agent by sending `X-AICC-Agent-ID`; the same header on a session request is refused. A mutating request that authenticates with the cookie must also carry X-AICC-Csrf; one that authenticates with a key must not — that header protects a credential the browser sends automatically.\n\nErrors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the client. That holds for the router's own refusals too: a path this contract does not declare is 404 NOT_FOUND and a method it does not declare on a path it does is 405 METHOD_NOT_ALLOWED, both in the envelope — never the web application's index.html, which a client cannot tell from a successful response.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -16,11 +16,28 @@
       "description": "Same-origin API mount; the SPA is served by the same process."
     }
   ],
-  "security": [
-    {
-      "cookieSession": []
-    }
-  ],
+  "x-scopes": {
+    "agent:act": "Drive this subject's own agent presence: sign in and out, ready, not ready, wrap up.",
+    "agent:manage": "Supervise other agents: read the roster and force one out. Separate from agent:act, which only ever reaches the subject's own agent identity.",
+    "agent:read": "Read this subject's own agent presence and the wrap-up vocabulary.",
+    "audit:read": "Read the audit trail.",
+    "calls:control": "Drive a call: answer, hold, retrieve, mute, transfer, DTMF, business data, hang up, and the callbacks that promise a call.",
+    "calls:create": "Place a call.",
+    "calls:create:ai": "Start the bot on a number: originate the customer leg and hand whoever answers to the flow published behind the DID. Required in addition to calls:create for kind=AI_OUTBOUND, because one operation carries one scope and this route serves two kinds of call with two different answers — click-to-dial is an agent's own work, starting a bot on a number is an operations decision.",
+    "calls:monitor": "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
+    "calls:read:all": "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
+    "calls:read:own": "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
+    "config:read": "Read the platform's configuration: extensions, queues, numbers, flows, webhook subscriptions, accounts and system health.",
+    "config:write": "Change the platform's configuration, and reveal an extension's SIP password.",
+    "contacts:read": "Read the customer record book.",
+    "contacts:write": "Add, edit and remove customer records.",
+    "history:read:all": "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
+    "history:read:own": "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
+    "keys:manage": "Create, disable and revoke API keys.",
+    "quality:review": "Read and write quality reviews of recorded calls.",
+    "reports:read": "Read the floor's aggregates: overview, per-queue and daily.",
+    "users:write": "Create and edit accounts, set roles and reset passwords. Separate from config:write because it is the one path to privilege."
+  },
   "tags": [
     {
       "name": "auth",
@@ -179,7 +196,15 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": []
+          },
+          {
+            "apiKeyBearer": []
+          }
+        ]
       }
     },
     "/agent/presence": {
@@ -207,7 +232,19 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "agent:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "agent:read"
+            ]
+          }
+        ]
       }
     },
     "/agent/login": {
@@ -220,8 +257,15 @@
         "description": "Binds the agent to an extension and enters NOT_READY (reason LOGIN). Requires the AGENT role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:act"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
           }
         ],
         "requestBody": {
@@ -276,8 +320,15 @@
         "description": "Requires the AGENT role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:act"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
           }
         ],
         "responses": {
@@ -319,8 +370,15 @@
         "description": "Requires the AGENT role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:act"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
           }
         ],
         "responses": {
@@ -362,8 +420,15 @@
         "description": "Requires the AGENT role. An omitted reason defaults to BREAK.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:act"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
           }
         ],
         "requestBody": {
@@ -439,7 +504,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "agent:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "agent:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "agentWrapUp",
@@ -450,8 +527,15 @@
         "description": "Confirms the record the platform opened when the call ended, applying whatever the agent changed, and returns them to READY. Both fields are optional — the disposition already has a value, and confirming the defaults is a legitimate answer. The filing is still accepted once the agent has moved on: the last wrapped call stays addressable until the next one starts, and 409 AGENT_NOT_IN_WRAP_UP says when there is none. Requires the AGENT role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:act"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
           }
         ],
         "requestBody": {
@@ -500,7 +584,7 @@
           "agents"
         ],
         "summary": "The live roster",
-        "description": "Every agent with their presence, device registration and on-call flag. Requires SUPERVISOR.",
+        "description": "Every agent with their presence, device registration and on-call flag.",
         "responses": {
           "200": {
             "description": "The roster.",
@@ -521,7 +605,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "agent:manage"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "agent:manage"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createAgent",
@@ -529,11 +625,18 @@
           "agents"
         ],
         "summary": "Give a user an agent identity",
-        "description": "Creates the agent identity behind an account and binds their phone. Requires ADMIN.",
+        "description": "Creates the agent identity behind an account and binds their phone.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -585,11 +688,18 @@
           "agents"
         ],
         "summary": "Rewrite an agent's configuration",
-        "description": "Rebinds the phone, renames the switch identifier, or changes wrap-up. Requires ADMIN.",
+        "description": "Rebinds the phone, renames the switch identifier, or changes wrap-up.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -653,11 +763,18 @@
           "agents"
         ],
         "summary": "Remove an agent identity",
-        "description": "The account remains; it simply stops being an agent, and any presence is dropped. Requires ADMIN.",
+        "description": "The account remains; it simply stops being an agent, and any presence is dropped.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -700,7 +817,7 @@
           "system"
         ],
         "summary": "Accounts",
-        "description": "Every account, with the agent identity and phone each one has. Requires ADMIN.",
+        "description": "Every account, with the agent identity and phone each one has.",
         "responses": {
           "200": {
             "description": "Every account.",
@@ -721,7 +838,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createUser",
@@ -729,11 +858,18 @@
           "system"
         ],
         "summary": "Create an account",
-        "description": "Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint. Requires ADMIN.",
+        "description": "Creates the account and, for a role that takes calls, its ACD identity and a phone from the extension pool — one transaction, so a rejected username burns no number and no half-made account is left behind. The phone's SIP password is generated and never returned; it is read back through the extension's own reveal endpoint.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "users:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "users:write"
+            ]
           }
         ],
         "requestBody": {
@@ -785,11 +921,18 @@
           "system"
         ],
         "summary": "Edit an account",
-        "description": "Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer. Requires ADMIN.",
+        "description": "Replaces the account's details. The last active administrator cannot be demoted or suspended — the alternative is a product nobody can administer.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "users:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "users:write"
+            ]
           }
         ],
         "parameters": [
@@ -855,11 +998,18 @@
           "system"
         ],
         "summary": "Set an account's password",
-        "description": "An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked. Requires ADMIN.",
+        "description": "An administrator gives somebody a new password, for the account they have been locked out of. Every session opened with the old one is revoked.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "users:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "users:write"
+            ]
           }
         ],
         "parameters": [
@@ -915,11 +1065,18 @@
           "agents"
         ],
         "summary": "Sign somebody else out",
-        "description": "How an abandoned phone stops absorbing calls. Requires SUPERVISOR.",
+        "description": "How an abandoned phone stops absorbing calls.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "agent:manage"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:manage"
+            ]
           }
         ],
         "parameters": [
@@ -972,7 +1129,7 @@
           "calls"
         ],
         "summary": "Every live call",
-        "description": "The supervision view. Requires SUPERVISOR.",
+        "description": "The supervision view.",
         "responses": {
           "200": {
             "description": "All live calls.",
@@ -990,7 +1147,19 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "calls:read:all"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "calls:read:all"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createCall",
@@ -998,14 +1167,18 @@
           "calls"
         ],
         "summary": "Place a call",
-        "description": "One entry point for every call the platform places, told apart by kind.\n\nAI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. Requires SUPERVISOR.\n\nAGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.\n\nIdempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.",
+        "description": "One entry point for every call the platform places, told apart by kind.\n\nAI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.\n\nIdempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.\n\nAuthorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:create"
+            ],
             "csrfHeader": []
           },
           {
-            "apiKeyHeader": []
+            "apiKeyBearer": [
+              "calls:create"
+            ]
           }
         ],
         "requestBody": {
@@ -1085,7 +1258,19 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "calls:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "calls:read:own"
+            ]
+          }
+        ]
       }
     },
     "/calls/waiting": {
@@ -1116,7 +1301,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "calls:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "calls:read:own"
+            ]
+          }
+        ]
       }
     },
     "/calls/{callId}/answer": {
@@ -1129,8 +1326,15 @@
         "description": "Call control acts through the caller's own agent identity: the call id in the path is never authority on its own. Requires the AGENT role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1179,8 +1383,15 @@
         "description": "Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1229,8 +1440,15 @@
         "description": "Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1279,8 +1497,15 @@
         "description": "Silences what the switch reads from the agent's leg, so the other party stops hearing them. The agent keeps hearing the call. Requires the AGENT role and being a party to the call.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1329,8 +1554,15 @@
         "description": "Restores the audio the switch reads from the agent's leg. Requires the AGENT role and being a party to the call.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1379,11 +1611,15 @@
         "description": "What is hung up depends on what the caller has.\n\nAn agent has a leg on the call and ends that leg: they leave the conversation, and whether the call itself survives is the switch's business. They must be a party to it — a call id in the path is never authority on its own.\n\nA supervisor, an administrator and an API-key caller have no leg of their own, so the leg is found by the call instead: the one at the extension, hung up exactly as if the person at that phone had. The bridge collapses and the switch releases the far end. They may do this to any call, which is how a call placed by a system for an agent who never signed in gets ended — nobody is a party to it, so nobody could end it through an agent's rule. A call with no leg at an extension answers 409.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
           },
           {
-            "apiKeyHeader": []
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1435,8 +1671,15 @@
         "description": "Sends the far end to a queue extension or number. Requires the AGENT role and being a party to the call. Transferring, holding and retrieving are refused on an INTERNAL call with OPERATION_NOT_ALLOWED_FOR_CALL_TYPE (409): one extension calling another is two people on a line, not a call being handled — there is no third party to pass it to and no queue to put it back into.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1498,8 +1741,15 @@
         "description": "Emits tones towards the far end, which is what reaches an IVR the caller was transferred to. Requires the AGENT role and being a party to the call.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -1558,11 +1808,18 @@
           "calls"
         ],
         "summary": "Listen to, whisper into or join an agent's call",
-        "description": "Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. Requires SUPERVISOR. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.",
+        "description": "Raises the supervisor's own phone and attaches it to the named agent's leg with the switch's eavesdrop: LISTEN hears both sides silently, WHISPER is heard by the agent only, BARGE is heard by everybody. The phone is the supervisor's own — the one they are signed in at as an agent, else the one bound to their agent identity in configuration; an account with no phone is refused with CONFLICT (409), as is an agent who is not on the call. A supervisor holds one monitoring leg at a time: a second request ends the first, which is how a mode is changed. The supervisor's leg is not a party to the call: it appears in no event and no CDR, only in the audit log.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:monitor"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:monitor"
+            ]
           }
         ],
         "parameters": [
@@ -1659,7 +1916,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:own"
+            ]
+          }
+        ]
       }
     },
     "/calls/{callId}/transcript": {
@@ -1669,7 +1938,7 @@
           "calls"
         ],
         "summary": "A call's transcript, from a cursor",
-        "description": "Requires AGENT and involvement in the call; SUPERVISOR and ADMIN pass unconditionally. Subscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.",
+        "description": "What was said on the call, live or finished.\n\nhistory:read:own reaches the subject's own calls, including ones that have ended — a transcript is a record of a call, and which screen wanted it is not the contract's business. history:read:all reaches anybody's.\n\nSubscribe to the event stream before calling this: subscribing first can only duplicate lines, and duplicates are removable because seq is dense, while snapshotting first can lose them.",
         "parameters": [
           {
             "name": "callId",
@@ -1730,7 +1999,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:own"
+            ]
+          }
+        ]
       }
     },
     "/calls/{callId}/reviews": {
@@ -1740,7 +2021,6 @@
           "recordings"
         ],
         "summary": "A call's quality reviews",
-        "description": "Requires SUPERVISOR.",
         "parameters": [
           {
             "name": "callId",
@@ -1775,7 +2055,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "quality:review"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "quality:review"
+            ]
+          }
+        ]
       }
     },
     "/extensions": {
@@ -1785,7 +2077,6 @@
           "catalog"
         ],
         "summary": "All extensions",
-        "description": "Requires ADMIN.",
         "responses": {
           "200": {
             "description": "Every extension.",
@@ -1806,7 +2097,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createExtension",
@@ -1814,11 +2117,18 @@
           "catalog"
         ],
         "summary": "Create an extension",
-        "description": "Password is required here and never returned. Requires ADMIN.",
+        "description": "Password is required here and never returned.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -1873,11 +2183,18 @@
           "catalog"
         ],
         "summary": "Update an extension",
-        "description": "An empty password keeps the current one. Requires ADMIN.",
+        "description": "An empty password keeps the current one.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -1941,11 +2258,18 @@
           "catalog"
         ],
         "summary": "Delete an extension",
-        "description": "Requires ADMIN. Refused with 409 EXTENSION_ASSIGNED_TO_AGENT while an agent has the extension as their phone: deleting it would unbind them silently, and the next registration their phone attempts would fail with nothing in the application to say why. Unbind the agent first.",
+        "description": "Refused with 409 EXTENSION_ASSIGNED_TO_AGENT while an agent has the extension as their phone: deleting it would unbind them silently, and the next registration their phone attempts would fail with nothing in the application to say why. Unbind the agent first.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -1991,7 +2315,7 @@
           "catalog"
         ],
         "summary": "Read a phone's SIP password",
-        "description": "The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.\n\nEvery read is recorded in the audit trail, including who asked and which phone. Requires ADMIN.",
+        "description": "The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.\n\nEvery read is recorded in the audit trail, including who asked and which phone.",
         "parameters": [
           {
             "name": "extensionId",
@@ -2026,7 +2350,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:write"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
+          }
+        ]
       }
     },
     "/queues": {
@@ -2036,7 +2372,7 @@
           "catalog"
         ],
         "summary": "All queues",
-        "description": "Reading the queues is supervision: it answers who is covering what right now. Requires SUPERVISOR.",
+        "description": "Reading the queues is supervision: it answers who is covering what right now.",
         "responses": {
           "200": {
             "description": "Every queue.",
@@ -2057,7 +2393,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createQueue",
@@ -2065,11 +2413,17 @@
           "catalog"
         ],
         "summary": "Create a queue",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -2124,11 +2478,17 @@
           "catalog"
         ],
         "summary": "Update a queue",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2192,11 +2552,17 @@
           "catalog"
         ],
         "summary": "Delete a queue",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2239,7 +2605,6 @@
           "catalog"
         ],
         "summary": "A queue's staffing",
-        "description": "Requires SUPERVISOR.",
         "parameters": [
           {
             "name": "queueId",
@@ -2274,7 +2639,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "put": {
         "operationId": "staffQueue",
@@ -2282,11 +2659,18 @@
           "catalog"
         ],
         "summary": "Put an agent on the queue",
-        "description": "Idempotent: staffing an already-staffed agent updates level and position. Requires ADMIN.",
+        "description": "Idempotent: staffing an already-staffed agent updates level and position.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2345,11 +2729,17 @@
           "catalog"
         ],
         "summary": "Take an agent off the queue",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2401,7 +2791,6 @@
           "catalog"
         ],
         "summary": "All DIDs",
-        "description": "Requires ADMIN.",
         "responses": {
           "200": {
             "description": "Every DID.",
@@ -2422,7 +2811,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createDID",
@@ -2430,11 +2831,17 @@
           "catalog"
         ],
         "summary": "Create a DID",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -2489,11 +2896,17 @@
           "catalog"
         ],
         "summary": "Update a DID",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2557,11 +2970,17 @@
           "catalog"
         ],
         "summary": "Delete a DID",
-        "description": "Requires ADMIN.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2604,7 +3023,7 @@
           "flows"
         ],
         "summary": "All flows",
-        "description": "Identity and publication state of every flow, by name. Requires ADMIN.",
+        "description": "Identity and publication state of every flow, by name.",
         "responses": {
           "200": {
             "description": "Every flow.",
@@ -2625,7 +3044,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createFlow",
@@ -2633,11 +3064,18 @@
           "flows"
         ],
         "summary": "Create a flow",
-        "description": "Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it. Requires ADMIN.",
+        "description": "Stores a new draft. The spec must already be one the loader accepts — there is no point keeping what could never publish — so a rejected spec comes back as 422 with params.problems listing everything wrong with it.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -2689,7 +3127,6 @@
           "flows"
         ],
         "summary": "One flow, its draft and its revisions",
-        "description": "Requires ADMIN.",
         "parameters": [
           {
             "name": "flowId",
@@ -2724,7 +3161,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "put": {
         "operationId": "updateFlowDraft",
@@ -2732,11 +3181,18 @@
           "flows"
         ],
         "summary": "Replace the draft",
-        "description": "Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems. Requires ADMIN.",
+        "description": "Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2799,11 +3255,18 @@
           "flows"
         ],
         "summary": "Publish the draft",
-        "description": "Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on. Requires ADMIN.",
+        "description": "Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -2866,7 +3329,7 @@
           "cdrs"
         ],
         "summary": "Page the ledger",
-        "description": "Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected. Requires SUPERVISOR.",
+        "description": "Finished calls, newest first, with filters. Unparseable filter values are ignored rather than rejected.",
         "parameters": [
           {
             "name": "status",
@@ -2964,7 +3427,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:all"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:all"
+            ]
+          }
+        ]
       }
     },
     "/cdrs/mine": {
@@ -3050,7 +3525,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:own"
+            ]
+          }
+        ]
       }
     },
     "/cdrs/{callId}": {
@@ -3060,7 +3547,7 @@
           "cdrs"
         ],
         "summary": "One finished call, with everything it left behind",
-        "description": "CDR, transcript and recordings in one round trip. Requires SUPERVISOR.",
+        "description": "CDR, transcript and recordings in one round trip.",
         "parameters": [
           {
             "name": "callId",
@@ -3098,7 +3585,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:all"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:all"
+            ]
+          }
+        ]
       }
     },
     "/recordings/{recordingId}/audio": {
@@ -3158,7 +3657,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:own"
+            ]
+          }
+        ]
       }
     },
     "/recordings/{recordingId}/reviews": {
@@ -3168,10 +3679,12 @@
           "recordings"
         ],
         "summary": "Score a recording",
-        "description": "Records a quality review against the recording, attributed to the signed-in reviewer. Requires SUPERVISOR.",
+        "description": "Records a quality review against the recording, attributed to the subject who wrote it.\n\n**The one operation with no apiKeyBearer branch.** A review is a person's judgement of another person's work, and reviewer_id has to name somebody who can be asked about it; a key acting for an agent would attribute the judgement to the agent being judged. This is not the web application being privileged — a supervisor's session token reaches it from curl exactly as it does from the browser. Reading reviews (GET /calls/{callId}/reviews) has a key branch like everything else.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "quality:review"
+            ],
             "csrfHeader": []
           }
         ],
@@ -3232,7 +3745,7 @@
           "reports"
         ],
         "summary": "KPI aggregates",
-        "description": "The window defaults to today (local midnight to midnight). Requires SUPERVISOR.",
+        "description": "The window defaults to today (local midnight to midnight).",
         "parameters": [
           {
             "name": "from",
@@ -3280,7 +3793,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "reports:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "reports:read"
+            ]
+          }
+        ]
       }
     },
     "/reports/queues": {
@@ -3290,7 +3815,7 @@
           "reports"
         ],
         "summary": "Per-queue aggregates",
-        "description": "The window defaults to today. Requires SUPERVISOR.",
+        "description": "The window defaults to today.",
         "parameters": [
           {
             "name": "from",
@@ -3329,7 +3854,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "reports:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "reports:read"
+            ]
+          }
+        ]
       }
     },
     "/reports/daily": {
@@ -3339,7 +3876,7 @@
           "reports"
         ],
         "summary": "Per-day aggregates",
-        "description": "The window defaults to today. Requires SUPERVISOR.",
+        "description": "The window defaults to today.",
         "parameters": [
           {
             "name": "from",
@@ -3378,7 +3915,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "reports:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "reports:read"
+            ]
+          }
+        ]
       }
     },
     "/reports/me": {
@@ -3429,7 +3978,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:own"
+            ]
+          }
+        ]
       }
     },
     "/callbacks": {
@@ -3490,7 +4051,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "calls:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "calls:read:own"
+            ]
+          }
+        ]
       }
     },
     "/callbacks/{callbackId}/claim": {
@@ -3503,8 +4076,15 @@
         "description": "Marks the callback CLAIMED by the caller. Whether it does not exist or somebody claimed it first, the answer is the same conflict: it is not theirs to work. Publishes CALLBACK_UPDATED on the event stream.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -3557,8 +4137,15 @@
         "description": "Closes the callback as DONE or DISMISSED. Publishes CALLBACK_UPDATED on the event stream.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -3621,8 +4208,15 @@
         "description": "Returns a CLAIMED callback to OPEN so somebody else can pick it up. Only the user who holds it may let it go; anyone else — and a callback not currently claimed — gets a conflict. Publishes CALLBACK_UPDATED on the event stream.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -3727,7 +4321,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "contacts:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "contacts:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createContact",
@@ -3738,8 +4344,15 @@
         "description": "Any signed-in role. A phone number that already has a contact is a conflict.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "contacts:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "contacts:write"
+            ]
           }
         ],
         "requestBody": {
@@ -3791,8 +4404,15 @@
         "description": "Any signed-in role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "contacts:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "contacts:write"
+            ]
           }
         ],
         "parameters": [
@@ -3856,8 +4476,15 @@
         "description": "Any signed-in role.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "contacts:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "contacts:write"
+            ]
           }
         ],
         "parameters": [
@@ -3915,7 +4542,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "agent:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "agent:read"
+            ]
+          }
+        ]
       }
     },
     "/system/health": {
@@ -3925,7 +4564,7 @@
           "system"
         ],
         "summary": "Stream and trunk introspection",
-        "description": "Stream counters and the trunks the switch holds. Requires ADMIN. Liveness and readiness live on the separate operations listener, outside this contract.",
+        "description": "Stream counters and the trunks the switch holds. Liveness and readiness live on the separate operations listener, outside this contract.",
         "responses": {
           "200": {
             "description": "Stream counters.",
@@ -3943,7 +4582,19 @@
           "403": {
             "$ref": "#/components/responses/Forbidden"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       }
     },
     "/events": {
@@ -4003,7 +4654,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "calls:read:own"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "calls:read:own"
+            ]
+          }
+        ]
       }
     },
     "/calls/{callId}/queue-events": {
@@ -4048,7 +4711,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "history:read:all"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "history:read:all"
+            ]
+          }
+        ]
       }
     },
     "/audit-logs": {
@@ -4138,7 +4813,19 @@
           "500": {
             "$ref": "#/components/responses/InternalError"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "audit:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "audit:read"
+            ]
+          }
+        ]
       }
     },
     "/calls/{callId}/user-data": {
@@ -4151,8 +4838,15 @@
         "description": "Merges business data into a call that is already running — an order number a backend resolved after the call arrived, a case the agent opened while talking. RFC 7386 semantics: a value replaces the key, null removes it, keys the patch does not mention are left alone. Requires the AGENT role and being a party to the call; a system integrating with this rides such a session. The whole patch applies or none of it does: if it would take the call past 32 keys the call is left exactly as it was and the answer is 409, naming the keys that would not fit. Data that moved is announced to everyone on the call as CALL_USER_DATA.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "calls:control"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "calls:control"
+            ]
           }
         ],
         "parameters": [
@@ -4215,7 +4909,7 @@
           "webhooks"
         ],
         "summary": "All webhook subscriptions",
-        "description": "Requires ADMIN. Tokens are not included.",
+        "description": "Tokens are not included.",
         "responses": {
           "200": {
             "description": "Every subscription.",
@@ -4236,7 +4930,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "post": {
         "operationId": "createWebhookSubscription",
@@ -4244,11 +4950,18 @@
           "webhooks"
         ],
         "summary": "Create a webhook subscription",
-        "description": "Requires ADMIN. Deliberately out of reach of AICC_API_KEY: that credential places and ends calls, and letting it also choose where the platform sends finished calls would let a leaked key exfiltrate every one of them (design 09 §10).",
+        "description": "Where finished calls are sent. Reachable by any subject holding config:write, a key included.\n\nThis was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from \"can the key reach it\" to \"was this key granted config:write\", which is the question a scope exists to answer.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "requestBody": {
@@ -4297,7 +5010,6 @@
           "webhooks"
         ],
         "summary": "One webhook subscription",
-        "description": "Requires ADMIN.",
         "parameters": [
           {
             "name": "subscriptionId",
@@ -4332,7 +5044,19 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
-        }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       },
       "put": {
         "operationId": "updateWebhookSubscription",
@@ -4340,11 +5064,18 @@
           "webhooks"
         ],
         "summary": "Update a webhook subscription",
-        "description": "Requires ADMIN. Omitting authToken leaves the stored one alone.",
+        "description": "Where finished calls are sent. Reachable by any subject holding config:write, a key included.\n\nThis was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from \"can the key reach it\" to \"was this key granted config:write\", which is the question a scope exists to answer.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -4405,11 +5136,18 @@
           "webhooks"
         ],
         "summary": "Delete a webhook subscription",
-        "description": "Requires ADMIN. Its deliveries go with it.",
+        "description": "Where finished calls are sent. Reachable by any subject holding config:write, a key included.\n\nThis was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from \"can the key reach it\" to \"was this key granted config:write\", which is the question a scope exists to answer.",
         "security": [
           {
-            "cookieSession": [],
+            "cookieSession": [
+              "config:write"
+            ],
             "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "config:write"
+            ]
           }
         ],
         "parameters": [
@@ -4449,7 +5187,7 @@
           "webhooks"
         ],
         "summary": "Recent deliveries for a subscription",
-        "description": "Newest first, for diagnosing what a subscriber was told and what came back. Requires ADMIN.",
+        "description": "Newest first, for diagnosing what a subscriber was told and what came back.",
         "parameters": [
           {
             "name": "subscriptionId",
@@ -4494,6 +5232,324 @@
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPI",
+        "tags": [
+          "system"
+        ],
+        "summary": "This contract",
+        "description": "The OpenAPI document this deployment implements, served by the deployment itself.\n\nUnauthenticated, deliberately: the contract is public documentation, and the person who most needs to read it is the integrator who has not been issued a credential yet. A product whose API is the product ships its own manual.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The contract, as JSON.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api-keys": {
+      "get": {
+        "operationId": "listAPIKeys",
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "All API keys",
+        "description": "Keys are how a system authenticates. Each carries its own scopes, so a key issued for one integration cannot do another's work.",
+        "security": [
+          {
+            "cookieSession": [
+              "keys:manage"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "keys:manage"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every key, secrets excluded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKeyList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createAPIKey",
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Issue an API key",
+        "description": "Issues a key and returns its secret **once**. Store it now; it cannot be read back.",
+        "security": [
+          {
+            "cookieSession": [
+              "keys:manage"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "keys:manage"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIKeyWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The key, and its secret, for the only time.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKeyCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api-keys/{keyId}": {
+      "parameters": [
+        {
+          "name": "keyId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "getAPIKey",
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "One API key",
+        "description": "Never carries the secret or its digest.",
+        "security": [
+          {
+            "cookieSession": [
+              "keys:manage"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "keys:manage"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateAPIKey",
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Rename a key or change its scopes",
+        "description": "Revocation is not here — it is terminal, so it has an operation of its own. A revoked key cannot be edited.",
+        "security": [
+          {
+            "cookieSession": [
+              "keys:manage"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "keys:manage"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/APIKeyUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The key as it now stands.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/api-keys/{keyId}/revoke": {
+      "parameters": [
+        {
+          "name": "keyId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "post": {
+        "operationId": "revokeAPIKey",
+        "tags": [
+          "api-keys"
+        ],
+        "summary": "Revoke a key",
+        "description": "Terminal and irreversible: the key stops authenticating immediately and can never be enabled again. Revoking an already revoked key is answered 409 rather than pretended to succeed — an operator who runs this twice should learn that the first one worked. The row stays, because the audit trail names it.",
+        "security": [
+          {
+            "cookieSession": [
+              "keys:manage"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "keys:manage"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revoked key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKey"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
         }
       }
     }
@@ -4504,19 +5560,18 @@
         "type": "apiKey",
         "in": "cookie",
         "name": "aicc_session",
-        "description": "Opaque session token issued by POST /auth/login. The cookie name is configurable (AICC_SESSION_COOKIE); aicc_session is the default. HttpOnly, SameSite=Lax."
+        "description": "Session cookie issued by POST /auth/login, for a person signed in at a browser. The cookie name is configurable (AICC_SESSION_COOKIE); aicc_session is the default. HttpOnly, SameSite=Lax. The scopes it carries are derived from the account's role at sign-in; the role itself never appears on the wire."
       },
       "csrfHeader": {
         "type": "apiKey",
         "in": "header",
         "name": "X-AICC-Csrf",
-        "description": "Anti-CSRF header required on every mutating request (any method other than GET, HEAD, OPTIONS). Any non-empty value passes; requiring a custom header forces a CORS preflight on cross-origin callers. Missing header: 403 FORBIDDEN."
+        "description": "Anti-CSRF header, required on every mutating request that authenticates with the session cookie. Any non-empty value passes; requiring a custom header forces a CORS preflight on a cross-origin caller. Missing header: 403 FORBIDDEN. It never accompanies apiKeyBearer — this header protects a credential the browser sends automatically, and a key is sent deliberately."
       },
-      "apiKeyHeader": {
-        "type": "apiKey",
-        "in": "header",
-        "name": "X-AICC-Api-Key",
-        "description": "Shared secret (AICC_API_KEY) for a system placing calls without a browser session. It authenticates the deployment's integrator, not a person, and is accepted only on the operations that say so. A request carrying it needs no session cookie and no X-AICC-Csrf header — CSRF protects a cookie, and this caller sends none. Unset AICC_API_KEY leaves the machine path closed."
+      "apiKeyBearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "An API key, presented as `Authorization: Bearer <key>`, for a system with no browser. The key is the subject; it is not a person and never becomes one. To act for an agent — a CRM dialling for somebody on the floor — send `X-AICC-Agent-ID: <agentId>` alongside it. Without that header the subject acts for nobody, and an agent-scoped operation answers AGENT_REQUIRED. The header is refused outright on a session request (AGENT_IMPERSONATION_NOT_ALLOWED), whatever the account's role. A key carries exactly the scopes it was issued with; missing one is INSUFFICIENT_SCOPE."
       }
     },
     "responses": {
@@ -4619,9 +5674,13 @@
           "INVALID_CREDENTIALS",
           "SESSION_EXPIRED",
           "FORBIDDEN",
+          "AGENT_REQUIRED",
+          "AGENT_IMPERSONATION_NOT_ALLOWED",
+          "INSUFFICIENT_SCOPE",
           "VALIDATION_FAILED",
           "USER_DATA_TOO_LARGE",
           "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
           "CONFLICT",
           "EXTENSION_IN_USE",
           "EXTENSION_ASSIGNED_TO_AGENT",
@@ -7710,6 +8769,28 @@
             "type": "string",
             "description": "The account's name at read time. Absent when the account has since been deleted — the row keeps the id either way, so a cleaned-up roster does not erase what its accounts did."
           },
+          "subjectKind": {
+            "type": "string",
+            "enum": [
+              "USER",
+              "API_KEY"
+            ],
+            "description": "What authenticated the request: a person with a browser session, or a system holding an API key. Absent on rows written before keys were a managed credential, where the old shared secret had no identity to name."
+          },
+          "subjectId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The subject within its kind: a user id, or a key id. The two are different spaces, which is why subjectKind is read with it and never inferred from it."
+          },
+          "subjectName": {
+            "type": "string",
+            "description": "The account name or the key name, snapshotted when the row was written. Snapshotted rather than joined, because a revoked key and a deleted account must both still be nameable here."
+          },
+          "agentId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The agent identity the request acted as. Present where a key named one in X-AICC-Agent-ID, and where a signed-in account has one — it is the difference between \"Mina went ready\" and \"the CRM put Mina ready\", which is the question an audit trail is read to answer."
+          },
           "action": {
             "type": "string",
             "description": "The method and the route template that matched, e.g. \"PUT /api/v1/queues/{queueId}\". The route template rather than the path, so the value is stable and greppable and cannot drift from the routing table."
@@ -7899,7 +8980,7 @@
             "type": "string",
             "maxLength": 1024,
             "writeOnly": true,
-            "description": "The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not this deployment's AICC_API_KEY, which points the other way and must never be used here (design 09 §8)."
+            "description": "The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not one of this deployment's own API keys, which point the other way and must never be used here (design 09 §8)."
           },
           "isEnabled": {
             "type": "boolean"
@@ -7994,6 +9075,145 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "APIKeyStatus": {
+        "type": "string",
+        "description": "ENABLED keys authenticate; REVOKED is terminal and irreversible. There is no third state and no hard delete: a key that ever authenticated is named in the audit trail, and a row that can vanish makes that trail unreadable.",
+        "enum": [
+          "ENABLED",
+          "REVOKED"
+        ]
+      },
+      "APIKey": {
+        "type": "object",
+        "description": "An API key as it can be read back. The secret is returned once, by the create operation, and never again — this shape carries only the prefix, which is what a person recognises a key by.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "description": "What this key is for, in the operator's words."
+          },
+          "keyPrefix": {
+            "type": "string",
+            "description": "The leading, non-secret part of the key, for display and for recognising it in a list. It identifies nothing on its own: authentication looks the key up by the SHA-256 of the whole secret."
+          },
+          "status": {
+            "$ref": "#/components/schemas/APIKeyStatus"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Exactly what this key may do. Names come from x-scopes at the root of this document."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When this key last authenticated. Null until it has."
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "keyPrefix",
+          "status",
+          "scopes",
+          "createdAt"
+        ]
+      },
+      "APIKeyList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/APIKey"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "APIKeyWrite": {
+        "type": "object",
+        "description": "What a key is created with.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            },
+            "description": "Names from x-scopes. An unknown name is refused rather than ignored: a key silently missing a capability fails later, somewhere else, for a reason nobody can see."
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ]
+      },
+      "APIKeyUpdate": {
+        "type": "object",
+        "description": "What a key can be changed to. Status is not here: the only status change is revocation, which is terminal and has its own operation.",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "scopes": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "APIKeyCreated": {
+        "type": "object",
+        "description": "The created key, plus its secret. **This is the only time the secret is ever returned.** It is stored as a SHA-256 digest, so nothing — not this API, not the database, not an administrator — can produce it again. A lost key is revoked and reissued.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/APIKey"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "secret": {
+                "type": "string",
+                "description": "The credential, to be sent as `Authorization: Bearer <secret>`."
+              }
+            },
+            "required": [
+              "secret"
+            ]
+          }
         ]
       }
     }

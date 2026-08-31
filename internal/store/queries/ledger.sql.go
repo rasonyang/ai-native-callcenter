@@ -299,17 +299,22 @@ func (q *Queries) HandleCallback(ctx context.Context, arg HandleCallbackParams) 
 }
 
 const insertAuditLog = `-- name: InsertAuditLog :exec
-INSERT INTO audit_logs (actor_id, action, target_kind, target_id, detail, ip)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO audit_logs (actor_id, action, target_kind, target_id, detail, ip,
+                        subject_kind, subject_id, subject_name, agent_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 `
 
 type InsertAuditLogParams struct {
-	ActorID    *uuid.UUID  `json:"actorId"`
-	Action     string      `json:"action"`
-	TargetKind string      `json:"targetKind"`
-	TargetID   string      `json:"targetId"`
-	Detail     []byte      `json:"detail"`
-	IP         *netip.Addr `json:"ip"`
+	ActorID     *uuid.UUID  `json:"actorId"`
+	Action      string      `json:"action"`
+	TargetKind  string      `json:"targetKind"`
+	TargetID    string      `json:"targetId"`
+	Detail      []byte      `json:"detail"`
+	IP          *netip.Addr `json:"ip"`
+	SubjectKind *string     `json:"subjectKind"`
+	SubjectID   *uuid.UUID  `json:"subjectId"`
+	SubjectName string      `json:"subjectName"`
+	AgentID     *uuid.UUID  `json:"agentId"`
 }
 
 func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) error {
@@ -320,6 +325,10 @@ func (q *Queries) InsertAuditLog(ctx context.Context, arg InsertAuditLogParams) 
 		arg.TargetID,
 		arg.Detail,
 		arg.IP,
+		arg.SubjectKind,
+		arg.SubjectID,
+		arg.SubjectName,
+		arg.AgentID,
 	)
 	return err
 }
@@ -659,7 +668,9 @@ func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscript
 
 const listAuditLogs = `-- name: ListAuditLogs :many
 SELECT a.id, a.occurred_at, a.actor_id, COALESCE(u.username, '')::text AS actor_username,
-       a.action, a.target_kind, a.target_id, a.detail, a.ip
+       a.action, a.target_kind, a.target_id, a.detail, a.ip,
+       COALESCE(a.subject_kind, '')::text AS subject_kind, a.subject_id,
+       a.subject_name, a.agent_id
 FROM audit_logs a
 LEFT JOIN users u ON u.id = a.actor_id
 WHERE ($3::uuid IS NULL OR a.actor_id = $3::uuid)
@@ -690,6 +701,10 @@ type ListAuditLogsRow struct {
 	TargetID      string             `json:"targetId"`
 	Detail        []byte             `json:"detail"`
 	IP            *netip.Addr        `json:"ip"`
+	SubjectKind   string             `json:"subjectKind"`
+	SubjectID     *uuid.UUID         `json:"subjectId"`
+	SubjectName   string             `json:"subjectName"`
+	AgentID       *uuid.UUID         `json:"agentId"`
 }
 
 // Newest first, with the actor's name resolved at read time. LEFT JOIN because
@@ -697,6 +712,10 @@ type ListAuditLogsRow struct {
 // id either way, so a cleaned-up roster does not erase what its accounts did.
 // COALESCE, not a bare cast: the join's NULL is the ordinary case for a deleted
 // account, and empty is what the reader turns back into "no name to show".
+// subject_name is read straight off the row rather than joined: it was
+// snapshotted at write time so a revoked key, or a deleted account, still has
+// a name here. actor_username keeps its join, because that is the field the
+// shipped response already carries and its behaviour must not change.
 func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogs,
 		arg.Limit,
@@ -723,6 +742,10 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 			&i.TargetID,
 			&i.Detail,
 			&i.IP,
+			&i.SubjectKind,
+			&i.SubjectID,
+			&i.SubjectName,
+			&i.AgentID,
 		); err != nil {
 			return nil, err
 		}

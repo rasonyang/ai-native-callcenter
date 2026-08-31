@@ -25,6 +25,7 @@ import (
 
 type auditRow struct {
 	actorID    *uuid.UUID
+	subject    store.AuditSubject
 	action     string
 	targetKind string
 	targetID   string
@@ -36,11 +37,11 @@ type fakeAuditor struct {
 	rows []auditRow
 }
 
-func (f *fakeAuditor) Audit(_ context.Context, actorID *uuid.UUID,
+func (f *fakeAuditor) Audit(_ context.Context, who store.AuditSubject,
 	action, targetKind, targetID string, detail map[string]any, _ string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.rows = append(f.rows, auditRow{actorID, action, targetKind, targetID, detail})
+	f.rows = append(f.rows, auditRow{who.ActorID, who, action, targetKind, targetID, detail})
 	return nil
 }
 

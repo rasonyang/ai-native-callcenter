@@ -25,6 +25,12 @@ func (s *Server) apiWrapper() *api.ServerInterfaceWrapper {
 	return &api.ServerInterfaceWrapper{
 		Handler:          s,
 		ErrorHandlerFunc: writeParamError,
+		// The contract's own authorization, applied to every operation
+		// mounted through the wrapper. It sits here rather than beside each
+		// route because it reads the route: this is the first moment chi has
+		// resolved which operation was matched, which is what lets the
+		// generated table answer instead of a hand-placed guard.
+		HandlerMiddlewares: []api.MiddlewareFunc{s.enforceContract},
 	}
 }
 

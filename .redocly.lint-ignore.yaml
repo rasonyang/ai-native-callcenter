@@ -11,3 +11,10 @@ docs/openapi.json:
     - '#/components/schemas/SseQueueJoinedPayload'
     - '#/components/schemas/SseQueueLeftPayload'
     - '#/components/schemas/SseQueueCountPayload'
+  # GET /openapi.json has no 4XX because it genuinely has no way to fail: no
+  # credential, no parameters, and its body is embedded at compile time
+  # (go:embed — a missing file is a build error, not a runtime 404). Declaring
+  # a 404 that cannot happen, to quiet the linter, would be writing something
+  # untrue in the one document that is the source of truth.
+  operation-4xx-response:
+    - '#/paths/~1openapi.json/get/responses'

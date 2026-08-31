@@ -174,7 +174,8 @@ func (w *Worker) deliver(ctx context.Context, d store.WebhookDelivery) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-AICC-Webhook-Id", d.DeliveryID.String())
 	if token != "" {
-		// Their credential, not ours. AICC_API_KEY points the other way and
+		// Their credential, not ours. This deployment's own API keys point
+		// the other way and
 		// must never travel outward (design 09 §8).
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

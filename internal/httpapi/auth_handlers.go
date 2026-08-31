@@ -66,12 +66,11 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
-	id, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, loginResponse{User: id})
+	writeJSON(w, http.StatusOK, loginResponse{User: ac.User})
 }
 
 func (s *Server) GetSystemHealth(w http.ResponseWriter, _ *http.Request) {

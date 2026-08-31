@@ -852,3 +852,63 @@ func TestMigrationsNormalizeContactNumbersWithoutMergingPeople(t *testing.T) {
 		}
 	}
 }
+
+// 00030 backfills the audit trail's new subject columns from rows that were
+// written before an API key could act at all, and then installs a CHECK on the
+// column it just filled.
+//
+// A fresh database cannot detect either half. If the backfill were written
+// after the constraint — or written to set a kind the CHECK does not allow —
+// PostgreSQL rejects the migration with "is violated by some row", but only on
+// a deployment that already has history, which is every real one. And a
+// backfill that quietly did nothing would pass an empty database happily and
+// leave a year of audit rows saying nobody did any of it.
+func TestMigrationsKeepTheAuditTrailsHistory(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	// Stop one short, so the fixture is written in the shape 00030 expects.
+	if err := goose.UpToContext(ctx, db, "migrations", 29); err != nil {
+		t.Fatalf("migrating to 29 failed: %v", err)
+	}
+
+	const userID = "22222222-2222-2222-2222-222222222222"
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO users (id, username, password_hash, display_name, role)
+		VALUES ($1, 'mina', 'x', 'Mina', 'ADMIN')`, userID); err != nil {
+		t.Fatalf("seed the account: %v", err)
+	}
+	// Two rows a person wrote, and one the old shared secret wrote — that one
+	// has no actor, because that credential had no identity to name.
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO audit_logs (actor_id, action, target_kind, target_id) VALUES
+		($1,   'PUT /api/v1/queues/{queueId}', 'queue', 'q1'),
+		($1,   'POST /api/v1/users',           'user',  'u1'),
+		(NULL, 'POST /api/v1/calls',           '',      '')`, userID); err != nil {
+		t.Fatalf("seed pre-migration audit rows: %v", err)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with history failed: %v", err)
+	}
+
+	var named, anonymous int
+	if err := db.QueryRowContext(ctx, `
+		SELECT count(*) FILTER (WHERE subject_kind = 'USER' AND subject_id = $1
+		                          AND subject_name = 'mina'),
+		       count(*) FILTER (WHERE subject_kind IS NULL)
+		FROM audit_logs`, userID).Scan(&named, &anonymous); err != nil {
+		t.Fatalf("read migrated rows: %v", err)
+	}
+	if named != 2 {
+		t.Errorf("rows attributed to the account = %d, want 2 — the backfill left "+
+			"history saying nobody did any of it", named)
+	}
+	if anonymous != 1 {
+		t.Errorf("rows with no subject = %d, want 1 — the row the old shared secret "+
+			"wrote has no identity to name, and inventing one would be a forgery",
+			anonymous)
+	}
+}

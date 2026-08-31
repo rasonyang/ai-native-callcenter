@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
-	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 )
 
@@ -32,9 +31,8 @@ const heartbeatInterval = 15 * time.Second
 // of a stream that simply starts fresh. Degrading is the safer failure here,
 // so the leniency below is deliberate.
 func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request, _ api.StreamEventsParams) {
-	id, ok := identityFrom(r.Context())
+	ac, ok := mustAuth(w, r)
 	if !ok {
-		writeError(w, http.StatusUnauthorized, CodeSessionExpired, "no session", nil)
 		return
 	}
 
@@ -44,18 +42,24 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request, _ api.Stre
 		return
 	}
 
+	// calls:read:own is what the contract asks for to open the stream at all;
+	// calls:read:all widens delivery from this subject's own leg events to
+	// every call on the floor. The hub is told the resolved answer and never
+	// the scope name — a leg event is private to its agent, and which subject
+	// that rule exempts is this package's decision to make.
 	who := events.Subscriber{
-		UserID:       id.UserID,
-		IsSupervisor: id.Role.AtLeast(auth.RoleSupervisor),
-		Types:        parseTypes(r.URL.Query().Get("types")),
+		UserID:        ac.SubjectID,
+		SeesEveryCall: ac.Has(api.ScopeCallsReadAll),
+		Types:         parseTypes(r.URL.Query().Get("types")),
 	}
-	// An agent's own call and queue events are scoped to their agent identity;
-	// without resolving it here the cockpit would receive nothing at all. A
-	// supervisor or administrator has no agent profile and needs none — they
-	// already see everything.
-	if s.agentDir != nil {
-		if agentID, err := s.agentDir.AgentIDForUser(r, id.UserID); err == nil {
-			who.AgentID = &agentID
+	// A subject's own call and queue events are scoped to their agent
+	// identity; without it the cockpit would receive nothing at all. Somebody
+	// with no agent identity needs none — either they see everything, or they
+	// have no leg for an event to be about.
+	if ac.IsAgent() {
+		agentID := ac.AgentID
+		who.AgentID = &agentID
+		if s.agentDir != nil {
 			if queueIDs, err := s.agentDir.QueuesForAgent(r, agentID); err == nil {
 				who.QueueIDs = queueIDs
 			} else {
@@ -105,7 +109,7 @@ func (s *Server) StreamEvents(w http.ResponseWriter, r *http.Request, _ api.Stre
 				// Dropped for lagging: end the response so the browser
 				// reconnects and resyncs.
 				if sub.Dropped {
-					slog.WarnContext(ctx, "sse subscriber dropped for lagging", "userId", id.UserID)
+					slog.WarnContext(ctx, "sse subscriber dropped for lagging", "subjectId", ac.SubjectID, "subjectKind", ac.Kind)
 				}
 				return
 			}

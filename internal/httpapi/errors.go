@@ -21,12 +21,31 @@ const (
 	CodeInvalidCredentials ErrorCode = "INVALID_CREDENTIALS"
 	CodeSessionExpired     ErrorCode = "SESSION_EXPIRED"
 	CodeForbidden          ErrorCode = "FORBIDDEN"
-	CodeValidationFailed   ErrorCode = "VALIDATION_FAILED"
+	// CodeAgentRequired is not a denial. The operation works through an
+	// agent identity — a presence change, a leg of a call, an agent's own
+	// history — and the credential has none: an administrator who takes no
+	// calls, or a key that named no agent. Distinct from FORBIDDEN, which
+	// would send the caller looking for a permission to add.
+	CodeAgentRequired ErrorCode = "AGENT_REQUIRED"
+	// CodeAgentImpersonationNotAllowed refuses X-AICC-Agent-ID on a browser
+	// session. An account is bound to at most one agent identity, so the
+	// header could only ever mean "act as somebody else".
+	CodeAgentImpersonationNotAllowed ErrorCode = "AGENT_IMPERSONATION_NOT_ALLOWED"
+	// CodeInsufficientScope names what is missing. FORBIDDEN says only that
+	// the answer is no, which leaves a caller unable to tell a capability
+	// they were never granted from a rule about this particular row.
+	CodeInsufficientScope ErrorCode = "INSUFFICIENT_SCOPE"
+	CodeValidationFailed  ErrorCode = "VALIDATION_FAILED"
 	// CodeUserDataTooLarge refuses business data rather than truncating it:
 	// a screen showing half a customer's details is worse than one saying the
 	// request was refused.
 	CodeUserDataTooLarge ErrorCode = "USER_DATA_TOO_LARGE"
 	CodeNotFound         ErrorCode = "NOT_FOUND"
+	// CodeMethodNotAllowed answers the router's own refusal, so that a
+	// wrong method lands in the same envelope as everything else. Without
+	// it chi replies 405 with an empty body and no content type, and the
+	// contract's promise that errors *always* use the envelope is false.
+	CodeMethodNotAllowed ErrorCode = "METHOD_NOT_ALLOWED"
 	CodeConflict         ErrorCode = "CONFLICT"
 	CodeExtensionInUse   ErrorCode = "EXTENSION_IN_USE"
 	// CodeExtensionAssignedToAgent refuses to delete an extension somebody

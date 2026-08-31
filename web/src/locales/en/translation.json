@@ -17,7 +17,8 @@
     "previous": "Previous",
     "next": "Next",
     "viewAll": "View all",
-    "close": "Close"
+    "close": "Close",
+    "done": "Done"
   },
   "auth": {
     "signInTitle": "Sign in",
@@ -49,7 +50,8 @@
     "agentIdentities": "Agents & Phones",
     "myCalls": "My Calls",
     "contacts": "Contacts",
-    "webhooks": "Webhooks"
+    "webhooks": "Webhooks",
+    "keys": "API Keys"
   },
   "roles": {
     "AGENT": "Agent",
@@ -90,8 +92,12 @@
     "INVALID_CREDENTIALS": "Incorrect username or password.",
     "SESSION_EXPIRED": "Your session has expired. Please sign in again.",
     "FORBIDDEN": "You do not have permission to do that.",
+    "AGENT_REQUIRED": "This action works through an agent identity, and this account has none.",
+    "AGENT_IMPERSONATION_NOT_ALLOWED": "A signed-in account acts as itself.",
+    "INSUFFICIENT_SCOPE": "This credential does not hold the capability {{requiredScope}}.",
     "VALIDATION_FAILED": "Some fields did not pass validation; check each one.",
     "NOT_FOUND": "Not found.",
+    "METHOD_NOT_ALLOWED": "The endpoint does not take this method.",
     "CONFLICT": "That change conflicts with the current state.",
     "USER_SUSPENDED": "This account is suspended.",
     "SWITCH_DOWN": "The telephony switch is unreachable.",
@@ -106,6 +112,10 @@
     "CALL_NOT_FOUND": "That call has already ended.",
     "NOT_CALL_PARTY": "You are not on that call.",
     "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against.",
+    "USER_DATA_TOO_LARGE": "The call has no room for this business data: at most {{maxKeys}} keys, {{maxValueBytes}} bytes each. Nothing was written.",
+    "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "This kind of call does not offer that.",
+    "LAST_ADMIN": "This would leave nobody able to administer the platform.",
+    "EXTENSION_POOL_EXHAUSTED": "There are no free extension numbers left in the pool.",
     "rules": {
       "DEFAULT_NEEDS_OUTBOUND": "Only a number that can place calls can be the default one.",
       "DIGITS_ONLY": "Digits only.",
@@ -700,5 +710,43 @@
       "DELIVERED": "Delivered",
       "FAILED": "Failed"
     }
+  },
+  "keys": {
+    "title": "API Keys",
+    "description": "The credentials a system authenticates with. Each key holds exactly the capabilities it was issued with, and is revoked on its own.",
+    "issue": "Issue key",
+    "edit": "Edit key",
+    "name": "Name",
+    "nameHint": "What holds this key — the integration, not the person who set it up.",
+    "prefix": "Prefix",
+    "scopes": "Capabilities",
+    "scopesHint": "Exactly what this key may do. A key with none authenticates and can reach nothing.",
+    "noScopes": "none",
+    "lastUsed": "Last used",
+    "status": "Status",
+    "statuses": {
+      "ENABLED": "Enabled",
+      "REVOKED": "Revoked"
+    },
+    "none": "No keys have been issued.",
+    "revoke": "Revoke",
+    "revokeConfirm": "Revoke {{name}}? This cannot be undone — anything using it stops working at once, and a replacement is a new key.",
+    "issuedTitle": "{{name}} is issued",
+    "secret": "Secret",
+    "secretHint": "This is the only time it is shown. It is stored as a digest, so nobody can produce it again — a lost key is revoked and reissued.",
+    "howToSend": "How to send it",
+    "resources": {
+      "agent": "Agent identity and presence",
+      "audit": "The audit trail",
+      "calls": "Calls: control, placing, watching",
+      "config": "Platform configuration",
+      "contacts": "The customer record book",
+      "history": "What happened on finished calls",
+      "keys": "API keys themselves",
+      "quality": "Quality review",
+      "reports": "Aggregates over the floor",
+      "users": "Accounts and roles"
+    },
+    "selectGroup": "Select every {{resource}} capability"
   }
 }

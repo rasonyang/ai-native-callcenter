@@ -38,15 +38,32 @@ type AgentStateLog struct {
 	ExitedAt  pgtype.Timestamptz `json:"exitedAt"`
 }
 
+type ApiKey struct {
+	ID         uuid.UUID          `json:"id"`
+	Name       string             `json:"name"`
+	KeyHash    []byte             `json:"keyHash"`
+	KeyPrefix  string             `json:"keyPrefix"`
+	Status     string             `json:"status"`
+	Scopes     []string           `json:"scopes"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+	CreatedBy  *uuid.UUID         `json:"createdBy"`
+	LastUsedAt pgtype.Timestamptz `json:"lastUsedAt"`
+	RevokedAt  pgtype.Timestamptz `json:"revokedAt"`
+}
+
 type AuditLog struct {
-	ID         int64              `json:"id"`
-	OccurredAt pgtype.Timestamptz `json:"occurredAt"`
-	ActorID    *uuid.UUID         `json:"actorId"`
-	Action     string             `json:"action"`
-	TargetKind string             `json:"targetKind"`
-	TargetID   string             `json:"targetId"`
-	Detail     []byte             `json:"detail"`
-	IP         *netip.Addr        `json:"ip"`
+	ID          int64              `json:"id"`
+	OccurredAt  pgtype.Timestamptz `json:"occurredAt"`
+	ActorID     *uuid.UUID         `json:"actorId"`
+	Action      string             `json:"action"`
+	TargetKind  string             `json:"targetKind"`
+	TargetID    string             `json:"targetId"`
+	Detail      []byte             `json:"detail"`
+	IP          *netip.Addr        `json:"ip"`
+	SubjectKind *string            `json:"subjectKind"`
+	SubjectID   *uuid.UUID         `json:"subjectId"`
+	SubjectName string             `json:"subjectName"`
+	AgentID     *uuid.UUID         `json:"agentId"`
 }
 
 type Callback struct {

@@ -169,9 +169,20 @@ func (s *Server) ListCallbacks(w http.ResponseWriter, r *http.Request, params ap
 
 // ClaimCallback marks a callback as being worked by the caller.
 func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	identity, _ := identityFrom(r.Context())
-
-	callback, err := s.ledger.ClaimCallback(r.Context(), id, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	// handled_by has always held a user id and still does. A key working as
+	// an agent writes that agent's person, so a promise is kept by somebody a
+	// colleague can go and ask — that a key placed the request is the audit
+	// trail's business, not this column's (ruling 2).
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is claimed by a person; name the agent this key works for", nil)
+		return
+	}
+	callback, err := s.ledger.ClaimCallback(r.Context(), id, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Either it does not exist or someone claimed it first; to the
@@ -188,9 +199,16 @@ func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.U
 
 // ReleaseCallback hands a claimed callback back to the pool.
 func (s *Server) ReleaseCallback(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	identity, _ := identityFrom(r.Context())
-
-	callback, err := s.ledger.ReleaseCallback(r.Context(), id, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is released by the person holding it", nil)
+		return
+	}
+	callback, err := s.ledger.ReleaseCallback(r.Context(), id, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Not claimed, or claimed by somebody else: either way it is not
@@ -223,8 +241,16 @@ func (s *Server) CompleteCallback(w http.ResponseWriter, r *http.Request, id uui
 		return
 	}
 
-	identity, _ := identityFrom(r.Context())
-	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	if !ac.IsActingForAPerson() {
+		writeError(w, http.StatusForbidden, CodeAgentRequired,
+			"a callback is completed by the person holding it", nil)
+		return
+	}
+	callback, err := s.ledger.HandleCallback(r.Context(), id, req.Status, ac.ActorUserID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, http.StatusNotFound, CodeNotFound, "no such callback", nil)
@@ -413,6 +439,20 @@ func (s *Server) ListAuditLogs(w http.ResponseWriter, r *http.Request, params ap
 			ip := row.IP
 			entry.IP = &ip
 		}
+		// Which credential asked, and as whom. Absent on rows written before
+		// keys were a managed credential: the shared secret they were written
+		// by had no identity to name, and inventing one now would be a
+		// forgery in the one table nobody may forge.
+		if row.SubjectKind != "" {
+			kind := api.AuditEntrySubjectKind(row.SubjectKind)
+			entry.SubjectKind = &kind
+			entry.SubjectID = row.SubjectID
+			if row.SubjectName != "" {
+				name := row.SubjectName
+				entry.SubjectName = &name
+			}
+		}
+		entry.AgentID = row.AgentID
 		items = append(items, entry)
 	}
 	writeJSON(w, http.StatusOK, api.AuditEntryList{Items: items, Total: int(total)})

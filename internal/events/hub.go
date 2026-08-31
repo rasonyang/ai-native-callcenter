@@ -24,8 +24,15 @@ type Subscriber struct {
 	UserID uuid.UUID
 	// AgentID is set when the user is an agent (nil for pure supervisors).
 	AgentID *uuid.UUID
-	// IsSupervisor grants the unrestricted view (supervisor and admin roles).
-	IsSupervisor bool
+	// SeesEveryCall grants the unrestricted view: every call's events, not
+	// only this subscriber's own.
+	//
+	// It is a resolved capability, deliberately not a role. The httpapi
+	// package decides it from the subject's scopes (calls:read:all) and hands
+	// the answer over; this package has no business knowing that a product
+	// with roles exists, and when it did — as IsSupervisor — a rule about
+	// authorization lived where the authorization code could not see it.
+	SeesEveryCall bool
 	// QueueIDs are the queues this agent staffs.
 	QueueIDs []uuid.UUID
 	// Types, when non-empty, narrows delivery further at client request.
@@ -220,9 +227,9 @@ func (s Subscriber) wants(ev Event, scope Scope) bool {
 	if len(s.Types) > 0 && !containsType(s.Types, ev.Type) {
 		return false
 	}
-	// A supervisor or administrator sees everything, which is the same rule
-	// the REST handlers apply.
-	if s.IsSupervisor {
+	// The unrestricted view, which is the same line calls:read:all draws in
+	// the REST handlers.
+	if s.SeesEveryCall {
 		return true
 	}
 	if scope.IsBroadcast {

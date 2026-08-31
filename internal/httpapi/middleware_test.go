@@ -4,7 +4,6 @@ package httpapi
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +12,57 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
+	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
+
+// stubKeys is the key store the authentication middleware talks to. It is a
+// stand-in for what commit ④ installs; the seam is what these tests exercise,
+// because the rules under test — a bearer is answered on its own terms, a key
+// never falls through to the session path, a key cannot reach an operation the
+// contract gives it no alternative on — are the middleware's and not the
+// store's.
+type stubKeys struct {
+	secret  string
+	subject KeySubject
+}
+
+func (k stubKeys) AuthenticateKey(_ context.Context, presented string) (KeySubject, error) {
+	if k.secret == "" || presented != k.secret {
+		return KeySubject{}, errors.New("no such key")
+	}
+	return k.subject, nil
+}
+
+// The management half. These tests are about the door, not about issuing
+// keys — the real store is exercised end to end by scopeauth_test.go against
+// a real database — so this half refuses rather than pretends.
+var errNotAKeyStore = errors.New("this stub issues no keys")
+
+func (stubKeys) Issue(context.Context, string, []string, *uuid.UUID) (store.APIKey, string, error) {
+	return store.APIKey{}, "", errNotAKeyStore
+}
+func (stubKeys) Get(context.Context, uuid.UUID) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
+}
+func (stubKeys) List(context.Context) ([]store.APIKey, error) { return nil, errNotAKeyStore }
+func (stubKeys) Update(context.Context, uuid.UUID, *string, *[]string) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
+}
+func (stubKeys) Revoke(context.Context, uuid.UUID) (store.APIKey, error) {
+	return store.APIKey{}, errNotAKeyStore
+}
+
+// aKey is a key holding exactly the scopes named, under a name a reader of the
+// audit trail can recognise.
+func aKey(secret string, scopes ...string) stubKeys {
+	return stubKeys{secret: secret, subject: KeySubject{
+		KeyID: uuid.New(), Name: "crm-integration", Scopes: scopes,
+	}}
+}
 
 // keyedDialer answers a click-to-dial and remembers it happened, so a test can
 // tell "the request was authenticated and refused later" from "it never got
@@ -31,13 +77,14 @@ func (d *keyedDialer) Dial(context.Context, outbound.AgentDialRequest) (uuid.UUI
 	return uuid.New(), nil
 }
 
-func keyedServer(t *testing.T, key string) (http.Handler, *keyedDialer) {
+func keyedServer(t *testing.T, keys KeyService) (http.Handler, *keyedDialer) {
 	t.Helper()
 	dialer := &keyedDialer{}
-	srv := New(config.Config{APIKey: key, SessionCookie: "aicc_session"}, Deps{
+	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{
 		Outbound: dialer,
 		Agents:   dialerPresence{},
 		AgentDir: dialerDirectory{},
+		Keys:     keys,
 	})
 	return srv.router(), dialer
 }
@@ -46,7 +93,7 @@ func machineRequest(key string) *http.Request {
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls", strings.NewReader(
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`))
 	if key != "" {
-		r.Header.Set(apiKeyHeader, key)
+		r.Header.Set("Authorization", "Bearer "+key)
 	}
 	return r
 }
@@ -60,7 +107,7 @@ func machineRequest(key string) *http.Request {
 // credential deliberately and has no cookie to abuse. Demanding it anyway
 // would be a ritual every integration would satisfy with a constant.
 func TestAKeyedRequestNeedsNoSessionAndNoCsrfHeader(t *testing.T) {
-	router, dialer := keyedServer(t, "s3cret")
+	router, dialer := keyedServer(t, aKey("s3cret", api.ScopeCallsCreate))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, machineRequest("s3cret"))
 
@@ -77,7 +124,7 @@ func TestAKeyedRequestNeedsNoSessionAndNoCsrfHeader(t *testing.T) {
 // bad credential, and send an integrator looking for a login problem they do
 // not have.
 func TestAWrongKeyIsRefusedRatherThanTreatedAsNoSession(t *testing.T) {
-	router, dialer := keyedServer(t, "s3cret")
+	router, dialer := keyedServer(t, aKey("s3cret", api.ScopeCallsCreate))
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, machineRequest("wrong"))
 
@@ -97,11 +144,11 @@ func TestAWrongKeyIsRefusedRatherThanTreatedAsNoSession(t *testing.T) {
 	}
 }
 
-// A deployment that never named a key has the machine path closed, and the
-// config loader gives an unset variable the empty string — so an empty header
-// must not compare equal to an empty setting and let everybody in.
+// A deployment that has issued no keys — or has no key store at all — answers
+// every bearer the same 401. Nothing about "no keys exist" may read as "any
+// key will do".
 func TestAnUnconfiguredKeyOpensNothing(t *testing.T) {
-	router, dialer := keyedServer(t, "")
+	router, dialer := keyedServer(t, nil)
 	for _, presented := range []string{"anything", " "} {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, machineRequest(presented))
@@ -118,20 +165,18 @@ func TestAnUnconfiguredKeyOpensNothing(t *testing.T) {
 // session rules — including the CSRF header, which a browser does have to
 // send.
 func TestWithoutAKeyTheSessionRulesStillApply(t *testing.T) {
-	router, dialer := keyedServer(t, "s3cret")
+	router, dialer := keyedServer(t, aKey("s3cret", api.ScopeCallsCreate))
 
+	// No credential at all: authentication refuses before the CSRF rule is
+	// ever reached, because the CSRF header protects a session and there is
+	// none to protect.
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, machineRequest(""))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("http = %d: %s — a mutating request with no CSRF header is refused", w.Code, w.Body)
-	}
-
-	r := machineRequest("")
-	r.Header.Set(csrfHeader, "1")
-	w = httptest.NewRecorder()
-	router.ServeHTTP(w, r)
 	if w.Code != http.StatusUnauthorized {
-		t.Fatalf("http = %d: %s — and with no cookie there is no session", w.Code, w.Body)
+		t.Fatalf("http = %d: %s — with no cookie there is no session", w.Code, w.Body)
+	}
+	if code := errorCodeOf(t, w); code != string(CodeSessionExpired) {
+		t.Errorf("code = %q, want SESSION_EXPIRED — for a browser, the session is the problem", code)
 	}
 
 	if dialer.placed {
@@ -139,17 +184,23 @@ func TestWithoutAKeyTheSessionRulesStillApply(t *testing.T) {
 	}
 }
 
-// The key is the deployment's own credential, not a person's, so the audit row
-// carries no user id — a made-up one would look like somebody to a reader
-// chasing who placed a call. It says what it was instead.
+// The key is not a person, so the audit row carries no user id — a made-up
+// one would look like somebody to a reader chasing who placed a call. It says
+// what it actually was in columns of its own.
+//
+// Those columns are the point. Before them the only way to record "a key did
+// this" was a word buried in the detail jsonb, which is a fact stored where
+// nothing can filter on it: an operator asking "what has the CRM been doing"
+// had a full-text search and a hope.
 func TestTheKeyIsAuditedAsItselfRatherThanAsAUser(t *testing.T) {
 	recorder := &recordingAuditor{}
 	dialer := &keyedDialer{}
-	srv := New(config.Config{APIKey: "s3cret", SessionCookie: "aicc_session"}, Deps{
+	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{
 		Outbound: dialer,
 		Agents:   dialerPresence{},
 		AgentDir: dialerDirectory{},
 		Auditor:  recorder,
+		Keys:     aKey("s3cret", api.ScopeCallsCreate),
 	})
 	w := httptest.NewRecorder()
 	srv.router().ServeHTTP(w, machineRequest("s3cret"))
@@ -160,24 +211,27 @@ func TestTheKeyIsAuditedAsItselfRatherThanAsAUser(t *testing.T) {
 	if recorder.actorID != nil {
 		t.Errorf("actor = %v, want null — no user placed this call", recorder.actorID)
 	}
-	detail, err := json.Marshal(recorder.detail)
-	if err != nil {
-		t.Fatalf("encode detail: %v", err)
+	if recorder.subject.Kind != string(SubjectKey) {
+		t.Errorf("subjectKind = %q, want %s", recorder.subject.Kind, SubjectKey)
 	}
-	if !strings.Contains(string(detail), machineUsername) {
-		t.Errorf("detail = %s, want it to name the API key — otherwise the row is "+
-			"indistinguishable from one with no actor at all", detail)
+	if recorder.subject.Name != "crm-integration" {
+		t.Errorf("subjectName = %q, want the key's own name — otherwise the row "+
+			"is indistinguishable from one with no actor at all", recorder.subject.Name)
+	}
+	if recorder.subject.ID == nil {
+		t.Error("subjectId is null; the row cannot be traced back to which key it was")
 	}
 }
 
 type recordingAuditor struct {
 	actorID *uuid.UUID
+	subject store.AuditSubject
 	detail  map[string]any
 }
 
-func (a *recordingAuditor) Audit(_ context.Context, actorID *uuid.UUID, _, _, _ string,
+func (a *recordingAuditor) Audit(_ context.Context, who store.AuditSubject, _, _, _ string,
 	detail map[string]any, _ string) error {
-	a.actorID, a.detail = actorID, detail
+	a.actorID, a.subject, a.detail = who.ActorID, who, detail
 	return nil
 }
 
@@ -204,11 +258,12 @@ func hangupAs(t *testing.T, callID uuid.UUID, dir AgentDirectory,
 	decorate func(*http.Request)) (*httptest.ResponseRecorder, *endingCalls) {
 	t.Helper()
 	calls := &endingCalls{}
-	srv := New(config.Config{APIKey: "s3cret", SessionCookie: "aicc_session"}, Deps{
+	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{
 		Calls:    calls,
 		Agents:   dialerPresence{},
 		AgentDir: dir,
 		Outbound: &keyedDialer{},
+		Keys:     aKey("s3cret", api.ScopeCallsControl),
 	})
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
 	decorate(r)
@@ -233,7 +288,7 @@ func (noAgents) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) { 
 func TestASystemCanEndTheCallItPlaced(t *testing.T) {
 	callID := uuid.New()
 	w, calls := hangupAs(t, callID, noAgents{}, func(r *http.Request) {
-		r.Header.Set(apiKeyHeader, "s3cret")
+		r.Header.Set("Authorization", "Bearer s3cret")
 	})
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -254,8 +309,9 @@ func TestASupervisorCanEndACallTheyAreNotOn(t *testing.T) {
 	calls := &endingCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: noAgents{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
-	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleSupervisor,
+	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
+		Kind: SubjectUser, SubjectID: uuid.New(),
+		scopes: grantedScopes(auth.RoleSupervisor),
 	}))
 	w := httptest.NewRecorder()
 	srv.HangupCall(w, r, callID)
@@ -280,8 +336,9 @@ func TestAnAgentStillEndsOnlyTheirOwnLeg(t *testing.T) {
 	calls := &endingCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
-	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleAgent,
+	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
+		Kind: SubjectUser, SubjectID: uuid.New(), AgentID: uuid.New(),
+		scopes: grantedScopes(auth.RoleAgent),
 	}))
 	w := httptest.NewRecorder()
 	srv.HangupCall(w, r, callID)
@@ -304,41 +361,44 @@ func TestAnAgentStillEndsOnlyTheirOwnLeg(t *testing.T) {
 // has nothing to log in with, so it retries that forever. The boundary itself
 // is the point of the 401 and does not move: a key that can place calls must
 // not reach the configuration saying where call records are sent.
-func TestAnAPIKeyOnASessionEndpointIsNotToldToRefreshItsSession(t *testing.T) {
-	srv := New(config.Config{SessionCookie: "aicc_session", APIKey: "the-key"}, Deps{})
+func TestAKeyIsNotToldToRefreshASessionItCannotHave(t *testing.T) {
+	// Logging out is the operation the contract gives no bearer alternative:
+	// a key has no session to end. It is the standing example of "this
+	// credential does not reach this operation", which is a different answer
+	// from "you lack a scope".
+	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{
+		Keys: aKey("the-key", api.AllScopes...),
+	})
 
-	r := httptest.NewRequest(http.MethodGet, "/api/v1/webhook-subscriptions", nil)
-	r.Header.Set(apiKeyHeader, "the-key")
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	r.Header.Set("Authorization", "Bearer the-key")
 	w := httptest.NewRecorder()
-	srv.requireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		t.Error("an API key reached a session-only endpoint")
-	})).ServeHTTP(w, r)
+	srv.router().ServeHTTP(w, r)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401: %s", w.Code, w.Body)
 	}
-	var body struct {
-		Error struct {
-			Code string `json:"code"`
-		} `json:"error"`
+	if code := errorCodeOf(t, w); code != string(CodeInvalidCredentials) {
+		t.Errorf("code = %q, want INVALID_CREDENTIALS — told SESSION_EXPIRED an "+
+			"integration goes and refreshes a session it never had", code)
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
-	}
-	if body.Error.Code != string(CodeInvalidCredentials) {
-		t.Errorf("code = %q, want %q", body.Error.Code, CodeInvalidCredentials)
+	// Holding every scope in the vocabulary changes nothing: this is not a
+	// missing capability, it is the wrong kind of credential.
+	if strings.Contains(w.Body.String(), string(CodeInsufficientScope)) {
+		t.Errorf("body = %s, want it not to blame a scope", w.Body)
 	}
 
 	// A browser with no cookie is still told its session is the problem,
 	// because for a browser it is.
-	plain := httptest.NewRequest(http.MethodGet, "/api/v1/webhook-subscriptions", nil)
+	plain := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	plain.Header.Set(csrfHeader, "1")
 	w = httptest.NewRecorder()
-	srv.requireSession(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).
-		ServeHTTP(w, plain)
-	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
-		t.Fatal(err)
+	srv.router().ServeHTTP(w, plain)
+	if code := errorCodeOf(t, w); code != string(CodeSessionExpired) {
+		t.Errorf("code = %q, want SESSION_EXPIRED for a browser", code)
 	}
-	if body.Error.Code != string(CodeSessionExpired) {
-		t.Errorf("code = %q, want %q for a browser", body.Error.Code, CodeSessionExpired)
-	}
+}
+
+func (noAgents) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.Nil, errors.New("not an agent")
 }

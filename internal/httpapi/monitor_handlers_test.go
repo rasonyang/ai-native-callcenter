@@ -52,9 +52,18 @@ func (oneAgentDirectory) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, 
 func monitorAs(t *testing.T, srv *Server, callID uuid.UUID, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/monitor", strings.NewReader(body))
+	// The agent identity the middleware would have resolved for this account:
+	// a supervisor listens in from the phone bound to their own seat, so the
+	// directory the server was built with is what supplies it.
+	agentID := []uuid.UUID{}
+	if srv.agentDir != nil {
+		if resolved, err := srv.agentDir.AgentIDForUser(r, uuid.New()); err == nil {
+			agentID = append(agentID, resolved)
+		}
+	}
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
 		UserID: uuid.New(), Role: auth.RoleSupervisor,
-	}))
+	}, agentID...))
 	w := httptest.NewRecorder()
 	srv.MonitorCall(w, r, callID)
 	return w
@@ -140,4 +149,8 @@ func TestMonitorRefusals(t *testing.T) {
 	if w.Code != http.StatusConflict {
 		t.Errorf("monitoring yourself: http = %d, want 409", w.Code)
 	}
+}
+
+func (oneAgentDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
+	return uuid.New(), nil
 }

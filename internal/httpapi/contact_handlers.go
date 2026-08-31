@@ -49,8 +49,11 @@ func (s *Server) CreateContact(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	identity, _ := identityFrom(r.Context())
-	contact, err := s.contacts.Create(r.Context(), contactWriteFrom(in), &identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	contact, err := s.contacts.Create(r.Context(), contactWriteFrom(in), ac.actorOrNil())
 	s.writeContact(w, r, contact, err, http.StatusCreated)
 }
 
@@ -60,8 +63,11 @@ func (s *Server) UpdateContact(w http.ResponseWriter, r *http.Request, contactID
 	if !decode(w, r, &in) {
 		return
 	}
-	identity, _ := identityFrom(r.Context())
-	contact, err := s.contacts.Update(r.Context(), contactID, contactWriteFrom(in), &identity.UserID)
+	ac, ok := mustAuth(w, r)
+	if !ok {
+		return
+	}
+	contact, err := s.contacts.Update(r.Context(), contactID, contactWriteFrom(in), ac.actorOrNil())
 	s.writeContact(w, r, contact, err, http.StatusOK)
 }
 

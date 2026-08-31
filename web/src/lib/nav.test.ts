@@ -33,6 +33,7 @@ describe('the sidebar each role gets', () => {
       '/admin/reports',
       '/admin/audit',
       '/admin/webhooks',
+      '/admin/keys',
     ])
   })
 

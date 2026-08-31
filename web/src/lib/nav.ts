@@ -1,5 +1,5 @@
 import {
-  Activity, BarChart3, Bot, BookUser, FileClock, Headphones, LayoutDashboard,
+  Activity, BarChart3, Bot, BookUser, FileClock, Headphones, KeyRound, LayoutDashboard,
   ListChecks, Phone, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users, Webhook,
 } from 'lucide-react'
 
@@ -93,6 +93,11 @@ export const NAV: NavGroup[] = [
       // than under Manage for the reason the audit trail is: Manage changes how
       // calls are handled, and a subscription changes nothing about a call.
       { to: '/admin/webhooks', labelKey: 'nav.webhooks', icon: Webhook, roles: ['ADMIN'], isReady: true },
+      // The credentials a system authenticates with. Under System rather than
+      // Manage for the same reason the audit trail is: Manage changes how
+      // calls are handled, and a key changes nothing about a call — it changes
+      // who may ask the platform to.
+      { to: '/admin/keys', labelKey: 'nav.keys', icon: KeyRound, roles: ['ADMIN'], isReady: true },
     ],
   },
 ]
