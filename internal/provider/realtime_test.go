@@ -631,6 +631,35 @@ func TestInterruptOnAProviderThatCancelsItself(t *testing.T) {
 	f.refuteMessage("response.cancel")
 }
 
+// A turn that speaks before it calls a tool adds a second output item, and the
+// caller can barge in over the sentence that preceded the call. Truncation has
+// to name the audio the caller was hearing; naming the function call instead is
+// rejected by the provider, and the model then believes a cut-off sentence was
+// heard in full.
+func TestBargeInTruncatesTheSpokenItemNotTheToolCall(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.output_item.added",
+		"item": map[string]any{"id": "item_7", "type": "message"}})
+	f.send(map[string]any{"type": "response.output_item.added",
+		"item": map[string]any{"id": "item_8", "type": "function_call"}})
+	time.Sleep(50 * time.Millisecond)
+
+	if err := session.Interrupt(InterruptReasonSpeech, 640); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+
+	truncate := f.awaitMessage("conversation.item.truncate")
+	if truncate["item_id"] != "item_7" {
+		t.Errorf("truncated %v, want the audio the caller was hearing", truncate["item_id"])
+	}
+}
+
 // Where it does not, a missed cancel leaves the model talking over the caller.
 func TestInterruptOnAProviderThatMustBeTold(t *testing.T) {
 	f := newFakeProvider(t, acceptSession)

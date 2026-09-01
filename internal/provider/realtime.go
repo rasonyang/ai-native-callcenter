@@ -420,6 +420,14 @@ func (r *Realtime) buildTurnDetection(turn TurnDetection) any {
 	}
 }
 
+// isSpokenItem reports whether an output item is the model talking, which is
+// the only kind truncation refers to. A dialect that omits the type is taken at
+// its word rather than losing the only item there is; a named non-message item
+// — a function call — is not a truncation target.
+func isSpokenItem(itemType string) bool {
+	return itemType == "" || itemType == "message"
+}
+
 // buildTools renders tool specifications in the flat shape both providers were
 // verified to accept.
 func (r *Realtime) buildTools(tools []ToolSpec) []map[string]any {
@@ -492,7 +500,12 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.emit(Event{Type: EventTypeResponseStarted})
 
 	case "response.output_item.added":
-		if event.Item != nil && event.Item.ID != "" {
+		// Only the item carrying speech can be truncated. A turn that says
+		// something before it calls a tool adds a second item, and letting
+		// that one overwrite the id would aim the truncate at the function
+		// call: the provider rejects it, and the model is left believing the
+		// caller heard a sentence that was cut off three words in.
+		if event.Item != nil && event.Item.ID != "" && isSpokenItem(event.Item.Type) {
 			r.mu.Lock()
 			r.responseItemID = event.Item.ID
 			r.mu.Unlock()
