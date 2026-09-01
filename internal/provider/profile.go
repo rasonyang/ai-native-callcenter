@@ -132,11 +132,58 @@ func QwenProfile() Profile {
 	}
 }
 
+// GatewayProfile is the Realtime gateway: a separate service that composes ASR,
+// an LLM and TTS behind this same protocol, so an engine that never spoke
+// Realtime can answer a call without this repository learning how it works
+// (phase1-decisions A6, docs/provider-extension.md §"Attaching something that
+// is not a vendor"). It impersonates no vendor — it answers under its own name.
+//
+// From here it is indistinguishable from a vendor, which is the point: it
+// differs from the two above in values, not in code.
+func GatewayProfile() Profile {
+	return Profile{
+		Name: "gateway",
+		// The gateway's own default listen address, co-located with this
+		// process. It serves plain ws:// only — the official SDKs demand
+		// wss://, our client does not — and a deployment that moves it says so
+		// with AICC_PROVIDER_ENDPOINT.
+		Endpoint:  "ws://127.0.0.1:8080/v1/realtime",
+		Model:     "cascade",
+		APIKeyEnv: "REALTIME_API_KEY",
+		Style:     styleGA,
+		// The voice belongs to whatever engine the gateway drives, so the
+		// deployment's own flows name it (global.voice) and there is no
+		// vendor default that would be right here.
+		Voice: "",
+		// Telephone audio is refused outright: this endpoint takes linear PCM
+		// at 24 kHz in both directions and nothing else, so both directions
+		// resample (8 kHz is a factor of three away, which media.Converter
+		// handles without an arbitrary-ratio resampler).
+		AcceptsG711:  false,
+		LinearInput:  media.PCM16Format(media.RateProviderOut),
+		LinearOutput: media.PCM16Format(media.RateProviderOut),
+		// No TranscribeModel, and like Qwen's that is the finding rather than
+		// an omission: the gateway accepts audio.input.transcription but its
+		// model and language only echo. What actually recognises the caller is
+		// configured on the gateway's own profile, so a value here would be
+		// one nothing reads.
+		TranscribeModel: "",
+		// Its turn detection cancels the response when it hears the caller
+		// (turn_detection.interrupt_response, on by default), so saying so
+		// again would be noise.
+		CancelsResponseItself: true,
+		SemanticTurnType:      "semantic_vad",
+	}
+}
+
 // Provider names this build can run. A deployment runs exactly one of them,
 // chosen at startup: Qwen inside mainland China, OpenAI elsewhere.
 const (
 	NameOpenAI = "openai"
 	NameQwen   = "qwen"
+	// NameGateway is not a vendor but a service of our own composing one
+	// behind this protocol; it is chosen the same way for the same reason.
+	NameGateway = "gateway"
 )
 
 // Override replaces where the deployment's provider is reached and which model
@@ -173,9 +220,11 @@ func ProfileFor(name string, override Override) (Profile, error) {
 		profile = OpenAIProfile()
 	case NameQwen:
 		profile = QwenProfile()
+	case NameGateway:
+		profile = GatewayProfile()
 	default:
-		return Profile{}, fmt.Errorf("provider: unknown provider %q (%s, %s)",
-			name, NameOpenAI, NameQwen)
+		return Profile{}, fmt.Errorf("provider: unknown provider %q (%s, %s, %s)",
+			name, NameOpenAI, NameQwen, NameGateway)
 	}
 	if override.Endpoint != "" {
 		profile.Endpoint = override.Endpoint

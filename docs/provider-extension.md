@@ -92,18 +92,41 @@ endpoint points at itself, its own `AICC_PROVIDER` value, and its own dialect
 if it needs one. It impersonates nobody: it is its own name, speaking a
 published protocol.
 
-Today it is reached without a profile at all:
+It now has one — `AICC_PROVIDER=gateway`, `GatewayProfile()`:
 
 ```sh
-AICC_PROVIDER=openai
-AICC_PROVIDER_ENDPOINT=wss://gateway.internal:8443/v1/realtime
-AICC_PROVIDER_MODEL=whatever-it-calls-itself
+AICC_PROVIDER=gateway
+AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9090/v1/realtime   # empty keeps :8080
+REALTIME_API_KEY=…                # the credential the gateway accepts
+AICC_TRANSCRIBE_PROVIDER=qwen     # the human phase's recogniser is separate
 ```
 
-That works because the endpoint is configuration, not a constant. It is the
-right way to try a gateway; it is the wrong way to ship one, because the
-profile then lies about which traits hold. A gateway that ships gets a profile
-of its own.
+The traits that make it a profile rather than an endpoint override:
+
+- **`AcceptsG711: false`, 24 kHz linear both ways.** It refuses telephone
+  audio outright, so both directions resample. Reaching it as
+  `AICC_PROVIDER=openai` with an endpoint override would put G.711 on a socket
+  that rejects it, and the call would fail on its first frame rather than at
+  startup — which is exactly the lie a profile exists to prevent.
+- **`TranscribeModel: ""`.** It accepts `audio.input.transcription`, but the
+  model and language in it only echo; what recognises the caller is configured
+  on the gateway's own profile. A value here would be one nothing reads.
+- **`Voice: ""`.** The voice belongs to whichever engine the gateway drives,
+  and the flow names it (`global.voice`) — so a name in this profile could
+  only be wrong for some deployment. Voice names are the engine's, not the
+  gateway's: a flow published for one composition is not portable to another.
+- **`CancelsResponseItself: true`.** Its turn detection cancels the response
+  when it hears the caller.
+
+The gateway serves plain `ws://` — the official SDKs demand `wss://`, this
+client does not — and it is not a recogniser, which is why
+`AICC_TRANSCRIBE_PROVIDER` has to be said rather than following
+`AICC_PROVIDER`.
+
+Reaching a gateway through an endpoint override alone is still the right way
+to *try* one, because the endpoint is configuration and not a constant. It is
+the wrong way to ship one, for the reason above: the profile then lies about
+which traits hold.
 
 ## Where a call's language comes in
 

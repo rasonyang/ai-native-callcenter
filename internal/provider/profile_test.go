@@ -2,7 +2,12 @@
 
 package provider
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/media"
+)
 
 // Whether the caller's own words appear in the bot phase's transcript is a
 // property of the profile, and the two vendors reach the same place by
@@ -91,5 +96,76 @@ func TestTheSessionUpdateAsksForCallerTranscriptionOnlyWhereItIsRead(t *testing.
 	}
 	if _, present := beta["audio"]; present {
 		t.Error("the beta dialect sent the GA audio shape")
+	}
+}
+
+// The gateway takes linear PCM at one rate in both directions and refuses
+// telephone audio outright, so the conversion it forces has to be real: a
+// profile that claimed G.711 here would put PCMU on a socket that rejects it,
+// and the call would fail on the first frame rather than at startup.
+func TestTheGatewayTakesLinearAudioAtOneRateBothWays(t *testing.T) {
+	profile, err := ProfileFor(NameGateway, Override{})
+	if err != nil {
+		t.Fatalf("gateway is not a provider this build can run: %v", err)
+	}
+
+	input, output := profile.FormatsFor(media.LawMu)
+	want := media.PCM16Format(24000)
+	if input != want || output != want {
+		t.Fatalf("formats = %s / %s, want %s both ways", input, output, want)
+	}
+
+	// Both directions are an integer factor from the telephone rate, which is
+	// the whole reason no arbitrary-ratio resampler exists in this repository.
+	if _, err := media.NewConverter(media.G711Format(media.LawMu), input); err != nil {
+		t.Errorf("caller audio cannot reach the gateway: %v", err)
+	}
+	if _, err := media.NewConverter(output, media.G711Format(media.LawMu)); err != nil {
+		t.Errorf("gateway audio cannot reach the caller: %v", err)
+	}
+}
+
+// The gateway serves the GA shape only, and names its rate on the wire because
+// it accepts exactly one. Getting this wrong is a rejected session.update, not
+// a degraded call.
+func TestTheGatewaySessionUpdateNamesLinearAudioAndItsRate(t *testing.T) {
+	profile := GatewayProfile()
+	gateway := &Realtime{profile: profile}
+
+	cfg := SessionConfig{}
+	cfg.InputFormat, cfg.OutputFormat = profile.FormatsFor(media.LawMu)
+	session := gateway.buildSessionUpdate(cfg, false)["session"].(map[string]any)
+
+	if session["type"] != "realtime" {
+		t.Errorf("session.type = %v, want realtime — the beta shape is rejected there",
+			session["type"])
+	}
+	audio, _ := session["audio"].(map[string]any)
+	input, _ := audio["input"].(map[string]any)
+	format, _ := input["format"].(map[string]any)
+	if format["type"] != "audio/pcm" || format["rate"] != 24000 {
+		t.Errorf("input format = %v, want audio/pcm at 24000", format)
+	}
+
+	// Asking for transcription it only echoes would be configuration nothing
+	// reads — the same dead setting the qwen profile refuses to carry.
+	if _, present := input["transcription"]; present {
+		t.Error("the gateway session.update asks for a transcription model whose " +
+			"value the gateway only echoes; the recogniser is configured there")
+	}
+}
+
+// An unknown name refuses to start, and the refusal says what the build does
+// run. A deployment that silently falls back to another provider is worse than
+// one that does not come up.
+func TestAnUnknownProviderNamesTheOnesThereAre(t *testing.T) {
+	_, err := ProfileFor("cascade", Override{})
+	if err == nil {
+		t.Fatal("an unknown provider started anyway")
+	}
+	for _, name := range []string{NameOpenAI, NameQwen, NameGateway} {
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("the refusal does not mention %q: %v", name, err)
+		}
 	}
 }
