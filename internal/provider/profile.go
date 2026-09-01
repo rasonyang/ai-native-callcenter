@@ -172,7 +172,14 @@ func GatewayProfile() Profile {
 		// (turn_detection.interrupt_response, on by default), so saying so
 		// again would be noise.
 		CancelsResponseItself: true,
-		SemanticTurnType:      "semantic_vad",
+		// No cue, and that is measured rather than assumed: asking for a turn
+		// on an empty conversation was verified against a live instance on
+		// 2026-09-02 and answered with a spoken greeting. The composed engine
+		// is sent instructions with no messages, which the vendor behind it
+		// accepts — the refusal that forces a cue on Qwen's own realtime
+		// dialect does not exist here.
+		NeedsCueForFirstTurn: false,
+		SemanticTurnType:     "semantic_vad",
 	}
 }
 
