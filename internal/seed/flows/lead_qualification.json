@@ -28,7 +28,7 @@
         "When the caller clearly wants to end the call, call hangup immediately, then say goodbye."
       ]
     },
-    "voice": "longanqian",
+    "voice": "",
     "fallbackTarget": "need_transfer",
     "maxTurns": 15,
     "alwaysAllowedTools": [

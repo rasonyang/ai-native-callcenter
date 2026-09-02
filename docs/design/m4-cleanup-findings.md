@@ -429,6 +429,14 @@ previous shape would have forced. **No gateway profile ships in phase 1**: the
 third value arrives with the service, so that adding it stays a profile
 addition and never a redesign.
 
+> **Superseded 2026-09-02.** The service arrived and the third value shipped
+> with it, on the owner's instruction: `AICC_PROVIDER=gateway`
+> (`provider.GatewayProfile`), verified on live calls the same day. The
+> paragraph above is left as written because it records what was decided at
+> M4, and the prediction it makes held — adding the gateway was a profile
+> addition, not a redesign. The `unknown provider` text quoted above now reads
+> `(openai, qwen, gateway)`.
+
 **Open at the time of writing — since closed, see Addendum 4.** Qwen's English
 handling has not been measured. A mainland deployment has no OpenAI to fall
 back to, so an English-language DID there is answered by Qwen with its Chinese
