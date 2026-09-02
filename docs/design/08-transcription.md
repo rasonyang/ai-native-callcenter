@@ -1068,12 +1068,12 @@ the right column: 280 px is far too narrow for a two-column speaker/text layout 
 | `web/src/components/live-transcript.tsx` | **new** | the panel: header + status dot, scroller, rows |
 | `web/src/lib/transcript.ts` | **new** | contract type re-exports, `useCallTranscript(callId)` (backfill + live merge), the status machine |
 | `web/src/components/live-transcript.test.tsx` | **new** | §16 layer 3 |
-| `web/src/routes/_app.agent.index.tsx` | **modified,局部** | insert `<LiveTranscript …/>` at line 52–53; drop `flex-1` from `JourneyCard` (`:479`); rewrite the file-header comment at `:26-35`, which currently states the panel is deliberately absent. **No existing component, handler or mutation is removed.** |
-| `web/src/lib/events.ts` | **modified, 局部** | append two names to the `types` array (`:54-64`) |
-| `web/src/lib/use-event-stream.ts` | **modified, 局部** | wrap listener invocation in try/catch (`:69-70`) — G-14 |
+| `web/src/routes/_app.agent.index.tsx` | **modified, in part** | insert `<LiveTranscript …/>` at line 52–53; drop `flex-1` from `JourneyCard` (`:479`); rewrite the file-header comment at `:26-35`, which currently states the panel is deliberately absent. **No existing component, handler or mutation is removed.** |
+| `web/src/lib/events.ts` | **modified, in part** | append two names to the `types` array (`:54-64`) |
+| `web/src/lib/use-event-stream.ts` | **modified, in part** | wrap listener invocation in try/catch (`:69-70`) — G-14 |
 | `web/src/generated/api.ts` | regenerated | `make api-generate` output; never hand-edited |
-| `web/src/lib/ledger.ts` | **modified, 局部** | `TranscriptEntry` → `TranscriptLine` re-export (`:19`) |
-| `web/src/routes/_app.admin.cdr.$callId.tsx` | **modified, 局部** | `entry.role` → `entry.speaker`; `cdr.roles.CALLER` → `cdr.roles.CUSTOMER`; add `HUMAN_AGENT` (`:161-198`) |
+| `web/src/lib/ledger.ts` | **modified, in part** | `TranscriptEntry` → `TranscriptLine` re-export (`:19`) |
+| `web/src/routes/_app.admin.cdr.$callId.tsx` | **modified, in part** | `entry.role` → `entry.speaker`; `cdr.roles.CALLER` → `cdr.roles.CUSTOMER`; add `HUMAN_AGENT` (`:161-198`) |
 | `web/src/locales/en/translation.json`, `…/zh/translation.json` | **modified** | new `transcript.*` block; rename `cdr.roles.CALLER` |
 
 `[FACT]` A whole-file rewrite of `_app.agent.index.tsx` is forbidden by the standing

@@ -2,12 +2,14 @@
 
 package httpapi
 
-// §3 测试先行：统一认证模型的九条断言。
+// Nine assertions about the unified authorization model, written before the
+// implementation and failing on the baseline exactly as predicted.
 //
-// 这些用例在实现之前写下，并在当前基线上按预期失败——失败形态记在
-// 它们跑在**真实的 PostgreSQL 和真实的路由树**上：
-// 会话、scope、act-as 全走真中间件，一个 mock 都没有。电话服务是假的，
-// 因为真的那个要一台 FreeSWITCH；这条界线是刻意的，鉴权链上没有假货。
+// They run against a **real PostgreSQL and the real routing tree**: sessions,
+// scopes and act-as all go through the real middleware, with no mock anywhere
+// in the chain. The telephony service is a fake, because the real one wants a
+// FreeSWITCH — that line is deliberate, and nothing on the authorization path
+// is on the wrong side of it.
 
 import (
 	"bytes"
@@ -42,7 +44,8 @@ type fixture struct {
 	t      *testing.T
 	server *httptest.Server
 	st     *store.Store
-	// agent 与 other 是两个坐席账号，用来问"这通电话是不是你的"。
+	// agent and other are two agent accounts, so a test can ask "is this call
+	// yours?" and mean it.
 	agent, other seeded
 }
 
@@ -53,7 +56,8 @@ type seeded struct {
 	cookie  string
 }
 
-// newFixture 建一个真库、跑真迁移、装一台真服务器。
+// newFixture builds a real database, runs the real migrations, and stands up a
+// real server.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
 	admin := os.Getenv(scopeTestDSNEnv)
@@ -142,7 +146,7 @@ func (f *fixture) seedAgent(username string, poolLow int) seeded {
 		cookie: f.signIn(username)}
 }
 
-// signIn 走真实的 POST /auth/login，拿真实的会话 cookie。
+// signIn goes through the real POST /auth/login for a real session cookie.
 func (f *fixture) signIn(username string) string {
 	f.t.Helper()
 	body, _ := json.Marshal(map[string]string{"username": username, "password": seedPassword})
@@ -163,18 +167,19 @@ func (f *fixture) signIn(username string) string {
 	return ""
 }
 
-// dbSeq 是事件序号的真实来源，和 main 里那个是同一条 SQL。
+// dbSeq is the real source of event sequence numbers — the same SQL main runs.
 type dbSeq struct{ st *store.Store }
 
 func (s dbSeq) ReserveSeqBlock(ctx context.Context, name string, size int64) (int64, error) {
 	return s.st.Queries.ReserveSeqBlock(ctx, queries.ReserveSeqBlockParams{Name: name, BlockSize: size})
 }
 
-// call 是这些用例唯一的请求出口，好让"带什么凭证"永远是显式的。
+// call is the only way these tests issue a request, so which credential is
+// being presented is always spelled out.
 type call struct {
 	method, path string
 	body         any
-	cookie       string // 页面 Token
+	cookie       string // the page's session
 	bearer       string // API Key
 	actAs        string // X-AICC-Agent-ID
 }
@@ -227,7 +232,8 @@ func (f *fixture) do(c call) reply {
 	return reply{status: res.StatusCode, code: env.Error.Code, body: raw, header: res.Header}
 }
 
-// issueKey 通过真实的 POST /api-keys 发一把 Key，返回只出现一次的 secret。
+// issueKey mints a key through the real POST /api-keys and returns the secret,
+// which is shown exactly once.
 func (f *fixture) issueKey(admin string, scopes ...string) (id, secret string) {
 	f.t.Helper()
 	got := f.do(call{method: http.MethodPost, path: "/api-keys", cookie: admin,
@@ -255,7 +261,8 @@ func (f *fixture) seedAdmin() string {
 }
 
 // ---------------------------------------------------------------------------
-// 1. 一把 Key 代理一个坐席，做的是那个坐席的事，审计记的是 Key。
+// 1. A key acting for an agent does that agent's work, and the audit row names
+// the key.
 // ---------------------------------------------------------------------------
 
 func TestAKeyActingForAnAgentDrivesThatAgentsPresence(t *testing.T) {
@@ -264,12 +271,13 @@ func TestAKeyActingForAnAgentDrivesThatAgentsPresence(t *testing.T) {
 
 	got := f.do(call{method: http.MethodPost, path: "/agent/ready",
 		bearer: secret, actAs: f.agent.agentID.String()})
-	// 契约上这条是 200，不是 §3 表里写的 202——以契约为准。
+	// The contract says 200 here, and the contract is what the server owes.
 	if got.status != http.StatusOK {
 		t.Fatalf("status = %d (%s), want 200; body %.200s", got.status, got.code, got.body)
 	}
 
-	// 审计行的主体是 Key，代理的坐席是目标——不是坐席本人干的。
+	// The subject of the audit row is the key and the agent is its target: the
+	// person did not do this.
 	var kind, agentID string
 	err := f.st.Pool.QueryRow(context.Background(),
 		`SELECT subject_kind, coalesce(agent_id::text, '') FROM audit_logs
@@ -286,7 +294,8 @@ func TestAKeyActingForAnAgentDrivesThatAgentsPresence(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. 没有 act-as 头，agent 作用域的端点无人可代表。
+// 2. Without the act-as header there is nobody for an agent-scoped operation to
+// act for.
 // ---------------------------------------------------------------------------
 
 func TestAKeyWithNoAgentHeaderCannotActForOne(t *testing.T) {
@@ -300,7 +309,8 @@ func TestAKeyWithNoAgentHeaderCannotActForOne(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 3. 不代表任何坐席的 Key，照样能读它有 scope 的东西。空集不算通过。
+// 3. A key representing no agent still reads whatever its scopes allow. An
+// empty result would pass this test for the wrong reason, so it does not count.
 // ---------------------------------------------------------------------------
 
 func TestAKeyWithNoAgentStillReadsWhatItsScopeAllows(t *testing.T) {
@@ -325,7 +335,7 @@ func TestAKeyWithNoAgentStillReadsWhatItsScopeAllows(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. 页面 Token 永远不许代理，什么角色都不行。
+// 4. A session cookie may never act for someone else, whatever the role.
 // ---------------------------------------------------------------------------
 
 func TestASessionMayNeverActForAnotherAgent(t *testing.T) {
@@ -337,8 +347,9 @@ func TestASessionMayNeverActForAnotherAgent(t *testing.T) {
 		{"an administrator", f.seedAdmin()},
 	} {
 		t.Run(who.name, func(t *testing.T) {
-			// /auth/me：最不起眼的一个端点。这条规则与端点无关，
-			// 所以挑一个永远挂载的，免得 404 掩盖真正的断言。
+			// /auth/me is the least interesting endpoint there is, which is the
+			// point: the rule is not about the endpoint, so pick one that is
+			// always mounted and cannot answer 404 over the real assertion.
 			got := f.do(call{method: http.MethodGet, path: "/auth/me",
 				cookie: who.cookie, actAs: f.other.agentID.String()})
 			if got.code != "AGENT_IMPERSONATION_NOT_ALLOWED" {
@@ -350,7 +361,8 @@ func TestASessionMayNeverActForAnotherAgent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. 吊销是终态：Key 立刻停用，而且不再留下"最后使用"的痕迹。
+// 5. Revocation is terminal: the key stops working at once, and stops leaving a
+// "last used" trace behind it.
 // ---------------------------------------------------------------------------
 
 func TestARevokedKeyStopsAuthenticatingAndStopsBeingTouched(t *testing.T) {
@@ -358,7 +370,7 @@ func TestARevokedKeyStopsAuthenticatingAndStopsBeingTouched(t *testing.T) {
 	admin := f.seedAdmin()
 	id, secret := f.issueKey(admin, "history:read:all")
 
-	// 先用一次，让 last_used_at 有值。
+	// Use it once so last_used_at has something in it.
 	if got := f.do(call{method: http.MethodGet, path: "/cdrs", bearer: secret}); got.status != http.StatusOK {
 		t.Fatalf("the key should work before revocation: %d %s", got.status, got.code)
 	}
@@ -389,7 +401,7 @@ func (f *fixture) lastUsedAt(id string) string {
 }
 
 // ---------------------------------------------------------------------------
-// 6. 坐席听不到别人的通话录音。
+// 6. An agent cannot listen to somebody else's call recording.
 // ---------------------------------------------------------------------------
 
 func TestAnAgentCannotHearSomebodyElsesCall(t *testing.T) {
@@ -404,12 +416,12 @@ func TestAnAgentCannotHearSomebodyElsesCall(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. Key 缺少 operation 要的 scope。
+// 7. A key without the scope the operation declares.
 // ---------------------------------------------------------------------------
 
 func TestAKeyMissingTheScopeIsToldWhichWayItFailed(t *testing.T) {
 	f := newFixture(t)
-	_, secret := f.issueKey(f.seedAdmin(), "agent:read") // 不含 history:read:all
+	_, secret := f.issueKey(f.seedAdmin(), "agent:read") // no history:read:all
 
 	got := f.do(call{method: http.MethodGet, path: "/cdrs", bearer: secret})
 	if got.code != "INSUFFICIENT_SCOPE" {
@@ -419,7 +431,8 @@ func TestAKeyMissingTheScopeIsToldWhichWayItFailed(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. 明文永远不落库，也永远不从读端点回来。
+// 8. The secret never reaches the database in clear, and never comes back out
+// of a read endpoint.
 // ---------------------------------------------------------------------------
 
 func TestTheSecretIsReturnedOnceAndStoredNever(t *testing.T) {
@@ -427,7 +440,7 @@ func TestTheSecretIsReturnedOnceAndStoredNever(t *testing.T) {
 	admin := f.seedAdmin()
 	id, secret := f.issueKey(admin, "history:read:all")
 
-	// 库里没有任何一列装着明文。
+	// No column holds it in clear.
 	rows, err := f.st.Pool.Query(context.Background(),
 		`SELECT column_name FROM information_schema.columns WHERE table_name = 'api_keys'`)
 	if err != nil {
@@ -449,14 +462,14 @@ func TestTheSecretIsReturnedOnceAndStoredNever(t *testing.T) {
 		var hit int
 		if err := f.st.Pool.QueryRow(context.Background(),
 			fmt.Sprintf(`SELECT count(*) FROM api_keys WHERE %s::text = $1`, c), secret).Scan(&hit); err != nil {
-			continue // 类型不可比较的列，比较不上就是没装明文
+			continue // a column that will not compare cannot be holding it
 		}
 		if hit > 0 {
 			t.Errorf("column %q holds the secret in clear", c)
 		}
 	}
 
-	// hash 是定长的 SHA-256。
+	// The hash is a fixed-length SHA-256.
 	var hashLen int
 	if err := f.st.Pool.QueryRow(context.Background(),
 		`SELECT length(key_hash) FROM api_keys WHERE id = $1`, id).Scan(&hashLen); err != nil {
@@ -466,7 +479,7 @@ func TestTheSecretIsReturnedOnceAndStoredNever(t *testing.T) {
 		t.Errorf("key_hash is %d bytes, want 32 (SHA-256)", hashLen)
 	}
 
-	// 读端点不回 secret，也不回 hash。
+	// The read endpoint returns neither the secret nor the hash.
 	for _, path := range []string{"/api-keys", "/api-keys/" + id} {
 		got := f.do(call{method: http.MethodGet, path: path, cookie: admin})
 		body := string(got.body)
@@ -482,7 +495,8 @@ func TestTheSecretIsReturnedOnceAndStoredNever(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 9. 事件流对机器开放——产品的实时性全在这一条流上。
+// 9. The event stream is open to a machine — everything live about this product
+// arrives on that one stream.
 // ---------------------------------------------------------------------------
 
 func TestAKeyCanSubscribeToTheEventStream(t *testing.T) {
@@ -510,8 +524,8 @@ func TestAKeyCanSubscribeToTheEventStream(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 播种用的两条直写。它们绕过 API 是刻意的：被测的是读端点的授权，
-// 不是写端点。
+// Two direct writes, for seeding. Going around the API is deliberate: what is
+// under test is the authorization of the read endpoints, not the write ones.
 // ---------------------------------------------------------------------------
 
 func (f *fixture) insertCDR() {
@@ -545,7 +559,7 @@ func (f *fixture) insertRecordingFor(agentID uuid.UUID) string {
 	return recordingID.String()
 }
 
-// dbDirectory 是真实的坐席解析，跟 cmd/aicc 里那个一样：从库里查。
+// dbDirectory resolves agents the way cmd/aicc does: out of the database.
 type dbDirectory struct{ st *store.Store }
 
 func (d dbDirectory) AgentIDForUser(r *http.Request, userID uuid.UUID) (uuid.UUID, error) {
@@ -577,16 +591,17 @@ func (d dbDirectory) UserIDForAgent(r *http.Request, agentID uuid.UUID) (uuid.UU
 }
 
 // ---------------------------------------------------------------------------
-// 吊销是终态：终态意味着此后关于这把 Key 的一切都不再变。
+// Revocation is terminal, and terminal means nothing about the key changes after.
 // ---------------------------------------------------------------------------
 
-// 契约写着 "A revoked key cannot be edited"，而服务器曾经照改不误——
-// 一次 PATCH 就能把一把已吊销 Key 的能力从 calls:* 改写成
-// users:write + keys:manage，返回 200。
+// The contract says "A revoked key cannot be edited"; the server edited them
+// anyway. One PATCH rewrote a revoked key's capability from calls:* to
+// users:write + keys:manage and answered 200.
 //
-// 这不是外观问题。审计行说这把 Key 做过事，而它记录在案的能力可以被事后
-// 改成别的，于是几个月前那些行描述的是一把从未存在过的 Key——那是唯一
-// 不许伪造的一张表。
+// That is not cosmetic. An audit row says this key did something, and if the
+// capability it records can be rewritten afterwards, rows from months ago
+// describe a key that never existed — in the one table that must not be
+// forgeable.
 func TestARevokedKeyCannotBeEdited(t *testing.T) {
 	f := newFixture(t)
 	admin := f.seedAdmin()
@@ -604,7 +619,8 @@ func TestARevokedKeyCannotBeEdited(t *testing.T) {
 			"cannot be edited; body %.200s", got.status, got.code, got.body)
 	}
 
-	// 而且真的没改。断言状态码不够：一个先写库再回错的实现照样能过。
+	// And nothing actually changed. Asserting the status code is not enough: an
+	// implementation that writes first and errors afterwards would pass that.
 	after := f.do(call{method: http.MethodGet, path: "/api-keys/" + id, cookie: admin})
 	var key struct {
 		Name   string   `json:"name"`

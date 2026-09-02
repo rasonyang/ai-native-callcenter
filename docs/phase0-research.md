@@ -1,4 +1,4 @@
-# Phase 0 Research Notes（调研纪要）
+# Phase 0 Research Notes
 
 Date: 2026-08-13 · Status: Phase 0 complete → feeds Phase 1 clarification
 Scope: findings from the six reference sources, the live FreeSWITCH dev environment, pipecat PR #3859, and current OpenAI/Qwen realtime provider documentation. No design decisions are final here; open questions are listed in §8.
@@ -42,7 +42,7 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 
 ---
 
-## 3. Per-reference findings（借鉴 / 放弃）
+## 3. Per-reference findings — what to borrow, what to drop
 
 ### 3.1 cti-server (highest-priority reference)
 
@@ -158,7 +158,7 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 | Endpoint | `wss://api.openai.com/v1/realtime` (+ WebRTC, + native SIP `sip.api.openai.com`) | `wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime?model=…` (Beijing; Singapore exists) |
 | Audio in | GA naming `audio/pcm` @24k; **`audio/pcmu` confirmed** (`audio/pcma` unconfirmed) | 16kHz PCM16 mono |
 | Audio out | `audio/pcm` @24k (pcmu out likely, unconfirmed) | 24kHz PCM16 mono |
-| Turn detection | `server_vad` / `semantic_vad` / null; flags `interrupt_response`, `create_response` | `server_vad` (threshold [-1,1] def 0.5; silence 200–6000ms def 800) / **`smart_turn`** (acoustic+semantic; 嗯/啊 backchannel does not interrupt) / null. **Settable only before first audio** — mode switch = reconnect |
+| Turn detection | `server_vad` / `semantic_vad` / null; flags `interrupt_response`, `create_response` | `server_vad` (threshold [-1,1] def 0.5; silence 200–6000ms def 800) / **`smart_turn`** (acoustic+semantic; an "mm-hm" backchannel does not interrupt) / null. **Settable only before first audio** — mode switch = reconnect |
 | Barge-in | `speech_started` → server auto-cancels (`response.cancelled`) → client `conversation.item.truncate {audio_end_ms}`; manual: `response.cancel` + `output_audio_buffer.clear` | `speech_started` → client sends `response.cancel` → `response.done{status:cancelled, reason:turn_detected\|client_cancelled}` |
 | Function calling | Same shape both: `tools` in `session.update` → `response.function_call_arguments.delta/.done` → item in `response.done` → client `conversation.item.create{function_call_output}` → `response.create`. Qwen excludes tool content from TTS | ← |
 | Transcripts | `response.output_audio_transcript.delta/done`; input transcription configurable | input `conversation.item.input_audio_transcription.delta/completed`; output `response.audio_transcript.delta/done`; smart_turn-only `ambient_audio_transcription.*` |

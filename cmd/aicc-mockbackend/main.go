@@ -158,7 +158,7 @@ func toInt(v any) int {
 	return n
 }
 
-// --------------------------------------------------- 手机售后：查维修进度
+// ------------------------------------------ Handset after-sales: repair status
 
 func (s *store) repairStatus(b map[string]any) (any, string) {
 	switch strings.ToUpper(str(b["rmaNo"])) {
@@ -174,7 +174,7 @@ func (s *store) repairStatus(b map[string]any) (any, string) {
 	return map[string]any{"found": "0", "device": "", "status": "", "eta": ""}, ""
 }
 
-// --------------------------------------------------- 上门服务：预约/改期/确认
+// ------------------- Field service: book, reschedule, confirm an appointment
 
 // slotText renders a bookable window in the words a bot can read aloud.
 func slotText(choice int) string {
@@ -240,7 +240,7 @@ func (s *store) apptConfirm(b map[string]any) (any, string) {
 	return map[string]any{"confirmed": "1", "slot": appt.Slot}, ""
 }
 
-// --------------------------------------------------- 宽带套餐变更
+// ------------------------------------------------ Broadband plan changes
 
 func (s *store) bbAccount(b map[string]any) (any, string) {
 	switch str(b["serviceNo"]) {
