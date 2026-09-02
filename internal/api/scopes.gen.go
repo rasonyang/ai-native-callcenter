@@ -6,7 +6,7 @@ package api
 
 // The scope vocabulary. A scope is a capability, never a role: the names are
 // `resource:action[:range]` and no single one of them is a role's alias
-// (docs/auth/TASKS.md §4 N1, docs/design/07-naming.md §7).
+// (docs/design/07-naming.md §7).
 //
 // The values are the wire strings. They are untyped string constants so they
 // drop straight into the []string the contract's request bodies use.

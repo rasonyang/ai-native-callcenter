@@ -38,7 +38,7 @@ for (const name of [COOKIE, CSRF, BEARER]) {
   }
 }
 if (spec.security !== undefined) {
-  throw new Error(`${CONTRACT}: a root-level "security" is back. Every operation declares its own so a missing one is a miss, not a silent inheritance — see docs/auth/RESULTS.md §2`)
+  throw new Error(`${CONTRACT}: a root-level "security" is back. Every operation declares its own so a missing one is a miss, not a silent inheritance`)
 }
 const vocab = spec['x-scopes'] ?? {}
 

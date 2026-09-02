@@ -40,7 +40,7 @@ stateDiagram-v2
     Held --> Idle: EventReleased
 ```
 
-`EventEstablished` is the edge into `Talk` (Genesys `EventEstablished` naming) and it is **fired by the switch's `CHANNEL_BRIDGE`, not by `CHANNEL_ANSWER`** (owner's rule 2026-08-24, superseding the original answer-driven edge — see **C55** in `docs/verification/TASKS.md`): a leg answering is that leg's own fact and the ledger keeps it as one (`bill_sec`), while being on a call is a fact about two legs. An auto-answer phone picks up in front of nobody; a caller the switch answers to play queue music is talking to nobody.
+`EventEstablished` is the edge into `Talk` (Genesys `EventEstablished` naming) and it is **fired by the switch's `CHANNEL_BRIDGE`, not by `CHANNEL_ANSWER`** (owner's rule 2026-08-24, superseding the original answer-driven edge): a leg answering is that leg's own fact and the ledger keeps it as one (`bill_sec`), while being on a call is a fact about two legs. An auto-answer phone picks up in front of nobody; a caller the switch answers to play queue music is talking to nobody.
 
 The first party is the sole originator (enters `Dialing`); later parties enter `Ringing`. Illegal edges are rejected and logged.
 

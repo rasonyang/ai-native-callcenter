@@ -49,3 +49,6 @@ web/src/routeTree.gen.ts
 prompts.md
 web/tsconfig.tsbuildinfo
 logs/
+
+# local .env backups
+.env.bak-*

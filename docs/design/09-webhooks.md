@@ -385,7 +385,7 @@ Every key now carries exactly the scopes it was issued with; a key issued for di
 exists to answer. Under **UI is optional, API is the product**, choosing where a deployment sends
 its own finished calls is exactly the kind of thing an integration configures.
 
-See `docs/auth/baseline.md` §17 P5 and `docs/api-first-audit.md`. Historical note: the ban lived in
+Historical note: the ban lived in
 three places — this section, the table in §12, and the operation descriptions in `docs/openapi.json`
 — and all three were rewritten together, because leaving one behind would make the code look like
 a bug to the next reader.
@@ -437,8 +437,8 @@ Recorded because the previous draft carried them and their absence is the point:
   serialisation.** All of it existed to make a firehose survivable.
 - **No lossy `Publish → outbox` window.** The enqueue is in the CDR's transaction.
 - **No enrichment of `CALL_CDR`**, and no widening of the SSE envelope.
-- **No `correlationId` interaction.** That design (settled by the owner 2026-08-24,
-  `docs/verification/TASKS.md`) ties a request to *the event it produced* and belongs to the
+- **No `correlationId` interaction.** That design (settled by the owner 2026-08-24)
+  ties a request to *the event it produced* and belongs to the
   generic-event surface. A CDR webhook is not a response to a request. Listed only so the next
   reader does not go looking for a link that was never made.
 

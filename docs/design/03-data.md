@@ -91,8 +91,8 @@ Spec = **DSL v2** (v1 re-keyed to lowerCamelCase per 07 §7: `specVersion`, `ini
 ```sql
 live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- DESIGNED, NEVER MIGRATED (see below)
                                    -- Amended 2026-08-31: this table does not exist. `rg live_calls .`
-                                   -- matches this file and the audits that noticed (08 §G-17,
-                                   -- docs/verification/plan-cdr-anchors.md). The registry's snapshot
+                                   -- matches this file and the audits that noticed (08 §G-17).
+                                   -- The registry's snapshot
                                    -- is in memory only, so a restart mid-call loses the in-flight
                                    -- tail — accepted, and the same thing that happens to the bot
                                    -- transcript. Left written down rather than deleted: it is a
@@ -139,9 +139,7 @@ quality_reviews(id uuid pk, recording_id fk, call_id, reviewer_id fk,
                                    -- frontend does not reference it — so this table is written to
                                    -- and never read back, deliberately and with a date on it
                                    -- rather than as an oversight somebody rediscovers. Nothing
-                                   -- here is a gap to close until that phase: see
-                                   -- docs/verification/coverage/tables.md, where the row is
-                                   -- marked UNCOVERED for the same reason.
+                                   -- here is a gap to close until that phase.
 callbacks(id uuid pk, call_id, queue_id, phone_number text, message text,
           status varchar check in ('OPEN','CLAIMED','DONE','DISMISSED'),   -- CLAIMED added 00006
           created_at, handled_by, handled_at,

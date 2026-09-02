@@ -23,8 +23,7 @@ import (
 // docs/auth/scopemap.py` prints these rows and enumerates every widening and
 // narrowing against that baseline. Nine widenings survive, all of them
 // config:read on screens a supervisor already had a link to, and they were
-// ruled deliberately (docs/auth/baseline.md ruling 8, revision 2). Narrowings:
-// none.
+// ruled deliberately when the change was made. Narrowings: none.
 func grantedScopes(role auth.Role) []string {
 	switch role {
 	case auth.RoleAdmin:

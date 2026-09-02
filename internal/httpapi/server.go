@@ -341,7 +341,7 @@ func (s *Server) router() chi.Router {
 				// configuration operation. The old rule shut the API key out of
 				// it entirely; that was a rule about credentials written where
 				// the contract could not state it, and it is now config:write
-				// like the rest (docs/auth/baseline.md P5).
+				// like the rest.
 				if s.webhooks != nil {
 					private.Get("/webhook-subscriptions", op.ListWebhookSubscriptions)
 					private.Post("/webhook-subscriptions", op.CreateWebhookSubscription)
