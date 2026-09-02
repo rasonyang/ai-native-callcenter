@@ -23,9 +23,11 @@ sqlc generate                                 # after editing internal/store/sql
 # migrations: add internal/store/migrations/NNNNN_name.sql (goose format); they run at server startup
 
 # dev server (PostgreSQL 18 must be up: deploy/dev/docker-compose.yml — never brew)
+# what has to be running, in what order, and which ports: docs/dev-stack.md
 go build -o /tmp/aicc ./cmd/aicc && /tmp/aicc # logs also land in logs/aicc-<starttime>.log (read these to analyze runs)
 /tmp/aicc useradd -username admin -password … -role ADMIN   # bootstrap first user
 /tmp/aicc flowadd -file internal/seed/flows/x.json -did 95001 # load/publish a flow; same slug = update+republish
+go run ./cmd/aicc-mockbackend -addr 127.0.0.1:8770 # the business APIs the reference flows call; without it every tool fails (correctly, and uselessly)
 
 # live provider verification (spends real API money; OPENAI_API_KEY / ALIYUN_API_KEY)
 AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider/ -run Live -v
