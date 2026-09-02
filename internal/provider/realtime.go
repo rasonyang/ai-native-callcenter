@@ -298,6 +298,13 @@ func (r *Realtime) UpdateInstructions(text string) error {
 // as it hears speech and only needs to be told how much was actually heard;
 // the other does nothing until asked.
 //
+// The two halves answer different questions and are gated separately. A
+// response is cancelled only while one is open — asking a provider to cancel
+// a response that already ended is an error on the vendors that accept the
+// cancel at all. Truncation has no such limit: the caller goes on hearing an
+// utterance for seconds after the provider finished making it, so the amount
+// actually heard is worth reporting long after there is anything to stop.
+//
 // No event is emitted here. The caller already knows it interrupted, and
 // emitting from this method would deadlock whenever it is called — as it
 // normally is — from the goroutine draining Events. The interruption surfaces
@@ -307,7 +314,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	itemID := r.responseItemID
 	r.mu.Unlock()
 
-	if !r.profile.CancelsResponseItself {
+	if !r.profile.CancelsResponseItself && r.isResponseOpen.Load() {
 		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
 			return err
 		}

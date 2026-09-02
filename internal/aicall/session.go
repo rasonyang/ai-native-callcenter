@@ -424,7 +424,15 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// The provider confirming a turn was cut short. It may have decided
 		// that on its own, so this doubles as a backstop: whatever the reason,
 		// the caller must not keep hearing the abandoned answer.
-		s.stopPlayback()
+		//
+		// Cancelling is not trimming. A provider that stops on its own knows
+		// it stopped, and still has no idea how much of what it produced ever
+		// reached the caller — only this side counts frames. When we have
+		// already flushed, this is a no-op: nothing was queued, so nothing
+		// was heard, so there is nothing to say.
+		if playedMs := s.stopPlayback(); playedMs > 0 {
+			s.tellTheModelWhatWasHeard(event.InterruptedBy, playedMs)
+		}
 		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status,
 			Usage: event.Usage, Turn: s.currentTurn()})
 
@@ -502,15 +510,18 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	}
 
 	playedMs := s.stopPlayback()
-	// The provider is only told when it is still producing: there is a
-	// response to cancel and a history to truncate. Speech over the tail of a
-	// finished turn needs the local flush alone — cancelling a response that
-	// no longer exists is an error on providers that take the cancel at all.
-	if isSpeaking {
-		if err := s.model.Interrupt(reason, playedMs); err != nil {
-			s.log.Warn("could not tell the model it was interrupted", "error", err)
-		}
-	}
+	// The provider is told whenever the caller stopped hearing something, not
+	// only while it was still producing. Its history is a record of what was
+	// said to the caller, and an utterance the caller never heard has to come
+	// out of it either way — otherwise the next turn is built on the model
+	// believing it said something nobody received.
+	//
+	// This used to be gated on generation still being in progress, to avoid
+	// cancelling a response that had already ended. That protection now lives
+	// where the truth is (Realtime.Interrupt knows whether a response is
+	// open), because the two are not the same question: speech over the tail
+	// of a finished turn still needs the history trimmed.
+	s.tellTheModelWhatWasHeard(reason, playedMs)
 	// Said out loud here and nowhere else. The line above this one used to be
 	// the only place an interruption was mentioned, and it was the *ignored*
 	// case — a Debug line for speech that turned out to be echo — so the
@@ -520,6 +531,15 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 		"reason", string(reason), "playedMs", playedMs, "wasGenerating", isSpeaking)
 	obs.RecordBotInterruption(string(reason))
 	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason)})
+}
+
+// tellTheModelWhatWasHeard reports the interruption and how much of the turn
+// reached the caller, so the provider's history matches the conversation that
+// actually happened.
+func (s *Session) tellTheModelWhatWasHeard(reason provider.InterruptReason, playedMs int) {
+	if err := s.model.Interrupt(reason, playedMs); err != nil {
+		s.log.Warn("could not tell the model it was interrupted", "error", err)
+	}
 }
 
 // stopPlayback drops queued speech and reports how much the caller heard.

@@ -457,6 +457,101 @@ func TestAProviderInitiatedCancelStopsPlayback(t *testing.T) {
 	}
 }
 
+// Generation ending is not the caller's experience ending. Text-to-speech
+// produces far faster than real time, so the send queue holds seconds of audio
+// after the provider has said it is finished — and on a composed provider that
+// gap is the whole utterance rather than a frame of it. A caller who talks
+// over that tail heard only part of it, and the provider's history has to say
+// so, or the next turn is built on the model believing it said something
+// nobody received.
+func TestSpeechOverTheTailOfAFinishedTurnStillTrimsTheHistory(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	// Eight frames go out and three are still queued when the caller cuts in,
+	// so five of them — a hundred milliseconds — were genuinely heard.
+	leg.holdFrames(3)
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*8),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+	awaitBridgeEvent(t, session, EventTypeTurnDone)
+
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	awaitBridgeEvent(t, session, EventTypeBargeIn)
+
+	interrupts := model.recordedInterrupts()
+	if len(interrupts) != 1 {
+		t.Fatalf("recorded %d interrupts over the tail of a finished turn, want 1 — "+
+			"the caller stopped hearing an answer the model still believes was "+
+			"delivered in full", len(interrupts))
+	}
+	if interrupts[0].playedMs <= 0 {
+		t.Errorf("playedMs = %d, want what the caller actually heard",
+			interrupts[0].playedMs)
+	}
+}
+
+// A provider that stops on its own knows it stopped. It still has no idea how
+// much of what it produced ever reached the caller — only this side counts
+// frames — so the trim is ours to send either way.
+func TestAProviderInitiatedCancelStillReportsWhatWasHeard(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	leg.holdFrames(3)
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*8),
+	}
+	model.events <- provider.Event{
+		Type: provider.EventTypeInterrupted, Status: "cancelled",
+	}
+	awaitBridgeEvent(t, session, EventTypeTurnDone)
+
+	interrupts := model.recordedInterrupts()
+	if len(interrupts) != 1 {
+		t.Fatalf("recorded %d interrupts, want the provider told how much of the "+
+			"turn it cancelled had been heard", len(interrupts))
+	}
+	if interrupts[0].playedMs <= 0 {
+		t.Errorf("playedMs = %d, want what the caller actually heard",
+			interrupts[0].playedMs)
+	}
+}
+
+// Once the queue is flushed there is nothing left to report, and a second
+// trim would name a length nobody heard. The provider's own cancellation
+// arriving after our barge-in must stay silent.
+func TestTheProvidersOwnCancelAfterABargeInSaysNothingTwice(t *testing.T) {
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: -1})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	leg.holdFrames(3)
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*8),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	awaitBridgeEvent(t, session, EventTypeBargeIn)
+
+	model.events <- provider.Event{
+		Type: provider.EventTypeInterrupted, Status: "cancelled",
+	}
+	awaitBridgeEvent(t, session, EventTypeTurnDone)
+
+	if got := model.recordedInterrupts(); len(got) != 1 {
+		t.Errorf("recorded %d interrupts for one interruption: %+v", len(got), got)
+	}
+}
+
 //
 // The barge-in guard.
 //

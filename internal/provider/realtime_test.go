@@ -672,11 +672,50 @@ func TestInterruptOnAProviderThatMustBeTold(t *testing.T) {
 	}
 	awaitEvent(t, session, EventTypeSessionReady)
 
+	// A response has to be in progress for there to be one to cancel.
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+
 	if err := session.Interrupt(InterruptReasonDTMF, 0); err != nil {
 		t.Fatalf("interrupt: %v", err)
 	}
 
 	f.awaitMessage("response.cancel")
+}
+
+// Cancelling and trimming answer different questions, and the second outlives
+// the first. The caller goes on hearing an utterance for seconds after the
+// provider finished making it, so speech over that tail has to trim the
+// history — while there is no longer any response to cancel, and asking to
+// cancel one is an error on the vendors that take the cancel at all.
+func TestInterruptAfterTheResponseEndedTrimsWithoutCancelling(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+
+	cfg := basicConfig()
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.output_item.added",
+		"item": map[string]any{"id": "item_3", "type": "message"}})
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+
+	if err := session.Interrupt(InterruptReasonSpeech, 1200); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+
+	truncate := f.awaitMessage("conversation.item.truncate")
+	if truncate["item_id"] != "item_3" || truncate["audio_end_ms"] != float64(1200) {
+		t.Errorf("truncate = %v, want item_3 trimmed at what was heard", truncate)
+	}
+	f.refuteMessage("response.cancel")
 }
 
 // The interruption surfaces where the provider confirms it, not from the call
