@@ -431,6 +431,12 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// already flushed, this is a no-op: nothing was queued, so nothing
 		// was heard, so there is nothing to say.
 		if playedMs := s.stopPlayback(); playedMs > 0 {
+			// Said out loud for the same reason the caller-initiated case is:
+			// an interruption that leaves no trace cannot be told apart
+			// afterwards from one that never happened. This path reports the
+			// provider's own decision, so it names who decided.
+			s.log.Info("the provider took the floor back",
+				"reason", string(event.InterruptedBy), "playedMs", playedMs)
 			s.tellTheModelWhatWasHeard(event.InterruptedBy, playedMs)
 		}
 		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status,
