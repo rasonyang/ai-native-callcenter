@@ -21,7 +21,7 @@ minutes. Afterwards the stack starts in seconds.
 | `aicc-demo-postgres` | PostgreSQL 18, with the `aicc` database and mod_callcenter's own `aicc_fs` beside it |
 | `aicc-demo-app` | The product: REST API, event stream, embedded SPA, and the SIP endpoint the AI calls land on |
 | `aicc-demo-lua-role` | Runs once, creates the confined role the switch reads the database with, exits |
-| `aicc-demo-freeswitch` | FreeSWITCH 1.10.12, configured from this repository at every boot |
+| `aicc-demo-freeswitch` | FreeSWITCH v1.11.3 — this repository's own image, configuration and all |
 
 Only the screens are published, on `127.0.0.1:8080`. Everything an AI call
 touches — the number, the dialplan, the gateway, the SIP leg, the RTP — stays
@@ -100,10 +100,18 @@ before putting any of it somewhere other people can reach.
 
 Two more things worth knowing:
 
-* The FreeSWITCH image is a third-party build (`dheaps/freeswitch`, pinned by
-  digest) chosen because it carries `mod_callcenter`, `mod_lua` and
-  `mod_pgsql`. It is **amd64 only** — on Apple Silicon it runs under emulation,
-  which is fine for a demo and not for load.
-* It is FreeSWITCH 1.10.12, where `uuid-version` does not exist yet, so channel
-  identifiers are UUIDv4 rather than v7. Nothing depends on their ordering. The
-  development box runs 1.11.1, which does honour it.
+* The FreeSWITCH image is built from this repository — `freeswitch/`, which
+  holds the whole configuration tree and the Dockerfile that compiles
+  FreeSWITCH v1.11.3 around it. The published tag is
+  `rasonyang/freeswitch-aicc:v1.11.3` and it is multi-arch,
+  `linux/amd64` and `linux/arm64`, so nothing here runs under emulation. Set
+  `AICC_FS_IMAGE` to try a locally built one (`make fs-image`).
+* Live transcription of the human phase is possible in the demo: the image
+  carries `mod_audio_stream`. It stays **off** by default, because turning it
+  on also needs a recogniser credential and the transcribe settings
+  (`AICC_TRANSCRIPTION_ENABLED`, `AICC_STREAM_PUBLIC_URL`,
+  `AICC_STREAM_SECRET`, `AICC_TRANSCRIBE_*` — the repository's own
+  [`.env.example`](../../.env.example) is the registry), and the demo has to
+  work with none of them. With it true and the module missing, the switch
+  refuses to start rather than leaving every transcript panel saying
+  "Connecting…" for ever.

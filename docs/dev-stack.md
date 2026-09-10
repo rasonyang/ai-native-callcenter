@@ -12,17 +12,29 @@ need, when, and what breaks if you skip one.
 |---|---|---|
 | PostgreSQL 18 | `127.0.0.1:5432` | `deploy/dev/docker-compose.yml` |
 | SeaweedFS (recordings) | filer `127.0.0.1:8888`, S3 `127.0.0.1:8333` | the same compose file |
-| FreeSWITCH | ESL `127.0.0.1:18021`, SIP `5060` | outside this repo — a native install on the development box |
+| FreeSWITCH | ESL `127.0.0.1:18021`, SIP `5060` | a native install on the development box; started outside this repo |
 | The application | HTTP/SPA `:8080` | `/tmp/aicc` |
 
 Order matters only at the first hop: the app runs its migrations at startup and
 will not come up without the database. FreeSWITCH can start before or after —
 the ESL link reconnects on its own — but the human path is dead until it does.
 
-**FreeSWITCH is not this repository's to start.** It is a native install whose
-configuration lives on the box, and the switch's own conventions differ between
-machines. Whoever set the box up knows where it is; nothing here should
-duplicate that.
+**FreeSWITCH is not this repository's to start — but its configuration is this
+repository's.** The process is a native install on this box, started and stopped
+outside the repository (`pgrep -fl freeswitch`;
+`/usr/local/freeswitch/bin/freeswitch -nc -nonat`). What it reads is ours:
+`freeswitch/conf/` is the complete configuration tree and `freeswitch/scripts/`
+the Lua that serves the directory and the queues from PostgreSQL, and
+[`freeswitch/README.md`](../freeswitch/README.md) §2 says how to install both
+onto a native switch and which placeholders a copy leaves to fill in. The demo
+runs the same tree inside this repository's own image; the dev box does not run
+that container.
+
+One thing on this box is *not* in `freeswitch/`: the simulated PSTN trunk. It
+belongs to a deployment rather than to the product, so it lives in
+[`deploy/dev/freeswitch/`](../deploy/dev/freeswitch/README.md) with its own
+installer — a dialplan fragment for the `aicc` include seam, the gateway that
+names the peer, and the `vars.xml` lines both need.
 
 ### Ports this stack expects to own
 

@@ -457,7 +457,7 @@ identity silently underneath it.
 | G-12 | The callId flips from provisional to minted at `CHANNEL_BRIDGE` (`coordinator.go:196-217` then `:280-289`) | **MAJOR** | `web`, backend event scoping | Re-run backfill when `callId` changes; §14 |
 | G-13 | A second writer would collide with `uq_transcripts_call_id_seq` (`00005_call_ledger.sql:64`), since the bot allocates `seq` in its own process-local counter (`ledger.go:82`) | **MAJOR** | `internal/aicall`, new sequencer | One per-call allocator owns `seq` for both producers (§8.4, D2) |
 | G-14 | A listener that throws stops the remaining listeners for that event (`web/src/lib/use-event-stream.ts:69-70`) | **MAJOR** (failure isolation, Q22) | `web/src/lib/use-event-stream.ts` | Wrap each listener call in try/catch |
-| ~~G-15~~ | **Guarded, not yet closed** — see §B.5. Neither switch has the module: the dev build is slim without audio_fork (`docs/phase0-research.md:17,144`); the demo entrypoint enables only `mod_callcenter`, `mod_lua`, `mod_pgsql` (`10-aicc.sh:59`) | **BLOCKER** (environment) | `freeswitch/README.md`, `deploy/demo/` | Build/install step + a demo image that carries it |
+| ~~G-15~~ | ~~**Guarded, not yet closed** — see §B.5. Neither switch has the module: the dev build is slim without audio_fork (`docs/phase0-research.md:17,144`); the demo entrypoint enables only `mod_callcenter`, `mod_lua`, `mod_pgsql` (`10-aicc.sh:59`)~~ → **CLOSED 2026-09-09.** The demo no longer runs a third-party image at all: `freeswitch/Dockerfile` builds FreeSWITCH v1.11.3 from source for `linux/amd64` and `linux/arm64` and compiles `mod_audio_stream` in the builder stage at a pinned upstream commit, and the shipped `modules.conf.xml` loads it. The boot-time guard stays, and so does the SpeexDSP assertion — §B.5 says why | **BLOCKER** (environment) | `freeswitch/`, `deploy/demo/` | Done (§B.5) |
 | G-16 | `docs/design/06-capacity.md:32` records "SIP/RTP in-process (**no mod_audio_fork/stream**) … Confirmed choice" | **MAJOR** (design conflict) | `docs/design/06-capacity.md` | Amend: the decision was about the *bot* leg's media path and stays; the human leg has no in-process alternative |
 | G-17 | No `live_calls` table, so nothing survives a restart mid-call (`rg live_calls .`) | **MINOR** | — | Accept; a restart loses the in-flight tail, exactly as it loses the bot transcript today |
 | G-18 | Quality-review UI absent (`web/src/lib/nav.ts:49` `isReady:false`) though the API exists (`server.go:212-214`) | **MINOR** | `web` | Out of scope; §12.9 |
@@ -2279,8 +2279,8 @@ as a logging fault rather than as the module's silence.
 | `internal/mockprovider` | a Realtime **server** for load tests, reached via endpoint override | `Server` `server.go:81` |
 | `internal/loadgen` | SIP UAC generator carrying the dialplan's `X-AICC-*` headers | `uac.go`, `run.go` |
 | `web/` | React 19 SPA; routes under `src/routes`, contract types in `src/generated/api.ts` | `_app.tsx`, `_app.agent.index.tsx`, `lib/events.ts`, `lib/use-event-stream.ts` |
-| `freeswitch/` | Lua (`aicc_xml`, `aicc_inbound`, `aicc_queue`) + dialplan XML | `scripts/`, `conf/dialplan/{public,default}/05_aicc.xml` |
-| `deploy/` | dev compose, demo compose (PG + stock FS turned into ours at boot + app), Lua role SQL | `demo/docker-compose.yml`, `demo/freeswitch/entrypoint.d/10-aicc.sh` |
+| `freeswitch/` | the switch: the complete v1.11.3 configuration tree, the Lua that serves it from PostgreSQL, and the Dockerfile that builds the image | `conf/`, `scripts/`, `Dockerfile`, `CONF-DEVIATIONS.md` |
+| `deploy/` | dev compose, demo compose (PG + our own FS image + app), this box's FS overlay, Lua role SQL | `demo/docker-compose.yml`, `dev/freeswitch/`, `sql/lua_role.sql` |
 
 ---
 
@@ -2438,7 +2438,9 @@ Environment facts unchanged: `[FACT]` the demo image is
 `mod_pgsql` (`deploy/demo/docker-compose.yml:115`,
 `deploy/demo/freeswitch/entrypoint.d/10-aicc.sh:52-63`), and is amd64-only
 (`m5-findings.md:180`). **The demo stack still needs this module added** (G-15); only the
-development switch is done.
+development switch is done. → **Superseded 2026-09-09:** none of that image is used any
+more; the demo runs `rasonyang/freeswitch-aicc`, built from `freeswitch/` with the module
+in it. The paragraph is kept as the state the experiments were run against.
 
 **Switch-side changes made for these experiments, so they reproduce.** Exactly one, and it
 predates this pass: `autoload_configs/modules.conf.xml` gained
@@ -2719,6 +2721,12 @@ which survives changes to the image because it is checked at every boot.
 load line when it is, and says out loud when transcription is off — so a stack that is not
 transcribing is never a silent surprise. All three paths were exercised:
 
+*(Amended 2026-09-09: that hook is gone with the third-party image it patched. The guard
+moved to `freeswitch/docker-entrypoint.sh` and the load line is now shipped in
+`freeswitch/conf/autoload_configs/modules.conf.xml` rather than enabled at boot. The
+guarantee below is unchanged, which is the point of stating it as a guarantee rather than
+as a file.)*
+
 | Configuration | Result |
 |---|---|
 | enabled, module absent | **refuses to start**, exit 1, naming what would otherwise happen |
@@ -2748,7 +2756,7 @@ linked, undefined symbols tolerated — and it **compiled**, carried the same fi
 `speex_resampler_*` symbols as the good one, and declared no libspeexdsp. The assertion
 passes the good module and refuses that one.
 
-### ✗ The pinned base image is amd64-only, and this host is arm64
+### ~~✗~~ The pinned base image is amd64-only, and this host is arm64 — resolved 2026-09-09
 
 `[MEASURED]` `dheaps/freeswitch@sha256:06798d…` has a single manifest whose config reports
 `architecture: amd64, os: linux`. There is no arm64 variant behind that digest. The
@@ -2771,6 +2779,38 @@ the real work G-15 still contains.
 **So G-15 is guarded but not closed.** A demo stack told to transcribe now fails loudly
 instead of lying; a demo stack that actually transcribes still needs the module built for
 that image, and that needs the base-image decision first.
+
+#### Resolution, 2026-09-09 — the second option was taken
+
+Neither of the two above, exactly: rather than finding another third-party base, the
+switch is now built here. `freeswitch/Dockerfile` compiles FreeSWITCH v1.11.3 from source
+(`signalwire/freeswitch`, with sofia-sip and spandsp pinned to commits) on a
+`debian:bookworm` builder into a `debian:bookworm-slim` runtime, for `linux/amd64` and
+`linux/arm64`, published as `rasonyang/freeswitch-aicc`. The demo compose uses that image
+and no longer bind-mounts or patches anything. The emulation this section discovered is
+gone on this host, and no measurement of media under QEMU is owed any more, because
+nothing runs under it.
+
+`mod_audio_stream` is compiled in the same build, from public upstream
+(`amigniter/mod_audio_stream`) at a pinned commit with its `libs/libwsc` submodule pinned
+too, linked against SpeexDSP explicitly
+(`-DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-as-needed -lspeexdsp"`), and
+`freeswitch/assert-audio-stream.sh` runs in the builder stage and fails the build if the
+object carries no `libspeexdsp` `DT_NEEDED` entry. That is the check described above,
+moved from a thing somebody should run to a thing the build does. The `[INFERENCE]` that
+the module could not be compiled in the pinned base was correct about that base and is now
+moot: the builder stage has the FreeSWITCH headers because it built FreeSWITCH.
+
+The shipped `modules.conf.xml` loads the module unconditionally, and the build fails if the
+configuration loads a module the image does not contain — so "the image has the module" is
+now checked too. **The boot-time guard nevertheless stays**, for the reason at the top of
+this section: it is not a claim about this image, it is a refusal to run a stack that was
+told to transcribe and cannot. An image is a thing somebody can replace; the guard is what
+still holds when they do. `AICC_TRANSCRIPTION_ENABLED=true` with no `mod_audio_stream.so`
+found still exits 1 and names what would otherwise happen.
+
+`freeswitch/CONF-DEVIATIONS.md` records the module-load change with the rest of the tree's
+differences from vanilla.
 
 ### ✗ Real-call recognition accuracy remains uncharacterised
 

@@ -75,6 +75,16 @@ A stock third-party FreeSWITCH image (`dheaps/freeswitch`, pinned by digest,
 1.10.12, carrying `mod_callcenter`/`mod_lua`/`mod_pgsql`) turned into ours at
 every boot by an entrypoint hook. Six things had to be found by running it.
 
+*(That arrangement was replaced on 2026-09-09 — see the last item of §6. The
+image and the hook are gone, but most of what was found here is not: the IPv4
+event-socket bind, the `aicc_esl` list and the pinned external addresses are
+now settings in `freeswitch/conf/`, and the recording group membership is still
+in the demo compose file. Two findings expired with the image. The busybox
+`install` one was about the hook, which no longer exists — nothing is applied at
+boot to do nothing quietly. And the demo now runs v1.11.3, where `uuid-version`
+exists and is honoured, so its channel UUIDs are v7 like the development
+switch's.)*
+
 **`install` does not exist in that image's busybox** — and a missing command
 does not reliably abort a sourced `ash` subshell under `set -e`. The hook
 printed "switch configuration applied", FreeSWITCH started, the modules loaded,
@@ -177,6 +187,13 @@ L3 builds on this harness.
   ones L3 and L5 grade, and building them without a run to grade would be
   guessing at what they need to show. `rtp_tx_underruns_total` is not built for
   a different reason, in 06 §8.
-- **The demo's FreeSWITCH image is amd64 only.** Fine under emulation for a
+- ~~**The demo's FreeSWITCH image is amd64 only.** Fine under emulation for a
   demo, not for load. A second-choice image or an in-repo build is the answer
-  if that ever matters.
+  if that ever matters.~~ → **Done 2026-09-09: the in-repo build is what
+  happened.** `freeswitch/Dockerfile` compiles FreeSWITCH v1.11.3 from source
+  for `linux/amd64` and `linux/arm64`, with the configuration tree, the Lua
+  scripts and `mod_audio_stream` in it, and the demo compose runs that image.
+  What decided it was not the emulation: the third-party base had no package
+  manager and no FreeSWITCH headers, so `mod_audio_stream` could not be
+  compiled into it at all, and live transcription needs it
+  (`08-transcription.md` §B.5).

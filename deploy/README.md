@@ -15,7 +15,7 @@ everything below is about a deployment that carries real calls.
 |---|---|
 | CPU / memory | Not yet characterised. Nothing here has been benchmarked, so size from your own traffic, watch `AICC_METRICS_ADDR`, and grow from what you see. |
 | PostgreSQL | 18. The application migrates its own schema at startup. |
-| FreeSWITCH | 1.10.13 or newer with `mod_lua`, `mod_pgsql` and `mod_callcenter`. |
+| FreeSWITCH | This project's own image, `rasonyang/freeswitch-aicc` (`linux/amd64`, `linux/arm64`), or a native install of 1.11.3 or newer with `mod_lua`, `mod_pgsql` and `mod_callcenter`. |
 | Network | The AI leg terminates its own SIP and RTP: one UDP port for signalling (6060) and a range for media (40000–40999 by default), reachable from the switch. |
 | Storage | Recordings on a filesystem, or any S3-compatible endpoint. |
 
@@ -43,26 +43,40 @@ Or as a container:
 ```sh
 docker run -d --name aicc \
     -e AICC_DATABASE_URL='postgres://aicc:…@db:5432/aicc' \
-    -e AICC_ESL_ADDR='fs:8021' -e AICC_ESL_PASSWORD='…' \
+    -e AICC_ESL_ADDR='fs:18021' -e AICC_ESL_PASSWORD='…' \
     -e AICC_SWITCH_DOMAIN='pbx.example.com' \
     -e OPENAI_API_KEY='…' \
     -p 8080:8080 -p 6060:6060/udp -p 40000-40999:40000-40999/udp \
     ghcr.io/rasonyang/ai-native-callcenter:latest
 ```
 
-Then the switch: [`freeswitch/README.md`](../freeswitch/README.md) has the
-complete procedure — three Lua scripts, four configuration files, one
-restart. Its shape matters more than its length: after it, **adding an
-extension, a queue or a number is a database change and FreeSWITCH is never
-edited again**.
+Then the switch. [`freeswitch/README.md`](../freeswitch/README.md) has both
+procedures; whichever you take, after it **adding an extension, a queue or a
+number is a database change and FreeSWITCH is never edited again**.
 
-Two details from that procedure are easy to skip and both are fatal:
+* **The image.** `rasonyang/freeswitch-aicc:v1.11.3` is FreeSWITCH built from
+  source with this project's configuration tree, its Lua scripts and
+  `mod_audio_stream` inside it. Nothing site-specific is baked in: the database
+  DSNs, the addresses, the passwords and the trunk all arrive as environment
+  variables at container start.
+  [`freeswitch/DOCKERHUB.md`](../freeswitch/DOCKERHUB.md) is that contract in
+  full, and `deploy/demo/docker-compose.yml` is a worked example of it.
+  `AICC_LUA_DSN` and `AICC_CC_DSN` are required — without them the switch
+  refuses to start, because one that started would look healthy and tell every
+  agent phone that its extension does not exist.
+* **A native install.** Build FreeSWITCH yourself with at least the modules in
+  `freeswitch/modules.conf`, copy `freeswitch/conf/` and `freeswitch/scripts/`
+  over the switch's own, and fill in the placeholders the image's entrypoint
+  would have substituted. The README lists them.
+
+Two details are easy to skip on either path and both are fatal:
 
 * **mod_callcenter needs a database of its own.** It creates unqualified
   `agents`/`tiers`/`members` tables, which collide with the application's. Give
   it `aicc_fs`.
 * **Binding the XML handler takes a restart, not a reload.** `reload mod_lua`
   answers "Module is not unloadable" and leaves the binding silently inactive.
+  The image restarts anyway; a native install has to be told.
 
 ## Configuring
 
