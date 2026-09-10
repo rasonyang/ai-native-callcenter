@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# What the switch image does not need. The build context is this directory, and
+# almost all of it — conf/, scripts/, modules.conf — is what the image is made
+# of, so the default is to copy.
+#
+# assert-audio-stream.sh is deliberately not excluded: the build runs it inside
+# the builder stage against the mod_audio_stream it just compiled, and a build
+# that could not find it would have no SpeexDSP gate.
+
+# Build inputs, not image content.
+Dockerfile
+.dockerignore
+build.sh
+
+# Documentation.
+README.md
+DOCKERHUB.md
+
+# The overlay for the stock third-party image, which this Dockerfile does not
+# use: it builds FreeSWITCH itself and ships docker-entrypoint.sh instead.
+entrypoint.d/
+
+# Editor and OS residue, and the backup files a live switch accumulates.
+.DS_Store
+**/.DS_Store
+*.bak
+*.bak-*
+*.pre-*
+*.m0bak

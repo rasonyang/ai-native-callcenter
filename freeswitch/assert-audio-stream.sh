@@ -53,7 +53,12 @@ Build it with SpeexDSP linked explicitly — its own CMakeLists includes the
 header without linking the library, so this succeeds by accident on some
 distributions and must not be relied on:
 
-  cmake -DCMAKE_SHARED_LINKER_FLAGS="-lspeexdsp" ...
+  cmake -DCMAKE_SHARED_LINKER_FLAGS="-Wl,--no-as-needed -lspeexdsp" ...
+
+--no-as-needed is not optional there. gcc on Debian defaults to --as-needed and
+CMake places these flags before the object files, so a plain -lspeexdsp is
+reached while nothing is undefined yet and is dropped without a word — leaving
+exactly the build this check rejects.
 WHY
     exit 1
 fi
