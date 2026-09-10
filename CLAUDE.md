@@ -10,6 +10,10 @@ An open-source AI-native call center: one Go binary (chi/pgx/sqlc/slog/OTel) ser
 
 The build is strictly phased. Requirements live in `docs/phase1-decisions.md`, the approved design in `docs/design/00-…07` (07 is the **mandatory naming spec** — 4-layer mapping Go `CallID` ↔ JSON `callId` ↔ TS `callId` ↔ DB `call_id`, SCREAMING_SNAKE enum values byte-identical across JSON/TS/DB, `xxxAt`/`xxxMs`/`xxxSec`, `is_`/`has_` booleans, no upstream FreeSWITCH/Genesys tokens outside boundary layers). Live-verified findings that amended the design are recorded in `docs/design/m0-findings.md` (M0 spike) and `docs/design/m4-cleanup-findings.md` (M4 drift audit + the A1/A6/A7 provider directives) — check both before trusting a doc's original claim.
 
+## Language
+
+**Commit messages, code comments and documentation are written in English** (owner directive 2026-09-10). The repository is published on GitHub for an English-speaking audience. The only other language that belongs in the tree is product content: the `zh` half of the bilingual bot flows, prompts and UI labels, `README.zh-CN.md`, and the `zh` i18n resources.
+
 ## Commands
 
 ```sh

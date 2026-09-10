@@ -437,7 +437,7 @@ function StatusPill({ status }: { status: APIKey['status'] }) {
   const enabled = status === 'ENABLED'
   return (
     <span
-      // nowrap because a pill is one word: Chinese 已吊销 wrapped to two lines
+      // nowrap because a pill is one word: the zh label for REVOKED wrapped to two lines
       // inside it and pushed the row taller than every other row in the table.
       className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs"
       style={{ color: enabled ? 'var(--state-available)' : 'var(--text-secondary)' }}
