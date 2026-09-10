@@ -52,3 +52,6 @@ logs/
 
 # local .env backups
 .env.bak-*
+
+# local ESL probe binary (go build ./cmd/... output), never committed
+eslprobe
