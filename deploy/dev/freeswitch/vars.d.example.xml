@@ -1,0 +1,62 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The X-PRE-PROCESS lines this overlay needs in FreeSWITCH's vars.xml, with
+  placeholder values.
+
+  This file is an example and is never installed. install.sh does not touch
+  vars.xml, because vars.xml holds passwords: the operator copies the
+  X-PRE-PROCESS lines below into their own vars.xml, inside the <include>
+  element already there, and fills in the real values by hand. The <include>
+  wrapper here exists so this file is well-formed XML on its own; it is the
+  same element vars.xml opens with, so pasting the lines in is a plain copy.
+
+  Everything here is an address or a credential of one particular host. That is
+  why the values are placeholders and why the directory this file sits in is
+  not shipped in the image.
+-->
+<include>
+
+  <!-- ai-native-callcenter: credentials and endpoints for the aicc_*.lua scripts.
+       These are what the product itself needs on a native install; the
+       container image supplies its own. -->
+
+  <!-- The confined role the Lua scripts read luacc.* through
+       (deploy/sql/lua_role.sql). Nothing else in the switch uses this DSN, and
+       the role can read nothing else. -->
+  <X-PRE-PROCESS cmd="set" data="aicc_lua_dsn=pgsql://hostaddr=127.0.0.1 dbname=aicc user=aicc_lua password='REPLACE_ME'"/>
+
+  <!-- mod_callcenter's own database. It is a separate database, not a schema:
+       mod_callcenter creates its tables unqualified in public and they would
+       collide with the application's. -->
+  <X-PRE-PROCESS cmd="set" data="aicc_cc_dsn=pgsql://hostaddr=127.0.0.1 dbname=aicc_fs user=aicc password='REPLACE_ME'"/>
+
+  <!-- Where the aicc_bot gateway sends its INVITEs: the Go process's SIP UAS.
+       It must be $${local_ip_v4} — never 127.0.0.1, never localhost, and never
+       with a sip: scheme in the value. The UAS binds the LAN address, and a
+       LAN-bound macOS socket cannot send to 127.0.0.1, so a loopback target
+       produces a gateway that looks up and calls that never arrive. DHCP has
+       moved this box before: if calls stop working, check ifconfig against the
+       local_ip_v4 pin at the top of vars.xml first. -->
+  <X-PRE-PROCESS cmd="set" data="aicc_bot_host=$${local_ip_v4}"/>
+  <X-PRE-PROCESS cmd="set" data="aicc_bot_port=6060"/>
+
+  <!-- Where mod_http_cache writes recordings. On this box that is the SeaweedFS
+       filer from deploy/dev/docker-compose.yml, so the switch records straight
+       to the store and the application reads the same objects over S3. -->
+  <X-PRE-PROCESS cmd="set" data="aicc_recordings_dir=http://127.0.0.1:8888/buckets/aicc-recordings"/>
+
+  <!-- Simulated PSTN trunk: an IP peer, so only its address is configuration.
+       There is no account to name here because the trunk neither registers nor
+       challenges — identity is the source address in both directions. Put the
+       peer's real address here; it does not belong in the XML this repository
+       ships, which names it as $${pstn_gateway_host} only. -->
+  <X-PRE-PROCESS cmd="set" data="pstn_gateway_host=REPLACE_ME"/>
+  <X-PRE-PROCESS cmd="set" data="pstn_gateway_port=5080"/>
+
+  <!-- The fallback caller id the trunk presents outbound, used only when the
+       leg carries no effective_caller_id_number of its own. Make it a DID this
+       deployment actually owns, so a callee who returns the call reaches us
+       rather than an extension the peer cannot route. -->
+  <X-PRE-PROCESS cmd="set" data="pstn_gateway_caller_id=REPLACE_ME"/>
+</include>

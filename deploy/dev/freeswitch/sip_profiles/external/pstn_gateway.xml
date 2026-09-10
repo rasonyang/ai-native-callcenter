@@ -1,0 +1,42 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The simulated PSTN trunk.
+
+  An IP trunk in both directions: we never register and the peer never
+  challenges us, so the gateway exists only to name a destination address for
+  outbound INVITEs. Inbound calls from the same peer arrive on the external
+  profile, which already runs with auth-calls disabled, and land in the public
+  context named below - the same context the profile itself would have given
+  them, stated explicitly so gateway matching cannot move them elsewhere.
+
+  caller-id-in-from is what makes the trunk transparent: without it every
+  outbound call would announce itself as the gateway's own username, and the
+  number the caller actually dialled from would never reach the peer.
+
+  No ping: an OPTIONS keepalive would mark the gateway down whenever the
+  simulator declines to answer it, and a gateway marked down rejects calls it
+  could otherwise have placed. A NOREG gateway is dialable as it stands.
+
+  outbound-proxy is what keeps an established call hanging together. The peer
+  advertises a public address in the Via and Contact of its answers rather than
+  the LAN address it actually occupies, and a Contact is where in-dialog
+  requests are sent. Left alone, our ACK and our BYE both go to that public
+  address and arrive nowhere: the peer tears the call down with
+  Reason: SIP;cause=408 "ACK Timeout" because the ACK never came, then
+  retransmits its own BYE ten times over thirty-two seconds because our 200 is
+  going to the same dead address. The caller sits through all of it.
+
+  Naming the proxy here pins the dialog's route set to the address the peer is
+  really at, so ACK and BYE follow the same path the INVITE did. It fixes the
+  teardown rather than papering over it with a media timeout.
+-->
+<include>
+  <gateway name="pstn_gateway">
+    <param name="proxy" value="$${pstn_gateway_host}:$${pstn_gateway_port}"/>
+    <param name="outbound-proxy" value="$${pstn_gateway_host}:$${pstn_gateway_port}"/>
+    <param name="register" value="false"/>
+    <param name="caller-id-in-from" value="true"/>
+    <param name="context" value="public"/>
+  </gateway>
+</include>

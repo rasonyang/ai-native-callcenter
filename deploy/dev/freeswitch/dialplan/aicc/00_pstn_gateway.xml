@@ -1,0 +1,47 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+  DEV ONLY, this machine. The simulated PSTN trunk, as a plain <extension>
+  inside the aicc context's include point — not a second <context> block,
+  which FreeSWITCH would ignore.
+
+  The caller id the far end sees comes from the platform: click-to-dial sets
+  effective_caller_id_number on the agent's leg from the number marked as the
+  deployment's default outbound one, and this passes it onward to the trunk
+  leg. It used to be pinned to $${pstn_gateway_caller_id}, which quietly beat
+  whatever the platform had chosen — the Numbers page said 95555 was what the
+  callee would see, and every call went out as 95001.
+
+  The pattern is any 7-to-16-digit number, optionally + prefixed. It matched
+  only the ten test terminals behind the simulator until 2026-09-09, when it
+  was widened to the general form and verified on a live call to a US number.
+  The narrow pattern was there to keep a mistyped number a dialplan miss
+  rather than a call into a trunk that cannot complete it; the trunk now
+  reaches the real PSTN, so the numbers it can complete are no longer a list
+  this file could hold.
+
+  The codec pin rides the trunk leg itself, as it does on the bot leg. A PSTN
+  speaks G.711 and nothing else, while $${global_codec_prefs} opens with OPUS,
+  so an unpinned offer is answered with 488 and the call never rings. Pinning
+  only the b-leg leaves the caller free to speak whatever it likes; the switch
+  transcodes between the two.
+
+  Three conditions rather than one, because a fallback needs somewhere to be
+  written before it can be overwritten: the first sets it, the second replaces
+  it when the leg carries a number of its own (break="never" so a leg that
+  carries none simply falls through), the third places the call.
+-->
+<include>
+  <extension name="pstn_gateway_outbound">
+      <condition field="destination_number" expression="^\+?[0-9]{7,16}$" break="never">
+        <action application="set" data="trunk_clid=$${pstn_gateway_caller_id}"/>
+      </condition>
+      <condition field="${effective_caller_id_number}" expression="^([0-9]+)$" break="never">
+        <action application="set" data="trunk_clid=$1"/>
+      </condition>
+      <condition field="destination_number" expression="^(\+?[0-9]{7,16})$">
+        <action application="set" data="hangup_after_bridge=true"/>
+        <action application="set" data="continue_on_fail=false"/>
+        <action application="bridge" data="{absolute_codec_string=PCMU,PCMA,origination_caller_id_number=${trunk_clid},origination_caller_id_name=${trunk_clid}}sofia/gateway/pstn_gateway/$1"/>
+      </condition>
+    </extension>
+</include>
