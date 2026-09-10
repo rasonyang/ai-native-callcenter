@@ -13,6 +13,9 @@ PostgreSQL 和 FreeSWITCH。
 [English](README.md) · [部署](deploy/README.md) ·
 [设计文档](docs/design/00-overview.md)
 
+<!-- 录自坐席工作台原型（ui-test / CallDesk）：接听来电、实时转写逐行出现、话后处理。 -->
+![坐席工作台：接听来电，实时转写逐行出现，随后进入话后处理](docs/assets/agent-desktop.gif)
+
 ## 先跑起来
 
 ```sh

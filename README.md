@@ -15,6 +15,10 @@ inside it — plus PostgreSQL and FreeSWITCH.
 [简体中文](README.zh-CN.md) · [Deploying](deploy/README.md) ·
 [Design](docs/design/00-overview.md)
 
+<!-- Recorded from the agent desktop prototype (ui-test / CallDesk): an inbound
+     call answered, the live transcript filling in, then after-call work. -->
+![Agent desktop: an inbound call is answered, the live transcript fills in, then after-call work](docs/assets/agent-desktop.gif)
+
 ## Try it
 
 ```sh
