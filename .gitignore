@@ -55,3 +55,6 @@ logs/
 
 # local ESL probe binary (go build ./cmd/... output), never committed
 eslprobe
+
+# Playwright MCP debug output (browser console dumps)
+.playwright-mcp/
