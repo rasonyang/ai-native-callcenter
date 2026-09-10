@@ -1,0 +1,172 @@
+<configuration name="modules.conf" description="Modules">
+  <modules>
+    <!-- Loggers (I'd load these first) -->
+    <load module="mod_console"/>
+    <!-- <load module="mod_graylog2"/> -->
+    <load module="mod_logfile"/>
+    <!-- <load module="mod_syslog"/> -->
+
+    <!-- Multi-Faceted -->
+    <!-- mod_enum is a dialplan interface, an application interface and an api command interface -->
+    <!--<load module="mod_enum"/>-->
+    <!-- XML Interfaces -->
+    <!-- <load module="mod_xml_rpc"/> -->
+    <!-- <load module="mod_xml_curl"/> -->
+    <!-- <load module="mod_xml_cdr"/> -->
+    <!-- <load module="mod_xml_scgi"/> -->
+
+    <!-- Event Handlers -->
+    <!-- <load module="mod_amqp"/> -->
+    <load module="mod_cdr_csv"/>
+    <!-- <load module="mod_cdr_sqlite"/> -->
+    <!-- <load module="mod_event_multicast"/> -->
+    <load module="mod_event_socket"/>
+    <!-- <load module="mod_zeroconf"/> -->
+    <!-- <load module="mod_erlang_event"/> -->
+    <!-- <load module="mod_smpp"/> -->
+    <!-- <load module="mod_snmp"/> -->
+
+    <!-- Directory Interfaces -->
+    <!-- <load module="mod_ldap"/> -->
+
+    <!-- Databases -->
+    <!-- The switch reads its own directory and its queue configuration from
+         PostgreSQL through mod_lua (see lua.conf.xml), and mod_callcenter
+         keeps its queue tables there too. mod_pgsql is what turns a
+         "pgsql://..." DSN into a connection; without it every such DSN is an
+         unknown scheme and the queue engine comes up with no queues at all.
+         It is loaded here, ahead of anything that opens one. -->
+    <load module="mod_pgsql"/>
+
+    <!-- Endpoints -->
+    <!-- <load module="mod_dingaling"/> -->
+    <!-- <load module="mod_alsa"/> -->
+    <load module="mod_sofia"/>
+    <load module="mod_loopback"/>
+    <!-- <load module="mod_woomera"/> -->
+    <!-- <load module="mod_freetdm"/> -->
+    <!-- <load module="mod_skinny"/> -->
+    <!--<load module="mod_rtc"/>-->
+    <!-- <load module="mod_rtmp"/>   -->
+    <!--<load module="mod_verto"/>-->
+    <!-- Applications -->
+    <!--<load module="mod_signalwire"/>-->
+    <load module="mod_commands"/>
+    <!--<load module="mod_conference"/>-->
+    <!-- <load module="mod_curl"/> -->
+    <!--<load module="mod_db"/>-->
+    <load module="mod_dptools"/>
+    <load module="mod_expr"/>
+    <load module="mod_fifo"/>
+    <load module="mod_hash"/>
+    <!--<load module="mod_mongo"/> -->
+    <load module="mod_voicemail"/>
+    <!--<load module="mod_directory"/>-->
+    <!--<load module="mod_distributor"/>-->
+    <!--<load module="mod_lcr"/>-->
+    <!--<load module="mod_easyroute"/>-->
+    <!--<load module="mod_esf"/>-->
+    <!--<load module="mod_fsv"/>-->
+    <!--<load module="mod_cluechoo"/>-->
+    <load module="mod_valet_parking"/>
+    <!--<load module="mod_fsk"/>-->
+    <!--<load module="mod_spy"/>-->
+    <!--<load module="mod_sms"/>-->
+    <!--<load module="mod_smpp"/>-->
+    <!--<load module="mod_random"/>-->
+    <!-- mod_httapi is not loaded: it claims the http:// and https:// file
+         formats, and so does mod_http_cache below. Only one of them can have
+         them, and this product needs the one that can write. -->
+    <!-- <load module="mod_httapi"/> -->
+    <!-- Recordings may go to an http:// object store rather than a directory
+         (aicc_recordings_dir in vars.xml). With this module loaded and
+         enable-file-formats true in http_cache.conf.xml, record_session takes
+         a URL and the switch uploads each finished recording itself, with no
+         volume shared between it and the application. Without it the URL is
+         rejected as an unknown file format and nothing is recorded. -->
+    <load module="mod_http_cache"/>
+    <!--<load module="mod_translate"/>-->
+
+    <!-- Dialplan Interfaces -->
+    <!-- <load module="mod_dialplan_directory"/> -->
+    <load module="mod_dialplan_xml"/>
+    <!--<load module="mod_dialplan_asterisk"/>-->
+    <!-- Codec Interfaces -->
+    <!--<load module="mod_spandsp"/>-->
+    <load module="mod_g723_1"/>
+    <load module="mod_g729"/>
+    <!-- Commented out because this image does not build them. The build
+         list is freeswitch/modules.conf; a <load> of a module that was
+         not built is a CRIT at every boot and nothing else. Each of
+         these is reachable only from the stock demo dialplan, which
+         this deployment does not route to. mod_signalwire is dropped
+         for a second reason: it contacts SignalWire's provisioning API
+         at every boot, which a self-contained switch should not do. -->
+    <!--<load module="mod_amr"/>-->
+    <!--<load module="mod_ilbc"/>-->
+    <!--<load module="mod_b64"/>-->
+    <!--<load module="mod_siren"/>-->
+    <load module="mod_opus"/>
+
+    <!-- File Format Interfaces -->
+    <!-- mod_av is not loaded, and is not in the image's build list. This
+         product is audio only; H264 and VP8 are struck from global_codec_prefs
+         in vars.xml for the same reason. A load line for a module that was
+         never built is a CRIT at every boot. -->
+    <!-- <load module="mod_av"/> -->
+    <load module="mod_sndfile"/>
+    <load module="mod_native_file"/>
+    <!--<load module="mod_opusfile"/>-->
+    <!--<load module="mod_png"/>-->
+    <!-- <load module="mod_shell_stream"/> -->
+    <!--For icecast/mp3 streams/files-->
+    <!--<load module="mod_shout"/>-->
+    <!--For local streams (play all the files in a directory)-->
+    <load module="mod_local_stream"/>
+    <load module="mod_tone_stream"/>
+
+    <!-- Timers -->
+    <!-- <load module="mod_timerfd"/> -->
+    <!-- <load module="mod_posix_timer"/> -->
+
+    <!-- Languages -->
+    <!-- <load module="mod_v8"/> -->
+    <!-- <load module="mod_perl"/> -->
+    <!-- <load module="mod_python3"/> -->
+    <!-- <load module="mod_java"/> -->
+    <load module="mod_lua"/>
+
+    <!-- ASR /TTS -->
+    <!-- <load module="mod_flite"/> -->
+    <!-- <load module="mod_pocketsphinx"/> -->
+    <!-- <load module="mod_tts_commandline"/> -->
+
+    <!-- Say -->
+    <load module="mod_say_en"/>
+    <!-- <load module="mod_say_ru"/> -->
+    <!-- <load module="mod_say_zh"/> -->
+    <!-- <load module="mod_say_sv"/> -->
+
+    <!-- Third party modules -->
+    <!--<load module="mod_nibblebill"/>-->
+    <!-- The queue engine. Vanilla ships it commented out; here it is the
+         thing agents are delivered calls by, and its queues and agents are
+         rendered from PostgreSQL by aicc_xml.lua rather than written below.
+         It is loaded last, after mod_lua, because it reads its configuration
+         through that binding: loaded first it would find no queues and say
+         nothing about why. -->
+    <load module="mod_callcenter"/>
+
+    <!-- Live transcription taps an agent's leg with uuid_audio_stream and
+         sends the audio to the application over a websocket. Not a stock
+         FreeSWITCH module — it is built into this image from source, and the
+         build must declare libspeexdsp or the tap resamples at the wrong rate
+         (freeswitch/assert-audio-stream.sh checks exactly that). Without the
+         module the stack still comes up entirely healthy and transcribes
+         nothing at all, which is why it is loaded unconditionally here: a
+         missing module must be a boot failure, not a transcript panel that
+         says "Connecting..." until the call ends. -->
+    <load module="mod_audio_stream"/>
+
+  </modules>
+</configuration>

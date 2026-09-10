@@ -1,0 +1,38 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The application's one connection to the switch.
+
+  Port 18021, not the stock 8021. The project documents 18021 everywhere
+  (AICC_ESL_ADDR's default, docs/dev-stack.md, the design set), and a switch
+  that shares a host with another one should not have to fight over the stock
+  port to be reachable.
+
+  Both the listen address and the password are meant to be rewritten at
+  container start — the entrypoint substitutes AICC_ESL_PASSWORD for the value
+  below. The password shipped here is the stock FreeSWITCH one on purpose: an
+  image published to a registry must not carry a credential anybody actually
+  uses, and "ClueCon" is unmistakably a default rather than something a reader
+  might take for a real secret.
+
+  IPv4 explicitly, where vanilla binds "::": a compose network has no IPv6, and
+  mod_event_socket answers a bind on :: there by refusing to start its listener
+  thread at all — the switch comes up healthy and the application can never
+  connect to it.
+
+  stop-on-bind-error is on for the same reason. A switch whose event socket
+  did not bind is a switch the application cannot drive; failing the boot says
+  so, where the vanilla default leaves it looking fine.
+-->
+<configuration name="event_socket.conf" description="Socket Client">
+  <settings>
+    <param name="nat-map" value="false"/>
+    <param name="listen-ip" value="0.0.0.0"/>
+    <param name="listen-port" value="18021"/>
+    <param name="password" value="ClueCon"/>
+    <!-- Defined in acl.conf.xml: loopback and the private ranges a compose
+         network draws from. -->
+    <param name="apply-inbound-acl" value="aicc_esl"/>
+    <param name="stop-on-bind-error" value="true"/>
+  </settings>
+</configuration>

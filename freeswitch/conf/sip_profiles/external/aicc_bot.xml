@@ -14,6 +14,12 @@
     <param name="register" value="false"/>
     <param name="ping" value="30"/>
     <param name="ping-max" value="3"/>
-    <param name="context" value="default"/>
+    <!-- Inbound context for calls arriving through this gateway. Nothing
+         arrives that way today: the application never sends a call back
+         in, and a transfer moves the caller's own channel with
+         uuid_transfer. It says aicc rather than default because the
+         stock default context is unreachable by design here, so a call
+         that did arrive would land nowhere. -->
+    <param name="context" value="aicc"/>
   </gateway>
 </include>

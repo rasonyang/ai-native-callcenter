@@ -1,0 +1,83 @@
+<!--
+    NOTICE:
+
+    This context is usually accessed via the external sip profile listening on port 5080.
+    
+    It is recommended to have separate inbound and outbound contexts.  Not only for security
+    but clearing up why you would need to do such a thing.  You don't want outside un-authenticated
+    callers hitting your default context which allows dialing calls thru your providers and results 
+    in Toll Fraud.
+-->
+
+<!-- http://wiki.freeswitch.org/wiki/Dialplan_XML -->
+<include>
+  <context name="public">
+
+    <extension name="unloop">
+      <condition field="${unroll_loops}" expression="^true$"/>
+      <condition field="${sip_looped_call}" expression="^true$">
+	<action application="deflect" data="${destination_number}"/>
+      </condition>
+    </extension>
+    <!--
+	Tag anything pass thru here as an outside_call so you can make sure not
+	to create any routing loops based on the conditions that it came from 
+	the outside of the switch.  
+    -->
+    <extension name="outside_call" continue="true">
+      <condition>
+	<action application="set" data="outside_call=true"/>
+	<action application="export" data="RFC2822_DATE=${strftime(%a, %d %b %Y %T %z)}"/>
+      </condition>
+    </extension>
+
+    <extension name="call_debug" continue="true">
+      <condition field="${call_debug}" expression="^true$" break="never">
+	<action application="info"/>
+      </condition>
+    </extension>
+
+    <!--
+	Vanilla has two rules here, public_extensions (10xx) and
+	public_conference_extensions (3500-3819), both of which transfer an
+	unauthenticated inbound call into the stock `default` context. Both are
+	removed, for two separate reasons.
+
+	The first is that they sit above the public/*.xml include below, and an
+	include's position is fixed in the file rather than by filename. Any
+	number they match therefore never reaches 05_aicc.xml, which is this
+	product's doorway. 3500-3819 is an ordinary range for a four-digit DID:
+	a deployment that was handed one would find the call answered by a stock
+	conference instead of by the bot, with nothing in the configuration
+	naming the rule that took it.
+
+	The second is what they transfer to. `default` is the stock demo
+	dialplan; calls belonging to this product live in the `aicc` context and
+	get there through 05_aicc.xml. Handing an outside caller a route into
+	`default` is the same structural mistake that made every agent phone
+	skip dialplan/aicc.xml (design 01 §7 D6a), seen from the other side.
+    -->
+
+    <!--
+	You can place files in the public directory to get included.
+    -->
+    <X-PRE-PROCESS cmd="include" data="public/*.xml"/>
+    <!--
+	If you have made it this far lets challenge the caller and if they authenticate
+	lets try what they dialed in the default context. (commented out by default)
+    -->
+    <!--
+    <extension name="check_auth" continue="true">
+      <condition field="${sip_authorized}" expression="^true$" break="never">
+	<anti-action application="respond" data="407"/>
+      </condition>
+    </extension>
+    
+    <extension name="transfer_to_default">
+      <condition>
+	<action application="transfer" data="${destination_number} XML default"/>
+      </condition>
+    </extension>
+    -->
+  </context>
+</include>

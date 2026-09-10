@@ -1,0 +1,58 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  Vanilla's network lists, plus the one the event socket uses.
+
+  Left unset, mod_event_socket applies loopback.auto and rudely rejects the
+  application, which in a container deployment lives at another address on the
+  compose network. localnet.auto alone would let the application in but shut
+  fs_cli out of the switch's own container, which is exactly where anyone
+  debugging this reaches for it. "aicc_esl" is both.
+
+  Private ranges and loopback only. No site's own subnet belongs in a file that
+  ships in an image: the port is deliberately not published, so nothing outside
+  the host can reach it whatever this list says, and a real address baked in
+  here would only tell a reader about the office it was written in.
+-->
+<configuration name="acl.conf" description="Network Lists">
+  <network-lists>
+    <!--
+	 These ACL's are automatically created on startup.
+
+	 rfc1918.auto  - RFC1918 Space
+	 nat.auto      - RFC1918 Excluding your local lan.
+	 localnet.auto - ACL for your local lan.
+	 loopback.auto - ACL for your local lan.
+    -->
+
+    <!-- The application's one connection to the switch, and fs_cli. -->
+    <list name="aicc_esl" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
+      <!-- The compose network. RFC1918 is as wide as a bridge network gets,
+           and the address it hands a container is not knowable in advance. -->
+      <node type="allow" cidr="10.0.0.0/8"/>
+      <node type="allow" cidr="172.16.0.0/12"/>
+      <node type="allow" cidr="192.168.0.0/16"/>
+    </list>
+
+    <list name="lan" default="allow">
+      <node type="deny" cidr="192.168.42.0/24"/>
+      <node type="allow" cidr="192.168.42.42/32"/>
+    </list>
+
+    <!--
+	This will traverse the directory adding all users
+	with the cidr= tag to this ACL, when this ACL matches
+	the users variables and params apply as if they
+	digest authenticated.
+    -->
+    <list name="domains" default="deny">
+      <!-- domain= is special it scans the domain from the directory to build the ACL -->
+      <node type="allow" domain="$${domain}"/>
+      <!-- use cidr= if you wish to allow ip ranges to this domains acl. -->
+      <!-- <node type="allow" cidr="192.168.0.0/24"/> -->
+    </list>
+
+  </network-lists>
+</configuration>

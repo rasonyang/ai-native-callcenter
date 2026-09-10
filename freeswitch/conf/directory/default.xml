@@ -1,0 +1,72 @@
+<!--
+    NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
+
+    FreeSWITCH works off the concept of users and domains just like email.
+    You have users that are in domains for example 1000@domain.com.
+
+    When freeswitch gets a register packet it looks for the user in the directory
+    based on the from or to domain in the packet depending on how your sofia profile
+    is configured.  Out of the box the default domain will be the IP address of the
+    machine running FreeSWITCH.  This IP can be found by typing "sofia status" at the
+    CLI.  You will register your phones to the IP and not the hostname by default.
+    If you wish to register using the domain please open vars.xml in the root conf
+    directory and set the default domain to the hostname you desire.  Then you would
+    use the domain name in the client instead of the IP address to register
+    with FreeSWITCH.
+
+    NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE NOTICE
+-->
+
+<include>
+  <!--the domain or ip (the right hand side of the @ in the addr-->
+  <domain name="$${domain}">
+    <params>
+      <param name="dial-string" value="{^^:sip_invite_domain=${dialed_domain}:presence_id=${dialed_user}@${dialed_domain}}${sofia_contact(*/${dialed_user}@${dialed_domain})},${verto_contact(${dialed_user}@${dialed_domain})}"/>
+      <!-- These are required for Verto to function properly -->
+      <param name="jsonrpc-allowed-methods" value="verto"/>
+      <!-- <param name="jsonrpc-allowed-event-channels" value="demo,conference,presence"/> -->
+    </params>
+
+    <variables>
+      <variable name="record_stereo" value="true"/>
+      <variable name="default_gateway" value="$${default_provider}"/>
+      <variable name="default_areacode" value="$${default_areacode}"/>
+      <variable name="transfer_fallback_extension" value="operator"/>
+    </variables>
+
+    <!--
+	No users, and no sales/billing/support groups.
+
+	The SIP directory is served from PostgreSQL by aicc_xml.lua, which is
+	bound to the directory section in autoload_configs/lua.conf.xml and
+	renders a complete <domain> of its own for whichever account is being
+	looked up. This file is only what the switch falls back to when that
+	handler answers with nothing, and the right answer then is "no such
+	user".
+
+	Vanilla ships users 1000-1019 here, all with $${default_password}. That
+	is exactly the extension range an agent phone uses (dialplan/aicc.xml
+	matches ^(10[0-9][0-9])$), so a stale demo account would shadow a real
+	agent with a password of 1234 and the call would go to whoever
+	registered first. They are removed rather than left as a migration
+	fallback (design 01 §7 D3 kept them during the migration; the migration
+	is done).
+
+	Emptying the directory has a second effect worth naming, because it is
+	load-bearing rather than incidental: the "domains" ACL in acl.conf.xml
+	builds itself by scanning this directory for cidr= tags, and the
+	internal profile applies it as apply-inbound-acl. With no users to scan,
+	that ACL admits nobody without a challenge — which is what
+	internal_auth_calls=true was supposed to mean all along. Vanilla's demo
+	users made it mean something else.
+    -->
+    <groups>
+      <group name="default">
+	<users>
+	  <X-PRE-PROCESS cmd="include" data="default/*.xml"/>
+	</users>
+      </group>
+    </groups>
+
+  </domain>
+</include>

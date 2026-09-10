@@ -1,0 +1,52 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  Vanilla lua.conf.xml, with the XML handler bound (design 01 §7 diff D3).
+
+  Binding the handler is what makes PostgreSQL the switch's configuration:
+  the directory section (which SIP accounts exist, their passwords, the
+  context they land in) and the callcenter.conf section (which queues exist
+  and who is in them) are both answered by aicc_xml.lua instead of being read
+  from files under this tree. Nothing here has to be edited to add an agent or
+  a queue.
+
+  Binding takes a restart rather than a reload. mod_lua reads these parameters
+  when it loads and is not unloadable, so `reload mod_lua` answers "Module is
+  not unloadable" and leaves the binding inactive — a database-only extension
+  then stays invisible to `user_exists` and nobody can see why. In a container
+  that restart is simply what a boot is.
+-->
+<configuration name="lua.conf" description="LUA Configuration">
+  <settings>
+
+    <!-- 
+    Specify local directories that will be searched for LUA modules
+    These entries will be pre-pended to the LUA_CPATH environment variable
+    -->
+    <!-- <param name="module-directory" value="/usr/lib/lua/5.1/?.so"/> -->
+    <!-- <param name="module-directory" value="/usr/local/lib/lua/5.1/?.so"/> -->
+
+    <!-- 
+    Specify local directories that will be searched for LUA scripts
+    These entries will be pre-pended to the LUA_PATH environment variable
+    -->
+    <!-- <param name="script-directory" value="/usr/local/lua/?.lua"/> -->
+    <!-- <param name="script-directory" value="$${script_dir}/?.lua"/> -->
+
+    <!-- The two lines vanilla ships commented out, pointed at our handler.
+         aicc_xml.lua is installed into $${script_dir} by the image. -->
+    <param name="xml-handler-script" value="aicc_xml.lua"/>
+    <param name="xml-handler-bindings" value="directory|configuration"/>
+
+    <!--
+	The following options identifies a lua script that is launched
+	at startup and may live forever in the background.
+	You can define multiple lines, one for each script you 
+	need to run.
+    -->
+    <!--<param name="startup-script" value="startup_script_1.lua"/>-->
+    <!--<param name="startup-script" value="startup_script_2.lua"/>-->
+    
+    <!--<hook event="CUSTOM" subclass="conference::maintenance" script="catch-event.lua"/>-->
+  </settings>
+</configuration>
