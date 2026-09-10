@@ -1835,7 +1835,8 @@ export interface components {
              */
             callId?: string;
             /**
-             * @description AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
+             * @description AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND. Left out, it is AGENT_OUTBOUND: a plain {to} is a click-to-dial.
+             * @default AGENT_OUTBOUND
              * @enum {string}
              */
             kind: "AI_OUTBOUND" | "AGENT_OUTBOUND";

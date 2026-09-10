@@ -255,6 +255,22 @@ func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
 	}
 }
 
+// kind is optional: left out, the request is a click-to-dial. The default
+// is the kind that needs no second scope, so omitting it can never reach
+// further than naming it would have.
+func TestAnOmittedKindIsAClickToDial(t *testing.T) {
+	w, dialer := agentDial(t, agentSubject(), `{"to":"13912345678"}`)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	if dialer.got.AgentExtension != "1008" || dialer.got.To != "13912345678" {
+		t.Errorf("dialled %+v, want the agent's own phone raised for 13912345678", dialer.got)
+	}
+	if w, _ := agentDial(t, agentSubject(), `{"kind":"OUTBOUND","to":"13912345678"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("unknown kind: http = %d, want 400 — the default covers absence, not typos", w.Code)
+	}
+}
+
 // The requirement this whole path exists for: a system places the call, the
 // agent's phone is registered, and nobody has signed into this application.
 // Presence has nothing to say about such an agent, so the phone is what is

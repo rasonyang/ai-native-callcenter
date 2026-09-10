@@ -36,7 +36,14 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	if !req.Kind.Valid() {
+	// kind is optional and defaults to AGENT_OUTBOUND: a plain {to} is a
+	// click-to-dial, the call an integration places most often. AI_OUTBOUND
+	// has to be asked for by name, since it also needs a second scope.
+	kind := api.CreateCallRequestKindAGENTOUTBOUND
+	if req.Kind != nil {
+		kind = *req.Kind
+	}
+	if !kind.Valid() {
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "unknown kind",
 			map[string]any{"allowed": []string{
 				string(api.CreateCallRequestKindAIOUTBOUND),
@@ -52,7 +59,7 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	switch req.Kind {
+	switch kind {
 	case api.CreateCallRequestKindAIOUTBOUND:
 		s.createAICall(w, r, req)
 	case api.CreateCallRequestKindAGENTOUTBOUND:

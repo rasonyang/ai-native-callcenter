@@ -1231,8 +1231,8 @@ type CreateCallRequest struct {
 	// ExtensionNumber AGENT_OUTBOUND only: the extension whose phone is raised first. A signed-in agent may leave it out — the phone they signed in at is used — and may not name another's. A supervisor or an API-key caller has no phone of their own, so they must name one.
 	ExtensionNumber *string `json:"extensionNumber,omitempty"`
 
-	// Kind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
-	Kind CreateCallRequestKind `json:"kind"`
+	// Kind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND. Left out, it is AGENT_OUTBOUND: a plain {to} is a click-to-dial.
+	Kind *CreateCallRequestKind `json:"kind,omitempty"`
 
 	// Language AI_OUTBOUND only: overrides the DID's language when set.
 	Language *string `json:"language,omitempty"`
@@ -1244,7 +1244,7 @@ type CreateCallRequest struct {
 	UserData *UserData `json:"userData,omitempty"`
 }
 
-// CreateCallRequestKind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND.
+// CreateCallRequestKind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND. Left out, it is AGENT_OUTBOUND: a plain {to} is a click-to-dial.
 type CreateCallRequestKind string
 
 // CreateCallResponse defines model for CreateCallResponse.
