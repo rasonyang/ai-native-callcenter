@@ -22,8 +22,18 @@ web/src/routeTree.gen.ts
 *.log
 .DS_Store
 
-# Documentation and deployment material are not inputs to the binary.
-docs/
+# Deployment material is not an input to the binary.
 deploy/
 freeswitch/
 prompts.md
+
+# docs/ is not documentation as far as the build is concerned: docs/embed.go
+# is a Go package and docs/openapi.json is embedded into the binary, because a
+# deployment that cannot hand out its own contract asks every integrator to
+# trust a copy found somewhere else. Excluding the directory made the image
+# build fail with "no required module provides package .../docs" while
+# `go build ./...` on a workstation passed. Everything under docs/ that is
+# genuinely prose is excluded below instead.
+docs/design/
+docs/*.md
+docs/auth/
