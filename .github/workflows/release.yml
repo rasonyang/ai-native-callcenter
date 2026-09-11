@@ -6,6 +6,18 @@
 #
 # The executable carries the SPA inside it, so every archive here is the whole
 # product — no assets to unpack beside it, nothing to serve it with.
+#
+# Tags: a release publishes the image under the exact git tag and nothing else —
+# `ghcr.io/<owner>/<repo>:v0.1.0`. No `latest`, no floating `0.1`, no v-stripped
+# alias: a deployment names the build it runs, and a tag that moves cannot be
+# named. A `workflow_dispatch` run builds the image but pushes nothing.
+#
+# Pre-releases: a tag whose name contains a hyphen (`v0.1.0-rc.1`) is marked as a
+# pre-release on GitHub; a plain `v0.1.0` is a full release.
+#
+# Notes: the release body comes from `scripts/release-notes.sh <tag>` — the
+# CHANGELOG.md section for the tag when there is one, otherwise the commit
+# subjects since the previous tag.
 name: release
 
 on:
@@ -74,8 +86,21 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME}"
           [ "${GITHUB_REF_TYPE}" = tag ] || version="$(git rev-parse --short HEAD)"
+          echo "version=${version}" >> "$GITHUB_ENV"
           go build -trimpath -ldflags "-s -w -X main.version=${version}" -o aicc ./cmd/aicc
-          ./aicc version || true   # a cross build cannot run; native ones say hello
+
+      # The runner is linux/amd64, so exactly one matrix entry produces an
+      # executable it can run — and that one has to prove the ldflags landed.
+      # An archive that cannot say which build it is cannot be supported.
+      - name: Check the stamped version
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        run: |
+          out="$(./aicc --version)"
+          echo "$out"
+          case "$out" in
+            *"aicc ${version} "*) ;;
+            *) echo "::error::--version does not carry ${version}: ${out}"; exit 1 ;;
+          esac
 
       - name: Package
         run: |
@@ -110,10 +135,12 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ghcr.io/${{ github.repository }}
+          # The exact tag, and only that. `type=sha` gives a dispatch run
+          # something to label the image it builds and never pushes.
+          flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ github.ref_type == 'tag' }}
+            type=ref,event=tag
+            type=sha,enable=${{ github.ref_type != 'tag' }}
 
       # The image builds the SPA itself, so it does not take the artifact
       # above: one Dockerfile, one way to build it, wherever it is built.
@@ -134,13 +161,27 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      # The notes are written from the history between two tags, so this
+      # checkout needs all of it — and the tags themselves.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
       - uses: actions/download-artifact@v4
         with:
           pattern: binaries-*
           merge-multiple: true
           path: dist
 
+      - name: Release notes
+        run: scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
+
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/release-notes.md
+          # A hyphen in the tag is a pre-release: v0.1.0-rc.1, v0.2.0-beta.2.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: dist/*
-          generate_release_notes: true

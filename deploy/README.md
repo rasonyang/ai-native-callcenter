@@ -47,8 +47,11 @@ docker run -d --name aicc \
     -e AICC_SWITCH_DOMAIN='pbx.example.com' \
     -e OPENAI_API_KEY='…' \
     -p 8080:8080 -p 6060:6060/udp -p 40000-40999:40000-40999/udp \
-    ghcr.io/rasonyang/ai-native-callcenter:latest
+    ghcr.io/rasonyang/ai-native-callcenter:v0.1.0
 ```
+
+Only exact release tags are published — there is no `latest`, so a deployment
+names the build it runs and an image pull cannot quietly change under it.
 
 Then the switch. [`freeswitch/README.md`](../freeswitch/README.md) has both
 procedures; whichever you take, after it **adding an extension, a queue or a
