@@ -39,10 +39,14 @@ nothing else.
   `psql "$AICC_DATABASE_URL" -v lua_password="'…'" -f deploy/sql/lua_role.sql`
   That file is in the repository and **not in the release tarball**, which
   carries the binary, `.env.example`, the licence and the notices and nothing
-  else. Fetch it at the tag being deployed:
-  `curl -fsSLO https://raw.githubusercontent.com/rasonyang/ai-native-callcenter/v0.1.0/deploy/sql/lua_role.sql`.
+  else. Fetch it at the exact tag being deployed — the path carries the tag, so
+  a release candidate is `v0.1.0-rc.1`, not `v0.1.0`, and the wrong one is a
+  404 rather than a wrong file:
+  `curl -fsSLO https://raw.githubusercontent.com/rasonyang/ai-native-callcenter/<tag>/deploy/sql/lua_role.sql`.
   It has to run as a superuser and after the migrations, because it grants on
-  the `luacc` views.
+  the `luacc` views. With PostgreSQL in a container and no client on the host,
+  the same thing through the container is
+  `docker cp lua_role.sql <db>:/tmp/ && docker exec <db> psql -U aicc -d aicc -v lua_password="'…'" -f /tmp/lua_role.sql`.
 * **A database of its own for mod_callcenter.** It creates unqualified
   `agents`/`tiers`/`members` tables in `public`, which collide with the
   application's, so it gets `aicc_fs` rather than sharing.
@@ -167,7 +171,9 @@ fs_cli -x "reload mod_callcenter"
 Editing the Lua scripts afterwards needs no reload at all — the handler reads
 the file per request. Only the initial binding needs the restart.
 
-Verify:
+Verify (on the image, each of these is
+`docker exec <container> fs_cli -P 18021 -p "$FS_ESL_PASSWORD" -x "…"`, because
+the event socket wants its password and the shell is inside the container):
 
 ```sh
 fs_cli -x "callcenter_config queue list"                 # queues from the database

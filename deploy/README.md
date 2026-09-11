@@ -24,9 +24,25 @@ apart — the defaults already are (FreeSWITCH 16384–32768, the bot 40000–40
 
 ## Installing
 
+Nothing below is installed for you. A clean Ubuntu 24.04 host has neither
+PostgreSQL nor its client tools nor a container runtime, so the first command
+of every procedure here fails with `command not found` until they are there.
+The image path needs a container runtime in any case — the switch ships as one.
+
 ```sh
-# 1. The database.
-createdb aicc
+sudo apt-get install -y docker.io postgresql-client acl
+```
+
+`acl` is for `setfacl`, which the recording section below depends on;
+`postgresql-client` is `psql` and `createdb`, needed even when the server
+itself is a container, because the switch's read-only role is created with
+them.
+
+```sh
+# 1. The database. PostgreSQL 18, wherever it lives. As a container:
+docker run -d --name aicc-db --restart unless-stopped \
+    -e POSTGRES_USER=aicc -e POSTGRES_PASSWORD='…' -e POSTGRES_DB=aicc \
+    -p 127.0.0.1:5432:5432 -v aicc-pgdata:/var/lib/postgresql postgres:18
 createdb aicc_fs          # mod_callcenter's own tables; see below
 
 # 2. The application.
@@ -37,6 +53,15 @@ cp .env.example .env      # then uncomment what this deployment changes
 # 3. The first administrator, against the now-migrated database.
 ./aicc useradd -username admin -password '…' -role ADMIN
 ```
+
+The volume goes at `/var/lib/postgresql`, not at `/var/lib/postgresql/data`.
+The 18 image puts its cluster in a subdirectory of the former so that
+`pg_upgrade --link` has both versions inside one mount point, and a container
+given the old path exits at every start with `This is usually the result of
+upgrading the Docker image without upgrading the underlying database`.
+
+Publish the port on loopback. The database has no business being reachable
+from the network when the application shares its host.
 
 Or as a container:
 
@@ -52,6 +77,47 @@ docker run -d --name aicc \
 
 Only exact release tags are published — there is no `latest`, so a deployment
 names the build it runs and an image pull cannot quietly change under it.
+
+### As a service
+
+`./aicc` in step 2 is the foreground form, which is what you want while you
+are still reading its output. A deployment that survives a reboot needs the
+process supervised, and the release tarball carries no unit file, so write one:
+
+```ini
+# /etc/systemd/system/aicc.service
+[Unit]
+Description=aicc — AI-native call center
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aicc
+Group=aicc
+WorkingDirectory=/opt/aicc
+ExecStart=/opt/aicc/aicc
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`.env` is read from the working directory and holds the database password and
+the provider key, so it belongs to that user and to nobody else
+(`chown aicc:aicc /opt/aicc/.env && chmod 600 /opt/aicc/.env`). Give the
+containers `--restart unless-stopped` for the same reason: after a reboot the
+switch and the database have to come back on their own, and the unit above
+starts before Docker has finished starting them — `Restart=on-failure` is what
+closes that gap, so expect the service to be `activating` for a few seconds
+after boot before it reports `active`.
+
+Until the switch is up and the application logs `esl connected`, creating an
+account is refused: provisioning a SIP extension is a change the switch has to
+be told about, and the request times out as `STORAGE_DOWN` rather than leaving
+an extension that exists in one place only. Bring the switch up first, or retry.
+
 
 Then the switch. [`freeswitch/README.md`](../freeswitch/README.md) has both
 procedures; whichever you take, after it **adding an extension, a queue or a
@@ -80,6 +146,34 @@ Two details are easy to skip on either path and both are fatal:
 * **Binding the XML handler takes a restart, not a reload.** `reload mod_lua`
   answers "Module is not unloadable" and leaves the binding silently inactive.
   The image restarts anyway; a native install has to be told.
+
+## Answering a call
+
+A migrated database holds no numbers and no conversations, so the deployment
+you now have answers nothing. Both are API objects, and the order matters:
+
+```sh
+# 1. A flow. Creating stores a draft.
+curl -X POST …/api/v1/flows -d '{"slug":"…","name":"…","spec":{…}}'
+
+# 2. Publishing is what a call runs. A number pointing at an unpublished
+#    flow reaches no bot.
+curl -X POST …/api/v1/flows/<flowId>/publish
+
+# 3. The number, pointing at that flow.
+curl -X POST …/api/v1/dids -d '{"number":"95001","language":"en","flowId":"<flowId>","allowInbound":true}'
+```
+
+An inbound number requires a flow — the contract refuses one without it — and
+the number's `language` is what the bot greets in, not a property of the flow.
+`spec` is the v2 flow DSL, validated by the server's loader: what it rejects
+with 422 is exactly what could not have run. `internal/seed/flows/` in the
+repository holds working examples, and `AICC_SEED=demo` installs a complete
+set on a machine that is only being tried out.
+
+FreeSWITCH needs to be told nothing about any of this. The inbound rule hands
+every external number to the Lua entry point, which asks the database which
+flow the number carries.
 
 ## Configuring
 
@@ -154,6 +248,10 @@ right.
   setfacl -R    -m u:aicc:rX /var/lib/aicc/recordings   # what is already there
   setfacl -R -d -m u:aicc:rX /var/lib/aicc/recordings   # what the switch creates next
   ```
+
+  `setfacl` is in the `acl` package, which a minimal server install does not
+  have. Without it the command answers `setfacl: command not found` and the
+  symptom above stays exactly as it was.
 
   A shared group works too, as long as it is inherited — the mode the switch
   writes leaves nothing for "other".
