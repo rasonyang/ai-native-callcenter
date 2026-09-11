@@ -33,6 +33,10 @@ go build -o /tmp/aicc ./cmd/aicc
 
 pkill -f /tmp/aicc 2>/dev/null || true
 
+# The application creates logs/ on its first start, but the marker has to
+# exist before that start, and the directory is gitignored: a fresh checkout
+# has no logs/ yet.
+mkdir -p logs
 marker="logs/.restart-marker"
 touch "$marker"
 
