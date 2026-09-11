@@ -41,9 +41,15 @@ history — is left exactly as it is.
 | Extensions | `wei` 1001, `amy` 1000, `ben` 1002 — SIP password `aicc@12345` |
 | Staffing | `wei` and `amy` on `support-en`, `ben` on `support-zh`, so a queued call actually reaches somebody |
 | Queues | `support-en` on 7001, `support-zh` on 7002 |
-| Flow | `novanet_support`, published, bilingual |
-| Numbers | 95001 answers in English, 95002 in Chinese; both fall back to the queue of their language |
+| Flows | Six, all published and bilingual — the Nth answers on 950N1 in English and 950N2 in Chinese, each falling back to the queue of its language |
+| Numbers | `novanet_support` 95001 / 95002 · `mobile_support` 95011 / 95012 · `plan_change` 95021 / 95022 · `early_collections` 95031 / 95032 · `field_service_appointment` 95041 / 95042 · `lead_qualification` 95051 / 95052 (English first) |
 | History | Seven deterministic days of calls, queue events and presence, so the wallboard and the reports are not empty |
+
+The five business flows fetch their facts from a backend, so without
+`AICC_BOT_BACKEND_BASE` pointing at a running `cmd/aicc-mockbackend` every one
+of their tools fails and the bot offers a transfer to a human instead — the
+correct behaviour, because a bot must not invent a repair order or an overdue
+bill (see [docs/dev-stack.md](../../docs/dev-stack.md)).
 
 `AICC_SEED=fresh` removes all of that again — the only way back to an empty
 product once the volume exists:

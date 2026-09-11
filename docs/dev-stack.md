@@ -78,10 +78,11 @@ An empty database needs a first account, and a DID needs a flow:
 /tmp/aicc flowadd -file internal/seed/flows/novanet_support.json -did 95001
 ```
 
-Or take the whole demo dataset instead — accounts, queues, a published
-bilingual flow behind 95001/95002 and a week of history — with `AICC_SEED=demo`
-on one boot. `AICC_SEED=fresh` removes exactly that again. Existing data always
-wins, so a second boot with `demo` changes nothing.
+Or take the whole demo dataset instead — accounts, queues, six published
+bilingual flows, each behind an English and a Chinese number (95001/95002 …
+95051/95052), and a week of history — with `AICC_SEED=demo` on one boot.
+`AICC_SEED=fresh` removes exactly that again. Existing data always wins, so a
+second boot with `demo` changes nothing.
 
 ## The business backend a bot walkthrough needs
 

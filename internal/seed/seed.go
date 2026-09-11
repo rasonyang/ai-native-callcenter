@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package seed fills an empty installation with a deterministic demo: a small
-// team, two queues, a published bilingual flow behind two numbers, and seven
-// days of synthetic history so the wallboard, the CDR explorer and the reports
-// render alive on first sight.
+// team, two queues, six published bilingual flows each behind an English and a
+// Chinese number, and seven days of synthetic history so the wallboard, the
+// CDR explorer and the reports render alive on first sight.
 package seed
 
 import (
@@ -41,10 +41,54 @@ const prngSeed = 20260814
 // deployment doc says in as many words that it must not be a public host.
 const demoPassword = "aicc@12345"
 
-// demoFlowFile is the flow both demo numbers answer with. It carries English
-// and Chinese personas, so one flow serves both — the number's language picks
-// the strings (phase1-decisions A1: language never selects a provider).
-const demoFlowFile = "flows/novanet_support.json"
+// demoFlows are the bundled flows the demo publishes, each behind one number
+// per language. Every bundled flow carries English and Chinese personas, so one
+// flow serves both numbers — the number's language picks the strings
+// (phase1-decisions A1: language never selects a provider).
+//
+// The numbers follow a plan rather than a list: the Nth flow answers on 950N1
+// in English and on 950N2 in Chinese. A number therefore says which flow picks
+// up and in which language without looking anything up, and a seventh flow
+// knows its own pair before anybody assigns one. 95001 / 95002 keep the meaning
+// they have had since the first demo.
+var demoFlows = []demoFlow{
+	{"flows/novanet_support.json", "NovaNet support", "95001", "95002"},
+	{"flows/mobile_support.json", "StarCom mobile after-sales", "95011", "95012"},
+	{"flows/plan_change.json", "NovaNet broadband plan change", "95021", "95022"},
+	{"flows/early_collections.json", "NovaNet early collections", "95031", "95032"},
+	{"flows/field_service_appointment.json", "StarCom field-service appointment", "95041", "95042"},
+	{"flows/lead_qualification.json", "StarCom lead qualification", "95051", "95052"},
+}
+
+// demoFlow is one bundled flow and the two numbers it answers on.
+type demoFlow struct {
+	file, name string // embedded spec, display name
+	en, zh     string // the English and the Chinese number
+}
+
+// demoNumber is one DID the demo owns.
+type demoNumber struct {
+	number, language, queue, description string
+}
+
+// numbers are the two DIDs of a demo flow. The language decides the fallback
+// queue — the demo has exactly one queue per language — and the description
+// names the flow, because that is what an operator reads in the DID list.
+func (f demoFlow) numbers() []demoNumber {
+	return []demoNumber{
+		{f.en, "en", queueForLanguage("en"), f.name + " (English)"},
+		{f.zh, "zh", queueForLanguage("zh"), f.name + " (Chinese)"},
+	}
+}
+
+// demoNumbers is every DID the demo owns, in flow order.
+func demoNumbers() []demoNumber {
+	out := make([]demoNumber, 0, 2*len(demoFlows))
+	for _, f := range demoFlows {
+		out = append(out, f.numbers()...)
+	}
+	return out
+}
 
 // demoPeople is the cast of the demo: one account per role that a visitor
 // needs, plus the agents who make the wallboard worth looking at. An account
@@ -63,13 +107,22 @@ var demoPeople = []struct {
 	{"ben", "Ben Liu", "AGENT", "1002", "support-zh"},
 }
 
-// demoNumbers are the DIDs the demo answers on. Both run the same flow in
-// different languages and fall back to the queue of that language.
-var demoNumbers = []struct {
-	number, language, queue, description string
-}{
-	{"95001", "en", "support-en", "Demo hotline (English)"},
-	{"95002", "zh", "support-zh", "Demo hotline (Chinese)"},
+// demoQueues are the two queues the demo staffs, one per language: a bot that
+// hands over, or cannot run at all, sends the caller to the queue that speaks
+// the number's language.
+var demoQueues = []struct{ language, name, ext, display string }{
+	{"en", "support-en", "7001", "Support (EN)"},
+	{"zh", "support-zh", "7002", "Support (ZH)"},
+}
+
+// queueForLanguage names the queue a number of that language falls back to.
+func queueForLanguage(language string) string {
+	for _, q := range demoQueues {
+		if q.language == language {
+			return q.name
+		}
+	}
+	return ""
 }
 
 // Demo seeds the demo dataset. Existing data always wins: entities are
@@ -244,10 +297,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 		}
 	}
 
-	for _, q := range []struct{ name, ext, display string }{
-		{"support-en", "7001", "Support (EN)"},
-		{"support-zh", "7002", "Support (ZH)"},
-	} {
+	for _, q := range demoQueues {
 		// Every column the demo depends on, named rather than left to the
 		// table's defaults: a queue created through the API without them comes
 		// out with zeros (C33), and one seeded queue already differed from the
@@ -320,43 +370,48 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 	return agents, queues, nil
 }
 
-// ensureFlowAndNumbers publishes the bundled demo flow and points the demo
+// ensureFlowAndNumbers publishes every bundled demo flow and points its two
 // numbers at it. Without this a seeded install looks complete and still cannot
 // take a call: dids.flow_id is NOT NULL, so a number exists only once a flow
 // does.
 //
 // Existing data wins here too — an operator who has already published a flow
-// under this slug, or who owns these numbers, keeps what they have.
+// under one of these slugs, or who owns one of these numbers, keeps what they
+// have.
 func ensureFlowAndNumbers(ctx context.Context, st *store.Store, log *slog.Logger) error {
-	spec, err := flowFiles.ReadFile(demoFlowFile)
-	if err != nil {
-		return err
-	}
-	slug := specID(spec)
-
 	flows := st.Flows()
-	flowID, err := flows.Create(ctx, slug, "NovaNet support", spec)
-	if err != nil {
-		existing, lookupErr := st.Queries.GetFlowBySlug(ctx, slug)
-		if lookupErr != nil {
-			return fmt.Errorf("create flow %s: %w", slug, err)
+	var numbers int
+	for _, f := range demoFlows {
+		spec, err := flowFiles.ReadFile(f.file)
+		if err != nil {
+			return err
 		}
-		log.Info("seed: demo flow already present", "slug", slug)
-		flowID = existing.ID
-	} else if err := flows.Publish(ctx, flowID, "seed"); err != nil {
-		return fmt.Errorf("publish flow %s: %w", slug, err)
-	}
+		slug := specID(spec)
 
-	for _, n := range demoNumbers {
-		if _, err := st.Pool.Exec(ctx, `
-			INSERT INTO dids (id, number, language, flow_id, fallback_queue_id, description)
-			SELECT $1, $2, $3, $4, q.id, $6 FROM queues q WHERE q.name = $5
-			ON CONFLICT (number) DO NOTHING`,
-			uuid.New(), n.number, n.language, flowID, n.queue, n.description); err != nil {
-			return fmt.Errorf("seed number %s: %w", n.number, err)
+		flowID, err := flows.Create(ctx, slug, f.name, spec)
+		if err != nil {
+			existing, lookupErr := st.Queries.GetFlowBySlug(ctx, slug)
+			if lookupErr != nil {
+				return fmt.Errorf("create flow %s: %w", slug, err)
+			}
+			log.Info("seed: demo flow already present", "slug", slug)
+			flowID = existing.ID
+		} else if err := flows.Publish(ctx, flowID, "seed"); err != nil {
+			return fmt.Errorf("publish flow %s: %w", slug, err)
+		}
+
+		for _, n := range f.numbers() {
+			if _, err := st.Pool.Exec(ctx, `
+				INSERT INTO dids (id, number, language, flow_id, fallback_queue_id, description)
+				SELECT $1, $2, $3, $4, q.id, $6 FROM queues q WHERE q.name = $5
+				ON CONFLICT (number) DO NOTHING`,
+				uuid.New(), n.number, n.language, flowID, n.queue, n.description); err != nil {
+				return fmt.Errorf("seed number %s: %w", n.number, err)
+			}
+			numbers++
 		}
 	}
-	log.Info("seed: demo flow published", "slug", slug, "numbers", len(demoNumbers))
+	log.Info("seed: demo flows published", "flows", len(demoFlows), "numbers", numbers)
 	return nil
 }
 

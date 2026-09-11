@@ -274,3 +274,91 @@ func countRows(t *testing.T, st *store.Store) map[string]int {
 	}
 	return out
 }
+
+// Every bundled flow is published and reachable on both of its numbers. The
+// seeder used to publish one flow of six: the other five shipped in the binary
+// and answered nothing, which a reading of either the directory or the table
+// cannot show — only the rows can.
+func TestEveryShippedFlowAnswersOnItsNumbers(t *testing.T) {
+	st := seededStore(t)
+	seedDemo(t, st)
+	ctx := context.Background()
+
+	for _, f := range demoFlows {
+		t.Run(f.file, func(t *testing.T) {
+			spec, err := flowFiles.ReadFile(f.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			slug := specID(spec)
+
+			record, err := st.Queries.GetFlowBySlug(ctx, slug)
+			if err != nil {
+				t.Fatalf("no flow %q after seeding: %v", slug, err)
+			}
+			// A flow with a draft and no published revision is a flow a call
+			// refuses to run (store.ErrFlowNotPublished).
+			if record.PublishedRevisionID == nil {
+				t.Fatalf("flow %q has no published revision, so a call to its "+
+					"numbers finds nothing to run", slug)
+			}
+
+			for _, n := range f.numbers() {
+				var (
+					flowID   uuid.UUID
+					language string
+					fallback *uuid.UUID
+				)
+				if err := st.Pool.QueryRow(ctx, `
+					SELECT flow_id, language, fallback_queue_id FROM dids WHERE number = $1`,
+					n.number).Scan(&flowID, &language, &fallback); err != nil {
+					t.Errorf("%s is not a seeded number: %v", n.number, err)
+					continue
+				}
+				if flowID != record.ID {
+					t.Errorf("%s points at flow %s, want %s (%s)", n.number, flowID, record.ID, slug)
+				}
+				if language != n.language {
+					t.Errorf("%s answers in %q, want %q", n.number, language, n.language)
+				}
+				// The fallback is where the caller goes when the bot hands over
+				// or cannot run: the queue of the number's language.
+				var queueID uuid.UUID
+				if err := st.Pool.QueryRow(ctx,
+					`SELECT id FROM queues WHERE name = $1`, n.queue).Scan(&queueID); err != nil {
+					t.Fatalf("the demo queue %q is missing: %v", n.queue, err)
+				}
+				if fallback == nil || *fallback != queueID {
+					t.Errorf("%s falls back to %v, want the %s queue %s",
+						n.number, fallback, n.queue, queueID)
+				}
+			}
+		})
+	}
+}
+
+// AICC_SEED=fresh is the only way back to an empty product once the volume
+// exists, and it has to know about every flow and number the demo publishes —
+// a slug the reset does not name is a flow that survives it.
+func TestFreshRemovesEverySeededFlowAndNumber(t *testing.T) {
+	st := seededStore(t)
+	seedDemo(t, st)
+
+	seeded := countRows(t, st)
+	if seeded["dids"] != 2*len(demoFlows) || seeded["flows"] != len(demoFlows) {
+		t.Fatalf("seeded %d dids and %d flows, want %d and %d",
+			seeded["dids"], seeded["flows"], 2*len(demoFlows), len(demoFlows))
+	}
+
+	if err := Fresh(context.Background(), st, quietLog()); err != nil {
+		t.Fatalf("Fresh() error = %v", err)
+	}
+
+	after := countRows(t, st)
+	if after["dids"] != 0 {
+		t.Errorf("%d numbers survived the reset", after["dids"])
+	}
+	if after["flows"] != 0 {
+		t.Errorf("%d flows survived the reset", after["flows"])
+	}
+}

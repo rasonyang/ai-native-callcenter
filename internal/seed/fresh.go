@@ -12,7 +12,7 @@ import (
 // Fresh removes the demo dataset, so the next screen an operator sees is the
 // empty product (phase1-decisions O3, the reset flag). It is the counterpart
 // of Demo and undoes exactly what Demo creates — the seeded history, the demo
-// flow behind the demo numbers, the two demo queues and the five demo
+// flows behind the demo numbers, the two demo queues and the five demo
 // accounts. Data that arrived any other way is not its business.
 //
 // A demo container keeps its database in a volume, so unsetting AICC_SEED
@@ -32,15 +32,22 @@ func Fresh(ctx context.Context, st *store.Store, log *slog.Logger) error {
 			extensions = append(extensions, p.ext)
 		}
 	}
-	numbers := make([]string, 0, len(demoNumbers))
-	queueNames := make([]string, 0, len(demoNumbers))
-	for _, n := range demoNumbers {
+	seeded := demoNumbers()
+	numbers := make([]string, 0, len(seeded))
+	for _, n := range seeded {
 		numbers = append(numbers, n.number)
-		queueNames = append(queueNames, n.queue)
 	}
-	flowSlug := ""
-	if spec, err := flowFiles.ReadFile(demoFlowFile); err == nil {
-		flowSlug = specID(spec)
+	queueNames := make([]string, 0, len(demoQueues))
+	for _, q := range demoQueues {
+		queueNames = append(queueNames, q.name)
+	}
+	// A flow whose file cannot be read was never seeded either, so a slug that
+	// is missing here is a slug there is nothing to delete for.
+	flowSlugs := make([]string, 0, len(demoFlows))
+	for _, f := range demoFlows {
+		if spec, err := flowFiles.ReadFile(f.file); err == nil {
+			flowSlugs = append(flowSlugs, specID(spec))
+		}
 	}
 
 	// Order follows the foreign keys: the ledger before the entities it
@@ -63,7 +70,7 @@ func Fresh(ctx context.Context, st *store.Store, log *slog.Logger) error {
 		{"queue events", `DELETE FROM queue_events WHERE call_id IN (` + seededCDRs + `)`, nil},
 		{"calls", `DELETE FROM cdrs WHERE tech->>'isSeeded' = 'true'`, nil},
 		{"numbers", `DELETE FROM dids WHERE number = ANY($1)`, []any{numbers}},
-		{"flow", `DELETE FROM flows WHERE slug = $1`, []any{flowSlug}},
+		{"flows", `DELETE FROM flows WHERE slug = ANY($1)`, []any{flowSlugs}},
 		{"queues", `DELETE FROM queues WHERE name = ANY($1)`, []any{queueNames}},
 		{"accounts", `DELETE FROM users WHERE username = ANY($1)`, []any{usernames}},
 		{"extensions", `DELETE FROM extensions WHERE number = ANY($1)`, []any{extensions}},

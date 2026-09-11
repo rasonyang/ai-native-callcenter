@@ -46,3 +46,59 @@ func TestNoShippedFlowNamesAProviderSpecificVoice(t *testing.T) {
 		}
 	}
 }
+
+// A flow in the directory that no entry of demoFlows names ships in the binary
+// and never answers: it is embedded, it is not published, and no number points
+// at it. The reverse — a table entry naming a file that is not there — is a
+// seed that fails at boot. Both are invisible to a reading of either side, so
+// the directory and the table are compared here.
+func TestEveryShippedFlowIsSeeded(t *testing.T) {
+	entries, err := flowFiles.ReadDir("flows")
+	if err != nil {
+		t.Fatalf("read the embedded flows: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no flows are embedded; this test would pass on an empty set")
+	}
+
+	seeded := map[string]bool{}
+	for _, f := range demoFlows {
+		seeded[f.file] = true
+	}
+	for _, entry := range entries {
+		file := "flows/" + entry.Name()
+		if !seeded[file] {
+			t.Errorf("%s is embedded but no demoFlows entry publishes it, so it "+
+				"ships in the binary and never answers a call", file)
+		}
+	}
+
+	// The other direction, and the two identities a demo flow must not share
+	// with another: its numbers and its slug.
+	numbers := map[string]string{}
+	slugs := map[string]string{}
+	for _, f := range demoFlows {
+		spec, err := flowFiles.ReadFile(f.file)
+		if err != nil {
+			t.Errorf("demoFlows names %s, which is not embedded: %v", f.file, err)
+			continue
+		}
+		slug := specID(spec)
+		if other, dup := slugs[slug]; dup {
+			t.Errorf("%s and %s both carry the slug %q; the second would find the "+
+				"first's flow and publish nothing", other, f.file, slug)
+		}
+		slugs[slug] = f.file
+		for _, n := range f.numbers() {
+			if other, dup := numbers[n.number]; dup {
+				t.Errorf("%s and %s both claim %s; only the first to be seeded "+
+					"gets it (ON CONFLICT DO NOTHING)", other, f.file, n.number)
+			}
+			numbers[n.number] = f.file
+		}
+	}
+	if len(numbers) != 2*len(demoFlows) {
+		t.Errorf("%d distinct numbers for %d flows, want %d",
+			len(numbers), len(demoFlows), 2*len(demoFlows))
+	}
+}

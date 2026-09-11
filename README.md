@@ -28,10 +28,10 @@ docker-compose up -d
 ```
 
 <http://127.0.0.1:8080>, sign in as `admin` / `aicc@12345`. The database, the
-switch and the application come up together, seeded with a team, two queues, a
-published bilingual flow behind two numbers, and a week of history so the
-wallboard is not empty. Put an `OPENAI_API_KEY` in `.env` and it answers the
-phone. [More about the demo](deploy/demo/README.md).
+switch and the application come up together, seeded with a team, two queues,
+six published bilingual flows — each behind an English and a Chinese number —
+and a week of history so the wallboard is not empty. Put an `OPENAI_API_KEY` in
+`.env` and it answers the phone. [More about the demo](deploy/demo/README.md).
 
 ## What it does
 
