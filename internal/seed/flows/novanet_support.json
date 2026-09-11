@@ -59,8 +59,8 @@
   "nodes": {
     "welcome": {
       "instruction": {
-        "en": "Open with: \"Thanks for calling NovaNet, how can I help you today?\" Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, call transfer_to_agent with queue \"support-en\". If the transfer is refused, explain why and offer to take a message instead.",
-        "zh": "开场说：“感谢致电 NovaNet，请问有什么可以帮您？” 了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，调用 transfer_to_agent，queue 参数用 “support-zh”。如果转接被拒绝，向用户说明原因并主动提出留言。"
+        "en": "Open with: \"Thanks for calling NovaNet, how can I help you today?\" Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, call transfer_to_agent with queue \"support-en\". If the transfer is refused, explain why and offer to take a message instead. When the caller wants to finish, call hangup immediately instead of saying goodbye yourself; say goodbye after the tool returns, and the call ends once you have.",
+        "zh": "开场说：“感谢致电 NovaNet，请问有什么可以帮您？” 了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，调用 transfer_to_agent，queue 参数用 “support-zh”。如果转接被拒绝，向用户说明原因并主动提出留言。用户表示要结束时，立即调用 hangup，不要自己先说再见；等工具返回后再道别，道别说完线路会自动挂断。"
       },
       "tools": [],
       "transitions": [
