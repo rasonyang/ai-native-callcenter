@@ -119,9 +119,32 @@ services:
       # Demo seed: accounts, queues, DIDs 95001/95002 and the published flow
       # behind them.
       AICC_SEED: demo
-      # AI calls go to the real OpenAI endpoint; the key comes from the host
-      # environment when this deployment gets one. To run the self-contained
-      # end-to-end chain instead (loadgen + mock provider), uncomment:
+
+      # Which vendor answers every AI call in this deployment, resolved once at
+      # startup. A call's language picks the greeting and the prompt language,
+      # never the provider (phase1-decisions A1); the voice belongs to the flow,
+      # not to the language. qwen is Aliyun's end-to-end realtime model on
+      # DashScope, for this deployment inside mainland China; openai is OpenAI's
+      # Realtime and answers everywhere else.
+      AICC_PROVIDER: ${AICC_PROVIDER:-qwen}
+      # Empty keeps the value built into the selected profile:
+      #   qwen    wss://dashscope.aliyuncs.com/api-ws/v1/realtime
+      #           qwen-audio-3.0-realtime-plus   (-flash selectable)
+      #   openai  wss://api.openai.com/v1/realtime        gpt-realtime-2.1
+      AICC_PROVIDER_ENDPOINT: ${AICC_PROVIDER_ENDPOINT:-}
+      AICC_PROVIDER_MODEL: ${AICC_PROVIDER_MODEL:-}
+      # The credential of whichever profile is selected: ALIYUN_API_KEY for
+      # qwen, OPENAI_API_KEY for openai. Both pass through from the host
+      # environment, so switching provider is an edit in this directory's .env
+      # rather than in this file. An absent key does not stop the container; it
+      # fails the AI leg when a call arrives, naming the variable it wanted.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ALIYUN_API_KEY: ${ALIYUN_API_KEY:-}
+      # The self-contained chain instead — loadgen plus the in-repo mock
+      # provider — needs AICC_PROVIDER=openai as well: the mock ignores
+      # session.update and always sends 8 kHz µ-law, which only the openai
+      # profile's G.711 passthrough reproduces faithfully. Its key is only
+      # checked for being non-empty, so a placeholder will do.
       # AICC_PROVIDER_ENDPOINT: "ws://aicc-mockprovider:9099/v1/realtime"
       # OPENAI_API_KEY: not-a-key
 
