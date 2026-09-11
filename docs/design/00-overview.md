@@ -72,7 +72,7 @@ Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 0
 | `internal/transcript` | the order of a call's conversation — one actor serialising transcript rows and their events | store, events |
 | `internal/transcribe` | speech recognition on a human leg (DashScope / OpenAI Realtime transcription) | — |
 | `internal/streamin` | receives the audio the switch taps from an agent's leg and feeds it to transcription | telephony, transcribe, transcript, events, store, obs |
-| `internal/webhook` | delivers finished calls to a customer's own system: subscriptions, signed delivery, retries, retention | store |
+| `internal/webhook` | delivers finished calls to a customer's own system: subscriptions, bearer-authenticated delivery, retries, retention | store |
 | `internal/seed` | `AICC_SEED=demo` fills an empty installation deterministically; `fresh` removes exactly that again | auth, store |
 | `internal/httpapi` | chi router mounted through the generated wrapper, handlers, the two credentials (cookie sessions + `Authorization: Bearer` API keys) and the single scope middleware that applies the contract's `security`, CSRF, SSE endpoint, SPA embed/serving, `GET /openapi.json` | all services (never imported by anyone) |
 

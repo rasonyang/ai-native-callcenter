@@ -1,8 +1,9 @@
 # CDR Webhooks — Design
 
-Date: 2026-08-26 · Status: **design only; no code written, no migration added, no
-contract edited.** Requirement 3 of the customer API set (1 outbound and 2 hangup shipped
-on `feat/one-post-calls`). · Author: agent session
+Date: 2026-08-26 · Status: **built**, in commit `03efe73` (2026-08-26) — migration
+`internal/store/migrations/00026_a_finished_call_can_be_told_to_somebody_else.sql`, package
+`internal/webhook`, six contract operations. Requirement 3 of the customer API set (1 outbound
+and 2 hangup shipped on `feat/one-post-calls`). · Author: agent session
 
 > ## Scope, settled by the owner on 2026-08-26
 >
@@ -142,11 +143,17 @@ the others.
 |---|---|---|
 | `subscription_id` | `uuid` PK | |
 | `name` | `text NOT NULL` | operator-facing label; a list of URLs is unreadable |
-| `url` | `text NOT NULL` | HTTPS endpoint |
+| `url` | `text NOT NULL` | http or https; the handler refuses anything else |
 | `filter` | `jsonb NOT NULL DEFAULT '{}'` | see §5 |
 | `auth_token` | `text NOT NULL DEFAULT ''` | the customer's own credential — see §8 |
 | `is_enabled` | `boolean NOT NULL DEFAULT true` | |
 | `created_at` / `updated_at` | `timestamptz NOT NULL` | |
+
+`http` is accepted alongside `https` because a receiver is usually integrated against before it
+has a certificate — a staging endpoint, or one on the same host as the deployment. Every other
+scheme, and any address with no host, is refused with 422 when the subscription is written
+(`decodeSubscription`, `internal/httpapi/webhook_handlers.go`), on the same rule the filter
+follows: an endpoint that can never be reached is a write to refuse, not a silence to diagnose.
 
 No `event_types` column. There is one event and it is the CDR; a column offering a choice that
 does not exist would be a promise the platform cannot keep.
@@ -171,8 +178,13 @@ back on is one flag.
 | `last_error` | `text NOT NULL DEFAULT ''` | |
 | `created_at` `timestamptz NOT NULL` / `delivered_at` `timestamptz` | | |
 
-Index on `(status, next_attempt_at)` for the worker's claim, and on `(subscription_id, call_id)`
-for the enqueue's own lookup and for an operator asking what a subscriber was told about a call.
+Three indexes, one per reader. `idx_webhook_deliveries_due` is a **partial** index on
+`(next_attempt_at) WHERE status = 'PENDING'` — the worker only ever claims pending work, so the
+status belongs in the predicate rather than the key, and settled rows stay out of the index
+entirely. `idx_webhook_deliveries_call` on `(subscription_id, call_id)` serves the enqueue's own
+lookup and an operator asking what a subscriber was told about one call.
+`idx_webhook_deliveries_recent` on `(subscription_id, created_at DESC)` serves the deliveries
+listing, which is newest-first within one subscription.
 
 The unique key includes `revision`, so a correction is a **new row** rather than a mutated one.
 Keeping the superseded row is the point: the `deliveries` endpoint (§10) has to be able to answer
@@ -214,6 +226,13 @@ language moves validation to delivery time, where a bad filter is discovered as 
 receiving silence. The allowed keys are a closed list checked when the subscription is written;
 an unknown key is 422 at creation, not a surprise at 3am.
 
+That list lives in `internal/store/webhookstore.go`, reached through `WebhookFilterKeys` and
+`UnknownWebhookFilterKeys`; the handler reads the filter's keys from the raw body — a key the Go
+type has no field for would otherwise decode to nothing and be stored as "every call" — and the
+422 names the first unknown key. `TestTheFilterKeysAreTheOnesTheContractDeclares` pins the list
+to the `WebhookFilter` schema in `docs/openapi.json`, which declares
+`additionalProperties: false`, so the two cannot drift apart.
+
 A filter that matches nothing enqueues nothing. **No row is written for a non-match** — the
 outbox is a work queue, not an audit of calls that did not qualify.
 
@@ -225,8 +244,16 @@ outbox is a work queue, not an audit of calls that did not qualify.
 Each CDR is a complete, independent record of a finished call; a customer who receives
 yesterday's before this morning's can still file both. The generic design needed strict
 per-subscription serialisation because `PARTY_ESTABLISHED` after `PARTY_RELEASED` is unusable
-— none of that applies. The worker may deliver concurrently, bounded by a modest
-per-subscription cap so one deployment cannot flood a customer.
+— none of that applies. The worker delivers concurrently, capped at
+`PerSubscriptionConcurrency = 4` (`internal/webhook/webhook.go`): every goroutine takes a slot
+from its own subscription's semaphore before it sends, so a batch that happens to be all one
+customer's still arrives four at a time, while other subscriptions are not held up behind it.
+One drain claims a global batch of 20 on a 5s tick, and `ClaimDueWebhookDeliveries`
+(`internal/store/sql/webhooks.sql`, `FOR UPDATE SKIP LOCKED`) leases each claimed row for an
+hour by pushing `next_attempt_at` forward. Waiting for a slot costs nothing against that lease —
+a full batch of 20 for one subscription, every attempt burning the whole 10s timeout, drains in
+about 50s — and the drain blocks the run loop, so ticks never overlap and a second batch cannot
+be claimed while the first is still queued behind the cap.
 
 Because delivery is concurrent, **the customer must order by `revision`, not by arrival**.
 Revision 2 of a call can land before revision 1 of the same call; the rule they implement is
@@ -371,7 +398,14 @@ Spec-first: `docs/openapi.json` before any code.
 | `DELETE /webhook-subscriptions/{subscriptionId}` | delete, cascading its deliveries |
 | `GET /webhook-subscriptions/{subscriptionId}/deliveries` | recent attempts, for diagnosis |
 
-**Scope: `config:write`, reachable by an API key that holds it (amended 2026-08-31).**
+**Scope: `config:read` to look, `config:write` to change, either credential (amended
+2026-08-31).** The three reads — `listWebhookSubscriptions`, `getWebhookSubscription`,
+`listWebhookDeliveries` — require `config:read`; `createWebhookSubscription`,
+`updateWebhookSubscription` and `deleteWebhookSubscription` require `config:write`, and their
+cookie variant additionally `csrfHeader`. That is the split `docs/design/04-api-sse.md` already
+states for the whole configuration group, webhooks included; it also records that `config:read`
+is deliberately coarse, so a supervisor who reads queues for the wallboard reads these
+subscriptions too — there is no credential in what they see (§8: `authToken` is never served).
 
 This section previously read: *"ADMIN, and deliberately not reachable by `AICC_API_KEY`"* — the
 key being the credential for placing and ending calls, and letting the dialling credential also
@@ -446,11 +480,12 @@ Recorded because the previous draft carried them and their absence is the point:
 
 ## 13. Sizing, honestly
 
-Smaller than the generic design by a wide margin, and still not a patch: two tables with a
-migration exercised against a populated database, a new sqlc file, a six-operation contract
-resource, a transactional change to the path every finished call takes, a delivery worker with
-retry semantics, a retention sweeper, and a read-only screen. A milestone's worth of work,
-where the generic version was two.
+Smaller than the generic design by a wide margin, and still not a patch. The estimate was two
+tables with a migration exercised against a populated database, a new sqlc file, a six-operation
+contract resource, a transactional change to the path every finished call takes, a delivery
+worker with retry semantics, a retention sweeper, and a read-only screen — a milestone's worth
+of work, where the generic version was two. That is what `03efe73` landed, item for item; §15
+records where the implementation went past this document rather than short of it.
 
 ---
 
@@ -467,8 +502,53 @@ Every question this design raised has been answered by the owner on 2026-08-26:
 | Failure signal | a metric **and** a WARN |
 | Retention | `FAILED` 30 days, `DELIVERED` 7, `PENDING` never |
 | Authentication outward | the customer's own bearer token, no HMAC |
-| Configuration scope | `config:write`; an API key holding it may configure subscriptions (amended 2026-08-31, §10) |
+| Configuration scope | `config:read` to read, `config:write` to change; either credential, cookie mutations also `csrfHeader` (amended 2026-08-31, §10) |
 | Screen | `/admin/webhooks`, under the System group |
 | Screen scope | read-only; creation and editing go through the API |
 
-The design is ready to implement. First step is `docs/openapi.json`, not the migration.
+Every one of those answers is in the code, and the order held: `docs/openapi.json` first, then
+the migration, then the package. What the build decided for itself is §15.
+
+---
+
+## 15. As built — where the code went beyond this document
+
+Each of these was settled during implementation rather than here, and each is recorded because
+the next reader will otherwise take this document for the whole story.
+
+- **`hasAuthToken` on `WebhookSubscription`** (`apiWebhookSubscription`,
+  `internal/httpapi/webhook_handlers.go`). §8 makes the token write-only, which left the
+  read-only screen unable to say whether a subscription would reach its endpoint with any
+  credential at all. A boolean answers that without serving the secret; the API type has no
+  field for the token itself, so it cannot leak by accident.
+- **`limit` on `listWebhookDeliveries`** — integer, 1–200, default 50. A subscription accumulates
+  a delivery per finished call forever, and a diagnosis screen wants the recent ones; a client
+  that says nothing gets a page rather than the whole history.
+- **`api.WebhookDelivery` omits `subscriptionId`.** The only way to a delivery is through its
+  subscription's own listing, so the field would repeat the path parameter on every item. The
+  store type (`store.WebhookDelivery`) still carries it, because the worker delivers from it.
+- **The claim leases the row for an hour.** `ClaimDueWebhookDeliveries` pushes `next_attempt_at`
+  to `now() + interval '1 hour'` as it claims. A worker killed mid-attempt would otherwise leave
+  its rows `PENDING` and never due again; instead they come back on their own, and the hour is
+  long enough that a slow batch cannot have a row claimed twice (§6).
+- **The URL and the token are read fresh at delivery time**, while only the payload is frozen
+  (`Endpoint`, `internal/store/webhookstore.go`). The two are frozen for opposite reasons: a
+  retry must send the call as it was recorded, but an operator correcting a mistyped URL must
+  not have to wait out the retries of every delivery already queued against the old one.
+- **`authToken` is tri-state on `PUT`**: absent leaves the stored token alone, an empty string
+  clears it. `sqlc.narg(auth_token)` with `coalesce` in `internal/store/sql/webhooks.sql`, and a
+  `*string` through `WebhookSubscriptionWrite`. A plain string could not tell the two apart, and
+  a `PUT` that simply forgot the field would silently disarm the subscription's credential.
+- **Retention is measured from `created_at`, not from `delivered_at`.** A `FAILED` row has no
+  delivery timestamp to measure from, so one column dates both windows and the two sweeps read
+  the same way (`SweepWebhookDeliveries`).
+- **`ListWebhookDeliveries` returns 404 for an unknown subscription** rather than an empty list:
+  it reads the subscription first. "This subscriber has never been told anything" and "there is
+  no such subscriber" are different answers, and a screen that cannot tell them apart shows the
+  operator a typo as a working configuration.
+- **Config refuses a negative retention window.** `AICC_WEBHOOK_RETENTION_DELIVERED_DAYS` and
+  `AICC_WEBHOOK_RETENTION_FAILED_DAYS` must be 0 or more or the server does not start
+  (`internal/config/config.go`); `0` still means "keep for good", per §7.
+- **No seed contains a subscription.** `AICC_SEED=demo` fills a deployment with accounts, queues,
+  a flow and a week of history, and deliberately not with a delivery target: a demo that posts
+  a stranger's finished calls to an endpoint nobody chose would be a defect, not a convenience.
