@@ -43,6 +43,16 @@ var Backoff = []time.Duration{
 // takes longer than this under load is better retried than waited on.
 const RequestTimeout = 10 * time.Second
 
+// PerSubscriptionConcurrency is how many deliveries this deployment will have
+// in flight against one subscription at a time (design 09 §6).
+//
+// A backlog is ours, not the customer's: a queue that built up here must not
+// arrive at one endpoint as a burst it has to survive. The cap is per
+// subscription rather than global so a slow or wedged receiver holds up only
+// its own deliveries — other subscriptions keep draining at full speed behind
+// it.
+const PerSubscriptionConcurrency = 4
+
 // Store is the slice of the outbox this package uses.
 type Store interface {
 	ClaimDue(ctx context.Context, n int) ([]store.WebhookDelivery, error)
@@ -125,16 +135,40 @@ func (w *Worker) Run(ctx context.Context) {
 // before another rearranges nothing. The generic-event design this replaced
 // needed strict per-subscription ordering, because PARTY_ESTABLISHED after
 // PARTY_RELEASED cannot be read.
+//
+// Concurrency is global across the batch but capped per subscription: every
+// goroutine takes a slot from its subscription's semaphore before it sends,
+// so a batch that happens to be all one customer's still arrives
+// PerSubscriptionConcurrency at a time while other subscriptions are not held
+// up behind it. Waiting for a slot costs nothing against the lease — a full
+// batch of 20 for one subscription, every attempt burning the whole
+// RequestTimeout, drains in about 50s against an hour-long lease — and drain
+// blocks the Run loop, so ticks never overlap and a second batch cannot be
+// claimed while this one is still queued behind the cap.
 func (w *Worker) drain(ctx context.Context) {
 	due, err := w.store.ClaimDue(ctx, w.batch)
 	if err != nil {
 		w.log.ErrorContext(ctx, "cannot read the webhook outbox", "error", err)
 		return
 	}
+	slots := make(map[uuid.UUID]chan struct{}, len(due))
+	for _, d := range due {
+		if _, ok := slots[d.SubscriptionID]; !ok {
+			slots[d.SubscriptionID] = make(chan struct{}, PerSubscriptionConcurrency)
+		}
+	}
 	done := make(chan struct{}, len(due))
 	for _, d := range due {
+		slot := slots[d.SubscriptionID]
 		go func(d store.WebhookDelivery) {
 			defer func() { done <- struct{}{} }()
+			select {
+			case slot <- struct{}{}:
+			case <-ctx.Done():
+				// Shutdown does not wait for a slot that may never come.
+				return
+			}
+			defer func() { <-slot }()
 			w.deliver(ctx, d)
 		}(d)
 	}

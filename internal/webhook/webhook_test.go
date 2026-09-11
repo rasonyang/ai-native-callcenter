@@ -22,21 +22,29 @@ func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 // fakeStore is the outbox, in memory, recording how each delivery settled.
 type fakeStore struct {
-	mu          sync.Mutex
-	due         []store.WebhookDelivery
-	url         string
-	token       string
+	mu    sync.Mutex
+	due   []store.WebhookDelivery
+	url   string
+	token string
+	// urls overrides url per subscription, for the tests that need two
+	// customers with two endpoints.
+	urls        map[uuid.UUID]string
 	delivered   map[uuid.UUID]int
 	failed      map[uuid.UUID]string
 	rescheduled map[uuid.UUID]time.Time
+	// deliveredCh announces each settled delivery, so a test can wait on
+	// progress instead of sleeping and hoping.
+	deliveredCh chan uuid.UUID
 }
 
 func newFakeStore(url, token string, due ...store.WebhookDelivery) *fakeStore {
 	return &fakeStore{
 		due: due, url: url, token: token,
+		urls:        map[uuid.UUID]string{},
 		delivered:   map[uuid.UUID]int{},
 		failed:      map[uuid.UUID]string{},
 		rescheduled: map[uuid.UUID]time.Time{},
+		deliveredCh: make(chan uuid.UUID, 256),
 	}
 }
 
@@ -48,15 +56,31 @@ func (f *fakeStore) ClaimDue(context.Context, int) ([]store.WebhookDelivery, err
 	return out, nil
 }
 
-func (f *fakeStore) Endpoint(context.Context, uuid.UUID) (string, string, error) {
+func (f *fakeStore) Endpoint(_ context.Context, subscriptionID uuid.UUID) (string, string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if url, ok := f.urls[subscriptionID]; ok {
+		return url, f.token, nil
+	}
 	return f.url, f.token, nil
 }
 
 func (f *fakeStore) MarkDelivered(_ context.Context, id uuid.UUID, code int) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	f.delivered[id] = code
+	f.mu.Unlock()
+	select {
+	case f.deliveredCh <- id:
+	default:
+	}
 	return nil
+}
+
+// deliveredCount is how many deliveries have been marked so far.
+func (f *fakeStore) deliveredCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.delivered)
 }
 
 func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, at time.Time, _ int, _ string) error {
@@ -74,9 +98,15 @@ func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, _ int, reason st
 }
 
 func pending(attempt int) store.WebhookDelivery {
+	return pendingFor(uuid.New(), attempt)
+}
+
+// pendingFor is pending for a named subscription, for the tests about what one
+// subscription is subjected to.
+func pendingFor(subscriptionID uuid.UUID, attempt int) store.WebhookDelivery {
 	return store.WebhookDelivery{
 		DeliveryID:     uuid.New(),
-		SubscriptionID: uuid.New(),
+		SubscriptionID: subscriptionID,
 		CallID:         uuid.New(),
 		Revision:       1,
 		Payload:        json.RawMessage(`{"callId":"c-1","talkSec":40}`),
@@ -246,6 +276,121 @@ func TestEveryTwoHundredIsSuccess(t *testing.T) {
 		if _, ok := st.delivered[d.DeliveryID]; !ok {
 			t.Errorf("HTTP %d was treated as a failure", code)
 		}
+	}
+}
+
+// A backlog here must not arrive at one customer as a burst. Ten deliveries
+// for one subscription are worked concurrently — the point of the fan-out —
+// but never more than PerSubscriptionConcurrency of them are in flight at the
+// endpoint at once.
+func TestOneSubscriptionIsNeverHitByMoreThanTheCap(t *testing.T) {
+	var (
+		mu       sync.Mutex
+		inFlight int
+		peak     int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		inFlight++
+		if inFlight > peak {
+			peak = inFlight
+		}
+		mu.Unlock()
+		// Wide enough that overlapping requests really do overlap; without it
+		// a fast handler could serialise by luck and prove nothing.
+		time.Sleep(50 * time.Millisecond)
+		mu.Lock()
+		inFlight--
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	sub := uuid.New()
+	const count = 10
+	due := make([]store.WebhookDelivery, 0, count)
+	for range count {
+		due = append(due, pendingFor(sub, 1))
+	}
+	st := newFakeStore(srv.URL, "t", due...)
+	New(st, nil, discard()).drain(t.Context())
+
+	mu.Lock()
+	got := peak
+	mu.Unlock()
+	if got > PerSubscriptionConcurrency {
+		t.Errorf("peak in flight = %d, want at most %d — a backlog here is not the "+
+			"customer's problem to absorb", got, PerSubscriptionConcurrency)
+	}
+	if got < 2 {
+		t.Errorf("peak in flight = %d, want more than one — the cap bounds the fan-out, "+
+			"it does not serialise it", got)
+	}
+	if n := st.deliveredCount(); n != count {
+		t.Errorf("delivered = %d, want %d", n, count)
+	}
+}
+
+// The cap is per subscription, so one wedged receiver holds up only its own
+// deliveries. B's endpoint is answered in full while A's is still hanging.
+func TestASlowSubscriberDoesNotHoldUpAnotherOne(t *testing.T) {
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer slow.Close()
+	quick := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer quick.Close()
+
+	// One more than the cap each, so both subscriptions have a delivery that
+	// has to wait for a slot.
+	const each = PerSubscriptionConcurrency + 1
+	subA, subB := uuid.New(), uuid.New()
+	var due []store.WebhookDelivery
+	quickIDs := map[uuid.UUID]bool{}
+	for range each {
+		due = append(due, pendingFor(subA, 1))
+		d := pendingFor(subB, 1)
+		quickIDs[d.DeliveryID] = true
+		due = append(due, d)
+	}
+	st := newFakeStore(slow.URL, "t", due...)
+	st.urls[subB] = quick.URL
+
+	drained := make(chan struct{})
+	go func() {
+		defer close(drained)
+		New(st, nil, discard()).drain(t.Context())
+	}()
+
+	// Every one of B's deliveries settles while A is still hanging.
+	for i := range each {
+		select {
+		case id := <-st.deliveredCh:
+			if !quickIDs[id] {
+				t.Errorf("delivery %v settled, but the blocked subscription's deliveries "+
+					"cannot have", id)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of %d deliveries to the responsive subscription got through "+
+				"while the other one was blocked", i, each)
+		}
+	}
+
+	close(release)
+	select {
+	case <-drained:
+	case <-time.After(10 * time.Second):
+		t.Fatal("drain did not finish after the slow subscriber answered")
+	}
+	if n := st.deliveredCount(); n != 2*each {
+		t.Errorf("delivered = %d, want %d", n, 2*each)
 	}
 }
 
