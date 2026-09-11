@@ -37,6 +37,12 @@ nothing else.
 * The application's migrations applied, so the `luacc` views exist.
 * The read-only database role created:
   `psql "$AICC_DATABASE_URL" -v lua_password="'…'" -f deploy/sql/lua_role.sql`
+  That file is in the repository and **not in the release tarball**, which
+  carries the binary, `.env.example`, the licence and the notices and nothing
+  else. Fetch it at the tag being deployed:
+  `curl -fsSLO https://raw.githubusercontent.com/rasonyang/ai-native-callcenter/v0.1.0/deploy/sql/lua_role.sql`.
+  It has to run as a superuser and after the migrations, because it grants on
+  the `luacc` views.
 * **A database of its own for mod_callcenter.** It creates unqualified
   `agents`/`tiers`/`members` tables in `public`, which collide with the
   application's, so it gets `aicc_fs` rather than sharing.
@@ -166,9 +172,16 @@ Verify:
 ```sh
 fs_cli -x "callcenter_config queue list"                 # queues from the database
 fs_cli -x "sofia status gateway aicc_bot"                # UP once the application listens
-fs_cli -x "user_exists id 1001 \$\${domain}"             # directory served from the database
+fs_cli -x "user_exists id 1000 \$\${domain}"             # directory served from the database
 fs_cli -x "sofia status profile internal" | grep -i context   # aicc, not public
 ```
+
+The third one asks about an extension, so it answers `false` until an account
+exists — on a database that has only been migrated there are none, and that is
+not a fault in the switch. Create an agent or a supervisor first
+(`POST /users`); the number it is given is the lowest free one in
+`AICC_EXTENSION_RANGE`, so on a fresh deployment it is 1000. Ask about that
+number, not a number from the demo dataset.
 
 That last one is the check worth keeping: a phone's INVITE takes its profile's
 context, and in `public` the stock rules hand internal numbers to the stock

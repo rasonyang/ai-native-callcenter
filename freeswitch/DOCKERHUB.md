@@ -70,7 +70,7 @@ DSN format: `pgsql://hostaddr=10.0.0.5 dbname=aicc user=aicc password='secret'`.
 
 | Variable | Injected into | Unset |
 |---|---|---|
-| `FS_ESL_LISTEN_IP` | `listen-ip` | `0.0.0.0` — the application is in another container. What keeps that safe is the ACL and the fact that the port is not published, not the bind address. |
+| `FS_ESL_LISTEN_IP` | `listen-ip` | `0.0.0.0` — the application is in another container. What keeps that safe is the ACL and the fact that the port is not published, not the bind address. **`--network host` removes both halves of that**: nothing is published because everything is, and the shipped `aicc_esl` list allows the RFC1918 ranges, so any machine on the LAN reaches the event socket and is answered with `auth/request`. Set `127.0.0.1` when the application shares the host, or narrow `FS_ESL_ACL` to the one address it connects from. |
 | `FS_ESL_PORT` | `listen-port` | `18021` (not the stock 8021; the project documents 18021 everywhere) |
 | `FS_ESL_PASSWORD` | `password` | `ClueCon`, the stock FreeSWITCH default, with a warning on every start. Set it. |
 | `FS_ESL_ACL` | `apply-inbound-acl` | `aicc_esl` — loopback plus the RFC1918 ranges a compose network draws from, defined in the shipped `acl.conf.xml` |

@@ -106,7 +106,7 @@ The settings a deployment almost always changes:
 | `AICC_RECORDING_DIR`, `AICC_RECORDING_BACKEND` | Recording is off until the spool directory is set |
 | `AICC_SECURE_COOKIES` | `true` wherever the interface is served over HTTPS, or the session cookie is never sent back |
 | `AICC_METRICS_ADDR` | Loopback by default. That listener has no authentication of its own. |
-| — | There is no API-key setting. Keys are issued through `POST /api-keys`, each with its own name and scopes, and revoked one at a time. |
+| — | There is no API-key setting. Keys are issued through `POST /api-keys`, each with its own name and scopes, and revoked one at a time. The first one is issued with the administrator's session, and a session cookie must carry `X-AICC-Csrf` on anything that writes — any value; its presence is the check — or the request is refused `FORBIDDEN: missing X-AICC-Csrf header`. A `Authorization: Bearer` key never needs it. |
 
 ## In front of it
 
@@ -142,6 +142,21 @@ right.
   application can read what the switch wrote. Same host, or a shared mount; if
   the two run as different users, the application's user needs to traverse the
   directories the switch creates.
+
+  That is not automatic, and the way it fails is quiet: the switch creates
+  `YYYY/MM/DD` as `drwxr-x---` owned by itself — uid 999 in this project's
+  image — so the recording is written, the call is fine, and ingestion logs
+  `no recording ingested … permission denied` while the CDR says there is
+  audio. Grant the traversal once, with inheritance, so it also covers the
+  directories tomorrow's calls create:
+
+  ```sh
+  setfacl -R    -m u:aicc:rX /var/lib/aicc/recordings   # what is already there
+  setfacl -R -d -m u:aicc:rX /var/lib/aicc/recordings   # what the switch creates next
+  ```
+
+  A shared group works too, as long as it is inherited — the mode the switch
+  writes leaves nothing for "other".
 * **`S3`** uploads on hangup and clears the spool, and playback redirects to a
   presigned URL. Any S3-compatible endpoint (`AICC_S3_*`); verified against
   SeaweedFS as well as AWS.
@@ -168,8 +183,13 @@ normally touch FreeSWITCH — but the release notes say when it does.
 - [ ] `AICC_SECURE_COOKIES=true` and TLS in front.
 - [ ] `AICC_METRICS_ADDR` on loopback or behind the proxy's authentication.
 - [ ] The event socket unreachable from outside the host — ESL is a shell on
-      the switch, and its ACL is the only thing standing in front of it.
-- [ ] The SIP UAS reachable from the switch and nowhere else.
+      the switch, and its ACL is the only thing standing in front of it. On
+      `--network host` that ACL allows the whole of RFC1918 as shipped; bind
+      the listener to loopback instead (`FS_ESL_LISTEN_IP`).
+- [ ] The SIP UAS reachable from the switch and nowhere else. `AICC_BOT_SIP_HOST`
+      settles the signalling port; the RTP range does not follow it — it binds
+      every interface whatever that is set to — so the media ports are closed
+      by a host firewall or by nothing.
 - [ ] Every issued API key has a name saying which integration holds it, and
       only the scopes that integration needs. A key is a managed credential:
       a leaked one is revoked on its own, which is exactly what the shared
