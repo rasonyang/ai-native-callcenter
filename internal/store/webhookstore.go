@@ -42,6 +42,33 @@ type WebhookFilter struct {
 	IsContained []bool      `json:"isContained,omitempty"`
 }
 
+// webhookFilterKeys is that closed list, spelled as it travels on the wire.
+//
+// It must match the properties of the WebhookFilter schema in
+// docs/openapi.json, which declares `additionalProperties: false`; the
+// contract states the closed list and this is what enforces it at runtime.
+// TestTheFilterKeysAreTheOnesTheContractDeclares joins the two.
+var webhookFilterKeys = []string{"callType", "did", "queueId", "status", "isContained"}
+
+// WebhookFilterKeys returns the keys a filter may carry.
+func WebhookFilterKeys() []string { return slices.Clone(webhookFilterKeys) }
+
+// UnknownWebhookFilterKeys returns those of keys that are not filter keys, in
+// the order given. An empty result means every key named a real field.
+//
+// A caller that reports one key reports the first: the keys of a decoded JSON
+// object have no order of their own, so sort them before asking if the answer
+// has to be the same twice.
+func UnknownWebhookFilterKeys(keys []string) []string {
+	var unknown []string
+	for _, key := range keys {
+		if !slices.Contains(webhookFilterKeys, key) {
+			unknown = append(unknown, key)
+		}
+	}
+	return unknown
+}
+
 // Matches reports whether this call is one the subscription asked for.
 func (f WebhookFilter) Matches(cdr CDR) bool {
 	if len(f.CallType) > 0 && !slices.Contains(f.CallType, cdr.CallType) {

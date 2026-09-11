@@ -4,9 +4,14 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -120,9 +125,36 @@ func (s *Server) ListWebhookDeliveries(w http.ResponseWriter, r *http.Request,
 // The URL is checked here rather than at delivery time, which is the same rule
 // the filter follows: a subscription that can never reach anywhere is refused
 // when somebody writes it, not discovered as a customer receiving silence.
+//
+// The filter's keys are read from the raw body rather than from the decoded
+// type, because a key the type has no field for decodes to nothing at all: a
+// filter naming `talkSec` would be stored as "every call" and the subscriber
+// would be told 201. The body is unmarshalled twice over the same bytes — once
+// into the contract type, once into the keys — rather than with
+// DisallowUnknownFields, which would also refuse unknown top-level fields and
+// could not say which level it refused.
 func decodeSubscription(w http.ResponseWriter, r *http.Request) (store.WebhookSubscriptionWrite, bool) {
+	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 64<<10))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
+		return store.WebhookSubscriptionWrite{}, false
+	}
 	var body api.WebhookSubscriptionWrite
-	if !decode(w, r, &body) {
+	if err := json.Unmarshal(raw, &body); err != nil {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
+		return store.WebhookSubscriptionWrite{}, false
+	}
+	var keyed struct {
+		Filter map[string]json.RawMessage `json:"filter"`
+	}
+	if err := json.Unmarshal(raw, &keyed); err != nil {
+		writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
+		return store.WebhookSubscriptionWrite{}, false
+	}
+	if unknown := store.UnknownWebhookFilterKeys(slices.Sorted(maps.Keys(keyed.Filter))); len(unknown) > 0 {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			fmt.Sprintf("filter has no key %q", unknown[0]),
+			map[string]any{"field": "filter", "key": unknown[0]})
 		return store.WebhookSubscriptionWrite{}, false
 	}
 	if body.Name == "" {
