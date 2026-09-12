@@ -456,15 +456,21 @@ func dsResult(sentenceID int, text string, final bool) map[string]any {
 // the socket stays open, no error arrives, no result ever comes back, and the
 // session reads healthy the whole time. Nothing above this could tell.
 func TestStartWaitsForTheTaskToExistBeforeAnyAudio(t *testing.T) {
+	// The service takes its time, as the Beijing host measurably does.
+	const taskStartDelay = 150 * time.Millisecond
+
 	var mu sync.Mutex
 	var binaryBeforeStart int
 	started := make(chan struct{})
 
 	f := newFakeEngine(t, func(c *websocket.Conn) {
-		// The service takes its time, as the Beijing host measurably does.
-		time.Sleep(150 * time.Millisecond)
-		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
+		time.Sleep(taskStartDelay)
+		// Crossed before the frame is on the wire, so a frame that arrives
+		// while it is still open is audio that reached the service before the
+		// task existed. Nothing the client sends after Start returns can race
+		// this close: the frame it read was written after this line ran.
 		close(started)
+		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
 	})
 	go func() {
 		for n := range f.binary {
@@ -480,16 +486,29 @@ func TestStartWaitsForTheTaskToExistBeforeAnyAudio(t *testing.T) {
 
 	client := newDashscope(Profile{Name: ProviderQwen, Endpoint: f.url(),
 		Model: "m", SampleRate: 16000}, "k", nopLogger{})
+	begin := time.Now()
 	if err := client.Start(t.Context(), Config{}); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
 
-	// Start returned, so by contract the task exists.
-	select {
-	case <-started:
-	default:
-		t.Fatal("Start returned before task-started arrived")
+	// Start returned, so by contract the task exists — asserted as a wait, not
+	// as a receive on `started`. The client decodes task-started and returns
+	// from Start while the service's goroutine may still be a statement away
+	// from closing that channel, and a non-blocking receive then reported
+	// "Start returned before task-started arrived" on unmodified trees (CI,
+	// 2026-09-11 and 2026-09-12): a false accusation of the exact regression
+	// this test exists to catch. A Start that returns cannot have beaten the
+	// frame the service sends taskStartDelay after its script starts.
+	//
+	// The floor sits a dial's margin under that delay rather than at a
+	// comfortable half of it, because a Start that waits for something else
+	// need only return inside the window to escape this check too: the frame
+	// it then sends is only counted below if the counting goroutine gets there
+	// before the service does announce the task.
+	if waited := time.Since(begin); waited < taskStartDelay-25*time.Millisecond {
+		t.Fatalf("Start returned after %v; the service sends task-started %v after its script starts",
+			waited, taskStartDelay)
 	}
 	if err := client.SendAudio(make([]byte, 640)); err != nil {
 		t.Fatalf("send: %v", err)
