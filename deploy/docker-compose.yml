@@ -1,0 +1,232 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The whole product on one machine, with the demo dataset in it: PostgreSQL,
+# FreeSWITCH and the application.
+#
+#   cp .env.example .env && $EDITOR .env && docker compose up -d
+#
+# One line in .env has no default: FS_EXTERNAL_IP, the address phones reach
+# this host at. Everything else already works, passwords included, and the
+# database comes up seeded with a team, six published bilingual flows, their
+# numbers and a week of history. README.md is the procedure from an empty host
+# to a call, and the list of what is in that dataset.
+
+name: aicc
+
+services:
+  postgres:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aicc
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aicc@123}
+      POSTGRES_DB: aicc
+    volumes:
+      # /var/lib/postgresql, not /var/lib/postgresql/data. The 18 image keeps
+      # its cluster in a subdirectory of the former so that pg_upgrade --link
+      # has both versions inside one mount point; a container given the old
+      # path exits at every start.
+      - postgres-data:/var/lib/postgresql
+      # Creates mod_callcenter's own aicc_fs database on an empty volume.
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aicc -d aicc"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  aicc:
+    # By default the application is built from this checkout on first start: a
+    # few minutes, then seconds afterwards. That is what keeps the stack and
+    # the documentation in step before a release is cut, because the image a
+    # published tag names is always older than the tree it came from. Set
+    # AICC_IMAGE to a published tag to skip the build; exact release tags only,
+    # there is no `latest`, so a deployment names the build it runs and a pull
+    # cannot change it.
+    image: ${AICC_IMAGE:-aicc:local}
+    build:
+      context: ..
+      args:
+        VERSION: ${AICC_VERSION:-local}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Everything else the application reads comes from .env unchanged: the
+    # provider keys, AICC_TRANSCRIBE_*, AICC_BOT_BACKEND_BASE, AICC_S3_*, any
+    # AICC_* line at all. No per-variable passthrough is needed here, and
+    # adding one to reach a new setting is never the fix.
+    env_file:
+      - path: .env
+        required: false
+    # environment: wins over env_file:, so the wiring below cannot be broken
+    # from .env. These values address one container from another and belong to
+    # the stack, not to the deployment.
+    environment:
+      AICC_ENV: prod
+      # The keyword/value form, not a URL: the password is quoted here, so a
+      # password holding an @ or a / needs no percent-encoding. In URL form
+      # pgx splits the authority at the first @ and the default password below
+      # would name a host called `123@postgres`.
+      AICC_DATABASE_URL: "host=postgres port=5432 dbname=aicc user=aicc password='${POSTGRES_PASSWORD:-aicc@123}' sslmode=disable"
+
+      # One provider answers every call, chosen at startup: qwen inside
+      # mainland China, openai elsewhere. Named here rather than left to
+      # env_file: so that an empty or absent AICC_PROVIDER line still means
+      # qwen. Set AICC_PROVIDER=openai in .env to change it.
+      AICC_PROVIDER: ${AICC_PROVIDER:-qwen}
+
+      # The switch is a container away, not a socket away.
+      AICC_ESL_ADDR: freeswitch:18021
+      AICC_ESL_PASSWORD: ${ESL_PASSWORD:-aicc@123}
+
+      # Must equal FreeSWITCH's own $${domain}: queue names are rendered with
+      # it on both sides and mod_callcenter matches them literally.
+      AICC_SWITCH_DOMAIN: ${SWITCH_DOMAIN:-${FS_EXTERNAL_IP}}
+
+      # The gateway dials this container by name; the SDP address is probed
+      # toward the peer, which on a compose network is this container's own.
+      AICC_BOT_SIP_HOST: 0.0.0.0
+      AICC_BOT_SIP_PORT: "6060"
+
+      # The sample dataset, on by default so a first start has something to
+      # look at. One hyphen, not two: unset means demo, `AICC_SEED=` in .env
+      # means an empty value and therefore no seed at all, and AICC_SEED=fresh
+      # removes exactly what the seed created.
+      AICC_SEED: ${AICC_SEED-demo}
+
+      # The switch records into the shared volume; the application serves what
+      # it finds there.
+      AICC_RECORDING_DIR: /recordings
+      AICC_RECORDING_BACKEND: FS
+
+      # Metrics and health have no authentication of their own, so they are
+      # opened onto the compose network only and no port is published.
+      AICC_METRICS_ADDR: :9090
+      AICC_LOG_LEVEL: ${AICC_LOG_LEVEL:-info}
+    # The switch writes recordings as its own user into directories it creates
+    # 0750, so reading them takes membership of its group rather than a mode
+    # change on every new day's folder. 999 is the freeswitch group in the
+    # pinned image below.
+    group_add:
+      - "999"
+    volumes:
+      - recordings:/recordings:ro
+      - app-logs:/var/log/aicc
+    # A fixed address, because the switch has to dial the bot by IP: see
+    # AICC_BOT_HOST below.
+    networks:
+      default:
+        ipv4_address: ${AICC_APP_IP:-10.130.0.10}
+    ports:
+      - "${HTTP_BIND:-0.0.0.0}:${HTTP_PORT:-8080}:8080"
+
+  # Creates the confined role the switch reads the luacc views with. It waits
+  # for the application to have migrated, because the views are what it grants
+  # on, and then exits. FreeSWITCH starts once it has succeeded.
+  lua-role:
+    image: postgres:18
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      aicc:
+        condition: service_started
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-aicc@123}
+      LUA_PASSWORD: ${LUA_PASSWORD:-aicc@123}
+    volumes:
+      - ./postgres/lua-role.sh:/lua-role.sh:ro
+      - ./sql/lua_role.sql:/lua_role.sql:ro
+    entrypoint: ["/bin/bash", "/lua-role.sh"]
+
+  freeswitch:
+    # This repository's own switch image: FreeSWITCH v1.11.3 from source, the
+    # configuration tree in freeswitch/conf/, the Lua scripts, and
+    # mod_audio_stream. Nothing site-specific is baked in; the entrypoint
+    # injects what is below. freeswitch/DOCKERHUB.md is that contract in full.
+    image: ${AICC_FS_IMAGE:-rasonyang/freeswitch-aicc:v1.11.3}
+    restart: unless-stopped
+    depends_on:
+      lua-role:
+        condition: service_completed_successfully
+    environment:
+      # Required. Without them the switch starts, looks healthy, and tells
+      # every agent phone that its extension does not exist.
+      AICC_LUA_DSN: "pgsql://host=postgres dbname=aicc user=aicc_lua password='${LUA_PASSWORD:-aicc@123}'"
+      AICC_CC_DSN: "pgsql://host=postgres dbname=aicc_fs user=aicc password='${POSTGRES_PASSWORD:-aicc@123}'"
+      # mod_callcenter keeps its own tables; they are unqualified names in
+      # public and would collide with the application's, hence a database of
+      # its own.
+      FS_CALLCENTER_DSN: "pgsql://host=postgres dbname=aicc_fs user=aicc password='${POSTGRES_PASSWORD:-aicc@123}'"
+      # Must equal the application's AICC_SWITCH_DOMAIN above.
+      FS_DOMAIN: ${SWITCH_DOMAIN:-${FS_EXTERNAL_IP}}
+      # The gateway dials the application by IP, not by its compose name. With
+      # a name here FreeSWITCH cannot match the peer against its local network
+      # list, so it advertises FS_EXTERNAL_IP for the bot's media and the
+      # audio leaves the compose network to reach a container beside it.
+      # Verified 2026-09-12: by name the bot's channel of the recording is
+      # silent; by IP it is not.
+      AICC_BOT_HOST: ${AICC_APP_IP:-10.130.0.10}
+      AICC_BOT_PORT: "6060"
+      # The event socket the application connects on. 18021, not the stock
+      # 8021. It listens on all interfaces because the application is another
+      # container; no port is published, so the compose network is its edge.
+      FS_ESL_LISTEN_IP: 0.0.0.0
+      FS_ESL_PORT: "18021"
+      FS_ESL_PASSWORD: ${ESL_PASSWORD:-aicc@123}
+      # The switch records into the shared volume the application reads.
+      AICC_RECORDINGS_DIR: /usr/local/freeswitch/recordings
+      # A switch told to transcribe refuses to start without mod_audio_stream.
+      # This image has it; the guard stays because a future image may not.
+      AICC_TRANSCRIPTION_ENABLED: ${AICC_TRANSCRIPTION_ENABLED:-false}
+      # The address a phone reaches this host at. It goes into the SDP and the
+      # Contact, so a softphone with the wrong value registers and hears
+      # nothing.
+      FS_EXTERNAL_IP: ${FS_EXTERNAL_IP:?set FS_EXTERNAL_IP in .env to the address phones reach this host at}
+      # The media range, published below from the same two variables so the
+      # two can never disagree.
+      FS_RTP_START_PORT: ${RTP_START:-16384}
+      FS_RTP_END_PORT: ${RTP_END:-16484}
+    volumes:
+      # Recordings are written here by the switch and read by the application.
+      - recordings:/usr/local/freeswitch/recordings
+      - fs-db:/usr/local/freeswitch/db
+      - fs-log:/usr/local/freeswitch/log
+      # The simulated public network: eighteen customer telephones any
+      # softphone can register as, and the dialplan that delivers what they
+      # dial to the inbound doorway and rings the matching phone when the
+      # platform dials a customer number back. A real deployment puts its own
+      # trunk files in these two directories instead of the simulated ones;
+      # deploy/dev/freeswitch/ is the shape, and freeswitch/README.md §3
+      # explains the seam.
+      - ./freeswitch/dialplan:/usr/local/freeswitch/conf/dialplan/aicc:ro
+      - ./freeswitch/directory:/usr/local/freeswitch/conf/directory/default:ro
+    ports:
+      # SIP signalling for a softphone: UDP, TCP, and the plain WebSocket
+      # transport the browser phone registers over, ws://<host>:5066/.
+      - "${SIP_BIND:-0.0.0.0}:5060:5060/udp"
+      - "${SIP_BIND:-0.0.0.0}:5060:5060/tcp"
+      - "${SIP_BIND:-0.0.0.0}:5066:5066/tcp"
+      # Media. Ports are allocated as RTP and RTCP pairs, so the range carries
+      # half as many calls as it has ports; widen RTP_START and RTP_END
+      # together when a deployment needs more. On a bridge network each
+      # published port costs one proxy process, so a range wider than the
+      # traffic is paid for at every start.
+      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-16384}-${RTP_END:-16484}:${RTP_START:-16384}-${RTP_END:-16484}/udp"
+
+# The compose network gets a fixed subnet so the application can have a fixed
+# address in it. Change AICC_SUBNET and AICC_APP_IP together if this range is
+# taken on the host.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${AICC_SUBNET:-10.130.0.0/24}
+
+volumes:
+  postgres-data:
+  recordings:
+  fs-db:
+  fs-log:
+  app-logs:

@@ -12,25 +12,25 @@ help: ## List targets
 
 .PHONY: dev-up
 dev-up: ## Start development PostgreSQL
-	docker-compose -f $(COMPOSE) up -d
+	docker compose -f $(COMPOSE) up -d
 
 .PHONY: dev-down
 dev-down: ## Stop development PostgreSQL
-	docker-compose -f $(COMPOSE) down
+	docker compose -f $(COMPOSE) down
 
-DEMO := deploy/demo/docker-compose.yml
+STACK := deploy/docker-compose.yml
 
-.PHONY: demo-up
-demo-up: ## Start the full demo stack (app + FreeSWITCH + PostgreSQL, seeded)
-	docker-compose -f $(DEMO) up -d
+.PHONY: stack-up
+stack-up: ## Start the whole product on this machine, seeded
+	docker compose -f $(STACK) up -d
 
-.PHONY: demo-down
-demo-down: ## Stop the demo stack (add ARGS=-v to discard its data)
-	docker-compose -f $(DEMO) down $(ARGS)
+.PHONY: stack-down
+stack-down: ## Stop the stack (add ARGS=-v to discard its data)
+	docker compose -f $(STACK) down $(ARGS)
 
-.PHONY: demo-logs
-demo-logs: ## Follow the demo application log
-	docker-compose -f $(DEMO) logs -f aicc
+.PHONY: stack-logs
+stack-logs: ## Follow the stack's application log
+	docker compose -f $(STACK) logs -f aicc
 
 .PHONY: image
 image: ## Build the container image (VERSION=v0.1.0 stamps `aicc version`)

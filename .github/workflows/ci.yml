@@ -27,7 +27,7 @@ jobs:
     # a seed test that still inserted it went on being green for two days,
     # because it was not being run at all.
     #
-    # Same major version as deploy/dev and the demo stack: a suite that
+    # Same major version as deploy/dev and deploy/: a suite that
     # exercises real SQL on a different server is testing a different database.
     services:
       postgres:

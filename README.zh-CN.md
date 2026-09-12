@@ -20,14 +20,18 @@ PostgreSQL 和 FreeSWITCH。
 
 ```sh
 git clone https://github.com/rasonyang/ai-native-callcenter
-cd ai-native-callcenter/deploy/demo
-docker-compose up -d
+cd ai-native-callcenter/deploy
+cp .env.example .env    # 只需填两行：FS_EXTERNAL_IP 和 ALIYUN_API_KEY
+docker compose up -d
 ```
 
-打开 <http://127.0.0.1:8080>，用 `admin` / `aicc@12345` 登录。数据库、交换机和应用会
-一起启动，并预置一支坐席团队、两个队列、六条已发布的双语流程（每条一个英文号码、
-一个中文号码），以及一周的历史数据，这样看板不会是空的。在 `.env` 里填上 `OPENAI_API_KEY`，
-它就能真正接听电话了。[关于演示环境](deploy/demo/README.md)
+首次启动会从这份代码构建应用，需要几分钟；之后再启动只需几秒。
+
+打开 `http://<主机地址>:8080`，用 `admin` / `aicc@123` 登录。数据库、交换机和应用会
+一起启动，并预置一支坐席团队、两个队列、六条已发布的双语流程（每条一个英文号码、一
+个中文号码和一个美国号码，总机是 800-555-0199）、十八部模拟客户电话，以及一周的历史
+数据，这样看板不会是空的，软电话也能立刻打给机器人。所有密码都是 `aicc@123`。
+[更多说明](deploy/README.md)
 
 ## 它做什么
 

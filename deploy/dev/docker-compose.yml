@@ -1,6 +1,6 @@
 # Dev infrastructure for ai-native-callcenter.
 # PostgreSQL runs here (never via host package managers); FreeSWITCH runs natively on the host.
-# The full demo environment (app + FreeSWITCH + seed) lives in deploy/demo/ (M5).
+# The full environment (app + FreeSWITCH + seed) lives in deploy/ (M5).
 services:
   postgres:
     image: postgres:18

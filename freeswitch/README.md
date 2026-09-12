@@ -34,6 +34,9 @@ nothing else.
 
 ## Prerequisites, either way
 
+`deploy/docker-compose.yml` does all three of these on its own; this section is
+for a switch assembled by hand.
+
 * The application's migrations applied, so the `luacc` views exist.
 * The read-only database role created:
   `psql "$AICC_DATABASE_URL" -v lua_password="'…'" -f deploy/sql/lua_role.sql`
@@ -92,7 +95,7 @@ the container refuses to start without them, because a switch that started
 without a database would look entirely healthy while telling every agent phone
 that its extension does not exist. Everything else is defaulted or optional.
 
-`deploy/demo/docker-compose.yml` is a worked example of the whole set.
+`deploy/docker-compose.yml` is a worked example of the whole set.
 
 ## 2. A native install
 

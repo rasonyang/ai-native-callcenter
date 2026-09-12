@@ -1,0 +1,212 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The simulated customers: eighteen "mobile phones" any SIP softphone can
+  register as, password aicc@123. They stand in for the public network, so a
+  call they place enters the switch the way a carrier's would (user_context
+  public, the inbound doorway) and carries their number as caller id. They are
+  not accounts of the product: no aicc_managed, no extension, no presence.
+
+  Mounted into conf/directory/default/, which the switch consults only for a
+  number the database does not know.
+-->
+<include>
+    <user id="13800000001">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000001"/>
+        <variable name="effective_caller_id_number" value="13800000001"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000002">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000002"/>
+        <variable name="effective_caller_id_number" value="13800000002"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000003">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000003"/>
+        <variable name="effective_caller_id_number" value="13800000003"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000004">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000004"/>
+        <variable name="effective_caller_id_number" value="13800000004"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000005">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000005"/>
+        <variable name="effective_caller_id_number" value="13800000005"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000006">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000006"/>
+        <variable name="effective_caller_id_number" value="13800000006"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000007">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000007"/>
+        <variable name="effective_caller_id_number" value="13800000007"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000008">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000008"/>
+        <variable name="effective_caller_id_number" value="13800000008"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="13800000009">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="13800000009"/>
+        <variable name="effective_caller_id_number" value="13800000009"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550101">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550101"/>
+        <variable name="effective_caller_id_number" value="2125550101"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550102">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550102"/>
+        <variable name="effective_caller_id_number" value="2125550102"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550103">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550103"/>
+        <variable name="effective_caller_id_number" value="2125550103"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550104">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550104"/>
+        <variable name="effective_caller_id_number" value="2125550104"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550105">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550105"/>
+        <variable name="effective_caller_id_number" value="2125550105"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550106">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550106"/>
+        <variable name="effective_caller_id_number" value="2125550106"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550107">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550107"/>
+        <variable name="effective_caller_id_number" value="2125550107"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550108">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550108"/>
+        <variable name="effective_caller_id_number" value="2125550108"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+    <user id="2125550109">
+      <params>
+        <param name="password" value="aicc@123"/>
+      </params>
+      <variables>
+        <variable name="user_context" value="public"/>
+        <variable name="effective_caller_id_name" value="2125550109"/>
+        <variable name="effective_caller_id_number" value="2125550109"/>
+        <variable name="aicc_simulated_pstn" value="true"/>
+      </variables>
+    </user>
+</include>

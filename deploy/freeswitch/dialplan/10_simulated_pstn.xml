@@ -1,0 +1,33 @@
+<!--
+  SPDX-License-Identifier: Apache-2.0
+
+  The simulated public network, in the aicc context's include point.
+
+  Inbound: whatever a simulated customer dials is delivered to the public
+  doorway (dialplan/public/05_aicc.xml), exactly as a carrier would deliver
+  it. The directory entry already puts the customer in the public context;
+  this rule is the guard for a leg that arrives here anyway.
+
+  Outbound: a customer number dialed by the platform, an agent or a callback
+  rings the registered phone of that number instead of a trunk. A number
+  nobody registered fails as USER_NOT_REGISTERED, which is what an
+  unallocated number does on a real trunk.
+
+  A real deployment replaces this file with its trunk: see
+  deploy/dev/freeswitch/dialplan/aicc/00_pstn_gateway.xml for the shape.
+-->
+<include>
+  <extension name="simulated_pstn_inbound">
+    <condition field="${aicc_simulated_pstn}" expression="^true$" break="on-false"/>
+    <condition field="destination_number" expression="^(\d{3,})$">
+      <action application="transfer" data="$1 XML public"/>
+    </condition>
+  </extension>
+
+  <extension name="simulated_pstn_outbound">
+    <condition field="destination_number" expression="^(\+?[0-9]{7,16})$">
+      <action application="set" data="hangup_after_bridge=true"/>
+      <action application="bridge" data="{absolute_codec_string=PCMU,PCMA}user/$1@${domain_name}"/>
+    </condition>
+  </extension>
+</include>

@@ -41,7 +41,7 @@ cd web && npm run dev                         # Vite dev server on 5173
 cd web && npm run build                       # emits web/dist for go:embed
 
 # the whole product in containers (app + FreeSWITCH + PostgreSQL, seeded)
-make demo-up                                  # deploy/demo/README.md; screens on 127.0.0.1:8080
+make stack-up                                 # deploy/README.md; screens on <host>:8080
 make image VERSION=v0.1.0                     # the release image, SPA embedded
 
 # load testing (docs/load-tests.md) — the mock provider is a Realtime *server*,
@@ -52,7 +52,7 @@ go run ./cmd/aicc-loadgen -target 127.0.0.1:6060 -calls 200 -ramp 60s -duration 
 
 ## Database & migrations
 
-PostgreSQL runs in a container, never from `brew`. The dev server, `make demo-up` and the migration tests all need it up first.
+PostgreSQL runs in a container, never from `brew`. The dev server, `make stack-up` and the migration tests all need it up first.
 
 ```sh
 docker compose -f deploy/dev/docker-compose.yml up -d   # PostgreSQL 18 on 127.0.0.1:5432
@@ -127,7 +127,7 @@ Flow DSL v2 (`internal/flow`): the model owns the conversation, the flow owns th
 
 ## Packaging (M5)
 
-`deploy/demo/` is the one-command stack: PostgreSQL + this repository's own switch image + the application, all on a compose network so an AI call never leaves the host. `freeswitch/` **is** the switch — the complete v1.11.3 configuration tree in `conf/` (design 01 §7's diffs made in the files, not patched in at boot; `CONF-DEVIATIONS.md` is the record against vanilla), `modules.conf`, and a `Dockerfile` that builds FreeSWITCH from source with `mod_audio_stream` (`build.sh`, multi-arch, `rasonyang/freeswitch-aicc`). Nothing site-specific is baked in: the entrypoint injects a deployment's DSNs, addresses and passwords (`DOCKERHUB.md` is that contract), and a trunk belongs to a deployment — this box's is `deploy/dev/freeswitch/`. `AICC_SEED=demo` seeds it complete — accounts, queues, a published bilingual flow behind 95001/95002, a week of history — and `AICC_SEED=fresh` removes exactly that again. The audience-facing docs are `README.md` / `README.zh-CN.md`, `deploy/README.md` (deployment), `docs/provider-extension.md` (a provider is a profile, never a second client) and `docs/load-tests.md` (the plan for L1–L5).
+`deploy/` is the one-command stack: PostgreSQL + this repository's own switch image + the application, all on a compose network so an AI call never leaves the host. The application is built from the checkout by default (`AICC_IMAGE` names a published release tag instead), and the simulated public network a softphone registers against lives in `deploy/freeswitch/`. `freeswitch/` **is** the switch — the complete v1.11.3 configuration tree in `conf/` (design 01 §7's diffs made in the files, not patched in at boot; `CONF-DEVIATIONS.md` is the record against vanilla), `modules.conf`, and a `Dockerfile` that builds FreeSWITCH from source with `mod_audio_stream` (`build.sh`, multi-arch, `rasonyang/freeswitch-aicc`). Nothing site-specific is baked in: the entrypoint injects a deployment's DSNs, addresses and passwords (`DOCKERHUB.md` is that contract), and a trunk belongs to a deployment — this box's is `deploy/dev/freeswitch/`. `AICC_SEED` defaults to `demo` and seeds it complete — accounts, queues, published bilingual flows behind 95001/95002 and the rest, a week of history — while an empty value seeds nothing and `AICC_SEED=fresh` removes exactly what the seed created. The audience-facing docs are `README.md` / `README.zh-CN.md`, `deploy/README.md` (deployment), `docs/provider-extension.md` (a provider is a profile, never a second client) and `docs/load-tests.md` (the plan for L1–L5).
 
 **No performance claim, anywhere (owner directive 2026-08-16).** The benchmark campaign is deferred: L2–L5 need a host that is not a developer laptop, a switch that is not the development one, `sipp` and provider credit. Until it has run, no capacity or latency figure goes in the README, the deployment guide, a release note or a commit message — no "200 concurrent on 8c/16GB", no core counts, no measured latency. The estimates in 06 are an internal design aid and stay inside the design set. The harness exists (`cmd/aicc-mockprovider` — a Realtime *server* reached through `AICC_PROVIDER_ENDPOINT`, not an in-process fake — and `cmd/aicc-loadgen`), and a shakedown run of it is what found the watchdog bug in `m5-findings.md` §1; its numbers are not results.
 
