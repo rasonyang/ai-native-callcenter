@@ -84,6 +84,12 @@ services:
       # it on both sides and mod_callcenter matches them literally.
       AICC_SWITCH_DOMAIN: ${SWITCH_DOMAIN:-${FS_EXTERNAL_IP}}
 
+      # What a browser phone is handed: the digest realm it authenticates
+      # against, and the WebSocket the switch's internal profile binds. The
+      # phone is told both when it signs in, so neither is typed into a handset.
+      AICC_SIP_DOMAIN: ${SIP_DOMAIN:-${SWITCH_DOMAIN:-${FS_EXTERNAL_IP}}}
+      AICC_SIP_WSS_URL: ${SIP_WSS_URL:-ws://${FS_EXTERNAL_IP}:5066/}
+
       # The gateway dials this container by name; the SDP address is probed
       # toward the peer, which on a compose network is this container's own.
       AICC_BOT_SIP_HOST: 0.0.0.0

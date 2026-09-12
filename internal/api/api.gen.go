@@ -241,6 +241,7 @@ const (
 	ErrorCodeAGENTREQUIRED                  ErrorCode = "AGENT_REQUIRED"
 	ErrorCodeCALLNOTFOUND                   ErrorCode = "CALL_NOT_FOUND"
 	ErrorCodeCONFLICT                       ErrorCode = "CONFLICT"
+	ErrorCodeDEVICENOTREGISTERED            ErrorCode = "DEVICE_NOT_REGISTERED"
 	ErrorCodeEXTENSIONASSIGNEDTOAGENT       ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
 	ErrorCodeEXTENSIONINUSE                 ErrorCode = "EXTENSION_IN_USE"
 	ErrorCodeEXTENSIONPOOLEXHAUSTED         ErrorCode = "EXTENSION_POOL_EXHAUSTED"
@@ -278,6 +279,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeCALLNOTFOUND:
 		return true
 	case ErrorCodeCONFLICT:
+		return true
+	case ErrorCodeDEVICENOTREGISTERED:
 		return true
 	case ErrorCodeEXTENSIONASSIGNEDTOAGENT:
 		return true
@@ -401,6 +404,7 @@ func (e MonitorMode) Valid() bool {
 const (
 	NotReadyReasonAFTERCALLWORK NotReadyReason = "AFTER_CALL_WORK"
 	NotReadyReasonBREAK         NotReadyReason = "BREAK"
+	NotReadyReasonDEVICELOST    NotReadyReason = "DEVICE_LOST"
 	NotReadyReasonLOGIN         NotReadyReason = "LOGIN"
 	NotReadyReasonLUNCH         NotReadyReason = "LUNCH"
 	NotReadyReasonSUPERVISOR    NotReadyReason = "SUPERVISOR"
@@ -414,6 +418,8 @@ func (e NotReadyReason) Valid() bool {
 	case NotReadyReasonAFTERCALLWORK:
 		return true
 	case NotReadyReasonBREAK:
+		return true
+	case NotReadyReasonDEVICELOST:
 		return true
 	case NotReadyReasonLOGIN:
 		return true
@@ -1264,6 +1270,12 @@ type CreateReviewRequest struct {
 
 // CurrentUser defines model for CurrentUser.
 type CurrentUser struct {
+	// DeviceAccount The extension number the switch holds a registration for, or null when it holds none.
+	DeviceAccount *string `json:"deviceAccount"`
+
+	// IsDeviceRegistered Whether the switch currently holds a registration for this subject's agent extension. False for a subject with no agent identity.
+	IsDeviceRegistered bool `json:"isDeviceRegistered"`
+
 	// User The authenticated user.
 	User Identity `json:"user"`
 }
@@ -1399,6 +1411,8 @@ type ExtensionList struct {
 // ExtensionSecret A phone's SIP registration password, in clear.
 //
 // It is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.
+//
+// Since an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.
 type ExtensionSecret struct {
 	Password string `json:"password"`
 }
@@ -1409,7 +1423,7 @@ type ExtensionWrite struct {
 	IsEnabled   *bool   `json:"isEnabled,omitempty"`
 	Number      string  `json:"number"`
 
-	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch.
+	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned. A phone no longer registers with it — an agent's handset authenticates with a server-issued SIP session (POST /agent/sip-session) — and the stored value is retained for API compatibility.
 	Password *string `json:"password,omitempty"`
 }
 
@@ -1543,7 +1557,7 @@ type MonitorRequest struct {
 	Mode MonitorMode `json:"mode"`
 }
 
-// NotReadyReason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
+// NotReadyReason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
 type NotReadyReason string
 
 // Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
@@ -1612,11 +1626,17 @@ type Presence struct {
 	AgentID openapi_types.UUID `json:"agentId"`
 
 	// Availability The single word that answers: could this agent take a call, and if not, why.
-	Availability    Availability `json:"availability"`
-	EnteredAt       time.Time    `json:"enteredAt"`
-	ExtensionNumber *string      `json:"extensionNumber,omitempty"`
+	Availability Availability `json:"availability"`
 
-	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
+	// DeviceAccount The extension number the switch holds a registration for, or null when it holds none.
+	DeviceAccount   *string   `json:"deviceAccount"`
+	EnteredAt       time.Time `json:"enteredAt"`
+	ExtensionNumber *string   `json:"extensionNumber,omitempty"`
+
+	// IsDeviceRegistered Whether the switch currently holds a registration for this agent's extension.
+	IsDeviceRegistered bool `json:"isDeviceRegistered"`
+
+	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
 	Reason *NotReadyReason `json:"reason,omitempty"`
 
 	// State Presence FSM state.
@@ -1828,7 +1848,7 @@ type RosterEntry struct {
 	IsOnCall        bool    `json:"isOnCall"`
 	IsRegistered    bool    `json:"isRegistered"`
 
-	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
+	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
 	Reason *NotReadyReason `json:"reason,omitempty"`
 
 	// State Presence FSM state.
@@ -1840,6 +1860,26 @@ type RosterEntry struct {
 // RosterList defines model for RosterList.
 type RosterList struct {
 	Items []RosterEntry `json:"items"`
+}
+
+// SIPSession The credentials one agent's phone registers with. The platform mints them; nobody types them into a handset. The plaintext password is generated server-side, hashed into a1Hash and discarded, so it appears in no response, no log and no table.
+//
+// One active SIP session per agent: issuing a new one replaces the previous, and the previous registration is flushed from the switch.
+type SIPSession struct {
+	// A1Hash md5(account:sipDomain:password) in lower-case hex. This is what the phone authenticates with; the password it was derived from is issued to nobody, here or anywhere else.
+	A1Hash string `json:"a1Hash"`
+
+	// Account The extension number to register as.
+	Account string `json:"account"`
+
+	// ExpiresAt When these credentials stop being accepted. It follows the web session's expiry, so the phone is signed in for exactly as long as the person is.
+	ExpiresAt time.Time `json:"expiresAt"`
+
+	// SIPDomain The digest realm, and the domain the phone builds its address of record from.
+	SIPDomain string `json:"sipDomain"`
+
+	// WssURL The WebSocket URL the phone connects to.
+	WssURL string `json:"wssUrl"`
 }
 
 // Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
@@ -2430,6 +2470,12 @@ type ServerInterface interface {
 	// AgentReady Go ready
 	// (POST /agent/ready)
 	AgentReady(w http.ResponseWriter, r *http.Request)
+	// DeleteAgentSIPSession Revoke the phone credentials and flush the registration
+	// (DELETE /agent/sip-session)
+	DeleteAgentSIPSession(w http.ResponseWriter, r *http.Request)
+	// CreateAgentSIPSession Issue the phone credentials for this agent
+	// (POST /agent/sip-session)
+	CreateAgentSIPSession(w http.ResponseWriter, r *http.Request)
 	// GetAgentWrapUp The after-call work waiting on the caller
 	// (GET /agent/wrap-up)
 	GetAgentWrapUp(w http.ResponseWriter, r *http.Request)
@@ -2721,6 +2767,18 @@ func (_ Unimplemented) GetAgentPresence(w http.ResponseWriter, r *http.Request) 
 // AgentReady Go ready
 // (POST /agent/ready)
 func (_ Unimplemented) AgentReady(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteAgentSIPSession Revoke the phone credentials and flush the registration
+// (DELETE /agent/sip-session)
+func (_ Unimplemented) DeleteAgentSIPSession(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateAgentSIPSession Issue the phone credentials for this agent
+// (POST /agent/sip-session)
+func (_ Unimplemented) CreateAgentSIPSession(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3310,6 +3368,34 @@ func (siw *ServerInterfaceWrapper) AgentReady(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AgentReady(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAgentSIPSession operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAgentSIPSession(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAgentSIPSession(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAgentSIPSession operation middleware
+func (siw *ServerInterfaceWrapper) CreateAgentSIPSession(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAgentSIPSession(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5856,6 +5942,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agent/ready", wrapper.AgentReady)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/agent/sip-session", wrapper.DeleteAgentSIPSession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent/sip-session", wrapper.CreateAgentSIPSession)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/agent/wrap-up", wrapper.GetAgentWrapUp)

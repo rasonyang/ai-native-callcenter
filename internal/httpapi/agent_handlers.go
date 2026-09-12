@@ -58,6 +58,15 @@ func presenceOf(agentID uuid.UUID, p agents.Presence) api.Presence {
 		out.ExtensionNumber = &p.ExtensionNumber
 	}
 	out.WrapUpCallID = p.WrapUpCallID
+	// The phone, as the switch last described it. deviceAccount names the
+	// account the registration is held for, which is the extension the agent
+	// is signed in at; it is null while there is no registration, so a screen
+	// never has to guess whether a number it can see is actually reachable.
+	out.IsDeviceRegistered = p.IsRegistered
+	if p.IsRegistered && p.ExtensionNumber != "" {
+		account := p.ExtensionNumber
+		out.DeviceAccount = &account
+	}
 	return out
 }
 
@@ -354,6 +363,11 @@ func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, agentID u
 		writeError(w, http.StatusConflict, CodeAgentAlreadyLoggedIn, "already signed in", nil)
 	case errors.Is(err, agents.ErrNotLoggedIn):
 		writeError(w, http.StatusConflict, CodeAgentNotLoggedIn, "not signed in", nil)
+	case errors.Is(err, agents.ErrDeviceNotRegistered):
+		// A conflict with the state of the world, not a bad request: nothing
+		// about the call was wrong, there is simply no phone to take one on.
+		writeError(w, http.StatusConflict, CodeDeviceNotRegistered,
+			"no phone is registered for this agent", nil)
 	case errors.Is(err, agents.ErrUnknownReason):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"unknown not-ready reason", map[string]any{"field": "reason"})

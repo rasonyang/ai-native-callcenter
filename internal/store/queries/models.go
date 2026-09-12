@@ -185,12 +185,12 @@ type LuaccDid struct {
 }
 
 type LuaccDirectory struct {
-	Number              string `json:"number"`
-	Password            string `json:"password"`
-	DisplayName         string `json:"displayName"`
-	IsEnabled           bool   `json:"isEnabled"`
-	IsAutoAnswer        bool   `json:"isAutoAnswer"`
-	CallcenterAgentName string `json:"callcenterAgentName"`
+	Number              string  `json:"number"`
+	DisplayName         string  `json:"displayName"`
+	IsEnabled           bool    `json:"isEnabled"`
+	IsAutoAnswer        bool    `json:"isAutoAnswer"`
+	CallcenterAgentName string  `json:"callcenterAgentName"`
+	A1Hash              *string `json:"a1Hash"`
 }
 
 type LuaccQueue struct {
@@ -288,6 +288,14 @@ type Session struct {
 	TokenHash []byte             `json:"tokenHash"`
 	UserAgent *string            `json:"userAgent"`
 	IP        *netip.Addr        `json:"ip"`
+	CreatedAt pgtype.Timestamptz `json:"createdAt"`
+	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
+}
+
+type SipSession struct {
+	AgentID   uuid.UUID          `json:"agentId"`
+	Extension string             `json:"extension"`
+	A1Hash    string             `json:"a1Hash"`
 	CreatedAt pgtype.Timestamptz `json:"createdAt"`
 	ExpiresAt pgtype.Timestamptz `json:"expiresAt"`
 }

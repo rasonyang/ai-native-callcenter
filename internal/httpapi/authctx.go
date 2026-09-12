@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"slices"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -48,6 +49,16 @@ type AuthContext struct {
 	// SubjectName is what to call the subject in a log line or an audit row:
 	// a username, or a key's name.
 	SubjectName string
+
+	// SessionExpiresAt is when a browser session stops being accepted. Zero
+	// for a key, which does not expire on a clock — it is revoked, or it is
+	// not.
+	//
+	// It is here because a credential minted for a session has to end with it:
+	// an agent's phone is signed in for exactly as long as the person is, and
+	// the alternative — "now plus the session TTL" at the moment of issue —
+	// quietly extends a session that is nearly over.
+	SessionExpiresAt time.Time
 
 	// User is the account behind a browser session. A key has none, and the
 	// zero value is the honest answer rather than an invented account. Only

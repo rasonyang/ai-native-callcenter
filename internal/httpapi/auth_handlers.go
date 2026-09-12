@@ -10,6 +10,9 @@ import (
 	"net/netip"
 	"strings"
 
+	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -21,6 +24,33 @@ type loginRequest struct {
 
 type loginResponse struct {
 	User auth.Identity `json:"user"`
+	// The phone, as the switch currently holds it. A screen asks this to
+	// decide whether it may offer to place a call; it is a fact about the
+	// device and not about the account, which is why it is answered from the
+	// agent service rather than from the session.
+	//
+	// False and nil for anybody who is not an agent — a supervisor has no
+	// phone of their own signed in — and that is the honest answer rather than
+	// an omission.
+	IsDeviceRegistered bool    `json:"isDeviceRegistered"`
+	DeviceAccount      *string `json:"deviceAccount"`
+}
+
+// deviceOf answers what the switch holds for this request's agent identity.
+func (s *Server) deviceOf(r *http.Request, ac AuthContext) (isRegistered bool, account *string) {
+	if s.agents == nil || !ac.IsAgent() {
+		return false, nil
+	}
+	isRegistered, _ = s.agents.DeviceState(ac.AgentID)
+	if !isRegistered {
+		return false, nil
+	}
+	// The number the phone registered as is the one bound to the agent: a
+	// session is only ever issued for that extension.
+	if ext := s.agents.BoundExtensionFor(r.Context(), ac.AgentID); ext != "" {
+		account = &ext
+	}
+	return true, account
 }
 
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +86,19 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
+	// Signing out of the page signs the whole agent out: presence first, then
+	// the phone, then the web session.
+	//
+	// The order is the point, and it was decided by a live run. Revoking the
+	// credential flushes the registration, the switch answers with
+	// sofia::unregister, and a READY agent losing their phone is moved to
+	// NOT_READY with reason DEVICE_LOST — which is true of a phone that
+	// crashed and a lie about a person who pressed Sign out. Signing presence
+	// out first means the DEVICE_UNREGISTERED that follows finds nobody READY
+	// and has nothing to report.
+	if ac, ok := authFrom(r.Context()); ok && ac.IsAgent() {
+		s.signAgentOut(r, ac.AgentID)
+	}
 	if cookie, err := r.Cookie(s.cfg.SessionCookie); err == nil {
 		if err := s.auth.Logout(r.Context(), cookie.Value); err != nil {
 			slog.ErrorContext(r.Context(), "logout failed", "error", err)
@@ -65,12 +108,46 @@ func (s *Server) Logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// signAgentOut ends everything a person's sign-out ends, in the order the
+// switch needs it: presence, then the phone credential.
+//
+// Every failure here is logged and continued past. The web session must end
+// even when the agent service or the credential store cannot be reached,
+// because the alternative is an account that cannot sign out — and both of the
+// states left behind expire by themselves.
+func (s *Server) signAgentOut(r *http.Request, agentID uuid.UUID) {
+	if s.agents != nil {
+		// Already signed out is the state this asks for, not a failure: a
+		// person who signed out of the cockpit and then out of the page is
+		// the ordinary way this happens.
+		if _, err := s.agents.Logout(r.Context(), agentID); err != nil &&
+			!errors.Is(err, agents.ErrNotLoggedIn) {
+			slog.ErrorContext(r.Context(), "could not sign the agent out of presence on logout",
+				"agentId", agentID, "error", err)
+		}
+	}
+	if s.sipSessions != nil {
+		// Leaving the credential behind would keep a closed tab registered
+		// and ringing for whatever is left of the session's lifetime, which
+		// is the exact thing one-session-per-agent exists to prevent.
+		if err := s.sipSessions.Revoke(r.Context(), agentID); err != nil {
+			slog.ErrorContext(r.Context(), "could not revoke the sip session on logout",
+				"agentId", agentID, "error", err)
+		}
+	}
+}
+
 func (s *Server) GetMe(w http.ResponseWriter, r *http.Request) {
 	ac, ok := mustAuth(w, r)
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, loginResponse{User: ac.User})
+	isRegistered, account := s.deviceOf(r, ac)
+	writeJSON(w, http.StatusOK, loginResponse{
+		User:               ac.User,
+		IsDeviceRegistered: isRegistered,
+		DeviceAccount:      account,
+	})
 }
 
 func (s *Server) GetSystemHealth(w http.ResponseWriter, _ *http.Request) {

@@ -35,12 +35,16 @@ const (
 	ReasonAfterCallWork Reason = "AFTER_CALL_WORK"
 	ReasonSystem        Reason = "SYSTEM"
 	ReasonSupervisor    Reason = "SUPERVISOR"
+	// ReasonDeviceLost is platform-set: the phone's registration expired
+	// or was flushed while the agent was READY.
+	ReasonDeviceLost Reason = "DEVICE_LOST"
 )
 
 var validReasons = map[Reason]bool{
 	ReasonLogin: true, ReasonBreak: true, ReasonLunch: true,
 	ReasonTraining: true, ReasonAfterCallWork: true,
 	ReasonSystem: true, ReasonSupervisor: true,
+	ReasonDeviceLost: true,
 }
 
 // Valid reports whether r is a known reason.
@@ -86,6 +90,12 @@ var (
 	ErrNotLoggedIn     = fmt.Errorf("agent is not logged in")
 	ErrAlreadyLoggedIn = fmt.Errorf("agent is already logged in")
 	ErrUnknownReason   = fmt.Errorf("unknown not-ready reason")
+	// ErrDeviceNotRegistered refuses READY to an agent whose phone the switch
+	// holds no registration for. Wanting calls without a phone to take them on
+	// is not a state worth entering: the mirror would put them On Break the
+	// same instant (CallcenterStatus), so the agent would read READY on their
+	// own screen while no queue could ever deliver to them.
+	ErrDeviceNotRegistered = fmt.Errorf("no phone is registered for this agent")
 )
 
 // CurrentState normalizes the state so the zero value of Presence is a
@@ -128,9 +138,18 @@ func (p *Presence) Logout(at time.Time) error {
 }
 
 // Ready makes the agent routable, ending any wrap-up early.
+//
+// It needs a phone. Registration is the one precondition checked here rather
+// than reachability: a phone that stopped answering the switch's ping is still
+// a phone the agent is holding, and taking their READY for it would be reading
+// a transport failure as a decision. A missing registration is different —
+// there is nothing to ring at all.
 func (p *Presence) Ready(at time.Time) error {
 	if p.IsLoggedOut() {
 		return ErrNotLoggedIn
+	}
+	if !p.IsRegistered {
+		return ErrDeviceNotRegistered
 	}
 	p.State = StateReady
 	p.Reason = ""

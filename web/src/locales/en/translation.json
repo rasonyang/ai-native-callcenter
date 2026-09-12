@@ -73,7 +73,8 @@
     "TRAINING": "Training",
     "AFTER_CALL_WORK": "After-call work",
     "SYSTEM": "System",
-    "SUPERVISOR": "Supervisor"
+    "SUPERVISOR": "Supervisor",
+    "DEVICE_LOST": "Phone lost"
   },
   "callTypes": {
     "INBOUND": "Inbound",
@@ -112,6 +113,7 @@
     "CALL_NOT_FOUND": "That call has already ended.",
     "NOT_CALL_PARTY": "You are not on that call.",
     "AGENT_NOT_IN_WRAP_UP": "There is no finished call to file this against.",
+    "DEVICE_NOT_REGISTERED": "Your phone is not registered",
     "USER_DATA_TOO_LARGE": "The call has no room for this business data: at most {{maxKeys}} keys, {{maxValueBytes}} bytes each. Nothing was written.",
     "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "This kind of call does not offer that.",
     "LAST_ADMIN": "This would leave nobody able to administer the platform.",
@@ -517,6 +519,50 @@
   "device": {
     "reachable": "Phone registered",
     "unreachable": "Phone unreachable"
+  },
+  "phone": {
+    "retry": "Retry",
+    "reprovision": "Re-provision",
+    "openOptions": "Open extension options",
+    "noExtension": "No extension is bound to your account",
+    "readyBlocked": "Your phone is not ready, so calls cannot be offered to you.",
+    "chip": {
+      "setup": "Set up phone",
+      "connecting": "Connecting…",
+      "ready": "Phone ready",
+      "wrongAccount": "Wrong account",
+      "displaced": "Phone moved to another browser",
+      "overridden": "Manual override in extension",
+      "errors": {
+        "REGISTRATION_FAILED": "Phone could not register",
+        "WSS_LOST": "Phone lost its connection",
+        "MIC_UNAVAILABLE": "Microphone unavailable",
+        "MEDIA_FAILED": "Call audio failed"
+      }
+    },
+    "onboarding": {
+      "title": "Set up your phone",
+      "subtitle": "Calls ring in a Chrome extension. Three steps, once per browser.",
+      "done": "Done",
+      "pending": "Not done yet",
+      "noExtensionId": "Open the extension's options page from chrome://extensions",
+      "install": {
+        "title": "Install the phone extension",
+        "text": "The extension holds the registration and the microphone; this page never does.",
+        "action": "Open the Chrome Web Store",
+        "reload": "Reload after installing"
+      },
+      "site": {
+        "title": "Allow this site",
+        "text": "The extension only runs on sites you allow. Add {{host}}.",
+        "action": "Open extension options"
+      },
+      "microphone": {
+        "title": "Allow the microphone",
+        "text": "Chrome asks once. Without it a call connects with no audio.",
+        "action": "Open microphone settings"
+      }
+    }
   },
   "transcript": {
     "title": "Live transcript",

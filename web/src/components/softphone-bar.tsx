@@ -9,14 +9,19 @@ import { DropdownMenu, Popover } from 'radix-ui'
 
 import { Keypad } from '@/components/keypad'
 import { StatusDot } from '@/components/status-pill'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   SELECTABLE_REASONS, myParty, otherParty, useCallActions, useElapsedSec,
   useIsWrapUpPending, useMyCalls, usePresence, usePresenceActions,
 } from '@/lib/agent'
-import { callApi, type CallSnapshot, type NotReadyReason, type PartyState } from '@/lib/api'
+import {
+  callApi, type Availability, type CallSnapshot, type NotReadyReason, type PartyState, type Presence,
+} from '@/lib/api'
 import { describeError } from '@/lib/errors'
+import { optionsUrl, usePhoneBridge } from '@/lib/phone-bridge'
+import { phoneChipFor } from '@/lib/phone'
 import { cn, formatDuration } from '@/lib/utils'
 
 /**
@@ -29,6 +34,7 @@ import { cn, formatDuration } from '@/lib/utils'
 export function SoftphoneBar() {
   const { data: presence } = usePresence(true)
   const { data: calls } = useMyCalls(Boolean(presence && presence.state !== 'LOGGED_OUT'))
+  const chip = usePhoneChip(presence)
 
   if (!presence) return null
 
@@ -41,16 +47,21 @@ export function SoftphoneBar() {
     )
   }
 
-  // Three segments divided by hairlines: who the agent is to the queue, what
-  // call they are on, what they can do to it.
+  // Four segments divided by hairlines: whether the phone is there at all,
+  // who the agent is to the queue, what call they are on, what they can do to
+  // it. The phone comes first because none of the rest means anything without
+  // one.
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 rounded-md border bg-card pl-0.5 pr-1">
+    <div className="flex h-10 shrink-0 items-center gap-1 rounded-md border bg-card pl-1.5 pr-1">
+      <PhoneChip chip={chip} extensionNumber={presence.extensionNumber} />
+      <Divider />
       <PresenceControl
         availability={presence.availability}
         reason={presence.reason}
         enteredAt={presence.enteredAt}
         state={presence.state}
         hasCall={Boolean(call)}
+        isPhoneReady={chip.isReadyAllowed}
       />
       <Divider />
       <span className="flex w-56 min-w-0 items-center px-1.5">
@@ -65,6 +76,85 @@ export function SoftphoneBar() {
 /** The hairline between two segments of the bar. */
 function Divider() {
   return <span aria-hidden className="h-4 w-px shrink-0 bg-border" />
+}
+
+/**
+ * Whether this browser has a phone, said in one line.
+ *
+ * The switch and the extension are asked separately and neither is taken on
+ * trust for what the other knows: see `phoneChipFor`.
+ */
+function usePhoneChip(presence: Presence | null | undefined) {
+  const { detected, state } = usePhoneBridge()
+  return phoneChipFor(
+    Boolean(presence?.isDeviceRegistered),
+    detected ? state : undefined,
+    presence?.extensionNumber,
+  )
+}
+
+/**
+ * The phone segment: a dot, what is wrong, and the one thing to do about it.
+ *
+ * It is not a duplicate of the presence pill beside it. Presence is what the
+ * agent chose; this is whether the choice can be honoured.
+ */
+function PhoneChip({
+  chip,
+  extensionNumber,
+}: {
+  chip: ReturnType<typeof usePhoneChip>
+  extensionNumber?: string
+}) {
+  const { t } = useTranslation()
+  const { reprovision, openOnboarding, provisionErrorCode, extensionId } = usePhoneBridge()
+
+  // A server that will not mint a session at all outranks whatever the
+  // extension is reporting: there is no phone for it to register with, and no
+  // amount of retrying binds one.
+  const label = provisionErrorCode === 'CONFLICT' ? t('phone.noExtension') : t(chip.labelKey)
+
+  // Nothing is set up yet, so the chip is the way into setting it up.
+  if (chip.action === 'setup') {
+    return (
+      <Button variant="ghost" size="sm" className="gap-1.5" onClick={openOnboarding}>
+        <StatusDot color={chip.dot} />
+        {label}
+      </Button>
+    )
+  }
+
+  return (
+    <span className="flex items-center gap-1.5">
+      <Badge className="gap-1.5">
+        <StatusDot color={chip.dot} />
+        {label}
+        {chip.kind === 'ready' && extensionNumber && (
+          <span className="tabular">{` \u00b7 ${extensionNumber}`}</span>
+        )}
+      </Badge>
+      {/* An override is undone where it was made, so the chip links there
+          rather than offering to replace a credential the extension has been
+          told to keep dormant. With no id to address there is no link to
+          render, and the chip simply says what is going on. */}
+      {chip.action === 'options' && optionsUrl('account', extensionId) && (
+        <Button asChild variant="ghost" size="sm">
+          <a
+            href={optionsUrl('account', extensionId) ?? undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t('phone.openOptions')}
+          </a>
+        </Button>
+      )}
+      {(chip.action === 'retry' || chip.action === 'reprovision') && (
+        <Button variant="ghost" size="sm" onClick={reprovision}>
+          {chip.action === 'retry' ? t('phone.retry') : t('phone.reprovision')}
+        </Button>
+      )}
+    </span>
+  )
 }
 
 /**
@@ -105,13 +195,21 @@ function PresenceControl({
   enteredAt,
   state,
   hasCall,
+  isPhoneReady,
 }: {
-  availability: Parameters<typeof StatusDot>[0]['availability']
+  availability: Availability
   reason?: NotReadyReason
   enteredAt: string
   state: string
   /** On a call the call segment owns the clock, so the chip drops its own. */
   hasCall: boolean
+  /**
+   * Whether a call could actually be delivered. Going ready without a phone
+   * puts the agent at the head of a queue that cannot ring them, which the
+   * server refuses anyway (409 DEVICE_NOT_REGISTERED) — offering the item and
+   * letting it fail tells the agent nothing about what to fix.
+   */
+  isPhoneReady: boolean
 }) {
   const { t } = useTranslation()
   const { signOut, ready, notReady } = usePresenceActions()
@@ -153,8 +251,14 @@ function PresenceControl({
           {state !== 'READY' && (
             <DropdownMenu.Item
               className="flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 outline-none data-[highlighted]:bg-muted data-disabled:opacity-50"
-              disabled={isWrapUpPending}
-              title={isWrapUpPending ? t('agent.wrapUpBlocks') : undefined}
+              disabled={isWrapUpPending || !isPhoneReady}
+              title={
+                isWrapUpPending
+                  ? t('agent.wrapUpBlocks')
+                  : !isPhoneReady
+                    ? t('phone.readyBlocked')
+                    : undefined
+              }
               onSelect={() => ready.mutate()}
             >
               <StatusDot availability="READY" />
@@ -163,6 +267,14 @@ function PresenceControl({
           )}
           {isWrapUpPending && (
             <p className="px-2 py-1 text-xs text-muted-foreground">{t('agent.wrapUpBlocks')}</p>
+          )}
+          {!isWrapUpPending && !isPhoneReady && state !== 'READY' && (
+            <p className="px-2 py-1 text-xs text-muted-foreground">{t('phone.readyBlocked')}</p>
+          )}
+          {ready.isError && (
+            <p className="px-2 py-1 text-xs" style={{ color: 'var(--state-breach)' }}>
+              {describeError(ready.error, t)}
+            </p>
           )}
           {SELECTABLE_REASONS.map((r) => (
             <DropdownMenu.Item

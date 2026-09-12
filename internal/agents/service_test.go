@@ -192,6 +192,18 @@ func (f *fakePublisher) Publish(_ context.Context, ev events.Event, _ events.Sco
 	return ev
 }
 
+// lastPayload is the body of the most recent event, which is what a browser
+// actually receives.
+func (f *fakePublisher) lastPayload(t *testing.T) map[string]any {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.events) == 0 {
+		t.Fatal("nothing was published")
+	}
+	return f.events[len(f.events)-1].Payload
+}
+
 func (f *fakePublisher) types() []events.Type {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -277,6 +289,7 @@ func TestStorageFailureRollsBackAndReportsError(t *testing.T) {
 	svc, store, sw, _, agentID := newTestService(t)
 	ctx := context.Background()
 
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -378,8 +391,17 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 // both directions meant a phone's death was announced as DEVICE_IN_SERVICE
 // carrying DEVICE_UNREACHABLE in its payload: anything filtering on type was
 // told the opposite of the truth.
-func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
-	svc, _, sw, pub, agentID := newTestService(t)
+// A phone that goes away is announced, mirrored, and now also takes the agent
+// out of routing.
+//
+// READY used to stand through a lost registration — losing a phone says
+// nothing about the agent's intent — with only the switch mirror keeping the
+// queue off it. That left the agent reading READY on their own screen while
+// nothing could reach them, and no word anywhere saying why. The intent
+// argument survives in the reason: DEVICE_LOST is the platform saying what
+// happened, not an agent's own choice put in their mouth.
+func TestALostPhoneTakesTheAgentOutOfRoutingUnderItsOwnReason(t *testing.T) {
+	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
@@ -393,14 +415,17 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 		t.Fatalf("the agent never became routable: %v", sw.commands)
 	}
 
-	// The phone goes away. The agent has chosen nothing — they are still READY.
+	// The phone goes. The agent has chosen nothing.
 	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
 
-	if got := svc.Presence(agentID); got.CurrentState() != StateReady {
-		t.Errorf("state = %s, want READY — losing a phone is not a decision to stop taking calls", got.CurrentState())
+	got := svc.Presence(agentID)
+	if got.CurrentState() != StateNotReady || got.Reason != ReasonDeviceLost {
+		t.Errorf("presence = %s/%s, want NOT_READY/DEVICE_LOST",
+			got.CurrentState(), got.Reason)
 	}
-	if got := svc.Presence(agentID).Availability(); got != AvailDeviceUnreachable {
-		t.Errorf("availability = %s, want DEVICE_UNREACHABLE", got)
+	if saved, _ := store.LoadPresence(ctx, agentID); saved.Reason != ReasonDeviceLost {
+		t.Errorf("persisted reason = %q, want DEVICE_LOST — a reload would put "+
+			"them back where the phone is not", saved.Reason)
 	}
 	last := ""
 	for _, c := range sw.commands {
@@ -412,25 +437,96 @@ func TestALostPhoneReachesTheSwitchAndIsNamedForWhatHappened(t *testing.T) {
 		t.Errorf("the switch was last told %q, want On Break — it will otherwise keep offering to a phone that cannot ring", last)
 	}
 
+	// Cause and consequence, in that order and both said out loud: the switch
+	// reported the phone, the platform reports what it did about the agent.
 	types := pub.types()
-	if got := types[len(types)-1]; got != events.TypeDeviceUnregistered {
-		t.Errorf("the phone's loss was announced as %s, want %s", got, events.TypeDeviceUnregistered)
+	if len(types) < 2 {
+		t.Fatalf("published %v, want the phone and the presence change", types)
+	}
+	if types[len(types)-2] != events.TypeDeviceUnregistered {
+		t.Errorf("the phone's loss was announced as %s, want %s",
+			types[len(types)-2], events.TypeDeviceUnregistered)
+	}
+	if types[len(types)-1] != events.TypeAgentNotReady {
+		t.Errorf("last event = %s, want AGENT_NOT_READY — without it the agent's "+
+			"own screen still reads READY", types[len(types)-1])
 	}
 
-	// And back again.
+	// And back again. The phone returning is not a decision to take calls, so
+	// the agent stays where the platform put them until they say otherwise.
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	last = ""
-	for _, c := range sw.commands {
-		if strings.HasPrefix(c, "status agent-1001 ") {
-			last = c
-		}
-	}
-	if last != "status agent-1001 Available" {
-		t.Errorf("the switch was last told %q after the phone came back, want Available", last)
+	if got := svc.Presence(agentID); got.CurrentState() != StateNotReady {
+		t.Errorf("state = %s, want NOT_READY — a phone coming back is not the "+
+			"agent saying they are ready for the next call", got.CurrentState())
 	}
 	types = pub.types()
 	if got := types[len(types)-1]; got != events.TypeDeviceRegistered {
 		t.Errorf("the phone's return was announced as %s, want %s", got, events.TypeDeviceRegistered)
+	}
+
+	// Which they now can, the phone being back.
+	if _, err := svc.Ready(ctx, agentID); err != nil {
+		t.Fatalf("Ready() after the phone came back: %v", err)
+	}
+}
+
+// An agent already out of routing has nothing to change, and a state event
+// means a state changed.
+func TestALostPhoneSaysNothingAboutAnAgentWhoWasNotReadyAnyway(t *testing.T) {
+	svc, _, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.NotReady(ctx, agentID, ReasonLunch); err != nil {
+		t.Fatal(err)
+	}
+	before := svc.Presence(agentID)
+	told := len(pub.types())
+
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+
+	after := svc.Presence(agentID)
+	if after.Reason != ReasonLunch || after.EnteredAt != before.EnteredAt {
+		t.Errorf("presence = %s/%s entered %v, want lunch left exactly as it was",
+			after.CurrentState(), after.Reason, after.EnteredAt)
+	}
+	// The phone's loss is still announced; the agent's presence is not,
+	// because it did not move.
+	if got := pub.types()[told:]; len(got) != 1 || got[0] != events.TypeDeviceUnregistered {
+		t.Errorf("published %v, want DEVICE_UNREGISTERED alone", got)
+	}
+}
+
+// Registration is the axis that decides READY; reachability is not. A phone
+// that stopped answering the switch's ping is still a phone the agent holds,
+// and taking their READY for it would read a transport failure as a decision.
+// The derived DEVICE_UNREACHABLE is what says so, and it is enough.
+func TestAPhoneThatStopsAnsweringIsNotAPhoneThatWentAway(t *testing.T) {
+	svc, _, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Ready(ctx, agentID); err != nil {
+		t.Fatal(err)
+	}
+	svc.ObserveDevice(ctx, "1001", SignalUnreachable)
+
+	got := svc.Presence(agentID)
+	if got.CurrentState() != StateReady {
+		t.Errorf("state = %s, want READY", got.CurrentState())
+	}
+	if got.Availability() != AvailDeviceUnreachable {
+		t.Errorf("availability = %s, want DEVICE_UNREACHABLE", got.Availability())
+	}
+	types := pub.types()
+	if types[len(types)-1] != events.TypeDeviceUnreachable {
+		t.Errorf("last event = %s, want DEVICE_UNREACHABLE alone", types[len(types)-1])
 	}
 }
 
@@ -494,13 +590,13 @@ func TestDeviceObservationAffectsAvailability(t *testing.T) {
 	svc, _, _, _, agentID := newTestService(t)
 	ctx := context.Background()
 
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if got := svc.Presence(agentID).Availability(); got != AvailReady {
 		t.Errorf("availability = %s, want READY", got)
 	}
@@ -516,13 +612,13 @@ func TestRosterResolvesAvailability(t *testing.T) {
 	svc, _, _, _, agentID := newTestService(t)
 	ctx := context.Background()
 
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	svc.ObserveDevice(ctx, "1001", SignalRegistered)
 	svc.SetOnCall(ctx, agentID, true, uuid.New())
 
 	rows, err := svc.Roster(ctx)
@@ -685,27 +781,30 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 		}
 	})
 
+	// The premise moved with the zero-config phone: a lost registration now
+	// takes the agent out of routing itself, under its own reason. What has
+	// not moved is that the On Break it mirrors must not come back as a missed
+	// call — that would restamp the reason as SYSTEM and blame the agent for a
+	// phone that went away on its own.
 	t.Run("a lost phone is not an ignored call", func(t *testing.T) {
 		svc, _, _, _, agentID := newTestService(t)
+		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
 			t.Fatalf("login: %v", err)
 		}
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
-		// The phone goes. We mirror On Break on purpose — the switch must not
-		// keep offering — while their READY stands, because losing a phone
-		// says nothing about their intent (C28).
 		svc.ObserveDevice(t.Context(), "1008", SignalUnregistered)
 
 		got, err := svc.RingNoAnswer(t.Context(), agentID)
 		if err != nil {
 			t.Fatalf("ring-no-answer: %v", err)
 		}
-		if got.CurrentState() != StateReady {
-			t.Errorf("state = %s, want READY — the On Break we mirrored for an "+
-				"unreachable phone was read back as the agent ignoring a call, "+
-				"and it cost them a state they never changed", got.CurrentState())
+		if got.CurrentState() != StateNotReady || got.Reason != ReasonDeviceLost {
+			t.Errorf("presence = %s/%s, want NOT_READY/DEVICE_LOST — the On Break "+
+				"we mirrored for a phone that went away was read back as the agent "+
+				"ignoring a call", got.CurrentState(), got.Reason)
 		}
 	})
 }
@@ -717,4 +816,195 @@ func hasType(types []events.Type, want events.Type) bool {
 		}
 	}
 	return false
+}
+
+// The phone is a fact the presence carries and every agent event states: a
+// cockpit that has to know whether the extension it shows can actually ring
+// reads it from the event it already has, not from a second request.
+func TestEveryAgentEventStatesWhetherThePhoneIsRegistered(t *testing.T) {
+	svc, _, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	// What the switch's sofia::register reaches this service as.
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	if isRegistered, isInService := svc.DeviceState(agentID); isRegistered || isInService {
+		t.Errorf("DeviceState = %v/%v before the agent signed in; the phone is "+
+			"known but it is not yet theirs", isRegistered, isInService)
+	}
+
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if isRegistered, isInService := svc.DeviceState(agentID); !isRegistered || !isInService {
+		t.Errorf("DeviceState = %v/%v, want a registered phone in service",
+			isRegistered, isInService)
+	}
+
+	payload := pub.lastPayload(t)
+	if payload["isDeviceRegistered"] != true {
+		t.Errorf("isDeviceRegistered = %v, want true", payload["isDeviceRegistered"])
+	}
+	if payload["deviceAccount"] != "1001" {
+		t.Errorf("deviceAccount = %v, want the extension the registration is held for",
+			payload["deviceAccount"])
+	}
+
+	// And null rather than absent when there is none: a screen cannot tell an
+	// omitted key from "the switch holds no phone for them".
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+	payload = pub.lastPayload(t)
+	if payload["isDeviceRegistered"] != false {
+		t.Errorf("isDeviceRegistered = %v, want false", payload["isDeviceRegistered"])
+	}
+	account, present := payload["deviceAccount"]
+	if !present || account != nil {
+		t.Errorf("deviceAccount = %v (present=%v), want an explicit null", account, present)
+	}
+}
+
+// READY is refused outright when the switch holds no registration, and the
+// refusal changes nothing: no row is written, no event is published, and the
+// agent stays exactly where they were.
+func TestReadyIsRefusedWithoutAPhoneAndChangesNothing(t *testing.T) {
+	svc, store, sw, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	before := svc.Presence(agentID)
+	told := len(pub.types())
+	store.mu.Lock()
+	logs := store.logs
+	store.mu.Unlock()
+
+	if _, err := svc.Ready(ctx, agentID); !errors.Is(err, ErrDeviceNotRegistered) {
+		t.Fatalf("Ready() error = %v, want ErrDeviceNotRegistered", err)
+	}
+	if got := svc.Presence(agentID); got.CurrentState() != before.CurrentState() {
+		t.Errorf("state = %s, want the agent left in %s", got.CurrentState(), before.CurrentState())
+	}
+	if saved, _ := store.LoadPresence(ctx, agentID); saved.CurrentState() != StateNotReady {
+		t.Errorf("persisted state = %s, want NOT_READY", saved.CurrentState())
+	}
+	store.mu.Lock()
+	wroteHistory := store.logs != logs
+	store.mu.Unlock()
+	if wroteHistory {
+		t.Error("a state change was recorded in history although none happened")
+	}
+	if got := pub.types()[told:]; len(got) != 0 {
+		t.Errorf("published %v, want nothing — no transition, no event", got)
+	}
+	if sw.seen("status agent-1001 Available") {
+		t.Error("the switch was told the agent is available at a phone that is not there")
+	}
+
+	// The phone arrives and the same request is accepted.
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	p, err := svc.Ready(ctx, agentID)
+	if err != nil {
+		t.Fatalf("Ready() after the phone registered: %v", err)
+	}
+	if p.CurrentState() != StateReady {
+		t.Errorf("state = %s, want READY", p.CurrentState())
+	}
+}
+
+// A restart restores READY from the database and learns the phones back from
+// the switch. An agent whose phone did not come back with it must not come
+// back routable — the reconciliation runs before SyncSwitch, so the mirror
+// that follows carries the corrected presence the first time.
+//
+// The caller runs the two in that order, and runs the release only when it
+// actually read the registrations (cmd/aicc/wiring.go); here they are both
+// run, which is the case where the read succeeded.
+func TestReconnectReleasesAnAgentWhosePhoneDidNotComeBack(t *testing.T) {
+	t.Run("no registration: the agent is released and it is announced", func(t *testing.T) {
+		svc, store, sw, pub, agentID := newTestService(t)
+		ctx := context.Background()
+		store.presence[agentID] = Presence{
+			State: StateReady, ExtensionNumber: "1001", EnteredAt: now,
+		}
+		if err := svc.Restore(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		svc.ReleaseAgentsWithoutPhones(ctx)
+		svc.SyncSwitch(ctx)
+
+		got := svc.Presence(agentID)
+		if got.CurrentState() != StateNotReady || got.Reason != ReasonDeviceLost {
+			t.Errorf("presence = %s/%s, want NOT_READY/DEVICE_LOST — a restart "+
+				"brought back a READY agent at a phone that is not there",
+				got.CurrentState(), got.Reason)
+		}
+		notReady := 0
+		for _, ty := range pub.types() {
+			if ty == events.TypeAgentNotReady {
+				notReady++
+			}
+		}
+		if notReady != 1 {
+			t.Errorf("published %d AGENT_NOT_READY, want exactly one", notReady)
+		}
+		if sw.seen("status agent-1001 Available") {
+			t.Errorf("the switch was told Available at some point: %v", sw.commands)
+		}
+	})
+
+	t.Run("the phone is there: nothing happens", func(t *testing.T) {
+		svc, store, sw, pub, agentID := newTestService(t)
+		ctx := context.Background()
+		store.presence[agentID] = Presence{
+			State: StateReady, ExtensionNumber: "1001", EnteredAt: now,
+		}
+		// The quiet pass the caller runs first, which is what makes the
+		// difference between the two halves of this test.
+		svc.NoteDevice("1001", true, true)
+		if err := svc.Restore(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		svc.ReleaseAgentsWithoutPhones(ctx)
+		svc.SyncSwitch(ctx)
+
+		if got := svc.Presence(agentID); got.CurrentState() != StateReady {
+			t.Errorf("state = %s, want READY left alone", got.CurrentState())
+		}
+		if got := pub.types(); len(got) != 0 {
+			t.Errorf("published %v, want nothing — nothing changed", got)
+		}
+		if !sw.seen("status agent-1001 Available") {
+			t.Errorf("the agent was not mirrored as available: %v", sw.commands)
+		}
+	})
+}
+
+// SyncSwitch is the mirror pass and nothing else. The release is a separate
+// call because it is the half that is only truthful when the caller actually
+// read the switch's registrations — a failed read leaves presence alone, and
+// this is what makes "leave it alone" reachable.
+func TestSyncSwitchAloneReleasesNobody(t *testing.T) {
+	svc, store, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+	store.presence[agentID] = Presence{
+		State: StateReady, ExtensionNumber: "1001", EnteredAt: now,
+	}
+	if err := svc.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	svc.SyncSwitch(ctx)
+
+	if got := svc.Presence(agentID); got.CurrentState() != StateReady {
+		t.Errorf("state = %s, want READY untouched — the mirror pass must not "+
+			"sign anybody off on its own", got.CurrentState())
+	}
+	for _, ty := range pub.types() {
+		if ty == events.TypeAgentNotReady {
+			t.Errorf("published %v, want no sign-off from the mirror pass", pub.types())
+			break
+		}
+	}
 }

@@ -54,6 +54,9 @@ func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	ctx := context.Background()
 
+	// The phone the agent is signed in at, as the switch reports it. Ending
+	// after-call work returns them to READY, which needs one.
+	svc.NoteDevice("1001", true, true)
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
@@ -243,5 +246,42 @@ func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
 	}
 	if !p.IsInWrapUp() {
 		t.Errorf("presence = %s(%s), want after-call work regardless of the ledger", p.State, p.Reason)
+	}
+}
+
+// An agent whose phone went away while they were writing up the call still
+// files it, and the filing is still accepted. What they cannot be is READY —
+// so the wrap-up ends in NOT_READY(DEVICE_LOST), which is where a device-loss
+// release would have put them anyway.
+//
+// Refusing the completion instead would show the agent a rejection for work
+// the ledger has already recorded, and leave them held in a wrap-up that is
+// over.
+func TestEndingWrapUpWithNoPhoneLandsInDeviceLostRatherThanFailing(t *testing.T) {
+	store := newFakeStore()
+	agentID := uuid.New()
+	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
+	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
+	ctx := context.Background()
+
+	svc.NoteDevice("1001", true, true)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+		t.Fatal(err)
+	}
+	// The browser tab closed while the note was being typed.
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+
+	p, err := svc.EndWrapUp(ctx, agentID)
+	if err != nil {
+		t.Fatalf("EndWrapUp() error = %v, want the completion to be accepted", err)
+	}
+	if p.CurrentState() != StateNotReady || p.Reason != ReasonDeviceLost {
+		t.Errorf("presence = %s(%s), want NOT_READY(DEVICE_LOST)", p.CurrentState(), p.Reason)
+	}
+	if p.WrapUpCallID != nil {
+		t.Error("the after-call work is over; the presence still names its call")
 	}
 }

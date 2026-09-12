@@ -88,6 +88,13 @@ export type Availability = components['schemas']['Availability']
 
 export type Presence = components['schemas']['Presence']
 
+/**
+ * The credentials one agent's phone registers with. The platform mints them
+ * and the browser hands them straight to the extension — nobody types a SIP
+ * password into a handset, and nothing here keeps a copy.
+ */
+export type SipSession = components['schemas']['SipSession']
+
 export type RosterEntry = components['schemas']['RosterEntry']
 export type MonitorMode = components['schemas']['MonitorMode']
 export type MonitorRequest = components['schemas']['MonitorRequest']
@@ -139,6 +146,22 @@ export const agentApi = {
    */
   wrapUp: (body: WrapUpRequest) =>
     request<Presence>('/agent/wrap-up', { method: 'POST', body: JSON.stringify(body) }),
+
+  /**
+   * Mints the credentials this agent's phone registers with.
+   *
+   * One session per agent: a second call replaces the first and flushes the
+   * registration the previous one held. The expiry follows the web session's,
+   * so there is nothing to refresh on a timer — asking again before the person
+   * signs out returns the same expiry.
+   *
+   * There is no revoke here on purpose. `DELETE /agent/sip-session` exists in
+   * the contract, but signing out is what ends a phone's session and the
+   * server does that itself, after signing the agent out of presence —
+   * flushing the registration from the browser first reported a phone lost by
+   * an agent who was still READY.
+   */
+  createSipSession: () => request<SipSession>('/agent/sip-session', { method: 'POST' }),
 
   roster: () => request<{ items: RosterEntry[] }>('/agents'),
 

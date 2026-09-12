@@ -11,6 +11,16 @@ import (
 
 var now = time.Date(2026, 8, 13, 9, 0, 0, 0, time.UTC)
 
+// signedInAtAWorkingPhone is the ordinary starting point: an agent signed in,
+// with the registration the switch reports for their extension already applied
+// to their presence — which is what Login does in the service. READY needs it,
+// so a test that reaches READY without it is testing a presence production
+// never holds.
+func signedInAtAWorkingPhone(p *Presence) {
+	_ = p.Login("1001", now)
+	p.IsRegistered, p.IsDeviceInService = true, true
+}
+
 func TestLoginLandsInNotReady(t *testing.T) {
 	var p Presence
 	if err := p.Login("1001", now); err != nil {
@@ -39,14 +49,25 @@ func TestTransitions(t *testing.T) {
 	}{
 		{
 			name:      "not ready to ready",
-			start:     func(p *Presence) { _ = p.Login("1001", now) },
+			start:     signedInAtAWorkingPhone,
 			act:       func(p *Presence) error { return p.Ready(now) },
 			wantState: StateReady,
 		},
 		{
+			name: "ready is refused while the switch holds no registration",
+			// The agent is signed in and the phone is simply not there —
+			// a closed browser tab, a handset that never registered. READY
+			// would be a state nothing could deliver to.
+			start:      func(p *Presence) { _ = p.Login("1001", now) },
+			act:        func(p *Presence) error { return p.Ready(now) },
+			wantState:  StateNotReady,
+			wantReason: ReasonLogin,
+			wantErr:    ErrDeviceNotRegistered,
+		},
+		{
 			name: "ready to not ready with a reason",
 			start: func(p *Presence) {
-				_ = p.Login("1001", now)
+				signedInAtAWorkingPhone(p)
 				_ = p.Ready(now)
 			},
 			act:        func(p *Presence) error { return p.NotReady(ReasonLunch, now) },
@@ -56,7 +77,7 @@ func TestTransitions(t *testing.T) {
 		{
 			name: "logout from ready",
 			start: func(p *Presence) {
-				_ = p.Login("1001", now)
+				signedInAtAWorkingPhone(p)
 				_ = p.Ready(now)
 			},
 			act:       func(p *Presence) error { return p.Logout(now) },
@@ -91,7 +112,7 @@ func TestTransitions(t *testing.T) {
 		{
 			name: "ring no answer takes the agent out of routing",
 			start: func(p *Presence) {
-				_ = p.Login("1001", now)
+				signedInAtAWorkingPhone(p)
 				_ = p.Ready(now)
 			},
 			act:        func(p *Presence) error { return p.RingNoAnswer(now) },
@@ -122,9 +143,7 @@ func TestTransitions(t *testing.T) {
 
 func TestWrapUpHoldsUntilItIsFiled(t *testing.T) {
 	var p Presence
-	if err := p.Login("1001", now); err != nil {
-		t.Fatal(err)
-	}
+	signedInAtAWorkingPhone(&p)
 	callID := uuid.New()
 	if err := p.StartWrapUp(callID, now); err != nil {
 		t.Fatal(err)

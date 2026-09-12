@@ -37,6 +37,12 @@ type OperationSecurity struct {
 // "METHOD /path" with the path exactly as the contract spells it — which is
 // chi's route pattern with the server's /api/v1 prefix removed.
 var OperationSecurityByRoute = map[string]OperationSecurity{
+	"DELETE /agent/sip-session": {
+		OperationID:   "deleteAgentSipSession",
+		SessionScopes: []string{"agent:act"},
+		KeyScopes:     []string{"agent:act"},
+		NeedsCSRF:     true,
+	},
 	"DELETE /agents/{agentId}": {
 		OperationID:   "deleteAgent",
 		SessionScopes: []string{"config:write"},
@@ -307,6 +313,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 	},
 	"POST /agent/ready": {
 		OperationID:   "agentReady",
+		SessionScopes: []string{"agent:act"},
+		KeyScopes:     []string{"agent:act"},
+		NeedsCSRF:     true,
+	},
+	"POST /agent/sip-session": {
+		OperationID:   "createAgentSipSession",
 		SessionScopes: []string{"agent:act"},
 		KeyScopes:     []string{"agent:act"},
 		NeedsCSRF:     true,

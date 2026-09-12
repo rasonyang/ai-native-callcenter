@@ -337,3 +337,47 @@ func TestRenderVarsJoinsBare(t *testing.T) {
 		t.Fatalf("renderVars = %q, want %q", got, "a=1,b=2")
 	}
 }
+
+// Flushing a registration is the only thing that ends a binding the switch has
+// already accepted, so the command string is the contract and is asserted
+// literally. The address is qualified with the adapter's domain: sofia stores
+// a registration under user@domain and flush_inbound_reg matches it there.
+func TestFlushRegistrationNamesTheProfileAndTheDomain(t *testing.T) {
+	a, c := newTestAdapter()
+
+	if err := a.FlushRegistration("external", "1001"); err != nil {
+		t.Fatalf("FlushRegistration: %v", err)
+	}
+	if want := "sofia profile external flush_inbound_reg 1001@aicc.test"; c.last() != want {
+		t.Errorf("command = %q, want %q", c.last(), want)
+	}
+
+	// No profile named falls back to the one agent phones register to, which
+	// is the same default AICC_SIP_PROFILE carries.
+	if err := a.FlushRegistration("", "1002"); err != nil {
+		t.Fatalf("FlushRegistration: %v", err)
+	}
+	if want := "sofia profile internal flush_inbound_reg 1002@aicc.test"; c.last() != want {
+		t.Errorf("command = %q, want %q", c.last(), want)
+	}
+}
+
+// Asking to flush a phone that is not registered is the ordinary case and
+// leaves the caller in exactly the state they wanted.
+func TestFlushRegistrationAcceptsNothingToFlush(t *testing.T) {
+	a, c := newTestAdapter()
+	c.reply = "+OK 0 contacts flushed\n"
+
+	if err := a.FlushRegistration("internal", "1001"); err != nil {
+		t.Fatalf("a reply saying nothing was flushed is success, got %v", err)
+	}
+}
+
+func TestFlushRegistrationReportsASwitchRefusal(t *testing.T) {
+	a, c := newTestAdapter()
+	c.reply = "-ERR Invalid Profile!"
+
+	if err := a.FlushRegistration("nosuch", "1001"); err == nil {
+		t.Fatal("a -ERR reply was reported as success")
+	}
+}

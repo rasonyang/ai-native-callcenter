@@ -22,6 +22,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
@@ -67,6 +68,9 @@ type fakeAgents struct {
 	staffing agents.Staffing
 	wrapUps  agents.WrapUpLedger
 	synced   int
+	// released counts the device-based sign-offs — the half of a reconnect
+	// that is only truthful when the registrations were actually read.
+	released int
 	observed []telephony.Registration
 	noted    []string
 	// steps is what happened in the order it happened, which is the whole
@@ -82,6 +86,11 @@ func (f *fakeAgents) SyncSwitch(context.Context) {
 	// point of the fix is that presence is never mirrored before the phones
 	// are known.
 	f.steps = append(f.steps, "sync")
+}
+
+func (f *fakeAgents) ReleaseAgentsWithoutPhones(context.Context) {
+	f.released++
+	f.steps = append(f.steps, "release")
 }
 
 func (f *fakeAgents) NoteDevice(ext string, _, _ bool) {
@@ -426,6 +435,51 @@ func TestReconnectStillSyncsWhenRegistrationsCannotBeRead(t *testing.T) {
 	}
 }
 
+// The half of the reconnect that a failed read must *not* cost us either way.
+//
+// "This agent's phone is not registered" is a fact only when the switch
+// answered. A read that errored hands back nothing, and treating nothing as
+// "no phones" signs off every READY agent in the room — mid-call deliveries
+// included — because one ESL command failed. An empty list from a switch that
+// did answer is the opposite: it means exactly what it says.
+func TestDeviceReleaseOnlyRunsWhenTheRegistrationsWereRead(t *testing.T) {
+	t.Run("the read failed: nobody is released", func(t *testing.T) {
+		f := newWiringFixture(t)
+		f.regsErr = errors.New("-ERR not connected")
+		f.comp.connect()
+
+		f.link.connected(t.Context())
+
+		if f.agents.released != 0 {
+			t.Errorf("released %d times on a failed read, want 0 — a READY agent "+
+				"was signed off on the strength of an error", f.agents.released)
+		}
+		if f.agents.synced != 1 {
+			t.Errorf("synced %d times, want 1 — the mirror pass is safe either way",
+				f.agents.synced)
+		}
+	})
+
+	t.Run("the read succeeded and is empty: the release runs", func(t *testing.T) {
+		f := newWiringFixture(t)
+		f.regs = nil
+		f.comp.connect()
+
+		f.link.connected(t.Context())
+
+		if f.agents.released != 1 {
+			t.Errorf("released %d times, want 1 — a switch that answered with no "+
+				"registrations has told us every phone is gone", f.agents.released)
+		}
+		// And before the mirror, so each agent is mirrored with the presence
+		// the reconciliation already corrected rather than On Break a moment
+		// later.
+		if got := f.agents.steps; !slices.Equal(got, []string{"release", "sync"}) {
+			t.Errorf("steps = %v, want [release sync]", got)
+		}
+	})
+}
+
 // --- the two struct literals -------------------------------------------------
 
 type fakeStreamer struct{}
@@ -481,6 +535,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&outbound.Service{},
 		&store.WebhookStore{},
 		httpapi.APIKeys{APIKeyStore: &store.APIKeyStore{}},
+		&sipsession.Service{},
 		http.NewServeMux(),
 	)
 

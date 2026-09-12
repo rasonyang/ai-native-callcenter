@@ -132,7 +132,7 @@ export interface paths {
         put?: never;
         /**
          * Go ready
-         * @description Requires the AGENT role.
+         * @description Requires the AGENT role. 409 DEVICE_NOT_REGISTERED when the switch holds no registration for the agent's extension: an agent with no phone cannot be offered a call.
          */
         post: operations["agentReady"];
         delete?: never;
@@ -180,6 +180,32 @@ export interface paths {
          */
         post: operations["agentWrapUp"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent/sip-session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue the phone credentials for this agent
+         * @description Requires the AGENT role. Mints a SIP session for the extension bound to this agent and answers with everything the phone needs to register: realm, WebSocket URL, account and the digest a1-hash. The password behind that hash is generated here, hashed and discarded — there is no way to read it back.
+         *
+         *     One active session per agent: a second call replaces the first, and the registration the first was holding is flushed from the switch. 409 when the agent has no extension bound, because there is nothing to register as.
+         */
+        post: operations["createAgentSipSession"];
+        /**
+         * Revoke the phone credentials and flush the registration
+         * @description Requires the AGENT role. The credentials stop being accepted and the switch drops the registration they were holding. Idempotent: an agent with no session is already in the state this asks for, and the answer is the same 204.
+         */
+        delete: operations["deleteAgentSipSession"];
         options?: never;
         head?: never;
         patch?: never;
@@ -689,6 +715,8 @@ export interface paths {
          * @description The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.
          *
          *     Every read is recorded in the audit trail, including who asked and which phone.
+         *
+         *     Since an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.
          */
         get: operations["revealExtensionPassword"];
         put?: never;
@@ -1488,7 +1516,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -1522,6 +1550,10 @@ export interface components {
         };
         CurrentUser: {
             user: components["schemas"]["Identity"];
+            /** @description Whether the switch currently holds a registration for this subject's agent extension. False for a subject with no agent identity. */
+            isDeviceRegistered: boolean;
+            /** @description The extension number the switch holds a registration for, or null when it holds none. */
+            deviceAccount: string | null;
         };
         /**
          * @description Presence FSM state.
@@ -1529,10 +1561,10 @@ export interface components {
          */
         AgentState: "LOGGED_OUT" | "NOT_READY" | "READY";
         /**
-         * @description Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.
+         * @description Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
          * @enum {string}
          */
-        NotReadyReason: "LOGIN" | "BREAK" | "LUNCH" | "TRAINING" | "AFTER_CALL_WORK" | "SYSTEM" | "SUPERVISOR";
+        NotReadyReason: "LOGIN" | "BREAK" | "LUNCH" | "TRAINING" | "AFTER_CALL_WORK" | "SYSTEM" | "SUPERVISOR" | "DEVICE_LOST";
         /**
          * @description The single word that answers: could this agent take a call, and if not, why.
          * @enum {string}
@@ -1549,6 +1581,10 @@ export interface components {
             reason?: components["schemas"]["NotReadyReason"];
             availability: components["schemas"]["Availability"];
             extensionNumber?: string;
+            /** @description Whether the switch currently holds a registration for this agent's extension. */
+            isDeviceRegistered: boolean;
+            /** @description The extension number the switch holds a registration for, or null when it holds none. */
+            deviceAccount: string | null;
             /** Format: date-time */
             enteredAt: string;
             /**
@@ -1556,6 +1592,26 @@ export interface components {
              * @description The call the agent is doing after-call work for. Set while availability is WRAP_UP and kept until the next call is wrapped, so a filing made after the agent has moved on still lands on the right call.
              */
             wrapUpCallId?: string;
+        };
+        /**
+         * @description The credentials one agent's phone registers with. The platform mints them; nobody types them into a handset. The plaintext password is generated server-side, hashed into a1Hash and discarded, so it appears in no response, no log and no table.
+         *
+         *     One active SIP session per agent: issuing a new one replaces the previous, and the previous registration is flushed from the switch.
+         */
+        SipSession: {
+            /** @description The digest realm, and the domain the phone builds its address of record from. */
+            sipDomain: string;
+            /** @description The WebSocket URL the phone connects to. */
+            wssUrl: string;
+            /** @description The extension number to register as. */
+            account: string;
+            /** @description md5(account:sipDomain:password) in lower-case hex. This is what the phone authenticates with; the password it was derived from is issued to nobody, here or anywhere else. */
+            a1Hash: string;
+            /**
+             * Format: date-time
+             * @description When these credentials stop being accepted. It follows the web session's expiry, so the phone is signed in for exactly as long as the person is.
+             */
+            expiresAt: string;
         };
         /** @description What the agent confirms for the call they just finished. Both fields are optional: the record already exists with a default disposition, and pressing Done with neither is an agent saying the defaults are right. */
         WrapUpRequest: {
@@ -1885,7 +1941,7 @@ export interface components {
             number: string;
             displayName?: string;
             isEnabled?: boolean;
-            /** @description Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch. */
+            /** @description Write-only: required on create, optional on update (empty keeps the current one). Never returned. A phone no longer registers with it — an agent's handset authenticates with a server-issued SIP session (POST /agent/sip-session) — and the stored value is retained for API compatibility. */
             password?: string;
         };
         ExtensionList: {
@@ -1895,6 +1951,8 @@ export interface components {
          * @description A phone's SIP registration password, in clear.
          *
          *     It is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.
+         *
+         *     Since an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.
          */
         ExtensionSecret: {
             password: string;
@@ -2509,6 +2567,24 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** @description Payload of the AGENT_* events: this agent's presence as it now stands, carrying what a roster row shows so a supervisor's list updates without refetching. */
+        SseAgentPresencePayload: {
+            state: components["schemas"]["AgentState"];
+            availability: components["schemas"]["Availability"];
+            displayName: string;
+            reason?: components["schemas"]["NotReadyReason"];
+            /** @description The extension bound to the agent; absent while none is. */
+            extensionNumber?: string;
+            /**
+             * Format: uuid
+             * @description The call the agent is doing after-call work for; absent while there is none.
+             */
+            wrapUpCallId?: string;
+            /** @description Whether the switch currently holds a registration for this agent's extension. */
+            isDeviceRegistered: boolean;
+            /** @description The extension number the switch holds a registration for, or null when it holds none. */
+            deviceAccount: string | null;
+        };
         /** @description Payload of CALLBACK_CREATED and CALLBACK_UPDATED. */
         SseCallbackEventPayload: {
             callback: components["schemas"]["Callback"];
@@ -2844,7 +2920,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -3156,6 +3232,55 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
             500: components["responses"]["InternalError"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    createAgentSipSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The credentials the phone registers with. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SipSession"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+            502: components["responses"]["BadGateway"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    deleteAgentSipSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked. The agent's phone holds no registration. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+            502: components["responses"]["BadGateway"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };
@@ -5000,7 +5125,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseCallbackEventPayload, SseSystemResetPayload). */
+            /** @description The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseAgentPresencePayload, SseCallbackEventPayload, SseSystemResetPayload). */
             200: {
                 headers: {
                     [name: string]: unknown;

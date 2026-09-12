@@ -273,7 +273,11 @@ func (stubAgents) BoundExtensionFor(context.Context, uuid.UUID) string { return 
 // A phone the switch has never mentioned, which is what an extension nobody
 // named looks like. Stubs that want a reachable one override this.
 func (stubAgents) DeviceAtExtension(string) (bool, bool, bool) { return false, false, false }
-func (stubAgents) AgentAtExtension(string) (uuid.UUID, bool)   { return uuid.Nil, false }
+
+// And a person whose phone the switch has never mentioned either. A stub that
+// wants a registered device overrides this.
+func (stubAgents) DeviceState(uuid.UUID) (bool, bool)        { return false, false }
+func (stubAgents) AgentAtExtension(string) (uuid.UUID, bool) { return uuid.Nil, false }
 
 func (stubAgents) Roster(context.Context) ([]agents.RosterEntry, error) { return nil, nil }
 func (stubAgents) CreateAgent(context.Context, agents.AgentConfig) (agents.AgentConfig, error) {
