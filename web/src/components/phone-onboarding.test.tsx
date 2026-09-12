@@ -59,16 +59,17 @@ describe('an agent with no extension', () => {
    * and an agent hit ERR_BLOCKED_BY_CLIENT — so with no id to address, the
    * card says how to get there by hand instead of offering a dead button.
    */
-  it('offers no dead link while there is no id to address', async () => {
-    // A build that was told no id, which is every build until the extension
-    // is published. `web/.env.local` may say otherwise on a developer's
-    // machine, so the test states the case it is about.
+  it('addresses the published extension when the build was told nothing', async () => {
+    // `web/.env.local` may say otherwise on a developer's machine, so the
+    // test states the case it is about: no override, the published id.
     vi.stubEnv('VITE_WEB_SIP_PHONE_ID', '')
     renderCard()
     await screen.findByText(/set up your phone/i)
-    expect(screen.queryAllByRole('link')).toHaveLength(0)
-    expect(document.body.innerHTML).not.toContain('chrome-extension://')
-    expect(screen.getAllByText(/chrome:\/\/extensions/i).length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: /web store/i })).toHaveAttribute(
+      'href',
+      'https://chromewebstore.google.com/detail/dkhaojcfjdcdpldokeokajkmambkbacp',
+    )
+    expect(document.body.innerHTML).toContain('chrome-extension://dkhaojcfjdcdpldokeokajkmambkbacp/')
   })
 
   it('uses the id this build was given, when it was given one', async () => {
@@ -150,12 +151,13 @@ describe('as the agent works through it', () => {
     )
   })
 
-  it('ignores an announced id that is not one', async () => {
+  it('ignores an announced id that is not one and falls back to the published id', async () => {
     vi.stubEnv('VITE_WEB_SIP_PHONE_ID', '')
     extension = installFakeExtension({ extensionId: 'nope', state: { microphone: 'DENIED' } })
     renderCard()
     await waitFor(() => expect(steps()[0].isDone).toBe(true))
-    expect(document.body.innerHTML).not.toContain('chrome-extension://')
+    expect(document.body.innerHTML).not.toContain('chrome-extension://nope/')
+    expect(document.body.innerHTML).toContain('chrome-extension://dkhaojcfjdcdpldokeokajkmambkbacp/')
   })
 
   it('stays while an extension that said hello has not reported yet', async () => {

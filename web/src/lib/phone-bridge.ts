@@ -25,8 +25,10 @@ const PAGE_SOURCE = 'aicc'
 const EXTENSION_SOURCE = 'web-sip-phone'
 
 /**
- * The published extension id, which does not exist yet. A deployment that
- * knows one sets `VITE_WEB_SIP_PHONE_ID` at build time.
+ * The published extension id. The extension's manifest carries the Web Store
+ * public key, so this id is the same for the store copy and an unpacked build
+ * of the same source. A deployment running a differently keyed build sets
+ * `VITE_WEB_SIP_PHONE_ID` at build time.
  *
  * Neither is the first answer. An extension that has said hello announces its
  * own `chrome.runtime.id`, and that is the one a link is built from: an
@@ -35,15 +37,20 @@ const EXTENSION_SOURCE = 'web-sip-phone'
  * `chrome-extension://replace_with_web_store_id/…`, which Chrome blocks
  * outright (seen live).
  */
-export const WEB_SIP_PHONE_EXTENSION_ID = 'REPLACE_WITH_WEB_STORE_ID'
+export const WEB_SIP_PHONE_EXTENSION_ID = 'dkhaojcfjdcdpldokeokajkmambkbacp'
 
 /** A Chrome extension id: 32 letters from the first half of the alphabet. */
 const EXTENSION_ID_PATTERN = /^[a-p]{32}$/
 
-/** The id this build was given, or null when it is still the placeholder. */
+/**
+ * The id this build addresses when nothing has announced one: the build-time
+ * override if it looks like an id, else the published id. Null only if
+ * neither does, which a shipped build cannot produce.
+ */
 function configuredExtensionId(): string | null {
   const configured = import.meta.env.VITE_WEB_SIP_PHONE_ID
-  return configured && configured !== WEB_SIP_PHONE_EXTENSION_ID ? configured : null
+  if (configured && EXTENSION_ID_PATTERN.test(configured)) return configured
+  return EXTENSION_ID_PATTERN.test(WEB_SIP_PHONE_EXTENSION_ID) ? WEB_SIP_PHONE_EXTENSION_ID : null
 }
 
 /**
