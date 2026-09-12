@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package seed fills an empty installation with a deterministic demo: a small
-// team, two queues, six published bilingual flows each behind an English and a
-// Chinese number, and seven days of synthetic history so the wallboard, the
-// CDR explorer and the reports render alive on first sight.
+// team, two queues, six published bilingual flows each behind an English, a
+// Chinese and a toll-free number, and seven days of synthetic history so the
+// wallboard, the CDR explorer and the reports render alive on first sight.
 package seed
 
 import (
@@ -39,51 +39,87 @@ const prngSeed = 20260814
 //
 // The dataset only exists where AICC_SEED=demo was set deliberately, and the
 // deployment doc says in as many words that it must not be a public host.
-const demoPassword = "aicc@12345"
+//
+// Shortened from aicc@12345 on 2026-09-12 (owner directive): a newcomer should
+// have as little to configure and as little to type as possible, and eight
+// characters is the floor auth.CreateUser enforces.
+const demoPassword = "aicc@123"
 
 // demoFlows are the bundled flows the demo publishes, each behind one number
-// per language. Every bundled flow carries English and Chinese personas, so one
-// flow serves both numbers — the number's language picks the strings
-// (phase1-decisions A1: language never selects a provider).
+// per language plus a toll-free one. Every bundled flow carries English and
+// Chinese personas, so one flow serves all of its numbers — the number's
+// language picks the strings (phase1-decisions A1: language never selects a
+// provider).
 //
-// The numbers follow a plan rather than a list: the Nth flow answers on 950N1
-// in English and on 950N2 in Chinese. A number therefore says which flow picks
-// up and in which language without looking anything up, and a seventh flow
-// knows its own pair before anybody assigns one. 95001 / 95002 keep the meaning
-// they have had since the first demo.
+// The per-language numbers follow a plan rather than a list: the Nth flow
+// answers on 950N1 in English and on 950N2 in Chinese. A number therefore says
+// which flow picks up and in which language without looking anything up, and a
+// seventh flow knows its own set before anybody assigns one. 95001 / 95002 keep
+// the meaning they have had since the first demo.
+//
+// The toll-free numbers are one block, 800-555-0190 … 800-555-0199, inside the
+// fictional 555-01XX plan, so no demo call can ever be placed to somebody's
+// real number (owner directive 2026-09-12, for compliance). 8005550199 is the
+// deployment's main line: it is the one number to dial to reach the first flow,
+// and it is also the default outbound number, because an agent's outbound call
+// needs a number to present as caller id and a deployment has to name it.
+// 8005550190 and 0196–0198 are spare. The block is assigned, not computed —
+// a flow's index does not derive its toll-free number.
+//
+// Existing rows win (ON CONFLICT DO NOTHING), so a database seeded before this
+// renumbering keeps the 8005550N01 numbers it already has; nothing migrates
+// them, and AICC_SEED=fresh removes only what demoNumbers() now lists.
 var demoFlows = []demoFlow{
-	{"flows/novanet_support.json", "NovaNet support", "95001", "95002"},
-	{"flows/mobile_support.json", "StarCom mobile after-sales", "95011", "95012"},
-	{"flows/plan_change.json", "NovaNet broadband plan change", "95021", "95022"},
-	{"flows/early_collections.json", "NovaNet early collections", "95031", "95032"},
-	{"flows/field_service_appointment.json", "StarCom field-service appointment", "95041", "95042"},
-	{"flows/lead_qualification.json", "StarCom lead qualification", "95051", "95052"},
+	{"flows/novanet_support.json", "NovaNet support", "95001", "95002", "8005550199", true},
+	{"flows/mobile_support.json", "StarCom mobile after-sales", "95011", "95012", "8005550191", false},
+	{"flows/plan_change.json", "NovaNet broadband plan change", "95021", "95022", "8005550192", false},
+	{"flows/early_collections.json", "NovaNet early collections", "95031", "95032", "8005550193", false},
+	{"flows/field_service_appointment.json", "StarCom field-service appointment", "95041", "95042", "8005550194", false},
+	{"flows/lead_qualification.json", "StarCom lead qualification", "95051", "95052", "8005550195", false},
 }
 
-// demoFlow is one bundled flow and the two numbers it answers on.
+// demoFlow is one bundled flow and the three numbers it answers on.
 type demoFlow struct {
-	file, name string // embedded spec, display name
-	en, zh     string // the English and the Chinese number
+	file, name   string // embedded spec, display name
+	en, zh, toll string // the English, the Chinese and the toll-free number
+	isMainLine   bool   // the toll-free number is the deployment's main line
 }
 
-// demoNumber is one DID the demo owns.
+// demoNumber is one DID the demo owns. Every demo number takes inbound calls;
+// only the main line also places them, so the two outbound flags are the only
+// ones a number has to state.
 type demoNumber struct {
 	number, language, queue, description string
+	allowOutbound, isDefaultOutbound     bool
 }
 
-// numbers are the two DIDs of a demo flow. The language decides the fallback
+// numbersPerFlow is how many DIDs a demo flow answers on: English, Chinese and
+// toll-free.
+const numbersPerFlow = 3
+
+// numbers are the three DIDs of a demo flow. The language decides the fallback
 // queue — the demo has exactly one queue per language — and the description
-// names the flow, because that is what an operator reads in the DID list.
+// names the flow, because that is what an operator reads in the DID list. The
+// toll-free number is the English one by another route, so it falls back to the
+// same queue. On the main line it is also the number the platform stamps on
+// outbound calls, which is why that one row carries the two outbound flags.
 func (f demoFlow) numbers() []demoNumber {
+	toll := demoNumber{f.toll, "en", queueForLanguage("en"), f.name + ", toll-free", false, false}
+	if f.isMainLine {
+		toll.description = f.name + ", main line"
+		toll.allowOutbound = true
+		toll.isDefaultOutbound = true
+	}
 	return []demoNumber{
-		{f.en, "en", queueForLanguage("en"), f.name + " (English)"},
-		{f.zh, "zh", queueForLanguage("zh"), f.name + " (Chinese)"},
+		{f.en, "en", queueForLanguage("en"), f.name + " (English)", false, false},
+		{f.zh, "zh", queueForLanguage("zh"), f.name + " (Chinese)", false, false},
+		toll,
 	}
 }
 
 // demoNumbers is every DID the demo owns, in flow order.
 func demoNumbers() []demoNumber {
-	out := make([]demoNumber, 0, 2*len(demoFlows))
+	out := make([]demoNumber, 0, numbersPerFlow*len(demoFlows))
 	for _, f := range demoFlows {
 		out = append(out, f.numbers()...)
 	}
@@ -370,7 +406,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger) ([]u
 	return agents, queues, nil
 }
 
-// ensureFlowAndNumbers publishes every bundled demo flow and points its two
+// ensureFlowAndNumbers publishes every bundled demo flow and points its three
 // numbers at it. Without this a seeded install looks complete and still cannot
 // take a call: dids.flow_id is NOT NULL, so a number exists only once a flow
 // does.
@@ -401,11 +437,21 @@ func ensureFlowAndNumbers(ctx context.Context, st *store.Store, log *slog.Logger
 		}
 
 		for _, n := range f.numbers() {
+			// Every flag the CHECKs read is stated: dids_go_somewhere wants a
+			// direction, dids_default_outbound_dials_out wants the default to
+			// be able to dial out. The default flag is also conditional on no
+			// number already holding it — uq_dids_default_outbound allows one,
+			// and an operator who has already chosen theirs keeps it while the
+			// number itself is still seeded.
 			if _, err := st.Pool.Exec(ctx, `
-				INSERT INTO dids (id, number, language, flow_id, fallback_queue_id, description)
-				SELECT $1, $2, $3, $4, q.id, $6 FROM queues q WHERE q.name = $5
+				INSERT INTO dids (id, number, language, flow_id, fallback_queue_id, description,
+				                  allow_inbound, allow_outbound, is_default_outbound)
+				SELECT $1, $2, $3, $4, q.id, $6, true, $7,
+				       $8 AND NOT EXISTS (SELECT 1 FROM dids WHERE is_default_outbound)
+				FROM queues q WHERE q.name = $5
 				ON CONFLICT (number) DO NOTHING`,
-				uuid.New(), n.number, n.language, flowID, n.queue, n.description); err != nil {
+				uuid.New(), n.number, n.language, flowID, n.queue, n.description,
+				n.allowOutbound, n.isDefaultOutbound); err != nil {
 				return fmt.Errorf("seed number %s: %w", n.number, err)
 			}
 			numbers++

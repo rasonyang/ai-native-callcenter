@@ -78,9 +78,17 @@ An empty database needs a first account, and a DID needs a flow:
 /tmp/aicc flowadd -file internal/seed/flows/novanet_support.json -did 95001
 ```
 
+`-did` creates the number if it does not exist yet and points it at the flow
+just published; a number that is already there keeps every other column and
+only changes its flow. `-language` (default `en`) picks the greeting language
+of a number this creates — an existing one keeps its own.
+
 Or take the whole demo dataset instead — accounts, queues, six published
-bilingual flows, each behind an English and a Chinese number (95001/95002 …
-95051/95052), and a week of history — with `AICC_SEED=demo` on one boot.
+bilingual flows, each behind an English, a Chinese and a toll-free number
+(95001/95002/8005550199, 95011/95012/8005550191 … 95051/95052/8005550195 — the
+toll-free numbers are the fictional 800-555-0190 … 0199 block, and 8005550199 is
+the main line and the default outbound number), and a week of history — with
+`AICC_SEED=demo` on one boot.
 `AICC_SEED=fresh` removes exactly that again. Existing data always wins, so a
 second boot with `demo` changes nothing.
 

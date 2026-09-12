@@ -97,8 +97,42 @@ func TestEveryShippedFlowIsSeeded(t *testing.T) {
 			numbers[n.number] = f.file
 		}
 	}
-	if len(numbers) != 2*len(demoFlows) {
+	if len(numbers) != numbersPerFlow*len(demoFlows) {
 		t.Errorf("%d distinct numbers for %d flows, want %d",
-			len(numbers), len(demoFlows), 2*len(demoFlows))
+			len(numbers), len(demoFlows), numbersPerFlow*len(demoFlows))
+	}
+}
+
+// The toll-free numbers are a compliance boundary and a single main line, so
+// the table is checked before any of it reaches a database: US demo numbers
+// stay inside the fictional 800-555-01XX block (owner directive 2026-09-12),
+// and exactly one number carries the outbound flags — the database allows one
+// default outbound row, and a second entry setting isMainLine would make the
+// seed unapplicable rather than merely wrong.
+func TestOneTollFreeNumberIsTheMainLine(t *testing.T) {
+	var mainLines, defaults []string
+	for _, f := range demoFlows {
+		if len(f.toll) != 10 || f.toll[:7] != "8005550" || f.toll[7] != '1' {
+			t.Errorf("%s answers toll-free on %s, which is outside the "+
+				"fictional 800-555-01XX block", f.file, f.toll)
+		}
+		if f.isMainLine {
+			mainLines = append(mainLines, f.toll)
+		}
+		for _, n := range f.numbers() {
+			if n.isDefaultOutbound {
+				defaults = append(defaults, n.number)
+				if !n.allowOutbound {
+					t.Errorf("%s is the default outbound number and is not allowed "+
+						"to dial out (dids_default_outbound_dials_out)", n.number)
+				}
+			}
+		}
+	}
+	if len(mainLines) != 1 || mainLines[0] != "8005550199" {
+		t.Errorf("main lines = %v, want exactly [8005550199]", mainLines)
+	}
+	if len(defaults) != 1 || defaults[0] != "8005550199" {
+		t.Errorf("default outbound numbers = %v, want exactly [8005550199]", defaults)
 	}
 }
