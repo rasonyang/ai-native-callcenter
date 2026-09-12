@@ -170,9 +170,14 @@ func redactInto(node map[string]any) {
 // isSecretField reads a field name the way an operator would. Substring rather
 // than exact match, so newPassword and apiKeyId are covered without a list of
 // every spelling somebody might choose.
+//
+// a1hash is here for a field no request carries today. The only place an
+// a1-hash appears is the *response* to POST /agent/sip-session, and responses
+// are not audited — but "a digest is a credential" is the durable rule, and
+// the day a response body is captured is not the day to remember it.
 func isSecretField(name string) bool {
 	lower := strings.ToLower(name)
-	for _, word := range []string{"password", "secret", "token", "apikey", "credential"} {
+	for _, word := range []string{"password", "secret", "token", "apikey", "credential", "a1hash"} {
 		if strings.Contains(lower, word) {
 			return true
 		}

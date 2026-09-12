@@ -10,15 +10,24 @@ import { cn } from '@/lib/utils'
  */
 export function StatusDot({
   availability,
+  color,
   className,
 }: {
-  availability: Availability
+  availability?: Availability
+  /**
+   * A colour token for a dot that is not an agent's availability — a setup
+   * step that is done, a phone that is connecting. The palette is the same
+   * one; only the thing being coloured differs.
+   */
+  color?: string
   className?: string
 }) {
   return (
     <span
       className={cn('inline-block size-2 shrink-0 rounded-full', className)}
-      style={{ backgroundColor: AVAILABILITY_COLOR[availability] }}
+      style={{
+        backgroundColor: color ?? (availability ? AVAILABILITY_COLOR[availability] : undefined),
+      }}
     />
   )
 }

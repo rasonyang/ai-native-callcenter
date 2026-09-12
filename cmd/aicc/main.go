@@ -31,6 +31,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/seed"
+	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 	"github.com/rasonyang/ai-native-callcenter/internal/streamin"
@@ -144,6 +145,14 @@ func run() error {
 	defer registry.Shutdown()
 
 	agentSvc := agents.NewService(st.Agents(), adapter, hub)
+	// The agent's phone credential. It needs the directory to know which
+	// extension is theirs and the switch to end a registration the previous
+	// session was holding, so it is built beside both.
+	sipSessions := sipsession.New(st.SIPSessions(), agentSvc, adapter, sipsession.Config{
+		SIPDomain: cfg.SIPDomain,
+		WSSURL:    cfg.SIPWSSURL,
+		Profile:   cfg.SIPProfile,
+	}, slog.Default(), time.Now)
 	if err := agentSvc.Restore(ctx); err != nil {
 		slog.Warn("could not restore agent presence", "error", err)
 	}
@@ -349,6 +358,7 @@ func run() error {
 			outboundSvc,
 			st.Webhooks(),
 			httpapi.APIKeys{APIKeyStore: st.APIKeys()},
+			sipSessions,
 			spa,
 		)).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
@@ -364,7 +374,7 @@ func run() error {
 	go serve(metricsSrv, "metrics")
 	go serve(srv, "http")
 
-	go purgeSessions(ctx, authSvc)
+	go purgeSessions(ctx, authSvc, sipSessions)
 
 	// CDR delivery to whoever subscribed. The enqueue rides in the ledger's
 	// own transaction, so this only drains what is already durable — every
@@ -405,8 +415,13 @@ func serve(srv *http.Server, name string) {
 	}
 }
 
-// purgeSessions removes expired sessions hourly.
-func purgeSessions(ctx context.Context, svc *auth.Service) {
+// purgeSessions removes expired sessions hourly — the browser's and the
+// phone's, which expire together because one is minted for the other.
+//
+// Housekeeping in both cases. An expired web session is already refused by the
+// query that reads it, and an expired SIP session is already invisible to
+// luacc.directory, so nothing here is what enforces an expiry.
+func purgeSessions(ctx context.Context, svc *auth.Service, phones *sipsession.Service) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
@@ -421,6 +436,17 @@ func purgeSessions(ctx context.Context, svc *auth.Service) {
 			}
 			if n > 0 {
 				slog.Info("purged expired sessions", "count", n)
+			}
+			if phones == nil {
+				continue
+			}
+			phoned, err := phones.PurgeExpired(ctx)
+			if err != nil {
+				slog.Error("purge sip sessions", "error", err)
+				continue
+			}
+			if phoned > 0 {
+				slog.Info("purged expired sip sessions", "count", phoned)
 			}
 		}
 	}

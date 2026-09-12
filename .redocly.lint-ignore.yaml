@@ -11,6 +11,7 @@ docs/openapi.json:
     - '#/components/schemas/SseQueueJoinedPayload'
     - '#/components/schemas/SseQueueLeftPayload'
     - '#/components/schemas/SseQueueCountPayload'
+    - '#/components/schemas/SseAgentPresencePayload'
   # GET /openapi.json has no 4XX because it genuinely has no way to fail: no
   # credential, no parameters, and its body is embedded at compile time
   # (go:embed — a missing file is a build error, not a runtime 404). Declaring

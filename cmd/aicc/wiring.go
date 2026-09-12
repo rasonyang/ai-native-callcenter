@@ -44,6 +44,10 @@ type presenceWiring interface {
 	AttachStaffing(agents.Staffing)
 	AttachWrapUps(agents.WrapUpLedger)
 	SyncSwitch(ctx context.Context)
+	// ReleaseAgentsWithoutPhones signs off every READY agent whose phone the
+	// switch does not have registered. It is separate from SyncSwitch because
+	// it is only truthful when the registrations were actually read.
+	ReleaseAgentsWithoutPhones(ctx context.Context)
 	ObserveDevice(ctx context.Context, extensionNumber string, signal agents.DeviceSignal)
 	// NoteDevice records a phone without mirroring it, for the pass that has
 	// to happen before presence is sent to the switch.
@@ -184,6 +188,7 @@ func (c composition) onSwitchConnected(ctx context.Context) {
 	// On Break mid-delivery, and the caller waited out the queue's no-answer
 	// delay — eighty seconds — before anybody was tried again.
 	regs, err := c.Registrations()
+	isKnown := err == nil
 	if err != nil {
 		// Not fatal — the rest of the reconciliation still has to run, and an
 		// agent whose phone we could not ask about is better mirrored from
@@ -194,6 +199,16 @@ func (c composition) onSwitchConnected(ctx context.Context) {
 	}
 	for _, reg := range regs {
 		c.Agents.NoteDevice(reg.Extension, true, reg.IsReachable)
+	}
+
+	// Only now, and only if we actually heard back, is "this agent's phone is
+	// not registered" a fact. An empty list from a switch that answered means
+	// no phones are registered and every READY agent is unroutable; an error
+	// means we do not know, and signing off the whole room on the strength of
+	// one failed ESL command is a far worse answer than leaving presence as it
+	// stands until the next connect.
+	if isKnown {
+		c.Agents.ReleaseAgentsWithoutPhones(ctx)
 	}
 
 	c.Agents.SyncSwitch(ctx)
@@ -301,6 +316,7 @@ func apiDeps(
 	outboundSvc httpapi.OutboundService,
 	webhooks httpapi.WebhookService,
 	keys httpapi.KeyService,
+	sipSessions httpapi.SIPSessionService,
 	spa http.Handler,
 ) httpapi.Deps {
 	return httpapi.Deps{
@@ -321,6 +337,7 @@ func apiDeps(
 		Outbound:    outboundSvc,
 		Webhooks:    webhooks,
 		Keys:        keys,
+		SIPSessions: sipSessions,
 		SPA:         spa,
 	}
 }

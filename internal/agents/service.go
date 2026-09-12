@@ -338,12 +338,23 @@ func (s *Service) WrapUpCall(agentID uuid.UUID) (uuid.UUID, bool) {
 // An agent whose window already expired, or who chose something else in the
 // meantime, is left exactly where they are: the filing they just made is what
 // mattered, and their presence is not to be second-guessed by it.
+//
+// An agent whose phone went away while they were writing up the call ends the
+// wrap-up in NOT_READY(DEVICE_LOST) instead of being refused. The gate on
+// READY holds either way — they do not become routable without a phone — but
+// the filing has already been recorded by the time this runs, and answering it
+// with an error would leave the agent looking at a rejection for work that was
+// accepted, still held in a wrap-up that is over.
 func (s *Service) EndWrapUp(ctx context.Context, agentID uuid.UUID) (Presence, error) {
 	s.mu.Lock()
-	inWrapUp := s.presenceLocked(agentID).IsInWrapUp()
+	p := s.presenceLocked(agentID)
+	inWrapUp, isRegistered := p.IsInWrapUp(), p.IsRegistered
 	s.mu.Unlock()
 	if !inWrapUp {
 		return s.Presence(agentID), nil
+	}
+	if !isRegistered {
+		return s.NotReady(ctx, agentID, ReasonDeviceLost)
 	}
 	return s.Ready(ctx, agentID)
 }
@@ -547,7 +558,50 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, sig
 	// was announced as DEVICE_UNREGISTERED, a claim about the other axis that
 	// was simply untrue. The caller knows which signal arrived; it says so.
 	s.publish(ctx, signal.eventType(), profile, snapshot)
+
+	// Cause, then consequence. The phone going away is what the switch said;
+	// the agent leaving READY is what this service did about it, and the two
+	// are separate facts a subscriber wants in that order.
+	if signal == SignalUnregistered {
+		s.releaseForLostDevice(ctx, agentID)
+	}
 }
+
+// releaseForLostDevice takes a READY agent out of routing because the switch
+// no longer holds a registration for their phone.
+//
+// READY used to survive a lost registration on the grounds that losing a phone
+// says nothing about the agent's intent, and the switch mirror alone kept the
+// queue from delivering to it. That left an agent reading READY on their own
+// screen with nothing able to reach them, and no word anywhere saying why. The
+// intent argument still stands — which is exactly why the reason is
+// DEVICE_LOST and not one of the agent's own: the platform is saying what
+// happened, not putting words in their mouth.
+//
+// An agent who is already NOT_READY has nothing to change, and says nothing.
+// An agent on a call is READY and is released like any other: the leg is the
+// call actor's to finish, and the wrap-up that follows opens from wherever
+// presence stands.
+func (s *Service) releaseForLostDevice(ctx context.Context, agentID uuid.UUID) {
+	_, err := s.change(ctx, agentID, events.TypeAgentNotReady, func(p *Presence) error {
+		if p.CurrentState() != StateReady {
+			return errPresenceUnchanged
+		}
+		return p.NotReady(ReasonDeviceLost, s.now())
+	})
+	switch {
+	case err == nil, errors.Is(err, errPresenceUnchanged):
+	default:
+		slog.WarnContext(ctx, "an agent whose phone is gone was not taken out of routing",
+			"agentId", agentID, "error", err)
+	}
+}
+
+// errPresenceUnchanged aborts a change that turned out to have nothing to
+// change. It never leaves this package: change() reports it before persisting,
+// so no row is written and no event is published — a state event means a state
+// changed.
+var errPresenceUnchanged = errors.New("presence already stands where this would put it")
 
 // Presence returns an agent's live presence.
 func (s *Service) Presence(agentID uuid.UUID) Presence {
@@ -718,6 +772,40 @@ func (s *Service) SyncSwitch(ctx context.Context) {
 	slog.InfoContext(ctx, "agent presence mirrored to the switch", "agents", len(work))
 }
 
+// ReleaseAgentsWithoutPhones reconciles READY against registration.
+//
+// A restart restores presence from the database, where READY survives the
+// process; the phones do not, and are learned back from the switch in the
+// quiet pass that runs before this. An agent who was READY when the process
+// stopped and whose browser closed in the meantime would otherwise come back
+// READY at a phone that is not there — the same untruth a live registration
+// loss produces, arrived at by a different route.
+//
+// It is separate from SyncSwitch, and the caller runs it first, for two
+// reasons. Running it before the mirror pass means the status each agent is
+// mirrored with is already the one their reconciled presence yields, rather
+// than On Break now and a corrected event a moment later. And it is the only
+// half of the reconnect that depends on having actually read the switch's
+// registrations: a read that *failed* has told us nothing, and releasing every
+// READY agent on the strength of it would sign off a room full of working
+// agents because one ESL command errored. SyncSwitch stays the mirror pass,
+// which is safe to run either way; this is the part a caller skips when it
+// could not ask.
+func (s *Service) ReleaseAgentsWithoutPhones(ctx context.Context) {
+	s.mu.Lock()
+	lost := make([]uuid.UUID, 0, len(s.live))
+	for id, p := range s.live {
+		if !p.IsLoggedOut() && p.CurrentState() == StateReady && !p.IsRegistered {
+			lost = append(lost, id)
+		}
+	}
+	s.mu.Unlock()
+
+	for _, id := range lost {
+		s.releaseForLostDevice(ctx, id)
+	}
+}
+
 // change applies a presence transition, persists it, mirrors it and publishes.
 func (s *Service) change(ctx context.Context, agentID uuid.UUID, eventType events.Type, apply func(*Presence) error) (Presence, error) {
 	profile, err := s.store.AgentProfile(ctx, agentID)
@@ -875,6 +963,15 @@ func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p
 		"state":        string(p.CurrentState()),
 		"availability": string(p.Availability()),
 		"displayName":  profile.DisplayName,
+		// Both are always present, and deviceAccount is null rather than
+		// absent when there is no registration: a screen that has to tell
+		// "the switch holds no phone for them" from "this event does not
+		// carry the field" cannot do it from an omitted key.
+		"isDeviceRegistered": p.IsRegistered,
+		"deviceAccount":      nil,
+	}
+	if p.IsRegistered && p.ExtensionNumber != "" {
+		payload["deviceAccount"] = p.ExtensionNumber
 	}
 	if p.Reason != "" {
 		payload["reason"] = string(p.Reason)

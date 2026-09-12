@@ -10,6 +10,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -32,6 +33,18 @@ type Config struct {
 	SwitchDomain string
 	// SIPProfile is the sofia profile agents register to.
 	SIPProfile string
+	// SIPDomain is the digest realm and the address-of-record domain issued
+	// to browser phones. The internal profile challenges with
+	// challenge-realm=auto_from, so the realm a phone is asked for is exactly
+	// the domain it put in its From header — which is this value — and
+	// a1_hash = md5(extension:AICC_SIP_DOMAIN:password) is what verifies.
+	// Defaults to SwitchDomain, because a deployment that has not separated
+	// the two has only one domain.
+	SIPDomain string
+	// SIPWSSURL is the WebSocket binding a browser phone connects to. It is
+	// the internal profile's ws-binding, published to the phone rather than
+	// typed into it.
+	SIPWSSURL string
 
 	// The AI voice leg. The SIP port is the target of the switch's bot
 	// gateway; the RTP range sits clear of the switch's own.
@@ -205,6 +218,8 @@ func Load() (Config, error) {
 		ESLPassword:      env("AICC_ESL_PASSWORD", "ClueCon"),
 		SwitchDomain:     env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
 		SIPProfile:       env("AICC_SIP_PROFILE", "internal"),
+		SIPDomain:        env("AICC_SIP_DOMAIN", ""),
+		SIPWSSURL:        env("AICC_SIP_WSS_URL", ""),
 		BotSIPHost:       env("AICC_BOT_SIP_HOST", "0.0.0.0"),
 		BotSIPPort:       envInt("AICC_BOT_SIP_PORT", 6060),
 		BotAdvertiseIP:   env("AICC_BOT_ADVERTISE_IP", ""),
@@ -250,6 +265,16 @@ func Load() (Config, error) {
 		Seed:                          env("AICC_SEED", ""),
 	}
 
+	// The phone's view of the switch derives from the switch's own domain
+	// unless a deployment has separated them. Resolved here rather than at
+	// every read, so one value is what is validated, logged and handed out.
+	if c.SIPDomain == "" {
+		c.SIPDomain = c.SwitchDomain
+	}
+	if c.SIPWSSURL == "" {
+		c.SIPWSSURL = "ws://" + c.SIPDomain + ":5066/"
+	}
+
 	return c, c.validate()
 }
 
@@ -266,6 +291,25 @@ func (c Config) validate() error {
 	}
 	if c.SessionTTL < time.Minute {
 		errs = append(errs, fmt.Errorf("AICC_SESSION_TTL must be >= 1m, got %s", c.SessionTTL))
+	}
+	// Caught here rather than in the browser. A phone is handed this URL and
+	// has nowhere to go with a value that is not a WebSocket one; the failure
+	// would present as a softphone that never connects and says nothing about
+	// why.
+	//
+	// Only when there is one. Load always fills it — an empty AICC_SIP_WSS_URL
+	// means "unset", and unset derives from the SIP domain — so an empty value
+	// reaching here is a Config assembled in code, with no phone to hand it to.
+	if c.SIPWSSURL != "" {
+		u, err := url.Parse(c.SIPWSSURL)
+		switch {
+		case err != nil:
+			errs = append(errs, fmt.Errorf("AICC_SIP_WSS_URL is not a URL: %w", err))
+		case u.Scheme != "ws" && u.Scheme != "wss":
+			errs = append(errs, fmt.Errorf("AICC_SIP_WSS_URL must be ws:// or wss://, got %q", c.SIPWSSURL))
+		case u.Host == "":
+			errs = append(errs, fmt.Errorf("AICC_SIP_WSS_URL must name a host, got %q", c.SIPWSSURL))
+		}
 	}
 	if c.IsTranscriptionEnabled {
 		if c.StreamPublicURL == "" {

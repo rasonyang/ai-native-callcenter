@@ -17,6 +17,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -41,6 +42,9 @@ type AgentService interface {
 	// is on the floor but never signed into this application; who is signed in
 	// there, if anybody, is the separate question.
 	DeviceAtExtension(extensionNumber string) (isRegistered, isInService, isKnown bool)
+	// DeviceState is the same question asked about a person rather than a
+	// number: has this agent's phone registered, and is it in service.
+	DeviceState(agentID uuid.UUID) (isRegistered, isInService bool)
 	AgentAtExtension(extensionNumber string) (agentID uuid.UUID, ok bool)
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 
@@ -58,6 +62,15 @@ type AgentService interface {
 	MirrorAgent(ctx context.Context, agentID uuid.UUID)
 	UpdateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error)
 	DeleteAgent(ctx context.Context, agentID uuid.UUID) error
+}
+
+// SIPSessionService mints the credential an agent's phone registers with.
+// Nil means the deployment issues none — the operations answer 501 and 204
+// respectively, which is what a caller needs to tell "not configured" from
+// "refused".
+type SIPSessionService interface {
+	Issue(ctx context.Context, agentID uuid.UUID, expiresAt time.Time) (sipsession.Issued, error)
+	Revoke(ctx context.Context, agentID uuid.UUID) error
 }
 
 // TrunkReader reports the gateways the switch holds. Read-only by design: a
@@ -86,6 +99,7 @@ type Server struct {
 	outbound    OutboundService
 	webhooks    WebhookService
 	keys        KeyService
+	sipSessions SIPSessionService
 	spa         http.Handler
 }
 
@@ -125,6 +139,10 @@ type Deps struct {
 	// answered with the same 401, and the /api-keys operations are not
 	// mounted — the same shape every other optional dependency here has.
 	Keys KeyService
+	// SIPSessions mints an agent's phone credential. Nil leaves a deployment
+	// with no zero-config phone, which is how one that predates this feature
+	// keeps working.
+	SIPSessions SIPSessionService
 	// SPA may be nil during development, when the Vite dev server serves the
 	// frontend instead.
 	SPA http.Handler
@@ -151,6 +169,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		outbound:    deps.Outbound,
 		webhooks:    deps.Webhooks,
 		keys:        deps.Keys,
+		sipSessions: deps.SIPSessions,
 		spa:         deps.SPA,
 	}
 }
@@ -231,6 +250,8 @@ func (s *Server) router() chi.Router {
 					private.Post("/agent/not-ready", op.AgentNotReady)
 					private.Get("/agent/wrap-up", op.GetAgentWrapUp)
 					private.Post("/agent/wrap-up", op.AgentWrapUp)
+					private.Post("/agent/sip-session", op.CreateAgentSIPSession)
+					private.Delete("/agent/sip-session", op.DeleteAgentSIPSession)
 
 					private.Get("/agents", op.ListAgents)
 					private.Post("/agents/{agentId}/force-logout", op.ForceLogoutAgent)

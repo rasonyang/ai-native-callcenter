@@ -367,7 +367,7 @@
           "agents"
         ],
         "summary": "Go ready",
-        "description": "Requires the AGENT role.",
+        "description": "Requires the AGENT role. 409 DEVICE_NOT_REGISTERED when the switch holds no registration for the agent's extension: an agent with no phone cannot be offered a call.",
         "security": [
           {
             "cookieSession": [
@@ -570,6 +570,100 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalError"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/agent/sip-session": {
+      "post": {
+        "operationId": "createAgentSipSession",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Issue the phone credentials for this agent",
+        "description": "Requires the AGENT role. Mints a SIP session for the extension bound to this agent and answers with everything the phone needs to register: realm, WebSocket URL, account and the digest a1-hash. The password behind that hash is generated here, hashed and discarded — there is no way to read it back.\n\nOne active session per agent: a second call replaces the first, and the registration the first was holding is flushed from the switch. 409 when the agent has no extension bound, because there is nothing to register as.",
+        "security": [
+          {
+            "cookieSession": [
+              "agent:act"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The credentials the phone registers with.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SipSession"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteAgentSipSession",
+        "tags": [
+          "agents"
+        ],
+        "summary": "Revoke the phone credentials and flush the registration",
+        "description": "Requires the AGENT role. The credentials stop being accepted and the switch drops the registration they were holding. Idempotent: an agent with no session is already in the state this asks for, and the answer is the same 204.",
+        "security": [
+          {
+            "cookieSession": [
+              "agent:act"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "agent:act"
+            ]
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Revoked. The agent's phone holds no registration."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -2315,7 +2409,7 @@
           "catalog"
         ],
         "summary": "Read a phone's SIP password",
-        "description": "The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.\n\nEvery read is recorded in the audit trail, including who asked and which phone.",
+        "description": "The one way to learn what a phone was given, for configuring the handset. Separate from the extension itself so the password is never carried by a list, a snapshot or a form that only meant to show a number — a credential should have to be asked for by name.\n\nEvery read is recorded in the audit trail, including who asked and which phone.\n\nSince an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.",
         "parameters": [
           {
             "name": "extensionId",
@@ -4636,7 +4730,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseCallbackEventPayload, SseSystemResetPayload).",
+            "description": "The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseAgentPresencePayload, SseCallbackEventPayload, SseSystemResetPayload).",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -5616,7 +5710,7 @@
         }
       },
       "Conflict": {
-        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP.",
+        "description": "The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED.",
         "content": {
           "application/json": {
             "schema": {
@@ -5689,6 +5783,7 @@
           "AGENT_ALREADY_LOGGED_IN",
           "AGENT_NOT_LOGGED_IN",
           "AGENT_NOT_IN_WRAP_UP",
+          "DEVICE_NOT_REGISTERED",
           "CALL_NOT_FOUND",
           "NOT_CALL_PARTY",
           "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE",
@@ -5793,10 +5888,23 @@
         "properties": {
           "user": {
             "$ref": "#/components/schemas/Identity"
+          },
+          "isDeviceRegistered": {
+            "type": "boolean",
+            "description": "Whether the switch currently holds a registration for this subject's agent extension. False for a subject with no agent identity."
+          },
+          "deviceAccount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The extension number the switch holds a registration for, or null when it holds none."
           }
         },
         "required": [
-          "user"
+          "user",
+          "isDeviceRegistered",
+          "deviceAccount"
         ]
       },
       "AgentState": {
@@ -5810,7 +5918,7 @@
       },
       "NotReadyReason": {
         "type": "string",
-        "description": "Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM and SUPERVISOR are set by the platform, never chosen by the agent.",
+        "description": "Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.",
         "enum": [
           "LOGIN",
           "BREAK",
@@ -5818,7 +5926,8 @@
           "TRAINING",
           "AFTER_CALL_WORK",
           "SYSTEM",
-          "SUPERVISOR"
+          "SUPERVISOR",
+          "DEVICE_LOST"
         ]
       },
       "Availability": {
@@ -5854,6 +5963,17 @@
           "extensionNumber": {
             "type": "string"
           },
+          "isDeviceRegistered": {
+            "type": "boolean",
+            "description": "Whether the switch currently holds a registration for this agent's extension."
+          },
+          "deviceAccount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The extension number the switch holds a registration for, or null when it holds none."
+          },
           "enteredAt": {
             "type": "string",
             "format": "date-time"
@@ -5868,7 +5988,43 @@
           "agentId",
           "state",
           "availability",
-          "enteredAt"
+          "enteredAt",
+          "isDeviceRegistered",
+          "deviceAccount"
+        ]
+      },
+      "SipSession": {
+        "type": "object",
+        "description": "The credentials one agent's phone registers with. The platform mints them; nobody types them into a handset. The plaintext password is generated server-side, hashed into a1Hash and discarded, so it appears in no response, no log and no table.\n\nOne active SIP session per agent: issuing a new one replaces the previous, and the previous registration is flushed from the switch.",
+        "properties": {
+          "sipDomain": {
+            "type": "string",
+            "description": "The digest realm, and the domain the phone builds its address of record from."
+          },
+          "wssUrl": {
+            "type": "string",
+            "description": "The WebSocket URL the phone connects to."
+          },
+          "account": {
+            "type": "string",
+            "description": "The extension number to register as."
+          },
+          "a1Hash": {
+            "type": "string",
+            "description": "md5(account:sipDomain:password) in lower-case hex. This is what the phone authenticates with; the password it was derived from is issued to nobody, here or anywhere else."
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When these credentials stop being accepted. It follows the web session's expiry, so the phone is signed in for exactly as long as the person is."
+          }
+        },
+        "required": [
+          "sipDomain",
+          "wssUrl",
+          "account",
+          "a1Hash",
+          "expiresAt"
         ]
       },
       "WrapUpRequest": {
@@ -6688,7 +6844,7 @@
           "password": {
             "type": "string",
             "minLength": 6,
-            "description": "Write-only: required on create, optional on update (empty keeps the current one). Never returned; the only reader that needs it is the switch."
+            "description": "Write-only: required on create, optional on update (empty keeps the current one). Never returned. A phone no longer registers with it — an agent's handset authenticates with a server-issued SIP session (POST /agent/sip-session) — and the stored value is retained for API compatibility."
           }
         },
         "required": [
@@ -6711,7 +6867,7 @@
       },
       "ExtensionSecret": {
         "type": "object",
-        "description": "A phone's SIP registration password, in clear.\n\nIt is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.",
+        "description": "A phone's SIP registration password, in clear.\n\nIt is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.\n\nSince an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.",
         "properties": {
           "password": {
             "type": "string"
@@ -8430,6 +8586,51 @@
           "seq",
           "type",
           "occurredAt"
+        ]
+      },
+      "SseAgentPresencePayload": {
+        "type": "object",
+        "description": "Payload of the AGENT_* events: this agent's presence as it now stands, carrying what a roster row shows so a supervisor's list updates without refetching.",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/AgentState"
+          },
+          "availability": {
+            "$ref": "#/components/schemas/Availability"
+          },
+          "displayName": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/NotReadyReason"
+          },
+          "extensionNumber": {
+            "type": "string",
+            "description": "The extension bound to the agent; absent while none is."
+          },
+          "wrapUpCallId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The call the agent is doing after-call work for; absent while there is none."
+          },
+          "isDeviceRegistered": {
+            "type": "boolean",
+            "description": "Whether the switch currently holds a registration for this agent's extension."
+          },
+          "deviceAccount": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The extension number the switch holds a registration for, or null when it holds none."
+          }
+        },
+        "required": [
+          "state",
+          "availability",
+          "displayName",
+          "isDeviceRegistered",
+          "deviceAccount"
         ]
       },
       "SseCallbackEventPayload": {

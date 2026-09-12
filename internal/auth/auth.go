@@ -128,17 +128,31 @@ func (s *Service) Login(ctx context.Context, username, password, userAgent strin
 
 // Authenticate resolves a session token to its identity.
 func (s *Service) Authenticate(ctx context.Context, token string) (Identity, error) {
+	id, _, err := s.AuthenticateSession(ctx, token)
+	return id, err
+}
+
+// AuthenticateSession is Authenticate plus when the session stops being
+// accepted.
+//
+// A sibling rather than a wider Authenticate, so no existing caller has to
+// care. The expiry exists because a credential minted *for* a session must
+// not outlive it: a phone's SIP session follows the browser's, and the only
+// place that knows when the browser's ends is the row this query already
+// reads. Deriving it from "now plus the TTL" at the point of issue would hand
+// a phone a fresh twelve hours in the eleventh hour of a session.
+func (s *Service) AuthenticateSession(ctx context.Context, token string) (Identity, time.Time, error) {
 	row, err := s.q.GetSessionByTokenHash(ctx, hashToken(token))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Identity{}, ErrSessionExpired
+			return Identity{}, time.Time{}, ErrSessionExpired
 		}
-		return Identity{}, fmt.Errorf("get session: %w", err)
+		return Identity{}, time.Time{}, fmt.Errorf("get session: %w", err)
 	}
 	if row.User.Status == StatusSuspended {
-		return Identity{}, ErrUserSuspended
+		return Identity{}, time.Time{}, ErrUserSuspended
 	}
-	return identityOf(row.User), nil
+	return identityOf(row.User), row.Session.ExpiresAt.Time, nil
 }
 
 // Logout revokes a single session.

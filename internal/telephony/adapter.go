@@ -385,6 +385,30 @@ func (a *Adapter) EndCallerWithTheirBridge(channelID string) error {
 // reconciling after a restart or a reconnect.
 func (a *Adapter) ShowChannels() (string, error) { return a.cmd.API("show channels as json") }
 
+// FlushRegistration drops whatever is registered as an extension, so the
+// phone holding it stops being reachable and has to authenticate again.
+//
+// This is what makes one SIP session per agent true on the switch as well as
+// in the database. Revoking a credential stops the next REGISTER; it does not
+// touch the binding an earlier one already established, and a browser that has
+// registered keeps ringing until that binding expires on its own — which is
+// minutes of an agent's calls going to a tab they closed.
+//
+// A reply saying nothing was flushed is success. Asking to flush a phone that
+// is not registered is the ordinary case (an agent who signed in and never
+// opened the softphone), and it is already in the state the caller wanted.
+// Only the switch refusing outright is an error.
+func (a *Adapter) FlushRegistration(profile, extensionNumber string) error {
+	if profile == "" {
+		profile = defaultSIPProfile
+	}
+	return a.exec("sofia profile %s flush_inbound_reg %s@%s", profile, extensionNumber, a.domain)
+}
+
+// defaultSIPProfile is the sofia profile agent phones register to when a
+// caller names none. It matches AICC_SIP_PROFILE's own default.
+const defaultSIPProfile = "internal"
+
 // Trunk is a gateway as the switch currently holds it.
 type Trunk struct {
 	// Name is the gateway's, without the profile it lives on.

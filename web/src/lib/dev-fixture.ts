@@ -30,6 +30,8 @@ function presenceFor(state: FixtureState, now: number): Presence {
       reason: 'AFTER_CALL_WORK',
       availability: 'WRAP_UP',
       extensionNumber: '1005',
+      isDeviceRegistered: true,
+      deviceAccount: '1005',
       enteredAt,
       wrapUpCallId: CALL_ID,
     }
@@ -40,6 +42,8 @@ function presenceFor(state: FixtureState, now: number): Presence {
     reason: undefined,
     availability: state === 'onCall' || state === 'ringing' ? 'ON_CALL' : 'READY',
     extensionNumber: '1005',
+    isDeviceRegistered: true,
+    deviceAccount: '1005',
     enteredAt,
   }
 }

@@ -60,6 +60,25 @@ end
 -- a TLS proxy and authenticates against that hostname. Lookups therefore key
 -- on the extension number alone.
 --
+-- The credential is a1-hash, never a password, and it is minted per session by
+-- the application: luacc.directory carries the hash of whichever SIP session is
+-- valid for that number right now, and NULL when there is none. An extension
+-- nobody has signed in at is an extension nothing may register as.
+--
+-- That NULL has to be refused explicitly. sofia_reg.c:3327-3335 treats a
+-- directory user carrying neither password nor a1-hash as AUTH_OK — a user
+-- with no credential authenticates *anything* — unless the entry says
+-- allow-empty-password is false. So two things happen below and both matter:
+-- every entry emits allow-empty-password=false, and an authentication lookup
+-- with no live session returns nothing at all rather than a user with no
+-- credential.
+--
+-- Only the authentication lookup. The same section answers dial-string
+-- resolution, user_call and mod_callcenter's agent tracking, and those ask
+-- "where does this extension go", not "may this phone register" — refusing
+-- them for want of a session would stop calls reaching a desk phone that is
+-- already registered.
+--
 -- aicc_managed marks a channel as ours from the moment it exists. Everything a
 -- dialplan can stamp arrives one step too late for the leg that triggered the
 -- dialplan — the caller's CHANNEL_CREATE reaches the application first — so a
@@ -68,6 +87,14 @@ end
 -- accounts in the aicc dialplan for the same reason: the account, not the
 -- call, is what aicc owns.
 local function directory_document(domain, row)
+  -- The credential, when there is one. A non-authentication lookup for an
+  -- extension with no live session gets an entry with no credential at all,
+  -- which is why allow-empty-password sits beside it unconditionally.
+  local a1 = ""
+  if row.a1_hash ~= nil and row.a1_hash ~= "" then
+    a1 = string.format('          <param name="a1-hash" value="%s"/>\n', escape(row.a1_hash))
+  end
+
   local auto_answer = ""
   if row.is_auto_answer == "t" or row.is_auto_answer == true then
     auto_answer = '        <variable name="sip_auto_answer" value="true"/>\n'
@@ -118,7 +145,7 @@ local function directory_document(domain, row)
       </params>
       <user id="%s">
         <params>
-          <param name="password" value="%s"/>
+%s          <param name="allow-empty-password" value="false"/>
         </params>
         <variables>
           <variable name="user_context" value="aicc"/>
@@ -131,7 +158,7 @@ local function directory_document(domain, row)
     </domain>
   </section>
 </document>]],
-    escape(domain), escape(row.number), escape(row.password),
+    escape(domain), escape(row.number), a1,
     escape(row.display_name ~= "" and row.display_name or row.number),
     escape(row.number), escape(row.number), auto_answer, track)
 end
@@ -145,7 +172,7 @@ local function handle_directory(params)
   if dbh == nil then return nil end
 
   local found = nil
-  dbh:query("SELECT number, password, display_name, is_auto_answer, callcenter_agent_name " ..
+  dbh:query("SELECT number, a1_hash, display_name, is_auto_answer, callcenter_agent_name " ..
     "FROM luacc.directory WHERE number = "
     .. quote(user), function(row)
       found = row
@@ -153,6 +180,18 @@ local function handle_directory(params)
   dbh:release()
 
   if found == nil then return nil end
+
+  -- An authentication lookup with no live session is a lookup that found
+  -- nothing. Returning the user without a credential would authenticate every
+  -- REGISTER for that extension (sofia_reg.c:3327-3335); returning nothing
+  -- makes the switch answer 403, which is the true answer.
+  if params:getHeader("action") == "sip_auth"
+      and (found.a1_hash == nil or found.a1_hash == "") then
+    freeswitch.consoleLog("info",
+      "aicc_xml: no active sip session for " .. tostring(user) .. "; refusing authentication\n")
+    return nil
+  end
+
   return directory_document(domain, found)
 end
 

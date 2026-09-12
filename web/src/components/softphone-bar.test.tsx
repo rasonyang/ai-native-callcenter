@@ -1,16 +1,23 @@
 import { screen, waitFor, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
 import { SoftphoneBar } from '@/components/softphone-bar'
+import { usePresence } from '@/lib/agent'
+import { PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
+import { useLogout, useSession } from '@/lib/session'
+import type { ExtensionState } from '@/lib/phone-bridge'
 import {
   AGENT_ID,
   CALL_ID,
   CALLER,
   callFixture,
   installBackend,
+  identityFixture,
+  installFakeExtension,
   presenceFixture,
   renderWithProviders,
   type Backend,
+  type FakeExtension,
 } from '@/test/harness'
 
 /**
@@ -19,13 +26,51 @@ import {
  * renders but no longer calls its endpoint must fail here.
  */
 
+/** When a spied call happened, relative to every other spied call. */
+function orderOf(spy: MockInstance, matches: (call: unknown[]) => boolean): number | null {
+  const index = spy.mock.calls.findIndex((call) => matches(call as unknown[]))
+  return index === -1 ? null : spy.mock.invocationCallOrder[index]
+}
+
+let extension: FakeExtension | undefined
+
 afterEach(() => {
+  extension?.uninstall()
+  extension = undefined
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+  delete document.documentElement.dataset.webSipPhone
 })
 
-async function renderBar(backend: Partial<Backend> = {}) {
-  const api = installBackend(backend)
-  const view = renderWithProviders(<SoftphoneBar />)
+/** The bar as it is mounted in the app shell: below the phone bridge. */
+function Bar() {
+  const { data: presence } = usePresence(true)
+  const phone = usePhoneBridgeValue(true, presence?.extensionNumber)
+  return (
+    <PhoneBridgeProvider value={phone}>
+      <SoftphoneBar />
+    </PhoneBridgeProvider>
+  )
+}
+
+/**
+ * Renders the bar into the ordinary world: an agent whose phone extension is
+ * installed, provisioned and registered at their own extension. A test about
+ * a phone that is not there passes `extension: false` or a state of its own.
+ */
+async function renderBar(
+  backend: Partial<Backend> & {
+    extension?: false | Partial<ExtensionState>
+    /** The id the extension announces, when the test is about a link. */
+    extensionId?: string
+  } = {},
+) {
+  const { extension: phone, extensionId, ...rest } = backend
+  const api = installBackend(rest)
+  if (phone !== false) {
+    extension = installFakeExtension({ state: phone ?? {}, extensionId })
+  }
+  const view = renderWithProviders(<Bar />)
   await screen.findByRole('button', { name: /ready|break|login|on call|sign in/i })
   return { api, ...view }
 }
@@ -318,5 +363,267 @@ describe('dialler', () => {
     })
     expect(await screen.findByText('1007')).toBeInTheDocument()
     expect(screen.queryByText(/unknown number/i)).toBeNull()
+  })
+})
+
+/**
+ * The phone the bar reports on.
+ *
+ * An agent types no credentials anywhere: signing in mints a SIP session and
+ * hands it to the extension, signing out takes it back, and the chip says
+ * whether the two ever met. The switch's own answer is what gates READY —
+ * a queue cannot offer a call to a phone that is not registered.
+ */
+describe('the phone', () => {
+  /**
+   * A phone holding nothing is what earns a session — not the page loading.
+   * The extension keeps provisioned credentials across a reload, and minting
+   * flushes the registration it already has, which would drop a READY agent
+   * to DEVICE_LOST for pressing F5.
+   */
+  it('provisions a phone that is holding nothing', async () => {
+    const postMessage = vi.spyOn(window, 'postMessage')
+    const { api } = await renderBar({
+      extension: { credentialSource: 'NONE', account: null, registration: 'UNREGISTERED' },
+    })
+    await waitFor(() =>
+      expect(api.commands).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: '/agent/sip-session' }),
+      ),
+    )
+    await waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([message]) => (message as { type?: string }).type === 'provision',
+        ),
+      ).toBe(true),
+    )
+    const [provision, targetOrigin] = postMessage.mock.calls.find(
+      ([message]) => (message as { type?: string }).type === 'provision',
+    )!
+    expect(provision).toMatchObject({ source: 'aicc', protocolVersion: 1, account: '1001' })
+    expect(targetOrigin).toBe(window.location.origin)
+  })
+
+  it('provisions nothing for a phone that reloaded with its credentials', async () => {
+    const { api } = await renderBar()
+    await screen.findByText(/phone ready/i)
+    expect(api.commands.some((r) => r.path === '/agent/sip-session')).toBe(false)
+  })
+
+  it('names the extension it is registered at', async () => {
+    await renderBar()
+    const chip = await screen.findByText(/phone ready/i)
+    expect(chip.closest('span')).toHaveTextContent('Phone ready · 1001')
+  })
+
+  it('offers setup instead when no extension answers', async () => {
+    await renderBar({ extension: false })
+    expect(await screen.findByRole('button', { name: /set up phone/i })).toBeInTheDocument()
+  })
+
+  it('will not let an agent go ready with no registration on the switch', async () => {
+    const { user } = await renderBar({
+      presence: presenceFixture({
+        state: 'NOT_READY',
+        availability: 'NOT_READY',
+        reason: 'BREAK',
+        isDeviceRegistered: false,
+        deviceAccount: null,
+      }),
+      extension: { registration: 'UNREGISTERED', credentialSource: 'NONE', account: null },
+    })
+    await user.click(
+      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
+    )
+    const goReady = await screen.findByRole('menuitem', { name: /go ready/i })
+    expect(goReady).toHaveAttribute('data-disabled')
+  })
+
+  it('lets an agent whose phone is registered go ready', async () => {
+    const { user } = await renderBar({
+      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
+    })
+    await user.click(
+      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
+    )
+    const goReady = await screen.findByRole('menuitem', { name: /go ready/i })
+    expect(goReady).not.toHaveAttribute('data-disabled')
+  })
+
+  /**
+   * Somebody saved a manual account in the extension's Options while a
+   * provisioned session was held. The phone works; it is just not using what
+   * this page gave it, and the way back is that same Options page.
+   */
+  it('says when the extension is running on a manual override', async () => {
+    await renderBar({
+      extensionId: 'ponmlkjihgfedcbaponmlkjihgfedcba',
+      extension: {
+        credentialSource: 'MANUAL',
+        account: '1001',
+        registration: 'REGISTERED',
+        provisionStatus: 'OVERRIDDEN',
+      },
+    })
+    expect(await screen.findByText(/manual override/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /extension options/i })).toHaveAttribute(
+      'href',
+      'chrome-extension://ponmlkjihgfedcbaponmlkjihgfedcba/options.html#account',
+    )
+    // Replacing the credential is exactly what must not be offered here.
+    expect(screen.queryByRole('button', { name: /re-provision|retry/i })).toBeNull()
+  })
+
+  it('still lets an overridden phone at this agent’s own extension go ready', async () => {
+    const { user } = await renderBar({
+      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
+      extension: {
+        credentialSource: 'MANUAL',
+        account: '1001',
+        registration: 'REGISTERED',
+        provisionStatus: 'OVERRIDDEN',
+      },
+    })
+    await user.click(
+      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
+    )
+    expect(await screen.findByRole('menuitem', { name: /go ready/i })).not.toHaveAttribute(
+      'data-disabled',
+    )
+  })
+
+  it('keeps an override onto another extension out of the queue', async () => {
+    const { user } = await renderBar({
+      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
+      extension: {
+        credentialSource: 'MANUAL',
+        account: '1002',
+        registration: 'REGISTERED',
+        provisionStatus: 'OVERRIDDEN',
+      },
+    })
+    await user.click(
+      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
+    )
+    expect(await screen.findByRole('menuitem', { name: /go ready/i })).toHaveAttribute(
+      'data-disabled',
+    )
+  })
+
+  // The platform takes an agent out of the queue when their phone goes away,
+  // and the reason reads like every other reason it sets.
+  it('names the reason when a lost phone is what made them not-ready', async () => {
+    installBackend({
+      presence: presenceFixture({
+        state: 'NOT_READY',
+        availability: 'NOT_READY',
+        reason: 'DEVICE_LOST',
+        isDeviceRegistered: false,
+        deviceAccount: null,
+      }),
+    })
+    extension = installFakeExtension({
+      state: { registration: 'UNREGISTERED', account: null, credentialSource: 'NONE' },
+    })
+    renderWithProviders(<Bar />)
+    expect(await screen.findByRole('button', { name: /phone lost/i })).toBeInTheDocument()
+  })
+
+  it('says so when the account has no extension bound to it', async () => {
+    await renderBar({
+      sipSession: null,
+      presence: presenceFixture({ isDeviceRegistered: false, deviceAccount: null }),
+      extension: { credentialSource: 'NONE', account: null, registration: 'UNREGISTERED' },
+    })
+    expect(await screen.findByText(/no extension is bound/i)).toBeInTheDocument()
+  })
+})
+
+// The shell's own wiring: only an agent's page talks to a phone, and the
+// context is provided to everybody below either way.
+function SignOutProbe() {
+  const { data: user } = useSession()
+  const phone = usePhoneBridgeValue(user?.role === 'AGENT')
+  return (
+    <PhoneBridgeProvider value={phone}>
+      <LogoutButton />
+    </PhoneBridgeProvider>
+  )
+}
+
+function LogoutButton() {
+  const { data: user } = useSession()
+  const logout = useLogout()
+  return (
+    <button type="button" disabled={!user} onClick={() => logout.mutate()}>
+      sign out
+    </button>
+  )
+}
+
+
+/**
+ * Signing out of the web session signs the phone out with it: the extension is
+ * told to drop the credentials, and the session ends.
+ *
+ * Revoking the SIP session is the server's half, done after the agent has been
+ * signed out of presence. The browser did it itself once, and flushing the
+ * registration while the agent was still READY put a DEVICE_LOST in the record
+ * of every clean sign-out.
+ */
+describe('signing out of everything', () => {
+  it('deprovisions the phone before it ends the web session', async () => {
+    const api = installBackend()
+    extension = installFakeExtension()
+    const postMessage = vi.spyOn(window, 'postMessage')
+    const { user } = renderWithProviders(<SignOutProbe />)
+    await waitFor(() => expect(screen.getByRole('button')).toBeEnabled())
+
+    await user.click(screen.getByRole('button'))
+    await waitFor(() =>
+      expect(api.requests).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: '/auth/logout' }),
+      ),
+    )
+
+    const deprovisionAt = orderOf(postMessage, (call) =>
+      (call[0] as { type?: string }).type === 'deprovision',
+    )
+    expect(deprovisionAt).not.toBeNull()
+    const logoutAt = orderOf(globalThis.fetch as unknown as MockInstance, (call) =>
+      String(call[0]).endsWith('/auth/logout'),
+    )
+    expect(deprovisionAt!).toBeLessThan(logoutAt!)
+  })
+
+  // The registration is the server's to flush, and only after it has signed
+  // the agent out. A DELETE from here reported a phone lost by an agent who
+  // was still READY.
+  it('revokes no SIP session itself', async () => {
+    const api = installBackend()
+    extension = installFakeExtension()
+    const { user } = renderWithProviders(<SignOutProbe />)
+    await waitFor(() => expect(screen.getByRole('button')).toBeEnabled())
+    await user.click(screen.getByRole('button'))
+    await waitFor(() =>
+      expect(api.requests).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: '/auth/logout' }),
+      ),
+    )
+    expect(api.requests.some((r) => r.method === 'DELETE')).toBe(false)
+  })
+
+  it('signs out an account that has no phone at all', async () => {
+    const api = installBackend({ session: identityFixture({ role: 'SUPERVISOR' }) })
+    const { user } = renderWithProviders(<SignOutProbe />)
+    await waitFor(() => expect(screen.getByRole('button')).toBeEnabled())
+    await user.click(screen.getByRole('button'))
+    await waitFor(() =>
+      expect(api.requests).toContainEqual(
+        expect.objectContaining({ method: 'POST', path: '/auth/logout' }),
+      ),
+    )
+    expect(api.requests.some((r) => r.path === '/agent/sip-session')).toBe(false)
   })
 })

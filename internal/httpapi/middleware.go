@@ -112,7 +112,7 @@ func (s *Server) authenticateSession(w http.ResponseWriter, r *http.Request) (ac
 		return AuthContext{}, true
 	}
 
-	id, err := s.auth.Authenticate(r.Context(), cookie.Value)
+	id, expiresAt, err := s.auth.AuthenticateSession(r.Context(), cookie.Value)
 	switch {
 	case errors.Is(err, auth.ErrSessionExpired):
 		s.clearSessionCookie(w)
@@ -139,12 +139,13 @@ func (s *Server) authenticateSession(w http.ResponseWriter, r *http.Request) (ac
 	}
 
 	ac = AuthContext{
-		Kind:        SubjectUser,
-		SubjectID:   id.UserID,
-		SubjectName: id.Username,
-		User:        id,
-		ActorUserID: id.UserID,
-		scopes:      grantedScopes(id.Role),
+		Kind:             SubjectUser,
+		SubjectID:        id.UserID,
+		SubjectName:      id.Username,
+		User:             id,
+		SessionExpiresAt: expiresAt,
+		ActorUserID:      id.UserID,
+		scopes:           grantedScopes(id.Role),
 	}
 	// The agent identity behind the account, resolved once. Thirteen call
 	// sites used to look it up for themselves; a handler now reads a field.

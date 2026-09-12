@@ -42,3 +42,46 @@ describe('the reason a call went unserved', () => {
     )
   })
 })
+
+/**
+ * The phone setup copy, in both languages.
+ *
+ * Every string an agent reads while their phone is not working is in this
+ * group, and a missing one renders as "phone.chip.errors.WSS_LOST" on the one
+ * screen whose whole job is telling them what to do about it. The chip's
+ * labels are looked up by key from `phoneChipFor`, so nothing in the type
+ * system notices when one is absent.
+ */
+const PHONE_CHIPS = ['setup', 'connecting', 'ready', 'wrongAccount', 'displaced', 'overridden']
+
+const PHONE_ERRORS = ['REGISTRATION_FAILED', 'WSS_LOST', 'MIC_UNAVAILABLE', 'MEDIA_FAILED']
+
+/** Every key below `phone`, flattened, so neither language may omit one. */
+function keysOf(value: unknown, prefix = ''): string[] {
+  if (typeof value !== 'object' || value === null) return [prefix]
+  return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) =>
+    keysOf(child, prefix ? `${prefix}.${key}` : key),
+  )
+}
+
+/** The sentences themselves, so an empty one fails here rather than on screen. */
+function sentencesOf(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null) return [String(value)]
+  return Object.values(value as Record<string, unknown>).flatMap(sentencesOf)
+}
+
+describe('the phone setup copy', () => {
+  it.each([
+    ['en', en],
+    ['zh', zh],
+  ])('names every chip and every phone error in %s', (_locale, bundle) => {
+    const phone = (bundle as { phone: { chip: Record<string, unknown> } }).phone
+    expect(Object.keys(phone.chip).toSorted()).toEqual([...PHONE_CHIPS, 'errors'].toSorted())
+    expect(Object.keys(phone.chip.errors as object).toSorted()).toEqual([...PHONE_ERRORS].toSorted())
+    for (const sentence of sentencesOf(phone)) expect(sentence.trim()).not.toBe('')
+  })
+
+  it('says the same set of things in both languages', () => {
+    expect(keysOf(en.phone).toSorted()).toEqual(keysOf(zh.phone).toSorted())
+  })
+})

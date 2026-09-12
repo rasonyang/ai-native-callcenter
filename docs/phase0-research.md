@@ -107,6 +107,8 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 
 **Discard**: nothing to port (it's a black box we integrate). We will NOT modify it in phase 1 unless the user decides otherwise (§8 Q-R4).
 
+**Amendment 2026-09-12 — two findings above are no longer true.** (1) *"No external integration surface exists"* and *"the extension is never talked to programmatically"*: it now has one, for credentials and status only. The page provisions the phone over same-origin `window.postMessage` and reads back a registration/microphone status message; the contract is [`web-sip-phone-protocol.md`](web-sip-phone-protocol.md), and it is additive to `design.md` §20 rather than against it — no dialling, answering or hangup crosses it, so the coordination model in the bullet above (FreeSWITCH is the call-control authority, driven over ESL, rendered from SSE) is unchanged. (2) *"WSS URL is derived as `wss://<domain>/` (port 443, path `/`)"*: the URL and the digest realm are now issued by the platform (`AICC_SIP_WSS_URL`, `AICC_SIP_DOMAIN`) instead of derived in the client, which is what lets the default deployment use the profile's own `ws://…:5066/` binding with no proxy at all. The Allow-Site requirement stands, and is now a step in the product's onboarding card or a `runtime_allowed_hosts` entry in Chrome policy, not an instruction to an agent. The whole decision is recorded as [phase1-decisions](phase1-decisions.md) G4.
+
 ### 3.5 ui-test (visual contract)
 
 **Imitate (hard rules)**

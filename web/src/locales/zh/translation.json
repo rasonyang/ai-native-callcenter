@@ -73,7 +73,8 @@
     "TRAINING": "培训",
     "AFTER_CALL_WORK": "话后处理",
     "SYSTEM": "系统",
-    "SUPERVISOR": "班长设置"
+    "SUPERVISOR": "班长设置",
+    "DEVICE_LOST": "话机断开"
   },
   "callTypes": {
     "INBOUND": "呼入",
@@ -112,6 +113,7 @@
     "CALL_NOT_FOUND": "该通话已结束。",
     "NOT_CALL_PARTY": "您不在该通话中。",
     "AGENT_NOT_IN_WRAP_UP": "没有待填写的已结束通话。",
+    "DEVICE_NOT_REGISTERED": "你的话机未注册",
     "USER_DATA_TOO_LARGE": "这通电话装不下这些业务数据：最多 {{maxKeys}} 个键，每个值 {{maxValueBytes}} 字节。一个都没有写入。",
     "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE": "这种通话没有这个功能。",
     "LAST_ADMIN": "这一步会让平台没有人能管理。",
@@ -515,6 +517,50 @@
   "device": {
     "reachable": "话机已注册",
     "unreachable": "话机不可达"
+  },
+  "phone": {
+    "retry": "重试",
+    "reprovision": "重新下发",
+    "openOptions": "打开扩展设置",
+    "noExtension": "您的账号未绑定分机",
+    "readyBlocked": "话机未就绪，无法向您分配呼叫。",
+    "chip": {
+      "setup": "设置话机",
+      "connecting": "连接中…",
+      "ready": "话机就绪",
+      "wrongAccount": "账号不符",
+      "displaced": "话机已转移到另一个浏览器",
+      "overridden": "扩展中已手动覆盖",
+      "errors": {
+        "REGISTRATION_FAILED": "话机注册失败",
+        "WSS_LOST": "话机连接中断",
+        "MIC_UNAVAILABLE": "麦克风不可用",
+        "MEDIA_FAILED": "通话音频失败"
+      }
+    },
+    "onboarding": {
+      "title": "设置您的话机",
+      "subtitle": "呼叫在 Chrome 扩展中振铃。每个浏览器需完成三步。",
+      "done": "已完成",
+      "pending": "尚未完成",
+      "noExtensionId": "从 chrome://extensions 打开扩展的选项页",
+      "install": {
+        "title": "安装话机扩展",
+        "text": "注册和麦克风由扩展持有，本页面从不持有。",
+        "action": "打开 Chrome 应用商店",
+        "reload": "安装后重新加载"
+      },
+      "site": {
+        "title": "允许本站点",
+        "text": "扩展仅在您允许的站点上运行。请添加 {{host}}。",
+        "action": "打开扩展设置"
+      },
+      "microphone": {
+        "title": "允许使用麦克风",
+        "text": "Chrome 仅询问一次。未允许时通话将没有声音。",
+        "action": "打开麦克风设置"
+      }
+    }
   },
   "transcript": {
     "title": "实时转写",

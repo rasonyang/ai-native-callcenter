@@ -58,3 +58,6 @@ eslprobe
 
 # Playwright MCP debug output (browser console dumps)
 .playwright-mcp/
+
+# Machine-local Vite overrides (e.g. VITE_WEB_SIP_PHONE_ID for an unpacked extension)
+web/.env.local

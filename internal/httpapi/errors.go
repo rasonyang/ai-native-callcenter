@@ -61,8 +61,12 @@ const (
 	CodeAgentAlreadyLoggedIn ErrorCode = "AGENT_ALREADY_LOGGED_IN"
 	CodeAgentNotLoggedIn     ErrorCode = "AGENT_NOT_LOGGED_IN"
 	CodeAgentNotInWrapUp     ErrorCode = "AGENT_NOT_IN_WRAP_UP"
-	CodeCallNotFound         ErrorCode = "CALL_NOT_FOUND"
-	CodeNotCallParty         ErrorCode = "NOT_CALL_PARTY"
+	// CodeDeviceNotRegistered refuses READY because the switch holds no
+	// registration for the agent's extension: an agent with no phone
+	// cannot be offered a call.
+	CodeDeviceNotRegistered ErrorCode = "DEVICE_NOT_REGISTERED"
+	CodeCallNotFound        ErrorCode = "CALL_NOT_FOUND"
+	CodeNotCallParty        ErrorCode = "NOT_CALL_PARTY"
 	// CodeOperationNotAllowedForCallType refuses a control this kind of
 	// call does not offer, rather than a control this caller may not use.
 	CodeOperationNotAllowedForCallType ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"

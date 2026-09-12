@@ -61,7 +61,7 @@ else is left as it is.
 | | |
 |---|---|
 | Accounts | `admin` (administrator), `supervisor` (supervisor), `wei` / `amy` / `ben` (agents), password `aicc@123` |
-| Extensions | `amy` 1000, `wei` 1001, `ben` 1002, SIP password `aicc@123` |
+| Extensions | `amy` 1000, `wei` 1001, `ben` 1002. The SIP password is `aicc@123` and registers nothing: an agent's browser phone is issued its credentials by the platform when they sign in. The stored password is kept, and still readable through `GET /extensions/{id}/password`, for API compatibility alone |
 | Queues | `support-en` on 7001, `support-zh` on 7002; `wei` and `amy` staff the first, `ben` the second |
 | Customers | Eighteen numbers a SIP phone may register as: 13800000001–13800000009 and (212) 555-0101 – (212) 555-0109, password `aicc@123`, at `<FS_EXTERNAL_IP>:5060` with `<FS_EXTERNAL_IP>` as the domain. Until a phone registers as one, that number does not exist to the switch |
 | History | Seven deterministic days of calls, queue events and presence, so the wallboard and the reports are not empty |
@@ -97,12 +97,17 @@ numbers but *not* the history, which is only ever generated into an empty ledger
 now (212) 555-0101, and nothing works before it: a number nobody registered is
 unreachable, like an unallocated number on a real trunk.
 
-**2. wei calls the customer.** Sign in as `wei` / `aicc@123`. The agent's phone
-is the [web-sip-phone](https://github.com/rasonyang/web-sip-phone) Chrome
-extension: in its options page set Server to `ws://<FS_EXTERNAL_IP>:5066/`,
-Account `1001`, Password `aicc@123`, and add this host under Allow Sites.
-Signing in at the softphone bar takes no input and lands in Not ready, which
-dialling out does not need: open the keypad, type `2125550101`, press Dial.
+**2. wei calls the customer.** The agent's phone is the
+[web-sip-phone](https://github.com/rasonyang/web-sip-phone) Chrome extension,
+and there is nothing to configure in it. Install it, then sign in as `wei` /
+`aicc@123`: the platform issues that browser its own SIP credentials and hands
+them to the extension, so no server, account or password is ever typed. The
+onboarding card in the cockpit asks for the two things only the person can
+give — allow this site, allow the microphone — and disappears once the phone
+chip in the softphone bar reports ready. Going ready needs that chip: an agent
+whose phone is not registered is refused, because a call cannot be delivered to
+a phone that is not there. Dialling out does not need *ready*, though: open the
+keypad, type `2125550101`, press Dial.
 wei's phone is raised first and auto-answers; only then does the customer
 telephone ring, showing 800-555-0199. Answer it: the call is on the wallboard
 and ends as a CDR.
@@ -120,6 +125,44 @@ docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 \
     -x "originate {aicc_harness=true}loopback/95001/public &playback(silence_stream://20000)"
 # +OK <uuid>
 ```
+
+## Phones for a fleet
+
+The onboarding card is written for one person installing an extension for
+themselves. For a floor of agents, Chrome policy does the same three things
+centrally, and the card then has nothing left to ask: the extension is already
+installed, this host is already an allowed site, and the microphone is already
+granted. Policies are read from the registry on Windows, from a managed
+preferences file on macOS and from `/etc/opt/chrome/policies/managed/` on
+Linux; the JSON below is the payload in each case.
+
+```json
+{
+  "ExtensionInstallForcelist": [
+    "<extension-id>;https://clients2.google.com/service/update2/crx"
+  ],
+  "ExtensionSettings": {
+    "<extension-id>": {
+      "installation_mode": "force_installed",
+      "runtime_allowed_hosts": ["https://aicc.example.com"]
+    }
+  },
+  "AudioCaptureAllowedUrls": ["https://aicc.example.com"]
+}
+```
+
+`ExtensionInstallForcelist` installs it and keeps it installed;
+`runtime_allowed_hosts` is what pre-approves the platform's origin, so the
+extension's own Allow Sites list needs no visit; `AudioCaptureAllowedUrls`
+grants the microphone without a prompt. The `<extension-id>` is the extension's
+Web Store ID — an unpacked development build has a different, per-machine ID,
+and policy cannot address it. Verify the policy names against the Chrome
+version your fleet runs before rolling this out: Google renames and retires
+policies between releases, and a policy Chrome does not recognise is ignored
+silently.
+
+The origin in all three places is the one agents open, which behind a TLS
+proxy is the proxy's name and not this host's address.
 
 ## What is running
 
@@ -155,6 +198,8 @@ docker compose down -v                                  # stop and forget everyt
 | `POSTGRES_PASSWORD`, `LUA_PASSWORD`, `ESL_PASSWORD` | All three default to `aicc@123` |
 | `AICC_SEED` | `demo` unless set. Empty seeds nothing; `fresh` removes what the seed created |
 | `SWITCH_DOMAIN` | The switch's domain, defaulting to `FS_EXTERNAL_IP`. The application is configured from the same value |
+| `SIP_DOMAIN` | The digest realm and the domain an agent's browser phone registers under, defaulting to `SWITCH_DOMAIN`. A deployment that has not separated the two leaves it alone |
+| `SIP_WSS_URL` | Where that phone connects, defaulting to `ws://<FS_EXTERNAL_IP>:5066/`. Behind TLS this is the proxy's `wss://…` URL, and it is published to the phone rather than typed into it |
 | `HTTP_BIND`, `HTTP_PORT`, `SIP_BIND` | Where the published ports listen |
 | `RTP_START`, `RTP_END` | The media range. Configures the switch and publishes the ports together |
 | `AICC_SUBNET`, `AICC_APP_IP` | The compose network and the application's fixed address in it, which the switch dials the bot at. Change together |
@@ -220,6 +265,10 @@ hand instead of pulling it.
       cookie is never sent back. That proxy needs response buffering **off** and
       a read timeout longer than a quiet stream: with buffering on, Server-Sent
       Events arrive in batches; with a short timeout, browsers reconnect forever.
+- [ ] `SIP_WSS_URL` pointing at a `wss://` endpoint once the interface is on
+      TLS. A page served over `https://` is not allowed to open a plain `ws://`
+      socket, so the agent's phone would never register, and the default is the
+      plain one.
 - [ ] `AICC_METRICS_ADDR` reachable only inside the stack. That listener has no
       authentication of its own; the compose file publishes no port for it.
 - [ ] SIP and the RTP range reachable by the phones that need them and nothing

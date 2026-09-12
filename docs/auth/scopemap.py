@@ -65,6 +65,8 @@ OPS = {
     "agentReady":               (["agent:act"], A, True),
     "agentNotReady":            (["agent:act"], A, True),
     "agentWrapUp":              (["agent:act"], A, True),
+    "createAgentSipSession":     (["agent:act"], A, True),
+    "deleteAgentSipSession":     (["agent:act"], A, True),
     "forceLogoutAgent":         (["agent:manage"], S, True),
 
     # Live calls.

@@ -11,7 +11,10 @@ import type { ComponentProps, ReactElement } from 'react'
 import { vi } from 'vitest'
 
 import i18n from '@/lib/i18n'
-import type { CallSnapshot, CurrentWrapUp, Presence, StaffedQueue, WaitingCall } from '@/lib/api'
+import type {
+  CallSnapshot, CurrentWrapUp, Identity, Presence, SipSession, StaffedQueue, WaitingCall,
+} from '@/lib/api'
+import type { ExtensionState } from '@/lib/phone-bridge'
 import type { Contact } from '@/lib/contacts'
 import type { CDR, RecordingRow } from '@/lib/ledger'
 import type { AgentToday, Disposition } from '@/lib/ledger'
@@ -35,6 +38,10 @@ export interface Backend {
   requests: RecordedRequest[]
   /** Requests that changed something, i.e. everything but GET. */
   commands: RecordedRequest[]
+  /** Who is signed in, as /auth/me answers it. */
+  session: Identity | null
+  /** The credentials POST /agent/sip-session mints, or null to refuse. */
+  sipSession: SipSession | null
   presence: Presence
   calls: CallSnapshot[]
   /** Callers queued in the agent's own queues. */
@@ -77,12 +84,51 @@ export const AGENT_ID = '00000000-0000-4000-8000-0000000000a1'
 export const CALL_ID = '00000000-0000-4000-8000-0000000000c1'
 export const CALLER = '+861083550341'
 
+/** The signed-in agent, as the session endpoint reports them. */
+export function identityFixture(overrides: Partial<Identity> = {}): Identity {
+  return {
+    userId: AGENT_ID,
+    username: 'alice',
+    displayName: 'Alice Chen',
+    role: 'AGENT',
+    locale: null,
+    ...overrides,
+  }
+}
+
+/** The credentials the platform mints for one agent's phone. */
+export function sipSessionFixture(overrides: Partial<SipSession> = {}): SipSession {
+  return {
+    sipDomain: 'aicc.local',
+    wssUrl: 'ws://127.0.0.1:7443',
+    account: '1001',
+    a1Hash: '5f4dcc3b5aa765d61d8327deb882cf99',
+    expiresAt: new Date(Date.now() + 8 * 3_600_000).toISOString(),
+    ...overrides,
+  }
+}
+
+/** What the extension reports when everything is where it should be. */
+export function extensionStateFixture(overrides: Partial<ExtensionState> = {}): ExtensionState {
+  return {
+    registration: 'REGISTERED',
+    account: '1001',
+    sipDomain: 'aicc.local',
+    credentialSource: 'PROVISIONED',
+    microphone: 'GRANTED',
+    error: null,
+    ...overrides,
+  }
+}
+
 export function presenceFixture(overrides: Partial<Presence> = {}): Presence {
   return {
     agentId: AGENT_ID,
     state: 'READY',
     availability: 'READY',
     extensionNumber: '1001',
+    isDeviceRegistered: true,
+    deviceAccount: '1001',
     enteredAt: new Date().toISOString(),
     ...overrides,
   }
@@ -249,6 +295,8 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     get commands() {
       return backend.requests.filter((r) => r.method !== 'GET')
     },
+    session: initial.session ?? identityFixture(),
+    sipSession: initial.sipSession === undefined ? sipSessionFixture() : initial.sipSession,
     presence: initial.presence ?? presenceFixture(),
     calls: initial.calls ?? [],
     waiting: initial.waiting ?? [],
@@ -282,6 +330,24 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
         }
         return json({ items: backend.transcript ?? [], nextSinceSeq: 0, isLive: true,
           state: backend.transcriptState ?? 'LIVE' })
+      }
+      if (path === '/auth/me') {
+        return backend.session
+          ? json({ user: backend.session })
+          : new Response(JSON.stringify({ error: { code: 'SESSION_EXPIRED', message: 'no' } }),
+              { status: 401, headers: { 'content-type': 'application/json' } })
+      }
+      if (path === '/auth/logout') return new Response(null, { status: 204 })
+      if (path === '/agent/sip-session') {
+        if (method === 'DELETE') return new Response(null, { status: 204 })
+        // A refusal here is the one that matters: no extension is bound to
+        // this account, so there is nothing for a phone to register as.
+        return backend.sipSession
+          ? json(backend.sipSession)
+          : new Response(
+              JSON.stringify({ error: { code: 'CONFLICT', message: 'no extension bound' } }),
+              { status: 409, headers: { 'content-type': 'application/json' } },
+            )
       }
       if (path === '/agent/presence') return json(backend.presence)
       if (path === '/agent/wrap-up' && method === 'GET') {
@@ -346,6 +412,90 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
   )
 
   return backend
+}
+
+/** A message the page sent towards the extension. */
+export interface PageMessage {
+  source: string
+  protocolVersion: number
+  type: string
+  [key: string]: unknown
+}
+
+export interface FakeExtension {
+  /** Everything the page posted, in order, credentials included. */
+  received: PageMessage[]
+  messagesOfType: (type: string) => PageMessage[]
+  /** Reports a new state, the way a registration changing would. */
+  report: (state: Partial<ExtensionState>) => void
+  /** Writes the content script's marker, which is what a late install does. */
+  mark: () => void
+  uninstall: () => void
+}
+
+/**
+ * A stand-in for the web-sip-phone extension.
+ *
+ * It speaks the same protocol the real content script does — same window,
+ * same origin, same envelope — because that is the whole contract between
+ * them. A test that wants an uninstalled browser simply does not install one.
+ */
+/** One message from the extension's content script, envelope and all. */
+function fromExtension(data: Record<string, unknown>) {
+  window.dispatchEvent(
+    new MessageEvent('message', {
+      data: { source: 'web-sip-phone', protocolVersion: 1, ...data },
+      origin: window.location.origin,
+      source: window,
+    }),
+  )
+}
+
+export function installFakeExtension(
+  options: {
+    version?: string
+    /** The `chrome.runtime.id` it announces, if it announces one. */
+    extensionId?: string
+    /** null answers hello but reports no state, which is a phone still starting. */
+    state?: Partial<ExtensionState> | null
+    /** Off leaves an extension that is present but never answers. */
+    answersHello?: boolean
+  } = {},
+): FakeExtension {
+  const received: PageMessage[] = []
+  let current: ExtensionState | null =
+    options.state === null ? null : extensionStateFixture(options.state ?? {})
+
+  const onMessage = (event: MessageEvent) => {
+    const data = event.data as PageMessage | null
+    if (!data || data.source !== 'aicc') return
+    received.push(data)
+    if (data.type !== 'hello' || options.answersHello === false) return
+    fromExtension({
+      type: 'hello',
+      nonce: data.nonce,
+      extensionVersion: options.version ?? '1.4.0',
+      ...(options.extensionId ? { extensionId: options.extensionId } : {}),
+    })
+    if (current) fromExtension({ type: 'state', ...current })
+  }
+  window.addEventListener('message', onMessage)
+
+  return {
+    received,
+    messagesOfType: (type) => received.filter((m) => m.type === type),
+    report: (next) => {
+      current = { ...extensionStateFixture(current ?? {}), ...next }
+      fromExtension({ type: 'state', ...current })
+    },
+    mark: () => {
+      document.documentElement.dataset.webSipPhone = '1'
+    },
+    uninstall: () => {
+      window.removeEventListener('message', onMessage)
+      delete document.documentElement.dataset.webSipPhone
+    },
+  }
 }
 
 /**
