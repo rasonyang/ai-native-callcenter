@@ -14,8 +14,13 @@
 # proxy (goproxy.cn). deploy/.env carries both into `docker compose up`.
 ARG BASE_IMAGE=gcr.io/distroless/static-debian12:nonroot
 
+# The two build stages run on the builder's own architecture and only their
+# output is per-target: the SPA is plain JavaScript, and Go cross-compiles with
+# CGO off. A multi-arch build therefore emulates nothing. Under QEMU the arm64
+# half of npm ci and go build took the v0.1.0-rc.3 release past fifty minutes.
+
 # --- the single-page application --------------------------------------------
-FROM node:22-alpine AS web
+FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
@@ -25,7 +30,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- the executable ----------------------------------------------------------
-FROM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
