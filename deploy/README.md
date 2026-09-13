@@ -45,8 +45,8 @@ is not going to change the code names the published images instead — two lines
 `.env`, and nothing to build:
 
 ```ini
-AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0-rc.3
-AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.0-rc.3
+AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0-rc.4
+AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.0-rc.4
 ```
 
 The image is the release. It carries the executable with the SPA inside it and

@@ -58,7 +58,7 @@ for a switch assembled by hand.
 
 ```sh
 make fs-image                        # one architecture, loaded into the local Docker daemon
-make fs-push VERSION=v0.1.0-rc.3     # linux/amd64 + linux/arm64, pushed
+make fs-push VERSION=v0.1.0-rc.4     # linux/amd64 + linux/arm64, pushed
 ```
 
 Both call `build.sh`, whose header comment lists what it reads — `VERSION`,
