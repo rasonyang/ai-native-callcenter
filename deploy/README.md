@@ -12,8 +12,10 @@ bot to speak, and the address phones reach this host at. Nothing else.
 curl -fsSL https://get.docker.com | sh
 ```
 
-Or `sudo apt install docker.io docker-compose-v2` on Ubuntu. A `permission
-denied` later means `sudo usermod -aG docker $USER` and a new login.
+Or `sudo apt install docker.io docker-compose-v2` on Ubuntu. Skip both where
+`docker compose version` already answers: on a host with Docker's own packages
+the second conflicts with them (`containerd.io : Conflicts: containerd`). A
+`permission denied` later means `sudo usermod -aG docker $USER` and a new login.
 
 **2. Get the stack.** The checkout is what compose builds and mounts.
 
