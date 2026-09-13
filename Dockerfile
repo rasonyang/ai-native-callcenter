@@ -7,6 +7,12 @@
 #
 #   docker build -t aicc:dev .
 #   docker build --build-arg VERSION=v0.1.0 -t aicc:v0.1.0 .
+#
+# Two build arguments exist for hosts that cannot reach the defaults, which is
+# the case on the mainland-China network: BASE_IMAGE names the runtime layer
+# (gcr.m.daocloud.io mirrors gcr.io, same digests) and GOPROXY the Go module
+# proxy (goproxy.cn). deploy/.env carries both into `docker compose up`.
+ARG BASE_IMAGE=gcr.io/distroless/static-debian12:nonroot
 
 # --- the single-page application --------------------------------------------
 FROM node:22-alpine AS web
@@ -22,6 +28,8 @@ RUN npm run build
 FROM golang:1.26-alpine AS build
 
 WORKDIR /src
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 COPY go.mod go.sum ./
 RUN go mod download
 
@@ -42,7 +50,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 RUN mkdir -p /out/logs /out/recordings && chown -R 65532:65532 /out/logs /out/recordings
 
 # --- what ships ---------------------------------------------------------------
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM ${BASE_IMAGE}
 
 COPY --from=build /out/aicc /usr/local/bin/aicc
 COPY --from=build --chown=nonroot:nonroot /out/logs /var/log/aicc
