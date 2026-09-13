@@ -96,7 +96,9 @@ func run() error {
 
 	slog.Info("starting", "service", cfg.ServiceName, "env", cfg.Env, "httpAddr", cfg.HTTPAddr)
 
-	st, err := store.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
+	st, err := retryOpen(ctx, storeWaitBudget, func(ctx context.Context) (*store.Store, error) {
+		return store.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
+	}, time.Now, sleepCtx)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
