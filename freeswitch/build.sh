@@ -3,7 +3,14 @@
 #
 # Builds rasonyang/freeswitch-aicc from this repository.
 #
-#   freeswitch/build.sh
+#   VERSION=v0.1.0 freeswitch/build.sh
+#
+# The image carries the application's release tag, not the FreeSWITCH version:
+# rasonyang/freeswitch-aicc:v0.1.0 and rasonyang/ai-native-callcenter:v0.1.0
+# come from the same commit. The switch's Lua scripts and the application's
+# migrations share the luacc.* contract, so a change to either needs a new tag
+# on both, and a FreeSWITCH-versioned tag gave a changed scripts/ nothing to be
+# named by. There is no latest: a tag that moves cannot be named.
 #
 # There is no staging step. The build context is freeswitch/ as it is in the
 # working tree, and everything else the image needs — the FreeSWITCH sources,
@@ -13,8 +20,11 @@
 # build host's /usr/local/freeswitch/{conf,scripts,sounds} into a temporary
 # context and shipped one office's credentials and addresses to Docker Hub.
 #
+#   VERSION     release tag for the image, required (e.g. v0.1.0, the value
+#               `make image VERSION=...` uses for the application)
 #   IMAGE       image name (default rasonyang/freeswitch-aicc)
-#   FS_REF      FreeSWITCH tag; also the version tag on the image (default v1.11.3)
+#   FS_REF      FreeSWITCH source tag to build (default v1.11.3); recorded in the
+#               freeswitch.version label, never used as an image tag
 #   PLATFORM    target platforms (default linux/amd64,linux/arm64)
 #   LOAD        set to 1 to build one platform and --load it into the local
 #               daemon instead of pushing, for a local test
@@ -30,6 +40,11 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/.." && pwd)"
+VERSION="${VERSION:-}"
+if [ -z "$VERSION" ]; then
+  echo "VERSION is required: the release tag the image is published under, e.g. VERSION=v0.1.0" >&2
+  exit 1
+fi
 IMAGE="${IMAGE:-rasonyang/freeswitch-aicc}"
 FS_REF="${FS_REF:-v1.11.3}"
 PLATFORM="${PLATFORM:-linux/amd64,linux/arm64}"
@@ -67,11 +82,12 @@ docker buildx build --platform "$PLATFORM" \
   --build-arg MAKE_JOBS="${MAKE_JOBS:-}" \
   --build-arg SOUNDS="$SOUNDS" \
   --build-arg GIT_REVISION="$GIT_REVISION" \
-  -t "$IMAGE:$FS_REF" -t "$IMAGE:latest" \
+  --build-arg VERSION="$VERSION" \
+  -t "$IMAGE:$VERSION" \
   "${OUTPUT[@]}" \
   "$HERE"
 
-echo "== built $IMAGE:$FS_REF / $IMAGE:latest for $PLATFORM (${OUTPUT[*]}) at $GIT_REVISION"
+echo "== built $IMAGE:$VERSION (FreeSWITCH $FS_REF) for $PLATFORM (${OUTPUT[*]}) at $GIT_REVISION"
 
 # The Docker Hub overview is DOCKERHUB.md. Publishing it is a separate step
 # that needs a Hub credential, and the script that does it is the owner's:

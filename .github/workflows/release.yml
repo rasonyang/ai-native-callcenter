@@ -18,6 +18,9 @@
 # token with Read & Write, not the account password) as secrets. Without them a
 # tag build fails at the login step rather than pushing nothing quietly.
 #
+# The switch image is not built here: `make fs-push VERSION=<tag>` publishes
+# `rasonyang/freeswitch-aicc:<tag>` from the same commit, under the same tag.
+#
 # Pre-releases: a tag whose name contains a hyphen (`v0.1.0-rc.1`) is marked as a
 # pre-release on GitHub; a plain `v0.1.0` is a full release.
 #

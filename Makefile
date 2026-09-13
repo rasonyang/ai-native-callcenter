@@ -37,13 +37,13 @@ image: ## Build the container image (VERSION=v0.1.0 stamps `aicc version`)
 	docker build --build-arg VERSION=$(VERSION) -t aicc:$(if $(VERSION),$(VERSION),dev) .
 
 .PHONY: fs-image
-fs-image: ## Build the switch image locally for this machine's architecture (LOAD)
-	PLATFORM=$(if $(PLATFORM),$(PLATFORM),linux/$(shell uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)) \
+fs-image: ## Build the switch image locally for this machine's architecture (LOAD; VERSION defaults to dev)
+	VERSION=$(if $(VERSION),$(VERSION),dev) PLATFORM=$(if $(PLATFORM),$(PLATFORM),linux/$(shell uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)) \
 	LOAD=1 IMAGE=$(if $(FS_IMAGE),$(FS_IMAGE),aicc-freeswitch) freeswitch/build.sh
 
 .PHONY: fs-push
-fs-push: ## Build and push the multi-arch switch image (refuses a dirty tree)
-	freeswitch/build.sh
+fs-push: ## Build and push the multi-arch switch image (VERSION=v0.1.0 required, the application's release tag; refuses a dirty tree)
+	VERSION=$(VERSION) freeswitch/build.sh
 
 .PHONY: generate
 generate: ## Regenerate sqlc query code

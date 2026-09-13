@@ -23,7 +23,7 @@ tree onto a FreeSWITCH you built yourself.
 | `modules.conf` | The 26 modules that build compiles. The build fails if the shipped `modules.conf.xml` loads anything not on the list |
 | `docker-entrypoint.sh` | Injects a deployment's own values into the shipped configuration at every container start. Its header comment is the contract |
 | `assert-audio-stream.sh` | Fails the build if the built `mod_audio_stream` does not declare SpeexDSP |
-| `build.sh` | Builds and pushes `rasonyang/freeswitch-aicc` |
+| `build.sh` | Builds and pushes `rasonyang/freeswitch-aicc`, tagged with the application's release tag |
 | `DOCKERHUB.md` | The image's own documentation: every environment variable, port and volume |
 
 Nothing is patched at runtime. It used to be: a third-party image was turned
@@ -57,13 +57,16 @@ for a switch assembled by hand.
 ## 1. The image
 
 ```sh
-make fs-image      # one architecture, loaded into the local Docker daemon
-make fs-push       # linux/amd64 + linux/arm64, pushed
+make fs-image                        # one architecture, loaded into the local Docker daemon
+make fs-push VERSION=v0.1.0-rc.3     # linux/amd64 + linux/arm64, pushed
 ```
 
-Both call `build.sh`, whose header comment lists what it reads — `IMAGE`,
-`FS_REF`, `PLATFORM`, `SOUNDS`, `MAKE_JOBS`. The build context is this
-directory, not the repository root.
+Both call `build.sh`, whose header comment lists what it reads — `VERSION`,
+`IMAGE`, `FS_REF`, `PLATFORM`, `SOUNDS`, `MAKE_JOBS`. `VERSION` is required and
+is the image tag: the application's release tag, because the switch's Lua
+scripts and the application's migrations share the `luacc.*` contract and have
+to be released together. `FS_REF` only selects the FreeSWITCH source. The build
+context is this directory, not the repository root.
 
 Nothing is read from the machine running the build. The FreeSWITCH sources
 (tag `v1.11.3`, with sofia-sip and spandsp pinned to commits),

@@ -100,6 +100,6 @@ nothing else. Only exact tags are published — there is no \`latest\`, so a
 deployment names the build it runs.
 
 Point \`AICC_IMAGE\` at it and the stack pulls instead of building; the switch
-that goes with it is \`rasonyang/freeswitch-aicc\`, and
+that goes with it is \`rasonyang/freeswitch-aicc:${tag}\`, and
 [deploy/README.md](deploy/README.md) is the whole procedure.
 EOF

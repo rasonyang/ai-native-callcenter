@@ -155,7 +155,9 @@ services:
     # configuration tree in freeswitch/conf/, the Lua scripts, and
     # mod_audio_stream. Nothing site-specific is baked in; the entrypoint
     # injects what is below. freeswitch/DOCKERHUB.md is that contract in full.
-    image: ${AICC_FS_IMAGE:-rasonyang/freeswitch-aicc:v1.11.3}
+    # Its tag is the application's release tag: the two share the luacc.*
+    # contract, and a mismatched pair breaks phone registration.
+    image: ${AICC_FS_IMAGE:-rasonyang/freeswitch-aicc:v0.1.0-rc.3}
     restart: unless-stopped
     depends_on:
       lua-role:

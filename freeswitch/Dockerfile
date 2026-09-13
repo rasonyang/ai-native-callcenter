@@ -66,6 +66,11 @@ ARG SOUNDS_MUSIC_SHA256=2491dcb92a69c629b03ea070d2483908a52e2c530dd77791f49a45a4
 # built from. Left "unknown" when someone runs docker build by hand.
 ARG GIT_REVISION=unknown
 
+# The release tag the image is published under, the same one the application
+# image carries; stamped into org.opencontainers.image.version by build.sh.
+# FS_VERSION is the FreeSWITCH source pin and goes into freeswitch.version.
+ARG VERSION=unknown
+
 ARG MAKE_JOBS=
 
 ########## sounds ##############################################################
@@ -223,6 +228,7 @@ ARG LIBWSC_COMMIT
 ARG SOFIASIP_REF
 ARG SPANDSP_REF
 ARG GIT_REVISION
+ARG VERSION
 ENV DEBIAN_FRONTEND=noninteractive
 
 # image.source is this repository, because the recipe and the configuration are
@@ -233,7 +239,7 @@ LABEL org.opencontainers.image.title="freeswitch-aicc" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.source="https://github.com/rasonyang/ai-native-callcenter" \
       org.opencontainers.image.revision="${GIT_REVISION}" \
-      org.opencontainers.image.version="${FS_VERSION}" \
+      org.opencontainers.image.version="${VERSION}" \
       freeswitch.upstream="https://github.com/signalwire/freeswitch" \
       freeswitch.version="${FS_VERSION}" \
       mod_audio_stream.commit="${MOD_AUDIO_STREAM_COMMIT}" \

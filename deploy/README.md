@@ -41,16 +41,20 @@ everything works except the bot's voice.
 
 **4. Start it.** The first run builds the application from this checkout, which
 takes a few minutes; afterwards the stack starts in seconds. A deployment that
-is not going to change the code names a published image instead — one line in
+is not going to change the code names the published images instead — two lines in
 `.env`, and nothing to build:
 
 ```ini
-AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0-rc.2
+AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0-rc.3
+AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.0-rc.3
 ```
 
 The image is the release. It carries the executable with the SPA inside it and
 nothing else, so `docker compose pull` is the whole of getting the product onto
-a host; exact tags only, there is no `latest`.
+a host; exact tags only, there is no `latest`. The switch image carries the same
+release tag, and the two must match: the application's migrations and the
+switch's Lua scripts share the `luacc.*` contract, so a mismatched pair breaks
+phone registration.
 
 ```sh
 docker compose up -d
@@ -215,7 +219,7 @@ docker compose down -v                                  # stop and forget everyt
 | `HTTP_BIND`, `HTTP_PORT`, `SIP_BIND` | Where the published ports listen |
 | `RTP_START`, `RTP_END` | The media range. Configures the switch and publishes the ports together |
 | `AICC_SUBNET`, `AICC_APP_IP` | The compose network and the application's fixed address in it, which the switch dials the bot at. Change together |
-| `AICC_IMAGE`, `AICC_FS_IMAGE` | Unset, the application is built from this checkout. A published release tag pulls it instead — `rasonyang/ai-native-callcenter:<tag>` for the application, `rasonyang/freeswitch-aicc:<tag>` for the switch. Exact tags only, there is no `latest`: a deployment names the build it runs, and a tag that moves cannot be named |
+| `AICC_IMAGE`, `AICC_FS_IMAGE` | Unset, the application is built from this checkout. A published release tag pulls it instead — `rasonyang/ai-native-callcenter:<tag>` for the application, `rasonyang/freeswitch-aicc:<tag>` for the switch. Both carry the same release tag, and the switch tag must match the application's: they share the Go↔Lua `luacc.*` contract, so mismatched tags break phone registration. `AICC_FS_IMAGE` defaults to the switch of this checkout's release. Exact tags only, there is no `latest`: a deployment names the build it runs, and a tag that moves cannot be named |
 
 Any other `AICC_*` line in the same `.env` reaches the application unchanged:
 provider keys, `AICC_TRANSCRIBE_*`, `AICC_BOT_BACKEND_BASE`, `AICC_S3_*`, all
