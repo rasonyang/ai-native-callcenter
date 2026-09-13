@@ -77,7 +77,10 @@ export function AppShell({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card px-6">
+        {/* pr-14 keeps the top-right corner clear: the web-sip-phone extension
+            docks its 36px widget there, 8px from each edge, and would otherwise
+            sit on the user menu. 56px is that 44px plus a 12px gap. */}
+        <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card pl-6 pr-14">
           <Breadcrumb pathname={pathname} role={user.role} />
           {softphone}
           <div className="ml-auto flex items-center gap-2">

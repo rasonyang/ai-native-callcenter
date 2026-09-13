@@ -105,8 +105,9 @@ describe('an agent with no extension', () => {
 describe('as the agent works through it', () => {
   let extension: FakeExtension | undefined
 
-  afterEach(() => {
-    extension?.uninstall()
+  afterEach(async () => {
+    // An uninstall removes the marker, which the mounted card reacts to.
+    await act(async () => extension?.uninstall())
     extension = undefined
   })
 
@@ -158,6 +159,42 @@ describe('as the agent works through it', () => {
     await waitFor(() => expect(steps()[0].isDone).toBe(true))
     expect(document.body.innerHTML).not.toContain('chrome-extension://nope/')
     expect(document.body.innerHTML).toContain('chrome-extension://dkhaojcfjdcdpldokeokajkmambkbacp/')
+  })
+
+  it('offers a reload on the site step for builds that do not inject into open tabs', async () => {
+    renderCard()
+    await screen.findByText(/set up your phone/i)
+    expect(screen.getByRole('button', { name: /reload after allowing/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /reload after installing/i })).toBeInTheDocument()
+  })
+
+  it('ticks and leaves for an extension injected into the open tab, without a reload', async () => {
+    renderCard()
+    await screen.findByText(/set up your phone/i)
+    const fake = installFakeExtension({ state: { microphone: 'DENIED' } })
+    extension = fake
+    await act(async () => {
+      fake.mark()
+    })
+    await waitFor(() => expect(steps()[1].isDone).toBe(true))
+    expect(steps()[0].isDone).toBe(true)
+    await act(async () => {
+      fake.report({ microphone: 'GRANTED' })
+    })
+    await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
+  })
+
+  it('comes back, with every step undone, when the extension removes its marker', async () => {
+    const fake = installFakeExtension({ state: { microphone: 'GRANTED' } })
+    extension = fake
+    fake.mark()
+    renderCard()
+    await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
+    await act(async () => {
+      fake.uninstall()
+    })
+    expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
+    expect(steps().map((s) => s.isDone)).toEqual([false, false, false])
   })
 
   it('stays while an extension that said hello has not reported yet', async () => {

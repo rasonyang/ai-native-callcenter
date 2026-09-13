@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { usePhoneBridgeValue, type PhoneBridge } from '@/lib/phone-bridge'
+import { HELLO_TIMEOUT_MS, usePhoneBridgeValue, type PhoneBridge } from '@/lib/phone-bridge'
 import { installBackend, installFakeExtension, sipSessionFixture } from '@/test/harness'
 
 /**
@@ -91,6 +91,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   delete document.documentElement.dataset.webSipPhone
@@ -188,7 +189,99 @@ describe('what the page accepts', () => {
       extension.mark()
     })
     await waitFor(() => expect(extension.messagesOfType('hello').length).toBeGreaterThan(before))
-    extension.uninstall()
+    // Removing the marker is an event the page hears; let it land in act.
+    await act(async () => extension.uninstall())
+  })
+})
+
+/**
+ * Detection follows the extension for as long as the page is open.
+ *
+ * An extension can arrive in an open tab (installed, a site allowed, updated
+ * and re-injected) and leave it (disabled, removed, invalidated by an update).
+ * Each of those is an event the page hears — the marker coming or going, a
+ * hello answered or not — and none of them may need a refresh to be seen.
+ */
+describe('detection over time', () => {
+  it('detects an extension injected into the tab after the page loaded', async () => {
+    installBackend()
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+    await act(async () => {})
+    expect(bridge.detected).toBe(false)
+    const extension = installFakeExtension()
+    await act(async () => {
+      extension.mark()
+    })
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    // Removing the marker is an event the page hears; let it land in act.
+    await act(async () => extension.uninstall())
+  })
+
+  it('forgets the extension when its marker is removed', async () => {
+    installBackend()
+    const extension = installFakeExtension()
+    extension.mark()
+    renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {
+      extension.uninstall()
+    })
+    await waitFor(() => expect(bridge.detected).toBe(false))
+  })
+
+  it('does not react to attribute changes that are not the marker', async () => {
+    installBackend()
+    const extension = installFakeExtension()
+    extension.mark()
+    renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    const hellos = extension.messagesOfType('hello').length
+    await act(async () => {
+      document.documentElement.setAttribute('data-theme', 'dark')
+    })
+    await act(async () => {})
+    expect(extension.messagesOfType('hello')).toHaveLength(hellos)
+    expect(bridge.detected).toBe(true)
+    document.documentElement.removeAttribute('data-theme')
+    // Removing the marker is an event the page hears; let it land in act.
+    await act(async () => extension.uninstall())
+  })
+
+  it('forgets the extension when a later hello goes unanswered', async () => {
+    installBackend()
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+    act(() => fromExtension({ type: 'hello', nonce: lastHelloNonce(postMessage), extensionVersion: '1.4.0' }))
+    await waitFor(() => expect(bridge.detected).toBe(true))
+
+    vi.useFakeTimers()
+    // The tab comes back, the page asks again, and nothing answers: an
+    // instance invalidated by an update that left its marker behind.
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    act(() => {
+      vi.advanceTimersByTime(HELLO_TIMEOUT_MS - 1)
+    })
+    expect(bridge.detected).toBe(true)
+    act(() => {
+      vi.advanceTimersByTime(1)
+    })
+    expect(bridge.detected).toBe(false)
+  })
+
+  it('stays detected when the hello is answered inside the deadline', async () => {
+    installBackend()
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+    vi.useFakeTimers()
+    act(() => fromExtension({ type: 'hello', nonce: lastHelloNonce(postMessage), extensionVersion: '1.4.0' }))
+    expect(bridge.detected).toBe(true)
+    act(() => {
+      vi.advanceTimersByTime(HELLO_TIMEOUT_MS * 2)
+    })
+    expect(bridge.detected).toBe(true)
   })
 })
 

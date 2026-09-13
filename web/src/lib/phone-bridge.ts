@@ -99,6 +99,17 @@ export function optionsUrl(
  */
 export const PRESENCE_MARKER = 'webSipPhone'
 
+/** The marker as an attribute name, for observing it on the root element. */
+const PRESENCE_ATTRIBUTE = 'data-web-sip-phone'
+
+/**
+ * How long a hello may go unanswered before the extension is taken to be
+ * gone. A live content script answers within the same task; the margin is for
+ * a busy tab, not for a slow extension. It is a single timer per hello, armed
+ * by an event and cancelled by the reply, never a loop.
+ */
+export const HELLO_TIMEOUT_MS = 2000
+
 export type PhoneRegistration = 'UNREGISTERED' | 'REGISTERING' | 'REGISTERED' | 'FAILED'
 
 /** Where the phone's credentials came from: nowhere, a person, or this page. */
@@ -142,7 +153,11 @@ export interface ExtensionState {
 }
 
 export interface PhoneBridge {
-  /** A hello reply carrying one of our own nonces has arrived. */
+  /**
+   * The extension is answering: a hello reply carrying one of our own nonces
+   * has arrived, and neither has the marker been removed since nor has a
+   * later hello gone unanswered.
+   */
   detected: boolean
   extensionVersion: string | null
   /** The id the extension announced for itself, if it announced one. */
@@ -241,6 +256,14 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
   const [state, setState] = useState<ExtensionState | null>(null)
   const [isOnboardingForced, setOnboardingForced] = useState(false)
   const nonces = useRef(new Set<string>())
+  /** The one outstanding hello's deadline, if a hello is outstanding. */
+  const helloTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearHelloTimer = useCallback(() => {
+    if (helloTimer.current === null) return
+    clearTimeout(helloTimer.current)
+    helloTimer.current = null
+  }, [])
 
   const post = useCallback((message: Record<string, unknown>) => {
     window.postMessage(
@@ -252,8 +275,17 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
   const sendHello = useCallback(() => {
     const nonce = newNonce()
     nonces.current.add(nonce)
+    // An extension that was answering and has stopped — disabled, removed,
+    // or invalidated by an update that left its old marker behind — says
+    // nothing at all, so silence past the deadline is the answer. Each hello
+    // moves the deadline: it is the latest question that is waiting.
+    clearHelloTimer()
+    helloTimer.current = setTimeout(() => {
+      helloTimer.current = null
+      setDetected(false)
+    }, HELLO_TIMEOUT_MS)
     post({ type: 'hello', nonce })
-  }, [post])
+  }, [post, clearHelloTimer])
 
   const provision = useCallback(
     (credentials: SipSession) => {
@@ -273,6 +305,7 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
         // A reply to a hello we sent, and to no other page's.
         if (!nonces.current.has(message.nonce)) return
         nonces.current.delete(message.nonce)
+        clearHelloTimer()
         // A hello answers "is it there", and nothing else. It is sent again
         // on every tab switch and every late injection, so anything that
         // hangs off it happens on every tab switch too — and minting a
@@ -299,21 +332,34 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
       })
     }
     window.addEventListener('message', onMessage)
-    return () => window.removeEventListener('message', onMessage)
-  }, [])
+    return () => {
+      window.removeEventListener('message', onMessage)
+      clearHelloTimer()
+    }
+  }, [clearHelloTimer])
 
   useEffect(() => {
     if (!enabled) return
     sendHello()
 
     // The content script may be injected after this page mounted — a fresh
-    // install, or a tab that was open through one. The marker landing on the
-    // document is the only warning of that, so it is watched rather than
-    // polled.
+    // install, a site allowed while the tab was open, or an update that
+    // re-injects into open tabs. The marker landing on the document is the
+    // only warning of that, so it is watched rather than polled, and its
+    // removal is the extension saying it has gone: an invalidated instance
+    // takes its marker with it (protocol R8).
     const observer = new MutationObserver(() => {
-      if (document.documentElement.dataset[PRESENCE_MARKER] !== undefined) sendHello()
+      if (document.documentElement.dataset[PRESENCE_MARKER] !== undefined) {
+        sendHello()
+      } else {
+        clearHelloTimer()
+        setDetected(false)
+      }
     })
-    observer.observe(document.documentElement, { attributes: true })
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: [PRESENCE_ATTRIBUTE],
+    })
 
     // Coming back to the tab is the other moment an extension may have
     // changed underneath us: installed, disabled, or updated in place.
@@ -326,7 +372,7 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
       observer.disconnect()
       document.removeEventListener('visibilitychange', onVisible)
     }
-  }, [enabled, sendHello])
+  }, [enabled, sendHello, clearHelloTimer])
 
   const openOnboarding = useCallback(() => setOnboardingForced(true), [])
   const closeOnboarding = useCallback(() => setOnboardingForced(false), [])

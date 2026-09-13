@@ -40,6 +40,13 @@ the root element's attributes, because the content script may be injected after
 the page's own script has run and a single read at startup would report "not
 installed" for an extension that is.
 
+The page also reads the marker's removal. An extension instance that stops
+running removes it (R8), and the page then treats the extension as not
+detected until a later `hello` is answered. A `hello` the page sends — on
+mount, when the marker appears, when the tab becomes visible — that is not
+answered within 2 seconds has the same effect. That is one timer per `hello`,
+cancelled by its reply, not a poll.
+
 The marker answers *installed*; only a `state` message answers *working*.
 
 ## 3. Messages
@@ -177,6 +184,7 @@ no longer valid.
 | R5 | Provisioned credentials are not persisted beyond the session, and `PROVISIONED` wins over `MANUAL`. | The credential is session-bound by design (§5); an extension that wrote it to disk would outlive the expiry it was given. Preferring the provisioned one means an agent who once typed credentials in by hand still gets the phone the platform issued, without being asked to clear anything. The exception is deliberate and is reported: saving a manual account in Options while a provision is held applies the manual one and reports `provisionStatus: OVERRIDDEN`, which is how the page knows to leave it alone rather than mint over it. |
 | R6 | Registration uses the a1-hash against realm `sipDomain`, taking the realm from what was provisioned rather than deriving it from the WebSocket URL. | The WebSocket host and the SIP domain are the same value in the default deployment and different ones behind a proxy; the hash only verifies against the realm it was computed for. |
 | R7 | No call control arrives over this channel, and none is accepted. | The extension's `design.md` §20. Answer, hangup and hold stay the platform's, driven over ESL, and a page that could dial would be a second authority over the same phone. |
+| R8 | The extension injects its content script into already-open allowed tabs after a site is allowed or the extension is installed or updated, and an invalidated instance (an update, a reload, a disable) removes its presence marker and its host element. | Chrome runs a content script only in pages loaded after the fact, so without it the onboarding card could only be completed by reloading the page. The page watches the marker (§2): it appearing makes the page say `hello`, and it disappearing — or a `hello` unanswered within 2 seconds — takes the extension back to not detected, so steps 1 and 2 tick and untick without a refresh. An invalidated instance that leaves its marker behind is only noticed on the next unanswered `hello`, and one that leaves its host behind leaves a dead widget on the page. Until every installed build does this, the card keeps a Reload button on both steps. |
 
 ## 7. Versioning
 

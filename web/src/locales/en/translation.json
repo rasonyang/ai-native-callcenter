@@ -555,7 +555,8 @@
       "site": {
         "title": "Allow this site",
         "text": "The extension only runs on sites you allow. Add {{host}}.",
-        "action": "Open extension options"
+        "action": "Open extension options",
+        "reload": "Reload after allowing"
       },
       "microphone": {
         "title": "Allow the microphone",
