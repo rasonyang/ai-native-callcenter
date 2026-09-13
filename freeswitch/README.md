@@ -23,7 +23,7 @@ tree onto a FreeSWITCH you built yourself.
 | `modules.conf` | The 26 modules that build compiles. The build fails if the shipped `modules.conf.xml` loads anything not on the list |
 | `docker-entrypoint.sh` | Injects a deployment's own values into the shipped configuration at every container start. Its header comment is the contract |
 | `assert-audio-stream.sh` | Fails the build if the built `mod_audio_stream` does not declare SpeexDSP |
-| `build.sh` | Builds and pushes `rasonyang/freeswitch-aicc`, tagged with the application's release tag |
+| `build.sh` | Builds `rasonyang/freeswitch-aicc` by hand, tagged with the application's release tag. A release is published by `.github/workflows/release.yml`, not by this script |
 | `DOCKERHUB.md` | The image's own documentation: every environment variable, port and volume |
 
 Nothing is patched at runtime. It used to be: a third-party image was turned
@@ -67,6 +67,12 @@ is the image tag: the application's release tag, because the switch's Lua
 scripts and the application's migrations share the `luacc.*` contract and have
 to be released together. `FS_REF` only selects the FreeSWITCH source. The build
 context is this directory, not the repository root.
+
+A release does not come from `make fs-push`. Pushing a `v*` tag runs
+`.github/workflows/release.yml`, which builds this image on one native runner
+per architecture and publishes `rasonyang/freeswitch-aicc:<tag>` beside
+`rasonyang/ai-native-callcenter:<tag>`, both from the tagged commit.
+`make fs-push` is for a manual build.
 
 Nothing is read from the machine running the build. The FreeSWITCH sources
 (tag `v1.11.3`, with sofia-sip and spandsp pinned to commits),

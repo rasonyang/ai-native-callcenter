@@ -1,25 +1,31 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cutting a release: one container image, and that is the release.
+# Cutting a release: two container images under one tag, and that is the release.
 #
 #   git tag -a v0.1.0 -m "…" && git push origin v0.1.0
 #
-# The image carries the executable with the SPA embedded in it and nothing else
-# — no web server, no interpreter, no assets to unpack beside it. A deployment
-# names it in `AICC_IMAGE` and pulls; `deploy/README.md` is that procedure.
+# `rasonyang/ai-native-callcenter:<tag>` carries the executable with the SPA
+# embedded in it and nothing else — no web server, no interpreter, no assets to
+# unpack beside it. `rasonyang/freeswitch-aicc:<tag>` is the switch built from
+# `freeswitch/` at the same commit. The two share the `luacc.*` contract (the
+# application's migrations define the views, the switch's Lua scripts read
+# them), so they are built by one run from one commit and published under one
+# tag. A deployment names both in `AICC_IMAGE` / `AICC_FS_IMAGE` and pulls;
+# `deploy/README.md` is that procedure.
 #
-# Tags: a release publishes the image under the exact git tag and nothing else —
-# `rasonyang/ai-native-callcenter:v0.1.0`. No `latest`, no floating `0.1`, no
-# v-stripped alias: a deployment names the build it runs, and a tag that moves
-# cannot be named. A `workflow_dispatch` run builds the image but pushes nothing.
+# Tags: a release publishes each image under the exact git tag and nothing else —
+# `rasonyang/ai-native-callcenter:v0.1.0`, `rasonyang/freeswitch-aicc:v0.1.0`.
+# No `latest`, no floating `0.1`, no v-stripped alias: a deployment names the
+# build it runs, and a tag that moves cannot be named. A `workflow_dispatch` run
+# builds both images but pushes nothing.
 #
-# Credentials: the image goes to Docker Hub, beside `rasonyang/freeswitch-aicc`,
-# so the repository needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (an access
-# token with Read & Write, not the account password) as secrets. Without them a
-# tag build fails at the login step rather than pushing nothing quietly.
+# Credentials: both images go to Docker Hub, so the repository needs
+# `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (an access token with Read & Write,
+# not the account password) as secrets. Without them a tag build fails at the
+# login step rather than pushing nothing quietly.
 #
-# The switch image is not built here: `make fs-push VERSION=<tag>` publishes
-# `rasonyang/freeswitch-aicc:<tag>` from the same commit, under the same tag.
+# `make fs-push VERSION=<tag>` still builds and pushes the switch image by hand,
+# for a manual build; a release does not use it.
 #
 # Pre-releases: a tag whose name contains a hyphen (`v0.1.0-rc.1`) is marked as a
 # pre-release on GitHub; a plain `v0.1.0` is a full release.
@@ -39,8 +45,45 @@ permissions:
   contents: write   # creating the release
 
 jobs:
+  # The deploy stack and its documentation name the images of one release. A
+  # tag whose deploy/ still names an older release publishes images nobody's
+  # stack pulls, or worse: v0.1.0-rc.2 shipped a deploy stack defaulting to a
+  # switch image that predated the application's migrations, and every phone
+  # REGISTER was answered 403. This runs before either image is built, so a
+  # mismatch pushes nothing.
+  deploy-tags:
+    name: deploy-tags
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check deploy/ names this release
+        if: github.ref_type == 'tag'
+        run: |
+          app="rasonyang/ai-native-callcenter:${GITHUB_REF_NAME}"
+          fs="rasonyang/freeswitch-aicc:${GITHUB_REF_NAME}"
+          failed=0
+          if ! grep -qF "\${AICC_FS_IMAGE:-${fs}}" deploy/docker-compose.yml; then
+            echo "::error file=deploy/docker-compose.yml::the default for AICC_FS_IMAGE must be ${fs}; set \${AICC_FS_IMAGE:-${fs}} before tagging again"
+            failed=1
+          fi
+          # -w so that v0.1.0-rc.3 does not pass on a file naming v0.1.0-rc.30.
+          for f in deploy/README.md deploy/.env.example; do
+            for image in "$app" "$fs"; do
+              if ! grep -qwF "$image" "$f"; then
+                echo "::error file=${f}::${f} must name ${image}; update the image tags in it before tagging again"
+                failed=1
+              fi
+            done
+          done
+          exit "$failed"
+
   image:
     name: image
+    # After the switch has built on both architectures: the application image
+    # is pushed as soon as it builds, and one pushed without its switch is a
+    # tag nobody can deploy.
+    needs: [deploy-tags, switch]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,9 +144,116 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+  # The switch image, one native runner per architecture. No QEMU: gcc
+  # segfaults at random under QEMU user-mode emulation (freeswitch/build.sh),
+  # and the failure looks like a source problem rather than an emulation one.
+  # Each leg pushes its image by digest only; switch-manifest puts the tag on
+  # the pair. fail-fast stays on: a release missing one architecture is not a
+  # release.
+  switch:
+    name: switch (${{ matrix.platform }})
+    needs: [deploy-tags]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-24.04
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: github.ref_type == 'tag'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The build args are the ones build.sh passes. FS_VERSION and SOUNDS are
+      # build.sh's defaults, given explicitly so the freeswitch.version label
+      # names what was built even if the Dockerfile's ARG default moves. The
+      # Dockerfile sets the labels itself; metadata-action's would overwrite
+      # org.opencontainers.image.version and .revision, so it is not used here.
+      # A dispatch run exports to the cache only.
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: freeswitch
+          file: freeswitch/Dockerfile
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            FS_VERSION=v1.11.3
+            SOUNDS=8000
+            GIT_REVISION=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+          outputs: ${{ github.ref_type == 'tag' && 'type=image,name=rasonyang/freeswitch-aicc,push-by-digest=true,name-canonical=true,push=true' || 'type=cacheonly' }}
+          cache-from: type=gha,scope=switch-${{ matrix.arch }}
+          cache-to: type=gha,scope=switch-${{ matrix.arch }},mode=max
+
+      - name: Export the digest
+        if: github.ref_type == 'tag'
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/digests"
+          touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        with:
+          name: switch-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  # Tags the two per-architecture digests as one multi-arch manifest.
+  switch-manifest:
+    name: switch-manifest
+    needs: [switch]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: switch-digest-*
+          merge-multiple: true
+
+      - name: Create the manifest
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # shellcheck disable=SC2046
+          docker buildx imagetools create -t "rasonyang/freeswitch-aicc:${GITHUB_REF_NAME}" \
+            $(printf 'rasonyang/freeswitch-aicc@sha256:%s ' *)
+
+      - name: Check both architectures are in it
+        run: |
+          image="rasonyang/freeswitch-aicc:${GITHUB_REF_NAME}"
+          docker buildx imagetools inspect "$image"
+          platforms="$(docker buildx imagetools inspect --raw "$image" \
+            | jq -r '.manifests[] | "\(.platform.os)/\(.platform.architecture)"')"
+          for want in linux/amd64 linux/arm64; do
+            if ! grep -qx "$want" <<<"$platforms"; then
+              echo "::error::${image} has no ${want} image"
+              exit 1
+            fi
+          done
+
   publish:
     name: publish
-    needs: [image]
+    needs: [image, switch-manifest]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -117,7 +267,8 @@ jobs:
       - name: Release notes
         run: scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
 
-      # No files: the release is the image, and this is the note that names it.
+      # No files: the release is the two images, and this is the note that
+      # names them.
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}

@@ -12,6 +12,10 @@
 # on both, and a FreeSWITCH-versioned tag gave a changed scripts/ nothing to be
 # named by. There is no latest: a tag that moves cannot be named.
 #
+# A release does not use this script: .github/workflows/release.yml builds and
+# pushes rasonyang/freeswitch-aicc:<tag> beside the application image, from the
+# tagged commit, with the same build args. This script is for a manual build.
+#
 # There is no staging step. The build context is freeswitch/ as it is in the
 # working tree, and everything else the image needs — the FreeSWITCH sources,
 # mod_audio_stream, the sound files — is fetched inside the build at a pin the

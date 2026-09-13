@@ -21,7 +21,7 @@ Nothing site-specific is baked in. The image carries no database credential, no 
 
 ## Tags
 
-Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.0-rc.3` is the switch for `rasonyang/ai-native-callcenter:v0.1.0-rc.3`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`). Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
+Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.0-rc.3` is the switch for `rasonyang/ai-native-callcenter:v0.1.0-rc.3`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`), published by the aicc repository's release workflow together with the application image. Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
 
 | Tag | Description |
 |---|---|
@@ -175,6 +175,6 @@ VERSION=v0.1.0-rc.3 MAKE_JOBS=3 freeswitch/build.sh                  # emulated 
 VERSION=v0.1.0-rc.3 SOUNDS=none freeswitch/build.sh                  # no sound files (queue hold music stops working)
 ```
 
-`VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.3`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.
+These are manual builds; a release is built and pushed by `.github/workflows/release.yml`. `VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.3`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.
 
 On Apple Silicon, run Colima with `--vz-rosetta` so the amd64 half compiles under Rosetta; QEMU user-mode emulation segfaults gcc at random.

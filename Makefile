@@ -42,7 +42,7 @@ fs-image: ## Build the switch image locally for this machine's architecture (LOA
 	LOAD=1 IMAGE=$(if $(FS_IMAGE),$(FS_IMAGE),aicc-freeswitch) freeswitch/build.sh
 
 .PHONY: fs-push
-fs-push: ## Build and push the multi-arch switch image (VERSION=v0.1.0 required, the application's release tag; refuses a dirty tree)
+fs-push: ## Build and push the multi-arch switch image by hand (VERSION=v0.1.0 required; refuses a dirty tree). A release is pushed by the release workflow
 	VERSION=$(VERSION) freeswitch/build.sh
 
 .PHONY: generate

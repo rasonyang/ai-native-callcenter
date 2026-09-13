@@ -14,8 +14,8 @@
 #   2. Otherwise the commit subjects since the previous `v*` tag, or the whole
 #      log when this is the first tag.
 #
-# Either way the image is named at the end, because the image is the release and
-# a reader needs the line that pulls it.
+# Either way the images are named at the end, because the two images are the
+# release and a reader needs the lines that pull them.
 set -euo pipefail
 
 tag="${1:-}"
@@ -89,17 +89,20 @@ fi
 
 cat <<EOF
 
-## The image
+## The images
 
 \`\`\`sh
 docker pull rasonyang/ai-native-callcenter:${tag}
+docker pull rasonyang/freeswitch-aicc:${tag}
 \`\`\`
 
-\`linux/amd64\` and \`linux/arm64\`, one executable with the SPA inside it and
-nothing else. Only exact tags are published — there is no \`latest\`, so a
-deployment names the build it runs.
+Both \`linux/amd64\` and \`linux/arm64\`, built from the same commit. The
+application image is one executable with the SPA inside it and nothing else;
+the switch image is FreeSWITCH with this release's configuration and Lua
+scripts. Run them together: they share the \`luacc.*\` contract, and a switch
+from another release breaks phone registration. Only exact tags are published —
+there is no \`latest\`, so a deployment names the build it runs.
 
-Point \`AICC_IMAGE\` at it and the stack pulls instead of building; the switch
-that goes with it is \`rasonyang/freeswitch-aicc:${tag}\`, and
-[deploy/README.md](deploy/README.md) is the whole procedure.
+Point \`AICC_IMAGE\` and \`AICC_FS_IMAGE\` at them and the stack pulls instead
+of building; [deploy/README.md](deploy/README.md) is the whole procedure.
 EOF
