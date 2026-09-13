@@ -14,8 +14,8 @@
 #   2. Otherwise the commit subjects since the previous `v*` tag, or the whole
 #      log when this is the first tag.
 #
-# Either way the artifact names are appended, because a reader who has just been
-# handed four archives needs to know which one is theirs.
+# Either way the image is named at the end, because the image is the release and
+# a reader needs the line that pulls it.
 set -euo pipefail
 
 tag="${1:-}"
@@ -92,18 +92,14 @@ cat <<EOF
 ## The image
 
 \`\`\`sh
-docker pull ghcr.io/rasonyang/ai-native-callcenter:${tag}
+docker pull rasonyang/ai-native-callcenter:${tag}
 \`\`\`
 
-Only exact tags are published — there is no \`latest\`.
+\`linux/amd64\` and \`linux/arm64\`, one executable with the SPA inside it and
+nothing else. Only exact tags are published — there is no \`latest\`, so a
+deployment names the build it runs.
 
-## The archives
-
-Each archive is one executable with the SPA inside it, beside a \`.sha256\` of
-the archive:
-
-    aicc_${tag}_<os>_<arch>.tar.gz
-    aicc_${tag}_<os>_<arch>.tar.gz.sha256
-
-built for \`linux_amd64\`, \`linux_arm64\`, \`darwin_amd64\` and \`darwin_arm64\`.
+Point \`AICC_IMAGE\` at it and the stack pulls instead of building; the switch
+that goes with it is \`rasonyang/freeswitch-aicc\`, and
+[deploy/README.md](deploy/README.md) is the whole procedure.
 EOF

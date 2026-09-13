@@ -40,9 +40,9 @@ for a switch assembled by hand.
 * The application's migrations applied, so the `luacc` views exist.
 * The read-only database role created:
   `psql "$AICC_DATABASE_URL" -v lua_password="'…'" -f deploy/sql/lua_role.sql`
-  That file is in the repository and **not in the release tarball**, which
-  carries the binary, `.env.example`, the licence and the notices and nothing
-  else. Fetch it at the exact tag being deployed — the path carries the tag, so
+  That file is in the repository and **not in the release image**, which carries
+  the executable and nothing else — it is distroless, with no shell to run a
+  script with anyway. Fetch it at the exact tag being deployed — the path carries the tag, so
   a release candidate is `v0.1.0-rc.1`, not `v0.1.0`, and the wrong one is a
   404 rather than a wrong file:
   `curl -fsSLO https://raw.githubusercontent.com/rasonyang/ai-native-callcenter/<tag>/deploy/sql/lua_role.sql`.

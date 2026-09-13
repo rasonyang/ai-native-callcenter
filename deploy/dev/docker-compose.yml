@@ -3,7 +3,7 @@
 # The full environment (app + FreeSWITCH + seed) lives in deploy/ (M5).
 services:
   postgres:
-    image: postgres:18
+    image: postgres:18-alpine
     container_name: aicc-postgres
     restart: unless-stopped
     ports:

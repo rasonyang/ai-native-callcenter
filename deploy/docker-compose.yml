@@ -40,9 +40,9 @@ services:
     # few minutes, then seconds afterwards. That is what keeps the stack and
     # the documentation in step before a release is cut, because the image a
     # published tag names is always older than the tree it came from. Set
-    # AICC_IMAGE to a published tag to skip the build; exact release tags only,
-    # there is no `latest`, so a deployment names the build it runs and a pull
-    # cannot change it.
+    # AICC_IMAGE to a published tag — rasonyang/ai-native-callcenter:<tag> — to
+    # skip the build; exact release tags only, there is no `latest`, so a
+    # deployment names the build it runs and a pull cannot change it.
     image: ${AICC_IMAGE:-aicc:local}
     build:
       context: ..

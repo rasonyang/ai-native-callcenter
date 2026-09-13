@@ -1,16 +1,22 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# Cutting a release: one executable per platform, and one container image.
+# Cutting a release: one container image, and that is the release.
 #
 #   git tag -a v0.1.0 -m "…" && git push origin v0.1.0
 #
-# The executable carries the SPA inside it, so every archive here is the whole
-# product — no assets to unpack beside it, nothing to serve it with.
+# The image carries the executable with the SPA embedded in it and nothing else
+# — no web server, no interpreter, no assets to unpack beside it. A deployment
+# names it in `AICC_IMAGE` and pulls; `deploy/README.md` is that procedure.
 #
 # Tags: a release publishes the image under the exact git tag and nothing else —
-# `ghcr.io/<owner>/<repo>:v0.1.0`. No `latest`, no floating `0.1`, no v-stripped
-# alias: a deployment names the build it runs, and a tag that moves cannot be
-# named. A `workflow_dispatch` run builds the image but pushes nothing.
+# `rasonyang/ai-native-callcenter:v0.1.0`. No `latest`, no floating `0.1`, no
+# v-stripped alias: a deployment names the build it runs, and a tag that moves
+# cannot be named. A `workflow_dispatch` run builds the image but pushes nothing.
+#
+# Credentials: the image goes to Docker Hub, beside `rasonyang/freeswitch-aicc`,
+# so the repository needs `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` (an access
+# token with Read & Write, not the account password) as secrets. Without them a
+# tag build fails at the login step rather than pushing nothing quietly.
 #
 # Pre-releases: a tag whose name contains a hyphen (`v0.1.0-rc.1`) is marked as a
 # pre-release on GitHub; a plain `v0.1.0` is a full release.
@@ -23,99 +29,13 @@ name: release
 on:
   push:
     tags: ["v*"]
-  # A dry run against any commit: builds and uploads nothing.
+  # A dry run against any commit: builds and pushes nothing.
   workflow_dispatch:
 
 permissions:
   contents: write   # creating the release
-  packages: write   # pushing to ghcr.io
 
 jobs:
-  # Built once and handed to every platform: the frontend is architecture
-  # independent, and four identical npm builds would only be four chances to
-  # differ.
-  spa:
-    name: spa
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-        working-directory: web
-      - run: npm run build
-        working-directory: web
-      - uses: actions/upload-artifact@v4
-        with:
-          name: spa
-          path: web/dist
-          retention-days: 1
-
-  binaries:
-    name: ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: spa
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { goos: linux,  goarch: amd64 }
-          - { goos: linux,  goarch: arm64 }
-          - { goos: darwin, goarch: amd64 }
-          - { goos: darwin, goarch: arm64 }
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: spa
-          path: web/dist
-
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          version="${GITHUB_REF_NAME}"
-          [ "${GITHUB_REF_TYPE}" = tag ] || version="$(git rev-parse --short HEAD)"
-          echo "version=${version}" >> "$GITHUB_ENV"
-          go build -trimpath -ldflags "-s -w -X main.version=${version}" -o aicc ./cmd/aicc
-
-      # The runner is linux/amd64, so exactly one matrix entry produces an
-      # executable it can run — and that one has to prove the ldflags landed.
-      # An archive that cannot say which build it is cannot be supported.
-      - name: Check the stamped version
-        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
-        run: |
-          out="$(./aicc --version)"
-          echo "$out"
-          case "$out" in
-            *"aicc ${version} "*) ;;
-            *) echo "::error::--version does not carry ${version}: ${out}"; exit 1 ;;
-          esac
-
-      - name: Package
-        run: |
-          name="aicc_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          mkdir -p "dist/$name"
-          cp aicc LICENSE NOTICE README.md ".env.example" "dist/$name/"
-          tar -czf "dist/$name.tar.gz" -C dist "$name"
-          (cd dist && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*.tar.gz*
-          retention-days: 1
-
   image:
     name: image
     runs-on: ubuntu-latest
@@ -127,14 +47,13 @@ jobs:
       - uses: docker/login-action@v3
         if: github.ref_type == 'tag'
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: rasonyang/ai-native-callcenter
           # The exact tag, and only that. `type=sha` gives a dispatch run
           # something to label the image it builds and never pushes.
           flavor: latest=false
@@ -142,8 +61,32 @@ jobs:
             type=ref,event=tag
             type=sha,enable=${{ github.ref_type != 'tag' }}
 
-      # The image builds the SPA itself, so it does not take the artifact
-      # above: one Dockerfile, one way to build it, wherever it is built.
+      # One architecture, loaded into the runner's own daemon, so that the
+      # image can be run before it is pushed: an image that cannot say which
+      # build it is cannot be supported. The multi-arch build below is the same
+      # Dockerfile against the same cache, so this costs a copy, not a build.
+      - name: Build linux/amd64 for the version check
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: aicc:version-check
+          build-args: VERSION=${{ github.ref_name }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Check the stamped version
+        run: |
+          out="$(docker run --rm aicc:version-check --version)"
+          echo "$out"
+          case "$out" in
+            *"aicc ${GITHUB_REF_NAME} "*) ;;
+            *) echo "::error::--version does not carry ${GITHUB_REF_NAME}: ${out}"; exit 1 ;;
+          esac
+
+      # The image builds the SPA itself, so there is no artifact to hand it:
+      # one Dockerfile, one way to build it, wherever it is built.
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -157,7 +100,7 @@ jobs:
 
   publish:
     name: publish
-    needs: [binaries, image]
+    needs: [image]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -168,15 +111,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: binaries-*
-          merge-multiple: true
-          path: dist
-
       - name: Release notes
         run: scripts/release-notes.sh "${GITHUB_REF_NAME}" > "${RUNNER_TEMP}/release-notes.md"
 
+      # No files: the release is the image, and this is the note that names it.
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
@@ -184,4 +122,3 @@ jobs:
           body_path: ${{ runner.temp }}/release-notes.md
           # A hyphen in the tag is a pre-release: v0.1.0-rc.1, v0.2.0-beta.2.
           prerelease: ${{ contains(github.ref_name, '-') }}
-          files: dist/*
