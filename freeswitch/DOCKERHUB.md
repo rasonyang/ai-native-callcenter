@@ -21,11 +21,11 @@ Nothing site-specific is baked in. The image carries no database credential, no 
 
 ## Tags
 
-Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.0-rc.4` is the switch for `rasonyang/ai-native-callcenter:v0.1.0-rc.4`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`), published by the aicc repository's release workflow together with the application image. Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
+Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.0` is the switch for `rasonyang/ai-native-callcenter:v0.1.0`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`), published by the aicc repository's release workflow together with the application image. Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
 
 | Tag | Description |
 |---|---|
-| `v0.1.0-rc.4` | aicc v0.1.0-rc.4, FreeSWITCH v1.11.3 |
+| `v0.1.0` | aicc v0.1.0, FreeSWITCH v1.11.3 |
 
 ## Quick start
 
@@ -36,7 +36,7 @@ docker run -d --name freeswitch --network host \
   -e AICC_BOT_HOST=10.0.0.6 \
   -e FS_ESL_PASSWORD="$(openssl rand -hex 16)" \
   -v fs-db:/usr/local/freeswitch/db -v fs-log:/usr/local/freeswitch/log \
-  rasonyang/freeswitch-aicc:v0.1.0-rc.4
+  rasonyang/freeswitch-aicc:v0.1.0
 
 docker exec freeswitch fs_cli -P 18021 -p "$FS_ESL_PASSWORD" -x status
 ```
@@ -169,10 +169,10 @@ FreeSWITCH runs in the foreground as the `freeswitch` user (`-nonat -nf -nc`); `
 ## Build
 
 ```bash
-VERSION=v0.1.0-rc.4 freeswitch/build.sh                              # both platforms, --push
+VERSION=v0.1.0 freeswitch/build.sh                                  # both platforms, --push
 VERSION=dev LOAD=1 PLATFORM=linux/arm64 freeswitch/build.sh          # one platform, into the local daemon
-VERSION=v0.1.0-rc.4 MAKE_JOBS=3 freeswitch/build.sh                  # emulated builds want 2-3
-VERSION=v0.1.0-rc.4 SOUNDS=none freeswitch/build.sh                  # no sound files (queue hold music stops working)
+VERSION=v0.1.0 MAKE_JOBS=3 freeswitch/build.sh                      # emulated builds want 2-3
+VERSION=v0.1.0 SOUNDS=none freeswitch/build.sh                      # no sound files (queue hold music stops working)
 ```
 
 These are manual builds; a release is built and pushed by `.github/workflows/release.yml`. `VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.3`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.

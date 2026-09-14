@@ -157,7 +157,7 @@ services:
     # injects what is below. freeswitch/DOCKERHUB.md is that contract in full.
     # Its tag is the application's release tag: the two share the luacc.*
     # contract, and a mismatched pair breaks phone registration.
-    image: ${AICC_FS_IMAGE:-rasonyang/freeswitch-aicc:v0.1.0-rc.4}
+    image: ${AICC_FS_IMAGE:-rasonyang/freeswitch-aicc:v0.1.0}
     restart: unless-stopped
     depends_on:
       lua-role:
