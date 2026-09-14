@@ -232,6 +232,11 @@ provider is one of those: a single provider answers every call, chosen at
 startup, and a call's language never selects it ([the provider
 notes](../docs/provider-extension.md)).
 
+The API is mounted at `/api/v1` on the same port, and
+[docs/openapi.json](../docs/openapi.json) is its contract: every path in it,
+such as `POST /auth/login` with `{"username":"admin","password":"aicc@123"}`,
+is reached as `http://<host>:8080/api/v1/auth/login`.
+
 There is no API-key setting: keys are issued through `POST /api-keys`, named
 and scoped, the first with the administrator's session. A session cookie must
 carry an `X-AICC-Csrf` header, any value, on anything that writes; a bearer key
