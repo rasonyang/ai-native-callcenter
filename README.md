@@ -127,6 +127,9 @@ Never the other way round.
   [`internal/seed/flows/`](internal/seed/flows/) for a working bilingual one.
 * **A new screen** follows the design system in
   [`web/CLAUDE.md`](web/CLAUDE.md), which is binding rather than advisory.
+* **An integration with another product** is a service behind the flow's
+  backend URL, never code in this tree:
+  [`CONTRIBUTING.md`](CONTRIBUTING.md#integrations-live-outside-the-tree).
 
 ## Status
 

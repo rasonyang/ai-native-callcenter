@@ -114,6 +114,8 @@ HTTP API 是**契约先行**的：[`docs/openapi.json`](docs/openapi.json) 是�
   [`internal/seed/flows/`](internal/seed/flows/) 里那条双语流程。
 * **新增页面**遵循 [`web/CLAUDE.md`](web/CLAUDE.md) 里的设计系统——那是硬性约束，
   不是建议。
+* **对接其他产品**是一个部署在流程后端地址之后的独立服务，不进入本仓库：
+  [`CONTRIBUTING.md`](CONTRIBUTING.md#integrations-live-outside-the-tree)。
 
 ## 当前状态
 
