@@ -2168,17 +2168,19 @@ partial semantics — the shape `internal/provider` was explicitly designed not 
 (`session.go:35-36`).
 
 **D17 — transcription is switchable in system administration, not only by env var.
-~~`PROVISIONAL`~~ → SETTLED by owner directive (2026-08-16): cost is the deployer's
-decision, so an administrator must be able to turn it off without a restart.**
-*Consequence for §13:* `AICC_TRANSCRIPTION_ENABLED` becomes the *deployment ceiling*
-(false = the feature does not exist, no listener bound), and a row in the existing
-`settings` table (`00001_foundation.sql:38-42`) is the *operational switch*, editable
-from an admin screen and readable per call at stream-start time.
-*Two things this drags in that the first draft did not have:* `settings` is currently
-inert — `[FACT]` M4 removed `GetSetting`/`UpsertSetting`/`PutSetting` as unused
-(`m4-cleanup-findings.md:186-190`), so the accessors must come back — and there is no
-settings screen in the SPA, so `/admin` grows one control. Both are small; neither is
-free, and neither was in the milestone plan before this ruling.
+~~`PROVISIONAL`~~ → ~~SETTLED by owner directive (2026-08-16)~~ → WITHDRAWN by owner
+directive (2026-09-15): not being built at this stage.**
+The requirement was that an administrator be able to turn transcription off without a
+restart, on the reasoning that cost is the deployer's decision. It was never implemented,
+and the mechanism it named has since stopped existing: it put the operational switch in a
+row of the `settings` table, and migration `00022` dropped that table — configuration has
+one home in this product and it is not the database. No accessor came back, no `/admin`
+control was added, and nothing reads a per-call switch.
+What stands is §13's table unchanged, where `AICC_TRANSCRIPTION_ENABLED` is the only
+switch and false means no listener is bound and no tap is issued. **The deployment ceiling
+and the operational control are therefore the same thing** — which is the outcome this
+decision set out to avoid, recorded so that a future attempt starts from that fact rather
+than from the original ruling.
 
 **D18 — click-to-dial outbound is in scope, which is why the trigger is `CHANNEL_BRIDGE`
 and not `bridge-agent-start`. ~~`PROVISIONAL`~~ → SETTLED by owner directive
@@ -2251,8 +2253,8 @@ leg now opens two recognition sessions, one per stereo channel. `Registry.For` i
 nothing — the spend is `streamin/session.go`'s `client.Start`, reached only once a tap
 connects and the ingest finds the actor — so it tracks calls that are really transcribed.
 `AICC_TRANSCRIPTION_ENABLED` is still the only switch, and it is a deployment ceiling
-rather than an operator's control: D17's admin-operable version assumed the `settings`
-table, which migration `00022` deliberately dropped.
+rather than an operator's control — D17, which wanted the latter, is withdrawn rather
+than pending.
 
 **D22 — one fault is reported once. SETTLED (2026-08-26). Landed the same day.**
 
