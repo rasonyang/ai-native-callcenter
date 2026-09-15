@@ -41,6 +41,11 @@
       <condition field="destination_number" expression="^(\+?[0-9]{7,16})$">
         <action application="set" data="hangup_after_bridge=true"/>
         <action application="set" data="continue_on_fail=false"/>
+        <!-- Records the placement under the same UTC-dated key the application
+             looks the object up by, if the DID the far end will see has
+             recording enabled. Runs after trunk_clid is decided and before the
+             trunk leg exists, and never fails the call. -->
+        <action application="lua" data="aicc_outbound.lua"/>
         <action application="bridge" data="{absolute_codec_string=PCMU,PCMA,origination_caller_id_number=${trunk_clid},origination_caller_id_name=${trunk_clid}}sofia/gateway/pstn_gateway/$1"/>
       </condition>
     </extension>
