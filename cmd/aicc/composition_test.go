@@ -33,10 +33,11 @@ import (
 // with a broken run() as readily as a correct one.
 
 type fakeCoordinator struct {
-	taps      telephony.Tapper
-	audiences telephony.Audiences
-	queues    telephony.QueueCatalog
-	cdr       *telephony.CDRAssembler
+	taps        telephony.Tapper
+	audiences   telephony.Audiences
+	transcripts telephony.TranscriptStarter
+	queues      telephony.QueueCatalog
+	cdr         *telephony.CDRAssembler
 	// hookWhenCDRAttached is what the registry's finish hook did at the moment
 	// AttachCDR was called. The real coordinator *sets* that hook, so a
 	// composition that wrapped it first would have its wrapper thrown away —
@@ -51,6 +52,8 @@ type fakeCoordinator struct {
 func (f *fakeCoordinator) AttachTaps(t telephony.Tapper) { f.taps = t }
 
 func (f *fakeCoordinator) AttachAudiences(a telephony.Audiences) { f.audiences = a }
+
+func (f *fakeCoordinator) AttachTranscripts(s telephony.TranscriptStarter) { f.transcripts = s }
 
 func (f *fakeCoordinator) AttachQueues(q telephony.QueueCatalog) { f.queues = q }
 
@@ -310,6 +313,16 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	t.Run("the coordinator has the tap", func(t *testing.T) {
 		if f.coordinator.taps != telephony.Tapper(f.taps) {
 			t.Fatalf("taps = %#v, want the media tap", f.coordinator.taps)
+		}
+	})
+
+	t.Run("the coordinator opens the transcript actor", func(t *testing.T) {
+		want := telephony.TranscriptStarter(transcriptStarter{reg: f.transcripts})
+		if f.coordinator.transcripts != want {
+			t.Fatalf("transcripts = %#v, want the transcript registry — without it "+
+				"a call with no bot phase attaches a tap that the ingest then "+
+				"refuses for want of an actor, and the human phase is never "+
+				"transcribed", f.coordinator.transcripts)
 		}
 	})
 

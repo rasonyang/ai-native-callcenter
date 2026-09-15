@@ -405,6 +405,8 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 			c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 			taps := newRecordingTapper()
 			c.AttachTaps(taps)
+			transcripts := newRecordingTranscripts()
+			c.AttachTranscripts(transcripts)
 
 			ctx := t.Context()
 			minted := uuid.New().String()
@@ -422,11 +424,32 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 			c.Handle(ctx, raw("CHANNEL_BRIDGE", agentChan, "outbound",
 				merged(vars, map[string]string{"Other-Leg-Unique-ID": callerChan})))
 
+			callID, err := uuid.Parse(minted)
+			if err != nil {
+				t.Fatalf("the call id this test minted is not a uuid: %v", err)
+			}
+
 			if tc.wantTaps {
 				waitFor(t, func() bool {
 					attached, _, _, _ := taps.snapshot()
 					return len(attached) > 0
 				})
+				// A tap without an actor is a stream the ingest turns away: the
+				// agent's panel stays empty for the whole call and the human
+				// phase reaches no CDR. The tap and the actor are decided in one
+				// place precisely so this cannot be true of one and not the
+				// other, which is what D21 was.
+				answeredAt, ok := transcripts.forCall(callID)
+				if !ok {
+					t.Fatalf("a %s call was tapped but has no transcript actor — "+
+						"the ingest refuses the stream and the human phase is "+
+						"transcribed nowhere", tc.hint)
+				}
+				if answeredAt.IsZero() {
+					t.Errorf("the transcript actor for a %s call is anchored at the "+
+						"zero time, so every line's offsetMs is measured from "+
+						"nothing", tc.hint)
+				}
 				return
 			}
 			// Nothing to wait for, so the absence is given the same window the
@@ -436,6 +459,11 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 			if attached, _, _, _ := taps.snapshot(); len(attached) != 0 {
 				t.Errorf("a %s call was tapped on %v — there is no customer on it to "+
 					"transcribe, and the stream is refused for want of an actor", tc.hint, attached)
+			}
+			if _, ok := transcripts.forCall(callID); ok {
+				t.Errorf("a %s call opened a transcript actor — there is no customer "+
+					"on it to transcribe, and an actor no tap will ever write to is "+
+					"a goroutine per call spent on nothing", tc.hint)
 			}
 		})
 	}
@@ -607,6 +635,35 @@ func (r *recordingAudiences) forCall(callID uuid.UUID) ([]uuid.UUID, bool) {
 	defer r.mu.Unlock()
 	got, ok := r.set[callID]
 	return got, ok
+}
+
+// recordingTranscripts records the calls whose transcript actor the coordinator
+// asked for, and the instant it anchored them at.
+//
+// Whether an actor exists is not an implementation detail the ingest can work
+// around: it looks one up before it will accept a tap's stream, and closes the
+// socket when it finds none. So this is where "a tap implies an actor" becomes
+// something a test can hold the coordinator to.
+type recordingTranscripts struct {
+	mu      sync.Mutex
+	started map[uuid.UUID]time.Time
+}
+
+func newRecordingTranscripts() *recordingTranscripts {
+	return &recordingTranscripts{started: map[uuid.UUID]time.Time{}}
+}
+
+func (r *recordingTranscripts) Start(callID uuid.UUID, _ events.CallType, answeredAt time.Time) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.started[callID] = answeredAt
+}
+
+func (r *recordingTranscripts) forCall(callID uuid.UUID) (time.Time, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	at, ok := r.started[callID]
+	return at, ok
 }
 
 // Who may see a call's live transcript comes from who is on the call, and only

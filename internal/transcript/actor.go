@@ -362,8 +362,9 @@ func (r *Registry) Lookup(callID uuid.UUID) (*Actor, bool) {
 }
 
 // SetAudience records who may see a call's transcript, if the call has an
-// actor. A call with none is not an error: the bot phase creates the actor and
-// a switch-only call never has one.
+// actor. A call with none is not an error: an actor is opened either by a bot
+// phase or, once the call reaches an agent, by the same place that attaches the
+// tap — and a call with neither is one nothing transcribes.
 func (r *Registry) SetAudience(callID uuid.UUID, agentIDs []uuid.UUID) {
 	r.mu.Lock()
 	a, ok := r.actors[callID]

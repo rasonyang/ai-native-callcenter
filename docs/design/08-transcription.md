@@ -2210,7 +2210,7 @@ is excluded on the day it starts being emitted rather than quietly acquiring a t
 that arm is unreachable today and is asserted as such rather than tested.
 
 **D21 — a human-only call has no transcript actor, so D18 is half-implemented.
-`OPEN`. Found live 2026-08-26; not scheduled.**
+`CLOSED` 2026-09-15. Found live 2026-08-26.**
 
 `[FACT]` `Registry.For` — the only thing that creates a transcript actor — has exactly
 one caller in the repository, `internal/aicall/ledger.go:222`. A call reaches an actor by
@@ -2232,9 +2232,27 @@ every agent call rather than only on calls the bot touched — and brings with i
 actor retirement for calls that never pass through `aicall`'s ledger. It is a milestone
 item, not a patch.
 
-*Until it is done*, a human-only INBOUND/OUTBOUND call still attaches a tap that is then
-refused. That refusal is now reported once rather than three times (D22) and is otherwise
-harmless: no call, CDR or recording is affected.
+*What landed, 2026-09-15:* the coordinator opens the actor where it attaches the tap —
+in `tapAgentLeg`, under the same two gates (the call is `INBOUND` or `OUTBOUND`, and the
+channel carries a party with an `AgentID`) and immediately before the attach. The two are
+now one decision rather than two judgements about the same call made in two places, which
+is the shape the defect had.
+
+Three of the four costs above turned out to be already paid. The audience announcement
+needed no wiring: `announceAudience` runs beside the attach and `SetAudience` is a
+documented no-op until an actor exists, so it began working the moment one did. Neither did
+retirement: `retireTranscriptWithCall` sits on `Registry.OnCallFinished`, which fires for
+every call and not only `aicall`'s. The anchor is `call.AnsweredAt()` — the earliest answer
+by anybody, which is the same instant `record_session` begins, so the transcript and the
+recording share a timeline.
+
+The remaining cost is real and unchanged: a human-only INBOUND/OUTBOUND call with an agent
+leg now opens two recognition sessions, one per stereo channel. `Registry.For` itself costs
+nothing — the spend is `streamin/session.go`'s `client.Start`, reached only once a tap
+connects and the ingest finds the actor — so it tracks calls that are really transcribed.
+`AICC_TRANSCRIPTION_ENABLED` is still the only switch, and it is a deployment ceiling
+rather than an operator's control: D17's admin-operable version assumed the `settings`
+table, which migration `00022` deliberately dropped.
 
 **D22 — one fault is reported once. SETTLED (2026-08-26). Landed the same day.**
 

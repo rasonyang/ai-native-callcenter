@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -36,6 +37,7 @@ type switchWiring interface {
 	AttachTaps(telephony.Tapper)
 	AttachCDR(*telephony.CDRAssembler)
 	AttachAudiences(telephony.Audiences)
+	AttachTranscripts(telephony.TranscriptStarter)
 	AttachQueues(telephony.QueueCatalog)
 	ReconcileWaiting(ctx context.Context)
 }
@@ -84,7 +86,7 @@ type composition struct {
 	CDR           *telephony.CDRAssembler
 	Queues        telephony.QueueCatalog
 	WrapUps       agents.WrapUpLedger
-	Transcripts   transcriptRetirer
+	Transcripts   transcriptRegistry
 	Audiences     telephony.Audiences
 	Taps          telephony.Tapper
 	Registrations func() ([]telephony.Registration, error)
@@ -159,6 +161,13 @@ func (c composition) connect() {
 
 	if c.Taps != nil {
 		c.Coordinator.AttachTaps(c.Taps)
+		// Attached with the tap, because the two are one decision: the
+		// coordinator opens the actor at the moment it attaches the tap and
+		// under the same gates, so a call that is transcribed always has
+		// somewhere for the transcript to go. A deployment that turns
+		// transcription off has no tap and therefore wants no actor — which is
+		// why this is inside the same branch rather than beside it.
+		c.Coordinator.AttachTranscripts(transcriptStarter{reg: c.Transcripts})
 		// Switch events start and stop the tap in the ordinary case; the
 		// call's own retirement is what makes it converge in every other one.
 		c.Registry.OnCallRetired = detachTapsWithCall(c.Registry.OnCallRetired, c.Taps)
@@ -234,6 +243,26 @@ func (c composition) onSwitchConnected(ctx context.Context) {
 // transcriptRetirer is the part of the transcript registry this file needs.
 type transcriptRetirer interface {
 	Close(callID uuid.UUID)
+}
+
+// transcriptRegistry is the registry as the composition holds it: the
+// coordinator opens a call's actor through it, and the call's own end closes it.
+type transcriptRegistry interface {
+	transcriptRetirer
+	For(callID uuid.UUID, callType events.CallType, answeredAt time.Time) *transcript.Actor
+}
+
+// transcriptStarter names the coordinator's half of For.
+//
+// The coordinator says "this call has an agent on it now" and the registry
+// turns that into the actor the ingest will look for; neither needs the other's
+// vocabulary, which is why the registry's For is not simply renamed. It is
+// deliberately paired with the tap in the coordinator rather than wired
+// somewhere of its own — see AttachTranscripts.
+type transcriptStarter struct{ reg transcriptRegistry }
+
+func (s transcriptStarter) Start(callID uuid.UUID, callType events.CallType, answeredAt time.Time) {
+	s.reg.For(callID, callType, answeredAt)
 }
 
 // retireTranscriptWithCall composes the call-finished hook so that a call's

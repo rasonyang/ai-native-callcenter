@@ -4,15 +4,30 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
+	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
 
-type retirer struct{ closed []uuid.UUID }
+type retirer struct {
+	closed  []uuid.UUID
+	started []uuid.UUID
+}
 
 func (r *retirer) Close(id uuid.UUID) { r.closed = append(r.closed, id) }
+
+// For records that a call's actor was asked for. It returns nil because what
+// the actor does once it exists is internal/transcript's to prove, not this
+// file's; the composition only has to show that the registry is reachable from
+// the coordinator, so that a call with a tap always has somewhere to write.
+func (r *retirer) For(id uuid.UUID, _ events.CallType, _ time.Time) *transcript.Actor {
+	r.started = append(r.started, id)
+	return nil
+}
 
 // The composition has two ways to be wrong and both are silent.
 //

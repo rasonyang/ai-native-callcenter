@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -72,13 +73,14 @@ var (
 // rejected, which is also what makes the application safe to restart while
 // calls are up.
 type Coordinator struct {
-	registry  *Registry
-	adapter   *Adapter
-	agents    AgentLookup
-	pub       Publisher
-	cdr       *CDRAssembler
-	taps      Tapper
-	audiences Audiences
+	registry    *Registry
+	adapter     *Adapter
+	agents      AgentLookup
+	pub         Publisher
+	cdr         *CDRAssembler
+	taps        Tapper
+	audiences   Audiences
+	transcripts TranscriptStarter
 	// callData is what a placed call was asked to carry. Only a call placed
 	// through this application has any, and it arrives here rather than
 	// through the switch: business data on a channel variable is business
@@ -111,6 +113,24 @@ type Coordinator struct {
 // delivery are not its business.
 type Audiences interface {
 	SetAudience(callID uuid.UUID, agentIDs []uuid.UUID)
+}
+
+// TranscriptStarter opens a call's transcript actor, so that a call without a
+// bot phase still has one by the time its tap connects. Nil disables it.
+//
+// It exists because the actor used to be created only where a bot leg was
+// offered, while the tap went on wherever a call had a customer and an agent on
+// it (D18, D20). A human-only call therefore satisfied the second condition and
+// not the first: the tap attached, the ingest found nothing to write to, and
+// the stream was refused. Calling this from the same place that attaches the
+// tap is what makes "a tap implies an actor" one rule instead of two that can
+// drift apart again.
+//
+// It is a port for the same reason the other two are: this package knows when a
+// call has an agent on it, and the transcript's ordering, storage and delivery
+// are not its business.
+type TranscriptStarter interface {
+	Start(callID uuid.UUID, callType events.CallType, answeredAt time.Time)
 }
 
 // Tapper starts and stops the media tap that feeds live transcription. Nil
@@ -147,6 +167,9 @@ func (c *Coordinator) AttachTaps(t Tapper) { c.taps = t }
 
 // AttachAudiences points party changes at the live transcript's addressing.
 func (c *Coordinator) AttachAudiences(a Audiences) { c.audiences = a }
+
+// AttachTranscripts points the bridge at the actor a tapped call writes to.
+func (c *Coordinator) AttachTranscripts(s TranscriptStarter) { c.transcripts = s }
 
 // announceAudience tells the transcript who is on this call.
 //
@@ -873,6 +896,20 @@ func (c *Coordinator) tapAgentLeg(callID uuid.UUID, channels ...string) {
 					continue
 				}
 				agentID, partyID := *p.AgentID, p.PartyID
+				// Under the same two gates as the tap, and immediately before
+				// it, so a call that gets a tap is a call that has somewhere to
+				// write. A call with a bot phase already has its actor — For is
+				// idempotent — and a call without one gets it here, which is
+				// the whole of what was missing.
+				//
+				// answeredAt is the earliest answer by anybody: the anchor the
+				// actor measures offsetMs from, and the same instant
+				// record_session starts, so the transcript and the recording
+				// share a timeline. A bot call anchored at its INVITE instead,
+				// and keeps the actor it made then.
+				if c.transcripts != nil {
+					c.transcripts.Start(callID, call.CallType, call.AnsweredAt())
+				}
 				c.taps.Attach(callID, &agentID, &partyID, channelID, call.Language)
 			}
 		}
