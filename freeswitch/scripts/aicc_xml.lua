@@ -60,18 +60,26 @@ end
 -- a TLS proxy and authenticates against that hostname. Lookups therefore key
 -- on the extension number alone.
 --
--- The credential is a1-hash, never a password, and it is minted per session by
--- the application: luacc.directory carries the hash of whichever SIP session is
--- valid for that number right now, and NULL when there is none. An extension
--- nobody has signed in at is an extension nothing may register as.
+-- One credential per entry, chosen here, and the session's comes first.
+-- luacc.directory carries two candidates: the a1-hash of whichever SIP session
+-- is valid for that number right now, NULL when there is none, and the
+-- extension's static password. An agent signed in to the SPA has a session, and
+-- that session's hash is the credential their phone was issued — zero-config
+-- stays the main path and nothing about it changes. An extension nobody is
+-- signed in at falls back to the static password, so a handset configured by
+-- hand can register (owner directive 2026-09-16); phase 1 is browser-phone
+-- first, which is not the same as forbidding every other phone.
 --
--- That NULL has to be refused explicitly. sofia_reg.c:3327-3335 treats a
--- directory user carrying neither password nor a1-hash as AUTH_OK — a user
--- with no credential authenticates *anything* — unless the entry says
+-- Exactly one of the two is emitted, never both. FreeSWITCH verifies a single
+-- credential and an entry offering two says nothing useful about which one the
+-- switch honoured.
+--
+-- An entry with neither has to be refused explicitly. sofia_reg.c:3327-3335
+-- treats a directory user carrying neither password nor a1-hash as AUTH_OK — a
+-- user with no credential authenticates *anything* — unless the entry says
 -- allow-empty-password is false. So two things happen below and both matter:
 -- every entry emits allow-empty-password=false, and an authentication lookup
--- with no live session returns nothing at all rather than a user with no
--- credential.
+-- that found no credential at all returns nothing rather than a user with none.
 --
 -- Only the authentication lookup. The same section answers dial-string
 -- resolution, user_call and mod_callcenter's agent tracking, and those ask
@@ -87,12 +95,15 @@ end
 -- accounts in the aicc dialplan for the same reason: the account, not the
 -- call, is what aicc owns.
 local function directory_document(domain, row)
-  -- The credential, when there is one. A non-authentication lookup for an
-  -- extension with no live session gets an entry with no credential at all,
-  -- which is why allow-empty-password sits beside it unconditionally.
-  local a1 = ""
+  -- The credential, when there is one: the live session's hash, else the
+  -- static password, never the two together. An extension with neither gets an
+  -- entry with no credential at all, which is why allow-empty-password sits
+  -- beside it unconditionally.
+  local credential = ""
   if row.a1_hash ~= nil and row.a1_hash ~= "" then
-    a1 = string.format('          <param name="a1-hash" value="%s"/>\n', escape(row.a1_hash))
+    credential = string.format('          <param name="a1-hash" value="%s"/>\n', escape(row.a1_hash))
+  elseif row.password ~= nil and row.password ~= "" then
+    credential = string.format('          <param name="password" value="%s"/>\n', escape(row.password))
   end
 
   local auto_answer = ""
@@ -158,7 +169,7 @@ local function directory_document(domain, row)
     </domain>
   </section>
 </document>]],
-    escape(domain), escape(row.number), a1,
+    escape(domain), escape(row.number), credential,
     escape(row.display_name ~= "" and row.display_name or row.number),
     escape(row.number), escape(row.number), auto_answer, track)
 end
@@ -172,7 +183,7 @@ local function handle_directory(params)
   if dbh == nil then return nil end
 
   local found = nil
-  dbh:query("SELECT number, a1_hash, display_name, is_auto_answer, callcenter_agent_name " ..
+  dbh:query("SELECT number, password, a1_hash, display_name, is_auto_answer, callcenter_agent_name " ..
     "FROM luacc.directory WHERE number = "
     .. quote(user), function(row)
       found = row
@@ -181,14 +192,17 @@ local function handle_directory(params)
 
   if found == nil then return nil end
 
-  -- An authentication lookup with no live session is a lookup that found
-  -- nothing. Returning the user without a credential would authenticate every
-  -- REGISTER for that extension (sofia_reg.c:3327-3335); returning nothing
-  -- makes the switch answer 403, which is the true answer.
-  if params:getHeader("action") == "sip_auth"
-      and (found.a1_hash == nil or found.a1_hash == "") then
+  -- An authentication lookup that found no credential at all is a lookup that
+  -- found nothing. extensions.password is NOT NULL, so this needs a session to
+  -- be absent and the password to be empty — but returning the user without a
+  -- credential would authenticate every REGISTER for that extension
+  -- (sofia_reg.c:3327-3335), and returning nothing makes the switch answer
+  -- 403, which is the true answer.
+  local has_session = found.a1_hash ~= nil and found.a1_hash ~= ""
+  local has_password = found.password ~= nil and found.password ~= ""
+  if params:getHeader("action") == "sip_auth" and not has_session and not has_password then
     freeswitch.consoleLog("info",
-      "aicc_xml: no active sip session for " .. tostring(user) .. "; refusing authentication\n")
+      "aicc_xml: no credential for " .. tostring(user) .. "; refusing authentication\n")
     return nil
   end
 

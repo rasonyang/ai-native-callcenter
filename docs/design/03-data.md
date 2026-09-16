@@ -228,7 +228,11 @@ webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; 
 ## 4. The Lua contract (`luacc` views)
 
 ```sql
-luacc.directory  (number, password, is_enabled, display_name, is_auto_answer)          -- from extensions ⋈ agents
+luacc.directory  (number, password, display_name, is_enabled, is_auto_answer,
+                  callcenter_agent_name, a1_hash)
+                 -- from extensions ⋈ agents ⋈ the agent's unexpired sip_sessions row.
+                 -- Two credentials offered, one chosen by the handler: a1_hash is the
+                 -- live session's and wins, password is the static fallback (01 §3).
 luacc.dids       (number, language, is_recording_enabled, fallback_queue_ext_number, is_enabled)
                  -- the dialplan needs only: is this number ours, record it?, and where to
                  -- send the caller if the bot cannot take the call. Which flow runs is

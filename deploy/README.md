@@ -77,7 +77,7 @@ else is left as it is.
 | | |
 |---|---|
 | Accounts | `admin` (administrator), `supervisor` (supervisor), `wei` / `amy` / `ben` (agents), password `aicc@123` |
-| Extensions | `amy` 1000, `wei` 1001, `ben` 1002. The SIP password is `aicc@123` and registers nothing: an agent's browser phone is issued its credentials by the platform when they sign in. The stored password is kept, and still readable through `GET /extensions/{id}/password`, for API compatibility alone |
+| Extensions | `amy` 1000, `wei` 1001, `ben` 1002. The SIP password is `aicc@123`, readable through `GET /extensions/{id}/password`. An agent's browser phone is issued its own credentials by the platform when they sign in and uses those; the static password is what a phone configured by hand registers with while nobody is signed in at that extension |
 | Queues | `support-en` on 7001, `support-zh` on 7002; `wei` and `amy` staff the first, `ben` the second |
 | Customers | Eighteen numbers a SIP phone may register as: 13800000001–13800000009 and (212) 555-0101 – (212) 555-0109, password `aicc@123`, at `<FS_EXTERNAL_IP>:5060` with `<FS_EXTERNAL_IP>` as the domain. Until a phone registers as one, that number does not exist to the switch |
 | History | Seven deterministic days of calls, queue events and presence, so the wallboard and the reports are not empty |

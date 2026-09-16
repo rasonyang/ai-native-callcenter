@@ -912,3 +912,133 @@ func TestMigrationsKeepTheAuditTrailsHistory(t *testing.T) {
 			anonymous)
 	}
 }
+
+// 00033 hands luacc.directory its fallback password back, and a view migration
+// has two failure modes a fresh database cannot show.
+//
+// The first is the grant: the migration has to DROP the view to change its
+// column list, and a drop takes every privilege on it with no warning. A
+// deployment that lost it has a switch that cannot read its directory, so no
+// phone registers at all — which looks nothing like "a view changed shape".
+// The role only exists on a database somebody ran lua_role.sql against, so it
+// is created here first, the way a running deployment already has it.
+//
+// The second is the rows. A deployment being migrated has extensions with
+// passwords and agents holding live sessions, and the view has to keep telling
+// the truth about both across the change and across a rollback.
+func TestMigrationsGiveTheDirectoryItsFallbackPasswordBack(t *testing.T) {
+	dsn := scratchDB(t)
+	db := openScratch(t, dsn)
+	gooseFor(t)
+	ctx := context.Background()
+
+	// Stop one short, so the fixture is written against the shape 00033 finds.
+	if err := goose.UpToContext(ctx, db, "migrations", 32); err != nil {
+		t.Fatalf("migrating to 32 failed: %v", err)
+	}
+	checkGrant := ensureLuaRole(t, db)
+
+	const (
+		password = "aicc@123"
+		hash     = "89abcdef89abcdef89abcdef89abcdef"
+	)
+	ids := seedAgentAtExtension(t, db, "1001")
+	if _, err := db.ExecContext(ctx,
+		`UPDATE extensions SET password = $1 WHERE id = $2`, password, ids.extID); err != nil {
+		t.Fatalf("give the extension a password: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO sip_sessions (agent_id, extension, a1_hash, expires_at)
+		 VALUES ($1, '1001', $2, now() + interval '1 hour')`, ids.agentID, hash); err != nil {
+		t.Fatalf("seed a live session: %v", err)
+	}
+	// The grant the migration must restore is one this database already holds.
+	if checkGrant && !luaCanRead(t, db) {
+		t.Fatal("the Lua role cannot read luacc.directory before the migration; " +
+			"the fixture is wrong, not the migration")
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("migrating a database with phones on it failed: %v", err)
+	}
+
+	if checkGrant && !luaCanRead(t, db) {
+		t.Error("the migration dropped the view and did not give the Lua role its " +
+			"SELECT back — the switch would read no directory and nothing would register")
+	}
+	if got := directoryPassword(t, db, "1001"); got == nil || *got != password {
+		t.Errorf("password = %v after the migration, want the extension's %q", got, password)
+	}
+	if got := directoryHash(t, db, "1001"); got == nil || *got != hash {
+		t.Errorf("a1_hash = %v after the migration, want the live session's %q", got, hash)
+	}
+
+	// Down returns the view to 00031's shape without taking the rows or the
+	// grant with it, which is the state a rollback has to leave behind.
+	if err := goose.DownToContext(ctx, db, "migrations", 32); err != nil {
+		t.Fatalf("rolling 00033 back failed: %v", err)
+	}
+	if cols := columnsOf(t, db, "luacc", "directory"); slicesContains(cols, "password") {
+		t.Errorf("after the rollback luacc.directory has %v, want the password gone again", cols)
+	}
+	if checkGrant && !luaCanRead(t, db) {
+		t.Error("the rollback dropped the view and did not give the Lua role its SELECT back")
+	}
+	if got := directoryHash(t, db, "1001"); got == nil || *got != hash {
+		t.Errorf("a1_hash = %v after the rollback, want the session still there", got)
+	}
+
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		t.Fatalf("re-applying failed: %v", err)
+	}
+}
+
+// ensureLuaRole makes the confined Lua role exist, and reports whether the
+// grant assertions can be trusted. Roles are cluster-wide, so a role this test
+// created is removed again and one it found is left exactly as it was.
+func ensureLuaRole(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	ctx := context.Background()
+
+	var exists bool
+	if err := db.QueryRowContext(ctx,
+		`SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aicc_lua')`).Scan(&exists); err != nil {
+		t.Fatalf("look for the Lua role: %v", err)
+	}
+	if !exists {
+		if _, err := db.ExecContext(ctx, `CREATE ROLE aicc_lua NOLOGIN`); err != nil {
+			// No permission to create one, or something else made it first.
+			// The migration's DO block skips a role that is not there, so
+			// there is nothing left to assert.
+			t.Logf("no Lua role and none could be created (%v); the grant is not checked", err)
+			return false
+		}
+		t.Cleanup(func() {
+			// Every privilege the role holds is a dependency PostgreSQL will
+			// refuse to drop the role over, and they live in this database,
+			// which outlives this cleanup by one step.
+			_, _ = db.Exec(`DROP OWNED BY aicc_lua`)
+			if _, err := db.Exec(`DROP ROLE IF EXISTS aicc_lua`); err != nil {
+				t.Errorf("the Lua role this test created outlived it: %v", err)
+			}
+		})
+	}
+	// 00031 and 00033 both grant on the view; make sure the pre-migration
+	// state has it whether or not the role existed when they ran.
+	if _, err := db.ExecContext(ctx, `GRANT SELECT ON luacc.directory TO aicc_lua`); err != nil {
+		t.Fatalf("grant the Lua role its SELECT: %v", err)
+	}
+	return true
+}
+
+// luaCanRead asks the server what the view's ACL says, which is the only place
+// the answer lives after a DROP.
+func luaCanRead(t *testing.T, db *sql.DB) bool {
+	t.Helper()
+	var ok bool
+	if err := db.QueryRowContext(context.Background(),
+		`SELECT has_table_privilege('aicc_lua', 'luacc.directory', 'SELECT')`).Scan(&ok); err != nil {
+		t.Fatalf("read the directory's privileges: %v", err)
+	}
+	return ok
+}

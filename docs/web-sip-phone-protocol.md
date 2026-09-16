@@ -169,9 +169,12 @@ no longer valid.
 - **The credential stays in the browser that was given it.** Same-window,
   same-origin `postMessage` is the only path; nothing is written to
   `localStorage`, a URL or a request to a third party.
-- **The static extension password no longer authenticates a registration.**
-  `extensions.password` and `GET /extensions/{extensionId}/password` remain for
-  API compatibility; the switch accepts only an active session's a1-hash.
+- **The session credential takes precedence over the static one.** The switch
+  is offered one credential per extension: an active session's a1-hash where
+  there is one, and `extensions.password` (readable through
+  `GET /extensions/{extensionId}/password`) where there is not. So a phone
+  configured by hand still registers when nobody is signed in, and stops being
+  the credential in use the moment somebody is.
 
 ## 6. What the extension has to do, and why
 

@@ -11,14 +11,16 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-// 00031 removes the last plaintext SIP password from the switch's contract and
-// replaces it with a session-scoped digest.
+// 00031 replaces the switch's plaintext SIP password with a session-scoped
+// digest, and 00033 puts the password back beside it as the fallback for a
+// phone the platform never provisioned. The view offers both and the Lua
+// handler picks one, session first.
 //
-// Reading the file cannot tell you whether the view really lost a column —
-// PostgreSQL will not drop one through CREATE OR REPLACE, so the migration has
-// to drop and recreate, and a drop silently takes the Lua role's grant with it.
-// Nor can reading tell you whether the join actually filters on expiry. Both
-// are checked here against a server.
+// Reading the files cannot tell you whether the view really gained and lost
+// columns — PostgreSQL will not drop one through CREATE OR REPLACE, so each
+// migration has to drop and recreate, and a drop silently takes the Lua role's
+// grant with it. Nor can reading tell you whether the join actually filters on
+// expiry. Both are checked here against a server.
 //
 // Needs AICC_TEST_DATABASE_URL; see migrate_test.go.
 
@@ -104,9 +106,11 @@ func TestSIPSessionsRefuseAnythingThatIsNotAnMD5Hex(t *testing.T) {
 	}
 }
 
-// The switch's contract: no password column, and the hash of whichever session
-// is valid right now.
-func TestTheDirectoryHandsOutASessionHashRatherThanAPassword(t *testing.T) {
+// The switch's contract: the hash of whichever session is valid right now, and
+// the static password beside it for when there is none (00033). Which of the
+// two reaches FreeSWITCH is the Lua handler's decision; the view's job is to
+// offer both and to keep the hash honest about expiry.
+func TestTheDirectoryOffersASessionHashAheadOfTheStaticPassword(t *testing.T) {
 	dsn := scratchDB(t)
 	db := openScratch(t, dsn)
 	gooseFor(t)
@@ -117,8 +121,8 @@ func TestTheDirectoryHandsOutASessionHashRatherThanAPassword(t *testing.T) {
 	}
 
 	cols := columnsOf(t, db, "luacc", "directory")
-	if slicesContains(cols, "password") {
-		t.Error("luacc.directory still hands FreeSWITCH a plaintext password")
+	if !slicesContains(cols, "password") {
+		t.Error("luacc.directory has no password, so a phone nobody signed in at cannot register")
 	}
 	if !slicesContains(cols, "a1_hash") {
 		t.Fatalf("luacc.directory has %v, want an a1_hash", cols)
@@ -126,10 +130,13 @@ func TestTheDirectoryHandsOutASessionHashRatherThanAPassword(t *testing.T) {
 
 	ids := seedAgentAtExtension(t, db, "1001")
 
-	// No session: the number is in the directory, but nothing may register as
-	// it. NULL is how Lua is told so.
+	// No session: the number is in the directory with its static password and
+	// no hash. NULL is how Lua is told to fall back.
 	if got := directoryHash(t, db, "1001"); got != nil {
 		t.Errorf("a1_hash = %q with no session at all, want NULL", *got)
+	}
+	if got := directoryPassword(t, db, "1001"); got == nil || *got != "x" {
+		t.Errorf("password = %v with no session, want the extension's own", got)
 	}
 
 	const hash = "0123456789abcdef0123456789abcdef"
@@ -152,6 +159,11 @@ func TestTheDirectoryHandsOutASessionHashRatherThanAPassword(t *testing.T) {
 	}
 	if got := directoryHash(t, db, "1001"); got != nil {
 		t.Errorf("a1_hash = %q for an expired session, want NULL", *got)
+	}
+	// And the fallback is there again, so an expiry costs the phone its
+	// provisioned credential rather than its ability to register at all.
+	if got := directoryPassword(t, db, "1001"); got == nil || *got != "x" {
+		t.Errorf("password = %v once the session expired, want the extension's own", got)
 	}
 }
 
@@ -186,9 +198,11 @@ func TestASessionDiesWithItsAgent(t *testing.T) {
 	}
 }
 
-// Rolling 00031 back restores the column the switch used to read, on a
-// database that already holds a session — which is the state a rollback finds
-// in practice, and the one a naive DROP TABLE ordering would fail on.
+// Rolling back past 00031 — through 00033, which is where the password now
+// comes from — restores the directory the switch read before sessions existed,
+// on a database that already holds one. That is the state a rollback finds in
+// practice, and the one a naive DROP TABLE ordering would fail on: the view
+// 00033's Down installs still joins the table 00031's Down removes.
 func TestRollingBackTheSessionTableRestoresTheOldDirectory(t *testing.T) {
 	dsn := scratchDB(t)
 	db := openScratch(t, dsn)
@@ -263,6 +277,19 @@ func directoryHash(t *testing.T, db *sql.DB, number string) *string {
 		t.Fatalf("read luacc.directory for %s: %v", number, err)
 	}
 	return hash
+}
+
+// directoryPassword is the fallback credential the switch would read for a
+// number when no session is live.
+func directoryPassword(t *testing.T, db *sql.DB, number string) *string {
+	t.Helper()
+	var password *string
+	err := db.QueryRowContext(context.Background(),
+		`SELECT password FROM luacc.directory WHERE number = $1`, number).Scan(&password)
+	if err != nil {
+		t.Fatalf("read luacc.directory for %s: %v", number, err)
+	}
+	return password
 }
 
 func slicesContains(haystack []string, needle string) bool {

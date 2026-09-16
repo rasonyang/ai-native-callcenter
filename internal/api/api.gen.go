@@ -1412,7 +1412,7 @@ type ExtensionList struct {
 //
 // It is stored in clear deliberately (D4): the a1-hash alternative is bound to the SIP realm, this deployment's realm follows the host address, and that address has already moved twice — a hash cannot be recomputed, so every phone would need a new password and every registered agent would be knocked off mid-shift. The cost of that choice is this endpoint, and the price of this endpoint is that reading it is recorded.
 //
-// Since an agent's phone registers with a server-issued SIP session (POST /agent/sip-session), this password no longer authenticates a registration — the switch accepts only a session's a1-hash. The stored value is kept, and readable here, for API compatibility.
+// It is what a manually configured phone registers with. An agent signed in to the panel is issued a SIP session instead (POST /agent/sip-session), and while that session is live its credential is the one the switch is given.
 type ExtensionSecret struct {
 	Password string `json:"password"`
 }
@@ -1423,7 +1423,7 @@ type ExtensionWrite struct {
 	IsEnabled   *bool   `json:"isEnabled,omitempty"`
 	Number      string  `json:"number"`
 
-	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned. A phone no longer registers with it — an agent's handset authenticates with a server-issued SIP session (POST /agent/sip-session) — and the stored value is retained for API compatibility.
+	// Password Write-only: required on create, optional on update (empty keeps the current one). Never returned. A manually configured phone registers with it; while the agent is signed in to the panel their handset holds a server-issued SIP session (POST /agent/sip-session) and that credential takes precedence.
 	Password *string `json:"password,omitempty"`
 }
 
