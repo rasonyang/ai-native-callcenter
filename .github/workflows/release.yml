@@ -55,7 +55,7 @@ jobs:
     name: deploy-tags
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Check deploy/ names this release
         if: github.ref_type == 'tag'
@@ -86,20 +86,20 @@ jobs:
     needs: [deploy-tags, switch]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # No QEMU. The Dockerfile's build stages run on this runner's own
       # architecture and cross-compile; without an emulator registered, a RUN
       # that ever needs the arm64 platform fails here instead of slowing down.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: github.ref_type == 'tag'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: rasonyang/ai-native-callcenter
           # The exact tag, and only that. `type=sha` gives a dispatch run
@@ -114,7 +114,7 @@ jobs:
       # build it is cannot be supported. The multi-arch build below is the same
       # Dockerfile against the same cache, so this costs a copy, not a build.
       - name: Build linux/amd64 for the version check
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
@@ -135,7 +135,7 @@ jobs:
 
       # The image builds the SPA itself, so there is no artifact to hand it:
       # one Dockerfile, one way to build it, wherever it is built.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -167,10 +167,10 @@ jobs:
             arch: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         if: github.ref_type == 'tag'
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -183,7 +183,7 @@ jobs:
       # org.opencontainers.image.version and .revision, so it is not used here.
       # A dispatch run exports to the cache only.
       - id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: freeswitch
           file: freeswitch/Dockerfile
@@ -205,7 +205,7 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/digests"
           touch "${RUNNER_TEMP}/digests/${DIGEST#sha256:}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: github.ref_type == 'tag'
         with:
           name: switch-digest-${{ matrix.arch }}
@@ -220,14 +220,14 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: ${{ runner.temp }}/digests
           pattern: switch-digest-*
@@ -261,7 +261,7 @@ jobs:
     steps:
       # The notes are written from the history between two tags, so this
       # checkout needs all of it — and the tags themselves.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -271,7 +271,7 @@ jobs:
 
       # No files: the release is the two images, and this is the note that
       # names them.
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           tag_name: ${{ github.ref_name }}
