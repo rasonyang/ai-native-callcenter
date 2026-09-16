@@ -276,7 +276,12 @@ func TestOpeningTurnIsPromptedWhereTheProviderNeedsIt(t *testing.T) {
 		t.Errorf("cue is not in the session's language: %v", content["text"])
 	}
 
-	// The cue must precede the request, or it does not help.
+	// The cue must precede the request, or it does not help. Wait for the
+	// request before reading the record: Start returns once both have been
+	// sent, but the fake logs them as they arrive, and an assertion landing in
+	// that window reads a request still in flight as one never sent (CI went
+	// red on a docs-only commit, 2026-09-15).
+	f.awaitMessage("response.create")
 	sent := typesOf(f.messages())
 	cueAt, requestAt := indexOf(sent, "conversation.item.create"), indexOf(sent, "response.create")
 	if cueAt < 0 || requestAt < 0 || cueAt > requestAt {
