@@ -1494,10 +1494,12 @@ hard way on 2026-08-17:
    callers wait out `max_wait_time` and abandon while our database still says the queue is
    staffed. Restored on reconnect as of `catalog.Service.SyncTiers`; before that the dev
    switch showed `calls_answered=0 calls_abandoned=4` against two staffed agents.
-2. `[FACT]` **`AICC_SWITCH_DOMAIN` must equal the switch's own domain.** It defaults to
-   `127.0.0.1`, and the dev switch's queue is `support-en@192.168.31.55`, so every
-   queue-named callcenter command fails with `-ERR Queue not found!` — into a `WARN`, not an
-   error. The same mismatch breaks registration: a softphone must register to the LAN
+2. `[FACT, half superseded 2026-08-22]` **`AICC_SWITCH_DOMAIN` must equal the switch's own
+   domain.** It defaults to `127.0.0.1`, and the dev switch's queue was then
+   `support-en@192.168.31.55`, so every queue-named callcenter command failed with `-ERR
+   Queue not found!` — into a `WARN`, not an error. The queue half no longer applies: a
+   queue name carries no domain at any layer since `72d8b60`, so this setting cannot reach
+   a callcenter command. The registration half stands: a softphone must register to the LAN
    address, which is the realm the switch authenticates against.
 3. ✗ **An agent staffed while logged out never gets its tier**, and logging in later adds
    the agent without adding the tier — `mirrorRegistration` restores presence, and nothing

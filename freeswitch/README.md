@@ -148,8 +148,8 @@ In `conf/vars.xml`:
   cannot send to loopback, and the result is a gateway that reports UP and
   calls that never arrive.
 * `domain` — `$${local_ip_v4}` as shipped. Whatever it becomes must equal the
-  application's `AICC_SWITCH_DOMAIN`: queue names are rendered with it on both
-  sides and mod_callcenter matches them literally.
+  application's `AICC_SWITCH_DOMAIN`: it is the realm a phone registers to and
+  the domain an endpoint is dialled at. A queue name does not carry it.
 * `aicc_recordings_dir` — a directory or a URL; see below.
 * `default_password` — `REPLACE_ME`. It applies only to file-based directory
   entries, of which this tree has none, but leave nothing usable there.

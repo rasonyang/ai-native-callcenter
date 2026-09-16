@@ -133,7 +133,7 @@ func (f *fixture) seedAgent(username string, poolLow int) seeded {
 	}
 	acct, err := f.st.Accounts().Provision(context.Background(), store.NewAccount{
 		Username: username, PasswordHash: hash, DisplayName: username,
-		Role: string(auth.RoleAgent), CallcenterName: username + "@aicc",
+		Role: string(auth.RoleAgent), CallcenterName: "agent-" + username,
 		SIPPassword: "sip-" + username, ExtensionLow: poolLow, ExtensionHigh: poolLow + 9,
 	})
 	if err != nil {

@@ -28,8 +28,9 @@ type Config struct {
 
 	ESLAddr     string
 	ESLPassword string
-	// SwitchDomain must match FreeSWITCH own $${domain}: the Lua handler
-	// renders queue names with it and mod_callcenter matches them literally.
+	// SwitchDomain must match FreeSWITCH own $${domain}: it is the realm a
+	// phone registers to and the domain an endpoint is dialled at. A queue
+	// name does not carry it.
 	SwitchDomain string
 	// SIPProfile is the sofia profile agents register to.
 	SIPProfile string

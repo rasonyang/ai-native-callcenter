@@ -5,35 +5,31 @@
     <!--<param name="cc-instance-id" value="single_box"/>-->
   </settings>
 
+  <!-- Queues are not configured here. aicc_xml.lua binds the configuration
+       section and renders callcenter.conf from luacc.queues; agents and tiers
+       are runtime state the application writes over ESL. Design 01 §7 D4.
+
+       This file is what FreeSWITCH falls back to when that handler declines,
+       which it does whenever the database is unreachable, so it must define
+       nothing. Vanilla shipped a queue named "support@default" here, and a
+       fallback that quietly installs a queue named after a domain is the
+       stale-name failure C1 was about: the switch stores literally what it is
+       told and mod_callcenter persists it. Empty, the fallback adds no queue,
+       which is the honest answer when the queues cannot be read.
+
+       A queue name carries no domain suffix at any layer. -->
   <queues>
-
-    <queue name="support@default">
-      <param name="strategy" value="longest-idle-agent"/>
-      <param name="moh-sound" value="$${hold_music}"/>
-      <!--<param name="record-template" value="$${recordings_dir}/${strftime(%Y-%m-%d-%H-%M-%S)}.${destination_number}.${caller_id_number}.${uuid}.wav"/>-->
-      <param name="time-base-score" value="system"/>
-      <param name="max-wait-time" value="0"/>
-      <param name="max-wait-time-with-no-agent" value="0"/>
-      <param name="max-wait-time-with-no-agent-time-reached" value="5"/>
-      <param name="tier-rules-apply" value="false"/>
-      <param name="tier-rule-wait-second" value="300"/>
-      <param name="tier-rule-wait-multiply-level" value="true"/>
-      <param name="tier-rule-no-agent-no-wait" value="false"/>
-      <param name="discard-abandoned-after" value="60"/>
-      <param name="abandoned-resume-allowed" value="false"/>
-    </queue>
-
   </queues>
 
 <!-- WARNING: Configuration of XML Agents will be updated into the DB upon restart. -->
 <!-- WARNING: Configuration of XML Tiers will reset the level and position if those were supplied. -->
 <!-- WARNING: Agents and Tiers XML config shouldn't be used in a multi FS shared DB setup (Not currently supported anyway) -->
   <agents>
-    <!--<agent name="1000@default" type="callback" contact="[leg_timeout=10]user/1000@default" status="Available" max-no-answer="3" wrap-up-time="10" reject-delay-time="10" busy-delay-time="60" />-->
+    <!--<agent name="1000" type="callback" contact="[leg_timeout=10]user/1000@$${domain}" status="Available" max-no-answer="3" wrap-up-time="10" reject-delay-time="10" busy-delay-time="60" />-->
   </agents>
   <tiers>
     <!-- If no level or position is provided, they will default to 1.  You should do this to keep db value on restart. -->
-    <!-- <tier agent="1000@default" queue="support@default" level="1" position="1"/> -->
+    <!-- <tier agent="1000" queue="support" level="1" position="1"/> -->
   </tiers>
 
 </configuration> 

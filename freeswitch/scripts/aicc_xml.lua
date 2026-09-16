@@ -218,7 +218,6 @@ local function handle_callcenter()
   if dbh == nil then return nil end
 
   local cc_dsn = freeswitch.getGlobalVariable("aicc_cc_dsn") or ""
-  local domain = freeswitch.getGlobalVariable("domain") or "default"
 
   local parts = {}
   table.insert(parts, [[<?xml version="1.0" encoding="UTF-8" standalone="no"?>

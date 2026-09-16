@@ -23,9 +23,10 @@ type Commander interface {
 // switch's spelling stays in one reviewable place.
 type Adapter struct {
 	cmd Commander
-	// domain qualifies queue names and endpoint addresses. It must match the
-	// switch's own $${domain}, because the Lua handler renders queue names
-	// with it and mod_callcenter matches them literally.
+	// domain qualifies endpoint addresses and the SIP realm. It must match the
+	// switch's own $${domain}, because that is the realm a phone registers to
+	// and the domain Endpoint dials into. It does not reach a queue name —
+	// QueueName appends nothing.
 	domain string
 }
 

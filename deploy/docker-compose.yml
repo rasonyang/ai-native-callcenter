@@ -84,8 +84,9 @@ services:
       AICC_ESL_ADDR: freeswitch:18021
       AICC_ESL_PASSWORD: ${ESL_PASSWORD:-aicc@123}
 
-      # Must equal FreeSWITCH's own $${domain}: queue names are rendered with
-      # it on both sides and mod_callcenter matches them literally.
+      # Must equal FreeSWITCH's own $${domain}: it is the realm a phone
+      # registers to and the domain an endpoint is dialled at. A queue name
+      # does not carry it.
       AICC_SWITCH_DOMAIN: ${SWITCH_DOMAIN:-${FS_EXTERNAL_IP}}
 
       # What a browser phone is handed: the digest realm it authenticates

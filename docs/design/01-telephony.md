@@ -174,7 +174,7 @@ On start and every ESL reconnect: load live-call snapshots from PG, `show channe
 ```
 Static directory users 1000–1019 remain as fallback during migration; removed in a later cleanup diff once DB directory is verified.
 
-**D4 `autoload_configs/callcenter.conf.xml`**: replace stock content with `odbc-dsn` param (pgsql DSN) and no static queues (queues come from the xml-handler).
+**D4 `autoload_configs/callcenter.conf.xml`**: replace stock content with `odbc-dsn` param (pgsql DSN) and no static queues (queues come from the xml-handler). *Status: the handler landed, but the stock `support@default` queue sat in this file until 2026-09-16 — it is the fallback FreeSWITCH loads when the handler declines on an unreachable database, so it could still install a domain-named queue. The `<queues>` block is now empty.*
 
 **D5 `sip_profiles/external/local6060.xml`** → replaced by `aicc_bot.xml`:
 ```xml

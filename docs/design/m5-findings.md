@@ -123,9 +123,10 @@ application container membership of the switch's group rather than by chasing
 the mode of every new day's folder.
 
 Verified live in the compose stack: queues and the SIP directory served from
-the database (`support-en@aicc.demo`, `user_exists id 1000` true), the gateway
-pinging our UAS, a call to 95001 walking dialplan → Lua → DID → flow → gateway
-→ UAS → PCMU passthrough → provider, and a recording booked at hangup.
+the database (`support-en@aicc.demo` — queue names dropped the domain suffix
+later, see C1 — `user_exists id 1000` true), the gateway pinging our UAS, a
+call to 95001 walking dialplan → Lua → DID → flow → gateway → UAS → PCMU
+passthrough → provider, and a recording booked at hangup.
 
 ## 4. The seed had to grow up to be a demo
 

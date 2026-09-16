@@ -84,8 +84,10 @@ func TestQueueValidation(t *testing.T) {
 			wantErr: "name is required",
 		},
 		{
-			// The name travels to the switch inside a queue identifier of the
-			// form name@domain, so these characters would make it ambiguous.
+			// The name reaches the switch as a queue identifier, and both the
+			// tier read-back and the event normalizer cut one at the first "@"
+			// to recognise names qualified before 2026-08-22. A name holding
+			// one would be truncated to something else.
 			name:    "the name cannot contain an at sign",
 			mutate:  func(q *Queue) { q.Name = "support@default" },
 			wantErr: "@",

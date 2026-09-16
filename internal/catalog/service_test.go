@@ -20,8 +20,9 @@ type tierCall struct {
 type fakeSwitch struct {
 	isUp bool
 	// onSwitch is what the switch already believes, keyed by agent. Bare names:
-	// the adapter owns the domain suffix in both directions, so this interface
-	// only ever sees queues named the way the database names them.
+	// nothing appends a domain to a queue, and the adapter strips a legacy one
+	// on the way back, so this interface only ever sees queues named the way
+	// the database names them.
 	onSwitch map[string][]string
 	added    []tierCall
 	removed  []tierCall

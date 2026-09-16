@@ -61,7 +61,6 @@ if (queue.is_recording_enabled == "t" or queue.is_recording_enabled == true)
     string.format("%s/%s/%s.wav", recordings, os.date("!%Y/%m/%d"), call_id))
 end
 
-local domain = freeswitch.getGlobalVariable("domain") or "default"
 session:setVariable("aicc_queue", queue.name)
 session:execute("callcenter", queue.name)
 

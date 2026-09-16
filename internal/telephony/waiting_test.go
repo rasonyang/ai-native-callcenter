@@ -63,7 +63,7 @@ func queueEvent(action, queue, memberChannel string, extra map[string]string) Sw
 		"Event-Name":             "CUSTOM",
 		"Event-Subclass":         "callcenter::info",
 		"CC-Action":              action,
-		"CC-Queue":               queue + "@default",
+		"CC-Queue":               queue,
 		"CC-Member-Session-UUID": memberChannel,
 		"CC-Member-CID-Number":   "13800138000",
 	}
