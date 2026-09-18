@@ -20,11 +20,14 @@ Each fact below is marked **DOC** (stated by one of the two documents) or
 **MEASURED** (observed in the probe). Where they disagree, the probe wins and
 the disagreement is the finding.
 
-**No latency or capacity figure appears in this document.** The timings the
-probe recorded are real but they are one laptop against one region on one
-afternoon, and the repository publishes no performance claim before a benchmark
-that deserves the name (CLAUDE.md, owner directive 2026-08-16). The numbers that
-gate barge-in are recorded after the live verification, in their own commit.
+**Every figure in this document stays in this document.** The probe's timings
+are one laptop against one region on one afternoon; §10's are one afternoon of
+telephone calls on a developer's FreeSWITCH. They are the record of what was
+verified and what it did, not a statement about how fast or how large this
+product is, and the repository still publishes no performance claim before a
+benchmark that deserves the name (CLAUDE.md, owner directive 2026-08-16): no
+number from here goes into the README, the deployment guide, a release note or a
+commit message.
 
 ## 1. Why this is a protocol and not a dialect
 
@@ -88,7 +91,7 @@ breakdown of each) and they arrive after the turn they describe has already
 ended above the boundary, which is why they are logged rather than carried on
 the event.
 
-## 4. Barge-in is the provider's, and the one open question
+## 4. Barge-in is the provider's, and the provider misses some
 
 **MEASURED**: when the caller speaks over a reply, the old response's audio
 deltas stop, and the response is ended by a **bare `response.done` with no
@@ -107,13 +110,24 @@ the server has already stopped — and only `Interrupt(DTMF)` and
 `Interrupt(SYSTEM)` send `response.cancel`. There is no client-side voice
 activity detection in this package.
 
-**MEASURED, and the reason this section is not finished**: in one probe of
+**MEASURED, and the reason there was a gate at all**: in one probe of
 three identical attempts, a caller talking over a reply was **never detected**
 — no transcript, no `response.done`, the reply simply continued. One
 observation on a laptop microphone is not a defect rate, and it is not the line
-a real call runs on either. The acceptance gate is a live verification over a
-real telephone leg, and **its numbers are recorded when it has run**, here, in
-its own commit. If that gate fails, the follow-up below is the answer.
+a real call runs on either.
+
+**The gate has now run over a real telephone leg, and it failed.** The owner set
+it at ≥10 human interruptions, a cut p50 ≤ 1.0 s, a p90 ≤ 1.5 s and **zero
+misses**. Nine calls gave 17 conversational overlaps and 14 cuts: p50 **950 ms**,
+p90 **1444 ms**, min 480 ms, max 2380 ms — the latency criteria passed, and
+narrowly — and **3 misses**, which the gate does not allow. In the worst of them
+a ~380 ms caller utterance 4.1 s into a 10.3 s bot turn was never noticed and the
+bot talked on for 6.1 s; the other two ended within 380–480 ms only because the
+turn was finishing anyway. §10 is the measurement.
+
+So detection stays the provider's — nothing about the protocol changed — but the
+provider is not reliable enough to be the only detector, and **W-D3 below is
+required rather than contingent**.
 
 ## 5. There is no text cue, and that reaches the flows
 
@@ -220,9 +234,111 @@ else this process measures would show it being approached: `aicc_calls_active`
 counts how many are up, not how fast they were created, and a deployment can sit
 well inside its concurrency and still be turned away at the door.
 
+## 10. Live verification, 2026-09-18
+
+**Method.** Nine calls with a human caller over the simulated PSTN trunk into the
+development FreeSWITCH, DID 95002, flow `novanet_support`, Chinese — 435 s of
+bot-phase audio in all. Every figure below is **MEASURED**. Barge-in was measured
+in the two-channel recordings rather than in the log: a cut is the interval from
+speech onset on the caller channel to the bot channel falling to digital zero,
+read on a 20 ms envelope, and all 14 `the provider took the floor back` lines
+were matched 1:1 to a cut measured that way.
+
+The nine sessions' provider `X-Tt-Logid`s:
+`20260918182805969D7FE8E79F856BAFCB`, `20260918183054D731BC4487E941E91FCE`,
+`20260918183449A5731450751B3B6355AC`, `2026091818361989DA06FB5F5121362580`,
+`2026091818364931F5382A6B1A133C9086`, `202609181837339B69074C06F3EB5896DD`,
+`202609181839023DE652AA338844C287EE`, `2026091818415176395609B0B8603F6D56`,
+`20260918184309BA30D30682355E6B8872`. Every one ended `CLOSED_CLEAN` — three
+caller hangups, five transfers, one `hangup` tool — and none reported
+`ContextCanceled`.
+
+**Barge-in: the gate failed on misses.** 17 conversational overlaps, 14 cuts, **3
+misses**; cut p50 950 ms, p90 1444 ms, min 480 ms, max 2380 ms. The gate's
+latency criteria (p50 ≤ 1.0 s, p90 ≤ 1.5 s over ≥10 interruptions) passed
+narrowly; its zero-miss criterion did not. Two more observations qualify the
+count in both directions:
+
+- In 7 of the 9 calls there is a burst on the caller channel 0.6–1.1 s into the
+  greeting that never cut it. Whether it is speech or the transient of the call
+  being answered cannot be decided from the recordings, so it is **not** counted
+  as a conversational miss — but it is not dismissed either.
+- Three further cases were the provider **starting** a turn while the caller was
+  already speaking, then cutting it 1.3–1.5 s after the caller's onset. One of
+  them appears in the application log as `the provider took the floor back`
+  although the caller had the floor first: the attribution in that line is
+  **unreliable on this provider**, which is worth knowing before anyone counts
+  barge-ins from the log alone.
+
+**Stages**, relative to flow entry: the provider session opens at +0.10–0.16 s,
+the leg is bridged at +0.14–0.22 s, and the first greeting audio reaches the
+caller at +0.42–1.00 s (median ≈0.6 s). The greeting — the entry phase's
+`announce`, carried as `OpeningText` — was spoken verbatim **exactly once** in
+all nine calls, and the farewell `announce` exactly once in the `hangup` call.
+Neither was repeated, and neither was paraphrased by the model.
+
+**Turn latency**, caller stopped → first bot frame, as the `turn latency` line
+records it: n=17, median 645 ms, range 411–1067 ms. The turn that follows a tool
+result is a different animal at 2797–3789 ms (n=6), which is the business API and
+the model's second pass, not the transport.
+
+**Tool round trip.** Executing the tool itself is 8–16 ms. Around it: the
+caller's final transcript → `TOOL_CALL` is 0.51–2.39 s, and `TOOL_RESULT` → the
+text of the bridging line is 0.53–1.83 s.
+
+**Uplink pacer.** 15,619 frames sent and 181 dropped overall (1.16 %), 0.19–1.61 %
+on an ordinary call — the three-frame queue doing what §7 says it does. Derived
+rather than logged: 15,619 × 640 B is 9,996,160 B of PCM16 at 16 kHz, equivalent
+to 2,499,040 B of G.711. The downlink converter's byte counts are logged nowhere
+and are simply not available.
+
+The DTMF call is the outlier: 435 frames sent, **77 dropped (17.7 %)**, 4 mutes
+and 3 unmutes, ≈3.1 s of uplink that never arrived. That is consistent with RFC
+2833 events taking the place of audio and a gap-filling burst being dropped on
+resume, and it is **not confirmed** — no debug line existed that would have
+settled it. All eight keypresses landed while the bot was silent, so "a keypress
+cuts playback" was **not exercised**; each produced the expected WARN (`this
+engine takes no text cue`, §5).
+
+**Dead air** behaved as designed and the design is audibly thin: the
+re-engagement cue is unavailable on this provider, so the caller heard **17.4 s**
+of digital silence. Three short caller utterances inside that window produced no
+transcript at all — the provider never acted on them. That is the residual gap
+§5 could only call an assumption, now observed: an utterance the full-duplex
+model does not act on re-arms nothing.
+
+**Hold is NOT VERIFIED beyond the mute.** On hold the caller's RTP stops, the
+pacer sent `input_audio_mute.commit` after ~500 ms (mutes=1), and the provider
+raised no error — and then `internal/voice`'s dead-media watchdog ended the call
+(`media went dead silentFor=5.45s` / `5.20s`), because `RTPDeadTimeout` is 5 s
+(`internal/voice/uas.go`). That watchdog is provider-agnostic, so this is a hold
+defect for every provider, filed as **W-D4**. Unmute, and "the first frame after
+unmute is live", remain covered only by the package tests and the probe's
+one-minute muted session.
+
+**qwen regression**, same build, unattended loopback call, same flow: the
+greeting was spoken exactly once with the same text, the caller was transcribed,
+and there was no WARN or ERROR — the live qwen endpoint accepts the new
+`OpeningText` frames. **Goroutines** (`go_goroutines`, ops port): 23 before and
+22 after a doubao call; 22 → 23 around the qwen call.
+
+**A defect this verification found, and it is not in the doubao client.** After
+the bridging or farewell line finished playing, the caller heard 1.3–5.1 s of
+silence before the transfer or the BYE. An instrumented build preserved the
+timeline: `aicall.Session.watchPlayback` runs the drain watch and the dead-air
+watch on one goroutine, and `awaitCallerOrDeadAir` (`internal/aicall/session.go`)
+waits out the whole no-input timeout — 8 s — without listening for the next
+playback marker. The marker sits in the buffered channel until that wait expires,
+so an armed action fires on the timer rather than when the line's audio ended.
+It is provider-agnostic and pre-existing: the same 8.000 s parks are there on
+qwen. Doubao only makes it audible, because its tool turn carries no audio and
+its speech arrives about five times faster than real time, so the line has long
+finished playing before the wait is over. Every session test sets `NoInput: -1`,
+which is exactly why the suite is blind to it. Filed as **W-D5**.
+
 ## Follow-ups
 
-Three items, filed here because this document is what created them.
+Six items, filed here because this document is what created them.
 
 **W-D1 — one provider registry.** A provider name is registered in two places
 today: `provider.ProfileFor` for its profile and `cmd/aicc/wiring.go` for its
@@ -243,10 +359,36 @@ client should have too. It needs its own test — one that loses the race
 deterministically — and then the fix. Not done here: it is a bug in a different
 client, and a fix smuggled into this commit would be a fix nobody reviewed.
 
-**W-D3 — in-package voice activity detection, if the gate fails.** Only if the
-live barge-in verification in §4 does not pass: an energy-based detector inside
-`internal/provider/doubao` raising `SPEECH_STARTED` and sending
-`response.cancel`, rather than waiting for the server to notice. It is a real
-cost — a detector is a thing to tune and to get wrong — so it is contingent on
-measurement and not on preference, and it stays inside the package, because
-where the caller was heard is a property of the protocol and not of the seam.
+**W-D3 — in-package voice activity detection. REQUIRED.** The gate it was
+contingent on has run and failed on misses (§4, §10): 3 of 17 overlaps were never
+detected, and in the worst of them the bot talked over the caller for 6.1 s. So
+an energy-based detector inside `internal/provider/doubao` must raise
+`SPEECH_STARTED` and send `response.cancel` rather than wait for the server to
+notice. It is still a real cost — a detector is a thing to tune and to get
+wrong — but it is no longer optional. It stays inside the package: where the
+caller was heard is a property of the protocol and not of the seam.
+
+**W-D4 — a held call must not be killed by the dead-media watchdog.** SIP hold —
+a re-INVITE with `sendonly` or `inactive`, or simply a held call that stops
+sending RTP — has to suspend `internal/voice`'s dead-media watch for as long as
+the hold lasts. Today any hold longer than `RTPDeadTimeout` (5 s,
+`internal/voice/uas.go`) ends the AI leg, on **every** provider; §10 watched it
+happen twice. The doubao pacer's side of a hold is already correct — it mutes and
+the provider is content — so this is the leg's problem, not the client's.
+
+**W-D5 — the dead-air wait must be interruptible by the next playback marker.**
+In `internal/aicall/session.go`, `awaitCallerOrDeadAir` should return the marker
+it received and let `watchPlayback` process it on the next iteration of the loop,
+instead of swallowing the whole no-input timeout while the marker waits in the
+channel (§10). It is about fifteen lines. It needs pinning with a session test
+that has the no-input timeout **enabled** — every existing one sets
+`NoInput: -1`, which is why the suite never saw this — asserting that a second
+turn's `PLAYBACK_DONE` arrives when that turn's audio drains and not when the
+timer expires.
+
+**W-D6 — a startup line that reads as a bug (cosmetic).** `voice provider
+selected … transcribesCaller=""` prints the profile's own transcription model. On
+doubao there is none, so the line says `transcribesCaller=""` even when
+`AICC_TRANSCRIBE_PROVIDER` is configured and the caller is in fact being
+transcribed, which reads as "caller transcription off" to anyone checking a
+deployment from its logs.
