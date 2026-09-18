@@ -320,6 +320,279 @@ func TestGreetingCueCanBeOverridden(t *testing.T) {
 	}
 }
 
+//
+// Spoken lines: the opening one, and the ones a flow decides on mid-call.
+//
+
+// The opening frames are the ones every existing call already sends, and a
+// flow that names no opening line must go on sending exactly those: one bare
+// request, carrying nothing.
+func TestWithNoOpeningLineTheOpeningRequestIsUnchanged(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		profile Profile
+	}{
+		{"GA dialect", OpenAIProfile()},
+		{"older dialect", QwenProfile()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeProvider(t, acceptSession)
+			session := testSession(t, f, tt.profile)
+
+			cfg := basicConfig()
+			cfg.InputFormat, cfg.OutputFormat = tt.profile.FormatsFor(media.LawMu)
+			if err := session.Start(t.Context(), cfg); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+
+			request := f.awaitMessages("response.create", 1)[0]
+			if len(request) != 1 {
+				t.Errorf("response.create = %v, want the bare request and nothing else", request)
+			}
+		})
+	}
+}
+
+// Where the flow owns the opening words, the request carries them and asks for
+// them as written. This provider greets unprompted, so nothing is put into the
+// conversation: a synthetic user turn would land in the caller's transcript.
+func TestAnOpeningLineIsAskedForAsWritten(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+
+	cfg := basicConfig()
+	cfg.OpeningText = "Thanks for calling NovaNet, how can I help you today?"
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	request := f.awaitMessages("response.create", 1)[0]
+	direction, ok := nested(t, request, "response", "instructions").(string)
+	if !ok {
+		t.Fatalf("the opening request carries no instructions: %v", request)
+	}
+	if !strings.Contains(direction, cfg.OpeningText) {
+		t.Errorf("the opening request does not carry the line: %q", direction)
+	}
+	if !strings.Contains(direction, "word for word") {
+		t.Errorf("the opening request does not ask for the line as written: %q", direction)
+	}
+	f.awaitMessages("conversation.item.create", 0)
+}
+
+// The other provider refuses to answer an empty conversation, and the cue it
+// needs is the direction itself: there is no second thing to say, and a cue
+// that said something else would be steering the turn two ways at once.
+func TestAnOpeningLineIsAlsoTheCueWhereTheConversationMayNotBeEmpty(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+
+	cfg := basicConfig()
+	cfg.Language = "zh"
+	cfg.OpeningText = "感谢致电 NovaNet，请问有什么可以帮您？"
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+
+	request := f.awaitMessages("response.create", 1)[0]
+	item := f.awaitMessages("conversation.item.create", 1)[0]
+
+	direction := nested(t, request, "response", "instructions").(string)
+	if !strings.Contains(direction, cfg.OpeningText) {
+		t.Errorf("the opening request does not carry the line: %q", direction)
+	}
+	content := nested(t, item, "item", "content").([]any)[0].(map[string]any)
+	if content["text"] != direction {
+		t.Errorf("cue = %v, want the same direction the request carries", content["text"])
+	}
+	if !strings.Contains(direction, "一字不差") {
+		t.Errorf("the direction is not in the session's language: %q", direction)
+	}
+
+	sent := typesOf(f.messages())
+	cueAt, requestAt := indexOf(sent, "conversation.item.create"), indexOf(sent, "response.create")
+	if cueAt < 0 || requestAt < 0 || cueAt > requestAt {
+		t.Errorf("client sent %v, want the cue before the request", sent)
+	}
+}
+
+// With the floor free there is nothing to wait for and nothing to stop.
+func TestSpeakingWithTheFloorFreeAsksAtOnce(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	finishTheOpeningTurn(t, f, session)
+
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the request does not carry the line: %q", direction)
+	}
+	f.awaitMessages("response.cancel", 0)
+}
+
+// A line pre-empts. The turn in progress is stopped first, and the request for
+// the line waits for that turn to end — asking for a second response while one
+// is open is refused outright.
+func TestSpeakingOverAnOpenResponseStopsItFirstAndWaits(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+	// Only the opening request so far: the floor is still taken.
+	f.awaitMessages("response.create", 1)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the request does not carry the line: %q", direction)
+	}
+	f.awaitMessages("response.cancel", 1)
+}
+
+// The gap the flow actually falls into: a tool result asks for a turn on its
+// way out, and the phase change that follows asks for a line before the
+// provider has created it. There is nothing to cancel yet, and asking again
+// would be refused, so the line waits for the turn to exist and stops it then.
+func TestALineAskedForBeforeTheProviderAnsweredWaitsForTheTurnToExist(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	finishTheOpeningTurn(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":1}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	f.awaitMessages("response.create", 2)
+
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.cancel", 0)
+	f.awaitMessages("response.create", 2)
+
+	f.send(map[string]any{"type": "response.created"})
+	f.awaitMessages("response.cancel", 1)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	requests := f.awaitMessages("response.create", 3)
+	direction := nested(t, requests[2], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the request does not carry the line: %q", direction)
+	}
+}
+
+// Two lines are not a queue. Both describe what should be said next, so the
+// later one is the only one still true by the time the floor comes free.
+func TestASecondLineReplacesTheFirstRatherThanQueueingBehindIt(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+
+	if err := session.SpeakText("One moment please."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak again: %v", err)
+	}
+	// One cancel, not one per line: the turn only has to be stopped once.
+	f.awaitMessages("response.cancel", 1)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the request does not carry the later line: %q", direction)
+	}
+	if strings.Contains(direction, "One moment please.") {
+		t.Errorf("the superseded line was spoken as well: %q", direction)
+	}
+}
+
+// A turn we stopped ourselves is still an interruption — the caller stops
+// hearing it, and how much they heard has to reach the provider's history —
+// but it is not the caller's. Reporting it as speech would put a barge-in the
+// caller never made into the log of the call.
+func TestATurnStoppedForALineIsNotBlamedOnTheCaller(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	event := awaitEvent(t, session, EventTypeInterrupted)
+	if event.InterruptedBy != InterruptReasonSystem {
+		t.Errorf("interruptedBy = %q, want the application's own doing", event.InterruptedBy)
+	}
+
+	// And the next cancelled turn is the caller's again: the attribution is
+	// spent on the turn it belonged to.
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	event = awaitEvent(t, session, EventTypeInterrupted)
+	if event.InterruptedBy != InterruptReasonSpeech {
+		t.Errorf("interruptedBy = %q, want the caller", event.InterruptedBy)
+	}
+}
+
+// finishTheOpeningTurn plays the greeting out, so a test about a later line
+// starts with the floor free.
+func finishTheOpeningTurn(t *testing.T, f *fakeProvider, session *Realtime) {
+	t.Helper()
+	f.awaitMessages("response.create", 1)
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+}
+
 func indexOf(values []string, want string) int {
 	for i, v := range values {
 		if v == want {

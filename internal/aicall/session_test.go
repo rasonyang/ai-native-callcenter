@@ -110,10 +110,16 @@ type fakeModel struct {
 	userText     []string
 	toolResults  []toolResult
 	instructions []string
-	interrupts   []interrupt
-	sendErr      error
-	isClosed     bool
-	closeOnce    sync.Once
+	// spoken holds the lines the flow asked for word for word, in order.
+	spoken     []string
+	interrupts []interrupt
+	sendErr    error
+	isClosed   bool
+	closeOnce  sync.Once
+
+	// startCfg is the configuration the session was started with, which is
+	// where the call's opening line travels.
+	startCfg provider.SessionConfig
 }
 
 type toolResult struct{ id, output, hint string }
@@ -126,8 +132,14 @@ func newFakeModel() *fakeModel {
 	return &fakeModel{events: make(chan provider.Event, 64)}
 }
 
-func (m *fakeModel) Start(context.Context, provider.SessionConfig) error { return nil }
-func (m *fakeModel) Events() <-chan provider.Event                       { return m.events }
+func (m *fakeModel) Start(_ context.Context, cfg provider.SessionConfig) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startCfg = cfg
+	return nil
+}
+
+func (m *fakeModel) Events() <-chan provider.Event { return m.events }
 
 func (m *fakeModel) SendAudio(audio []byte) error {
 	m.mu.Lock()
@@ -157,6 +169,13 @@ func (m *fakeModel) UpdateInstructions(text string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.instructions = append(m.instructions, text)
+	return nil
+}
+
+func (m *fakeModel) SpeakText(text string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.spoken = append(m.spoken, text)
 	return nil
 }
 
@@ -193,6 +212,13 @@ func (m *fakeModel) recordedUserText() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.userText...)
+}
+
+// spokenLines are the lines the flow handed over to be said as written.
+func (m *fakeModel) spokenLines() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.spoken...)
 }
 
 func (m *fakeModel) failSends(err error) {

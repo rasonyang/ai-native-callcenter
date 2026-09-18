@@ -150,6 +150,43 @@ func (f *fakeProvider) awaitMessage(messageType string) map[string]any {
 	return nil
 }
 
+// messagesOfType narrows the record to one kind of client message.
+func (f *fakeProvider) messagesOfType(messageType string) []map[string]any {
+	var out []map[string]any
+	for _, message := range f.messages() {
+		if message["type"] == messageType {
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
+// awaitMessages waits for n client messages of a type and returns them, then
+// holds still long enough for an n+1th to turn up.
+//
+// Every assertion about what a frame says is paired with one of these: on this
+// protocol a frame that is right and sent twice is a different bug from one
+// that is wrong — a second response.create is refused outright — and a test
+// that only reads the first frame it likes cannot tell them apart. n may be
+// zero, which asserts that none is sent at all.
+func (f *fakeProvider) awaitMessages(messageType string, n int) []map[string]any {
+	f.t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for n > 0 && time.Now().Before(deadline) {
+		if len(f.messagesOfType(messageType)) >= n {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	got := f.messagesOfType(messageType)
+	if len(got) != n {
+		f.t.Fatalf("the client sent %d %q messages, want %d; it sent %v",
+			len(got), messageType, n, typesOf(f.messages()))
+	}
+	return got
+}
+
 // refuteMessage fails if a message of this type is ever sent.
 func (f *fakeProvider) refuteMessage(messageType string) {
 	f.t.Helper()

@@ -70,6 +70,20 @@ type Realtime struct {
 	// isSessionRetried guards the one-shot retry of a rejected configuration.
 	isSessionRetried bool
 
+	// The three fields a pre-empting spoken line needs. See SpeakText.
+	//
+	// pendingSpeak is a line waiting for the floor; there is at most one,
+	// because a newer line supersedes an older one rather than joining a
+	// queue. isResponseRequested covers the window between asking for a turn
+	// and the provider creating it, in which there is nothing to cancel and a
+	// second request would be refused. isPreemptedForSpeak remembers that the
+	// turn now ending was stopped to make room, which is what keeps the
+	// interruption from being reported as the caller's.
+	pendingSpeak         string
+	isResponseRequested  bool
+	isCancelSentForSpeak bool
+	isPreemptedForSpeak  bool
+
 	// watch carries response-progress signals to the watchdog.
 	watch chan watchSignal
 	// Watchdog deadlines, held as fields so tests need not wait seconds for
@@ -174,19 +188,35 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 
 	// The opening turn is the flow's first node speaking; the caller is
 	// already on the line waiting to be greeted.
+	//
+	// Two shapes, and the flow chooses. Saying nothing about the words leaves
+	// the model to write its greeting from the standing instructions, which is
+	// what every call did before a phase could carry a line — and the request
+	// is the bare one it always was. Naming a line asks for that line instead.
+	opening := map[string]any{"type": "response.create"}
+	cue := greetingCue(cfg)
+	if cfg.OpeningText != "" {
+		direction := sayExactly(cfg.OpeningText, cfg.Language)
+		opening["response"] = map[string]any{"instructions": direction}
+		// Where the conversation may not be empty, the direction is also the
+		// cue. Anything else would steer the same turn two ways at once, and
+		// there is no second thing worth saying to a provider that is about to
+		// be handed the sentence anyway.
+		cue = direction
+	}
 	if r.profile.NeedsCueForFirstTurn {
 		if err := r.conn.send(map[string]any{
 			"type": "conversation.item.create",
 			"item": map[string]any{
 				"type": "message", "role": "user",
-				"content": []map[string]any{{"type": "input_text", "text": greetingCue(cfg)}},
+				"content": []map[string]any{{"type": "input_text", "text": cue}},
 			},
 		}); err != nil {
 			r.conn.close()
 			return fmt.Errorf("prompt opening turn: %w", err)
 		}
 	}
-	if err := r.conn.send(map[string]any{"type": "response.create"}); err != nil {
+	if err := r.requestResponse(opening); err != nil {
 		r.conn.close()
 		return fmt.Errorf("request opening turn: %w", err)
 	}
@@ -232,7 +262,140 @@ func (r *Realtime) SendUserText(text string) error {
 	}); err != nil {
 		return err
 	}
-	return r.conn.send(map[string]any{"type": "response.create"})
+	return r.requestResponse(map[string]any{"type": "response.create"})
+}
+
+// SpeakText says a line the flow chose, in place of whatever is being said now.
+//
+// This protocol has no way to hand a provider audio to play, so the nearest
+// thing it offers is a turn of its own with a per-response instruction: the
+// model is told to repeat one sentence and nothing else. That is best effort
+// rather than verbatim, and it is the honest limit of this client — an engine
+// that speaks text outright gets its own profile and says the line as written.
+//
+// The floor may already be taken, and asking for a second response while one
+// is open is refused with "conversation already has an active response". Two
+// states have to be told apart:
+//
+//   - a response is open: it is cancelled now, and the request for the line
+//     goes out when that response's own response.done arrives. The cancel is
+//     sent whatever the profile says about barge-in — CancelsResponseItself
+//     describes a provider that stops when it hears the CALLER, and nobody
+//     here is speaking.
+//   - a response has been asked for and not yet created: there is nothing to
+//     cancel yet, so the line waits, and the turn is stopped the moment it
+//     exists. SendToolResult asks for a turn on its way out, and a phase
+//     change is decided on that very result, so this is the ordinary case
+//     rather than the exotic one.
+//
+// The read loop owns both deferred sends. Nothing is emitted from here, for
+// the reason Interrupt gives: this is normally called from the goroutine
+// draining Events, and emitting would deadlock it.
+func (r *Realtime) SpeakText(text string) error {
+	if text == "" {
+		return nil
+	}
+
+	r.mu.Lock()
+	isDeferred := r.isResponseOpen.Load() || r.isResponseRequested
+	isCancelNeeded := r.isResponseOpen.Load() && !r.isCancelSentForSpeak
+	if isCancelNeeded {
+		r.isCancelSentForSpeak = true
+		r.isPreemptedForSpeak = true
+	}
+	r.pendingSpeak = ""
+	if isDeferred {
+		r.pendingSpeak = text
+	}
+	request := speakRequest(text, r.cfg.Language)
+	r.mu.Unlock()
+
+	if isCancelNeeded {
+		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+			return err
+		}
+	}
+	if isDeferred {
+		return nil
+	}
+	return r.requestResponse(request)
+}
+
+// speakRequest is the frame that asks for one line, said as written.
+//
+// One frame for both dialects: the type discriminator the GA session object
+// carries has no counterpart on a response, and both name the per-response
+// override the same way, so there is nothing here for a dialect to disagree
+// about.
+func speakRequest(text, language string) map[string]any {
+	return map[string]any{
+		"type":     "response.create",
+		"response": map[string]any{"instructions": sayExactly(text, language)},
+	}
+}
+
+// sayExactly is how a model is asked for particular words rather than for a
+// subject. In the session's own language, because an instruction in the wrong
+// one is an invitation to answer in it.
+func sayExactly(text, language string) string {
+	if strings.HasPrefix(strings.ToLower(language), "zh") {
+		return "请一字不差地说出下面这句话，不要添加任何其它内容：\n" + text
+	}
+	return "Say exactly this, word for word, and add nothing else:\n" + text
+}
+
+// requestResponse asks the model for a turn and records that one is on its way.
+// Between here and response.created there is nothing to cancel, which is what
+// SpeakText has to know before it asks for anything.
+func (r *Realtime) requestResponse(request map[string]any) error {
+	r.mu.Lock()
+	r.isResponseRequested = true
+	r.mu.Unlock()
+	return r.conn.send(request)
+}
+
+// onResponseCreated stops a turn that was superseded before it existed.
+//
+// A line asked for while the previous request was still in flight could not be
+// cancelled then, because the provider had created nothing. This is the first
+// moment there is something to stop.
+func (r *Realtime) onResponseCreated() {
+	r.mu.Lock()
+	r.isResponseRequested = false
+	isCancelNeeded := r.pendingSpeak != "" && !r.isCancelSentForSpeak
+	if isCancelNeeded {
+		r.isCancelSentForSpeak = true
+		r.isPreemptedForSpeak = true
+	}
+	r.mu.Unlock()
+
+	if isCancelNeeded {
+		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
+		}
+	}
+}
+
+// dispatchPendingSpeak asks for the line that was waiting, now that the turn
+// holding the floor has ended. It reports whether that turn was stopped to make
+// room, which is what decides who the interruption is attributed to.
+func (r *Realtime) dispatchPendingSpeak() (wasPreempted bool) {
+	r.mu.Lock()
+	text := r.pendingSpeak
+	wasPreempted = r.isPreemptedForSpeak
+	request := speakRequest(text, r.cfg.Language)
+	r.pendingSpeak = ""
+	r.isPreemptedForSpeak = false
+	r.isCancelSentForSpeak = false
+	r.mu.Unlock()
+
+	if text == "" {
+		return wasPreempted
+	}
+	if err := r.requestResponse(request); err != nil {
+		r.log.Warn("could not ask for the line that was waiting for the floor", "error", err)
+	}
+	return wasPreempted
 }
 
 // SendToolResult answers a tool call and steers what happens next.
@@ -251,7 +414,7 @@ func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
 	}); err != nil {
 		return err
 	}
-	return r.conn.send(map[string]any{"type": "response.create"})
+	return r.requestResponse(map[string]any{"type": "response.create"})
 }
 
 // mergeHint folds steering into a tool result. A result that is already a JSON
@@ -503,6 +666,7 @@ func (r *Realtime) handle(event *wireEvent) {
 
 	case "response.created":
 		r.isResponseOpen.Store(true)
+		r.onResponseCreated()
 		r.signal(watchResponseStarted)
 		r.emit(Event{Type: EventTypeResponseStarted})
 
@@ -564,6 +728,10 @@ func (r *Realtime) handle(event *wireEvent) {
 func (r *Realtime) handleResponseDone(event *wireEvent) {
 	r.isResponseOpen.Store(false)
 	r.signal(watchResponseEnded)
+	// The floor is free: a line that was waiting for it goes out before the
+	// turn is reported, so the next words are already being made while the
+	// consumer catches up.
+	isPreemptedForSpeak := r.dispatchPendingSpeak()
 
 	out := Event{Type: EventTypeResponseDone}
 	if event.Response != nil {
@@ -580,10 +748,22 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	// it or the provider decided on its own when it heard the caller. Either
 	// way the consumer needs to know the turn ended early rather than
 	// completing, so it is reported as an interruption in its own right.
+	//
+	// Who cut it short is the one thing that differs, and it has to be said:
+	// the consumer flushes what it has queued either way — the caller must not
+	// go on hearing an abandoned answer, and how much of it they did hear is
+	// counted on that side and trimmed from the provider's history — but a
+	// turn this client stopped to make room for a line is not a barge-in, and
+	// logging it as one puts an interruption the caller never made into the
+	// record of the call.
 	if out.Status == statusCancelled {
+		by := InterruptReasonSpeech
+		if isPreemptedForSpeak {
+			by = InterruptReasonSystem
+		}
 		r.emit(Event{
 			Type: EventTypeInterrupted, Status: out.Status,
-			Usage: out.Usage, InterruptedBy: InterruptReasonSpeech,
+			Usage: out.Usage, InterruptedBy: by,
 		})
 		return
 	}
@@ -719,6 +899,9 @@ func (r *Realtime) watchdog() {
 			r.isResponseOpen.Store(false)
 			r.log.Warn("response abandoned", "reason", reason,
 				"hasAudioArrived", hasAudioArrived)
+			// This path never reaches handleResponseDone, so a line waiting for
+			// a turn the provider walked away from would wait for ever.
+			r.dispatchPendingSpeak()
 			// Not fatal: the session is still usable, and the caller has heard
 			// whatever did arrive. The flow decides what to say next.
 			r.emit(Event{Type: EventTypeError, Text: reason,
