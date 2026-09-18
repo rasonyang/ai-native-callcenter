@@ -198,6 +198,47 @@ func GatewayProfile() Profile {
 	}
 }
 
+// DoubaoProfile is the one provider here that is not reached over the Realtime
+// protocol at all.
+//
+// It is therefore the one profile whose values do not all mean what they mean
+// above: everything the Realtime client alone reads — Style, Headers,
+// TranscribeModel, CancelsResponseItself, NeedsCueForFirstTurn and the two
+// semantic-turn fields — is left at zero, because the client that answers for
+// this name (internal/provider/doubao) reads none of them. What it does read is
+// the name, the endpoint, the credential, the voice and the two audio formats.
+// Model is informational for the same reason: that protocol's version is a
+// constant inside its client and AICC_PROVIDER_MODEL cannot move it.
+//
+// RequiresTerminalAnnounce is the one capability that had to be said out loud.
+// This engine answers audio and nothing else — no text this client sends makes
+// it take a turn — so a phase the call never leaves has to carry its own words
+// or the caller hears silence, and a flow without them is refused at publish.
+func DoubaoProfile() Profile {
+	return Profile{
+		Name:     NameDoubao,
+		Endpoint: "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue",
+		// Pinned by the client, kept here so that a deployment reading this
+		// profile can see which protocol version it is talking to.
+		Model:     "1.2.6.1",
+		APIKeyEnv: "DOUBAO_API_KEY",
+		// One of the vendor's own voice names. A flow that wants another says
+		// so in global.voice, and the names are this vendor's alone.
+		Voice: "zh_female_vv_jupiter_bigtts",
+		// Telephone audio is refused: this endpoint takes linear 16-bit PCM at
+		// 16 kHz up and returns it at 24 kHz, both fixed rather than
+		// negotiated, so both directions convert.
+		AcceptsG711:              false,
+		LinearInput:              media.PCM16Format(media.RateProviderIn),
+		LinearOutput:             media.PCM16Format(media.RateProviderOut),
+		RequiresTerminalAnnounce: true,
+		// No TranscribeModel, and as on qwen that is the finding rather than an
+		// omission: this engine transcribes the caller unprompted, and its
+		// session payload has no field to ask for it in.
+		TranscribeModel: "",
+	}
+}
+
 // Provider names this build can run. A deployment runs exactly one of them,
 // chosen at startup: Qwen inside mainland China, OpenAI elsewhere.
 const (
@@ -206,6 +247,11 @@ const (
 	// NameGateway is not a vendor but a service of our own composing one
 	// behind this protocol; it is chosen the same way for the same reason.
 	NameGateway = "gateway"
+	// NameDoubao is the one name here that selects a different client as well
+	// as a different profile, because it is a different wire protocol. The
+	// choice is made in the composition root, not here: a client in a
+	// sub-package of this one cannot be built from inside it.
+	NameDoubao = "doubao"
 )
 
 // Override replaces where the deployment's provider is reached and which model
@@ -244,9 +290,11 @@ func ProfileFor(name string, override Override) (Profile, error) {
 		profile = QwenProfile()
 	case NameGateway:
 		profile = GatewayProfile()
+	case NameDoubao:
+		profile = DoubaoProfile()
 	default:
-		return Profile{}, fmt.Errorf("provider: unknown provider %q (%s, %s, %s)",
-			name, NameOpenAI, NameQwen, NameGateway)
+		return Profile{}, fmt.Errorf("provider: unknown provider %q (%s, %s, %s, %s)",
+			name, NameOpenAI, NameQwen, NameGateway, NameDoubao)
 	}
 	if override.Endpoint != "" {
 		profile.Endpoint = override.Endpoint

@@ -28,6 +28,7 @@ var (
 	jitterFilled     metric.Int64Counter
 	providerFirstAud metric.Int64Histogram
 	providerErrors   metric.Int64Counter
+	providerSessions metric.Int64Counter
 	botInterruptions metric.Int64Counter
 
 	transcribeFramesDropped metric.Int64Counter
@@ -70,6 +71,11 @@ func init() {
 		metric.WithExplicitBucketBoundaries(100, 200, 300, 400, 500, 700, 900, 1200, 1600, 2000, 3000))
 	providerErrors, _ = meter.Int64Counter("aicc_provider_ws_errors_total",
 		metric.WithDescription("Provider sessions that ended on an error rather than a hangup."))
+	providerSessions, _ = meter.Int64Counter("aicc_provider_sessions_started_total",
+		metric.WithDescription("Provider sessions this process opened, by provider. Vendors "+
+			"rate-limit session creation rather than concurrency — doubao allows 60 a "+
+			"minute per application id — so the rate of opening them is a quota a busy "+
+			"minute can exhaust while every other number here looks healthy."))
 	botInterruptions, _ = meter.Int64Counter("aicc_bot_interruptions_total",
 		metric.WithDescription("Times a caller took the floor back from the bot, by what "+
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
@@ -145,6 +151,21 @@ func RecordBotInterruption(reason string) {
 	}
 	botInterruptions.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// RecordProviderSessionStarted counts one conversation session being opened.
+//
+// It is a rate, not a population: aicc_calls_active already says how many are
+// up. What this answers is the question that gauge cannot — how fast they are
+// being created — because the vendor's limit is on creations per minute (60 per
+// application id on doubao) and not on how many run at once. A deployment can
+// sit well inside its concurrency and still be refused at the door.
+func RecordProviderSessionStarted(provider string) {
+	if providerSessions == nil {
+		return
+	}
+	providerSessions.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("provider", provider)))
 }
 
 // RecordProviderError counts a session that ended badly. A rise here is the
