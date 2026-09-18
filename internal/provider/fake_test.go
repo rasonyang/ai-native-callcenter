@@ -29,6 +29,11 @@ type fakeProvider struct {
 	// tests push events from their own, and a WebSocket has one writer.
 	writeMu  sync.Mutex
 	received []map[string]any
+	// The three things a decoded map cannot answer: what the bytes were, what
+	// the handshake carried, and how the socket ended. See the wire golden.
+	rawReceived     [][]byte
+	handshakeHeader http.Header
+	readErr         error
 
 	connected chan struct{}
 	closeOnce sync.Once
@@ -43,6 +48,7 @@ func newFakeProvider(t *testing.T, reply func(f *fakeProvider, message map[strin
 	upgrader := websocket.Upgrader{}
 
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		f.recordHandshake(req.Header)
 		conn, err := upgrader.Upgrade(w, req, nil)
 		if err != nil {
 			return
@@ -55,8 +61,10 @@ func newFakeProvider(t *testing.T, reply func(f *fakeProvider, message map[strin
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
+				f.recordReadError(err)
 				return
 			}
+			f.recordFrame(data)
 			var message map[string]any
 			if err := json.Unmarshal(data, &message); err != nil {
 				continue
@@ -240,6 +248,51 @@ func awaitEvent(t *testing.T, session *Realtime, want EventType) Event {
 			t.Fatalf("no %s event arrived (saw %v)", want, seen)
 		}
 	}
+}
+
+//
+// The record the wire golden reads. A decoded map says what a frame meant; a
+// golden has to say what was sent, so these keep the bytes themselves, the
+// handshake that carried them and the way the socket ended.
+//
+
+func (f *fakeProvider) recordHandshake(header http.Header) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handshakeHeader = header.Clone()
+}
+
+// handshake returns the upgrade request's headers.
+func (f *fakeProvider) handshake() http.Header {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.handshakeHeader
+}
+
+func (f *fakeProvider) recordFrame(data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rawReceived = append(f.rawReceived, append([]byte(nil), data...))
+}
+
+// rawFrames returns every client frame exactly as it arrived, in order.
+func (f *fakeProvider) rawFrames() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]byte(nil), f.rawReceived...)
+}
+
+func (f *fakeProvider) recordReadError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readErr = err
+}
+
+// readError returns what ended the server's read loop, once it has.
+func (f *fakeProvider) readError() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readErr
 }
 
 // nested walks a decoded JSON object.
