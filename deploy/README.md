@@ -229,8 +229,16 @@ non-empty default cannot be blanked, and everything after the first `=` is the
 value, comments included. The wiring keys in `docker-compose.yml` sit in
 `environment:`, which wins over `env_file:`, so `.env` cannot break them. The
 provider is one of those: a single provider answers every call, chosen at
-startup, and a call's language never selects it ([the provider
-notes](../docs/provider-extension.md)).
+startup, and a call's language never selects it. `AICC_PROVIDER` takes `openai`,
+`qwen`, `gateway` or `doubao`, each with its own credential —
+`DOUBAO_API_KEY` for the last, which is ByteDance's full-duplex dialogue API and
+the one value here that is a different wire protocol rather than another vendor
+of the same one. On `doubao` the model is pinned by the client, so
+`AICC_PROVIDER_MODEL` is ignored; `AICC_TRANSCRIBE_PROVIDER` has to be named if
+transcription is on, as on `gateway`; and a flow must give every terminal phase
+an `announce`, because nothing said to that engine in text makes it speak — a
+flow without one is refused at publish rather than discovered on a call ([the
+provider notes](../docs/provider-extension.md)).
 
 The API is mounted at `/api/v1` on the same port, and
 [docs/openapi.json](../docs/openapi.json) is its contract: every path in it,

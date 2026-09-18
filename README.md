@@ -65,8 +65,11 @@ store.
 
 **Speaks two languages, and admits which provider it runs.** English and
 Chinese throughout, interface and bot. One provider answers every call in a
-deployment, chosen at startup: `qwen` inside mainland China, `openai`
-elsewhere. A call's language never selects it.
+deployment, chosen at startup: `qwen` or `doubao` inside mainland China,
+`openai` elsewhere, or `gateway` for a Realtime gateway of your own. A call's
+language never selects it. Three of those are profiles of one protocol;
+`doubao` speaks a different one and has a client of its own
+([how a provider is added](docs/provider-extension.md)).
 
 ## How it fits together
 
