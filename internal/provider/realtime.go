@@ -426,9 +426,13 @@ func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
 	return r.requestResponse(map[string]any{"type": "response.create"})
 }
 
-// mergeHint folds steering into a tool result. A result that is already a JSON
+// MergeHint folds steering into a tool result. A result that is already a JSON
 // object gains a field; anything else is wrapped so the shape stays predictable.
-func mergeHint(output, hint string) string {
+//
+// It is exported because the hint belongs to the flow engine rather than to any
+// wire protocol: whatever a client wraps a tool result in, the model has to read
+// the steering as part of what it just learned, and in the same shape.
+func MergeHint(output, hint string) string {
 	if hint == "" {
 		return output
 	}
@@ -446,6 +450,9 @@ func mergeHint(output, hint string) string {
 	}
 	return string(merged)
 }
+
+// mergeHint is the name this client's one call site knows it by.
+var mergeHint = MergeHint
 
 // UpdateInstructions replaces the standing instructions.
 //
