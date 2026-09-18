@@ -123,6 +123,21 @@ func TestInstructionsCarryPersonaRulesAndPhase(t *testing.T) {
 	}
 }
 
+// The standing instructions are a brief; the announcement is a line. They are
+// read separately because the second is spoken word for word and the first
+// never is, so the announcement must not be folded into the instructions.
+func TestTheAnnouncementIsReadApartFromTheInstructions(t *testing.T) {
+	r := testRuntime(t, &fakeActions{}, "")
+
+	announce := r.Announce()
+	if announce != "Thanks for calling NovaNet billing." {
+		t.Errorf("announce = %q, want the phase's own line", announce)
+	}
+	if strings.Contains(r.Instructions(), announce) {
+		t.Errorf("the line to be spoken was folded into the instructions:\n%s", r.Instructions())
+	}
+}
+
 //
 // Dispatch.
 //

@@ -129,6 +129,11 @@ func (r *Runtime) Instructions() string {
 	return b.String()
 }
 
+// Announce is the current phase's own line, to be spoken as written. It is
+// deliberately not part of Instructions: the instructions are a brief the model
+// writes from, and this is wording the flow is not asking anybody to rephrase.
+func (r *Runtime) Announce() string { return r.engine.Announce() }
+
 // Dispatch runs a tool the model asked for and returns what to send back.
 //
 // It also reports whether the phase changed, which is what the caller uses to
