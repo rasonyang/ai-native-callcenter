@@ -29,6 +29,11 @@ type fakeProvider struct {
 	// tests push events from their own, and a WebSocket has one writer.
 	writeMu  sync.Mutex
 	received []map[string]any
+	// The three things a decoded map cannot answer: what the bytes were, what
+	// the handshake carried, and how the socket ended. See the wire golden.
+	rawReceived     [][]byte
+	handshakeHeader http.Header
+	readErr         error
 
 	connected chan struct{}
 	closeOnce sync.Once
@@ -43,6 +48,7 @@ func newFakeProvider(t *testing.T, reply func(f *fakeProvider, message map[strin
 	upgrader := websocket.Upgrader{}
 
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		f.recordHandshake(req.Header)
 		conn, err := upgrader.Upgrade(w, req, nil)
 		if err != nil {
 			return
@@ -55,8 +61,10 @@ func newFakeProvider(t *testing.T, reply func(f *fakeProvider, message map[strin
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
+				f.recordReadError(err)
 				return
 			}
+			f.recordFrame(data)
 			var message map[string]any
 			if err := json.Unmarshal(data, &message); err != nil {
 				continue
@@ -150,6 +158,43 @@ func (f *fakeProvider) awaitMessage(messageType string) map[string]any {
 	return nil
 }
 
+// messagesOfType narrows the record to one kind of client message.
+func (f *fakeProvider) messagesOfType(messageType string) []map[string]any {
+	var out []map[string]any
+	for _, message := range f.messages() {
+		if message["type"] == messageType {
+			out = append(out, message)
+		}
+	}
+	return out
+}
+
+// awaitMessages waits for n client messages of a type and returns them, then
+// holds still long enough for an n+1th to turn up.
+//
+// Every assertion about what a frame says is paired with one of these: on this
+// protocol a frame that is right and sent twice is a different bug from one
+// that is wrong — a second response.create is refused outright — and a test
+// that only reads the first frame it likes cannot tell them apart. n may be
+// zero, which asserts that none is sent at all.
+func (f *fakeProvider) awaitMessages(messageType string, n int) []map[string]any {
+	f.t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for n > 0 && time.Now().Before(deadline) {
+		if len(f.messagesOfType(messageType)) >= n {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	got := f.messagesOfType(messageType)
+	if len(got) != n {
+		f.t.Fatalf("the client sent %d %q messages, want %d; it sent %v",
+			len(got), messageType, n, typesOf(f.messages()))
+	}
+	return got
+}
+
 // refuteMessage fails if a message of this type is ever sent.
 func (f *fakeProvider) refuteMessage(messageType string) {
 	f.t.Helper()
@@ -203,6 +248,51 @@ func awaitEvent(t *testing.T, session *Realtime, want EventType) Event {
 			t.Fatalf("no %s event arrived (saw %v)", want, seen)
 		}
 	}
+}
+
+//
+// The record the wire golden reads. A decoded map says what a frame meant; a
+// golden has to say what was sent, so these keep the bytes themselves, the
+// handshake that carried them and the way the socket ended.
+//
+
+func (f *fakeProvider) recordHandshake(header http.Header) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.handshakeHeader = header.Clone()
+}
+
+// handshake returns the upgrade request's headers.
+func (f *fakeProvider) handshake() http.Header {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.handshakeHeader
+}
+
+func (f *fakeProvider) recordFrame(data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rawReceived = append(f.rawReceived, append([]byte(nil), data...))
+}
+
+// rawFrames returns every client frame exactly as it arrived, in order.
+func (f *fakeProvider) rawFrames() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]byte(nil), f.rawReceived...)
+}
+
+func (f *fakeProvider) recordReadError(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.readErr = err
+}
+
+// readError returns what ended the server's read loop, once it has.
+func (f *fakeProvider) readError() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.readErr
 }
 
 // nested walks a decoded JSON object.

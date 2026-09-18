@@ -61,9 +61,13 @@
   },
   "nodes": {
     "welcome": {
+      "announce": {
+        "zh": "星讯手机售后热线,语音助手为您服务。请问是咨询手机使用问题,查询维修进度,还是其它服务?",
+        "en": "Welcome to the StarCom Mobile after-sales hotline. Are you calling about a usage question, a repair status, or something else?"
+      },
       "instruction": {
-        "zh": "开场说:“星讯手机售后热线,语音助手为您服务。请问是咨询手机使用问题,查询维修进度,还是其它服务?”使用类问题:用你自己的知识简短解答常见操作问题(开关机、系统设置、充电、存储、系统升级等),超出能力或用户不满意时转人工。查维修进度:请用户报维修单号(RMA开头,可逐位确认),调用 repair_status 查询;查无此单(found=0)请用户核对单号。",
-        "en": "Open with: \"Welcome to the StarCom Mobile after-sales hotline. Are you calling about a usage question, a repair status, or something else?\" Usage questions: answer common operations briefly from your own knowledge (power, settings, charging, storage, system updates); transfer when it is beyond you or the caller is unsatisfied. Repair status: ask for the RMA number (confirm character by character) and call repair_status; if not found (found=0), ask the caller to double-check the number."
+        "zh": "使用类问题:用你自己的知识简短解答常见操作问题(开关机、系统设置、充电、存储、系统升级等),超出能力或用户不满意时转人工。查维修进度:请用户报维修单号(RMA开头,可逐位确认),调用 repair_status 查询;查无此单(found=0)请用户核对单号。",
+        "en": "Usage questions: answer common operations briefly from your own knowledge (power, settings, charging, storage, system updates); transfer when it is beyond you or the caller is unsatisfied. Repair status: ask for the RMA number (confirm character by character) and call repair_status; if not found (found=0), ask the caller to double-check the number."
       },
       "tools": [
         "repair_status"
@@ -121,17 +125,25 @@
       "tools": []
     },
     "finish_transfer": {
+      "announce": {
+        "zh": "好的,正在为您转接人工客服,请不要挂机,稍等片刻。",
+        "en": "Certainly — I am putting you through to an agent now. Please stay on the line."
+      },
       "instruction": {
-        "zh": "播报固定转接话术:“好的,正在为您转接人工客服,请不要挂机,稍等片刻。”说完就会接通,不要再问问题,也不要说再见。",
-        "en": "Announce the fixed transfer script: \"Certainly — I am putting you through to an agent now. Please stay on the line.\" You are connected right after that; ask no further questions and do not say goodbye."
+        "zh": "说完这句就会接通,不要再问问题,也不要说再见。",
+        "en": "The caller is connected right after this line; ask no further questions and do not say goodbye."
       },
       "tools": [],
       "isTerminal": true
     },
     "finish": {
+      "announce": {
+        "zh": "感谢来电,再见。",
+        "en": "Thank you for calling, goodbye."
+      },
       "instruction": {
-        "zh": "道别:“感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
-        "en": "Say goodbye: \"Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+        "zh": "说完这句线路会自动挂断,不要再问问题。",
+        "en": "The line hangs up once this has been said; ask no further questions."
       },
       "tools": [],
       "isTerminal": true

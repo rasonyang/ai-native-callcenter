@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,8 +16,11 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
@@ -371,6 +375,40 @@ func apiDeps(
 	}
 }
 
+// voiceProfile resolves the one provider this deployment's conversations run
+// on, with its connection details applied.
+//
+// A deployment with the AI leg switched off still calls this, and still fails
+// on a name nobody recognises: the setting is either meant or a typo, and a
+// typo that only surfaces when somebody turns the bot on is a typo that
+// surfaces during an incident.
+func voiceProfile(cfg config.Config) (provider.Profile, error) {
+	transcribeOff := strings.EqualFold(cfg.ProviderTranscribeModel, "off")
+	transcribeModel := cfg.ProviderTranscribeModel
+	if transcribeOff {
+		transcribeModel = ""
+	}
+	return provider.ProfileFor(cfg.Provider, provider.Override{
+		Endpoint:        cfg.ProviderEndpoint,
+		Model:           cfg.ProviderModel,
+		TranscribeModel: transcribeModel,
+		TranscribeOff:   transcribeOff,
+	})
+}
+
+// flowPublishRules is what this deployment demands of a flow before it will let
+// one answer a call, beyond the flow being loadable.
+//
+// With the AI leg off there is no demand to make: nothing here answers a call,
+// and refusing a flow over the shortcomings of a provider this process will
+// never open a session with would be a rule inventing its own reason.
+func flowPublishRules(cfg config.Config, profile provider.Profile) []flow.Rule {
+	if !cfg.IsBotEnabled || !profile.RequiresTerminalAnnounce {
+		return nil
+	}
+	return []flow.Rule{flow.RequireTerminalAnnounce}
+}
+
 // botUAS is the AI leg's SIP listener, which starts from the deployment's
 // defaults and overrides only what configuration supplies.
 //
@@ -390,11 +428,35 @@ func botUAS(cfg config.Config) voice.Config {
 	return uas
 }
 
+// voiceSession opens one conversation with the provider this deployment runs.
+//
+// Which client answers is decided here, in the composition root, because it
+// cannot be decided anywhere lower: the second client lives in a sub-package of
+// internal/provider, and a package cannot import one of its own children. This
+// is the only place where both are already in scope. It is still just a
+// SessionFactory — the orchestrator keeps its own default for the tests that
+// never name a provider, and a test that wants a fake still swaps this one out.
+//
+// A name that is not doubao is a dialect of the Realtime protocol and reaches
+// the one client that speaks it, which is the rule this file has always
+// followed; the switch has one case because there is one other protocol.
+func voiceSession(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
+	obs.RecordProviderSessionStarted(profile.Name)
+	switch profile.Name {
+	case provider.NameDoubao:
+		return doubao.New(profile, log)
+	default:
+		return provider.New(profile, log)
+	}
+}
+
 // botConfig assembles what the AI voice leg is given.
 //
-// Sessions and Logger are deliberately not parameters: the orchestrator fills
-// both with its own defaults, and passing them from here would mean this
-// process could disagree with every test that builds one.
+// Logger is deliberately not a parameter: the orchestrator fills it with its
+// own default, and passing it from here would mean this process could disagree
+// with every test that builds one. Sessions used to be left the same way, and
+// is not any more — see voiceSession for why the choice of client belongs to
+// the composition root.
 func botConfig(
 	uas voice.Config,
 	catalogSvc aicall.Catalog,
@@ -410,6 +472,7 @@ func botConfig(
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
 		UAS:                uas,
+		Sessions:           voiceSession,
 		Catalog:            catalogSvc,
 		Flows:              flows,
 		Switch:             sw,

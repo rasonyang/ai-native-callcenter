@@ -56,6 +56,16 @@ func runFlowAdd(args []string) error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 
+	// The same rule the server applies, from the same configuration. A flow
+	// this command could publish and the API could not would be a way around
+	// the deployment's own requirements, and it is the command an operator
+	// reaches for first.
+	profile, err := voiceProfile(cfg)
+	if err != nil {
+		return fmt.Errorf("AICC_PROVIDER: %w", err)
+	}
+	st.FlowPublishRules = flowPublishRules(cfg, profile)
+
 	flows := st.Flows()
 	resolvedSlug := orFirst(*slug, specID(data))
 

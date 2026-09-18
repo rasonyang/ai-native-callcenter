@@ -56,9 +56,13 @@
   },
   "nodes": {
     "greet": {
+      "announce": {
+        "zh": "您好,这里是星联宽带客服。",
+        "en": "Hello, this is NovaNet Broadband customer service."
+      },
       "instruction": {
-        "zh": "开场说:“您好,这里是星联宽带客服。”确认对方是机主本人后(只报号码后4位),立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,礼貌致歉并调用 hangup。",
-        "en": "Open with: \"Hello, this is NovaNet Broadband customer service.\" Confirm you are speaking with the account owner (mention only the last 4 digits of the number), then immediately call bill_lookup. If the answerer is not the owner: disclose nothing, apologize and call hangup."
+        "zh": "确认对方是机主本人后(只报号码后4位),立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,礼貌致歉并调用 hangup。",
+        "en": "Confirm you are speaking with the account owner (mention only the last 4 digits of the number), then immediately call bill_lookup. If the answerer is not the owner: disclose nothing, apologize and call hangup."
       },
       "tools": [
         "bill_lookup"
@@ -148,17 +152,25 @@
       "tools": []
     },
     "finish_transfer": {
+      "announce": {
+        "zh": "好的,正在为您转接专员,请不要挂机,稍等片刻。",
+        "en": "Certainly — I am putting you through to a specialist now. Please stay on the line."
+      },
       "instruction": {
-        "zh": "播报固定转接话术:“好的,正在为您转接专员,请不要挂机,稍等片刻。”说完就会接通,不要再问问题,也不要说再见。",
-        "en": "Announce the fixed transfer script: \"Certainly — I am putting you through to a specialist now. Please stay on the line.\" You are connected right after that; ask no further questions and do not say goodbye."
+        "zh": "说完这句就会接通,不要再问问题,也不要说再见。",
+        "en": "The caller is connected right after this line; ask no further questions and do not say goodbye."
       },
       "tools": [],
       "isTerminal": true
     },
     "finish": {
+      "announce": {
+        "zh": "感谢配合,再见。",
+        "en": "Thank you, goodbye."
+      },
       "instruction": {
-        "zh": "道别:“感谢配合,再见。”说完线路会自动挂断,不要再问问题。",
-        "en": "Say goodbye: \"Thank you, goodbye.\" The line hangs up automatically; ask no further questions."
+        "zh": "说完这句线路会自动挂断,不要再问问题。",
+        "en": "The line hangs up once this has been said; ask no further questions."
       },
       "tools": [],
       "isTerminal": true

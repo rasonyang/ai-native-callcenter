@@ -36,6 +36,13 @@ const (
 	// they were never granted from a rule about this particular row.
 	CodeInsufficientScope ErrorCode = "INSUFFICIENT_SCOPE"
 	CodeValidationFailed  ErrorCode = "VALIDATION_FAILED"
+	// CodeTerminalAnnounceRequired refuses a flow this deployment's speech
+	// provider could not speak the ending of. It is not VALIDATION_FAILED
+	// because nothing is wrong with the document — the same flow publishes on
+	// an installation whose provider can be prompted to speak — and an author
+	// told to check their spec would be hunting a typo that is not there.
+	// params.nodes lists the phases at fault.
+	CodeTerminalAnnounceRequired ErrorCode = "TERMINAL_ANNOUNCE_REQUIRED"
 	// CodeUserDataTooLarge refuses business data rather than truncating it:
 	// a screen showing half a customer's details is worse than one saying the
 	// request was refused.

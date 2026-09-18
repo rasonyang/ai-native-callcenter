@@ -85,7 +85,7 @@ flows(id uuid pk, slug text unique, name text, draft_spec jsonb,
       published_revision_id uuid null, published_at, updated_at, updated_by)
 flow_revisions(id uuid pk, flow_id fk, spec jsonb, note text, created_by, created_at)  -- publish = insert + point
 ```
-Spec = **DSL v2** (v1 re-keyed to lowerCamelCase per 07 §7: `specVersion`, `initialNode`, `maxTurns`, …; enum-like values SCREAMING_SNAKE). Server-side validation mirrors the Designer's Validate (reachable nodes, defined targets, known tools, bilingual completeness).
+Spec = **DSL v2** (v1 re-keyed to lowerCamelCase per 07 §7: `specVersion`, `initialNode`, `maxTurns`, …; enum-like values SCREAMING_SNAKE). A node carries `instruction` and, optionally, `announce` — a bilingual line the bot says as written on entering the phase (02 §6). Server-side validation mirrors the Designer's Validate (reachable nodes, defined targets, known tools, bilingual completeness). One further check runs on **publish** only, because it depends on the installation rather than the document: where the deployment's speech provider cannot be prompted to speak by text, a terminal node without an `announce` is refused (`TERMINAL_ANNOUNCE_REQUIRED`).
 
 **Calls & artifacts**
 ```sql

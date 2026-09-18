@@ -2,15 +2,35 @@
 
 The extension point is the wire protocol, not Go.
 
-`internal/provider` is one client for the OpenAI Realtime protocol plus a
-`Profile` describing how a particular vendor speaks it. Adding a provider means
-adding a profile and a name for `AICC_PROVIDER` — never a second client, never
-an interface with two implementations behind it.
+`internal/provider` is a client for the OpenAI Realtime protocol plus a
+`Profile` describing how a particular vendor speaks it. Adding an engine that
+speaks that protocol means adding a profile and a name for `AICC_PROVIDER` —
+never a second client, never an interface with two implementations behind it.
 
-This is not an accident of the current code. Two engines already ship (OpenAI
-and Qwen) and they differ only in values: an endpoint, a model, a dialect of
-the session payload, and a handful of behavioural traits discovered by calling
-them. A third that speaks the same protocol differs in exactly the same way.
+This is not an accident of the current code. Three engines already ship that way
+(OpenAI, Qwen and the Realtime gateway) and they differ only in values: an
+endpoint, a model, a dialect of the session payload, and a handful of
+behavioural traits discovered by calling them. A fourth that speaks the same
+protocol differs in exactly the same way.
+
+Only a different **protocol** earns another client, and one has. `doubao` is
+ByteDance's full-duplex dialogue API, and `internal/provider/doubao` is the
+client that speaks it. That is the same rule applied rather than an exception to
+it — `internal/transcribe` has held two clients under the same sentence since it
+was written, for the same reason. A new *engine* on a protocol already spoken
+here is a profile; a new *grammar* is a client, and the test is lifecycle rather
+than field names: Doubao bootstraps its session and waits to be told it exists,
+has no way to ask for a turn, announces neither the start nor the end of the
+caller speaking, returns tool results as items with a role, and ends with a
+handshake. None of that is expressible as values in a `Profile`.
+
+A second client changes nothing above it. It lives in its own sub-package, it
+implements the same provider-neutral `VoiceSession`, and every event it produces
+is one the Realtime client already produces. It shares transport and audio
+plumbing — `wsconn`, `provider.Watchdog`, `provider.MergeHint` — only where
+ownership, lifetime and failure behaviour are identical in both, and it shares
+no protocol event, ever. Decoding is where the two are supposed to differ, and
+factoring that together is the abstraction layer this rule exists to prevent.
 
 ## What a profile is
 
@@ -28,12 +48,21 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `LinearInput` / `LinearOutput` | The PCM formats used when it does not. Fixed by the vendor, not negotiated. |
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
 | `NeedsCueForFirstTurn` | Whether it refuses to speak into an empty conversation. Our bot greets first, so those providers need a synthetic cue. |
+| `RequiresTerminalAnnounce` | Whether *no* text will make it take a turn. Stronger than the row above: a cue is something a client can invent, and this says there is no cue at all, so a phase the call stops at must carry its own words or the caller hears silence. A publish is refused otherwise. |
 | `SemanticTurnType`, `SemanticTurnSilenceMs` | The vendor's name for semantic turn detection, and the hold it forces in that mode regardless of what was asked |
 
-The last four are the interesting ones. They are not configuration in any
+The last five are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call
 behaved differently from the documentation, and each is a bug somewhere else in
 the call if it is wrong.
+
+A profile answered by a client other than the Realtime one fills in only what
+that client reads. `DoubaoProfile` leaves `Style`, `Headers`, `TranscribeModel`,
+`CancelsResponseItself`, `NeedsCueForFirstTurn` and both semantic-turn fields at
+zero, and says so in its doc comment: a trait nothing reads is worse than an
+absent one, because the next person takes it for a statement about the vendor.
+Its `Model` is informational for the same reason — the protocol version is a
+constant inside the client, and `AICC_PROVIDER_MODEL` cannot move it.
 
 ## The steps
 
@@ -55,7 +84,10 @@ the call if it is wrong.
 
 3. **Name it.** Add the constant and the `ProfileFor` case. An unknown
    `AICC_PROVIDER` must keep refusing to start — a deployment silently falling
-   back to another vendor is worse than not starting.
+   back to another vendor is worse than not starting. A name that also selects a
+   *client* gets a second registration, in `cmd/aicc/wiring.go`: a client in a
+   sub-package of `internal/provider` cannot be built from inside it, so the
+   composition root is the only place where both are in scope.
 
 4. **Register the setting.** `.env.example` is the registry; the new name goes
    in the `AICC_PROVIDER` comment with its endpoint and model defaults.
@@ -67,18 +99,55 @@ the call if it is wrong.
 
 ## What never happens
 
-**A second client.** `VoiceSession` is the seam between the call actor and the
-one Realtime client, plus its test fake. It is not a generalisation point.
-Widening it to fit a protocol that is not Realtime is how a codebase acquires
-an abstraction layer nobody wanted.
+**A second client for a protocol that already has one.** A vendor's dialect of
+Realtime is a profile. If the difference between an engine and one that already
+works here is an endpoint, a model, a field name or a behavioural trait, it is
+values, and writing a client for it is writing the same client twice.
+
+**A widened `VoiceSession`.** It is the seam between the call actor and whatever
+client answers, plus its test fake, and it is stated in AICC's own vocabulary —
+sessions, turns, speech, tool calls. A protocol concept has never appeared in it
+and never will. A second client is added *underneath* it, saying the same
+things; the day one of them needs the seam to grow a method named after
+something on its wire is the day that client is doing the seam's job.
+
+**Shared protocol code.** Two clients may share a socket, a keepalive, a
+watchdog and a pure function, and only because ownership and runtime semantics
+are identical in both — the same test `internal/transcribe` applies. They share
+no event, no decoder and no dispatch. That is where they are supposed to differ.
 
 **A cascade.** ASR + LLM + TTS composed in-process is out of scope permanently
 (phase1-decisions A6) — no types, no interfaces, no adapters, no stubs, no
 TODOs. The composition is a real and useful thing to build; it is simply
 another service.
 
-**A vendor's protocol other than this one.** If an engine does not speak the
-OpenAI Realtime protocol, it does not attach here.
+**A third protocol on a whim.** A new client is a wire protocol's worth of
+lifecycle, failure modes and tests, verified against the live endpoint before a
+line of it is written. An engine that speaks neither protocol here reaches a
+call through the Realtime gateway, which is what the gateway is for; a client of
+its own has to be worth that, and has to be decided rather than drifted into.
+
+## Attaching a second protocol
+
+`AICC_PROVIDER=doubao` is the one name here that selects a client as well as a
+profile. What that costs, and what was measured to justify it, is written down
+in [doubao-findings](design/doubao-findings.md); what a deployment has to know
+is short:
+
+```sh
+AICC_PROVIDER=doubao
+DOUBAO_API_KEY=…                  # the vendor's own name for it
+AICC_TRANSCRIBE_PROVIDER=qwen     # the human phase's recogniser is separate
+# AICC_PROVIDER_MODEL is ignored — the protocol version is pinned in the client
+```
+
+Two of its properties reach the flows rather than the environment. Voice names
+are this vendor's own and go in `global.voice`, as on every provider. And
+because nothing this client sends makes that engine take a turn, **every
+terminal phase must carry an `announce`** — `RequiresTerminalAnnounce` turns
+that into a publish rule, so a flow that would have left a caller in silence is
+refused with a reason rather than discovered on a call. An entry phase with no
+`announce` is legal and means the bot answers and waits for the caller to speak.
 
 ## Attaching something that is not a vendor
 
@@ -133,6 +202,6 @@ which traits hold.
 Nowhere. A DID's language sets the greeting, the prompt language and the voice.
 It has never selected a provider and reintroducing that mapping is a regression
 (phase1-decisions A1). One provider answers every call in a deployment, chosen
-at startup, because the two shipped vendors are not both reachable with
-acceptable latency from the same network — `qwen` inside mainland China,
-`openai` elsewhere.
+at startup, because the vendors that ship here are not all reachable with
+acceptable latency from the same network — `qwen` or `doubao` inside mainland
+China, `openai` elsewhere.

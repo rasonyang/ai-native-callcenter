@@ -258,6 +258,7 @@ const (
 	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
 	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
 	ErrorCodeSWITCHDOWN                     ErrorCode = "SWITCH_DOWN"
+	ErrorCodeTERMINALANNOUNCEREQUIRED       ErrorCode = "TERMINAL_ANNOUNCE_REQUIRED"
 	ErrorCodeUSERDATATOOLARGE               ErrorCode = "USER_DATA_TOO_LARGE"
 	ErrorCodeUSERSUSPENDED                  ErrorCode = "USER_SUSPENDED"
 	ErrorCodeVALIDATIONFAILED               ErrorCode = "VALIDATION_FAILED"
@@ -313,6 +314,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeSTORAGEDOWN:
 		return true
 	case ErrorCodeSWITCHDOWN:
+		return true
+	case ErrorCodeTERMINALANNOUNCEREQUIRED:
 		return true
 	case ErrorCodeUSERDATATOOLARGE:
 		return true
@@ -1452,7 +1455,9 @@ type FlowCreate struct {
 	Name string `json:"name"`
 	Slug string `json:"slug"`
 
-	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+	//
+	// One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
 	//
 	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
 	Spec FlowSpec `json:"spec"`
@@ -1460,7 +1465,9 @@ type FlowCreate struct {
 
 // FlowDetail One flow: what it is, what its draft says, and every time it has been published.
 type FlowDetail struct {
-	// DraftSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	// DraftSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+	//
+	// One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
 	//
 	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
 	DraftSpec FlowSpec `json:"draftSpec"`
@@ -1476,7 +1483,9 @@ type FlowDetail struct {
 type FlowDraftWrite struct {
 	Name string `json:"name"`
 
-	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+	//
+	// One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
 	//
 	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
 	Spec FlowSpec `json:"spec"`
@@ -1505,7 +1514,9 @@ type FlowRevision struct {
 	RevisionID openapi_types.UUID `json:"revisionId"`
 }
 
-// FlowSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+// FlowSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+//
+// One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
 //
 // The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
 type FlowSpec map[string]interface{}

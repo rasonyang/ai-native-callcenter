@@ -175,6 +175,20 @@ type Node struct {
 	// Instruction is what the model should be doing in this phase. It may
 	// reference collected values as {slots.name}.
 	Instruction Text `json:"instruction"`
+	// Announce is the phase's own line, spoken when the conversation enters
+	// it. Unlike Instruction it is not a brief the model writes from: it is
+	// wording the flow owns, said as written.
+	//
+	// It exists because not every engine can be talked into a turn. A model
+	// asked to open with a sentence usually obliges and sometimes improvises,
+	// which is fine for a greeting and not fine for a regulated closing line —
+	// and a full-duplex engine that takes no text cue at all cannot be asked
+	// in the first place. Where the provider can only approximate this the
+	// client says so; where it can speak a line verbatim, it does.
+	//
+	// It renders {slots.name} exactly as Instruction does, and it is optional:
+	// most phases leave the wording to the model.
+	Announce Text `json:"announce,omitempty"`
 	// Tools is the allowlist for this phase. "*" allows everything; empty
 	// allows only the flow's always-available tools.
 	Tools       []string     `json:"tools,omitempty"`

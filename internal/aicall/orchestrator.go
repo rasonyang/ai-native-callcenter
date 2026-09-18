@@ -311,16 +311,8 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 
 	session, err := New(FromDialog(dialog), model, profile, Config{
-		Session: provider.SessionConfig{
-			Instructions: runtime.Instructions(),
-			Language:     language,
-			// The bot's own voice, published with the flow. Empty falls back
-			// to the provider profile's default.
-			Voice: spec.Global.Voice,
-			Turn:  provider.DefaultTurnDetection(),
-			Tools: runtime.Tools(),
-		},
-		Logger: log,
+		Session: sessionConfigFor(spec, runtime, language),
+		Logger:  log,
 	})
 	if err != nil {
 		return err
@@ -352,6 +344,27 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	// will never hear it, and the caller's channel is gone with the call.
 	actions.disarm()
 	return nil
+}
+
+// sessionConfigFor is everything the model needs before it hears anything: who
+// it is, what phase it is in, what it may call — and the entry phase's own
+// opening line, where the flow named one.
+//
+// The opening line belongs here rather than beside the other announcements
+// because the first turn is asked for while the session is being started.
+// There is no moment afterwards early enough to catch it: by the time the
+// bridge is running, the greeting is already being made.
+func sessionConfigFor(spec *flow.Spec, runtime *flow.Runtime, language string) provider.SessionConfig {
+	return provider.SessionConfig{
+		Instructions: runtime.Instructions(),
+		Language:     language,
+		// The bot's own voice, published with the flow. Empty falls back
+		// to the provider profile's default.
+		Voice:       spec.Global.Voice,
+		Turn:        provider.DefaultTurnDetection(),
+		Tools:       runtime.Tools(),
+		OpeningText: runtime.Announce(),
+	}
 }
 
 // drive consumes the bridge's events and lets the flow steer.
@@ -410,10 +423,11 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 }
 
 // afterMove follows up a phase change: the standing instructions are re-pinned
-// so collected facts survive a provider's context limits, and a terminal phase
-// ends the call once its closing words have been heard. Without that last rule
-// a conversation that reaches goodbye simply stays open, with the bot politely
-// re-engaging the silence forever.
+// so collected facts survive a provider's context limits, the phase's own line
+// is said where it has one, and a terminal phase ends the call once its closing
+// words have been heard. Without that last rule a conversation that reaches
+// goodbye simply stays open, with the bot politely re-engaging the silence
+// forever.
 func (o *Orchestrator) afterMove(moved string, session *Session,
 	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
 
@@ -424,29 +438,48 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 		log.Warn("could not update instructions", "error", err)
 	}
 	if runtime.Engine().IsTerminal() {
-		// Unless the tool that moved us here already armed the call's ending.
-		// A phase is usually terminal *because* of that tool — transfer_to_agent
-		// lands in a "we're putting you through" phase, hangup in a goodbye —
-		// and arming replaces whatever was armed before. So the flow's own
-		// ending displaced the transfer: the bot said an agent would be with
-		// them, then hung up on them instead of putting them through.
-		if actions.isArmed() {
-			log.Info("flow reached a terminal phase; the armed action ends the call",
-				"node", moved)
-			return
-		}
-		log.Info("flow reached a terminal phase; the call ends after the closing line",
-			"node", moved)
-		// The flow concluding the call is containment, exactly like the
-		// hangup tool concluding it — the ledger must not tell them apart.
-		if actions.recorder != nil {
-			actions.recorder.markHangup()
-		}
-		actions.arm(context.Background(), func() {
-			actions.markFinished("FLOW_END")
-			session.Close(context.Background())
-		})
+		o.armTheEnding(moved, session, actions, log)
 	}
+	// Last, and that ordering is load-bearing on a terminal phase. Arming
+	// remembers the turn it happened in and waits for the playback of a later
+	// one, because the closing line is spoken in a turn of its own. Asking for
+	// the line first would race that turn into existence before the turn is
+	// recorded, and then no playback would ever count: the call would end ten
+	// seconds later on the grace cap, in silence the caller has to sit through.
+	if line := runtime.Announce(); line != "" {
+		if err := session.Speak(line); err != nil {
+			log.Warn("could not say the phase's own line", "node", moved, "error", err)
+		}
+	}
+}
+
+// armTheEnding schedules the end of a call the flow has concluded, for once the
+// caller has heard what the terminal phase had to say.
+func (o *Orchestrator) armTheEnding(moved string, session *Session,
+	actions *callActions, log *slog.Logger) {
+
+	// Unless the tool that moved us here already armed the call's ending.
+	// A phase is usually terminal *because* of that tool — transfer_to_agent
+	// lands in a "we're putting you through" phase, hangup in a goodbye —
+	// and arming replaces whatever was armed before. So the flow's own
+	// ending displaced the transfer: the bot said an agent would be with
+	// them, then hung up on them instead of putting them through.
+	if actions.isArmed() {
+		log.Info("flow reached a terminal phase; the armed action ends the call",
+			"node", moved)
+		return
+	}
+	log.Info("flow reached a terminal phase; the call ends after the closing line",
+		"node", moved)
+	// The flow concluding the call is containment, exactly like the
+	// hangup tool concluding it — the ledger must not tell them apart.
+	if actions.recorder != nil {
+		actions.recorder.markHangup()
+	}
+	actions.arm(context.Background(), func() {
+		actions.markFinished("FLOW_END")
+		session.Close(context.Background())
+	})
 }
 
 // handleDeadAir asks the model to re-engage a silent caller, or moves the flow

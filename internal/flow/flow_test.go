@@ -3,6 +3,7 @@
 package flow
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -44,6 +45,7 @@ const testFlow = `{
 	"nodes": {
 		"welcome": {
 			"instruction": {"en": "Greet and ask for the account phone number.", "zh": "问候并询问账户手机号。"},
+			"announce": {"en": "Thanks for calling NovaNet billing.", "zh": "感谢致电 NovaNet 账务热线。"},
 			"tools": ["lookup_account"],
 			"transitions": [
 				{"on": "TOOL_RESULT", "tool": "lookup_account",
@@ -60,6 +62,7 @@ const testFlow = `{
 		"report": {
 			"instruction": {"en": "Report the balance for {slots.lookup_account.name}.",
 			                "zh": "向 {slots.lookup_account.name} 播报余额。"},
+			"announce": "Here is the balance for {slots.lookup_account.name}.",
 			"tools": ["lookup_account", "take_message"]
 		},
 		"handoff": {
@@ -395,6 +398,104 @@ func TestInstructionRendersMissingSlotsAsNothing(t *testing.T) {
 
 	if got := e.Instruction(); strings.Contains(got, "{slots.") {
 		t.Errorf("an unfilled template leaked to the model: %q", got)
+	}
+}
+
+//
+// Announcements.
+//
+
+// A phase's announce is a line the bot says, not a brief it works from: it is
+// taken from the flow word for word, in the call's own language.
+func TestAPhaseAnnouncementIsTakenVerbatimInTheCallsLanguage(t *testing.T) {
+	english := testEngine(t, "en")
+	if got := english.Announce(); got != "Thanks for calling NovaNet billing." {
+		t.Errorf("announce = %q, want the English line unchanged", got)
+	}
+
+	chinese := testEngine(t, "zh-CN")
+	if got := chinese.Announce(); got != "感谢致电 NovaNet 账务热线。" {
+		t.Errorf("announce = %q, want the Chinese line", got)
+	}
+}
+
+// The same substitution the instruction gets: a line naming the caller is
+// worth nothing if it reaches them as a template. The bare-string form is the
+// other half of this — one wording in every language, as Text already allows.
+func TestAnAnnouncementRendersSlotsAndAcceptsOneWordingForEveryLanguage(t *testing.T) {
+	e := testEngine(t, "en")
+	if moved := e.OnToolResult("lookup_account",
+		map[string]any{"found": "1", "name": "Alice"}); moved != "report" {
+		t.Fatalf("moved to %q, want report", moved)
+	}
+
+	if got := e.Announce(); got != "Here is the balance for Alice." {
+		t.Errorf("announce = %q, want the collected name substituted", got)
+	}
+	if got := testEngine(t, "zh").Spec().Nodes["report"].Announce.For(LangZH); got == "" {
+		t.Error("a bare-string announce did not reach the Chinese side")
+	}
+}
+
+// Most phases say nothing of their own, and the field is optional: a phase
+// with no announce must report emptiness rather than something to speak.
+func TestAPhaseWithNoAnnouncementHasNothingToSay(t *testing.T) {
+	e := testEngine(t, "en")
+	if moved := e.OnNoInput(); moved != "" {
+		t.Fatalf("one silence moved to %q", moved)
+	}
+	if moved := e.OnNoInput(); moved != "farewell" {
+		t.Fatalf("two silences moved to %q, want farewell", moved)
+	}
+	if got := e.Announce(); got != "" {
+		t.Errorf("announce = %q, want nothing", got)
+	}
+}
+
+// A phase the conversation does not leave has one job: say the closing words.
+// Where the engine that answers cannot be prompted into a turn by text, a
+// terminal phase with no line of its own says nothing at all — the caller
+// hears the bot stop mid-call — so the flow is refused before it can be
+// published rather than discovered on a call.
+func TestTerminalPhasesMustCarryALineWhereTheProviderCannotBeCued(t *testing.T) {
+	spec := loadTestFlow(t)
+
+	err := RequireTerminalAnnounce(spec)
+	if err == nil {
+		t.Fatal("a flow whose terminal phase says nothing of its own was accepted")
+	}
+	var missing *MissingAnnounceError
+	if !errors.As(err, &missing) {
+		t.Fatalf("error is %T, want one a handler can answer with its own code", err)
+	}
+	if len(missing.Nodes) != 1 || missing.Nodes[0] != "farewell" {
+		t.Errorf("nodes = %v, want exactly the terminal phase at fault", missing.Nodes)
+	}
+	if !strings.Contains(err.Error(), "farewell") {
+		t.Errorf("error %q does not name the phase", err)
+	}
+
+	// The phases a conversation passes through are the model's to speak for;
+	// only the ones it cannot leave are at issue.
+	withLine := strings.Replace(testFlow,
+		`"instruction": {"en": "Say goodbye.", "zh": "道别。"},`,
+		`"instruction": {"en": "Say goodbye.", "zh": "道别。"},
+			"announce": {"en": "Goodbye.", "zh": "再见。"},`, 1)
+	fixed, err := Load([]byte(withLine))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := RequireTerminalAnnounce(fixed); err != nil {
+		t.Errorf("a flow whose terminal phase carries its line was refused: %v", err)
+	}
+}
+
+// The rule is the deployment's, not the dialect's: the same flow is perfectly
+// valid on an engine that can be asked to greet, and loading must not depend
+// on which one this installation runs.
+func TestLoadingDoesNotApplyTheDeploymentsOwnRule(t *testing.T) {
+	if _, err := Load([]byte(testFlow)); err != nil {
+		t.Errorf("a flow with no terminal line failed to load: %v", err)
 	}
 }
 

@@ -127,6 +127,60 @@ func (e *ValidationError) Error() string {
 		e.FlowID, strings.Join(e.Problems, "\n  - "))
 }
 
+// Rule is a check a spec must pass beyond being loadable.
+//
+// It is separate from validate for one reason: validate answers "is this a
+// flow", which is the same question everywhere, and a Rule answers "may this
+// flow run here", which is not. A deployment applies the rules its own
+// installation implies — today exactly one, and only on publish, because that
+// is the operation a caller can hear.
+type Rule func(*Spec) error
+
+// RequireTerminalAnnounce refuses a flow whose terminal phases have no line of
+// their own.
+//
+// A phase the conversation does not leave exists to say one thing: the
+// goodbye, the hand-over script. Every phase before it can leave the wording
+// to the model because the model is answering the caller — but a terminal
+// phase has nobody to answer. It is reached, it speaks, and the call ends, so
+// something has to prompt that turn. Where the engine takes a text cue, the
+// phase instruction is that prompt; where it does not, the phase's own line is
+// the only way those words exist at all, and without one the caller hears the
+// bot simply stop.
+//
+// It is a publish-time rule and not a load-time one on purpose. The same flow
+// is perfectly good on an engine that can be cued, and a spec that loads on one
+// installation and not on another would make the dialect a property of the
+// host.
+func RequireTerminalAnnounce(spec *Spec) error {
+	var nodes []string
+	for id, node := range spec.Nodes {
+		if node.IsTerminal && node.Announce.IsEmpty() {
+			nodes = append(nodes, id)
+		}
+	}
+	if len(nodes) == 0 {
+		return nil
+	}
+	slices.Sort(nodes)
+	return &MissingAnnounceError{FlowID: spec.ID, Nodes: nodes}
+}
+
+// MissingAnnounceError names every terminal phase that would have nothing to
+// say. Like ValidationError it reports the whole list rather than the first,
+// so an author fixes the flow once.
+type MissingAnnounceError struct {
+	FlowID string
+	Nodes  []string
+}
+
+func (e *MissingAnnounceError) Error() string {
+	return fmt.Sprintf("flow %s cannot run on this deployment: its speech provider "+
+		"cannot be prompted to speak by text, so a phase the call does not leave "+
+		"needs an announce of its own; these have none: %s",
+		e.FlowID, strings.Join(e.Nodes, ", "))
+}
+
 // knownToolNames is everything a phase may legitimately allow: the flow's own
 // declarative tools plus the built-ins every flow gets.
 func (s *Spec) knownToolNames() []string {

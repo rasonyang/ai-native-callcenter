@@ -1,0 +1,11 @@
+{"session":{"audio":{"input":{"format":{"type":"audio/pcmu"},"transcription":{"model":"gpt-live-transcribe"},"turn_detection":{"silence_duration_ms":500,"threshold":0.5,"type":"server_vad"}},"output":{"format":{"type":"audio/pcmu"},"voice":"marin"}},"instructions":"You answer the phone for NovaNet.","tools":[{"description":"Read the caller's balance.","name":"lookup_balance","parameters":{"type":"object","properties":{"accountId":{"type":"string"}}},"type":"function"}],"type":"realtime"},"type":"session.update"}
+{"type":"response.create"}
+{"type":"input_audio_buffer.append","audio":"AH+A/w=="}
+{"audio_end_ms":120,"content_index":0,"item_id":"item-1","type":"conversation.item.truncate"}
+{"audio_end_ms":200,"content_index":0,"item_id":"item-1","type":"conversation.item.truncate"}
+{"session":{"instructions":"You are now closing the call.","type":"realtime"},"type":"session.update"}
+{"item":{"content":[{"text":"2","type":"input_text"}],"role":"user","type":"message"},"type":"conversation.item.create"}
+{"type":"response.create"}
+{"item":{"call_id":"call-7","output":"{\"balance\":\"12.50\",\"hint\":\"Tell the caller the balance, then offer to close.\"}","type":"function_call_output"},"type":"conversation.item.create"}
+{"type":"response.create"}
+{"response":{"instructions":"Say exactly this, word for word, and add nothing else:\nThanks for calling NovaNet."},"type":"response.create"}

@@ -54,9 +54,13 @@
   },
   "nodes": {
     "welcome": {
+      "announce": {
+        "zh": "星讯上门服务热线,语音助手为您服务。",
+        "en": "Welcome to the StarCom field-service hotline."
+      },
       "instruction": {
-        "zh": "开场说:“星讯上门服务热线,语音助手为您服务。”然后立即调用 appt_lookup 查询本机号码是否已有预约,不要先问用户问题。",
-        "en": "Open with: \"Welcome to the StarCom field-service hotline.\" Then immediately call appt_lookup to check whether this number already has an appointment — do not ask questions first."
+        "zh": "立即调用 appt_lookup 查询本机号码是否已有预约,不要先问用户问题。",
+        "en": "Immediately call appt_lookup to check whether this number already has an appointment — do not ask questions first."
       },
       "tools": [
         "appt_lookup"
@@ -169,17 +173,25 @@
       "tools": []
     },
     "finish_transfer": {
+      "announce": {
+        "zh": "好的,正在为您转接人工客服,请不要挂机,稍等片刻。",
+        "en": "Certainly — I am putting you through to an agent now. Please stay on the line."
+      },
       "instruction": {
-        "zh": "播报固定转接话术:“好的,正在为您转接人工客服,请不要挂机,稍等片刻。”说完就会接通,不要再问问题,也不要说再见。",
-        "en": "Announce the fixed transfer script: \"Certainly — I am putting you through to an agent now. Please stay on the line.\" You are connected right after that; ask no further questions and do not say goodbye."
+        "zh": "说完这句就会接通,不要再问问题,也不要说再见。",
+        "en": "The caller is connected right after this line; ask no further questions and do not say goodbye."
       },
       "tools": [],
       "isTerminal": true
     },
     "finish": {
+      "announce": {
+        "zh": "感谢来电,再见。",
+        "en": "Thank you for calling, goodbye."
+      },
       "instruction": {
-        "zh": "道别:“感谢来电,再见。”说完线路会自动挂断,不要再问问题。",
-        "en": "Say goodbye: \"Thank you for calling, goodbye.\" The line hangs up automatically; ask no further questions."
+        "zh": "说完这句线路会自动挂断,不要再问问题。",
+        "en": "The line hangs up once this has been said; ask no further questions."
       },
       "tools": [],
       "isTerminal": true

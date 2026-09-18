@@ -60,6 +60,21 @@ type VoiceSession interface {
 	// between phases.
 	UpdateInstructions(text string) error
 
+	// SpeakText makes the bot say something the application has decided on,
+	// mid-call. Verbatim where the provider can manage it and as close as it
+	// will come otherwise — this is a request for particular words, not a brief
+	// to write from.
+	//
+	// It PRE-EMPTS: whatever the model is in the middle of saying, this line
+	// replaces it, and the caller stops hearing the old one. It does NOT
+	// QUEUE: a second call before the first has been spoken replaces it too,
+	// because both say what should come next and the older one is by then out
+	// of date.
+	//
+	// It is for mid-call use. The line a call opens with is SessionConfig's,
+	// because the opening turn is asked for as part of starting the session.
+	SpeakText(text string) error
+
 	// Interrupt handles barge-in. playedMs is how much of the current response
 	// the caller actually heard, which some providers need in order to keep
 	// their own history honest about what was said.
@@ -94,6 +109,15 @@ type SessionConfig struct {
 	// caller said, and it is never recorded as caller speech. Empty uses a
 	// default in the session's language.
 	GreetingCue string
+	// OpeningText is what the bot says at the start of the call: not a brief
+	// for a greeting but the greeting, in the words the flow chose. Empty
+	// leaves the opening to the model, which is what every call did before
+	// there was anywhere to put a line.
+	//
+	// How close to verbatim it lands is the provider's to decide. The client
+	// here can only direct a model to repeat a sentence, which is best effort;
+	// an engine that speaks text outright will say it as written.
+	OpeningText string
 	// InputFormat and OutputFormat are what this session's audio will be in.
 	// The caller converts to and from them.
 	InputFormat  media.AudioFormat

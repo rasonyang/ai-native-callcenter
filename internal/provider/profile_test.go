@@ -163,9 +163,70 @@ func TestAnUnknownProviderNamesTheOnesThereAre(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown provider started anyway")
 	}
-	for _, name := range []string{NameOpenAI, NameQwen, NameGateway} {
+	for _, name := range []string{NameOpenAI, NameQwen, NameGateway, NameDoubao} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("the refusal does not mention %q: %v", name, err)
 		}
+	}
+}
+
+// Every engine reached over the Realtime protocol takes a text cue, so none of
+// them makes a flow's terminal phases carry their own words. Said out loud
+// because the capability is the reason a publish can be refused, and turning it
+// on for a profile that does not need it would refuse flows that run perfectly
+// well. Doubao is the exception and has its own test below.
+func TestNoRealtimeProfileMakesAFlowWriteItsOwnClosingLines(t *testing.T) {
+	for _, profile := range []Profile{OpenAIProfile(), QwenProfile(), GatewayProfile()} {
+		if profile.RequiresTerminalAnnounce {
+			t.Errorf("%s requires terminal announcements; it is reached through a "+
+				"client that can prompt a turn with text", profile.Name)
+		}
+	}
+}
+
+// The doubao profile is chosen by its own name, and what it names is a
+// different protocol rather than a different vendor of this one.
+//
+// Its audio is the reason the values matter: 16 kHz up and 24 kHz down, linear
+// both ways, with telephone audio refused outright. A profile that claimed
+// G.711 here would put PCMU on a socket that takes none, and the call would
+// fail on the first frame instead of at startup.
+func TestDoubaoIsChosenByNameAndTakesLinearAudioBothWays(t *testing.T) {
+	profile, err := ProfileFor(NameDoubao, Override{})
+	if err != nil {
+		t.Fatalf("doubao is not a provider this build can run: %v", err)
+	}
+	if profile.Name != NameDoubao {
+		t.Errorf("profile name = %q, want %q", profile.Name, NameDoubao)
+	}
+	if profile.APIKeyEnv != "DOUBAO_API_KEY" {
+		t.Errorf("credential = %q, want DOUBAO_API_KEY", profile.APIKeyEnv)
+	}
+
+	for _, law := range []media.Law{media.LawMu, media.LawAlaw} {
+		input, output := profile.FormatsFor(law)
+		if want := media.PCM16Format(media.RateProviderIn); input != want {
+			t.Errorf("%s input format = %s, want %s", law, input, want)
+		}
+		if want := media.PCM16Format(media.RateProviderOut); output != want {
+			t.Errorf("%s output format = %s, want %s", law, output, want)
+		}
+		if _, err := media.NewConverter(media.G711Format(law), input); err != nil {
+			t.Errorf("caller audio cannot reach doubao on %s: %v", law, err)
+		}
+		if _, err := media.NewConverter(output, media.G711Format(law)); err != nil {
+			t.Errorf("doubao audio cannot reach the caller on %s: %v", law, err)
+		}
+	}
+}
+
+// The one capability this profile turns on, and the only one that changes what
+// a deployment will accept: a phase the call does not leave has to carry its
+// own words, because nothing this client sends will make that engine speak.
+func TestDoubaoMakesAFlowWriteItsOwnClosingLines(t *testing.T) {
+	if !DoubaoProfile().RequiresTerminalAnnounce {
+		t.Error("the doubao profile does not require terminal announcements; a flow " +
+			"whose last phase says nothing would publish, and the caller would " +
+			"reach it and hear silence")
 	}
 }

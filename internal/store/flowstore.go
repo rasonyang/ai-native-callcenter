@@ -21,10 +21,17 @@ import (
 // The draft is what an author edits; a revision is an immutable copy taken at
 // publish time. Calls only ever run the published revision, so an edit in
 // progress can never change what a live number does.
-type FlowStore struct{ q *queries.Queries }
+type FlowStore struct {
+	q *queries.Queries
+	// publishRules are what this deployment demands of a flow on top of it
+	// being loadable. See Store.FlowPublishRules.
+	publishRules []flow.Rule
+}
 
 // Flows returns the flow store.
-func (s *Store) Flows() *FlowStore { return &FlowStore{q: s.Queries} }
+func (s *Store) Flows() *FlowStore {
+	return &FlowStore{q: s.Queries, publishRules: s.FlowPublishRules}
+}
 
 // ErrFlowNotPublished distinguishes a flow that exists but has never been
 // published from one that does not exist.
@@ -108,6 +115,11 @@ func (f *FlowStore) Create(ctx context.Context, slug, name string, draft []byte)
 
 // Publish snapshots the current draft as an immutable revision and points the
 // flow at it.
+//
+// This is where the deployment's own rules apply, and only here. A draft is
+// something an author is still working on; publishing is the one operation a
+// caller can hear, so it is the one that has to be answerable on this
+// installation rather than merely well formed.
 func (f *FlowStore) Publish(ctx context.Context, flowID uuid.UUID, note string) error {
 	record, err := f.q.GetFlow(ctx, flowID)
 	if err != nil {
@@ -116,8 +128,14 @@ func (f *FlowStore) Publish(ctx context.Context, flowID uuid.UUID, note string) 
 		}
 		return fmt.Errorf("publish flow %s: %w", flowID, err)
 	}
-	if _, err := flow.Load(record.DraftSpec); err != nil {
+	spec, err := flow.Load(record.DraftSpec)
+	if err != nil {
 		return fmt.Errorf("publish flow %s: draft is not publishable: %w", flowID, err)
+	}
+	for _, rule := range f.publishRules {
+		if err := rule(spec); err != nil {
+			return err
+		}
 	}
 
 	revisionID, err := uuid.NewV7()

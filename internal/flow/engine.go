@@ -95,6 +95,13 @@ func (e *Engine) Instruction() string {
 	return e.render(e.current.Instruction.For(e.lang))
 }
 
+// Announce is the line this phase speaks on being entered, with collected
+// values substituted in. Empty means the phase has nothing of its own to say
+// and the model does the talking.
+func (e *Engine) Announce() string {
+	return e.render(e.current.Announce.For(e.lang))
+}
+
 // OnToolResult records a tool having run and moves the conversation on if a
 // rule says to. It returns the new phase, or an empty string for staying put.
 //

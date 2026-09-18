@@ -212,3 +212,37 @@ func TestCreatingAFlowDoesNotPublishIt(t *testing.T) {
 		t.Errorf("the stored draft is not loadable: %v", err)
 	}
 }
+
+// Publishing is refused on its own terms when the deployment's speech provider
+// cannot be prompted to speak: it is not a malformed spec — the same document
+// runs elsewhere — so it carries its own code and names the phases at fault,
+// which is what an author needs in order to fix it.
+func TestAFlowThatCannotSpeakItsEndingIsRefusedWithItsOwnCode(t *testing.T) {
+	f := flowStub()
+	f.err = &flow.MissingAnnounceError{FlowID: "probe", Nodes: []string{"farewell", "handoff"}}
+	s := &Server{flows: f}
+	rec := httptest.NewRecorder()
+
+	s.PublishFlow(rec, httptest.NewRequest(http.MethodPost, "/", strings.NewReader("")), f.summary.ID)
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Code   string         `json:"code"`
+			Params map[string]any `json:"params"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error.Code != string(CodeTerminalAnnounceRequired) {
+		t.Errorf("code = %q, want TERMINAL_ANNOUNCE_REQUIRED — VALIDATION_FAILED "+
+			"would tell the author to look for a typo that is not there", body.Error.Code)
+	}
+	nodes, _ := body.Error.Params["nodes"].([]any)
+	if len(nodes) != 2 {
+		t.Errorf("params.nodes = %v, want both phases", body.Error.Params["nodes"])
+	}
+}

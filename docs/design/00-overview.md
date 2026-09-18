@@ -57,7 +57,9 @@ Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 0
 | `internal/esl` | minimal ESL inbound client: auth, `event plain` subscribe, FIFO api replies, reconnect/backoff | — |
 | `internal/media` | shared audio primitives: PCM16 frames, G.711 LUT codecs, resamplers, buffer pools | — |
 | `internal/voice` | SIP UAS, SDP, RTP/RTCP, jitter buffer, DTMF (golang-bot port) | media |
-| `internal/provider` | one OpenAI-Realtime client × `Profile` (`openai`, `qwen` are profiles, not clients); `VoiceSession` is the seam to `aicall` | media |
+| `internal/provider` | the OpenAI-Realtime client × `Profile` (`openai`, `qwen`, `gateway` are profiles, not clients); `VoiceSession` is the provider-neutral seam to `aicall`, and `Profile` is where every provider's values live whichever client answers | media |
+| `internal/provider/doubao` | the second client, for ByteDance's full-duplex dialogue protocol (`AICC_PROVIDER=doubao`) — a different protocol, not a dialect (A6 as amended, `doubao-findings.md`). Behind the same `VoiceSession`, producing no event the first client does not | provider, wsconn |
+| `internal/provider/wsconn` | what both clients' sockets do identically: dial with a deadline, single-writer send, ping/pong keepalive, close. Transport only — no protocol event crosses it | — |
 | `internal/mockprovider` | a stand-in Realtime **server** for load testing, reached through `AICC_PROVIDER_ENDPOINT` like a real one — not an in-process fake (`cmd/aicc-mockprovider`) | provider, media |
 | `internal/loadgen` | the load generator's SIP UAC and run loop (`cmd/aicc-loadgen`) | media, voice |
 | `internal/flow` | Flow DSL v1: schema, validation, engine (hint steering), HTTP tool runner | — |

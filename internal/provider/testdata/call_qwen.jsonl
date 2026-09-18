@@ -1,0 +1,13 @@
+{"session":{"input_audio_format":"pcm","instructions":"You answer the phone for NovaNet.","modalities":["text","audio"],"output_audio_format":"pcm","tools":[{"description":"Read the caller's balance.","name":"lookup_balance","parameters":{"type":"object","properties":{"accountId":{"type":"string"}}},"type":"function"}],"turn_detection":{"silence_duration_ms":500,"threshold":0.5,"type":"server_vad"},"voice":"longanqian"},"type":"session.update"}
+{"item":{"content":[{"text":"(The call has connected. Greet the caller as instructed.)","type":"input_text"}],"role":"user","type":"message"},"type":"conversation.item.create"}
+{"type":"response.create"}
+{"type":"input_audio_buffer.append","audio":"AH+A/w=="}
+{"type":"response.cancel"}
+{"audio_end_ms":120,"content_index":0,"item_id":"item-1","type":"conversation.item.truncate"}
+{"audio_end_ms":200,"content_index":0,"item_id":"item-1","type":"conversation.item.truncate"}
+{"session":{"instructions":"You are now closing the call."},"type":"session.update"}
+{"item":{"content":[{"text":"2","type":"input_text"}],"role":"user","type":"message"},"type":"conversation.item.create"}
+{"type":"response.create"}
+{"item":{"call_id":"call-7","output":"{\"balance\":\"12.50\",\"hint\":\"Tell the caller the balance, then offer to close.\"}","type":"function_call_output"},"type":"conversation.item.create"}
+{"type":"response.create"}
+{"response":{"instructions":"Say exactly this, word for word, and add nothing else:\nThanks for calling NovaNet."},"type":"response.create"}

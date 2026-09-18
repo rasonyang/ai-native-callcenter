@@ -247,7 +247,19 @@ func decodeFlowBody(w http.ResponseWriter, r *http.Request, v any) bool {
 
 func (s *Server) writeFlowError(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid *flow.ValidationError
+	var unspeakable *flow.MissingAnnounceError
 	switch {
+	case errors.As(err, &unspeakable):
+		// Not a malformed spec: the document is fine, and on a deployment whose
+		// provider can be prompted to speak it publishes unchanged. So it gets
+		// its own code and names the phases, rather than sending the author
+		// looking for a mistake in what they wrote.
+		nodes := make([]any, 0, len(unspeakable.Nodes))
+		for _, node := range unspeakable.Nodes {
+			nodes = append(nodes, node)
+		}
+		writeError(w, http.StatusUnprocessableEntity, CodeTerminalAnnounceRequired,
+			unspeakable.Error(), map[string]any{"nodes": nodes})
 	case errors.As(err, &invalid):
 		// Every problem, not the first: an author fixing a spec should see
 		// the whole report rather than discover it one save at a time.

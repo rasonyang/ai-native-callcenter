@@ -410,7 +410,9 @@ function paint(source: string, range: [number, number] | null): string {
 // --- The graph --------------------------------------------------------------
 
 const NODE_W = 208
-const NODE_H = 92
+// Room for one line beneath the instruction: the wording a phase says as
+// written, where it has any. The gap to the next row still clears LABEL_H.
+const NODE_H = 110
 const COL_GAP = 240
 const ROW_GAP = 168
 const PAD = 20
@@ -706,6 +708,18 @@ function PhaseGraph({
                 <span className="mt-1 line-clamp-2 text-xs text-muted-foreground">
                   {textFor(node.instruction, lang)}
                 </span>
+                {textFor(node.announce, lang) && (
+                  // What the phase says as written, kept apart from the
+                  // instruction because the two are read differently: one is a
+                  // brief, the other is the sentence the caller hears.
+                  <span
+                    className="mt-1 line-clamp-1 text-xs text-muted-foreground"
+                    title={textFor(node.announce, lang)}
+                  >
+                    <span className="font-medium">{t('bots.announce')}</span>{' '}
+                    {textFor(node.announce, lang)}
+                  </span>
+                )}
                 <span className="mt-1 flex flex-wrap gap-1">
                   {(node.tools ?? []).map((tool) => (
                     <span

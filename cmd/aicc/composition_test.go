@@ -558,9 +558,10 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 	}
 }
 
-// Same for the AI voice leg. Sessions and Logger are the orchestrator's own
-// defaults and are named here so that the exemption is a decision on the
-// record rather than a gap.
+// Same for the AI voice leg. Logger is the orchestrator's own default and is
+// named here so that the exemption is a decision on the record rather than a
+// gap. Sessions was exempt for the same reason until there was a second client
+// to choose between, which only this file can do.
 func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 	cfg := botConfig(
 		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
@@ -578,7 +579,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		outbound.NewCallData(),
 	)
 
-	if missing := zeroFields(cfg, "Sessions", "Logger"); len(missing) > 0 {
+	if missing := zeroFields(cfg, "Logger"); len(missing) > 0 {
 		t.Errorf("aicall.OrchestratorConfig fields left unset: %v", missing)
 	}
 	if missing := zeroFields(cfg.UAS, "Logger"); len(missing) > 0 {

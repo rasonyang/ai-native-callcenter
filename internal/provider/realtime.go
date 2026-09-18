@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/wsconn"
 )
 
 // Watchdogs on a response. A provider that accepts a turn and then goes quiet
@@ -43,7 +45,7 @@ type Realtime struct {
 	log     *slog.Logger
 
 	events chan Event
-	conn   *transport
+	conn   *wsconn.Conn
 
 	// ready closes when the provider has accepted the session configuration.
 	ready     chan struct{}
@@ -70,21 +72,35 @@ type Realtime struct {
 	// isSessionRetried guards the one-shot retry of a rejected configuration.
 	isSessionRetried bool
 
-	// watch carries response-progress signals to the watchdog.
-	watch chan watchSignal
+	// The three fields a pre-empting spoken line needs. See SpeakText.
+	//
+	// pendingSpeak is a line waiting for the floor; there is at most one,
+	// because a newer line supersedes an older one rather than joining a
+	// queue. isResponseRequested covers the window between asking for a turn
+	// and the provider creating it, in which there is nothing to cancel and a
+	// second request would be refused. isPreemptedForSpeak remembers that the
+	// turn now ending was stopped to make room, which is what keeps the
+	// interruption from being reported as the caller's.
+	pendingSpeak         string
+	isResponseRequested  bool
+	isCancelSentForSpeak bool
+	isPreemptedForSpeak  bool
+
+	// dog ends a turn the provider has walked away from, and watch is the
+	// channel its progress signals travel on.
+	dog   *Watchdog
+	watch chan WatchSignal
 	// Watchdog deadlines, held as fields so tests need not wait seconds for
 	// behaviour that is measured in seconds on a real call.
 	firstAudioDeadline time.Duration
 	deltaStallDeadline time.Duration
 }
 
-// watchSignal tells the watchdog where a response has got to.
-type watchSignal uint8
-
+// The names this client knows the watchdog's signals by.
 const (
-	watchResponseStarted watchSignal = iota
-	watchAudioArrived
-	watchResponseEnded
+	watchResponseStarted = WatchResponseStarted
+	watchAudioArrived    = WatchAudioArrived
+	watchResponseEnded   = WatchResponseEnded
 )
 
 // atomic is a tiny typed holder; sync/atomic's generic Pointer would need a
@@ -114,7 +130,6 @@ func New(profile Profile, log *slog.Logger) (*Realtime, error) {
 		log:     log.With("provider", profile.Name, "model", profile.Model),
 		events:  make(chan Event, eventBuffer),
 		ready:   make(chan struct{}),
-		watch:   make(chan watchSignal, 16),
 
 		firstAudioDeadline: firstAudioTimeout,
 		deltaStallDeadline: deltaStallTimeout,
@@ -139,16 +154,24 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		headers.Set(key, value)
 	}
 
-	conn, err := dial(ctx, r.profile.endpointURL(), headers, r.log)
+	conn, err := wsconn.Dial(ctx, r.profile.endpointURL(), headers, r.log)
 	if err != nil {
 		return err
 	}
 	r.conn = conn
+	r.dog = NewWatchdog(WatchdogConfig{
+		FirstAudioDeadline: r.firstAudioDeadline,
+		DeltaStallDeadline: r.deltaStallDeadline,
+		Done:               conn.Done(),
+		IsResponseOpen:     r.isResponseOpen.Load,
+		OnStall:            r.onResponseStalled,
+	})
+	r.watch = r.dog.Signals()
 	go r.readLoop()
-	go r.watchdog()
+	go r.dog.Run()
 
-	if err := r.conn.send(r.buildSessionUpdate(cfg, false)); err != nil {
-		r.conn.close()
+	if err := r.sendEvent(r.buildSessionUpdate(cfg, false)); err != nil {
+		r.conn.Close()
 		return fmt.Errorf("configure session: %w", err)
 	}
 
@@ -158,36 +181,52 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 	select {
 	case <-r.ready:
 	case <-ctx.Done():
-		r.conn.close()
+		r.conn.Close()
 		return ctx.Err()
-	case <-time.After(dialTimeout):
-		r.conn.close()
+	case <-time.After(wsconn.DialTimeout):
+		r.conn.Close()
 		if err := r.startErr.get(); err != nil {
 			return fmt.Errorf("session rejected: %w", err)
 		}
 		return errors.New("provider did not confirm the session configuration")
 	}
 	if err := r.startErr.get(); err != nil {
-		r.conn.close()
+		r.conn.Close()
 		return fmt.Errorf("session rejected: %w", err)
 	}
 
 	// The opening turn is the flow's first node speaking; the caller is
 	// already on the line waiting to be greeted.
+	//
+	// Two shapes, and the flow chooses. Saying nothing about the words leaves
+	// the model to write its greeting from the standing instructions, which is
+	// what every call did before a phase could carry a line — and the request
+	// is the bare one it always was. Naming a line asks for that line instead.
+	opening := map[string]any{"type": "response.create"}
+	cue := greetingCue(cfg)
+	if cfg.OpeningText != "" {
+		direction := sayExactly(cfg.OpeningText, cfg.Language)
+		opening["response"] = map[string]any{"instructions": direction}
+		// Where the conversation may not be empty, the direction is also the
+		// cue. Anything else would steer the same turn two ways at once, and
+		// there is no second thing worth saying to a provider that is about to
+		// be handed the sentence anyway.
+		cue = direction
+	}
 	if r.profile.NeedsCueForFirstTurn {
-		if err := r.conn.send(map[string]any{
+		if err := r.sendEvent(map[string]any{
 			"type": "conversation.item.create",
 			"item": map[string]any{
 				"type": "message", "role": "user",
-				"content": []map[string]any{{"type": "input_text", "text": greetingCue(cfg)}},
+				"content": []map[string]any{{"type": "input_text", "text": cue}},
 			},
 		}); err != nil {
-			r.conn.close()
+			r.conn.Close()
 			return fmt.Errorf("prompt opening turn: %w", err)
 		}
 	}
-	if err := r.conn.send(map[string]any{"type": "response.create"}); err != nil {
-		r.conn.close()
+	if err := r.requestResponse(opening); err != nil {
+		r.conn.Close()
 		return fmt.Errorf("request opening turn: %w", err)
 	}
 	return nil
@@ -218,12 +257,12 @@ func (r *Realtime) SendAudio(audio []byte) error {
 	message = base64.StdEncoding.AppendEncode(message, audio)
 	message = append(message, '"', '}')
 
-	return r.conn.sendRaw(message)
+	return r.conn.Send(message)
 }
 
 // SendUserText adds a caller turn that was not spoken and asks for a reply.
 func (r *Realtime) SendUserText(text string) error {
-	if err := r.conn.send(map[string]any{
+	if err := r.sendEvent(map[string]any{
 		"type": "conversation.item.create",
 		"item": map[string]any{
 			"type": "message", "role": "user",
@@ -232,7 +271,140 @@ func (r *Realtime) SendUserText(text string) error {
 	}); err != nil {
 		return err
 	}
-	return r.conn.send(map[string]any{"type": "response.create"})
+	return r.requestResponse(map[string]any{"type": "response.create"})
+}
+
+// SpeakText says a line the flow chose, in place of whatever is being said now.
+//
+// This protocol has no way to hand a provider audio to play, so the nearest
+// thing it offers is a turn of its own with a per-response instruction: the
+// model is told to repeat one sentence and nothing else. That is best effort
+// rather than verbatim, and it is the honest limit of this client — an engine
+// that speaks text outright gets its own profile and says the line as written.
+//
+// The floor may already be taken, and asking for a second response while one
+// is open is refused with "conversation already has an active response". Two
+// states have to be told apart:
+//
+//   - a response is open: it is cancelled now, and the request for the line
+//     goes out when that response's own response.done arrives. The cancel is
+//     sent whatever the profile says about barge-in — CancelsResponseItself
+//     describes a provider that stops when it hears the CALLER, and nobody
+//     here is speaking.
+//   - a response has been asked for and not yet created: there is nothing to
+//     cancel yet, so the line waits, and the turn is stopped the moment it
+//     exists. SendToolResult asks for a turn on its way out, and a phase
+//     change is decided on that very result, so this is the ordinary case
+//     rather than the exotic one.
+//
+// The read loop owns both deferred sends. Nothing is emitted from here, for
+// the reason Interrupt gives: this is normally called from the goroutine
+// draining Events, and emitting would deadlock it.
+func (r *Realtime) SpeakText(text string) error {
+	if text == "" {
+		return nil
+	}
+
+	r.mu.Lock()
+	isDeferred := r.isResponseOpen.Load() || r.isResponseRequested
+	isCancelNeeded := r.isResponseOpen.Load() && !r.isCancelSentForSpeak
+	if isCancelNeeded {
+		r.isCancelSentForSpeak = true
+		r.isPreemptedForSpeak = true
+	}
+	r.pendingSpeak = ""
+	if isDeferred {
+		r.pendingSpeak = text
+	}
+	request := speakRequest(text, r.cfg.Language)
+	r.mu.Unlock()
+
+	if isCancelNeeded {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
+			return err
+		}
+	}
+	if isDeferred {
+		return nil
+	}
+	return r.requestResponse(request)
+}
+
+// speakRequest is the frame that asks for one line, said as written.
+//
+// One frame for both dialects: the type discriminator the GA session object
+// carries has no counterpart on a response, and both name the per-response
+// override the same way, so there is nothing here for a dialect to disagree
+// about.
+func speakRequest(text, language string) map[string]any {
+	return map[string]any{
+		"type":     "response.create",
+		"response": map[string]any{"instructions": sayExactly(text, language)},
+	}
+}
+
+// sayExactly is how a model is asked for particular words rather than for a
+// subject. In the session's own language, because an instruction in the wrong
+// one is an invitation to answer in it.
+func sayExactly(text, language string) string {
+	if strings.HasPrefix(strings.ToLower(language), "zh") {
+		return "请一字不差地说出下面这句话，不要添加任何其它内容：\n" + text
+	}
+	return "Say exactly this, word for word, and add nothing else:\n" + text
+}
+
+// requestResponse asks the model for a turn and records that one is on its way.
+// Between here and response.created there is nothing to cancel, which is what
+// SpeakText has to know before it asks for anything.
+func (r *Realtime) requestResponse(request map[string]any) error {
+	r.mu.Lock()
+	r.isResponseRequested = true
+	r.mu.Unlock()
+	return r.sendEvent(request)
+}
+
+// onResponseCreated stops a turn that was superseded before it existed.
+//
+// A line asked for while the previous request was still in flight could not be
+// cancelled then, because the provider had created nothing. This is the first
+// moment there is something to stop.
+func (r *Realtime) onResponseCreated() {
+	r.mu.Lock()
+	r.isResponseRequested = false
+	isCancelNeeded := r.pendingSpeak != "" && !r.isCancelSentForSpeak
+	if isCancelNeeded {
+		r.isCancelSentForSpeak = true
+		r.isPreemptedForSpeak = true
+	}
+	r.mu.Unlock()
+
+	if isCancelNeeded {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
+			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
+		}
+	}
+}
+
+// dispatchPendingSpeak asks for the line that was waiting, now that the turn
+// holding the floor has ended. It reports whether that turn was stopped to make
+// room, which is what decides who the interruption is attributed to.
+func (r *Realtime) dispatchPendingSpeak() (wasPreempted bool) {
+	r.mu.Lock()
+	text := r.pendingSpeak
+	wasPreempted = r.isPreemptedForSpeak
+	request := speakRequest(text, r.cfg.Language)
+	r.pendingSpeak = ""
+	r.isPreemptedForSpeak = false
+	r.isCancelSentForSpeak = false
+	r.mu.Unlock()
+
+	if text == "" {
+		return wasPreempted
+	}
+	if err := r.requestResponse(request); err != nil {
+		r.log.Warn("could not ask for the line that was waiting for the floor", "error", err)
+	}
+	return wasPreempted
 }
 
 // SendToolResult answers a tool call and steers what happens next.
@@ -241,7 +413,7 @@ func (r *Realtime) SendUserText(text string) error {
 // update: the model reads it as part of what it just learned, which is what
 // makes it act on it immediately instead of at some later turn.
 func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
-	if err := r.conn.send(map[string]any{
+	if err := r.sendEvent(map[string]any{
 		"type": "conversation.item.create",
 		"item": map[string]any{
 			"type":    "function_call_output",
@@ -251,12 +423,16 @@ func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
 	}); err != nil {
 		return err
 	}
-	return r.conn.send(map[string]any{"type": "response.create"})
+	return r.requestResponse(map[string]any{"type": "response.create"})
 }
 
-// mergeHint folds steering into a tool result. A result that is already a JSON
+// MergeHint folds steering into a tool result. A result that is already a JSON
 // object gains a field; anything else is wrapped so the shape stays predictable.
-func mergeHint(output, hint string) string {
+//
+// It is exported because the hint belongs to the flow engine rather than to any
+// wire protocol: whatever a client wraps a tool result in, the model has to read
+// the steering as part of what it just learned, and in the same shape.
+func MergeHint(output, hint string) string {
 	if hint == "" {
 		return output
 	}
@@ -275,6 +451,9 @@ func mergeHint(output, hint string) string {
 	return string(merged)
 }
 
+// mergeHint is the name this client's one call site knows it by.
+var mergeHint = MergeHint
+
 // UpdateInstructions replaces the standing instructions.
 //
 // Only the instructions are sent. Re-sending the whole configuration would
@@ -289,7 +468,7 @@ func (r *Realtime) UpdateInstructions(text string) error {
 	if r.profile.Style == styleGA {
 		session["type"] = "realtime"
 	}
-	return r.conn.send(map[string]any{"type": "session.update", "session": session})
+	return r.sendEvent(map[string]any{"type": "session.update", "session": session})
 }
 
 // Interrupt stops the model talking over the caller.
@@ -315,7 +494,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	r.mu.Unlock()
 
 	if !r.profile.CancelsResponseItself && r.isResponseOpen.Load() {
-		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
 			return err
 		}
 	}
@@ -324,7 +503,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	// honest: without it the model believes the caller heard a sentence that
 	// was cut off after three words.
 	if itemID != "" && playedMs > 0 {
-		if err := r.conn.send(map[string]any{
+		if err := r.sendEvent(map[string]any{
 			"type":          "conversation.item.truncate",
 			"item_id":       itemID,
 			"content_index": 0,
@@ -340,7 +519,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 func (r *Realtime) Close(_ context.Context) error {
 	r.closeOnce.Do(func() {
 		if r.conn != nil {
-			r.conn.close()
+			r.conn.Close()
 		}
 	})
 	return nil
@@ -462,7 +641,7 @@ func (r *Realtime) readLoop() {
 	defer close(r.events)
 
 	for {
-		event, raw, err := r.conn.receive()
+		event, raw, err := r.receive()
 		if err != nil {
 			// There is no reconnect: the provider holds conversation state
 			// that cannot be rebuilt, so a lost socket ends the session and
@@ -503,6 +682,7 @@ func (r *Realtime) handle(event *wireEvent) {
 
 	case "response.created":
 		r.isResponseOpen.Store(true)
+		r.onResponseCreated()
 		r.signal(watchResponseStarted)
 		r.emit(Event{Type: EventTypeResponseStarted})
 
@@ -564,6 +744,10 @@ func (r *Realtime) handle(event *wireEvent) {
 func (r *Realtime) handleResponseDone(event *wireEvent) {
 	r.isResponseOpen.Store(false)
 	r.signal(watchResponseEnded)
+	// The floor is free: a line that was waiting for it goes out before the
+	// turn is reported, so the next words are already being made while the
+	// consumer catches up.
+	isPreemptedForSpeak := r.dispatchPendingSpeak()
 
 	out := Event{Type: EventTypeResponseDone}
 	if event.Response != nil {
@@ -580,10 +764,22 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	// it or the provider decided on its own when it heard the caller. Either
 	// way the consumer needs to know the turn ended early rather than
 	// completing, so it is reported as an interruption in its own right.
+	//
+	// Who cut it short is the one thing that differs, and it has to be said:
+	// the consumer flushes what it has queued either way — the caller must not
+	// go on hearing an abandoned answer, and how much of it they did hear is
+	// counted on that side and trimmed from the provider's history — but a
+	// turn this client stopped to make room for a line is not a barge-in, and
+	// logging it as one puts an interruption the caller never made into the
+	// record of the call.
 	if out.Status == statusCancelled {
+		by := InterruptReasonSpeech
+		if isPreemptedForSpeak {
+			by = InterruptReasonSystem
+		}
 		r.emit(Event{
 			Type: EventTypeInterrupted, Status: out.Status,
-			Usage: out.Usage, InterruptedBy: InterruptReasonSpeech,
+			Usage: out.Usage, InterruptedBy: by,
 		})
 		return
 	}
@@ -609,7 +805,7 @@ func (r *Realtime) handleError(event *wireEvent) {
 		r.mu.Lock()
 		cfg := r.cfg
 		r.mu.Unlock()
-		if sendErr := r.conn.send(r.buildSessionUpdate(cfg, true)); sendErr == nil {
+		if sendErr := r.sendEvent(r.buildSessionUpdate(cfg, true)); sendErr == nil {
 			return
 		}
 	}
@@ -648,103 +844,35 @@ func (r *Realtime) finishStart(err error) {
 // It is synthesised here, not reported by any provider.
 const StatusStalled = "STALLED"
 
-// watchdog ends a turn the provider has silently abandoned.
-//
-// A model that accepts a turn and then stops is indistinguishable, to the
-// person on the phone, from a call that has died — and the flow engine would
-// wait for a completion that is never coming. Rather than hang, the turn is
-// closed out with what actually arrived.
-func (r *Realtime) watchdog() {
-	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		<-timer.C
+// onResponseStalled closes out a turn the provider walked away from. The
+// watchdog calls it on its own goroutine, having already decided that a
+// response really is open.
+func (r *Realtime) onResponseStalled(hasAudioArrived bool) {
+	reason := "the provider never started speaking"
+	if hasAudioArrived {
+		reason = "the provider stopped partway through speaking"
 	}
-	defer timer.Stop()
-
-	hasAudioArrived := false
-	isWaiting := false
-
-	arm := func(d time.Duration) {
-		if isWaiting && !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timer.Reset(d)
-		isWaiting = true
-	}
-	disarm := func() {
-		if isWaiting && !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		isWaiting = false
-	}
-
-	for {
-		select {
-		case <-r.conn.done:
-			return
-
-		case signal := <-r.watch:
-			switch signal {
-			case watchResponseStarted:
-				hasAudioArrived = false
-				arm(r.firstAudioDeadline)
-			case watchAudioArrived:
-				hasAudioArrived = true
-				arm(r.deltaStallDeadline)
-			case watchResponseEnded:
-				disarm()
-			}
-
-		case <-timer.C:
-			isWaiting = false
-			// Signals are droppable and a turn arrives in a burst: fifty
-			// deltas can overflow the channel and take the completion with
-			// them, leaving this timer armed on a response that finished
-			// cleanly. The state cannot be lost the way a signal can, so it
-			// is what decides. Found under sustained load, where about 1% of
-			// turns were reported abandoned while the model was fine.
-			if !r.isResponseOpen.Load() {
-				continue
-			}
-			reason := "the provider never started speaking"
-			if hasAudioArrived {
-				reason = "the provider stopped partway through speaking"
-			}
-			r.isResponseOpen.Store(false)
-			r.log.Warn("response abandoned", "reason", reason,
-				"hasAudioArrived", hasAudioArrived)
-			// Not fatal: the session is still usable, and the caller has heard
-			// whatever did arrive. The flow decides what to say next.
-			r.emit(Event{Type: EventTypeError, Text: reason,
-				Err: errors.New(reason)})
-			r.emit(Event{Type: EventTypeResponseDone, Status: StatusStalled})
-		}
-	}
+	r.isResponseOpen.Store(false)
+	r.log.Warn("response abandoned", "reason", reason,
+		"hasAudioArrived", hasAudioArrived)
+	// This path never reaches handleResponseDone, so a line waiting for
+	// a turn the provider walked away from would wait for ever.
+	r.dispatchPendingSpeak()
+	// Not fatal: the session is still usable, and the caller has heard
+	// whatever did arrive. The flow decides what to say next.
+	r.emit(Event{Type: EventTypeError, Text: reason,
+		Err: errors.New(reason)})
+	r.emit(Event{Type: EventTypeResponseDone, Status: StatusStalled})
 }
 
 // signal notifies the watchdog without ever blocking the read loop.
-func (r *Realtime) signal(s watchSignal) {
-	select {
-	case r.watch <- s:
-	case <-r.conn.done:
-	default:
-		// The watchdog is momentarily behind. A missed signal costs at worst
-		// a late re-arm: whether a response is still open is read from state,
-		// not inferred from having seen every signal.
-	}
-}
+func (r *Realtime) signal(s WatchSignal) { r.dog.Signal(s) }
 
 // emit delivers an event, dropping it only once the session is finished.
 func (r *Realtime) emit(event Event) {
 	select {
 	case r.events <- event:
-	case <-r.conn.done:
+	case <-r.conn.Done():
 		// The session is over; nobody is reading any more.
 	}
 }
