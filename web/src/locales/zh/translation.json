@@ -97,6 +97,7 @@
     "AGENT_IMPERSONATION_NOT_ALLOWED": "已登录的账号只能以自己的身份操作。",
     "INSUFFICIENT_SCOPE": "此凭证不具备 {{requiredScope}} 能力。",
     "VALIDATION_FAILED": "有字段没通过校验，请逐项检查。",
+    "TERMINAL_ANNOUNCE_REQUIRED": "本部署的语音引擎只会说给定的话，因此每个通话不会再离开的环节都必须自带一句话术。",
     "NOT_FOUND": "未找到。",
     "METHOD_NOT_ALLOWED": "该端点不接受此请求方法。",
     "CONFLICT": "该操作与当前状态冲突。",

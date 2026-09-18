@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
-	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/seed"
 	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
@@ -114,6 +112,17 @@ func run() error {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	slog.Info("database ready")
+
+	// Which provider answers is resolved here rather than beside the AI leg it
+	// belongs to, because it decides what a flow must carry before this
+	// deployment will publish one — and the seed below publishes six. An
+	// unknown name is a startup failure either way, not a surprise on the
+	// first call.
+	profile, err := voiceProfile(cfg)
+	if err != nil {
+		return fmt.Errorf("AICC_PROVIDER: %w", err)
+	}
+	st.FlowPublishRules = flowPublishRules(cfg, profile)
 
 	switch cfg.Seed {
 	case "demo":
@@ -284,22 +293,6 @@ func run() error {
 	// The AI voice leg: a SIP server the switch bridges bot calls to, and the
 	// orchestration that runs a conversation on each.
 	if cfg.IsBotEnabled {
-		// One provider answers every call in this deployment; an unknown name
-		// is a startup failure, not a surprise on the first call.
-		transcribeOff := strings.EqualFold(cfg.ProviderTranscribeModel, "off")
-		transcribeModel := cfg.ProviderTranscribeModel
-		if transcribeOff {
-			transcribeModel = ""
-		}
-		profile, err := provider.ProfileFor(cfg.Provider, provider.Override{
-			Endpoint:        cfg.ProviderEndpoint,
-			Model:           cfg.ProviderModel,
-			TranscribeModel: transcribeModel,
-			TranscribeOff:   transcribeOff,
-		})
-		if err != nil {
-			return fmt.Errorf("AICC_PROVIDER: %w", err)
-		}
 		slog.Info("voice provider selected",
 			"provider", profile.Name, "model", profile.Model, "endpoint", profile.Endpoint,
 			// Whether the caller's own words will be in the bot phase's

@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/httpapi"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -369,6 +371,40 @@ func apiDeps(
 		SIPSessions: sipSessions,
 		SPA:         spa,
 	}
+}
+
+// voiceProfile resolves the one provider this deployment's conversations run
+// on, with its connection details applied.
+//
+// A deployment with the AI leg switched off still calls this, and still fails
+// on a name nobody recognises: the setting is either meant or a typo, and a
+// typo that only surfaces when somebody turns the bot on is a typo that
+// surfaces during an incident.
+func voiceProfile(cfg config.Config) (provider.Profile, error) {
+	transcribeOff := strings.EqualFold(cfg.ProviderTranscribeModel, "off")
+	transcribeModel := cfg.ProviderTranscribeModel
+	if transcribeOff {
+		transcribeModel = ""
+	}
+	return provider.ProfileFor(cfg.Provider, provider.Override{
+		Endpoint:        cfg.ProviderEndpoint,
+		Model:           cfg.ProviderModel,
+		TranscribeModel: transcribeModel,
+		TranscribeOff:   transcribeOff,
+	})
+}
+
+// flowPublishRules is what this deployment demands of a flow before it will let
+// one answer a call, beyond the flow being loadable.
+//
+// With the AI leg off there is no demand to make: nothing here answers a call,
+// and refusing a flow over the shortcomings of a provider this process will
+// never open a session with would be a rule inventing its own reason.
+func flowPublishRules(cfg config.Config, profile provider.Profile) []flow.Rule {
+	if !cfg.IsBotEnabled || !profile.RequiresTerminalAnnounce {
+		return nil
+	}
+	return []flow.Rule{flow.RequireTerminalAnnounce}
 }
 
 // botUAS is the AI leg's SIP listener, which starts from the deployment's

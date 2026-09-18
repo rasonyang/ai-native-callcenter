@@ -1516,7 +1516,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -2106,7 +2106,9 @@ export interface components {
             items: components["schemas"]["DID"][];
         };
         /**
-         * @description One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, and the transitions between them.
+         * @description One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+         *
+         *     One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
          *
          *     The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
          */
@@ -2929,7 +2931,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. */
+        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. Publishing a flow may also answer TERMINAL_ANNOUNCE_REQUIRED, with params.nodes listing the phases at fault. */
         UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;

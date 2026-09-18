@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
 
@@ -43,6 +44,12 @@ type Store struct {
 	// attempt just learned how it went — from a CDR landing. The store cannot
 	// reach the event stream, so whoever wires it up hands in the announcer.
 	OnCallbackSettled func(Callback)
+	// FlowPublishRules are the checks a flow must pass, beyond loading, before
+	// this deployment will let it answer a call. They depend on what the
+	// installation runs — which speech provider, today — and the store has no
+	// way to know that, so whoever wires it up hands them in. Every path that
+	// publishes goes through FlowStore, which is what makes one place enough.
+	FlowPublishRules []flow.Rule
 }
 
 // Open creates the pool, verifies connectivity and takes the single-instance

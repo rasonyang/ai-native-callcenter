@@ -3,6 +3,7 @@
 package flow
 
 import (
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
@@ -448,6 +449,53 @@ func TestAPhaseWithNoAnnouncementHasNothingToSay(t *testing.T) {
 	}
 	if got := e.Announce(); got != "" {
 		t.Errorf("announce = %q, want nothing", got)
+	}
+}
+
+// A phase the conversation does not leave has one job: say the closing words.
+// Where the engine that answers cannot be prompted into a turn by text, a
+// terminal phase with no line of its own says nothing at all — the caller
+// hears the bot stop mid-call — so the flow is refused before it can be
+// published rather than discovered on a call.
+func TestTerminalPhasesMustCarryALineWhereTheProviderCannotBeCued(t *testing.T) {
+	spec := loadTestFlow(t)
+
+	err := RequireTerminalAnnounce(spec)
+	if err == nil {
+		t.Fatal("a flow whose terminal phase says nothing of its own was accepted")
+	}
+	var missing *MissingAnnounceError
+	if !errors.As(err, &missing) {
+		t.Fatalf("error is %T, want one a handler can answer with its own code", err)
+	}
+	if len(missing.Nodes) != 1 || missing.Nodes[0] != "farewell" {
+		t.Errorf("nodes = %v, want exactly the terminal phase at fault", missing.Nodes)
+	}
+	if !strings.Contains(err.Error(), "farewell") {
+		t.Errorf("error %q does not name the phase", err)
+	}
+
+	// The phases a conversation passes through are the model's to speak for;
+	// only the ones it cannot leave are at issue.
+	withLine := strings.Replace(testFlow,
+		`"instruction": {"en": "Say goodbye.", "zh": "道别。"},`,
+		`"instruction": {"en": "Say goodbye.", "zh": "道别。"},
+			"announce": {"en": "Goodbye.", "zh": "再见。"},`, 1)
+	fixed, err := Load([]byte(withLine))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := RequireTerminalAnnounce(fixed); err != nil {
+		t.Errorf("a flow whose terminal phase carries its line was refused: %v", err)
+	}
+}
+
+// The rule is the deployment's, not the dialect's: the same flow is perfectly
+// valid on an engine that can be asked to greet, and loading must not depend
+// on which one this installation runs.
+func TestLoadingDoesNotApplyTheDeploymentsOwnRule(t *testing.T) {
+	if _, err := Load([]byte(testFlow)); err != nil {
+		t.Errorf("a flow with no terminal line failed to load: %v", err)
 	}
 }
 

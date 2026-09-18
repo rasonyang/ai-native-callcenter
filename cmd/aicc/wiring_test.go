@@ -8,7 +8,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -99,5 +101,51 @@ func TestDetachingTapsWorksWithNoPredecessor(t *testing.T) {
 
 	if len(taps.calls) != 1 || taps.calls[0] != callID {
 		t.Errorf("detached %v, want the retired call", taps.calls)
+	}
+}
+
+// What a deployment demands of a flow follows from what answers its calls.
+//
+// The three engines this build speaks to can all be prompted into a turn, so
+// none of them demands anything — and a deployment with the AI leg switched
+// off demands nothing either, whatever provider its configuration names: there
+// is no session to have shortcomings.
+func TestWhatAPublishMustSatisfyFollowsFromWhatAnswersTheCalls(t *testing.T) {
+	speaksOnDemand := provider.Profile{Name: "doubao-shaped", RequiresTerminalAnnounce: true}
+
+	for _, tc := range []struct {
+		name         string
+		isBotEnabled bool
+		profile      provider.Profile
+		wantRules    int
+	}{
+		{"a provider that can be cued asks for nothing", true, provider.OpenAIProfile(), 0},
+		{"a provider that cannot needs every ending written", true, speaksOnDemand, 1},
+		{"with no AI leg there is nothing to satisfy", false, speaksOnDemand, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rules := flowPublishRules(config.Config{IsBotEnabled: tc.isBotEnabled}, tc.profile)
+			if len(rules) != tc.wantRules {
+				t.Errorf("%d publish rules, want %d", len(rules), tc.wantRules)
+			}
+		})
+	}
+}
+
+// A misspelled provider is a misspelling whether or not the AI leg is on. It
+// surfaces at startup rather than the first time somebody turns the bot on,
+// which would be during an incident.
+func TestAnUnknownProviderNameIsAStartupFailure(t *testing.T) {
+	if _, err := voiceProfile(config.Config{Provider: "nonesuch"}); err == nil {
+		t.Error("an unknown provider name was accepted")
+	}
+	profile, err := voiceProfile(config.Config{
+		Provider: "openai", ProviderEndpoint: "wss://gateway.internal/realtime",
+	})
+	if err != nil {
+		t.Fatalf("voiceProfile: %v", err)
+	}
+	if profile.Endpoint != "wss://gateway.internal/realtime" {
+		t.Errorf("endpoint = %q, want the deployment's own", profile.Endpoint)
 	}
 }

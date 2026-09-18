@@ -57,6 +57,21 @@ type Profile struct {
 	// prompted with a synthetic cue.
 	NeedsCueForFirstTurn bool
 
+	// RequiresTerminalAnnounce means no text this client sends will make the
+	// engine take a turn, so the words of a phase the call does not leave have
+	// to come from the flow itself.
+	//
+	// It is stronger than NeedsCueForFirstTurn and not the same thing: that one
+	// says a cue is needed to START a conversation, and a cue is something this
+	// client can invent. This one says there is no cue at all — the engine
+	// speaks when it is given words, and a terminal phase with none is a caller
+	// listening to silence.
+	//
+	// False on every profile here: all three take a text cue. A flow is refused
+	// at publish rather than at load because of exactly that, the rule belongs
+	// to the deployment and not to the dialect (flow.RequireTerminalAnnounce).
+	RequiresTerminalAnnounce bool
+
 	// SemanticTurnType is this vendor's name for semantic turn detection.
 	SemanticTurnType string
 	// SemanticTurnSilenceMs is the hold the vendor forces in that mode,

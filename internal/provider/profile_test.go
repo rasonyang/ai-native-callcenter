@@ -169,3 +169,16 @@ func TestAnUnknownProviderNamesTheOnesThereAre(t *testing.T) {
 		}
 	}
 }
+
+// Every engine this build speaks to takes a text cue, so none of them makes a
+// flow's terminal phases carry their own words. Said out loud because the
+// capability is the reason a publish can be refused, and turning it on for a
+// profile that does not need it would refuse flows that run perfectly well.
+func TestNoProfileHereMakesAFlowWriteItsOwnClosingLines(t *testing.T) {
+	for _, profile := range []Profile{OpenAIProfile(), QwenProfile(), GatewayProfile()} {
+		if profile.RequiresTerminalAnnounce {
+			t.Errorf("%s requires terminal announcements; it is reached through a "+
+				"client that can prompt a turn with text", profile.Name)
+		}
+	}
+}
