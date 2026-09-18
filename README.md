@@ -47,7 +47,9 @@ nothing decodes or resamples on the way.
 
 **Steers without scripting the conversation.** The model owns the dialogue; the
 flow owns the phase. A phase carries instructions and a list of tools the model
-may use; transitions fire on tool results. The built-in tools may *refuse* —
+may use; transitions fire on tool results. A phase may also carry a line of its
+own — a greeting, a hand-over script, a goodbye — which the bot says as written
+rather than paraphrases. The built-in tools may *refuse* —
 "the queue is closed" is something to talk about, not an error — and the
 persona, the rules and the bot's voice are published and versioned together.
 

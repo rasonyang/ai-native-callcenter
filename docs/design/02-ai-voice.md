@@ -40,6 +40,7 @@ type VoiceSession interface {
     SendAudio(f media.Frame) error            // caller audio, provider-native format (adapter converts)
     SendToolResult(callID string, output string, hint string) error // hint => steering (§6)
     UpdateInstructions(text string) error     // long-call fact pinning / node changes
+    SpeakText(text string) error              // say this, now: pre-empts, never queues (§6)
     Interrupt(reason InterruptReason) error   // normalize barge-in (§5)
     Events() <-chan Event
     Close(ctx context.Context) error
@@ -50,9 +51,31 @@ type SessionConfig struct {
     Language string                            // "en"|"zh" (informs prompts, not routing)
     Turn TurnDetection                         // {Mode: Semantic|VAD, SilenceMs int}
     Tools []ToolSpec                           // JSON-schema tools from the flow
+    OpeningText string                         // the call's first words, as written (§6)
     InputFormat, OutputFormat media.AudioFormat
 }
 ```
+
+**Words, not only subjects** (added 2026-09-18). Everything else here is a
+brief the model writes from. `OpeningText` and `SpeakText` are the sentence
+itself: *say this*. Both are documented as **verbatim where the provider can
+manage it and best effort where it cannot** — the client in `internal/provider`
+speaks one protocol, and the nearest that protocol comes to handing over words
+is a per-response `instructions` telling the model to repeat one sentence and
+add nothing. An engine that speaks text outright says it as written, and that
+is a property of its profile rather than of this interface.
+
+`SpeakText` is mid-call only, **pre-empts** whatever is being said, and **does
+not queue**: a second call before the first has been spoken replaces it, because
+both describe what should come next and the older one is by then out of date.
+The opening line is `SessionConfig`'s instead, because the first turn is asked
+for while the session is being started and there is no mid-call moment to catch
+(§4, session bring-up). A turn stopped to make room for a line is reported as
+`Interrupted{by: SYSTEM}` rather than `SPEECH`: the consumer must flush its
+queue and report played-ms either way — the caller stopped hearing it, and the
+provider's history has to be trimmed to what they heard — but it was not a
+barge-in, and recording it as one writes an interruption the caller never made
+into the log of the call.
 
 Events (closed set): `SessionReady`, `AudioDelta{PCM/G711 bytes}`, `InputTranscript{delta|final}`, `OutputTranscript{delta|final}`, `SpeechStarted`, `SpeechStopped`, `ResponseStarted`, `Interrupted{by}`, `ToolCall{call_id,name,args}`, `ResponseDone{status,usage}`, `Error{fatal bool}`, `Closed`.
 
@@ -64,7 +87,9 @@ One shared **OpenAI-protocol client** parameterized by a `Profile` (endpoint, mo
 
 WS hygiene (mandatory, absent in golang-bot): ping/pong keepalive (15s), read deadlines (45s hard, reset on any frame), single-writer mutex, lazy nothing — connect at call start with a 3s deadline; **no mid-call reconnect** (provider session state is unrecoverable) — a fatal WS error surfaces as `Error{fatal}` → flow `on_error` route (transfer to queue / apology per flow config). Watchdogs: first-audio deadline per response (3s), delta-stall deadline (2s with audio already received → force-complete and play what arrived).
 
-Session bring-up: `Start` = WS dial → `session.update` (instructions, voice, formats, turn detection, tools) → wait `session.updated` → **[Qwen only] synthetic greeting cue** → greeting `response.create` (flow's initial node). ⚠ **M3-verified**: Qwen rejects `response.create` on an empty conversation (`conversation has no messages or no user message`), so the opening turn is prompted with a `conversation.item.create` user text item — a stage direction, never recorded as caller speech. Carried as the profile trait `NeedsCueForFirstTurn` (false for OpenAI, which greets unprompted) with per-flow override `SessionConfig.GreetingCue`. Preflight (java-bot pattern): on aicc startup and on config change, a background check dials each configured provider, round-trips one greeting + one tool call, and surfaces status on the admin health panel.
+Session bring-up: `Start` = WS dial → `session.update` (instructions, voice, formats, turn detection, tools) → wait `session.updated` → **[Qwen only] synthetic greeting cue** → greeting `response.create` (flow's initial node). ⚠ **M3-verified**: Qwen rejects `response.create` on an empty conversation (`conversation has no messages or no user message`), so the opening turn is prompted with a `conversation.item.create` user text item — a stage direction, never recorded as caller speech. Carried as the profile trait `NeedsCueForFirstTurn` (false for OpenAI, which greets unprompted) with per-flow override `SessionConfig.GreetingCue`.
+
+Where the entry phase names its own opening line (`SessionConfig.OpeningText`, from `announce` in §6), that last request carries it: `response.create` with `response.instructions` set to a say-exactly direction in the session's language, one frame on both dialects — the type discriminator the GA session object needs has no counterpart on a response object. On a `NeedsCueForFirstTurn` provider the direction *is* the cue item as well, because the conversation still may not be empty and a cue saying anything else would steer one turn two ways. With no opening line the request is the bare `{"type":"response.create"}` it always was, byte for byte. Preflight (java-bot pattern): on aicc startup and on config change, a background check dials each configured provider, round-trips one greeting + one tool call, and surfaces status on the admin health panel.
 
 ## 5. Barge-in — unified semantics (mandated comparison)
 
@@ -86,9 +111,13 @@ Turn-detection config mapping: `VAD` → `server_vad` with `SilenceMs` (**the de
 
 ## 6. Flow engine (DSL v1) over realtime sessions
 
-Spec = **DSL v2**: ui-test's v1 re-keyed to lowerCamelCase per 07 §7 (`specVersion:"v2"`): `global{persona, rules, fallback, maxTurns, tools, transitions}`, `nodes{instruction, tools, transitions, isTerminal}`, `tools{description, params(JSON-schema), http{path, body template, success predicate, result slots}}` — all user-facing strings bilingual `{en,zh}`; the session uses the entry point's language. The five v1 reference flows are converted by a one-shot script; v1 files stay reference-only.
+Spec = **DSL v2**: ui-test's v1 re-keyed to lowerCamelCase per 07 §7 (`specVersion:"v2"`): `global{persona, rules, voice, fallback, maxTurns, tools, transitions}`, `nodes{instruction, announce, tools, transitions, isTerminal}`, `tools{description, params(JSON-schema), http{path, body template, success predicate, result slots}}` — all user-facing strings bilingual `{en,zh}`; the session uses the entry point's language. The five v1 reference flows are converted by a one-shot script; v1 files stay reference-only.
 
-Engine mechanics (java-bot's hint steering, verified live over realtime function calling): the model owns the conversation; the engine owns phase. Node entry → `UpdateInstructions(persona+rules+node instruction)`. On `ToolCall`: if the tool is not allowed in the current node → `SendToolResult(ok:0 + current-phase hint)`; else run it (HTTP runner: 5s timeout, success predicate, slot extraction) and reply with the result, **overwriting `hint` with the next node's instruction** when a transition fires. The `maxTurns` guard forces the fallback node on runaway tool loops.
+`announce` (added 2026-09-18) is optional and is the one field of a node that is not a brief: a line the bot says **as written** on entering the phase, rendered with `{slots.x}` exactly as `instruction` is. It exists for the two ends of the range an instruction cannot reach — a closing line a business has signed off, which should not be paraphrased, and an engine that takes no text cue at all, for which a phase whose only job is one sentence has no way to say it. A deployment whose provider is of the second kind sets `Profile.RequiresTerminalAnnounce`, and `flow.RequireTerminalAnnounce` then refuses to **publish** a flow whose terminal phases carry none (422 `TERMINAL_ANNOUNCE_REQUIRED`, `params.nodes` naming them). Publish and not load: the same document is perfectly good where the provider can be cued, and a spec that loads on one installation and not on another would make the dialect a property of the host.
+
+Engine mechanics (java-bot's hint steering, verified live over realtime function calling): the model owns the conversation; the engine owns phase. Node entry → `UpdateInstructions(persona+rules+node instruction)`, then `SpeakText(node announce)` where the node has one — the entry node's goes into `SessionConfig.OpeningText` instead, being spoken before there is a call to speak into. On `ToolCall`: if the tool is not allowed in the current node → `SendToolResult(ok:0 + current-phase hint)`; else run it (HTTP runner: 5s timeout, success predicate, slot extraction) and reply with the result, **overwriting `hint` with the next node's instruction** when a transition fires. The `maxTurns` guard forces the fallback node on runaway tool loops.
+
+⚠ On a **terminal** node the order within node entry is load-bearing: the ending is armed *before* the line is asked for. Arming records the turn it happened in and fires on the playback of a later one (§6, `PLAYBACK_DONE`), and the line is spoken in a turn of its own — ask for it first and that turn can be the one recorded, after which no playback ever counts and the call ends on the 10 s grace cap with the caller sitting in silence.
 
 **Built-in tools** (present in every flow's allowed set; not HTTP):
 
