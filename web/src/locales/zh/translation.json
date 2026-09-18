@@ -669,6 +669,7 @@
     "specEditor": "流程配置 JSON",
     "anyPhase": "任一阶段",
     "terminal": "终止阶段",
+    "announce": "固定话术：",
     "revisions_other": "{{count}} 个版本",
     "revision": "版本",
     "note": "备注",

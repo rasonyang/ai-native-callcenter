@@ -47,6 +47,11 @@ export interface FlowTransition {
 
 export interface FlowNode {
   instruction?: FlowText
+  /**
+   * A line the bot says as written on entering this phase, rather than a brief
+   * it improvises from. Optional: most phases leave the words to the model.
+   */
+  announce?: FlowText
   tools?: string[]
   transitions?: FlowTransition[]
   isTerminal?: boolean
@@ -330,9 +335,17 @@ export function starterSpec(slug: string): FlowSpec {
     },
     nodes: {
       welcome: {
+        // The greeting as a line rather than as an instruction, because a
+        // first flow is also where an author learns the difference — and
+        // because a deployment whose provider only says what it is given
+        // needs one on every phase a call cannot leave.
+        announce: {
+          en: 'Thanks for calling. How can I help you today?',
+          zh: '感谢致电，请问有什么可以帮您？',
+        },
         instruction: {
-          en: 'Greet the caller and ask how you can help.',
-          zh: '问候来电者，并询问需要什么帮助。',
+          en: 'Find out what the caller needs and help them with it.',
+          zh: '了解来电者的需求，并帮助他们解决。',
         },
         tools: [],
       },

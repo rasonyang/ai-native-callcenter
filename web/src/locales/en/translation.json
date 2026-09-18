@@ -671,6 +671,7 @@
     "specEditor": "Flow spec JSON",
     "anyPhase": "Any phase",
     "terminal": "Terminal phase",
+    "announce": "Says:",
     "revisions_one": "{{count}} revision",
     "revisions_other": "{{count}} revisions",
     "revision": "Revision",

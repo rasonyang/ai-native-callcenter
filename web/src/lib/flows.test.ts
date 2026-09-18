@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  describeRule, locateNodes, sameSpec, textFor, textListFor, unreachableNodes,
+  describeRule, locateNodes, sameSpec, starterSpec, textFor, textListFor, unreachableNodes,
   type FlowSpec,
 } from '@/lib/flows'
 
@@ -134,5 +134,20 @@ describe('describeRule', () => {
         target: 'answer',
       }),
     ).toBe('lookup · ok = true & count ≥ 3')
+  })
+})
+
+describe('starterSpec', () => {
+  /**
+   * A first flow is where an author learns the difference between a brief and
+   * a line, so the starter shows both. It also has to publish as it stands on
+   * any deployment, and one whose provider only says what it is given needs
+   * the entry phase to carry its greeting.
+   */
+  it('gives its one phase a line of its own, in both languages', () => {
+    const welcome = starterSpec('probe').nodes?.welcome
+    expect(textFor(welcome?.announce, 'en')).not.toBe('')
+    expect(textFor(welcome?.announce, 'zh')).not.toBe('')
+    expect(textFor(welcome?.instruction, 'en')).not.toBe(textFor(welcome?.announce, 'en'))
   })
 })
