@@ -4,6 +4,7 @@ package seed
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
@@ -134,5 +135,94 @@ func TestOneTollFreeNumberIsTheMainLine(t *testing.T) {
 	}
 	if len(defaults) != 1 || defaults[0] != "8005550199" {
 		t.Errorf("default outbound numbers = %v, want exactly [8005550199]", defaults)
+	}
+}
+
+// A shipped flow has to be publishable on a deployment whose speech engine
+// only says what it is given, which means two things: the phase a call starts
+// in carries the greeting, and every phase a call does not leave carries its
+// closing line. Both languages, because the same flow answers an English
+// number and a Chinese one.
+//
+// The demo is where this bites first. It publishes six flows at boot, and a
+// seed that will not apply is an installation that comes up empty — with no
+// accounts, no numbers and no history either, because the flows are seeded
+// before any of it.
+func TestEveryShippedFlowSpeaksItsOpeningAndItsEndings(t *testing.T) {
+	for file, spec := range shippedFlows(t) {
+		entry, ok := spec.Node(spec.InitialNode)
+		if !ok {
+			t.Errorf("%s: initialNode %q is not a phase", file, spec.InitialNode)
+			continue
+		}
+		hasBothLanguages(t, file, spec.InitialNode, entry.Announce)
+
+		if err := flow.RequireTerminalAnnounce(spec); err != nil {
+			t.Errorf("%s: %v", file, err)
+		}
+		for id, node := range spec.Nodes {
+			if node.IsTerminal {
+				hasBothLanguages(t, file, id, node.Announce)
+			}
+		}
+	}
+}
+
+// The greeting used to be prose inside the entry instruction — "Open with:
+// ..." — and the model obliged by saying it. Now that the phase carries the
+// line, an instruction still asking for it would have the caller greeted
+// twice: once as written, once again in the model's own words.
+func TestNoEntryInstructionStillAsksForTheGreeting(t *testing.T) {
+	for file, spec := range shippedFlows(t) {
+		entry, ok := spec.Node(spec.InitialNode)
+		if !ok {
+			continue
+		}
+		for _, lang := range []string{flow.LangEN, flow.LangZH} {
+			instruction := entry.Instruction.For(lang)
+			for _, leftover := range []string{"Open with", "开场说"} {
+				if strings.Contains(instruction, leftover) {
+					t.Errorf("%s: the %s instruction of %q still says %q, so the caller "+
+						"is greeted twice", file, lang, spec.InitialNode, leftover)
+				}
+			}
+		}
+	}
+}
+
+// shippedFlows loads every embedded flow, keyed by file name.
+func shippedFlows(t *testing.T) map[string]*flow.Spec {
+	t.Helper()
+	entries, err := flowFiles.ReadDir("flows")
+	if err != nil {
+		t.Fatalf("read the embedded flows: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Fatal("no flows are embedded; this test would pass on an empty set")
+	}
+
+	specs := make(map[string]*flow.Spec, len(entries))
+	for _, entry := range entries {
+		data, err := flowFiles.ReadFile("flows/" + entry.Name())
+		if err != nil {
+			t.Fatalf("%s: %v", entry.Name(), err)
+		}
+		spec, err := flow.Load(data)
+		if err != nil {
+			t.Fatalf("%s: %v", entry.Name(), err)
+		}
+		specs[entry.Name()] = spec
+	}
+	return specs
+}
+
+// hasBothLanguages fails when a line exists in one language only. The flow
+// falls back to the other rather than to silence, so the caller would be
+// greeted in a language they did not dial.
+func hasBothLanguages(t *testing.T, file, node string, line flow.Text) {
+	t.Helper()
+	if line.EN == "" || line.ZH == "" {
+		t.Errorf("%s: phase %q has no line to speak in %s", file, node,
+			map[bool]string{true: "English", false: "Chinese"}[line.EN == ""])
 	}
 }
