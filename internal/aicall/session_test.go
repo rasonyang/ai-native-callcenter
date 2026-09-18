@@ -120,6 +120,11 @@ type fakeModel struct {
 	// startCfg is the configuration the session was started with, which is
 	// where the call's opening line travels.
 	startCfg provider.SessionConfig
+	// onSpeak runs inside SpeakText. A real provider answers a line with a
+	// turn of its own, and a test about turn ordering needs that to happen at
+	// the moment the line is asked for rather than whenever an event pump gets
+	// to it — otherwise the ordering it is checking is not exercised at all.
+	onSpeak func(string)
 }
 
 type toolResult struct{ id, output, hint string }
@@ -174,9 +179,22 @@ func (m *fakeModel) UpdateInstructions(text string) error {
 
 func (m *fakeModel) SpeakText(text string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.spoken = append(m.spoken, text)
+	onSpeak := m.onSpeak
+	m.mu.Unlock()
+
+	if onSpeak != nil {
+		onSpeak(text)
+	}
 	return nil
+}
+
+// answerLinesWithATurn makes the fake behave as a provider does: a line asked
+// for becomes a turn of its own.
+func (m *fakeModel) answerLinesWithATurn(session *Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSpeak = func(string) { session.beginTurn() }
 }
 
 func (m *fakeModel) Interrupt(reason provider.InterruptReason, playedMs int) error {

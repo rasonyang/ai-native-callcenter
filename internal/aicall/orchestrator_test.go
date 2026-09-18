@@ -463,6 +463,204 @@ func TestReachingATerminalPhaseIsContainment(t *testing.T) {
 	}
 }
 
+//
+// Lines the flow owns.
+//
+
+// A phase that carries its own words has them said on the way in, and a
+// terminal phase still ends the call only once the caller has heard them.
+//
+// The ordering is the whole of it. arm() remembers the turn it was armed in
+// and waits for the playback of a LATER one, so the line has to be asked for
+// after that turn is recorded — ask first and the line's own turn can be the
+// one remembered, and then no playback ever counts and the call ends ten
+// seconds later on the grace cap, in silence.
+func TestATerminalPhaseSaysItsLineAndStillWaitsForTheCallerToHearIt(t *testing.T) {
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, &fakeSwitch{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(announcingFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{orchestrator: o, session: session, log: log}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	model.answerLinesWithATurn(session)
+
+	turnBefore := session.currentTurn()
+	moved := engine.OnNoInput()
+	if moved != "farewell" || !engine.IsTerminal() {
+		t.Fatalf("the test flow did not reach its terminal phase (moved=%q)", moved)
+	}
+	o.afterMove(moved, session, runtime, actions, log)
+
+	if got := model.spokenLines(); len(got) != 1 || got[0] != "Thank you for calling, goodbye." {
+		t.Fatalf("spoken lines = %v, want the phase's own closing line once", got)
+	}
+	if !actions.isArmed() {
+		t.Fatal("the call ended before the closing line could be heard")
+	}
+	if actions.armedInTurn != turnBefore {
+		t.Errorf("armed in turn %d, want %d — the line's own turn must come after",
+			actions.armedInTurn, turnBefore)
+	}
+
+	// The turn that carried the move does not count; the line's own does.
+	actions.onPlaybackDone(turnBefore)
+	if !actions.isArmed() {
+		t.Fatal("the call ended on the playback of a turn that preceded the line")
+	}
+	actions.onPlaybackDone(turnBefore + 1)
+	if actions.isArmed() {
+		t.Error("the caller heard the closing line and the call stayed open")
+	}
+}
+
+// The transfer case, where an action is already armed when the phase arrives.
+// The line still has to be said — it is the hand-over script — and the
+// transfer still has to wait for it.
+func TestATerminalPhaseThatFindsAnArmedTransferStillSaysItsLine(t *testing.T) {
+	sw := &fakeSwitch{}
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, sw)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(announcingFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
+	}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	model.answerLinesWithATurn(session)
+
+	turnBefore := session.currentTurn()
+	_, moved := runtime.Dispatch(t.Context(), flow.ToolTransferToAgent,
+		`{"queue":"support","reason":"BILLING","summary":"needs help"}`)
+	if moved != "handoff" {
+		t.Fatalf("moved to %q, want handoff", moved)
+	}
+	o.afterMove(moved, session, runtime, actions, log)
+
+	if got := model.spokenLines(); len(got) != 1 || got[0] != "I am putting you through now." {
+		t.Fatalf("spoken lines = %v, want the hand-over line once", got)
+	}
+	actions.onPlaybackDone(turnBefore + 1)
+	if got := sw.recordedTransfers(); len(got) != 1 || got[0] != "chan-9→7001" {
+		t.Errorf("transfers = %v, want the caller put through once the line was heard", got)
+	}
+}
+
+// Most phases leave the words to the model, and for those nothing new happens:
+// the instructions are re-pinned and that is all.
+func TestAPhaseWithNoLineOfItsOwnAsksForNothingToBeSaid(t *testing.T) {
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, &fakeSwitch{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(driveFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{orchestrator: o, session: session, log: log}
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+
+	o.afterMove(engine.OnToolResult(flow.ToolTransferToAgent,
+		map[string]any{"ok": "1"}), session, runtime, actions, log)
+
+	if got := model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken lines = %v, want none: this phase has no words of its own", got)
+	}
+	model.mu.Lock()
+	instructions := len(model.instructions)
+	model.mu.Unlock()
+	if instructions != 1 {
+		t.Errorf("the phase change re-pinned the instructions %d times, want once", instructions)
+	}
+}
+
+// The call's first words travel in the session configuration, because the
+// opening turn is asked for as part of starting the session — there is no
+// mid-call moment to say them in.
+func TestTheEntryPhasesLineOpensTheCall(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(announcingFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "zh", nil, log)
+	runtime := flow.NewRuntime(engine, &callActions{log: log}, flow.NewBackend(""), nil, log)
+
+	cfg := sessionConfigFor(spec, runtime, "zh")
+	if cfg.OpeningText != "感谢致电，请问有什么可以帮您？" {
+		t.Errorf("openingText = %q, want the entry phase's line in the call's language",
+			cfg.OpeningText)
+	}
+	if !strings.Contains(cfg.Instructions, "Current phase [welcome]") &&
+		!strings.Contains(cfg.Instructions, "当前环节【welcome】") {
+		t.Errorf("instructions do not start the call in the entry phase:\n%s", cfg.Instructions)
+	}
+
+	// A flow that names no line leaves the opening to the model, exactly as
+	// every call did before a phase could carry one.
+	plain, err := flow.Load([]byte(driveFlow))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	plainEngine := flow.NewEngine(plain, "en", nil, log)
+	plainRuntime := flow.NewRuntime(plainEngine, &callActions{log: log},
+		flow.NewBackend(""), nil, log)
+	if got := sessionConfigFor(plain, plainRuntime, "en").OpeningText; got != "" {
+		t.Errorf("openingText = %q, want nothing", got)
+	}
+}
+
+// announcingFlow carries a line on its entry phase and on both of its terminal
+// phases, which is the shape a provider that cannot be cued demands.
+const announcingFlow = `{
+	"id": "announcing-test",
+	"specVersion": "v2",
+	"initialNode": "welcome",
+	"global": {
+		"persona": "You answer the phone.",
+		"alwaysAllowedTools": ["transfer_to_agent", "hangup"],
+		"transitions": [
+			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",
+			 "condition": {"slot": "result.ok", "op": "EQ", "value": "1"},
+			 "target": "handoff"}
+		]
+	},
+	"nodes": {
+		"welcome": {
+			"instruction": "Greet the caller.",
+			"announce": {"en": "Thanks for calling, how can I help you today?",
+			             "zh": "感谢致电，请问有什么可以帮您？"},
+			"tools": [],
+			"transitions": [{"on": "NO_INPUT", "target": "farewell"}]
+		},
+		"handoff": {
+			"instruction": "Announce the transfer.",
+			"announce": "I am putting you through now.",
+			"tools": [], "isTerminal": true
+		},
+		"farewell": {
+			"instruction": "Say goodbye.",
+			"announce": "Thank you for calling, goodbye.",
+			"tools": [], "isTerminal": true
+		}
+	}
+}`
+
 const driveFlow = `{
 	"id": "drive-test",
 	"specVersion": "v2",

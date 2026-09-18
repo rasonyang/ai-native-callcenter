@@ -311,6 +311,21 @@ func (s *Session) Reinstruct(text string) error {
 	return s.model.UpdateInstructions(text)
 }
 
+// Speak says a line the flow chose, in the words it chose.
+//
+// The counterpart to Reinstruct: that one changes what the model is working
+// towards, this one is the sentence itself. It pre-empts whatever is being
+// said and does not queue behind anything — see provider.VoiceSession — so a
+// phase whose whole job is one line gets that line out, not a paraphrase of it
+// two turns later.
+//
+// The opening line of a call is not sent through here. It travels in the
+// session configuration, because the first turn is asked for while the session
+// is being started and there is no mid-call moment to catch.
+func (s *Session) Speak(text string) error {
+	return s.model.SpeakText(text)
+}
+
 //
 // Audio.
 //
