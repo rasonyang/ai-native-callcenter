@@ -86,21 +86,21 @@ type Realtime struct {
 	isCancelSentForSpeak bool
 	isPreemptedForSpeak  bool
 
-	// watch carries response-progress signals to the watchdog.
-	watch chan watchSignal
+	// dog ends a turn the provider has walked away from, and watch is the
+	// channel its progress signals travel on.
+	dog   *Watchdog
+	watch chan WatchSignal
 	// Watchdog deadlines, held as fields so tests need not wait seconds for
 	// behaviour that is measured in seconds on a real call.
 	firstAudioDeadline time.Duration
 	deltaStallDeadline time.Duration
 }
 
-// watchSignal tells the watchdog where a response has got to.
-type watchSignal uint8
-
+// The names this client knows the watchdog's signals by.
 const (
-	watchResponseStarted watchSignal = iota
-	watchAudioArrived
-	watchResponseEnded
+	watchResponseStarted = WatchResponseStarted
+	watchAudioArrived    = WatchAudioArrived
+	watchResponseEnded   = WatchResponseEnded
 )
 
 // atomic is a tiny typed holder; sync/atomic's generic Pointer would need a
@@ -130,7 +130,6 @@ func New(profile Profile, log *slog.Logger) (*Realtime, error) {
 		log:     log.With("provider", profile.Name, "model", profile.Model),
 		events:  make(chan Event, eventBuffer),
 		ready:   make(chan struct{}),
-		watch:   make(chan watchSignal, 16),
 
 		firstAudioDeadline: firstAudioTimeout,
 		deltaStallDeadline: deltaStallTimeout,
@@ -160,8 +159,16 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		return err
 	}
 	r.conn = conn
+	r.dog = NewWatchdog(WatchdogConfig{
+		FirstAudioDeadline: r.firstAudioDeadline,
+		DeltaStallDeadline: r.deltaStallDeadline,
+		Done:               conn.Done(),
+		IsResponseOpen:     r.isResponseOpen.Load,
+		OnStall:            r.onResponseStalled,
+	})
+	r.watch = r.dog.Signals()
 	go r.readLoop()
-	go r.watchdog()
+	go r.dog.Run()
 
 	if err := r.sendEvent(r.buildSessionUpdate(cfg, false)); err != nil {
 		r.conn.Close()
@@ -830,100 +837,29 @@ func (r *Realtime) finishStart(err error) {
 // It is synthesised here, not reported by any provider.
 const StatusStalled = "STALLED"
 
-// watchdog ends a turn the provider has silently abandoned.
-//
-// A model that accepts a turn and then stops is indistinguishable, to the
-// person on the phone, from a call that has died — and the flow engine would
-// wait for a completion that is never coming. Rather than hang, the turn is
-// closed out with what actually arrived.
-func (r *Realtime) watchdog() {
-	timer := time.NewTimer(time.Hour)
-	if !timer.Stop() {
-		<-timer.C
+// onResponseStalled closes out a turn the provider walked away from. The
+// watchdog calls it on its own goroutine, having already decided that a
+// response really is open.
+func (r *Realtime) onResponseStalled(hasAudioArrived bool) {
+	reason := "the provider never started speaking"
+	if hasAudioArrived {
+		reason = "the provider stopped partway through speaking"
 	}
-	defer timer.Stop()
-
-	hasAudioArrived := false
-	isWaiting := false
-
-	arm := func(d time.Duration) {
-		if isWaiting && !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timer.Reset(d)
-		isWaiting = true
-	}
-	disarm := func() {
-		if isWaiting && !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		isWaiting = false
-	}
-
-	for {
-		select {
-		case <-r.conn.Done():
-			return
-
-		case signal := <-r.watch:
-			switch signal {
-			case watchResponseStarted:
-				hasAudioArrived = false
-				arm(r.firstAudioDeadline)
-			case watchAudioArrived:
-				hasAudioArrived = true
-				arm(r.deltaStallDeadline)
-			case watchResponseEnded:
-				disarm()
-			}
-
-		case <-timer.C:
-			isWaiting = false
-			// Signals are droppable and a turn arrives in a burst: fifty
-			// deltas can overflow the channel and take the completion with
-			// them, leaving this timer armed on a response that finished
-			// cleanly. The state cannot be lost the way a signal can, so it
-			// is what decides. Found under sustained load, where about 1% of
-			// turns were reported abandoned while the model was fine.
-			if !r.isResponseOpen.Load() {
-				continue
-			}
-			reason := "the provider never started speaking"
-			if hasAudioArrived {
-				reason = "the provider stopped partway through speaking"
-			}
-			r.isResponseOpen.Store(false)
-			r.log.Warn("response abandoned", "reason", reason,
-				"hasAudioArrived", hasAudioArrived)
-			// This path never reaches handleResponseDone, so a line waiting for
-			// a turn the provider walked away from would wait for ever.
-			r.dispatchPendingSpeak()
-			// Not fatal: the session is still usable, and the caller has heard
-			// whatever did arrive. The flow decides what to say next.
-			r.emit(Event{Type: EventTypeError, Text: reason,
-				Err: errors.New(reason)})
-			r.emit(Event{Type: EventTypeResponseDone, Status: StatusStalled})
-		}
-	}
+	r.isResponseOpen.Store(false)
+	r.log.Warn("response abandoned", "reason", reason,
+		"hasAudioArrived", hasAudioArrived)
+	// This path never reaches handleResponseDone, so a line waiting for
+	// a turn the provider walked away from would wait for ever.
+	r.dispatchPendingSpeak()
+	// Not fatal: the session is still usable, and the caller has heard
+	// whatever did arrive. The flow decides what to say next.
+	r.emit(Event{Type: EventTypeError, Text: reason,
+		Err: errors.New(reason)})
+	r.emit(Event{Type: EventTypeResponseDone, Status: StatusStalled})
 }
 
 // signal notifies the watchdog without ever blocking the read loop.
-func (r *Realtime) signal(s watchSignal) {
-	select {
-	case r.watch <- s:
-	case <-r.conn.Done():
-	default:
-		// The watchdog is momentarily behind. A missed signal costs at worst
-		// a late re-arm: whether a response is still open is read from state,
-		// not inferred from having seen every signal.
-	}
-}
+func (r *Realtime) signal(s WatchSignal) { r.dog.Signal(s) }
 
 // emit delivers an event, dropping it only once the session is finished.
 func (r *Realtime) emit(event Event) {
