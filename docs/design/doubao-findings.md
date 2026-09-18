@@ -334,7 +334,8 @@ It is provider-agnostic and pre-existing: the same 8.000 s parks are there on
 qwen. Doubao only makes it audible, because its tool turn carries no audio and
 its speech arrives about five times faster than real time, so the line has long
 finished playing before the wait is over. Every session test sets `NoInput: -1`,
-which is exactly why the suite is blind to it. Filed as **W-D5**.
+which is exactly why the suite is blind to it. Filed as **W-D5**, and fixed in
+this branch — the description above stays as the record of what was found.
 
 ## Follow-ups
 
@@ -376,15 +377,17 @@ the hold lasts. Today any hold longer than `RTPDeadTimeout` (5 s,
 happen twice. The doubao pacer's side of a hold is already correct — it mutes and
 the provider is content — so this is the leg's problem, not the client's.
 
-**W-D5 — the dead-air wait must be interruptible by the next playback marker.**
-In `internal/aicall/session.go`, `awaitCallerOrDeadAir` should return the marker
-it received and let `watchPlayback` process it on the next iteration of the loop,
-instead of swallowing the whole no-input timeout while the marker waits in the
-channel (§10). It is about fifteen lines. It needs pinning with a session test
-that has the no-input timeout **enabled** — every existing one sets
-`NoInput: -1`, which is why the suite never saw this — asserting that a second
-turn's `PLAYBACK_DONE` arrives when that turn's audio drains and not when the
-timer expires.
+**W-D5 — the dead-air wait must be interruptible by the next playback marker.
+DONE.** In `internal/aicall/session.go`, `awaitCallerOrDeadAir` now selects on
+`s.playbackDone` as well as the timer and returns the marker it received, and
+`watchPlayback` processes it on the next iteration of the loop instead of
+letting it wait out the whole no-input timeout in the channel (§10). Pinned by
+`TestASecondTurnsPlaybackIsNotHeldByTheDeadAirWatch`, with the no-input timeout
+**enabled** — every pre-existing session test sets `NoInput: -1`, which is why
+the suite never saw this — and by
+`TestDeadAirIsReportedOnceAfterTheLastTurn`, which holds the other half: a turn
+that interrupts the watch re-arms it, so the caller who then says nothing is
+still told so, once and no earlier than the timeout.
 
 **W-D6 — a startup line that reads as a bug (cosmetic).** `voice provider
 selected … transcribesCaller=""` prints the profile's own transcription model. On

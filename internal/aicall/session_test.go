@@ -792,6 +792,140 @@ func TestACallerWhoSpeaksCancelsTheDeadAirWatch(t *testing.T) {
 	}
 }
 
+// speakTurn plays one complete model turn of n frames.
+func speakTurn(model *fakeModel, frames int) {
+	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	model.events <- provider.Event{
+		Type:  provider.EventTypeAudioDelta,
+		Audio: make([]byte, media.FrameSamples*frames),
+	}
+	model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+}
+
+// awaitFramesSent waits until the leg has been handed n frames in all.
+func awaitFramesSent(t *testing.T, leg *fakeLeg, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for len(leg.sentFrames()) < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of %d frames reached the leg", len(leg.sentFrames()), n)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// A turn's audio draining and the caller going quiet are two different waits,
+// and the second must never detain the first. The bot speaking again answers
+// the dead-air question by itself, and the new turn's PLAYBACK_DONE — which is
+// what an armed transfer or hangup is gated on — belongs to the moment that
+// turn's audio ended, not to the moment a timer nobody cancelled expired.
+// Live calls heard seconds of silence before a transfer because of this.
+func TestASecondTurnsPlaybackIsNotHeldByTheDeadAirWatch(t *testing.T) {
+	const noInput = 2 * time.Second
+
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: noInput})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	speakTurn(model, 1)
+	if event := awaitBridgeEvent(t, session, EventTypePlaybackDone); event.Turn != 1 {
+		t.Fatalf("the first completion was for turn %d, want turn 1", event.Turn)
+	}
+
+	// The dead-air watch for turn one is running when turn two arrives.
+	speakTurn(model, 3)
+	awaitFramesSent(t, leg, 4)
+	drained := time.Now()
+
+	deadline := time.After(noInput - 500*time.Millisecond)
+collect:
+	for {
+		select {
+		case event, ok := <-session.Events():
+			if !ok {
+				t.Fatal("the stream closed before the second turn was heard")
+			}
+			switch event.Type {
+			case EventTypeNoInput:
+				t.Fatal("dead air was reported although the bot had spoken again")
+			case EventTypePlaybackDone:
+				if event.Turn != 2 {
+					t.Fatalf("playback completion for turn %d, want turn 2", event.Turn)
+				}
+				if waited := time.Since(drained); waited > 500*time.Millisecond {
+					t.Fatalf("the second turn was reported heard %v after its audio drained", waited)
+				}
+				break collect
+			}
+		case <-deadline:
+			t.Fatal("the second turn's playback completion was held behind the dead-air wait")
+		}
+	}
+
+	// One completion per turn, and the caller has not yet had the chance to be
+	// silent for a whole timeout.
+	tail := time.After(300 * time.Millisecond)
+	for {
+		select {
+		case event := <-session.Events():
+			switch event.Type {
+			case EventTypePlaybackDone:
+				t.Fatalf("a second completion for turn %d", event.Turn)
+			case EventTypeNoInput:
+				t.Fatal("dead air was reported before the timeout")
+			}
+		case <-tail:
+			return
+		}
+	}
+}
+
+// A turn that interrupts the dead-air watch re-arms it rather than disarming
+// it: the caller who says nothing after the last thing the bot said is still
+// in dead air, and is told so once.
+func TestDeadAirIsReportedOnceAfterTheLastTurn(t *testing.T) {
+	const noInput = 400 * time.Millisecond
+
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: noInput})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	speakTurn(model, 1)
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+	speakTurn(model, 1)
+	awaitFramesSent(t, leg, 2)
+	if event := awaitBridgeEvent(t, session, EventTypePlaybackDone); event.Turn != 2 {
+		t.Fatalf("the second completion was for turn %d, want turn 2", event.Turn)
+	}
+	heard := time.Now()
+
+	// The timer starts just after the event is emitted, so measuring from the
+	// moment the test read it allows a little slack for the scheduler.
+	const slack = 50 * time.Millisecond
+
+	reports := 0
+	deadline := time.After(3 * noInput)
+	for {
+		select {
+		case event := <-session.Events():
+			switch event.Type {
+			case EventTypeNoInput:
+				if waited := time.Since(heard); waited < noInput-slack {
+					t.Fatalf("dead air was reported after %v, before the %v timeout", waited, noInput)
+				}
+				reports++
+			case EventTypePlaybackDone:
+				t.Fatalf("a second completion for turn %d", event.Turn)
+			}
+		case <-deadline:
+			if reports != 1 {
+				t.Fatalf("dead air was reported %d times, want once", reports)
+			}
+			return
+		}
+	}
+}
+
 //
 // Keypresses.
 //

@@ -638,12 +638,19 @@ type playbackMarker struct {
 func (s *Session) watchPlayback() {
 	defer s.wg.Done()
 
+	var next playbackMarker
+	var hasNext bool
+
 	for {
-		var marker playbackMarker
-		select {
-		case <-s.done:
-			return
-		case marker = <-s.playbackDone:
+		marker := next
+		if hasNext {
+			hasNext = false
+		} else {
+			select {
+			case <-s.done:
+				return
+			case marker = <-s.playbackDone:
+			}
 		}
 
 		if !s.awaitDrained(marker.generation) {
@@ -653,7 +660,7 @@ func (s *Session) watchPlayback() {
 		s.mu.Lock()
 		idleGeneration := s.idleGeneration
 		s.mu.Unlock()
-		s.awaitCallerOrDeadAir(idleGeneration)
+		next, hasNext = s.awaitCallerOrDeadAir(idleGeneration)
 	}
 }
 
@@ -685,11 +692,18 @@ func (s *Session) awaitDrained(generation uint64) bool {
 	}
 }
 
-// awaitCallerOrDeadAir reports dead air if the caller stays silent.
-func (s *Session) awaitCallerOrDeadAir(generation uint64) {
+// awaitCallerOrDeadAir reports dead air if the caller stays silent. It returns
+// the next turn's marker, if one arrives first, for the caller to handle.
+//
+// The wait has to watch for that marker as well as for the clock: the bot
+// speaking again says there was no dead air to report, and the new turn's
+// playback must be followed from the moment it ends, not from whenever a
+// timeout nobody is waiting for any more happens to expire. Leaving the marker
+// in the channel put seconds of silence in front of every armed transfer.
+func (s *Session) awaitCallerOrDeadAir(generation uint64) (playbackMarker, bool) {
 	timeout := s.noInputAfter()
 	if timeout <= 0 {
-		return
+		return playbackMarker{}, false
 	}
 
 	timer := time.NewTimer(timeout)
@@ -697,15 +711,18 @@ func (s *Session) awaitCallerOrDeadAir(generation uint64) {
 
 	select {
 	case <-s.done:
+	case marker := <-s.playbackDone:
+		return marker, true
 	case <-timer.C:
 		// A stale timer recognises itself rather than being stopped, which
 		// removes the race between cancelling and firing entirely.
 		if !s.isCurrentIdle(generation) {
-			return
+			return playbackMarker{}, false
 		}
 		s.log.Info("dead air", "afterMs", timeout.Milliseconds())
 		s.emit(Event{Type: EventTypeNoInput})
 	}
+	return playbackMarker{}, false
 }
 
 // cancelDeadAirWatch invalidates any timer waiting on the caller. It touches
