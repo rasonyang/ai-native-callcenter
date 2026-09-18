@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/wsconn"
 )
 
 // Watchdogs on a response. A provider that accepts a turn and then goes quiet
@@ -43,7 +45,7 @@ type Realtime struct {
 	log     *slog.Logger
 
 	events chan Event
-	conn   *transport
+	conn   *wsconn.Conn
 
 	// ready closes when the provider has accepted the session configuration.
 	ready     chan struct{}
@@ -153,7 +155,7 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		headers.Set(key, value)
 	}
 
-	conn, err := dial(ctx, r.profile.endpointURL(), headers, r.log)
+	conn, err := wsconn.Dial(ctx, r.profile.endpointURL(), headers, r.log)
 	if err != nil {
 		return err
 	}
@@ -161,8 +163,8 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 	go r.readLoop()
 	go r.watchdog()
 
-	if err := r.conn.send(r.buildSessionUpdate(cfg, false)); err != nil {
-		r.conn.close()
+	if err := r.sendEvent(r.buildSessionUpdate(cfg, false)); err != nil {
+		r.conn.Close()
 		return fmt.Errorf("configure session: %w", err)
 	}
 
@@ -172,17 +174,17 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 	select {
 	case <-r.ready:
 	case <-ctx.Done():
-		r.conn.close()
+		r.conn.Close()
 		return ctx.Err()
-	case <-time.After(dialTimeout):
-		r.conn.close()
+	case <-time.After(wsconn.DialTimeout):
+		r.conn.Close()
 		if err := r.startErr.get(); err != nil {
 			return fmt.Errorf("session rejected: %w", err)
 		}
 		return errors.New("provider did not confirm the session configuration")
 	}
 	if err := r.startErr.get(); err != nil {
-		r.conn.close()
+		r.conn.Close()
 		return fmt.Errorf("session rejected: %w", err)
 	}
 
@@ -205,19 +207,19 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		cue = direction
 	}
 	if r.profile.NeedsCueForFirstTurn {
-		if err := r.conn.send(map[string]any{
+		if err := r.sendEvent(map[string]any{
 			"type": "conversation.item.create",
 			"item": map[string]any{
 				"type": "message", "role": "user",
 				"content": []map[string]any{{"type": "input_text", "text": cue}},
 			},
 		}); err != nil {
-			r.conn.close()
+			r.conn.Close()
 			return fmt.Errorf("prompt opening turn: %w", err)
 		}
 	}
 	if err := r.requestResponse(opening); err != nil {
-		r.conn.close()
+		r.conn.Close()
 		return fmt.Errorf("request opening turn: %w", err)
 	}
 	return nil
@@ -248,12 +250,12 @@ func (r *Realtime) SendAudio(audio []byte) error {
 	message = base64.StdEncoding.AppendEncode(message, audio)
 	message = append(message, '"', '}')
 
-	return r.conn.sendRaw(message)
+	return r.conn.Send(message)
 }
 
 // SendUserText adds a caller turn that was not spoken and asks for a reply.
 func (r *Realtime) SendUserText(text string) error {
-	if err := r.conn.send(map[string]any{
+	if err := r.sendEvent(map[string]any{
 		"type": "conversation.item.create",
 		"item": map[string]any{
 			"type": "message", "role": "user",
@@ -311,7 +313,7 @@ func (r *Realtime) SpeakText(text string) error {
 	r.mu.Unlock()
 
 	if isCancelNeeded {
-		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
 			return err
 		}
 	}
@@ -351,7 +353,7 @@ func (r *Realtime) requestResponse(request map[string]any) error {
 	r.mu.Lock()
 	r.isResponseRequested = true
 	r.mu.Unlock()
-	return r.conn.send(request)
+	return r.sendEvent(request)
 }
 
 // onResponseCreated stops a turn that was superseded before it existed.
@@ -370,7 +372,7 @@ func (r *Realtime) onResponseCreated() {
 	r.mu.Unlock()
 
 	if isCancelNeeded {
-		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
 			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
 		}
 	}
@@ -404,7 +406,7 @@ func (r *Realtime) dispatchPendingSpeak() (wasPreempted bool) {
 // update: the model reads it as part of what it just learned, which is what
 // makes it act on it immediately instead of at some later turn.
 func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
-	if err := r.conn.send(map[string]any{
+	if err := r.sendEvent(map[string]any{
 		"type": "conversation.item.create",
 		"item": map[string]any{
 			"type":    "function_call_output",
@@ -452,7 +454,7 @@ func (r *Realtime) UpdateInstructions(text string) error {
 	if r.profile.Style == styleGA {
 		session["type"] = "realtime"
 	}
-	return r.conn.send(map[string]any{"type": "session.update", "session": session})
+	return r.sendEvent(map[string]any{"type": "session.update", "session": session})
 }
 
 // Interrupt stops the model talking over the caller.
@@ -478,7 +480,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	r.mu.Unlock()
 
 	if !r.profile.CancelsResponseItself && r.isResponseOpen.Load() {
-		if err := r.conn.send(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
 			return err
 		}
 	}
@@ -487,7 +489,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	// honest: without it the model believes the caller heard a sentence that
 	// was cut off after three words.
 	if itemID != "" && playedMs > 0 {
-		if err := r.conn.send(map[string]any{
+		if err := r.sendEvent(map[string]any{
 			"type":          "conversation.item.truncate",
 			"item_id":       itemID,
 			"content_index": 0,
@@ -503,7 +505,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 func (r *Realtime) Close(_ context.Context) error {
 	r.closeOnce.Do(func() {
 		if r.conn != nil {
-			r.conn.close()
+			r.conn.Close()
 		}
 	})
 	return nil
@@ -625,7 +627,7 @@ func (r *Realtime) readLoop() {
 	defer close(r.events)
 
 	for {
-		event, raw, err := r.conn.receive()
+		event, raw, err := r.receive()
 		if err != nil {
 			// There is no reconnect: the provider holds conversation state
 			// that cannot be rebuilt, so a lost socket ends the session and
@@ -789,7 +791,7 @@ func (r *Realtime) handleError(event *wireEvent) {
 		r.mu.Lock()
 		cfg := r.cfg
 		r.mu.Unlock()
-		if sendErr := r.conn.send(r.buildSessionUpdate(cfg, true)); sendErr == nil {
+		if sendErr := r.sendEvent(r.buildSessionUpdate(cfg, true)); sendErr == nil {
 			return
 		}
 	}
@@ -866,7 +868,7 @@ func (r *Realtime) watchdog() {
 
 	for {
 		select {
-		case <-r.conn.done:
+		case <-r.conn.Done():
 			return
 
 		case signal := <-r.watch:
@@ -915,7 +917,7 @@ func (r *Realtime) watchdog() {
 func (r *Realtime) signal(s watchSignal) {
 	select {
 	case r.watch <- s:
-	case <-r.conn.done:
+	case <-r.conn.Done():
 	default:
 		// The watchdog is momentarily behind. A missed signal costs at worst
 		// a late re-arm: whether a response is still open is read from state,
@@ -927,7 +929,7 @@ func (r *Realtime) signal(s watchSignal) {
 func (r *Realtime) emit(event Event) {
 	select {
 	case r.events <- event:
-	case <-r.conn.done:
+	case <-r.conn.Done():
 		// The session is over; nobody is reading any more.
 	}
 }
