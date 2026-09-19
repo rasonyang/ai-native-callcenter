@@ -4,6 +4,7 @@ package aicall
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strconv"
@@ -416,6 +417,72 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("drive did not return after the call ended")
+	}
+}
+
+// A failure the provider could name reaches the CDR as that name. A failure it
+// could not is released exactly as it always was.
+//
+// Both halves matter. The caller is rescued the same way either way — nothing
+// about the release changes — but "the provider's session ran out of time" and
+// "the bot could not go on" are different answers to give whoever reads the
+// call afterwards, and a deployment whose calls keep outliving a cap can only
+// see that if the cause survives the trip out of the client.
+func TestAFailureSaysWhatTheProviderCalledIt(t *testing.T) {
+	for _, testCase := range []struct {
+		name  string
+		cause provider.FailureCause
+		want  string
+	}{
+		{"a failure with nothing to say for itself",
+			"", "MEDIA_OR_PROVIDER_FAILURE"},
+		{"a session the provider's own clock ended",
+			provider.FailureCauseSessionExpired, "PROVIDER_SESSION_EXPIRED"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			session, _, model := startBridge(t, provider.OpenAIProfile())
+			awaitBridgeEvent(t, session, EventTypeReady)
+
+			o := testOrchestrator(t, &fakeSwitch{})
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			spec, err := flow.Load([]byte(driveFlow))
+			if err != nil {
+				t.Fatalf("load flow: %v", err)
+			}
+			actions := &callActions{orchestrator: o, session: session, log: log}
+			runtime := flow.NewRuntime(flow.NewEngine(spec, "en", nil, log),
+				actions, flow.NewBackend(""), nil, log)
+			recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+			actions.recorder = recorder
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				o.drive(t.Context(), session, runtime, actions, recorder, log)
+			}()
+
+			model.events <- provider.Event{
+				Type: provider.EventTypeError, IsFatal: true,
+				Text: "the session ended", Err: errors.New("the session ended"),
+				FailureCause: testCase.cause,
+			}
+
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("drive did not return after the conversation failed")
+			}
+
+			recorder.mu.Lock()
+			endReason, cause := recorder.endReason, recorder.hangupCause
+			recorder.mu.Unlock()
+			if endReason != "FAILED" {
+				t.Errorf("endReason = %q, want FAILED", endReason)
+			}
+			if cause != testCase.want {
+				t.Errorf("hangup cause = %q, want %q", cause, testCase.want)
+			}
+		})
 	}
 }
 

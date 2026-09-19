@@ -411,8 +411,9 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 		case EventTypeFailed:
 			// The conversation cannot continue; the caller still can.
-			log.Warn("conversation failed, rescuing the caller", "reason", event.Text)
-			recorder.markFailed("MEDIA_OR_PROVIDER_FAILURE")
+			log.Warn("conversation failed, rescuing the caller",
+				"reason", event.Text, "cause", event.FailureCause)
+			recorder.markFailed(hangupCauseFor(event.FailureCause))
 			actions.rescueCaller()
 			return
 
@@ -420,6 +421,23 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 			return
 		}
 	}
+}
+
+// hangupCauseMediaOrProvider is what a failed AI call has always been released
+// with: the bot could not go on, and nothing said which half of it broke.
+const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
+
+// hangupCauseFor is what the CDR says about a failure.
+//
+// A provider that named its own cause is taken at its word — the whole point of
+// naming one is that it reaches whoever reads the call afterwards — and a
+// failure nobody could explain is still a failure of the media or the provider,
+// which is what this path has always recorded and what it records now.
+func hangupCauseFor(cause provider.FailureCause) string {
+	if cause == "" {
+		return hangupCauseMediaOrProvider
+	}
+	return string(cause)
 }
 
 // afterMove follows up a phase change: the standing instructions are re-pinned
