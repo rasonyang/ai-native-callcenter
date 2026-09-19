@@ -343,15 +343,23 @@ func speakRequest(text, language string) map[string]any {
 	}
 }
 
-// sayExactly is how a model is asked for particular words rather than for a
+// SayExactly is how a model is asked for particular words rather than for a
 // subject. In the session's own language, because an instruction in the wrong
 // one is an invitation to answer in it.
-func sayExactly(text, language string) string {
+//
+// It is exported because a phase's announce is words the flow chose and nobody
+// should paraphrase, and a client that can only direct a model has to ask for
+// them the same way: the same demand, in the same language, ahead of the same
+// text. A client whose engine speaks text outright needs none of it.
+func SayExactly(text, language string) string {
 	if strings.HasPrefix(strings.ToLower(language), "zh") {
 		return "请一字不差地说出下面这句话，不要添加任何其它内容：\n" + text
 	}
 	return "Say exactly this, word for word, and add nothing else:\n" + text
 }
+
+// sayExactly is the name this client's call sites know it by.
+var sayExactly = SayExactly
 
 // requestResponse asks the model for a turn and records that one is on its way.
 // Between here and response.created there is nothing to cancel, which is what
