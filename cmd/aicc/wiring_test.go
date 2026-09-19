@@ -16,6 +16,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/gemini"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -112,10 +113,10 @@ func TestDetachingTapsWorksWithNoPredecessor(t *testing.T) {
 // What a deployment demands of a flow follows from what answers its calls.
 //
 // The three engines reached over the Realtime protocol can all be prompted into
-// a turn, so none of them demands anything. Doubao cannot be, so every ending a
-// call can stop at has to carry its own words — and a deployment with the AI
-// leg switched off demands nothing either, whatever provider its configuration
-// names: there is no session to have shortcomings.
+// a turn, and so can gemini, so none of them demands anything. Doubao cannot be,
+// so every ending a call can stop at has to carry its own words — and a
+// deployment with the AI leg switched off demands nothing either, whatever
+// provider its configuration names: there is no session to have shortcomings.
 func TestWhatAPublishMustSatisfyFollowsFromWhatAnswersTheCalls(t *testing.T) {
 	speaksOnDemand := provider.DoubaoProfile()
 
@@ -126,6 +127,8 @@ func TestWhatAPublishMustSatisfyFollowsFromWhatAnswersTheCalls(t *testing.T) {
 		wantRules    int
 	}{
 		{"a provider that can be cued asks for nothing", true, provider.OpenAIProfile(), 0},
+		{"and a third protocol that can be cued asks for nothing either", true,
+			provider.GeminiProfile(), 0},
 		{"a provider that cannot needs every ending written", true, speaksOnDemand, 1},
 		{"with no AI leg there is nothing to satisfy", false, speaksOnDemand, 0},
 	} {
@@ -158,14 +161,15 @@ func TestAnUnknownProviderNameIsAStartupFailure(t *testing.T) {
 
 // A provider name selects a client as well as a profile, and only here.
 //
-// Getting it wrong is silent in every way that matters: both clients satisfy
-// provider.VoiceSession, both are built without touching the network, and the
-// process starts. A doubao deployment handed the Realtime client would dial the
-// right address speaking the wrong protocol, and the first real call would be
-// the first thing to notice.
+// Getting it wrong is silent in every way that matters: every client satisfies
+// provider.VoiceSession, all of them are built without touching the network, and
+// the process starts. A doubao deployment handed the Realtime client would dial
+// the right address speaking the wrong protocol, and the first real call would
+// be the first thing to notice.
 func TestTheProviderNameChoosesTheClient(t *testing.T) {
 	for _, keyEnv := range []string{
 		"OPENAI_API_KEY", "ALIYUN_API_KEY", "REALTIME_API_KEY", "DOUBAO_API_KEY",
+		"GEMINI_API_KEY",
 	} {
 		t.Setenv(keyEnv, "not-a-real-key")
 	}
@@ -175,6 +179,7 @@ func TestTheProviderNameChoosesTheClient(t *testing.T) {
 		want    provider.VoiceSession
 	}{
 		{provider.DoubaoProfile(), (*doubao.Session)(nil)},
+		{provider.GeminiProfile(), (*gemini.Session)(nil)},
 		{provider.OpenAIProfile(), (*provider.Realtime)(nil)},
 		{provider.QwenProfile(), (*provider.Realtime)(nil)},
 		{provider.GatewayProfile(), (*provider.Realtime)(nil)},
@@ -191,26 +196,40 @@ func TestTheProviderNameChoosesTheClient(t *testing.T) {
 	}
 }
 
-// Every session opened is counted, because the vendor's limit is on opening
-// them. Doubao allows sixty a minute per application id, and nothing else this
-// process measures would show that being approached: the live-call gauge counts
-// how many are up, not how fast they were created, and a deployment can sit
-// well inside its concurrency and still be turned away at the door.
+// Every session opened is counted, whichever client opened it, because the
+// vendor's limit is on opening them. Doubao allows sixty a minute per
+// application id, and nothing else this process measures would show that being
+// approached: the live-call gauge counts how many are up, not how fast they
+// were created, and a deployment can sit well inside its concurrency and still
+// be turned away at the door. The counter is taken before the switch for that
+// reason — a branch added later must not be able to leave a provider uncounted.
 func TestEveryProviderSessionOpenedIsCounted(t *testing.T) {
-	t.Setenv("DOUBAO_API_KEY", "not-a-real-key")
+	for _, keyEnv := range []string{
+		"OPENAI_API_KEY", "ALIYUN_API_KEY", "REALTIME_API_KEY", "DOUBAO_API_KEY",
+		"GEMINI_API_KEY",
+	} {
+		t.Setenv(keyEnv, "not-a-real-key")
+	}
 
 	reader := metricsdk.NewManualReader()
 	otel.SetMeterProvider(metricsdk.NewMeterProvider(metricsdk.WithReader(reader)))
 
-	before := sessionsStarted(t, reader, provider.NameDoubao)
-	for range 3 {
-		if _, err := voiceSession(provider.DoubaoProfile(), nil); err != nil {
-			t.Fatalf("voiceSession: %v", err)
-		}
-	}
-	if got := sessionsStarted(t, reader, provider.NameDoubao) - before; got != 3 {
-		t.Errorf("three sessions opened counted %d; a quota nobody can see being "+
-			"spent is a quota that runs out during an incident", got)
+	for _, profile := range []provider.Profile{
+		provider.DoubaoProfile(), provider.GeminiProfile(), provider.OpenAIProfile(),
+		provider.QwenProfile(), provider.GatewayProfile(),
+	} {
+		t.Run(profile.Name, func(t *testing.T) {
+			before := sessionsStarted(t, reader, profile.Name)
+			for range 3 {
+				if _, err := voiceSession(profile, nil); err != nil {
+					t.Fatalf("voiceSession: %v", err)
+				}
+			}
+			if got := sessionsStarted(t, reader, profile.Name) - before; got != 3 {
+				t.Errorf("three sessions opened counted %d; a quota nobody can see "+
+					"being spent is a quota that runs out during an incident", got)
+			}
+		})
 	}
 }
 

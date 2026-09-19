@@ -21,6 +21,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider/doubao"
+	"github.com/rasonyang/ai-native-callcenter/internal/provider/gemini"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
@@ -431,20 +432,24 @@ func botUAS(cfg config.Config) voice.Config {
 // voiceSession opens one conversation with the provider this deployment runs.
 //
 // Which client answers is decided here, in the composition root, because it
-// cannot be decided anywhere lower: the second client lives in a sub-package of
-// internal/provider, and a package cannot import one of its own children. This
-// is the only place where both are already in scope. It is still just a
-// SessionFactory — the orchestrator keeps its own default for the tests that
-// never name a provider, and a test that wants a fake still swaps this one out.
+// cannot be decided anywhere lower: the clients that are not the Realtime one
+// live in sub-packages of internal/provider, and a package cannot import one of
+// its own children. This is the only place where all of them are already in
+// scope. It is still just a SessionFactory — the orchestrator keeps its own
+// default for the tests that never name a provider, and a test that wants a
+// fake still swaps this one out.
 //
-// A name that is not doubao is a dialect of the Realtime protocol and reaches
-// the one client that speaks it, which is the rule this file has always
-// followed; the switch has one case because there is one other protocol.
+// Every other name is a dialect of the Realtime protocol and reaches the one
+// client that speaks it, which is the rule this file has always followed; the
+// switch has a case per protocol, not per vendor, and it has two because two
+// other protocols are spoken here.
 func voiceSession(profile provider.Profile, log *slog.Logger) (provider.VoiceSession, error) {
 	obs.RecordProviderSessionStarted(profile.Name)
 	switch profile.Name {
 	case provider.NameDoubao:
 		return doubao.New(profile, log)
+	case provider.NameGemini:
+		return gemini.New(profile, log)
 	default:
 		return provider.New(profile, log)
 	}

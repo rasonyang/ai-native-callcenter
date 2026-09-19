@@ -163,7 +163,7 @@ func TestAnUnknownProviderNamesTheOnesThereAre(t *testing.T) {
 	if err == nil {
 		t.Fatal("an unknown provider started anyway")
 	}
-	for _, name := range []string{NameOpenAI, NameQwen, NameGateway, NameDoubao} {
+	for _, name := range []string{NameOpenAI, NameQwen, NameGateway, NameDoubao, NameGemini} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("the refusal does not mention %q: %v", name, err)
 		}
@@ -228,5 +228,68 @@ func TestDoubaoMakesAFlowWriteItsOwnClosingLines(t *testing.T) {
 		t.Error("the doubao profile does not require terminal announcements; a flow " +
 			"whose last phase says nothing would publish, and the caller would " +
 			"reach it and hear silence")
+	}
+}
+
+// The gemini profile is chosen by its own name too, and what it names is a
+// third protocol rather than a third vendor of the first one.
+//
+// Its audio is the reason the values matter: 16 kHz up and 24 kHz down, linear
+// both ways, with telephone audio refused outright. A profile that claimed
+// G.711 here would put PCMU on a socket that takes none, and the call would
+// fail on the first frame instead of at startup.
+//
+// The endpoint override is checked here rather than trusted: the version is
+// part of the path on this vendor, so a deployment behind a proxy has to be
+// able to replace the whole of it.
+func TestGeminiIsChosenByNameAndTakesLinearAudioBothWays(t *testing.T) {
+	profile, err := ProfileFor(NameGemini, Override{})
+	if err != nil {
+		t.Fatalf("gemini is not a provider this build can run: %v", err)
+	}
+	if profile.Name != NameGemini {
+		t.Errorf("profile name = %q, want %q", profile.Name, NameGemini)
+	}
+	if profile.APIKeyEnv != "GEMINI_API_KEY" {
+		t.Errorf("credential = %q, want GEMINI_API_KEY", profile.APIKeyEnv)
+	}
+	if profile.Voice == "" {
+		t.Error("the gemini profile names no voice; a flow that leaves global.voice " +
+			"empty would start a session with none")
+	}
+
+	for _, law := range []media.Law{media.LawMu, media.LawAlaw} {
+		input, output := profile.FormatsFor(law)
+		if want := media.PCM16Format(media.RateProviderIn); input != want {
+			t.Errorf("%s input format = %s, want %s", law, input, want)
+		}
+		if want := media.PCM16Format(media.RateProviderOut); output != want {
+			t.Errorf("%s output format = %s, want %s", law, output, want)
+		}
+		if _, err := media.NewConverter(media.G711Format(law), input); err != nil {
+			t.Errorf("caller audio cannot reach gemini on %s: %v", law, err)
+		}
+		if _, err := media.NewConverter(output, media.G711Format(law)); err != nil {
+			t.Errorf("gemini audio cannot reach the caller on %s: %v", law, err)
+		}
+	}
+
+	moved, err := ProfileFor(NameGemini, Override{Endpoint: "wss://proxy.internal/bidi"})
+	if err != nil {
+		t.Fatalf("ProfileFor: %v", err)
+	}
+	if moved.Endpoint != "wss://proxy.internal/bidi" {
+		t.Errorf("endpoint = %q, want the deployment's own", moved.Endpoint)
+	}
+}
+
+// Gemini demands nothing of a flow, and that is the difference from the other
+// non-Realtime client rather than a field nobody set. This engine speaks the
+// words it is given, so a closing line is an instruction like any other and a
+// flow whose terminal phases carry none publishes and runs.
+func TestGeminiLeavesAFlowsClosingLinesToTheFlow(t *testing.T) {
+	if GeminiProfile().RequiresTerminalAnnounce {
+		t.Error("the gemini profile requires terminal announcements; flows that run " +
+			"perfectly well on it would be refused at publish")
 	}
 }
