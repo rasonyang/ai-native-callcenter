@@ -13,24 +13,40 @@ endpoint, a model, a dialect of the session payload, and a handful of
 behavioural traits discovered by calling them. A fourth that speaks the same
 protocol differs in exactly the same way.
 
-Only a different **protocol** earns another client, and one has. `doubao` is
-ByteDance's full-duplex dialogue API, and `internal/provider/doubao` is the
-client that speaks it. That is the same rule applied rather than an exception to
-it — `internal/transcribe` has held two clients under the same sentence since it
-was written, for the same reason. A new *engine* on a protocol already spoken
-here is a profile; a new *grammar* is a client, and the test is lifecycle rather
-than field names: Doubao bootstraps its session and waits to be told it exists,
-has no way to ask for a turn, announces neither the start nor the end of the
-caller speaking, returns tool results as items with a role, and ends with a
-handshake. None of that is expressible as values in a `Profile`.
+Only a different **protocol** earns another client, and two have. `doubao` is
+ByteDance's full-duplex dialogue API and `gemini` is Google's Live bidirectional
+API; `internal/provider/doubao` and `internal/provider/gemini` are the clients
+that speak them. That is the same rule applied rather than an exception to it —
+`internal/transcribe` has held two clients under the same sentence since it was
+written, for the same reason. A new *engine* on a protocol already spoken here
+is a profile; a new *grammar* is a client, and the test is lifecycle rather than
+field names. Doubao bootstraps its session and waits to be told it exists, has
+no way to ask for a turn, announces neither the start nor the end of the caller
+speaking, returns tool results as items with a role, and ends with a handshake.
+Gemini configures its session once and cannot change any of it while the
+connection is open, declares a turn over twice because the model stopping and
+the caller having heard it are different moments, offers no cancel at all, and
+reports errors only by closing the socket with a code. None of that is
+expressible as values in a `Profile`.
 
-A second client changes nothing above it. It lives in its own sub-package, it
+Another client changes nothing above it. It lives in its own sub-package, it
 implements the same provider-neutral `VoiceSession`, and every event it produces
 is one the Realtime client already produces. It shares transport and audio
-plumbing — `wsconn`, `provider.Watchdog`, `provider.MergeHint` — only where
-ownership, lifetime and failure behaviour are identical in both, and it shares
-no protocol event, ever. Decoding is where the two are supposed to differ, and
-factoring that together is the abstraction layer this rule exists to prevent.
+plumbing — `wsconn`, `provider.Watchdog`, `provider.MergeHint`,
+`provider.SayExactly`, `internal/provider/pacer` — only where ownership,
+lifetime and failure behaviour are identical, and it shares no protocol event,
+ever. Decoding is where clients are supposed to differ, and factoring that
+together is the abstraction layer this rule exists to prevent.
+
+Two of those shared pieces are worth their own sentence, because they are the
+shape sharing is allowed to take. `pacer` carries frames and names no protocol:
+a client hands it a function that turns a frame into bytes and a function that
+writes them, and keeps every decision about what the frames *say* — one takes a
+frame per tick because its engine reads the uplink as a clock, the other keeps a
+deep queue and drains it whole because its sockets stall. `SayExactly` is a
+demand about a conversation rather than about a wire: say these words, add
+nothing, in the language this session is being held in. Both are shared because
+the two clients mean the same thing by them, which is the only test.
 
 ## What a profile is
 
@@ -57,21 +73,25 @@ behaved differently from the documentation, and each is a bug somewhere else in
 the call if it is wrong.
 
 A profile answered by a client other than the Realtime one fills in only what
-that client reads. `DoubaoProfile` leaves `Style`, `Headers`, `TranscribeModel`,
-`CancelsResponseItself`, `NeedsCueForFirstTurn` and both semantic-turn fields at
-zero, and says so in its doc comment: a trait nothing reads is worse than an
-absent one, because the next person takes it for a statement about the vendor.
-Its `Model` is informational for the same reason — the protocol version is a
-constant inside the client, and `AICC_PROVIDER_MODEL` cannot move it.
+that client reads. `DoubaoProfile` and `GeminiProfile` both leave `Style`,
+`Headers`, `TranscribeModel`, `CancelsResponseItself`, `NeedsCueForFirstTurn`
+and both semantic-turn fields at zero, and say so in their doc comments: a trait
+nothing reads is worse than an absent one, because the next person takes it for
+a statement about the vendor. `Model` is informational on both for the same
+reason — the version, or the model name, is a constant inside the client, and
+`AICC_PROVIDER_MODEL` cannot move it. Where the two differ is
+`RequiresTerminalAnnounce`: true on doubao, whose engine takes no text cue at
+all, and false on gemini, which speaks a line it is given the way the Realtime
+client's engines do.
 
 ## The steps
 
 1. **Verify against the real endpoint first.** Everything above is
-   unknowable from a specification. `internal/provider/live_test.go` is where
-   that verification lives:
+   unknowable from a specification. Every client keeps that verification beside
+   itself, in a `live_test.go` gated on the same variable:
 
    ```sh
-   AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider/ -run Live -v
+   AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider/... -run Live -v
    ```
 
    It spends real API credit, which is the point: the alternative is finding
@@ -121,18 +141,23 @@ no event, no decoder and no dispatch. That is where they are supposed to differ.
 TODOs. The composition is a real and useful thing to build; it is simply
 another service.
 
-**A third protocol on a whim.** A new client is a wire protocol's worth of
+**Another protocol on a whim.** A new client is a wire protocol's worth of
 lifecycle, failure modes and tests, verified against the live endpoint before a
-line of it is written. An engine that speaks neither protocol here reaches a
-call through the Realtime gateway, which is what the gateway is for; a client of
-its own has to be worth that, and has to be decided rather than drifted into.
+line of it is written. That two have now been admitted is not a precedent for a
+third: each was argued from lifecycle, against the real service, with the
+findings written down first. An engine that speaks none of the protocols here
+reaches a call through the Realtime gateway, which is what the gateway is for; a
+client of its own has to be worth that, and has to be decided rather than
+drifted into.
 
-## Attaching a second protocol
+## Attaching another protocol
 
-`AICC_PROVIDER=doubao` is the one name here that selects a client as well as a
-profile. What that costs, and what was measured to justify it, is written down
-in [doubao-findings](design/doubao-findings.md); what a deployment has to know
-is short:
+`AICC_PROVIDER=doubao` and `AICC_PROVIDER=gemini` are the two names here that
+select a client as well as a profile. What each costs, and what was measured to
+justify it, is written down in
+[doubao-findings](design/doubao-findings.md) and
+[gemini-findings](design/gemini-findings.md); what a deployment has to know is
+short.
 
 ```sh
 AICC_PROVIDER=doubao
@@ -141,13 +166,38 @@ AICC_TRANSCRIBE_PROVIDER=qwen     # the human phase's recogniser is separate
 # AICC_PROVIDER_MODEL is ignored — the protocol version is pinned in the client
 ```
 
-Two of its properties reach the flows rather than the environment. Voice names
-are this vendor's own and go in `global.voice`, as on every provider. And
+Two of doubao's properties reach the flows rather than the environment. Voice
+names are this vendor's own and go in `global.voice`, as on every provider. And
 because nothing this client sends makes that engine take a turn, **every
 terminal phase must carry an `announce`** — `RequiresTerminalAnnounce` turns
 that into a publish rule, so a flow that would have left a caller in silence is
 refused with a reason rather than discovered on a call. An entry phase with no
 `announce` is legal and means the bot answers and waits for the caller to speak.
+
+```sh
+AICC_PROVIDER=gemini
+GEMINI_API_KEY=…                  # the vendor's own name for it
+AICC_TRANSCRIBE_PROVIDER=openai   # the human phase's recogniser is separate
+# AICC_PROVIDER_MODEL is ignored — the model name is pinned in the client
+# outbound access to generativelanguage.googleapis.com is required
+```
+
+Gemini asks nothing of a flow that the Realtime providers do not, and three
+things of a deployment. Voice names are this vendor's own, in `global.voice` as
+always. **The language the bot speaks is steered by the flow's instructions and
+by nothing else** — this session has no language field, and the native-audio
+models refuse to be told one — so a flow that wants Chinese asks for Chinese in
+its own words. And **the provider ends the connection** once its own session
+lifetime runs out, with the caller still on the line: there is no reconnect, the
+call is released with the hangup cause `PROVIDER_SESSION_EXPIRED`, and the
+caller is rescued to the DID's fallback queue. A deployment that puts long
+conversations behind this provider wants that queue to exist.
+
+One consequence of the setup-once session is worth knowing before writing a
+flow for it: a phase change cannot be pushed to the model. It rides the next
+thing the client says — a tool result's hint, or the text cue a keypress or a
+silence produces — which is enough for the flows this repository ships and is
+the reason `gemini-findings.md` §2.6 exists.
 
 ## Attaching something that is not a vendor
 
@@ -204,4 +254,8 @@ It has never selected a provider and reintroducing that mapping is a regression
 (phase1-decisions A1). One provider answers every call in a deployment, chosen
 at startup, because the vendors that ship here are not all reachable with
 acceptable latency from the same network — `qwen` or `doubao` inside mainland
-China, `openai` elsewhere.
+China, `openai` or `gemini` elsewhere.
+
+On `gemini` this is more than a rule about routing: that session has no language
+field at all, so the DID's language reaches the model as words in its
+instructions and in nothing else.
