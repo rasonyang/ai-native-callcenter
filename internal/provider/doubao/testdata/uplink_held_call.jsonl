@@ -1,0 +1,7 @@
+{"type":"session.create","event_id":"evt_1","session":{"model":"1.2.6.1","instructions":"You answer the phone for NovaNet.","audio":{"input":{"format":{"type":"pcm","rate":16000}},"output":{"format":{"type":"pcm_s16le","rate":24000},"voice":"zh_female_vv_jupiter_bigtts"}},"tools":[{"type":"function","name":"lookup_balance","description":"Read the caller's balance.","parameters":{"type":"object","properties":{"accountId":{"type":"string"}}}}]},"extension":{"asr":{},"tts":{},"dialog":{}}}
+{"type":"input_audio_buffer.append","audio":"A3+A/w=="}
+{"type":"input_audio_buffer.append","audio":"BH+A/w=="}
+{"type":"input_audio_buffer.append","audio":"BX+A/w=="}
+{"type":"input_audio_mute.commit","event_id":"evt_2"}
+{"type":"input_audio_unmute.commit","event_id":"evt_3"}
+{"type":"input_audio_buffer.append","audio":"Bn+A/w=="}
