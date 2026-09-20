@@ -14,14 +14,19 @@ import (
 //
 // This provider is the opposite of the one that reads its uplink as a clock. It
 // takes audio as fast as it is given — a burst and a paced stream were measured
-// transcribing identically — and its sockets stall: a single write took between
-// two and 3.6 seconds, repeatedly, from about twenty seconds into a session.
+// transcribing identically — and a write to it has been measured blocking for
+// seconds at a time, part way into a session. Whose end that happens at is NOT
+// established: every session this repository has opened to this endpoint ran
+// from one development machine whose network path to it was not a controlled
+// condition (gemini-findings.md §2.5, W-G10).
 //
-// So the queue here is deep and it is drained whole. Five seconds of it, because
-// that is longer than any stall measured, and every frame of it goes out on the
-// first tick after the socket comes back. Dropping the caller's words to keep
-// the queue shallow would buy nothing: there is no cadence to preserve, and what
-// the model would be left with is a sentence with a hole in it.
+// So the queue here is deep and it is drained whole. Five seconds of it, longer
+// than any block measured, and every frame of it goes out on the first tick
+// after the socket comes back. That policy is right whichever end is at fault,
+// and it is right for this engine in any case: dropping the caller's words to
+// keep the queue shallow would buy nothing, because there is no cadence to
+// preserve and what the model would be left with is a sentence with a hole in
+// it.
 const (
 	// queueDepth is five seconds of caller audio at one frame every 20 ms.
 	queueDepth = 250

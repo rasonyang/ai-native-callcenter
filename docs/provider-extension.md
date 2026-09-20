@@ -43,7 +43,11 @@ shape sharing is allowed to take. `pacer` carries frames and names no protocol:
 a client hands it a function that turns a frame into bytes and a function that
 writes them, and keeps every decision about what the frames *say* — one takes a
 frame per tick because its engine reads the uplink as a clock, the other keeps a
-deep queue and drains it whole because its sockets stall. `SayExactly` is a
+deep queue and drains it whole because writes to it were measured blocking for
+seconds at a time — where that happens is open (`gemini-findings.md` §2.5: the
+network path those measurements ran over was not a controlled condition) and the
+policy is right either way, since that engine accepts a burst and dropping the
+caller's words would buy nothing. `SayExactly` is a
 demand about a conversation rather than about a wire: say these words, add
 nothing, in the language this session is being held in. Both are shared because
 the two clients mean the same thing by them, which is the only test.

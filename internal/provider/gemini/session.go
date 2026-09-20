@@ -76,9 +76,9 @@ const (
 	//
 	// Both are generous by the standards of the other clients here, and
 	// deliberately: the downlink runs about three times faster than real time,
-	// so a gap is a stall rather than a model thinking, but this provider's own
-	// sockets were measured stalling a single write for up to 3.6 seconds part
-	// way into a session.
+	// so a gap is a stall rather than a model thinking, but a write to this
+	// endpoint has been measured blocking for seconds part way into a session —
+	// at whose end is open (gemini-findings.md §2.5, W-G10).
 	firstAudioTimeout = 4 * time.Second
 	deltaStallTimeout = 4 * time.Second
 
@@ -399,8 +399,9 @@ func (s *Session) inputRateHz() int {
 // SendAudio hands one frame of caller audio to the pacer and returns.
 //
 // It never blocks on the socket. What feeds it is the media path, and a stalled
-// write there is audio lost in both directions — and this provider's sockets do
-// stall, for seconds at a time, part way into a session.
+// write there is audio lost in both directions — and a write to this endpoint
+// has been measured blocking for seconds at a time, part way into a session
+// (gemini-findings.md §2.5).
 //
 // The frame is copied because it is not ours: the call's converter writes the
 // next one into the same buffer, and a queued frame would arrive as whatever

@@ -281,8 +281,13 @@ func GeminiProfile() Profile {
 		LinearOutput:             media.PCM16Format(media.RateProviderOut),
 		RequiresTerminalAnnounce: false,
 		// No TranscribeModel, and as on qwen that is the finding rather than an
-		// omission: this engine transcribes both sides unprompted, and asking
-		// for it in the setup changes nothing that arrives.
+		// omission — with one honest limit on it. What was measured is that the
+		// transcript of the BOT's own audio arrives whether or not the setup asks
+		// for it. The caller's transcript has been asked for in every session
+		// this client has opened, so whether it too would arrive unrequested is
+		// not known. Either way there is nothing for a deployment to set: the
+		// client sends both transcription configs itself, and this field is read
+		// by nothing.
 		TranscribeModel: "",
 	}
 }

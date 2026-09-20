@@ -296,6 +296,13 @@ func buildTools(tools []provider.ToolSpec) []toolDeclarations {
 // left in place to be refused at setup with a message that names it, which is a
 // better failure than a field silently dropped.
 //
+// The rewrite is NOT required for the setup to be accepted — measured, and not
+// what was expected: the service takes the flows' own lowercase spelling too
+// (gemini-findings.md, W-G2). It stays because every real call this client has
+// made was made with it, and because acceptance of a setup is not evidence that
+// tool calling behaves the same way with either spelling. Removing it is that
+// second measurement's business, not a tidy-up.
+//
 // Re-encoding sorts the object keys, because a schema is a set of keywords
 // rather than a sequence of them.
 func geminiSchema(parameters json.RawMessage) json.RawMessage {

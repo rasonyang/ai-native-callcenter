@@ -17,8 +17,9 @@ import (
 //
 // The uplink.
 //
-// This provider takes audio as fast as it is given and its sockets stall for
-// seconds at a time, so the queue is deep and it is drained whole. The tests
+// This provider takes audio as fast as it is given, and writes to it have been
+// measured blocking for seconds at a time — at whose end is open
+// (gemini-findings.md §2.5) — so the queue is deep and it is drained whole. The tests
 // drive the cadence a tick at a time — sleeping through fifty real ticks would
 // make every one of these a second slower and none of them more certain.
 //
@@ -119,8 +120,8 @@ func TestAnUplinkFrameIsTheBytesAndTheRateTheyAreIn(t *testing.T) {
 	}
 }
 
-// Audio arrives from the telephone leg in bursts after a jitter gap, and this
-// provider's sockets stall for seconds. The whole backlog goes out on the first
+// Audio arrives from the telephone leg in bursts after a jitter gap, and a write
+// to this endpoint can block for seconds. The whole backlog goes out on the first
 // tick after the socket comes back, in order, with nothing dropped: there is no
 // cadence to preserve here, and what dropping would buy is a sentence with a
 // hole in it.
