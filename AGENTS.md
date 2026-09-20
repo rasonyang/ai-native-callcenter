@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## What this is
 
@@ -123,7 +123,7 @@ Flow DSL v2 (`internal/flow`): the model owns the conversation, the flow owns th
 
 ## Frontend
 
-`web/CLAUDE.md` is a **binding design system** (13px base, single accent #4F46E5, borders not shadows, 6px radius, tabular-nums for all numbers, nav config drives breadcrumbs) — read it before any UI work. i18n via react-i18next, en (default) / zh, no hardcoded user-facing strings. Routes live under `web/src/routes/` (TanStack Router file conventions; a parent route needs `<Outlet/>` or use `_app.section.index.tsx`). Role guards via `requireRole` in `beforeLoad`.
+`web/AGENTS.md` is a **binding design system** (13px base, single accent #4F46E5, borders not shadows, 6px radius, tabular-nums for all numbers, nav config drives breadcrumbs) — read it before any UI work. i18n via react-i18next, en (default) / zh, no hardcoded user-facing strings. Routes live under `web/src/routes/` (TanStack Router file conventions; a parent route needs `<Outlet/>` or use `_app.section.index.tsx`). Role guards via `requireRole` in `beforeLoad`.
 
 ## Packaging (M5)
 
@@ -135,4 +135,4 @@ Capacity metrics live in `internal/obs/callmetrics.go` — one place for every i
 
 ## Reference repos (read for lineage, never import)
 
-`~/workspaces/cc/golang-bot` (SIP/RTP — **first reference for the voice path**), `~/workspaces/cc/java-bot` (realtime s2s providers + **flow DSL reference**), `~/workspaces/cc/cti-server` (domain protocol; its ESL mappings are unverified hypotheses), `~/workspaces/github/web-sip-phone` (integrate as-is; changes go through the Claude session named `web-sip-phone`), `~/workspaces/github/ui-test` (UI reference). All owner-authored; Apache-2.0 clean.
+`~/workspaces/cc/golang-bot` (SIP/RTP — **first reference for the voice path**), `~/workspaces/cc/java-bot` (realtime s2s providers + **flow DSL reference**), `~/workspaces/cc/cti-server` (domain protocol; its ESL mappings are unverified hypotheses), `~/workspaces/github/web-sip-phone` (integrate as-is; changes go through the Codex session named `web-sip-phone`), `~/workspaces/github/ui-test` (UI reference). All owner-authored; Apache-2.0 clean.

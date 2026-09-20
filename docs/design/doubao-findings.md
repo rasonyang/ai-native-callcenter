@@ -191,6 +191,13 @@ timeout is documented. The vendor's own demo sends neither.
 Nothing above this package has a concept of muting, and the RTP path upstream is
 arrival-driven rather than clocked, so the pacer is this client's own:
 
+> **2026-09-19**: the *mechanism* is no longer this client's own — the queue,
+> the ticker, the drop-oldest policy and the idle hook moved to
+> `internal/provider/pacer` when the gemini client needed the same loop with the
+> opposite policy (`gemini-findings.md` §2.5). The numbers below are unchanged
+> and are now this client's parameters; the mute and unmute frames, being the
+> only things in this list that are about what the frames *say*, stayed here.
+
 - `SendAudio` never blocks; it pushes into a queue of **at most three frames**,
   dropping the oldest on overflow and counting the drop.
 - One goroutine on a **20 ms ticker** writes at most one frame per tick, never
@@ -349,6 +356,11 @@ single registry of name → `Profile` + factory, which the composition root read
 it is deferred rather than done because the right shape of it is clearer with a
 third protocol in hand than with a second, and because doing it in the same
 commit as the second client would have mixed a refactor into an addition.
+
+> **2026-09-19 — the condition is met and this item moves.** The third protocol
+> is in hand (`AICC_PROVIDER=gemini`), so the deferral's own reason is
+> discharged. It is now tracked as **W-G1** in `gemini-findings.md`, with the
+> requirements three clients made visible.
 
 **W-D2 — `internal/provider/realtime.go` can lose the final `CLOSED`.** Found
 while building this client, in the existing one: `emit` selects on the events

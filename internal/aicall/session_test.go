@@ -1115,6 +1115,10 @@ func TestAModelThatStopsAcceptingAudioEndsTheCall(t *testing.T) {
 	if event.Err == nil {
 		t.Error("the failure carried no cause")
 	}
+	if event.FailureCause != "" {
+		t.Errorf("the failure was named %q; a socket that stopped taking audio "+
+			"has not said why", event.FailureCause)
+	}
 	awaitBridgeEvent(t, session, EventTypeEnded)
 
 	select {
@@ -1122,6 +1126,34 @@ func TestAModelThatStopsAcceptingAudioEndsTheCall(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Error("the telephone leg was left up after the model failed")
 	}
+}
+
+// A fatal error the provider put a name to carries that name out of the bridge.
+//
+// The bridge decides nothing about it: the caller is rescued the same way
+// whatever the cause was. But a cause dropped here is a cause the CDR cannot
+// have, and the whole reason a client goes to the trouble of naming one is that
+// it is read long after the call.
+func TestAFatalErrorCarriesTheProvidersCauseOutOfTheBridge(t *testing.T) {
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{
+		Type: provider.EventTypeError, IsFatal: true,
+		Text:         "the provider ended the session",
+		Err:          errors.New("session lifetime reached"),
+		FailureCause: provider.FailureCauseSessionExpired,
+	}
+
+	event := awaitBridgeEvent(t, session, EventTypeFailed)
+	if event.FailureCause != provider.FailureCauseSessionExpired {
+		t.Errorf("the failure was named %q, want %q",
+			event.FailureCause, provider.FailureCauseSessionExpired)
+	}
+	if event.Err == nil {
+		t.Error("the failure carried no error")
+	}
+	awaitBridgeEvent(t, session, EventTypeEnded)
 }
 
 // The stream must be safe to range over: several goroutines publish to it, and

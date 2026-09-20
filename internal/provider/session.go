@@ -228,9 +228,37 @@ type Event struct {
 	// Err is set on EventTypeError. IsFatal means the session cannot continue:
 	// provider state is unrecoverable, so the call must be routed elsewhere
 	// rather than retried.
-	Err     error
-	IsFatal bool
+	//
+	// FailureCause says why, for a fatal error a client can put a name to. It
+	// is empty on every failure that has no name of its own, which is most of
+	// them, and the call path treats an empty cause exactly as it always did.
+	Err          error
+	IsFatal      bool
+	FailureCause FailureCause
 }
+
+// FailureCause is why a session ended fatally, in this repository's words.
+//
+// It is here rather than in a client because it leaves the provider layer: the
+// call path releases the call with it as the hangup cause, so it goes into a
+// CDR that a customer reads and an operator reports on. A vendor's own code is
+// the wrong thing to put there — it means nothing outside that vendor's
+// documentation, and a deployment that changes engine would find its history
+// speaking two languages. A client that knows its engine's code translates it
+// into one of these or into nothing at all.
+type FailureCause string
+
+const (
+	// FailureCauseSessionExpired is the provider ending the session because its
+	// own lifetime ran out, with the caller still on the line. Some engines cap
+	// how long one session may last however well it is going.
+	//
+	// It is worth telling apart from every other fatal error because nothing is
+	// broken: not the network, not the credential, not the engine. A deployment
+	// seeing it has conversations that outlive a limit, which is answered by
+	// what the flow is asking of the caller rather than by fixing anything.
+	FailureCauseSessionExpired FailureCause = "PROVIDER_SESSION_EXPIRED"
+)
 
 // Usage is what a turn cost, for budget tracking on providers that cap a
 // session by turns or by audio duration rather than by wall-clock time.

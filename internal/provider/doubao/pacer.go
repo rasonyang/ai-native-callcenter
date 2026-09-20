@@ -4,8 +4,10 @@ package doubao
 
 import (
 	"encoding/base64"
-	"sync"
+	"sync/atomic"
 	"time"
+
+	uplink "github.com/rasonyang/ai-native-callcenter/internal/provider/pacer"
 )
 
 // The uplink cadence.
@@ -16,15 +18,18 @@ import (
 // of the other protocol in this repository, where audio is written straight
 // through from whatever drives the telephone leg.
 //
-// So the cadence is this client's own. Caller audio arrives from the RTP jitter
-// buffer in whatever rhythm the network left it in; the pacer turns that back
-// into one frame every 20 ms, drops what it cannot place rather than catching
-// up in a burst, and declares a hold when the caller's side goes quiet.
+// So the cadence is this client's own, and the shared pacer is the mechanism it
+// is spelled with: one frame every 20 ms, three frames of jitter absorbed, the
+// oldest dropped rather than caught up in a burst. What belongs to this protocol
+// and nothing else is what the frames say — the append, and the two frames that
+// declare a hold and end it.
 const (
 	// queueDepth is how much jitter is absorbed: three frames, 60 ms. Deeper
 	// would be latency the caller hears, and the frames past it are ones the
 	// conversation has already moved beyond.
 	queueDepth = 3
+	// framesPerTick is one, because a burst is a pacing error to this engine.
+	framesPerTick = 1
 	// muteAfterEmptyTicks is the silence that counts as the microphone being
 	// off — half a second of nothing arriving from the leg.
 	muteAfterEmptyTicks = 25
@@ -45,154 +50,81 @@ type Stats struct {
 // SendAudio hands it a frame and returns; nothing on the call path ever blocks
 // on this socket, because the thing feeding it is the media path and a stalled
 // write there is audio lost in both directions.
+//
+// The cadence itself is shared. What is here is this protocol's half of it: the
+// frames, and the count of how often the hold was declared and lifted — which
+// only this package can keep, because only this protocol has such a frame.
 type pacer struct {
 	session *Session
-	ticks   <-chan time.Time
-	stopped chan struct{}
+	uplink  *uplink.Pacer
 
-	mu         sync.Mutex
-	queue      [][]byte
-	isMuted    bool
-	emptyTicks int
-	writeErr   error
-	stats      Stats
+	mutes   atomic.Int64
+	unmutes atomic.Int64
 }
 
 func newPacer(session *Session, ticks <-chan time.Time) *pacer {
-	return &pacer{
-		session: session,
-		ticks:   ticks,
-		stopped: make(chan struct{}),
-		queue:   make([][]byte, 0, queueDepth),
-	}
+	p := &pacer{session: session}
+	p.uplink = uplink.New(uplink.Config{
+		Ticks:      ticks,
+		Stopping:   session.stopping,
+		Write:      session.sendFrame,
+		Encode:     appendFrame,
+		Depth:      queueDepth,
+		MaxPerTick: framesPerTick,
+		IdleTicks:  muteAfterEmptyTicks,
+		OnIdle:     p.onMute,
+		OnResume:   p.onUnmute,
+		StopTicker: session.stopTicker,
+		Ticked:     session.paced,
+	})
+	return p
 }
 
-// push takes one frame of caller audio. A full queue drops its oldest: the
-// caller has already moved past it, and the alternative — blocking — would
-// stall the media path that produced it.
+// push takes one frame of caller audio, and drops the oldest if the queue is
+// already full.
+func (p *pacer) push(frame []byte) { p.uplink.Push(frame) }
+
+// run paces the uplink until the session begins stopping.
 //
-// The queue is shifted in place rather than resliced: this runs fifty times a
-// second for the length of every call, and a slice that walks forward through
-// its own array reallocates for ever.
-func (p *pacer) push(frame []byte) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+// It is this method that Start runs as a goroutine, rather than the shared loop
+// directly: a pacer that outlived its session has to be recognisable as this
+// package's in a stack, which is how the leak check finds one.
+func (p *pacer) run() { p.uplink.Run() }
 
-	if len(p.queue) == queueDepth {
-		copy(p.queue, p.queue[1:])
-		p.queue[queueDepth-1] = frame
-		p.stats.FramesDropped++
-		return
-	}
-	p.queue = append(p.queue, frame)
+// stopped closes when the uplink goroutine has ended.
+func (p *pacer) stopped() <-chan struct{} { return p.uplink.Stopped() }
+
+// muteNow declares the hold without waiting for the silence to prove itself.
+func (p *pacer) muteNow() { p.uplink.Idle() }
+
+// onMute says the microphone is off. Whatever was queued has already been
+// forgotten by the time this runs: it is audio from before the silence, and
+// sending it on resume would play the caller a moment of their own past.
+func (p *pacer) onMute() {
+	p.mutes.Add(1)
+	p.uplink.Write(p.session.simpleFrame("input_audio_mute.commit"))
 }
 
-// run paces the uplink until the session begins stopping. Queued frames are
-// discarded rather than flushed: they are audio from a call that has ended.
-func (p *pacer) run() {
-	defer close(p.stopped)
-	if p.session.stopTicker != nil {
-		defer p.session.stopTicker()
-	}
-
-	for {
-		select {
-		case <-p.session.stopping:
-			p.discard()
-			return
-		case <-p.ticks:
-			p.tick()
-			// The tests drive the clock themselves and need to know when a tick
-			// has been dealt with; there is no such channel on a real call.
-			if p.session.paced != nil {
-				select {
-				case p.session.paced <- struct{}{}:
-				case <-p.session.stopping:
-					return
-				}
-			}
-		}
-	}
+// onUnmute says it is back on. It goes out ahead of the frame that resumed the
+// uplink, on the same tick: this is a frame the provider has to be ready for.
+func (p *pacer) onUnmute() {
+	p.unmutes.Add(1)
+	p.uplink.Write(p.session.simpleFrame("input_audio_unmute.commit"))
 }
 
-// tick writes at most one frame. A tick the pacer was late for is a tick
-// missed, never two frames: this provider reads a burst as a pacing error, and
-// the caller would hear the conversation drift further behind with every one.
-func (p *pacer) tick() {
-	p.mu.Lock()
-	if len(p.queue) == 0 {
-		p.emptyTicks++
-		isMuteDue := !p.isMuted && p.emptyTicks >= muteAfterEmptyTicks
-		p.mu.Unlock()
-		if isMuteDue {
-			p.muteNow()
-		}
-		return
-	}
-
-	frame := p.queue[0]
-	copy(p.queue, p.queue[1:])
-	p.queue = p.queue[:len(p.queue)-1]
-	p.emptyTicks = 0
-	wasMuted := p.isMuted
-	p.isMuted = false
-	if wasMuted {
-		p.stats.Unmutes++
-	}
-	p.stats.FramesSent++
-	p.mu.Unlock()
-
-	if wasMuted {
-		p.write(p.session.simpleFrame("input_audio_unmute.commit"))
-	}
-	p.write(appendFrame(frame))
-}
-
-// muteNow declares the hold and forgets what was queued. Whatever is in the
-// queue at this point is audio from before the silence; sending it on resume
-// would play the caller a moment of their own past.
-func (p *pacer) muteNow() {
-	p.mu.Lock()
-	if p.isMuted {
-		p.mu.Unlock()
-		return
-	}
-	p.isMuted = true
-	p.queue = p.queue[:0]
-	p.stats.Mutes++
-	p.mu.Unlock()
-
-	p.write(p.session.simpleFrame("input_audio_mute.commit"))
-}
-
-// write records a failure rather than reporting it: the next SendAudio returns
-// it, and the read loop reports the connection itself. Reporting from here as
-// well would fail the call twice for one broken socket.
-func (p *pacer) write(data []byte) {
-	if err := p.session.sendFrame(data); err != nil {
-		p.mu.Lock()
-		p.writeErr = err
-		p.mu.Unlock()
-	}
-}
-
-func (p *pacer) discard() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.queue = p.queue[:0]
-}
-
-// err is the last write failure, if there was one.
-func (p *pacer) err() error {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.writeErr
-}
+// err is the last write failure, if there was one. It is recorded rather than
+// reported: the next SendAudio returns it, and the read loop reports the
+// connection itself, so one broken socket does not fail the call twice.
+func (p *pacer) err() error { return p.uplink.WriteError() }
 
 func (p *pacer) statistics() Stats {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.stats
+	paced := p.uplink.Stats()
+	return Stats{
+		FramesSent:    paced.FramesSent,
+		FramesDropped: paced.FramesDropped,
+		Mutes:         p.mutes.Load(),
+		Unmutes:       p.unmutes.Load(),
+	}
 }
 
 // appendFrame is one frame of caller audio.

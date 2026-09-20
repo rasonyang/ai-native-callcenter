@@ -561,7 +561,7 @@ func (s *Session) awaitPacer() {
 		return
 	}
 	select {
-	case <-s.pacer.stopped:
+	case <-s.pacer.stopped():
 	case <-time.After(time.Second):
 		s.log.Warn("the uplink did not stop promptly")
 	}
