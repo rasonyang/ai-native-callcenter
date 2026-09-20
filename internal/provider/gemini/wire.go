@@ -88,16 +88,26 @@ type setupBody struct {
 	SystemInstruction *content            `json:"systemInstruction,omitempty"`
 	Tools             []toolDeclarations  `json:"tools,omitempty"`
 	RealtimeInput     realtimeInputConfig `json:"realtimeInputConfig"`
-	// The two transcription configs are empty objects, which is how this
-	// protocol says "on, with your defaults". Without the output one there is no
-	// record of what the bot said; without the input one, none of what the
-	// caller said.
-	InputTranscription  emptyObject `json:"inputAudioTranscription"`
-	OutputTranscription emptyObject `json:"outputAudioTranscription"`
+	// Both transcription configs are present, because their presence is what
+	// turns transcription on: without the output one there is no record of what
+	// the bot said, and without the input one, none of what the caller said.
+	// The input one also carries the language the call is in — see
+	// transcriptionLanguages; the output one has nothing to say, because the
+	// language of the model's own speech is inferred from what it produced.
+	InputTranscription  audioTranscriptionConfig `json:"inputAudioTranscription"`
+	OutputTranscription emptyObject              `json:"outputAudioTranscription"`
 }
 
 // emptyObject is a field whose presence is the whole message.
 type emptyObject struct{}
+
+// audioTranscriptionConfig is transcription's own settings. An empty object is
+// how this protocol says "on, with your defaults", so every field is omitted
+// when it has nothing to say and the frame degrades to exactly what it used to
+// be.
+type audioTranscriptionConfig struct {
+	LanguageCodes []string `json:"languageCodes,omitempty"`
+}
 
 type generationConfig struct {
 	ResponseModalities []string      `json:"responseModalities"`
@@ -203,6 +213,7 @@ func (s *Session) buildSetup() setupFrame {
 	voice := s.voice
 	tools := s.tools
 	silenceMs := s.silenceMs
+	language := s.cfg.Language
 	s.mu.Unlock()
 
 	body := setupBody{
@@ -215,6 +226,8 @@ func (s *Session) buildSetup() setupFrame {
 			AutomaticActivityDetection: activityDetection{Disabled: false},
 			ActivityHandling:           activityInterrupts,
 		},
+		InputTranscription: audioTranscriptionConfig{
+			LanguageCodes: transcriptionLanguages(language)},
 	}
 	if voice != "" {
 		body.GenerationConfig.SpeechConfig = &speechConfig{
@@ -229,6 +242,30 @@ func (s *Session) buildSetup() setupFrame {
 		body.RealtimeInput.AutomaticActivityDetection.SilenceDurationMs = &hold
 	}
 	return setupFrame{Setup: body}
+}
+
+// transcriptionLanguages is the hint the caller's transcription is given, in
+// the spelling the API's own language table uses.
+//
+// This is NOT speechConfig.languageCode, which the native-audio models refuse:
+// it is a hint to the recognition of what the CALLER said, and without it that
+// recognition guesses. Measured on live calls: Chinese and English callers came
+// back as Spanish, Hindi and Italian — "¿Qué?" for a caller asking a question
+// in Chinese — which reaches the transcript, the CDR and the screen a
+// supervisor reads.
+//
+// The table lists zh-Hans and zh-Hant rather than a bare zh, and the content in
+// this repository is Simplified. A language nothing here speaks is no hint at
+// all: the field goes out empty and the service detects the language itself,
+// which is what it did before any of this.
+func transcriptionLanguages(language string) []string {
+	switch strings.ToLower(language) {
+	case "en":
+		return []string{"en"}
+	case "zh":
+		return []string{"zh-Hans"}
+	}
+	return nil
 }
 
 // buildTools renders the flow's tools as function declarations.

@@ -38,7 +38,8 @@ func TestTheSessionIsConfiguredExactlyAsMeasured(t *testing.T) {
 		`"behavior":"BLOCKING"}]}],` +
 		`"realtimeInputConfig":{"automaticActivityDetection":{"disabled":false,` +
 		`"silenceDurationMs":500},"activityHandling":"START_OF_ACTIVITY_INTERRUPTS"},` +
-		`"inputAudioTranscription":{},"outputAudioTranscription":{}}}`
+		`"inputAudioTranscription":{"languageCodes":["en"]},` +
+		`"outputAudioTranscription":{}}}`
 	if got := string(frames[0]); got != want {
 		t.Errorf("the session was configured as\n got: %s\nwant: %s", got, want)
 	}
@@ -65,7 +66,11 @@ func TestTheSetupCarriesNoneOfTheFieldsThatRefuseIt(t *testing.T) {
 		"enableAffectiveDialog", // removed from the API
 		"sessionResumption",     // this client never resumes a session
 		"contextWindowCompression",
-		"languageCode", // the native-audio models refuse to be told a language
+		// The native-audio models refuse to be told which language to speak.
+		// The key with the "s" is a different field on a different object — a
+		// hint for recognising what the CALLER said — and it is sent; this one
+		// is the key exactly, which is why it carries its colon.
+		`"languageCode":`,
 		"activityStart",
 		"activityEnd",
 		"mediaChunks",
@@ -125,6 +130,48 @@ func TestTheFlowsVoiceOverridesTheProfilesAndNeitherIsSentEmpty(t *testing.T) {
 			t.Errorf("the setup named a voice with nothing to name: %s", setup)
 		}
 	})
+}
+
+// The call's language is a hint for recognising what the CALLER says.
+//
+// Without it the service guesses, and on live calls it guessed wrong: Chinese
+// and English callers came back as Spanish, Hindi and Italian, and that reaches
+// the transcript, the CDR and the screen a supervisor reads. A language nothing
+// here speaks is no hint at all rather than a wrong one.
+func TestTheCallersLanguageIsHintedToTheTranscription(t *testing.T) {
+	cases := []struct {
+		name     string
+		language string
+		want     string
+	}{
+		// The table this API publishes lists zh-Hans and zh-Hant rather than a
+		// bare zh, and this repository's Chinese is Simplified.
+		{"Chinese", "zh", `"inputAudioTranscription":{"languageCodes":["zh-Hans"]}`},
+		{"English", "en", `"inputAudioTranscription":{"languageCodes":["en"]}`},
+		{"a language nothing here speaks", "ja", `"inputAudioTranscription":{}`},
+		{"no language at all", "", `"inputAudioTranscription":{}`},
+	}
+	for _, kase := range cases {
+		t.Run(kase.name, func(t *testing.T) {
+			f := newFakeGemini(t, acceptSetup)
+			session := testSession(t, f)
+
+			cfg := testConfig()
+			cfg.Language = kase.language
+			start(t, session, cfg)
+
+			setup := string(f.settledFrames(2)[0])
+			if !strings.Contains(setup, kase.want) {
+				t.Errorf("the session was configured as\n  got: %s\nwanting: %s",
+					setup, kase.want)
+			}
+			// What the model speaks is still the instructions' business: these
+			// models refuse a language of their own.
+			if !strings.Contains(setup, `"outputAudioTranscription":{}`) {
+				t.Errorf("the output transcription was configured: %s", setup)
+			}
+		})
+	}
 }
 
 // A turn hold the flow did not choose is the server's to pick. Sending zero
