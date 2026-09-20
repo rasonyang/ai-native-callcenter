@@ -34,8 +34,12 @@ func (s *Session) readLoop() {
 	for {
 		frame, _, err := s.receive()
 		if err != nil {
-			s.finishStart(err)
+			// The outcome is recorded before Start is released, because
+			// finishStart hands control back to the caller: one that gets it
+			// first can Close the session and stamp a clean outcome over the
+			// refusal the provider actually gave, and the first outcome wins.
 			s.reportLostConnection(err)
+			s.finishStart(err)
 			return
 		}
 		if frame == nil {

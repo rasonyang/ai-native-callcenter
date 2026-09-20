@@ -26,8 +26,12 @@ func (s *Session) readLoop() {
 	for {
 		event, raw, err := s.receive()
 		if err != nil {
-			s.finishStart(err)
+			// The outcome is recorded before Start is released, because
+			// finishStart hands control back to the caller: one that gets it
+			// first can Close the session and stamp a clean outcome over the
+			// failure that ended the socket, and the first outcome wins.
 			s.reportLostConnection(err)
+			s.finishStart(err)
 			s.emit(provider.Event{Type: provider.EventTypeClosed})
 			return
 		}
