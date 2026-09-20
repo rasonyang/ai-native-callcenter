@@ -5,9 +5,9 @@ An open-source call center where the AI is the default answer, not an add-on.
 Calls arrive at FreeSWITCH and are answered by a voice model over a
 speech-to-speech connection the application terminates itself. The model talks;
 a flow steers the conversation and decides when a person is needed. When one
-is, the caller is transferred into a real queue where real agents are waiting
-with a browser softphone. Everything the two halves do lands in one call
-record.
+is, the caller is transferred into a real queue where real agents are waiting,
+their SIP leg held by a companion Chrome extension. Everything the two halves
+do lands in one call record.
 
 It is **one Go binary** — REST API, event stream and the whole web interface
 inside it — plus PostgreSQL and FreeSWITCH.
@@ -48,15 +48,25 @@ nothing decodes or resamples on the way.
 **Steers without scripting the conversation.** The model owns the dialogue; the
 flow owns the phase. A phase carries instructions and a list of tools the model
 may use; transitions fire on tool results. A phase may also carry a line of its
-own — a greeting, a hand-over script, a goodbye — which the bot says as written
-rather than paraphrases. The built-in tools may *refuse* —
+own — a greeting, a hand-over script, a goodbye — which the bot is meant to say
+as written rather than paraphrase: `doubao` is handed the words to speak, the
+other four providers are instructed to repeat them word for word. The built-in
+tools may *refuse* —
 "the queue is closed" is something to talk about, not an error — and the
 persona, the rules and the bot's voice are published and versioned together.
 
-**Hands over to people properly.** Transfers go into `mod_callcenter` queues
-with the caller's context attached, so the agent's screen has already popped
-when the phone rings. Agents work in the browser: presence, softphone bar,
-callbacks. Supervisors get a live wallboard, the queue view and the roster.
+**Hands over to people properly.** Transfers go into `mod_callcenter` queues,
+and the agent's screen has popped by the time the phone rings: a
+`PARTY_RINGING` event over SSE says who is calling and carries the call's
+`userData`, and the bot-phase transcript is already there to read, because the
+call id is minted before any leg exists and survives the transfer. Agents work
+in the browser: presence, call control, callbacks — but not the audio, which
+belongs to the [web-sip-phone](https://github.com/rasonyang/web-sip-phone)
+Chrome extension, a separate repository. It holds the agent's SIP registration
+with credentials this application issues at sign-in, and it has no dialpad of
+its own: answering, holding and hanging up are REST calls here, carried to the
+phone over ESL `uuid_phone_event`. Supervisors get a live wallboard, the queue
+view and the roster.
 
 **Keeps one record per conversation.** A call that a bot answered, handed to a
 queue and an agent finished is one CDR with one transcript and one recording —
@@ -79,24 +89,27 @@ their own ([how a provider is added](docs/provider-extension.md)).
                  │            │
                  │            └─ flow engine: phases, tools, transfers
                  │
-                 ├─ mod_callcenter queues ──▶ agents (browser softphone)
+                 ├─ mod_callcenter queues ──▶ agents (browser + web-sip-phone)
                  │
                  └─ ESL ──▶ call registry ──▶ REST + SSE ──▶ web interface
                                                     │
                                               PostgreSQL
 ```
 
-FreeSWITCH reads its directory, its dialplan and its queues *from the
-database*, through Lua. Adding an extension, a queue or a number is a database
-change; the switch is configured once and never edited again.
+FreeSWITCH reads its directory and its `mod_callcenter` queues *from the
+database*, through Lua. The dialplan is static XML, but its rules decide
+nothing by themselves: each one hands the call to a Lua script that looks the
+answer up. Adding an extension, a queue or a number is a database change; the
+switch's own files change only when the routing itself does.
 
 Two design notes worth knowing before reading the code:
 
 * The domain model is Genesys-lineage. A **call** aggregates **parties**; leg
   events are `PARTY_*`, call-scoped ones are `CALL_*`.
 * Every live call is an actor — one goroutine as its sole mutator, snapshots by
-  mailbox. There are no locks around call state because there is no shared call
-  state.
+  mailbox. Nothing in `internal/telephony` locks call state, because there is
+  no shared call state; the AI leg is the exception, holding mutexes over the
+  playback and recording state its own goroutines share.
 
 The full design is in [`docs/design/`](docs/design/), starting with
 [the overview](docs/design/00-overview.md).
