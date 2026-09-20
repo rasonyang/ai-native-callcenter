@@ -3,8 +3,11 @@
 package gemini
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
+	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,11 +30,20 @@ func pacedSession(t *testing.T, f *fakeGemini) (*Session, func()) {
 	t.Helper()
 
 	session := testSession(t, f)
+	tick := pacedByHand(t, session)
+	start(t, session, testConfig())
+	return session, tick
+}
+
+// pacedByHand takes the cadence off the clock and gives it to the test. It runs
+// before the session is started, because that is when the pacer is built.
+func pacedByHand(t *testing.T, session *Session) func() {
+	t.Helper()
+
 	ticks := make(chan time.Time)
 	paced := make(chan struct{})
 	session.ticks = ticks
 	session.paced = paced
-	start(t, session, testConfig())
 
 	tick := func() {
 		t.Helper()
@@ -46,7 +58,7 @@ func pacedSession(t *testing.T, f *fakeGemini) (*Session, func()) {
 			t.Fatal("the pacer never finished the tick")
 		}
 	}
-	return session, tick
+	return tick
 }
 
 // frameOf is one 20 ms frame of caller audio at 16 kHz, marked so a test can
@@ -240,6 +252,305 @@ func TestAFailedWriteSurfacesOnTheNextSendAudio(t *testing.T) {
 		t.Errorf("the next send returned %v, want what the write failed with", err)
 	}
 	drainEvents(t, session)
+}
+
+//
+// Uplink trouble, while it is happening.
+//
+// Eleven live calls ended with a thousand dropped frames and an i/o timeout in
+// the record and not one line about either while the caller was on the phone.
+// These are about the log a person reads during a call: a write that blocks is
+// the caller being heard late, and a drop is words that are gone.
+//
+
+// A socket whose writes take exactly as long as the test says, on a clock the
+// test moves. A real stall is seconds long, and waiting one out would make this
+// suite slower without making a single assertion more certain.
+type timedSocket struct {
+	mu   sync.Mutex
+	now  time.Time
+	cost time.Duration
+	send func([]byte) error
+}
+
+func newTimedSocket() *timedSocket {
+	return &timedSocket{now: time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)}
+}
+
+// clock is what the pacer reads instead of the wall clock.
+func (s *timedSocket) clock() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.now
+}
+
+// costs is how long every write from here on takes.
+func (s *timedSocket) costs(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cost = d
+}
+
+// write spends the write's time on the clock and then writes for real, so the
+// session behaves in every other way as it always does.
+func (s *timedSocket) write(data []byte) error {
+	s.mu.Lock()
+	s.now = s.now.Add(s.cost)
+	send := s.send
+	s.mu.Unlock()
+	return send(data)
+}
+
+// loggedLine is one line a session wrote, flattened to what an assertion needs.
+type loggedLine struct {
+	level   slog.Level
+	message string
+	attrs   map[string]any
+}
+
+// logRecorder keeps every line the session logged.
+//
+// It is a handler rather than a buffer that is parsed afterwards, because these
+// assertions are about which line was written and what number it carried, and
+// reading that back out of formatted text is string matching dressed up.
+type logRecorder struct {
+	mu    sync.Mutex
+	lines []loggedLine
+}
+
+func (r *logRecorder) Enabled(context.Context, slog.Level) bool { return true }
+func (r *logRecorder) WithAttrs([]slog.Attr) slog.Handler       { return r }
+func (r *logRecorder) WithGroup(string) slog.Handler            { return r }
+
+func (r *logRecorder) Handle(_ context.Context, record slog.Record) error {
+	line := loggedLine{
+		level: record.Level, message: record.Message, attrs: map[string]any{}}
+	record.Attrs(func(attr slog.Attr) bool {
+		line.attrs[attr.Key] = attr.Value.Any()
+		return true
+	})
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, line)
+	return nil
+}
+
+// saying is every line with this message, in the order they were written.
+func (r *logRecorder) saying(message string) []loggedLine {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	out := make([]loggedLine, 0)
+	for _, line := range r.lines {
+		if line.message == message {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// The lines this uplink says about itself, by name rather than by copy.
+const (
+	lineSlowWrite   = "a write to the provider is slow"
+	lineDropping    = "the uplink is dropping the caller's audio"
+	lineRecovered   = "the uplink recovered after dropping the caller's audio"
+	lineSessionOver = "provider session finished"
+)
+
+// stalledSession is a paced session whose writes cost whatever the test says,
+// whose clock the test moves, and whose every log line is kept.
+func stalledSession(t *testing.T, f *fakeGemini) (
+	*Session, func(), *timedSocket, *logRecorder) {
+	t.Helper()
+
+	t.Setenv("GEMINI_API_KEY", "test-key")
+	logs := &logRecorder{}
+	session, err := newSession(testProfile(f.endpoint()), slog.New(logs))
+	if err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close(context.Background()) })
+
+	socket := newTimedSocket()
+	socket.send = session.sendFrame
+	session.uplinkWrite = socket.write
+	session.clock = socket.clock
+
+	tick := pacedByHand(t, session)
+	start(t, session, testConfig())
+	return session, tick, socket, logs
+}
+
+// sendFrames hands the uplink n frames of caller audio.
+func sendFrames(t *testing.T, session *Session, n int) {
+	t.Helper()
+	for range n {
+		if err := session.SendAudio(frameOf(0x77)); err != nil {
+			t.Fatalf("send audio: %v", err)
+		}
+	}
+}
+
+func attrOf(t *testing.T, line loggedLine, key string) int64 {
+	t.Helper()
+	value, ok := line.attrs[key].(int64)
+	if !ok {
+		t.Fatalf("the line carried %q as %T, want a number: %v",
+			key, line.attrs[key], line.attrs)
+	}
+	return value
+}
+
+// A write that blocked is said out loud, with how long it took, while the call
+// it is delaying is still going on.
+func TestASlowWriteIsReportedWhileTheCallIsStillGoing(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	socket.costs(800 * time.Millisecond)
+	sendFrames(t, session, 1)
+	tick()
+
+	said := logs.saying(lineSlowWrite)
+	if len(said) != 1 {
+		t.Fatalf("a slow write was reported %d times, want once", len(said))
+	}
+	if said[0].level != slog.LevelWarn {
+		t.Errorf("the slow write was logged at %v, want a warning", said[0].level)
+	}
+	if got := attrOf(t, said[0], "writeMs"); got != 800 {
+		t.Errorf("the line says the write took %d ms, want 800", got)
+	}
+
+	stats := session.Stats()
+	if stats.SlowWrites != 1 || stats.MaxWriteMs != 800 {
+		t.Errorf("the client counted %+v, want one slow write of 800 ms", stats)
+	}
+}
+
+// A stall is dozens of slow writes in a row, and each of them says the same
+// thing. One line a second is what makes the log readable while it lasts.
+func TestSlowWritesAreReportedAtMostOnceASecond(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	// Six writes of 600 ms, drained on one tick: the clock passes 600, 1200,
+	// 1800, … so the line is due at 600, again at 1800 and again at 3000, and
+	// the three writes in between are suppressed.
+	socket.costs(600 * time.Millisecond)
+	sendFrames(t, session, 6)
+	tick()
+
+	said := logs.saying(lineSlowWrite)
+	if len(said) != 3 {
+		t.Fatalf("six slow writes over 3.6 s were reported %d times, want 3", len(said))
+	}
+	// The backlog is what the caller is waiting behind: five frames are still
+	// unwritten while the first one is on the socket.
+	if got := attrOf(t, said[0], "backlogFrames"); got != 5 {
+		t.Errorf("the first line says %d frames are waiting, want 5", got)
+	}
+
+	stats := session.Stats()
+	if stats.SlowWrites != 6 {
+		t.Errorf("the client counted %d slow writes, want 6", stats.SlowWrites)
+	}
+	if stats.MaxBacklogFrames != 5 {
+		t.Errorf("the client counted a deepest backlog of %d frames, want 5",
+			stats.MaxBacklogFrames)
+	}
+}
+
+// Dropped frames are the caller's words and they are not coming back. They are
+// named the first time it happens in a stall, and added up when it is over.
+func TestDroppedAudioIsNamedOnceAndAddedUpWhenTheSocketComesBack(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	// The socket is blocked, so the queue fills and the oldest frames go. This
+	// is the shape of the live call that lost 1877 of 8409 frames.
+	const lost = 3
+	sendFrames(t, session, queueDepth+lost)
+	socket.costs(700 * time.Millisecond)
+	tick()
+
+	dropping := logs.saying(lineDropping)
+	if len(dropping) != 1 {
+		t.Fatalf("the drops were reported %d times in one stall, want once", len(dropping))
+	}
+	if got := attrOf(t, dropping[0], "framesDropped"); got != lost {
+		t.Errorf("the line says %d frames were dropped, want %d", got, lost)
+	}
+	if got := logs.saying(lineRecovered); len(got) != 0 {
+		t.Fatalf("the stall was summed up %d times while it was still going", len(got))
+	}
+
+	// The socket comes back: the first write that is not slow ends the episode.
+	socket.costs(0)
+	sendFrames(t, session, 1)
+	tick()
+
+	recovered := logs.saying(lineRecovered)
+	if len(recovered) != 1 {
+		t.Fatalf("the stall was summed up %d times, want once", len(recovered))
+	}
+	if got := attrOf(t, recovered[0], "framesDropped"); got != lost {
+		t.Errorf("the summary says %d frames were dropped, want %d", got, lost)
+	}
+}
+
+// The closing line is what an operator reads about a call that is already over,
+// and a call whose caller was heard seconds late has these three numbers in it.
+func TestTheClosingLineSaysWhatTheUplinkCost(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	socket.costs(900 * time.Millisecond)
+	sendFrames(t, session, 2)
+	tick()
+
+	if err := session.Close(t.Context()); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	drainEvents(t, session)
+
+	finished := logs.saying(lineSessionOver)
+	if len(finished) != 1 {
+		t.Fatalf("the session finished %d times, want once", len(finished))
+	}
+	if got := attrOf(t, finished[0], "slowWrites"); got != 2 {
+		t.Errorf("the closing line counts %d slow writes, want 2", got)
+	}
+	if got := attrOf(t, finished[0], "maxWriteMs"); got != 900 {
+		t.Errorf("the closing line counts %d ms as the worst write, want 900", got)
+	}
+	if got := attrOf(t, finished[0], "maxBacklogFrames"); got != 1 {
+		t.Errorf("the closing line counts a deepest backlog of %d frames, want 1", got)
+	}
+}
+
+// The normal case says nothing at all: a healthy uplink is not news, and a log
+// that reports every write is one nobody reads.
+func TestASocketThatKeepsUpSaysNothing(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	socket.costs(20 * time.Millisecond)
+	for range 5 {
+		sendFrames(t, session, 3)
+		tick()
+	}
+
+	for _, message := range []string{lineSlowWrite, lineDropping, lineRecovered} {
+		if got := logs.saying(message); len(got) != 0 {
+			t.Errorf("a healthy uplink logged %q %d times", message, len(got))
+		}
+	}
+	stats := session.Stats()
+	if stats.SlowWrites != 0 || stats.MaxWriteMs != 0 || stats.MaxBacklogFrames != 0 {
+		t.Errorf("a healthy uplink counted %+v, want nothing", stats)
+	}
 }
 
 // Whatever is queued when a call ends is audio from a call that has ended.

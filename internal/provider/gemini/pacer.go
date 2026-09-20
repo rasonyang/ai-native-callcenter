@@ -29,15 +29,36 @@ const (
 	// side having stopped, which the server is told about so it stops holding
 	// audio it will never be given the end of.
 	idleAfterEmptyTicks = 50
+
+	// slowWriteThreshold is the write that is worth a line while the call is
+	// still happening. One frame is 20 ms of audio, so half a second on the
+	// socket is twenty-five frames arriving behind it: past this the caller is
+	// being heard late, and a stall that is only counted at the end of the call
+	// is a stall nobody could act on.
+	slowWriteThreshold = 500 * time.Millisecond
+	// slowWriteWarnEvery is how often the slow-write line may be said. A stall
+	// is dozens of slow writes in a row and each of them says the same thing;
+	// what matters is that the log shows it while it lasts, not that it shows it
+	// fifty times.
+	slowWriteWarnEvery = time.Second
 )
 
 // Stats is what the uplink did, for the line logged when a session ends. A call
 // with drops in it had five seconds of the caller's words go missing, which is
 // the socket having stalled for longer than anything measured.
+//
+// The three write figures are the same trouble seen from the other end: how
+// often a write was slow, the worst single one, and the deepest the queue got
+// behind it. A call whose transcripts read as if the model heard the caller
+// seconds late has them; a healthy call has zeroes.
 type Stats struct {
 	FramesSent    int64
 	FramesDropped int64
 	StreamEnds    int64
+
+	SlowWrites       int64
+	MaxWriteMs       int64
+	MaxBacklogFrames int64
 }
 
 // pacer is the one goroutine that writes caller audio.
@@ -56,18 +77,56 @@ type pacer struct {
 	// because the rate in it is the session's and does not change.
 	prefix []byte
 
+	// send is the socket write this cadence times, and now is the clock it
+	// times it with. They are fields so that a test can make a write take four
+	// seconds without waiting four seconds; a call leaves both at their real
+	// values.
+	send func([]byte) error
+	now  func() time.Time
+
 	streamEnds atomic.Int64
+
+	// pushed and encoded are the two ends of the queue, each written by one
+	// goroutine and only ever growing. What is waiting is the difference,
+	// less what the queue dropped — see backlog, which is the one place that
+	// arithmetic is done.
+	pushed  atomic.Int64
+	encoded atomic.Int64
+
+	slowWrites atomic.Int64
+	maxWriteMs atomic.Int64
+	maxBacklog atomic.Int64
+
+	// The stall being lived through, touched only on the pacer's own goroutine:
+	// a stall starts at a slow write and ends at the next write that is not one.
+	//
+	// droppedAccounted is the drop total the log has already reported. Frames go
+	// missing while a write is blocked — before anything here can know that the
+	// write is slow — so what a stall cost is everything dropped since the last
+	// one was summed up, not everything dropped since it was noticed.
+	isStalling       bool
+	isDropReported   bool
+	droppedAccounted int64
+	lastSlowWarnAt   time.Time
 }
 
 func newPacer(session *Session, ticks <-chan time.Time, mimeType string) *pacer {
 	p := &pacer{
 		session: session,
 		prefix:  []byte(`{"realtimeInput":{"audio":{"mimeType":"` + mimeType + `","data":"`),
+		send:    session.sendFrame,
+		now:     time.Now,
+	}
+	if session.uplinkWrite != nil {
+		p.send = session.uplinkWrite
+	}
+	if session.clock != nil {
+		p.now = session.clock
 	}
 	p.uplink = uplink.New(uplink.Config{
 		Ticks:      ticks,
 		Stopping:   session.stopping,
-		Write:      session.sendFrame,
+		Write:      p.write,
 		Encode:     p.appendFrame,
 		Depth:      queueDepth,
 		MaxPerTick: uplink.DrainEverything,
@@ -81,7 +140,98 @@ func newPacer(session *Session, ticks <-chan time.Time, mimeType string) *pacer 
 
 // push takes one frame of caller audio, and drops the oldest if the queue is
 // already full.
-func (p *pacer) push(frame []byte) { p.uplink.Push(frame) }
+func (p *pacer) push(frame []byte) {
+	p.pushed.Add(1)
+	p.uplink.Push(frame)
+}
+
+// write puts one frame on the socket and times it.
+//
+// This is the whole fast path: two readings of the clock and a comparison. A
+// write that took no time at all is the normal case and costs nothing more
+// than that — everything that reports a stall is behind the branch, where a
+// mutex and a log line are affordable because the call is already in trouble.
+func (p *pacer) write(data []byte) error {
+	started := p.now()
+	err := p.send(data)
+	elapsed := p.now().Sub(started)
+
+	if elapsed >= slowWriteThreshold {
+		p.onSlowWrite(elapsed)
+	} else if p.isStalling {
+		p.onStallEnded()
+	}
+	return err
+}
+
+// onSlowWrite is a write that blocked long enough for the caller to be heard
+// late, said while it is still happening.
+//
+// Two lines can come out of here and they say different things. That writes are
+// slow is worth knowing once a second for as long as it lasts; that frames were
+// DROPPED is worth knowing the first time it happens in a stall, because those
+// are the caller's words and they are not coming back.
+func (p *pacer) onSlowWrite(elapsed time.Duration) {
+	writeMs := elapsed.Milliseconds()
+	p.slowWrites.Add(1)
+	if writeMs > p.maxWriteMs.Load() {
+		p.maxWriteMs.Store(writeMs)
+	}
+
+	dropped := p.uplink.Stats().FramesDropped
+	backlog := p.backlog(dropped)
+	if backlog > p.maxBacklog.Load() {
+		p.maxBacklog.Store(backlog)
+	}
+
+	if !p.isStalling {
+		p.isStalling = true
+		p.isDropReported = false
+	}
+
+	now := p.now()
+	if lost := dropped - p.droppedAccounted; lost > 0 && !p.isDropReported {
+		p.isDropReported = true
+		p.lastSlowWarnAt = now
+		p.session.log.Warn("the uplink is dropping the caller's audio",
+			"writeMs", writeMs, "backlogFrames", backlog, "framesDropped", lost)
+		return
+	}
+	if now.Sub(p.lastSlowWarnAt) < slowWriteWarnEvery {
+		return
+	}
+	p.lastSlowWarnAt = now
+	p.session.log.Warn("a write to the provider is slow",
+		"writeMs", writeMs, "backlogFrames", backlog)
+}
+
+// onStallEnded is the socket coming back. What the episode cost is said here
+// and nowhere else: the frames that went missing are known only as a total, so
+// the difference across the stall is the only figure that names this one.
+func (p *pacer) onStallEnded() {
+	p.isStalling = false
+	dropped := p.uplink.Stats().FramesDropped
+	lost := dropped - p.droppedAccounted
+	p.droppedAccounted = dropped
+	if lost <= 0 {
+		p.session.log.Debug("the uplink recovered with nothing lost")
+		return
+	}
+	p.session.log.Warn("the uplink recovered after dropping the caller's audio",
+		"framesDropped", lost)
+}
+
+// backlog is how many frames are waiting to go out: everything handed over that
+// has not been encoded onto the wire, less what the queue threw away. Each term
+// is owned by one goroutine and only grows, so the difference is a number that
+// cannot drift even though nothing here holds a lock.
+func (p *pacer) backlog(dropped int64) int64 {
+	waiting := p.pushed.Load() - p.encoded.Load() - dropped
+	if waiting < 0 {
+		return 0
+	}
+	return waiting
+}
 
 // run paces the uplink until the session begins stopping.
 //
@@ -113,6 +263,10 @@ func (p *pacer) statistics() Stats {
 		FramesSent:    paced.FramesSent,
 		FramesDropped: paced.FramesDropped,
 		StreamEnds:    p.streamEnds.Load(),
+
+		SlowWrites:       p.slowWrites.Load(),
+		MaxWriteMs:       p.maxWriteMs.Load(),
+		MaxBacklogFrames: p.maxBacklog.Load(),
 	}
 }
 
@@ -125,6 +279,7 @@ func (p *pacer) statistics() Stats {
 func (p *pacer) appendFrame(audio []byte) []byte {
 	const suffix = `"}}}`
 
+	p.encoded.Add(1)
 	message := make([]byte, 0,
 		len(p.prefix)+base64.StdEncoding.EncodedLen(len(audio))+len(suffix))
 	message = append(message, p.prefix...)

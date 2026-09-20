@@ -210,6 +210,11 @@ type Session struct {
 	ticks      <-chan time.Time
 	paced      chan struct{}
 	stopTicker func()
+	// uplinkWrite and clock are the same idea as ticks, for the other half of
+	// what this uplink measures: a socket write a test can make take four
+	// seconds, and a clock it can move without waiting. Both are nil on a call.
+	uplinkWrite func([]byte) error
+	clock       func() time.Time
 }
 
 // New builds a session for a profile. The credential is read from the
@@ -647,7 +652,9 @@ func (s *Session) Close(ctx context.Context) error {
 		stats := s.Stats()
 		s.log.Info("provider session finished", "outcome", s.outcome(),
 			"framesSent", stats.FramesSent, "framesDropped", stats.FramesDropped,
-			"streamEnds", stats.StreamEnds)
+			"streamEnds", stats.StreamEnds, "slowWrites", stats.SlowWrites,
+			"maxWriteMs", stats.MaxWriteMs,
+			"maxBacklogFrames", stats.MaxBacklogFrames)
 	})
 	return nil
 }
