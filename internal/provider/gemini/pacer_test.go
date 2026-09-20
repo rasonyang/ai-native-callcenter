@@ -353,8 +353,7 @@ func (r *logRecorder) saying(message string) []loggedLine {
 // The lines this uplink says about itself, by name rather than by copy.
 const (
 	lineSlowWrite   = "a write to the provider is slow"
-	lineDropping    = "the uplink is dropping the caller's audio"
-	lineRecovered   = "the uplink recovered after dropping the caller's audio"
+	lineDropping    = "the uplink dropped the caller's audio while a write was blocked"
 	lineSessionOver = "provider session finished"
 )
 
@@ -462,9 +461,15 @@ func TestSlowWritesAreReportedAtMostOnceASecond(t *testing.T) {
 	}
 }
 
-// Dropped frames are the caller's words and they are not coming back. They are
-// named the first time it happens in a stall, and added up when it is over.
-func TestDroppedAudioIsNamedOnceAndAddedUpWhenTheSocketComesBack(t *testing.T) {
+// Dropped frames are the caller's words and they are not coming back. The loss
+// happens while a write is blocked and is knowable only when that write returns,
+// so that is where it is said — once, in one line, with the block that cost it.
+//
+// Live calls are what settled the shape: over 31 episodes the old pair of lines
+// landed in the same millisecond carrying the same count, because the stall a
+// "recovered" line announced the end of was already over when the drop was
+// discovered.
+func TestDroppedAudioIsReportedWhenTheBlockedWriteReturns(t *testing.T) {
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -477,26 +482,62 @@ func TestDroppedAudioIsNamedOnceAndAddedUpWhenTheSocketComesBack(t *testing.T) {
 
 	dropping := logs.saying(lineDropping)
 	if len(dropping) != 1 {
-		t.Fatalf("the drops were reported %d times in one stall, want once", len(dropping))
+		t.Fatalf("the drops were reported %d times, want once", len(dropping))
+	}
+	if dropping[0].level != slog.LevelWarn {
+		t.Errorf("the drops were logged at %v, want a warning", dropping[0].level)
+	}
+	if got := attrOf(t, dropping[0], "blockedMs"); got != 700 {
+		t.Errorf("the line says the socket was blocked %d ms, want 700", got)
 	}
 	if got := attrOf(t, dropping[0], "framesDropped"); got != lost {
 		t.Errorf("the line says %d frames were dropped, want %d", got, lost)
 	}
-	if got := logs.saying(lineRecovered); len(got) != 0 {
-		t.Fatalf("the stall was summed up %d times while it was still going", len(got))
+	// The backlog at that moment: everything handed over but this one frame,
+	// less what the queue threw away.
+	if got := attrOf(t, dropping[0], "backlogFrames"); got != queueDepth-1 {
+		t.Errorf("the line says %d frames are waiting, want %d", got, queueDepth-1)
 	}
 
-	// The socket comes back: the first write that is not slow ends the episode.
+	// The socket comes back. There is nothing left to say: the episode was
+	// reported in full by the write that lived through it.
 	socket.costs(0)
 	sendFrames(t, session, 1)
 	tick()
 
-	recovered := logs.saying(lineRecovered)
-	if len(recovered) != 1 {
-		t.Fatalf("the stall was summed up %d times, want once", len(recovered))
+	if got := logs.saying(lineDropping); len(got) != 1 {
+		t.Errorf("the drops were reported %d times once the socket came back, want once",
+			len(got))
 	}
-	if got := attrOf(t, recovered[0], "framesDropped"); got != lost {
-		t.Errorf("the summary says %d frames were dropped, want %d", got, lost)
+}
+
+// Each blocked write names the frames it lost and nobody else's. A stall is one
+// write after another, and a line that repeated the running total would make one
+// caller's lost sentence look like several.
+func TestEachBlockedWriteNamesOnlyTheFramesItLost(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session, tick, socket, logs := stalledSession(t, f)
+
+	socket.costs(700 * time.Millisecond)
+	for range 2 {
+		// The queue is drained whole on each tick, so it is filled again — and
+		// overflowed again — before the next one.
+		sendFrames(t, session, queueDepth+1)
+		tick()
+	}
+
+	dropping := logs.saying(lineDropping)
+	if len(dropping) != 2 {
+		t.Fatalf("two episodes were reported in %d lines, want 2", len(dropping))
+	}
+	for i, line := range dropping {
+		if got := attrOf(t, line, "framesDropped"); got != 1 {
+			t.Errorf("episode %d says %d frames were dropped, want the 1 it lost",
+				i, got)
+		}
+	}
+	if got := session.Stats().FramesDropped; got != 2 {
+		t.Errorf("the client counted %d frames dropped over both episodes, want 2", got)
 	}
 }
 
@@ -542,7 +583,7 @@ func TestASocketThatKeepsUpSaysNothing(t *testing.T) {
 		tick()
 	}
 
-	for _, message := range []string{lineSlowWrite, lineDropping, lineRecovered} {
+	for _, message := range []string{lineSlowWrite, lineDropping} {
 		if got := logs.saying(message); len(got) != 0 {
 			t.Errorf("a healthy uplink logged %q %d times", message, len(got))
 		}

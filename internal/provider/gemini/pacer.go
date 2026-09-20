@@ -97,15 +97,11 @@ type pacer struct {
 	maxWriteMs atomic.Int64
 	maxBacklog atomic.Int64
 
-	// The stall being lived through, touched only on the pacer's own goroutine:
-	// a stall starts at a slow write and ends at the next write that is not one.
+	// The reporting state, touched only on the pacer's own goroutine.
 	//
-	// droppedAccounted is the drop total the log has already reported. Frames go
-	// missing while a write is blocked — before anything here can know that the
-	// write is slow — so what a stall cost is everything dropped since the last
-	// one was summed up, not everything dropped since it was noticed.
-	isStalling       bool
-	isDropReported   bool
+	// droppedAccounted is the drop total the log has already reported, so that
+	// each blocked write names the frames lost behind it and not the running
+	// total. lastSlowWarnAt rate-limits the slow-write line.
 	droppedAccounted int64
 	lastSlowWarnAt   time.Time
 }
@@ -158,8 +154,6 @@ func (p *pacer) write(data []byte) error {
 
 	if elapsed >= slowWriteThreshold {
 		p.onSlowWrite(elapsed)
-	} else if p.isStalling {
-		p.onStallEnded()
 	}
 	return err
 }
@@ -169,13 +163,22 @@ func (p *pacer) write(data []byte) error {
 //
 // Two lines can come out of here and they say different things. That writes are
 // slow is worth knowing once a second for as long as it lasts; that frames were
-// DROPPED is worth knowing the first time it happens in a stall, because those
-// are the caller's words and they are not coming back.
+// LOST behind this write is worth a line of its own every time it happens,
+// because those are the caller's words and they are not coming back.
+//
+// The loss is reported here rather than at any later moment because here is
+// where it becomes knowable. Frames are dropped by a full queue *while* the
+// write is blocked, and nothing on this goroutine learns that the write was slow
+// — or that the queue overflowed behind it — until it returns, by which time the
+// socket is already moving again. Two lines, one for the drop and one for the
+// recovery, is what this used to say; over 31 live episodes they landed in the
+// same millisecond carrying the same count, which is the recovery having happened
+// before either of them could be written.
 func (p *pacer) onSlowWrite(elapsed time.Duration) {
-	writeMs := elapsed.Milliseconds()
+	blockedMs := elapsed.Milliseconds()
 	p.slowWrites.Add(1)
-	if writeMs > p.maxWriteMs.Load() {
-		p.maxWriteMs.Store(writeMs)
+	if blockedMs > p.maxWriteMs.Load() {
+		p.maxWriteMs.Store(blockedMs)
 	}
 
 	dropped := p.uplink.Stats().FramesDropped
@@ -184,17 +187,12 @@ func (p *pacer) onSlowWrite(elapsed time.Duration) {
 		p.maxBacklog.Store(backlog)
 	}
 
-	if !p.isStalling {
-		p.isStalling = true
-		p.isDropReported = false
-	}
-
 	now := p.now()
-	if lost := dropped - p.droppedAccounted; lost > 0 && !p.isDropReported {
-		p.isDropReported = true
+	if lost := dropped - p.droppedAccounted; lost > 0 {
+		p.droppedAccounted = dropped
 		p.lastSlowWarnAt = now
-		p.session.log.Warn("the uplink is dropping the caller's audio",
-			"writeMs", writeMs, "backlogFrames", backlog, "framesDropped", lost)
+		p.session.log.Warn("the uplink dropped the caller's audio while a write was blocked",
+			"blockedMs", blockedMs, "framesDropped", lost, "backlogFrames", backlog)
 		return
 	}
 	if now.Sub(p.lastSlowWarnAt) < slowWriteWarnEvery {
@@ -202,23 +200,7 @@ func (p *pacer) onSlowWrite(elapsed time.Duration) {
 	}
 	p.lastSlowWarnAt = now
 	p.session.log.Warn("a write to the provider is slow",
-		"writeMs", writeMs, "backlogFrames", backlog)
-}
-
-// onStallEnded is the socket coming back. What the episode cost is said here
-// and nowhere else: the frames that went missing are known only as a total, so
-// the difference across the stall is the only figure that names this one.
-func (p *pacer) onStallEnded() {
-	p.isStalling = false
-	dropped := p.uplink.Stats().FramesDropped
-	lost := dropped - p.droppedAccounted
-	p.droppedAccounted = dropped
-	if lost <= 0 {
-		p.session.log.Debug("the uplink recovered with nothing lost")
-		return
-	}
-	p.session.log.Warn("the uplink recovered after dropping the caller's audio",
-		"framesDropped", lost)
+		"writeMs", blockedMs, "backlogFrames", backlog)
 }
 
 // backlog is how many frames are waiting to go out: everything handed over that
