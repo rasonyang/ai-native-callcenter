@@ -587,9 +587,18 @@ and not this client.
 1.5 s over ≥10 interruptions) passed in **both** rounds, comfortably. Its
 **zero-miss** criterion failed in both: 2 misses in round 1, 1 in round 2 — and
 the round 2 miss was on an uplink that was demonstrably healthy for the following
-twenty seconds, so "the audio arrived late" does not account for it. The
-**qwen and doubao regression calls have NOT YET BEEN RUN**; the shared pacer and
-`SayExactly` still sit under both of them.
+twenty seconds, so "the audio arrived late" does not account for it. The **qwen
+regression has been run** — 2026-09-20, recorded in
+[qwen-findings](qwen-findings.md): the same gate was **met** there, and
+`SayExactly` measured **4 of 7** on mid-call lines against 8 of 8 on the
+greeting (its **W-Q1**). The **doubao regression has still NOT BEEN RUN**. What
+that run does and does not cover follows from what is actually shared: qwen and
+this client have **four** pieces in common — `wsconn`, `Watchdog`, `MergeHint`
+and `SayExactly` — and all four were exercised over real telephone calls on
+2026-09-20, so the refactors that moved them out are now covered from both
+sides. The **pacer is the exception**: it sits under doubao and gemini and has
+never sat under qwen, which takes the Realtime client's unpaced uplink, so it
+remains covered by those two alone and by doubao only once that run happens.
 
 **Per owner decision (2026-09-20), the cause comes before the remedy.** The run
 is to be repeated from another host, and until that has happened:
