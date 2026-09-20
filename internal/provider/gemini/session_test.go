@@ -406,6 +406,121 @@ func TestTheWatchdogIsSilentWhileAToolCallIsPending(t *testing.T) {
 	refuteMoreEvents(t, session)
 }
 
+// answersWith replies to a tool result the moment it reaches the provider, and
+// with nothing else. It is what makes the three tests below exact: the model's
+// reply cannot arrive late for a reason the test invented.
+func answersWith(frames ...map[string]any) func(*fakeGemini, map[string]any) {
+	return func(f *fakeGemini, message map[string]any) {
+		if _, isSetup := message["setup"]; isSetup {
+			f.send(map[string]any{"setupComplete": map[string]any{}})
+			return
+		}
+		if _, isAnswered := message["toolResponse"]; !isAnswered {
+			return
+		}
+		for _, frame := range frames {
+			f.send(frame)
+		}
+	}
+}
+
+// answeredSession is a session with a tool call outstanding and a short patience
+// for the answer to it.
+func answeredSession(t *testing.T, f *fakeGemini) *Session {
+	t.Helper()
+
+	session := testSession(t, f)
+	session.firstAudioDeadline = 150 * time.Millisecond
+	session.deltaStallDeadline = 150 * time.Millisecond
+	start(t, session, testConfig())
+
+	f.send(toolCallFrame(functionCallOf("fc_1", "lookup_balance", nil)))
+	expectEvents(t, session,
+		provider.EventTypeResponseStarted,
+		provider.EventTypeToolCall,
+		provider.EventTypeResponseDone)
+	return session
+}
+
+// A tool result the model takes and then says nothing about.
+//
+// Measured on a live call: sixty-four seconds in which the model answered tool
+// results with more tool calls and then with nothing at all, while the caller
+// heard silence and nothing in this client was waiting on anything — the turn
+// that would have been watched ended when the calls were handed over.
+//
+// The turn the model owed is the turn that is reported: started and stalled,
+// which is one beginning and one ending, and which the flow already knows what
+// to do with.
+func TestAToolResultTheModelNeverAnswersIsReportedAsAStall(t *testing.T) {
+	f := newFakeGemini(t, acceptSetup)
+	session := answeredSession(t, f)
+
+	if err := session.SendToolResult("fc_1", `{"balance":"12.30"}`, ""); err != nil {
+		t.Fatalf("answer the call: %v", err)
+	}
+
+	events := expectEvents(t, session,
+		provider.EventTypeResponseStarted,
+		provider.EventTypeError,
+		provider.EventTypeResponseDone,
+	)
+	if events[1].IsFatal {
+		t.Error("an unanswered tool result ended the session; the next turn is still possible")
+	}
+	if got := events[2].Status; got != provider.StatusStalled {
+		t.Errorf("the turn ended with status %q, want %q", got, provider.StatusStalled)
+	}
+	// Once, not once per deadline: the watchdog is not re-armed by a stall it
+	// has already reported.
+	refuteMoreEvents(t, session)
+}
+
+// The model answering a tool result with another tool call is the conversation
+// working, not a stall — and it is half of what the live call actually did.
+func TestAToolCallAfterAToolResultIsNotAStall(t *testing.T) {
+	f := newFakeGemini(t, answersWith(
+		toolCallFrame(functionCallOf("fc_2", "lookup_balance", nil))))
+	session := answeredSession(t, f)
+
+	if err := session.SendToolResult("fc_1", `{"balance":"12.30"}`, ""); err != nil {
+		t.Fatalf("answer the call: %v", err)
+	}
+
+	events := expectEvents(t, session,
+		provider.EventTypeResponseStarted,
+		provider.EventTypeToolCall,
+		provider.EventTypeResponseDone)
+	if got := events[1].ToolCallID; got != "fc_2" {
+		t.Errorf("the model called %q, want the second call", got)
+	}
+	// Several deadlines' worth of the silence that follows a call nobody has
+	// answered yet, which is silence the model is entitled to.
+	time.Sleep(500 * time.Millisecond)
+	refuteMoreEvents(t, session)
+}
+
+// The ordinary ending: the model takes the answer and speaks.
+func TestSpeechAfterAToolResultIsNotAStall(t *testing.T) {
+	f := newFakeGemini(t, answersWith(
+		modelAudioParts("Your balance is twelve thirty.", encoded(0x01)),
+		generationComplete()))
+	session := answeredSession(t, f)
+
+	if err := session.SendToolResult("fc_1", `{"balance":"12.30"}`, ""); err != nil {
+		t.Fatalf("answer the call: %v", err)
+	}
+
+	expectEvents(t, session,
+		provider.EventTypeResponseStarted,
+		provider.EventTypeAudioDelta,
+		provider.EventTypeOutputTranscript,
+		provider.EventTypeOutputTranscript,
+		provider.EventTypeResponseDone)
+	time.Sleep(500 * time.Millisecond)
+	refuteMoreEvents(t, session)
+}
+
 // The gap between the model stopping and the server saying the playback is over
 // is seconds long, and it is not a stall either.
 func TestTheWatchdogIsSilentBetweenGenerationAndTurnComplete(t *testing.T) {

@@ -214,6 +214,9 @@ func (s *Session) onModelAudio(encoded string) {
 // model produces IS the turn starting, whether that is a syllable or a function
 // call.
 func (s *Session) beginTurn() {
+	// Whatever the model owed, it has begun paying: this is the first output
+	// after a tool result as much as it is the first output of anything else.
+	s.isAnswerOwed.Store(false)
 	if s.isTurnOpen.Load() {
 		return
 	}
@@ -324,8 +327,10 @@ func (s *Session) onInterrupted() {
 
 	// The model is no longer waiting on anything it asked for: the server
 	// discards outstanding calls when a turn is interrupted, and asks again
-	// under new ids.
+	// under new ids. An answer it had already been given is discarded with
+	// them, so nothing is owed on it either.
 	s.withdrawToolCalls("the turn was interrupted")
+	s.isAnswerOwed.Store(false)
 
 	wasOpen := s.isTurnOpen.Swap(false)
 	s.dog.Signal(provider.WatchResponseEnded)
@@ -516,15 +521,36 @@ func (s *Session) onGoAway(event *goAway) {
 	})
 }
 
-// onTurnStalled closes out a turn the provider walked away from. The watchdog
-// calls it on its own goroutine, having already decided a turn really is open.
+// onTurnStalled closes out a turn the provider walked away from, or an answer
+// to a tool result that never came. The watchdog calls it on its own goroutine,
+// having already decided the model owes the caller one of the two.
+//
+// The tool case has no turn to close — the tool call's own turn ended when the
+// calls were handed over — so the turn the model owed is the turn that is
+// reported, started and stalled in one breath. That keeps the invariant every
+// consumer here relies on: one RESPONSE_STARTED, one ending, never an ending
+// with no beginning.
 func (s *Session) onTurnStalled(hasAudioArrived bool) {
-	reason := "the provider never started speaking"
-	if hasAudioArrived {
-		reason = "the provider stopped partway through speaking"
+	wasAnswerOwed := s.isAnswerOwed.Swap(false)
+	wasTurnOpen := s.isTurnOpen.Swap(false)
+	if !wasTurnOpen && !wasAnswerOwed {
+		// The turn ended between the watchdog deciding and this running. One
+		// turn gets one ending, and it has had it.
+		s.log.Debug("a turn ended while it was being abandoned")
+		return
 	}
-	s.isTurnOpen.Store(false)
+
+	reason := "the provider never started speaking"
+	switch {
+	case hasAudioArrived:
+		reason = "the provider stopped partway through speaking"
+	case !wasTurnOpen:
+		reason = "the provider never answered a tool result"
+	}
 	s.log.Warn("turn abandoned", "reason", reason, "hasAudioArrived", hasAudioArrived)
+	if !wasTurnOpen {
+		s.emit(provider.Event{Type: provider.EventTypeResponseStarted})
+	}
 	s.flushOutputTranscript()
 	// The server is not going to say this turn is over, so nothing is coming
 	// that would start the caller being listened to again.

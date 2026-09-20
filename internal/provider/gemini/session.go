@@ -148,6 +148,16 @@ type Session struct {
 	// has to know whether there is anything to interrupt.
 	isTurnOpen atomic.Bool
 
+	// isAnswerOwed is true between a tool result going out and the model
+	// producing anything at all in reply.
+	//
+	// There is no turn open in that window — the tool call's own turn ended when
+	// the calls were handed over — and nothing on this protocol announces that
+	// the model has taken the answer. So it is a second reason for the watchdog
+	// to be watching, and the only one there is for the sixty-four seconds a
+	// live caller once spent listening to a model that had stopped answering.
+	isAnswerOwed atomic.Bool
+
 	mu         sync.Mutex
 	cfg        provider.SessionConfig
 	voice      string
@@ -301,7 +311,7 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 		FirstAudioDeadline: s.firstAudioDeadline,
 		DeltaStallDeadline: s.deltaStallDeadline,
 		Done:               conn.Done(),
-		IsResponseOpen:     s.isTurnOpen.Load,
+		IsResponseOpen:     s.isOutputDue,
 		OnStall:            s.onTurnStalled,
 	})
 	go s.readLoop()
@@ -509,8 +519,26 @@ func (s *Session) SendToolResult(toolCallID, output, hint string) error {
 	s.toolResults = nil
 	s.mu.Unlock()
 
-	return s.sendFrameOf(toolResponseFrame{
-		ToolResponse: toolResponseBody{FunctionResponses: responses}})
+	if err := s.sendFrameOf(toolResponseFrame{
+		ToolResponse: toolResponseBody{FunctionResponses: responses}}); err != nil {
+		return err
+	}
+
+	// The model now owes the conversation something — speech, or another call —
+	// and until it produces one of them there is no turn for the watchdog to be
+	// watching. Measured on a live call: the model answered tool results with
+	// more tool calls and then with nothing at all, for a minute, while the
+	// caller heard silence and nothing here was waiting on anything.
+	s.isAnswerOwed.Store(true)
+	s.dog.Signal(provider.WatchResponseStarted)
+	return nil
+}
+
+// isOutputDue reports whether the model owes the caller anything: a turn it is
+// in the middle of, or an answer to a tool result it has not begun. It is what
+// the watchdog consults before abandoning either.
+func (s *Session) isOutputDue() bool {
+	return s.isTurnOpen.Load() || s.isAnswerOwed.Load()
 }
 
 // UpdateInstructions takes the new instructions and writes no frame.
