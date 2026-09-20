@@ -21,13 +21,13 @@ Each fact below is marked **DOC** (stated by one of the two documents) or
 the disagreement is the finding.
 
 **Every figure in this document stays in this document.** The probe's timings
-are one laptop against one region on one afternoon; §10's are one afternoon of
-telephone calls on a developer's FreeSWITCH. They are the record of what was
-verified and what it did, not a statement about how fast or how large this
-product is, and the repository still publishes no performance claim before a
-benchmark that deserves the name (CLAUDE.md, owner directive 2026-08-16): no
-number from here goes into the README, the deployment guide, a release note or a
-commit message.
+are one laptop against one region on one afternoon; §10's and §11's are an
+afternoon each of telephone calls on a developer's FreeSWITCH. They are the
+record of what was verified and what it did, not a statement about how fast or
+how large this product is, and the repository still publishes no performance
+claim before a benchmark that deserves the name (CLAUDE.md, owner directive
+2026-08-16): no number from here goes into the README, the deployment guide, a
+release note or a commit message.
 
 ## 1. Why this is a protocol and not a dialect
 
@@ -344,9 +344,152 @@ finished playing before the wait is over. Every session test sets `NoInput: -1`,
 which is exactly why the suite is blind to it. Filed as **W-D5**, and fixed in
 this branch — the description above stays as the record of what was found.
 
+## 11. Live regression, 2026-09-20
+
+**Why.** The Gemini client landed after §10 and touched what every client
+shares — `provider.Event.FailureCause`, `aicall.Session.fail`, the
+orchestrator's hangup cause, `ProfileFor`, `cmd/aicc/wiring.go` — so the doubao
+path was walked again on `main` at `667c1dc`.
+
+**Method.** Twelve calls with a human caller over the simulated PSTN trunk into
+the development FreeSWITCH, 531 s of bot-phase audio in all: nine on DID 95002
+(`novanet_support`, Chinese), one on 95012 (`mobile_support`, Chinese), two on
+95001 (`novanet_support`, English). Every figure below is **MEASURED**, from the
+application log, the `transcripts` rows and the recordings. The recordings are
+8 kHz two-channel — caller on one, what the caller hears on the other — read on
+a 10 ms RMS envelope with silence at −40 dBFS; queue music was told from speech
+by spectral flatness, and the separation is wide enough that "the bot stopped"
+and "the queue began" are measured and not judged. File offsets map onto log
+timestamps to about ±2 s, so durations below are exact and their wall-clock
+positions are not.
+
+The twelve sessions' `X-Tt-Logid`s:
+`20260920142920D8EF0B4C1214E565FA95`, `2026092014301712D043F559680718311A`,
+`2026092014323814DDDC87455577E84C99`, `202609201434135A85F1143F95EE1C3F89`,
+`2026092014351545B0BF2A238500BE5A05`, `2026092014360915ADE18FE479902A5711`,
+`20260920143712DDBF2EBD317451FF7883`, `202609201438105EBDD9446D8829BF9EF4`,
+`2026092014393409D14794E7FE1C26D60F`, `20260920144121753C6C119F2879679DE2`,
+`20260920144157C61F7A660CE153BF4B04`, `202609201442584B59F5FB640E39E9D48B`.
+Every one ended `CLOSED_CLEAN` — six transfers, five `hangup` tools, one caller
+hangup — with no provider error and no rescue.
+
+**W-D5 holds.** Bot's last speech → queue music, on the six transfers: 0.34,
+0.48, 0.51, 0.55, 0.56 and 0.69 s. Bot's last speech → end of recording, on the
+five farewells: 0.54, 0.63, 0.72, 0.73 and 0.78 s. §10 measured 1.3–5.1 s at the
+same two places. The last far-end segment is speech in every file, so none of
+these is a line cut short.
+
+**A keypress cuts playback — exercised this time.** Seventeen keypresses on one
+call, three of them while the bot was speaking; each of the three stopped the
+playback at once (`the caller took the floor back reason=DTMF`, `playedMs` 2800,
+2340, 4300). The other half of §5 showed its cost on the same call: the caller
+pressed eleven keys in ten seconds, the model never learned of any, the far
+end stayed silent for 26.5 s, and the next thing in the transcript is the caller
+asking whether anyone was listening.
+
+**The DTMF pacer outlier did not return.** That call: 3,624 frames sent, 42
+dropped (1.16 %), 16 mutes and 16 unmutes — the uplink did go empty under the
+keypresses, sixteen times, and the pacer declared and ended each one. §10's
+17.7 % stays unexplained and unreproduced. Over all twelve calls: 24,613 sent,
+200 dropped (0.81 %), 0–2.31 % per call.
+
+**Announces.** Both entry announces were spoken verbatim exactly once in all
+twelve calls — `mobile_support`'s too, the first time it has been heard on this
+provider — and the terminal announce verbatim exactly once in the five `hangup`
+calls. English on the profile's default Chinese voice was intelligible enough
+for the caller to hold both conversations; nothing more than that was measured.
+
+**Turn latency.** Ordinary turns n=23, median 609 ms, range 376–858 ms. The turn
+after a tool result n=8, 2127–4499 ms; the slowest was the English hand-over
+line. The terminal announce after `hangup` n=5, 948–1131 ms, which is a
+`speech_text_buffer.commit` and not a second pass of the model.
+
+**Tools.** `repair_status` twice on one call and `transfer_to_agent` six times,
+every result a `role:"tool"` item and every one picked up. The caller read the
+second repair number as "IM1002" and the model asked for `RMA1002`.
+
+**Dead air is longer than §10 found.** On the call where the caller said nothing,
+the far end was silent for 27.8 s and then for 38.0 s, and both channels together
+for 15.8 s, 8.5 s and 35.2 s. `dead air` fired twice and `could not prompt a
+silent caller` followed it twice. §10's 17.4 s was not the ceiling; there is
+none, short of the provider's ten-minute release (§6).
+
+**A caller who is speaking can go unanswered.** New, and worse than dead air. On
+the first English call the caller spoke in four stretches between 3.9 s and
+13.7 s of the recording — about six seconds of speech — and the far end was
+silent from 3.4 s to 22.0 s. One utterance was transcribed, at the end of that
+window; nothing before it produced a transcript, a turn or an event. On the
+caller-hangup call the caller spoke for the last 2.9 s and the far end was
+digital zero throughout. §10 saw three short utterances lost inside a dead-air
+window; this is the same gap with a caller who kept talking. Nothing in the
+client can see it: with no speech events of our own (§1), an utterance the engine
+ignores does not exist on this side of the socket.
+
+**The hand-over line can be taken away, and the transfer waits for a line nobody
+hears.** The same English call:
+
+```
+14:41:38.3  TOOL_CALL transfer_to_agent → ok, action armed
+14:41:40.7  "I'm connecting you to our support team right now, please hold."
+14:41:41.1  the provider took the floor back  playedMs=180
+14:41:41.8  caller: "Hello."
+14:41:42.3  "Go ahead, what can I do for you?"
+14:41:43.8  "Yes, I can hear you clearly."
+14:41:46.4  transferring the caller
+```
+
+The recording has no far-end audio where the hand-over line should be: the
+caller was transferred having never been told. What the log supports is this
+much: the armed action (`internal/aicall/actions.go`) runs on the
+`PLAYBACK_DONE` of a turn later than the one that armed it, or on a barge-in
+once that line's `TURN_DONE` has been seen; here the engine pre-empted its own
+hand-over turn after 180 ms and opened another for the caller's "Hello", so the
+line never finished, and the action ran after the playback of a later, unrelated
+turn. Which of the two paths released it was **not confirmed** — no line in the
+log says. It stayed inside the 10 s cap, which is why no WARN marks it. Filed as
+**W-D7**.
+
+**Two things the model did, recorded because a flow author will meet them.**
+Neither is the client's.
+
+- It said goodbye without calling `hangup`. The caller: "我说再见了，怎么还不挂电话？";
+  the bot: "不好意思，再见啦。" — and no tool call. Eighteen seconds of silence
+  later the caller asked again and `hangup` arrived with
+  `isFarewellSpoken:"True"`, so the model knew. `novanet_support`'s rules tell it
+  to call `hangup` first in so many words. On this provider the cost of that
+  lapse is total, because nothing can prompt the turn that would repair it (§5).
+- It transferred a caller who said "My internet is slow" with the reason "Caller
+  has no internet service" and announced help with "your out-of-service
+  internet". The summary an agent reads was wrong before the agent picked up.
+
+**One server error, on a call that was not part of the twelve.** Five unattended
+loopback calls preceded the human ones, silent callers on 95002. The first —
+also the first session of that process — failed 4 s in: `code=55000000`, `sami
+error: codes=42000999, desc=stream send timeout`, logid
+`2026092014012344B12EDA9BF89AC0BCF9`, 202 frames sent and 3 dropped, no mute.
+The caller was rescued to `support-zh` and the CDR reads `FAILED` /
+`MEDIA_OR_PROVIDER_FAILURE`, which is §6 working. The identical call 32 s later
+and the three after it closed clean, as did all twelve human calls, and the code
+appears in no log from 2026-09-18. One occurrence; the cause is **not known**.
+
+**What the shared-code changes did to this client.** Nothing a caller can hear.
+Two things an operator can read, filed together as **W-D8**: this client names no
+`FailureCause`, so every fatal ending — the ten-minute release included — is
+`MEDIA_OR_PROVIDER_FAILURE` in the CDR and
+`aicc_provider_sessions_expired_total` cannot move; and the one failed call above
+counted **twice** in `aicc_provider_ws_errors_total`, because a provider error
+frame and the session end that follows it are both fatal events and
+`aicall.Session` counts at the one place both arrive.
+
+**Not exercised:** hold (W-D4 is as §10 left it), a refused transfer and
+`take_message`, and barge-in cut latency — 11 `reason=SPEECH` interruptions and
+3 `the provider took the floor back` are in the log, and §10 is the reason
+nobody should count misses from those lines. The recordings are kept; the
+measurement was not made.
+
 ## Follow-ups
 
-Six items, filed here because this document is what created them.
+Eight items, filed here because this document is what created them.
 
 **W-D1 — one provider registry.** A provider name is registered in two places
 today: `provider.ProfileFor` for its profile and `cmd/aicc/wiring.go` for its
@@ -381,6 +524,12 @@ notice. It is still a real cost — a detector is a thing to tune and to get
 wrong — but it is no longer optional. It stays inside the package: where the
 caller was heard is a property of the protocol and not of the seam.
 
+> **2026-09-20 — §11 widens what this has to cover.** A caller spoke for about
+> six seconds and the engine produced nothing — no transcript, no turn. A
+> detector of our own is also the only way this client can know that happened:
+> it is what would let the call path re-arm the dead-air watch on speech the
+> engine ignored, and say in the log that a caller went unanswered.
+
 **W-D4 — a held call must not be killed by the dead-media watchdog.** SIP hold —
 a re-INVITE with `sendonly` or `inactive`, or simply a held call that stops
 sending RTP — has to suspend `internal/voice`'s dead-media watch for as long as
@@ -407,3 +556,56 @@ doubao there is none, so the line says `transcribesCaller=""` even when
 `AICC_TRANSCRIBE_PROVIDER` is configured and the caller is in fact being
 transcribed, which reads as "caller transcription off" to anyone checking a
 deployment from its logs.
+
+**W-D7 — an armed action must not wait on a line the engine took away.** §11: the
+engine pre-empted its own hand-over line 180 ms in, the caller was never told of
+the transfer, and the transfer ran several seconds late behind two turns of
+small talk. The armed action waits for a closing line to be heard; on a provider
+that decides interruptions itself, that line can be replaced without the call
+path having interrupted anything. Two questions to settle before a fix: whether
+a turn opened while an action is armed should be allowed to play at all, and
+whether the hand-over line belongs in an `announce` on the `handoff` phase — said
+as written through `SpeakText`, which pre-empts rather than is pre-empted (§5) —
+instead of being left to the model. The second is a flow change and costs
+nothing on the other providers. It needs a test that loses the line
+deterministically first.
+
+> **2026-09-20, later the same day — the flow half is done and measured.**
+> Five of the six seeded flows already ended a transfer in a terminal
+> `finish_transfer` with an `announce`; `novanet_support` was the one that left
+> the line to the model, and every transfer in §11 was on it. It now has the
+> same two phases as the rest (`need_transfer` as the fallback target,
+> `finish_transfer` terminal and announced). Eleven transfers followed, all
+> **MEASURED** in the log and, for the human calls, on the far-end channel of
+> the recording: four on `mobile_support` before the change, four human calls on
+> `novanet_support` after it (two Chinese, two English), and three unattended
+> loopback calls replaying a recorded "转人工", two of them with the caller
+> already talking when the line began.
+>
+> - The model's own turn after the tool result never appeared. Every call has
+>   exactly one turn after `transfer_to_agent` — 131–183 tokens, the announce —
+>   and no `the provider took the floor back`. Uninterrupted, the line played
+>   whole (4.30–4.47 s) and queue music followed 0.47–0.61 s later. So the
+>   orchestration change this item contemplated — withholding the tool result
+>   while an action is armed — is **not needed**.
+> - A caller who speaks over the line is transferred at once: `the caller took
+>   the floor back` → `caller spoke after the closing line; running the armed
+>   action now`, 0.7–1.2 s after the caller's onset, with the line cut where it
+>   stood (`playedMs` 880–4440). No small talk, no deferred transfer, in seven
+>   of seven. That is `onBargeIn` doing what it was written for, and it can,
+>   because the announce's `TURN_DONE` arrives about 0.4 s after its first
+>   frame.
+> - **Still open, and smaller:** those first ~0.4 s. The earliest barge-in
+>   recorded was 0.88 s into the line, so an interruption landing before
+>   `TURN_DONE` — the 180 ms case of §11 — was **not reproduced** and not ruled
+>   out. The `actions.go` half of this item stands for that window alone: a turn
+>   later than the arming one that ends `INTERRUPTED` should run the action
+>   rather than wait for a line that will not finish.
+
+**W-D8 — what an operator reads about a doubao failure.** Two small things from
+§11. The client sets no `provider.Event.FailureCause`; whether code `45000003`
+(§6) should be named `PROVIDER_SESSION_EXPIRED` is a judgement — it is an idle
+release and not a lifetime cap — but today the CDR cannot tell it from a fault.
+And `aicc_provider_ws_errors_total` counts a failed doubao session twice, once
+for the error frame and once for the session end it causes; one session that
+ended badly should be one.

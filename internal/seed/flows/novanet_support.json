@@ -26,7 +26,7 @@
         "用户明确表示要结束通话时，立即调用 hangup，工具返回后再道别。"
       ]
     },
-    "fallbackTarget": "handoff",
+    "fallbackTarget": "need_transfer",
     "maxTurns": 30,
     "alwaysAllowedTools": [
       "transfer_to_agent",
@@ -42,7 +42,7 @@
           "op": "EQ",
           "value": "1"
         },
-        "target": "handoff"
+        "target": "finish_transfer"
       },
       {
         "on": "TOOL_RESULT",
@@ -79,12 +79,24 @@
         }
       ]
     },
-    "handoff": {
+    "need_transfer": {
       "instruction": {
-        "en": "Tell the caller you are connecting them to the support team now, in one short sentence.",
-        "zh": "用一句话告诉来电者正在为他们转接人工客服。"
+        "en": "This cannot proceed via self-service: apologize briefly, then immediately call transfer_to_agent.",
+        "zh": "当前问题无法继续自助处理：向用户简短道歉说明，立即调用 transfer_to_agent。"
       },
       "tools": []
+    },
+    "finish_transfer": {
+      "announce": {
+        "en": "Certainly — I am putting you through to the support team now. Please stay on the line.",
+        "zh": "好的，正在为您转接人工客服，请不要挂机，稍等片刻。"
+      },
+      "instruction": {
+        "en": "The caller is connected right after this line; ask no further questions and do not say goodbye.",
+        "zh": "说完这句就会接通，不要再问问题，也不要说再见。"
+      },
+      "tools": [],
+      "isTerminal": true
     },
     "farewell": {
       "announce": {
