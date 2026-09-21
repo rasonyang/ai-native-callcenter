@@ -656,6 +656,106 @@ func TestAPhaseWithNoLineOfItsOwnAsksForNothingToBeSaid(t *testing.T) {
 	}
 }
 
+//
+// Silence.
+//
+
+// deadAirHarness wires one flow for the no-input tests.
+func deadAirHarness(t *testing.T, flowJSON string) (*Orchestrator, *Session,
+	*fakeModel, *flow.Engine, *flow.Runtime, *callActions, *slog.Logger) {
+	t.Helper()
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, &fakeSwitch{})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(flowJSON))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{orchestrator: o, session: session, log: log}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	return o, session, model, engine, runtime, actions, log
+}
+
+// Silence that moves the flow into a phase with words of its own asks for one
+// turn, and it is the line. The re-engagement cue on top of it was a second
+// turn requested 38 ms later (W-Q2): qwen refused it with "another response is
+// in progress", and an engine that takes it says both — a check-in after the
+// flow's own goodbye.
+func TestSilenceThatMovesIntoALineAsksForOneTurnOnly(t *testing.T) {
+	o, session, model, engine, runtime, actions, log := deadAirHarness(t, announcingFlow)
+	model.answerLinesWithATurn(session)
+
+	o.handleDeadAir(session, runtime, actions, log)
+
+	if !engine.IsTerminal() {
+		t.Fatal("the test flow did not move on the silence")
+	}
+	if got := model.spokenLines(); len(got) != 1 || got[0] != "Thank you for calling, goodbye." {
+		t.Errorf("spoken lines = %v, want the phase's own line once", got)
+	}
+	if got := model.recordedUserText(); len(got) != 0 {
+		t.Errorf("cues sent = %v, want none: the line is the turn", got)
+	}
+	if !actions.isArmed() {
+		t.Error("the terminal phase did not arm the ending")
+	}
+}
+
+// Silence the flow does not act on is the model's to handle, and nothing but
+// the cue asks it to.
+func TestSilenceWithNoMoveStillPromptsTheModel(t *testing.T) {
+	o, session, model, _, runtime, actions, log := deadAirHarness(t, `{
+		"id": "silence-test",
+		"specVersion": "v2",
+		"initialNode": "welcome",
+		"global": {"persona": "You answer the phone."},
+		"nodes": {"welcome": {"instruction": "Greet.", "tools": []}}
+	}`)
+
+	o.handleDeadAir(session, runtime, actions, log)
+
+	if got := model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken lines = %v, want none", got)
+	}
+	if got := model.recordedUserText(); len(got) != 1 ||
+		!strings.Contains(got[0], "still there") {
+		t.Errorf("cues sent = %v, want the re-engagement cue once", got)
+	}
+}
+
+// A move into a phase with no words of its own leaves them to the model, so
+// the cue still goes — here the goodbye one, because the phase is terminal.
+func TestSilenceThatMovesIntoAPhaseWithoutALineStillPromptsTheModel(t *testing.T) {
+	o, session, model, engine, runtime, actions, log := deadAirHarness(t, `{
+		"id": "silence-terminal-test",
+		"specVersion": "v2",
+		"initialNode": "welcome",
+		"global": {"persona": "You answer the phone."},
+		"nodes": {
+			"welcome": {"instruction": "Greet.", "tools": [],
+				"transitions": [{"on": "NO_INPUT", "target": "farewell"}]},
+			"farewell": {"instruction": "Say goodbye.", "tools": [], "isTerminal": true}
+		}
+	}`)
+
+	o.handleDeadAir(session, runtime, actions, log)
+
+	if !engine.IsTerminal() {
+		t.Fatal("the test flow did not move on the silence")
+	}
+	if got := model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken lines = %v, want none", got)
+	}
+	if got := model.recordedUserText(); len(got) != 1 ||
+		!strings.Contains(got[0], "goodbye") {
+		t.Errorf("cues sent = %v, want the goodbye cue once", got)
+	}
+}
+
 // The call's first words travel in the session configuration, because the
 // opening turn is asked for as part of starting the session — there is no
 // mid-call moment to say them in.

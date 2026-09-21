@@ -446,11 +446,14 @@ func hangupCauseFor(cause provider.FailureCause) string {
 // words have been heard. Without that last rule a conversation that reaches
 // goodbye simply stays open, with the bot politely re-engaging the silence
 // forever.
+//
+// It reports whether the new phase's own line was asked for, because a caller
+// that was about to ask for a turn of its own must not: the line is that turn.
 func (o *Orchestrator) afterMove(moved string, session *Session,
-	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
+	runtime *flow.Runtime, actions *callActions, log *slog.Logger) (isLineAsked bool) {
 
 	if moved == "" {
-		return
+		return false
 	}
 	if err := session.Reinstruct(runtime.Instructions()); err != nil {
 		log.Warn("could not update instructions", "error", err)
@@ -467,8 +470,11 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 	if line := runtime.Announce(); line != "" {
 		if err := session.Speak(line); err != nil {
 			log.Warn("could not say the phase's own line", "node", moved, "error", err)
+			return false
 		}
+		return true
 	}
+	return false
 }
 
 // armTheEnding schedules the end of a call the flow has concluded, for once the
@@ -506,7 +512,14 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 	actions *callActions, log *slog.Logger) {
 
 	moved := runtime.OnNoInput()
-	o.afterMove(moved, session, runtime, actions, log)
+	// A move that carried words of its own has already asked for the next
+	// turn, and those words are the flow's answer to the silence. The cue is
+	// sent only when no line was: asking for both is two turns at once — one
+	// provider refuses the second, another says both — and the cue would
+	// contradict a closing line the flow has just chosen.
+	if o.afterMove(moved, session, runtime, actions, log) {
+		return
+	}
 
 	cue := "(The caller has been silent. Gently check whether they are still there " +
 		"and repeat the current question.)"

@@ -278,6 +278,16 @@ the ordering a stated rule instead of an accident of line order. It is
 provider-agnostic: qwen returns an error, other engines take the second request
 and talk over themselves.
 
+*Fixed (2026-09-21), verified on one live call.* `afterMove` now reports whether it
+asked for the new phase's line, and `handleDeadAir` returns without the cue when
+it did; the comment there states the rule. A move into a phase without a line,
+and silence that moves nothing, still send the cue. Covered by
+`TestSilenceThatMovesIntoALineAsksForOneTurnOnly` and its two counterparts in
+`internal/aicall/orchestrator_test.go`. On a 95002 call left silent
+throughout, two no-input prompts moved nothing and sent the cue; the third moved
+into `farewell`, whose line was the only turn asked for, and the call logged no
+WARN before the BYE.
+
 **W-Q3 — accept the cancel race rather than close it.** `Realtime.Interrupt`
 sends `response.cancel` on a profile with `CancelsResponseItself: false` when
 the local `isResponseOpen` is true, and the provider's response can end in the
