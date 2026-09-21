@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/rasonyang/ai-native-callcenter/discussions
+    about: Ask usage questions, share ideas and discuss deployments in GitHub Discussions. Please keep issues for bugs and concrete feature requests.
