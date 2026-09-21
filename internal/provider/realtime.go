@@ -86,6 +86,11 @@ type Realtime struct {
 	isCancelSentForSpeak bool
 	isPreemptedForSpeak  bool
 
+	// cancelSentAt is when this client last asked the provider to cancel a
+	// response. It is what lets a refusal of that cancel be recognised as
+	// the answer to our own request; see isAnsweredCancel.
+	cancelSentAt time.Time
+
 	// dog ends a turn the provider has walked away from, and watch is the
 	// channel its progress signals travel on.
 	dog   *Watchdog
@@ -320,7 +325,7 @@ func (r *Realtime) SpeakText(text string) error {
 	r.mu.Unlock()
 
 	if isCancelNeeded {
-		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendCancel(); err != nil {
 			return err
 		}
 	}
@@ -387,7 +392,7 @@ func (r *Realtime) onResponseCreated() {
 	r.mu.Unlock()
 
 	if isCancelNeeded {
-		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendCancel(); err != nil {
 			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
 		}
 	}
@@ -502,7 +507,7 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 	r.mu.Unlock()
 
 	if !r.profile.CancelsResponseItself && r.isResponseOpen.Load() {
-		if err := r.sendEvent(map[string]any{"type": "response.cancel"}); err != nil {
+		if err := r.sendCancel(); err != nil {
 			return err
 		}
 	}
@@ -521,6 +526,48 @@ func (r *Realtime) Interrupt(reason InterruptReason, playedMs int) error {
 		}
 	}
 	return nil
+}
+
+// sendCancel asks the provider to stop the response in progress, and remembers
+// when it did.
+//
+// Whether a response is in progress is only ever this side's belief: the
+// provider may finish it in the round trip before the cancel arrives, and then
+// it refuses the cancel. No local state closes that window, so the refusal is
+// expected and has to be recognisable as ours — see isAnsweredCancel.
+func (r *Realtime) sendCancel() error {
+	r.mu.Lock()
+	r.cancelSentAt = time.Now()
+	r.mu.Unlock()
+	return r.sendEvent(map[string]any{"type": "response.cancel"})
+}
+
+// cancelAnswerWindow is how long after a cancel a refusal of it is still taken
+// as its answer. A refusal arrives one round trip later (74 ms measured on
+// qwen); the window is generous so a slow link does not turn it into a WARN,
+// and bounded so the same words long after any cancel still surface.
+const cancelAnswerWindow = 5 * time.Second
+
+// isAnsweredCancel reports whether an error is the provider refusing a cancel
+// this client sent because the response had already ended — the benign losing
+// side of the race sendCancel describes, not a fault.
+//
+// Matched narrowly, on the code and the words qwen was seen to use
+// ("invalid_value: Conversation has no active response"), and only within
+// cancelAnswerWindow of a cancel we sent. The error event names neither the
+// frame it refuses nor the response it is about, so a time bound is the one
+// correlation available; ordering-based bookkeeping would be wrong whenever a
+// new response is requested before the refusal arrives, which is exactly what
+// a keypress or a spoken line does right after an interruption.
+func (r *Realtime) isAnsweredCancel(err *wireError) bool {
+	if err.Code != "invalid_value" ||
+		!strings.Contains(strings.ToLower(err.Message), "no active response") {
+		return false
+	}
+	r.mu.Lock()
+	sentAt := r.cancelSentAt
+	r.mu.Unlock()
+	return !sentAt.IsZero() && time.Since(sentAt) <= cancelAnswerWindow
 }
 
 // Close ends the session.
@@ -816,6 +863,16 @@ func (r *Realtime) handleError(event *wireEvent) {
 		if sendErr := r.sendEvent(r.buildSessionUpdate(cfg, true)); sendErr == nil {
 			return
 		}
+	}
+
+	// A cancel that lost the race with the response ending changes nothing:
+	// the turn is over either way, and its response.done has already said
+	// so. It is not reported, so the WARN count of a healthy call means
+	// something.
+	if r.isAnsweredCancel(err) {
+		r.log.Debug("the provider refused a cancel because the response had already ended",
+			"code", err.Code, "message", err.Message)
+		return
 	}
 
 	r.finishStart(err)

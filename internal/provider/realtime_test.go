@@ -961,6 +961,104 @@ func TestInterruptOnAProviderThatMustBeTold(t *testing.T) {
 	f.awaitMessage("response.cancel")
 }
 
+// The provider's response can end in the round trip between Interrupt reading
+// it as open and the cancel arriving, and qwen then refuses the cancel. That
+// race cannot be closed from this side; the refusal is the benign answer to our
+// own request and must not surface as an error the call logs at WARN.
+func TestARefusedCancelThatLostTheRaceIsNotAnError(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+
+	cfg := basicConfig()
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	if err := session.Start(t.Context(), cfg); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	if err := session.Interrupt(InterruptReasonSpeech, 0); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	f.awaitMessage("response.cancel")
+
+	// The response had already finished on the provider's side.
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+	f.send(map[string]any{"type": "error", "error": map[string]any{
+		"type": "invalid_request_error", "code": "invalid_value",
+		"message": "Conversation has no active response",
+	}})
+	// A marker that arrives after the refusal: anything the refusal produced
+	// would be in front of it.
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+
+	select {
+	case event := <-session.Events():
+		if event.Type != EventTypeSpeechStarted {
+			t.Fatalf("got %s (%v), want the refused cancel to pass silently", event.Type, event.Err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no event arrived after the refused cancel")
+	}
+
+	// The session carries on as before.
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+}
+
+// The same words are a real error when this client sent no cancel, and any
+// other error after a cancel is still reported: the match is the refusal of
+// our own request and nothing wider.
+func TestOnlyTheRefusalOfOurOwnCancelIsSwallowed(t *testing.T) {
+	tests := []struct {
+		name         string
+		isCancelSent bool
+		code         string
+		message      string
+	}{
+		{"no cancel was sent", false, "invalid_value", "Conversation has no active response"},
+		{"another error after a cancel", true, "invalid_value",
+			"Cannot create response while another response is in progress"},
+		{"another code after a cancel", true, "rate_limit_exceeded", "no active response"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeProvider(t, acceptSession)
+			session := testSession(t, f, QwenProfile())
+
+			cfg := basicConfig()
+			cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+			if err := session.Start(t.Context(), cfg); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			awaitEvent(t, session, EventTypeSessionReady)
+
+			if tt.isCancelSent {
+				f.send(map[string]any{"type": "response.created"})
+				awaitEvent(t, session, EventTypeResponseStarted)
+				if err := session.Interrupt(InterruptReasonSpeech, 0); err != nil {
+					t.Fatalf("interrupt: %v", err)
+				}
+				f.awaitMessage("response.cancel")
+			}
+			f.send(map[string]any{"type": "error", "error": map[string]any{
+				"type": "invalid_request_error", "code": tt.code, "message": tt.message,
+			}})
+
+			event := awaitEvent(t, session, EventTypeError)
+			if event.Text != tt.message {
+				t.Errorf("message = %q, want %q", event.Text, tt.message)
+			}
+			if event.IsFatal {
+				t.Error("a recoverable error was marked fatal")
+			}
+		})
+	}
+}
+
 // Cancelling and trimming answer different questions, and the second outlives
 // the first. The caller goes on hearing an utterance for seconds after the
 // provider finished making it, so speech over that tail has to trim the

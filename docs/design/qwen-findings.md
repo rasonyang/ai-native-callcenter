@@ -296,3 +296,19 @@ that window; the provider's view is the only authority and it is one round trip
 away. The work is therefore to stop treating it as an error: recognise
 `Conversation has no active response` as the benign outcome it is and log it at
 debug, so that the WARN count of a healthy call means something.
+
+*Fixed (2026-09-21), verified on one live call.* Every `response.cancel` the client
+sends now goes through `sendCancel`, which records when. `handleError` drops an
+error whose code is `invalid_value` and whose message contains `no active
+response` if it arrives within five seconds of such a cancel, logging it at
+debug; it emits no event, so nothing is logged at WARN and no failure is
+recorded. The same words with no cancel behind them, and any other error after
+one, are reported as before. A time bound, because the error event names
+neither the frame it refuses nor the response it concerns. The invariant is
+unchanged: `Interrupt` still sends no cancel once `response.done` has been
+handled. Covered by `TestARefusedCancelThatLostTheRaceIsNotAnError` and
+`TestOnlyTheRefusalOfOurOwnCancelIsSwallowed` in
+`internal/provider/realtime_test.go`. On a 95002 call run at debug, one
+interruption with `wasGenerating=true` lost the race: the refusal arrived 39 ms
+after the flush and was logged only at debug, with no WARN and the call
+continuing normally.
