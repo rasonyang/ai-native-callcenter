@@ -520,18 +520,25 @@ func (s *Session) SendToolResult(toolCallID, output, hint string) error {
 	s.toolResults = nil
 	s.mu.Unlock()
 
-	if err := s.sendFrameOf(toolResponseFrame{
-		ToolResponse: toolResponseBody{FunctionResponses: responses}}); err != nil {
-		return err
-	}
-
 	// The model now owes the conversation something — speech, or another call —
 	// and until it produces one of them there is no turn for the watchdog to be
 	// watching. Measured on a live call: the model answered tool results with
 	// more tool calls and then with nothing at all, for a minute, while the
 	// caller heard silence and nothing here was waiting on anything.
+	//
+	// Said before the frame is written, never after: the reply can be read,
+	// and its first output clear the debt, before the write even returns. A
+	// debt recorded after that is one nobody will ever pay, and the watchdog
+	// reports a stall on a model that answered at once.
 	s.isAnswerOwed.Store(true)
 	s.dog.Signal(provider.WatchResponseStarted)
+
+	if err := s.sendFrameOf(toolResponseFrame{
+		ToolResponse: toolResponseBody{FunctionResponses: responses}}); err != nil {
+		// Nothing went out, so nothing is owed.
+		s.isAnswerOwed.Store(false)
+		return err
+	}
 	return nil
 }
 
