@@ -1186,6 +1186,296 @@ func TestToolResultCarriesTheHintAndAsksForTheNextTurn(t *testing.T) {
 	f.awaitMessage("response.create")
 }
 
+//
+// Tool results answered while the response that called the tool is still
+// open (qwen-findings W-Q4).
+//
+
+// openATurnThatCallsATool plays the greeting out and opens the next turn, in
+// which the model calls a tool and keeps going: the shape qwen was seen to
+// produce, a function call followed by more speech in the same response.
+func openATurnThatCallsATool(t *testing.T, f *fakeProvider, session *Realtime) {
+	t.Helper()
+	finishTheOpeningTurn(t, f, session)
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.function_call_arguments.done",
+		"call_id": "fc_1", "name": "transfer_to_agent", "arguments": `{}`})
+	awaitEvent(t, session, EventTypeToolCall)
+	f.send(map[string]any{"type": "response.output_item.added",
+		"item": map[string]any{"id": "item_after_call", "type": "message"}})
+	f.send(map[string]any{"type": "response.audio.delta", "delta": "AAAA"})
+	awaitEvent(t, session, EventTypeAudioDelta)
+}
+
+// functionCallOutputs is the tool results the client put into the
+// conversation, in the order it sent them.
+func functionCallOutputs(f *fakeProvider) []map[string]any {
+	var out []map[string]any
+	for _, message := range f.messagesOfType("conversation.item.create") {
+		if item, ok := message["item"].(map[string]any); ok && item["type"] == "function_call_output" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// The live defect: the result is sent while the model is still talking in the
+// response that called the tool, and a request for the next turn in that
+// moment is refused. The result goes in at once; the request waits for the
+// response to end, and then goes out after the result it answers.
+func TestAToolResultSentWhileTheResponseIsOpenAsksForItsTurnWhenItEnds(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, "Say goodbye."); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	// The result goes in at once; only the opening request has been made,
+	// because the floor is still taken.
+	f.awaitMessages("conversation.item.create", 1)
+	if got := len(functionCallOutputs(f)); got != 1 {
+		t.Fatalf("the result was not put into the conversation at once: %d outputs", got)
+	}
+	f.awaitMessages("response.create", 1)
+	f.awaitMessages("response.cancel", 0)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	done := awaitEvent(t, session, EventTypeResponseDone)
+	if done.Status != "completed" {
+		t.Errorf("status = %q", done.Status)
+	}
+
+	f.awaitMessages("response.create", 2)
+	types := typesOf(f.messages())
+	lastRequest := len(types) - 1 - indexOf(reversed(types), "response.create")
+	lastItem := len(types) - 1 - indexOf(reversed(types), "conversation.item.create")
+	if lastRequest < lastItem {
+		t.Errorf("the turn was asked for ahead of the result it answers: %v", types)
+	}
+}
+
+// With the floor free nothing waits: the result and the request go out together,
+// as they always did.
+func TestAToolResultWithTheFloorFreeAsksAtOnce(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	finishTheOpeningTurn(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	f.awaitMessages("response.create", 2)
+	if got := len(functionCallOutputs(f)); got != 1 {
+		t.Errorf("function_call_output items = %d, want 1", got)
+	}
+}
+
+// Parallel tool calls in one response are answered in one turn: every result
+// goes in, and the floor is asked for once.
+func TestSeveralToolResultsForOneResponseAskForOneTurn(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send first tool result: %v", err)
+	}
+	if err := session.SendToolResult("fc_2", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send second tool result: %v", err)
+	}
+	f.awaitMessages("response.create", 1)
+	if got := len(functionCallOutputs(f)); got != 2 {
+		t.Fatalf("function_call_output items = %d, want 2", got)
+	}
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	f.awaitMessages("response.create", 2)
+
+	// The released turn plays out, and nothing more is asked for: the
+	// results were owed one turn between them, not one each.
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+	f.awaitMessages("response.create", 2)
+}
+
+// The caller barges in on the response that called the tool. The provider
+// answers the caller with a response of its own, and that response reads the
+// result that is already in the conversation; a request of ours on top of it
+// would be refused. So nothing is asked for — neither when the cancelled
+// response ends nor when the provider's own begins.
+func TestACallerWhoBargesInIsAnsweredByTheProviderAloneAfterTheDone(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+	awaitEvent(t, session, EventTypeSpeechStarted)
+	if err := session.Interrupt(InterruptReasonSpeech, 320); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+	awaitEvent(t, session, EventTypeInterrupted)
+	// The caller is still talking: nothing is asked for.
+	f.awaitMessages("response.create", 1)
+
+	f.send(map[string]any{"type": "input_audio_buffer.speech_stopped"})
+	awaitEvent(t, session, EventTypeSpeechStopped)
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+
+	// The provider's reply was the turn the result was owed.
+	f.awaitMessages("response.create", 1)
+	f.awaitMessages("response.cancel", 1)
+}
+
+// The same, with the provider's own response created before the one that
+// called the tool is reported done: that response is the owed turn, and the
+// done that follows releases nothing.
+func TestAResponseTheProviderStartsBeforeTheDoneDischargesTheOwedTurn(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+	awaitEvent(t, session, EventTypeSpeechStarted)
+	f.send(map[string]any{"type": "input_audio_buffer.speech_stopped"})
+	awaitEvent(t, session, EventTypeSpeechStopped)
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "completed"}})
+	awaitEvent(t, session, EventTypeResponseDone)
+
+	f.awaitMessages("response.create", 1)
+}
+
+// A line asked for while a tool result's turn waits takes that turn: the line
+// is said with the result in view, and the floor is asked for once, for the
+// line.
+func TestALineAskedForWhileAToolTurnWaitsIsTheOneTurnAskedFor(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, OpenAIProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+	f.awaitMessages("response.create", 1)
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+	event := awaitEvent(t, session, EventTypeInterrupted)
+	if event.InterruptedBy != InterruptReasonSystem {
+		t.Errorf("interruptedBy = %q, want the application's own doing", event.InterruptedBy)
+	}
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the one request is not the line: %q", direction)
+	}
+}
+
+// While the turn is held for the provider's reply to a caller who is still
+// speaking, the floor is spoken for: a line waits for that reply to exist,
+// stops it, and is asked for when it ends — once.
+func TestALineAskedForWhileTheToolTurnIsHeldWaitsForTheProvidersReply(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+	if err := session.Start(t.Context(), basicConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	openATurnThatCallsATool(t, f, session)
+
+	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
+		t.Fatalf("send tool result: %v", err)
+	}
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+	awaitEvent(t, session, EventTypeSpeechStarted)
+	if err := session.Interrupt(InterruptReasonSpeech, 320); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+	awaitEvent(t, session, EventTypeInterrupted)
+
+	if err := session.SpeakText("I am putting you through now."); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.create", 1)
+
+	f.send(map[string]any{"type": "input_audio_buffer.speech_stopped"})
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.awaitMessages("response.cancel", 2)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+	awaitEvent(t, session, EventTypeInterrupted)
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "I am putting you through now.") {
+		t.Errorf("the one request is not the line: %q", direction)
+	}
+}
+
+func reversed(values []string) []string {
+	out := make([]string, len(values))
+	for i, v := range values {
+		out[len(values)-1-i] = v
+	}
+	return out
+}
+
 func TestMergeHint(t *testing.T) {
 	tests := []struct {
 		name   string

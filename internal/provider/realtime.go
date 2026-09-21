@@ -86,6 +86,19 @@ type Realtime struct {
 	isCancelSentForSpeak bool
 	isPreemptedForSpeak  bool
 
+	// The two fields a tool result answered mid-response needs. See
+	// SendToolResult and releaseToolTurn.
+	//
+	// isToolTurnOwed means a tool result is in the conversation and the turn
+	// it asks for has not been requested yet, because a response still held
+	// the floor when it arrived (W-Q4). It is a flag, not a count: however
+	// many results one response produced, they are answered in one turn.
+	// isCallerSpeaking means the provider has reported the caller starting to
+	// speak and neither the end of that speech nor a new response since. Its
+	// own turn detection answers that speech with a response of its own.
+	isToolTurnOwed   bool
+	isCallerSpeaking bool
+
 	// cancelSentAt is when this client last asked the provider to cancel a
 	// response. It is what lets a refusal of that cancel be recognised as
 	// the answer to our own request; see isAnsweredCancel.
@@ -311,7 +324,9 @@ func (r *Realtime) SpeakText(text string) error {
 	}
 
 	r.mu.Lock()
-	isDeferred := r.isResponseOpen.Load() || r.isResponseRequested
+	// An owed tool turn counts as a turn requested: the floor is spoken for,
+	// and asking now would be the second request the provider refuses.
+	isDeferred := r.isResponseOpen.Load() || r.isResponseRequested || r.isToolTurnOwed
 	isCancelNeeded := r.isResponseOpen.Load() && !r.isCancelSentForSpeak
 	if isCancelNeeded {
 		r.isCancelSentForSpeak = true
@@ -369,9 +384,14 @@ var sayExactly = SayExactly
 // requestResponse asks the model for a turn and records that one is on its way.
 // Between here and response.created there is nothing to cancel, which is what
 // SpeakText has to know before it asks for anything.
+//
+// Any request discharges an owed tool turn: the tool output is already in the
+// conversation, so whatever turn comes next is made with it in view, and a
+// second request on top of this one would be refused.
 func (r *Realtime) requestResponse(request map[string]any) error {
 	r.mu.Lock()
 	r.isResponseRequested = true
+	r.isToolTurnOwed = false
 	r.mu.Unlock()
 	return r.sendEvent(request)
 }
@@ -384,6 +404,12 @@ func (r *Realtime) requestResponse(request map[string]any) error {
 func (r *Realtime) onResponseCreated() {
 	r.mu.Lock()
 	r.isResponseRequested = false
+	r.isCallerSpeaking = false
+	// Whoever asked for this response — this client or the provider's own
+	// turn detection answering the caller — it is made with the tool output
+	// in view, so it is the turn that output was owed.
+	wasToolTurnOwed := r.isToolTurnOwed
+	r.isToolTurnOwed = false
 	isCancelNeeded := r.pendingSpeak != "" && !r.isCancelSentForSpeak
 	if isCancelNeeded {
 		r.isCancelSentForSpeak = true
@@ -391,6 +417,9 @@ func (r *Realtime) onResponseCreated() {
 	}
 	r.mu.Unlock()
 
+	if wasToolTurnOwed {
+		r.log.Debug("a new response answers the tool result that was waiting for the floor")
+	}
 	if isCancelNeeded {
 		if err := r.sendCancel(); err != nil {
 			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
@@ -425,6 +454,15 @@ func (r *Realtime) dispatchPendingSpeak() (wasPreempted bool) {
 // The hint travels inside the result rather than as a separate instruction
 // update: the model reads it as part of what it just learned, which is what
 // makes it act on it immediately instead of at some later turn.
+//
+// The result goes into the conversation at once; the turn it asks for may
+// not. A model can go on talking in the same response after calling a tool,
+// and asking for a response while one is open is refused ("Cannot create
+// response while another response is in progress", qwen-findings W-Q4) —
+// OpenAI refuses it too. The turn the result was meant to produce is then
+// never made. So while a response is open, or a tool turn is already owed,
+// the request is owed instead of sent, and releaseToolTurn asks for it once
+// that response is done. Several results in one response owe one turn.
 func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
 	if err := r.sendEvent(map[string]any{
 		"type": "conversation.item.create",
@@ -436,7 +474,70 @@ func (r *Realtime) SendToolResult(toolCallID, output, hint string) error {
 	}); err != nil {
 		return err
 	}
+
+	// Decided after the output is sent, so a turn released by the read loop
+	// can never be requested ahead of the output it is meant to answer. If
+	// the response ends in between, the floor is seen free here and the turn
+	// is asked for now.
+	r.mu.Lock()
+	isOwed := r.isResponseOpen.Load() || r.isToolTurnOwed
+	if isOwed {
+		r.isToolTurnOwed = true
+	}
+	r.mu.Unlock()
+	if isOwed {
+		r.log.Debug("a response holds the floor; the turn for this tool result waits for it to end",
+			"toolCallId", toolCallID)
+		return nil
+	}
 	return r.requestResponse(map[string]any{"type": "response.create"})
+}
+
+// releaseToolTurn asks for the turn a tool result is owed, now that the
+// response that held the floor has ended. The read loop calls it after
+// dispatchPendingSpeak, so a line that was waiting has already taken the
+// floor and — through requestResponse — discharged the tool turn: the line
+// is said with the result in view, and one turn is all the floor holds.
+//
+// The rule for a caller who is speaking: if the provider has reported the
+// caller starting to speak, and neither the end of it nor a new response
+// since, the turn is held rather than requested. That is the ordinary shape
+// of a barge-in — the cancelled response's done arrives one round trip after
+// the speech began, long before the turn detector's silence hold ends it.
+// The provider's own turn detection answers that speech with a response of
+// its own (this client never turns that off), the output is already in the
+// conversation for it to read, and a request of ours would land on top of it
+// and be refused — or, where it wins the race, answer the tool while the
+// caller is still talking. The provider's response.created
+// discharges the held turn (onResponseCreated), as does any request this
+// client makes in the meantime: a keypress's SendUserText, a SpeakText, the
+// dead-air prompt. What is given up is the case where the provider hears
+// speech and then answers nothing; the dead-air prompt is what covers a
+// silent line, and it asks for a turn that reads the output too.
+//
+// Once the speech has ended the turn is no longer held. The provider's reply
+// normally follows within a round trip, and a request of ours in that gap
+// can be refused; but a provider that heard speech while a response was
+// still open may never answer it (echo of the bot's own audio is the usual
+// source), and a refused request costs a WARN where a stranded turn costs the
+// call its next line. The narrower hold is the cheaper mistake.
+func (r *Realtime) releaseToolTurn() {
+	r.mu.Lock()
+	if !r.isToolTurnOwed {
+		r.mu.Unlock()
+		return
+	}
+	if r.isCallerSpeaking {
+		r.mu.Unlock()
+		r.log.Debug("the caller is speaking; the turn for the tool result is left to the provider's reply")
+		return
+	}
+	r.mu.Unlock()
+
+	r.log.Debug("the floor is free; asking for the turn the tool result was waiting for")
+	if err := r.requestResponse(map[string]any{"type": "response.create"}); err != nil {
+		r.log.Warn("could not ask for the turn a tool result was waiting for", "error", err)
+	}
 }
 
 // MergeHint folds steering into a tool result. A result that is already a JSON
@@ -730,9 +831,15 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.emit(Event{Type: EventTypeSessionReady})
 
 	case "input_audio_buffer.speech_started":
+		r.mu.Lock()
+		r.isCallerSpeaking = true
+		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeSpeechStarted})
 
 	case "input_audio_buffer.speech_stopped":
+		r.mu.Lock()
+		r.isCallerSpeaking = false
+		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeSpeechStopped})
 
 	case "response.created":
@@ -803,6 +910,9 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	// turn is reported, so the next words are already being made while the
 	// consumer catches up.
 	isPreemptedForSpeak := r.dispatchPendingSpeak()
+	// Then the turn a tool result answered mid-response is owed, unless the
+	// line just asked for is that turn.
+	r.releaseToolTurn()
 
 	out := Event{Type: EventTypeResponseDone}
 	if event.Response != nil {
@@ -923,6 +1033,8 @@ func (r *Realtime) onResponseStalled(hasAudioArrived bool) {
 	// This path never reaches handleResponseDone, so a line waiting for
 	// a turn the provider walked away from would wait for ever.
 	r.dispatchPendingSpeak()
+	// Nor would a tool result's turn that was waiting for it.
+	r.releaseToolTurn()
 	// Not fatal: the session is still usable, and the caller has heard
 	// whatever did arrive. The flow decides what to say next.
 	r.emit(Event{Type: EventTypeError, Text: reason,
