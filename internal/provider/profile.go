@@ -73,6 +73,31 @@ type Profile struct {
 	// the dialect (flow.RequireTerminalAnnounce).
 	RequiresTerminalAnnounce bool
 
+	// PutsTerminalAnnounceInToolResult means a tool result that moves the call
+	// into a terminal phase with a line of its own carries that line as its
+	// hint (SayExactly), and the turn the result produces is the line: no
+	// SpeakText follows. Where it is false the result carries the new phase's
+	// instruction and SpeakText says the line in a turn of its own, as every
+	// other move does.
+	//
+	// True on the Realtime profiles (openai, qwen, gateway). There asking for
+	// the line in a turn of its own on top of the result measured 0 of 7 on
+	// qwen, because the model follows the tool result it has just read over a
+	// per-response override (docs/design/qwen-findings.md, W-Q1).
+	//
+	// False on doubao, whose SpeakText commits text the engine synthesises and
+	// is exact by construction; a direction to a model is not. False on gemini
+	// for now, for a different reason: that model sometimes answers a tool
+	// result with nothing (gemini-findings W-G6), and the SpeakText that
+	// follows the result is what rescues the line. With the line in the result
+	// instead, such a turn would complete without audio and the armed ending
+	// would release the caller without it. Revisit when W-G6 is fixed.
+	//
+	// Not RequiresTerminalAnnounce: that one says whether a flow may leave a
+	// terminal phase wordless, this one says how the words it did write reach
+	// the caller after a tool call.
+	PutsTerminalAnnounceInToolResult bool
+
 	// SemanticTurnType is this vendor's name for semantic turn detection.
 	SemanticTurnType string
 	// SemanticTurnSilenceMs is the hold the vendor forces in that mode,
@@ -104,7 +129,10 @@ func OpenAIProfile() Profile {
 		LinearInput:           media.PCM16Format(media.RateProviderOut),
 		LinearOutput:          media.PCM16Format(media.RateProviderOut),
 		CancelsResponseItself: true,
-		SemanticTurnType:      "semantic_vad",
+		// A line is a direction to the model, never audio handed over, and
+		// best said in the turn the tool result produces (W-Q1).
+		PutsTerminalAnnounceInToolResult: true,
+		SemanticTurnType:                 "semantic_vad",
 	}
 }
 
@@ -140,7 +168,10 @@ func QwenProfile() Profile {
 		// Verified live: asking for a turn on an empty conversation is
 		// rejected with "conversation has no messages or no user message".
 		NeedsCueForFirstTurn: true,
-		SemanticTurnType:     "smart_turn",
+		// A line asked for in a turn of its own after a tool result lost to
+		// the result 0 of 7 times; carried in the result, 7 of 7 (W-Q1).
+		PutsTerminalAnnounceInToolResult: true,
+		SemanticTurnType:                 "smart_turn",
 		// Selecting semantic turns here rewrites the silence hold to two
 		// seconds and ignores any attempt to lower it, which is why that mode
 		// is opt-in rather than the default.
@@ -195,7 +226,10 @@ func GatewayProfile() Profile {
 		// accepts — the refusal that forces a cue on Qwen's own realtime
 		// dialect does not exist here.
 		NeedsCueForFirstTurn: false,
-		SemanticTurnType:     "semantic_vad",
+		// A line is a direction to whatever the gateway composes, never text
+		// this client can make it synthesise — the same wire as openai.
+		PutsTerminalAnnounceInToolResult: true,
+		SemanticTurnType:                 "semantic_vad",
 	}
 }
 
@@ -215,6 +249,9 @@ func GatewayProfile() Profile {
 // This engine answers audio and nothing else — no text this client sends makes
 // it take a turn — so a phase the call never leaves has to carry its own words
 // or the caller hears silence, and a flow without them is refused at publish.
+// PutsTerminalAnnounceInToolResult is false for the related reason: the words a
+// phase does carry are given to the engine as text to synthesise, not as a
+// direction to a model, so they keep their own SpeakText.
 func DoubaoProfile() Profile {
 	return Profile{
 		Name:     NameDoubao,
@@ -233,6 +270,10 @@ func DoubaoProfile() Profile {
 		LinearInput:              media.PCM16Format(media.RateProviderIn),
 		LinearOutput:             media.PCM16Format(media.RateProviderOut),
 		RequiresTerminalAnnounce: true,
+		// SpeakText commits the line as text the engine synthesises
+		// (speech_text_buffer.commit), so it is said as written; a tool result
+		// keeps the phase's instruction and the line keeps SpeakText.
+		PutsTerminalAnnounceInToolResult: false,
 		// No TranscribeModel, and as on qwen that is the finding rather than an
 		// omission: this engine transcribes the caller unprompted, and its
 		// session payload has no field to ask for it in.
@@ -258,6 +299,9 @@ func DoubaoProfile() Profile {
 // not an oversight: this engine does take words from the client, so a closing
 // line reaches the caller the way it does on openai and qwen — by instruction,
 // best effort, rather than as audio we have synthesised.
+// PutsTerminalAnnounceInToolResult is nevertheless false: this model sometimes
+// answers a tool result with nothing (gemini-findings W-G6), and until that is
+// fixed the SpeakText that follows the result is what makes the line happen.
 func GeminiProfile() Profile {
 	return Profile{
 		Name: NameGemini,
@@ -280,6 +324,10 @@ func GeminiProfile() Profile {
 		LinearInput:              media.PCM16Format(media.RateProviderIn),
 		LinearOutput:             media.PCM16Format(media.RateProviderOut),
 		RequiresTerminalAnnounce: false,
+		// Held back until W-G6 is fixed: a tool result the model leaves
+		// unanswered would end the call without the line, where SpeakText
+		// after the result still says it.
+		PutsTerminalAnnounceInToolResult: false,
 		// No TranscribeModel, and as on qwen that is the finding rather than an
 		// omission — with one honest limit on it. What was measured is that the
 		// transcript of the BOT's own audio arrives whether or not the setup asks

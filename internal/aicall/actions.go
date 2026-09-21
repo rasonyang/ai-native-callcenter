@@ -36,16 +36,28 @@ type callActions struct {
 	recorder *callRecorder
 	facts    *callFacts
 
+	// graceCap overrides actionGraceCap; zero keeps it. Tests only.
+	graceCap time.Duration
+
 	mu    sync.Mutex
 	armed func()
-	// armedInTurn is the model turn the arming tool call arrived in. The
-	// action waits for the playback of a LATER turn: the model speaks its
-	// closing line in the turn created by the tool's own result, and the turn
-	// that carried the tool call may finish playing after arming — acting on
-	// that one would cut in before the line is spoken.
+	// armedInTurn is the model turn in progress when the action was armed —
+	// the turn the arming tool call arrived in. A tool arms inside its own
+	// dispatch, and a terminal phase whose line the tool result carries arms
+	// before the result is sent, so in both cases the turn the answer produces
+	// is a later one. The
+	// action waits for the playback of a LATER turn: the closing line is spoken
+	// in the turn created by the tool's own result (or, on a client that speaks
+	// text outright, in the line's own turn after it), and the turn that
+	// carried the tool call may finish playing after arming — acting on that
+	// one would cut in before the line is spoken.
 	armedInTurn int
 	// isLineSpoken records that a later turn has finished generating — the
-	// closing line exists and is playing out or already played.
+	// closing line exists and is playing out or already played. Only a turn
+	// that ran to completion counts: a turn cut short before its words existed
+	// (a tool-result turn stopped to make room for a line, or one the caller
+	// talked over) is not the line, and counting it let a barge-in fire the
+	// action while the real line was still being generated.
 	isLineSpoken bool
 	// armedGeneration lets the cap timer recognise the action it belongs to.
 	armedGeneration int
@@ -191,7 +203,11 @@ func (a *callActions) arm(_ context.Context, action func()) {
 	generation := a.armedGeneration
 	a.mu.Unlock()
 
-	time.AfterFunc(actionGraceCap, func() {
+	graceCap := a.graceCap
+	if graceCap <= 0 {
+		graceCap = actionGraceCap
+	}
+	time.AfterFunc(graceCap, func() {
 		a.mu.Lock()
 		isStillArmed := a.armed != nil && a.armedGeneration == generation
 		armed := a.armed
@@ -241,10 +257,11 @@ func (a *callActions) onPlaybackDone(turn int) {
 	armed()
 }
 
-// onTurnDone records that the closing line has finished generating.
-func (a *callActions) onTurnDone(turn int) {
+// onTurnDone records that the closing line has finished generating. A turn
+// that was cut short is not the line, whichever turn it was.
+func (a *callActions) onTurnDone(turn int, isInterrupted bool) {
 	a.mu.Lock()
-	if a.armed != nil && turn > a.armedInTurn {
+	if a.armed != nil && turn > a.armedInTurn && !isInterrupted {
 		a.isLineSpoken = true
 	}
 	a.mu.Unlock()

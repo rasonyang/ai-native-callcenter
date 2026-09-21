@@ -293,3 +293,28 @@ func TestGeminiLeavesAFlowsClosingLinesToTheFlow(t *testing.T) {
 			"perfectly well on it would be refused at publish")
 	}
 }
+
+// Only the Realtime profiles answer a tool result that ends the call with the
+// closing line itself. Said out loud because the call path answers the result
+// differently on the two sides (W-Q1, A5c): turning this off for a Realtime
+// profile would put the closing line back in a turn of its own, which qwen
+// measured at 0 of 7; turning it on for doubao would trade an exact line for a
+// best-effort one; and turning it on for gemini before W-G6 is fixed would let
+// an unanswered tool result end the call without the line.
+func TestOnlyTheRealtimeProfilesPutTheClosingLineInTheToolResult(t *testing.T) {
+	for _, testCase := range []struct {
+		profile Profile
+		want    bool
+	}{
+		{OpenAIProfile(), true},
+		{QwenProfile(), true},
+		{GatewayProfile(), true},
+		{DoubaoProfile(), false},
+		{GeminiProfile(), false},
+	} {
+		if got := testCase.profile.PutsTerminalAnnounceInToolResult; got != testCase.want {
+			t.Errorf("%s: PutsTerminalAnnounceInToolResult = %v, want %v",
+				testCase.profile.Name, got, testCase.want)
+		}
+	}
+}

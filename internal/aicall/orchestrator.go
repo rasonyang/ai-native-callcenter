@@ -387,21 +387,13 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 			recorder.say(store.SpeakerCustomer, "[keypad] "+event.Text)
 
 		case EventTypeToolCall:
-			recorder.toolCall(event.ToolName, event.ToolArgs)
-			output, moved := runtime.Dispatch(ctx, event.ToolName, event.ToolArgs)
-			recorder.toolResult(event.ToolName, output)
-			if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
-				log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
-			}
-			// A phase change re-pins the standing instructions, which is what
-			// keeps collected facts alive past a provider's context limits.
-			o.afterMove(moved, session, runtime, actions, log)
+			o.answerToolCall(ctx, event, session, runtime, actions, recorder, log)
 
 		case EventTypeNoInput:
 			o.handleDeadAir(session, runtime, actions, log)
 
 		case EventTypeTurnDone:
-			actions.onTurnDone(event.Turn)
+			actions.onTurnDone(event.Turn, event.IsInterrupted)
 
 		case EventTypeBargeIn:
 			actions.onBargeIn()
@@ -440,6 +432,75 @@ func hangupCauseFor(cause provider.FailureCause) string {
 	return string(cause)
 }
 
+// answerToolCall runs a tool the model asked for, answers it, and follows up
+// whatever phase change the result caused.
+//
+// One move is answered differently: into a terminal phase that has a line of
+// its own, on a profile that puts that line in the tool result
+// (Profile.PutsTerminalAnnounceInToolResult — the Realtime ones). There the
+// tool result's hint IS the line — SayExactly in place of the new phase's
+// instruction — and the turn the result produces is the line's turn; nothing
+// else is asked for. Asking for the line in a turn of its own on top of the
+// result, as every other move does, lost to the result on qwen every time it
+// was measured (0 of 7): the model answers the last thing on the caller's side
+// of the conversation, which is the tool result, over a per-response override.
+// With the line in the result it was said 7 of 7 on qwen, and as often as the
+// other path on openai (docs/design/qwen-findings.md, W-Q1).
+//
+// Doubao keeps its own SpeakText, because that is exact by construction and a
+// direction to a model is not. Gemini keeps it for now: that model sometimes
+// answers a tool result with nothing (gemini-findings W-G6), and the SpeakText
+// after the result is what still says the line then. A phase that is not
+// terminal keeps it on every client: the direction would stay in the history
+// and nobody has measured what it does to the turns after it.
+func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, session *Session,
+	runtime *flow.Runtime, actions *callActions, recorder *callRecorder, log *slog.Logger) {
+
+	recorder.toolCall(event.ToolName, event.ToolArgs)
+	output, moved := runtime.Dispatch(ctx, event.ToolName, event.ToolArgs)
+
+	if !o.isLineTheToolAnswer(moved, runtime) {
+		recorder.toolResult(event.ToolName, output)
+		if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
+			log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
+		}
+		// A phase change re-pins the standing instructions, which is what
+		// keeps collected facts alive past a provider's context limits.
+		o.afterMove(moved, session, runtime, actions, log)
+		return
+	}
+
+	// The flow's own hint for the move is the new phase's instruction; the
+	// line replaces it, in the language the line is written in. The phase's
+	// instruction still reaches the model, as the standing instructions.
+	output = provider.MergeHint(output,
+		provider.SayExactly(runtime.Announce(), runtime.Engine().Lang()))
+	recorder.toolResult(event.ToolName, output)
+
+	// Before the answer, both of them. The instructions first, so the turn the
+	// answer asks for runs under the terminal phase's. The ending second: it
+	// remembers the turn in progress and waits for the playback of a later
+	// one, and the answer is what brings the line's turn into existence —
+	// arming after it would race that turn into being before it was recorded,
+	// and no playback would ever count.
+	o.enterPhase(moved, session, runtime, actions, log)
+	log.Info("the tool's answer asks for the phase's own line", "node", moved)
+	if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
+		log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
+	}
+}
+
+// isLineTheToolAnswer reports whether a tool result that moved the call to
+// moved should carry the new phase's line itself, rather than have it asked for
+// in a turn of its own: only into a terminal phase with a line, and only on a
+// profile that puts that line in the result. See answerToolCall.
+func (o *Orchestrator) isLineTheToolAnswer(moved string, runtime *flow.Runtime) bool {
+	return moved != "" &&
+		o.cfg.Profile.PutsTerminalAnnounceInToolResult &&
+		runtime.Engine().IsTerminal() &&
+		runtime.Announce() != ""
+}
+
 // afterMove follows up a phase change: the standing instructions are re-pinned
 // so collected facts survive a provider's context limits, the phase's own line
 // is said where it has one, and a terminal phase ends the call once its closing
@@ -455,12 +516,7 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 	if moved == "" {
 		return false
 	}
-	if err := session.Reinstruct(runtime.Instructions()); err != nil {
-		log.Warn("could not update instructions", "error", err)
-	}
-	if runtime.Engine().IsTerminal() {
-		o.armTheEnding(moved, session, actions, log)
-	}
+	o.enterPhase(moved, session, runtime, actions, log)
 	// Last, and that ordering is load-bearing on a terminal phase. Arming
 	// remembers the turn it happened in and waits for the playback of a later
 	// one, because the closing line is spoken in a turn of its own. Asking for
@@ -475,6 +531,19 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 		return true
 	}
 	return false
+}
+
+// enterPhase re-pins the standing instructions for the phase the call has just
+// moved to and, when that phase is terminal, arms the call's ending.
+func (o *Orchestrator) enterPhase(moved string, session *Session,
+	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
+
+	if err := session.Reinstruct(runtime.Instructions()); err != nil {
+		log.Warn("could not update instructions", "error", err)
+	}
+	if runtime.Engine().IsTerminal() {
+		o.armTheEnding(moved, session, actions, log)
+	}
 }
 
 // armTheEnding schedules the end of a call the flow has concluded, for once the

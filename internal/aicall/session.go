@@ -76,6 +76,11 @@ type Event struct {
 
 	Status string
 	Usage  provider.Usage
+	// IsInterrupted marks a TURN_DONE whose turn was cut short — by the
+	// caller, by a keypress, or to make room for another turn. Such a turn
+	// never reaches PLAYBACK_DONE, and what it produced is not a line anybody
+	// can count on having been said.
+	IsInterrupted bool
 
 	Err error
 	// FailureCause is why a FAILED event happened, when the provider put a name
@@ -461,7 +466,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			s.tellTheModelWhatWasHeard(event.InterruptedBy, playedMs)
 		}
 		s.emit(Event{Type: EventTypeTurnDone, Status: event.Status,
-			Usage: event.Usage, Turn: s.currentTurn()})
+			Usage: event.Usage, Turn: s.currentTurn(), IsInterrupted: true})
 
 	case provider.EventTypeResponseStarted:
 		s.beginTurn()

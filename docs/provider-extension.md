@@ -69,9 +69,10 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
 | `NeedsCueForFirstTurn` | Whether it refuses to speak into an empty conversation. Our bot greets first, so those providers need a synthetic cue. |
 | `RequiresTerminalAnnounce` | Whether *no* text will make it take a turn. Stronger than the row above: a cue is something a client can invent, and this says there is no cue at all, so a phase the call stops at must carry its own words or the caller hears silence. A publish is refused otherwise. |
+| `PutsTerminalAnnounceInToolResult` | Whether a tool result that moves the call into a terminal phase with an `announce` carries the line as its hint (`SayExactly`), so the turn the result produces is the line, or carries the phase's instruction and has the line said with `SpeakText`. True on the Realtime profiles, where a line asked for on top of the result lost to it on qwen (qwen-findings W-Q1). False on doubao, whose `SpeakText` is exact by construction, and on gemini until a tool result it leaves unanswered is fixed (gemini-findings W-G6). |
 | `SemanticTurnType`, `SemanticTurnSilenceMs` | The vendor's name for semantic turn detection, and the hold it forces in that mode regardless of what was asked |
 
-The last five are the interesting ones. They are not configuration in any
+The last six are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call
 behaved differently from the documentation, and each is a bug somewhere else in
 the call if it is wrong.
@@ -86,7 +87,10 @@ reason — the version, or the model name, is a constant inside the client, and
 `AICC_PROVIDER_MODEL` cannot move it. Where the two differ is
 `RequiresTerminalAnnounce`: true on doubao, whose engine takes no text cue at
 all, and false on gemini, which speaks a line it is given the way the Realtime
-client's engines do.
+client's engines do. `PutsTerminalAnnounceInToolResult` is false on both, for
+different reasons: doubao's `SpeakText` commits text the engine synthesises,
+and gemini sometimes answers a tool result with nothing, which the `SpeakText`
+after it still covers (gemini-findings W-G6).
 
 ## The steps
 

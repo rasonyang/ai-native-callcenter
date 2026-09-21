@@ -125,6 +125,12 @@ type fakeModel struct {
 	// the moment the line is asked for rather than whenever an event pump gets
 	// to it — otherwise the ordering it is checking is not exercised at all.
 	onSpeak func(string)
+	// onToolResult runs inside SendToolResult, for a test that needs to see
+	// what was already true at the moment a tool was answered.
+	onToolResult func()
+	// calls names the conversation-control methods in the order they were
+	// called: SendToolResult, UpdateInstructions, SpeakText.
+	calls []string
 }
 
 type toolResult struct{ id, output, hint string }
@@ -165,8 +171,16 @@ func (m *fakeModel) SendUserText(text string) error {
 
 func (m *fakeModel) SendToolResult(id, output, hint string) error {
 	m.mu.Lock()
+	onToolResult := m.onToolResult
+	m.mu.Unlock()
+	if onToolResult != nil {
+		onToolResult()
+	}
+
+	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.toolResults = append(m.toolResults, toolResult{id, output, hint})
+	m.calls = append(m.calls, "SendToolResult")
 	return nil
 }
 
@@ -174,12 +188,14 @@ func (m *fakeModel) UpdateInstructions(text string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.instructions = append(m.instructions, text)
+	m.calls = append(m.calls, "UpdateInstructions")
 	return nil
 }
 
 func (m *fakeModel) SpeakText(text string) error {
 	m.mu.Lock()
 	m.spoken = append(m.spoken, text)
+	m.calls = append(m.calls, "SpeakText")
 	onSpeak := m.onSpeak
 	m.mu.Unlock()
 
@@ -237,6 +253,20 @@ func (m *fakeModel) spokenLines() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.spoken...)
+}
+
+// recordedCalls are the conversation-control calls, in order.
+func (m *fakeModel) recordedCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.calls...)
+}
+
+// recordedToolResults are the tool answers, in order.
+func (m *fakeModel) recordedToolResults() []toolResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]toolResult(nil), m.toolResults...)
 }
 
 func (m *fakeModel) failSends(err error) {
