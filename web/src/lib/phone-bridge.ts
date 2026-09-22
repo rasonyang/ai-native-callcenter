@@ -103,12 +103,51 @@ export const PRESENCE_MARKER = 'webSipPhone'
 const PRESENCE_ATTRIBUTE = 'data-web-sip-phone'
 
 /**
- * How long a hello may go unanswered before the extension is taken to be
- * gone. A live content script answers within the same task; the margin is for
- * a busy tab, not for a slow extension. It is a single timer per hello, armed
- * by an event and cancelled by the reply, never a loop.
+ * How long a hello may go unanswered before it is asked again. A live content
+ * script answers within the same task; the margin is for a busy tab, not for
+ * a slow extension.
  */
 export const HELLO_TIMEOUT_MS = 2000
+
+/**
+ * How many times one question is asked before silence is taken for an answer.
+ *
+ * A single miss is not proof of absence. A tab that has just woken from a
+ * machine asleep runs its timers late and its listeners later, and latching
+ * "no extension" on the first miss told an agent whose phone was registered
+ * the whole time to go and install it. Removing the marker is still immediate:
+ * that is the extension saying it has gone, not this page guessing.
+ */
+export const HELLO_ATTEMPTS = 3
+
+/**
+ * Where this browser remembers that it has seen the extension answer.
+ *
+ * It is a latch, not a cache: nothing is read back off it but the one fact
+ * that the pair have talked before on this browser, which is what separates
+ * "not installed" from "installed and out of reach". Storage can be absent or
+ * refused (private window, blocked site data), so every access is guarded and
+ * a failure means the browser simply has no memory of it.
+ */
+export const PHONE_SEEN_STORAGE_KEY = 'aicc.phone.extensionSeen'
+
+function readSeenLatch(): boolean {
+  try {
+    return window.localStorage.getItem(PHONE_SEEN_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function writeSeenLatch(seen: boolean): void {
+  try {
+    if (seen) window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
+    else window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
+  } catch {
+    // A browser that will not store it is a browser that will not remember
+    // it. Nothing above this line depends on the memory being there.
+  }
+}
 
 export type PhoneRegistration = 'UNREGISTERED' | 'REGISTERING' | 'REGISTERED' | 'FAILED'
 
@@ -154,11 +193,25 @@ export interface ExtensionState {
 
 export interface PhoneBridge {
   /**
-   * The extension is answering: a hello reply carrying one of our own nonces
-   * has arrived, and neither has the marker been removed since nor has a
-   * later hello gone unanswered.
+   * The extension is answering: a hello reply carrying one of our own nonces,
+   * or a state it reported, has arrived — and neither has the marker been
+   * removed since nor has a later run of hellos gone unanswered to its last
+   * attempt.
    */
   detected: boolean
+  /**
+   * The extension has answered this page at least once — in this page load or
+   * in an earlier one on this browser, which is what the stored latch adds.
+   */
+  wasDetected: boolean
+  /**
+   * The extension was there and is not answering now. It is still installed,
+   * still holding the registration in its own worker, and out of reach of
+   * this page: the content script was torn down while the tab slept, and only
+   * a navigation puts it back. Telling the agent to install it would be a
+   * lie; the honest instruction is to reload.
+   */
+  isLost: boolean
   extensionVersion: string | null
   /** The id the extension announced for itself, if it announced one. */
   extensionId: string | null
@@ -188,6 +241,8 @@ export interface PhoneBridge {
  */
 const INERT: PhoneBridge = {
   detected: false,
+  wasDetected: false,
+  isLost: false,
   extensionVersion: null,
   extensionId: null,
   state: null,
@@ -251,19 +306,39 @@ function readExtensionMessage(event: MessageEvent): ExtensionMessage | null {
  */
 export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): PhoneBridge {
   const [detected, setDetected] = useState(false)
+  /** Seeded from the browser's own memory: an earlier page load counts. */
+  const [wasDetected, setWasDetected] = useState(readSeenLatch)
   const [extensionVersion, setExtensionVersion] = useState<string | null>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [state, setState] = useState<ExtensionState | null>(null)
   const [isOnboardingForced, setOnboardingForced] = useState(false)
   const nonces = useRef(new Set<string>())
-  /** The one outstanding hello's deadline, if a hello is outstanding. */
-  const helloTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** The outstanding question's clock: it ticks once per unanswered hello. */
+  const helloTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  /** Whether anything has answered since this page loaded. */
+  const hasAnswered = useRef(false)
 
   const clearHelloTimer = useCallback(() => {
     if (helloTimer.current === null) return
-    clearTimeout(helloTimer.current)
+    clearInterval(helloTimer.current)
     helloTimer.current = null
   }, [])
+
+  /**
+   * The extension has spoken — a hello reply or a state, either is proof it
+   * is listening. Whatever question was outstanding has been answered, and
+   * this browser now remembers the two have met.
+   */
+  const noteAnswered = useCallback(() => {
+    clearHelloTimer()
+    setDetected(true)
+    // Written once per page load. A state arrives whenever the registration
+    // moves, and none of those is news to the browser's memory.
+    if (hasAnswered.current) return
+    hasAnswered.current = true
+    setWasDetected(true)
+    writeSeenLatch(true)
+  }, [clearHelloTimer])
 
   const post = useCallback((message: Record<string, unknown>) => {
     window.postMessage(
@@ -273,18 +348,35 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
   }, [])
 
   const sendHello = useCallback(() => {
-    const nonce = newNonce()
-    nonces.current.add(nonce)
+    const ask = () => {
+      const nonce = newNonce()
+      nonces.current.add(nonce)
+      post({ type: 'hello', nonce })
+    }
     // An extension that was answering and has stopped — disabled, removed,
     // or invalidated by an update that left its old marker behind — says
-    // nothing at all, so silence past the deadline is the answer. Each hello
-    // moves the deadline: it is the latest question that is waiting.
+    // nothing at all, so silence past the last attempt is the answer. Each
+    // call restarts the run: it is the latest question that is waiting.
     clearHelloTimer()
-    helloTimer.current = setTimeout(() => {
-      helloTimer.current = null
+    let attemptsLeft = HELLO_ATTEMPTS - 1
+    helloTimer.current = setInterval(() => {
+      if (attemptsLeft > 0) {
+        attemptsLeft -= 1
+        ask()
+        return
+      }
+      clearHelloTimer()
       setDetected(false)
+      // Nothing has ever answered this page and nothing answers now: the
+      // extension is not out of reach, it is not here. A browser that goes on
+      // claiming it saw one would keep offering "reload" to an agent who has
+      // to install it instead.
+      if (!hasAnswered.current) {
+        setWasDetected(false)
+        writeSeenLatch(false)
+      }
     }, HELLO_TIMEOUT_MS)
-    post({ type: 'hello', nonce })
+    ask()
   }, [post, clearHelloTimer])
 
   const provision = useCallback(
@@ -305,12 +397,11 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
         // A reply to a hello we sent, and to no other page's.
         if (!nonces.current.has(message.nonce)) return
         nonces.current.delete(message.nonce)
-        clearHelloTimer()
         // A hello answers "is it there", and nothing else. It is sent again
         // on every tab switch and every late injection, so anything that
         // hangs off it happens on every tab switch too — and minting a
         // session flushes the registration the last one was holding.
-        setDetected(true)
+        noteAnswered()
         setExtensionVersion(message.extensionVersion)
         // Optional, and only believed when it looks like an id at all. An
         // older extension announces none and the build-time id answers for it.
@@ -319,6 +410,12 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
         }
         return
       }
+      // A state is an extension talking, so it proves presence exactly as a
+      // hello reply does — and it is the one message that keeps arriving
+      // unprompted. A page that only believed replies could watch the phone
+      // report a live registration while telling the agent there was no
+      // extension at all.
+      noteAnswered()
       // Only the state's own fields: the envelope is how the message got
       // here, not something a consumer should be able to read back off it.
       setState({
@@ -336,7 +433,7 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
       window.removeEventListener('message', onMessage)
       clearHelloTimer()
     }
-  }, [clearHelloTimer])
+  }, [clearHelloTimer, noteAnswered])
 
   useEffect(() => {
     if (!enabled) return
@@ -380,6 +477,11 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
 
   return {
     detected,
+    wasDetected,
+    // The one reading the setup card must not treat as "nothing installed".
+    // A page that never asked has lost nothing: an account with no phone is
+    // not an agent whose phone went quiet.
+    isLost: enabled && !detected && wasDetected,
     extensionVersion,
     extensionId,
     state,

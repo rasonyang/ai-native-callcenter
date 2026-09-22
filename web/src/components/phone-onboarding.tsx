@@ -28,7 +28,8 @@ import { optionsUrl, usePhoneBridge, webStoreUrl } from '@/lib/phone-bridge'
  */
 export function PhoneOnboarding() {
   const { t } = useTranslation()
-  const { detected, state, extensionId, isOnboardingForced, closeOnboarding } = usePhoneBridge()
+  const { detected, isLost, state, extensionId, isOnboardingForced, closeOnboarding } =
+    usePhoneBridge()
 
   // A state is only as current as the extension that sent it: once it has
   // stopped answering, its last word about the microphone is not evidence.
@@ -37,6 +38,14 @@ export function PhoneOnboarding() {
   const open = isRequired || isOnboardingForced
 
   if (!open) return null
+
+  // An extension that has answered this browser before and is not answering
+  // now is installed, allowed and registered — its worker held the SIP
+  // registration right through the machine being asleep. What went away is
+  // the content script in this tab, and only a navigation brings it back.
+  // Three undone steps here would be three lies. An agent who opened the card
+  // themselves asked for the steps, and gets them.
+  if (isLost && !isOnboardingForced) return <LostContactCard />
 
   return (
     // Nothing dismisses it while a step is undone. An agent who opened it
@@ -91,6 +100,40 @@ export function PhoneOnboarding() {
               </ExternalLink>
             </Step>
           </ol>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
+  )
+}
+
+/**
+ * The card for a phone that is there but out of reach.
+ *
+ * It blocks like the setup card does — a page that cannot reach the extension
+ * cannot ring, answer or hang up, so there is nothing behind it to work with
+ * — and it says the one true thing and offers the one action that fixes it.
+ */
+function LostContactCard() {
+  const { t } = useTranslation()
+  return (
+    <Dialog.Root open>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/20" />
+        <Dialog.Content
+          className="fixed left-1/2 top-1/2 z-50 w-[400px] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-card p-4 shadow-md"
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onPointerDownOutside={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
+          <Dialog.Title className="text-base font-medium">{t('phone.lost.title')}</Dialog.Title>
+          <Dialog.Description className="mt-1 text-xs text-muted-foreground">
+            {t('phone.lost.text')}
+          </Dialog.Description>
+          <div className="mt-4 flex justify-end">
+            <Button size="sm" onClick={() => window.location.reload()}>
+              {t('phone.lost.action')}
+            </Button>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

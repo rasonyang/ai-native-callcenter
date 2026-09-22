@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
 import { SoftphoneBar } from '@/components/softphone-bar'
 import { usePresence } from '@/lib/agent'
-import { PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
+import { PHONE_SEEN_STORAGE_KEY, PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
 import { useLogout, useSession } from '@/lib/session'
 import type { ExtensionState } from '@/lib/phone-bridge'
 import {
@@ -40,6 +40,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   delete document.documentElement.dataset.webSipPhone
+  // Having met the extension is remembered per browser, and every test here
+  // shares one. A test about a browser that has never had it says so.
+  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
 })
 
 /** The bar as it is mounted in the app shell: below the phone bridge. */
@@ -420,6 +423,17 @@ describe('the phone', () => {
   it('offers setup instead when no extension answers', async () => {
     await renderBar({ extension: false })
     expect(await screen.findByRole('button', { name: /set up phone/i })).toBeInTheDocument()
+  })
+
+  // The same silence on a browser that has had the extension means something
+  // else entirely: it is installed and registered, and only this page has
+  // lost its content script. "Set up phone" would send the agent to install
+  // what they already have.
+  it('says it lost contact when a browser that had the extension hears nothing', async () => {
+    window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
+    await renderBar({ extension: false })
+    expect(await screen.findByText(/lost contact/i)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /set up phone/i })).toBeNull()
   })
 
   it('will not let an agent go ready with no registration on the switch', async () => {
