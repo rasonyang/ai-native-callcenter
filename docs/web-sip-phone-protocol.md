@@ -145,7 +145,9 @@ for, and the phone is revoked just the same.
 
 Two failures are ordinary and both are visible. A registration lost while the
 agent is READY moves them to `NOT_READY` with reason `DEVICE_LOST`, because an
-agent with no phone cannot be sent a call. A second login for the same agent
+agent with no phone cannot be sent a call — and the same registration coming
+back puts them straight back to READY, since `DEVICE_LOST` is the platform's
+own reason to withdraw and no reason the agent or a supervisor chose is touched. A second login for the same agent
 elsewhere issues a new session, which displaces this one — the page says "phone
 moved to another browser" rather than showing a registration that is quietly
 no longer valid.
