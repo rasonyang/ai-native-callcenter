@@ -2,7 +2,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { HELLO_TIMEOUT_MS, usePhoneBridgeValue, type PhoneBridge } from '@/lib/phone-bridge'
+import {
+  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, PHONE_SEEN_STORAGE_KEY, usePhoneBridgeValue,
+  type PhoneBridge,
+} from '@/lib/phone-bridge'
 import { installBackend, installFakeExtension, sipSessionFixture } from '@/test/harness'
 
 /**
@@ -95,7 +98,16 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   delete document.documentElement.dataset.webSipPhone
+  // The latch outlives a page load by design, so it must not outlive a test.
+  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
 })
+
+/** Every attempt of one run of hellos gone unanswered, deadline included. */
+function letEveryHelloGoUnanswered() {
+  act(() => {
+    vi.advanceTimersByTime(HELLO_TIMEOUT_MS * HELLO_ATTEMPTS)
+  })
+}
 
 describe('what the page posts', () => {
   it('says hello on mount, on this origin, under our name and version', async () => {
@@ -248,7 +260,13 @@ describe('detection over time', () => {
     await act(async () => extension.uninstall())
   })
 
-  it('forgets the extension when a later hello goes unanswered', async () => {
+  /**
+   * A miss is not an absence. A tab that has just woken runs its timers late
+   * and its listeners later, and one silent hello there was enough to tell an
+   * agent whose phone was registered the whole time that they had no
+   * extension. The question is asked again before silence is believed.
+   */
+  it('asks again before it forgets an extension that missed one hello', async () => {
     installBackend()
     renderBridge()
     await waitFor(() => expect(postMessage).toHaveBeenCalled())
@@ -258,17 +276,48 @@ describe('detection over time', () => {
     vi.useFakeTimers()
     // The tab comes back, the page asks again, and nothing answers: an
     // instance invalidated by an update that left its marker behind.
+    const before = postMessage.mock.calls.length
     act(() => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
+    for (let attempt = 1; attempt < HELLO_ATTEMPTS; attempt += 1) {
+      act(() => {
+        vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+      })
+      // Still asking, so still detected: this one is not over yet.
+      expect(bridge.detected).toBe(true)
+    }
+    expect(postMessage.mock.calls.length - before).toBe(HELLO_ATTEMPTS)
     act(() => {
-      vi.advanceTimersByTime(HELLO_TIMEOUT_MS - 1)
-    })
-    expect(bridge.detected).toBe(true)
-    act(() => {
-      vi.advanceTimersByTime(1)
+      vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
     })
     expect(bridge.detected).toBe(false)
+  })
+
+  // The extension keeps reporting its registration unprompted, and a report
+  // is an extension talking. A page that only believed hello replies watched
+  // the phone say REGISTERED while it told the agent to go and install one.
+  it('takes a state as proof of presence after a hello went unanswered', async () => {
+    installBackend()
+    const extension = installFakeExtension({ answersHello: false })
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+
+    vi.useFakeTimers()
+    letEveryHelloGoUnanswered()
+    expect(bridge.detected).toBe(false)
+
+    act(() => {
+      extension.report({ registration: 'REGISTERED' })
+    })
+    expect(bridge.detected).toBe(true)
+    expect(bridge.state?.registration).toBe('REGISTERED')
+    // And the deadline that would have unset it again is gone with the rest.
+    act(() => {
+      vi.advanceTimersByTime(HELLO_TIMEOUT_MS * HELLO_ATTEMPTS * 2)
+    })
+    expect(bridge.detected).toBe(true)
+    extension.uninstall()
   })
 
   it('stays detected when the hello is answered inside the deadline', async () => {
@@ -547,6 +596,104 @@ describe('provisioning', () => {
     })
     await waitFor(() => expect(mints(api)).toBe(attempts + 1))
     extension.uninstall()
+  })
+})
+
+/**
+ * Out of reach is not uninstalled.
+ *
+ * The extension holds its registration in a worker that survives the machine
+ * sleeping; the content script in a sleeping tab does not. What the page sees
+ * is the marker going and the hellos stopping — the same signals an uninstall
+ * gives — so it keeps the one fact that separates them: whether this browser
+ * has ever had the two talking.
+ */
+describe('an extension this page has lost', () => {
+  it('is lost, not absent, once the marker goes after a hello was answered', async () => {
+    installBackend()
+    const extension = installFakeExtension()
+    extension.mark()
+    renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    expect(bridge.wasDetected).toBe(true)
+    expect(bridge.isLost).toBe(false)
+
+    await act(async () => {
+      extension.uninstall()
+    })
+    await waitFor(() => expect(bridge.detected).toBe(false))
+    expect(bridge.wasDetected).toBe(true)
+    expect(bridge.isLost).toBe(true)
+  })
+
+  it('is absent, not lost, on a browser that has never seen one', async () => {
+    installBackend()
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+    await act(async () => {})
+    expect(bridge.detected).toBe(false)
+    expect(bridge.wasDetected).toBe(false)
+    expect(bridge.isLost).toBe(false)
+  })
+
+  // A fresh page load is where the real case lands: the tab slept, the
+  // content script went with it, and the page comes up knowing nothing —
+  // except what this browser wrote down the last time they spoke.
+  it('remembers across a page load that this browser has had one', async () => {
+    installBackend()
+    const extension = installFakeExtension()
+    const first = renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {
+      extension.uninstall()
+      first.unmount()
+    })
+
+    renderBridge()
+    await waitFor(() => expect(postMessage).toHaveBeenCalled())
+    expect(bridge.wasDetected).toBe(true)
+    expect(bridge.isLost).toBe(true)
+  })
+
+  // Private windows and blocked site data both make this throw. A page whose
+  // phone depends on storage being there has one more way to fail.
+  it('works, without the memory, where storage refuses to answer', async () => {
+    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('storage is not available')
+    })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage is not available')
+    })
+    installBackend()
+    const extension = installFakeExtension()
+    extension.mark()
+    renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    // Held in memory for this page load, which is all a browser that will not
+    // store it can offer — and enough for the reading that matters.
+    expect(bridge.wasDetected).toBe(true)
+    await act(async () => {
+      extension.uninstall()
+    })
+    await waitFor(() => expect(bridge.isLost).toBe(true))
+  })
+
+  // The other half of the latch: a browser that really has no extension any
+  // more must stop being told to reload and be told to install instead.
+  it('forgets the browser ever had one when a fresh page load finds nothing', async () => {
+    installBackend()
+    window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
+    // The clock is faked before the page loads, so the run of hellos this
+    // mount starts is the one that goes unanswered.
+    vi.useFakeTimers()
+    renderBridge()
+    expect(postMessage).toHaveBeenCalled()
+    expect(bridge.isLost).toBe(true)
+
+    letEveryHelloGoUnanswered()
+    expect(bridge.wasDetected).toBe(false)
+    expect(bridge.isLost).toBe(false)
+    expect(window.localStorage.getItem(PHONE_SEEN_STORAGE_KEY)).toBeNull()
   })
 })
 

@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PhoneOnboarding } from '@/components/phone-onboarding'
-import { PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
+import {
+  PHONE_SEEN_STORAGE_KEY, PhoneBridgeProvider, usePhoneBridgeValue, type PhoneBridge,
+} from '@/lib/phone-bridge'
 import {
   installBackend, installFakeExtension, renderWithProviders, type FakeExtension,
 } from '@/test/harness'
@@ -22,10 +24,17 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   delete document.documentElement.dataset.webSipPhone
+  // Having met the extension once is remembered per browser, which is the
+  // point of the latch and would otherwise be remembered per test run too.
+  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
 })
+
+/** The bridge behind the card, so a test can ask for the card itself. */
+let bridge: PhoneBridge
 
 function Card() {
   const phone = usePhoneBridgeValue(true)
+  bridge = phone
   return (
     <PhoneBridgeProvider value={phone}>
       <PhoneOnboarding />
@@ -184,7 +193,15 @@ describe('as the agent works through it', () => {
     await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
   })
 
-  it('comes back, with every step undone, when the extension removes its marker', async () => {
+  /**
+   * The extension holds the registration in a worker that survives the
+   * machine sleeping; the content script in the sleeping tab does not, and it
+   * takes its marker with it. The phone is installed, allowed and registered
+   * — three undone steps would be three lies, and the agent would go looking
+   * for a Web Store page to reinstall what they already have. The one true
+   * thing is that this page cannot reach it, and the one cure is a reload.
+   */
+  it('says it lost contact, not that nothing is installed, when the marker goes', async () => {
     const fake = installFakeExtension({ state: { microphone: 'GRANTED' } })
     extension = fake
     fake.mark()
@@ -193,8 +210,42 @@ describe('as the agent works through it', () => {
     await act(async () => {
       fake.uninstall()
     })
+    expect(await screen.findByText(/lost contact with this page/i)).toBeInTheDocument()
+    expect(screen.queryByText(/set up your phone/i)).toBeNull()
+    expect(screen.queryByRole('listitem')).toBeNull()
+
+    const reload = vi.fn()
+    vi.stubGlobal('location', { ...window.location, reload })
+    await userEvent.click(screen.getByRole('button', { name: /reload the page/i }))
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  // Asking for the card is asking for the steps: an agent who opens it
+  // themselves wants the links into the extension, whatever the page can
+  // currently reach.
+  it('still shows the three steps when the agent opens the card themselves', async () => {
+    const fake = installFakeExtension({ state: { microphone: 'GRANTED' } })
+    extension = fake
+    fake.mark()
+    renderCard()
+    await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
+    await act(async () => {
+      fake.uninstall()
+    })
+    await screen.findByText(/lost contact with this page/i)
+    await act(async () => {
+      bridge.openOnboarding()
+    })
     expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
-    expect(steps().map((s) => s.isDone)).toEqual([false, false, false])
+    expect(steps()).toHaveLength(3)
+  })
+
+  // A browser that has never had the extension is told to install it, as it
+  // always was: nothing has been seen here to lose contact with.
+  it('asks an untouched browser to install it, not to reload', async () => {
+    renderCard()
+    expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
+    expect(screen.queryByText(/lost contact with this page/i)).toBeNull()
   })
 
   it('stays while an extension that said hello has not reported yet', async () => {

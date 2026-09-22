@@ -198,3 +198,29 @@ L3 builds on this harness.
   manager and no FreeSWITCH headers, so `mod_audio_stream` could not be
   compiled into it at all, and live transcription needs it
   (`08-transcription.md` §B.5).
+
+---
+
+## Addendum (2026-09-22) — a platform-set reason has to be withdrawn by the platform
+
+Found on a live agent, not in a test: a macOS lock/unlock let the browser
+phone's registration lease expire during sleep, the platform took the READY
+agent out of routing under `DEVICE_LOST`, the phone re-registered on unlock —
+and the agent stayed `NOT_READY(DEVICE_LOST)` with the timer running, the
+presence pill reading "Phone lost" beside a phone chip reading "Phone ready ·
+1001". Nothing was wrong with the phone, and only the agent pressing *Go ready*
+could say so.
+
+`releaseForLostDevice` had no counterpart. It has one now
+(`restoreForReturnedDevice`): a `REGISTERED` signal for an agent who is
+`NOT_READY` with reason exactly `DEVICE_LOST` returns them to READY, through
+`Presence.Ready` like any other return, so the registration gate still applies.
+`DEVICE_LOST` is the only reason withdrawn this way, because it is the only one
+the platform set on its own — a phone coming back says nothing about a break, a
+lunch, a supervisor's decision or an unfiled wrap-up, and each of those is left
+exactly where it stands. Cause then consequence, as on the way out: the
+`DEVICE_REGISTERED` event first, then `AGENT_READY`, and no presence event at
+all when nothing moved.
+
+Amended in place: `01-telephony.md` §3, `05-frontend.md` §4 and
+`../web-sip-phone-protocol.md` §4.

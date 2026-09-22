@@ -186,6 +186,44 @@ describe('the phone chip', () => {
     },
   )
 
+  /**
+   * Not detected is two different browsers. One has never had the extension
+   * and is told to install it; one had it a moment ago, still holds the
+   * registration in the extension's own worker, and has only lost the content
+   * script in this tab. Telling the second to set up a phone it already has
+   * is the bug this branch exists to prevent — the chip says reload instead.
+   */
+  it('tells a browser that has lost contact to reload, not to set up a phone', () => {
+    const lost = phoneChipFor(true, undefined, MINE, true)
+    expect(lost).toMatchObject({
+      kind: 'lost',
+      labelKey: 'phone.chip.lost',
+      isReadyAllowed: false,
+    })
+    expect(lost.action).toBeUndefined()
+    // It reads as a fault, like the other chips that need attention.
+    expect(lost.dot).toBe('var(--state-breach)')
+  })
+
+  it('still asks a browser that never had one to set it up', () => {
+    expect(phoneChipFor(false, undefined, MINE, false)).toMatchObject({
+      kind: 'setup',
+      labelKey: 'phone.chip.setup',
+      action: 'setup',
+    })
+    // The parameter is an addition, so the calls that predate it are unmoved.
+    expect(phoneChipFor(false, undefined, MINE)).toMatchObject({ kind: 'setup' })
+  })
+
+  // Lost contact says nothing about what the extension last reported: a
+  // reading it is still making outranks a page that cannot hear it.
+  it('ignores the loss for an extension that is answering', () => {
+    expect(phoneChipFor(true, ext(), MINE, true)).toMatchObject({
+      kind: 'ready',
+      isReadyAllowed: true,
+    })
+  })
+
   // The way out of an override is the Options page that made it. Offering to
   // re-provision would replace a credential the extension has been told to
   // hold dormant, and flush the registration the manual account is using.

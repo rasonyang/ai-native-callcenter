@@ -22,6 +22,7 @@ export type { SipSession } from './api'
  */
 export type PhoneChipKind =
   | 'setup'
+  | 'lost'
   | 'connecting'
   | 'ready'
   | 'error'
@@ -44,6 +45,11 @@ export interface PhoneChip {
 
 const CHIP: Record<PhoneChipKind, Omit<PhoneChip, 'labelKey'>> = {
   setup: { kind: 'setup', dot: 'var(--state-offline)', action: 'setup', isReadyAllowed: false },
+  // The extension is there and this page cannot reach it. It reads as a
+  // fault, not as an empty browser, so it wears the fault colour — and it
+  // offers no action here: the only cure is a reload, and the card behind
+  // this chip is where that button lives.
+  lost: { kind: 'lost', dot: 'var(--state-breach)', isReadyAllowed: false },
   connecting: { kind: 'connecting', dot: 'var(--state-ringing)', isReadyAllowed: false },
   ready: { kind: 'ready', dot: 'var(--state-available)', isReadyAllowed: true },
   error: { kind: 'error', dot: 'var(--state-breach)', action: 'retry', isReadyAllowed: false },
@@ -78,13 +84,23 @@ const chip = (kind: PhoneChipKind, labelKey: string): PhoneChip => ({ ...CHIP[ki
  * `extension` carries the third state the two booleans cannot: `undefined` is
  * no extension detected on this page at all, `null` is one that has said hello
  * but has not reported yet.
+ *
+ * `isLost` splits that first case in two. A browser that has never had the
+ * extension needs to install it; one that had it a moment ago needs to reload
+ * the page, because the registration is still up in the extension's own
+ * worker and only the content script went away. Telling the second agent to
+ * go and install what they already have is the defect this parameter exists
+ * to prevent.
  */
 export function phoneChipFor(
   isDeviceRegistered: boolean,
   extension: ExtensionState | null | undefined,
   myExtension: string | undefined,
+  isLost = false,
 ): PhoneChip {
-  if (extension === undefined) return chip('setup', 'phone.chip.setup')
+  if (extension === undefined) {
+    return isLost ? chip('lost', 'phone.chip.lost') : chip('setup', 'phone.chip.setup')
+  }
   if (extension === null) return chip('connecting', 'phone.chip.connecting')
 
   const isMine = Boolean(

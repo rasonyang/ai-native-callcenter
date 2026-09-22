@@ -85,11 +85,15 @@ function Divider() {
  * trust for what the other knows: see `phoneChipFor`.
  */
 function usePhoneChip(presence: Presence | null | undefined) {
-  const { detected, state } = usePhoneBridge()
+  const { detected, state, isLost } = usePhoneBridge()
   return phoneChipFor(
     Boolean(presence?.isDeviceRegistered),
     detected ? state : undefined,
     presence?.extensionNumber,
+    // Not detected is two different things, and the chip may not confuse
+    // them: an extension that was never installed, and one this page has
+    // lost contact with while it goes on holding the registration.
+    isLost,
   )
 }
 

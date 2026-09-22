@@ -561,9 +561,13 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, sig
 
 	// Cause, then consequence. The phone going away is what the switch said;
 	// the agent leaving READY is what this service did about it, and the two
-	// are separate facts a subscriber wants in that order.
-	if signal == SignalUnregistered {
+	// are separate facts a subscriber wants in that order. The same ordering
+	// on the way back: the phone returning, then the agent returning with it.
+	switch signal {
+	case SignalUnregistered:
 		s.releaseForLostDevice(ctx, agentID)
+	case SignalRegistered:
+		s.restoreForReturnedDevice(ctx, agentID)
 	}
 }
 
@@ -593,6 +597,45 @@ func (s *Service) releaseForLostDevice(ctx context.Context, agentID uuid.UUID) {
 	case err == nil, errors.Is(err, errPresenceUnchanged):
 	default:
 		slog.WarnContext(ctx, "an agent whose phone is gone was not taken out of routing",
+			"agentId", agentID, "error", err)
+	}
+}
+
+// restoreForReturnedDevice puts an agent back in routing because the phone the
+// platform took them out of routing for has registered again.
+//
+// It is the other half of releaseForLostDevice, and it withdraws exactly what
+// that one set. The platform said the phone was gone and took the agent out
+// under its own reason; when the switch says the phone is back, the platform
+// withdraws its own reason and the agent stands where they last chose to
+// stand, which was READY. Without it a laptop that slept through its
+// registration lease came back with the phone ready and the agent still
+// reading "Phone lost", with a timer counting how long the platform had been
+// wrong (live, 2026-09-22).
+//
+// DEVICE_LOST is the only reason the platform withdraws, because it is the
+// only one the platform set on its own. A phone that comes back while the
+// agent is on break says nothing about the break, and a wrap-up is work that
+// is still unfiled — every other NOT_READY is somebody's decision, the agent's
+// or a supervisor's, and a returning registration is not an argument against
+// it. Anything but NOT_READY(DEVICE_LOST) therefore changes nothing and says
+// nothing.
+//
+// READY is entered through the same FSM method any other return uses, so the
+// registration gate still applies; the caller has already recorded the
+// registration on the presence by the time this runs, which is why the gate
+// passes.
+func (s *Service) restoreForReturnedDevice(ctx context.Context, agentID uuid.UUID) {
+	_, err := s.change(ctx, agentID, events.TypeAgentReady, func(p *Presence) error {
+		if p.CurrentState() != StateNotReady || p.Reason != ReasonDeviceLost {
+			return errPresenceUnchanged
+		}
+		return p.Ready(s.now())
+	})
+	switch {
+	case err == nil, errors.Is(err, errPresenceUnchanged):
+	default:
+		slog.WarnContext(ctx, "an agent whose phone came back was not put back in routing",
 			"agentId", agentID, "error", err)
 	}
 }

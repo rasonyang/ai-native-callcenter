@@ -52,7 +52,9 @@ describe('the reason a call went unserved', () => {
  * labels are looked up by key from `phoneChipFor`, so nothing in the type
  * system notices when one is absent.
  */
-const PHONE_CHIPS = ['setup', 'connecting', 'ready', 'wrongAccount', 'displaced', 'overridden']
+const PHONE_CHIPS = [
+  'setup', 'lost', 'connecting', 'ready', 'wrongAccount', 'displaced', 'overridden',
+]
 
 const PHONE_ERRORS = ['REGISTRATION_FAILED', 'WSS_LOST', 'MIC_UNAVAILABLE', 'MEDIA_FAILED']
 

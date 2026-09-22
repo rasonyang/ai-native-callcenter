@@ -529,6 +529,7 @@
     "readyBlocked": "Your phone is not ready, so calls cannot be offered to you.",
     "chip": {
       "setup": "Set up phone",
+      "lost": "Phone lost contact · reload",
       "connecting": "Connecting…",
       "ready": "Phone ready",
       "wrongAccount": "Wrong account",
@@ -540,6 +541,11 @@
         "MIC_UNAVAILABLE": "Microphone unavailable",
         "MEDIA_FAILED": "Call audio failed"
       }
+    },
+    "lost": {
+      "title": "Phone lost contact with this page",
+      "text": "The extension is installed and registered, but this page no longer reaches it. Reload the page to reconnect.",
+      "action": "Reload the page"
     },
     "onboarding": {
       "title": "Set up your phone",

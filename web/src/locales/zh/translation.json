@@ -527,6 +527,7 @@
     "readyBlocked": "话机未就绪，无法向您分配呼叫。",
     "chip": {
       "setup": "设置话机",
+      "lost": "话机失联 · 请刷新",
       "connecting": "连接中…",
       "ready": "话机就绪",
       "wrongAccount": "账号不符",
@@ -538,6 +539,11 @@
         "MIC_UNAVAILABLE": "麦克风不可用",
         "MEDIA_FAILED": "通话音频失败"
       }
+    },
+    "lost": {
+      "title": "话机与本页失去联系",
+      "text": "扩展已安装并已注册，但本页已无法与它通信。重新加载页面即可恢复。",
+      "action": "重新加载页面"
     },
     "onboarding": {
       "title": "设置您的话机",

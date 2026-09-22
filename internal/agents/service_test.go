@@ -452,21 +452,163 @@ func TestALostPhoneTakesTheAgentOutOfRoutingUnderItsOwnReason(t *testing.T) {
 			"own screen still reads READY", types[len(types)-1])
 	}
 
-	// And back again. The phone returning is not a decision to take calls, so
-	// the agent stays where the platform put them until they say otherwise.
+	// What happens when the phone comes back is
+	// TestAReturnedPhoneWithdrawsTheReasonThePlatformSet.
+}
+
+// The platform set DEVICE_LOST on its own, so the platform withdraws it on its
+// own: a phone that registers again puts the agent back where they last chose
+// to stand, which was READY. Live on 2026-09-22 a laptop slept through its
+// registration lease and came back with the phone ready and the agent still
+// reading "Phone lost", counting how long the platform had been wrong.
+func TestAReturnedPhoneWithdrawsTheReasonThePlatformSet(t *testing.T) {
+	svc, store, sw, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if got := svc.Presence(agentID); got.CurrentState() != StateNotReady {
-		t.Errorf("state = %s, want NOT_READY — a phone coming back is not the "+
-			"agent saying they are ready for the next call", got.CurrentState())
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
 	}
-	types = pub.types()
-	if got := types[len(types)-1]; got != events.TypeDeviceRegistered {
-		t.Errorf("the phone's return was announced as %s, want %s", got, events.TypeDeviceRegistered)
+	if _, err := svc.Ready(ctx, agentID); err != nil {
+		t.Fatal(err)
+	}
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+	if got := svc.Presence(agentID); got.Reason != ReasonDeviceLost {
+		t.Fatalf("presence = %s/%s, want NOT_READY/DEVICE_LOST before the phone returns",
+			got.CurrentState(), got.Reason)
+	}
+	told := len(pub.types())
+
+	// Unlock: the extension registers again.
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+
+	got := svc.Presence(agentID)
+	if got.CurrentState() != StateReady || got.Reason != "" {
+		t.Errorf("presence = %s/%s, want READY — the phone the platform took them "+
+			"out for is back, so its own reason is withdrawn",
+			got.CurrentState(), got.Reason)
+	}
+	if saved, _ := store.LoadPresence(ctx, agentID); saved.State != StateReady {
+		t.Errorf("persisted state = %q, want READY — a reload would leave them "+
+			"out of routing at a working phone", saved.State)
 	}
 
-	// Which they now can, the phone being back.
+	// Cause, then consequence: the phone's return, then the agent's.
+	if got := pub.types()[told:]; len(got) != 2 ||
+		got[0] != events.TypeDeviceRegistered || got[1] != events.TypeAgentReady {
+		t.Errorf("published %v, want DEVICE_REGISTERED then AGENT_READY", got)
+	}
+
+	last := ""
+	for _, c := range sw.commands {
+		if strings.HasPrefix(c, "status agent-1001 ") {
+			last = c
+		}
+	}
+	if last != "status agent-1001 Available" {
+		t.Errorf("the switch was last told %q, want Available — no queue would "+
+			"deliver to the agent otherwise", last)
+	}
+}
+
+// DEVICE_LOST is the only reason the platform withdraws, because it is the
+// only one it set. A phone coming back says nothing about a break.
+func TestAReturnedPhoneSaysNothingAboutAReasonTheAgentChose(t *testing.T) {
+	for _, reason := range []Reason{
+		ReasonBreak, ReasonLunch, ReasonTraining, ReasonLogin,
+		ReasonSystem, ReasonSupervisor,
+	} {
+		t.Run(string(reason), func(t *testing.T) {
+			svc, _, _, pub, agentID := newTestService(t)
+			ctx := t.Context()
+
+			svc.ObserveDevice(ctx, "1001", SignalRegistered)
+			if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := svc.NotReady(ctx, agentID, reason); err != nil {
+				t.Fatal(err)
+			}
+			before := svc.Presence(agentID)
+
+			// The phone goes and comes back around the agent's own decision.
+			svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+			if got := svc.Presence(agentID); got.Reason != reason {
+				t.Fatalf("reason = %s, want %s left alone by the phone's loss", got.Reason, reason)
+			}
+			told := len(pub.types())
+			svc.ObserveDevice(ctx, "1001", SignalRegistered)
+
+			after := svc.Presence(agentID)
+			if after.CurrentState() != StateNotReady || after.Reason != reason ||
+				after.EnteredAt != before.EnteredAt {
+				t.Errorf("presence = %s/%s entered %v, want %s left exactly as it was",
+					after.CurrentState(), after.Reason, after.EnteredAt, reason)
+			}
+			if got := pub.types()[told:]; len(got) != 1 || got[0] != events.TypeDeviceRegistered {
+				t.Errorf("published %v, want DEVICE_REGISTERED alone — the agent's "+
+					"own decision did not move", got)
+			}
+		})
+	}
+}
+
+// After-call work is unfiled work, not a platform reason: the agent is out of
+// routing until they file it, whatever their phone does in the meantime.
+func TestAReturnedPhoneDoesNotEndWrapUp(t *testing.T) {
+	svc, _, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
+	callID := uuid.New()
+	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
+		t.Fatal(err)
+	}
+	svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+	told := len(pub.types())
+
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+
+	got := svc.Presence(agentID)
+	if !got.IsInWrapUp() {
+		t.Errorf("presence = %s/%s, want the after-call work still open",
+			got.CurrentState(), got.Reason)
+	}
+	if got.WrapUpCallID == nil || *got.WrapUpCallID != callID {
+		t.Error("the after-call work lost the call it is for")
+	}
+	if got := pub.types()[told:]; len(got) != 1 || got[0] != events.TypeDeviceRegistered {
+		t.Errorf("published %v, want DEVICE_REGISTERED alone", got)
+	}
+}
+
+// A state event means a state changed: a phone re-registering under an agent
+// who is already READY has nothing to say about their presence.
+func TestARegistrationForAReadyAgentPublishesNoPresenceChange(t *testing.T) {
+	svc, _, _, pub, agentID := newTestService(t)
+	ctx := context.Background()
+
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
-		t.Fatalf("Ready() after the phone came back: %v", err)
+		t.Fatal(err)
+	}
+	before := svc.Presence(agentID)
+	told := len(pub.types())
+
+	// A re-REGISTER is routine: the lease is refreshed every few minutes.
+	svc.ObserveDevice(ctx, "1001", SignalRegistered)
+
+	if after := svc.Presence(agentID); after.EnteredAt != before.EnteredAt {
+		t.Error("the routine re-registration restamped a READY the agent never left")
+	}
+	if got := pub.types()[told:]; len(got) != 1 || got[0] != events.TypeDeviceRegistered {
+		t.Errorf("published %v, want DEVICE_REGISTERED alone", got)
 	}
 }
 
