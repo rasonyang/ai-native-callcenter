@@ -205,5 +205,6 @@ happening rather than to a half-provisioned phone.
   path and the Lua directory handler that serves the a1-hash.
 - [design/05-frontend.md](design/05-frontend.md) §4 — the softphone bar and the
   onboarding card.
-- [../deploy/README.md](../deploy/README.md) — what an operator does, including
-  the Chrome policy path for a managed fleet.
+- [../deploy/README.md](../deploy/README.md) — what an operator does.
+- [../deploy/chrome-policy.md](../deploy/chrome-policy.md) — the Chrome policy
+  path for a managed fleet.
