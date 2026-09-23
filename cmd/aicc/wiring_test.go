@@ -3,7 +3,10 @@
 package main
 
 import (
+	"bytes"
+	"log/slog"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -260,4 +263,45 @@ func sessionsStarted(t *testing.T, reader *metricsdk.ManualReader, name string) 
 		}
 	}
 	return 0
+}
+
+// The key the startup check asks for is the one the provider's client will
+// read when a call arrives, for every provider this process can run — not a
+// name written into the check. A deployment on doubao missing ALIYUN_API_KEY
+// has nothing to be told.
+func TestAMissingProviderKeyIsReportedByTheNameItsClientReads(t *testing.T) {
+	for _, name := range []string{provider.NameOpenAI, provider.NameQwen, provider.NameGateway, provider.NameDoubao, provider.NameGemini} {
+		t.Run(name, func(t *testing.T) {
+			profile, err := provider.ProfileFor(name, provider.Override{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if profile.APIKeyEnv == "" {
+				t.Fatalf("profile %s names no credential variable", name)
+			}
+
+			var buf bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&buf, nil))
+			if !reportMissingProviderKey(log, profile, func(string) string { return "" }) {
+				t.Fatal("an unset key was not reported")
+			}
+			line := buf.String()
+			for _, want := range []string{"level=ERROR", profile.APIKeyEnv, "fallback queue", "docker compose up -d"} {
+				if !strings.Contains(line, want) {
+					t.Errorf("report %q does not mention %q", line, want)
+				}
+			}
+
+			buf.Reset()
+			set := func(k string) string {
+				if k == profile.APIKeyEnv {
+					return "sk-test"
+				}
+				return ""
+			}
+			if reportMissingProviderKey(log, profile, set) || buf.Len() != 0 {
+				t.Errorf("a key that is set was reported: %q", buf.String())
+			}
+		})
+	}
 }

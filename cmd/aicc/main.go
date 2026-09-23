@@ -300,6 +300,7 @@ func run() error {
 			// an empty column afterwards. Empty on a vendor that transcribes
 			// unasked is not the same as off.
 			"transcribesCaller", profile.TranscribeModel)
+		reportMissingProviderKey(slog.Default(), profile, os.Getenv)
 
 		orchestrator, err := aicall.NewOrchestrator(botConfig(
 			botUAS(cfg),

@@ -1,23 +1,17 @@
-# Running it
+# Deployment guide
 
-The whole product on one machine: PostgreSQL, FreeSWITCH and the application,
-with a demo dataset already in the database. It needs Docker, a Qwen key for the
-bot to speak, and the address phones reach this host at. Nothing else.
+This stack runs the whole product on one host: PostgreSQL, FreeSWITCH and the
+application, seeded with a demo dataset.
 
-## Start it
+## Prerequisites
 
-**1. Docker.**
+- Docker with Compose v2 (`docker compose version` works).
+- A Qwen key (`ALIYUN_API_KEY`), or an OpenAI key outside mainland China.
+- The address phones use to reach this host.
 
-```sh
-curl -fsSL https://get.docker.com | sh
-```
+## Quick start
 
-Or `sudo apt install docker.io docker-compose-v2` on Ubuntu. Skip both where
-`docker compose version` already answers: on a host with Docker's own packages
-the second conflicts with them (`containerd.io : Conflicts: containerd`). A
-`permission denied` later means `sudo usermod -aG docker $USER` and a new login.
-
-**2. Get the stack.** The checkout is what compose builds and mounts.
+**1. Get the stack and copy the example config.**
 
 ```sh
 git clone --depth 1 https://github.com/rasonyang/ai-native-callcenter
@@ -25,62 +19,80 @@ cd ai-native-callcenter/deploy
 cp .env.example .env
 ```
 
-**3. Fill in `.env`.** Two lines; everything else has a default and every
-password is `aicc@123`.
+Compose builds and mounts files from this checkout, so run it from `deploy/`.
+
+**2. Set two values in `deploy/.env`.**
 
 ```ini
 FS_EXTERNAL_IP=<the address phones reach this host at>
 ALIYUN_API_KEY=<key>
 ```
 
-Leave `FS_EXTERNAL_IP` empty and compose refuses to start, naming it: nothing
-inside a container can work out the host's address, and a phone given the wrong
-one registers and hears nothing. Outside mainland China set
-`AICC_PROVIDER=openai` and `OPENAI_API_KEY` instead. With no key at all,
-everything works except the bot's voice.
+- `FS_EXTERNAL_IP` is required. Compose refuses to start without it. A wrong
+  value lets a phone register but it hears no audio.
+- Outside mainland China, set `AICC_PROVIDER=openai` and `OPENAI_API_KEY`
+  instead of `ALIYUN_API_KEY`.
+- Put the key in `deploy/.env`. The `.env` at the repository root is not read
+  by the stack.
+- Without a key, everything works except the bot: it never answers, every call
+  to a bot number goes straight to that number's queue, and the caller hears
+  hold music until an agent picks up.
+- Every other setting has a default. Every password is `aicc@123`. Change
+  them before others can reach the host
+  ([production checklist](production-checklist.md)).
 
-**4. Start it.** The first run builds the application from this checkout, which
-takes a few minutes; afterwards the stack starts in seconds. A deployment that
-is not going to change the code names the published images instead — two lines in
-`.env`, and nothing to build:
+**3. (Optional) Use the published images instead of building.** By default the
+first start builds the application from this checkout (a few minutes; later
+starts take seconds). To skip the build, add to `.env`:
 
 ```ini
 AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0
 AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.0
 ```
 
-The image is the release. It carries the executable with the SPA inside it and
-nothing else, so `docker compose pull` is the whole of getting the product onto
-a host; exact tags only, there is no `latest`. The switch image carries the same
-release tag, and the two must match: the application's migrations and the
-switch's Lua scripts share the `luacc.*` contract, so a mismatched pair breaks
-phone registration.
+- The application image contains the executable with the SPA embedded;
+  `docker compose pull` is all it takes to get the product onto a host.
+- Use exact tags. There is no `latest`.
+- Both images must carry the same release tag. The application's migrations and
+  the switch's Lua scripts share the `luacc.*` contract; a mismatched pair
+  breaks phone registration.
+
+**4. Start the stack and check it.**
 
 ```sh
 docker compose up -d
 docker compose ps -a            # three running, lua-role exited (0)
 docker compose logs aicc | grep 'esl connected'
 # {"level":"INFO","msg":"esl connected","addr":"freeswitch:18021"}
+docker compose logs aicc | grep -c 'API_KEY is not set'
+# 0
 ```
 
-A non-zero `lua-role` means the application never migrated, so read
-`docker compose logs aicc`.
+- `lua-role` exited non-zero: the application never migrated. Read
+  `docker compose logs aicc`.
+- Count other than `0`: the provider key did not reach the application. The
+  counted line names the variable. The application still starts, but the bot
+  does not answer.
 
-**5. Open it.** `http://<host>:8080`, and sign in as `admin` / `aicc@123`.
+After any change to `.env`, run `docker compose up -d`. It recreates the
+containers whose settings changed. `docker compose restart` does not re-read
+`.env`.
 
-## What is seeded
+**5. Open `http://<host>:8080`** and sign in as `admin` / `aicc@123`.
 
-`AICC_SEED` defaults to `demo`, so a first start fills an empty database. The
-seeded accounts have their password and role reset on every boot; everything
-else is left as it is.
+## Demo data
+
+`AICC_SEED` defaults to `demo`, so the first start fills an empty database. On
+every boot the seeded accounts get their password and role reset; nothing else
+is touched.
 
 | | |
 |---|---|
-| Accounts | `admin` (administrator), `supervisor` (supervisor), `wei` / `amy` / `ben` (agents), password `aicc@123` |
-| Extensions | `amy` 1000, `wei` 1001, `ben` 1002. The SIP password is `aicc@123`, readable through `GET /extensions/{id}/password`. An agent's browser phone is issued its own credentials by the platform when they sign in and uses those; the static password is what a phone configured by hand registers with while nobody is signed in at that extension |
-| Queues | `support-en` on 7001, `support-zh` on 7002; `wei` and `amy` staff the first, `ben` the second |
-| Customers | Eighteen numbers a SIP phone may register as: 13800000001–13800000009 and (212) 555-0101 – (212) 555-0109, password `aicc@123`, at `<FS_EXTERNAL_IP>:5060` with `<FS_EXTERNAL_IP>` as the domain. Until a phone registers as one, that number does not exist to the switch |
-| History | Seven deterministic days of calls, queue events and presence, so the wallboard and the reports are not empty |
+| Accounts | `admin` (administrator), `supervisor` (supervisor), `wei` / `amy` / `ben` (agents). Password `aicc@123` |
+| Extensions | `amy` 1000, `wei` 1001, `ben` 1002. SIP password `aicc@123`, readable through `GET /extensions/{id}/password`. A signed-in agent's browser phone gets its own credentials from the platform; the static password is for a hand-configured phone while nobody is signed in at that extension |
+| Queues | `support-en` on 7001 (`wei`, `amy`), `support-zh` on 7002 (`ben`) |
+| Customers | 18 numbers a SIP phone can register as: 13800000001–13800000009 and (212) 555-0101 – (212) 555-0109. Password `aicc@123`, registrar `<FS_EXTERNAL_IP>:5060`, domain `<FS_EXTERNAL_IP>`. A number is unreachable until a phone registers as it |
+| History | Seven deterministic days of calls, queue events and presence, for the wallboard and reports |
 
 Six published bilingual flows, each on an English, a Chinese and a US number:
 
@@ -93,48 +105,56 @@ Six published bilingual flows, each on an English, a Chinese and a US number:
 | StarCom field-service appointment | 95041 | 95042 | 800-555-0194 |
 | StarCom lead qualification | 95051 | 95052 | 800-555-0195 |
 
-800-555-0199 is the main line, and the number the platform shows when it calls
-out. The number picks the flow and the language; the flow carries both personas.
-Five of the six fetch their facts from a business backend, so without
-`AICC_BOT_BACKEND_BASE` pointing at a running `cmd/aicc-mockbackend` every one
-of their tools fails and the bot offers a transfer instead, which is correct
-behaviour ([docs/dev-stack.md](../docs/dev-stack.md)).
+- 800-555-0199 is the main line and the caller ID for outbound calls.
+- The dialled number selects the flow and the language.
+- Five of the six flows call a business backend. Without
+  `AICC_BOT_BACKEND_BASE` pointing at a running `cmd/aicc-mockbackend`, their
+  tools fail and the bot offers a transfer instead. This is expected
+  ([docs/dev-stack.md](../docs/dev-stack.md)).
 
-`AICC_SEED=fresh docker compose up -d aicc` removes all of it again, the only way
-back to an empty product once the volume exists; `docker compose up -d aicc` then
-seeds it afresh. Only what the seeder created goes, so real calls placed against
-this stack stay, and seeding again restores the accounts, queues, flows and
-numbers but *not* the history, which is only ever generated into an empty ledger.
+**Remove or re-seed the demo data:**
 
-## Make a call
+```sh
+AICC_SEED=fresh docker compose up -d aicc   # remove what the seed created
+docker compose up -d aicc                   # seed again
+```
 
-**1. A customer telephone.** Register any SIP softphone as `2125550101` /
-`aicc@123` at `<FS_EXTERNAL_IP>:5060`, domain `<FS_EXTERNAL_IP>`. That phone is
-now (212) 555-0101, and nothing works before it: a number nobody registered is
-unreachable, like an unallocated number on a real trunk.
+- `fresh` is the only way back to an empty product once the volume exists.
+- It removes only seeded data. Real calls placed on this stack stay.
+- Seeding again restores accounts, queues, flows and numbers, but not the
+  history. History is only generated into an empty ledger.
 
-**2. wei calls the customer.** The agent's phone is the
-[web-sip-phone](https://github.com/rasonyang/web-sip-phone) Chrome extension,
-and there is nothing to configure in it. Install it, then sign in as `wei` /
-`aicc@123`: the platform issues that browser its own SIP credentials and hands
-them to the extension, so no server, account or password is ever typed. The
-onboarding card in the cockpit asks for the two things only the person can
-give — allow this site, allow the microphone — and disappears once the phone
-chip in the softphone bar reports ready. Going ready needs that chip: an agent
-whose phone is not registered is refused, because a call cannot be delivered to
-a phone that is not there. Dialling out does not need *ready*, though: open the
-keypad, type `2125550101`, press Dial.
-wei's phone is raised first and auto-answers; only then does the customer
-telephone ring, showing 800-555-0199. Answer it: the call is on the wallboard
-and ends as a CDR.
+## Make a test call
 
-**3. The customer calls in.** From that telephone dial `8005550199`: the bot
-answers in English as NovaNet support; ask for a person and the call lands in
-`support-en`, ringing wei, once wei has picked Go ready in the bar. 95001 and
-95002 are the same flow's Chinese-style hotlines; 95002 greets in Chinese.
+**1. Register a customer phone.** In any SIP softphone, register as
+`2125550101` / `aicc@123` at `<FS_EXTERNAL_IP>:5060`, domain
+`<FS_EXTERNAL_IP>`. The phone is now (212) 555-0101. Do this first: an
+unregistered number is unreachable.
 
-**With no telephone at hand,** this places the same call from inside the
-switch, and `-ERR UNALLOCATED_NUMBER` means no enabled number `95001` exists.
+**2. Call the customer as agent wei.**
+
+1. Install the [web-sip-phone](https://github.com/rasonyang/web-sip-phone)
+   Chrome extension. It needs no configuration.
+2. Sign in as `wei` / `aicc@123`. The platform issues the browser its own SIP
+   credentials and passes them to the extension.
+3. Follow the onboarding card in the cockpit: allow this site, allow the
+   microphone. The card disappears when the phone chip in the softphone bar
+   shows ready.
+   For many agents, [Chrome policy](chrome-policy.md) does this instead.
+4. Open the keypad, type `2125550101`, press Dial. Dialling out does not need
+   *Go ready*.
+
+wei's phone rings first and auto-answers, then the customer phone rings showing
+800-555-0199. Answer it. The call appears on the wallboard and ends as a CDR.
+
+Going *ready* requires a registered phone; an agent without one is refused.
+
+**3. Call in as the customer.** From the customer phone, dial `8005550199`. The
+bot answers in English as NovaNet support. Ask for a person: the call goes to
+`support-en` and rings wei once wei has picked *Go ready*. 95001 and 95002 are
+the same flow; 95002 greets in Chinese.
+
+**Without a phone**, place the same call from inside the switch:
 
 ```sh
 docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 \
@@ -142,177 +162,139 @@ docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 \
 # +OK <uuid>
 ```
 
-## Phones for a fleet
-
-The onboarding card is written for one person installing an extension for
-themselves. For a floor of agents, Chrome policy does the same three things
-centrally, and the card then has nothing left to ask: the extension is already
-installed, this host is already an allowed site, and the microphone is already
-granted. Policies are read from the registry on Windows, from a managed
-preferences file on macOS and from `/etc/opt/chrome/policies/managed/` on
-Linux; the JSON below is the payload in each case.
-
-```json
-{
-  "ExtensionInstallForcelist": [
-    "<extension-id>;https://clients2.google.com/service/update2/crx"
-  ],
-  "ExtensionSettings": {
-    "<extension-id>": {
-      "installation_mode": "force_installed",
-      "runtime_allowed_hosts": ["https://aicc.example.com"]
-    }
-  },
-  "AudioCaptureAllowedUrls": ["https://aicc.example.com"]
-}
-```
-
-`ExtensionInstallForcelist` installs it and keeps it installed;
-`runtime_allowed_hosts` is what pre-approves the platform's origin, so the
-extension's own Allow Sites list needs no visit; `AudioCaptureAllowedUrls`
-grants the microphone without a prompt. The `<extension-id>` is the extension's
-Web Store ID — an unpacked development build has a different, per-machine ID,
-and policy cannot address it. Verify the policy names against the Chrome
-version your fleet runs before rolling this out: Google renames and retires
-policies between releases, and a policy Chrome does not recognise is ignored
-silently.
-
-The origin in all three places is the one agents open, which behind a TLS
-proxy is the proxy's name and not this host's address.
+`-ERR UNALLOCATED_NUMBER` means no enabled number `95001` exists.
 
 ## What is running
 
-`postgres` is PostgreSQL 18, holding `aicc` and mod_callcenter's own `aicc_fs`
-beside it; `aicc` is the product, REST API, event stream, embedded SPA and the
-SIP endpoint AI calls land on; `lua-role` runs once, creates the confined role
-the switch reads the database with, and exits; `freeswitch` is FreeSWITCH
-v1.11.3, this repository's own image. The volumes are `postgres-data`,
-`recordings` (written by the switch, read by the application), `fs-db`,
-`fs-log` and `app-logs`.
+| Container | Role |
+|---|---|
+| `postgres` | PostgreSQL 18. Holds `aicc` and mod_callcenter's `aicc_fs` |
+| `aicc` | The application: REST API, event stream, embedded SPA, and the SIP endpoint for AI calls |
+| `lua-role` | Runs once, creates the confined role the switch reads the database with, and exits |
+| `freeswitch` | FreeSWITCH v1.11.3, this repository's own image |
 
-Published, on `HTTP_BIND` or `SIP_BIND`: 8080/tcp for the API, the event stream
-and the interface; 5060/udp and 5060/tcp for SIP signalling; 5066/tcp for the
-browser phone's WebSocket transport; 16384-16484/udp for media to a phone off
-this host. ESL, the metrics listener and the AI leg's own SIP and RTP are
-published nowhere.
+Volumes: `postgres-data`, `recordings` (written by the switch, read by the
+application), `fs-db`, `fs-log`, `app-logs`.
 
-## Reaching into it
+Published ports (on `HTTP_BIND` or `SIP_BIND`):
+
+| Port | Use |
+|---|---|
+| 8080/tcp | API, event stream and web interface |
+| 5060/udp, 5060/tcp | SIP signalling |
+| 5066/tcp | Browser phone WebSocket transport |
+| 16384-16484/udp | Media to phones off this host |
+
+ESL, the metrics listener, and the AI leg's SIP and RTP are not published.
+
+## Common commands
 
 ```sh
-docker compose logs -f aicc                             # the application
+docker compose logs -f aicc                             # application logs
 docker compose exec freeswitch fs_cli -P 18021 -p aicc@123
 docker compose exec postgres psql -U aicc aicc
 docker compose down                                     # stop
-docker compose down -v                                  # stop and forget everything
+docker compose down -v                                  # stop and delete all data
 ```
 
-## What to change
+## Configuration
 
-| `.env` | |
+Stack settings in `deploy/.env`:
+
+| Variable | Meaning |
 |---|---|
 | `FS_EXTERNAL_IP` | Required. The address phones reach this host at |
-| `POSTGRES_PASSWORD`, `LUA_PASSWORD`, `ESL_PASSWORD` | All three default to `aicc@123` |
-| `AICC_SEED` | `demo` unless set. Empty seeds nothing; `fresh` removes what the seed created |
-| `SWITCH_DOMAIN` | The switch's domain, defaulting to `FS_EXTERNAL_IP`. The application is configured from the same value |
-| `SIP_DOMAIN` | The digest realm and the domain an agent's browser phone registers under, defaulting to `SWITCH_DOMAIN`. A deployment that has not separated the two leaves it alone |
-| `SIP_WSS_URL` | Where that phone connects, defaulting to `ws://<FS_EXTERNAL_IP>:5066/`. Behind TLS this is the proxy's `wss://…` URL, and it is published to the phone rather than typed into it |
-| `HTTP_BIND`, `HTTP_PORT`, `SIP_BIND` | Where the published ports listen |
-| `RTP_START`, `RTP_END` | The media range. Configures the switch and publishes the ports together |
-| `AICC_SUBNET`, `AICC_APP_IP` | The compose network and the application's fixed address in it, which the switch dials the bot at. Change together |
-| `AICC_IMAGE`, `AICC_FS_IMAGE` | Unset, the application is built from this checkout. A published release tag pulls it instead — `rasonyang/ai-native-callcenter:<tag>` for the application, `rasonyang/freeswitch-aicc:<tag>` for the switch. Both carry the same release tag, and the switch tag must match the application's: they share the Go↔Lua `luacc.*` contract, so mismatched tags break phone registration. `AICC_FS_IMAGE` defaults to the switch of this checkout's release. Exact tags only, there is no `latest`: a deployment names the build it runs, and a tag that moves cannot be named |
+| `POSTGRES_PASSWORD`, `LUA_PASSWORD`, `ESL_PASSWORD` | Default `aicc@123` |
+| `AICC_SEED` | Default `demo`. Empty seeds nothing; `fresh` removes what the seed created. Empty it on a host others can reach ([production checklist](production-checklist.md)) |
+| `SWITCH_DOMAIN` | The switch's domain. Default `FS_EXTERNAL_IP`. The application uses the same value |
+| `SIP_DOMAIN` | Digest realm and registration domain for agents' browser phones. Default `SWITCH_DOMAIN`. Leave it unless you separate the two |
+| `SIP_WSS_URL` | Where the browser phone connects. Default `ws://<FS_EXTERNAL_IP>:5066/`. Behind TLS, set the proxy's `wss://…` URL ([production checklist](production-checklist.md)). It is sent to the phone, not typed into it |
+| `HTTP_BIND`, `HTTP_PORT`, `SIP_BIND` | Listen addresses for the published ports |
+| `RTP_START`, `RTP_END` | Media port range. Configures the switch and publishes the ports |
+| `AICC_SUBNET`, `AICC_APP_IP` | The compose network and the application's fixed address in it (the switch dials the bot at this address). Change together |
+| `AICC_IMAGE`, `AICC_FS_IMAGE` | Unset: build the application from this checkout. Set to `rasonyang/ai-native-callcenter:<tag>` and `rasonyang/freeswitch-aicc:<tag>` to pull. Same release tag on both (they share the `luacc.*` contract; mismatched tags break phone registration). `AICC_FS_IMAGE` defaults to the switch of this checkout's release. Exact tags only; no `latest` |
 
-Any other `AICC_*` line in the same `.env` reaches the application unchanged:
-provider keys, `AICC_TRANSCRIBE_*`, `AICC_BOT_BACKEND_BASE`, `AICC_S3_*`, all
-of it. The registry is the repository's own [`.env.example`](../.env.example),
-and two of its semantics surprise people: an empty value means *unset*, so a
-non-empty default cannot be blanked, and everything after the first `=` is the
-value, comments included. The wiring keys in `docker-compose.yml` sit in
-`environment:`, which wins over `env_file:`, so `.env` cannot break them. The
-provider is one of those: a single provider answers every call, chosen at
-startup, and a call's language never selects it. `AICC_PROVIDER` takes `openai`,
-`qwen`, `gateway`, `doubao` or `gemini`, each with its own credential.
-`DOUBAO_API_KEY` goes with ByteDance's full-duplex dialogue API and
-`GEMINI_API_KEY` with Google's Live API; those two are the values here that are
-a different wire protocol rather than another vendor of the same one, and each
-has a client of its own. On both the model is pinned by the client, so
-`AICC_PROVIDER_MODEL` is ignored, and `AICC_TRANSCRIBE_PROVIDER` has to be named
-if transcription is on, as on `gateway`. On `doubao` a flow must also give every
-terminal phase an `announce`, because nothing said to that engine in text makes
-it speak — a flow without one is refused at publish rather than discovered on a
-call. A `gemini` deployment needs outbound access to
-`generativelanguage.googleapis.com`, and should have a fallback queue on every
-DID it answers: that provider ends a connection once its own session lifetime
-runs out, and this application does not reconnect — the call is released with
-the hangup cause `PROVIDER_SESSION_EXPIRED` and the caller goes to the queue
-([the provider notes](../docs/provider-extension.md)).
+**Application settings.** Any other `AICC_*` line in `deploy/.env` is passed to
+the application unchanged: provider keys, `AICC_TRANSCRIBE_*`,
+`AICC_BOT_BACKEND_BASE`, `AICC_S3_*`, and so on. The full list is the
+repository's [`.env.example`](../.env.example). Two rules:
 
-The API is mounted at `/api/v1` on the same port, and
-[docs/openapi.json](../docs/openapi.json) is its contract: every path in it,
-such as `POST /auth/login` with `{"username":"admin","password":"aicc@123"}`,
-is reached as `http://<host>:8080/api/v1/auth/login`.
+- An empty value means unset, so a non-empty default cannot be blanked.
+- Everything after the first `=` is the value, including comments.
 
-There is no API-key setting: keys are issued through `POST /api-keys`, named
-and scoped, the first with the administrator's session. A session cookie must
-carry an `X-AICC-Csrf` header, any value, on anything that writes; a bearer key
-need not.
+The wiring keys in `docker-compose.yml` are set under `environment:`, which
+overrides `env_file:`, so `.env` cannot break them.
 
-## Your own carrier
+**Voice provider.** One provider answers every call, chosen at startup. A
+call's language does not select it. `AICC_PROVIDER` takes `openai`, `qwen`,
+`gateway`, `doubao` or `gemini`, each with its own credential.
 
-The two directories mounted onto the switch are the seam: `freeswitch/dialplan/`
-holds the rules of the `aicc` context, `freeswitch/directory/` the SIP users the
-switch knows outside the database. Here they hold a simulated public network,
-which is why a softphone can be a customer. A real deployment puts its own trunk
-files there instead and mounts its gateway into `conf/sip_profiles/external/` as
-a third one. `deploy/dev/freeswitch/` is a worked example of both, and
-[freeswitch/README.md](../freeswitch/README.md) §3 explains the seam.
+- `doubao` uses `DOUBAO_API_KEY` (ByteDance full-duplex dialogue API); `gemini`
+  uses `GEMINI_API_KEY` (Google Live API).
+- On `doubao` and `gemini`, the client pins the model, so `AICC_PROVIDER_MODEL`
+  is ignored. If transcription is on, set `AICC_TRANSCRIBE_PROVIDER` (also
+  required on `gateway`).
+- On `doubao`, every terminal phase of a flow needs an `announce`; publishing a
+  flow without one is refused.
+- On `gemini`, allow outbound access to `generativelanguage.googleapis.com`,
+  and give every DID a fallback queue. Gemini closes the connection when its
+  session lifetime runs out and the application does not reconnect: the call is
+  released with hangup cause `PROVIDER_SESSION_EXPIRED` and the caller goes to
+  the queue.
+
+See [the provider notes](../docs/provider-extension.md).
+
+**API.** The API is at `/api/v1` on the same port.
+[docs/openapi.json](../docs/openapi.json) is the contract. For example,
+`POST /auth/login` with `{"username":"admin","password":"aicc@123"}` is
+`http://<host>:8080/api/v1/auth/login`.
+
+- API keys are not configured in `.env`. Issue them with `POST /api-keys`,
+  named and scoped; the first one with the administrator's session.
+- Requests that write with a session cookie must carry an `X-AICC-Csrf` header
+  (any value). Bearer-key requests need not.
 
 ## Recordings
 
-The `recordings` volume is shared between the switch and the application, with
-`AICC_RECORDING_BACKEND=FS`: the switch writes, the application serves what it
-finds. Files are keyed `recordings/YYYY/MM/DD/<call_id>.wav`, stereo, caller
-left, bot or agent right. Retention is a product setting, applied by a daily job.
-Any S3-compatible store works too: set `AICC_RECORDING_BACKEND=S3` and the
-`AICC_S3_*` lines in `.env`, and the application uploads each recording on
-hangup, clears the spool and plays it back through a presigned URL.
+- Default (`AICC_RECORDING_BACKEND=FS`): the switch writes to the shared
+  `recordings` volume and the application serves from it.
+- Files are `recordings/YYYY/MM/DD/<call_id>.wav`, stereo: caller left, bot or
+  agent right.
+- Retention is a product setting, applied by a daily job.
+- S3-compatible storage: set `AICC_RECORDING_BACKEND=S3` and the `AICC_S3_*`
+  lines in `.env`. The application uploads each recording on hangup, clears the
+  spool, and plays it back through a presigned URL.
 
 ## Upgrading
 
-Where `AICC_IMAGE` names a published tag — which is what a deployment runs —
-change it to the new one and `docker compose pull && docker compose up -d`.
-Where the application is built from a checkout instead, `git pull && docker
-compose up -d --build`.
-Migrations run at startup and are forward-only; a
-single-instance advisory lock means two cannot race. The switch's configuration
-is versioned with the schema, so `AICC_FS_IMAGE` does not normally move with
-it; the release notes say when it does, and
-[freeswitch/README.md](../freeswitch/README.md) covers installing that switch by
+- Published images: change `AICC_IMAGE` to the new tag, then
+  `docker compose pull && docker compose up -d`.
+- Built from a checkout: `git pull && docker compose up -d --build`.
+
+Migrations run at startup and are forward-only. A single-instance advisory lock
+prevents two from running at once. `AICC_FS_IMAGE` usually does not change with
+the application; the release notes say when it does.
+[freeswitch/README.md](../freeswitch/README.md) covers installing the switch by
 hand instead of pulling it.
 
-## Before it faces anyone
+## Troubleshooting
 
-- [ ] Every password changed: PostgreSQL, `aicc_lua`, ESL, and every seeded
-      account. They are published in this file.
-- [ ] `AICC_SEED=` (empty) in `.env`, so none of the demo dataset lands on a
-      host other people can reach. Where a database already holds it,
-      `AICC_SEED=fresh` once removes exactly what the seed created.
-- [ ] TLS in front, which this stack does not cover. Terminate at a reverse
-      proxy given the whole of `/` (API, event stream and interface are one
-      origin by design) and set `AICC_SECURE_COOKIES=true`, or the session
-      cookie is never sent back. That proxy needs response buffering **off** and
-      a read timeout longer than a quiet stream: with buffering on, Server-Sent
-      Events arrive in batches; with a short timeout, browsers reconnect forever.
-- [ ] `SIP_WSS_URL` pointing at a `wss://` endpoint once the interface is on
-      TLS. A page served over `https://` is not allowed to open a plain `ws://`
-      socket, so the agent's phone would never register, and the default is the
-      plain one.
-- [ ] `AICC_METRICS_ADDR` reachable only inside the stack. That listener has no
-      authentication of its own; the compose file publishes no port for it.
-- [ ] SIP and the RTP range reachable by the phones that need them and nothing
-      else, through a host firewall. The AI leg's own SIP and RTP are published
-      nowhere and need no rule.
-- [ ] Every issued API key named for the integration that holds it, with only
-      the scopes that integration needs. A leaked key is revoked on its own.
-- [ ] Provider keys in the environment, never in the database, never in a flow.
-- [ ] Provider concurrency quota raised to match the traffic. It is an external
-      limit and no amount of local capacity substitutes for it.
+- **A call to a bot number only plays hold music.** The bot session did not
+  start, and the caller went to the number's fallback queue with nobody
+  staffed. Find the reason with
+  `docker compose logs aicc | grep -E 'could not run|conversation failed'`.
+- **`… API_KEY is not set` in the logs.** The key is not in the container's
+  environment. Put it in `deploy/.env` and run `docker compose up -d`
+  (`restart` is not enough).
+- **A `401` or a failed handshake.** The provider rejected the key: it is wrong,
+  or not enabled for the realtime model shown in the `voice provider selected`
+  log line.
+
+## More
+
+- [chrome-policy.md](chrome-policy.md): install the browser phone and grant
+  its permissions on a managed fleet, instead of the onboarding card.
+- [carrier.md](carrier.md): replace the simulated public network with your own
+  trunk.
+- [production-checklist.md](production-checklist.md): passwords, demo data, TLS
+  and firewalling before the stack faces anyone.
