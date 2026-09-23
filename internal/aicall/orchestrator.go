@@ -465,7 +465,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, session 
 	output, moved := runtime.Dispatch(ctx, event.ToolName, event.ToolArgs)
 
 	if !o.isLineTheToolAnswer(moved, runtime) {
-		recorder.toolResult(event.ToolName, output)
+		recorder.toolResult(event.ToolName, output, moved)
 		if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
 			log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
 		}
@@ -480,7 +480,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, session 
 	// instruction still reaches the model, as the standing instructions.
 	output = provider.MergeHint(output,
 		provider.SayExactly(runtime.Announce(), runtime.Engine().Lang()))
-	recorder.toolResult(event.ToolName, output)
+	recorder.toolResult(event.ToolName, output, moved)
 
 	// Before the answer, both of them. The instructions first, so the turn the
 	// answer asks for runs under the terminal phase's. The ending second: it

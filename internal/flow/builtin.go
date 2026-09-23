@@ -80,6 +80,27 @@ func Succeeded(fields map[string]any, hint string) Result {
 	return Result{IsOK: true, Fields: fields, Hint: hint}
 }
 
+// TranscriptOutput is a tool output as the transcript records it: without the
+// hint. The hint is instruction text for the model (a phase's instruction, a
+// line to say exactly), which is not the tool's answer and must not reach the
+// CDR or anyone reading it. An output that is not a JSON object, or has no
+// hint, is returned unchanged.
+func TranscriptOutput(output string) string {
+	var asObject map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(output), &asObject); err != nil || asObject == nil {
+		return output
+	}
+	if _, ok := asObject["hint"]; !ok {
+		return output
+	}
+	delete(asObject, "hint")
+	stripped, err := json.Marshal(asObject)
+	if err != nil {
+		return output
+	}
+	return string(stripped)
+}
+
 // asToolOutput renders a result as the JSON the model receives.
 func (r Result) asToolOutput() string {
 	payload := map[string]any{"ok": boolAsFlag(r.IsOK)}

@@ -998,8 +998,7 @@ func TestTheEntryPhasesLineOpensTheCall(t *testing.T) {
 		t.Errorf("openingText = %q, want the entry phase's line in the call's language",
 			cfg.OpeningText)
 	}
-	if !strings.Contains(cfg.Instructions, "Current phase [welcome]") &&
-		!strings.Contains(cfg.Instructions, "当前环节【welcome】") {
+	if !strings.Contains(cfg.Instructions, "Greet the caller.") {
 		t.Errorf("instructions do not start the call in the entry phase:\n%s", cfg.Instructions)
 	}
 
@@ -1664,8 +1663,11 @@ func TestAToolThatEndsTheCallOnDoubaoOrGeminiSpeaksTheLineAsBefore(t *testing.T)
 			answer := h.callTool(t, flow.ToolHangup, `{}`)
 
 			hint := hintOf(t, answer.output)
-			if !strings.Contains(hint, "farewell") || !strings.Contains(hint, "Say goodbye.") {
+			if !strings.Contains(hint, "Say goodbye.") {
 				t.Errorf("hint = %q, want the farewell phase's instruction", hint)
+			}
+			if strings.Contains(hint, "farewell") {
+				t.Errorf("hint = %q names the node; the model is told no phase's id", hint)
 			}
 			if strings.Contains(hint, line) {
 				t.Errorf("hint = %q carries the line; this client speaks it itself", hint)
@@ -1703,9 +1705,11 @@ func TestAToolThatMovesIntoALineThatIsNotTheEndIsUnchanged(t *testing.T) {
 			answer := h.callTool(t, flow.ToolTakeMessage, `{"message":"call me back"}`)
 
 			hint := hintOf(t, answer.output)
-			if !strings.Contains(hint, "noted") ||
-				!strings.Contains(hint, "Ask whether there is anything else.") {
+			if !strings.Contains(hint, "Ask whether there is anything else.") {
 				t.Errorf("hint = %q, want the new phase's instruction", hint)
+			}
+			if strings.Contains(hint, "noted") {
+				t.Errorf("hint = %q names the node; the model is told no phase's id", hint)
 			}
 			if got := h.model.spokenLines(); len(got) != 1 || got[0] != "I have taken your message." {
 				t.Errorf("spoken lines = %v, want the phase's line once", got)
