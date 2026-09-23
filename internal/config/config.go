@@ -77,8 +77,9 @@ type Config struct {
 	IsBotEnabled bool
 
 	// Provider is the speech model this deployment runs, resolved once at
-	// startup: qwen inside mainland China, openai elsewhere. A call's
-	// language never selects it.
+	// startup: qwen or doubao inside mainland China, openai or gemini
+	// elsewhere, gateway for a self-hosted service speaking the Realtime
+	// protocol. A call's language never selects it.
 	Provider string
 	// ProviderEndpoint and ProviderModel replace the built-in address and
 	// model of that provider. The vendor's own values are defaults, not

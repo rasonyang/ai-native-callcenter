@@ -1316,9 +1316,9 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // two agents each of them should see their own party ring, establish and
 // release — not six events about both of them.
 //
-// The exception is a party with no agent: the caller's leg on an inbound call
-// belongs to nobody, and scoping it to its own agent would address the
-// customer's hangup to nobody at all.
+// A party with no agent reaches no agent's stream at all; the agent learns the
+// customer left from their own leg's PARTY_RELEASED
+// (TestAnAgentLessLegReachesNoAgentsStream).
 func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
@@ -1369,6 +1369,91 @@ func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
 		select {
 		case <-deadline:
 			t.Fatal("no PARTY_ESTABLISHED naming that agent was published")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// A party with no agent is addressed to no agent, for every state it moves
+// through — not only the PARTY_DIALING it starts with. Nor may a leg event be
+// addressed to a queue: that would reach every agent staffing it, the widening
+// the owner directive of 2026-08-22 forbids. Call-scoped events still carry
+// the queue.
+func TestAnAgentLessLegReachesNoAgentsStream(t *testing.T) {
+	pub := &capturingPublisher{}
+	registry := NewRegistry(pub)
+	t.Cleanup(registry.Shutdown)
+	c := NewCoordinator(registry, nil, noAgents{}, pub)
+
+	ctx := t.Context()
+	callerChan, calleeChan := "caller-chan", "callee-chan"
+	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", map[string]string{
+		"Caller-Destination-Number": agentExtension,
+		"Caller-Caller-ID-Number":   otherExtension,
+		"Caller-Context":            "aicc",
+	}))
+	callID, ok := registry.CallForChannel(callerChan)
+	if !ok {
+		t.Fatal("the caller is bound to no call")
+	}
+	// A call that knows its queue must still not address a leg to it.
+	queueID := uuid.New()
+	if err := registry.Do(callID, func(call *Call) { call.QueueID = &queueID }); err != nil {
+		t.Fatalf("setting the queue: %v", err)
+	}
+	c.Handle(ctx, raw("CHANNEL_CREATE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+		"Caller-Context":               "aicc",
+	}))
+	c.Handle(ctx, raw("CHANNEL_ANSWER", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number":    agentExtension,
+		"variable_aicc_parent_channel": callerChan,
+	}))
+	c.Handle(ctx, raw("CHANNEL_BRIDGE", calleeChan, "outbound", map[string]string{
+		"Caller-Destination-Number": agentExtension,
+		"Other-Leg-Unique-ID":       callerChan,
+	}))
+	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", calleeChan, "outbound", nil))
+	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", callerChan, "inbound", nil))
+
+	// Parties publish from their call's own goroutine, so wait rather than read.
+	want := []events.Type{events.TypePartyEstablished, events.TypePartyReleased}
+	deadline := time.After(2 * time.Second)
+	for {
+		pub.mu.Lock()
+		seen := map[events.Type]int{}
+		var bad []string
+		for i, ev := range pub.events {
+			sc := pub.scopes[i]
+			if ev.PartyID != nil {
+				seen[ev.Type]++
+				if len(sc.AgentIDs) != 0 || sc.QueueID != nil {
+					bad = append(bad, fmt.Sprintf("%s to agents %v, queue %v", ev.Type, sc.AgentIDs, sc.QueueID))
+				}
+			} else if sc.QueueID == nil || *sc.QueueID != queueID {
+				bad = append(bad, fmt.Sprintf("call-scoped %s lost its queue scope", ev.Type))
+			}
+		}
+		pub.mu.Unlock()
+		for _, b := range bad {
+			t.Errorf("an agent-less leg reached a stream: %s", b)
+		}
+		if len(bad) > 0 {
+			return
+		}
+		complete := true
+		for _, typ := range want {
+			if seen[typ] < 2 {
+				complete = false
+			}
+		}
+		if complete {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("published %v, want both parties established and released", seen)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

@@ -18,8 +18,9 @@ import (
 // Instruments live here rather than in the packages that feed them because
 // their names are a contract with whatever scrapes them, and a contract spread
 // across five packages is one nobody can read. Every name carries the aicc_
-// prefix, as aicc_turn_latency_ms already did.
+// prefix.
 var (
+	turnLatency      metric.Int64Histogram
 	callsActive      metric.Int64UpDownCounter
 	rtpLateTicks     metric.Int64Counter
 	rtpFramesSent    metric.Int64Counter
@@ -52,6 +53,22 @@ func init() {
 	// Errors are ignored deliberately: an instrument that cannot be created
 	// leaves a nil that every call site already tolerates, and no telephony
 	// path should fail because a counter did not.
+	//
+	// The latency budget lives or dies on one number: how long the caller
+	// waits between finishing their sentence and hearing the answer begin. It
+	// is measured per turn, from the provider reporting the caller stopped to
+	// the first frame of the reply being handed to the wire. The window starts
+	// at speech_stopped, after the VAD's silence hold: the hold is a
+	// configuration constant (500 ms by default), so the budget's
+	// caller-stop-to-caller-hears p50 <= 1.2 s corresponds to <= ~700 ms here.
+	turnLatency, _ = meter.Int64Histogram("aicc_turn_latency_ms",
+		metric.WithDescription("Per turn: provider speech_stopped to the first "+
+			"reply frame handed to the RTP queue, in milliseconds. The VAD "+
+			"silence hold happens before this window."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(100, 200, 300, 400, 500, 700, 900,
+			1200, 1600, 2000, 3000, 5000),
+	)
 	callsActive, _ = meter.Int64UpDownCounter("aicc_calls_active",
 		metric.WithDescription("Calls currently up. SWITCH counts every call the switch "+
 			"is carrying, BOT the subset the model is answering; they overlap."))
@@ -131,6 +148,16 @@ func RecordRTPHealth(sent, lateTicks, lost, dropped, filled int64) {
 			instrument.Add(ctx, value)
 		}
 	}
+}
+
+// RecordTurnLatency publishes one turn's whole wait: the caller falling silent
+// to the first reply frame reaching the RTP queue.
+func RecordTurnLatency(provider string, ms int64) {
+	if turnLatency == nil {
+		return
+	}
+	turnLatency.Record(context.Background(), ms,
+		metric.WithAttributes(attribute.String("provider", provider)))
 }
 
 // RecordProviderFirstAudio publishes the provider's share of one turn's wait.

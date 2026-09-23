@@ -7,10 +7,10 @@
 // entering it; this one synthesises nothing, holds no dialogue state and
 // drives no conversation. The two are siblings joined only by the caller.
 //
-// Unlike internal/provider, this package holds *two* clients, and that is the
-// same rule applied rather than an exception to it: the extension point is the
-// wire protocol. OpenAI serves transcription over the Realtime dialect;
-// Alibaba serves qwen-audio-3.0-asr-flash-streaming over DashScope's native
+// Like internal/provider, which holds three, this package holds *two* clients,
+// and that is the same rule applied rather than an exception to it: the
+// extension point is the wire protocol. OpenAI serves transcription over the
+// Realtime dialect; Alibaba serves qwen-audio-3.0-asr-flash-streaming over DashScope's native
 // run-task duplex protocol. Those are different grammars, not different field
 // names, and no Profile bridges them. A new *engine* on either protocol is a
 // new profile; only a new *protocol* earns a third client.

@@ -5,7 +5,7 @@ This app must look like a product from the Linear / Vercel / Stripe family:
 quiet, dense, precise, professional. It is an operations tool used 8 hours a
 day, NOT a marketing site.
 
-## Tokens (define once in globals.css as CSS variables; never invent new values)
+## Tokens (define once in `src/index.css` as CSS variables; never invent new values)
 - Background:        #FAFAFA (app) / #FFFFFF (surfaces/cards)
 - Border:            #E5E7EB (1px solid; borders instead of shadows everywhere)
 - Text primary:      #18181B
@@ -44,7 +44,7 @@ re-implement a variant.
   a supervisor watches the floor, an agent takes calls — the sidebar is a job
   description, not a seniority ladder.
 - ADMIN: Overview, Users, Extensions, Queues & Routing, Numbers,
-  Bot Flows / CDR, Reports, Audit Log.
+  Bot Flows / CDR, Reports, Audit Log, Webhooks, API Keys.
   SUPERVISOR: Wallboard, Agents, Queues / CDR, Reports.
   AGENT: Dashboard, My Calls, Contacts, Callbacks.
   CDR and Reports are the only overlap, and only between the two senior roles.

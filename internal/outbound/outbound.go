@@ -483,7 +483,6 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 			"aicc_call_id":            callID.String(),
 			"aicc_did":                did.Number,
 			"aicc_language":           language,
-			"absolute_codec_string":   "PCMU,PCMA",
 			"sip_h_X-AICC-Call-ID":    callID.String(),
 			"sip_h_X-AICC-Channel-ID": customerLeg.String(),
 			"sip_h_X-AICC-DID":        did.Number,

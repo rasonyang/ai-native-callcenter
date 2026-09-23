@@ -107,8 +107,9 @@ type VoiceSession interface {
 type SessionConfig struct {
 	Instructions string
 	Voice        string
-	// Language informs the prompt and the choice of provider profile. It does
-	// not route anything by itself.
+	// Language sets the prompt language and the default greeting cue. It never
+	// selects the provider, which a deployment chooses once at startup (A1),
+	// nor the voice, which the flow owns (A7).
 	Language string
 	Turn     TurnDetection
 	Tools    []ToolSpec
@@ -141,7 +142,9 @@ const (
 	TurnModeVAD TurnMode = "VAD"
 	// TurnModeSemantic waits for the utterance to sound complete. It ignores
 	// backchannels, at a cost of well over a second of added turn latency on
-	// at least one provider, so it is opt-in per flow.
+	// at least one provider. Only the Realtime client maps it, and nothing
+	// selects it today: no flow field or setting asks for it, and every call
+	// runs DefaultTurnDetection.
 	TurnModeSemantic TurnMode = "SEMANTIC"
 )
 

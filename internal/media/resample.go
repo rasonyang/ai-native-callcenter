@@ -8,9 +8,11 @@ import "math"
 const (
 	// RateTelephone is the rate on the wire: G.711 is always 8 kHz.
 	RateTelephone = 8000
-	// RateProviderIn is what the Chinese provider expects to be fed.
+	// RateProviderIn is the linear input rate of the providers that take
+	// 16 kHz (qwen, doubao, gemini); see each provider.Profile.
 	RateProviderIn = 16000
-	// RateProviderOut is what it speaks back.
+	// RateProviderOut is the linear rate those providers speak back at, and
+	// the rate the gateway takes and returns in both directions.
 	RateProviderOut = 24000
 )
 

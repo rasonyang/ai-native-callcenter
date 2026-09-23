@@ -265,12 +265,13 @@ func GatewayProfile() Profile {
 // protocol at all.
 //
 // It is therefore the one profile whose values do not all mean what they mean
-// above: everything the Realtime client alone reads — Style, Headers,
+// above: everything the Realtime client alone reads — Style,
 // TranscribeModel, CancelsResponseItself, NeedsCueForFirstTurn,
 // NeedsDirectedLineInConversation and the two semantic-turn fields — is left
 // at zero, because the client that answers for this name
 // (internal/provider/doubao) reads none of them. What it does read is the name,
-// the endpoint, the credential, the voice and the two audio formats.
+// the endpoint, the credential, any extra Headers, the voice and the two audio
+// formats.
 // Model is informational for the same reason: that protocol's version is a
 // constant inside its client and AICC_PROVIDER_MODEL cannot move it.
 //
@@ -314,11 +315,12 @@ func DoubaoProfile() Profile {
 // and the third client this build can put on a call.
 //
 // It leaves the same fields at zero as the doubao profile does, for the same
-// reason: Style, Headers, TranscribeModel, CancelsResponseItself,
+// reason: Style, TranscribeModel, CancelsResponseItself,
 // NeedsCueForFirstTurn, NeedsDirectedLineInConversation and the two
 // semantic-turn fields are read by the Realtime client alone, and the client
-// that answers for this name (internal/provider/gemini) reads none of them. What it reads is the name, the
-// endpoint, the credential, the voice and the two audio formats. Model is
+// that answers for this name (internal/provider/gemini) reads none of them.
+// What it reads is the name, the endpoint, the credential, any extra Headers,
+// the voice and the two audio formats. Model is
 // informational: the model name is a constant inside that client — its
 // lifecycle is what the client knows how to hold a conversation with — so
 // AICC_PROVIDER_MODEL is ignored here and the value is kept only so a
@@ -370,7 +372,8 @@ func GeminiProfile() Profile {
 }
 
 // Provider names this build can run. A deployment runs exactly one of them,
-// chosen at startup: Qwen inside mainland China, OpenAI elsewhere.
+// chosen at startup: qwen or doubao inside mainland China, openai or gemini
+// elsewhere, gateway for a self-hosted service behind the Realtime protocol.
 const (
 	NameOpenAI = "openai"
 	NameQwen   = "qwen"

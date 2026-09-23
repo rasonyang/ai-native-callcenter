@@ -616,7 +616,9 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 	// it is about. It is in the CDR, and supervisors see everything.
 	//
 	// Call-scoped events (p == nil) keep the whole conversation: they are about
-	// the call, not about a leg of it.
+	// the call, not about a leg of it. Only they may also reach a queue's
+	// audience; a leg event addressed to a queue would reach every agent
+	// staffing it, which is exactly the widening the rule above forbids.
 	scope := events.Scope{AgentIDs: a.call.AgentIDs()}
 	if p != nil {
 		partyID := p.PartyID
@@ -626,8 +628,7 @@ func (a *actor) publish(t events.Type, p *Party, payload map[string]any) {
 		if p.AgentID != nil {
 			scope.AgentIDs = []uuid.UUID{*p.AgentID}
 		}
-	}
-	if a.call.QueueID != nil {
+	} else if a.call.QueueID != nil {
 		scope.QueueID = a.call.QueueID
 	}
 	a.registry.pub.Publish(context.Background(), ev, scope)

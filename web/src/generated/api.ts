@@ -364,7 +364,7 @@ export interface paths {
          *
          *     Idempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.
          *
-         *     Authorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai.
+         *     Authorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai. The machine-readable form is x-body-scopes: scopes a credential of either kind must hold, beyond the security block, when the named request-body property has the listed value. A security block cannot say this, because its alternatives choose between credentials, not between request bodies.
          */
         post: operations["createCall"];
         delete?: never;
@@ -2064,7 +2064,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             number: string;
-            /** @description Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting, the prompt language and the voice; it does not select a provider, which is a deployment-wide setting. */
+            /** @description Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting and the prompt language, nothing else. It selects neither the provider, which is fixed per deployment, nor the voice, which comes from the flow (global.voice) or, when the flow names none, the provider's default. */
             language: string;
             /** Format: uuid */
             flowId?: string;
