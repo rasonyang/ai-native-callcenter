@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
 )
@@ -80,10 +81,19 @@ func (r *callRecorder) toolCall(name, args string) {
 		map[string]any{"name": name, "args": args})
 }
 
-// toolResult records what the tool answered.
-func (r *callRecorder) toolResult(name, output string) {
-	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name,
-		map[string]any{"name": name, "output": output})
+// toolResult records what the tool answered and the phase the call moved to,
+// if it moved.
+//
+// The output is recorded without its hint (flow.TranscriptOutput): the hint is
+// instruction text for the model, not the tool's answer, and the transcript is
+// read by people. The phase change it would have announced is kept as the
+// node the call moved to.
+func (r *callRecorder) toolResult(name, output, movedTo string) {
+	content := map[string]any{"name": name, "output": flow.TranscriptOutput(output)}
+	if movedTo != "" {
+		content["movedTo"] = movedTo
+	}
+	r.add(store.SpeakerBot, store.TranscriptKindToolResult, name, content)
 }
 
 // add hands the line to the call's transcript actor. The bot's transcript is

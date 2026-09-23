@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -98,7 +99,7 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 	recorder.say(store.SpeakerBot, "感谢致电 NovaNet")
 	recorder.say(store.SpeakerCustomer, "帮我查个问题")
 	recorder.toolCall("hangup", "{}")
-	recorder.toolResult("hangup", `{"ok":"1"}`)
+	recorder.toolResult("hangup", `{"ok":"1"}`, "")
 	recorder.markHangup()
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -336,5 +337,43 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 					"the number they called finds nothing")
 			}
 		})
+	}
+}
+
+// A tool result reaches the transcript without the hint the model was given:
+// the hint is instruction text, and the transcript is read by people. The
+// phase the call moved to is recorded in its place.
+func TestAToolResultIsRecordedWithoutItsHint(t *testing.T) {
+	callID := uuid.New()
+	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
+
+	recorder.toolResult("transfer_to_agent",
+		`{"ok":"1","queue":"support","hint":"Current phase:\nAnnounce the transfer."}`, "handoff")
+	recorder.toolResult("lookup_account", `{"ok":"0","hint":"Tell the caller."}`, "")
+
+	flushTranscript()
+	entries := transcripts.get(callID)
+	if len(entries) != 2 {
+		t.Fatalf("transcript has %d entries, want 2", len(entries))
+	}
+
+	moved := entries[0].Content
+	output, _ := moved["output"].(string)
+	if strings.Contains(output, "hint") || strings.Contains(output, "Announce the transfer") {
+		t.Errorf("the recorded output carries the hint: %s", output)
+	}
+	if !strings.Contains(output, `"queue":"support"`) {
+		t.Errorf("the recorded output lost the tool's own fields: %s", output)
+	}
+	if moved["movedTo"] != "handoff" {
+		t.Errorf("movedTo = %v, want the node the call moved to", moved["movedTo"])
+	}
+
+	stayed := entries[1].Content
+	if output, _ := stayed["output"].(string); strings.Contains(output, "Tell the caller") {
+		t.Errorf("the recorded output carries the hint: %s", output)
+	}
+	if _, ok := stayed["movedTo"]; ok {
+		t.Errorf("a result that moved nowhere records movedTo = %v", stayed["movedTo"])
 	}
 }
