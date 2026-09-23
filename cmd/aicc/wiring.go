@@ -455,6 +455,28 @@ func voiceSession(profile provider.Profile, log *slog.Logger) (provider.VoiceSes
 	}
 }
 
+// reportMissingProviderKey says at startup what the first bot call would
+// otherwise find out alone: the provider's credential is not in this process's
+// environment. It reports whether it was missing.
+//
+// It does not refuse to start. A stack with no key is a supported way to run —
+// agents, queues and the screens all work — and only the bot is silent. But
+// silent is the problem: every client reads its key when a session opens, so
+// without this the process logs a healthy start, and the first sign of trouble
+// is a caller hearing hold music, because the orchestrator hands a call whose
+// session cannot open to the number's fallback queue. The variable comes from
+// the profile, which is where every client (Realtime, doubao, gemini) looks.
+func reportMissingProviderKey(log *slog.Logger, profile provider.Profile, getenv func(string) string) bool {
+	if profile.APIKeyEnv == "" || getenv(profile.APIKeyEnv) != "" {
+		return false
+	}
+	log.Error(profile.APIKeyEnv+" is not set: every AI call will be transferred straight to the number's fallback queue",
+		"provider", profile.Name,
+		"missing", profile.APIKeyEnv,
+		"hint", "set it in deploy/.env for the compose stack and recreate the container with `docker compose up -d` (restart does not re-read .env)")
+	return true
+}
+
 // botConfig assembles what the AI voice leg is given.
 //
 // Logger is deliberately not a parameter: the orchestrator fills it with its
