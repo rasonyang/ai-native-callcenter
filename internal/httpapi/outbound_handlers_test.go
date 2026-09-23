@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -377,6 +378,18 @@ func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
 	}
 	if dialer.got.To != "" {
 		t.Error("the call went out anyway")
+	}
+	if !strings.Contains(w.Body.String(), `"requiredScope":"calls:create:ai"`) {
+		t.Errorf("the refusal does not name calls:create:ai: %s", w.Body)
+	}
+
+	// The rule is the contract's x-body-scopes, not a literal here: losing it
+	// from docs/openapi.json would open the bot to every agent, silently.
+	if got := api.ScopesForBody("createCall", string(api.CreateCallRequestKindAIOUTBOUND)); !slices.Equal(got, []string{api.ScopeCallsCreateAI}) {
+		t.Errorf("AI_OUTBOUND requires %v beyond calls:create, want [%s]", got, api.ScopeCallsCreateAI)
+	}
+	if got := api.ScopesForBody("createCall", string(api.CreateCallRequestKindAGENTOUTBOUND)); got != nil {
+		t.Errorf("AGENT_OUTBOUND requires %v beyond calls:create, want nothing", got)
 	}
 }
 

@@ -68,7 +68,7 @@ go build -o /tmp/aicc ./cmd/aicc && /tmp/aicc
 value means *unset* there, so a non-empty default cannot be blanked by leaving
 the variable empty — the setting's own comment says what to write instead.
 
-Logs go to stdout **and** to `logs/aicc-<starttime>.log`. Read the file when
+Logs go to stderr **and** to `logs/aicc-<starttime>.log`. Read the file when
 analysing a run; it is the only copy that survives the terminal.
 
 An empty database needs a first account, and a DID needs a flow:

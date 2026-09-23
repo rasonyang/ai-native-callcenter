@@ -72,8 +72,6 @@ baseline within a minute of the last call ending.
 
 ## Stages
 
-| Stage | Setup | Pass criteria | State |
-|---|---|---|---|
 | Stage | Setup | What it establishes | State |
 |---|---|---|---|
 | **L1 micro** | `go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/` | Frame paths allocate nothing per frame | The one stage that runs continuously: CI holds it on every change |

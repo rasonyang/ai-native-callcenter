@@ -6,11 +6,11 @@ One ESL **inbound-mode** connection (default `127.0.0.1:18021`, password from en
 
 **Subscriptions**: `CHANNEL_CREATE, CHANNEL_ANSWER, CHANNEL_PARK, CHANNEL_BRIDGE, CHANNEL_UNBRIDGE, CHANNEL_HOLD, CHANNEL_UNHOLD, CHANNEL_HANGUP_COMPLETE, DTMF, RECORD_START, RECORD_STOP, CUSTOM sofia::register sofia::unregister sofia::sip_user_state callcenter::info`.
 
-**Command vocabulary** (`internal/telephony/adapter`; complete list — anything else needs a design change): `originate {origination_uuid=…}…`, `uuid_transfer <uuid> 'bridge:{…}<ep>' inline` (route-to-endpoint AND blind transfer — **never** `originate`+`uuid_bridge`, per cti-server's production lesson), `uuid_transfer <uuid> <ext> XML <ctx>` (send a live channel through dialplan, used for queue entry), `uuid_phone_event <uuid> talk|hold` (browser phones), `uuid_answer`, `uuid_hold [off]`, `uuid_break`, `uuid_broadcast`, `uuid_record start|stop`, `uuid_kill <cause>`, `uuid_setvar(_multi)`, `callcenter_config <…>`, `sofia profile external rescan`, `reloadxml`, `show channels as json`, `create_uuid`.
+**Command vocabulary** (`internal/telephony/adapter`; complete list — anything else needs a design change): `originate {origination_uuid=…}…`, `uuid_transfer <uuid> 'm:^:bridge:{…}<ep>' inline` (route-to-endpoint AND blind transfer — **never** `originate`+`uuid_bridge`, per cti-server's production lesson), `uuid_transfer <uuid> <ext> XML <ctx>` (send a live channel through dialplan, used for queue entry), `uuid_phone_event <uuid> talk|hold` (answer, hold and retrieve — never `uuid_answer` / `uuid_hold`, which report success while a browser phone does nothing), `originate {…}<ep> &eavesdrop(<uuid>)` (monitoring), `uuid_audio <uuid> start read mute|stop`, `uuid_send_dtmf`, `uuid_record start|stop`, `uuid_audio_stream start|stop|pause|resume` (transcription tap), `uuid_kill <cause>`, `uuid_setvar`, `uuid_getvar`, `callcenter_config agent|tier|queue <…>` (including `tier list` and `queue list members`), `sofia status`, `sofia status profile <p> reg`, `sofia profile <p> flush_inbound_reg`, `show channels as json`. Party UUIDs are generated in Go and passed as `origination_uuid`; there is no `create_uuid`.
 
 **Link management**: reconnect 500ms→30s exponential backoff; state observed everywhere; call-affecting endpoints return `503 switch_down` while down; agent-profile and read endpoints keep working. On (re)connect: recovery reconcile (§6).
 
-**Normalization boundary**: raw FS events are mapped in one place to internal events; header hypotheses (from cti-server, never live-verified) are validated by the M0 spike before hardening. Switch-level facts needed by events (release cause, SIP status, codec) surface as normalized payload fields; business context lives in `userData`. `switchData` (the Genesys-Extensions analog) is strictly request-side — it exists only on `POST /calls` and in the Lua leg-creation scripts, applied to originate strings / channel variables at this boundary (04 §4).
+**Normalization boundary**: raw FS events are mapped in one place to internal events; header hypotheses (from cti-server, never live-verified) are validated by the M0 spike before hardening. Switch-level facts needed by events (release cause, SIP status, codec) surface as normalized payload fields; business context lives in `userData`. `switchData` (the Genesys-Extensions analog; **designed, not implemented** — no contract field, Go, TS or Lua code carries it) was to be strictly request-side — it exists only on `POST /calls` and in the Lua leg-creation scripts, applied to originate strings / channel variables at this boundary (04 §4).
 
 ## 2. State machines (table-driven tests mandatory)
 
@@ -179,12 +179,12 @@ Static directory users 1000–1019 remain as fallback during migration; removed 
 **D5 `sip_profiles/external/local6060.xml`** → replaced by `aicc_bot.xml`:
 ```xml
 <gateway name="aicc_bot">
-  <param name="proxy" value="sip:$${local_ip_v4}:6060"/>
+  <param name="proxy" value="$${aicc_bot_host}:$${aicc_bot_port}"/>
   <param name="register" value="false"/>
   <param name="ping" value="30"/>
 </gateway>
 ```
-(`ping` gives real OPTIONS keepalive; the old `expire-seconds` was inert. Our UAS answers OPTIONS 200.)
+(No `sip:` scheme in the value; `aicc_bot_host` / `aicc_bot_port` are injected per deployment and must not be loopback (`freeswitch/conf/sip_profiles/external/aicc_bot.xml`). `ping` gives real OPTIONS keepalive; the old `expire-seconds` was inert. Our UAS answers OPTIONS 200.)
 
 **D6 dialplan** — ~~as originally written~~ **SUPERSEDED 2026-08-22 by D6a**. Original: remove custom extensions `outbound_test` (default.xml + public.xml), `bridge-to-local-9999`, `bridge-to-ai-6060` (public.xml), and delete the legacy bot dialplan file under `dialplan/public/` (the file defining the 95013/95015 routes; old bot retired per T6). Add `public/05_aicc.xml` (catch-all → `lua aicc_inbound.lua`) and `default/05_aicc.xml` (`^(7\d{3})$` queue extensions → `lua aicc_queue.lua $1`; **internal extension dialing stays on the stock `Local_Extension`**).
 

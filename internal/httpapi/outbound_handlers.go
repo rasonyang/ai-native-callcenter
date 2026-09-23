@@ -70,13 +70,14 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 // createAICall originates the customer leg and hands whoever answers to the
 // bot running the DID's flow.
 //
-// The second scope is checked here rather than declared in the contract's
-// security block because one operation carries one scope and this route
-// serves two kinds of call with two different answers: click-to-dial is an
-// agent's own work, starting a bot on a number is an operations decision.
-// calls:create reaches the operation; calls:create:ai reaches this half of
-// it, and the contract says so in the operation's own description (owner
-// ruling, 2026-08-31).
+// The second scope cannot live in the contract's security block, because its
+// alternatives choose between credentials and this route serves two kinds of
+// call with two different answers: click-to-dial is an agent's own work,
+// starting a bot on a number is an operations decision. calls:create reaches
+// the operation; the contract's x-body-scopes on createCall states what
+// kind=AI_OUTBOUND requires on top of it (calls:create:ai, owner ruling
+// 2026-08-31), and it is applied here, where the kind first exists, from the
+// generated table rather than from a literal.
 //
 // The scope exists because the baseline's rule was a SUPERVISOR check inside
 // this handler — exactly the shape docs/auth/scopemap.py cannot see, since it
@@ -90,11 +91,13 @@ func (s *Server) createAICall(w http.ResponseWriter, r *http.Request, req api.Cr
 	if !ok {
 		return
 	}
-	if !ac.Has(api.ScopeCallsCreateAI) {
-		writeError(w, http.StatusForbidden, CodeInsufficientScope,
-			"starting the bot on a number is not the same act as placing a call",
-			map[string]any{"requiredScope": api.ScopeCallsCreateAI})
-		return
+	for _, scope := range api.ScopesForBody("createCall", string(api.CreateCallRequestKindAIOUTBOUND)) {
+		if !ac.Has(scope) {
+			writeError(w, http.StatusForbidden, CodeInsufficientScope,
+				"starting the bot on a number is not the same act as placing a call",
+				map[string]any{"requiredScope": scope})
+			return
+		}
 	}
 
 	dial := outbound.AIDialRequest{To: req.To}

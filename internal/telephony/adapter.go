@@ -19,8 +19,12 @@ type Commander interface {
 }
 
 // Adapter is the complete vocabulary of commands this application sends to
-// FreeSWITCH. Nothing outside this file builds a switch command string, so the
-// switch's spelling stays in one reviewable place.
+// FreeSWITCH: its methods — here and in members.go, tiers.go and
+// registrations.go — are the only code that builds a switch command string, so
+// the switch's spelling stays in one reviewable type. Callers supply only the
+// arguments; the one exception in shape is the endpoint an originate or bridge
+// dials, which internal/outbound composes (a gateway dial string and its
+// channel variables) and the Adapter wraps into the command.
 type Adapter struct {
 	cmd Commander
 	// domain qualifies endpoint addresses and the SIP realm. It must match the

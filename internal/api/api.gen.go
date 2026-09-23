@@ -1312,7 +1312,7 @@ type DID struct {
 	IsEnabled          bool `json:"isEnabled"`
 	IsRecordingEnabled bool `json:"isRecordingEnabled"`
 
-	// Language Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting, the prompt language and the voice; it does not select a provider, which is a deployment-wide setting.
+	// Language Lowercase BCP 47 subtag, at most 8 characters. Sets the greeting and the prompt language, nothing else. It selects neither the provider, which is fixed per deployment, nor the voice, which comes from the flow (global.voice) or, when the flow names none, the provider's default.
 	Language string `json:"language"`
 	Number   string `json:"number"`
 }

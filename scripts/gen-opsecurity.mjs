@@ -42,6 +42,44 @@ if (spec.security !== undefined) {
 }
 const vocab = spec['x-scopes'] ?? {}
 
+// x-body-scopes is the one authorization rule a `security` block cannot state:
+// scopes that depend on what the request body asks for. Its alternatives
+// choose between credentials, so listing a scope there would demand it of
+// every body. The extension names one request-body property, which must be a
+// string enum, and the extra scopes each of its values requires; the handler
+// applies them once it has decoded the body (that is the first moment the
+// value exists, defaults included).
+function resolve(schema) {
+  let s = schema
+  for (let i = 0; s && s.$ref && i < 16; i++) {
+    const m = /^#\/components\/schemas\/(.+)$/.exec(s.$ref)
+    if (!m) throw new Error(`${CONTRACT}: unsupported $ref ${s.$ref}`)
+    s = spec.components?.schemas?.[m[1]]
+  }
+  return s
+}
+
+function bodyScopesOf(op, where) {
+  const ext = op['x-body-scopes']
+  if (ext === undefined) return null
+  const { property, values, ...rest } = ext
+  if (Object.keys(rest).length) throw new Error(`${CONTRACT}: ${where} x-body-scopes has unknown key(s) ${Object.keys(rest).join(', ')}`)
+  if (typeof property !== 'string' || !property) throw new Error(`${CONTRACT}: ${where} x-body-scopes names no property`)
+  const body = resolve(op.requestBody?.content?.['application/json']?.schema)
+  const prop = resolve(body?.properties?.[property])
+  if (!prop) throw new Error(`${CONTRACT}: ${where} x-body-scopes names "${property}", which its JSON request body does not have`)
+  if (prop.type !== 'string' || !Array.isArray(prop.enum)) throw new Error(`${CONTRACT}: ${where} x-body-scopes property "${property}" is not a string enum`)
+  if (!values || typeof values !== 'object' || !Object.keys(values).length) throw new Error(`${CONTRACT}: ${where} x-body-scopes lists no values`)
+  for (const [value, scopes] of Object.entries(values)) {
+    if (!prop.enum.includes(value)) throw new Error(`${CONTRACT}: ${where} x-body-scopes value "${value}" is not in ${property}'s enum`)
+    if (!Array.isArray(scopes) || !scopes.length) throw new Error(`${CONTRACT}: ${where} x-body-scopes value "${value}" requires no scope`)
+    for (const s of scopes) {
+      if (!(s in vocab)) throw new Error(`${CONTRACT}: ${where} x-body-scopes requires scope "${s}", which is not in root x-scopes`)
+    }
+  }
+  return { property, values }
+}
+
 const rows = []
 for (const [path, item] of Object.entries(spec.paths ?? {})) {
   for (const method of METHODS) {
@@ -88,6 +126,7 @@ for (const [path, item] of Object.entries(spec.paths ?? {})) {
     rows.push({
       key: where,
       operationId: op.operationId,
+      bodyScopes: bodyScopesOf(op, where),
       anonymous: sec.length === 0,
       cookie,
       bearer,
@@ -134,6 +173,21 @@ type OperationSecurity struct {
 \t// with the cookie because a cookie travels by itself; a key is presented
 \t// deliberately on every request and is never asked for it.
 \tNeedsCSRF bool
+
+\t// BodyScopes is the operation's x-body-scopes: scopes a credential of
+\t// either kind must hold, beyond SessionScopes or KeyScopes, when the
+\t// request body asks for a particular thing. nil for every operation whose
+\t// authorization does not depend on its body. The handler applies it after
+\t// decoding, through ScopesForBody — the middleware runs before the body
+\t// is read.
+\tBodyScopes *BodyScopes
+}
+
+// BodyScopes names one request-body property and the extra scopes each of its
+// values requires. A value it does not list requires nothing extra.
+type BodyScopes struct {
+\tProperty string
+\tValues   map[string][]string
 }
 
 // OperationSecurityByRoute is every operation the contract declares, keyed
@@ -143,8 +197,29 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 ${rows.map((r) => `\t${q(r.key)}: {
 \t\tOperationID:   ${q(r.operationId)},${r.anonymous ? '\n\t\tIsAnonymous:   true,' : ''}
 \t\tSessionScopes: ${slice(r.cookie)},
-\t\tKeyScopes:     ${slice(r.bearer)},${r.needsCSRF ? '\n\t\tNeedsCSRF:     true,' : ''}
+\t\tKeyScopes:     ${slice(r.bearer)},${r.needsCSRF ? '\n\t\tNeedsCSRF:     true,' : ''}${r.bodyScopes ? `\n\t\tBodyScopes: &BodyScopes{\n\t\t\tProperty: ${q(r.bodyScopes.property)},\n\t\t\tValues: map[string][]string{\n${Object.keys(r.bodyScopes.values).sort().map((v) => `\t\t\t\t${q(v)}: ${slice(r.bodyScopes.values[v])},`).join('\n')}\n\t\t\t},\n\t\t},` : ''}
 \t},`).join('\n')}
+}
+
+// operationRoutes finds an operation's row by its operationId.
+var operationRoutes = func() map[string]string {
+\tm := make(map[string]string, len(OperationSecurityByRoute))
+\tfor route, sec := range OperationSecurityByRoute {
+\t\tm[sec.OperationID] = route
+\t}
+\treturn m
+}()
+
+// ScopesForBody answers which scopes, beyond the security block, the
+// operation requires of a request whose body property (the one its
+// x-body-scopes names) holds value. Nil when the operation declares no
+// x-body-scopes or the value requires nothing extra.
+func ScopesForBody(operationID, value string) []string {
+\tsec := OperationSecurityByRoute[operationRoutes[operationID]]
+\tif sec.BodyScopes == nil {
+\t\treturn nil
+\t}
+\treturn sec.BodyScopes.Values[value]
 }
 
 // SecurityForRoute answers what the operation mounted at this method and path

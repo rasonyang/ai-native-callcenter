@@ -31,6 +31,21 @@ type OperationSecurity struct {
 	// with the cookie because a cookie travels by itself; a key is presented
 	// deliberately on every request and is never asked for it.
 	NeedsCSRF bool
+
+	// BodyScopes is the operation's x-body-scopes: scopes a credential of
+	// either kind must hold, beyond SessionScopes or KeyScopes, when the
+	// request body asks for a particular thing. nil for every operation whose
+	// authorization does not depend on its body. The handler applies it after
+	// decoding, through ScopesForBody — the middleware runs before the body
+	// is read.
+	BodyScopes *BodyScopes
+}
+
+// BodyScopes names one request-body property and the extra scopes each of its
+// values requires. A value it does not list requires nothing extra.
+type BodyScopes struct {
+	Property string
+	Values   map[string][]string
 }
 
 // OperationSecurityByRoute is every operation the contract declares, keyed
@@ -388,6 +403,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		SessionScopes: []string{"calls:create"},
 		KeyScopes:     []string{"calls:create"},
 		NeedsCSRF:     true,
+		BodyScopes: &BodyScopes{
+			Property: "kind",
+			Values: map[string][]string{
+				"AI_OUTBOUND": []string{"calls:create:ai"},
+			},
+		},
 	},
 	"POST /calls/{callId}/answer": {
 		OperationID:   "answerCall",
@@ -557,6 +578,27 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		KeyScopes:     []string{"config:write"},
 		NeedsCSRF:     true,
 	},
+}
+
+// operationRoutes finds an operation's row by its operationId.
+var operationRoutes = func() map[string]string {
+	m := make(map[string]string, len(OperationSecurityByRoute))
+	for route, sec := range OperationSecurityByRoute {
+		m[sec.OperationID] = route
+	}
+	return m
+}()
+
+// ScopesForBody answers which scopes, beyond the security block, the
+// operation requires of a request whose body property (the one its
+// x-body-scopes names) holds value. Nil when the operation declares no
+// x-body-scopes or the value requires nothing extra.
+func ScopesForBody(operationID, value string) []string {
+	sec := OperationSecurityByRoute[operationRoutes[operationID]]
+	if sec.BodyScopes == nil {
+		return nil
+	}
+	return sec.BodyScopes.Values[value]
 }
 
 // SecurityForRoute answers what the operation mounted at this method and path

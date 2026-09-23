@@ -221,7 +221,7 @@ func (s *Server) enforceContract(next http.Handler) http.Handler {
 		if !ok {
 			// Fail closed. A route with no contract entry is a routing table
 			// that has drifted from the contract, and guessing is how a hole
-			// opens quietly. TestEveryRouteIsInTheContract makes this
+			// opens quietly. TestEveryMountedRouteDeclaresItsAuthorization makes this
 			// unreachable; this is what happens if it ever is not.
 			writeError(w, http.StatusInternalServerError, CodeInternal,
 				"this route declares no security in the contract", nil)

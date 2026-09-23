@@ -285,7 +285,7 @@ func (s *store) bbChange(b map[string]any) (any, string) {
 		"effective": "下一个账期生效"}, ""
 }
 
-// --------------------------------------------------- 账单提醒（早期催收）
+// ------------------------------------- Bill reminders (early collections)
 
 func (s *store) billOverdue(b map[string]any) (any, string) {
 	switch str(b["phone"]) {
@@ -318,7 +318,7 @@ func (s *store) billDispute(map[string]any) (any, string) {
 	return map[string]any{"recorded": "1"}, ""
 }
 
-// --------------------------------------------------- 销售线索
+// ------------------------------------------------------------- Sales leads
 
 func (s *store) leadSubmit(b map[string]any) (any, string) {
 	grade := map[string]string{"high": "A", "mid": "B", "low": "C"}[str(b["interest"])]

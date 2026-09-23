@@ -80,10 +80,12 @@ the call if it is wrong.
 
 A profile answered by a client other than the Realtime one fills in only what
 that client reads. `DoubaoProfile` and `GeminiProfile` both leave `Style`,
-`Headers`, `TranscribeModel`, `CancelsResponseItself`, `NeedsCueForFirstTurn`,
+`TranscribeModel`, `CancelsResponseItself`, `NeedsCueForFirstTurn`,
 `NeedsDirectedLineInConversation` and both semantic-turn fields at zero, and say so in their doc comments: a trait
 nothing reads is worse than an absent one, because the next person takes it for
-a statement about the vendor. `Model` is informational on both for the same
+a statement about the vendor. `Headers` is the exception: both clients send
+its entries with the upgrade request, after their own API-key header, though
+neither profile sets any. `Model` is informational on both for the same
 reason — the version, or the model name, is a constant inside the client, and
 `AICC_PROVIDER_MODEL` cannot move it. Where the two differ is
 `RequiresTerminalAnnounce`: true on doubao, whose engine takes no text cue at
@@ -258,7 +260,9 @@ which traits hold.
 
 ## Where a call's language comes in
 
-Nowhere. A DID's language sets the greeting, the prompt language and the voice.
+Nowhere. A DID's language sets the greeting and the prompt language. The voice comes
+from the flow's `global.voice`, or the profile's default where the flow names
+none (A7).
 It has never selected a provider and reintroducing that mapping is a regression
 (phase1-decisions A1). One provider answers every call in a deployment, chosen
 at startup, because the vendors that ship here are not all reachable with
