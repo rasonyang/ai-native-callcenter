@@ -81,10 +81,12 @@ type Realtime struct {
 	// second request would be refused. isPreemptedForSpeak remembers that the
 	// turn now ending was stopped to make room, which is what keeps the
 	// interruption from being reported as the caller's.
-	pendingSpeak         string
-	isResponseRequested  bool
-	isCancelSentForSpeak bool
-	isPreemptedForSpeak  bool
+	pendingSpeak string
+	// isPendingSpeakClosing is SpeakText's isClosing for pendingSpeak.
+	isPendingSpeakClosing bool
+	isResponseRequested   bool
+	isCancelSentForSpeak  bool
+	isPreemptedForSpeak   bool
 
 	// The two fields a tool result answered mid-response needs. See
 	// SendToolResult and releaseToolTurn.
@@ -232,13 +234,7 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		cue = direction
 	}
 	if r.profile.NeedsCueForFirstTurn {
-		if err := r.sendEvent(map[string]any{
-			"type": "conversation.item.create",
-			"item": map[string]any{
-				"type": "message", "role": "user",
-				"content": []map[string]any{{"type": "input_text", "text": cue}},
-			},
-		}); err != nil {
+		if err := r.sendEvent(userTextItem(cue)); err != nil {
 			r.conn.Close()
 			return fmt.Errorf("prompt opening turn: %w", err)
 		}
@@ -248,6 +244,18 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		return fmt.Errorf("request opening turn: %w", err)
 	}
 	return nil
+}
+
+// userTextItem is the frame that puts text in the conversation as a caller
+// message: a cue, a keypress, a directed line.
+func userTextItem(text string) map[string]any {
+	return map[string]any{
+		"type": "conversation.item.create",
+		"item": map[string]any{
+			"type": "message", "role": "user",
+			"content": []map[string]any{{"type": "input_text", "text": text}},
+		},
+	}
 }
 
 // greetingCue is the stage direction that gets a provider talking first.
@@ -280,13 +288,7 @@ func (r *Realtime) SendAudio(audio []byte) error {
 
 // SendUserText adds a caller turn that was not spoken and asks for a reply.
 func (r *Realtime) SendUserText(text string) error {
-	if err := r.sendEvent(map[string]any{
-		"type": "conversation.item.create",
-		"item": map[string]any{
-			"type": "message", "role": "user",
-			"content": []map[string]any{{"type": "input_text", "text": text}},
-		},
-	}); err != nil {
+	if err := r.sendEvent(userTextItem(text)); err != nil {
 		return err
 	}
 	return r.requestResponse(map[string]any{"type": "response.create"})
@@ -299,6 +301,8 @@ func (r *Realtime) SendUserText(text string) error {
 // model is told to repeat one sentence and nothing else. That is best effort
 // rather than verbatim, and it is the honest limit of this client — an engine
 // that speaks text outright gets its own profile and says the line as written.
+// Where the override alone loses to the conversation already there, a line
+// that ends the call is put in the conversation too (askForLine).
 //
 // The floor may already be taken, and asking for a second response while one
 // is open is refused with "conversation already has an active response". Two
@@ -315,10 +319,15 @@ func (r *Realtime) SendUserText(text string) error {
 //     change is decided on that very result, so this is the ordinary case
 //     rather than the exotic one.
 //
+// When the floor is free it is claimed under the same lock that found it
+// free, before anything is written: a second SpeakText arriving while the
+// line's frames are still going out finds it taken and waits, rather than
+// asking for a second response the provider would refuse.
+//
 // The read loop owns both deferred sends. Nothing is emitted from here, for
 // the reason Interrupt gives: this is normally called from the goroutine
 // draining Events, and emitting would deadlock it.
-func (r *Realtime) SpeakText(text string) error {
+func (r *Realtime) SpeakText(text string, isClosing bool) error {
 	if text == "" {
 		return nil
 	}
@@ -332,11 +341,13 @@ func (r *Realtime) SpeakText(text string) error {
 		r.isCancelSentForSpeak = true
 		r.isPreemptedForSpeak = true
 	}
-	r.pendingSpeak = ""
+	r.pendingSpeak, r.isPendingSpeakClosing = "", false
 	if isDeferred {
-		r.pendingSpeak = text
+		r.pendingSpeak, r.isPendingSpeakClosing = text, isClosing
+	} else {
+		r.claimFloorLocked()
 	}
-	request := speakRequest(text, r.cfg.Language)
+	language := r.cfg.Language
 	r.mu.Unlock()
 
 	if isCancelNeeded {
@@ -347,19 +358,63 @@ func (r *Realtime) SpeakText(text string) error {
 	if isDeferred {
 		return nil
 	}
-	return r.requestResponse(request)
+	return r.askForLine(text, language, isClosing)
 }
 
-// speakRequest is the frame that asks for one line, said as written.
+// claimFloorLocked records that a turn is on its way before anything asks for
+// it: the state requestResponse sets, set early. The caller holds mu.
+func (r *Realtime) claimFloorLocked() {
+	r.isResponseRequested = true
+	r.isToolTurnOwed = false
+}
+
+// askForLine asks for the turn that says one line, on a floor the caller has
+// already claimed (claimFloorLocked): the request carrying the direction as a
+// per-response override and, for a line that ends the call on a profile that
+// needs it (NeedsDirectedLineInConversation), the same direction put in the
+// conversation as a caller message first. The item goes strictly before the
+// request, so the turn the request makes is made with it in view.
+//
+// Only a closing line is put in the conversation. The item stays in the
+// history, and what a caller message saying "repeat this sentence" does to the
+// turns after it has not been measured — a call that is ending has no turns
+// after it to spoil. A line in a phase the conversation goes on from keeps
+// the override alone, for the reason answerToolCall keeps such a line out of
+// a tool result.
+//
+// Both of SpeakText's ways to the floor end here — asked at once, or asked when
+// the turn that held it has ended — so a line is steered the same way whichever
+// one it took. If nothing could be asked for, the claim is released so that
+// the next line is not left waiting for a turn that will never come.
+func (r *Realtime) askForLine(text, language string, isClosing bool) error {
+	direction := sayExactly(text, language)
+	err := func() error {
+		if isClosing && r.profile.NeedsDirectedLineInConversation {
+			if err := r.sendEvent(userTextItem(direction)); err != nil {
+				return err
+			}
+		}
+		return r.sendEvent(speakRequest(direction))
+	}()
+	if err != nil {
+		r.mu.Lock()
+		r.isResponseRequested = false
+		r.mu.Unlock()
+	}
+	return err
+}
+
+// speakRequest is the frame that asks for one line, said as written;
+// direction is SayExactly's demand for it.
 //
 // One frame for both dialects: the type discriminator the GA session object
 // carries has no counterpart on a response, and both name the per-response
 // override the same way, so there is nothing here for a dialect to disagree
 // about.
-func speakRequest(text, language string) map[string]any {
+func speakRequest(direction string) map[string]any {
 	return map[string]any{
 		"type":     "response.create",
-		"response": map[string]any{"instructions": sayExactly(text, language)},
+		"response": map[string]any{"instructions": direction},
 	}
 }
 
@@ -432,18 +487,21 @@ func (r *Realtime) onResponseCreated() {
 // room, which is what decides who the interruption is attributed to.
 func (r *Realtime) dispatchPendingSpeak() (wasPreempted bool) {
 	r.mu.Lock()
-	text := r.pendingSpeak
+	text, isClosing := r.pendingSpeak, r.isPendingSpeakClosing
 	wasPreempted = r.isPreemptedForSpeak
-	request := speakRequest(text, r.cfg.Language)
-	r.pendingSpeak = ""
+	language := r.cfg.Language
+	r.pendingSpeak, r.isPendingSpeakClosing = "", false
 	r.isPreemptedForSpeak = false
 	r.isCancelSentForSpeak = false
+	if text != "" {
+		r.claimFloorLocked()
+	}
 	r.mu.Unlock()
 
 	if text == "" {
 		return wasPreempted
 	}
-	if err := r.requestResponse(request); err != nil {
+	if err := r.askForLine(text, language, isClosing); err != nil {
 		r.log.Warn("could not ask for the line that was waiting for the floor", "error", err)
 	}
 	return wasPreempted

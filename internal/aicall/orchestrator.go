@@ -371,11 +371,13 @@ func sessionConfigFor(spec *flow.Spec, runtime *flow.Runtime, language string) p
 func (o *Orchestrator) drive(ctx context.Context, session *Session,
 	runtime *flow.Runtime, actions *callActions, recorder *callRecorder, log *slog.Logger) {
 
+	wall := turnsWithoutToolWatch{toolCallTurn: -1}
 	for event := range session.Events() {
 		switch event.Type {
 		case EventTypeCustomerSaid:
 			if event.IsFinal {
 				recorder.say(store.SpeakerCustomer, event.Text)
+				runtime.OnCallerSpoke(event.Text)
 			}
 
 		case EventTypeBotSaid:
@@ -385,8 +387,10 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 		case EventTypeDigit:
 			recorder.say(store.SpeakerCustomer, "[keypad] "+event.Text)
+			runtime.OnCallerKeyed()
 
 		case EventTypeToolCall:
+			wall.toolCallTurn = event.Turn
 			o.answerToolCall(ctx, event, session, runtime, actions, recorder, log)
 
 		case EventTypeNoInput:
@@ -394,12 +398,13 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 		case EventTypeTurnDone:
 			actions.onTurnDone(event.Turn, event.IsInterrupted)
+			wall.onTurnDone(event.Turn, event.IsInterrupted, runtime)
 
 		case EventTypeBargeIn:
 			actions.onBargeIn()
 
 		case EventTypePlaybackDone:
-			actions.onPlaybackDone(event.Turn)
+			o.handlePlaybackDone(event.Turn, &wall, session, runtime, actions, log)
 
 		case EventTypeFailed:
 			// The conversation cannot continue; the caller still can.
@@ -524,7 +529,7 @@ func (o *Orchestrator) afterMove(moved string, session *Session,
 	// recorded, and then no playback would ever count: the call would end ten
 	// seconds later on the grace cap, in silence the caller has to sit through.
 	if line := runtime.Announce(); line != "" {
-		if err := session.Speak(line); err != nil {
+		if err := session.Speak(line, runtime.Engine().IsTerminal()); err != nil {
 			log.Warn("could not say the phase's own line", "node", moved, "error", err)
 			return false
 		}
@@ -598,13 +603,94 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 	if moved != "" && runtime.Engine().IsTerminal() {
 		// The flow has decided the conversation is over; the model's next words
 		// are the goodbye, not another prompt.
-		cue = "(The caller seems to have gone. Say a brief goodbye; the call will end.)"
-		if runtime.Engine().Lang() == flow.LangZH {
-			cue = "（来电者似乎已离开。请简短道别，通话随后会结束。）"
-		}
+		cue = goodbyeCue(runtime.Engine().Lang(), true)
 	}
 	if err := session.model.SendUserText(cue); err != nil {
 		log.Warn("could not prompt a silent caller", "error", err)
+	}
+}
+
+// goodbyeCue asks the model for the goodbye of a call the flow has closed on
+// its own, when the closing phase has no line of its own to say instead. A
+// caller who went silent is told goodbye as someone who may have gone; one
+// who is still talking, as someone who is there.
+func goodbyeCue(lang string, isCallerSilent bool) string {
+	switch {
+	case isCallerSilent && lang == flow.LangZH:
+		return "（来电者似乎已离开。请简短道别，通话随后会结束。）"
+	case isCallerSilent:
+		return "(The caller seems to have gone. Say a brief goodbye; the call will end.)"
+	case lang == flow.LangZH:
+		return "（通话即将结束。请感谢来电者并简短道别，通话随后会结束。）"
+	default:
+		return "(The call is ending now. Thank the caller and say a brief goodbye; the call will end.)"
+	}
+}
+
+// turnsWithoutToolWatch follows the model's turns for the flow's
+// maxTurnsWithoutTool wall, on the call's own goroutine. The engine counts;
+// this knows which turn is which, which the engine cannot.
+type turnsWithoutToolWatch struct {
+	// toolCallTurn is the turn the latest tool call arrived in, so the turn's
+	// TURN_DONE can tell the engine it made one. -1 before any.
+	toolCallTurn int
+	// crossedInTurn is the completed turn after which the call stood past the
+	// wall, and whose playback the move waits for. 0 is none: turns are
+	// numbered from 1.
+	crossedInTurn int
+}
+
+// onTurnDone accounts for one finished turn and records whether the call now
+// stands past the wall, and after which turn.
+//
+// Every turn re-decides it. A turn that follows the crossing one supersedes it
+// — the caller talked over the reply, or answered it and got another — and the
+// one after it is what the caller must hear before the goodbye; if that turn
+// was a tool call, the count is back at zero and there is nothing to wait for.
+func (w *turnsWithoutToolWatch) onTurnDone(turn int, isInterrupted bool, runtime *flow.Runtime) {
+	isPast := runtime.OnBotTurnDone(turn == w.toolCallTurn, isInterrupted)
+	w.crossedInTurn = 0
+	if isPast {
+		w.crossedInTurn = turn
+	}
+}
+
+// handlePlaybackDone runs what waited for the caller to hear a turn: an armed
+// action first, then the maxTurnsWithoutTool wall.
+//
+// The wall's move is made here, on the playback of the reply that crossed it,
+// and not when the count crossed. Then the model had only just finished that
+// reply, the caller had not heard it, and — with the provider's own turn
+// detection answering the same utterance — the goodbye asked for on top of it
+// was refused on qwen, so the call ended on the reply after it with no goodbye
+// at all. Here the floor is free and the reply has been heard. A caller who
+// talks over the reply first supersedes it: barge-in flushes the turn, its
+// playback never completes, and the turn the caller's words produce decides
+// again (turnsWithoutToolWatch.onTurnDone).
+//
+// The move itself is any other terminal arrival's: afterMove re-pins the
+// instructions and arms the ending before the closing line is asked for. A
+// closing phase with no line gets the goodbye cue instead, as handleDeadAir's
+// terminal move does — without it the model has nothing to answer and the call
+// ends on the grace cap in silence.
+func (o *Orchestrator) handlePlaybackDone(turn int, wall *turnsWithoutToolWatch,
+	session *Session, runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
+
+	// An action already armed ends the call its own way; the wall has nothing
+	// to add to it.
+	wasArmed := actions.isArmed()
+	actions.onPlaybackDone(turn)
+	if wasArmed || wall.crossedInTurn == 0 || turn != wall.crossedInTurn {
+		return
+	}
+	wall.crossedInTurn = 0
+
+	moved := runtime.CloseAtTurnsWithoutToolWall()
+	if moved == "" || o.afterMove(moved, session, runtime, actions, log) {
+		return
+	}
+	if err := session.model.SendUserText(goodbyeCue(runtime.Engine().Lang(), false)); err != nil {
+		log.Warn("could not ask for the goodbye", "error", err)
 	}
 }
 

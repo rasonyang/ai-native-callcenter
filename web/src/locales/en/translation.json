@@ -703,6 +703,9 @@
     "providerDefault": "Provider default",
     "maxTurns": "Max turns",
     "fallbackTarget": "Fallback phase",
+    "closingTarget": "Closing target",
+    "maxTurnsWithoutTool": "Max tool-less replies per phase",
+    "off": "Off",
     "alwaysAllowed": "Always allowed",
     "builtinTool": "Built in — implemented by the platform, no HTTP call",
     "builtin": {

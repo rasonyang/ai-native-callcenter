@@ -68,19 +68,20 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `LinearInput` / `LinearOutput` | The PCM formats used when it does not. Fixed by the vendor, not negotiated. |
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
 | `NeedsCueForFirstTurn` | Whether it refuses to speak into an empty conversation. Our bot greets first, so those providers need a synthetic cue. |
+| `NeedsDirectedLineInConversation` | Whether a mid-call line that *ends the call* (`SpeakText(text, isClosing=true)`) must also be put in the conversation as a caller message carrying the same `SayExactly` direction, ahead of the request that carries it as a per-response override. True on qwen, where the override alone lost to the conversation already there (qwen-findings W-Q1). A line the call goes on from keeps the override alone on every profile. |
 | `RequiresTerminalAnnounce` | Whether *no* text will make it take a turn. Stronger than the row above: a cue is something a client can invent, and this says there is no cue at all, so a phase the call stops at must carry its own words or the caller hears silence. A publish is refused otherwise. |
 | `PutsTerminalAnnounceInToolResult` | Whether a tool result that moves the call into a terminal phase with an `announce` carries the line as its hint (`SayExactly`), so the turn the result produces is the line, or carries the phase's instruction and has the line said with `SpeakText`. True on the Realtime profiles, where a line asked for on top of the result lost to it on qwen (qwen-findings W-Q1). False on doubao, whose `SpeakText` is exact by construction, and on gemini until a tool result it leaves unanswered is fixed (gemini-findings W-G6). |
 | `SemanticTurnType`, `SemanticTurnSilenceMs` | The vendor's name for semantic turn detection, and the hold it forces in that mode regardless of what was asked |
 
-The last six are the interesting ones. They are not configuration in any
+The last seven are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call
 behaved differently from the documentation, and each is a bug somewhere else in
 the call if it is wrong.
 
 A profile answered by a client other than the Realtime one fills in only what
 that client reads. `DoubaoProfile` and `GeminiProfile` both leave `Style`,
-`Headers`, `TranscribeModel`, `CancelsResponseItself`, `NeedsCueForFirstTurn`
-and both semantic-turn fields at zero, and say so in their doc comments: a trait
+`Headers`, `TranscribeModel`, `CancelsResponseItself`, `NeedsCueForFirstTurn`,
+`NeedsDirectedLineInConversation` and both semantic-turn fields at zero, and say so in their doc comments: a trait
 nothing reads is worse than an absent one, because the next person takes it for
 a statement about the vendor. `Model` is informational on both for the same
 reason — the version, or the model name, is a constant inside the client, and

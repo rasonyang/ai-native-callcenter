@@ -30,6 +30,7 @@
     },
     "voice": "",
     "fallbackTarget": "need_transfer",
+    "closingTarget": "finish",
     "maxTurns": 20,
     "alwaysAllowedTools": [
       "transfer_to_agent",

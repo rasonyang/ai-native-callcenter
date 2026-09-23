@@ -12,6 +12,7 @@ import { useNameThisPage } from '@/lib/breadcrumb'
 import { describeError, fieldErrorText } from '@/lib/errors'
 import {
   describeRule,
+  globalEntries,
   locateNodes,
   sameSpec,
   specProblems,
@@ -431,24 +432,40 @@ type Edge = {
   count: number
 }
 
-/** The arrows the global rules and the fallback add, one per target entry. */
-function globalEdges(spec: FlowSpec, anyPhase: string, fallback: string): Edge[] {
-  const nodes = spec.nodes ?? {}
-  const rules: Array<{ to: string; label: string }> = (spec.global?.transitions ?? [])
-    .filter((rule) => rule.target && nodes[rule.target])
-    .map((rule) => ({
-      to: rule.target as string,
-      label: `${anyPhase} · ${describeRule(rule)}`,
-    }))
-  const fb = spec.global?.fallbackTarget
-  if (fb && nodes[fb]) rules.push({ to: fb, label: fallback })
+/**
+ * The arrows the global entries add (globalEntries: the global rules, the
+ * fallback and the closing target), one per entry. index and count number the
+ * entries into the same target, which is how their labels are stacked.
+ */
+function globalEdges(
+  spec: FlowSpec,
+  anyPhase: string,
+  fallback: string,
+  closing: string,
+): Edge[] {
+  const entries = globalEntries(spec)
   const perTarget: Record<string, number> = {}
-  return rules.map((rule) => {
-    const index = perTarget[rule.to] ?? 0
-    perTarget[rule.to] = index + 1
-    return { from: null, ...rule, index, count: 0 }
+  for (const entry of entries) perTarget[entry.to] = (perTarget[entry.to] ?? 0) + 1
+  const seen: Record<string, number> = {}
+  return entries.map((entry) => {
+    const index = seen[entry.to] ?? 0
+    seen[entry.to] = index + 1
+    const label =
+      entry.kind === 'rule'
+        ? `${anyPhase} · ${describeRule(entry.rule)}`
+        : entry.kind === 'fallback'
+          ? fallback
+          : closing
+    return { from: null, to: entry.to, label, index, count: perTarget[entry.to] }
   })
 }
+
+/**
+ * How far above its dashed arrow the index-th global label into one phase
+ * sits. Stacked one label height (plus a gap) apart, so labels into the same
+ * phase never share a line, however wide they are.
+ */
+const globalLift = (index: number) => index * (LABEL_H + 4)
 
 /**
  * Phases in the order a call reaches them, laid out downwards: the entry phase
@@ -483,31 +500,35 @@ function layout(spec: FlowSpec) {
     frontier = next
   }
 
-  const globalTargets = [
-    ...new Set(
-      [
-        ...(spec.global?.transitions ?? []).map((r) => r.target),
-        spec.global?.fallbackTarget,
-      ].filter((id): id is string => Boolean(id) && Boolean(nodes[id as string])),
-    ),
-  ].filter((id) => !placed.has(id))
+  const entries = globalEntries(spec)
+  const globalTargets = [...new Set(entries.map((entry) => entry.to))].filter(
+    (id) => !placed.has(id),
+  )
   globalTargets.forEach((id) => placed.add(id))
   if (globalTargets.length > 0) rows.push(globalTargets)
 
   const rest = Object.keys(nodes).filter((id) => !placed.has(id))
   if (rest.length > 0) rows.push(rest)
 
+  // Global labels into one phase are stacked upwards (globalLift), so every
+  // gap between rows grows by the height the tallest stack adds — the phase
+  // with most global entries may sit in any row.
+  const perTarget: Record<string, number> = {}
+  for (const entry of entries) perTarget[entry.to] = (perTarget[entry.to] ?? 0) + 1
+  const stack = globalLift(Math.max(1, ...Object.values(perTarget)) - 1)
+  const rowGap = ROW_GAP + stack
+
   const at: Record<string, { x: number; y: number }> = {}
   rows.forEach((row, rowIndex) =>
     row.forEach((id, columnIndex) => {
-      at[id] = { x: PAD + columnIndex * COL_GAP, y: PAD + rowIndex * ROW_GAP }
+      at[id] = { x: PAD + columnIndex * COL_GAP, y: PAD + stack + rowIndex * rowGap }
     }),
   )
   const widest = Math.max(1, ...rows.map((row) => row.length))
   return {
     at,
     width: PAD * 2 + (widest - 1) * COL_GAP + NODE_W,
-    height: PAD * 2 + Math.max(1, rows.length) * ROW_GAP,
+    height: PAD * 2 + stack + Math.max(1, rows.length) * rowGap,
   }
 }
 
@@ -530,7 +551,8 @@ function PhaseGraph({
   const orphaned = new Set(orphans)
 
   // Every arrow the loader would follow, including the ones no phase owns:
-  // the global rules and the fallback reach their target from *any* phase, so
+  // the global rules, the fallback and the closing target reach their target
+  // from *any* phase, so
   // they are drawn entering the target alone, dashed, rather than from one
   // node that would be a lie about where the call came from. Without them the
   // phases only the global rules reach look orphaned, which is the opposite of
@@ -545,7 +567,7 @@ function PhaseGraph({
         count: all.length,
       })),
     ),
-    ...globalEdges(spec, t('bots.anyPhase'), t('bots.fallbackTarget')),
+    ...globalEdges(spec, t('bots.anyPhase'), t('bots.fallbackTarget'), t('bots.closingTarget')),
   ]
 
   // The graph is laid out at one size and shrunk to fit its box, so a nine-
@@ -602,11 +624,12 @@ function PhaseGraph({
               const tx = to.x + NODE_W / 2 + (edge.from === null ? edge.index * 40 : 0)
               const ty = to.y - 4
               if (edge.from === null) {
-                // From nowhere in particular: a short dashed drop into the phase.
+                // From nowhere in particular: a short dashed drop into the
+                // phase, starting at its own label.
                 return (
                   <path
                     key={i}
-                    d={`M ${tx} ${ty - GLOBAL_DROP} L ${tx} ${ty}`}
+                    d={`M ${tx} ${ty - GLOBAL_DROP - globalLift(edge.index)} L ${tx} ${ty}`}
                     stroke="var(--muted-foreground)"
                     strokeWidth="1.2"
                     strokeDasharray="3 3"
@@ -642,7 +665,10 @@ function PhaseGraph({
                   className={cn(LABEL, 'border-dashed')}
                   style={{
                     left: to.x + NODE_W / 2 + edge.index * 40,
-                    top: to.y - 4 - GLOBAL_DROP - LABEL_H / 2,
+                    // Labels into one phase are wider than the 40px their
+                    // arrows are apart, so each takes its own line above the
+                    // one before, as sibling node-edge labels do.
+                    top: to.y - 4 - GLOBAL_DROP - globalLift(edge.index) - LABEL_H / 2,
                   }}
                 >
                   {edge.label}
@@ -869,6 +895,12 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
           </Fact>
           <Fact label={t('bots.fallbackTarget')}>
             <span className="font-mono text-xs">{spec.global?.fallbackTarget || '—'}</span>
+          </Fact>
+          <Fact label={t('bots.closingTarget')}>
+            <span className="font-mono text-xs">{spec.global?.closingTarget || '—'}</span>
+          </Fact>
+          <Fact label={t('bots.maxTurnsWithoutTool')}>
+            <span className="tabular">{spec.global?.maxTurnsWithoutTool || t('bots.off')}</span>
           </Fact>
           <Fact label={t('bots.alwaysAllowed')}>
             <span className="font-mono text-xs">

@@ -34,7 +34,9 @@
     },
     "voice": "",
     "fallbackTarget": "need_transfer",
+    "closingTarget": "finish",
     "maxTurns": 40,
+    "maxTurnsWithoutTool": 10,
     "alwaysAllowedTools": [
       "transfer_to_agent",
       "take_message",
@@ -98,8 +100,8 @@
     },
     "repair_report": {
       "instruction": {
-        "zh": "维修单查询结果:设备 {slots.repair_status.device},当前状态 {slots.repair_status.status},{slots.repair_status.eta}。向用户播报后问“请问还需要其它服务吗?”可以继续解答使用问题,或查询其它维修单(再次调用 repair_status,以最新返回为准);结束时调用 hangup。",
-        "en": "Repair lookup result: device {slots.repair_status.device}, status {slots.repair_status.status}, {slots.repair_status.eta}. Announce it in English (translate the Chinese fields naturally), then ask \"Anything else I can help you with?\" You may keep answering usage questions or check another repair order (call repair_status again; trust the latest result). To end, call hangup."
+        "zh": "维修单查询结果:设备 {slots.repair_status.device},当前状态 {slots.repair_status.status},{slots.repair_status.eta}。向用户播报后问“请问还需要其它服务吗?”对方有手机使用问题就继续解答;要查其它维修单就再次调用 repair_status(以最新返回为准);对方请你再说一遍,就重复播报。对方说“没有了”“不用了”“没事了”这类话,就是不需要了:立即调用 hangup,不要再问一次。",
+        "en": "Repair lookup result: device {slots.repair_status.device}, status {slots.repair_status.status}, {slots.repair_status.eta}. Announce it in English (translate the Chinese fields naturally), then ask \"Anything else I can help you with?\" If the caller has a usage question, answer it; if they want another repair order checked, call repair_status again (trust the latest result); if they ask you to repeat, repeat the result. If they decline — \"no\", \"that's all\", \"nothing else\" — call hangup immediately and do not ask again."
       },
       "tools": [
         "repair_status"

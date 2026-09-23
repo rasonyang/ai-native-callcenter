@@ -111,11 +111,13 @@ type fakeModel struct {
 	toolResults  []toolResult
 	instructions []string
 	// spoken holds the lines the flow asked for word for word, in order.
-	spoken     []string
-	interrupts []interrupt
-	sendErr    error
-	isClosed   bool
-	closeOnce  sync.Once
+	spoken []string
+	// spokenClosing is each spoken line's isClosing.
+	spokenClosing []bool
+	interrupts    []interrupt
+	sendErr       error
+	isClosed      bool
+	closeOnce     sync.Once
 
 	// startCfg is the configuration the session was started with, which is
 	// where the call's opening line travels.
@@ -192,9 +194,10 @@ func (m *fakeModel) UpdateInstructions(text string) error {
 	return nil
 }
 
-func (m *fakeModel) SpeakText(text string) error {
+func (m *fakeModel) SpeakText(text string, isClosing bool) error {
 	m.mu.Lock()
 	m.spoken = append(m.spoken, text)
+	m.spokenClosing = append(m.spokenClosing, isClosing)
 	m.calls = append(m.calls, "SpeakText")
 	onSpeak := m.onSpeak
 	m.mu.Unlock()
@@ -253,6 +256,14 @@ func (m *fakeModel) spokenLines() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.spoken...)
+}
+
+// spokenLinesClosing says, line for line with spokenLines, which were asked
+// for as lines that end the call.
+func (m *fakeModel) spokenLinesClosing() []bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]bool(nil), m.spokenClosing...)
 }
 
 // recordedCalls are the conversation-control calls, in order.

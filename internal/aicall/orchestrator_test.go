@@ -698,6 +698,9 @@ func TestSilenceThatMovesIntoALineAsksForOneTurnOnly(t *testing.T) {
 	if got := model.spokenLines(); len(got) != 1 || got[0] != "Thank you for calling, goodbye." {
 		t.Errorf("spoken lines = %v, want the phase's own line once", got)
 	}
+	if got := model.spokenLinesClosing(); len(got) != 1 || !got[0] {
+		t.Errorf("a terminal phase's line was not asked for as one that ends the call: %v", got)
+	}
 	if got := model.recordedUserText(); len(got) != 0 {
 		t.Errorf("cues sent = %v, want none: the line is the turn", got)
 	}
@@ -754,6 +757,227 @@ func TestSilenceThatMovesIntoAPhaseWithoutALineStillPromptsTheModel(t *testing.T
 	if got := model.recordedUserText(); len(got) != 1 ||
 		!strings.Contains(got[0], "goodbye") {
 		t.Errorf("cues sent = %v, want the goodbye cue once", got)
+	}
+}
+
+//
+// A caller's decline never ended the call, only the model calling hangup did
+// (issue #9): the maxTurnsWithoutTool wall closes the call through the same
+// terminal-phase path as any other ending, once the reply that crossed it has
+// been heard.
+//
+
+// wallFlow is a two-reply wall into a closing phase; the announce is
+// substituted in, so a test can drop it.
+const wallFlow = `{
+	"id": "wall-test",
+	"specVersion": "v2",
+	"initialNode": "welcome",
+	"global": {
+		"persona": "You answer the phone.",
+		"closingTarget": "farewell",
+		"maxTurnsWithoutTool": 2
+	},
+	"nodes": {
+		"welcome": {"instruction": "Answer questions.", "tools": []},
+		"farewell": {"instruction": "Say goodbye.", ANNOUNCE
+			"tools": [], "isTerminal": true}
+	}
+}`
+
+func wallHarness(t *testing.T, hasAnnounce bool) (*Orchestrator, *Session,
+	*fakeModel, *flow.Engine, *flow.Runtime, *callActions, *slog.Logger, *fakeSwitch) {
+	t.Helper()
+	announce := ""
+	if hasAnnounce {
+		announce = `"announce": "Thank you for calling, goodbye.",`
+	}
+	sw := &fakeSwitch{}
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, sw)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(strings.Replace(wallFlow, "ANNOUNCE", announce, 1)))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
+	}
+	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	model.answerLinesWithATurn(session)
+	return o, session, model, engine, runtime, actions, log, sw
+}
+
+// replyInTurn is one exchange the wall counts, as drive would see it: the
+// caller's words, then turn n finishing without a tool call.
+func replyInTurn(runtime *flow.Runtime, wall *turnsWithoutToolWatch, n int) {
+	runtime.OnCallerSpoke("no")
+	wall.onTurnDone(n, false, runtime)
+}
+
+// The wall is crossed when the replies exceed it, and the call moves only once
+// the caller has heard the reply that crossed it. The move is any terminal
+// arrival's: the ending is armed before the closing line is asked for, the line
+// is asked for as one that ends the call, and the call ends when the line has
+// been heard.
+func TestTheTurnsWithoutToolWallClosesOnceTheCrossingReplyIsHeard(t *testing.T) {
+	o, session, model, engine, runtime, actions, log, sw := wallHarness(t, true)
+	wall := turnsWithoutToolWatch{toolCallTurn: -1}
+
+	replyInTurn(runtime, &wall, 1)
+	replyInTurn(runtime, &wall, 2)
+	o.handlePlaybackDone(2, &wall, session, runtime, actions, log)
+	if engine.IsTerminal() {
+		t.Fatal("two replies moved the call; the wall is crossed only when they exceed two")
+	}
+
+	replyInTurn(runtime, &wall, 3)
+	if engine.IsTerminal() || len(model.spokenLines()) != 0 {
+		t.Fatal("the wall moved the call before the reply that crossed it was heard")
+	}
+
+	turnBefore := session.currentTurn()
+	o.handlePlaybackDone(3, &wall, session, runtime, actions, log)
+	if !engine.IsTerminal() {
+		t.Fatal("the caller heard the crossing reply and the call did not close")
+	}
+	if got := model.spokenLines(); len(got) != 1 || got[0] != "Thank you for calling, goodbye." {
+		t.Fatalf("spoken lines = %v, want the closing announce once", got)
+	}
+	if got := model.spokenLinesClosing(); len(got) != 1 || !got[0] {
+		t.Errorf("the closing announce was not asked for as a line that ends the call: %v", got)
+	}
+	if got := model.recordedUserText(); len(got) != 0 {
+		t.Errorf("cues sent = %v, want none: the announce is the goodbye", got)
+	}
+	if !actions.isArmed() || actions.armedInTurn != turnBefore {
+		t.Fatalf("armed=%v in turn %d, want armed in turn %d, before the announce's own turn",
+			actions.isArmed(), actions.armedInTurn, turnBefore)
+	}
+
+	o.handlePlaybackDone(turnBefore+1, &wall, session, runtime, actions, log)
+	if actions.isArmed() {
+		t.Error("the caller heard the announce and the call stayed open")
+	}
+	if got := sw.variable("aicc_bot_finished"); got != "FLOW_END" {
+		t.Errorf("aicc_bot_finished = %q, want FLOW_END", got)
+	}
+}
+
+// A closing phase with no line of its own gets the goodbye cue, as a dead-air
+// move into one does; without it the model has nothing to answer and the call
+// ends on the grace cap in silence.
+func TestTheTurnsWithoutToolWallAsksForAGoodbyeWhereTheClosingPhaseHasNoLine(t *testing.T) {
+	o, session, model, engine, runtime, actions, log, _ := wallHarness(t, false)
+	wall := turnsWithoutToolWatch{toolCallTurn: -1}
+
+	for n := 1; n <= 3; n++ {
+		replyInTurn(runtime, &wall, n)
+	}
+	o.handlePlaybackDone(3, &wall, session, runtime, actions, log)
+
+	if !engine.IsTerminal() || !actions.isArmed() {
+		t.Fatalf("terminal=%v armed=%v, want the call closing", engine.IsTerminal(), actions.isArmed())
+	}
+	if got := model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken lines = %v, want none", got)
+	}
+	if got := model.recordedUserText(); len(got) != 1 || !strings.Contains(got[0], "goodbye") {
+		t.Errorf("cues sent = %v, want the goodbye cue once", got)
+	}
+}
+
+// Whatever follows the crossing reply decides again. A tool call puts the
+// count back at zero and nothing waits for anybody's playback; a further
+// tool-less reply — the caller talked over the crossing one and was answered —
+// is the one the caller must hear before the goodbye.
+func TestALaterTurnSupersedesTheCrossingReply(t *testing.T) {
+	t.Run("a tool call", func(t *testing.T) {
+		o, session, _, engine, runtime, actions, log, _ := wallHarness(t, true)
+		wall := turnsWithoutToolWatch{toolCallTurn: -1}
+		for n := 1; n <= 3; n++ {
+			replyInTurn(runtime, &wall, n)
+		}
+		// The caller asks for something a tool does, in turn 4.
+		runtime.OnCallerSpoke("actually, one more thing")
+		wall.toolCallTurn = 4
+		wall.onTurnDone(4, false, runtime)
+
+		o.handlePlaybackDone(3, &wall, session, runtime, actions, log)
+		o.handlePlaybackDone(4, &wall, session, runtime, actions, log)
+		if engine.IsTerminal() {
+			t.Fatal("the wall closed a call whose conversation moved on to a tool")
+		}
+	})
+
+	t.Run("a further reply", func(t *testing.T) {
+		o, session, model, engine, runtime, actions, log, _ := wallHarness(t, true)
+		wall := turnsWithoutToolWatch{toolCallTurn: -1}
+		for n := 1; n <= 3; n++ {
+			replyInTurn(runtime, &wall, n)
+		}
+		// Turn 3 was talked over — its playback never completes — and the
+		// caller's words got turn 4.
+		replyInTurn(runtime, &wall, 4)
+
+		o.handlePlaybackDone(3, &wall, session, runtime, actions, log)
+		if engine.IsTerminal() {
+			t.Fatal("the superseded reply's playback moved the call")
+		}
+		o.handlePlaybackDone(4, &wall, session, runtime, actions, log)
+		if !engine.IsTerminal() || len(model.spokenLines()) != 1 {
+			t.Fatal("the reply the caller did hear did not close the call")
+		}
+	})
+}
+
+// drive wires the live events to the wall: final transcripts give the next
+// turn a caller to answer, and a completed turn's playback is where the move
+// is made.
+func TestDriveClosesAToolLessLoopThroughTheWall(t *testing.T) {
+	sw := &fakeSwitch{}
+	session, _, model := startBridge(t, provider.OpenAIProfile())
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	o := testOrchestrator(t, sw)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	spec, err := flow.Load([]byte(strings.Replace(wallFlow, "ANNOUNCE",
+		`"announce": "Thank you for calling, goodbye.",`, 1)))
+	if err != nil {
+		t.Fatalf("load flow: %v", err)
+	}
+	engine := flow.NewEngine(spec, "en", nil, log)
+	actions := &callActions{
+		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
+	}
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	actions.recorder = recorder
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+
+	go o.drive(t.Context(), session, runtime, actions, recorder, log)
+
+	for range 3 {
+		model.events <- provider.Event{Type: provider.EventTypeInputTranscript,
+			Text: "no", IsFinal: true}
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+		model.events <- provider.Event{Type: provider.EventTypeAudioDelta,
+			Audio: make([]byte, media.FrameSamples)}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone, Status: "completed"}
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(model.spokenLines()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := model.spokenLines(); len(got) != 1 || got[0] != "Thank you for calling, goodbye." {
+		t.Fatalf("spoken lines = %v, want the closing announce once", got)
+	}
+	if got := model.spokenLinesClosing(); !got[0] {
+		t.Error("the closing announce was not asked for as a line that ends the call")
 	}
 }
 
@@ -1485,6 +1709,11 @@ func TestAToolThatMovesIntoALineThatIsNotTheEndIsUnchanged(t *testing.T) {
 			}
 			if got := h.model.spokenLines(); len(got) != 1 || got[0] != "I have taken your message." {
 				t.Errorf("spoken lines = %v, want the phase's line once", got)
+			}
+			// The call goes on from this phase, so the line is not one that
+			// ends it — which is what keeps it out of qwen's history.
+			if got := h.model.spokenLinesClosing(); len(got) != 1 || got[0] {
+				t.Errorf("a non-terminal line was asked for as one that ends the call: %v", got)
 			}
 			if got := h.model.recordedCalls(); strings.Join(got, ",") !=
 				"SendToolResult,UpdateInstructions,SpeakText" {

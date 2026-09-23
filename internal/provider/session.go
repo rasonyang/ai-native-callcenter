@@ -73,7 +73,15 @@ type VoiceSession interface {
 	//
 	// It is for mid-call use. The line a call opens with is SessionConfig's,
 	// because the opening turn is asked for as part of starting the session.
-	SpeakText(text string) error
+	//
+	// isClosing says the line ends the call — the flow has reached a phase it
+	// does not leave, and nothing will be asked of the model after it. A
+	// client may steer such a line harder than one the conversation goes on
+	// from, because whatever that leaves in the model's history has no later
+	// turn to affect (the Realtime client does, on a profile with
+	// NeedsDirectedLineInConversation). A client that speaks text outright,
+	// or steers every line the same way, ignores it.
+	SpeakText(text string, isClosing bool) error
 
 	// Interrupt handles barge-in. playedMs is how much of the current response
 	// the caller actually heard, which some providers need in order to keep

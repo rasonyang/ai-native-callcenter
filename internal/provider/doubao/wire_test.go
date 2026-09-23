@@ -271,13 +271,13 @@ func TestEventIDsRunInOrder(t *testing.T) {
 	f := newFakeDoubao(t, acceptSession)
 	session := startedSession(t, f)
 
-	if err := session.SpeakText("One."); err != nil {
+	if err := session.SpeakText("One.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	if err := session.UpdateInstructions("Two."); err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if err := session.SpeakText("Three."); err != nil {
+	if err := session.SpeakText("Three.", false); err != nil {
 		t.Fatalf("speak again: %v", err)
 	}
 

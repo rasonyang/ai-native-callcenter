@@ -141,7 +141,13 @@ Consequences, in order of how far they travel:
 - `SendUserText` returns `ErrTextCueUnsupported`, a typed error. Both callers
   above the boundary — the keypress report and the dead-air re-engagement cue —
   already log and continue, so nothing above changed. Those two features are
-  simply **unavailable on this provider**.
+  simply **unavailable on this provider**. A consequence found later (issue #9,
+  2026-09-23): the engine's NO_INPUT default for a flow with
+  `global.closingTarget` (`noInput.count GTE 3 → closingTarget`) never fires
+  here. Dead air is reported once per bot turn's playback; the refused cue
+  produces no turn, so no second NO_INPUT follows and the count stops at 1
+  until the caller speaks. An authored rule at `GTE 1` is the only silence
+  rule that can end a doubao call (02-ai-voice §6).
 - A phase the call does not leave must carry its own words. The profile says so
   with `RequiresTerminalAnnounce`, and a flow whose terminal phases have no
   `announce` is **refused at publish**, with a reason, rather than discovered by

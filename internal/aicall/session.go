@@ -331,8 +331,10 @@ func (s *Session) Reinstruct(text string) error {
 // The opening line of a call is not sent through here. It travels in the
 // session configuration, because the first turn is asked for while the session
 // is being started and there is no mid-call moment to catch.
-func (s *Session) Speak(text string) error {
-	return s.model.SpeakText(text)
+//
+// isClosing says the line ends the call (provider.VoiceSession.SpeakText).
+func (s *Session) Speak(text string, isClosing bool) error {
+	return s.model.SpeakText(text, isClosing)
 }
 
 //

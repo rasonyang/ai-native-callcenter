@@ -175,10 +175,17 @@ func TestTheFramesOfAWholeCallAreWhatTheyWere(t *testing.T) {
 			awaitEvent(t, session, EventTypeResponseDone)
 
 			// The floor is free, so the line the flow chose is asked for outright.
-			if err := session.SpeakText("Thanks for calling NovaNet."); err != nil {
+			// A closing line: the one kind a profile may also put in the
+			// conversation.
+			if err := session.SpeakText("Thanks for calling NovaNet.", true); err != nil {
 				t.Fatalf("speak text: %v", err)
 			}
 			sent++
+			if profile.NeedsDirectedLineInConversation {
+				// The same direction as a caller message first (W-Q1),
+				// because the line ends the call.
+				sent++
+			}
 			awaitFrames(t, f, sent)
 
 			frames := settledFrames(t, f, sent)

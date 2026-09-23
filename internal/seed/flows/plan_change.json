@@ -34,7 +34,9 @@
     },
     "voice": "",
     "fallbackTarget": "need_transfer",
+    "closingTarget": "finish",
     "maxTurns": 40,
+    "maxTurnsWithoutTool": 10,
     "alwaysAllowedTools": [
       "transfer_to_agent",
       "hangup"
@@ -163,8 +165,8 @@
     },
     "done": {
       "instruction": {
-        "zh": "变更受理成功:受理单号 {slots.bb_change.order_no},{slots.bb_change.effective}。向用户逐位播报受理单号并说明生效时间。然后问还需要其它服务吗;不需要则调用 hangup。",
-        "en": "Change accepted: order number {slots.bb_change.order_no}, {slots.bb_change.effective} (announce in English, e.g. \"effective from the next billing cycle\"). Read the order number digit by digit. Then ask if there is anything else; if not, call hangup."
+        "zh": "变更受理成功:受理单号 {slots.bb_change.order_no},{slots.bb_change.effective}。向用户逐位播报受理单号并说明生效时间。然后问还需要其它服务吗。对方说“没有了”“不用了”“没事了”这类话,就是不需要了:立即调用 hangup,不要再问一次。对方请你再说一遍,就重复一遍;还有别的问题或需求,就照常处理。",
+        "en": "Change accepted: order number {slots.bb_change.order_no}, {slots.bb_change.effective} (announce in English, e.g. \"effective from the next billing cycle\"). Read the order number digit by digit. Then ask if there is anything else. If the caller declines — \"no\", \"that's all\", \"nothing else\" — call hangup immediately and do not ask again. If they ask you to repeat something, repeat it; if they have a follow-up question or another request, handle it as usual."
       },
       "tools": [
         "bb_account",

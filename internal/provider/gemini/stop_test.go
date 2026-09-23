@@ -247,7 +247,7 @@ func TestNoAudioIsTakenOnceTheSessionIsStopping(t *testing.T) {
 	if err := session.SendAudio(frameOf(0x01)); err == nil {
 		t.Error("audio after the close was accepted")
 	}
-	if err := session.SpeakText("Too late."); err == nil {
+	if err := session.SpeakText("Too late.", false); err == nil {
 		t.Error("a line after the close was accepted")
 	}
 	if err := session.SendUserText("2"); err == nil {
@@ -295,7 +295,7 @@ func TestEverythingEndsTheSessionAtOnce(t *testing.T) {
 			// The call actor is still feeding audio and driving the
 			// conversation when the hangup arrives.
 			_ = session.SendAudio(frameOf(0x01))
-			_ = session.SpeakText("Goodbye.")
+			_ = session.SpeakText("Goodbye.", false)
 			_ = session.Interrupt(provider.InterruptReasonSystem, 40)
 		}()
 		work.Wait()
