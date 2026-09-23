@@ -162,7 +162,8 @@ type Condition struct {
 type Transition struct {
 	// On is the event this rule reacts to. Empty matches any event.
 	On EventType `json:"on,omitempty"`
-	// Tool narrows a TOOL_RESULT rule to one tool. Empty matches any.
+	// Tool narrows a TOOL_RESULT rule to one tool. Empty matches any. A
+	// NO_INPUT rule cannot name one: a silence carries no tool.
 	Tool string `json:"tool,omitempty"`
 	// Condition must hold; nil always holds.
 	Condition *Condition `json:"condition,omitempty"`
@@ -257,9 +258,29 @@ type Global struct {
 	// FallbackTarget is where a conversation goes when it has run too long or
 	// lost its way.
 	FallbackTarget string `json:"fallbackTarget,omitempty"`
+	// ClosingTarget is the flow's own goodbye phase: a terminal node reached
+	// when the engine, rather than the model, decides a call is over —
+	// repeated silence in a phase where no authored rule can fire on NO_INPUT
+	// (see Engine.OnNoInput) and the tool-less conversation wall (see
+	// MaxTurnsWithoutTool). It must name a phase with isTerminal true. It is
+	// the backstop for a caller asked "anything else?" indefinitely (issue
+	// #9), not a replacement for a closing phase that tells the model to hang
+	// up on a decline. Empty leaves both guards off.
+	ClosingTarget string `json:"closingTarget,omitempty"`
 	// MaxTurns bounds tool dispatches for the whole call, guarding against a
 	// model that loops.
 	MaxTurns int `json:"maxTurns,omitempty"`
+	// MaxTurnsWithoutTool bounds tool-less replies to the caller within one
+	// phase: the wall against a model that keeps answering — "is there
+	// anything else?", "no", "are you sure?" — without ever calling a tool
+	// that would end the call. A reply counts when the model finishes a turn
+	// that followed caller speech and made no tool call; a tool call and a
+	// phase change both start the count over (see Engine.OnBotTurnDone). When
+	// the count EXCEEDS this value the call moves to ClosingTarget, once the
+	// caller has heard the reply that crossed it. Zero (the default) turns it
+	// off, negative is refused at load, and a positive value requires
+	// ClosingTarget.
+	MaxTurnsWithoutTool int `json:"maxTurnsWithoutTool,omitempty"`
 	// AlwaysAllowedTools are available in every phase — asking for a person,
 	// or hanging up, should never be blocked by whatever phase the caller
 	// happens to be in.

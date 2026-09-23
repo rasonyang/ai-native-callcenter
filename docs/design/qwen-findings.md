@@ -201,6 +201,37 @@ reliability at the cost the opening path already pays — the direction enters t
 history as caller speech — and whether that trade is worth making mid-call is
 open.
 
+*Update 2026-09-23.* The tool-result half was since fixed by carrying the line
+in the result (A5c, `PutsTerminalAnnounceInToolResult`). The half with no tool
+result to carry it — a dead-air move into a terminal phase, and the
+`maxTurnsWithoutTool` wall — still went through `SpeakText` with the override
+alone, and failed again on live call `01a0cbb9-3f93-702d-8c62-7536378c1b93`
+(`mobile_support`, DID 95012, `logs/aicc-20260923-084400.log`): after the third
+silence the flow moved to `finish` and armed the ending, `SpeakText` asked for
+"感谢来电,再见。", and the turn it produced was a third "您好，请问您还在线吗？…" —
+the two dead-air check-ins already in the conversation as caller messages won
+over the override. The ending fired on that turn's playback, so the caller was
+released without a goodbye. `novanet_support`'s declared `NO_INPUT → farewell`
+rule takes the same path and has the same exposure. The trade is now taken, for
+lines that end the call only: the qwen profile sets
+`NeedsDirectedLineInConversation`, and `SpeakText(text, isClosing=true)` — the
+orchestrator sets `isClosing` for a terminal phase's `announce` — sends the same
+`SayExactly` direction as a user `conversation.item.create` strictly before the
+`response.create` that still carries it as the override, both when the floor is
+free and after a pre-empted turn ends: the opening turn's double steering,
+applied to a closing line. A line in a phase the call goes on from keeps the
+override alone, because the item stays in the history and what it does to the
+turns after it is unmeasured; a call that is ending has none. Pre-emption is
+unchanged; openai and gateway stay on the override alone; doubao and gemini are
+other clients. **Confirmed on two live calls**, 2026-09-23, both
+`mobile_support` on DID 95012 — three silences, the move to `finish`, then
+"感谢来电,再见。" said and the BYE: `01a0cbc9-ad0f-7797-b98b-6edab0eec8fe`
+(before the item was scoped to closing lines) and
+`01a0cc44-a4d4-73ec-9906-869749760eb6` (after it, `isClosing=true`,
+`logs/aicc-20260923-110845.log`). That is two calls, not a reliability figure;
+the 8 of 8 the approach borrows from was measured on the opening turn, not
+mid-call.
+
 **W-Q2 — a no-input move into a phase that carries an announce asks for two
 turns at once.** Provider-agnostic; qwen only makes it audible as an error.
 `handleDeadAir` (`internal/aicall/orchestrator.go:505-527`) calls `afterMove`

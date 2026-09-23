@@ -188,6 +188,28 @@ func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output 
 // treats silence as a reason to move on.
 func (r *Runtime) OnNoInput() string { return r.engine.OnNoInput() }
 
+// OnCallerSpoke reports a finished caller utterance by its transcript. An
+// empty one is ignored; words end a run of silence and give the next bot turn
+// a caller to answer (Engine.OnCallerSpoke).
+func (r *Runtime) OnCallerSpoke(transcript string) { r.engine.OnCallerSpoke(transcript) }
+
+// OnCallerKeyed reports a keypress, which ends a run of silence.
+func (r *Runtime) OnCallerKeyed() { r.engine.OnCallerKeyed() }
+
+// OnBotTurnDone accounts for a bot turn the model finished producing and
+// reports whether the call now stands past the flow's maxTurnsWithoutTool
+// wall (Engine.OnBotTurnDone).
+func (r *Runtime) OnBotTurnDone(isToolCall, isInterrupted bool) bool {
+	return r.engine.OnBotTurnDone(isToolCall, isInterrupted)
+}
+
+// CloseAtTurnsWithoutToolWall moves the call to the flow's closing target if
+// it still stands past the wall, returning the new phase or an empty string
+// (Engine.CloseAtTurnsWithoutToolWall).
+func (r *Runtime) CloseAtTurnsWithoutToolWall() string {
+	return r.engine.CloseAtTurnsWithoutToolWall()
+}
+
 // run executes one tool: a built-in acts on the call, anything else is the
 // flow's own declarative backend call.
 func (r *Runtime) run(ctx context.Context, name string, args map[string]any) (Result, error) {

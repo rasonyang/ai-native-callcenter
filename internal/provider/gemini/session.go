@@ -460,7 +460,9 @@ func (s *Session) SendUserText(text string) error {
 //
 // Nothing is emitted here: this is normally called from the goroutine draining
 // Events, and emitting would deadlock the call.
-func (s *Session) SpeakText(text string) error {
+//
+// isClosing makes no difference here: every line is steered the same way.
+func (s *Session) SpeakText(text string, _ bool) error {
 	if text == "" {
 		return nil
 	}

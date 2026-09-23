@@ -673,7 +673,7 @@ func TestSpeakTextAsksForTheLineVerbatim(t *testing.T) {
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
-	if err := session.SpeakText("I am transferring you now."); err != nil {
+	if err := session.SpeakText("I am transferring you now.", false); err != nil {
 		t.Fatalf("speak text: %v", err)
 	}
 

@@ -221,7 +221,7 @@ func TestTheCallerTalkingOverTheModelEndsTheTurnAsSpeech(t *testing.T) {
 func TestATurnWeReplacedIsNotBlamedOnTheCaller(t *testing.T) {
 	preemptions := map[string]func(t *testing.T, session *Session){
 		"a line the flow chose": func(t *testing.T, session *Session) {
-			if err := session.SpeakText("I am transferring you now."); err != nil {
+			if err := session.SpeakText("I am transferring you now.", false); err != nil {
 				t.Fatalf("speak text: %v", err)
 			}
 		},
@@ -832,7 +832,7 @@ func TestTheConsumerGoroutineCanDriveTheSessionWithoutDeadlocking(t *testing.T) 
 			if err := session.Interrupt(provider.InterruptReasonDTMF, 100); err != nil {
 				t.Errorf("interrupt from the consumer: %v", err)
 			}
-			if err := session.SpeakText("One moment."); err != nil {
+			if err := session.SpeakText("One moment.", false); err != nil {
 				t.Errorf("speak from the consumer: %v", err)
 			}
 			if err := session.UpdateInstructions("Now close the call."); err != nil {

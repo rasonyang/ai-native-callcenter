@@ -253,7 +253,7 @@ func TestASpokenLineIsAnnouncedWhenItsTurnStarts(t *testing.T) {
 	f := newFakeDoubao(t, acceptSession)
 	session := startedSession(t, f)
 
-	if err := session.SpeakText("请稍等，我为您转接人工客服。"); err != nil {
+	if err := session.SpeakText("请稍等，我为您转接人工客服。", false); err != nil {
 		t.Fatalf("speak text: %v", err)
 	}
 	committed := f.awaitMessages("speech_text_buffer.commit", 1)
@@ -351,7 +351,7 @@ func TestTheConsumerGoroutineCanDriveTheSessionWithoutDeadlocking(t *testing.T) 
 			if err := session.Interrupt(provider.InterruptReasonDTMF, 100); err != nil {
 				t.Errorf("interrupt from the consumer: %v", err)
 			}
-			if err := session.SpeakText("One moment."); err != nil {
+			if err := session.SpeakText("One moment.", false); err != nil {
 				t.Errorf("speak from the consumer: %v", err)
 			}
 			if err := session.UpdateInstructions("Now close the call."); err != nil {

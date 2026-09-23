@@ -63,6 +63,18 @@ func (s *Spec) validate() error {
 			report("global.fallbackTarget %q is not a phase in this flow", s.Global.FallbackTarget)
 		}
 	}
+	if s.Global.ClosingTarget != "" {
+		if node, ok := s.Nodes[s.Global.ClosingTarget]; !ok {
+			report("global.closingTarget %q is not a phase in this flow", s.Global.ClosingTarget)
+		} else if !node.IsTerminal {
+			report("global.closingTarget %q must be a terminal phase, the conversation cannot leave it again", s.Global.ClosingTarget)
+		}
+	}
+	if s.Global.MaxTurnsWithoutTool < 0 {
+		report("global.maxTurnsWithoutTool is %d; it is a count of turns, 0 to turn the wall off", s.Global.MaxTurnsWithoutTool)
+	} else if s.Global.MaxTurnsWithoutTool > 0 && s.Global.ClosingTarget == "" {
+		report("global.maxTurnsWithoutTool is set but global.closingTarget is empty, so the wall has nowhere to send the call")
+	}
 
 	// Every tool a phase names must exist, or the model will be offered
 	// something that cannot run.
@@ -204,6 +216,13 @@ func (s *Spec) validateTransitions(where string, rules []Transition, problems *[
 		if rule.On != "" && rule.On != EventTypeToolResult && rule.On != EventTypeNoInput {
 			*problems = append(*problems,
 				fmt.Sprintf("%s transition %d fires on unknown event %q", where, i, rule.On))
+		}
+		// A silence carries no tool, so such a rule could never fire: it is a
+		// rule that says something about silence and does nothing about it.
+		if rule.On == EventTypeNoInput && rule.Tool != "" {
+			*problems = append(*problems,
+				fmt.Sprintf("%s transition %d fires on NO_INPUT but names tool %q, which a silence never carries",
+					where, i, rule.Tool))
 		}
 		if err := validateCondition(rule.Condition); err != nil {
 			*problems = append(*problems,

@@ -28,7 +28,9 @@
     },
     "voice": "",
     "fallbackTarget": "need_transfer",
+    "closingTarget": "finish",
     "maxTurns": 30,
+    "maxTurnsWithoutTool": 10,
     "alwaysAllowedTools": [
       "transfer_to_agent",
       "hangup"
@@ -146,22 +148,22 @@
     },
     "done_book": {
       "instruction": {
-        "zh": "预约成功:预约号 {slots.appt_book.appt_id},上门时间 {slots.appt_book.slot}。向用户播报预约号(逐位)与时间,提醒保持电话畅通。然后问还有其它需要吗;没有则调用 hangup。",
-        "en": "Appointment created: number {slots.appt_book.appt_id}, visit time {slots.appt_book.slot}. Announce the number digit by digit and the time in English; remind the caller to keep the phone reachable. Then ask if there is anything else; if not, call hangup."
+        "zh": "预约成功:预约号 {slots.appt_book.appt_id},上门时间 {slots.appt_book.slot}。向用户播报预约号(逐位)与时间,提醒保持电话畅通。然后问还有其它需要吗。对方说“没有了”“不用了”“没事了”这类话,就是不需要了:立即调用 hangup,不要再问一次。对方请你再说一遍,就重复一遍;还有别的问题或需求,就照常处理。",
+        "en": "Appointment created: number {slots.appt_book.appt_id}, visit time {slots.appt_book.slot}. Announce the number digit by digit and the time in English; remind the caller to keep the phone reachable. Then ask if there is anything else. If the caller declines — \"no\", \"that's all\", \"nothing else\" — call hangup immediately and do not ask again. If they ask you to repeat something, repeat it; if they have a follow-up question or another request, handle it as usual."
       },
       "tools": []
     },
     "done_confirm": {
       "instruction": {
-        "zh": "已为用户确认预约,上门时间 {slots.appt_confirm.slot}。播报确认结果,提醒工程师上门前会先电话联系。然后问还有其它需要吗;没有则调用 hangup。",
-        "en": "Appointment confirmed for {slots.appt_confirm.slot}. Announce the confirmation and mention the engineer will call before arriving. Then ask if there is anything else; if not, call hangup."
+        "zh": "已为用户确认预约,上门时间 {slots.appt_confirm.slot}。播报确认结果,提醒工程师上门前会先电话联系。然后问还有其它需要吗。对方说“没有了”“不用了”“没事了”这类话,就是不需要了:立即调用 hangup,不要再问一次。对方请你再说一遍,就重复一遍;还有别的问题或需求,就照常处理。",
+        "en": "Appointment confirmed for {slots.appt_confirm.slot}. Announce the confirmation and mention the engineer will call before arriving. Then ask if there is anything else. If the caller declines — \"no\", \"that's all\", \"nothing else\" — call hangup immediately and do not ask again. If they ask you to repeat something, repeat it; if they have a follow-up question or another request, handle it as usual."
       },
       "tools": []
     },
     "done_reschedule": {
       "instruction": {
-        "zh": "改期成功:预约号 {slots.appt_reschedule.appt_id},新的上门时间 {slots.appt_reschedule.slot}。向用户播报新时间。然后问还有其它需要吗;没有则调用 hangup。",
-        "en": "Rescheduled: appointment {slots.appt_reschedule.appt_id}, new visit time {slots.appt_reschedule.slot}. Announce the new time in English. Then ask if there is anything else; if not, call hangup."
+        "zh": "改期成功:预约号 {slots.appt_reschedule.appt_id},新的上门时间 {slots.appt_reschedule.slot}。向用户播报新时间。然后问还有其它需要吗。对方说“没有了”“不用了”“没事了”这类话,就是不需要了:立即调用 hangup,不要再问一次。对方请你再说一遍,就重复一遍;还有别的问题或需求,就照常处理。",
+        "en": "Rescheduled: appointment {slots.appt_reschedule.appt_id}, new visit time {slots.appt_reschedule.slot}. Announce the new time in English. Then ask if there is anything else. If the caller declines — \"no\", \"that's all\", \"nothing else\" — call hangup immediately and do not ask again. If they ask you to repeat something, repeat it; if they have a follow-up question or another request, handle it as usual."
       },
       "tools": []
     },

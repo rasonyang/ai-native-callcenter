@@ -427,7 +427,7 @@ func TestSpeakingWithTheFloorFreeAsksAtOnce(t *testing.T) {
 	awaitEvent(t, session, EventTypeSessionReady)
 	finishTheOpeningTurn(t, f, session)
 
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", true); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 
@@ -437,6 +437,11 @@ func TestSpeakingWithTheFloorFreeAsksAtOnce(t *testing.T) {
 		t.Errorf("the request does not carry the line: %q", direction)
 	}
 	f.awaitMessages("response.cancel", 0)
+	// This profile is steered by the override alone, a closing line
+	// included; nothing enters the conversation on its behalf.
+	if items := f.messagesOfType("conversation.item.create"); len(items) != 0 {
+		t.Errorf("the client sent %d conversation items, want none", len(items))
+	}
 }
 
 // A line pre-empts. The turn in progress is stopped first, and the request for
@@ -453,7 +458,7 @@ func TestSpeakingOverAnOpenResponseStopsItFirstAndWaits(t *testing.T) {
 	f.send(map[string]any{"type": "response.created"})
 	awaitEvent(t, session, EventTypeResponseStarted)
 
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	f.awaitMessages("response.cancel", 1)
@@ -469,6 +474,191 @@ func TestSpeakingOverAnOpenResponseStopsItFirstAndWaits(t *testing.T) {
 		t.Errorf("the request does not carry the line: %q", direction)
 	}
 	f.awaitMessages("response.cancel", 1)
+	if items := f.messagesOfType("conversation.item.create"); len(items) != 0 {
+		t.Errorf("the client sent %d conversation items, want none", len(items))
+	}
+}
+
+// qwenConfig is basicConfig as a Chinese call on the qwen profile.
+func qwenConfig() SessionConfig {
+	cfg := basicConfig()
+	cfg.Language = "zh"
+	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
+	return cfg
+}
+
+// startQwenCall starts a qwen session whose opening turn has finished, and
+// returns once the opening cue — the one item this profile always sends — is
+// on the wire.
+func startQwenCall(t *testing.T) (*fakeProvider, *Realtime) {
+	t.Helper()
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+	if err := session.Start(t.Context(), qwenConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+	finishTheOpeningTurn(t, f, session)
+	f.awaitMessages("conversation.item.create", 1)
+	return f, session
+}
+
+// assertLineIsAlsoInTheConversation checks the last conversation item and the
+// last request against each other: the item is a caller message carrying the
+// same direction the request carries as its override, and it went first.
+func assertLineIsAlsoInTheConversation(t *testing.T, f *fakeProvider,
+	items, requests []map[string]any, line string) {
+	t.Helper()
+
+	request, item := requests[len(requests)-1], items[len(items)-1]
+	direction := nested(t, request, "response", "instructions").(string)
+	if !strings.Contains(direction, line) || !strings.Contains(direction, "一字不差") {
+		t.Errorf("the request does not ask for the line as written: %q", direction)
+	}
+	if role := nested(t, item, "item", "role"); role != "user" {
+		t.Errorf("item role = %v, want user", role)
+	}
+	content := nested(t, item, "item", "content").([]any)[0].(map[string]any)
+	if content["type"] != "input_text" || content["text"] != direction {
+		t.Errorf("item content = %v, want input_text carrying the request's direction", content)
+	}
+
+	sent := typesOf(f.messages())
+	lastItem, lastRequest := -1, -1
+	for i, messageType := range sent {
+		switch messageType {
+		case "conversation.item.create":
+			lastItem = i
+		case "response.create":
+			lastRequest = i
+		}
+	}
+	if lastItem < 0 || lastRequest < 0 || lastItem > lastRequest {
+		t.Errorf("client sent %v, want the line's item before the line's request", sent)
+	}
+}
+
+// On qwen the override alone lost to the conversation already there — a
+// dead-air goodbye came out as a third "are you still there" (W-Q1). A line
+// that ends the call is put in the conversation as well, ahead of the request
+// for it.
+func TestAClosingLineIsAlsoPutInTheConversationWhereTheOverrideAloneLoses(t *testing.T) {
+	f, session := startQwenCall(t)
+
+	if err := session.SpeakText("感谢来电，再见。", true); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+
+	requests := f.awaitMessages("response.create", 2)
+	items := f.messagesOfType("conversation.item.create")
+	if len(items) != 2 {
+		t.Fatalf("the client sent %d items, want the opening cue and the line's", len(items))
+	}
+	assertLineIsAlsoInTheConversation(t, f, items, requests, "感谢来电，再见。")
+	if cancels := f.messagesOfType("response.cancel"); len(cancels) != 0 {
+		t.Errorf("the client sent %d cancels with the floor free", len(cancels))
+	}
+}
+
+// A line in a phase the conversation goes on from keeps the override alone,
+// even on qwen: the item would stay in the history, and what it does to the
+// turns after it has not been measured.
+func TestALineTheCallGoesOnFromStaysOutOfTheConversation(t *testing.T) {
+	f, session := startQwenCall(t)
+
+	if err := session.SpeakText("请稍等，我帮您查一下。", false); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+
+	requests := f.awaitMessages("response.create", 2)
+	direction := nested(t, requests[1], "response", "instructions").(string)
+	if !strings.Contains(direction, "请稍等，我帮您查一下。") {
+		t.Errorf("the request does not carry the line: %q", direction)
+	}
+	if items := f.messagesOfType("conversation.item.create"); len(items) != 1 {
+		t.Errorf("the client sent %d items, want only the opening cue", len(items))
+	}
+}
+
+// The same line asked for over an open response pre-empts exactly as before —
+// cancel now, ask when the turn has ended — and nothing enters the conversation
+// until the line is actually asked for.
+func TestAClosingLineThatWaitedForTheFloorIsAlsoPutInTheConversation(t *testing.T) {
+	f := newFakeProvider(t, acceptSession)
+	session := testSession(t, f, QwenProfile())
+	if err := session.Start(t.Context(), qwenConfig()); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	awaitEvent(t, session, EventTypeSessionReady)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+
+	if err := session.SpeakText("感谢来电，再见。", true); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.cancel", 1)
+	// Only the opening turn's cue and request so far: the floor is still taken.
+	if items, requests := f.messagesOfType("conversation.item.create"),
+		f.messagesOfType("response.create"); len(items) != 1 || len(requests) != 1 {
+		t.Fatalf("with the floor taken the client sent %d items and %d requests, want 1 and 1",
+			len(items), len(requests))
+	}
+
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+
+	requests := f.awaitMessages("response.create", 2)
+	items := f.messagesOfType("conversation.item.create")
+	if len(items) != 2 {
+		t.Fatalf("the client sent %d items, want the opening cue and the line's", len(items))
+	}
+	assertLineIsAlsoInTheConversation(t, f, items, requests, "感谢来电，再见。")
+	if cancels := f.messagesOfType("response.cancel"); len(cancels) != 1 {
+		t.Errorf("the client sent %d cancels, want the one that made room", len(cancels))
+	}
+}
+
+// The floor is claimed before the line's first frame goes out, so a second
+// line asked for while the first one's frames are still being written waits
+// for the floor instead of asking for a second response the provider would
+// refuse ("conversation already has an active response").
+func TestASecondLineWhileTheFirstIsBeingAskedForWaits(t *testing.T) {
+	f, session := startQwenCall(t)
+
+	// Claimed exactly as SpeakText claims it, and left claimed: the window
+	// between the claim and the request going out, held open.
+	session.mu.Lock()
+	session.claimFloorLocked()
+	session.mu.Unlock()
+
+	if err := session.SpeakText("感谢来电，再见。", true); err != nil {
+		t.Fatalf("speak: %v", err)
+	}
+	f.awaitMessages("response.create", 1) // the opening turn's only
+	session.mu.Lock()
+	pending := session.pendingSpeak
+	session.mu.Unlock()
+	if pending != "感谢来电，再见。" {
+		t.Errorf("pendingSpeak = %q, want the line waiting for the floor", pending)
+	}
+}
+
+// A line that could not be asked for gives the floor back: otherwise every
+// later line would wait for a response that was never requested.
+func TestALineThatCouldNotBeAskedForReleasesTheFloor(t *testing.T) {
+	_, session := startQwenCall(t)
+	session.conn.Close()
+
+	if err := session.SpeakText("感谢来电，再见。", true); err == nil {
+		t.Fatal("a line asked for on a closed connection reported success")
+	}
+	session.mu.Lock()
+	isRequested := session.isResponseRequested
+	session.mu.Unlock()
+	if isRequested {
+		t.Error("the floor is still claimed for a line that was never asked for")
+	}
 }
 
 // The gap the flow actually falls into: a tool result asks for a turn on its
@@ -489,7 +679,7 @@ func TestALineAskedForBeforeTheProviderAnsweredWaitsForTheTurnToExist(t *testing
 	}
 	f.awaitMessages("response.create", 2)
 
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	f.awaitMessages("response.cancel", 0)
@@ -520,10 +710,10 @@ func TestASecondLineReplacesTheFirstRatherThanQueueingBehindIt(t *testing.T) {
 	f.send(map[string]any{"type": "response.created"})
 	awaitEvent(t, session, EventTypeResponseStarted)
 
-	if err := session.SpeakText("One moment please."); err != nil {
+	if err := session.SpeakText("One moment please.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak again: %v", err)
 	}
 	// One cancel, not one per line: the turn only has to be stopped once.
@@ -556,7 +746,7 @@ func TestATurnStoppedForALineIsNotBlamedOnTheCaller(t *testing.T) {
 
 	f.send(map[string]any{"type": "response.created"})
 	awaitEvent(t, session, EventTypeResponseStarted)
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	f.awaitMessages("response.cancel", 1)
@@ -1403,7 +1593,7 @@ func TestALineAskedForWhileAToolTurnWaitsIsTheOneTurnAskedFor(t *testing.T) {
 	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
 		t.Fatalf("send tool result: %v", err)
 	}
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	f.awaitMessages("response.cancel", 1)
@@ -1448,7 +1638,7 @@ func TestALineAskedForWhileTheToolTurnIsHeldWaitsForTheProvidersReply(t *testing
 		"response": map[string]any{"status": "cancelled"}})
 	awaitEvent(t, session, EventTypeInterrupted)
 
-	if err := session.SpeakText("I am putting you through now."); err != nil {
+	if err := session.SpeakText("I am putting you through now.", false); err != nil {
 		t.Fatalf("speak: %v", err)
 	}
 	f.awaitMessages("response.create", 1)

@@ -358,7 +358,9 @@ func (s *Session) SendUserText(string) error { return ErrTextCueUnsupported }
 // there is at most one line waiting and the newer one is it. Nothing is emitted
 // here — this is normally called from the goroutine draining Events, and
 // emitting would deadlock it.
-func (s *Session) SpeakText(text string) error {
+//
+// isClosing makes no difference: the words are spoken as written either way.
+func (s *Session) SpeakText(text string, _ bool) error {
 	if text == "" {
 		return nil
 	}

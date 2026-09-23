@@ -85,7 +85,25 @@ export interface FlowGlobal {
   /** The bot's timbre, published with the persona rather than set per host. */
   voice?: string
   fallbackTarget?: string
+  /**
+   * The flow's own goodbye phase: a terminal node the engine moves a call to
+   * on its own — after repeated silence in a phase where no rule can fire on
+   * NO_INPUT, or once tool-less replies exceed maxTurnsWithoutTool. A
+   * backstop for a model that keeps asking "anything else?", not a
+   * replacement for a closing phase that hangs up on a decline. Must name a
+   * terminal phase.
+   */
+  closingTarget?: string
   maxTurns?: number
+  /**
+   * The most tool-less replies to the caller one phase may make: a reply
+   * counts when the model finishes a turn that followed caller speech and
+   * made no tool call, and a tool call or a phase change starts the count
+   * over. Once the count exceeds this, the call moves to closingTarget after
+   * the caller has heard that reply. 0 or unset is off; setting it requires
+   * closingTarget.
+   */
+  maxTurnsWithoutTool?: number
   alwaysAllowedTools?: string[]
   apiBaseEnv?: string
   transitions?: FlowTransition[]
@@ -119,6 +137,35 @@ export function textListFor(value: FlowTextList | undefined, lang: SpecLang): st
 }
 
 /**
+ * One way into a phase that no phase owns: a global rule, which any phase can
+ * fire, or a target the engine sends a call to on its own — the fallback when
+ * a call runs too long, the closing target when it will not end by itself.
+ */
+export type GlobalEntry =
+  | { kind: 'rule'; to: string; rule: FlowTransition }
+  | { kind: 'fallback' | 'closing'; to: string }
+
+/**
+ * Every global way into a phase, in the order the loader would consider them,
+ * limited to targets that exist. The one list the reachability check and the
+ * graph both read, so a new engine-chosen target is added in one place.
+ */
+export function globalEntries(spec: FlowSpec): GlobalEntry[] {
+  const nodes = spec.nodes ?? {}
+  const exists = (id: string | undefined): id is string =>
+    Boolean(id) && Boolean(nodes[id as string])
+  const entries: GlobalEntry[] = []
+  for (const rule of spec.global?.transitions ?? []) {
+    if (exists(rule.target)) entries.push({ kind: 'rule', to: rule.target, rule })
+  }
+  const fallback = spec.global?.fallbackTarget
+  if (exists(fallback)) entries.push({ kind: 'fallback', to: fallback })
+  const closing = spec.global?.closingTarget
+  if (exists(closing)) entries.push({ kind: 'closing', to: closing })
+  return entries
+}
+
+/**
  * Phases no transition can reach.
  *
  * The loader does not refuse these, and it is right not to: an orphan phase
@@ -138,8 +185,7 @@ export function unreachableNodes(spec: FlowSpec): string[] {
   }
 
   enter(spec.initialNode)
-  enter(spec.global?.fallbackTarget)
-  for (const rule of spec.global?.transitions ?? []) enter(rule.target)
+  for (const entry of globalEntries(spec)) enter(entry.to)
 
   while (frontier.length > 0) {
     const id = frontier.pop() as string
@@ -313,7 +359,8 @@ export function useFlowMutations(flowId?: string) {
  *
  * Not an empty object: the loader refuses one, and an author's first
  * experience of the editor should be a spec that already publishes, not a
- * validation report. It is the smallest flow that does — one phase, a persona,
+ * validation report. It is the smallest flow that does — a working phase, the
+ * goodbye phase the engine closes a call in (global.closingTarget), a persona,
  * and the built-ins every flow gets.
  */
 export function starterSpec(slug: string): FlowSpec {
@@ -332,6 +379,12 @@ export function starterSpec(slug: string): FlowSpec {
       },
       alwaysAllowedTools: ['transfer_to_agent', 'hangup'],
       maxTurns: 40,
+      // A goodbye phase the engine can reach on its own, so a caller who
+      // stops answering is not re-prompted forever (issue #9). No
+      // maxTurnsWithoutTool: the starter's one working phase has no tools, so
+      // a wall would count every exchange of the call.
+      closingTarget: 'goodbye',
+      transitions: [{ on: 'TOOL_RESULT', tool: 'hangup', target: 'goodbye' }],
     },
     nodes: {
       welcome: {
@@ -344,10 +397,23 @@ export function starterSpec(slug: string): FlowSpec {
           zh: '感谢致电，请问有什么可以帮您？',
         },
         instruction: {
-          en: 'Find out what the caller needs and help them with it.',
-          zh: '了解来电者的需求，并帮助他们解决。',
+          en: 'Find out what the caller needs and help them with it. When they say ' +
+            'they need nothing else, call hangup at once and do not ask again.',
+          zh: '了解来电者的需求，并帮助他们解决。对方说没有其它需要了，就立即调用 hangup，不要再问一次。',
         },
         tools: [],
+      },
+      goodbye: {
+        announce: {
+          en: 'Thank you for calling, goodbye.',
+          zh: '感谢来电，再见。',
+        },
+        instruction: {
+          en: 'The line hangs up once this has been said; ask no further questions.',
+          zh: '说完这句线路会自动挂断，不要再问问题。',
+        },
+        tools: [],
+        isTerminal: true,
       },
     },
   }

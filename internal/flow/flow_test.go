@@ -145,6 +145,26 @@ func TestLoadRejectsBrokenFlows(t *testing.T) {
 				`"persona": {"en": "You answer for NovaNet billing.", "zh": "你是 NovaNet 账务热线客服。"},`,
 				`"persona": "",`, 1)
 		}, "persona"},
+		{"closing target names no phase", func(s string) string {
+			return strings.Replace(s, `"fallbackTarget": "handoff",`,
+				`"fallbackTarget": "handoff", "closingTarget": "nowhere",`, 1)
+		}, "closingTarget"},
+		{"closing target is not terminal", func(s string) string {
+			return strings.Replace(s, `"fallbackTarget": "handoff",`,
+				`"fallbackTarget": "handoff", "closingTarget": "report",`, 1)
+		}, "terminal phase"},
+		{"turns-without-tool wall with no closing target", func(s string) string {
+			return strings.Replace(s, `"maxTurns": 6,`,
+				`"maxTurns": 6, "maxTurnsWithoutTool": 3,`, 1)
+		}, "maxTurnsWithoutTool"},
+		{"negative turns-without-tool wall", func(s string) string {
+			return strings.Replace(s, `"maxTurns": 6,`,
+				`"maxTurns": 6, "maxTurnsWithoutTool": -1,`, 1)
+		}, "maxTurnsWithoutTool is -1"},
+		{"NO_INPUT rule that names a tool", func(s string) string {
+			return strings.Replace(s, `{"on": "NO_INPUT",`,
+				`{"on": "NO_INPUT", "tool": "lookup_account",`, 1)
+		}, "a silence never carries"},
 	}
 
 	for _, tt := range breakages {
@@ -374,6 +394,318 @@ func TestDeadAirMovesThePhaseOnlyWhenTheRuleSays(t *testing.T) {
 	}
 	if moved := e.OnNoInput(); moved != "farewell" {
 		t.Fatalf("two silences moved to %q, want farewell", moved)
+	}
+}
+
+//
+// The NO_INPUT default, consecutive silence, and the turns-without-a-tool
+// wall (issue #9: a caller's decline never ended the call, only the model
+// calling hangup did).
+//
+
+// testFlowWithClosing adds global.closingTarget to testFlow, pointed at the
+// one terminal phase the fixture already has.
+var testFlowWithClosing = strings.Replace(testFlow, `"fallbackTarget": "handoff",`,
+	`"fallbackTarget": "handoff", "closingTarget": "farewell",`, 1)
+
+// testFlowWithWall adds both closingTarget and a three-reply
+// maxTurnsWithoutTool wall.
+var testFlowWithWall = strings.Replace(testFlowWithClosing, `"maxTurns": 6,`,
+	`"maxTurns": 6, "maxTurnsWithoutTool": 3,`, 1)
+
+// welcomeNoInputRule is the fixture's own NO_INPUT rule in welcome, for tests
+// that rewrite it.
+const welcomeNoInputRule = `{"on": "NO_INPUT",
+				 "condition": {"slot": "noInput.count", "op": "GTE", "value": 2},
+				 "target": "farewell"}`
+
+func testEngineFor(t *testing.T, spec string, lang string) *Engine {
+	t.Helper()
+	loaded, err := Load([]byte(spec))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	return NewEngine(loaded, lang, map[string]any{"caller": "13800138000"},
+		slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// withWelcomeNoInputRule swaps welcome's NO_INPUT rule for another.
+func withWelcomeNoInputRule(t *testing.T, spec, rule string) string {
+	t.Helper()
+	if !strings.Contains(spec, welcomeNoInputRule) {
+		t.Fatal("the fixture no longer carries the NO_INPUT rule this test rewrites")
+	}
+	return strings.Replace(spec, welcomeNoInputRule, rule, 1)
+}
+
+// toReport moves an engine on the fixture to "report", the phase that declares
+// nothing about silence.
+func toReport(t *testing.T, e *Engine) {
+	t.Helper()
+	if moved := e.OnToolResult("lookup_account",
+		map[string]any{"found": "1", "name": "Alice"}); moved != "report" {
+		t.Fatalf("did not reach the phase under test: moved to %q", moved)
+	}
+}
+
+// silences reports n silences and fails if any of them moves the call.
+func silences(t *testing.T, e *Engine, n int) {
+	t.Helper()
+	for i := range n {
+		if moved := e.OnNoInput(); moved != "" {
+			t.Fatalf("silence %d moved to %q", i+1, moved)
+		}
+	}
+}
+
+// The "report" phase declares no NO_INPUT rule of its own, unlike "welcome":
+// with a closing target named, silence there must still end the call rather
+// than re-prompt forever, and it does so on the same count novanet_support's
+// own rule already used.
+func TestNoInputDefaultFiresAfterRepeatedUndeclaredSilence(t *testing.T) {
+	e := testEngineFor(t, testFlowWithClosing, "en")
+	toReport(t, e)
+
+	silences(t, e, defaultNoInputLimit-1)
+	if moved := e.OnNoInput(); moved != "farewell" {
+		t.Fatalf("silence %d moved to %q, want the closing target", defaultNoInputLimit, moved)
+	}
+}
+
+// A phase whose own NO_INPUT rule has not tripped yet keeps exactly that rule:
+// the default must not fire at its own count ahead of it.
+func TestNoInputDefaultDoesNotOverrideAnAuthoredRule(t *testing.T) {
+	e := testEngineFor(t, withWelcomeNoInputRule(t, testFlowWithClosing,
+		`{"on": "NO_INPUT", "condition": {"slot": "noInput.count", "op": "GTE", "value": 5},
+		  "target": "handoff"}`), "en")
+
+	// Past the default's limit: had the authored rule been overlooked, the
+	// default would have closed the call here.
+	silences(t, e, defaultNoInputLimit+1)
+	if moved := e.OnNoInput(); moved != "handoff" {
+		t.Fatalf("silence 5 moved to %q, want the authored rule's target", moved)
+	}
+}
+
+// A rule with no `on` matches every event, NO_INPUT included — fire() would
+// consider it for a silence, so it is the author's word on silence here and
+// the default stands aside.
+func TestNoInputDefaultStandsAsideForARuleThatMatchesEveryEvent(t *testing.T) {
+	e := testEngineFor(t, withWelcomeNoInputRule(t, testFlowWithClosing,
+		`{"condition": {"slot": "noInput.count", "op": "GTE", "value": 5},
+		  "target": "handoff"}`), "en")
+
+	silences(t, e, defaultNoInputLimit+1)
+	if moved := e.OnNoInput(); moved != "handoff" {
+		t.Fatalf("silence 5 moved to %q, want the authored rule's target", moved)
+	}
+}
+
+// A rule that names a tool can never fire on a silence, which carries none; it
+// says nothing about silence and must not switch the default off.
+func TestNoInputDefaultIgnoresARuleThatCannotFireOnSilence(t *testing.T) {
+	spec := strings.Replace(testFlowWithClosing, `"transitions": [
+			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",`, `"transitions": [
+			{"tool": "take_message", "target": "farewell"},
+			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",`, 1)
+	if spec == testFlowWithClosing {
+		t.Fatal("the fixture no longer has the global transitions this test extends")
+	}
+	e := testEngineFor(t, spec, "en")
+	toReport(t, e)
+
+	silences(t, e, defaultNoInputLimit-1)
+	if moved := e.OnNoInput(); moved != "farewell" {
+		t.Fatalf("silence %d moved to %q, want the default's closing target", defaultNoInputLimit, moved)
+	}
+}
+
+// Without a closing target there is nowhere to send the call, so a phase that
+// declared nothing about silence keeps re-prompting — the behaviour before
+// this feature existed, not a new failure mode.
+func TestNoInputDefaultDoesNothingWithoutAClosingTarget(t *testing.T) {
+	e := testEngine(t, "en") // plain testFlow: no closingTarget
+	toReport(t, e)
+	silences(t, e, defaultNoInputLimit+2)
+}
+
+// noInput.count is consecutive, not cumulative: any sign of the caller making
+// progress — words, a keypress, a tool the conversation led to — resets it.
+// A final transcript with nothing in it is not progress: on a noisy abandoned
+// line it would otherwise keep the count from ever reaching a rule.
+func TestConsecutiveSilenceResetsOnCallerProgressOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		progress  func(e *Engine)
+		wantReset bool
+	}{
+		{"words", func(e *Engine) { e.OnCallerSpoke("hello?") }, true},
+		{"a keypress", func(e *Engine) { e.OnCallerKeyed() }, true},
+		{"a tool result", func(e *Engine) {
+			e.OnToolResult("take_message", map[string]any{"ok": "1"})
+		}, true},
+		{"an empty transcript", func(e *Engine) { e.OnCallerSpoke("") }, false},
+		{"a blank transcript", func(e *Engine) { e.OnCallerSpoke("  ") }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := testEngineFor(t, testFlowWithClosing, "en")
+			toReport(t, e)
+
+			silences(t, e, defaultNoInputLimit-1)
+			tc.progress(e)
+			moved := e.OnNoInput()
+			switch {
+			case tc.wantReset && moved != "":
+				t.Fatalf("one silence after %s moved to %q; the count should have reset", tc.name, moved)
+			case !tc.wantReset && moved != "farewell":
+				t.Fatalf("silence after %s moved to %q; it is not progress and the count should have reached the default", tc.name, moved)
+			}
+		})
+	}
+}
+
+// reply is one exchange the wall counts: the caller says something, and the
+// model finishes a reply to it without calling a tool.
+func reply(e *Engine) bool {
+	e.OnCallerSpoke("no")
+	return e.OnBotTurnDone(false, false)
+}
+
+// The wall guards a tool-less loop: a caller who keeps answering — "anything
+// else?", "no" — without the model ever dispatching a tool reaches the closing
+// target once the replies EXCEED the wall, and only when asked to close, which
+// the orchestrator does once the reply that crossed it has been heard.
+func TestTheTurnsWithoutToolWallClosesTheCallOnceExceeded(t *testing.T) {
+	e := testEngineFor(t, testFlowWithWall, "en") // maxTurnsWithoutTool = 3
+
+	for i := range 3 {
+		if reply(e) {
+			t.Fatalf("reply %d crossed a wall of 3", i+1)
+		}
+		if moved := e.CloseAtTurnsWithoutToolWall(); moved != "" {
+			t.Fatalf("closing after reply %d moved to %q", i+1, moved)
+		}
+	}
+	if !reply(e) {
+		t.Fatal("the fourth tool-less reply did not cross a wall of 3")
+	}
+	if e.IsTerminal() {
+		t.Fatal("crossing the wall moved the call by itself; the move waits for the reply to be heard")
+	}
+	if got, _ := e.Slot("turnsWithoutTool"); got != 4 {
+		t.Errorf("turnsWithoutTool = %v, want 4", got)
+	}
+	if moved := e.CloseAtTurnsWithoutToolWall(); moved != "farewell" {
+		t.Fatalf("closing moved to %q, want the closing target", moved)
+	}
+	if !e.IsTerminal() {
+		t.Error("closing target was not entered as terminal")
+	}
+	if e.IsPastTurnsWithoutToolWall() {
+		t.Error("a terminal phase still reports standing past the wall")
+	}
+}
+
+// Only a completed reply to caller speech counts. The opening turn, a dead-air
+// re-prompt and a phase's own line have no caller behind them; a turn cut short
+// replied to nobody; an empty transcript is not speech.
+func TestTheTurnsWithoutToolWallCountsOnlyRepliesToTheCaller(t *testing.T) {
+	e := testEngineFor(t, testFlowWithWall, "en")
+
+	for range 10 {
+		e.OnBotTurnDone(false, false) // no caller utterance behind it
+	}
+	e.OnCallerSpoke("")
+	e.OnBotTurnDone(false, false)
+	e.OnCallerSpoke("no")
+	e.OnBotTurnDone(false, true) // cut short: the caller is still owed a reply
+	if got, _ := e.Slot("turnsWithoutTool"); got != 0 {
+		t.Fatalf("turnsWithoutTool = %v after no counted reply, want 0", got)
+	}
+	e.OnBotTurnDone(false, false) // the reply the utterance above was owed
+	if got, _ := e.Slot("turnsWithoutTool"); got != 1 {
+		t.Fatalf("turnsWithoutTool = %v, want 1", got)
+	}
+	// Two finals for one utterance (gemini) still earn one reply.
+	e.OnCallerSpoke("no")
+	e.OnCallerSpoke("no thanks")
+	e.OnBotTurnDone(false, false)
+	e.OnBotTurnDone(false, false)
+	if got, _ := e.Slot("turnsWithoutTool"); got != 2 {
+		t.Fatalf("turnsWithoutTool = %v, want 2", got)
+	}
+}
+
+// A turn that makes a tool call resets the count, and the turn after it
+// answers the tool's result rather than the caller — even when the caller's
+// transcript lands after the tool call, as it can on the Realtime clients.
+func TestTheTurnsWithoutToolWallResetsOnAToolCall(t *testing.T) {
+	e := testEngineFor(t, testFlowWithWall, "en")
+	reply(e)
+	reply(e)
+	reply(e)
+
+	// Transcript first (gemini, doubao): the utterance leads to a tool call.
+	e.OnCallerSpoke("check my balance")
+	e.OnToolResult("take_message", map[string]any{"ok": "1"}) // matches no rule in welcome
+	if e.OnBotTurnDone(true, false) {
+		t.Fatal("the tool-call turn reported the wall crossed")
+	}
+	if e.OnBotTurnDone(false, false) {
+		t.Fatal("the tool's answer reported the wall crossed")
+	}
+	if got, _ := e.Slot("turnsWithoutTool"); got != 0 {
+		t.Fatalf("turnsWithoutTool = %v after a tool call, want 0", got)
+	}
+
+	// Transcript last (openai): it arrives after the tool-call turn and must
+	// not be charged to the tool's answer.
+	e.OnToolResult("take_message", map[string]any{"ok": "1"})
+	e.OnBotTurnDone(true, false)
+	e.OnCallerSpoke("check my balance")
+	e.OnBotTurnDone(false, false)
+	if got, _ := e.Slot("turnsWithoutTool"); got != 0 {
+		t.Fatalf("turnsWithoutTool = %v after a late transcript, want 0", got)
+	}
+
+	for i := range 3 {
+		if reply(e) {
+			t.Fatalf("reply %d after the reset crossed the wall", i+1)
+		}
+	}
+	if !reply(e) {
+		t.Fatal("the fourth reply after the reset did not cross the wall")
+	}
+}
+
+// A phase change is progress too: the wall bounds replies within one phase.
+func TestTheTurnsWithoutToolWallResetsOnAPhaseChange(t *testing.T) {
+	e := testEngineFor(t, testFlowWithWall, "en")
+	reply(e)
+	reply(e)
+	reply(e)
+	if moved := e.enter("report"); moved != "report" {
+		t.Fatalf("entered %q", moved)
+	}
+	if got, _ := e.Slot("turnsWithoutTool"); got != 0 {
+		t.Fatalf("turnsWithoutTool = %v after a phase change, want 0", got)
+	}
+	if reply(e) {
+		t.Fatal("the first reply in a new phase crossed the wall")
+	}
+}
+
+// Zero (the field's absence) is off: a flow that never opted in must never
+// have its calls ended by a wall it did not set.
+func TestTheTurnsWithoutToolWallIsOffByDefault(t *testing.T) {
+	e := testEngine(t, "en") // plain testFlow: maxTurnsWithoutTool is 0
+	for i := range 20 {
+		if reply(e) {
+			t.Fatalf("reply %d crossed a wall that is not set", i+1)
+		}
+	}
+	if moved := e.CloseAtTurnsWithoutToolWall(); moved != "" {
+		t.Fatalf("closing moved to %q with the wall unset", moved)
 	}
 }
 

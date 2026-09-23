@@ -700,6 +700,9 @@
     "providerDefault": "供应商默认",
     "maxTurns": "最大轮次",
     "fallbackTarget": "兜底阶段",
+    "closingTarget": "收尾阶段",
+    "maxTurnsWithoutTool": "每个阶段无工具回复上限",
+    "off": "关闭",
     "alwaysAllowed": "始终可用",
     "builtinTool": "内置 — 由平台实现，没有 HTTP 调用",
     "builtin": {

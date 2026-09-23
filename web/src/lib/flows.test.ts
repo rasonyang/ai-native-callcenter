@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  describeRule, locateNodes, sameSpec, starterSpec, textFor, textListFor, unreachableNodes,
+  describeRule, globalEntries, locateNodes, sameSpec, starterSpec, textFor, textListFor,
+  unreachableNodes,
   type FlowSpec,
 } from '@/lib/flows'
 
@@ -58,6 +59,21 @@ describe('unreachableNodes', () => {
     const found = unreachableNodes(CHAIN)
     expect(found).not.toContain('welcome')
     expect(found).not.toContain('goodbye')
+  })
+
+  // The engine can move a call to closingTarget with no transition naming it
+  // — from the NO_INPUT default or the turns-without-a-tool wall — so it must
+  // count as reached the same way fallbackTarget does.
+  it('counts the global closing target as reached', () => {
+    const withClosing: FlowSpec = {
+      initialNode: 'welcome',
+      global: { closingTarget: 'farewell' },
+      nodes: {
+        welcome: { instruction: 'Greet.' },
+        farewell: { instruction: 'Say goodbye.', isTerminal: true },
+      },
+    }
+    expect(unreachableNodes(withClosing)).toEqual([])
   })
 
   // A flow whose phases form a cycle is legitimate; walking it must terminate.
@@ -149,5 +165,51 @@ describe('starterSpec', () => {
     expect(textFor(welcome?.announce, 'en')).not.toBe('')
     expect(textFor(welcome?.announce, 'zh')).not.toBe('')
     expect(textFor(welcome?.instruction, 'en')).not.toBe(textFor(welcome?.announce, 'en'))
+  })
+
+  // A caller's decline is otherwise invisible to the engine, so the starter
+  // shows the fix (issue #9) from a first author's very first flow: a
+  // terminal goodbye phase named as the closing target.
+  it('names a terminal closing target the caller cannot decline out of', () => {
+    const spec = starterSpec('probe')
+    const target = spec.global?.closingTarget
+    expect(target).toBeTruthy()
+    expect(spec.nodes?.[target as string]?.isTerminal).toBe(true)
+    expect(unreachableNodes(spec)).toEqual([])
+  })
+
+  // The starter's one working phase has no tools, so a turns-without-a-tool
+  // wall would count every exchange of the call and cut it short.
+  it('sets no turns-without-a-tool wall', () => {
+    expect(starterSpec('probe').global?.maxTurnsWithoutTool).toBeUndefined()
+  })
+})
+
+describe('globalEntries', () => {
+  // The one list the reachability check and the graph both read: every
+  // global rule, then the fallback, then the closing target — only where the
+  // target exists — so two entries into one phase are both kept.
+  it('lists rules, the fallback and the closing target that exist', () => {
+    const spec: FlowSpec = {
+      initialNode: 'welcome',
+      global: {
+        fallbackTarget: 'handoff',
+        closingTarget: 'farewell',
+        transitions: [
+          { on: 'TOOL_RESULT', tool: 'hangup', target: 'farewell' },
+          { on: 'TOOL_RESULT', tool: 'nowhere', target: 'missing' },
+        ],
+      },
+      nodes: {
+        welcome: { instruction: 'Greet.' },
+        handoff: { instruction: 'Transfer.' },
+        farewell: { instruction: 'Say goodbye.', isTerminal: true },
+      },
+    }
+    expect(globalEntries(spec).map((entry) => [entry.kind, entry.to])).toEqual([
+      ['rule', 'farewell'],
+      ['fallback', 'handoff'],
+      ['closing', 'farewell'],
+    ])
   })
 })

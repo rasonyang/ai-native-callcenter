@@ -57,6 +57,30 @@ type Profile struct {
 	// prompted with a synthetic cue.
 	NeedsCueForFirstTurn bool
 
+	// NeedsDirectedLineInConversation means a line that ends the call, asked
+	// for mid-call (SpeakText with isClosing), must also be put in the
+	// conversation, as a caller message carrying the same SayExactly
+	// direction, ahead of the response.create that carries it as a
+	// per-response override. With the override alone the model answers the
+	// last thing on the caller's side of the conversation instead: 4 of 7 on
+	// qwen, where the opening turn, which carries the direction both ways, was
+	// 8 of 8 (docs/design/qwen-findings.md, W-Q1). On live call
+	// 01a0cbb9-3f93-702d-8c62-7536378c1b93 a dead-air move into the closing
+	// phase asked for its goodbye with the override alone, and the model
+	// repeated the two dead-air check-ins already in the conversation instead;
+	// the caller was released without hearing a goodbye.
+	//
+	// Closing lines only. The item stays in the history, and what it does to
+	// the turns after it has not been measured; a call that is ending has
+	// none. A line in a phase the conversation goes on from keeps the override
+	// alone.
+	//
+	// Not NeedsCueForFirstTurn: that one records that an empty conversation is
+	// refused, a fact about starting a conversation. This one is about what the
+	// model listens to once there is one. The cost is the one the opening turn
+	// already pays: the direction enters the history as caller text.
+	NeedsDirectedLineInConversation bool
+
 	// RequiresTerminalAnnounce means no text this client sends will make the
 	// engine take a turn, so the words of a phase the call does not leave have
 	// to come from the flow itself.
@@ -168,6 +192,10 @@ func QwenProfile() Profile {
 		// Verified live: asking for a turn on an empty conversation is
 		// rejected with "conversation has no messages or no user message".
 		NeedsCueForFirstTurn: true,
+		// A closing line asked for with a per-response override alone lost to
+		// the conversation already there (W-Q1, and a dead-air goodbye on live
+		// call 01a0cbb9-…); the opening turn, told both ways, did not.
+		NeedsDirectedLineInConversation: true,
 		// A line asked for in a turn of its own after a tool result lost to
 		// the result 0 of 7 times; carried in the result, 7 of 7 (W-Q1).
 		PutsTerminalAnnounceInToolResult: true,
@@ -238,10 +266,11 @@ func GatewayProfile() Profile {
 //
 // It is therefore the one profile whose values do not all mean what they mean
 // above: everything the Realtime client alone reads — Style, Headers,
-// TranscribeModel, CancelsResponseItself, NeedsCueForFirstTurn and the two
-// semantic-turn fields — is left at zero, because the client that answers for
-// this name (internal/provider/doubao) reads none of them. What it does read is
-// the name, the endpoint, the credential, the voice and the two audio formats.
+// TranscribeModel, CancelsResponseItself, NeedsCueForFirstTurn,
+// NeedsDirectedLineInConversation and the two semantic-turn fields — is left
+// at zero, because the client that answers for this name
+// (internal/provider/doubao) reads none of them. What it does read is the name,
+// the endpoint, the credential, the voice and the two audio formats.
 // Model is informational for the same reason: that protocol's version is a
 // constant inside its client and AICC_PROVIDER_MODEL cannot move it.
 //
@@ -286,9 +315,9 @@ func DoubaoProfile() Profile {
 //
 // It leaves the same fields at zero as the doubao profile does, for the same
 // reason: Style, Headers, TranscribeModel, CancelsResponseItself,
-// NeedsCueForFirstTurn and the two semantic-turn fields are read by the
-// Realtime client alone, and the client that answers for this name
-// (internal/provider/gemini) reads none of them. What it reads is the name, the
+// NeedsCueForFirstTurn, NeedsDirectedLineInConversation and the two
+// semantic-turn fields are read by the Realtime client alone, and the client
+// that answers for this name (internal/provider/gemini) reads none of them. What it reads is the name, the
 // endpoint, the credential, the voice and the two audio formats. Model is
 // informational: the model name is a constant inside that client — its
 // lifecycle is what the client knows how to hold a conversation with — so

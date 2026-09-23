@@ -168,6 +168,39 @@ func TestEveryShippedFlowSpeaksItsOpeningAndItsEndings(t *testing.T) {
 	}
 }
 
+// Every shipped flow names a closing target, so the NO_INPUT default can end a
+// call nobody is on any more (issue #9); Load already checks that the target
+// is a terminal phase. The turns-without-a-tool wall is set only where a
+// closing phase ends in an "anything else?" loop the model can keep running
+// without a tool, at the value 02-ai-voice §6 justifies — a wall anywhere else
+// could only cut a legitimate call short.
+func TestEveryShippedFlowCanCloseACallOnItsOwn(t *testing.T) {
+	const wall = 10
+	hasAnythingElseLoop := map[string]bool{
+		"mobile_support.json":            true,
+		"field_service_appointment.json": true,
+		"plan_change.json":               true,
+	}
+	flows := shippedFlows(t)
+	for file := range hasAnythingElseLoop {
+		if _, ok := flows[file]; !ok {
+			t.Errorf("%s is no longer shipped; this test names it", file)
+		}
+	}
+	for file, spec := range flows {
+		if spec.Global.ClosingTarget == "" {
+			t.Errorf("%s: global.closingTarget is empty", file)
+		}
+		want := 0
+		if hasAnythingElseLoop[file] {
+			want = wall
+		}
+		if got := spec.Global.MaxTurnsWithoutTool; got != want {
+			t.Errorf("%s: maxTurnsWithoutTool = %d, want %d", file, got, want)
+		}
+	}
+}
+
 // The greeting used to be prose inside the entry instruction — "Open with:
 // ..." — and the model obliged by saying it. Now that the phase carries the
 // line, an instruction still asking for it would have the caller greeted

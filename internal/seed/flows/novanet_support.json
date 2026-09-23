@@ -27,6 +27,7 @@
       ]
     },
     "fallbackTarget": "need_transfer",
+    "closingTarget": "farewell",
     "maxTurns": 30,
     "alwaysAllowedTools": [
       "transfer_to_agent",
