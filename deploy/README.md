@@ -46,8 +46,8 @@ first start builds the application from this checkout (a few minutes; later
 starts take seconds). To skip the build, add to `.env`:
 
 ```ini
-AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.0
-AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.0
+AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.1
+AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.1.1
 ```
 
 - The application image contains the executable with the SPA embedded;
