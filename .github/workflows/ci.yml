@@ -5,10 +5,21 @@
 # duplicates it.
 name: ci
 
+# A change that touches only Markdown runs nothing this workflow checks, so
+# it does not start. GitHub honours `!` only inside `paths`, hence the '**'
+# include. main has no branch protection today; if go, web or image ever
+# become required checks, a skipped workflow leaves the PR waiting on them
+# forever, and this filter must move into the jobs instead.
 on:
   pull_request:
+    paths:
+      - '**'
+      - '!**/*.md'
   push:
     branches: [main]
+    paths:
+      - '**'
+      - '!**/*.md'
 
 concurrency:
   group: ci-${{ github.ref }}
