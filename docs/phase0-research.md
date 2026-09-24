@@ -11,7 +11,7 @@ Scope: findings from the six reference sources, the live FreeSWITCH dev environm
 |---|---|---|
 | cti-server `/docs` + code | Domain model, call flow, event protocol | Near-complete blueprint for our telephony core (REST+SSE, ESL inbound, actor-per-call) — but never verified against live FreeSWITCH |
 | golang-bot | AI-call SIP/RTP media path | `internal/voice/sip` (~1.9k lines + tests) is the port-as-is asset; provider layer does NOT transfer (it's a cascade bot) |
-| java-bot | SIP bot comparison | Surprise: the best **realtime s2s provider reference** — live-verified `qwen-audio-3.0-realtime-plus` and `gpt-realtime-2.1` GA integrations |
+| java-bot | SIP bot comparison | Surprise: the best **realtime s2s provider reference** — live-verified `qwen-audio-3.1-realtime-plus` and `gpt-realtime-2.1` GA integrations |
 | web-sip-phone | Agent softphone (integrate as-is) | Deliberately has **no external API**; coordination must be backend-driven (ESL → SSE), which its design doc anticipates |
 | ui-test | Finalized UI to imitate | Complete visual system + screen inventory + domain types + bot-flow DSL; missing i18n and TanStack Query (both must be added fresh) |
 | FreeSWITCH `/usr/local/freeswitch/conf` | Live dev switch | 1.11.1, running; ESL on **127.0.0.1:18021**; WS 5066/WSS 7443 live; `local6060` gateway exists; mod_lua+mod_pgsql loaded; slim build without mod_callcenter/conference/audio_fork |
@@ -88,7 +88,7 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 
 **Borrow**
 - **Provider abstraction proven live**: one `RealtimeProvider` interface; one `OpenAiCompatRealtimeProvider` parameterized by a `Profile` record (endpoint/model/voice env, `SessionStyle` GA|BETA, `ToolStyle`, in/out sample rates) covering OpenAI/StepFun/Grok; a bespoke Qwen client only for DashScope quirks (e.g., rejected `session.update` fields stripped and resent once). `RealtimeEvents.mapCommon()` folds GA/beta event-name variants into one internal enum.
-- Live-verified facts: `qwen-audio-3.0-realtime-plus` (its default) and `gpt-realtime-2.1` GA protocol both work over this shape; smart_turn tradeoff documented from real calls (backchannel-safe but slow onset — short commands can be swallowed as `turn_invalid`).
+- Live-verified facts: `qwen-audio-3.1-realtime-plus` (its default) and `gpt-realtime-2.1` GA protocol both work over this shape; smart_turn tradeoff documented from real calls (backchannel-safe but slow onset — short commands can be swallowed as `turn_invalid`).
 - Barge-in: local play-queue + RTP TX flush on `SPEECH_STARTED`, with a **backstop flush on `RESPONSE_INTERRUPTED`** in case `SPEECH_STARTED` never arrives.
 - **FSM-over-realtime-model steering** (`hint` pattern): flow nodes constrain tools; when a transition fires, the tool result's `hint` field carries the next node's instruction; out-of-phase tool calls return `ok:0` + current phase instruction. Keeps the model on rails without fighting its turn-taking. Same flow DSL as ui-test `flows/*.json`.
 - Preflight self-check (connect + `session.update` accepted + one greeting + one function-call round-trip) as a deploy gate; windowed-sinc downsampling for 16k/24k→8k (avoids "muffled/metallic" output); DTMF-during-response race fix (`response.cancel` + deferred inject, never block the actor).
@@ -154,9 +154,9 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 
 ## 5. Realtime provider facts (as of 2026-08-13)
 
-| Aspect | OpenAI Realtime | Qwen-Audio 3.0 Realtime |
+| Aspect | OpenAI Realtime | Qwen-Audio 3.1 Realtime |
 |---|---|---|
-| Models | `gpt-realtime-2.1` (flagship), `gpt-realtime-2.1-mini` | `qwen-audio-3.0-realtime-plus` / `-flash` (no public price/latency delta; console-gated) |
+| Models | `gpt-realtime-2.1` (flagship), `gpt-realtime-2.1-mini` | `qwen-audio-3.1-realtime-plus` (console-gated) |
 | Endpoint | `wss://api.openai.com/v1/realtime` (+ WebRTC, + native SIP `sip.api.openai.com`) | `wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/realtime?model=…` (Beijing; Singapore exists) |
 | Audio in | GA naming `audio/pcm` @24k; **`audio/pcmu` confirmed** (`audio/pcma` unconfirmed) | 16kHz PCM16 mono |
 | Audio out | `audio/pcm` @24k (pcmu out likely, unconfirmed) | 24kHz PCM16 mono |
@@ -200,7 +200,7 @@ From cti-server (runtime) + ui-test (product surface). Terminology we will keep:
 
 - **R1 Product scope**: MVP feature set (outbound AI / supervisor live-ops / quality review / reports); bot config model (flow DSL vs prompt+tools); traditional IVR yes/no; no-agent-available behavior.
 - **R2 Telephony**: bot SIP stack choice; PCMU-only vs +PCMA; bot port 6060 reuse & old-bot routes fate; trunk reality in dev + assumed codecs.
-- **R3 AI providers**: Qwen plus vs flash default; latency budget; `transfer_to_agent` contract richness; language→provider routing basis.
+- **R3 AI providers**: latency budget; `transfer_to_agent` contract richness; language→provider routing basis.
 - **R4 Agent side & auth**: extension coordination model confirmation; dev WSS/cert story; auth method (roles assumed Agent/Supervisor/Admin per ui-test).
 - **R5 Recording & storage**: scope; transcript persistence; S3 implementation; project name.
 - **R6 Open-source packaging**: docs language; demo seed data. (docker-compose demo itself is already mandated.)

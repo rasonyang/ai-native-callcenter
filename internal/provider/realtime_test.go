@@ -70,11 +70,13 @@ func TestConnectionDetailsCanBeOverridden(t *testing.T) {
 		t.Errorf("an empty field replaced the model with %q", endpoint.Model)
 	}
 
-	model, err := ProfileFor(NameQwen, Override{Model: "qwen-audio-3.0-realtime-flash"})
+	// The vendor serves one qwen realtime model, which is also the default, so
+	// this half checks that an override round-trips, not that it replaces.
+	model, err := ProfileFor(NameQwen, Override{Model: "qwen-audio-3.1-realtime-plus"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model.Model != "qwen-audio-3.0-realtime-flash" {
+	if model.Model != "qwen-audio-3.1-realtime-plus" {
 		t.Errorf("model = %q, want the override", model.Model)
 	}
 	if model.Endpoint != QwenProfile().Endpoint {
@@ -82,7 +84,7 @@ func TestConnectionDetailsCanBeOverridden(t *testing.T) {
 	}
 
 	// The model still selects on the connection address, wherever it points.
-	if url := model.endpointURL(); !strings.Contains(url, "model=qwen-audio-3.0-realtime-flash") {
+	if url := model.endpointURL(); !strings.Contains(url, "model=qwen-audio-3.1-realtime-plus") {
 		t.Errorf("connection url %q does not carry the overridden model", url)
 	}
 }
@@ -171,7 +173,7 @@ func TestSessionUpdateInTheOlderDialect(t *testing.T) {
 	if got := nested(t, update, "session", "input_audio_format"); got != "pcm" {
 		t.Errorf("input format = %v, want the flat pcm name", got)
 	}
-	if got := nested(t, update, "session", "voice"); got != "longanqian" {
+	if got := nested(t, update, "session", "voice"); got != "longanqian_v3.1" {
 		t.Errorf("voice = %v", got)
 	}
 	if _, hasAudioBlock := nested(t, update, "session").(map[string]any)["audio"]; hasAudioBlock {

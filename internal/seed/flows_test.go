@@ -17,8 +17,8 @@ import (
 // synthesiser rejected the voice on its first frame, so the call connected,
 // heard the caller, and never said a word.
 //
-// Empty is what a shipped flow says instead, and it costs nothing on the
-// vendor the name came from: the profile's own default is that same voice.
+// Empty is what a shipped flow says instead, and each profile supplies a voice
+// its own engine offers (qwen's is now longanqian_v3.1).
 // A deployment with a persona in mind still names one — it just knows which
 // engine it runs.
 func TestNoShippedFlowNamesAProviderSpecificVoice(t *testing.T) {
