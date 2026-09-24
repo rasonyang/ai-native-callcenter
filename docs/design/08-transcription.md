@@ -246,7 +246,7 @@ describe input-audio transcription as on by default; it is configured under
 `store.TranscriptRoleCaller` rows are never written.
 
 ~~`[ASSUMPTION]` Qwen-Audio-Realtime's default behaviour for input transcription on the
-`qwen-audio-3.0-realtime-plus` s2s model is unverified.~~
+`qwen-audio-3.1-realtime-plus` s2s model is unverified.~~
 `[MEASURED 2026-08-23]` **It transcribes input unprompted.** Live calls on the qwen
 profile produce `CUSTOMER|MODEL` transcript rows carrying the caller's own words,
 while the Beta branch of `buildSessionUpdate` sends no transcription field at all

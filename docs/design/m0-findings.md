@@ -47,9 +47,9 @@ Also observed (GA defaults on session.created): input/output default `audio/pcm`
 
 `freeswitch.Dbh("pgsql://hostaddr=127.0.0.1 dbname=aicc user=aicc password='aicc'")` from a mod_lua script returned `PostgreSQL 18.4 … user=aicc` via the api `lua` command. The directory/dialplan/queue-config path in design 01 §5 is executable exactly as written (mod_pgsql in-core, no ODBC layer).
 
-## M0.5 — Qwen-Audio 3.0 Realtime (added 2026-08-13, `ALIYUN_API_KEY`)
+## M0.5 — Qwen-Audio 3.1 Realtime (added 2026-08-13, `ALIYUN_API_KEY`)
 
-Endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-realtime-plus` (the java-bot-proven form, not the workspace-scoped host in the public docs), auth `Authorization: Bearer $ALIYUN_API_KEY`. Connected first try.
+Endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.1-realtime-plus` (the java-bot-proven form, not the workspace-scoped host in the public docs), auth `Authorization: Bearer $ALIYUN_API_KEY`. Connected first try.
 
 - **Session defaults** (`session.created`): `turn_detection = server_vad {silence_duration_ms: 800, threshold: 0.5}`, `voice: longanqian`, `modalities: [text, audio]`.
 - **Our contract is accepted verbatim**: `session.update` with instructions, `modalities`, `input/output_audio_format: pcm`, and an OpenAI-shaped `tools` array (`transfer_to_agent` with a JSON-schema `parameters`) → `session.updated` echoes the tool definition unchanged. The provider abstraction's tool path needs no Qwen-specific shaping.
@@ -60,7 +60,7 @@ Endpoint `wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen-audio-3.0-r
 
 The open item from M0.5 was that Qwen never echoes audio-format fields, so acceptance could only be proven by real audio. Both legs have now been run end to end against the live vendors via `internal/provider`'s gated live tests (`AICC_LIVE_PROVIDER_TEST=1 go test ./internal/provider -run Live`).
 
-| | OpenAI `gpt-realtime-2.1` | Qwen `qwen-audio-3.0-realtime-plus` |
+| | OpenAI `gpt-realtime-2.1` | Qwen `qwen-audio-3.1-realtime-plus` |
 |---|---|---|
 | Negotiated formats | `PCMU@8000` both ways (passthrough) | `PCM16@16000` in / `PCM16@24000` out |
 | `session.updated` after connect | 1.95 s | 0.24 s |

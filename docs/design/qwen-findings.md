@@ -51,7 +51,7 @@ everything the playback fix changed about how a call ends, was unverified here.
 Eight real handset calls on **2026-09-20, 12:47:02–12:55:30 +08**, into the
 development FreeSWITCH on a developer's machine, human caller, ANI
 `18688886666`. Build `667c1dc`, binary built from a clean tree.
-`AICC_PROVIDER=qwen`, model `qwen-audio-3.0-realtime-plus`, endpoint
+`AICC_PROVIDER=qwen`, model `qwen-audio-3.1-realtime-plus`, endpoint
 `wss://dashscope.aliyuncs.com/api-ws/v1/realtime`; transcription `qwen` /
 `qwen-audio-3.0-asr-flash-streaming` at 16000. Process log
 `logs/aicc-20260920-124541.log`. All eight recordings are two-channel 8 kHz
@@ -713,3 +713,73 @@ previous client. Six qwen calls on the fixed build (log
 said every line as written, but in none of them did the model keep speaking
 after its tool call, so the deferral was never taken: they show the ordinary path
 unharmed, not the fix at work.
+
+## Model: qwen-audio-3.1-realtime-plus (2026-09-24)
+
+The profile's model is `qwen-audio-3.1-realtime-plus`, with the voice
+`longanqian_v3.1`.
+
+**What the vendor documents.** Sources: the Model Studio guide for
+Qwen-Audio-Realtime,
+<https://www.alibabacloud.com/help/en/model-studio/qwen-audio-realtime-user-guides>
+and <https://help.aliyun.com/en/model-studio/qwen-audio-realtime-user-guides>,
+read 2026-09-24.
+
+- Model id: `qwen-audio-3.1-realtime-plus`. There is no 3.1 flash.
+- The model is selected by the `model` query parameter.
+- Voices: eight `_v3.1` voices (`longanqian_v3.1`, `longanhuan_v3.1`,
+  `longanlingxin_v3.1`, `longanfengyue_v3.1`, `xunanchuan_v3.1`, `beth_v3.1`,
+  `betty_v3.1`, `cally_v3.1`) alongside the earlier set. The documented default
+  is `longanqian_v3.1`. The voice is honoured only in the first `session.update`.
+- Turn detection: `server_vad` (`threshold`, `silence_duration_ms` 200–6000,
+  default 800), `smart_turn`, or `null` for push-to-talk; settable only before
+  the first audio frame.
+- Audio: PCM 16 kHz 16-bit mono in, PCM 24 kHz 16-bit mono out.
+- Tools, `response.create`, `response.cancel`: the Realtime events this client
+  already sends. `conversation.item.truncate` is not mentioned in the guide.
+
+**What was measured.** A standalone probe (raw WebSocket, not the product
+client) against `wss://dashscope.aliyuncs.com/api-ws/v1/realtime`, this
+repository's `ALIYUN_API_KEY`, sending exactly the `session.update` the qwen
+profile sends (`modalities [text, audio]`, `input_audio_format` and
+`output_audio_format` `pcm`, `turn_detection {server_vad,
+silence_duration_ms 500}`, `voice longanqian` — the profile's voice before
+the decision below — one function tool). **MEASURED:**
+
+| Item | Result |
+|---|---|
+| Connect on the non-workspace host | HTTP 101, `session.created` naming `qwen-audio-3.1-realtime-plus` |
+| `session.update` as the profile sends it | `session.updated` echoing `voice longanqian`, `server_vad` at `silence_duration_ms 500` |
+| `response.create` on an empty conversation | `error invalid_value "Cannot create response: conversation has no messages or no user message."` — `NeedsCueForFirstTurn` applies |
+| Cue item + `response.create` | greeting spoken, `response.done status=completed` |
+| Output format | audio bytes consistent with 24 kHz PCM16 for the transcript's length |
+| Mid-call `session.update` with `instructions` only | `session.updated`, turn detection unchanged |
+| Tool call | `response.output_item.added` (`function_call`) → `response.function_call_arguments.done` → `response.done`; `function_call_output` + `response.create` → spoken turn |
+| `response.cancel` on an open response | `response.done status=cancelled`, `status_details.reason client_cancelled` |
+| `conversation.item.truncate` after the cancel | no acknowledgement and no error within 3 s |
+| `response.cancel` with nothing open | `error invalid_value "Conversation has no active response."` — the text `isAnsweredCancel` matches |
+| `smart_turn` with `silence_duration_ms 500` | echoed back as 2000 — `SemanticTurnSilenceMs` true |
+| `voice longanqian_v3.1` / `beth_v3.1` | accepted |
+| `voice nosuchvoice` | `error "Unsupported voice"`, listing the accepted names |
+| `model qwen-audio-3.1-realtime-flash` | `session.created`, then `close 1007 "Model not found (qwen-audio-3.1-realtime-flash)!"` |
+
+**Consequences.**
+
+- Every qwen trait in `QwenProfile` holds on this model: `NeedsCueForFirstTurn`,
+  instructions-only mid-call updates, `server_vad` at 500 ms, the `smart_turn`
+  hold of 2000 ms, `CancelsResponseItself false`, 16 kHz in / 24 kHz out.
+- **Owner decision, 2026-09-24: the profile's fallback voice is the vendor's
+  default, `longanqian_v3.1`** (was `longanqian`). The shipped flows name no
+  voice, so they get `longanqian_v3.1`. `global.voice` (A7) is a free string:
+  no check at load or publish catches a name the model refuses, and such a
+  session is rejected with `Unsupported voice` and the call is rescued to its
+  fallback.
+- `session.created` reports `input_audio_transcription.model
+  gummy-realtime-v1` as a session default; the caller's words are transcribed
+  unprompted. The separate transcription service
+  (`internal/transcribe`, `qwen-audio-3.0-asr-flash-streaming`) was not changed
+  and not re-probed.
+
+**Not covered.** This probe placed no telephone call: barge-in over real
+speech, the drain and playback gating, a mid-call `announce` (W-Q1) and voice
+quality on the 8 kHz leg are not verified by it.

@@ -26,6 +26,18 @@ func TestWhetherTheCallerIsTranscribedDuringTheBotPhase(t *testing.T) {
 	}
 }
 
+// The qwen default is qwen-audio-3.1-realtime-plus with the vendor's default
+// voice for it (owner decision, 2026-09-24).
+func TestQwenDefaultsToThe31ModelAndIts31Voice(t *testing.T) {
+	profile := QwenProfile()
+	if profile.Model != "qwen-audio-3.1-realtime-plus" {
+		t.Errorf("qwen model = %q, want qwen-audio-3.1-realtime-plus", profile.Model)
+	}
+	if profile.Voice != "longanqian_v3.1" {
+		t.Errorf("qwen fallback voice = %q, want longanqian_v3.1", profile.Voice)
+	}
+}
+
 // "Off" has to be sayable. An empty environment value means unset everywhere
 // in this configuration, so it can never blank a default that is not empty.
 func TestCallerTranscriptionCanBeOverriddenAndTurnedOff(t *testing.T) {

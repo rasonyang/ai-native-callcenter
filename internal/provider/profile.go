@@ -168,12 +168,16 @@ func OpenAIProfile() Profile {
 // conversion happens on our side.
 func QwenProfile() Profile {
 	return Profile{
-		Name:      "qwen",
-		Endpoint:  "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-		Model:     "qwen-audio-3.0-realtime-plus",
+		Name:     "qwen",
+		Endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
+		// Probed against this profile's session in qwen-findings §2026-09-24.
+		// There is no flash variant.
+		Model:     "qwen-audio-3.1-realtime-plus",
 		APIKeyEnv: "ALIYUN_API_KEY",
 		Style:     styleBeta,
-		Voice:     "longanqian",
+		// The vendor's default voice for this model, by owner decision
+		// (2026-09-24).
+		Voice: "longanqian_v3.1",
 		// No TranscribeModel, and that is the finding rather than an omission.
 		// Design 08 §4.2 left it open — "Qwen-Audio-Realtime's default
 		// behaviour for input transcription is unverified" — and live calls on

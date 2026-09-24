@@ -24,7 +24,7 @@ Binds to: [phase1-decisions.md](../phase1-decisions.md). Reading order: 00 → 0
                                                         │ (PCM/G.711 + JSON events)
                                         ┌───────────────┴───────────────┐
                                         │ ONE provider per deployment:  │
-                                        │ Qwen-Audio 3.0 (mainland) or  │
+                                        │ Qwen-Audio 3.1 (mainland) or  │
                                         │ OpenAI gpt-realtime-2.1 (else)│
                                         │ … or any endpoint speaking    │
                                         │ the same protocol (phase 2:   │
