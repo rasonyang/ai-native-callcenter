@@ -13,6 +13,11 @@
 # tag. A deployment names both in `AICC_IMAGE` / `AICC_FS_IMAGE` and pulls;
 # `deploy/README.md` is that procedure.
 #
+# Before tagging, name the tag everywhere the deploy-tags job checks: the
+# AICC_FS_IMAGE default in deploy/docker-compose.yml, both image tags in
+# deploy/README.md and deploy/.env.example, and the `git clone --branch <tag>`
+# line in deploy/README.md.
+#
 # Tags: a release publishes each image under the exact git tag and nothing else —
 # `rasonyang/ai-native-callcenter:v0.1.0`, `rasonyang/freeswitch-aicc:v0.1.0`.
 # No `latest`, no floating `0.1`, no v-stripped alias: a deployment names the
@@ -76,6 +81,15 @@ jobs:
               fi
             done
           done
+          # The guide clones this tag, because compose mounts files from the
+          # checkout; a guide cloning main mounts files of another release.
+          # The trailing space does what -w does above, and more: neither
+          # v0.1.0-rc.3 nor v0.1 passes on a line cloning v0.1.0-rc.30 or
+          # v0.1.1 (-w cannot be combined with it; the URL follows the space).
+          if ! grep -qF -- "--branch ${GITHUB_REF_NAME} " deploy/README.md; then
+            echo "::error file=deploy/README.md::deploy/README.md must clone with --branch ${GITHUB_REF_NAME}; update the git clone line before tagging again"
+            failed=1
+          fi
           exit "$failed"
 
   image:

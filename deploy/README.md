@@ -5,7 +5,8 @@ application, seeded with a demo dataset.
 
 ## Prerequisites
 
-- Docker with Compose v2 (`docker compose version` works).
+- [Docker Engine](https://docs.docker.com/engine/install/) with the Compose
+  plugin, v2 or later (`docker compose version` works).
 - A Qwen key (`ALIYUN_API_KEY`), or an OpenAI key outside mainland China.
 - The address phones use to reach this host.
 
@@ -14,12 +15,16 @@ application, seeded with a demo dataset.
 **1. Get the stack and copy the example config.**
 
 ```sh
-git clone --depth 1 https://github.com/rasonyang/ai-native-callcenter
+git clone --depth 1 --branch v0.1.1 https://github.com/rasonyang/ai-native-callcenter
 cd ai-native-callcenter/deploy
 cp .env.example .env
 ```
 
 Compose builds and mounts files from this checkout, so run it from `deploy/`.
+The branch is the release tag, the same tag as `AICC_IMAGE` and
+`AICC_FS_IMAGE` in step 3: the database init script, the switch's confined
+role and its simulated dialplan and directory are mounted from the checkout,
+and they must belong to the release the images come from.
 
 **2. Set two values in `deploy/.env`.**
 
@@ -33,7 +38,9 @@ ALIYUN_API_KEY=<key>
 - Outside mainland China, set `AICC_PROVIDER=openai` and `OPENAI_API_KEY`
   instead of `ALIYUN_API_KEY`.
 - Put the key in `deploy/.env`. The `.env` at the repository root is not read
-  by the stack.
+  by the stack, and a key exported in your shell does not reach the
+  application either: compose passes provider keys to it only from
+  `deploy/.env`.
 - Without a key, everything works except the bot: it never answers, every call
   to a bot number goes straight to that number's queue, and the caller hears
   hold music until an agent picks up.
@@ -43,7 +50,7 @@ ALIYUN_API_KEY=<key>
 
 **3. (Optional) Use the published images instead of building.** By default the
 first start builds the application from this checkout (a few minutes; later
-starts take seconds). To skip the build, add to `.env`:
+starts take seconds). To skip the build, uncomment these two lines in `.env`:
 
 ```ini
 AICC_IMAGE=rasonyang/ai-native-callcenter:v0.1.1
@@ -66,10 +73,23 @@ docker compose logs aicc | grep 'esl connected'
 # {"level":"INFO","msg":"esl connected","addr":"freeswitch:18021"}
 docker compose logs aicc | grep -c 'API_KEY is not set'
 # 0
+docker compose exec postgres psql -U aicc aicc -Atc \
+    'select max(version_id) from goose_db_version where is_applied'
+# the highest number under internal/store/migrations/ in this checkout
 ```
 
+- `postgres` and `freeswitch` show `(healthy)`; `aicc` shows `Up`. It has no
+  healthcheck, so `Up` is the whole of what `ps` says about it.
 - `lua-role` exited non-zero: the application never migrated. Read
   `docker compose logs aicc`.
+- A few `esl connect failed … connection refused` warnings before
+  `esl connected` are normal on the first start: the switch starts last, after
+  `lua-role`, and the application retries until it is up.
+- The switch's first boot logs `[ERR]` lines such as
+  `NATIVE SQL ERR [no such table: channels]` and, from mod_pgsql,
+  `relation "members" does not exist`. They are expected: the switch probes
+  its core tables in the new `fs-db` volume and mod_callcenter probes its
+  tables in the empty `aicc_fs` database, then creates what is missing.
 - Count other than `0`: the provider key did not reach the application. The
   counted line names the variable. The application still starts, but the bot
   does not answer.
@@ -160,9 +180,15 @@ the same flow; 95002 greets in Chinese.
 docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 \
     -x "originate {aicc_harness=true}loopback/95001/public &playback(silence_stream://20000)"
 # +OK <uuid>
+docker compose logs aicc | grep 'ai conversation started'
+# {"level":"INFO","msg":"ai conversation started",…,"provider":"qwen","language":"en"}
 ```
 
-`-ERR UNALLOCATED_NUMBER` means no enabled number `95001` exists.
+- `-p` is the `ESL_PASSWORD` value; `aicc@123` is its default.
+- `-ERR UNALLOCATED_NUMBER` means no enabled number `95001` exists.
+- The `ai conversation started` line names the provider that answered. The
+  call then appears under CDRs, and its transcript starts with the bot's
+  greeting.
 
 ## What is running
 
@@ -187,11 +213,18 @@ Published ports (on `HTTP_BIND` or `SIP_BIND`):
 
 ESL, the metrics listener, and the AI leg's SIP and RTP are not published.
 
+The switch reaches the AI leg through the gateway `aicc_bot`. `sofia status`,
+`GET /system/health` and the administrator's Overview show it as `NOREG`. That
+is by design: it is not a registering trunk, and FreeSWITCH sends calls to it
+without registration. Its health is the OPTIONS ping the application answers:
+`sofia status gateway aicc_bot` shows `Status UP`. `/system/health` reports
+`isUp: true` for a `NOREG` trunk; it does not reflect the ping.
+
 ## Common commands
 
 ```sh
 docker compose logs -f aicc                             # application logs
-docker compose exec freeswitch fs_cli -P 18021 -p aicc@123
+docker compose exec freeswitch fs_cli -P 18021 -p aicc@123   # -p is ESL_PASSWORD
 docker compose exec postgres psql -U aicc aicc
 docker compose down                                     # stop
 docker compose down -v                                  # stop and delete all data
@@ -220,10 +253,34 @@ the application unchanged: provider keys, `AICC_TRANSCRIBE_*`,
 repository's [`.env.example`](../.env.example). Two rules:
 
 - An empty value means unset, so a non-empty default cannot be blanked.
+  `AICC_SEED` is the exception in this stack: compose itself reads it, so no
+  line means `demo` and `AICC_SEED=` means seed nothing.
 - Everything after the first `=` is the value, including comments.
 
 The wiring keys in `docker-compose.yml` are set under `environment:`, which
 overrides `env_file:`, so `.env` cannot break them.
+
+**Transcription.** Live transcription of the human phase is off by default.
+To turn it on, set in `deploy/.env`:
+
+```ini
+AICC_TRANSCRIPTION_ENABLED=true
+AICC_STREAM_ADDR=0.0.0.0:8090
+AICC_STREAM_PUBLIC_URL=ws://aicc:8090/stream
+AICC_STREAM_SECRET=<a long random string>
+# qwen only:
+AICC_TRANSCRIBE_ENDPOINT=wss://<workspace-id>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference
+```
+
+- The application refuses to start with transcription on and
+  `AICC_STREAM_PUBLIC_URL` or `AICC_STREAM_SECRET` empty.
+- `AICC_STREAM_ADDR` defaults to loopback, which the switch in another
+  container cannot reach. The port is not published.
+- On `qwen`, `AICC_TRANSCRIBE_ENDPOINT` is required: the workspace id is part
+  of the hostname, so there is no default. On other providers it is optional.
+- `AICC_TRANSCRIPTION_ENABLED` also tells the switch to load
+  mod_audio_stream, so it must be a line in `deploy/.env`, not only in the
+  application's environment.
 
 **Voice provider.** One provider answers every call, chosen at startup. A
 call's language does not select it. `AICC_PROVIDER` takes `openai`, `qwen`,
@@ -267,13 +324,19 @@ See [the provider notes](../docs/provider-extension.md).
 
 ## Upgrading
 
-- Published images: change `AICC_IMAGE` to the new tag, then
-  `docker compose pull && docker compose up -d`.
-- Built from a checkout: `git pull && docker compose up -d --build`.
+First move the checkout to the new release tag, because compose mounts files
+from it:
+
+```sh
+git fetch --depth 1 origin tag <tag> && git checkout <tag>
+```
+
+- Published images: change `AICC_IMAGE` and `AICC_FS_IMAGE` to the same tag,
+  then `docker compose pull && docker compose up -d`.
+- Built from the checkout: `docker compose up -d --build`.
 
 Migrations run at startup and are forward-only. A single-instance advisory lock
-prevents two from running at once. `AICC_FS_IMAGE` usually does not change with
-the application; the release notes say when it does.
+prevents two from running at once.
 [freeswitch/README.md](../freeswitch/README.md) covers installing the switch by
 hand instead of pulling it.
 
