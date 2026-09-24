@@ -21,10 +21,11 @@ Nothing site-specific is baked in. The image carries no database credential, no 
 
 ## Tags
 
-Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.0` is the switch for `rasonyang/ai-native-callcenter:v0.1.0`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`), published by the aicc repository's release workflow together with the application image. Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
+Tags are aicc release tags, not FreeSWITCH versions: `rasonyang/freeswitch-aicc:v0.1.1` is the switch for `rasonyang/ai-native-callcenter:v0.1.1`, built from the same commit. Run the switch tag that matches the application's release — the two share the `luacc.*` views the Lua scripts read, and a mismatched pair breaks phone registration. Every tag is a multi-arch manifest (`linux/amd64` + `linux/arm64`), published by the aicc repository's release workflow together with the application image. Exact tags only; there is no `latest`. The FreeSWITCH version is in the `freeswitch.version` label.
 
 | Tag | Description |
 |---|---|
+| `v0.1.1` | aicc v0.1.1, FreeSWITCH v1.11.3 |
 | `v0.1.0` | aicc v0.1.0, FreeSWITCH v1.11.3 |
 
 ## Quick start
@@ -36,7 +37,7 @@ docker run -d --name freeswitch --network host \
   -e AICC_BOT_HOST=10.0.0.6 \
   -e FS_ESL_PASSWORD="$(openssl rand -hex 16)" \
   -v fs-db:/usr/local/freeswitch/db -v fs-log:/usr/local/freeswitch/log \
-  rasonyang/freeswitch-aicc:v0.1.0
+  rasonyang/freeswitch-aicc:v0.1.1
 
 docker exec freeswitch fs_cli -P 18021 -p "$FS_ESL_PASSWORD" -x status
 ```
