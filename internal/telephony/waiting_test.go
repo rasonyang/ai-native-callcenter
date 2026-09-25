@@ -88,6 +88,7 @@ func waitingFixture(t *testing.T) (*Coordinator, *capturingPublisher) {
 }
 
 func TestAQueuedCallerIsWaitingUntilAnAgentTakesThem(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
@@ -122,6 +123,7 @@ func TestAQueuedCallerIsWaitingUntilAnAgentTakesThem(t *testing.T) {
 }
 
 func TestAnAbandonedCallerLeavesTheQueueWithTheQueuesOwnReason(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
@@ -149,6 +151,7 @@ func TestAnAbandonedCallerLeavesTheQueueWithTheQueuesOwnReason(t *testing.T) {
 // The one the switch does not owe us: a caller who hangs up mid-queue may
 // never be announced as leaving it, and a ghost in the list never expires.
 func TestAHangupTakesTheCallerOutOfTheQueue(t *testing.T) {
+	t.Parallel()
 	c, _ := waitingFixture(t)
 	ctx := context.Background()
 
@@ -161,6 +164,7 @@ func TestAHangupTakesTheCallerOutOfTheQueue(t *testing.T) {
 }
 
 func TestTheWaitingListIsLongestWaitFirstAndPerQueue(t *testing.T) {
+	t.Parallel()
 	c, _ := waitingFixture(t)
 	ctx := context.Background()
 
@@ -194,6 +198,7 @@ func TestTheWaitingListIsLongestWaitFirstAndPerQueue(t *testing.T) {
 // The count is what the queue's own panel reads, and it is addressed to the
 // agents who staff that queue — not broadcast, and not to nobody.
 func TestQueueCountFollowsTheLineAndReachesTheQueuesAgents(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
@@ -235,6 +240,7 @@ func TestQueueCountFollowsTheLineAndReachesTheQueuesAgents(t *testing.T) {
 // A queue that is not configured here cannot be rendered, so nothing is
 // recorded rather than a row nobody can read.
 func TestAnUnknownQueueIsNotTracked(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
@@ -252,6 +258,7 @@ func TestAnUnknownQueueIsNotTracked(t *testing.T) {
 // a member on some transitions, and a queue panel that counted each one would
 // drift up and never come back down.
 func TestAReannouncedMemberIsNotASecondCaller(t *testing.T) {
+	t.Parallel()
 	c, _ := waitingFixture(t)
 	ctx := context.Background()
 
@@ -267,6 +274,7 @@ func TestAReannouncedMemberIsNotASecondCaller(t *testing.T) {
 // without a second request — and the envelope names the call, so a click can
 // open it.
 func TestAWaitingCallCarriesTheCallItBelongsTo(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
@@ -313,6 +321,7 @@ func TestAWaitingCallCarriesTheCallItBelongsTo(t *testing.T) {
 // A caller the registry has never heard of is still waiting: the entry stands
 // on the switch's own account rather than being dropped.
 func TestAWaitingCallerWithNoKnownCallIsStillListed(t *testing.T) {
+	t.Parallel()
 	c, pub := waitingFixture(t)
 
 	c.Handle(context.Background(), queueEvent("member-queue-start", "support-en", "stranger", nil))

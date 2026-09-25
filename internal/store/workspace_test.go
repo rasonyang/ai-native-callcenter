@@ -401,6 +401,7 @@ func TestAContactWithoutANumberIsRefused(t *testing.T) {
 // Every number on the Today card is a division by something that can be zero:
 // a day with no calls, a shift that has not started, a wrap-up nobody filed.
 func TestTheAgentsDayDividesSafely(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                                   string
 		calls, talk, wrapUp, wrapUps, signedIn int
@@ -420,6 +421,7 @@ func TestTheAgentsDayDividesSafely(t *testing.T) {
 			wantHandle: 1200, wantWrapUp: 300, wantOccupancy: 100, wantConfirmedPct: 100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := agentDay(tc.calls, tc.talk, tc.wrapUp, tc.wrapUps, tc.signedIn,
 				tc.opened, tc.confirmed)
 			if got.ConfirmedPct != tc.wantConfirmedPct {

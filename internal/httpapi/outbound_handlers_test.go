@@ -53,6 +53,7 @@ func placeCall(t *testing.T, body string) (*httptest.ResponseRecorder, *recordin
 // truncated: a screen showing half a customer's details, with nothing to say
 // the other half was sent, is worse than a request that failed.
 func TestUserDataIsBoundedWhereItArrives(t *testing.T) {
+	t.Parallel()
 	t.Run("omitted attaches nothing", func(t *testing.T) {
 		w, dialer := placeCall(t, `{"kind":"AI_OUTBOUND","to":"18600000000"}`)
 		if w.Code != http.StatusCreated {
@@ -170,6 +171,7 @@ func errorCodeOf(t *testing.T, w *httptest.ResponseRecorder) string {
 // same limits, same carrier — because two ways of saying the same thing is
 // how a second scheme starts.
 func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":{"orderId":"9999000000000000"}}`)
 	if w.Code != http.StatusCreated {
@@ -242,6 +244,7 @@ func agentDial(t *testing.T, ac AuthContext, body string) (*httptest.ResponseRec
 // The handler is where the agent's switch-side name comes from, so this is
 // where a dial that forgot it would go unnoticed.
 func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, agentSubject(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -260,6 +263,7 @@ func TestAClickToDialNamesTheAgentToTheSwitch(t *testing.T) {
 // is the kind that needs no second scope, so omitting it can never reach
 // further than naming it would have.
 func TestAnOmittedKindIsAClickToDial(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, agentSubject(), `{"to":"13912345678"}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -277,6 +281,7 @@ func TestAnOmittedKindIsAClickToDial(t *testing.T) {
 // Presence has nothing to say about such an agent, so the phone is what is
 // asked about.
 func TestASystemDialsForAnAgentWhoNeverSignedIn(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, keySubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
 	if w.Code != http.StatusCreated {
@@ -296,6 +301,7 @@ func TestASystemDialsForAnAgentWhoNeverSignedIn(t *testing.T) {
 // Without an extension there is no phone to raise, and the API key has none of
 // its own to fall back on. Refused rather than guessed.
 func TestASystemMustSayWhichPhoneToRaise(t *testing.T) {
+	t.Parallel()
 	w, _ := agentDial(t, keySubject(), `{"kind":"AGENT_OUTBOUND","to":"13912345678"}`)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
@@ -307,6 +313,7 @@ func TestASystemMustSayWhichPhoneToRaise(t *testing.T) {
 // a typo in the integration, a phone that is switched off is an operations
 // problem, and an operator reading the error has to tell them apart.
 func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, extension, want string
 	}{
@@ -315,6 +322,7 @@ func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
 		{"not answering", "1011", "the phone is not answering"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			w, dialer := agentDial(t, keySubject(),
 				`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"`+tc.extension+`"}`)
 			if w.Code != http.StatusConflict {
@@ -333,6 +341,7 @@ func TestAPhoneThatCannotTakeTheCallIsRefusedBeforeItIsRung(t *testing.T) {
 // An agent acts as themselves. A cockpit that sent somebody else's extension
 // has a bug, and dialling from the right phone anyway would hide it.
 func TestAnAgentMayNotDialFromAnotherAgentsPhone(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009"}`)
 	if w.Code != http.StatusForbidden {
@@ -347,6 +356,7 @@ func TestAnAgentMayNotDialFromAnotherAgentsPhone(t *testing.T) {
 // that fills the field in from its own presence is being explicit, not
 // overreaching.
 func TestAnAgentMayNameTheirOwnPhone(t *testing.T) {
+	t.Parallel()
 	w, dialer := agentDial(t, agentSubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1008"}`)
 	if w.Code != http.StatusCreated {
@@ -365,6 +375,7 @@ func TestAnAgentMayNameTheirOwnPhone(t *testing.T) {
 // give this operation one scope, and an agent holds it for their own
 // click-to-dial. Starting a bot on a number is not the same act.
 func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
+	t.Parallel()
 	dialer := &recordingOutbound{}
 	s := &Server{outbound: dialer, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls",
@@ -397,6 +408,7 @@ func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
 // second time while they are still talking on the first call, so the
 // client-minted id is carried through to the service that keeps the record.
 func TestAClickToDialCarriesTheClientMintedIDThroughToTheService(t *testing.T) {
+	t.Parallel()
 	callID := uuid.New()
 	w, dialer := agentDial(t, keySubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009","callId":"`+
@@ -463,6 +475,7 @@ func (dialerPresence) AgentAtExtension(extension string) (uuid.UUID, bool) {
 // one and the other goes quietly out of step: a client told it may send 64
 // keys would have half of them dropped without being refused.
 func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.json"))
 	if err != nil {
 		t.Fatalf("read the contract: %v", err)

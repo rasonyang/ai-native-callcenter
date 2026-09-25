@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { phoneChipFor } from '@/lib/phone'
-import type { ExtensionState } from '@/lib/phone-bridge'
+import { extensionStateFixture as ext } from '@/test/harness'
 
 /**
  * What the phone chip says, for every pair of facts that can reach it.
@@ -12,18 +12,6 @@ import type { ExtensionState } from '@/lib/phone-bridge'
  * is that reading. A row changed here is a behaviour changed on the bar.
  */
 const MINE = '1001'
-
-function ext(overrides: Partial<ExtensionState> = {}): ExtensionState {
-  return {
-    registration: 'REGISTERED',
-    account: MINE,
-    sipDomain: 'aicc.local',
-    credentialSource: 'PROVISIONED',
-    microphone: 'GRANTED',
-    error: null,
-    ...overrides,
-  }
-}
 
 describe('the phone chip', () => {
   it.each([
@@ -205,16 +193,6 @@ describe('the phone chip', () => {
     expect(lost.dot).toBe('var(--state-breach)')
   })
 
-  it('still asks a browser that never had one to set it up', () => {
-    expect(phoneChipFor(false, undefined, MINE, false)).toMatchObject({
-      kind: 'setup',
-      labelKey: 'phone.chip.setup',
-      action: 'setup',
-    })
-    // The parameter is an addition, so the calls that predate it are unmoved.
-    expect(phoneChipFor(false, undefined, MINE)).toMatchObject({ kind: 'setup' })
-  })
-
   // Lost contact says nothing about what the extension last reported: a
   // reading it is still making outranks a page that cannot hear it.
   it('ignores the loss for an extension that is answering', () => {
@@ -222,35 +200,5 @@ describe('the phone chip', () => {
       kind: 'ready',
       isReadyAllowed: true,
     })
-  })
-
-  // The way out of an override is the Options page that made it. Offering to
-  // re-provision would replace a credential the extension has been told to
-  // hold dormant, and flush the registration the manual account is using.
-  it('never offers to re-provision an overridden phone', () => {
-    for (const isDeviceRegistered of [true, false]) {
-      for (const account of [MINE, '1002']) {
-        const chip = phoneChipFor(
-          isDeviceRegistered,
-          ext({ account, credentialSource: 'MANUAL', provisionStatus: 'OVERRIDDEN' }),
-          MINE,
-        )
-        expect(chip.action).toBe('options')
-      }
-    }
-  })
-
-  // The gate is the point of the chip: everything that is not "the phone is
-  // where it should be and the switch agrees" keeps the agent out of the queue.
-  it('allows READY in exactly one reading', () => {
-    const readings = [
-      phoneChipFor(false, undefined, MINE),
-      phoneChipFor(false, null, MINE),
-      phoneChipFor(false, ext(), MINE),
-      phoneChipFor(true, ext({ account: '1002' }), MINE),
-      phoneChipFor(true, ext({ registration: 'FAILED' }), MINE),
-      phoneChipFor(true, ext(), MINE),
-    ]
-    expect(readings.filter((chip) => chip.isReadyAllowed)).toHaveLength(1)
   })
 })

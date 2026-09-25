@@ -59,6 +59,7 @@ func muteFlag(t *testing.T, c *Coordinator, callID uuid.UUID) bool {
 // Mute acts on the agent's own leg and on the read direction: muting the write
 // direction would deafen the agent instead of silencing them.
 func TestMuteSilencesTheAgentsOwnLeg(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 
 	if err := c.Mute(t.Context(), callID, agentID); err != nil {
@@ -86,6 +87,7 @@ func TestMuteSilencesTheAgentsOwnLeg(t *testing.T) {
 // is off: an agent who believes they are muted and is not will say something
 // the caller hears.
 func TestARefusedMuteLeavesTheFlagAlone(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 	cmd.err = errors.New("switch refused")
 
@@ -101,6 +103,7 @@ func TestARefusedMuteLeavesTheFlagAlone(t *testing.T) {
 // the far end's channel. Sent at the agent's own leg they would only beep in
 // the agent's ear.
 func TestDTMFGoesToTheFarEnd(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 
 	if err := c.SendDTMF(t.Context(), callID, agentID, "12*#"); err != nil {
@@ -112,6 +115,7 @@ func TestDTMFGoesToTheFarEnd(t *testing.T) {
 }
 
 func TestDTMFRejectsAnythingThatIsNotATone(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 
 	for _, digits := range []string{"", "12 34", "hello", "1;drop", "+8613800138000"} {
@@ -129,6 +133,7 @@ func TestDTMFRejectsAnythingThatIsNotATone(t *testing.T) {
 // Being on the call is the permission: without this check any agent could
 // push tones into any conversation, or mute somebody else's microphone.
 func TestMuteAndDTMFRefuseAnAgentWhoIsNotOnTheCall(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	stranger := uuid.New()
 

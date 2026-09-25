@@ -94,9 +94,6 @@ func (p *pacer) run() { p.uplink.Run() }
 // stopped closes when the uplink goroutine has ended.
 func (p *pacer) stopped() <-chan struct{} { return p.uplink.Stopped() }
 
-// muteNow declares the hold without waiting for the silence to prove itself.
-func (p *pacer) muteNow() { p.uplink.Idle() }
-
 // onMute says the microphone is off. Whatever was queued has already been
 // forgotten by the time this runs: it is audio from before the silence, and
 // sending it on resume would play the caller a moment of their own past.

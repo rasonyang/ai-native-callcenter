@@ -74,6 +74,7 @@ func flowStub() *stubFlows {
 // EventSource-shaped mistake here would be a Publish button that cannot be
 // pressed without inventing a note for the operator.
 func TestPublishingNeedsNoBody(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		body string
@@ -84,6 +85,7 @@ func TestPublishingNeedsNoBody(t *testing.T) {
 		{"a note", `{"note":"  seasonal greeting  "}`, "seasonal greeting"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			f := flowStub()
 			s := &Server{flows: f}
 			rec := httptest.NewRecorder()
@@ -106,6 +108,7 @@ func TestPublishingNeedsNoBody(t *testing.T) {
 // An author fixing a spec should see the whole report, not discover it one
 // save at a time — so the refusal carries every problem the loader found.
 func TestARefusedSpecCarriesEveryProblem(t *testing.T) {
+	t.Parallel()
 	f := flowStub()
 	f.err = &flow.ValidationError{FlowID: "probe", Problems: []string{
 		"global.persona is empty, so the model has no character to adopt",
@@ -142,6 +145,7 @@ func TestARefusedSpecCarriesEveryProblem(t *testing.T) {
 // is a name to change, a missing flow is a stale link, a storage fault is
 // neither and must not be dressed up as either.
 func TestFlowFailuresAreToldApart(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		err  error
@@ -152,6 +156,7 @@ func TestFlowFailuresAreToldApart(t *testing.T) {
 		{"storage down", context.DeadlineExceeded, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			s := &Server{flows: flowStub()}
 			rec := httptest.NewRecorder()
 			s.writeFlowError(rec, httptest.NewRequest(http.MethodGet, "/", nil), tc.err)
@@ -165,6 +170,7 @@ func TestFlowFailuresAreToldApart(t *testing.T) {
 // The slug is the identity automation updates a flow by. One with a space or a
 // capital in it is not a thing `aicc flowadd -slug` can name back.
 func TestASlugMustBeOneAutomationCanName(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		slug string
 		want int
@@ -177,6 +183,7 @@ func TestASlugMustBeOneAutomationCanName(t *testing.T) {
 		{"-leading", http.StatusUnprocessableEntity},
 	} {
 		t.Run(tc.slug, func(t *testing.T) {
+			t.Parallel()
 			f := flowStub()
 			s := &Server{flows: f}
 			rec := httptest.NewRecorder()
@@ -194,6 +201,7 @@ func TestASlugMustBeOneAutomationCanName(t *testing.T) {
 // Creating stores a draft and stops there. A flow that answered its number the
 // moment it was typed would make saving a deployment.
 func TestCreatingAFlowDoesNotPublishIt(t *testing.T) {
+	t.Parallel()
 	f := flowStub()
 	s := &Server{flows: f}
 	rec := httptest.NewRecorder()
@@ -218,6 +226,7 @@ func TestCreatingAFlowDoesNotPublishIt(t *testing.T) {
 // runs elsewhere — so it carries its own code and names the phases at fault,
 // which is what an author needs in order to fix it.
 func TestAFlowThatCannotSpeakItsEndingIsRefusedWithItsOwnCode(t *testing.T) {
+	t.Parallel()
 	f := flowStub()
 	f.err = &flow.MissingAnnounceError{FlowID: "probe", Nodes: []string{"farewell", "handoff"}}
 	s := &Server{flows: f}

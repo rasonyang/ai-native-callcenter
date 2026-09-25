@@ -42,9 +42,6 @@ import (
 // final whose text is fixed per connection, so the two speakers are
 // distinguishable at the other end.
 type fakeASR struct {
-	srv *http.Server
-	ln  interface{ Close() error }
-
 	mu       sync.Mutex
 	connects int
 	texts    []string
@@ -147,6 +144,7 @@ func discardLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard,
 
 // One conversation, two producers, one dense sequence.
 func TestBothProducersShareOneActorAndOneSequence(t *testing.T) {
+	t.Parallel()
 	asr, asrURL := startFakeASR(t, []string{"I can see the order", "hello can you hear me"})
 	_ = asr
 

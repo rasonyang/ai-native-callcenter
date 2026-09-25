@@ -3,7 +3,6 @@
 package seed
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -22,28 +21,13 @@ import (
 // A deployment with a persona in mind still names one — it just knows which
 // engine it runs.
 func TestNoShippedFlowNamesAProviderSpecificVoice(t *testing.T) {
-	entries, err := flowFiles.ReadDir("flows")
-	if err != nil {
-		t.Fatalf("read the embedded flows: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("no flows are embedded; this test would pass on an empty set")
-	}
-
-	for _, entry := range entries {
-		data, err := flowFiles.ReadFile("flows/" + entry.Name())
-		if err != nil {
-			t.Fatalf("%s: %v", entry.Name(), err)
-		}
-		var spec flow.Spec
-		if err := json.Unmarshal(data, &spec); err != nil {
-			t.Fatalf("%s: %v", entry.Name(), err)
-		}
+	t.Parallel()
+	for file, spec := range shippedFlows(t) {
 		if spec.Global.Voice != "" {
 			t.Errorf("%s names the voice %q; a shipped flow cannot know which "+
 				"engine answers, and a name the deployment's engine does not "+
 				"offer is a call that connects and stays silent",
-				entry.Name(), spec.Global.Voice)
+				file, spec.Global.Voice)
 		}
 	}
 }
@@ -54,6 +38,7 @@ func TestNoShippedFlowNamesAProviderSpecificVoice(t *testing.T) {
 // seed that fails at boot. Both are invisible to a reading of either side, so
 // the directory and the table are compared here.
 func TestEveryShippedFlowIsSeeded(t *testing.T) {
+	t.Parallel()
 	entries, err := flowFiles.ReadDir("flows")
 	if err != nil {
 		t.Fatalf("read the embedded flows: %v", err)
@@ -111,6 +96,7 @@ func TestEveryShippedFlowIsSeeded(t *testing.T) {
 // default outbound row, and a second entry setting isMainLine would make the
 // seed unapplicable rather than merely wrong.
 func TestOneTollFreeNumberIsTheMainLine(t *testing.T) {
+	t.Parallel()
 	var mainLines, defaults []string
 	for _, f := range demoFlows {
 		if len(f.toll) != 10 || f.toll[:7] != "8005550" || f.toll[7] != '1' {
@@ -149,6 +135,7 @@ func TestOneTollFreeNumberIsTheMainLine(t *testing.T) {
 // accounts, no numbers and no history either, because the flows are seeded
 // before any of it.
 func TestEveryShippedFlowSpeaksItsOpeningAndItsEndings(t *testing.T) {
+	t.Parallel()
 	for file, spec := range shippedFlows(t) {
 		entry, ok := spec.Node(spec.InitialNode)
 		if !ok {
@@ -175,6 +162,7 @@ func TestEveryShippedFlowSpeaksItsOpeningAndItsEndings(t *testing.T) {
 // without a tool, at the value 02-ai-voice §6 justifies — a wall anywhere else
 // could only cut a legitimate call short.
 func TestEveryShippedFlowCanCloseACallOnItsOwn(t *testing.T) {
+	t.Parallel()
 	const wall = 10
 	hasAnythingElseLoop := map[string]bool{
 		"mobile_support.json":            true,
@@ -206,6 +194,7 @@ func TestEveryShippedFlowCanCloseACallOnItsOwn(t *testing.T) {
 // line, an instruction still asking for it would have the caller greeted
 // twice: once as written, once again in the model's own words.
 func TestNoEntryInstructionStillAsksForTheGreeting(t *testing.T) {
+	t.Parallel()
 	for file, spec := range shippedFlows(t) {
 		entry, ok := spec.Node(spec.InitialNode)
 		if !ok {

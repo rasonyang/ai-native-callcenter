@@ -91,6 +91,7 @@ func final(speaker, text string) Line {
 // Both producers post to one actor, and the order they are accepted in is the
 // order the transcript has. seq is dense from 1 because it is a cursor.
 func TestSeqIsDenseAndPerCallAcrossBothProducers(t *testing.T) {
+	t.Parallel()
 	actor, st, _, flush := newFixture(t)
 
 	actor.Post(final(store.SpeakerBot, "thanks for calling"))
@@ -122,6 +123,7 @@ func TestSeqIsDenseAndPerCallAcrossBothProducers(t *testing.T) {
 // surfaces no error anywhere. Asserting on the row count alone would pass
 // while that defect shipped, so this asserts the counter did not move.
 func TestAnEmptyFinalTakesNoSeq(t *testing.T) {
+	t.Parallel()
 	actor, st, pub, flush := newFixture(t)
 
 	actor.Post(final(store.SpeakerCustomer, "hello"))
@@ -149,6 +151,7 @@ func TestAnEmptyFinalTakesNoSeq(t *testing.T) {
 // A partial reaches the stream so the panel feels live, and stops there: the
 // ledger never holds text nobody said, and a guess takes no place in the order.
 func TestAPartialIsPublishedButNeverStoredAndTakesNoSeq(t *testing.T) {
+	t.Parallel()
 	actor, st, pub, flush := newFixture(t)
 
 	actor.Post(Line{Speaker: store.SpeakerCustomer, Kind: store.TranscriptKindText,
@@ -180,6 +183,7 @@ func TestAPartialIsPublishedButNeverStoredAndTakesNoSeq(t *testing.T) {
 // supervisors and administrators only — which is exactly why an agent joining
 // later must backfill.
 func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
+	t.Parallel()
 	actor, _, pub, flush := newFixture(t)
 
 	actor.Post(final(store.SpeakerBot, "thanks for calling"))
@@ -220,6 +224,7 @@ func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 // A line the database refuses is still published: a transcript the agent can
 // read beats one that is durable and invisible.
 func TestAStoreFailureStillReachesTheStream(t *testing.T) {
+	t.Parallel()
 	st, pub := &fakeStore{err: context.DeadlineExceeded}, &fakePub{}
 	reg := NewRegistry(st, pub, discard())
 	callID := uuid.New()
@@ -234,6 +239,7 @@ func TestAStoreFailureStillReachesTheStream(t *testing.T) {
 
 // offsetMs is measured from the answer, so it lines up with the recording.
 func TestOffsetIsMeasuredFromAnswer(t *testing.T) {
+	t.Parallel()
 	actor, st, _, flush := newFixture(t) // answered 10s ago
 	actor.Post(final(store.SpeakerBot, "hello"))
 	flush()
@@ -250,6 +256,7 @@ func TestOffsetIsMeasuredFromAnswer(t *testing.T) {
 // The registry hands the same actor to both producers, which is the whole
 // point: two allocators would collide on uq_transcripts_call_id_seq.
 func TestTheRegistryReturnsOneActorPerCall(t *testing.T) {
+	t.Parallel()
 	reg := NewRegistry(&fakeStore{}, &fakePub{}, discard())
 	callID := uuid.New()
 	t.Cleanup(func() { reg.Close(callID) })
@@ -272,6 +279,7 @@ func TestTheRegistryReturnsOneActorPerCall(t *testing.T) {
 // call nobody is transcribing is not connecting, and the panel used to invent
 // CONNECTING in exactly this gap.
 func TestCurrentStateIsIdleUntilSomethingSaysOtherwise(t *testing.T) {
+	t.Parallel()
 	actor, _, _, flush := newFixture(t)
 	if got := actor.CurrentState(); got != StateIdle {
 		t.Errorf("CurrentState = %q before anything was published, want IDLE", got)

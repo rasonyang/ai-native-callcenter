@@ -56,6 +56,7 @@ func (s *stubWebhooks) Deliveries(context.Context, uuid.UUID, int) ([]store.Webh
 // (`additionalProperties: false` on WebhookFilter) and design 09 §5 says an
 // unknown key is 422 at creation; this is where that happens.
 func TestAnUnknownFilterKeyIsRefusedWhenTheSubscriptionIsWritten(t *testing.T) {
+	t.Parallel()
 	t.Run("create is refused and names the key", func(t *testing.T) {
 		svc := &stubWebhooks{}
 		s := &Server{webhooks: svc}
@@ -134,6 +135,7 @@ func TestAnUnknownFilterKeyIsRefusedWhenTheSubscriptionIsWritten(t *testing.T) {
 // then refused; one added to the store and not to the schema would be accepted
 // by the server and rejected by every client generated from the contract.
 func TestTheFilterKeysAreTheOnesTheContractDeclares(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.json"))
 	if err != nil {
 		t.Fatalf("read the contract: %v", err)

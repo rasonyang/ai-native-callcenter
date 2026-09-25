@@ -72,6 +72,7 @@ func monitorAs(t *testing.T, srv *Server, callID uuid.UUID, body string) *httpte
 // The phone is the supervisor's own and is never asked for: a supervisor who
 // staffs no queue is reached at the extension bound to their account.
 func TestASupervisorListensFromTheirBoundPhone(t *testing.T) {
+	t.Parallel()
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: deskedSupervisor{}, agentDir: dialerDirectory{}}
 	callID, agentID := uuid.New(), uuid.New()
@@ -91,6 +92,7 @@ func TestASupervisorListensFromTheirBoundPhone(t *testing.T) {
 // A supervisor who has taken a seat on the floor is at that seat, not at the
 // desk configuration remembers.
 func TestAStaffedSupervisorListensFromTheSeatTheySignedInAt(t *testing.T) {
+	t.Parallel()
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 
@@ -107,6 +109,7 @@ func TestAStaffedSupervisorListensFromTheSeatTheySignedInAt(t *testing.T) {
 // from somebody else's handset is not on offer: it would put a live
 // conversation into a stranger's phone.
 func TestAnAccountWithNoPhoneCannotListen(t *testing.T) {
+	t.Parallel()
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: noAgents{}}
 
@@ -123,6 +126,7 @@ func TestAnAccountWithNoPhoneCannotListen(t *testing.T) {
 // mode the switch does not know never reaches it, and listening to yourself is
 // a feedback loop rather than supervision.
 func TestMonitorRefusals(t *testing.T) {
+	t.Parallel()
 	calls := &monitoringCalls{err: telephony.ErrNoAgentLeg}
 	self := uuid.New()
 	srv := &Server{calls: calls, agents: deskedSupervisor{}, agentDir: oneAgentDirectory{agentID: self}}

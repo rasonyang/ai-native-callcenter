@@ -18,6 +18,7 @@ import (
 var testTime = time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
 
 func TestPartyTransitions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		from    PartyState
@@ -47,6 +48,7 @@ func TestPartyTransitions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := &Party{State: tt.from}
 			err := p.apply(tt.trigger, testTime)
 
@@ -71,6 +73,7 @@ func TestPartyTransitions(t *testing.T) {
 }
 
 func TestPartyTimestamps(t *testing.T) {
+	t.Parallel()
 	p := &Party{State: PartyRinging}
 	if err := p.apply(TriggerAnswer, testTime); err != nil {
 		t.Fatal(err)
@@ -101,6 +104,7 @@ func TestPartyTimestamps(t *testing.T) {
 }
 
 func TestFirstPartyIsOriginator(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	if c.State != CallCreated {
 		t.Errorf("new call state = %s, want CREATED", c.State)
@@ -137,6 +141,7 @@ func TestFirstPartyIsOriginator(t *testing.T) {
 }
 
 func TestCallTypeIsStampedOnce(t *testing.T) {
+	t.Parallel()
 	// The caller-perspective type must survive the whole call, including the
 	// transfer that replaces every original party.
 	c := NewCall(uuid.New(), events.CallTypeOutbound, testTime)
@@ -160,6 +165,7 @@ func TestCallTypeIsStampedOnce(t *testing.T) {
 }
 
 func TestAnsweredAtIsTheEarliestAnswer(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	caller := c.AddParty("chan-a", "+86138", testTime)
 	bot := c.AddParty("chan-bot", "bot", testTime)
@@ -179,6 +185,7 @@ func TestAnsweredAtIsTheEarliestAnswer(t *testing.T) {
 }
 
 func TestMergeUserData(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-1", "intent": "billing"})
 	c.MergeUserData(map[string]any{"intent": "refund", "customerName": "Wei"})
@@ -203,6 +210,7 @@ func TestMergeUserData(t *testing.T) {
 // consultation transfer is very often the same data it already holds. Reported
 // as changes, every one of those would announce a change nobody made.
 func TestAMergeReportsOnlyWhatMoved(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-1", "intent": "billing"})
 
@@ -234,6 +242,7 @@ func TestAMergeReportsOnlyWhatMoved(t *testing.T) {
 // A value over the bound is refused whole. Truncating would put half an order
 // number on an agent's screen with nothing to say the other half existed.
 func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"note": "the short one"})
 
@@ -267,6 +276,7 @@ func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
 // map iteration the same patch against the same call keeps a different pair
 // each time, and nobody outside could tell why.
 func TestTheKeysThatSurviveAFullCallAreAlwaysTheSameOnes(t *testing.T) {
+	t.Parallel()
 	fill := func() *Call {
 		c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 		seed := map[string]any{}
@@ -297,6 +307,7 @@ func TestTheKeysThatSurviveAFullCallAreAlwaysTheSameOnes(t *testing.T) {
 // to make room for a new one: data a call has carried since it started is not
 // a later patch's to displace.
 func TestAFullCallStillTakesADeleteAndAReplacement(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	seed := map[string]any{}
 	for i := range UserDataMaxKeys {
@@ -330,6 +341,7 @@ func TestAFullCallStillTakesADeleteAndAReplacement(t *testing.T) {
 // the phone. CALL_REJECTED leaves the count at 0; ORIGINATOR_CANCEL costs
 // nothing at all.
 func TestALegSaysWhyItIsEnding(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		role  PartyRole
@@ -351,6 +363,7 @@ func TestALegSaysWhyItIsEnding(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			p := &Party{Role: tt.role, State: tt.state}
 			if got := p.HangupCause(); got != tt.want {
 				t.Errorf("%s/%s ends with %s, want %s", tt.role, tt.state, got, tt.want)
@@ -365,6 +378,7 @@ func TestALegSaysWhyItIsEnding(t *testing.T) {
 // originated; the agent hanging up before the far end picks up is cancelling
 // their own call, not ending a conversation.
 func TestALegThatAnsweredItselfHasNotStartedAConversation(t *testing.T) {
+	t.Parallel()
 	p := &Party{Role: RoleOriginator, State: PartyDialing, AnsweredAt: testTime}
 	if got := p.HangupCause(); got != "ORIGINATOR_CANCEL" {
 		t.Errorf("cause = %s, want ORIGINATOR_CANCEL — the leg answered, nobody talked", got)
@@ -372,6 +386,7 @@ func TestALegThatAnsweredItselfHasNotStartedAConversation(t *testing.T) {
 }
 
 func TestFinishRequiresAllPartiesReleased(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
 	a := c.AddParty("chan-a", "+86138", testTime)
 	b := c.AddParty("chan-b", "1001", testTime)
@@ -401,6 +416,7 @@ func TestFinishRequiresAllPartiesReleased(t *testing.T) {
 }
 
 func TestSnapshotIsADetachedCopy(t *testing.T) {
+	t.Parallel()
 	c := NewCall(uuid.New(), events.CallTypeInternal, testTime)
 	p := c.AddParty("chan-a", "1001", testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-7"})

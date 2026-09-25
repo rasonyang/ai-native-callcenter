@@ -66,6 +66,7 @@ func newTestRegistry(t *testing.T) (*Registry, *recorder) {
 }
 
 func TestRegistryRoutesEventsToTheOwningCall(t *testing.T) {
+	t.Parallel()
 	reg, rec := newTestRegistry(t)
 	callID := uuid.New()
 
@@ -106,6 +107,7 @@ func TestRegistryRoutesEventsToTheOwningCall(t *testing.T) {
 }
 
 func TestDispatchIgnoresUnknownChannels(t *testing.T) {
+	t.Parallel()
 	reg, _ := newTestRegistry(t)
 	if reg.Dispatch(SwitchEvent{Kind: KindChannelAnswer, ChannelID: "unknown"}) {
 		t.Error("Dispatch() claimed an unknown channel")
@@ -116,6 +118,7 @@ func TestDispatchIgnoresUnknownChannels(t *testing.T) {
 }
 
 func TestCallEndsWhenEveryLegReleases(t *testing.T) {
+	t.Parallel()
 	reg, rec := newTestRegistry(t)
 	callID := uuid.New()
 
@@ -159,6 +162,7 @@ func TestCallEndsWhenEveryLegReleases(t *testing.T) {
 }
 
 func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
+	t.Parallel()
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
@@ -185,6 +189,7 @@ func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
 }
 
 func TestSnapshotsAreSerializedWithMutations(t *testing.T) {
+	t.Parallel()
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
@@ -229,6 +234,7 @@ func TestSnapshotsAreSerializedWithMutations(t *testing.T) {
 }
 
 func TestDuplicateCallIDIsRejected(t *testing.T) {
+	t.Parallel()
 	reg, _ := newTestRegistry(t)
 	callID := uuid.New()
 
@@ -241,6 +247,7 @@ func TestDuplicateCallIDIsRejected(t *testing.T) {
 }
 
 func TestOperationsOnUnknownCalls(t *testing.T) {
+	t.Parallel()
 	reg, _ := newTestRegistry(t)
 	unknown := uuid.New()
 
@@ -260,6 +267,7 @@ func TestOperationsOnUnknownCalls(t *testing.T) {
 // mid-life and never finishes, so anything released on the finish path — a
 // media tap on a leg, in this design — is simply never released for it.
 func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		end        func(reg *Registry, callID uuid.UUID)
@@ -289,6 +297,7 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			reg, _ := newTestRegistry(t)
 			var mu sync.Mutex
 			var retired []uuid.UUID
@@ -362,6 +371,7 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 // So the test now hangs up both legs, as the switch does, and asks what the
 // agent is told about their own.
 func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 	for _, tc := range []struct {
 		name    string
@@ -376,6 +386,7 @@ func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 			who: events.Subscriber{SeesEveryCall: true}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			hub := events.NewHub(events.NewSequence(seqStub{}, "events"))
 			reg := NewRegistry(hub)
 			t.Cleanup(reg.Shutdown)
@@ -441,6 +452,7 @@ func (seqStub) ReserveSeqBlock(context.Context, string, int64) (int64, error) { 
 // normalized long before anything published it: RECORD_START and RECORD_STOP
 // arrived, were understood, and went nowhere (W7 group one).
 func TestTheCallSaysWhenItIsBeingRecorded(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	t.Cleanup(registry.Shutdown)

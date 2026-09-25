@@ -34,9 +34,6 @@ var roleRank = map[Role]int{RoleAgent: 1, RoleSupervisor: 2, RoleAdmin: 3}
 // Valid reports whether r is a known role.
 func (r Role) Valid() bool { _, ok := roleRank[r]; return ok }
 
-// AtLeast reports whether r is at least as privileged as want.
-func (r Role) AtLeast(want Role) bool { return roleRank[r] >= roleRank[want] }
-
 // Status values of a user account.
 const (
 	StatusActive    = "ACTIVE"

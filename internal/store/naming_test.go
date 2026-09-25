@@ -12,6 +12,7 @@ import (
 // Every field the API emits is camelCase (docs/design/07-naming.md). The CDR
 // struct once shipped without tags and leaked CallID/StartedAt to browsers.
 func TestLedgerTypesMarshalPerTheNamingSpec(t *testing.T) {
+	t.Parallel()
 	for name, value := range map[string]any{
 		"CDR":            CDR{},
 		"Leg":            Leg{},

@@ -15,6 +15,7 @@ import (
 // After-call work is for a call. The presence names it while the window is
 // open, so what the agent files lands on that call and not on the next one.
 func TestWrapUpNamesTheCallItIsFor(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
@@ -48,6 +49,7 @@ func TestWrapUpNamesTheCallItIsFor(t *testing.T) {
 // EndWrapUp is the completion of after-call work: READY when the agent was
 // still in it, and no opinion at all when they were not.
 func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
@@ -91,6 +93,7 @@ func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 // taken out of it — by their own choice, or by a supervisor — may still file
 // against the call they were writing up, until the next one begins.
 func TestTheLastWrappedCallOutlivesTheState(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
@@ -127,6 +130,7 @@ func TestTheLastWrappedCallOutlivesTheState(t *testing.T) {
 // The event says what happened: an agent has entered after-call work and is
 // not taking calls, which is what a wallboard needs to hear.
 func TestStartingWrapUpAnnouncesTheAgentIsNotReady(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	pub := &fakePublisher{}
 	agentID := uuid.New()
@@ -158,6 +162,7 @@ func TestStartingWrapUpAnnouncesTheAgentIsNotReady(t *testing.T) {
 // After a restart the in-memory record is gone, but a wrap-up under way was
 // persisted with its call and Restore brings it back.
 func TestRestoreRecoversTheWrapUpCall(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	callID := uuid.New()
@@ -205,6 +210,7 @@ func (o *openedWrapUps) all() [][2]uuid.UUID {
 // wrote this call up" and "the agent is still typing" are the same absence,
 // and no report can tell them apart.
 func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
@@ -230,6 +236,7 @@ func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
 // A ledger that refuses does not leave the agent taking calls: after-call work
 // has begun either way, and the confirmation will create the record.
 func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
@@ -258,6 +265,7 @@ func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
 // the ledger has already recorded, and leave them held in a wrap-up that is
 // over.
 func TestEndingWrapUpWithNoPhoneLandsInDeviceLostRatherThanFailing(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}

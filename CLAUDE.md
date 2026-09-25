@@ -24,7 +24,7 @@ Commit messages, code comments and documentation are in English (owner directive
 
 ```sh
 go build ./...
-go test -race ./...                               # always -race (`make test` omits it)
+go test -race ./...                               # always -race (`make test` runs this, then the web tests)
 go test -race -run TestName ./internal/voice/     # one test
 go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/  # hot paths: 0 allocs/op, CI fails otherwise
 make lint                                         # go vet + gofmt + oxlint

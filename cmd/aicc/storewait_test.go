@@ -30,6 +30,7 @@ var errRefused = errors.New("dial tcp 10.130.0.3:5432: connect: connection refus
 
 // A host reboot brings the server up before PostgreSQL: it waits, then runs.
 func TestTheServerWaitsForADatabaseThatIsStillStarting(t *testing.T) {
+	t.Parallel()
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	attempts := 0
 	got, err := retryOpen(context.Background(), storeWaitBudget, func(context.Context) (string, error) {
@@ -59,6 +60,7 @@ func TestTheServerWaitsForADatabaseThatIsStillStarting(t *testing.T) {
 // A database that never comes fails the way a single attempt does, with the
 // last error, once the budget is spent and not a moment past it.
 func TestTheServerGivesUpOnADatabaseThatNeverComes(t *testing.T) {
+	t.Parallel()
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	start := clock.t
 	attempts := 0
@@ -85,6 +87,7 @@ func TestTheServerGivesUpOnADatabaseThatNeverComes(t *testing.T) {
 
 // SIGTERM during the wait ends the wait.
 func TestStoppingTheServerEndsTheWaitForTheDatabase(t *testing.T) {
+	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	attempts := 0
 	_, err := retryOpen(ctx, storeWaitBudget, func(context.Context) (string, error) {
@@ -104,6 +107,7 @@ func TestStoppingTheServerEndsTheWaitForTheDatabase(t *testing.T) {
 
 // A malformed connection string will not fix itself in a minute.
 func TestAMalformedDatabaseURLFailsAtOnce(t *testing.T) {
+	t.Parallel()
 	clock := &fakeClock{t: time.Unix(0, 0)}
 	parseErr := &pgconn.ParseConfigError{}
 	_, err := retryOpen(context.Background(), storeWaitBudget, func(context.Context) (string, error) {

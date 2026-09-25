@@ -12,9 +12,11 @@ import (
 // it wrong is not a visible failure: the deliveries simply never happen and the
 // first anyone knows is a customer reconciling a month and finding a gap.
 func TestAFilterAsksForWhatItNamesAndNothingMore(t *testing.T) {
+	t.Parallel()
 	support := uuid.New()
 	sales := uuid.New()
 
+	internal := CDR{CallID: uuid.New(), CallType: "INTERNAL", Status: "ANSWERED"}
 	answered := CDR{
 		CallID: uuid.New(), CallType: "OUTBOUND", DID: "95001",
 		Status: "ANSWERED", QueueID: &support, IsContained: false,
@@ -45,26 +47,17 @@ func TestAFilterAsksForWhatItNamesAndNothingMore(t *testing.T) {
 			CallType: []string{"OUTBOUND"}, Status: []string{"ANSWERED"}}, answered, true},
 		{"one key matches and the other does not", WebhookFilter{
 			CallType: []string{"OUTBOUND"}, Status: []string{"NO_ANSWER"}}, answered, false},
+
+		// QueueID is a pointer and an internal call leaves it nil: it matches
+		// no queue filter, without panicking, and every filter silent on queues.
+		{"a call never queued, a queue filter", WebhookFilter{QueueID: []uuid.UUID{sales}}, internal, false},
+		{"a call never queued, no queue filter", WebhookFilter{CallType: []string{"INTERNAL"}}, internal, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := tc.filter.Matches(tc.cdr); got != tc.want {
 				t.Errorf("Matches = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// A call that never reached a queue matches no queue filter, and must not
-// panic on the way to saying so: QueueID is a pointer and an internal call
-// leaves it nil.
-func TestACallWithNoQueueMatchesNoQueueFilter(t *testing.T) {
-	internal := CDR{CallID: uuid.New(), CallType: "INTERNAL", Status: "ANSWERED"}
-
-	if (WebhookFilter{QueueID: []uuid.UUID{uuid.New()}}).Matches(internal) {
-		t.Error("a call that was never in a queue matched a queue filter")
-	}
-	// And a filter that says nothing about queues still wants it.
-	if !(WebhookFilter{CallType: []string{"INTERNAL"}}).Matches(internal) {
-		t.Error("a filter that says nothing about queues refused a call that has none")
 	}
 }

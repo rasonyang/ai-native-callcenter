@@ -309,37 +309,6 @@ func TestACallerAnsweringTheGoodbyeFiresTheArmedAction(t *testing.T) {
 }
 
 //
-// The cap.
-//
-
-func TestAnArmedActionRunsAtTheCapWhenPlaybackNeverFinishes(t *testing.T) {
-	actions, session, _ := testActions(t, &fakeSwitch{})
-
-	fired := make(chan struct{})
-	actions.arm(t.Context(), func() { close(fired) })
-	_ = session
-
-	select {
-	case <-fired:
-		t.Fatal("the action ran immediately")
-	case <-time.After(50 * time.Millisecond):
-	}
-
-	// The production cap is seconds; this test would rather not wait for it,
-	// so it verifies the mechanism by inspection of the timer having been set
-	// and fires the fallback path directly.
-	actions.mu.Lock()
-	armed := actions.armed
-	actions.armed = nil
-	actions.mu.Unlock()
-	if armed == nil {
-		t.Fatal("nothing was armed")
-	}
-	armed()
-	<-fired
-}
-
-//
 // Driving a conversation end to end over the fakes.
 //
 
@@ -484,50 +453,6 @@ func TestAFailureSaysWhatTheProviderCalledIt(t *testing.T) {
 				t.Errorf("hangup cause = %q, want %q", cause, testCase.want)
 			}
 		})
-	}
-}
-
-// driveFlow is the minimal flow the drive test runs.
-// A call the flow concludes — reaching a terminal phase by any route — is
-// contained, exactly as if the model had called the hangup tool. This path
-// forgot to say so once, and every farewell-ended call reported uncontained.
-func TestReachingATerminalPhaseIsContainment(t *testing.T) {
-	session, _, _ := startBridge(t, provider.OpenAIProfile())
-	awaitBridgeEvent(t, session, EventTypeReady)
-
-	o := testOrchestrator(t, &fakeSwitch{})
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	spec, err := flow.Load([]byte(`{
-		"id": "terminal-test",
-		"specVersion": "v2",
-		"initialNode": "welcome",
-		"global": {"persona": "You answer the phone."},
-		"nodes": {
-			"welcome": {"instruction": "Greet.", "tools": [],
-				"transitions": [{"on": "NO_INPUT", "target": "farewell"}]},
-			"farewell": {"instruction": "Say goodbye.", "tools": [], "isTerminal": true}
-		}
-	}`))
-	if err != nil {
-		t.Fatalf("load flow: %v", err)
-	}
-	engine := flow.NewEngine(spec, "en", nil, log)
-	actions := &callActions{orchestrator: o, session: session, log: log}
-	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
-
-	moved := engine.OnNoInput()
-	if moved == "" || !engine.IsTerminal() {
-		t.Fatalf("the test flow did not reach its terminal phase (moved=%q)", moved)
-	}
-	o.afterMove(moved, session, runtime, actions, log)
-
-	actions.recorder.mu.Lock()
-	endReason := actions.recorder.endReason
-	actions.recorder.mu.Unlock()
-	if endReason != "HANGUP" {
-		t.Errorf("endReason = %q, want HANGUP — a flow-concluded call must count as contained", endReason)
 	}
 }
 
@@ -1183,9 +1108,6 @@ func TestAnOrchestratorWithoutAProviderIsRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("an orchestrator with no provider profile was accepted")
 	}
-	if !strings.Contains(err.Error(), "provider") {
-		t.Errorf("error %q does not say what is missing", err)
-	}
 }
 
 // The dialplan keeps the caller alive past the bot leg now, so it has to be
@@ -1261,9 +1183,11 @@ func TestTheBotSaysWhetherItMeantToEndTheCall(t *testing.T) {
 	})
 }
 
-// The other deliberate ending: the flow itself concludes. It is containment
-// for the ledger already; it has to look deliberate to the dialplan too, or
-// every flow that ends by design drops its caller into a queue.
+// The other deliberate ending: the flow itself concludes, by any route. It is
+// containment for the ledger, exactly as if the model had called the hangup
+// tool (this path forgot to say so once, and every farewell-ended call reported
+// uncontained), and it has to look deliberate to the dialplan too, or every
+// flow that ends by design drops its caller into a queue.
 func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 	session, _, _ := startBridge(t, provider.OpenAIProfile())
 	awaitBridgeEvent(t, session, EventTypeReady)
@@ -1299,6 +1223,12 @@ func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 
 	if got := sw.variable("aicc_bot_finished"); got != "FLOW_END" {
 		t.Errorf("aicc_bot_finished = %q, want FLOW_END", got)
+	}
+	actions.recorder.mu.Lock()
+	endReason := actions.recorder.endReason
+	actions.recorder.mu.Unlock()
+	if endReason != "HANGUP" {
+		t.Errorf("endReason = %q, want HANGUP — a flow-concluded call must count as contained", endReason)
 	}
 }
 

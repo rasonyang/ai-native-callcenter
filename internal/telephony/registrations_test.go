@@ -35,6 +35,7 @@ Total items returned: 2
 `
 
 func TestParseRegistrations(t *testing.T) {
+	t.Parallel()
 	got := parseRegistrations(liveRegistrations)
 	if len(got) != 2 {
 		t.Fatalf("parsed %d registrations, want 2: %+v", len(got), got)
@@ -56,6 +57,7 @@ func TestParseRegistrations(t *testing.T) {
 }
 
 func TestParseRegistrationsHandlesEmptyListing(t *testing.T) {
+	t.Parallel()
 	if got := parseRegistrations("Total items returned: 0\n"); len(got) != 0 {
 		t.Errorf("parsed %+v from an empty listing", got)
 	}
@@ -65,6 +67,7 @@ func TestParseRegistrationsHandlesEmptyListing(t *testing.T) {
 }
 
 func TestRegistrationsDefaultsToTheInternalProfile(t *testing.T) {
+	t.Parallel()
 	a, c := newTestAdapter()
 	c.reply = liveRegistrations
 

@@ -18,6 +18,7 @@ import (
 // either way — one kill at the extension, the bridge collapses, the switch
 // releases the far end.
 func TestEndCallHangsUpTheExtensionLeg(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	if err := c.registry.Do(callID, func(call *Call) {
 		for _, p := range call.Parties {
@@ -49,6 +50,7 @@ func TestEndCallHangsUpTheExtensionLeg(t *testing.T) {
 // recorded as rejected, not as a conversation that ended normally. The same
 // rule Hangup follows, because it is the party that knows.
 func TestEndCallGivesTheLegTheCauseItsStateDeserves(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	if err := c.registry.Do(callID, func(call *Call) {
 		for _, p := range call.Parties {
@@ -74,6 +76,7 @@ func TestEndCallGivesTheLegTheCauseItsStateDeserves(t *testing.T) {
 // nothing this operation can hang up, and says so rather than reporting a
 // success that killed nothing.
 func TestEndCallRefusesACallWithNoExtensionLeg(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	before := len(cmd.sent)
 
@@ -90,6 +93,7 @@ func TestEndCallRefusesACallWithNoExtensionLeg(t *testing.T) {
 // A call the registry has never heard of is refused: a client that named the
 // wrong id must be told, not reassured.
 func TestEndCallOnAnUnknownCallIsRefused(t *testing.T) {
+	t.Parallel()
 	c, _, _, _ := onACallWithAnAgent(t)
 	if err := c.EndCall(t.Context(), uuid.New()); err == nil {
 		t.Error("ending a call that does not exist reported success")

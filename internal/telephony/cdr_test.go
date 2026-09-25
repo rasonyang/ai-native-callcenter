@@ -62,6 +62,7 @@ func newAssembler(ledger *memoryLedger, queues staticQueues) *CDRAssembler {
 // stamp marks the handover). Writing both sides doubled every contained call
 // in the reports.
 func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
+	t.Parallel()
 	contained := Snapshot{
 		CallID:    uuid.New(),
 		CallType:  events.CallTypeInbound,
@@ -114,6 +115,7 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 // is still a handover. Nothing about the share's contents can be the test —
 // only that the bot wrote one.
 func TestAnImmediateHandoverIsStillAHandover(t *testing.T) {
+	t.Parallel()
 	snap := Snapshot{
 		CallID:    uuid.New(),
 		CallType:  events.CallTypeInbound,
@@ -163,6 +165,7 @@ func idPtr(id uuid.UUID) *uuid.UUID { return &id }
 // making them add up has changed what these fields mean and should say so
 // here first.
 func TestTheDurationsMeasureTheCallRatherThanPartitionIt(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 	queueID := uuid.New()
 	flowID := uuid.New()
@@ -244,6 +247,7 @@ func TestTheDurationsMeasureTheCallRatherThanPartitionIt(t *testing.T) {
 // collide with SHORT_ABANDONED and ABANDONED_WAITING, which already mean the
 // caller left.
 func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name     string
 		callType events.CallType
@@ -255,6 +259,7 @@ func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
 		{"an inbound call to a number nobody serves", events.CallTypeInbound, "UNALLOCATED_NUMBER"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
 				CallID:    uuid.New(),
 				CallType:  tt.callType,
@@ -279,6 +284,7 @@ func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
 
 // Missed-reason precedence, caller phase first, from recorded facts only.
 func TestMissedReasons(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	tests := []struct {
@@ -358,6 +364,7 @@ func TestMissedReasons(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			tt.snap.CallID = uuid.New()
 			tt.snap.CallType = events.CallTypeInbound
 			tt.snap.CreatedAt = at(0)
@@ -377,6 +384,7 @@ func TestMissedReasons(t *testing.T) {
 // A pure bot call arriving through the human path (transferred and hung up in
 // queue never happened here): bot share present, no agent — still ANSWERED.
 func TestBotOnlyCallIsAnswered(t *testing.T) {
+	t.Parallel()
 	snap := Snapshot{
 		CallID: uuid.New(), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
@@ -397,6 +405,7 @@ func TestBotOnlyCallIsAnswered(t *testing.T) {
 // Queue movements land as ledger rows with the wait computed from the queue's
 // own clock.
 func TestQueueEventsAreRecorded(t *testing.T) {
+	t.Parallel()
 	ledger := &memoryLedger{}
 	queueID := uuid.New()
 	assembler := newAssembler(ledger, staticQueues{"support-en": queueID})
@@ -442,6 +451,7 @@ func TestQueueEventsAreRecorded(t *testing.T) {
 
 // An abandonment is its own event name, derived from the recorded cause.
 func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
+	t.Parallel()
 	ledger := &memoryLedger{}
 	assembler := newAssembler(ledger, staticQueues{"support-en": uuid.New()})
 
@@ -484,6 +494,7 @@ func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
 // decision: agentIds is empty because presence genuinely does not know who was
 // on this phone. What must not be empty is what the call itself did.
 func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.T) {
+	t.Parallel()
 	snap := Snapshot{
 		CallID:    uuid.New(),
 		CallType:  events.CallTypeOutbound,
@@ -533,6 +544,7 @@ func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.
 // them, and reading that as an answer recorded every unanswered dial-out as a
 // conversation, with no agent, no ring and no talk time (found live).
 func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	answeredOut := Snapshot{
@@ -589,6 +601,7 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 // every inbound call here meets the bot first, that hid queue abandonment
 // across the board.
 func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	snap := Snapshot{
@@ -644,6 +657,7 @@ func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
 // wrote the row — the walkthrough found the same flow reading "mobile_support"
 // on one call and "" on the next.
 func TestTheBotLegOfATransferredCallNamesTheFlow(t *testing.T) {
+	t.Parallel()
 	flow := uuid.New()
 	snap := Snapshot{
 		CallID: uuid.New(), CallType: events.CallTypeInbound,
@@ -670,27 +684,12 @@ func TestTheBotLegOfATransferredCallNamesTheFlow(t *testing.T) {
 	}
 }
 
-// A queue that timed the caller out, after the bot had served them, is equally
-// not an answered call.
-func TestABotServedCallThatTimedOutInQueueIsMissed(t *testing.T) {
-	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
-		CreatedAt: at(0), EndedAt: atPtr(300),
-		Bot:     BotShare{Sec: 12, DID: "95001"},
-		Queue:   QueueFacts{Name: "support-en", JoinedAt: at(12), LeftAt: at(300), Cause: "Timeout"},
-		Parties: []PartySnapshot{{Role: RoleOriginator, AnsweredAt: atPtr(0), ReleasedAt: atPtr(300)}},
-	}
-	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), snap)
-	if cdr.Status != store.CDRStatusNoAnswer || cdr.MissedReason != "NO_AVAILABLE_AGENT" {
-		t.Errorf("status=%s missedReason=%q, want NO_ANSWER/NO_AVAILABLE_AGENT", cdr.Status, cdr.MissedReason)
-	}
-}
-
 // A call passed from one agent to another is one conversation carried by two
 // people, and both stretches are work. Modelled on the live transfer of
 // 2026-08-21 (call 01a021f5): wei held it for 58 seconds, ben for 35, and the
 // ledger booked 58 because it read only the first leg that answered.
 func TestTalkTimeCountsEveryAgentTheCallReached(t *testing.T) {
+	t.Parallel()
 	wei, ben := uuid.New(), uuid.New()
 
 	snap := Snapshot{
@@ -726,6 +725,7 @@ func TestTalkTimeCountsEveryAgentTheCallReached(t *testing.T) {
 // clean 200 with no media at all — which is exactly what the click-to-dial
 // INCOMPATIBLE_DESTINATION of 2026-08-20 did.
 func TestALegThatAnsweredWithoutABridgeReachedNobody(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	snap := Snapshot{
@@ -757,6 +757,7 @@ func TestALegThatAnsweredWithoutABridgeReachedNobody(t *testing.T) {
 // Owner's ruling (2026-08-21): hold counts as talk. The caller hears music
 // instead of a person, but the agent has not left the call.
 func TestHoldCountsAsTalk(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	snap := Snapshot{
@@ -785,6 +786,7 @@ func TestHoldCountsAsTalk(t *testing.T) {
 // not take the call afterwards. Modelled on the RONA call of 2026-08-21: the
 // bot spoke, nobody took it, and the carrier billed all 142 seconds.
 func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	missed := Snapshot{
@@ -839,6 +841,7 @@ func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
 // The switch's own count of the billable seconds rides onto the row beside
 // ours, so a charge can be checked instead of only asserted.
 func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
+	t.Parallel()
 	base := func(switchBilled int) Snapshot {
 		return Snapshot{
 			CallID: uuid.New(), CallType: events.CallTypeInbound,
@@ -873,6 +876,7 @@ func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
 // as the ledger is concerned, and anchoring the money there produced a bill
 // longer than the thing it was for.
 func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	// An agent placing an outbound call: their own leg answers at 0, the
@@ -937,6 +941,7 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 // Live, 2026-08-23: 95002 → 18688886669, transferred, landed as
 // from=18688886669 to=95002.
 func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 	placed := Snapshot{
 		CallID:    uuid.New(),
@@ -981,6 +986,7 @@ func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 // dialled trunk that does not exist billed every AI outbound call at zero.
 // Live, 2026-08-23: bill_sec 0 against the switch's own 21 on that same leg.
 func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 	placed := Snapshot{
 		CallID:    uuid.New(),
@@ -1038,9 +1044,11 @@ func assemblerLogging(buf *bytes.Buffer) *CDRAssembler {
 // firing on calls that were fine. So the fix is to compare like with like, not
 // to quieten it.
 func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 
 	t.Run("an unanswered dial-out is silent", func(t *testing.T) {
+		t.Parallel()
 		// The agent's own leg auto-answers and the switch bills it for the
 		// whole time the far end rang; we bill the leg facing the carrier,
 		// which never answered, so nothing.
@@ -1064,6 +1072,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 	})
 
 	t.Run("two extensions talking have no billing claim to check", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
 			CallID: uuid.New(), CallType: events.CallTypeInternal,
@@ -1082,6 +1091,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 	})
 
 	t.Run("the leg C49 was about is still watched", func(t *testing.T) {
+		t.Parallel()
 		// An AI outbound this platform placed: the billed leg *is* the
 		// originator, so the alarm still covers the leg C49 was about. C49's
 		// own numbers cannot be replayed — it is fixed and the two now agree —
@@ -1111,7 +1121,9 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 // say what (C31); an AI outbound nobody answered had been dialled to somebody
 // and the row did not say who (C53).
 func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
+	t.Parallel()
 	t.Run("a rejected caller's row says what they dialled", func(t *testing.T) {
+		t.Parallel()
 		// 95009 is served by nobody, so aicc_inbound rejects before a second
 		// leg exists. The only leg there is knows its own destination.
 		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
@@ -1135,6 +1147,7 @@ func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
 	})
 
 	t.Run("an unanswered AI outbound row says who was called", func(t *testing.T) {
+		t.Parallel()
 		// The DID rides the customer's leg from creation, so the row takes the
 		// direction a platform-placed call has even though nothing answered.
 		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{

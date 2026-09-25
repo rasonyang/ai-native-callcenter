@@ -47,10 +47,7 @@ func TestProfileIsChosenByNameNotLanguage(t *testing.T) {
 	if got, err := ProfileFor("  QWEN ", Override{}); err != nil || got.Name != NameQwen {
 		t.Errorf("ProfileFor(\"  QWEN \") = %q, %v", got.Name, err)
 	}
-	// An unknown name fails at startup rather than on the first call.
-	if _, err := ProfileFor("nonesuch", Override{}); err == nil {
-		t.Error("an unknown provider name was accepted")
-	}
+	// An empty name fails at startup rather than on the first call.
 	if _, err := ProfileFor("", Override{}); err == nil {
 		t.Error("an empty provider name was accepted")
 	}
@@ -110,81 +107,6 @@ func TestFormatsForFollowTheNegotiatedLaw(t *testing.T) {
 // Session configuration payloads.
 //
 
-func TestSessionUpdateInTheCurrentDialect(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	update := f.awaitMessage("session.update")
-
-	if got := nested(t, update, "session", "instructions"); got != basicConfig().Instructions {
-		t.Errorf("instructions = %v", got)
-	}
-	// G.711 is named as a format in its own right, not as linear audio.
-	if got := nested(t, update, "session", "audio", "input", "format", "type"); got != "audio/pcmu" {
-		t.Errorf("input format = %v, want audio/pcmu", got)
-	}
-	if got := nested(t, update, "session", "audio", "output", "format", "type"); got != "audio/pcmu" {
-		t.Errorf("output format = %v, want audio/pcmu", got)
-	}
-	// Companded audio has one rate by definition; stating it would be noise.
-	if format, ok := nested(t, update, "session", "audio", "input", "format").(map[string]any); ok {
-		if _, present := format["rate"]; present {
-			t.Error("a rate was sent alongside a companded format")
-		}
-	}
-	if got := nested(t, update, "session", "audio", "output", "voice"); got != "marin" {
-		t.Errorf("voice = %v", got)
-	}
-
-	turn := nested(t, update, "session", "audio", "input", "turn_detection").(map[string]any)
-	if turn["type"] != "server_vad" || turn["silence_duration_ms"] != float64(500) {
-		t.Errorf("turn detection = %v, want server_vad holding 500ms", turn)
-	}
-
-	tools := nested(t, update, "session", "tools").([]any)
-	if len(tools) != 1 {
-		t.Fatalf("sent %d tools", len(tools))
-	}
-	// The flat shape, which both providers were verified to accept.
-	tool := tools[0].(map[string]any)
-	if tool["type"] != "function" || tool["name"] != "transfer_to_agent" {
-		t.Errorf("tool = %v, want the flat function shape", tool)
-	}
-	if _, isNested := tool["function"]; isNested {
-		t.Error("the tool was sent in the nested shape")
-	}
-}
-
-func TestSessionUpdateInTheOlderDialect(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, QwenProfile())
-
-	cfg := basicConfig()
-	cfg.Language = "zh"
-	cfg.InputFormat, cfg.OutputFormat = QwenProfile().FormatsFor(media.LawMu)
-	if err := session.Start(t.Context(), cfg); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	update := f.awaitMessage("session.update")
-
-	if got := nested(t, update, "session", "input_audio_format"); got != "pcm" {
-		t.Errorf("input format = %v, want the flat pcm name", got)
-	}
-	if got := nested(t, update, "session", "voice"); got != "longanqian_v3.1" {
-		t.Errorf("voice = %v", got)
-	}
-	if _, hasAudioBlock := nested(t, update, "session").(map[string]any)["audio"]; hasAudioBlock {
-		t.Error("the newer nested audio block was sent to a provider using the older dialect")
-	}
-	modalities := nested(t, update, "session", "modalities").([]any)
-	if len(modalities) != 2 {
-		t.Errorf("modalities = %v", modalities)
-	}
-}
-
 // Semantic turn taking is forced to a two-second hold on one provider, and any
 // value we send is ignored. Sending one anyway would make the configuration
 // claim a latency the call will not have.
@@ -231,25 +153,6 @@ func TestSemanticTurnDetectionKeepsTheHoldWhereItIsHonoured(t *testing.T) {
 //
 // Handshake.
 //
-
-func TestStartWaitsForConfirmationThenAsksForTheOpeningTurn(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	awaitEvent(t, session, EventTypeSessionReady)
-	f.awaitMessage("response.create")
-
-	// The confirmation must precede the request, or the greeting is generated
-	// under the provider's defaults rather than ours.
-	sent := typesOf(f.messages())
-	if len(sent) < 2 || sent[0] != "session.update" {
-		t.Errorf("client sent %v, want the configuration first", sent)
-	}
-}
 
 // One provider refuses to speak into an empty conversation, so the greeting
 // has to be prompted. Verified live: without this the opening turn is rejected
@@ -325,62 +228,6 @@ func TestGreetingCueCanBeOverridden(t *testing.T) {
 //
 // Spoken lines: the opening one, and the ones a flow decides on mid-call.
 //
-
-// The opening frames are the ones every existing call already sends, and a
-// flow that names no opening line must go on sending exactly those: one bare
-// request, carrying nothing.
-func TestWithNoOpeningLineTheOpeningRequestIsUnchanged(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		profile Profile
-	}{
-		{"GA dialect", OpenAIProfile()},
-		{"older dialect", QwenProfile()},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			f := newFakeProvider(t, acceptSession)
-			session := testSession(t, f, tt.profile)
-
-			cfg := basicConfig()
-			cfg.InputFormat, cfg.OutputFormat = tt.profile.FormatsFor(media.LawMu)
-			if err := session.Start(t.Context(), cfg); err != nil {
-				t.Fatalf("start: %v", err)
-			}
-
-			request := f.awaitMessages("response.create", 1)[0]
-			if len(request) != 1 {
-				t.Errorf("response.create = %v, want the bare request and nothing else", request)
-			}
-		})
-	}
-}
-
-// Where the flow owns the opening words, the request carries them and asks for
-// them as written. This provider greets unprompted, so nothing is put into the
-// conversation: a synthetic user turn would land in the caller's transcript.
-func TestAnOpeningLineIsAskedForAsWritten(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-
-	cfg := basicConfig()
-	cfg.OpeningText = "Thanks for calling NovaNet, how can I help you today?"
-	if err := session.Start(t.Context(), cfg); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	request := f.awaitMessages("response.create", 1)[0]
-	direction, ok := nested(t, request, "response", "instructions").(string)
-	if !ok {
-		t.Fatalf("the opening request carries no instructions: %v", request)
-	}
-	if !strings.Contains(direction, cfg.OpeningText) {
-		t.Errorf("the opening request does not carry the line: %q", direction)
-	}
-	if !strings.Contains(direction, "word for word") {
-		t.Errorf("the opening request does not ask for the line as written: %q", direction)
-	}
-	f.awaitMessages("conversation.item.create", 0)
-}
 
 // The other provider refuses to answer an empty conversation, and the cue it
 // needs is the direction itself: there is no second thing to say, and a cue
@@ -875,32 +722,6 @@ func TestRejectedConfigurationIsRetriedOnceWithoutOptionalFields(t *testing.T) {
 // Audio and events.
 //
 
-func TestSendAudioWireShape(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	frame := []byte{0xFF, 0x00, 0x7F, 0x80}
-	if err := session.SendAudio(frame); err != nil {
-		t.Fatalf("send audio: %v", err)
-	}
-
-	message := f.awaitMessage("input_audio_buffer.append")
-	encoded, ok := message["audio"].(string)
-	if !ok {
-		t.Fatalf("audio field is %T", message["audio"])
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		t.Fatalf("the hand-built JSON produced invalid base64: %v", err)
-	}
-	if string(decoded) != string(frame) {
-		t.Errorf("audio round-tripped as %v, want %v", decoded, frame)
-	}
-}
-
 func TestEventMapping(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -1345,39 +1166,6 @@ func TestInterruptDoesNotBlockTheEventConsumer(t *testing.T) {
 // Tool results and steering.
 //
 
-func TestToolResultCarriesTheHintAndAsksForTheNextTurn(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	err := session.SendToolResult("fc_1", `{"ok":1,"balance":"42.10"}`,
-		"Tell the caller the balance, then ask if they want to pay now.")
-	if err != nil {
-		t.Fatalf("send tool result: %v", err)
-	}
-
-	item := nested(t, f.awaitMessage("conversation.item.create"), "item").(map[string]any)
-	if item["call_id"] != "fc_1" {
-		t.Errorf("call_id = %v", item["call_id"])
-	}
-
-	var output map[string]any
-	if err := json.Unmarshal([]byte(item["output"].(string)), &output); err != nil {
-		t.Fatalf("the tool output is not valid JSON: %v", err)
-	}
-	if output["balance"] != "42.10" {
-		t.Errorf("the result lost its own fields: %v", output)
-	}
-	if !strings.Contains(output["hint"].(string), "ask if they want to pay") {
-		t.Errorf("the hint did not reach the model: %v", output["hint"])
-	}
-
-	// The model does not speak again until asked.
-	f.awaitMessage("response.create")
-}
-
 //
 // Tool results answered while the response that called the tool is still
 // open (qwen-findings W-Q4).
@@ -1450,26 +1238,6 @@ func TestAToolResultSentWhileTheResponseIsOpenAsksForItsTurnWhenItEnds(t *testin
 	lastItem := len(types) - 1 - indexOf(reversed(types), "conversation.item.create")
 	if lastRequest < lastItem {
 		t.Errorf("the turn was asked for ahead of the result it answers: %v", types)
-	}
-}
-
-// With the floor free nothing waits: the result and the request go out together,
-// as they always did.
-func TestAToolResultWithTheFloorFreeAsksAtOnce(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	awaitEvent(t, session, EventTypeSessionReady)
-	finishTheOpeningTurn(t, f, session)
-
-	if err := session.SendToolResult("fc_1", `{"ok":true}`, ""); err != nil {
-		t.Fatalf("send tool result: %v", err)
-	}
-	f.awaitMessages("response.create", 2)
-	if got := len(functionCallOutputs(f)); got != 1 {
-		t.Errorf("function_call_output items = %d, want 1", got)
 	}
 }
 

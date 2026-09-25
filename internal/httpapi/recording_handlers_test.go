@@ -12,6 +12,7 @@ import (
 
 // The ownership rule behind agent playback: the same line /cdrs/mine draws.
 func TestAgentWasOnCall(t *testing.T) {
+	t.Parallel()
 	mine := uuid.New()
 	other := uuid.New()
 

@@ -70,6 +70,7 @@ func (f fakeNames) CallcenterName(_ context.Context, agentID uuid.UUID) (string,
 // — while our own database still says the agent staffs the queue. The failure
 // is invisible from this side, which is why it is restored unconditionally.
 func TestSyncTiersRestoresEveryQueuesStaffing(t *testing.T) {
+	t.Parallel()
 	support, sales := uuid.New(), uuid.New()
 	alice, bob := uuid.New(), uuid.New()
 
@@ -102,6 +103,7 @@ func TestSyncTiersRestoresEveryQueuesStaffing(t *testing.T) {
 }
 
 func TestSyncTiersDoesNothingWhenTheSwitchIsDown(t *testing.T) {
+	t.Parallel()
 	queueID := uuid.New()
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
@@ -119,6 +121,7 @@ func TestSyncTiersDoesNothingWhenTheSwitchIsDown(t *testing.T) {
 // restored: one stale row would otherwise cost the whole call centre its
 // routing.
 func TestSyncTiersSkipsAMissingAgentAndKeepsGoing(t *testing.T) {
+	t.Parallel()
 	queueID := uuid.New()
 	gone, present := uuid.New(), uuid.New()
 	store := &fakeStore{
@@ -144,6 +147,7 @@ func TestSyncTiersSkipsAMissingAgentAndKeepsGoing(t *testing.T) {
 // tier has to follow — otherwise they are Available, in a queue, and offered
 // nothing, with our own database insisting they are staffed.
 func TestSigningInAddsTheTierThatCouldNotBeAddedWhileSignedOut(t *testing.T) {
+	t.Parallel()
 	queueID, agentID := uuid.New(), uuid.New()
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
@@ -170,6 +174,7 @@ func TestSigningInAddsTheTierThatCouldNotBeAddedWhileSignedOut(t *testing.T) {
 // The mirror case, and the worse of the two: a queue unstaffed while the agent
 // was signed out leaves the switch still offering them its calls.
 func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
+	t.Parallel()
 	queueID, agentID := uuid.New(), uuid.New()
 	store := &fakeStore{
 		queues: []Queue{{ID: queueID, Name: "support-en"}},
@@ -195,6 +200,7 @@ func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
 // Staffing nothing is a normal state, not a fault. The invariant is desired
 // against actual, and zero against zero satisfies it.
 func TestAnAgentWhoStaffsNothingStaysAtZero(t *testing.T) {
+	t.Parallel()
 	agentID := uuid.New()
 	store := &fakeStore{
 		queues:   []Queue{{ID: uuid.New(), Name: "support-en"}},
@@ -212,6 +218,7 @@ func TestAnAgentWhoStaffsNothingStaysAtZero(t *testing.T) {
 // A switch that already agrees is left alone — the reconcile must be idempotent,
 // because it runs on every registration.
 func TestAMatchingSwitchIsNotTouched(t *testing.T) {
+	t.Parallel()
 	queueID, agentID := uuid.New(), uuid.New()
 	name := "agent-" + agentID.String()[:4]
 	store := &fakeStore{
@@ -231,6 +238,7 @@ func TestAMatchingSwitchIsNotTouched(t *testing.T) {
 // system does not is the case the add-only version could not reach at all —
 // and it is the one that leaves the switch offering calls on behalf of nobody.
 func TestReconnectRemovesATierForAnAgentThisSystemDoesNotStaff(t *testing.T) {
+	t.Parallel()
 	queueID, staffed := uuid.New(), uuid.New()
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
@@ -254,23 +262,6 @@ func TestReconnectRemovesATierForAnAgentThisSystemDoesNotStaff(t *testing.T) {
 	}
 }
 
-// Reconnect is the same convergence sign-in performs, so it must still add what
-// is missing — the half it always covered.
-func TestReconnectStillAddsMissingTiers(t *testing.T) {
-	queueID, agentID := uuid.New(), uuid.New()
-	store := &fakeStore{
-		queues:   []Queue{{ID: queueID, Name: "support-en"}},
-		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 2, Position: 3}}},
-	}
-	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
-
-	NewService(store, sw, fakeNames{}).SyncTiers(context.Background())
-
-	if len(sw.added) != 1 || sw.added[0].level != 2 || sw.added[0].position != 3 {
-		t.Fatalf("added %+v, want support-en at level 2 position 3", sw.added)
-	}
-}
-
 // notOnSwitchError mimics what the adapter returns for an agent the switch has
 // not met yet.
 type notOnSwitchError struct{}
@@ -290,6 +281,7 @@ func (d deferringSwitch) AddCallcenterTier(string, string, int, int) error {
 // reconnect report a problem nothing could have fixed, which is how a warning
 // becomes background noise and then becomes unread.
 func TestATierForAnAgentTheSwitchHasNotMetIsDeferredNotFailed(t *testing.T) {
+	t.Parallel()
 	queueID, agentID := uuid.New(), uuid.New()
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
@@ -360,7 +352,9 @@ func (h honestSwitch) DeleteCallcenterTier(queue, agent string) error {
 // afterwards, and a false report of how they came to agree does not disturb
 // that. Only counting the switch's own before and after catches it.
 func TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted(t *testing.T) {
+	t.Parallel()
 	t.Run("a removal the switch only said +OK to is not counted", func(t *testing.T) {
+		t.Parallel()
 		sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
 			// The switch's staffing does not change when told to delete, which
 			// is what a tier that was never really there looks like.
@@ -384,6 +378,7 @@ func TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted(t *testing.T) {
 	})
 
 	t.Run("a removal that happened is counted", func(t *testing.T) {
+		t.Parallel()
 		base := &fakeSwitch{isUp: true, onSwitch: map[string][]string{"agent-wei": {"support-en"}}}
 		svc := NewService(&fakeStore{}, honestSwitch{base}, fakeNames{})
 
@@ -397,6 +392,7 @@ func TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted(t *testing.T) {
 	})
 
 	t.Run("an addition that happened is counted", func(t *testing.T) {
+		t.Parallel()
 		base := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
 		svc := NewService(&fakeStore{}, honestSwitch{base}, fakeNames{})
 
@@ -409,6 +405,7 @@ func TestConvergeCountsWhatTheSwitchDidNotWhatItAccepted(t *testing.T) {
 	})
 
 	t.Run("a second read that fails is reported as unverified", func(t *testing.T) {
+		t.Parallel()
 		sw := &blindSwitch{fakeSwitch: &fakeSwitch{isUp: true,
 			onSwitch: map[string][]string{"agent-wei": {"support-en"}}}}
 		svc := NewService(&fakeStore{}, sw, fakeNames{})

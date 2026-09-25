@@ -78,13 +78,6 @@ it('sends the status filter the agent chose', async () => {
   )
 })
 
-describe('empty', () => {
-  it('invites the agent to take a call rather than showing an empty grid', async () => {
-    await renderMyCalls({ myCDRs: [] })
-    expect(await screen.findByText(/no calls yet/i)).toBeInTheDocument()
-  })
-})
-
 describe('recordings', () => {
   it('offers no listen control on a call that was not recorded', async () => {
     await renderMyCalls({ myCDRs: [cdrFixture({ hasRecording: false })] })

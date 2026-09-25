@@ -235,6 +235,7 @@ func (fixedAgent) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) 
 // has to be said, and this is what says it — the scope literal at the publish
 // site, not the hub's willingness to deliver.
 func TestACallbackReachesAnAgentWhoIsOnNothing(t *testing.T) {
+	t.Parallel()
 	hub := events.NewHub(events.NewSequence(&stubReserver{}, "events"))
 	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{Hub: hub})
 

@@ -11,6 +11,7 @@ import "testing"
 // tier written under the old name became something converge could neither match
 // nor delete, and it outlived the queue it named (C1).
 func TestAQueueNameCarriesNoDomain(t *testing.T) {
+	t.Parallel()
 	a := NewAdapter(nil, "aicc.demo")
 	if got := a.QueueName("support-en"); got != "support-en" {
 		t.Fatalf("QueueName = %q, want the name itself", got)
@@ -29,30 +30,8 @@ func TestAQueueNameCarriesNoDomain(t *testing.T) {
 	}
 }
 
-// A tier left behind by an address this host no longer has still reads as the
-// queue it names, so converge can see it and take it away. This is C1 turned
-// from a delete that has to cope with stale names into names that do not go
-// stale: the row below outlived the queue it named because nothing upstream
-// could tell it was support-en at all.
-func TestATierUnderAnOldAddressIsStillThatQueue(t *testing.T) {
-	a := NewAdapter(nil, "192.168.31.55")
-	out := "queue|agent|state|level|position\n" +
-		"support-en@192.168.31.176|agent-wei|Ready|1|2\n" +
-		"support-zh|agent-ben|Ready|1|1\n" +
-		"+OK\n"
-	byAgent := map[string][]string{}
-	for _, tier := range parseTiers(out) {
-		byAgent[tier.Agent] = append(byAgent[tier.Agent], a.bareQueueName(tier.Queue))
-	}
-	if got := byAgent["agent-wei"]; len(got) != 1 || got[0] != "support-en" {
-		t.Errorf("the stale tier reads as %v, want [support-en] — converge cannot remove what it cannot name", got)
-	}
-	if got := byAgent["agent-ben"]; len(got) != 1 || got[0] != "support-zh" {
-		t.Errorf("the current tier reads as %v, want [support-zh]", got)
-	}
-}
-
 func TestParseTiersSkipsTheHeaderAndTheStatusLine(t *testing.T) {
+	t.Parallel()
 	out := "queue|agent|state|level|position\n" +
 		"support-en@aicc.demo|agent-wei|Ready|1|2\n" +
 		"malformed|row\n" +

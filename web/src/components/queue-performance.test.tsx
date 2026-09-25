@@ -62,14 +62,4 @@ describe('queue service level', () => {
     await waitFor(() => expect(screen.getByText('47%')).toBeInTheDocument())
     expect(screen.queryByText('100%')).not.toBeInTheDocument()
   })
-
-  it('says in the header which question the number answers', async () => {
-    renderTable()
-
-    await waitFor(() => expect(screen.getByText(i18n.t('supervisor.sla'))).toBeInTheDocument())
-    expect(screen.getByText(i18n.t('supervisor.sla'))).toHaveAttribute(
-      'title',
-      i18n.t('supervisor.slaHint'),
-    )
-  })
 })

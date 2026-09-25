@@ -31,6 +31,7 @@ func newTestHub() (*Hub, *fakeReserver) {
 }
 
 func TestSequenceReservesBlocksAndIncreasesMonotonically(t *testing.T) {
+	t.Parallel()
 	r := &fakeReserver{}
 	s := NewSequence(r, "events")
 	ctx := context.Background()
@@ -52,6 +53,7 @@ func TestSequenceReservesBlocksAndIncreasesMonotonically(t *testing.T) {
 }
 
 func TestSequenceDegradesWhenStorageFails(t *testing.T) {
+	t.Parallel()
 	r := &fakeReserver{err: errors.New("database down")}
 	s := NewSequence(r, "events")
 
@@ -65,6 +67,7 @@ func TestSequenceDegradesWhenStorageFails(t *testing.T) {
 }
 
 func TestPublishStampsEnvelope(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	sub, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	defer sub.Close()
@@ -87,6 +90,7 @@ func TestPublishStampsEnvelope(t *testing.T) {
 }
 
 func TestScopingByIdentity(t *testing.T) {
+	t.Parallel()
 	agentA := uuid.New()
 	agentB := uuid.New()
 	queue1 := uuid.New()
@@ -173,6 +177,7 @@ func TestScopingByIdentity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := tt.who.wants(tt.ev, tt.sc); got != tt.want {
 				t.Errorf("wants() = %v, want %v", got, tt.want)
 			}
@@ -181,6 +186,7 @@ func TestScopingByIdentity(t *testing.T) {
 }
 
 func TestResumeReplaysAfterLastEventID(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
 
@@ -199,6 +205,7 @@ func TestResumeReplaysAfterLastEventID(t *testing.T) {
 }
 
 func TestResumeBeyondRingRequestsReset(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	h.Publish(context.Background(), Event{Type: TypeAgentReady}, Scope{})
 
@@ -224,6 +231,7 @@ func TestResumeBeyondRingRequestsReset(t *testing.T) {
 }
 
 func TestSlowSubscriberIsDroppedNotBlocking(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	var droppedFor int
 	h.OnDropped = func(Subscriber) { droppedFor++ }
@@ -248,6 +256,7 @@ func TestSlowSubscriberIsDroppedNotBlocking(t *testing.T) {
 }
 
 func TestCloseIsIdempotent(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	sub, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
 	sub.Close()
@@ -263,6 +272,7 @@ func TestCloseIsIdempotent(t *testing.T) {
 // while the stream carried only call control, and a disclosure bug the moment
 // it began carrying what people said to each other.
 func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
 	alice, bob := uuid.New(), uuid.New()
@@ -301,6 +311,7 @@ func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
 
 // A supervisor still sees everything on replay, exactly as they do live.
 func TestReplayStillGivesSupervisorsEverything(t *testing.T) {
+	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
 	agent := uuid.New()

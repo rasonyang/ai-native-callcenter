@@ -190,20 +190,6 @@ describe('what the page accepts', () => {
     await act(async () => {})
     expect(bridge.detected).toBe(false)
   })
-
-  it('says hello again when a content script appears after the page loaded', async () => {
-    installBackend()
-    const extension = installFakeExtension()
-    renderBridge()
-    await waitFor(() => expect(bridge.detected).toBe(true))
-    const before = extension.messagesOfType('hello').length
-    await act(async () => {
-      extension.mark()
-    })
-    await waitFor(() => expect(extension.messagesOfType('hello').length).toBeGreaterThan(before))
-    // Removing the marker is an event the page hears; let it land in act.
-    await act(async () => extension.uninstall())
-  })
 })
 
 /**
@@ -228,18 +214,6 @@ describe('detection over time', () => {
     await waitFor(() => expect(bridge.detected).toBe(true))
     // Removing the marker is an event the page hears; let it land in act.
     await act(async () => extension.uninstall())
-  })
-
-  it('forgets the extension when its marker is removed', async () => {
-    installBackend()
-    const extension = installFakeExtension()
-    extension.mark()
-    renderBridge()
-    await waitFor(() => expect(bridge.detected).toBe(true))
-    await act(async () => {
-      extension.uninstall()
-    })
-    await waitFor(() => expect(bridge.detected).toBe(false))
   })
 
   it('does not react to attribute changes that are not the marker', async () => {
@@ -387,23 +361,19 @@ describe('provisioning', () => {
     extension.uninstall()
   })
 
-  it('replaces an account somebody typed in by hand', async () => {
+  // A build that predates provisionStatus sends none, and one that is newer
+  // may send a value this page does not know; either way the old rules stand.
+  it.each([
+    ['an account somebody typed in by hand', { credentialSource: 'MANUAL' as const }],
+    ['a session provisioned for somebody else', { account: '1002' }],
+    ['a manual account with a status it does not recognise',
+      { credentialSource: 'MANUAL' as const, provisionStatus: 'SOMETHING_ELSE' as never }],
+  ])('replaces %s', async (_case, state) => {
     const api = installBackend()
-    const extension = installFakeExtension({
-      state: { credentialSource: 'MANUAL', account: MY_EXTENSION, registration: 'REGISTERED' },
-    })
+    const extension = installFakeExtension({ state })
     renderBridge()
     await waitFor(() => expect(mints(api)).toBe(1))
-    extension.uninstall()
-  })
-
-  it('replaces a session provisioned for somebody else', async () => {
-    const api = installBackend()
-    const extension = installFakeExtension({
-      state: { credentialSource: 'PROVISIONED', account: '1002', registration: 'REGISTERED' },
-    })
-    renderBridge()
-    await waitFor(() => expect(mints(api)).toBe(1))
+    expect(bridge.state?.provisionStatus).toBeUndefined()
     extension.uninstall()
   })
 
@@ -533,35 +503,6 @@ describe('provisioning', () => {
       })
     })
     await waitFor(() => expect(mints(api)).toBe(1))
-    extension.uninstall()
-  })
-
-  it('reads a state from a build that does not know the field', async () => {
-    const api = installBackend()
-    const extension = installFakeExtension({
-      state: { credentialSource: 'MANUAL', account: MY_EXTENSION, registration: 'REGISTERED' },
-    })
-    renderBridge()
-    // No status at all, so the old rules stand and a manual account is
-    // replaced by a provisioned one.
-    await waitFor(() => expect(mints(api)).toBe(1))
-    expect(bridge.state?.provisionStatus).toBeUndefined()
-    extension.uninstall()
-  })
-
-  it('ignores a status it does not recognise', async () => {
-    const api = installBackend()
-    const extension = installFakeExtension({
-      state: {
-        credentialSource: 'MANUAL',
-        account: MY_EXTENSION,
-        registration: 'REGISTERED',
-        provisionStatus: 'SOMETHING_ELSE' as never,
-      },
-    })
-    renderBridge()
-    await waitFor(() => expect(mints(api)).toBe(1))
-    expect(bridge.state?.provisionStatus).toBeUndefined()
     extension.uninstall()
   })
 

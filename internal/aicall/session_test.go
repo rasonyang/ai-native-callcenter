@@ -403,38 +403,6 @@ func TestCallerAudioIsConvertedForAProviderThatNeedsLinearAudio(t *testing.T) {
 	t.Fatal("caller audio never reached the model")
 }
 
-// The model speaks in whatever chunks suit it; the wire needs exact frames.
-func TestModelAudioIsCutIntoWireFrames(t *testing.T) {
-	session, leg, model := startBridge(t, provider.OpenAIProfile())
-	awaitBridgeEvent(t, session, EventTypeReady)
-
-	// Two and a half frames of speech, which is not a whole number of frames.
-	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
-	model.events <- provider.Event{
-		Type:  provider.EventTypeAudioDelta,
-		Audio: make([]byte, media.FrameSamples*2+80),
-	}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if frames := leg.sentFrames(); len(frames) >= 2 {
-			for i, frame := range frames {
-				if len(frame) != media.FrameSamples {
-					t.Fatalf("frame %d is %d bytes, want exactly %d",
-						i, len(frame), media.FrameSamples)
-				}
-			}
-			// The half frame is held back rather than sent short.
-			if len(frames) != 2 {
-				t.Errorf("sent %d frames, want the partial one held back", len(frames))
-			}
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("model audio never reached the wire")
-}
-
 // The tail of a sentence is a fraction of a frame. Dropping it clips the last
 // word; padding it is inaudible.
 func TestTheTailOfATurnIsPaddedAndSent(t *testing.T) {

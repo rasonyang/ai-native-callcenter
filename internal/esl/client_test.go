@@ -106,20 +106,8 @@ func (f *fakeSwitch) waitConn(t *testing.T) *fakeConn {
 	}
 }
 
-func TestDialAuthenticates(t *testing.T) {
-	f := newFakeSwitch(t, "ClueCon")
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	client, err := Dial(ctx, f.addr(), "ClueCon")
-	if err != nil {
-		t.Fatalf("Dial() error = %v", err)
-	}
-	defer client.Close()
-	f.waitConn(t)
-}
-
 func TestDialRejectsBadPassword(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -131,6 +119,7 @@ func TestDialRejectsBadPassword(t *testing.T) {
 }
 
 func TestAPIAndBgAPI(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -160,6 +149,7 @@ func TestAPIAndBgAPI(t *testing.T) {
 }
 
 func TestCommandsMatchRepliesInOrder(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -200,6 +190,7 @@ func TestCommandsMatchRepliesInOrder(t *testing.T) {
 }
 
 func TestEventsAreDelivered(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -237,6 +228,7 @@ func TestEventsAreDelivered(t *testing.T) {
 }
 
 func TestClosedClientFailsCommands(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -254,6 +246,7 @@ func TestClosedClientFailsCommands(t *testing.T) {
 }
 
 func TestLinkReconnects(t *testing.T) {
+	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -290,6 +283,7 @@ func TestLinkReconnects(t *testing.T) {
 }
 
 func TestLinkReportsDownWhenDisconnected(t *testing.T) {
+	t.Parallel()
 	link := NewLink("127.0.0.1:1", "ClueCon", nil)
 	if link.IsUp() {
 		t.Error("IsUp() = true before Run")

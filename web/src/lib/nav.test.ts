@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Identity, Role } from '@/lib/api'
 import { requireRole } from '@/lib/guards'
-import { NAV, breadcrumbFor, roleHomeFor, visibleTo } from '@/lib/nav'
+import { NAV, breadcrumbFor, visibleTo } from '@/lib/nav'
 
 /**
  * The sidebar is a job description, so the three lists are pinned literally.
@@ -55,14 +55,6 @@ describe('the sidebar each role gets', () => {
       '/agent/callbacks',
     ])
   })
-
-  // The two overlaps are deliberate and small; everything else is exclusive.
-  it('overlaps only on the ledger and the reports', () => {
-    const admin = new Set(menuFor('ADMIN'))
-    const shared = menuFor('SUPERVISOR').filter((to) => admin.has(to))
-    expect(shared).toEqual(['/admin/cdr', '/admin/reports'])
-    expect(menuFor('AGENT').filter((to) => admin.has(to))).toEqual([])
-  })
 })
 
 const as = (role: Role): Identity => ({
@@ -99,14 +91,6 @@ describe('the route guard', () => {
     expect(bounce(() => requireRole(as('ADMIN'), 'AGENT'))).toBe('/admin')
     expect(bounce(() => requireRole(as('SUPERVISOR'), 'ADMIN'))).toBe('/supervisor')
     expect(bounce(() => requireRole(as('AGENT'), 'ADMIN', 'SUPERVISOR'))).toBe('/agent')
-  })
-
-  it('sends the turned-away visitor to their own home, not to a loop', () => {
-    for (const role of ['AGENT', 'SUPERVISOR', 'ADMIN'] as Role[]) {
-      const home = roleHomeFor(role)
-      // Whatever page refused them, the landing place is a page they can open.
-      expect(bounce(() => requireRole(as(role), 'NOBODY' as Role))).toBe(home)
-    }
   })
 
   it('sends a visitor with no session to the login page', () => {

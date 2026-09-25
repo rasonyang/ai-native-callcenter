@@ -78,6 +78,7 @@ func trailServer(auditor *fakeAuditor, identity auth.Identity) http.Handler {
 }
 
 func TestAuditTrail(t *testing.T) {
+	t.Parallel()
 	userID := uuid.New()
 	identity := auth.Identity{UserID: userID, Role: auth.RoleAdmin}
 
@@ -182,6 +183,7 @@ func TestAuditTrail(t *testing.T) {
 // This test is what makes coverage structural: adding a POST route outside it
 // turns this red, not a review comment.
 func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
+	t.Parallel()
 	server := New(config.Config{Env: "dev"}, Deps{
 		Auth: &auth.Service{},
 		// Non-nil markers so every conditional route group registers.
@@ -395,6 +397,7 @@ func (stubOutbound) DialAI(context.Context, outbound.AIDialRequest) (uuid.UUID, 
 // A read path over this table would have turned a dormant leak into a
 // browsable one, which is why this is fixed with W4 rather than after it.
 func TestTheAuditTrailKeepsNoSecrets(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		body string
@@ -419,6 +422,12 @@ func TestTheAuditTrailKeepsNoSecrets(t *testing.T) {
 			gone: []string{"deep"},
 		},
 		{
+			name: "a phone's digest, which only a response carries today",
+			body: `{"a1Hash":"0123456789abcdef","account":"1001"}`,
+			want: []string{`"account":"1001"`},
+			gone: []string{"0123456789abcdef"},
+		},
+		{
 			name: "inside an array",
 			body: `{"items":[{"name":"x","token":"zzz-leaked"}]}`,
 			want: []string{"[redacted]"},
@@ -426,6 +435,7 @@ func TestTheAuditTrailKeepsNoSecrets(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := redactSecrets([]byte(tc.body))
 			if !ok {
 				t.Fatalf("body was dropped: %s", tc.body)

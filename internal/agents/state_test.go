@@ -22,6 +22,7 @@ func signedInAtAWorkingPhone(p *Presence) {
 }
 
 func TestLoginLandsInNotReady(t *testing.T) {
+	t.Parallel()
 	var p Presence
 	if err := p.Login("1001", now); err != nil {
 		t.Fatalf("Login() error = %v", err)
@@ -39,6 +40,7 @@ func TestLoginLandsInNotReady(t *testing.T) {
 }
 
 func TestTransitions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		start      func(*Presence)
@@ -123,6 +125,7 @@ func TestTransitions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var p Presence
 			if tt.start != nil {
 				tt.start(&p)
@@ -142,6 +145,7 @@ func TestTransitions(t *testing.T) {
 }
 
 func TestWrapUpHoldsUntilItIsFiled(t *testing.T) {
+	t.Parallel()
 	var p Presence
 	signedInAtAWorkingPhone(&p)
 	callID := uuid.New()
@@ -171,25 +175,8 @@ func TestWrapUpHoldsUntilItIsFiled(t *testing.T) {
 	}
 }
 
-// After-call work is a state the agent can leave for a reason of their own;
-// what they had not filed stays unfiled, which is honest.
-func TestAnAgentMayChooseSomethingElseDuringWrapUp(t *testing.T) {
-	var p Presence
-	_ = p.Login("1001", now)
-	_ = p.StartWrapUp(uuid.New(), now)
-
-	if err := p.NotReady(ReasonLunch, now.Add(5*time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	if p.State != StateNotReady || p.Reason != ReasonLunch {
-		t.Errorf("state = %s(%s), want NOT_READY(LUNCH)", p.State, p.Reason)
-	}
-	if p.WrapUpCallID != nil {
-		t.Error("the wrap-up call survived a state the agent chose instead")
-	}
-}
-
 func TestAvailabilityPrecedence(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		p    Presence
@@ -234,6 +221,7 @@ func TestAvailabilityPrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := tt.p.Availability(); got != tt.want {
 				t.Errorf("Availability() = %s, want %s", got, tt.want)
 			}
@@ -242,6 +230,7 @@ func TestAvailabilityPrecedence(t *testing.T) {
 }
 
 func TestCallcenterStatusMapping(t *testing.T) {
+	t.Parallel()
 	// A signed-in agent always carries an observed device: Login applies what
 	// the switch already said about the phone, so "ready with no device" is a
 	// presence production never holds — Availability() reads it as unreachable

@@ -16,30 +16,6 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 )
 
-func TestRoleAtLeast(t *testing.T) {
-	tests := []struct {
-		name string
-		have auth.Role
-		want auth.Role
-		ok   bool
-	}{
-		{"agent meets agent", auth.RoleAgent, auth.RoleAgent, true},
-		{"agent below supervisor", auth.RoleAgent, auth.RoleSupervisor, false},
-		{"agent below admin", auth.RoleAgent, auth.RoleAdmin, false},
-		{"supervisor meets agent", auth.RoleSupervisor, auth.RoleAgent, true},
-		{"supervisor below admin", auth.RoleSupervisor, auth.RoleAdmin, false},
-		{"admin meets everything", auth.RoleAdmin, auth.RoleSupervisor, true},
-		{"unknown role meets nothing", auth.Role("GUEST"), auth.RoleAgent, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.have.AtLeast(tt.want); got != tt.ok {
-				t.Errorf("%s.AtLeast(%s) = %v, want %v", tt.have, tt.want, got, tt.ok)
-			}
-		})
-	}
-}
-
 // contextWithIdentity builds the AuthContext the authentication middleware
 // would have built for a signed-in account, so a handler test exercises the
 // handler rather than the door.
@@ -67,6 +43,7 @@ func contextWithIdentity(ctx context.Context, id auth.Identity, agentID ...uuid.
 // route rather than guessed: a route the contract does not declare is refused
 // rather than let through, and a subject missing the scope is told which one.
 func TestTheContractDecidesWhoReachesAnOperation(t *testing.T) {
+	t.Parallel()
 	reached := false
 	handler := (&Server{}).enforceContract(http.HandlerFunc(
 		func(w http.ResponseWriter, _ *http.Request) {
@@ -149,6 +126,7 @@ func TestTheContractDecidesWhoReachesAnOperation(t *testing.T) {
 }
 
 func TestParseLastEventID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		header string
@@ -163,6 +141,7 @@ func TestParseLastEventID(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			target := "/api/v1/events"
 			if tt.query != "" {
 				target += "?lastEventId=" + tt.query
@@ -179,6 +158,7 @@ func TestParseLastEventID(t *testing.T) {
 }
 
 func TestParseTypes(t *testing.T) {
+	t.Parallel()
 	got := parseTypes("PARTY_RINGING, AGENT_READY ,")
 	if len(got) != 2 || got[0] != "PARTY_RINGING" || got[1] != "AGENT_READY" {
 		t.Errorf("parseTypes() = %v, want [PARTY_RINGING AGENT_READY]", got)
@@ -189,6 +169,7 @@ func TestParseTypes(t *testing.T) {
 }
 
 func TestClientIP(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		remote string
 		want   string
@@ -214,6 +195,7 @@ func TestClientIP(t *testing.T) {
 // block, so nothing in the routing table would have shown an agent quietly
 // gaining the ability to launch outbound bot campaigns.
 func TestALoginsGrantIsTheDerivedOne(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		role auth.Role
 		want int

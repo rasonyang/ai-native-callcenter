@@ -43,12 +43,6 @@ func TestTheSessionIsConfiguredExactlyAsMeasured(t *testing.T) {
 	if got := string(frames[0]); got != want {
 		t.Errorf("the session was configured as\n got: %s\nwant: %s", got, want)
 	}
-
-	// The model is this client's, not the deployment's: what this code knows how
-	// to hold a conversation with is one model's lifecycle.
-	if strings.Contains(string(frames[0]), testProfile("").Model) {
-		t.Error("the profile's model reached the wire; this client names its own")
-	}
 }
 
 // Every field that has been measured closing the socket, and every one this

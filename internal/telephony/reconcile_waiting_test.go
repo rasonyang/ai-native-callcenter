@@ -77,6 +77,7 @@ func reconcileFixture(t *testing.T, replies func(string) (string, error)) (*Coor
 // 2026-08-23: the switch held them, /calls/waiting was empty, and each offer
 // to an agent surfaced as a call of its own.
 func TestACallerQueuedWhileWeWereDownIsFoundAgain(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-2 * time.Minute).Truncate(time.Second).UTC()
 	c, pub := reconcileFixture(t, switchHolding(map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Trying")},
@@ -105,6 +106,7 @@ func TestACallerQueuedWhileWeWereDownIsFoundAgain(t *testing.T) {
 
 // Converge, not top up: the switch is the truth in both directions.
 func TestACallerWhoLeftWhileWeWereDownIsNotStillWaiting(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	rows := map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
@@ -132,6 +134,7 @@ func TestACallerWhoLeftWhileWeWereDownIsNotStillWaiting(t *testing.T) {
 // An ordinary reconnect — the process never died, every entry already held —
 // must be silent. Otherwise every blip republishes the whole waiting line.
 func TestReconnectingWithNothingChangedSaysNothing(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-30 * time.Second).Truncate(time.Second).UTC()
 	c, pub := reconcileFixture(t, switchHolding(map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
@@ -154,6 +157,7 @@ func TestReconnectingWithNothingChangedSaysNothing(t *testing.T) {
 // its callers on a failed read would be the same false report as a delete that
 // never checked what it deleted.
 func TestAQueueWeCouldNotReadKeepsItsCallers(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	rows := map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
@@ -179,6 +183,7 @@ func TestAQueueWeCouldNotReadKeepsItsCallers(t *testing.T) {
 // A caller an agent has answered is not waiting, and the switch says so in the
 // same listing. Restoring them would put a talking caller back in the line.
 func TestAnAnsweredCallerIsNotRestoredToTheLine(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	c, _ := reconcileFixture(t, switchHolding(map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Answered")},
@@ -196,6 +201,7 @@ func TestAnAnsweredCallerIsNotRestoredToTheLine(t *testing.T) {
 // offer becomes a call of its own — outbound, agent as originator, one per
 // retry. That is what the switch showed live on 2026-08-23.
 func TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-90 * time.Second).Truncate(time.Second).UTC()
 	started := joined.Add(-19 * time.Second)
 	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
@@ -255,6 +261,7 @@ func TestAdoptingAQueuedCallerGivesTheDeliveryLegSomethingToBindTo(t *testing.T)
 // 01a02dc8: ten transcript lines, and the application restarted three seconds
 // after the last of them (C58).
 func TestAnAdoptedCallerBringsTheBotsHalfOfTheCallWithThem(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-90 * time.Second).Truncate(time.Second).UTC()
 	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
 	flowID := uuid.MustParse("019ffd60-d8db-736b-a1eb-b005dda34d28")
@@ -297,6 +304,7 @@ func TestAnAdoptedCallerBringsTheBotsHalfOfTheCallWithThem(t *testing.T) {
 
 // A caller who never met a bot is adopted without inventing one for them.
 func TestAnAdoptedCallerWhoNeverMetABotHasNoBotPhase(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
 
@@ -323,6 +331,7 @@ func TestAnAdoptedCallerWhoNeverMetABotHasNoBotPhase(t *testing.T) {
 // A channel that cannot name its call is left alone. Minting an id here would
 // orphan the recording and the transcript that already carry the real one.
 func TestAChannelThatCannotNameItsCallIsNotAdopted(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	c, _ := reconcileFixture(t, channelSaying(map[string]string{}, map[string][]string{
 		"support-en": {memberRow("support-en", "caller-1", "18688886669", joined, "Waiting")},
@@ -343,6 +352,7 @@ func TestAChannelThatCannotNameItsCallIsNotAdopted(t *testing.T) {
 // An adoption runs once. A second reconcile must not try to create the call
 // again, nor add the caller's leg twice.
 func TestAdoptingIsIdempotent(t *testing.T) {
+	t.Parallel()
 	joined := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
 	callID := uuid.MustParse("01a02c54-c2a3-7dda-856b-80d7c8fbe00d")
 	c, _ := reconcileFixture(t, channelSaying(map[string]string{

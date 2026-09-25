@@ -14,30 +14,25 @@ package httpapi
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
+	"github.com/rasonyang/ai-native-callcenter/internal/testdb"
 )
-
-const scopeTestDSNEnv = "AICC_TEST_DATABASE_URL"
 
 // fixture is a running server on a database of its own.
 type fixture struct {
@@ -60,11 +55,7 @@ type seeded struct {
 // real server.
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	admin := os.Getenv(scopeTestDSNEnv)
-	if admin == "" {
-		t.Skipf("set %s to run the scope tests", scopeTestDSNEnv)
-	}
-	dsn := scratchDatabase(t, admin)
+	dsn := testdb.ScratchDSN(t, "scopetest")
 
 	ctx := context.Background()
 	st, err := store.Open(ctx, dsn, 4)
@@ -94,33 +85,6 @@ func newFixture(t *testing.T) *fixture {
 	f.agent = f.seedAgent("mina", 1000)
 	f.other = f.seedAgent("tomas", 1010)
 	return f
-}
-
-func scratchDatabase(t *testing.T, admin string) string {
-	t.Helper()
-	u, err := url.Parse(admin)
-	if err != nil {
-		t.Fatalf("%s is not a URL: %v", scopeTestDSNEnv, err)
-	}
-	name := fmt.Sprintf("aicc_scopetest_%d", time.Now().UnixNano())
-	db, err := sql.Open("pgx", admin)
-	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
-	}
-	defer db.Close()
-	if _, err := db.Exec("CREATE DATABASE " + name); err != nil {
-		t.Fatalf("create scratch database: %v", err)
-	}
-	t.Cleanup(func() {
-		c, err := sql.Open("pgx", admin)
-		if err != nil {
-			return
-		}
-		defer c.Close()
-		_, _ = c.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
-	})
-	u.Path = "/" + name
-	return u.String()
 }
 
 const seedPassword = "correct-horse-battery"

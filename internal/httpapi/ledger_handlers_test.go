@@ -24,6 +24,7 @@ import (
 // This is the join. The contract is the far end because it is the promise made
 // to clients; the locales are checked on their own side, in the web tests.
 func TestEveryMissedReasonIsOneTheContractNames(t *testing.T) {
+	t.Parallel()
 	for _, reason := range telephony.MissedReasons {
 		if !api.MissedReason(reason).Valid() {
 			t.Errorf("the assembler can decide %s, which the contract's MissedReason "+

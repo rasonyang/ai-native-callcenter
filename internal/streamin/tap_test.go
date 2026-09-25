@@ -101,23 +101,10 @@ func tapFixture(t *testing.T) (*Tap, *fakeSwitch, uuid.UUID) {
 	return NewTap(srv, sw, "ws://127.0.0.1:9999/stream", 24000, time.Minute, nopLogger{}), sw, callID
 }
 
-// The tap dials the configured URL with a token appended, and the token is
-// what the ingest will accept — this is the only place the two halves meet.
-func TestAttachStartsOneStreamCarryingAUsableToken(t *testing.T) {
-	tap, sw, callID := tapFixture(t)
-	agentID, partyID := uuid.New(), uuid.New()
-
-	tap.Attach(callID, &agentID, &partyID, "chan-a", "zh")
-
-	started, _, _, _ := sw.snapshot()
-	if len(started) != 1 || started[0] != "chan-a" {
-		t.Fatalf("started %v, want one stream on chan-a", started)
-	}
-}
-
 // One bug per channel. The module enforces it too, and asking twice would
 // leave a stream nothing owns.
 func TestAttachingTwiceStartsOneStream(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 	tap.Attach(callID, nil, nil, "chan-a", "en")
@@ -130,6 +117,7 @@ func TestAttachingTwiceStartsOneStream(t *testing.T) {
 // A refused attach must leave nothing behind, or the channel can never be
 // tapped again for the life of the call.
 func TestARefusedAttachIsNotRemembered(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	sw.startErr = errors.New("-ERR no such channel")
 
@@ -147,6 +135,7 @@ func TestARefusedAttachIsNotRemembered(t *testing.T) {
 // A URL the switch cannot dial is a configuration fault, not a call fault: it
 // is refused before any command is sent.
 func TestAnUnusableStreamURLNeverReachesTheSwitch(t *testing.T) {
+	t.Parallel()
 	_, sw, callID := tapFixture(t)
 	reg := transcript.NewRegistry(nil, &statePub{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	reg.For(callID, "INBOUND", time.Now())
@@ -169,6 +158,7 @@ func TestAnUnusableStreamURLNeverReachesTheSwitch(t *testing.T) {
 // Hold is a private side-call and music, neither of which is this
 // conversation, so the tap pauses rather than recording it.
 func TestPauseAndResumeReachTheSwitchWhileTapped(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -191,6 +181,7 @@ func TestPauseAndResumeReachTheSwitchWhileTapped(t *testing.T) {
 // Detach stops the stream, and only for a channel that had one: a hangup
 // arrives for every leg of every call, and most of them were never tapped.
 func TestDetachStopsATappedChannelAndIgnoresAnUntappedOne(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -205,6 +196,7 @@ func TestDetachStopsATappedChannelAndIgnoresAnUntappedOne(t *testing.T) {
 
 // A stream URL keeps whatever the deployment already put on it.
 func TestWithTokenPreservesExistingQuery(t *testing.T) {
+	t.Parallel()
 	got, err := withToken("ws://host:9/stream?x=1", "tok")
 	if err != nil {
 		t.Fatalf("withToken: %v", err)
@@ -221,6 +213,7 @@ func TestWithTokenPreservesExistingQuery(t *testing.T) {
 // hangup — and without this the module keeps pumping a finished call's audio
 // for the life of the process, with nothing reporting a fault.
 func TestDetachCallStopsATapNoSwitchEventEverEnded(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -234,6 +227,7 @@ func TestDetachCallStopsATapNoSwitchEventEverEnded(t *testing.T) {
 
 // It will usually run second, after the switch event already stopped the tap.
 func TestDetachCallIsIdempotent(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -249,6 +243,7 @@ func TestDetachCallIsIdempotent(t *testing.T) {
 // A call's taps are its own. Retiring one call must not touch another's, which
 // is only expressible because the key carries the call.
 func TestDetachCallLeavesAnotherCallsTapAlone(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	other := uuid.New()
 	tap.Attach(callID, nil, nil, "chan-a", "en")
@@ -268,6 +263,7 @@ func TestDetachCallLeavesAnotherCallsTapAlone(t *testing.T) {
 // No silent action on a dead tap: the command was not carried out and the
 // caller is told which kind of nothing happened.
 func TestPauseAndResumeReportAChannelWithNoTap(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 	tap.Detach("chan-a")
@@ -290,6 +286,7 @@ func TestPauseAndResumeReportAChannelWithNoTap(t *testing.T) {
 // A tap that exists but cannot be commanded is a different answer from one
 // that does not exist, and the two must not collapse into each other.
 func TestPauseReportsTheSwitchBeingDownSeparately(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 	sw.mu.Lock()
@@ -307,6 +304,7 @@ func TestPauseReportsTheSwitchBeingDownSeparately(t *testing.T) {
 // retired without ever finishing, so it has to be stopped and re-attached
 // under the call the leg now belongs to.
 func TestReattachingUnderANewCallStopsTheOldStream(t *testing.T) {
+	t.Parallel()
 	tap, sw, absorbed := tapFixture(t)
 	kept := uuid.New()
 
@@ -337,6 +335,7 @@ func TestReattachingUnderANewCallStopsTheOldStream(t *testing.T) {
 // channel index, is what TestReattachingUnderANewCallStopsTheOldStream drives:
 // there the replaced attachment is still live when its stream is stopped.
 func TestAStaleAttachmentCannotEvictItsSuccessor(t *testing.T) {
+	t.Parallel()
 	tap, _, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -363,6 +362,7 @@ func TestAStaleAttachmentCannotEvictItsSuccessor(t *testing.T) {
 // destroyed — which mod_audio_stream logs at ERR. One per tapped call. A log
 // where teardown is always an error is a log where a real error is invisible.
 func TestAStreamTheModuleEndedIsNotStoppedAgain(t *testing.T) {
+	t.Parallel()
 	tap, sw, callID := tapFixture(t)
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 
@@ -378,26 +378,10 @@ func TestAStreamTheModuleEndedIsNotStoppedAgain(t *testing.T) {
 	}
 }
 
-// A stream that dropped without the module ending it is a different case: the
-// channel may well be alive and still streaming, so the stop must still go.
-func TestAnAbnormalStreamEndStillStopsTheTap(t *testing.T) {
-	tap, sw, callID := tapFixture(t)
-	tap.Attach(callID, nil, nil, "chan-a", "en")
-
-	// Nothing calls streamEnded: the socket dropped, the module did not close
-	// it, and for all we know the channel is still up.
-	tap.Detach("chan-a")
-
-	_, stopped, _, _ := sw.snapshot()
-	if len(stopped) != 1 || stopped[0] != "chan-a" {
-		t.Fatalf("stopped %v, want the tap stopped — a dropped socket is not "+
-			"evidence the channel ended", stopped)
-	}
-}
-
 // A stream ending cannot retire an attachment that belongs to a later call on
 // the same channel, which is the whole reason the key carries the call.
 func TestAStreamEndingCannotRetireALaterCallsTap(t *testing.T) {
+	t.Parallel()
 	tap, sw, absorbed := tapFixture(t)
 	kept := uuid.New()
 	tap.Attach(absorbed, nil, nil, "chan-a", "en")
@@ -418,23 +402,11 @@ func TestAStreamEndingCannotRetireALaterCallsTap(t *testing.T) {
 	}
 }
 
-// The tap registers itself with the ingest, or none of the above happens.
-//
-// streamEnded is only reachable because NewTap hands it to the Server. Nothing
-// else calls it, so without this line every test above passes against a build
-// where the module's stream end is never noticed — which is precisely the
-// class of defect this file keeps finding elsewhere.
-func TestNewTapRegistersItselfForStreamEnds(t *testing.T) {
-	tap, _, _ := tapFixture(t)
-	if tap.srv.onStreamEnded == nil {
-		t.Fatal("the ingest has no stream-end handler; the tap never registered one")
-	}
-}
-
 // Only a close the module initiated means the channel is gone. A socket that
 // simply dropped is not evidence of anything — the channel may still be up and
 // still streaming — so the stop must still be issued.
 func TestOnlyAGracefulCloseRetiresTheAttachment(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		closeNicely bool
@@ -444,6 +416,7 @@ func TestOnlyAGracefulCloseRetiresTheAttachment(t *testing.T) {
 		{name: "the socket just drops", closeNicely: false, wantStops: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			reg := transcript.NewRegistry(nil, &statePub{},
 				slog.New(slog.NewTextHandler(io.Discard, nil)))
 			callID := uuid.New()

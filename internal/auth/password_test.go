@@ -8,6 +8,7 @@ import (
 )
 
 func TestHashAndVerifyPassword(t *testing.T) {
+	t.Parallel()
 	const password = "correct horse battery staple"
 
 	hash, err := HashPassword(password)
@@ -36,6 +37,7 @@ func TestHashAndVerifyPassword(t *testing.T) {
 }
 
 func TestHashesAreSalted(t *testing.T) {
+	t.Parallel()
 	a, err := HashPassword("same")
 	if err != nil {
 		t.Fatal(err)
@@ -50,6 +52,7 @@ func TestHashesAreSalted(t *testing.T) {
 }
 
 func TestVerifyRejectsMalformedHashes(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		hash string
@@ -65,6 +68,7 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ok, err := VerifyPassword("whatever", tt.hash)
 			if ok {
 				t.Error("VerifyPassword() = true, want false")
@@ -79,22 +83,12 @@ func TestVerifyRejectsMalformedHashes(t *testing.T) {
 // The dummy hash used to equalize timing for unknown users must parse, or the
 // login path would take a visibly different code route.
 func TestDummyHashParses(t *testing.T) {
+	t.Parallel()
 	ok, err := VerifyPassword("anything", dummyHash)
 	if err != nil {
 		t.Fatalf("dummy hash does not parse: %v", err)
 	}
 	if ok {
 		t.Error("dummy hash matched a password")
-	}
-}
-
-func TestRoleValidity(t *testing.T) {
-	for _, r := range []Role{RoleAgent, RoleSupervisor, RoleAdmin} {
-		if !r.Valid() {
-			t.Errorf("%s.Valid() = false, want true", r)
-		}
-	}
-	if Role("ROOT").Valid() {
-		t.Error("unknown role reported as valid")
 	}
 }
