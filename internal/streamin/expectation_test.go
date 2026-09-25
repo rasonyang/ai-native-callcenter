@@ -33,6 +33,7 @@ func (s *Server) isExpecting(key string) bool {
 // out connectGrace: what the fix does is disarm the watchdog, and the log line
 // is downstream of that.
 func TestARefusedStreamIsNotAlsoReportedAsNeverConnected(t *testing.T) {
+	t.Parallel()
 	// testServer's Transcripts never has an actor, which is exactly the
 	// production case: a transcript actor is created only by the bot path.
 	s := testServer(t)

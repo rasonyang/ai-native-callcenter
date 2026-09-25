@@ -30,6 +30,7 @@ func stubSPA() http.Handler {
 // nothing real, or believes the call worked. The contract says a path it does
 // not declare is 404 in the error envelope, and this is what proves it.
 func TestTheAPIAnswersItsOwnMisses(t *testing.T) {
+	t.Parallel()
 	s := New(config.Config{SessionCookie: "aicc_session"}, Deps{SPA: stubSPA()})
 	router := s.router()
 
@@ -41,6 +42,7 @@ func TestTheAPIAnswersItsOwnMisses(t *testing.T) {
 	}
 	for _, path := range unknown {
 		t.Run("GET "+path, func(t *testing.T) {
+			t.Parallel()
 			w := httptest.NewRecorder()
 			router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 
@@ -61,6 +63,7 @@ func TestTheAPIAnswersItsOwnMisses(t *testing.T) {
 // chi's default answers 405 with an empty body and no content type, which
 // makes the contract's promise that errors *always* use the envelope false.
 func TestAWrongMethodIsRefusedInTheEnvelope(t *testing.T) {
+	t.Parallel()
 	s := New(config.Config{SessionCookie: "aicc_session"}, Deps{SPA: stubSPA()})
 
 	w := httptest.NewRecorder()
@@ -80,6 +83,7 @@ func TestAWrongMethodIsRefusedInTheEnvelope(t *testing.T) {
 // Everything outside /api/v1 is still the application's, so a deep link the
 // client-side router owns keeps reloading into the SPA.
 func TestTheApplicationStillOwnsEveryPathOutsideTheAPI(t *testing.T) {
+	t.Parallel()
 	s := New(config.Config{SessionCookie: "aicc_session"}, Deps{SPA: stubSPA()})
 
 	for _, path := range []string{"/admin/users", "/agent", "/"} {

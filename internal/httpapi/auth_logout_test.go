@@ -72,6 +72,7 @@ func webLogout(t *testing.T, ac AuthContext, rec *orderedSignOut) *httptest.Resp
 // run. Signing presence out first leaves the unregister with nobody READY to
 // report on.
 func TestWebSignOutEndsPresenceBeforeThePhone(t *testing.T) {
+	t.Parallel()
 	rec := &orderedSignOut{}
 	ac := agentWithSession(time.Now().Add(time.Hour))
 
@@ -90,6 +91,7 @@ func TestWebSignOutEndsPresenceBeforeThePhone(t *testing.T) {
 // for. It must not stop the phone being revoked, or the credential outlives
 // the person.
 func TestWebSignOutOfAnAgentWhoIsNotSignedInStillRevokesThePhone(t *testing.T) {
+	t.Parallel()
 	rec := &orderedSignOut{logoutErr: agents.ErrNotLoggedIn}
 	ac := agentWithSession(time.Now().Add(time.Hour))
 
@@ -105,6 +107,7 @@ func TestWebSignOutOfAnAgentWhoIsNotSignedInStillRevokesThePhone(t *testing.T) {
 // the page because a switch or a table is unreachable is worse than either
 // state left behind, both of which expire on their own.
 func TestWebSignOutSucceedsWhenEitherHalfFails(t *testing.T) {
+	t.Parallel()
 	ac := agentWithSession(time.Now().Add(time.Hour))
 
 	for name, rec := range map[string]*orderedSignOut{
@@ -113,6 +116,7 @@ func TestWebSignOutSucceedsWhenEitherHalfFails(t *testing.T) {
 		"both fail":      {logoutErr: errors.New("switch down"), revokeErr: errors.New("storage down")},
 	} {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			if w := webLogout(t, ac, rec); w.Code != http.StatusNoContent {
 				t.Fatalf("http = %d: %s", w.Code, w.Body)
 			}
@@ -126,6 +130,7 @@ func TestWebSignOutSucceedsWhenEitherHalfFails(t *testing.T) {
 
 // A subject with no agent identity has no presence and no phone to end.
 func TestWebSignOutOfANonAgentTouchesNeither(t *testing.T) {
+	t.Parallel()
 	rec := &orderedSignOut{}
 	supervisor := AuthContext{
 		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "priya",

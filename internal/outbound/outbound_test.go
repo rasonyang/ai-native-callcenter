@@ -25,6 +25,7 @@ import (
 // The bucket must pace above-rate bursts to the configured rate instead of
 // letting them slam the switch's sessions-per-second cliff.
 func TestLimiterPacesToTheConfiguredRate(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(100)
 
 	// Virtual time: the limiter sleeps by advancing a fake clock, so the
@@ -62,6 +63,7 @@ func TestLimiterPacesToTheConfiguredRate(t *testing.T) {
 }
 
 func TestLimiterDoesNotDelayUnderTheRate(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(100)
 	slept := false
 	limiter.sleep = func(context.Context, time.Duration) error {
@@ -79,6 +81,7 @@ func TestLimiterDoesNotDelayUnderTheRate(t *testing.T) {
 }
 
 func TestLimiterHonoursContextCancel(t *testing.T) {
+	t.Parallel()
 	limiter := NewLimiter(1)
 	_ = limiter.Take(context.Background()) // drain the single token
 
@@ -245,6 +248,7 @@ func waitBridges(t *testing.T, sw *fakeSwitch, want int) {
 // logs a warning and does nothing for an agent it cannot find, so a wrong name
 // fails silently and leaves exactly the behaviour this removes.
 func TestAnAgentsOwnCallIsTrackedSoQueuesLeaveThemAlone(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -260,6 +264,7 @@ func TestAnAgentsOwnCallIsTrackedSoQueuesLeaveThemAlone(t *testing.T) {
 // An agent the switch has no name for still gets their call. Decorating a
 // command is not a reason to refuse one.
 func TestADialGoesOutEvenWhenTheSwitchHasNoNameForTheAgent(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -274,6 +279,7 @@ func TestADialGoesOutEvenWhenTheSwitchHasNoNameForTheAgent(t *testing.T) {
 }
 
 func TestDialIsAgentFirst(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -327,6 +333,7 @@ func TestDialIsAgentFirst(t *testing.T) {
 
 // A declined agent leg must not dial the customer at all.
 func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -352,6 +359,7 @@ func TestDialDoesNothingWhenTheAgentDeclines(t *testing.T) {
 // gateway with the same correlation headers an inbound call carries — plus
 // the direction, which the recorder must not guess.
 func TestDialAIBridgesTheAnsweredCustomerToTheBot(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -390,6 +398,7 @@ func TestDialAIBridgesTheAnsweredCustomerToTheBot(t *testing.T) {
 
 // A retry with the same call id never redials a finished or running call.
 func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
+	t.Parallel()
 	callID := uuid.New()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, map[uuid.UUID]bool{callID: true})
@@ -409,6 +418,7 @@ func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
 // would otherwise raise the agent's phone a second time while they are still
 // talking on the first call.
 func TestAClickToDialIsIdempotentAgainstTheLedger(t *testing.T) {
+	t.Parallel()
 	callID := uuid.New()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, map[uuid.UUID]bool{callID: true})
@@ -430,6 +440,7 @@ func TestAClickToDialIsIdempotentAgainstTheLedger(t *testing.T) {
 // Without a client-minted id there is nothing to be idempotent against, and
 // the call still has to go out: a browser that clicks dial mints no id.
 func TestAClickToDialWithoutAnIDStillGoesOut(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -450,6 +461,7 @@ func TestAClickToDialWithoutAnIDStillGoesOut(t *testing.T) {
 // A pinned loopback dies with DESTINATION_OUT_OF_ORDER before routing (found
 // live): the G.711 pin may only ride legs that leave through sofia.
 func TestCodecPinNeverRidesLoopbackLegs(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	// Named rather than defaulted: there is no loopback default any more, and
 	// no deployment should choose one (C47). The rule under test is about the
@@ -478,6 +490,7 @@ func TestCodecPinNeverRidesLoopbackLegs(t *testing.T) {
 }
 
 func TestDialAIRejectsUnknownAndFlowlessNumbers(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -494,6 +507,7 @@ func TestDialAIRejectsUnknownAndFlowlessNumbers(t *testing.T) {
 // knows while the destination is still in hand (found live: an extension-to-
 // extension dial recorded as OUTBOUND).
 func TestDialStampsInternalVersusOutbound(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ destination, want string }{
 		{"1007", "INTERNAL"},
 		{"18688886669", "OUTBOUND"},
@@ -516,6 +530,7 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 // destination was never in doubt on this path: it is this call's own
 // argument, so it rides the leg rather than being read back off it (C61).
 func TestDialPutsTheNumberItDialledOnTheLeg(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "1002", CallcenterName: "agent-1008"}); err != nil {
@@ -532,6 +547,7 @@ func TestDialPutsTheNumberItDialledOnTheLeg(t *testing.T) {
 // neither the number dialled nor the number it was dialled from, and an
 // outbound campaign ringing out looked exactly like one that never ran (C53).
 func TestDialAIStampsTheDIDOnTheLegThatMayNeverBeAnswered(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 
@@ -560,6 +576,7 @@ func TestDialAIStampsTheDIDOnTheLegThatMayNeverBeAnswered(t *testing.T) {
 // number the operator never chose, on every call, discoverable only by asking
 // somebody who was rung what they saw. A refusal says so; a fallback does not.
 func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	flowID := uuid.New()
 	svc := New(Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw,

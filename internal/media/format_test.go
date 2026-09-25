@@ -9,6 +9,7 @@ import (
 )
 
 func TestConverterRejectsRatesThatAreNotIntegerMultiples(t *testing.T) {
+	t.Parallel()
 	if _, err := NewConverter(PCM16Format(44100), PCM16Format(8000)); err == nil {
 		t.Error("accepted a ratio this resampler cannot honour")
 	}
@@ -20,6 +21,7 @@ func TestConverterRejectsRatesThatAreNotIntegerMultiples(t *testing.T) {
 // The provider path that accepts G.711 must not pay for conversion it does not
 // need — that is the whole reason the RTP session keeps audio encoded.
 func TestSameFormatIsPassthrough(t *testing.T) {
+	t.Parallel()
 	c, err := NewConverter(G711Format(LawMu), G711Format(LawMu))
 	if err != nil {
 		t.Fatalf("new converter: %v", err)
@@ -38,6 +40,7 @@ func TestSameFormatIsPassthrough(t *testing.T) {
 }
 
 func TestLawChangeAtTheSameRateSkipsTheLinearDomain(t *testing.T) {
+	t.Parallel()
 	c, _ := NewConverter(G711Format(LawMu), G711Format(LawAlaw))
 	if c.IsPassthrough() {
 		t.Fatal("a law change reported as passthrough")
@@ -58,6 +61,7 @@ func TestLawChangeAtTheSameRateSkipsTheLinearDomain(t *testing.T) {
 // The uplink for the provider that needs linear audio: G.711 off the wire at
 // 8 kHz becomes PCM16 at 16 kHz.
 func TestTelephoneToProviderUplink(t *testing.T) {
+	t.Parallel()
 	c, err := NewConverter(G711Format(LawMu), PCM16Format(RateProviderIn))
 	if err != nil {
 		t.Fatalf("new converter: %v", err)
@@ -87,6 +91,7 @@ func TestTelephoneToProviderUplink(t *testing.T) {
 
 // The downlink for the same provider: PCM16 at 24 kHz becomes G.711 at 8 kHz.
 func TestProviderToTelephoneDownlink(t *testing.T) {
+	t.Parallel()
 	c, err := NewConverter(PCM16Format(RateProviderOut), G711Format(LawAlaw))
 	if err != nil {
 		t.Fatalf("new converter: %v", err)
@@ -117,6 +122,7 @@ func TestProviderToTelephoneDownlink(t *testing.T) {
 // A stream converted frame by frame must match the same audio converted whole,
 // or every frame boundary is an audible click.
 func TestConverterIsContinuousAcrossFrames(t *testing.T) {
+	t.Parallel()
 	const total = 2400 // 100 ms at 24 kHz
 	tone := make([]int16, total)
 	for i := range tone {
@@ -145,6 +151,7 @@ func TestConverterIsContinuousAcrossFrames(t *testing.T) {
 }
 
 func TestConverterResetClearsFilterState(t *testing.T) {
+	t.Parallel()
 	loud := make([]int16, 480)
 	for i := range loud {
 		loud[i] = 20000

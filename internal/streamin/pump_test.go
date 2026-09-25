@@ -12,7 +12,9 @@ import (
 // them apart, because the first thing anyone will do with C14 is read this log
 // line and decide what to change.
 func TestTheAccountingSaysHowTheAudioWasLost(t *testing.T) {
+	t.Parallel()
 	t.Run("one stall shows as one run of drops", func(t *testing.T) {
+		t.Parallel()
 		p := &pump{frames: make(chan []byte, 2), done: make(chan struct{})}
 		// The reader is not running: everything past the queue is a drop, and
 		// it is all one uninterrupted run.
@@ -28,6 +30,7 @@ func TestTheAccountingSaysHowTheAudioWasLost(t *testing.T) {
 	})
 
 	t.Run("audio flowing again starts a new run", func(t *testing.T) {
+		t.Parallel()
 		p := &pump{frames: make(chan []byte, 1), done: make(chan struct{})}
 		p.write([]byte{0, 0}) // fills
 		p.write([]byte{0, 0}) // drops: run 1
@@ -41,6 +44,7 @@ func TestTheAccountingSaysHowTheAudioWasLost(t *testing.T) {
 	})
 
 	t.Run("a send as long as the frame it carries counts as slow", func(t *testing.T) {
+		t.Parallel()
 		p := &pump{}
 		p.recordSend(frameInterval - time.Millisecond)
 		if got := p.sendSlow.Load(); got != 0 {

@@ -34,6 +34,7 @@ func writeSpoolFile(t *testing.T, root, key string, size int) string {
 }
 
 func TestKeyIsDatedAndNamedByCall(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 8, 14, 23, 59, 0, 0, time.FixedZone("cst", 8*3600))
 	// The date is UTC: a call at 23:59 Beijing time belongs to that UTC day.
 	if got := Key(at, "abc"); got != "2026/08/14/abc.wav" {
@@ -42,6 +43,7 @@ func TestKeyIsDatedAndNamedByCall(t *testing.T) {
 }
 
 func TestDurationEstimate(t *testing.T) {
+	t.Parallel()
 	// One second of stereo 16-bit telephone audio plus the header.
 	if got := DurationSec(wavHeaderSize + 32000); got != 1 {
 		t.Errorf("duration = %d, want 1", got)
@@ -52,6 +54,7 @@ func TestDurationEstimate(t *testing.T) {
 }
 
 func TestFSIngestOpenDelete(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	storage, err := New(Config{Backend: "FS", Dir: root})
 	if err != nil {
@@ -98,6 +101,7 @@ func TestFSIngestOpenDelete(t *testing.T) {
 // Keys come from the database, but escaping the recording directory must be
 // impossible rather than merely unexpected.
 func TestFSRefusesEscapingKeys(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	storage, _ := New(Config{Backend: "FS", Dir: root})
 
@@ -109,6 +113,7 @@ func TestFSRefusesEscapingKeys(t *testing.T) {
 }
 
 func TestUnknownBackendIsRejected(t *testing.T) {
+	t.Parallel()
 	if _, err := New(Config{Backend: "FTP", Dir: "x"}); err == nil {
 		t.Error("an unknown backend was accepted")
 	}

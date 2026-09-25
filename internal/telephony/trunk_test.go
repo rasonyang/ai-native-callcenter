@@ -16,6 +16,7 @@ const sofiaStatus = "                     Name\t   Type\t                       
 	"                 internal\tprofile\t          sip:mod_sofia@192.168.31.55:5060\tRUNNING (0)\n"
 
 func TestTrunksReadsGatewaysAndLeavesTheProfilesAlone(t *testing.T) {
+	t.Parallel()
 	got := parseTrunks(sofiaStatus)
 	if len(got) != 3 {
 		t.Fatalf("read %d trunks, want 3 — profiles and aliases are in the same "+

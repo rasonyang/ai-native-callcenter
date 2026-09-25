@@ -22,6 +22,7 @@ const switchOffer = "v=0\r\n" +
 	"a=sendrecv\r\n"
 
 func TestParseSDP(t *testing.T) {
+	t.Parallel()
 	offer := parseSDP(switchOffer)
 
 	if offer.IP != "10.0.0.8" || offer.Port != 24586 {
@@ -44,6 +45,7 @@ func TestParseSDP(t *testing.T) {
 }
 
 func TestParseSDPIgnoresOtherMediaSections(t *testing.T) {
+	t.Parallel()
 	sdp := switchOffer + "m=video 30000 RTP/AVP 99\r\na=rtpmap:99 H264/90000\r\n"
 	offer := parseSDP(sdp)
 
@@ -56,6 +58,7 @@ func TestParseSDPIgnoresOtherMediaSections(t *testing.T) {
 }
 
 func TestParseSDPWithoutDTMF(t *testing.T) {
+	t.Parallel()
 	sdp := "c=IN IP4 10.0.0.8\r\nm=audio 5000 RTP/AVP 0\r\n"
 	if got := parseSDP(sdp).DTMFPayloadType; got != -1 {
 		t.Errorf("DTMF payload type = %d, want -1 when none is offered", got)
@@ -63,6 +66,7 @@ func TestParseSDPWithoutDTMF(t *testing.T) {
 }
 
 func TestNegotiationFollowsLocalPreference(t *testing.T) {
+	t.Parallel()
 	offer := parseSDP(switchOffer) // offers both laws
 
 	law, pt, ok := negotiate(offer, []media.Law{media.LawAlaw, media.LawMu})
@@ -77,6 +81,7 @@ func TestNegotiationFollowsLocalPreference(t *testing.T) {
 }
 
 func TestNegotiationFailsWithNoCommonCodec(t *testing.T) {
+	t.Parallel()
 	offer := parseSDP("c=IN IP4 10.0.0.8\r\nm=audio 5000 RTP/AVP 9\r\na=rtpmap:9 G722/8000\r\n")
 	if _, _, ok := negotiate(offer, []media.Law{media.LawMu, media.LawAlaw}); ok {
 		t.Error("negotiated a codec that was never offered")
@@ -84,6 +89,7 @@ func TestNegotiationFailsWithNoCommonCodec(t *testing.T) {
 }
 
 func TestSDPAnswer(t *testing.T) {
+	t.Parallel()
 	answer := buildSDPAnswer("10.0.0.5", 40002, 7, media.LawAlaw, 8, 96)
 
 	for _, want := range []string{
@@ -107,6 +113,7 @@ func TestSDPAnswer(t *testing.T) {
 }
 
 func TestSDPAnswerOmitsDTMFWhenNotNegotiated(t *testing.T) {
+	t.Parallel()
 	answer := buildSDPAnswer("10.0.0.5", 40002, 7, media.LawMu, 0, -1)
 
 	if strings.Contains(answer, "telephone-event") {
@@ -141,6 +148,7 @@ func markersOf(frames [][]byte) []byte {
 }
 
 func TestJitterPassesOrderedAudioStraightThrough(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawMu)
 
 	for i := range 5 {
@@ -155,6 +163,7 @@ func TestJitterPassesOrderedAudioStraightThrough(t *testing.T) {
 }
 
 func TestJitterReordersWithinTheWindow(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawMu)
 	j.push(100, frameOf(0)) // establishes the sequence
 
@@ -172,6 +181,7 @@ func TestJitterReordersWithinTheWindow(t *testing.T) {
 }
 
 func TestJitterDropsFramesThatArriveTooLate(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawMu)
 	j.push(100, frameOf(0))
 	j.push(101, frameOf(1))
@@ -186,6 +196,7 @@ func TestJitterDropsFramesThatArriveTooLate(t *testing.T) {
 }
 
 func TestJitterFillsSmallGapsWithCodecCorrectSilence(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawAlaw)
 	j.push(100, frameOf(0))
 
@@ -210,6 +221,7 @@ func TestJitterFillsSmallGapsWithCodecCorrectSilence(t *testing.T) {
 }
 
 func TestJitterResyncsRatherThanFloodingSilence(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawMu)
 	j.push(100, frameOf(0))
 
@@ -227,6 +239,7 @@ func TestJitterResyncsRatherThanFloodingSilence(t *testing.T) {
 // Sequence numbers wrap after 65535. Comparing them as plain integers makes
 // the buffer treat the wrap as a huge backward jump and drop real audio.
 func TestJitterSurvivesSequenceWraparound(t *testing.T) {
+	t.Parallel()
 	j := newJitterBuffer(media.LawMu)
 	j.push(65534, frameOf(0))
 
@@ -246,6 +259,7 @@ func TestJitterSurvivesSequenceWraparound(t *testing.T) {
 //
 
 func TestRTPHeaderRoundTrip(t *testing.T) {
+	t.Parallel()
 	packet := packRTPHeader(make([]byte, 0, 200), 4242, 96000, 0xDEADBEEF, 8)
 	packet = append(packet, 0xD5, 0xD5)
 
@@ -267,6 +281,7 @@ func TestRTPHeaderRoundTrip(t *testing.T) {
 }
 
 func TestParseDTMFEvent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		payload  []byte
@@ -284,6 +299,7 @@ func TestParseDTMFEvent(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			digit, isEnd, duration, ok := parseDTMFEvent(tt.payload)
 			if ok != tt.ok || digit != tt.digit || isEnd != tt.isEnd || duration != tt.duration {
 				t.Errorf("got (%q, %v, %d, %v), want (%q, %v, %d, %v)",
@@ -296,6 +312,7 @@ func TestParseDTMFEvent(t *testing.T) {
 // One keypress produces many packets and three copies of the end packet. The
 // timestamp identifies the event, so one digit must reach the consumer.
 func TestOneKeypressYieldsOneDigit(t *testing.T) {
+	t.Parallel()
 	session := NewRTPSession(0, media.LawMu, 101, nil)
 
 	press := func(timestamp uint32) {
@@ -316,6 +333,7 @@ func TestOneKeypressYieldsOneDigit(t *testing.T) {
 }
 
 func TestUnnegotiatedPayloadTypeIsIgnored(t *testing.T) {
+	t.Parallel()
 	session := NewRTPSession(0, media.LawMu, 101, nil) // µ-law is payload type 0
 
 	// A-law audio on a µ-law session is not audio this decoder understands;
@@ -332,6 +350,7 @@ func TestUnnegotiatedPayloadTypeIsIgnored(t *testing.T) {
 }
 
 func TestSendCopiesTheCallersBuffer(t *testing.T) {
+	t.Parallel()
 	session := NewRTPSession(0, media.LawMu, -1, nil)
 
 	frame := []byte{1, 2, 3}
@@ -347,6 +366,7 @@ func TestSendCopiesTheCallersBuffer(t *testing.T) {
 }
 
 func TestClearTxDropsQueuedAudio(t *testing.T) {
+	t.Parallel()
 	session := NewRTPSession(0, media.LawMu, -1, nil)
 	for range 10 {
 		session.Send([]byte{1})
@@ -363,6 +383,7 @@ func TestClearTxDropsQueuedAudio(t *testing.T) {
 // The consumer is a live conversation: when it falls behind, the newest audio
 // matters and the oldest must go.
 func TestInboundQueueDropsTheOldestWhenFull(t *testing.T) {
+	t.Parallel()
 	session := NewRTPSession(0, media.LawMu, -1, nil)
 
 	total := cap(session.rx) + 10

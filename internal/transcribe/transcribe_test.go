@@ -136,6 +136,7 @@ func onlyText(events []Event, kind EventType) []string {
 //
 
 func TestBothClientsReportCumulativeTextAndOneFinal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		script func(*websocket.Conn)
@@ -182,6 +183,7 @@ func TestBothClientsReportCumulativeTextAndOneFinal(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			engine := newFakeEngine(t, tc.script)
 			s := tc.build(engine.url())
 			if err := s.Start(context.Background(), Config{Language: "en"}); err != nil {
@@ -206,6 +208,7 @@ func TestBothClientsReportCumulativeTextAndOneFinal(t *testing.T) {
 }
 
 func TestBothClientsDropAnEmptyFinal(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		script func(*websocket.Conn)
@@ -242,6 +245,7 @@ func TestBothClientsDropAnEmptyFinal(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			engine := newFakeEngine(t, tc.script)
 			s := tc.build(engine.url())
 			if err := s.Start(context.Background(), Config{}); err != nil {
@@ -266,6 +270,7 @@ func TestBothClientsDropAnEmptyFinal(t *testing.T) {
 //
 
 func TestDashscopeSendsRunTaskAndRawBinaryAudio(t *testing.T) {
+	t.Parallel()
 	engine := newFakeEngine(t, func(c *websocket.Conn) {
 		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
 	})
@@ -310,6 +315,7 @@ func TestDashscopeSendsRunTaskAndRawBinaryAudio(t *testing.T) {
 }
 
 func TestDashscopeSkipsHeartbeatsAndStopsOnTaskFailed(t *testing.T) {
+	t.Parallel()
 	engine := newFakeEngine(t, func(c *websocket.Conn) {
 		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
 		hb := dsResult(0, "ignore me", true)
@@ -339,6 +345,7 @@ func TestDashscopeSkipsHeartbeatsAndStopsOnTaskFailed(t *testing.T) {
 }
 
 func TestOpenAIRTRefusesNothingButOwnsTheBoundary(t *testing.T) {
+	t.Parallel()
 	engine := newFakeEngine(t, func(c *websocket.Conn) {})
 	s := newOpenAIRT(Profile{Name: ProviderOpenAI, Endpoint: engine.url(),
 		Model: "gpt-live-transcribe", SampleRate: 24000}, "k", nopLogger{})
@@ -387,6 +394,7 @@ func TestOpenAIRTRefusesNothingButOwnsTheBoundary(t *testing.T) {
 //
 
 func TestProfileForCarriesTheMeasuredConstraints(t *testing.T) {
+	t.Parallel()
 	openai, err := ProfileFor("openai", Override{})
 	if err != nil {
 		t.Fatalf("openai: %v", err)
@@ -423,6 +431,7 @@ func TestProfileForCarriesTheMeasuredConstraints(t *testing.T) {
 }
 
 func TestProfileValidateRejectsANonWebsocketEndpoint(t *testing.T) {
+	t.Parallel()
 	p := Profile{Name: "qwen", Endpoint: "https://example.invalid/x", Model: "m"}
 	if err := p.Validate(); err == nil || !strings.Contains(err.Error(), "ws://") {
 		t.Errorf("error = %v, want a scheme complaint", err)
@@ -456,6 +465,7 @@ func dsResult(sentenceID int, text string, final bool) map[string]any {
 // the socket stays open, no error arrives, no result ever comes back, and the
 // session reads healthy the whole time. Nothing above this could tell.
 func TestStartWaitsForTheTaskToExistBeforeAnyAudio(t *testing.T) {
+	t.Parallel()
 	// The service takes its time, as the Beijing host measurably does.
 	const taskStartDelay = 150 * time.Millisecond
 
@@ -524,6 +534,7 @@ func TestStartWaitsForTheTaskToExistBeforeAnyAudio(t *testing.T) {
 // A task that never starts is a failure with its own name, not a healthy
 // session. This is the state that read LIVE through a total outage.
 func TestATaskThatNeverStartsIsAnError(t *testing.T) {
+	t.Parallel()
 	// The service accepts the socket and then says nothing at all.
 	f := newFakeEngine(t, func(*websocket.Conn) { time.Sleep(2 * time.Second) })
 
@@ -546,6 +557,7 @@ func TestATaskThatNeverStartsIsAnError(t *testing.T) {
 // A task-failed that beats task-started must release Start with the service's
 // own reason rather than leaving it to time out.
 func TestATaskFailedDuringStartupIsReportedImmediately(t *testing.T) {
+	t.Parallel()
 	f := newFakeEngine(t, func(c *websocket.Conn) {
 		_ = c.WriteJSON(map[string]any{"header": map[string]any{
 			"event": "task-failed", "error_code": "InvalidParameter",
@@ -577,6 +589,7 @@ func TestATaskFailedDuringStartupIsReportedImmediately(t *testing.T) {
 // immediately after the request — which is what the live capture showed — puts
 // the final line of every call in the bin.
 func TestCloseWaitsForTheServiceToFlushItsLastResult(t *testing.T) {
+	t.Parallel()
 	f := newFakeEngine(t, nil)
 	f.script = func(c *websocket.Conn) {
 		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
@@ -617,6 +630,7 @@ func TestCloseWaitsForTheServiceToFlushItsLastResult(t *testing.T) {
 
 // A recogniser that will not say goodbye must not hold a call's teardown open.
 func TestCloseGivesUpOnAServiceThatNeverFinishes(t *testing.T) {
+	t.Parallel()
 	f := newFakeEngine(t, func(c *websocket.Conn) {
 		_ = c.WriteJSON(map[string]any{"header": map[string]any{"event": "task-started"}})
 	})

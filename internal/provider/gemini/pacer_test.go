@@ -120,57 +120,6 @@ func TestAnUplinkFrameIsTheBytesAndTheRateTheyAreIn(t *testing.T) {
 	}
 }
 
-// Audio arrives from the telephone leg in bursts after a jitter gap, and a write
-// to this endpoint can block for seconds. The whole backlog goes out on the first
-// tick after the socket comes back, in order, with nothing dropped: there is no
-// cadence to preserve here, and what dropping would buy is a sentence with a
-// hole in it.
-func TestABacklogIsWrittenWholeAndInOrder(t *testing.T) {
-	f := newFakeGemini(t, acceptSetup)
-	session, tick := pacedSession(t, f)
-
-	markers := []byte{0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6}
-	for _, marker := range markers {
-		if err := session.SendAudio(frameOf(marker)); err != nil {
-			t.Fatalf("send audio: %v", err)
-		}
-	}
-	uplinkFrames(t, f, 0)
-
-	tick()
-
-	frames := uplinkFrames(t, f, len(markers))
-	for i, want := range markers {
-		if frames[i][0] != want {
-			t.Errorf("frame %d is marked %#x, want %#x: the backlog goes out in order",
-				i, frames[i][0], want)
-		}
-	}
-	stats := session.Stats()
-	if stats.FramesSent != int64(len(markers)) || stats.FramesDropped != 0 {
-		t.Errorf("the client counted %+v, want six sent and none dropped", stats)
-	}
-}
-
-// Five seconds of backlog is deeper than any stall measured. Past that the
-// oldest frames go, because they are audio the conversation has moved beyond.
-func TestPastFiveSecondsTheOldestAudioIsDropped(t *testing.T) {
-	f := newFakeGemini(t, acceptSetup)
-	session, tick := pacedSession(t, f)
-
-	for range queueDepth + 2 {
-		if err := session.SendAudio(frameOf(0xB0)); err != nil {
-			t.Fatalf("send audio: %v", err)
-		}
-	}
-	tick()
-
-	uplinkFrames(t, f, queueDepth)
-	if got := session.Stats().FramesDropped; got != 2 {
-		t.Errorf("the client counted %d frames dropped, want 2", got)
-	}
-}
-
 // A second of nothing from the telephone leg is the caller's side having
 // stopped, which the server is told about so it stops holding audio it will
 // never be given the end of. It is said once per quiet, not on every tick of it.

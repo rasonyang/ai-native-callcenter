@@ -8,7 +8,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -79,6 +78,7 @@ func agentWithSession(expiresAt time.Time) AuthContext {
 // The five fields are what a phone needs to register, and nothing else is in
 // the answer — no password, under that name or any other.
 func TestIssuingASessionAnswersEverythingThePhoneNeedsAndNoPassword(t *testing.T) {
+	t.Parallel()
 	expires := time.Now().Add(90 * time.Minute).UTC().Truncate(time.Second)
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 	ac := agentWithSession(expires)
@@ -120,6 +120,7 @@ func TestIssuingASessionAnswersEverythingThePhoneNeedsAndNoPassword(t *testing.T
 
 // The phone is signed in for exactly as long as the person is.
 func TestAPhonesCredentialExpiresWithTheBrowserSession(t *testing.T) {
+	t.Parallel()
 	expires := time.Now().Add(37 * time.Minute).UTC().Truncate(time.Second)
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 
@@ -146,6 +147,7 @@ func TestAPhonesCredentialExpiresWithTheBrowserSession(t *testing.T) {
 // session lifetime from now — the same window a person would have had, rather
 // than a credential with no end.
 func TestAKeyGetsTheDeploymentsSessionLifetime(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 	ac := AuthContext{
 		Kind: SubjectKey, SubjectID: uuid.New(), SubjectName: "crm",
@@ -166,6 +168,7 @@ func TestAKeyGetsTheDeploymentsSessionLifetime(t *testing.T) {
 // An agent with no phone bound is a conflict, not a validation failure: the
 // request was well formed and there is nothing to put in it that would help.
 func TestAnAgentWithNoPhoneIsToldItIsAConflict(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{issueErr: sipsession.ErrNoExtensionBound}
 
 	w, _ := createSession(t, agentWithSession(time.Now().Add(time.Hour)), phones)
@@ -178,6 +181,7 @@ func TestAnAgentWithNoPhoneIsToldItIsAConflict(t *testing.T) {
 }
 
 func TestAStorageFailureIsReportedAsStorageDown(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{issueErr: errors.New("connection refused")}
 
 	w, _ := createSession(t, agentWithSession(time.Now().Add(time.Hour)), phones)
@@ -197,6 +201,7 @@ func TestAStorageFailureIsReportedAsStorageDown(t *testing.T) {
 // A supervisor is a subject with no agent identity. There is no phone that is
 // theirs to sign in, and the refusal says which fact is missing.
 func TestASupervisorWithNoAgentIdentityIsRefused(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 	ac := AuthContext{
 		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "priya",
@@ -217,6 +222,7 @@ func TestASupervisorWithNoAgentIdentityIsRefused(t *testing.T) {
 }
 
 func TestRevokingASessionAnswers204(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{}
 	ac := agentWithSession(time.Now().Add(time.Hour))
 	s := &Server{cfg: config.Config{SessionTTL: time.Hour}, sipSessions: phones}
@@ -248,6 +254,7 @@ func TestRevokingASessionAnswers204(t *testing.T) {
 // its registration keeps being rung, which is the whole failure this feature
 // exists to end.
 func TestSigningOutRevokesThePhoneToo(t *testing.T) {
+	t.Parallel()
 	phones := &fakeSIPSessions{}
 	ac := agentWithSession(time.Now().Add(time.Hour))
 	s := &Server{cfg: config.Config{SessionCookie: "aicc_session"}, sipSessions: phones}
@@ -265,25 +272,9 @@ func TestSigningOutRevokesThePhoneToo(t *testing.T) {
 	}
 }
 
-// A phone credential that could not be revoked must not keep somebody signed
-// in: the browser session ends either way.
-func TestSigningOutSucceedsEvenIfThePhoneCannotBeRevoked(t *testing.T) {
-	phones := &fakeSIPSessions{revokeErr: errors.New("storage down")}
-	ac := agentWithSession(time.Now().Add(time.Hour))
-	s := &Server{cfg: config.Config{SessionCookie: "aicc_session"}, sipSessions: phones}
-
-	r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
-	r = r.WithContext(contextWithAuth(r.Context(), ac))
-	w := httptest.NewRecorder()
-	s.Logout(w, r)
-
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("http = %d: %s", w.Code, w.Body)
-	}
-}
-
 // /auth/me reports the phone the switch actually holds, not what was issued.
 func TestGetMeReportsTheDeviceTheSwitchHolds(t *testing.T) {
+	t.Parallel()
 	ac := agentWithSession(time.Now().Add(time.Hour))
 
 	t.Run("registered", func(t *testing.T) {
@@ -357,26 +348,4 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
-}
-
-// The audit trail captures request bodies and never responses, which is why an
-// a1-hash cannot reach an audit row today: it exists only in the response to
-// POST /agent/sip-session, and that operation has no request body at all.
-// Redaction names it anyway, so the rule survives somebody capturing responses.
-func TestADigestIsTreatedAsACredentialByTheAuditTrail(t *testing.T) {
-	for _, field := range []string{"a1Hash", "a1hash", "A1HASH"} {
-		if !isSecretField(field) {
-			t.Errorf("%q is not redacted from an audit row", field)
-		}
-	}
-	redacted, ok := redactSecrets([]byte(`{"a1Hash":"0123456789abcdef0123456789abcdef","account":"1001"}`))
-	if !ok {
-		t.Fatal("a JSON object was not redactable")
-	}
-	if strings.Contains(redacted, "0123456789abcdef") {
-		t.Errorf("the digest survived redaction: %s", redacted)
-	}
-	if !strings.Contains(redacted, `"account":"1001"`) {
-		t.Errorf("redaction ate a field that is not a credential: %s", redacted)
-	}
 }

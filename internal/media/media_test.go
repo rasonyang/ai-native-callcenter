@@ -9,6 +9,7 @@ import (
 )
 
 func TestLawIdentity(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		law     Law
 		name    string
@@ -35,8 +36,10 @@ func TestLawIdentity(t *testing.T) {
 // G.711 is lossy by design; what matters is that the error stays within the
 // companding step size rather than the value surviving exactly.
 func TestCompandingRoundTrip(t *testing.T) {
+	t.Parallel()
 	for _, law := range []Law{LawMu, LawAlaw} {
 		t.Run(law.String(), func(t *testing.T) {
+			t.Parallel()
 			var worst float64
 			for sample := -32000; sample <= 32000; sample += 37 {
 				in := []int16{int16(sample)}
@@ -66,6 +69,7 @@ func TestCompandingRoundTrip(t *testing.T) {
 }
 
 func TestSilenceEncodesToTheSilenceByte(t *testing.T) {
+	t.Parallel()
 	for _, law := range []Law{LawMu, LawAlaw} {
 		encoded := law.Encode(make([]byte, 0, 4), []int16{0, 0, 0, 0})
 		for i, b := range encoded {
@@ -78,6 +82,7 @@ func TestSilenceEncodesToTheSilenceByte(t *testing.T) {
 }
 
 func TestTranscodeBetweenLaws(t *testing.T) {
+	t.Parallel()
 	original := []int16{0, 1000, -1000, 8000, -8000, 20000}
 
 	muBytes := LawMu.Encode(make([]byte, 0, len(original)), original)
@@ -106,6 +111,7 @@ func TestTranscodeBetweenLaws(t *testing.T) {
 }
 
 func TestUpsampleLengthAndEndpoints(t *testing.T) {
+	t.Parallel()
 	src := []int16{0, 100, 200}
 	got := Upsample(make([]int16, 0, 6), src, 2)
 
@@ -129,6 +135,7 @@ func TestUpsampleLengthAndEndpoints(t *testing.T) {
 // into the audible band. This is the failure that plain decimation produces
 // and that a listener hears as metallic speech.
 func TestDownsamplerRejectsAliasing(t *testing.T) {
+	t.Parallel()
 	const (
 		inRate = 24000
 		factor = 3 // 24 kHz to 8 kHz, so the new Nyquist is 4 kHz
@@ -166,6 +173,7 @@ func TestDownsamplerRejectsAliasing(t *testing.T) {
 // Converting a stream frame by frame must give the same audio as converting it
 // in one piece, or every frame boundary becomes an audible click.
 func TestDownsamplerIsContinuousAcrossFrames(t *testing.T) {
+	t.Parallel()
 	const total = 1440
 	src := make([]int16, total)
 	for i := range src {
@@ -196,6 +204,7 @@ func TestDownsamplerIsContinuousAcrossFrames(t *testing.T) {
 // conversion factor. The decimation phase must survive that, or the output
 // drifts by a sample at every ragged boundary.
 func TestDownsamplerHandlesRaggedChunks(t *testing.T) {
+	t.Parallel()
 	const total = 3000
 	src := make([]int16, total)
 	for i := range src {
@@ -226,6 +235,7 @@ func TestDownsamplerHandlesRaggedChunks(t *testing.T) {
 }
 
 func TestDownsamplerResetClearsState(t *testing.T) {
+	t.Parallel()
 	loud := make([]int16, 480)
 	for i := range loud {
 		loud[i] = 20000
@@ -246,6 +256,7 @@ func TestDownsamplerResetClearsState(t *testing.T) {
 }
 
 func TestByteConversionRoundTrip(t *testing.T) {
+	t.Parallel()
 	samples := []int16{0, 1, -1, 32767, -32768, 1234}
 	bytes := PCM16ToBytes(make([]byte, 0, len(samples)*2), samples)
 	if len(bytes) != len(samples)*2 {
@@ -266,6 +277,7 @@ func TestByteConversionRoundTrip(t *testing.T) {
 }
 
 func TestSilenceFrameIsPrebuilt(t *testing.T) {
+	t.Parallel()
 	for _, law := range []Law{LawMu, LawAlaw} {
 		frame := SilenceFrame(law)
 		if len(frame) != FrameSamples {
@@ -285,6 +297,7 @@ func TestSilenceFrameIsPrebuilt(t *testing.T) {
 }
 
 func TestBufferPoolHandsBackUsableBuffers(t *testing.T) {
+	t.Parallel()
 	b := GetBytes(160)
 	if len(b) != 0 || cap(b) < 160 {
 		t.Fatalf("borrowed byte buffer has len %d cap %d", len(b), cap(b))

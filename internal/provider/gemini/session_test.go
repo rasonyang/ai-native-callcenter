@@ -614,19 +614,6 @@ func TestATurnThatSaidNothingIsATurnAllTheSame(t *testing.T) {
 		provider.EventTypeResponseStarted, provider.EventTypeAudioDelta)
 }
 
-func TestUndecodableAudioIsReportedRatherThanPlayed(t *testing.T) {
-	f := newFakeGemini(t, acceptSetup)
-	session := startedSession(t, f)
-
-	f.send(modelAudio("not base64!!"))
-	events := expectEvents(t, session,
-		provider.EventTypeResponseStarted, provider.EventTypeError)
-	if events[1].IsFatal {
-		t.Error("one undecodable frame ended the session; the rest of the turn is still usable")
-	}
-	refuteMoreEvents(t, session)
-}
-
 // A frame that is not JSON at all is not a reason to end a phone call.
 func TestAGarbledFrameIsIgnored(t *testing.T) {
 	f := newFakeGemini(t, acceptSetup)

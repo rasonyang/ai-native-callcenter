@@ -28,7 +28,7 @@ import type { AgentToday, Disposition } from '@/lib/ledger'
  * request changes and the test fails.
  */
 
-export interface RecordedRequest {
+interface RecordedRequest {
   method: string
   path: string
   body: unknown
@@ -134,7 +134,6 @@ export function presenceFixture(overrides: Partial<Presence> = {}): Presence {
   }
 }
 
-/** A two-leg inbound call with the agent's own leg in the given state. */
 /** A caller queued in support-zh, waiting since `agoSec` ago. */
 export function waitingFixture(overrides: Partial<WaitingCall> = {}): WaitingCall {
   return {
@@ -248,6 +247,7 @@ export function contactFixture(overrides: Partial<Contact> = {}): Contact {
   }
 }
 
+/** A two-leg inbound call with the agent's own leg in the given state. */
 export function callFixture(state: CallSnapshot['parties'][number]['state']): CallSnapshot {
   const at = new Date().toISOString()
   const answered = state === 'TALKING' || state === 'HELD'
@@ -339,7 +339,6 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
       }
       if (path === '/auth/logout') return new Response(null, { status: 204 })
       if (path === '/agent/sip-session') {
-        if (method === 'DELETE') return new Response(null, { status: 204 })
         // A refusal here is the one that matters: no extension is bound to
         // this account, so there is nothing for a phone to register as.
         return backend.sipSession
@@ -404,7 +403,6 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
           : backend.contacts
         return json({ items, total: items.length })
       }
-      if (path === '/callbacks') return json({ items: [] })
       if (path === '/calls') return json({ callId: CALL_ID })
       if (path.startsWith('/agent/')) return json(backend.presence)
       return json({ items: [] })
@@ -415,7 +413,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
 }
 
 /** A message the page sent towards the extension. */
-export interface PageMessage {
+interface PageMessage {
   source: string
   protocolVersion: number
   type: string
@@ -423,8 +421,7 @@ export interface PageMessage {
 }
 
 export interface FakeExtension {
-  /** Everything the page posted, in order, credentials included. */
-  received: PageMessage[]
+  /** What the page posted of one type, in order, credentials included. */
   messagesOfType: (type: string) => PageMessage[]
   /** Reports a new state, the way a registration changing would. */
   report: (state: Partial<ExtensionState>) => void
@@ -433,13 +430,6 @@ export interface FakeExtension {
   uninstall: () => void
 }
 
-/**
- * A stand-in for the web-sip-phone extension.
- *
- * It speaks the same protocol the real content script does — same window,
- * same origin, same envelope — because that is the whole contract between
- * them. A test that wants an uninstalled browser simply does not install one.
- */
 /** One message from the extension's content script, envelope and all. */
 function fromExtension(data: Record<string, unknown>) {
   window.dispatchEvent(
@@ -451,9 +441,15 @@ function fromExtension(data: Record<string, unknown>) {
   )
 }
 
+/**
+ * A stand-in for the web-sip-phone extension.
+ *
+ * It speaks the same protocol the real content script does — same window,
+ * same origin, same envelope — because that is the whole contract between
+ * them. A test that wants an uninstalled browser simply does not install one.
+ */
 export function installFakeExtension(
   options: {
-    version?: string
     /** The `chrome.runtime.id` it announces, if it announces one. */
     extensionId?: string
     /** null answers hello but reports no state, which is a phone still starting. */
@@ -474,7 +470,7 @@ export function installFakeExtension(
     fromExtension({
       type: 'hello',
       nonce: data.nonce,
-      extensionVersion: options.version ?? '1.4.0',
+      extensionVersion: '1.4.0',
       ...(options.extensionId ? { extensionId: options.extensionId } : {}),
     })
     if (current) fromExtension({ type: 'state', ...current })
@@ -482,7 +478,6 @@ export function installFakeExtension(
   window.addEventListener('message', onMessage)
 
   return {
-    received,
     messagesOfType: (type) => received.filter((m) => m.type === type),
     report: (next) => {
       current = { ...extensionStateFixture(current ?? {}), ...next }
@@ -498,24 +493,24 @@ export function installFakeExtension(
   }
 }
 
-/**
- * Renders a page component under a memory router.
- *
- * The cockpit links to `/agent/callbacks`, and a `Link` needs a router that
- * knows the target, so the test tree registers it as a stub.
- */
 /** The listener registry the app shell would provide, exposed so a test can
  * push an event the way the EventSource does. */
 type EventStreamListeners = NonNullable<
   ComponentProps<typeof EventStreamProvider>['value']
 >['listeners']
 
-export const testListeners = new Map<string, ((event: unknown) => void)[]>()
+const testListeners = new Map<string, ((event: unknown) => void)[]>()
 
 export function emitEvent(type: string, event: unknown) {
   for (const listener of testListeners.get(type) ?? []) listener(event)
 }
 
+/**
+ * Renders a page component under a memory router.
+ *
+ * The cockpit links to `/agent/callbacks`, and a `Link` needs a router that
+ * knows the target, so the test tree registers it as a stub.
+ */
 export function renderPage(Component: () => ReactElement | null) {
   const root = createRootRoute({ component: Outlet })
   const tree = root.addChildren([

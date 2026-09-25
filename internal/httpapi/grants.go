@@ -18,7 +18,7 @@ import (
 //
 // The three rows are not opinion. They were derived mechanically from what
 // each role could reach on 2026-08-31 — the role guards were a *lower bound*
-// (auth.Role.AtLeast compares rank), so the input was reachability, not the
+// (they compared rank), so the input was reachability, not the
 // guard's label — and the derivation is replayable: `python3
 // docs/auth/scopemap.py` prints these rows and enumerates every widening and
 // narrowing against that baseline. Nine widenings survive, all of them

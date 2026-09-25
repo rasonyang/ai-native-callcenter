@@ -46,26 +46,25 @@ function renderPanel(options: { items?: unknown[]; failSnapshot?: boolean } = {}
   )
 
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  queryClientRef.current = client
-  const view = render(
+  const tree = (callId: string | undefined) => (
     <QueryClientProvider client={client}>
       <I18nextProvider i18n={i18n}>
         <EventStreamProvider value={{ status: 'connected', listeners }}>
-          <LiveTranscript callId={CALL_ID} myAgentId={AGENT_ID} streamStatus="connected" />
+          <LiveTranscript callId={callId} myAgentId={AGENT_ID} streamStatus="connected" />
         </EventStreamProvider>
       </I18nextProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   )
+  const view = render(tree(CALL_ID))
 
   const emit = (payload: Record<string, unknown>, type: EventType = 'CALL_TRANSCRIPT') => {
     const event = { type, callId: CALL_ID, payload } as unknown as AiccEvent
     for (const listener of listeners.get(type) ?? []) listener(event)
   }
-  return { ...view, emit, options }
+  /** What the cockpit passes as the roster changes: a call id, or none. */
+  const showCall = (callId: string | undefined) => view.rerender(tree(callId))
+  return { ...view, emit, options, client, showCall }
 }
-
-/** Holds the harness's query client so a test can force a refetch. */
-const queryClientRef: { current: QueryClient | null } = { current: null }
 
 /** One persisted row, as the snapshot serves it. */
 const row = (seq: number, text: string) => ({
@@ -92,11 +91,11 @@ const final = (seq: number, text: string, extra: Record<string, unknown> = {}) =
 
 afterEach(() => vi.unstubAllGlobals())
 
-describe('mergeLine', () => {
-  const line = (over: Partial<Line>): Line => ({
-    utteranceId: 'u', speaker: 'CUSTOMER', kind: 'TEXT', text: '', isFinal: true, ...over,
-  })
+const line = (over: Partial<Line>): Line => ({
+  utteranceId: 'u', speaker: 'CUSTOMER', kind: 'TEXT', text: '', isFinal: true, ...over,
+})
 
+describe('mergeLine', () => {
   it('orders by seq however the lines arrive', () => {
     let lines: Line[] = []
     for (const seq of [3, 1, 2]) {
@@ -197,19 +196,6 @@ describe('LiveTranscript', () => {
     expect(screen.getAllByText('hello')).toHaveLength(1)
   })
 
-  it('replaces a partial in place without growing the row count', async () => {
-    const { emit, container } = renderPanel()
-    emit({ utteranceId: 'p1', speaker: 'CUSTOMER', kind: 'TEXT', isFinal: false, text: 'I need' })
-    expect(await screen.findByText('I need')).toBeInTheDocument()
-    // Counted in the DOM, not by role: a partial is aria-hidden by design, so
-    // it has no listitem role to find.
-    expect(container.querySelectorAll('li')).toHaveLength(1)
-
-    emit(final(1, 'I need help', { utteranceId: 'p1' }))
-    await waitFor(() => expect(screen.getByText('I need help')).toBeInTheDocument())
-    expect(container.querySelectorAll('li')).toHaveLength(1)
-  })
-
   it('hides a partial from assistive technology and reveals it once final', async () => {
     const { emit } = renderPanel()
     emit({ utteranceId: 'p1', speaker: 'CUSTOMER', kind: 'TEXT', isFinal: false, text: 'guessing' })
@@ -231,15 +217,6 @@ describe('LiveTranscript', () => {
     // Customer and You carry no icon; only Bot does.
     expect(screen.getByText('Bot').closest('li')?.querySelector('svg')).toBeTruthy()
     expect(screen.getByText('You').closest('li')?.querySelector('svg')).toBeNull()
-  })
-
-  it('ignores lines belonging to another call', async () => {
-    const { emit } = renderPanel()
-    const stray = { type: 'CALL_TRANSCRIPT', callId: 'someone-else', payload: final(1, 'not mine') }
-    for (const listener of [] as Listener[]) listener(stray as unknown as AiccEvent)
-    emit(final(1, 'mine'))
-    expect(await screen.findByText('mine')).toBeInTheDocument()
-    expect(screen.queryByText('not mine')).toBeNull()
   })
 
   it('shows the empty state rather than an error when the snapshot fails', async () => {
@@ -274,22 +251,18 @@ describe('LiveTranscript', () => {
 // same standard of evidence as "it compiles". A status line that silently shows
 // nothing for DEGRADED is worse than none: the agent reads the absence as fine.
 describe('every transcription state renders', () => {
-  const cases: Array<[string, string]> = [
+  it.each([
     ['IDLE', 'Not transcribing'],
     ['CONNECTING', 'Connecting…'],
     ['LIVE', 'Transcribing…'],
     ['DEGRADED', 'Transcribing one side'],
     ['ERROR', 'Transcription unavailable'],
     ['STOPPED', 'Transcription ended'],
-  ]
-
-  for (const [state, label] of cases) {
-    it(`shows ${label} for ${state}`, async () => {
-      const { emit } = renderPanel()
-      emit({ state }, 'CALL_TRANSCRIPTION_STATE')
-      expect(await screen.findByText(label)).toBeInTheDocument()
-    })
-  }
+  ])('shows %s as %s', async (state, label) => {
+    const { emit } = renderPanel()
+    emit({ state }, 'CALL_TRANSCRIPTION_STATE')
+    expect(await screen.findByText(label)).toBeInTheDocument()
+  })
 
   // The reason a state carries is a stable code, never display text: the panel
   // renders the state, and the code is for whoever reads the event.
@@ -308,77 +281,17 @@ describe('a call ending', () => {
   const SECOND_CALL_ID = '00000000-0000-4000-8000-0000000000c2'
 
   it('keeps the transcript on screen until the next call replaces it', async () => {
-    const listeners = new Map<EventType | '*', Listener[]>()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async (input: RequestInfo | URL) => {
-        const url = String(input)
-        if (url.includes(`/calls/${CALL_ID}/transcript`)) {
-          return new Response(
-            JSON.stringify({
-              items: [
-                { seq: 1, occurredAt: new Date().toISOString(), speaker: 'CUSTOMER',
-                  kind: 'TEXT', content: { text: 'the last thing said' }, offsetMs: 0,
-                  source: 'ASR', utteranceId: 'u-1' },
-              ],
-              nextSinceSeq: 0, isLive: true, state: 'STOPPED',
-            }),
-            { status: 200, headers: { 'content-type': 'application/json' } },
-          )
-        }
-        return new Response(JSON.stringify({ items: [] }), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        })
-      }),
-    )
-
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-    const view = render(
-      <QueryClientProvider client={client}>
-        <I18nextProvider i18n={i18n}>
-          <EventStreamProvider value={{ status: 'connected', listeners }}>
-            <LiveTranscript
-              callId={CALL_ID}
-              myAgentId={AGENT_ID}
-              streamStatus="connected"
-            />
-          </EventStreamProvider>
-        </I18nextProvider>
-      </QueryClientProvider>,
-    )
-
+    const { options, showCall } = renderPanel({ items: [row(1, 'the last thing said')] })
     expect(await screen.findByText('the last thing said')).toBeInTheDocument()
 
     // The call ends: the cockpit drops it from calls/mine and passes no callId.
-    view.rerender(
-      <QueryClientProvider client={client}>
-        <I18nextProvider i18n={i18n}>
-          <EventStreamProvider value={{ status: 'connected', listeners }}>
-            <LiveTranscript callId={undefined} myAgentId={AGENT_ID} streamStatus="connected" />
-          </EventStreamProvider>
-        </I18nextProvider>
-      </QueryClientProvider>,
-    )
-
+    showCall(undefined)
     expect(await screen.findByText('Call ended')).toBeInTheDocument()
     expect(screen.getByText('the last thing said')).toBeInTheDocument()
 
     // A new call rings in with its own callId — only now does the panel reset.
-    view.rerender(
-      <QueryClientProvider client={client}>
-        <I18nextProvider i18n={i18n}>
-          <EventStreamProvider value={{ status: 'connected', listeners }}>
-            <LiveTranscript
-              callId={SECOND_CALL_ID}
-              myAgentId={AGENT_ID}
-              streamStatus="connected"
-            />
-          </EventStreamProvider>
-        </I18nextProvider>
-      </QueryClientProvider>,
-    )
-
+    options.items = []
+    showCall(SECOND_CALL_ID)
     await waitFor(() => expect(screen.queryByText('the last thing said')).toBeNull())
   })
 })
@@ -390,7 +303,7 @@ describe('a call ending', () => {
 // server had not yet persisted.
 describe('a refetched snapshot', () => {
   it('merges into what the stream delivered instead of replacing it', async () => {
-    const { emit, options } = renderPanel({ items: [row(1, 'from the bot phase')] })
+    const { emit, options, client } = renderPanel({ items: [row(1, 'from the bot phase')] })
     expect(await screen.findByText(/from the bot phase/i)).toBeInTheDocument()
 
     emit(final(2, 'said live on the stream'))
@@ -403,7 +316,7 @@ describe('a refetched snapshot', () => {
     // reading.
     options.items = [row(1, 'from the bot phase'), row(3, 'persisted later')]
     await act(async () => {
-      await queryClientRef.current?.invalidateQueries()
+      await client.invalidateQueries()
     })
     expect(await screen.findByText(/persisted later/i)).toBeInTheDocument()
 

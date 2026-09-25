@@ -16,6 +16,7 @@ import (
 // leg's point of view — and the command carries neither the call id nor
 // anything else that would make the listener a party.
 func TestMonitorRaisesTheSupervisorAgainstTheAgentLeg(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 
 	if err := c.Monitor(t.Context(), callID, agentID, "1099", "WHISPER"); err != nil {
@@ -40,6 +41,7 @@ func TestMonitorRaisesTheSupervisorAgainstTheAgentLeg(t *testing.T) {
 // before raising the next: two eavesdrops at one handset would mean the second
 // never answers, or answers over the first.
 func TestChangingModeEndsThePreviousMonitoringLeg(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, agentID := onACallWithAnAgent(t)
 
 	if err := c.Monitor(t.Context(), callID, agentID, "1099", "LISTEN"); err != nil {
@@ -93,6 +95,7 @@ func observerIDOf(t *testing.T, command string) string {
 // Somebody who is not on the call cannot be listened to on it: the supervisor
 // gets a refusal, not an eavesdrop on whichever leg came first.
 func TestMonitorRefusesAnAgentWhoIsNotOnTheCall(t *testing.T) {
+	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	before := len(cmd.sent)
 
@@ -111,6 +114,7 @@ func TestMonitorRefusesAnAgentWhoIsNotOnTheCall(t *testing.T) {
 // The supervisor's leg is scaffolding, not a party: its events create no call
 // and join none, so it reaches neither the stream nor the ledger.
 func TestAnObserverLegIsNeverAdopted(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 

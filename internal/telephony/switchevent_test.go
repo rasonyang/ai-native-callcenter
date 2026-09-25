@@ -18,6 +18,7 @@ import (
 func event(headers map[string]string) *esl.Event { return esl.NewEvent(headers, "") }
 
 func TestNormalizeChannelLifecycle(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		headers map[string]string
@@ -135,6 +136,7 @@ func TestNormalizeChannelLifecycle(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := Normalize(event(tt.headers))
 			if tt.want == "" {
 				if ok {
@@ -156,6 +158,7 @@ func TestNormalizeChannelLifecycle(t *testing.T) {
 }
 
 func TestNormalizeSofiaRegistration(t *testing.T) {
+	t.Parallel()
 	// Captured from a live SIP.js registration through the WSS path.
 	got, ok := Normalize(event(map[string]string{
 		"Event-Name":     "CUSTOM",
@@ -216,6 +219,7 @@ func TestNormalizeSofiaRegistration(t *testing.T) {
 }
 
 func TestNormalizeDeviceStateFromOptionsPing(t *testing.T) {
+	t.Parallel()
 	got, ok := Normalize(event(map[string]string{
 		"Event-Name":     "CUSTOM",
 		"Event-Subclass": "sofia::sip_user_state",
@@ -234,6 +238,7 @@ func TestNormalizeDeviceStateFromOptionsPing(t *testing.T) {
 }
 
 func TestNormalizeCallcenter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		headers map[string]string
@@ -369,6 +374,7 @@ func TestNormalizeCallcenter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := Normalize(event(tt.headers))
 			if tt.want == "" {
 				if ok {
@@ -390,6 +396,7 @@ func TestNormalizeCallcenter(t *testing.T) {
 }
 
 func TestNormalizeHandlesNilAndUnknown(t *testing.T) {
+	t.Parallel()
 	if _, ok := Normalize(nil); ok {
 		t.Error("Normalize(nil) reported ok")
 	}
@@ -407,6 +414,7 @@ func TestNormalizeHandlesNilAndUnknown(t *testing.T) {
 // were indistinguishable from a working one — which is how a whole call's
 // audio went nowhere with nothing anywhere reporting a fault.
 func TestTheMediaTapsOwnEventsAreUnderstood(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		subclass string
 		want     SwitchEventKind
@@ -416,6 +424,7 @@ func TestTheMediaTapsOwnEventsAreUnderstood(t *testing.T) {
 		{"mod_audio_stream::error", KindAudioStreamError},
 	} {
 		t.Run(tc.subclass, func(t *testing.T) {
+			t.Parallel()
 			ev, ok := Normalize(event(map[string]string{
 				"Event-Name":     "CUSTOM",
 				"Event-Subclass": tc.subclass,
@@ -443,7 +452,9 @@ func TestTheMediaTapsOwnEventsAreUnderstood(t *testing.T) {
 // failure was reported as error="" — the one field an operator would act on,
 // empty on every occurrence (found live 2026-08-26, three click-to-dial calls).
 func TestTheMediaTapsComplaintIsReadFromWhereTheModulePutsIt(t *testing.T) {
+	t.Parallel()
 	t.Run("the body, which is what the module sends", func(t *testing.T) {
+		t.Parallel()
 		ev, ok := Normalize(esl.NewEvent(map[string]string{
 			"Event-Name":     "CUSTOM",
 			"Event-Subclass": "mod_audio_stream::error",
@@ -460,6 +471,7 @@ func TestTheMediaTapsComplaintIsReadFromWhereTheModulePutsIt(t *testing.T) {
 	// A header still wins where one exists: a future subclass may grow one,
 	// and the body is the fallback rather than the replacement.
 	t.Run("a header outranks the body", func(t *testing.T) {
+		t.Parallel()
 		ev, _ := Normalize(esl.NewEvent(map[string]string{
 			"Event-Name":     "CUSTOM",
 			"Event-Subclass": "mod_audio_stream::error",
@@ -475,6 +487,7 @@ func TestTheMediaTapsComplaintIsReadFromWhereTheModulePutsIt(t *testing.T) {
 // Subscribing is half of it: an event we understand but never asked for never
 // arrives.
 func TestTheMediaTapsEventsAreSubscribedTo(t *testing.T) {
+	t.Parallel()
 	for _, want := range []string{
 		"mod_audio_stream::connect", "mod_audio_stream::disconnect",
 		"mod_audio_stream::error",
@@ -488,6 +501,7 @@ func TestTheMediaTapsEventsAreSubscribedTo(t *testing.T) {
 // A stamped call type outranks the channel's direction: the switch sees every
 // leg we originate as outbound, whether it rings an extension or a carrier.
 func TestCallTypeHintOutranksDirection(t *testing.T) {
+	t.Parallel()
 	ev := SwitchEvent{Direction: DirectionOutbound, CallTypeHint: "INTERNAL"}
 	if got := callTypeOf(ev); string(got) != "INTERNAL" {
 		t.Errorf("callTypeOf = %q, want INTERNAL", got)
@@ -503,6 +517,7 @@ func TestCallTypeHintOutranksDirection(t *testing.T) {
 // thing tying the two together before they bridge. The member's own leg
 // carries its own id in that variable and must not be read as a delivery.
 func TestNormalizeReadsTheQueueDeliveryStamp(t *testing.T) {
+	t.Parallel()
 	const (
 		member = "019ff973-6b32-7557-b7c4-11b3fdb692f0"
 		agent  = "019ff974-1a01-7000-9c3d-2b8e5f0a1c44"
@@ -546,6 +561,7 @@ func TestNormalizeReadsTheQueueDeliveryStamp(t *testing.T) {
 // caller's own leg delivers what the bot actually did. Taking the first
 // non-empty share whole let the DID-only half shut the rest out.
 func TestBotShareMergesAcrossLegs(t *testing.T) {
+	t.Parallel()
 	flow := uuid.New()
 
 	// What the bot leg carries when it hangs up at the transfer.
@@ -583,6 +599,7 @@ func TestBotShareMergesAcrossLegs(t *testing.T) {
 // agent, not on the caller's. The facts it carries are the caller's, so the
 // event has to reach the caller's call.
 func TestQueueEventsRouteToTheWaitingCaller(t *testing.T) {
+	t.Parallel()
 	const (
 		member = "019ff973-6b32-7557-b7c4-11b3fdb692f0"
 		agent  = "019ff974-1a01-7000-9c3d-2b8e5f0a1c44"
@@ -632,6 +649,7 @@ func TestQueueEventsRouteToTheWaitingCaller(t *testing.T) {
 // hangup. Carrying it is what lets the ledger's billing be checked rather than
 // only trusted.
 func TestNormalizeReadsTheSwitchesOwnBilledSeconds(t *testing.T) {
+	t.Parallel()
 	got, ok := Normalize(event(map[string]string{
 		"Event-Name":            "CHANNEL_HANGUP_COMPLETE",
 		"Unique-ID":             "019ff973-6b32-7557-b7c4-11b3fdb692f0",

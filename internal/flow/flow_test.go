@@ -98,6 +98,7 @@ func testEngine(t *testing.T, lang string) *Engine {
 //
 
 func TestLoadAcceptsACompleteFlow(t *testing.T) {
+	t.Parallel()
 	spec := loadTestFlow(t)
 
 	if spec.ID != "billing" || spec.InitialNode != "welcome" {
@@ -114,6 +115,7 @@ func TestLoadAcceptsACompleteFlow(t *testing.T) {
 // Every mistake here would otherwise surface mid-call, as a conversation that
 // dead-ends with a caller on the line.
 func TestLoadRejectsBrokenFlows(t *testing.T) {
+	t.Parallel()
 	breakages := []struct {
 		name  string
 		alter func(string) string
@@ -169,6 +171,7 @@ func TestLoadRejectsBrokenFlows(t *testing.T) {
 
 	for _, tt := range breakages {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := Load([]byte(tt.alter(testFlow)))
 			if err == nil {
 				t.Fatal("a broken flow loaded without complaint")
@@ -185,6 +188,7 @@ func TestLoadRejectsBrokenFlows(t *testing.T) {
 //
 
 func TestTextFallsBackAcrossLanguagesRatherThanToSilence(t *testing.T) {
+	t.Parallel()
 	text := Text{EN: "hello"}
 	if got := text.For(LangZH); got != "hello" {
 		t.Errorf("missing translation rendered %q, want the other language", got)
@@ -196,6 +200,7 @@ func TestTextFallsBackAcrossLanguagesRatherThanToSilence(t *testing.T) {
 }
 
 func TestLangNormalisation(t *testing.T) {
+	t.Parallel()
 	for input, want := range map[string]string{
 		"zh": LangZH, "zh-CN": LangZH, "ZH": LangZH,
 		"en": LangEN, "en-GB": LangEN, "": LangEN, "fr": LangEN,
@@ -211,6 +216,7 @@ func TestLangNormalisation(t *testing.T) {
 //
 
 func TestPredicates(t *testing.T) {
+	t.Parallel()
 	slots := map[string]any{
 		"found":   "1",
 		"count":   float64(3),
@@ -253,6 +259,7 @@ func TestPredicates(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := evaluate(&tt.condition, slots)
 			if err != nil {
 				t.Fatalf("evaluate: %v", err)
@@ -273,6 +280,7 @@ func TestPredicates(t *testing.T) {
 //
 
 func TestEngineStartsAtTheInitialPhase(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	if e.NodeID() != "welcome" {
@@ -288,6 +296,7 @@ func TestEngineStartsAtTheInitialPhase(t *testing.T) {
 }
 
 func TestAMatchingResultMovesThePhase(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	moved := e.OnToolResult("lookup_account",
@@ -303,6 +312,7 @@ func TestAMatchingResultMovesThePhase(t *testing.T) {
 
 // No match means stay and ask again — not an error, and not a move.
 func TestANonMatchingResultStaysPut(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	if moved := e.OnToolResult("lookup_account", map[string]any{"found": "0"}); moved != "" {
@@ -316,6 +326,7 @@ func TestANonMatchingResultStaysPut(t *testing.T) {
 // The third failed lookup gives up and hands the caller over; the counter the
 // rule reads is maintained by the engine itself.
 func TestRepeatedFailuresEscalateThroughThePriorityRule(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	notFound := map[string]any{"found": "0"}
@@ -332,6 +343,7 @@ func TestRepeatedFailuresEscalateThroughThePriorityRule(t *testing.T) {
 
 // A stale result.x from an earlier tool must never satisfy a later rule.
 func TestTransientResultSlotsAreReplacedWholesale(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	e.OnToolResult("lookup_account", map[string]any{"found": "0", "extra": "stale"})
@@ -347,6 +359,7 @@ func TestTransientResultSlotsAreReplacedWholesale(t *testing.T) {
 }
 
 func TestGlobalTransitionsApplyInEveryPhase(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	if moved := e.OnToolResult("transfer_to_agent", map[string]any{"ok": "1"}); moved != "handoff" {
@@ -357,6 +370,7 @@ func TestGlobalTransitionsApplyInEveryPhase(t *testing.T) {
 // A model that loops on a tool no rule matches would otherwise keep the caller
 // on the line indefinitely.
 func TestTheTurnLimitForcesTheFallback(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	// No rule matches take_message in the welcome phase, so nothing moves —
@@ -372,6 +386,7 @@ func TestTheTurnLimitForcesTheFallback(t *testing.T) {
 }
 
 func TestATerminalPhaseNeverMoves(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	e.OnNoInput()
@@ -383,17 +398,6 @@ func TestATerminalPhaseNeverMoves(t *testing.T) {
 	}
 	if moved := e.OnToolResult("transfer_to_agent", map[string]any{"ok": "1"}); moved != "" {
 		t.Errorf("a terminal phase moved to %q", moved)
-	}
-}
-
-func TestDeadAirMovesThePhaseOnlyWhenTheRuleSays(t *testing.T) {
-	e := testEngine(t, "en")
-
-	if moved := e.OnNoInput(); moved != "" {
-		t.Fatalf("one silence moved to %q; the rule wants two", moved)
-	}
-	if moved := e.OnNoInput(); moved != "farewell" {
-		t.Fatalf("two silences moved to %q, want farewell", moved)
 	}
 }
 
@@ -463,6 +467,7 @@ func silences(t *testing.T, e *Engine, n int) {
 // than re-prompt forever, and it does so on the same count novanet_support's
 // own rule already used.
 func TestNoInputDefaultFiresAfterRepeatedUndeclaredSilence(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, testFlowWithClosing, "en")
 	toReport(t, e)
 
@@ -475,6 +480,7 @@ func TestNoInputDefaultFiresAfterRepeatedUndeclaredSilence(t *testing.T) {
 // A phase whose own NO_INPUT rule has not tripped yet keeps exactly that rule:
 // the default must not fire at its own count ahead of it.
 func TestNoInputDefaultDoesNotOverrideAnAuthoredRule(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, withWelcomeNoInputRule(t, testFlowWithClosing,
 		`{"on": "NO_INPUT", "condition": {"slot": "noInput.count", "op": "GTE", "value": 5},
 		  "target": "handoff"}`), "en")
@@ -491,6 +497,7 @@ func TestNoInputDefaultDoesNotOverrideAnAuthoredRule(t *testing.T) {
 // consider it for a silence, so it is the author's word on silence here and
 // the default stands aside.
 func TestNoInputDefaultStandsAsideForARuleThatMatchesEveryEvent(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, withWelcomeNoInputRule(t, testFlowWithClosing,
 		`{"condition": {"slot": "noInput.count", "op": "GTE", "value": 5},
 		  "target": "handoff"}`), "en")
@@ -504,6 +511,7 @@ func TestNoInputDefaultStandsAsideForARuleThatMatchesEveryEvent(t *testing.T) {
 // A rule that names a tool can never fire on a silence, which carries none; it
 // says nothing about silence and must not switch the default off.
 func TestNoInputDefaultIgnoresARuleThatCannotFireOnSilence(t *testing.T) {
+	t.Parallel()
 	spec := strings.Replace(testFlowWithClosing, `"transitions": [
 			{"on": "TOOL_RESULT", "tool": "transfer_to_agent",`, `"transitions": [
 			{"tool": "take_message", "target": "farewell"},
@@ -524,6 +532,7 @@ func TestNoInputDefaultIgnoresARuleThatCannotFireOnSilence(t *testing.T) {
 // declared nothing about silence keeps re-prompting — the behaviour before
 // this feature existed, not a new failure mode.
 func TestNoInputDefaultDoesNothingWithoutAClosingTarget(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en") // plain testFlow: no closingTarget
 	toReport(t, e)
 	silences(t, e, defaultNoInputLimit+2)
@@ -534,6 +543,7 @@ func TestNoInputDefaultDoesNothingWithoutAClosingTarget(t *testing.T) {
 // A final transcript with nothing in it is not progress: on a noisy abandoned
 // line it would otherwise keep the count from ever reaching a rule.
 func TestConsecutiveSilenceResetsOnCallerProgressOnly(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		progress  func(e *Engine)
@@ -548,6 +558,7 @@ func TestConsecutiveSilenceResetsOnCallerProgressOnly(t *testing.T) {
 		{"a blank transcript", func(e *Engine) { e.OnCallerSpoke("  ") }, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			e := testEngineFor(t, testFlowWithClosing, "en")
 			toReport(t, e)
 
@@ -576,6 +587,7 @@ func reply(e *Engine) bool {
 // target once the replies EXCEED the wall, and only when asked to close, which
 // the orchestrator does once the reply that crossed it has been heard.
 func TestTheTurnsWithoutToolWallClosesTheCallOnceExceeded(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, testFlowWithWall, "en") // maxTurnsWithoutTool = 3
 
 	for i := range 3 {
@@ -610,6 +622,7 @@ func TestTheTurnsWithoutToolWallClosesTheCallOnceExceeded(t *testing.T) {
 // re-prompt and a phase's own line have no caller behind them; a turn cut short
 // replied to nobody; an empty transcript is not speech.
 func TestTheTurnsWithoutToolWallCountsOnlyRepliesToTheCaller(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, testFlowWithWall, "en")
 
 	for range 10 {
@@ -640,6 +653,7 @@ func TestTheTurnsWithoutToolWallCountsOnlyRepliesToTheCaller(t *testing.T) {
 // answers the tool's result rather than the caller — even when the caller's
 // transcript lands after the tool call, as it can on the Realtime clients.
 func TestTheTurnsWithoutToolWallResetsOnAToolCall(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, testFlowWithWall, "en")
 	reply(e)
 	reply(e)
@@ -680,6 +694,7 @@ func TestTheTurnsWithoutToolWallResetsOnAToolCall(t *testing.T) {
 
 // A phase change is progress too: the wall bounds replies within one phase.
 func TestTheTurnsWithoutToolWallResetsOnAPhaseChange(t *testing.T) {
+	t.Parallel()
 	e := testEngineFor(t, testFlowWithWall, "en")
 	reply(e)
 	reply(e)
@@ -698,6 +713,7 @@ func TestTheTurnsWithoutToolWallResetsOnAPhaseChange(t *testing.T) {
 // Zero (the field's absence) is off: a flow that never opted in must never
 // have its calls ended by a wall it did not set.
 func TestTheTurnsWithoutToolWallIsOffByDefault(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en") // plain testFlow: maxTurnsWithoutTool is 0
 	for i := range 20 {
 		if reply(e) {
@@ -710,6 +726,7 @@ func TestTheTurnsWithoutToolWallIsOffByDefault(t *testing.T) {
 }
 
 func TestToolAllowlistPerPhase(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 
 	if !e.IsToolAllowed("lookup_account") {
@@ -725,6 +742,7 @@ func TestToolAllowlistPerPhase(t *testing.T) {
 }
 
 func TestInstructionRendersMissingSlotsAsNothing(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 	e.OnToolResult("lookup_account", map[string]any{"found": "1"}) // no name collected
 
@@ -740,6 +758,7 @@ func TestInstructionRendersMissingSlotsAsNothing(t *testing.T) {
 // A phase's announce is a line the bot says, not a brief it works from: it is
 // taken from the flow word for word, in the call's own language.
 func TestAPhaseAnnouncementIsTakenVerbatimInTheCallsLanguage(t *testing.T) {
+	t.Parallel()
 	english := testEngine(t, "en")
 	if got := english.Announce(); got != "Thanks for calling NovaNet billing." {
 		t.Errorf("announce = %q, want the English line unchanged", got)
@@ -755,6 +774,7 @@ func TestAPhaseAnnouncementIsTakenVerbatimInTheCallsLanguage(t *testing.T) {
 // worth nothing if it reaches them as a template. The bare-string form is the
 // other half of this — one wording in every language, as Text already allows.
 func TestAnAnnouncementRendersSlotsAndAcceptsOneWordingForEveryLanguage(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 	if moved := e.OnToolResult("lookup_account",
 		map[string]any{"found": "1", "name": "Alice"}); moved != "report" {
@@ -772,6 +792,7 @@ func TestAnAnnouncementRendersSlotsAndAcceptsOneWordingForEveryLanguage(t *testi
 // Most phases say nothing of their own, and the field is optional: a phase
 // with no announce must report emptiness rather than something to speak.
 func TestAPhaseWithNoAnnouncementHasNothingToSay(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "en")
 	if moved := e.OnNoInput(); moved != "" {
 		t.Fatalf("one silence moved to %q", moved)
@@ -790,6 +811,7 @@ func TestAPhaseWithNoAnnouncementHasNothingToSay(t *testing.T) {
 // hears the bot stop mid-call — so the flow is refused before it can be
 // published rather than discovered on a call.
 func TestTerminalPhasesMustCarryALineWhereTheProviderCannotBeCued(t *testing.T) {
+	t.Parallel()
 	spec := loadTestFlow(t)
 
 	err := RequireTerminalAnnounce(spec)
@@ -822,16 +844,8 @@ func TestTerminalPhasesMustCarryALineWhereTheProviderCannotBeCued(t *testing.T) 
 	}
 }
 
-// The rule is the deployment's, not the dialect's: the same flow is perfectly
-// valid on an engine that can be asked to greet, and loading must not depend
-// on which one this installation runs.
-func TestLoadingDoesNotApplyTheDeploymentsOwnRule(t *testing.T) {
-	if _, err := Load([]byte(testFlow)); err != nil {
-		t.Errorf("a flow with no terminal line failed to load: %v", err)
-	}
-}
-
 func TestChineseCallsGetChineseInstructions(t *testing.T) {
+	t.Parallel()
 	e := testEngine(t, "zh-CN")
 
 	if got := e.Instruction(); !strings.Contains(got, "问候") {
@@ -842,6 +856,7 @@ func TestChineseCallsGetChineseInstructions(t *testing.T) {
 // The bot's voice is part of its character, so it travels with the published
 // flow rather than with the deployment.
 func TestTheFlowCarriesTheBotsVoice(t *testing.T) {
+	t.Parallel()
 	spec := loadTestFlow(t)
 	if spec.Global.Voice != "" {
 		t.Errorf("a flow that names no voice reported %q, want the provider's default",

@@ -147,33 +147,26 @@ describe('presence', () => {
   })
 })
 
+function mutedCall() {
+  const call = callFixture('TALKING')
+  call.parties[1].isMuted = true
+  return call
+}
+
 describe('call controls', () => {
-  it('answers a ringing call', async () => {
-    const { api, user } = await renderBar({ calls: [callFixture('RINGING')] })
-    await user.click(await screen.findByRole('button', { name: /^answer$/i }))
+  it.each([
+    ['answers a ringing call', callFixture('RINGING'), /^answer$/i, 'answer'],
+    ['holds an established call', callFixture('TALKING'), /^hold$/i, 'hold'],
+    ['retrieves a held call', callFixture('HELD'), /resume/i, 'retrieve'],
+    ['hangs up', callFixture('TALKING'), /hang up/i, 'hangup'],
+    ['mutes the agent', callFixture('TALKING'), /^mute$/i, 'mute'],
+    ['unmutes once the switch reports the leg muted', mutedCall(), /^unmute$/i, 'unmute'],
+  ])('%s', async (_case, call, button, action) => {
+    const { api, user } = await renderBar({ calls: [call] })
+    await user.click(await screen.findByRole('button', { name: button }))
     await waitFor(() =>
       expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/answer` }),
-      ),
-    )
-  })
-
-  it('holds an established call', async () => {
-    const { api, user } = await renderBar({ calls: [callFixture('TALKING')] })
-    await user.click(await screen.findByRole('button', { name: /^hold$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/hold` }),
-      ),
-    )
-  })
-
-  it('retrieves a held call', async () => {
-    const { api, user } = await renderBar({ calls: [callFixture('HELD')] })
-    await user.click(await screen.findByRole('button', { name: /resume/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/retrieve` }),
+        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/${action}` }),
       ),
     )
   })
@@ -195,51 +188,15 @@ describe('call controls', () => {
     )
   })
 
-  it('hangs up', async () => {
-    const { api, user } = await renderBar({ calls: [callFixture('TALKING')] })
-    await user.click(await screen.findByRole('button', { name: /hang up/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/hangup` }),
-      ),
-    )
-  })
-
   it('shows the caller and the direction', async () => {
     await renderBar({ calls: [callFixture('TALKING')] })
     expect(await screen.findByText(CALLER)).toBeInTheDocument()
   })
 
-  it('mutes the agent', async () => {
-    const { api, user } = await renderBar({ calls: [callFixture('TALKING')] })
-    await user.click(await screen.findByRole('button', { name: /^mute$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/mute` }),
-      ),
-    )
-  })
-
-  it('offers unmute once the switch reports the leg muted', async () => {
-    const muted = callFixture('TALKING')
-    muted.parties[1].isMuted = true
-    const { api, user } = await renderBar({ calls: [muted] })
-    await user.click(await screen.findByRole('button', { name: /^unmute$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/unmute` }),
-      ),
-    )
-  })
-
-  it('cannot mute with no call to mute', async () => {
+  it('cannot mute or hang up with no call', async () => {
     await renderBar()
     expect(await screen.findByRole('button', { name: /^mute$/i })).toBeDisabled()
-  })
-
-  it('hangup is inert with no call', async () => {
-    await renderBar()
-    expect(await screen.findByRole('button', { name: /hang up/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /hang up/i })).toBeDisabled()
   })
 })
 
@@ -378,46 +335,14 @@ describe('dialler', () => {
  * a queue cannot offer a call to a phone that is not registered.
  */
 describe('the phone', () => {
-  /**
-   * A phone holding nothing is what earns a session — not the page loading.
-   * The extension keeps provisioned credentials across a reload, and minting
-   * flushes the registration it already has, which would drop a READY agent
-   * to DEVICE_LOST for pressing F5.
-   */
-  it('provisions a phone that is holding nothing', async () => {
-    const postMessage = vi.spyOn(window, 'postMessage')
-    const { api } = await renderBar({
-      extension: { credentialSource: 'NONE', account: null, registration: 'UNREGISTERED' },
-    })
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: '/agent/sip-session' }),
-      ),
-    )
-    await waitFor(() =>
-      expect(
-        postMessage.mock.calls.some(
-          ([message]) => (message as { type?: string }).type === 'provision',
-        ),
-      ).toBe(true),
-    )
-    const [provision, targetOrigin] = postMessage.mock.calls.find(
-      ([message]) => (message as { type?: string }).type === 'provision',
-    )!
-    expect(provision).toMatchObject({ source: 'aicc', protocolVersion: 1, account: '1001' })
-    expect(targetOrigin).toBe(window.location.origin)
-  })
-
-  it('provisions nothing for a phone that reloaded with its credentials', async () => {
+  // A phone that reloaded with its credentials earns no new session: minting
+  // would flush the registration it already has. phone-bridge.test.tsx pins
+  // the minting rules; this is the bar's reading of the result.
+  it('names the extension it is registered at, and provisions nothing', async () => {
     const { api } = await renderBar()
-    await screen.findByText(/phone ready/i)
-    expect(api.commands.some((r) => r.path === '/agent/sip-session')).toBe(false)
-  })
-
-  it('names the extension it is registered at', async () => {
-    await renderBar()
     const chip = await screen.findByText(/phone ready/i)
     expect(chip.closest('span')).toHaveTextContent('Phone ready · 1001')
+    expect(api.commands.some((r) => r.path === '/agent/sip-session')).toBe(false)
   })
 
   it('offers setup instead when no extension answers', async () => {
@@ -436,33 +361,29 @@ describe('the phone', () => {
     expect(screen.queryByRole('button', { name: /set up phone/i })).toBeNull()
   })
 
-  it('will not let an agent go ready with no registration on the switch', async () => {
+  // The chip's reading (phone.test.ts) is what gates READY in the menu.
+  it.each([
+    ['a phone with no registration on the switch', { isDeviceRegistered: false, deviceAccount: null },
+      { registration: 'UNREGISTERED' as const, credentialSource: 'NONE' as const, account: null }, false],
+    ['a registered phone', {}, {}, true],
+    ['an overridden phone at the agent’s own extension', {},
+      { credentialSource: 'MANUAL' as const, provisionStatus: 'OVERRIDDEN' as const }, true],
+    ['an override onto another extension', {},
+      { credentialSource: 'MANUAL' as const, account: '1002', provisionStatus: 'OVERRIDDEN' as const },
+      false],
+  ])('with %s, go ready is enabled: %s', async (_case, presence, phone, isAllowed) => {
     const { user } = await renderBar({
       presence: presenceFixture({
-        state: 'NOT_READY',
-        availability: 'NOT_READY',
-        reason: 'BREAK',
-        isDeviceRegistered: false,
-        deviceAccount: null,
+        state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK', ...presence,
       }),
-      extension: { registration: 'UNREGISTERED', credentialSource: 'NONE', account: null },
+      extension: phone,
     })
     await user.click(
       screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
     )
     const goReady = await screen.findByRole('menuitem', { name: /go ready/i })
-    expect(goReady).toHaveAttribute('data-disabled')
-  })
-
-  it('lets an agent whose phone is registered go ready', async () => {
-    const { user } = await renderBar({
-      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
-    })
-    await user.click(
-      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
-    )
-    const goReady = await screen.findByRole('menuitem', { name: /go ready/i })
-    expect(goReady).not.toHaveAttribute('data-disabled')
+    if (isAllowed) expect(goReady).not.toHaveAttribute('data-disabled')
+    else expect(goReady).toHaveAttribute('data-disabled')
   })
 
   /**
@@ -487,42 +408,6 @@ describe('the phone', () => {
     )
     // Replacing the credential is exactly what must not be offered here.
     expect(screen.queryByRole('button', { name: /re-provision|retry/i })).toBeNull()
-  })
-
-  it('still lets an overridden phone at this agent’s own extension go ready', async () => {
-    const { user } = await renderBar({
-      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
-      extension: {
-        credentialSource: 'MANUAL',
-        account: '1001',
-        registration: 'REGISTERED',
-        provisionStatus: 'OVERRIDDEN',
-      },
-    })
-    await user.click(
-      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
-    )
-    expect(await screen.findByRole('menuitem', { name: /go ready/i })).not.toHaveAttribute(
-      'data-disabled',
-    )
-  })
-
-  it('keeps an override onto another extension out of the queue', async () => {
-    const { user } = await renderBar({
-      presence: presenceFixture({ state: 'NOT_READY', availability: 'NOT_READY', reason: 'BREAK' }),
-      extension: {
-        credentialSource: 'MANUAL',
-        account: '1002',
-        registration: 'REGISTERED',
-        provisionStatus: 'OVERRIDDEN',
-      },
-    })
-    await user.click(
-      screen.getAllByRole('button').find((b) => b.getAttribute('aria-haspopup') === 'menu')!,
-    )
-    expect(await screen.findByRole('menuitem', { name: /go ready/i })).toHaveAttribute(
-      'data-disabled',
-    )
   })
 
   // The platform takes an agent out of the queue when their phone goes away,
@@ -587,7 +472,9 @@ function LogoutButton() {
  * of every clean sign-out.
  */
 describe('signing out of everything', () => {
-  it('deprovisions the phone before it ends the web session', async () => {
+  // Revoking the registration is the server's, after it has signed the agent
+  // out; a DELETE from here reported a phone lost by an agent still READY.
+  it('deprovisions the phone before it ends the web session, and revokes nothing itself', async () => {
     const api = installBackend()
     extension = installFakeExtension()
     const postMessage = vi.spyOn(window, 'postMessage')
@@ -609,22 +496,6 @@ describe('signing out of everything', () => {
       String(call[0]).endsWith('/auth/logout'),
     )
     expect(deprovisionAt!).toBeLessThan(logoutAt!)
-  })
-
-  // The registration is the server's to flush, and only after it has signed
-  // the agent out. A DELETE from here reported a phone lost by an agent who
-  // was still READY.
-  it('revokes no SIP session itself', async () => {
-    const api = installBackend()
-    extension = installFakeExtension()
-    const { user } = renderWithProviders(<SignOutProbe />)
-    await waitFor(() => expect(screen.getByRole('button')).toBeEnabled())
-    await user.click(screen.getByRole('button'))
-    await waitFor(() =>
-      expect(api.requests).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: '/auth/logout' }),
-      ),
-    )
     expect(api.requests.some((r) => r.method === 'DELETE')).toBe(false)
   })
 

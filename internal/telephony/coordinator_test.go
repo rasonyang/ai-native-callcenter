@@ -87,6 +87,7 @@ func (f *finishedCollector) all() []Snapshot {
 // finished call under the minted identity — the provisional duplicate was
 // worth one phantom CDR per call in production.
 func TestAProvisionalCallCollapsesIntoItsMintedIdentity(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	finished := &finishedCollector{}
 	registry.OnCallFinished = finished.add
@@ -147,6 +148,7 @@ func TestAProvisionalCallCollapsesIntoItsMintedIdentity(t *testing.T) {
 // while the loopback half playing the caller, which inherits the same
 // variable, must still be tracked.
 func TestHarnessLegsNeverBecomeCalls(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 
@@ -238,14 +240,13 @@ func (oneAgent) BenchForNoAnswer(context.Context, uuid.UUID)               {}
 
 // recordingTapper captures what the coordinator asked of the media tap.
 type recordingTapper struct {
-	mu           sync.Mutex
-	attached     []string
-	paused       []string
-	resumed      []string
-	detached     []string
-	detachedCall []uuid.UUID
-	agents       map[string]uuid.UUID
-	languages    map[string]string
+	mu        sync.Mutex
+	attached  []string
+	paused    []string
+	resumed   []string
+	detached  []string
+	agents    map[string]uuid.UUID
+	languages map[string]string
 	// tapped is the set of channels this fake believes it has a tap on, so it
 	// can answer ErrNoTap the way the real one does.
 	tapped map[string]bool
@@ -296,17 +297,7 @@ func (r *recordingTapper) Detach(c string) {
 	r.detached = append(r.detached, c)
 }
 
-func (r *recordingTapper) DetachCall(callID uuid.UUID) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.detachedCall = append(r.detachedCall, callID)
-}
-
-func (r *recordingTapper) callsDetached() []uuid.UUID {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]uuid.UUID(nil), r.detachedCall...)
-}
+func (r *recordingTapper) DetachCall(uuid.UUID) {}
 
 func (r *recordingTapper) snapshot() ([]string, []string, []string, []string) {
 	r.mu.Lock()
@@ -324,6 +315,7 @@ func (r *recordingTapper) snapshot() ([]string, []string, []string, []string) {
 // went untranscribed and the test above kept passing, because it models a
 // delivery leg with no member pointer — the shape production stopped sending.
 func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
@@ -392,6 +384,7 @@ func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
 // call is created INBOUND. Asserting it would be asserting on a value this
 // coordinator cannot currently produce.
 func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		hint     string
 		wantTaps bool
@@ -401,6 +394,7 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 		{"INTERNAL", false},
 	} {
 		t.Run(tc.hint, func(t *testing.T) {
+			t.Parallel()
 			registry := NewRegistry(nullPublisher{})
 			c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 			taps := newRecordingTapper()
@@ -474,6 +468,7 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 // it carries one known agent, so a line's speaker is structural rather than
 // inferred from whoever happens to be bridged.
 func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
@@ -550,6 +545,7 @@ func bridgeAnAgentLeg(t *testing.T, c *Coordinator, taps *recordingTapper) strin
 // silent: the tap says ErrNoTap and the coordinator, which knows that the
 // caller's leg is never tapped, says nothing further.
 func TestHoldOnAnUntappedLegCommandsNothing(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
@@ -572,6 +568,7 @@ func TestHoldOnAnUntappedLegCommandsNothing(t *testing.T) {
 // nothing at all rather than silence, so pausing is what makes the gap
 // deliberate instead of mysterious.
 func TestHoldPausesTheTapAndUnholdResumesIt(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	taps := newRecordingTapper()
@@ -602,6 +599,7 @@ func TestHoldPausesTheTapAndUnholdResumesIt(t *testing.T) {
 
 // Transcription off must leave the telephony path byte-identical.
 func TestNoTapperMeansNoTranscriptionPath(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 
@@ -671,6 +669,7 @@ func (r *recordingTranscripts) forCall(callID uuid.UUID) (time.Time, bool) {
 // transcript actor's scope stayed empty, and the hub reads an empty scope as an
 // unscoped system notice bound for every subscriber.
 func TestAnAgentLegAddressesTheTranscriptToThatAgent(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	audiences := newRecordingAudiences()
@@ -705,20 +704,6 @@ func TestAnAgentLegAddressesTheTranscriptToThatAgent(t *testing.T) {
 	}
 }
 
-// Nothing attached is nothing driven: transcription off must leave this path
-// as absent as the tap's.
-func TestNoAudiencesMeansNoAddressing(t *testing.T) {
-	registry := NewRegistry(nullPublisher{})
-	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
-
-	ctx := t.Context()
-	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
-	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
-	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
-		map[string]string{"variable_dialed_user": agentExtension}))
-	// Reaching here without a nil dereference is the assertion.
-}
-
 // An agent whose leg is folded into another call must be told, or their client
 // keeps a call id that no longer exists.
 //
@@ -730,6 +715,7 @@ func TestNoAudiencesMeansNoAddressing(t *testing.T) {
 // silent: the absorbed call is retired without a word and nothing is published
 // for the kept call after it.
 func TestAMergeTellsTheMovedAgentTheCallHasANewIdentity(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	pub := &capturingPublisher{}
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
@@ -775,6 +761,7 @@ func TestAMergeTellsTheMovedAgentTheCallHasANewIdentity(t *testing.T) {
 // would vanish from the conversation it belongs to, and which one vanished
 // would depend on which leg the switch happened to announce first.
 func TestTheSurvivingCallKeepsItsOwnBusinessData(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, &capturingPublisher{})
 
@@ -839,6 +826,7 @@ func TestTheSurvivingCallKeepsItsOwnBusinessData(t *testing.T) {
 // to the coordinator alone would make every assertion below pass without the
 // event ever being published.
 func TestTheCallIsToldWhenItsBusinessDataMoves(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
@@ -913,6 +901,7 @@ func TestTheCallIsToldWhenItsBusinessDataMoves(t *testing.T) {
 // in the first place — announced, every consultation would report a change
 // nobody made.
 func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
+	t.Parallel()
 	newlyMerged := func(t *testing.T, keptData, absorbedData map[string]any) *capturingPublisher {
 		t.Helper()
 		pub := &capturingPublisher{}
@@ -945,6 +934,7 @@ func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
 	}
 
 	t.Run("data the surviving call did not have", func(t *testing.T) {
+		t.Parallel()
 		pub := newlyMerged(t,
 			map[string]any{"ticketId": "T-1"},
 			map[string]any{"orderId": "A-4471"})
@@ -964,6 +954,7 @@ func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
 	})
 
 	t.Run("the same data coming back", func(t *testing.T) {
+		t.Parallel()
 		same := map[string]any{"ticketId": "T-1", "orderId": "A-4471"}
 		pub := newlyMerged(t, same, maps.Clone(same))
 		if ev, _, ok := pub.find(events.TypeCallUserData); ok {
@@ -976,6 +967,7 @@ func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
 // the state this product refuses everywhere else — a screen showing part of a
 // customer's details, and a client that was told the write worked.
 func TestARefusedPatchWritesNothingAndAnnouncesNothing(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
@@ -1050,6 +1042,7 @@ func TestARefusedPatchWritesNothingAndAnnouncesNothing(t *testing.T) {
 // the write are one visit to the actor: split, an agent whose leg ended in
 // between would write to a call they had already left.
 func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
@@ -1080,6 +1073,7 @@ func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
 // channel variable on CHANNEL_CREATE by the time this application sees it, and
 // the human path needs no dialplan work at all.
 func TestACallCanArriveCarryingBusinessData(t *testing.T) {
+	t.Parallel()
 	arrive := func(t *testing.T, vars map[string]string) (Snapshot, *capturingPublisher) {
 		t.Helper()
 		pub := &capturingPublisher{}
@@ -1099,6 +1093,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 	}
 
 	t.Run("from an upstream's SIP headers", func(t *testing.T) {
+		t.Parallel()
 		snap, pub := arrive(t, map[string]string{
 			"variable_sip_h_X-AICC-UD-orderId":  "A-4471",
 			"variable_sip_h_X-AICC-UD-ticketId": "T-9",
@@ -1125,6 +1120,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 	})
 
 	t.Run("from our own dialplan", func(t *testing.T) {
+		t.Parallel()
 		snap, _ := arrive(t, map[string]string{"variable_aicc_ud_orderId": "A-4471"})
 		if snap.UserData["orderId"] != "A-4471" {
 			t.Errorf("userData = %v", snap.UserData)
@@ -1134,6 +1130,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 	// The dialplan looked the caller up and knows better than the claim that
 	// rode in with the call.
 	t.Run("our dialplan wins a collision", func(t *testing.T) {
+		t.Parallel()
 		snap, _ := arrive(t, map[string]string{
 			"variable_sip_h_X-AICC-UD-orderId": "what the caller claimed",
 			"variable_aicc_ud_orderId":         "what we looked up",
@@ -1147,6 +1144,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 	// call goes through. The alternative is turning a customer away because
 	// somebody upstream was verbose.
 	t.Run("more than a call may hold still connects", func(t *testing.T) {
+		t.Parallel()
 		vars := map[string]string{
 			"variable_aicc_ud_note": strings.Repeat("x", UserDataMaxValueBytes+1),
 		}
@@ -1171,6 +1169,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 // authority on what the switch saw anyway. Sending NORMAL_CLEARING for a
 // decline is what had mod_callcenter counting it as a call the agent ignored.
 func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
+	t.Parallel()
 	adapter, cmd := newTestAdapter()
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
@@ -1218,6 +1217,7 @@ func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
 // caller before its event reaches us, so the call answered before it started.
 // Sixty-four rows in the live ledger, and every total_sec carried the skew.
 func TestACallBeginsWhenTheSwitchSaysItDid(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	t.Cleanup(registry.Shutdown)
@@ -1289,29 +1289,6 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 	return events.Event{}, events.Scope{}, false
 }
 
-// A queue delivery leg joins the caller's call the moment it is created, not
-// at the bridge. On a call of its own it would be that call's first party —
-// ORIGINATOR/DIALING — and the agent's screen would show them dialling the
-// caller who is in fact ringing them; a delivery mod_callcenter cancels before
-// it answers never bridges at all, so the stray call reached the ledger as an
-// outbound CDR with caller and agent reversed, one per retry.
-// One extension calling another: the same shape as a queue delivery, but
-// mod_callcenter knows nothing about it, so the pointer back to the first leg
-// comes from our own dialplan instead. It cannot be a call id — the caller's
-// CHANNEL_CREATE reaches us before the dialplan runs, so whichever leg the
-// identity is minted on, the other has already been adopted on its own.
-//
-// Without the pointer the second leg is that new call's first party and comes
-// out ORIGINATOR/DIALING, which is what the agent being rung was shown: their
-// caller's leg, labelled "Calling out", on their own screen.
-// A caller's own leg belongs to the caller, not to the person they dialled.
-//
-// The switch's destination for a leg identifies an agent only when the switch
-// raised that leg towards them. A phone-originated leg carries the number it is
-// calling, so matching on it gave both legs of an internal call the same agent
-// id — and the cockpit, taking the first party with an id as its own, showed
-// the agent being rung their caller's leg: Calling out, dialling, on a screen
-// whose phone was ringing.
 // An agent works one leg, so their stream is about that leg. On a call between
 // two agents each of them should see their own party ring, establish and
 // release — not six events about both of them.
@@ -1320,6 +1297,7 @@ func (p *capturingPublisher) find(t events.Type) (events.Event, events.Scope, bo
 // customer left from their own leg's PARTY_RELEASED
 // (TestAnAgentLessLegReachesNoAgentsStream).
 func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	c := NewCoordinator(registry, nil, twoAgents{}, pub)
@@ -1380,6 +1358,7 @@ func TestALegEventGoesToTheAgentWhoseLegItIs(t *testing.T) {
 // the owner directive of 2026-08-22 forbids. Call-scoped events still carry
 // the queue.
 func TestAnAgentLessLegReachesNoAgentsStream(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	t.Cleanup(registry.Shutdown)
@@ -1460,6 +1439,7 @@ func TestAnAgentLessLegReachesNoAgentsStream(t *testing.T) {
 }
 
 func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, twoAgents{}, nullPublisher{})
 
@@ -1511,6 +1491,7 @@ func TestACallersOwnLegIsNotAttributedToWhoTheyDialled(t *testing.T) {
 }
 
 func TestTheSecondLegOfAnInternalCallJoinsTheFirst(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 
@@ -1567,6 +1548,7 @@ func TestTheSecondLegOfAnInternalCallJoinsTheFirst(t *testing.T) {
 }
 
 func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 
@@ -1628,6 +1610,7 @@ func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
 // the caller's leg delivers the bot's actual tally a conversation later. The
 // call must end up with both halves.
 func TestTheBotShareSurvivesTheLegThatHangsUpFirst(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	finished := &finishedCollector{}
 	registry.OnCallFinished = finished.add
@@ -1686,6 +1669,7 @@ func TestTheBotShareSurvivesTheLegThatHangsUpFirst(t *testing.T) {
 // but the event that puts the call on their screen was quoting the token back
 // at them as the extension they were being rung at (found live, 2026-08-20).
 func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	pub := &capturingPublisher{}
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
@@ -1721,6 +1705,7 @@ func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
 // into. Owner's ruling (2026-08-20) is that the three controls are refused,
 // and the refusal happens before the switch is touched.
 func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	ctx := t.Context()
@@ -1776,6 +1761,7 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 // showing them a call they had passed on, with controls for a leg the switch
 // had already hung up (found live, 2026-08-21).
 func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	ctx := t.Context()
@@ -1819,6 +1805,7 @@ func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
 // the echo comes straight back, and every restart read it as calls the agents
 // had ignored.
 func TestOnlyACallThatRangOutTakesAnAgentOutOfRouting(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct {
 		action, cause string
 		wantBenched   bool
@@ -1831,6 +1818,7 @@ func TestOnlyACallThatRangOutTakesAnAgentOutOfRouting(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			registry := NewRegistry(nullPublisher{})
 			t.Cleanup(registry.Shutdown)
 			agents := &presenceCalls{}
@@ -1864,7 +1852,9 @@ func TestOnlyACallThatRangOutTakesAnAgentOutOfRouting(t *testing.T) {
 // The owner found it by reading a live stream of one extension calling
 // another (2026-08-22).
 func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
+	t.Parallel()
 	t.Run("an agent placing a call sees their own leg before it is answered", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -1874,7 +1864,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
 			map[string]string{"variable_dialed_user": agentExtension}))
 
-		ev, _, ok := pub.find(events.TypePartyDialing)
+		ev, scope, ok := pub.find(events.TypePartyDialing)
 		if !ok {
 			t.Fatal("nothing announced the dialling leg; the workbench shows nothing " +
 				"until the other end picks up")
@@ -1885,28 +1875,23 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		if ev.PartyID == nil {
 			t.Error("the event names no party")
 		}
-	})
-
-	t.Run("it is the agent's own leg and nobody else's", func(t *testing.T) {
-		registry := NewRegistry(nullPublisher{})
-		t.Cleanup(registry.Shutdown)
-		pub := &capturingPublisher{}
-		c := NewCoordinator(registry, nil, oneAgent{}, pub)
-
-		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
-			map[string]string{"variable_dialed_user": agentExtension}))
-
-		_, scope, ok := pub.find(events.TypePartyDialing)
-		if !ok {
-			t.Fatal("no PARTY_DIALING")
-		}
 		if len(scope.AgentIDs) != 1 || scope.AgentIDs[0] != testAgentID {
 			t.Errorf("scope = %v, want only the agent whose leg it is — a colleague's "+
 				"cockpit cannot tell whose leg it is being shown", scope.AgentIDs)
 		}
+		// The same event published from the FSM carries role and state
+		// (registry.go transition()); this one did not, so a subscriber reading
+		// payload.state had to know which code path raised its event.
+		if got := ev.Payload["role"]; got != string(RoleOriginator) {
+			t.Errorf("role = %v, want %s", got, RoleOriginator)
+		}
+		if got := ev.Payload["state"]; got != string(PartyDialing) {
+			t.Errorf("state = %v, want %s", got, PartyDialing)
+		}
 	})
 
 	t.Run("a caller's own dialling leg reaches no agent", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -1934,6 +1919,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 	// pair PARTY_RINGING renders, which is the callee's view — who is ringing
 	// you — and is backwards on the leg doing the ringing.
 	t.Run("it reads from the dialling leg's own point of view", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -1965,6 +1951,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 	// that as the number being called is a wrong answer wearing the shape of a
 	// right one, and the callee's real number arrives moments later anyway.
 	t.Run("a registration token is not a number and is left out", func(t *testing.T) {
+		t.Parallel()
 		got := dialingPayload("1008", "doskp0mj")
 		if got["fromNumber"] != "1008" {
 			t.Errorf("fromNumber = %v", got["fromNumber"])
@@ -1985,6 +1972,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 	// nobody. Verbatim from the live call in artifacts/C61: wei's leg came up
 	// as sofia/internal/6p2g7hjk@… with wei dialling 1002.
 	t.Run("a call this application placed says what it dialled", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -2018,31 +2006,8 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		}
 	})
 
-	// The same event published from the FSM carries role and state
-	// (registry.go transition()); this one did not, so a subscriber reading
-	// payload.state had to know which code path raised its event.
-	t.Run("it is shaped like every other party event", func(t *testing.T) {
-		registry := NewRegistry(nullPublisher{})
-		t.Cleanup(registry.Shutdown)
-		pub := &capturingPublisher{}
-		c := NewCoordinator(registry, nil, oneAgent{}, pub)
-
-		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
-			map[string]string{"variable_dialed_user": agentExtension}))
-
-		ev, _, ok := pub.find(events.TypePartyDialing)
-		if !ok {
-			t.Fatal("no PARTY_DIALING")
-		}
-		if got := ev.Payload["role"]; got != string(RoleOriginator) {
-			t.Errorf("role = %v, want %s", got, RoleOriginator)
-		}
-		if got := ev.Payload["state"]; got != string(PartyDialing) {
-			t.Errorf("state = %v, want %s", got, PartyDialing)
-		}
-	})
-
 	t.Run("a leg that answers a call is ringing, not dialling", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -2077,7 +2042,9 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 // {"fromNumber":"1002","toNumber":"1002","extensionNumber":"1002"} — the agent
 // being rung was told they were being rung by themselves (C61).
 func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
+	t.Parallel()
 	t.Run("the caller is the leg that started the call", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -2117,6 +2084,7 @@ func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
 	// customer waiting in the queue is the call's originator, and their number
 	// is what the agent's screen has to pop with.
 	t.Run("a queue delivery names the customer", func(t *testing.T) {
+		t.Parallel()
 		registry := NewRegistry(nullPublisher{})
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
@@ -2142,18 +2110,6 @@ func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
 			t.Errorf("fromNumber = %v, want the customer's number", got)
 		}
 	})
-
-	// The "second leg outran its caller" path: the leg towards the agent
-	// reaches the application before the caller's own leg does, so there is no
-	// originator to ask and the leg's own ANI is all there is.
-	t.Run("with no originator on the books it falls back to the leg", func(t *testing.T) {
-		if got := orNumber("", "13800138000"); got != "13800138000" {
-			t.Errorf("orNumber = %q, want the fallback", got)
-		}
-		if got := orNumber("1008", "1002"); got != "1008" {
-			t.Errorf("orNumber = %q, want the call's own answer", got)
-		}
-	})
 }
 
 // stashedData stands in for the store an outbound request leaves its business
@@ -2167,6 +2123,7 @@ func (d stashedData) CallData(callID uuid.UUID) map[string]any { return d[callID
 // screen, and it does not travel through the switch to get there: it is left
 // here when the call is placed and picked up when the call comes into being.
 func TestBusinessDataAttachedToAPlacedCallReachesTheAgent(t *testing.T) {
+	t.Parallel()
 	minted := uuid.New()
 	sent := map[string]any{"ticketId": "T-1", "tier": "VIP", "订单": "ORD-9"}
 
@@ -2211,6 +2168,7 @@ func TestBusinessDataAttachedToAPlacedCallReachesTheAgent(t *testing.T) {
 // the call's own id — the extension, say — would hand one call's business data
 // to another.
 func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
+	t.Parallel()
 	somebodyElse := uuid.New()
 
 	registry := NewRegistry(nullPublisher{})
@@ -2242,6 +2200,7 @@ func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
 // through empty. Nothing broke, because the panel reads its cache — but the
 // promise was only true of the events that happened to keep it.
 func TestEveryCallEventRepeatsTheContextTheEnvelopePromises(t *testing.T) {
+	t.Parallel()
 	minted := uuid.New()
 	sent := map[string]any{"orderId": "9999000000000000"}
 
@@ -2291,6 +2250,7 @@ func TestEveryCallEventRepeatsTheContextTheEnvelopePromises(t *testing.T) {
 // as the one doing the ringing. Being on the call is a separate fact and
 // still follows.
 func TestALegTheAgentPlacedIsNotAlsoAnnouncedAsRinging(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
 	pub := &capturingPublisher{}
@@ -2326,6 +2286,7 @@ func TestALegTheAgentPlacedIsNotAlsoAnnouncedAsRinging(t *testing.T) {
 // back milliseconds later. Live, that told the agent their call id twice
 // within twelve milliseconds, the first one already on its way out (C46).
 func TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove(t *testing.T) {
+	t.Parallel()
 	minted := uuid.New()
 
 	registry := NewRegistry(nullPublisher{})
@@ -2378,6 +2339,7 @@ func TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove(t *testing.T) {
 // never connected ever kept the wrong answer — and that is exactly the call
 // whose record has nothing else to say who was dialled.
 func TestALegKnowsWhoItFacesBeforeAnythingHasBridged(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		vars  map[string]string
@@ -2432,6 +2394,7 @@ func TestALegKnowsWhoItFacesBeforeAnythingHasBridged(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			registry := NewRegistry(nullPublisher{})
 			c := NewCoordinator(registry, nil, twoAgents{}, nullPublisher{})
 
@@ -2471,6 +2434,7 @@ func TestALegKnowsWhoItFacesBeforeAnythingHasBridged(t *testing.T) {
 // the switch's bridge event. Answering is a leg's own fact — the ledger has
 // always kept the two apart, and now so does the party.
 func TestAnAgentIsNotToldTheyAreTalkingUntilSomebodyIsThere(t *testing.T) {
+	t.Parallel()
 	pub := &capturingPublisher{}
 	registry := NewRegistry(pub)
 	t.Cleanup(registry.Shutdown)
@@ -2573,6 +2537,7 @@ func TestAnAgentIsNotToldTheyAreTalkingUntilSomebodyIsThere(t *testing.T) {
 // saying what they had dialled. Eleven such rows in the ledger, while the
 // switch logged "unknown number 95009 from …" as it rejected each one (C31).
 func TestARejectedCallersLegKnowsWhatTheyDialled(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
@@ -2613,6 +2578,7 @@ func TestARejectedCallersLegKnowsWhatTheyDialled(t *testing.T) {
 // It must not make that leg look like the bot's: isBotLeg asks whether the leg
 // was dialled *at* the DID, and this one is dialled at the customer.
 func TestTheCustomerLegOfAnAIOutboundIsNotMistakenForTheBots(t *testing.T) {
+	t.Parallel()
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})

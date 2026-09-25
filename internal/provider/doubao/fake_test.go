@@ -41,7 +41,6 @@ type fakeDoubao struct {
 	rawReceived [][]byte
 
 	handshakeHeader http.Header
-	readErr         error
 
 	closeOnce sync.Once
 }
@@ -70,7 +69,6 @@ func newFakeDoubao(t *testing.T, reply func(f *fakeDoubao, message map[string]an
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
-				f.recordReadError(err)
 				return
 			}
 			f.recordFrame(data)
@@ -260,19 +258,6 @@ func (f *fakeDoubao) rawFrames() [][]byte {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([][]byte(nil), f.rawReceived...)
-}
-
-func (f *fakeDoubao) recordReadError(err error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.readErr = err
-}
-
-// readError returns what ended the server's read loop, once it has.
-func (f *fakeDoubao) readError() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.readErr
 }
 
 // assertNothingFollowedTheClose is the promise that no frame of any kind is

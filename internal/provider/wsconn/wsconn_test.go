@@ -47,6 +47,7 @@ func testLogger() *slog.Logger {
 // the whole diagnosis: a wrong credential and a wrong address look identical
 // without it.
 func TestARefusedDialCarriesTheStatus(t *testing.T) {
+	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "no", http.StatusUnauthorized)
 	}))
@@ -64,6 +65,7 @@ func TestARefusedDialCarriesTheStatus(t *testing.T) {
 // Some protocols put the session's identity in the handshake rather than in a
 // frame, so what the provider answered with has to survive the dial.
 func TestTheHandshakeAnswerIsKept(t *testing.T) {
+	t.Parallel()
 	endpoint := testServer(t, http.Header{"X-Session-Id": []string{"s-1"}}, func(conn *websocket.Conn) {
 		_, _, _ = conn.ReadMessage()
 	})
@@ -82,6 +84,7 @@ func TestTheHandshakeAnswerIsKept(t *testing.T) {
 // Once the session is over the socket is gone, and a send has to say so rather
 // than write into a closed connection.
 func TestASendAfterCloseIsRefused(t *testing.T) {
+	t.Parallel()
 	received := make(chan string, 1)
 	endpoint := testServer(t, nil, func(conn *websocket.Conn) {
 		for {

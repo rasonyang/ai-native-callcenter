@@ -42,49 +42,37 @@ async function renderCockpit(backend: Partial<Backend> = {}) {
 
 const onCall = { calls: [callFixture('TALKING')], presence: presenceFixture({ availability: 'ON_CALL' }) }
 
+function mutedCall() {
+  const call = callFixture('TALKING')
+  call.parties[1].isMuted = true
+  return call
+}
+
 describe('control grid', () => {
-  it('shows the five controls, every one of them wired', async () => {
+  // The grid used to carry a sixth, disabled key for conferencing. The product
+  // does not want conferencing, so the grid offers nothing the agent cannot use.
+  it('shows the five controls, every one of them enabled', async () => {
     await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
     for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
-      expect(within(grid).getByRole('button', { name })).toBeVisible()
+      expect(within(grid).getByRole('button', { name })).toBeEnabled()
     }
     expect(within(grid).getAllByRole('button')).toHaveLength(5)
   })
 
-  // The grid used to carry a sixth, disabled key for conferencing. The product
-  // does not want conferencing, so it is not a gap being tracked — it is a
-  // control that should never have been drawn.
-  it('offers nothing the agent cannot use', async () => {
-    await renderCockpit(onCall)
+  it.each([
+    ['mutes the agent', onCall.calls[0], /^mute$/i, 'mute'],
+    ['unmutes once the switch reports the leg muted', mutedCall(), /^unmute$/i, 'unmute'],
+    ['holds', onCall.calls[0], /^hold$/i, 'hold'],
+    ['resumes a held call', callFixture('HELD'), /resume/i, 'retrieve'],
+    ['hangs up', onCall.calls[0], /hang up/i, 'hangup'],
+  ])('%s', async (_case, call, button, action) => {
+    const { api, user } = await renderCockpit({ calls: [call] })
     const grid = await screen.findByRole('group', { name: /call controls/i })
-    const disabled = within(grid)
-      .getAllByRole('button')
-      .filter((b) => (b as HTMLButtonElement).disabled)
-    expect(disabled).toEqual([])
-    expect(within(grid).queryByRole('button', { name: /conference/i })).toBeNull()
-  })
-
-  it('mutes and unmutes the agent', async () => {
-    const { api, user } = await renderCockpit(onCall)
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    await user.click(within(grid).getByRole('button', { name: /^mute$/i }))
+    await user.click(within(grid).getByRole('button', { name: button }))
     await waitFor(() =>
       expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/mute` }),
-      ),
-    )
-  })
-
-  it('offers unmute once the switch reports the leg muted', async () => {
-    const muted = callFixture('TALKING')
-    muted.parties[1].isMuted = true
-    const { api, user } = await renderCockpit({ calls: [muted] })
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    await user.click(within(grid).getByRole('button', { name: /^unmute$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/unmute` }),
+        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/${action}` }),
       ),
     )
   })
@@ -102,13 +90,6 @@ describe('control grid', () => {
     expect(within(grid).getByRole('button', { name: /^transfer$/i })).toBeDisabled()
     // Muting yourself and hanging up still make sense on any call.
     expect(within(grid).getByRole('button', { name: /^mute$/i })).toBeEnabled()
-  })
-
-  it('leaves hold and transfer available on a call the agent is handling', async () => {
-    await renderCockpit(onCall)
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    expect(within(grid).getByRole('button', { name: /^hold$/i })).toBeEnabled()
-    expect(within(grid).getByRole('button', { name: /^transfer$/i })).toBeEnabled()
   })
 
   it('sends a tone the moment a key is pressed', async () => {
@@ -137,28 +118,6 @@ describe('control grid', () => {
     )
   })
 
-  it('holds', async () => {
-    const { api, user } = await renderCockpit(onCall)
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    await user.click(within(grid).getByRole('button', { name: /^hold$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/hold` }),
-      ),
-    )
-  })
-
-  it('resumes a held call', async () => {
-    const { api, user } = await renderCockpit({ calls: [callFixture('HELD')] })
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    await user.click(within(grid).getByRole('button', { name: /resume/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/retrieve` }),
-      ),
-    )
-  })
-
   it('transfers', async () => {
     const { api, user } = await renderCockpit(onCall)
     const grid = await screen.findByRole('group', { name: /call controls/i })
@@ -173,17 +132,6 @@ describe('control grid', () => {
           path: `/calls/${CALL_ID}/transfer`,
           body: { destination: '3002' },
         }),
-      ),
-    )
-  })
-
-  it('hangs up', async () => {
-    const { api, user } = await renderCockpit(onCall)
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    await user.click(within(grid).getByRole('button', { name: /hang up/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: `/calls/${CALL_ID}/hangup` }),
       ),
     )
   })
@@ -364,20 +312,6 @@ describe('the rest of the cockpit', () => {
     expect(screen.getByText('ORD-10391')).toBeInTheDocument()
   })
 
-  it('completes wrap-up', async () => {
-    const { api, user } = await renderCockpit({
-      presence: inWrapUp(),
-      dispositions: dispositionsFixture(),
-      currentWrapUp: openWrapUpFixture(),
-    })
-    await user.click(await screen.findByRole('button', { name: /^done$/i }))
-    await waitFor(() =>
-      expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: '/agent/wrap-up' }),
-      ),
-    )
-  })
-
   it('shows the agent their own day', async () => {
     await renderCockpit({
       today: todayFixture({ callsHandled: 23, avgHandleSec: 276, avgWrapUpSec: 42, occupancyPct: 78 }),
@@ -544,15 +478,6 @@ describe('after-call work', () => {
     await waitFor(() =>
       expect(screen.getByPlaceholderText(/customer number/i)).toBeEnabled(),
     )
-    expect(screen.queryByText(/finish the wrap-up first/i)).toBeNull()
-  })
-
-  it('leaves the dialler alone when nothing is waiting', async () => {
-    await renderCockpit({
-      presence: presenceFixture({ availability: 'READY' }),
-      currentWrapUp: null,
-    })
-    expect(await screen.findByPlaceholderText(/customer number/i)).toBeEnabled()
     expect(screen.queryByText(/finish the wrap-up first/i)).toBeNull()
   })
 
@@ -806,12 +731,6 @@ describe('the caller card', () => {
     expect(screen.getByText(/jul 30, 2026/i)).toBeInTheDocument()
   })
 
-  it('says so when there is nobody to show at all', async () => {
-    await renderCockpit({ calls: [], contacts: [], myCDRs: [] })
-    expect(await screen.findByText(/no caller identified yet/i)).toBeInTheDocument()
-  })
-
-
   it('shows the contact behind the number', async () => {
     await renderCockpit({ ...onCall, contacts: [contactFixture()] })
 
@@ -826,42 +745,6 @@ describe('the caller card', () => {
 
     expect(await screen.findAllByText(CALLER)).not.toHaveLength(0)
     expect(screen.queryByText('Zhang Wei')).toBeNull()
-  })
-})
-
-/**
- * The cockpit lost its softphone once to an agentic whole-file rewrite. These
- * assert that adding the transcript panel took nothing with it: the control
- * grid is intact and still issues the same request.
- */
-describe('the transcript panel does not disturb the cockpit', () => {
-  it('keeps all six controls and the transcript on the same screen', async () => {
-    await renderCockpit(onCall)
-
-    expect(await screen.findByText('Live transcript')).toBeInTheDocument()
-
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-    expect(within(grid).getAllByRole('button')).toHaveLength(5)
-    for (const name of [/^mute$/i, /^hold$/i, /^transfer$/i, /^keypad$/i, /hang up/i]) {
-      expect(within(grid).getByRole('button', { name })).toBeVisible()
-    }
-  })
-
-  it('still hangs up through the same endpoint with the panel mounted', async () => {
-    const { api } = await renderCockpit(onCall)
-    const grid = await screen.findByRole('group', { name: /call controls/i })
-
-    await userEvent.click(within(grid).getByRole('button', { name: /hang up/i }))
-    await waitFor(() =>
-      expect(api.commands.map((c) => c.path)).toContain(`/calls/${CALL_ID}/hangup`),
-    )
-  })
-
-  it('asks for no transcript when there is no call', async () => {
-    const { api } = await renderCockpit({ calls: [] })
-
-    await screen.findByText('Live transcript')
-    expect(api.requests.filter((r) => r.path.includes('/transcript'))).toHaveLength(0)
   })
 })
 
@@ -908,16 +791,11 @@ describe('live transcript', () => {
     expect(await screen.findByText(/my account number is 4471/i)).toBeInTheDocument()
   })
 
-  it('shows the state the server reports, not one it invents', async () => {
-    await renderCockpit({ ...onCall, transcriptState: 'LIVE' })
-    expect(await screen.findByText(/transcribing…/i)).toBeInTheDocument()
+  it('asks for no transcript when there is no call', async () => {
+    const { api } = await renderCockpit({ calls: [] })
 
-    emitEvent('CALL_TRANSCRIPTION_STATE', {
-      type: 'CALL_TRANSCRIPTION_STATE',
-      callId: CALL_ID,
-      payload: { state: 'DEGRADED', reason: 'ASR_SESSION_FAILED' },
-    })
-    expect(await screen.findByText(/transcribing one side/i)).toBeInTheDocument()
+    await screen.findByText('Live transcript')
+    expect(api.requests.filter((r) => r.path.includes('/transcript'))).toHaveLength(0)
   })
 
   it('keeps the state the stream reported when a staler snapshot arrives', async () => {

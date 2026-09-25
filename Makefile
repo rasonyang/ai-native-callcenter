@@ -89,8 +89,9 @@ run: ## Run the server (expects dev-up and a built SPA, or use the Vite dev serv
 	go run ./cmd/aicc
 
 .PHONY: test
-test: ## Run Go tests
-	go test ./...
+test: ## Run Go (with -race) and frontend tests, as CI does
+	go test -race ./...
+	cd $(WEB) && npm run test
 
 .PHONY: lint
 lint: ## Vet Go code and lint the frontend

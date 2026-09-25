@@ -34,6 +34,7 @@ var mountedElsewhere = []string{"StreamEvents"}
 // fetch failed to parse it, and the whole backfill half of the feature was
 // dead. Nothing failed. This is what would have failed.
 func TestEveryContractOperationIsRouted(t *testing.T) {
+	t.Parallel()
 	iface := reflect.TypeOf((*api.ServerInterface)(nil)).Elem()
 
 	fset := token.NewFileSet()

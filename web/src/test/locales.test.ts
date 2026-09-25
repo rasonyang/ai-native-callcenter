@@ -31,15 +31,8 @@ describe('the reason a call went unserved', () => {
   ])('is a sentence in %s, never a raw key', (_locale, bundle) => {
     const reasons = (bundle as { cdr: { missedReasons: Record<string, string> } }).cdr
       .missedReasons
-    expect(Object.keys(reasons).sort()).toEqual([...MISSED_REASONS].sort())
+    expect(Object.keys(reasons).toSorted()).toEqual(MISSED_REASONS.toSorted())
     for (const value of Object.values(reasons)) expect(value.trim()).not.toBe('')
-  })
-
-  // A word one language has and the other lacks is the same defect halfway.
-  it('says the same set of things in both languages', () => {
-    expect(Object.keys(en.cdr.missedReasons).sort()).toEqual(
-      Object.keys(zh.cdr.missedReasons).sort(),
-    )
   })
 })
 

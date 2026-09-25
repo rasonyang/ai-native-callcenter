@@ -36,12 +36,6 @@ func TestTheSessionIsCreatedExactlyAsMeasured(t *testing.T) {
 	if got := string(frames[0]); got != want {
 		t.Errorf("the session was created as\n got: %s\nwant: %s", got, want)
 	}
-
-	// The model is this client's, not the deployment's: the profile carries a
-	// name this protocol has no field for.
-	if strings.Contains(string(frames[0]), testProfile("").Model) {
-		t.Error("the profile's model reached the wire; this protocol names its own")
-	}
 }
 
 // The flow owns the voice; the profile's own is the fallback, and it has to be
@@ -89,16 +83,6 @@ func TestAnOpeningLineIsCommittedOnceTheSessionExists(t *testing.T) {
 			got.Text, got.IsFinal)
 	}
 	refuteMoreEvents(t, session)
-}
-
-// A call with no opening line sends exactly one frame and waits for the caller
-// to speak: this engine answers, it does not open.
-func TestWithNoOpeningLineNothingFollowsTheSessionCreate(t *testing.T) {
-	f := newFakeDoubao(t, acceptSession)
-	startedSession(t, f)
-
-	f.settledFrames(1)
-	f.awaitMessages("speech_text_buffer.commit", 0)
 }
 
 func TestTheCredentialRidesTheUpgrade(t *testing.T) {

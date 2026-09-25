@@ -23,6 +23,7 @@ func (s *sweepRecorder) Sweep(_ context.Context, deliveredBefore, failedBefore t
 // within hours of a customer asking "did you send it", a failed one weeks later
 // by somebody reconciling a month and finding a gap.
 func TestTheTwoWindowsAreCutSeparately(t *testing.T) {
+	t.Parallel()
 	rec := &sweepRecorder{}
 	NewSweeper(rec, 7, 30, discard()).sweep(t.Context())
 
@@ -43,6 +44,7 @@ func TestTheTwoWindowsAreCutSeparately(t *testing.T) {
 // nothing is older than. Getting this backwards would delete the whole table on
 // the first pass for a deployment that asked to keep everything.
 func TestAWindowOfZeroKeepsThatKindForever(t *testing.T) {
+	t.Parallel()
 	rec := &sweepRecorder{}
 	NewSweeper(rec, 0, 30, discard()).sweep(t.Context())
 
@@ -59,6 +61,7 @@ func TestAWindowOfZeroKeepsThatKindForever(t *testing.T) {
 // Both at zero and nothing runs at all: Run returns rather than ticking hourly
 // over a query that can delete nothing.
 func TestBothWindowsAtZeroDisableTheSweepEntirely(t *testing.T) {
+	t.Parallel()
 	rec := &sweepRecorder{}
 	s := NewSweeper(rec, 0, 0, discard())
 	if s.IsEnabled() {

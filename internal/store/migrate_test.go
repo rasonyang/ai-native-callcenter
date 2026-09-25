@@ -5,14 +5,12 @@ package store
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/pressly/goose/v3"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/testdb"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -23,48 +21,13 @@ import (
 // PostgreSQL rejects or a Down block that does not reverse its Up.
 //
 // These tests need a real PostgreSQL: goose speaks to a server, and the whole
-// point is to find what only a server can tell us. Set AICC_TEST_DATABASE_URL
-// to a superuser-capable DSN — the dev stack's is
-// postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable — and they run.
-// Without it they skip, so `go test ./...` stays green on a machine with no
-// database, at the cost of saying so loudly.
-const testDSNEnv = "AICC_TEST_DATABASE_URL"
+// point is to find what only a server can tell us. See internal/testdb for the
+// variable that enables them; without it they skip.
 
-// scratchDB creates a throwaway database and returns a DSN for it. Each test
-// gets its own, because migrating is a whole-database act and a shared one
-// would make the tests order-dependent.
+// scratchDB creates a throwaway, unmigrated database and returns a DSN for it.
 func scratchDB(t *testing.T) string {
 	t.Helper()
-	admin := os.Getenv(testDSNEnv)
-	if admin == "" {
-		t.Skipf("set %s to run the migration tests (see internal/store/migrate_test.go)", testDSNEnv)
-	}
-
-	u, err := url.Parse(admin)
-	if err != nil {
-		t.Fatalf("%s is not a URL: %v", testDSNEnv, err)
-	}
-	name := fmt.Sprintf("aicc_migtest_%d", time.Now().UnixNano())
-
-	db, err := sql.Open("pgx", admin)
-	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
-	}
-	defer db.Close()
-	if _, err := db.Exec("CREATE DATABASE " + name); err != nil {
-		t.Fatalf("create scratch database: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanup, err := sql.Open("pgx", admin)
-		if err != nil {
-			return
-		}
-		defer cleanup.Close()
-		_, _ = cleanup.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
-	})
-
-	u.Path = "/" + name
-	return u.String()
+	return testdb.ScratchDSN(t, "migtest")
 }
 
 func openScratch(t *testing.T, dsn string) *sql.DB {

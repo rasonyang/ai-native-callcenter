@@ -4,12 +4,8 @@ package seed
 
 import (
 	"context"
-	"database/sql"
-	"fmt"
 	"io"
 	"log/slog"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
@@ -17,8 +13,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/rasonyang/ai-native-callcenter/internal/testdb"
 )
 
 // The demo dataset is only worth having if somebody can sign in to it and take
@@ -26,45 +21,16 @@ import (
 // queues were never staffed — both invisible to a reading of the seeder, both
 // obvious the moment it runs against a server. So it runs against one here.
 //
-// Set AICC_TEST_DATABASE_URL (the dev stack's is
-// postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable) and these run;
-// without it they skip, loudly.
-const testDSNEnv = "AICC_TEST_DATABASE_URL"
+// Set AICC_TEST_DATABASE_URL (see internal/testdb) and these run; without it
+// they skip, loudly.
 
-// seededStore migrates a scratch database and seeds it.
+// seededStore migrates a scratch database. The tests seed it themselves.
 func seededStore(t *testing.T) *store.Store {
 	t.Helper()
-	admin := os.Getenv(testDSNEnv)
-	if admin == "" {
-		t.Skipf("set %s to run the seed tests (see internal/seed/demo_test.go)", testDSNEnv)
-	}
+	dsn := testdb.ScratchDSN(t, "seedtest")
 
-	u, err := url.Parse(admin)
-	if err != nil {
-		t.Fatalf("%s is not a URL: %v", testDSNEnv, err)
-	}
-	name := fmt.Sprintf("aicc_seedtest_%d", time.Now().UnixNano())
-
-	adminDB, err := sql.Open("pgx", admin)
-	if err != nil {
-		t.Fatalf("open admin connection: %v", err)
-	}
-	defer adminDB.Close()
-	if _, err := adminDB.Exec("CREATE DATABASE " + name); err != nil {
-		t.Fatalf("create scratch database: %v", err)
-	}
-	t.Cleanup(func() {
-		cleanup, err := sql.Open("pgx", admin)
-		if err != nil {
-			return
-		}
-		defer cleanup.Close()
-		_, _ = cleanup.Exec("DROP DATABASE IF EXISTS " + name + " WITH (FORCE)")
-	})
-
-	u.Path = "/" + name
 	ctx := context.Background()
-	st, err := store.Open(ctx, u.String(), 4)
+	st, err := store.Open(ctx, dsn, 4)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}

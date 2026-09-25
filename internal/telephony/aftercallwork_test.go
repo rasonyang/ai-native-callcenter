@@ -98,6 +98,7 @@ func answerAndEndAnAgentLeg(t *testing.T, c *Coordinator, answered bool) uuid.UU
 }
 
 func TestAnAnsweredAgentLegEndingStartsAfterCallWork(t *testing.T) {
+	t.Parallel()
 	agents := &presenceCalls{}
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
@@ -128,6 +129,7 @@ func TestAnAnsweredAgentLegEndingStartsAfterCallWork(t *testing.T) {
 
 // A leg that rang and was never answered left the agent nothing to write up.
 func TestAnUnansweredAgentLegStartsNoAfterCallWork(t *testing.T) {
+	t.Parallel()
 	agents := &presenceCalls{}
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
@@ -146,6 +148,7 @@ func TestAnUnansweredAgentLegStartsNoAfterCallWork(t *testing.T) {
 
 // The caller's own leg ending is not an agent's part of a call ending.
 func TestTheCallersLegEndingStartsNobodysAfterCallWork(t *testing.T) {
+	t.Parallel()
 	agents := &presenceCalls{}
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)

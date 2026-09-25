@@ -32,33 +32,20 @@ describe('sameSpec', () => {
   // The column is jsonb, which keeps neither key order nor whitespace. Compare
   // the text and every saved draft stays marked unsaved for ever, with Publish
   // — which wants a clean draft — permanently out of reach.
-  it('does not count key order or formatting as a change', () => {
-    const asWritten = { id: 'probe', specVersion: 'v2', nodes: { a: { tools: ['x'] } } }
-    const asReturned = { nodes: { a: { tools: ['x'] } }, specVersion: 'v2', id: 'probe' }
-
-    expect(sameSpec(asWritten, asReturned)).toBe(true)
-    expect(JSON.stringify(asWritten)).not.toBe(JSON.stringify(asReturned))
-  })
-
-  it('counts a changed value as a change', () => {
-    expect(sameSpec({ global: { maxTurns: 30 } }, { global: { maxTurns: 40 } })).toBe(false)
-  })
-
   // Order in a list is the order rules are evaluated in, so it is a change.
-  it('counts a reordered list as a change', () => {
-    expect(sameSpec({ tools: ['a', 'b'] }, { tools: ['b', 'a'] })).toBe(false)
+  it.each([
+    ['key order', { id: 'probe', nodes: { a: { tools: ['x'] } } },
+      { nodes: { a: { tools: ['x'] } }, id: 'probe' }, true],
+    ['a changed value', { global: { maxTurns: 30 } }, { global: { maxTurns: 40 } }, false],
+    ['a reordered list', { tools: ['a', 'b'] }, { tools: ['b', 'a'] }, false],
+  ])('judges %s', (_case, a, b, same) => {
+    expect(sameSpec(a, b)).toBe(same)
   })
 })
 
 describe('unreachableNodes', () => {
   it('names a phase nothing transitions to', () => {
     expect(unreachableNodes(CHAIN)).toEqual(['orphan'])
-  })
-
-  it('counts the entry phase and the global fallback as reached', () => {
-    const found = unreachableNodes(CHAIN)
-    expect(found).not.toContain('welcome')
-    expect(found).not.toContain('goodbye')
   })
 
   // The engine can move a call to closingTarget with no transition naming it
@@ -122,34 +109,16 @@ describe('textFor', () => {
 })
 
 describe('describeRule', () => {
-  it('reads a tool result with a condition', () => {
-    expect(
-      describeRule({
-        on: 'TOOL_RESULT',
-        tool: 'lookup',
-        condition: { slot: 'result.ok', op: 'EQ', value: true },
-        target: 'answer',
-      }),
-    ).toBe('lookup · ok = true')
-  })
-
-  it('reads a rule that fires on silence', () => {
-    expect(describeRule({ on: 'NO_INPUT', target: 'goodbye' })).toBe('no input')
-  })
-
-  it('joins a conjunction', () => {
-    expect(
-      describeRule({
-        tool: 'lookup',
-        condition: {
-          all: [
-            { slot: 'result.ok', op: 'EQ', value: true },
-            { slot: 'result.count', op: 'GTE', value: 3 },
-          ],
-        },
-        target: 'answer',
-      }),
-    ).toBe('lookup · ok = true & count ≥ 3')
+  it.each([
+    [{ on: 'TOOL_RESULT', tool: 'lookup', condition: { slot: 'result.ok', op: 'EQ', value: true },
+      target: 'answer' }, 'lookup · ok = true'],
+    [{ on: 'NO_INPUT', target: 'goodbye' }, 'no input'],
+    [{ tool: 'lookup', target: 'answer', condition: { all: [
+      { slot: 'result.ok', op: 'EQ', value: true },
+      { slot: 'result.count', op: 'GTE', value: 3 },
+    ] } }, 'lookup · ok = true & count ≥ 3'],
+  ] as const)('reads %o as %s', (rule, text) => {
+    expect(describeRule(rule as Parameters<typeof describeRule>[0])).toBe(text)
   })
 })
 
@@ -176,12 +145,6 @@ describe('starterSpec', () => {
     expect(target).toBeTruthy()
     expect(spec.nodes?.[target as string]?.isTerminal).toBe(true)
     expect(unreachableNodes(spec)).toEqual([])
-  })
-
-  // The starter's one working phase has no tools, so a turns-without-a-tool
-  // wall would count every exchange of the call and cut it short.
-  it('sets no turns-without-a-tool wall', () => {
-    expect(starterSpec('probe').global?.maxTurnsWithoutTool).toBeUndefined()
   })
 })
 

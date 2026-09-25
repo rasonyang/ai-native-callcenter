@@ -119,6 +119,7 @@ func pendingFor(subscriptionID uuid.UUID, attempt int) store.WebhookDelivery {
 // are the contract with somebody else's code, so they are asserted rather than
 // assumed.
 func TestWhatTheCustomersEndpointReceives(t *testing.T) {
+	t.Parallel()
 	var (
 		gotAuth string
 		gotID   string
@@ -177,6 +178,7 @@ func TestWhatTheCustomersEndpointReceives(t *testing.T) {
 // A subscription with no token presents none, rather than sending an empty
 // bearer that a receiver would have to special-case.
 func TestNoTokenMeansNoAuthorizationHeader(t *testing.T) {
+	t.Parallel()
 	var had bool
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, had = r.Header["Authorization"]
@@ -195,6 +197,7 @@ func TestNoTokenMeansNoAuthorizationHeader(t *testing.T) {
 // attempt already made — so a first failure waits the first interval, not the
 // second.
 func TestAFailedAttemptIsRescheduledOnTheSchedule(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -224,6 +227,7 @@ func TestAFailedAttemptIsRescheduledOnTheSchedule(t *testing.T) {
 // delivery, and it is announced: a metric for the dashboard, a WARN for the
 // operator with the customer on the phone.
 func TestRunningOutOfAttemptsFailsTheDeliveryAndSaysSo(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 	}))
@@ -250,6 +254,7 @@ func TestRunningOutOfAttemptsFailsTheDeliveryAndSaysSo(t *testing.T) {
 // transport error carries no status code, and the delivery must still settle
 // rather than being claimed and forgotten.
 func TestAnUnreachableEndpointIsRetriedLikeAnyOtherFailure(t *testing.T) {
+	t.Parallel()
 	d := pending(1)
 	// A port nothing is listening on.
 	st := newFakeStore("http://127.0.0.1:1/hook", "t", d)
@@ -264,6 +269,7 @@ func TestAnUnreachableEndpointIsRetriedLikeAnyOtherFailure(t *testing.T) {
 // A 2xx that is not 200 is still success. A receiver answering 204 has taken
 // the delivery, and retrying it would post them a duplicate.
 func TestEveryTwoHundredIsSuccess(t *testing.T) {
+	t.Parallel()
 	for _, code := range []int{200, 201, 202, 204} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(code)
@@ -284,6 +290,7 @@ func TestEveryTwoHundredIsSuccess(t *testing.T) {
 // but never more than PerSubscriptionConcurrency of them are in flight at the
 // endpoint at once.
 func TestOneSubscriptionIsNeverHitByMoreThanTheCap(t *testing.T) {
+	t.Parallel()
 	var (
 		mu       sync.Mutex
 		inFlight int
@@ -334,6 +341,7 @@ func TestOneSubscriptionIsNeverHitByMoreThanTheCap(t *testing.T) {
 // The cap is per subscription, so one wedged receiver holds up only its own
 // deliveries. B's endpoint is answered in full while A's is still hanging.
 func TestASlowSubscriberDoesNotHoldUpAnotherOne(t *testing.T) {
+	t.Parallel()
 	release := make(chan struct{})
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		select {

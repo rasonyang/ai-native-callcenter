@@ -48,6 +48,7 @@ func patchUserData(t *testing.T, calls *patchingCalls, body string) *httptest.Re
 // the only place that distinction can be lost: Go's zero value for a string is
 // "" either way, so the patch travels as *string and nil means delete.
 func TestANullInThePatchIsADeletionAndNotAnEmptyValue(t *testing.T) {
+	t.Parallel()
 	calls := &patchingCalls{
 		result: map[string]any{"orderId": "A-4471"},
 		change: telephony.UserDataChange{Changed: []string{"orderId"}, Deleted: []string{"ticketId"}},
@@ -86,6 +87,7 @@ func TestANullInThePatchIsADeletionAndNotAnEmptyValue(t *testing.T) {
 // The two lists are required by the contract, so they are [] and never null:
 // a client iterating them should not have to check first.
 func TestAPatchThatMovedNothingStillAnswersWithBothLists(t *testing.T) {
+	t.Parallel()
 	calls := &patchingCalls{result: map[string]any{"orderId": "A-4471"}}
 	w := patchUserData(t, calls, `{"userData":{"orderId":"A-4471"}}`)
 	if w.Code != http.StatusOK {
@@ -98,6 +100,7 @@ func TestAPatchThatMovedNothingStillAnswersWithBothLists(t *testing.T) {
 }
 
 func TestTheAnswerToAPatchSaysWhichKeysWereTheProblem(t *testing.T) {
+	t.Parallel()
 	t.Run("a value too long is refused before the call is touched", func(t *testing.T) {
 		calls := &patchingCalls{}
 		w := patchUserData(t, calls,

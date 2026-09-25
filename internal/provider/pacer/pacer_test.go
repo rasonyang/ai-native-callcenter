@@ -180,6 +180,7 @@ func (u *uplink) counted(sent, dropped int64) {
 // and an empty tick owes it nothing: a repeat would be audio the caller never
 // made.
 func TestOneTickWritesOneFrameAndNoMore(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1})
 
 	u.push("01")
@@ -196,6 +197,7 @@ func TestOneTickWritesOneFrameAndNoMore(t *testing.T) {
 // and the catch-up is never written as a burst, which is the other half of what
 // such an engine calls a pacing error.
 func TestAFullQueueDropsItsOldestAndNeverCatchesUpInABurst(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1})
 
 	for _, marker := range []string{"01", "02", "03", "04", "05", "06"} {
@@ -219,6 +221,7 @@ func TestAFullQueueDropsItsOldestAndNeverCatchesUpInABurst(t *testing.T) {
 // frame per tick would only make the stall longer, so the whole queue goes at
 // once — in the order it arrived.
 func TestDrainingEverythingClearsTheBacklogOnOneTickInOrder(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 8, MaxPerTick: DrainEverything})
 
 	for _, marker := range []string{"01", "02", "03", "04", "05"} {
@@ -241,6 +244,7 @@ func TestDrainingEverythingClearsTheBacklogOnOneTickInOrder(t *testing.T) {
 // A negative count means the same thing as DrainEverything rather than nothing
 // at all: a pacer that wrote no frames would be a call in silence.
 func TestANonsensicalFrameCountDrainsRatherThanStalls(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 4, MaxPerTick: -1})
 
 	u.push("01")
@@ -253,6 +257,7 @@ func TestANonsensicalFrameCountDrainsRatherThanStalls(t *testing.T) {
 // A queue has to hold something. A client that named no depth gets one frame,
 // not a pacer that drops everything handed to it.
 func TestADepthlessQueueStillHoldsOneFrame(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{MaxPerTick: 1})
 
 	u.push("01")
@@ -265,6 +270,7 @@ func TestADepthlessQueueStillHoldsOneFrame(t *testing.T) {
 // The quiet is the client's to announce, once, and the end of it has to reach
 // the engine ahead of the audio that ended it.
 func TestTheQuietIsDeclaredOnceAndTheResumeGoesFirst(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1, IdleTicks: 3})
 
 	u.push("01")
@@ -299,6 +305,7 @@ func TestTheQuietIsDeclaredOnceAndTheResumeGoesFirst(t *testing.T) {
 // began is audio from before the silence, and writing it on resume would play
 // the caller a moment of their own past.
 func TestNothingQueuedBeforeTheQuietSurvivesIt(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1, IdleTicks: 3})
 
 	u.push("01")
@@ -321,6 +328,7 @@ func TestNothingQueuedBeforeTheQuietSurvivesIt(t *testing.T) {
 // A client with nothing to say about silence is never asked about it. On the
 // protocol this repository had first, an uplink that goes quiet is simply quiet.
 func TestAClientThatNamesNoQuietIsNeverToldOfOne(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1})
 
 	for range 50 {
@@ -337,6 +345,7 @@ func TestAClientThatNamesNoQuietIsNeverToldOfOne(t *testing.T) {
 // whoever offers the next frame, and its read loop reports the connection
 // itself, so one broken socket does not fail the call twice.
 func TestAFailedWriteIsCapturedAndKeptForTheClientToReport(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1, IdleTicks: 3})
 	brokenSocket := errors.New("the socket is gone")
 
@@ -369,6 +378,7 @@ func TestAFailedWriteIsCapturedAndKeptForTheClientToReport(t *testing.T) {
 // socket, and a hold nobody could send is the same broken session as a frame of
 // audio nobody could send.
 func TestAFailedHoldIsCapturedToo(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1, IdleTicks: 1})
 	brokenSocket := errors.New("the socket is gone")
 
@@ -383,6 +393,7 @@ func TestAFailedHoldIsCapturedToo(t *testing.T) {
 // Once the session is stopping there is no uplink at all. Queued frames are
 // discarded rather than flushed: they are audio from a call that has ended.
 func TestStoppingDiscardsWhatWasQueuedAndWritesNothingMore(t *testing.T) {
+	t.Parallel()
 	u := newUplink(t, Config{Depth: 3, MaxPerTick: 1})
 
 	u.push("01")

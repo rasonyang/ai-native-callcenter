@@ -24,6 +24,7 @@ const inviteFromSwitch = "INVITE sip:aicc@10.0.0.5:6060 SIP/2.0\r\n" +
 	"v=0\r\n"
 
 func TestParseHandlesRealWorldHeaderForms(t *testing.T) {
+	t.Parallel()
 	msg, err := parseSIP([]byte(inviteFromSwitch))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
@@ -52,6 +53,7 @@ func TestParseHandlesRealWorldHeaderForms(t *testing.T) {
 }
 
 func TestCustomHeadersAreNormalisedButValuesArePreserved(t *testing.T) {
+	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
 	headers := msg.customHeaders()
 
@@ -68,6 +70,7 @@ func TestCustomHeadersAreNormalisedButValuesArePreserved(t *testing.T) {
 }
 
 func TestMultipleViasOnOneLineAreSplit(t *testing.T) {
+	t.Parallel()
 	raw := "OPTIONS sip:aicc@10.0.0.5 SIP/2.0\r\n" +
 		"Via: SIP/2.0/UDP a.example;branch=z9hG4bK1, SIP/2.0/UDP b.example;branch=z9hG4bK2\r\n" +
 		"From: <sip:x@a.example>;tag=1\r\nTo: <sip:aicc@10.0.0.5>\r\n" +
@@ -83,6 +86,7 @@ func TestMultipleViasOnOneLineAreSplit(t *testing.T) {
 }
 
 func TestCommasInsideURIsAndQuotesDoNotSplit(t *testing.T) {
+	t.Parallel()
 	got := splitHeaderValues(`"Doe, John" <sip:a@b;p=1,2>, <sip:c@d>`)
 	if len(got) != 2 {
 		t.Fatalf("split into %d parts (%v), want 2", len(got), got)
@@ -93,6 +97,7 @@ func TestCommasInsideURIsAndQuotesDoNotSplit(t *testing.T) {
 }
 
 func TestResponsesEchoTheFullRoutingSet(t *testing.T) {
+	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
 	response := string(build200OKInvite(msg, "v=0\r\n", "10.0.0.5", 6060, "aicc-1"))
 
@@ -118,6 +123,7 @@ func TestResponsesEchoTheFullRoutingSet(t *testing.T) {
 }
 
 func TestExistingToTagIsNotDuplicated(t *testing.T) {
+	t.Parallel()
 	raw := strings.Replace(inviteFromSwitch, "t: <sip:aicc@10.0.0.5>",
 		"t: <sip:aicc@10.0.0.5>;tag=already", 1)
 	msg, _ := parseSIP([]byte(raw))
@@ -131,6 +137,7 @@ func TestExistingToTagIsNotDuplicated(t *testing.T) {
 // A 487 belongs to the INVITE transaction. Answering with the CANCEL's own
 // CSeq leaves the caller waiting for a final response that never comes.
 func Test487CarriesTheInviteCSeq(t *testing.T) {
+	t.Parallel()
 	invite, _ := parseSIP([]byte(inviteFromSwitch))
 
 	response := string(build487(invite, "aicc-3"))
@@ -146,6 +153,7 @@ func Test487CarriesTheInviteCSeq(t *testing.T) {
 }
 
 func TestByeReversesTheRouteSetAndTargetsTheContact(t *testing.T) {
+	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
 	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
 		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReason{}))
@@ -185,6 +193,7 @@ func TestByeReversesTheRouteSetAndTargetsTheContact(t *testing.T) {
 // FreeSWITCH maps the Q.850 reason onto the hangup cause, so this is also what
 // makes the ledger able to tell a restart from a goodbye.
 func TestAByeSentBecauseWeAreRestartingSaysSo(t *testing.T) {
+	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
 	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
 		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReasonRestart))
@@ -203,6 +212,7 @@ func TestAByeSentBecauseWeAreRestartingSaysSo(t *testing.T) {
 }
 
 func TestParseInfoDTMF(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		contentType string
@@ -218,6 +228,7 @@ func TestParseInfoDTMF(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &sipMessage{
 				headers: map[string]string{"content-type": tt.contentType},
 				body:    tt.body,
@@ -230,6 +241,7 @@ func TestParseInfoDTMF(t *testing.T) {
 }
 
 func TestParseRejectsGarbage(t *testing.T) {
+	t.Parallel()
 	for _, raw := range []string{"", "SIP/2.0\r\n\r\n", "SIP/2.0 notanumber OK\r\n\r\n"} {
 		if _, err := parseSIP([]byte(raw)); err == nil {
 			t.Errorf("parsing %q returned no error", raw)

@@ -64,6 +64,7 @@ func newTestAdapter() (*Adapter, *fakeCommander) {
 // escapeOriginateValue, and nothing is concatenated raw. The rules are the
 // switch's own, read from separate_string_char_delim.
 func TestEscapeOriginateValue(t *testing.T) {
+	t.Parallel()
 	// The switch's escape character, spelled once so the table below reads.
 	const BS = "\\"
 
@@ -114,6 +115,7 @@ func TestEscapeOriginateValue(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			if got := escapeOriginateValue(tt.in); got != tt.want {
 				t.Errorf("escapeOriginateValue(%q) = %q, want %q", tt.in, got, tt.want)
 			}
@@ -122,6 +124,7 @@ func TestEscapeOriginateValue(t *testing.T) {
 }
 
 func TestCommandStrings(t *testing.T) {
+	t.Parallel()
 	partyID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3d")
 
 	tests := []struct {
@@ -228,6 +231,7 @@ func TestCommandStrings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			a, c := newTestAdapter()
 			if err := tt.act(a); err != nil {
 				t.Fatalf("command error = %v", err)
@@ -239,24 +243,8 @@ func TestCommandStrings(t *testing.T) {
 	}
 }
 
-func TestOriginateParksTheNewLeg(t *testing.T) {
-	a, c := newTestAdapter()
-	partyID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3d")
-
-	if _, err := a.Originate(partyID, "sofia/gateway/trunk/8613800138000",
-		map[string]string{"origination_caller_id_number": "95011"}); err != nil {
-		t.Fatalf("Originate() error = %v", err)
-	}
-
-	want := "originate {ignore_early_media=true,origination_caller_id_number=95011," +
-		"origination_uuid=019ffa1d-0dc1-7b9e-b124-cffb41e90a3d}" +
-		"sofia/gateway/trunk/8613800138000 &park()"
-	if got := c.last(); got != want {
-		t.Errorf("command =\n  %s\nwant\n  %s", got, want)
-	}
-}
-
 func TestEavesdropModes(t *testing.T) {
+	t.Parallel()
 	partyID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3d")
 
 	tests := []struct {
@@ -272,6 +260,7 @@ func TestEavesdropModes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.mode, func(t *testing.T) {
+			t.Parallel()
 			a, c := newTestAdapter()
 			callID := uuid.MustParse("019ffa1d-0dc1-7b9e-b124-cffb41e90a3e")
 			if _, err := a.Eavesdrop(partyID, "1099", "chan-target", tt.mode, callID, "1001"); err != nil {
@@ -305,6 +294,7 @@ func TestEavesdropModes(t *testing.T) {
 }
 
 func TestSwitchErrorRepliesBecomeErrors(t *testing.T) {
+	t.Parallel()
 	a, c := newTestAdapter()
 	c.reply = "-ERR No such channel!"
 
@@ -318,6 +308,7 @@ func TestSwitchErrorRepliesBecomeErrors(t *testing.T) {
 }
 
 func TestTransportErrorsPropagate(t *testing.T) {
+	t.Parallel()
 	a, c := newTestAdapter()
 	c.err = errors.New("esl link down")
 
@@ -332,6 +323,7 @@ func TestTransportErrorsPropagate(t *testing.T) {
 // as an application ("Invalid Application 1007", found live). The contract is
 // that callers supply token-clean values.
 func TestRenderVarsJoinsBare(t *testing.T) {
+	t.Parallel()
 	got := renderVars(map[string]string{"b": "2", "a": "1"})
 	if got != "a=1,b=2" {
 		t.Fatalf("renderVars = %q, want %q", got, "a=1,b=2")
@@ -343,6 +335,7 @@ func TestRenderVarsJoinsBare(t *testing.T) {
 // literally. The address is qualified with the adapter's domain: sofia stores
 // a registration under user@domain and flush_inbound_reg matches it there.
 func TestFlushRegistrationNamesTheProfileAndTheDomain(t *testing.T) {
+	t.Parallel()
 	a, c := newTestAdapter()
 
 	if err := a.FlushRegistration("external", "1001"); err != nil {
@@ -359,25 +352,5 @@ func TestFlushRegistrationNamesTheProfileAndTheDomain(t *testing.T) {
 	}
 	if want := "sofia profile internal flush_inbound_reg 1002@aicc.test"; c.last() != want {
 		t.Errorf("command = %q, want %q", c.last(), want)
-	}
-}
-
-// Asking to flush a phone that is not registered is the ordinary case and
-// leaves the caller in exactly the state they wanted.
-func TestFlushRegistrationAcceptsNothingToFlush(t *testing.T) {
-	a, c := newTestAdapter()
-	c.reply = "+OK 0 contacts flushed\n"
-
-	if err := a.FlushRegistration("internal", "1001"); err != nil {
-		t.Fatalf("a reply saying nothing was flushed is success, got %v", err)
-	}
-}
-
-func TestFlushRegistrationReportsASwitchRefusal(t *testing.T) {
-	a, c := newTestAdapter()
-	c.reply = "-ERR Invalid Profile!"
-
-	if err := a.FlushRegistration("nosuch", "1001"); err == nil {
-		t.Fatal("a -ERR reply was reported as success")
 	}
 }

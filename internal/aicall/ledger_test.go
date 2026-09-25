@@ -219,14 +219,19 @@ func TestANilLedgerIsANoOp(t *testing.T) {
 	recorder.finish(nil, testFacts(), discard())
 }
 
-// take_message persists an OPEN callback, defaulting the number to the caller.
-func TestTakeMessagePersistsACallback(t *testing.T) {
+// take_message persists an OPEN callback, defaulting the number to the caller,
+// and announces the saved row to the event stream.
+func TestTakeMessagePersistsAndAnnouncesACallback(t *testing.T) {
 	ledger := newFakeLedger()
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.orchestrator.cfg.Ledger = ledger
 	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.facts = testFacts()
+	var announced []store.Callback
+	actions.orchestrator.cfg.AnnounceCallback = func(cb store.Callback) {
+		announced = append(announced, cb)
+	}
 
 	result, err := actions.TakeMessage(t.Context(), flow.MessageRequest{Message: "请明天回电"})
 	if err != nil || !result.IsOK {
@@ -243,30 +248,8 @@ func TestTakeMessagePersistsACallback(t *testing.T) {
 	if cb.Message != "请明天回电" || cb.Status != store.CallbackStatusOpen {
 		t.Errorf("callback = %+v", cb)
 	}
-}
-
-// A saved callback is announced to the event stream; a failed save is not.
-func TestTakeMessageAnnouncesTheCallback(t *testing.T) {
-	ledger := newFakeLedger()
-	sw := &fakeSwitch{}
-	actions, _, _ := testActions(t, sw)
-	actions.orchestrator.cfg.Ledger = ledger
-	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
-	actions.facts = testFacts()
-
-	var announced []store.Callback
-	actions.orchestrator.cfg.AnnounceCallback = func(cb store.Callback) {
-		announced = append(announced, cb)
-	}
-
-	if _, err := actions.TakeMessage(t.Context(), flow.MessageRequest{Message: "回电"}); err != nil {
-		t.Fatal(err)
-	}
-	if len(announced) != 1 {
-		t.Fatalf("announced %d callbacks, want 1", len(announced))
-	}
-	if announced[0].Message != "回电" {
-		t.Errorf("announced the wrong row: %+v", announced[0])
+	if len(announced) != 1 || announced[0].ID != cb.ID {
+		t.Errorf("announced %+v, want the saved callback once", announced)
 	}
 }
 

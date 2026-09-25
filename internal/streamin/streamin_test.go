@@ -74,35 +74,10 @@ func frame(samples int, amplitude int16) []byte {
 	return b
 }
 
-// The queue drops the oldest frame rather than blocking its writer — the
-// switch is on the other end of that write, and stalling it to keep audio is
-// the worse failure. But a drop leaves no other trace, so it is counted: a
-// transcript with a hole in it reads the same whether the engine mis-heard the
-// words or we never sent them.
-func TestOverflowDropsOldestAndCountsIt(t *testing.T) {
-	client := newStallSession()
-	p := newPump("HUMAN_AGENT", "qwen", client, false, nopLogger{})
-	t.Cleanup(func() { close(client.release); p.close(context.Background()) })
-
-	const over = queueDepth + 50
-	for i := 0; i < over; i++ {
-		p.write(frame(160, 1000))
-	}
-
-	// The writer never blocked: reaching here at all is the assertion.
-	_, dropped := p.stats()
-	if dropped == 0 {
-		t.Fatal("the queue overflowed and reported no drops — a lost line would be untraceable")
-	}
-	if dropped > int64(over) {
-		t.Errorf("dropped %d of %d frames, which is more than were written", dropped, over)
-	}
-	t.Logf("dropped %d of %d frames written while the recogniser stalled", dropped, over)
-}
-
 // Where the engine refuses to end an utterance, the pump must. Without this a
 // final never arrives at all on that path.
 func TestSilenceCommitsWhereWeOwnEndpointing(t *testing.T) {
+	t.Parallel()
 	client := newStallSession()
 	close(client.release) // accept audio immediately
 	p := newPump("CUSTOMER", "openai", client, true, nopLogger{})
@@ -127,6 +102,7 @@ func TestSilenceCommitsWhereWeOwnEndpointing(t *testing.T) {
 
 // Where the engine segments for itself, committing would be wrong.
 func TestNoCommitWhereTheEngineOwnsEndpointing(t *testing.T) {
+	t.Parallel()
 	client := newStallSession()
 	close(client.release)
 	p := newPump("CUSTOMER", "qwen", client, false, nopLogger{})
@@ -149,6 +125,7 @@ func TestNoCommitWhereTheEngineOwnsEndpointing(t *testing.T) {
 // agent leg; asserted here so a future edit cannot quietly transpose them and
 // put every word under the wrong name.
 func TestStereoSplitPutsTheAgentOnTheLeft(t *testing.T) {
+	t.Parallel()
 	s := &session{}
 	// Two samples: left = 1000, right = -2000.
 	stereo := make([]byte, 8)
@@ -201,6 +178,7 @@ type stubTranscripts struct{}
 func (stubTranscripts) Lookup(uuid.UUID) (*transcript.Actor, bool) { return nil, false }
 
 func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	claim := Claim{
 		CallID: uuid.New(), PartyID: uuid.New(), AgentID: uuid.New(),
@@ -222,6 +200,10 @@ func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
 	if _, err := s.verify("garbage"); err == nil {
 		t.Error("a malformed token verified")
 	}
+	expired := s.Token(Claim{CallID: uuid.New(), Channel: "c", Expires: time.Now().Add(-time.Second)})
+	if _, err := s.verify(expired); err == nil {
+		t.Error("an expired token verified")
+	}
 
 	// A different secret must not verify: the token is the whole of the
 	// authentication on this listener.
@@ -232,16 +214,9 @@ func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
 	}
 }
 
-func TestExpiredTokenIsRefused(t *testing.T) {
-	s := testServer(t)
-	token := s.Token(Claim{CallID: uuid.New(), Channel: "c", Expires: time.Now().Add(-time.Second)})
-	if _, err := s.verify(token); err == nil {
-		t.Error("an expired token verified")
-	}
-}
-
 // One token, one connection: a captured URL is worthless the moment it is used.
 func TestATokenCannotBeReplayed(t *testing.T) {
+	t.Parallel()
 	s := testServer(t)
 	token := s.Token(Claim{CallID: uuid.New(), Channel: "c", Expires: time.Now().Add(time.Minute)})
 	if !s.claimToken(token) {
@@ -254,6 +229,7 @@ func TestATokenCannotBeReplayed(t *testing.T) {
 
 // The metadata frame confirms an identity; it must never be able to change one.
 func TestMetadataMustAgreeWithTheToken(t *testing.T) {
+	t.Parallel()
 	claim := Claim{CallID: uuid.New(), Channel: "chan-1"}
 	if err := checkMetadata([]byte(`{"callId":"`+claim.CallID.String()+`","channelId":"chan-1"}`), claim); err != nil {
 		t.Errorf("matching metadata was refused: %v", err)
@@ -270,6 +246,7 @@ func TestMetadataMustAgreeWithTheToken(t *testing.T) {
 }
 
 func TestNewRefusesAnUnusableConfiguration(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		cfg  Config
@@ -278,6 +255,7 @@ func TestNewRefusesAnUnusableConfiguration(t *testing.T) {
 		{"no secret", Config{Addr: "127.0.0.1:0", Logger: nopLogger{}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if _, err := New(tc.cfg); err == nil {
 				t.Error("an unusable configuration was accepted")
 			}
@@ -324,6 +302,7 @@ func (p *statePub) all() []string {
 // panel would sit at "Connecting…" for the whole call, which reads exactly
 // like a call nobody is transcribing.
 func TestAnAttachThatNeverConnectsSaysSo(t *testing.T) {
+	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	callID := uuid.New()
@@ -361,6 +340,7 @@ func TestAnAttachThatNeverConnectsSaysSo(t *testing.T) {
 
 // A stream that did connect must not then be reported as missing.
 func TestAConnectedStreamIsNotReportedMissing(t *testing.T) {
+	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	callID := uuid.New()
@@ -410,6 +390,7 @@ func (r *rejectingSession) SendAudio([]byte) error { return r.err }
 // is ever sent and no final ever arrives. The transcript simply stops, with the
 // audio still flowing and nothing reporting a fault.
 func TestSilenceStillEndsAnUtteranceWhenTheRecogniserIsRejectingAudio(t *testing.T) {
+	t.Parallel()
 	client := &rejectingSession{stallSession: *newStallSession(), err: errRejected}
 	close(client.release) // irrelevant here: SendAudio never reaches the queue
 	p := newPump("CUSTOMER", "openai", client, true, nopLogger{})

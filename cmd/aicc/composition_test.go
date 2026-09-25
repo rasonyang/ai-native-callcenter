@@ -264,6 +264,7 @@ func (nullPub) Publish(context.Context, events.Event, events.Scope) events.Event
 // same shape: a line in run() that nothing named, so deleting it left the
 // build green, the suite green and the system quietly missing a behaviour.
 func TestConnectMakesEveryConnection(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.connect()
 
@@ -353,6 +354,7 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 // so composing the transcript retirement on top of it has to happen after. The
 // other order compiles, runs, and silently throws the retirement away.
 func TestTheCDRIsAttachedBeforeTheFinishHookIsComposed(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.connect()
 
@@ -369,6 +371,7 @@ func TestTheCDRIsAttachedBeforeTheFinishHookIsComposed(t *testing.T) {
 // Transcription off must leave the rest of the composition intact and add
 // nothing of its own.
 func TestNoTapMeansNoTapConnections(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.Taps = nil
 	f.comp.connect()
@@ -393,6 +396,7 @@ func TestNoTapMeansNoTapConnections(t *testing.T) {
 // A reconnect rebuilds both directions: what the switch forgot about us, and
 // what we never observed about it.
 func TestReconnectRebuildsPresenceStaffingAndDevices(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.connect()
 
@@ -430,24 +434,6 @@ func TestReconnectRebuildsPresenceStaffingAndDevices(t *testing.T) {
 	}
 }
 
-// A switch that will not answer must not cost us the half of the reconnect
-// that does not depend on it.
-func TestReconnectStillSyncsWhenRegistrationsCannotBeRead(t *testing.T) {
-	f := newWiringFixture(t)
-	f.regsErr = errors.New("-ERR not connected")
-	f.comp.connect()
-
-	f.link.connected(t.Context())
-
-	if f.agents.synced != 1 || f.catalog.tiersSynced != 1 {
-		t.Errorf("synced presence %d and tiers %d, want 1 each even with the "+
-			"registration read failing", f.agents.synced, f.catalog.tiersSynced)
-	}
-	if len(f.agents.observed) != 0 {
-		t.Errorf("observed %v from a failed read", f.agents.observed)
-	}
-}
-
 // The half of the reconnect that a failed read must *not* cost us either way.
 //
 // "This agent's phone is not registered" is a fact only when the switch
@@ -456,6 +442,7 @@ func TestReconnectStillSyncsWhenRegistrationsCannotBeRead(t *testing.T) {
 // included — because one ESL command failed. An empty list from a switch that
 // did answer is the opposite: it means exactly what it says.
 func TestDeviceReleaseOnlyRunsWhenTheRegistrationsWereRead(t *testing.T) {
+	t.Parallel()
 	t.Run("the read failed: nobody is released", func(t *testing.T) {
 		f := newWiringFixture(t)
 		f.regsErr = errors.New("-ERR not connected")
@@ -467,9 +454,9 @@ func TestDeviceReleaseOnlyRunsWhenTheRegistrationsWereRead(t *testing.T) {
 			t.Errorf("released %d times on a failed read, want 0 — a READY agent "+
 				"was signed off on the strength of an error", f.agents.released)
 		}
-		if f.agents.synced != 1 {
-			t.Errorf("synced %d times, want 1 — the mirror pass is safe either way",
-				f.agents.synced)
+		if f.agents.synced != 1 || f.catalog.tiersSynced != 1 || len(f.agents.observed) != 0 {
+			t.Errorf("synced presence %d and tiers %d, observed %v — the mirror pass "+
+				"is safe either way", f.agents.synced, f.catalog.tiersSynced, f.agents.observed)
 		}
 	})
 
@@ -530,6 +517,7 @@ func zeroFields(v any, allowed ...string) []string {
 // anything. Parameters cannot be dropped — that is a compile error — and this
 // covers the other direction, a field added to Deps and never plumbed.
 func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
+	t.Parallel()
 	deps := apiDeps(
 		&auth.Service{},
 		&events.Hub{},
@@ -563,6 +551,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 // gap. Sessions was exempt for the same reason until there was a second client
 // to choose between, which only this file can do.
 func TestEveryBotDependencyIsPlumbed(t *testing.T) {
+	t.Parallel()
 	cfg := botConfig(
 		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
 			BotAdvertiseIP: "127.0.0.1", BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
@@ -606,6 +595,7 @@ func (r *recordingPublisher) Publish(_ context.Context, ev events.Event, sc even
 // accident and would have stopped working silently the moment the hub became
 // default-deny. It is stated now, and this is what holds it stated.
 func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
+	t.Parallel()
 	pub := &recordingPublisher{}
 	callID := uuid.New()
 
@@ -630,6 +620,7 @@ func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
 // Not a broadcast, unlike a callback: a callback appears on every screen that
 // can act on one, and this is a fact about one call that supervision watches.
 func TestTheStartOfAConversationIsAnnouncedToSupervision(t *testing.T) {
+	t.Parallel()
 	pub := &recordingPublisher{}
 	callID, flowID := uuid.New(), uuid.New()
 
@@ -665,6 +656,7 @@ func TestTheStartOfAConversationIsAnnouncedToSupervision(t *testing.T) {
 // Break mid-delivery, and the caller then waited out the queue's no-answer
 // delay — eighty seconds — before anybody was tried again.
 func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.connect()
 
@@ -683,8 +675,7 @@ func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
 	if firstSync < 0 {
 		t.Fatal("presence was never mirrored")
 	}
-	for i, step := range f.agents.steps[:firstSync] {
-		_ = i
+	for _, step := range f.agents.steps[:firstSync] {
 		if len(step) > 5 && step[:5] == "note:" {
 			return // a phone was learned before the mirror: what this is for
 		}
@@ -698,6 +689,7 @@ func TestThePhonesAreKnownBeforePresenceIsMirrored(t *testing.T) {
 // the contract with nothing producing it, and the hook to hang it on was
 // written and never called.
 func TestTheScreensAreToldWhenTheSwitchGoesAndComesBack(t *testing.T) {
+	t.Parallel()
 	f := newWiringFixture(t)
 	f.comp.connect()
 

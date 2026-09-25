@@ -61,6 +61,7 @@ var notTheAPI = map[string]string{
 // production, on the one endpoint somebody added without touching the
 // contract. This is where it is found instead.
 func TestEveryMountedRouteDeclaresItsAuthorization(t *testing.T) {
+	t.Parallel()
 	srv := New(config.Config{Env: "dev"}, Deps{
 		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
 		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{},
@@ -138,6 +139,7 @@ var untranslatable = map[string]string{
 // "Unexpected error", which turns an instruction the reader could act on into
 // one they cannot.
 func TestOneErrorCodeIsSpelledTheSameEverywhere(t *testing.T) {
+	t.Parallel()
 	contract := contractErrorCodes(t)
 	goConstants := goErrorCodes(t)
 
@@ -273,6 +275,7 @@ func translationErrorCodes(t *testing.T, locale string) []string {
 // would make describeError render a raw key on screen, and the assertion
 // above would go on passing.
 func TestTheUntranslatableKeysAreStillThere(t *testing.T) {
+	t.Parallel()
 	for _, locale := range []string{"en", "zh"} {
 		raw, err := os.ReadFile("../../web/src/locales/" + locale + "/translation.json")
 		if err != nil {
@@ -307,6 +310,7 @@ var browserOnly = map[string]string{
 }
 
 func TestASystemCanReachWhatAPersonCan(t *testing.T) {
+	t.Parallel()
 	var locked []string
 	for route, sec := range api.OperationSecurityByRoute {
 		if sec.IsAnonymous {
@@ -345,6 +349,7 @@ func TestASystemCanReachWhatAPersonCan(t *testing.T) {
 // interface the server implements: every operation the wrapper can call has a
 // row, or enforceContract has nothing to apply.
 func TestEveryContractOperationHasASecurityRow(t *testing.T) {
+	t.Parallel()
 	byID := map[string]bool{}
 	for _, sec := range api.OperationSecurityByRoute {
 		byID[sec.OperationID] = true

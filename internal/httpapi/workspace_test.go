@@ -92,6 +92,7 @@ func agentRequest(method, target, body string) *http.Request {
 // saying the defaults are right. What must still hold is that there is a call
 // to confirm against.
 func TestConfirmingWithNoFinishedCallIsRefusedAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	svc := &recordingAgents{hasWrapUp: false}
 	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 
@@ -116,6 +117,7 @@ func TestConfirmingWithNoFinishedCallIsRefusedAndChangesNothing(t *testing.T) {
 // A cockpit that reloads must find the work still waiting: the state is the
 // server's, so refreshing the page is not a way past it.
 func TestTheOpenRecordSurvivesAReload(t *testing.T) {
+	t.Parallel()
 	svc := &recordingAgents{hasWrapUp: false}
 	srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 
@@ -133,6 +135,7 @@ func TestTheOpenRecordSurvivesAReload(t *testing.T) {
 // The waiting list is the agent's own queues, resolved from their staffing —
 // the same rule that decides which queue events reach their event stream.
 func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
+	t.Parallel()
 	staffed := []uuid.UUID{uuid.New(), uuid.New()}
 	somebody_elses := uuid.New()
 	calls := &waitingCalls{answer: []telephony.WaitingCall{
@@ -196,41 +199,18 @@ type queueCatalogStub struct {
 
 func (q queueCatalogStub) Queues(context.Context) ([]catalog.Queue, error) { return q.queues, nil }
 
-// The agent's own day is theirs, and the contract is where that is written
-// down now: /reports/me asks for the own-scoped capability, while the
-// aggregates over everybody's day ask for the floor-wide ones.
-//
-// This used to walk the routing table looking for a role guard. There are no
-// role guards any more — an operation's authorization is a property of the
-// operation, not of where somebody mounted it — so the assertion moved to the
-// place that actually decides.
-func TestTheDayIsTheCallersOwn(t *testing.T) {
-	mine, ok := api.SecurityForRoute(http.MethodGet, "/reports/me")
-	if !ok {
-		t.Fatal("GET /reports/me is not in the contract")
-	}
-	if !slices.Contains(mine.SessionScopes, api.ScopeHistoryReadOwn) {
-		t.Errorf("scopes = %v, want history:read:own — it answers from the "+
-			"caller's own agent identity", mine.SessionScopes)
-	}
-	for _, wider := range []string{api.ScopeHistoryReadAll, api.ScopeReportsRead} {
-		if slices.Contains(mine.SessionScopes, wider) {
-			t.Errorf("scopes = %v, want no %s — an agent could not read their own day",
-				mine.SessionScopes, wider)
-		}
-	}
-}
-
 // The workspace operations answer "my calls", "my queues", "my day" from the
 // subject's own agent identity, so each asks for an own-scoped capability and
 // none of them asks for a floor-wide one. An operation that answered from the
 // caller's agent identity while demanding the floor-wide scope would be a
 // screen only supervisors could open to see nothing.
 func TestTheAgentWorkspaceOperationsAskForTheOwnScopedCapability(t *testing.T) {
+	t.Parallel()
 	want := map[string]string{
 		"POST /agent/wrap-up": api.ScopeAgentAct,
 		"GET /calls/waiting":  api.ScopeCallsReadOwn,
 		"GET /cdrs/mine":      api.ScopeHistoryReadOwn,
+		"GET /reports/me":     api.ScopeHistoryReadOwn,
 	}
 	for route, scope := range want {
 		method, path, _ := strings.Cut(route, " ")
@@ -250,6 +230,7 @@ func TestTheAgentWorkspaceOperationsAskForTheOwnScopedCapability(t *testing.T) {
 // Before this they were refused outright for not being an agent, which left
 // the one view of who is waiting available only to the people already busy.
 func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
+	t.Parallel()
 	staffed := []uuid.UUID{uuid.New()}
 	calls := &waitingCalls{
 		answer: []telephony.WaitingCall{

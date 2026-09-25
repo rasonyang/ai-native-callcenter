@@ -10,6 +10,7 @@ import (
 )
 
 func TestExtensionValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		ext        Extension
@@ -48,6 +49,7 @@ func TestExtensionValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ext := tt.ext
 			err := ext.validate(tt.onCreate)
 			if tt.wantErr != "" {
@@ -70,6 +72,7 @@ func TestExtensionValidation(t *testing.T) {
 }
 
 func TestQueueValidation(t *testing.T) {
+	t.Parallel()
 	valid := Queue{Name: "support-en", ExtNumber: "7001"}
 
 	tests := []struct {
@@ -126,6 +129,7 @@ func TestQueueValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			q := valid
 			if tt.mutate != nil {
 				tt.mutate(&q)
@@ -145,6 +149,7 @@ func TestQueueValidation(t *testing.T) {
 }
 
 func TestQueueDefaults(t *testing.T) {
+	t.Parallel()
 	q := Queue{Name: "support-en", ExtNumber: "7001"}
 	if err := q.validate(); err != nil {
 		t.Fatal(err)
@@ -167,6 +172,7 @@ func TestQueueDefaults(t *testing.T) {
 }
 
 func TestDIDValidation(t *testing.T) {
+	t.Parallel()
 	someFlow := uuid.New()
 	tests := []struct {
 		name    string
@@ -195,6 +201,7 @@ func TestDIDValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			d := tt.did
 			err := d.validate()
 			if tt.wantErr != "" {
@@ -217,6 +224,7 @@ func TestDIDValidation(t *testing.T) {
 // the input instead of printing a sentence at the bottom about nothing in
 // particular (walkthrough step 11).
 func TestAValidationFailureNamesItsFieldAndRule(t *testing.T) {
+	t.Parallel()
 	d := DID{Number: "95001", AllowInbound: false, AllowOutbound: false}
 	err := d.validate()
 	var invalid *ValidationError

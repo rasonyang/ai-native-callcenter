@@ -16,6 +16,7 @@ support-en|single_box|01a02c57-ead9-76ba-9579-d0d63dcfda1f|01a02c57-a227-710d-83
 `
 
 func TestTheSwitchsOwnMemberListingIsRead(t *testing.T) {
+	t.Parallel()
 	members := parseQueueMembers(liveMemberListing)
 	if len(members) != 1 {
 		t.Fatalf("read %d members, want 1: %+v", len(members), members)
@@ -43,6 +44,7 @@ func TestTheSwitchsOwnMemberListingIsRead(t *testing.T) {
 }
 
 func TestOnlyCallersWhoHaveReachedNobodyCountAsWaiting(t *testing.T) {
+	t.Parallel()
 	for state, want := range map[string]bool{
 		"Waiting": true, "Trying": true, "waiting": true,
 		"Answered": false, "Abandoned": false, "": false,
@@ -57,6 +59,7 @@ func TestOnlyCallersWhoHaveReachedNobodyCountAsWaiting(t *testing.T) {
 // caller whose wait began now, which reads as a fresh call and quietly
 // improves the queue's service level for having lost track of them.
 func TestARowWithNoUsableJoinTimeIsDroppedRatherThanInvented(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"no join time":     `support-en|single_box|u|chan|18600000000|n|1787450335|0|0|0|0|0|0|a|single_box|Waiting|50`,
 		"unparseable":      `support-en|single_box|u|chan|18600000000|n|1787450335|x|0|0|0|0|0|a|single_box|Waiting|50`,
@@ -77,6 +80,7 @@ func TestARowWithNoUsableJoinTimeIsDroppedRatherThanInvented(t *testing.T) {
 // would have agreed with whatever it got wrong; these are what the switch
 // actually said.
 func TestWhatTheSwitchAnswersForAChannelVariable(t *testing.T) {
+	t.Parallel()
 	for reply, want := range map[string]string{
 		"01a02c97-ae6b-773a-a2ea-a5359f0f313a": "01a02c97-ae6b-773a-a2ea-a5359f0f313a", // set
 		"en":                                   "en",

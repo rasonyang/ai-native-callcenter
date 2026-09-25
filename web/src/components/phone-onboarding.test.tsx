@@ -56,10 +56,12 @@ function steps() {
 }
 
 describe('an agent with no extension', () => {
+  // Nothing has been seen here to lose contact with, so it is told to install.
   it('is shown the card, blocking, with nothing done', async () => {
     renderCard()
     expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
     expect(steps().map((s) => s.isDone)).toEqual([false, false, false])
+    expect(screen.queryByText(/lost contact with this page/i)).toBeNull()
   })
 
   /**
@@ -120,13 +122,17 @@ describe('as the agent works through it', () => {
     extension = undefined
   })
 
-  it('completes install and site the moment the extension answers', async () => {
-    extension = installFakeExtension({ state: { microphone: 'DENIED' } })
+  // Step two has no signal of its own: being answered is the signal. The
+  // microphone step waits for a report, so an extension that has not sent one
+  // yet leaves the card up.
+  it.each([
+    ['reports no microphone', { microphone: 'DENIED' as const }],
+    ['has not reported yet', null],
+  ])('completes install and site, and stays, for an extension that %s', async (_case, state) => {
+    extension = installFakeExtension({ state })
     renderCard()
     await waitFor(() => expect(steps()[0].isDone).toBe(true))
-    // Step two has no signal of its own: being answered is the signal.
-    expect(steps()[1].isDone).toBe(true)
-    expect(steps()[2].isDone).toBe(false)
+    expect(steps().map((s) => s.isDone)).toEqual([true, true, false])
     expect(screen.getByText(/set up your phone/i)).toBeInTheDocument()
   })
 
@@ -238,21 +244,5 @@ describe('as the agent works through it', () => {
     })
     expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
     expect(steps()).toHaveLength(3)
-  })
-
-  // A browser that has never had the extension is told to install it, as it
-  // always was: nothing has been seen here to lose contact with.
-  it('asks an untouched browser to install it, not to reload', async () => {
-    renderCard()
-    expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
-    expect(screen.queryByText(/lost contact with this page/i)).toBeNull()
-  })
-
-  it('stays while an extension that said hello has not reported yet', async () => {
-    extension = installFakeExtension({ state: null })
-    renderCard()
-    await waitFor(() => expect(steps()[0].isDone).toBe(true))
-    expect(steps()[2].isDone).toBe(false)
-    expect(screen.getByText(/set up your phone/i)).toBeInTheDocument()
   })
 })

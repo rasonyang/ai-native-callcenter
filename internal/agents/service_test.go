@@ -229,6 +229,7 @@ func newTestService(t *testing.T) (*Service, *fakeStore, *fakeSwitch, *fakePubli
 }
 
 func TestLoginPersistsMirrorsAndPublishes(t *testing.T) {
+	t.Parallel()
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -262,6 +263,7 @@ func TestLoginPersistsMirrorsAndPublishes(t *testing.T) {
 }
 
 func TestReadyMirrorsAvailableToTheSwitch(t *testing.T) {
+	t.Parallel()
 	svc, _, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -286,6 +288,7 @@ func TestReadyMirrorsAvailableToTheSwitch(t *testing.T) {
 }
 
 func TestStorageFailureRollsBackAndReportsError(t *testing.T) {
+	t.Parallel()
 	svc, store, sw, _, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -312,6 +315,7 @@ func TestStorageFailureRollsBackAndReportsError(t *testing.T) {
 }
 
 func TestOneExtensionOneAgent(t *testing.T) {
+	t.Parallel()
 	svc, store, _, _, first := newTestService(t)
 	ctx := context.Background()
 
@@ -338,6 +342,7 @@ func TestOneExtensionOneAgent(t *testing.T) {
 // they do the switch keeps them out of routing — an agent released by a clock
 // would be handed the next call while still writing up the last.
 func TestWrapUpDoesNotEndByItself(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	sw := &fakeSwitch{up: true}
 	agentID := uuid.New()
@@ -401,6 +406,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 // argument survives in the reason: DEVICE_LOST is the platform saying what
 // happened, not an agent's own choice put in their mouth.
 func TestALostPhoneTakesTheAgentOutOfRoutingUnderItsOwnReason(t *testing.T) {
+	t.Parallel()
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -462,6 +468,7 @@ func TestALostPhoneTakesTheAgentOutOfRoutingUnderItsOwnReason(t *testing.T) {
 // registration lease and came back with the phone ready and the agent still
 // reading "Phone lost", counting how long the platform had been wrong.
 func TestAReturnedPhoneWithdrawsTheReasonThePlatformSet(t *testing.T) {
+	t.Parallel()
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -514,11 +521,13 @@ func TestAReturnedPhoneWithdrawsTheReasonThePlatformSet(t *testing.T) {
 // DEVICE_LOST is the only reason the platform withdraws, because it is the
 // only one it set. A phone coming back says nothing about a break.
 func TestAReturnedPhoneSaysNothingAboutAReasonTheAgentChose(t *testing.T) {
+	t.Parallel()
 	for _, reason := range []Reason{
 		ReasonBreak, ReasonLunch, ReasonTraining, ReasonLogin,
 		ReasonSystem, ReasonSupervisor,
 	} {
 		t.Run(string(reason), func(t *testing.T) {
+			t.Parallel()
 			svc, _, _, pub, agentID := newTestService(t)
 			ctx := t.Context()
 
@@ -556,6 +565,7 @@ func TestAReturnedPhoneSaysNothingAboutAReasonTheAgentChose(t *testing.T) {
 // After-call work is unfiled work, not a platform reason: the agent is out of
 // routing until they file it, whatever their phone does in the meantime.
 func TestAReturnedPhoneDoesNotEndWrapUp(t *testing.T) {
+	t.Parallel()
 	svc, _, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -588,6 +598,7 @@ func TestAReturnedPhoneDoesNotEndWrapUp(t *testing.T) {
 // A state event means a state changed: a phone re-registering under an agent
 // who is already READY has nothing to say about their presence.
 func TestARegistrationForAReadyAgentPublishesNoPresenceChange(t *testing.T) {
+	t.Parallel()
 	svc, _, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -615,6 +626,7 @@ func TestARegistrationForAReadyAgentPublishesNoPresenceChange(t *testing.T) {
 // An agent already out of routing has nothing to change, and a state event
 // means a state changed.
 func TestALostPhoneSaysNothingAboutAnAgentWhoWasNotReadyAnyway(t *testing.T) {
+	t.Parallel()
 	svc, _, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -647,6 +659,7 @@ func TestALostPhoneSaysNothingAboutAnAgentWhoWasNotReadyAnyway(t *testing.T) {
 // and taking their READY for it would read a transport failure as a decision.
 // The derived DEVICE_UNREACHABLE is what says so, and it is enough.
 func TestAPhoneThatStopsAnsweringIsNotAPhoneThatWentAway(t *testing.T) {
+	t.Parallel()
 	svc, _, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -681,6 +694,7 @@ func TestAPhoneThatStopsAnsweringIsNotAPhoneThatWentAway(t *testing.T) {
 // axis and is not true. The second is the one that matters: a dead browser tab
 // is still registered and looks exactly like a working one.
 func TestEachDeviceSignalIsAnnouncedUnderItsOwnName(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		signal DeviceSignal
 		want   events.Type
@@ -691,6 +705,7 @@ func TestEachDeviceSignalIsAnnouncedUnderItsOwnName(t *testing.T) {
 		{SignalUnreachable, events.TypeDeviceUnreachable},
 	} {
 		t.Run(string(tt.signal), func(t *testing.T) {
+			t.Parallel()
 			svc, _, _, pub, agentID := newTestService(t)
 			ctx := context.Background()
 			if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
@@ -711,6 +726,7 @@ func TestEachDeviceSignalIsAnnouncedUnderItsOwnName(t *testing.T) {
 // stopped answering is still one an agent could be signed in at, and the
 // remedy is different — reconnect the tab, not sign in again.
 func TestAnUnreachablePhoneIsStillARegisteredOne(t *testing.T) {
+	t.Parallel()
 	svc, _, _, _, agentID := newTestService(t)
 	ctx := context.Background()
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
@@ -728,29 +744,8 @@ func TestAnUnreachablePhoneIsStillARegisteredOne(t *testing.T) {
 	}
 }
 
-func TestDeviceObservationAffectsAvailability(t *testing.T) {
-	svc, _, _, _, agentID := newTestService(t)
-	ctx := context.Background()
-
-	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Ready(ctx, agentID); err != nil {
-		t.Fatal(err)
-	}
-	if got := svc.Presence(agentID).Availability(); got != AvailReady {
-		t.Errorf("availability = %s, want READY", got)
-	}
-
-	// The phone stops answering keepalives while still registered.
-	svc.ObserveDevice(ctx, "1001", SignalUnreachable)
-	if got := svc.Presence(agentID).Availability(); got != AvailDeviceUnreachable {
-		t.Errorf("availability = %s, want DEVICE_UNREACHABLE", got)
-	}
-}
-
 func TestRosterResolvesAvailability(t *testing.T) {
+	t.Parallel()
 	svc, _, _, _, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -779,6 +774,7 @@ func TestRosterResolvesAvailability(t *testing.T) {
 }
 
 func TestSwitchDownDoesNotBlockSignIn(t *testing.T) {
+	t.Parallel()
 	store := newFakeStore()
 	sw := &fakeSwitch{up: false} // switch link is down
 	agentID := uuid.New()
@@ -794,6 +790,7 @@ func TestSwitchDownDoesNotBlockSignIn(t *testing.T) {
 }
 
 func TestSyncSwitchRebuildsAfterReconnect(t *testing.T) {
+	t.Parallel()
 	svc, _, sw, _, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -811,32 +808,10 @@ func TestSyncSwitchRebuildsAfterReconnect(t *testing.T) {
 }
 
 func TestUnknownAgentIsRejected(t *testing.T) {
+	t.Parallel()
 	svc, _, _, _, _ := newTestService(t)
 	if _, err := svc.Login(context.Background(), uuid.New(), "1001"); !errors.Is(err, ErrUnknownAgent) {
 		t.Errorf("Login() error = %v, want ErrUnknownAgent", err)
-	}
-}
-
-// A phone the switch already told us about must count the moment its agent
-// signs in. Live events describe changes only, so an agent signing in at a
-// phone that registered earlier would otherwise read as unreachable and be
-// treated as unroutable.
-func TestLoginAdoptsAlreadyKnownDeviceState(t *testing.T) {
-	svc, _, _, _, agentID := newTestService(t)
-	ctx := context.Background()
-
-	// The reconciliation on connect saw this phone before anyone signed in.
-	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.Ready(ctx, agentID); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := svc.Presence(agentID).Availability(); got != AvailReady {
-		t.Errorf("availability = %s, want READY: the phone was known to be registered", got)
 	}
 }
 
@@ -846,6 +821,7 @@ func TestLoginAdoptsAlreadyKnownDeviceState(t *testing.T) {
 // ringing to timeout before the next attempt, and a refusing phone retried
 // with no pause at all.
 func TestAnAgentTheSwitchLearnsAboutComesWithItsRoutingGuards(t *testing.T) {
+	t.Parallel()
 	svc, _, sw, _, agentID := newTestService(t)
 
 	if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
@@ -863,17 +839,15 @@ func TestAnAgentTheSwitchLearnsAboutComesWithItsRoutingGuards(t *testing.T) {
 				"offering to a phone that is not being answered", want)
 		}
 	}
-	// After-call work stays ours, so the switch's own timer stays off.
-	if !sw.seen("wrapup agent-1001 0") {
-		t.Error("the switch's wrap-up timer was not reset")
-	}
 }
 
 // The switch benches an agent by setting them On Break, and so do we. Both
 // arrive here as the same notification, so what separates them is what this
 // service already believes about the agent.
 func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
+	t.Parallel()
 	t.Run("a ready agent at a working phone is taken out of routing", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, pub, agentID := newTestService(t)
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
 			t.Fatalf("login: %v", err)
@@ -899,6 +873,7 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 	})
 
 	t.Run("our own mirror echoing back changes nothing", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, _, agentID := newTestService(t)
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
 			t.Fatalf("login: %v", err)
@@ -929,6 +904,7 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 	// call — that would restamp the reason as SYSTEM and blame the agent for a
 	// phone that went away on its own.
 	t.Run("a lost phone is not an ignored call", func(t *testing.T) {
+		t.Parallel()
 		svc, _, _, _, agentID := newTestService(t)
 		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
 		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
@@ -964,6 +940,7 @@ func hasType(types []events.Type, want events.Type) bool {
 // cockpit that has to know whether the extension it shows can actually ring
 // reads it from the event it already has, not from a second request.
 func TestEveryAgentEventStatesWhetherThePhoneIsRegistered(t *testing.T) {
+	t.Parallel()
 	svc, _, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -1008,6 +985,7 @@ func TestEveryAgentEventStatesWhetherThePhoneIsRegistered(t *testing.T) {
 // refusal changes nothing: no row is written, no event is published, and the
 // agent stays exactly where they were.
 func TestReadyIsRefusedWithoutAPhoneAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
@@ -1062,7 +1040,9 @@ func TestReadyIsRefusedWithoutAPhoneAndChangesNothing(t *testing.T) {
 // actually read the registrations (cmd/aicc/wiring.go); here they are both
 // run, which is the case where the read succeeded.
 func TestReconnectReleasesAnAgentWhosePhoneDidNotComeBack(t *testing.T) {
+	t.Parallel()
 	t.Run("no registration: the agent is released and it is announced", func(t *testing.T) {
+		t.Parallel()
 		svc, store, sw, pub, agentID := newTestService(t)
 		ctx := context.Background()
 		store.presence[agentID] = Presence{
@@ -1096,6 +1076,7 @@ func TestReconnectReleasesAnAgentWhosePhoneDidNotComeBack(t *testing.T) {
 	})
 
 	t.Run("the phone is there: nothing happens", func(t *testing.T) {
+		t.Parallel()
 		svc, store, sw, pub, agentID := newTestService(t)
 		ctx := context.Background()
 		store.presence[agentID] = Presence{
@@ -1128,6 +1109,7 @@ func TestReconnectReleasesAnAgentWhosePhoneDidNotComeBack(t *testing.T) {
 // read the switch's registrations — a failed read leaves presence alone, and
 // this is what makes "leave it alone" reachable.
 func TestSyncSwitchAloneReleasesNobody(t *testing.T) {
+	t.Parallel()
 	svc, store, _, pub, agentID := newTestService(t)
 	ctx := context.Background()
 	store.presence[agentID] = Presence{

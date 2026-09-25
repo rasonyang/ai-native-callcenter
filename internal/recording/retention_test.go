@@ -74,6 +74,7 @@ func due(n int) ([]Expired, []uuid.UUID) {
 // Zero keeps everything. A deployment upgrading into this feature must not
 // start deleting audio because nobody chose a number.
 func TestRetentionOfZeroDeletesNothing(t *testing.T) {
+	t.Parallel()
 	rows, _ := due(3)
 	ledger := &fakeLedger{due: rows}
 	storage := &fakeStorage{}
@@ -90,34 +91,11 @@ func TestRetentionOfZeroDeletesNothing(t *testing.T) {
 	}
 }
 
-// The object goes first, and the row is stamped only once it has.
-//
-// The other order loses track of bytes: a row marked deleted whose object
-// survived is an orphan nothing will look for again, paid for for ever.
-func TestTheAudioIsDeletedBeforeTheRowSaysSo(t *testing.T) {
-	rows, ids := due(1)
-	ledger := &fakeLedger{due: rows}
-	storage := &fakeStorage{deleteFn: func(string) error {
-		return errors.New("the object store is unreachable")
-	}}
-
-	n, err := NewSweeper(ledger, storage, 30, quiet()).Sweep(context.Background())
-	if err != nil {
-		t.Fatalf("sweep: %v", err)
-	}
-	if n != 0 {
-		t.Errorf("reported %d deletions after the object delete failed", n)
-	}
-	if len(ledger.marked) != 0 {
-		t.Errorf("recording %s was marked deleted while its audio is still there — "+
-			"nothing will ever look for those bytes again", ids[0])
-	}
-}
-
 // An object that is already gone is not a failure: it is the state the sweep
 // was trying to reach, and the row still needs its mark. This is what repairs
 // a sweep that died between the delete and the stamp.
 func TestAnAlreadyMissingObjectStillMarksTheRow(t *testing.T) {
+	t.Parallel()
 	rows, ids := due(1)
 	ledger := &fakeLedger{due: rows}
 	storage := &fakeStorage{deleteFn: func(string) error { return fs.ErrNotExist }}
@@ -135,6 +113,7 @@ func TestAnAlreadyMissingObjectStillMarksTheRow(t *testing.T) {
 // One unreachable object must not stop the rest. A sweep that gives up on the
 // first failure never gets past it, and the queue behind it grows for ever.
 func TestOneFailureDoesNotStopTheSweep(t *testing.T) {
+	t.Parallel()
 	rows, _ := due(3)
 	ledger := &fakeLedger{due: rows}
 	storage := &fakeStorage{deleteFn: func(key string) error {

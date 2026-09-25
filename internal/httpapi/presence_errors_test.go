@@ -32,6 +32,7 @@ func (a phonelessAgents) Ready(context.Context, uuid.UUID) (agents.Presence, err
 func (a phonelessAgents) Presence(uuid.UUID) agents.Presence { return a.presence }
 
 func TestReadyWithoutARegisteredPhoneIsRefusedByName(t *testing.T) {
+	t.Parallel()
 	svc := phonelessAgents{presence: agents.Presence{
 		State: agents.StateNotReady, Reason: agents.ReasonLogin, ExtensionNumber: "1001",
 	}}
@@ -57,6 +58,7 @@ func TestReadyWithoutARegisteredPhoneIsRefusedByName(t *testing.T) {
 // than absent when there is no registration: a screen showing an extension
 // number has to be able to say whether that number can actually ring.
 func TestPresenceStatesWhoseRegistrationTheSwitchHolds(t *testing.T) {
+	t.Parallel()
 	for _, tt := range []struct {
 		name           string
 		presence       agents.Presence
@@ -81,6 +83,7 @@ func TestPresenceStatesWhoseRegistrationTheSwitchHolds(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			svc := phonelessAgents{presence: tt.presence}
 			srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 

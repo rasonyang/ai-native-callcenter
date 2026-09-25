@@ -29,6 +29,7 @@ var demoDispositions = []string{"RESOLVED", "FOLLOW_UP_REQUIRED", "OTHER"}
 // A demo whose agent screens are empty demos nothing: every call an agent
 // handled carries a wrap-up, and the callers who ring most have names.
 func TestTheHistoryGivesTheAgentScreensSomethingToShow(t *testing.T) {
+	t.Parallel()
 	plan := fixedPlan()
 
 	handled := map[uuid.UUID]bool{}
@@ -79,6 +80,7 @@ func TestTheHistoryGivesTheAgentScreensSomethingToShow(t *testing.T) {
 // Without a vocabulary there is nothing to file under, and the demo says so
 // by filing nothing rather than by inventing a code.
 func TestNoVocabularyMeansNoWrapUps(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 14, 17, 0, 0, 0, time.UTC)
 	agents := []uuid.UUID{uuid.MustParse("11111111-1111-4111-8111-111111111111")}
 	queues := []QueueRef{{ID: uuid.MustParse("33333333-3333-4333-8333-333333333333"), Name: "support-en"}}
@@ -95,6 +97,7 @@ func TestNoVocabularyMeansNoWrapUps(t *testing.T) {
 // One seed, one story: the generator must be bit-stable so every install
 // demos the same numbers and a re-run diffs to nothing.
 func TestHistoryIsDeterministic(t *testing.T) {
+	t.Parallel()
 	a, b := fixedPlan(), fixedPlan()
 	if len(a.CDRs) != len(b.CDRs) || len(a.QueueEvents) != len(b.QueueEvents) {
 		t.Fatalf("two runs disagree on volume: %d/%d vs %d/%d",
@@ -110,6 +113,7 @@ func TestHistoryIsDeterministic(t *testing.T) {
 // The story must add up: reports computed over the seed have to be
 // arithmetically coherent, or the demo teaches the wrong lessons.
 func TestHistoryArithmeticHoldsTogether(t *testing.T) {
+	t.Parallel()
 	plan := fixedPlan()
 
 	if len(plan.CDRs) < 150 {

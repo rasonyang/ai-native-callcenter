@@ -15,6 +15,7 @@ import (
 // answer a call. Before this, it stopped at "no rows" and the operator had to
 // reach for the API.
 func TestAMissingNumberIsCreatedPointingAtTheFlow(t *testing.T) {
+	t.Parallel()
 	flowID := uuid.Must(uuid.NewV7())
 
 	plan, err := planDIDBinding("95001", "zh", flowID, nil)
@@ -57,6 +58,7 @@ func TestAMissingNumberIsCreatedPointingAtTheFlow(t *testing.T) {
 // the zero value of an omitted flag here would set both directions to false,
 // which the dids_go_somewhere CHECK refuses.
 func TestAnExistingNumberOnlyChangesItsFlow(t *testing.T) {
+	t.Parallel()
 	flowID := uuid.Must(uuid.NewV7())
 	queueID := uuid.Must(uuid.NewV7())
 	oldFlow := uuid.Must(uuid.NewV7())
@@ -108,6 +110,7 @@ func TestAnExistingNumberOnlyChangesItsFlow(t *testing.T) {
 // (catalog.DID.validate): digits only, and a short language subtag that
 // defaults to en.
 func TestTheNumberAndLanguageAreCheckedAsTheAPIChecksThem(t *testing.T) {
+	t.Parallel()
 	flowID := uuid.Must(uuid.NewV7())
 
 	for _, number := range []string{"", "  ", "95-001", "9500a", "+95001"} {
