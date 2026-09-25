@@ -3,10 +3,15 @@
 This stack runs the whole product on one host: PostgreSQL, FreeSWITCH and the
 application, seeded with a demo dataset.
 
+This procedure is verified on a Linux server. On macOS, read
+[Running on macOS](#running-on-macos) first: the Mac's own address does not
+carry SIP and media to the containers.
+
 ## Prerequisites
 
-- [Docker Engine](https://docs.docker.com/engine/install/) with the Compose
-  plugin, v2 or later (`docker compose version` works).
+- A Linux host with [Docker Engine](https://docs.docker.com/engine/install/)
+  and the Compose plugin, v2 or later (`docker compose version` works). On
+  macOS, see [Running on macOS](#running-on-macos).
 - A Qwen key (`ALIYUN_API_KEY`), or an OpenAI key outside mainland China.
 - The address phones use to reach this host.
 
@@ -99,6 +104,57 @@ containers whose settings changed. `docker compose restart` does not re-read
 `.env`.
 
 **5. Open `http://<host>:8080`** and sign in as `admin` / `aicc@123`.
+
+## Running on macOS
+
+On macOS, containers run inside a Linux VM, and ports published on the Mac do
+not carry a call:
+
+- Colima by default forwards only TCP ports to the Mac. SIP over UDP and all
+  media (`16384-16484/udp`) never reach the switch; a UDP registration fails
+  with `503`.
+- SIP over TCP reaches the switch, but from the compose network's gateway
+  address instead of the phone's. The switch then treats the phone as local
+  and answers with the container's own address in the SDP, whatever
+  `FS_EXTERNAL_IP` says. The phone's audio does not reach the switch.
+- `network_mode: host` and macvlan networks attach to the VM, not to the Mac's
+  network, so they do not help.
+
+The result is a call that connects but has no audio in one or both
+directions. On a bot number the bot leg ends after 5 s without caller audio
+and the caller is moved to the number's fallback queue
+([Troubleshooting](#troubleshooting)).
+
+Give the VM its own address and point phones at it. Verified with Colima on
+Apple silicon:
+
+```sh
+colima start --vm-type vz --network-address
+colima list        # the ADDRESS column, e.g. 192.168.64.11
+```
+
+In `deploy/.env`:
+
+```ini
+FS_EXTERNAL_IP=<the ADDRESS from colima list>
+```
+
+Then follow the quick start from step 4. Phones register at
+`<FS_EXTERNAL_IP>:5060` over UDP, and the web interface is at
+`http://<FS_EXTERNAL_IP>:8080`. SIP and media then reach the switch with the
+phone's real address, as on a Linux host.
+
+- If the profile already runs without `--network-address`, run `colima stop`,
+  then the `colima start` line above.
+- The Mac's own address still forwards TCP ports, including `5060/tcp`. A phone
+  registered there has the problem above. Use the VM address only.
+- The VM address is on a network shared between the Mac and its VMs. Only
+  softphones on the same Mac can reach it. Phones on other hosts need the VM
+  bridged onto the LAN (Colima `--network-mode bridged`, which requires
+  `socket_vmnet`); this is not verified.
+- Docker Desktop is not verified. For phones on other hosts, or for anything
+  beyond a trial, run the stack on a Linux host or a Linux VM with a bridged
+  network adapter.
 
 ## Demo data
 
@@ -346,6 +402,20 @@ hand instead of pulling it.
   start, and the caller went to the number's fallback queue with nobody
   staffed. Find the reason with
   `docker compose logs aicc | grep -E 'could not run|conversation failed'`.
+- **The bot speaks, then about 5 s later the call goes to a queue.** The
+  caller's audio does not reach the switch, so the bot leg receives no media
+  and ends. The application logs `media went dead`; the switch logs
+  `aicc_inbound: bot leg vanished` and transfers the caller to the number's
+  fallback queue. In `sofia status profile internal reg`
+  (`docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 -x …`), the
+  phone's `IP` must be the phone's own address. A gateway address of the
+  compose network (`10.130.0.1` by default) means signalling is proxied; on a
+  Mac, see [Running on macOS](#running-on-macos). On a Linux host, check that
+  `FS_EXTERNAL_IP` is the address the phone dials and that the `RTP_START`–
+  `RTP_END` UDP range is open in the firewall.
+- **A softphone registers but hears nothing.** Same cause in the other
+  direction: the switch's media does not reach the phone, or the phone drops
+  it. Check the same two things as above.
 - **`… API_KEY is not set` in the logs.** The key is not in the container's
   environment. Put it in `deploy/.env` and run `docker compose up -d`
   (`restart` is not enough).
