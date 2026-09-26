@@ -1032,24 +1032,23 @@ func TestTurnLatencyIsMeasuredFromSpeechStoppedToFirstFrame(t *testing.T) {
 
 // A caller who resumes talking before any reply abandons the measurement:
 // there is no answer latency to measure for a turn that never got an answer.
+// Asserted on the timer itself: the session's field starts at zero, so polling
+// it through a bridge passed before either event had been handled.
 func TestResumedSpeechAbandonsTheMeasurement(t *testing.T) {
-	session, _, model := startBridge(t, provider.OpenAIProfile())
-	awaitBridgeEvent(t, session, EventTypeReady)
+	t.Parallel()
+	var timer turnTimer
 
-	model.events <- provider.Event{Type: provider.EventTypeSpeechStopped}
-	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		session.mu.Lock()
-		isAbandoned := session.timer.speechStoppedAt.IsZero()
-		session.mu.Unlock()
-		if isAbandoned {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	timer.onSpeechStopped()
+	timer.onSpeechStarted()
+	if _, _, ok := timer.onFirstFrame(); ok {
+		t.Error("the reply's first frame closed a measurement the caller had abandoned")
 	}
-	t.Fatal("the measurement survived the caller resuming speech")
+
+	// The next pause starts a fresh one.
+	timer.onSpeechStopped()
+	if _, _, ok := timer.onFirstFrame(); !ok {
+		t.Error("speech stopping after an abandoned turn started no measurement")
+	}
 }
 
 //
