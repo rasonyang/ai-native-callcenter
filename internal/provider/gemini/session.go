@@ -215,7 +215,6 @@ type Session struct {
 	firstAudioDeadline time.Duration
 	deltaStallDeadline time.Duration
 	setupWait          time.Duration
-	closeWait          time.Duration
 
 	pacer *pacer
 	// ticks is the pacer's cadence. Production fills it with a ticker in Start;
@@ -263,7 +262,6 @@ func newSession(profile provider.Profile, log *slog.Logger) (*Session, error) {
 		firstAudioDeadline: firstAudioTimeout,
 		deltaStallDeadline: deltaStallTimeout,
 		setupWait:          wsconn.DialTimeout,
-		closeWait:          closeTimeout,
 	}, nil
 }
 
@@ -759,7 +757,7 @@ func (s *Session) awaitPacer() {
 // bound. Every caller passes a context with no deadline in it, so nothing that
 // goes wrong here may hold a phone call open.
 func (s *Session) awaitReadLoop(ctx context.Context) {
-	timer := time.NewTimer(s.closeWait)
+	timer := time.NewTimer(closeTimeout)
 	defer timer.Stop()
 
 	select {

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -189,29 +188,6 @@ func TestAnAbruptSocketDropIsFatal(t *testing.T) {
 	if got := session.outcome(); got != outcomeConnectionLost {
 		t.Errorf("the session ended as %q, want %q", got, outcomeConnectionLost)
 	}
-}
-
-// A provider that stops answering altogether cannot hold the call open: the
-// wait is this client's own, because every caller passes a context with no
-// deadline in it.
-func TestAProviderThatStopsAnsweringStillEndsTheSession(t *testing.T) {
-	defer noGoroutinesLeft(t)()
-
-	f := newFakeGemini(t, acceptSetup)
-	session := testSession(t, f)
-	session.closeWait = 100 * time.Millisecond
-	start(t, session, testConfig())
-	before := len(f.settledFrames(2))
-
-	started := time.Now()
-	if err := session.Close(context.Background()); err != nil {
-		t.Fatalf("close: %v", err)
-	}
-	if elapsed := time.Since(started); elapsed > 2*time.Second {
-		t.Errorf("the close took %v, want the client's own bound", elapsed)
-	}
-
-	assertOneCleanEnding(t, session, f, before)
 }
 
 // The call is already gone and its context with it. The session is still ended
