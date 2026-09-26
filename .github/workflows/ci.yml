@@ -2,12 +2,13 @@
 #
 # The build gate. Everything that must hold for any change, on both halves of
 # the product. The API contract has a gate of its own (api.yml); this one never
-# duplicates it.
+# duplicates it. No container image is built here: the two images are built
+# only by release.yml, when a release is cut.
 name: ci
 
 # A change that touches only Markdown runs nothing this workflow checks, so
 # it does not start. GitHub honours `!` only inside `paths`, hence the '**'
-# include. main has no branch protection today; if go, web or image ever
+# include. main has no branch protection today; if go or web ever
 # become required checks, a skipped workflow leaves the PR waiting on them
 # forever, and this filter must move into the jobs instead.
 on:
@@ -123,25 +124,8 @@ jobs:
         run: npm run test
 
       # `npm run build` runs tsc --noEmit after vite, so this is the type check
-      # as well as the artifact the release will embed.
+      # as well as proof that the SPA builds. The release does not use this
+      # output: the Dockerfile builds the SPA itself.
       - name: Build
         run: npm run build
 
-  image:
-    name: image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: docker/setup-buildx-action@v4
-
-      # Proves the whole product still assembles into the thing we ship. Not
-      # pushed — release.yml owns publishing.
-      - name: Build the container image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: false
-          build-args: VERSION=ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
