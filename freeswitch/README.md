@@ -150,6 +150,11 @@ In `conf/vars.xml`:
 * `domain` — `$${local_ip_v4}` as shipped. Whatever it becomes must equal the
   application's `AICC_SWITCH_DOMAIN`: it is the realm a phone registers to and
   the domain an endpoint is dialled at. A queue name does not carry it.
+* `external_rtp_ip` and `external_sip_ip` — `$${local_ip_v4}` as shipped. The
+  internal profile treats every phone except one on loopback as behind NAT
+  (`local-network-acl=aicc_sip_local`) and puts this address in its SDP, so it
+  must be an address the phones reach. A value resolved over STUN would send a
+  LAN phone's audio to the network's public address.
 * `aicc_recordings_dir` — a directory or a URL; see below.
 * `default_password` — `REPLACE_ME`. It applies only to file-based directory
   entries, of which this tree has none, but leave nothing usable there.

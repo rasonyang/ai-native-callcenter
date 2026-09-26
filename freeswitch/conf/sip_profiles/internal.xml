@@ -128,7 +128,10 @@
     <!-- lets an inbound MESSAGE to api+<command> run FreeSWITCH API commands, so enable only for trusted peers -->
     <!-- <param name="enable-chat-api-proto" value="true"/> -->
 
-    <!--<param name="aggressive-nat-detection" value="true"/>-->
+    <!-- aicc: also treat a peer as behind NAT when the address in its Via
+         differs from the address the request came from. Paired with
+         local-network-acl=aicc_sip_local below. -->
+    <param name="aggressive-nat-detection" value="true"/>
     <!--
         There are known issues (asserts and segfaults) when 100rel is enabled.
         It is not recommended to enable 100rel at this time.
@@ -150,8 +153,13 @@
     <!--
         This defines your local network, by default we detect your local network
         and create this localnet.auto ACL for this.
+
+        aicc: aicc_sip_local (acl.conf.xml), loopback only. A phone reaching a
+        container arrives from the compose network's gateway address, which
+        localnet.auto counts as local, and the SDP then carried the
+        container's address instead of ext-rtp-ip.
     -->
-    <param name="local-network-acl" value="localnet.auto"/>
+    <param name="local-network-acl" value="aicc_sip_local"/>
     <!--<param name="apply-register-acl" value="domains"/>-->
     <!--<param name="dtmf-type" value="info"/>-->
 

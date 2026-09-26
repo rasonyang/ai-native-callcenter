@@ -1,7 +1,8 @@
 <!--
   SPDX-License-Identifier: Apache-2.0
 
-  Vanilla's network lists, plus the one the event socket uses.
+  Vanilla's network lists, plus the one the event socket uses and the one the
+  internal SIP profile uses as its local network.
 
   Left unset, mod_event_socket applies loopback.auto and rudely rejects the
   application, which in a container deployment lives at another address on the
@@ -13,6 +14,15 @@
   ships in an image: the port is deliberately not published, so nothing outside
   the host can reach it whatever this list says, and a real address baked in
   here would only tell a reader about the office it was written in.
+
+  "aicc_sip_local" is the internal profile's local-network-acl. A peer inside
+  it is taken to be on the switch's own link and is answered with the
+  container's address in the SDP; every other peer is taken to be behind NAT
+  and is answered with ext-rtp-ip (FS_EXTERNAL_IP). localnet.auto is wrong for
+  a container: a phone published in through Docker's port forwarding arrives
+  from the compose network's gateway address, which is private and inside
+  localnet.auto, so the phone was told to send its audio to a container
+  address it cannot reach. Only loopback is local.
 -->
 <configuration name="acl.conf" description="Network Lists">
   <network-lists>
@@ -34,6 +44,12 @@
       <node type="allow" cidr="10.0.0.0/8"/>
       <node type="allow" cidr="172.16.0.0/12"/>
       <node type="allow" cidr="192.168.0.0/16"/>
+    </list>
+
+    <!-- The internal profile's local network: loopback only. -->
+    <list name="aicc_sip_local" default="deny">
+      <node type="allow" cidr="127.0.0.0/8"/>
+      <node type="allow" cidr="::1/128"/>
     </list>
 
     <list name="lan" default="allow">

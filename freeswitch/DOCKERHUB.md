@@ -64,7 +64,7 @@ DSN format: `pgsql://hostaddr=10.0.0.5 dbname=aicc user=aicc password='secret'`.
 | Variable | Injected into | Unset |
 |---|---|---|
 | `FS_LOCAL_IP` | `local_ip_v4` (SIP/RTP bind address) | FreeSWITCH's own detection: the container's primary interface. Any `local_ip_v4` setting in the tree is removed so the core value wins. |
-| `FS_EXTERNAL_IP` | `external_rtp_ip`, `external_sip_ip` | `$${local_ip_v4}`. Vanilla resolves these over STUN, which behind NAT advertises the whole network's public address and sends the media of a purely internal call there. |
+| `FS_EXTERNAL_IP` | `external_rtp_ip`, `external_sip_ip` | `$${local_ip_v4}`. Vanilla resolves these over STUN, which behind NAT advertises the whole network's public address and sends the media of a purely internal call there. The internal profile advertises this address to every phone except one on loopback (`local-network-acl=aicc_sip_local`), so it must be an address the phones reach. |
 | `FS_DOMAIN` | `domain` (the SIP realm phones register to) | `$${local_ip_v4}` |
 | `FS_DEFAULT_PASSWORD` | `default_password` | Optional; the shipped value. aicc accounts come from PostgreSQL with their own passwords, so this affects only file-based directory entries, of which the tree has none. |
 
