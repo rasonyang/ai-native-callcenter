@@ -30,7 +30,7 @@ COPY web/ ./
 RUN npm run build
 
 # --- the executable ----------------------------------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine AS build
 
 WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
