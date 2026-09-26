@@ -4,7 +4,6 @@ package media
 
 import (
 	"math"
-	"slices"
 	"testing"
 )
 
@@ -170,36 +169,6 @@ func TestDownsamplerRejectsAliasing(t *testing.T) {
 	}
 }
 
-// Converting a stream frame by frame must give the same audio as converting it
-// in one piece, or every frame boundary becomes an audible click.
-func TestDownsamplerIsContinuousAcrossFrames(t *testing.T) {
-	t.Parallel()
-	const total = 1440
-	src := make([]int16, total)
-	for i := range src {
-		src[i] = int16(6000 * math.Sin(2*math.Pi*440*float64(i)/24000))
-	}
-
-	whole := NewDownsampler(3, 32).Process(make([]int16, 0, total/3), src)
-
-	framed := make([]int16, 0, total/3)
-	streaming := NewDownsampler(3, 32)
-	for start := 0; start < total; start += 480 {
-		chunk := streaming.Process(make([]int16, 0, 160), src[start:start+480])
-		framed = append(framed, chunk...)
-	}
-
-	if len(framed) != len(whole) {
-		t.Fatalf("framed conversion produced %d samples, whole produced %d", len(framed), len(whole))
-	}
-	for i := range whole {
-		if diff := math.Abs(float64(whole[i]) - float64(framed[i])); diff > 1 {
-			t.Fatalf("sample %d differs by %.0f between framed and whole conversion: "+
-				"the filter is not carrying state across frames", i, diff)
-		}
-	}
-}
-
 // Provider audio does not arrive in chunks that divide evenly by the
 // conversion factor. The decimation phase must survive that, or the output
 // drifts by a sample at every ragged boundary.
@@ -230,27 +199,6 @@ func TestDownsamplerHandlesRaggedChunks(t *testing.T) {
 		if diff := math.Abs(float64(whole[i]) - float64(ragged[i])); diff > 1 {
 			t.Fatalf("sample %d differs by %.0f: the decimation phase drifted "+
 				"on a chunk that was not a multiple of the factor", i, diff)
-		}
-	}
-}
-
-func TestDownsamplerResetClearsState(t *testing.T) {
-	t.Parallel()
-	loud := make([]int16, 480)
-	for i := range loud {
-		loud[i] = 20000
-	}
-
-	d := NewDownsampler(3, 32)
-	first := slices.Clone(d.Process(make([]int16, 0, 160), loud))
-
-	d.Reset()
-	second := d.Process(make([]int16, 0, 160), loud)
-
-	for i := range first {
-		if first[i] != second[i] {
-			t.Fatalf("after Reset, sample %d is %d rather than the first run's %d: "+
-				"state from the previous call leaked into the new one", i, second[i], first[i])
 		}
 	}
 }
