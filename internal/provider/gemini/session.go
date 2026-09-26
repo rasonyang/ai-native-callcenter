@@ -135,12 +135,15 @@ type Session struct {
 	// only written by a holder that has just seen the session still running.
 	sendMu sync.Mutex
 
-	// emitMu makes the event channel single-writer without making it
-	// single-goroutine. The read loop, the watchdog and the speech detector all
-	// have something to say; the channel is closed under this lock, with CLOSED
-	// written in the same critical section, so nothing can reach a closed
-	// channel and nothing can follow the last event.
-	emitMu         sync.Mutex
+	// emitMu guards the event channel against being closed under a writer.
+	// The read loop, the watchdog and the speech detector all have something
+	// to say, and each says it under the read lock, so no one of them can shut
+	// another out: a writer holding it exclusively would make the detector's
+	// non-blocking offer drop an event the channel had room for. The channel
+	// is closed under the write lock, with CLOSED written in the same critical
+	// section, so nothing can reach a closed channel and nothing can follow
+	// the last event.
+	emitMu         sync.RWMutex
 	isEventsClosed bool
 
 	// isTurnOpen is true between the first output of a turn and it ending,
