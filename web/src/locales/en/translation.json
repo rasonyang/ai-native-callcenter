@@ -601,7 +601,8 @@
     "queue": "Queue",
     "disposition": "Disposition",
     "note": "Note",
-    "talkTime": "Talk time",
+    "talkTime": "Agent talk",
+    "totalTime": "Total",
     "notFiled": "Not filed",
     "empty": "No calls yet. Yours will appear here as you finish them.",
     "listen": "Listen to the recording"
