@@ -583,8 +583,8 @@ func (s *Session) onTurnStalled(hasAudioArrived bool) {
 // channel still has room; what the connection says is only that nobody is
 // obliged to read any more.
 func (s *Session) emit(event provider.Event) {
-	s.emitMu.Lock()
-	defer s.emitMu.Unlock()
+	s.emitMu.RLock()
+	defer s.emitMu.RUnlock()
 	s.emitLocked(event)
 }
 
@@ -593,15 +593,17 @@ func (s *Session) emit(event provider.Event) {
 // in both directions.
 //
 // So it never blocks, on the lock or on the channel, and an event it cannot
-// place is dropped. What it carries — the caller has started or stopped talking
-// — is worth having and is not worth a stalled call: it cancels a dead-air timer
-// and starts a stopwatch, and both of those are already wrong when the consumer
-// is 256 events behind.
+// place is dropped. The lock it tries is the shared one, which another emitter
+// never holds against it; it fails only while the stream is being closed. What
+// it carries — the caller has started or stopped talking — is worth having and
+// is not worth a stalled call: it cancels a dead-air timer and starts a
+// stopwatch, and both of those are already wrong when the consumer is 256
+// events behind.
 func (s *Session) offer(event provider.Event) {
-	if !s.emitMu.TryLock() {
+	if !s.emitMu.TryRLock() {
 		return
 	}
-	defer s.emitMu.Unlock()
+	defer s.emitMu.RUnlock()
 	if s.isEventsClosed {
 		return
 	}
