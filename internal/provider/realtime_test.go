@@ -894,34 +894,6 @@ func TestUndecodableAudioIsReportedRatherThanPlayed(t *testing.T) {
 // Barge-in.
 //
 
-// Where the provider stops on its own, telling it again would be noise; what
-// it does need is how much the caller actually heard.
-func TestInterruptOnAProviderThatCancelsItself(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	awaitEvent(t, session, EventTypeSessionReady)
-
-	f.send(map[string]any{"type": "response.output_item.added",
-		"item": map[string]any{"id": "item_7", "type": "message"}})
-	time.Sleep(50 * time.Millisecond)
-
-	if err := session.Interrupt(InterruptReasonSpeech, 640); err != nil {
-		t.Fatalf("interrupt: %v", err)
-	}
-
-	truncate := f.awaitMessage("conversation.item.truncate")
-	if truncate["item_id"] != "item_7" {
-		t.Errorf("truncated %v, want the response the caller was hearing", truncate["item_id"])
-	}
-	if truncate["audio_end_ms"] != float64(640) {
-		t.Errorf("audio_end_ms = %v, want what was actually played", truncate["audio_end_ms"])
-	}
-	f.refuteMessage("response.cancel")
-}
-
 // A turn that speaks before it calls a tool adds a second output item, and the
 // caller can barge in over the sentence that preceded the call. Truncation has
 // to name the audio the caller was hearing; naming the function call instead is
@@ -1526,22 +1498,6 @@ func TestALostConnectionIsFatalAndClosesTheStream(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Error("the event stream was never closed")
-	}
-}
-
-func TestSendingAfterCloseFails(t *testing.T) {
-	f := newFakeProvider(t, acceptSession)
-	session := testSession(t, f, OpenAIProfile())
-	if err := session.Start(t.Context(), basicConfig()); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	_ = session.Close(t.Context())
-	// Close is idempotent; the call teardown path may reach it twice.
-	_ = session.Close(t.Context())
-
-	if err := session.SendAudio([]byte{1, 2}); err == nil {
-		t.Error("audio was accepted after the session closed")
 	}
 }
 

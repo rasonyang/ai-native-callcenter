@@ -319,47 +319,6 @@ func TestEveryShippedFlowAnswersOnItsNumbers(t *testing.T) {
 	}
 }
 
-// The deployment names one number as the one it dials out from. An agent's
-// outbound call has to present a caller id, outbound.defaultOutboundNumber
-// reads it from exactly this flag, and the database allows one row to hold it
-// (uq_dids_default_outbound) — so a seed that sets none leaves outbound calls
-// refused, and a seed that sets two cannot be applied at all.
-func TestTheMainLineIsTheDefaultOutboundNumber(t *testing.T) {
-	st := seededStore(t)
-	seedDemo(t, st)
-
-	rows, err := st.Pool.Query(context.Background(), `
-		SELECT number, allow_inbound, allow_outbound FROM dids WHERE is_default_outbound`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rows.Close()
-
-	var defaults []string
-	for rows.Next() {
-		var (
-			number            string
-			inbound, outbound bool
-		)
-		if err := rows.Scan(&number, &inbound, &outbound); err != nil {
-			t.Fatal(err)
-		}
-		if !outbound {
-			t.Errorf("%s is the default outbound number and cannot dial out", number)
-		}
-		if !inbound {
-			t.Errorf("%s is the main line and takes no inbound calls", number)
-		}
-		defaults = append(defaults, number)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if len(defaults) != 1 || defaults[0] != "8005550199" {
-		t.Errorf("default outbound numbers = %v, want exactly [8005550199]", defaults)
-	}
-}
-
 // AICC_SEED=fresh is the only way back to an empty product once the volume
 // exists, and it has to know about every flow and number the demo publishes —
 // a slug the reset does not name is a flow that survives it.

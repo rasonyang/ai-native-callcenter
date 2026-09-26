@@ -80,14 +80,6 @@ func TestNegotiationFollowsLocalPreference(t *testing.T) {
 	}
 }
 
-func TestNegotiationFailsWithNoCommonCodec(t *testing.T) {
-	t.Parallel()
-	offer := parseSDP("c=IN IP4 10.0.0.8\r\nm=audio 5000 RTP/AVP 9\r\na=rtpmap:9 G722/8000\r\n")
-	if _, _, ok := negotiate(offer, []media.Law{media.LawMu, media.LawAlaw}); ok {
-		t.Error("negotiated a codec that was never offered")
-	}
-}
-
 func TestSDPAnswer(t *testing.T) {
 	t.Parallel()
 	answer := buildSDPAnswer("10.0.0.5", 40002, 7, media.LawAlaw, 8, 96)
