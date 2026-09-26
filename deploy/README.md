@@ -3,9 +3,12 @@
 This stack runs the whole product on one host: PostgreSQL, FreeSWITCH and the
 application, seeded with a demo dataset.
 
-This procedure is verified on a Linux server. On macOS, read
-[Running on macOS](#running-on-macos) first: the Mac's own address does not
-carry SIP and media to the containers.
+This procedure is verified on a Linux server. The switch's current
+local-network setting (`local-network-acl=aicc_sip_local` on the internal SIP
+profile) is verified only on Docker Desktop on an Intel Mac and has not been
+re-verified on a Linux host. On macOS, read
+[Running on macOS](#running-on-macos) first: what works depends on the
+container runtime.
 
 ## Prerequisites
 
@@ -107,26 +110,42 @@ containers whose settings changed. `docker compose restart` does not re-read
 
 ## Running on macOS
 
-On macOS, containers run inside a Linux VM, and ports published on the Mac do
-not carry a call:
+On macOS, containers run inside a Linux VM. A port published on the Mac is
+forwarded into the VM, and the phone's SIP and media reach the switch from an
+address of the VM's network instead of the phone's own. The switch treats every
+phone except loopback as behind NAT: it advertises `FS_EXTERNAL_IP` in the SDP
+and sends its media to the address the phone's media arrives from. `network_mode: host` and macvlan networks attach to
+the VM, not to the Mac's network, so they do not help.
 
-- Colima by default forwards only TCP ports to the Mac. SIP over UDP and all
-  media (`16384-16484/udp`) never reach the switch; a UDP registration fails
-  with `503`.
-- SIP over TCP reaches the switch, but from the compose network's gateway
-  address instead of the phone's. The switch then treats the phone as local
-  and answers with the container's own address in the SDP, whatever
-  `FS_EXTERNAL_IP` says. The phone's audio does not reach the switch.
-- `network_mode: host` and macvlan networks attach to the VM, not to the Mac's
-  network, so they do not help.
-
-The result is a call that connects but has no audio in one or both
-directions. On a bot number the bot leg ends after 5 s without caller audio
-and the caller is moved to the number's fallback queue
+A call that connects with no audio in one direction is the failure to look
+for. On a bot number the bot leg ends after 5 s without caller audio and the
+caller is moved to the number's fallback queue
 ([Troubleshooting](#troubleshooting)).
 
-Give the VM its own address and point phones at it. Verified with Colima on
-Apple silicon:
+### Docker Desktop
+
+Verified on an Intel Mac with Docker Desktop, softphones on the same Mac.
+
+In `deploy/.env`:
+
+```ini
+FS_EXTERNAL_IP=<the Mac's own LAN address>
+```
+
+Then follow the quick start from step 4. Phones register at
+`<FS_EXTERNAL_IP>:5060` over UDP, and the web interface is at
+`http://<FS_EXTERNAL_IP>:8080`.
+
+- Phones on other hosts are not verified with Docker Desktop.
+- `sofia status profile internal reg` shows a Docker gateway address as the
+  phone's `IP` (`10.130.0.1` or `192.168.65.1`). That is expected here.
+
+### Colima
+
+Colima by default forwards only TCP ports to the Mac. SIP over UDP and all
+media (`16384-16484/udp`) never reach the switch; a UDP registration fails with
+`503`. Give the VM its own address and point phones at it. Verified with Colima
+on Apple silicon:
 
 ```sh
 colima start --vm-type vz --network-address
@@ -146,15 +165,16 @@ phone's real address, as on a Linux host.
 
 - If the profile already runs without `--network-address`, run `colima stop`,
   then the `colima start` line above.
-- The Mac's own address still forwards TCP ports, including `5060/tcp`. A phone
-  registered there has the problem above. Use the VM address only.
+- The Mac's own address still forwards TCP ports, including `5060/tcp`, but
+  not the UDP media. A phone registered there has no audio. Use the VM address
+  only.
 - The VM address is on a network shared between the Mac and its VMs. Only
   softphones on the same Mac can reach it. Phones on other hosts need the VM
   bridged onto the LAN (Colima `--network-mode bridged`, which requires
   `socket_vmnet`); this is not verified.
-- Docker Desktop is not verified. For phones on other hosts, or for anything
-  beyond a trial, run the stack on a Linux host or a Linux VM with a bridged
-  network adapter.
+
+For phones on other hosts, or for anything beyond a trial, run the stack on a
+Linux host or a Linux VM with a bridged network adapter.
 
 ## Demo data
 
@@ -406,16 +426,27 @@ hand instead of pulling it.
   caller's audio does not reach the switch, so the bot leg receives no media
   and ends. The application logs `media went dead`; the switch logs
   `aicc_inbound: bot leg vanished` and transfers the caller to the number's
-  fallback queue. In `sofia status profile internal reg`
-  (`docker compose exec freeswitch fs_cli -P 18021 -p aicc@123 -x …`), the
-  phone's `IP` must be the phone's own address. A gateway address of the
-  compose network (`10.130.0.1` by default) means signalling is proxied; on a
-  Mac, see [Running on macOS](#running-on-macos). On a Linux host, check that
-  `FS_EXTERNAL_IP` is the address the phone dials and that the `RTP_START`–
-  `RTP_END` UDP range is open in the firewall.
+  fallback queue. Check, in order
+  (`docker compose exec freeswitch fs_cli -P 18021 -p aicc@123`):
+  1. The `c=` line in the SDP of the switch's `200 OK` to the phone must be an
+     address the phone can reach, normally `FS_EXTERNAL_IP`. In an interactive
+     `fs_cli`, run `sofia profile internal siptrace on`, place the call, read
+     the `200 OK` it prints, then `sofia profile internal siptrace off`. A
+     container address (`10.130.x.x`) there means the internal profile treats
+     the phone as local: its `local-network-acl` must be `aicc_sip_local`
+     (`conf/sip_profiles/internal.xml` in the switch image).
+  2. `FS_EXTERNAL_IP` is the address the phone dials.
+  3. The `RTP_START`–`RTP_END` UDP range reaches the switch: open in the
+     firewall on a Linux host; on a Mac, see
+     [Running on macOS](#running-on-macos).
+
+  In `sofia status profile internal reg`, a Docker gateway address as the
+  phone's `IP` (`10.130.0.1` by default) means the runtime forwards the port
+  through its own proxy. It is expected on Docker Desktop and is not by itself
+  a fault.
 - **A softphone registers but hears nothing.** Same cause in the other
   direction: the switch's media does not reach the phone, or the phone drops
-  it. Check the same two things as above.
+  it. Check the same things as above.
 - **`… API_KEY is not set` in the logs.** The key is not in the container's
   environment. Put it in `deploy/.env` and run `docker compose up -d`
   (`restart` is not enough).
