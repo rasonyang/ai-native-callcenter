@@ -72,4 +72,4 @@ Date: 2026-08-13. Every item below was explicitly confirmed in the Phase 1 clari
 
 ## Standing constraints carried from prompts.md (not re-asked)
 
-Single tenant; Go 1.26 / PG 18 / chi / pgx / sqlc / slog / OTel; React 19 / TS / Vite / TanStack Router+Query / Tailwind 4 / shadcn; REST + SSE only (no app WebSocket); no extra middleware (no Redis/MQ); go:embed SPA; ESL inbound mode; speech-to-speech only, and cascade never in this repo (A6 — a Realtime Gateway service is the phase-2 path); FS config changes only via approved diffs; dev is HTTP-only; capacity target 200 AI calls + 50 agents on 8c16GB for the Go process.
+Single tenant; Go 1.27 / PG 18 / chi / pgx / sqlc / slog / OTel; React 19 / TS / Vite / TanStack Router+Query / Tailwind 4 / shadcn; REST + SSE only (no app WebSocket); no extra middleware (no Redis/MQ); go:embed SPA; ESL inbound mode; speech-to-speech only, and cascade never in this repo (A6 — a Realtime Gateway service is the phase-2 path); FS config changes only via approved diffs; dev is HTTP-only; capacity target 200 AI calls + 50 agents on 8c16GB for the Go process.
