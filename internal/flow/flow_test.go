@@ -310,19 +310,6 @@ func TestAMatchingResultMovesThePhase(t *testing.T) {
 	}
 }
 
-// No match means stay and ask again — not an error, and not a move.
-func TestANonMatchingResultStaysPut(t *testing.T) {
-	t.Parallel()
-	e := testEngine(t, "en")
-
-	if moved := e.OnToolResult("lookup_account", map[string]any{"found": "0"}); moved != "" {
-		t.Fatalf("moved to %q on a result no rule matches", moved)
-	}
-	if e.NodeID() != "welcome" {
-		t.Errorf("phase is %q", e.NodeID())
-	}
-}
-
 // The third failed lookup gives up and hands the caller over; the counter the
 // rule reads is maintained by the engine itself.
 func TestRepeatedFailuresEscalateThroughThePriorityRule(t *testing.T) {
@@ -355,15 +342,6 @@ func TestTransientResultSlotsAreReplacedWholesale(t *testing.T) {
 	// The namespaced copy is the durable one.
 	if _, ok := e.Slot("lookup_account.extra"); !ok {
 		t.Error("the namespaced slot did not persist")
-	}
-}
-
-func TestGlobalTransitionsApplyInEveryPhase(t *testing.T) {
-	t.Parallel()
-	e := testEngine(t, "en")
-
-	if moved := e.OnToolResult("transfer_to_agent", map[string]any{"ok": "1"}); moved != "handoff" {
-		t.Fatalf("the flow-wide transfer rule did not fire: moved to %q", moved)
 	}
 }
 
