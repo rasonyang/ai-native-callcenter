@@ -599,7 +599,8 @@
     "queue": "队列",
     "disposition": "处理结果",
     "note": "小结",
-    "talkTime": "通话时长",
+    "talkTime": "坐席通话",
+    "totalTime": "总时长",
     "notFiled": "未填写",
     "empty": "暂无通话，处理完的通话会出现在这里。",
     "listen": "试听录音"

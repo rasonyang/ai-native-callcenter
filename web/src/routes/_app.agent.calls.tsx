@@ -32,6 +32,8 @@ export const Route = createFileRoute('/_app/agent/calls')({
 })
 
 const PAGE_SIZE = 50
+// Spanned by the message rows and the expanded recording row.
+const COLUMN_COUNT = 8
 const STATUSES: Array<CDRStatus | ''> = ['', 'ANSWERED', 'NO_ANSWER', 'BUSY', 'FAILED']
 
 function MyCallsPage() {
@@ -95,13 +97,14 @@ function MyCallsPage() {
           <Th>{t('myCalls.disposition')}</Th>
           <Th>{t('myCalls.note')}</Th>
           <Th align="right">{t('myCalls.talkTime')}</Th>
+          <Th align="right">{t('myCalls.totalTime')}</Th>
           <Th align="right">{t('cdr.playColumn')}</Th>
         </THead>
         <TBody>
-          {isPending && <TableMessage colSpan={7}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={7}>{describeError(error, t)}</TableMessage>}
+          {isPending && <TableMessage colSpan={COLUMN_COUNT}>{t('common.loading')}</TableMessage>}
+          {isError && <TableMessage colSpan={COLUMN_COUNT}>{describeError(error, t)}</TableMessage>}
           {!isPending && !isError && rows.length === 0 && (
-            <TableMessage colSpan={7}>{t('myCalls.empty')}</TableMessage>
+            <TableMessage colSpan={COLUMN_COUNT}>{t('myCalls.empty')}</TableMessage>
           )}
           {rows.map((row) => (
             <Fragment key={row.callId}>
@@ -126,6 +129,9 @@ function MyCallsPage() {
               <Td align="right" className="tabular">
                 {formatDuration(row.talkSec)}
               </Td>
+              <Td align="right" className="tabular">
+                {formatDuration(row.totalSec)}
+              </Td>
               <Td align="right">
                 {row.hasRecording && (
                   <Button
@@ -146,7 +152,7 @@ function MyCallsPage() {
             </Tr>
             {openCallId === row.callId && (
               <Tr>
-                <Td colSpan={7}>
+                <Td colSpan={COLUMN_COUNT}>
                   <MyRecording callId={row.callId} />
                 </Td>
               </Tr>

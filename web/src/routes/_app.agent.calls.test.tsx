@@ -54,6 +54,17 @@ it('shows what the agent filed about each call', async () => {
   expect(screen.getByText('support-zh')).toBeInTheDocument()
 })
 
+// The recording covers the whole call (bot, queue and agent), so the row shows
+// the whole call's length beside the agent's own share of it.
+it('shows the agent’s talk time and the whole call’s length', async () => {
+  await renderMyCalls({ myCDRs: [cdrFixture({ talkSec: 9, totalSec: 69 })] })
+
+  expect(await screen.findByText('00:09')).toBeInTheDocument()
+  expect(screen.getByText('01:09')).toBeInTheDocument()
+  expect(screen.getByText('Agent talk')).toBeInTheDocument()
+  expect(screen.getByText('Total')).toBeInTheDocument()
+})
+
 it('says plainly when a call was never wrapped up', async () => {
   await renderMyCalls({ myCDRs: [cdrFixture()] })
   expect(await screen.findByText(/not filed/i)).toBeInTheDocument()
