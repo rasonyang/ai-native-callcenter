@@ -147,6 +147,10 @@ func (f *fakeSwitch) SetCallcenterAgentNoAnswerDelay(name string, sec int) error
 	return f.record("no_answer_delay_time %s %d", name, sec)
 }
 
+func (f *fakeSwitch) ClearCallcenterAgentHoldOff(name string) error {
+	return f.record("holdoff_clear %s", name)
+}
+
 func (f *fakeSwitch) SetCallcenterAgentRejectDelay(name string, sec int) error {
 	return f.record("reject_delay_time %s %d", name, sec)
 }
@@ -168,6 +172,31 @@ func (f *fakeSwitch) SetCallcenterAgentWrapUp(name string, sec int) error {
 }
 
 func (f *fakeSwitch) IsUp() bool { return f.up }
+
+// count is how many recorded commands contain substr.
+func (f *fakeSwitch) count(substr string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, c := range f.commands {
+		if strings.Contains(c, substr) {
+			n++
+		}
+	}
+	return n
+}
+
+// lastIndex is the position of the latest command containing substr, or -1.
+func (f *fakeSwitch) lastIndex(substr string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.commands) - 1; i >= 0; i-- {
+		if strings.Contains(f.commands[i], substr) {
+			return i
+		}
+	}
+	return -1
+}
 
 func (f *fakeSwitch) seen(substr string) bool {
 	f.mu.Lock()
@@ -1131,4 +1160,106 @@ func TestSyncSwitchAloneReleasesNobody(t *testing.T) {
 			break
 		}
 	}
+}
+
+// The switch pauses an agent after a missed call and setting Available does
+// not lift it (#51). An agent who chooses READY is ready now.
+func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
+	t.Parallel()
+	t.Run("a benched agent returning to READY is cleared after Available", func(t *testing.T) {
+		t.Parallel()
+		svc, _, sw, _, agentID := newTestService(t)
+		ctx := t.Context()
+		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Ready(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.RingNoAnswer(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		cleared := sw.count("holdoff_clear agent-1001")
+
+		if _, err := svc.Ready(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		if got := sw.count("holdoff_clear agent-1001"); got != cleared+1 {
+			t.Fatalf("hold-off clears = %d, want %d: the agent would idle until the "+
+				"switch's pause ran out", got, cleared+1)
+		}
+		if sw.lastIndex("holdoff_clear agent-1001") < sw.lastIndex("status agent-1001 Available") {
+			t.Error("hold-off cleared before the Available mirror")
+		}
+	})
+
+	t.Run("READY again is not a new decision", func(t *testing.T) {
+		t.Parallel()
+		svc, _, sw, _, agentID := newTestService(t)
+		ctx := t.Context()
+		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Ready(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		before := sw.count("holdoff_clear")
+		if _, err := svc.Ready(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		if got := sw.count("holdoff_clear"); got != before {
+			t.Errorf("READY to READY cleared the hold-off %d more time(s)", got-before)
+		}
+	})
+
+	t.Run("READY on an unreachable phone keeps the switch's pause", func(t *testing.T) {
+		t.Parallel()
+		svc, _, sw, _, agentID := newTestService(t)
+		ctx := t.Context()
+		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+			t.Fatal(err)
+		}
+		svc.ObserveDevice(ctx, "1008", SignalUnreachable)
+		before := sw.count("holdoff_clear")
+
+		p, err := svc.Ready(ctx, agentID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.CallcenterStatus() == "Available" {
+			t.Fatal("an unreachable phone was mirrored Available")
+		}
+		if got := sw.count("holdoff_clear"); got != before {
+			t.Errorf("READY on an unreachable phone cleared the hold-off %d time(s); "+
+				"it still protects that phone when it comes back", got-before)
+		}
+	})
+
+	t.Run("a phone that comes back keeps the switch's pause", func(t *testing.T) {
+		t.Parallel()
+		svc, _, sw, _, agentID := newTestService(t)
+		ctx := t.Context()
+		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.Ready(ctx, agentID); err != nil {
+			t.Fatal(err)
+		}
+		before := sw.count("holdoff_clear")
+
+		svc.ObserveDevice(ctx, "1008", SignalUnregistered)
+		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+
+		if got := svc.Presence(agentID); got.CurrentState() != StateReady {
+			t.Fatalf("state = %s, want READY restored by the returning phone", got.CurrentState())
+		}
+		if got := sw.count("holdoff_clear"); got != before {
+			t.Errorf("a registration cleared the hold-off %d time(s); it still "+
+				"protects a phone that bounces", got-before)
+		}
+	})
 }

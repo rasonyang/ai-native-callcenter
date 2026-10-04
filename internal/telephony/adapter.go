@@ -128,6 +128,18 @@ func (a *Adapter) SetCallcenterAgentNoAnswerDelay(name string, sec int) error {
 	return a.exec("callcenter_config agent set no_answer_delay_time %s %d", name, sec)
 }
 
+// ClearCallcenterAgentHoldOff lets the switch offer a call to an agent now,
+// ending the pause a refused offer put on them.
+//
+// After a missed call mod_callcenter writes now plus the agent's
+// no_answer_delay_time into the agent's ready_time and offers nothing until
+// that moment passes. Setting the status back to Available does not touch it,
+// so an agent who benched and returned stood idle while a caller waited. Zero
+// is the clearing value: the dispatch test is ready_time <= now.
+func (a *Adapter) ClearCallcenterAgentHoldOff(name string) error {
+	return a.exec("callcenter_config agent set ready_time %s 0", name)
+}
+
 // SetCallcenterAgentMaxNoAnswer sets how many delivered calls an agent may let
 // ring out before the switch benches them.
 //

@@ -44,6 +44,9 @@ type SwitchControl interface {
 	SetCallcenterAgentNoAnswerDelay(name string, sec int) error
 	SetCallcenterAgentRejectDelay(name string, sec int) error
 	SetCallcenterAgentBusyDelay(name string, sec int) error
+	// ClearCallcenterAgentHoldOff ends the switch's pause after a refused
+	// offer; see Ready for when that is right.
+	ClearCallcenterAgentHoldOff(name string) error
 	IsUp() bool
 }
 
@@ -254,10 +257,46 @@ func (s *Service) Logout(ctx context.Context, agentID uuid.UUID) (Presence, erro
 }
 
 // Ready makes an agent routable.
+//
+// Choosing READY also ends the switch's hold-off from an earlier refusal. The
+// switch pauses an agent for noAnswerDelaySec after a missed call, and setting
+// the status back to Available does not lift it, so an agent who was benched
+// for a missed call and came back stood idle for up to a minute while a caller
+// waited (#51). Whoever asks for READY is ready now, so the pause goes with it.
+//
+// Only a move into READY does this. READY again is not a new decision, and the
+// registration paths (restoreForReturnedDevice, mirrorRegistration) never
+// reach here on purpose: the pause still protects a phone that bounces, which
+// is exactly the case the bench declines.
 func (s *Service) Ready(ctx context.Context, agentID uuid.UUID) (Presence, error) {
-	return s.change(ctx, agentID, events.TypeAgentReady, func(p *Presence) error {
+	var wasReady bool
+	p, err := s.change(ctx, agentID, events.TypeAgentReady, func(p *Presence) error {
+		wasReady = p.CurrentState() == StateReady
 		return p.Ready(s.now())
 	})
+	// A phone out of service leaves a READY agent On Break at the switch; the
+	// pause stays for when that phone comes back.
+	if err != nil || wasReady || p.CallcenterStatus() != "Available" {
+		return p, err
+	}
+	s.clearHoldOff(agentID)
+	return p, nil
+}
+
+// clearHoldOff is the switch call behind Ready. It runs after the Available
+// mirror, because that status write is what makes the agent dispatchable, and
+// outside the presence lock like every other switch call.
+func (s *Service) clearHoldOff(agentID uuid.UUID) {
+	if s.switchCtl == nil || !s.switchCtl.IsUp() {
+		return
+	}
+	name := s.CallcenterNameFor(context.Background(), agentID)
+	if name == "" {
+		return
+	}
+	if err := s.switchCtl.ClearCallcenterAgentHoldOff(name); err != nil {
+		slog.Warn("callcenter hold-off not cleared", "agent", name, "error", err)
+	}
 }
 
 // NotReady takes an agent out of routing.
@@ -905,6 +944,11 @@ func (s *Service) persist(ctx context.Context, agentID uuid.UUID, p Presence) er
 // refused forty-two offers in three minutes on 2026-08-23 while the caller
 // heard hold music throughout, and neither the agent's screen nor the
 // wallboard showed anything happening.
+//
+// The pause ends early when the agent chooses READY (Ready clears the switch's
+// ready_time): a person who says they are back is not the phone that bounces.
+// noAnswerDelaySec stays as the backstop for every path that does not go
+// through that choice, such as a registration returning.
 const (
 	maxNoAnswerBeforeBenched = 2
 	noAnswerDelaySec         = 60
