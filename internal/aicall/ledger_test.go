@@ -337,10 +337,13 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		callType         callType
+		placedToCustomer bool
 		wantFrom, wantTo string
 	}{
-		{"a call that came in", callTypeInbound, "13800138000", "95012"},
-		{"a call this platform placed", callTypeOutbound, "95012", "13800138000"},
+		{"a call that came in", callTypeInbound, false, "13800138000", "95012"},
+		{"a call this platform placed", callTypeOutbound, true, "95012", "13800138000"},
+		{"an agent's call to a DID", callTypeOutbound, false, "13800138000", "95012"},
+		{"an internal call the bot answers", callTypeInternal, false, "13800138000", "95012"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := newFakeLedger()
@@ -349,6 +352,7 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 
 			facts := testFacts()
 			facts.callType = tc.callType
+			facts.isPlacedToCustomer = tc.placedToCustomer
 			recorder.finish(ledger, facts, discard())
 
 			if len(ledger.cdrs) != 1 {
@@ -366,7 +370,7 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 			}
 			// And on an outbound call the number dialled must be findable —
 			// which it is not while to_number simply repeats the DID.
-			if tc.callType == callTypeOutbound && cdr.ToNumber == cdr.DID {
+			if tc.placedToCustomer && cdr.ToNumber == cdr.DID {
 				t.Error("to_number is the DID again; searching AI outbound calls by " +
 					"the number they called finds nothing")
 			}
@@ -428,5 +432,17 @@ func TestACallEndedByTheTimeLimitIsNotContained(t *testing.T) {
 	}
 	if cdr.IsContained {
 		t.Error("a call the time limit ended was marked contained")
+	}
+}
+
+func TestCallTypeFromHeader(t *testing.T) {
+	for in, want := range map[string]callType{
+		"INBOUND": callTypeInbound, "OUTBOUND": callTypeOutbound,
+		"INTERNAL": callTypeInternal, "": callTypeInbound,
+		"outbound": callTypeInbound, "GARBAGE": callTypeInbound,
+	} {
+		if got := callTypeFromHeader(in); got != want {
+			t.Errorf("callTypeFromHeader(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

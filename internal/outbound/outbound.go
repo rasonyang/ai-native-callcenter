@@ -35,6 +35,12 @@ type DIDSource interface {
 	DIDs(ctx context.Context) ([]catalog.DID, error)
 }
 
+// NumberPlan answers whether a number belongs to the switch itself: a
+// provisioned extension or a queue's extension number.
+type NumberPlan interface {
+	IsInternalNumber(ctx context.Context, number string) (bool, error)
+}
+
 // Config shapes how the outside world is dialed.
 type Config struct {
 	// EndpointFormat renders a destination number into a dial string for the
@@ -92,6 +98,7 @@ type Service struct {
 	cfg     Config
 	sw      Switch
 	dids    DIDSource
+	numbers NumberPlan
 	hasCDR  func(ctx context.Context, callID uuid.UUID) (bool, error)
 	isLive  func(callID uuid.UUID) bool
 	limiter *Limiter
@@ -113,7 +120,7 @@ type pendingLeg struct {
 
 // New builds the service. hasCDR and isLive make retries idempotent: a call
 // the ledger already closed, or one still running, is never dialed again.
-func New(cfg Config, sw Switch, dids DIDSource,
+func New(cfg Config, sw Switch, dids DIDSource, numbers NumberPlan,
 	hasCDR func(context.Context, uuid.UUID) (bool, error),
 	isLive func(uuid.UUID) bool, log *slog.Logger) *Service {
 
@@ -125,6 +132,7 @@ func New(cfg Config, sw Switch, dids DIDSource,
 		cfg:      cfg,
 		sw:       sw,
 		dids:     dids,
+		numbers:  numbers,
 		hasCDR:   hasCDR,
 		isLive:   isLive,
 		limiter:  NewLimiter(cfg.RatePerSec),
@@ -163,19 +171,23 @@ func pinCodecs(vars map[string]string, endpoint string) {
 	}
 }
 
-// extensionDigits is how long an internal number is here. A destination of
-// exactly this many digits never leaves the building; anything longer goes out
-// through a carrier. Crossing the gateway is what actually decides the type,
-// but the dialplan owns that routing and the ledger needs an answer before the
-// second leg exists, so the length stands in for it.
-const extensionDigits = 4
-
-// callTypeFor classifies a dialled destination for the ledger.
-func callTypeFor(destination string) string {
-	if len(destination) == extensionDigits {
-		return "INTERNAL"
+// callTypeFor classifies a dialled destination for the ledger. The callee
+// decides (owner rule): a number internal to the switch, meaning a provisioned
+// extension (registered or not) or a queue's extension number, is INTERNAL;
+// anything else, a platform DID or an external number, is OUTBOUND. The ledger
+// needs the answer before the second leg exists, so it is looked up here.
+func (s *Service) callTypeFor(ctx context.Context, destination string) (string, error) {
+	if s.numbers == nil {
+		return "OUTBOUND", nil
 	}
-	return "OUTBOUND"
+	internal, err := s.numbers.IsInternalNumber(ctx, destination)
+	if err != nil {
+		return "", err
+	}
+	if internal {
+		return "INTERNAL", nil
+	}
+	return "OUTBOUND", nil
 }
 
 // isDialable keeps dial strings boring: digits only, sane length. Everything
@@ -251,6 +263,14 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		return uuid.Nil, err
 	}
 
+	// A store failure refuses the dial, like the default-outbound lookup
+	// below: guessing a type would stamp a wrong one on a ledger row that
+	// never changes. Nothing is held yet, so there is nothing to drop.
+	callType, err := s.callTypeFor(ctx, destination)
+	if err != nil {
+		return uuid.Nil, err
+	}
+
 	agentLeg := uuid.New()
 
 	// Before the originate, for the same reason as an AI call: the agent's
@@ -291,9 +311,9 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		// it. A leg an agent dials from their own phone carries the real
 		// number in the usual place and needs none of this.
 		"aicc_destination": destination,
-		// What this call is, decided where the destination is still known:
-		// to the switch every originated leg is simply outbound.
-		"aicc_call_type": callTypeFor(destination),
+		// What this call is, decided by the callee where the destination is
+		// still known: to the switch every originated leg is simply outbound.
+		"aicc_call_type": callType,
 		// The agent leg speaks telephone audio, not what a browser would
 		// prefer: the leg the dialplan raises next inherits this one's codec,
 		// and a G.711-only phone answers an inherited opus offer with
@@ -480,15 +500,16 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	s.arm(customerLeg.String(), func() {
 		botLeg := uuid.New()
 		bridgeVars := map[string]string{
-			"aicc_call_id":            callID.String(),
-			"aicc_did":                did.Number,
-			"aicc_language":           language,
-			"sip_h_X-AICC-Call-ID":    callID.String(),
-			"sip_h_X-AICC-Channel-ID": customerLeg.String(),
-			"sip_h_X-AICC-DID":        did.Number,
-			"sip_h_X-AICC-Language":   language,
-			"sip_h_X-AICC-ANI":        req.To,
-			"sip_h_X-AICC-Call-Type":  "OUTBOUND",
+			"aicc_call_id":                    callID.String(),
+			"aicc_did":                        did.Number,
+			"aicc_language":                   language,
+			"sip_h_X-AICC-Call-ID":            callID.String(),
+			"sip_h_X-AICC-Channel-ID":         customerLeg.String(),
+			"sip_h_X-AICC-DID":                did.Number,
+			"sip_h_X-AICC-Language":           language,
+			"sip_h_X-AICC-ANI":                req.To,
+			"sip_h_X-AICC-Call-Type":          "OUTBOUND",
+			"sip_h_X-AICC-Placed-To-Customer": "true",
 		}
 		target := "sofia/gateway/" + s.cfg.BotGateway + "/" + did.Number
 		pinCodecs(bridgeVars, target)

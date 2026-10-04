@@ -245,14 +245,16 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	// Which end is which depends on who called whom, and the two facts we
 	// have do not move: the DID is always this side and the ANI is always the
 	// far side. On a call that came in, the far side is the caller and the DID
-	// is what they dialled. On a call this platform placed, the far side is
-	// the person answering and the DID is the number shown to them.
+	// is what they dialled. On a call the bot placed to a customer, the far
+	// side is the person answering and the DID is the number shown to them.
+	// An agent's call to a DID is not that: the ANI is the agent's extension
+	// and the DID is what they dialled, whatever its call type.
 	//
 	// Written as though every call were inbound, an outbound row came out
 	// reversed — and its to_number was always the DID, so no AI outbound call
 	// could be found by the number it actually called (C43).
 	fromNumber, toNumber := call.fromNumber, call.did
-	if call.callType == callTypeOutbound {
+	if call.isPlacedToCustomer {
 		fromNumber, toNumber = call.did, call.fromNumber
 	}
 
@@ -309,7 +311,9 @@ func (o *Orchestrator) transcriptActor(callID uuid.UUID, direction callType) *tr
 // callFacts is what the orchestrator knows about the call that the recorder
 // does not learn from events.
 type callFacts struct {
-	callType           callType
+	callType callType
+	// isPlacedToCustomer: the AI-outbound bridge placed this call to a customer.
+	isPlacedToCustomer bool
 	language           string
 	fromNumber         string
 	did                string
@@ -328,6 +332,7 @@ type callType string
 const (
 	callTypeInbound  callType = "INBOUND"
 	callTypeOutbound callType = "OUTBOUND"
+	callTypeInternal callType = "INTERNAL"
 )
 
 // stampBotShare writes the bot's part of the story onto the caller's channel,

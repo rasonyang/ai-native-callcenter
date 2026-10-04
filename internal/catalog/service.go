@@ -196,6 +196,31 @@ func (s *Service) DeleteExtension(ctx context.Context, id uuid.UUID) error {
 // Queues lists every queue.
 func (s *Service) Queues(ctx context.Context) ([]Queue, error) { return s.store.ListQueues(ctx) }
 
+// IsInternalNumber reports whether number is internal to the switch: a
+// provisioned extension (registered or not, enabled or not) or a queue's
+// extension number.
+func (s *Service) IsInternalNumber(ctx context.Context, number string) (bool, error) {
+	exts, err := s.store.ListExtensions(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range exts {
+		if e.Number == number {
+			return true, nil
+		}
+	}
+	queues, err := s.store.ListQueues(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, q := range queues {
+		if q.ExtNumber == number {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // QueueByName resolves a queue name to its configuration: the switch speaks
 // in names, everything above it in ids, display names and targets.
 func (s *Service) QueueByName(ctx context.Context, name string) (Queue, bool) {

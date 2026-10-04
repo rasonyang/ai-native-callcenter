@@ -174,6 +174,25 @@ func (f *fakeSwitch) lastBridge() bridged {
 	return f.bridges[len(f.bridges)-1]
 }
 
+// fakeNumbers is the switch's own numbers: provisioned extensions and queue
+// extension numbers. err simulates a store failure.
+type fakeNumbers struct {
+	internal map[string]bool
+	err      error
+}
+
+func (f fakeNumbers) IsInternalNumber(_ context.Context, n string) (bool, error) {
+	return f.internal[n], f.err
+}
+
+func provisioned(numbers ...string) fakeNumbers {
+	m := map[string]bool{}
+	for _, n := range numbers {
+		m[n] = true
+	}
+	return fakeNumbers{internal: m}
+}
+
 type fakeDIDs []catalog.DID
 
 func (f fakeDIDs) DIDs(context.Context) ([]catalog.DID, error) { return f, nil }
@@ -197,7 +216,7 @@ func testServiceWithEndpoint(t *testing.T, sw *fakeSwitch,
 		{Number: "95011", Language: "en", IsEnabled: true,
 			AllowOutbound: true, IsDefaultOutbound: true},
 	}
-	return New(Config{EndpointFormat: endpointFormat}, sw, dids,
+	return New(Config{EndpointFormat: endpointFormat}, sw, dids, provisioned("1007", "1002", "1008", "7001"),
 		func(_ context.Context, id uuid.UUID) (bool, error) { return history[id], nil },
 		func(uuid.UUID) bool { return false },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
@@ -502,15 +521,19 @@ func TestDialAIRejectsUnknownAndFlowlessNumbers(t *testing.T) {
 	}
 }
 
-// The ledger must not call a walk down the hall an outbound call: to the
-// switch every originated leg is outbound, so click-to-dial stamps what it
-// knows while the destination is still in hand (found live: an extension-to-
-// extension dial recorded as OUTBOUND).
+// The callee decides the type: a provisioned extension or a queue's extension
+// number is INTERNAL; a platform DID, an external number, or a four-digit
+// number nobody provisioned is OUTBOUND (found live: an extension-to-extension
+// dial recorded as OUTBOUND, and the old length rule typed unprovisioned
+// four-digit numbers INTERNAL).
 func TestDialStampsInternalVersusOutbound(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ destination, want string }{
-		{"1007", "INTERNAL"},
-		{"18688886669", "OUTBOUND"},
+		{"1007", "INTERNAL"},        // provisioned extension
+		{"7001", "INTERNAL"},        // queue extension number
+		{"95012", "OUTBOUND"},       // platform DID
+		{"18688886669", "OUTBOUND"}, // external
+		{"1999", "OUTBOUND"},        // four digits, not provisioned
 	} {
 		sw := &fakeSwitch{}
 		s := testService(t, sw, nil)
@@ -520,6 +543,23 @@ func TestDialStampsInternalVersusOutbound(t *testing.T) {
 		if got := sw.lastOriginate().vars["aicc_call_type"]; got != tc.want {
 			t.Errorf("dialling %s stamped %q, want %q", tc.destination, got, tc.want)
 		}
+	}
+}
+
+// A failed lookup refuses the dial rather than stamping a guess on a ledger
+// row whose type never changes, and nothing is originated.
+func TestDialIsRefusedWhenTheNumberPlanCannotBeRead(t *testing.T) {
+	t.Parallel()
+	sw := &fakeSwitch{}
+	s := testService(t, sw, nil)
+	boom := errors.New("db down")
+	s.numbers = fakeNumbers{err: boom}
+	_, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "1007", CallcenterName: "agent-1008"})
+	if !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want the lookup error", err)
+	}
+	if len(sw.originates) != 0 {
+		t.Errorf("originated %d legs after a failed lookup", len(sw.originates))
 	}
 }
 
@@ -582,7 +622,7 @@ func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T)
 	svc := New(Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw,
 		fakeDIDs{{Number: "95012", Language: "zh", FlowID: &flowID,
 			IsEnabled: true, AllowInbound: true}},
-		nil, nil, slog.New(slog.DiscardHandler))
+		nil, nil, nil, slog.New(slog.DiscardHandler))
 
 	_, err := svc.Dial(context.Background(), AgentDialRequest{AgentExtension: "1001", To: "18688886669", CallcenterName: "agent-1001"})
 	if !errors.Is(err, ErrNoDefaultOutbound) {
