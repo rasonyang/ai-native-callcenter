@@ -5,12 +5,21 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.3.0 - 2026-10-04
 
 ### Upgrade notes
 
 - Existing flows without `maxDurationSec` now end AI calls after 15 minutes.
   Set `"maxDurationSec": 0` in a flow's `global` to keep the old behaviour.
+- Upgrade both images together. The switch image adds a dialplan route and
+  `aicc_did_route.lua` for an agent's call to a platform number, and sends the
+  call's type to the bot as `X-AICC-Call-Type`, which the application now
+  reads. The application adds migration 00034 (`unbacked_claims` on the CDR);
+  migrations run at application startup.
+- API contract: the CDR gains the optional `unbackedClaims` array and the
+  `UnbackedClaim` enum. Nothing was removed.
+- A queue call now rings the agent's phone for 30 seconds instead of 15
+  before it counts as missed.
 
 ### Added
 
@@ -41,6 +50,20 @@ carries the one-line installer's files.
   that should not count a caller told something that never happened can
   leave those calls out (#44).
 
+### Changed
+
+- Telephony: a call the queue delivers rings the agent for 30 seconds (five
+  rings on the browser phone), up from 15. Agents were missing calls they
+  were reaching for, and one miss benches them. Benching after one missed
+  call is unchanged.
+- Click-to-dial types a call by its callee: a provisioned extension or a
+  queue's number is `INTERNAL`, any other number (a DID or an external
+  number) is `OUTBOUND`. This replaces a four-digit length rule. When the
+  lookup fails the dial is refused rather than typed by a guess.
+- Demo flows: the repair-status flow looks up a clearly spoken repair number
+  at once instead of asking the caller to confirm it in the same turn; an
+  unclear number is still read back first.
+
 ### Fixed
 
 - Deploy: with `--no-demo` the installer's closing message says how to create
@@ -64,6 +87,41 @@ carries the one-line installer's files.
   hung up during the closing line) no longer carries the queue's `queueId`.
   The row was counted in the queue reports as a queue call answered inside
   the SLA, with a wait of 0 s, for a caller who never reached the queue (#44).
+- Telephony: an agent who dialled a platform number (95001, say) from the
+  browser phone was hung up with `NO_ROUTE_DESTINATION`. The call now reaches
+  that number's flow, the same one a carrier's caller reaches, as one call
+  with one id; the CDR row is `OUTBOUND` from the agent's extension (#74).
+- Agents: an agent benched for a missed call who chooses READY is offered the
+  next call at once. The switch kept them idle for up to a minute after the
+  miss while callers waited (#51).
+- AI calls: when the model asks for several tools in one response, each is
+  judged in the phase the response was made in. The second tool used to be
+  refused when the first one's result moved the phase, and the new phase's
+  line pre-empted the answers still owed (#12).
+- AI calls: an armed transfer or hangup whose closing line is queued behind
+  other audio waits for the line to finish playing (plus 2 s) instead of
+  cutting it off at the 10 s cap (#24).
+- AI calls, interruptions and keypresses:
+  - The tail of a response cut off by a barge-in is no longer played; a call
+    used to hear 40-80 ms of the interrupted answer after every keypress.
+  - A keypress while an ending is armed is recorded and leaves the closing
+    line alone. It used to cut the line into fragments and delay the action.
+  - A keypress takes the floor from a turn that is being generated but has
+    not spoken yet, and on openai and gateway it now cancels the turn at the
+    provider too (#55).
+  - A text cue sent while a response holds the floor is answered when that
+    response ends, instead of being refused and left unanswered (#55).
+  - A function call cut off by a cancel is removed from the conversation, so
+    qwen no longer says it is transferring without calling the tool.
+  - The 800 ms echo guard runs from when the caller starts hearing the bot,
+    so real speech over the start of a back-to-back answer is no longer
+    swallowed (#58).
+  - A turn flushed before any of it played is trimmed from the model's
+    history. qwen accepts the trim but still behaves as if the line was
+    heard (#53 stays open for qwen).
+- Web: an agent without the web-sip-phone extension on the page sees the
+  install wizard at once, not "Phone lost contact · reload" for several
+  seconds (#75).
 
 ## v0.2.0 - 2026-09-28
 
