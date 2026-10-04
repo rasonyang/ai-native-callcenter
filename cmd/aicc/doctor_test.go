@@ -359,6 +359,54 @@ func TestAMissingBotGatewayFails(t *testing.T) {
 	wantState(t, got, DoctorCheckBotGateway, DoctorStateFail)
 }
 
+// recoveringGateway answers DOWN twice, then UP: the state a switch shows
+// after the application is recreated, until its next OPTIONS ping.
+type recoveringGateway struct {
+	fakeStatus
+	calls int
+}
+
+func (g *recoveringGateway) GatewayUp(string) (bool, error) {
+	g.calls++
+	return g.calls > 2, nil
+}
+
+func TestWaitLetsTheBotGatewayComeBackAfterARestart(t *testing.T) {
+	h := newHarness(t)
+	h.opts.wait = 5 * time.Minute
+	gw := &recoveringGateway{fakeStatus: fakeStatus{profiles: []telephony.SwitchProfile{
+		{Name: "internal", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+		{Name: "external", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+	}}}
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return gw, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckBotGateway, DoctorStatePass)
+	if gw.calls < 3 {
+		t.Errorf("the gateway was asked %d times, want until it answered UP", gw.calls)
+	}
+}
+
+func TestADownBotGatewayStillFailsInsideTheWaitGrace(t *testing.T) {
+	h := newHarness(t)
+	h.opts.wait = time.Hour
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: []telephony.SwitchProfile{
+			{Name: "internal", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+			{Name: "external", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+		}}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckBotGateway, DoctorStateFail)
+	if h.sleeps == 0 {
+		t.Error("doctor never retried a gateway that reads DOWN")
+	}
+	if h.sleeps > 60 {
+		t.Errorf("doctor waited %d sleeps; the grace must stay bounded, not follow --wait", h.sleeps)
+	}
+}
+
 func TestTheExternalAddressIsLookedForAmongTheHostsOwn(t *testing.T) {
 	cases := []struct {
 		name       string

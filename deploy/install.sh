@@ -63,8 +63,9 @@ Install, upgrade or remove the AI-native call center on this host.
 
 Usage: install.sh [options]
 
-  --provider P        the voice provider: openai, qwen, gateway, doubao or none
-                      (none: the bot never answers; the human path works)
+  --provider P        the voice provider: openai, qwen, gateway, doubao,
+                      gemini or none (none: the bot never answers; the human
+                      path works)
   --external-ip IP    the address phones reach this host at (default: the
                       address of the default route's interface); on a rerun,
                       rewrites the address in .env
@@ -80,8 +81,9 @@ Usage: install.sh [options]
   -h, --help          this text
 
 The provider key comes from the environment (OPENAI_API_KEY, ALIYUN_API_KEY
-for qwen, DOUBAO_API_KEY, REALTIME_API_KEY for gateway, which also needs
-AICC_PROVIDER_ENDPOINT) or a prompt. With sudo, keep it with `sudo -E`.
+for qwen, DOUBAO_API_KEY, GEMINI_API_KEY, REALTIME_API_KEY for gateway, which
+also needs AICC_PROVIDER_ENDPOINT) or a prompt. With sudo, keep it with
+`sudo -E`.
 
 Installs into /opt/aicc on Linux (as root) and ~/.aicc on macOS (not as root).
 EOF
@@ -374,8 +376,8 @@ parse_args() {
         shift
     done
     case $PROVIDER_FLAG in
-    '' | openai | qwen | gateway | doubao | none) ;;
-    *) die "--provider must be openai, qwen, gateway, doubao or none, got '$PROVIDER_FLAG'" ;;
+    '' | openai | qwen | gateway | doubao | gemini | none) ;;
+    *) die "--provider must be openai, qwen, gateway, doubao, gemini or none, got '$PROVIDER_FLAG'" ;;
     esac
     if [ -n "$EXTERNAL_IP_FLAG" ] && ! is_ipv4 "$EXTERNAL_IP_FLAG"; then
         die "--external-ip must be an IPv4 address, got '$EXTERNAL_IP_FLAG'"
@@ -815,6 +817,7 @@ provider_key_var() {
     qwen) printf ALIYUN_API_KEY ;;
     gateway) printf REALTIME_API_KEY ;;
     doubao) printf DOUBAO_API_KEY ;;
+    gemini) printf GEMINI_API_KEY ;;
     esac
 }
 
@@ -835,13 +838,13 @@ resolve_provider() {
     else
         PROVIDER=$PROVIDER_FLAG
         if [ -z "$PROVIDER" ] && can_prompt; then
-            ask "Voice provider (openai, qwen, gateway, doubao, none): "
+            ask "Voice provider (openai, qwen, gateway, doubao, gemini, none): "
             PROVIDER=$REPLY
         fi
         case $PROVIDER in
-        openai | qwen | gateway | doubao | none) ;;
-        '') die "no provider chosen: pass --provider openai|qwen|gateway|doubao|none" ;;
-        *) die "unknown provider '$PROVIDER': pass --provider openai|qwen|gateway|doubao|none" ;;
+        openai | qwen | gateway | doubao | gemini | none) ;;
+        '') die "no provider chosen: pass --provider openai|qwen|gateway|doubao|gemini|none" ;;
+        *) die "unknown provider '$PROVIDER': pass --provider openai|qwen|gateway|doubao|gemini|none" ;;
         esac
     fi
     PROVIDER_KEY_VAR=$(provider_key_var "$PROVIDER")
@@ -1021,20 +1024,30 @@ do_uninstall() {
 }
 
 final_output() {
+    _fo_seed=$(env_get "$ENV_FILE" AICC_SEED)
+    _fo_dc='docker compose'
+    [ "$OS" = linux ] && _fo_dc='sudo docker compose'
     say ""
     say "The call center is running."
     say ""
     say "  Web:        http://$EXTERNAL_IP:$(env_get "$ENV_FILE" HTTP_PORT | grep . || echo 8080)"
-    if [ "$FIRST_INSTALL" = 1 ]; then
-        say "  Sign in:    admin / $(env_get "$ENV_FILE" AICC_SEED_PASSWORD)"
-        say "              (also the password of the demo's agents; kept in $ENV_FILE)"
+    if [ "$_fo_seed" = demo ]; then
+        if [ "$FIRST_INSTALL" = 1 ]; then
+            say "  Sign in:    admin / $(env_get "$ENV_FILE" AICC_SEED_PASSWORD)"
+            say "              (also the password of the demo's agents; kept in $ENV_FILE)"
+        else
+            say "  Sign in:    admin; the password is AICC_SEED_PASSWORD in $ENV_FILE"
+        fi
     else
-        say "  Sign in:    admin; the password is AICC_SEED_PASSWORD in $ENV_FILE"
+        say "  Sign in:    no demo accounts were seeded; create the first one:"
+        say "              cd $DIR && $_fo_dc exec aicc aicc useradd -username admin -password '<password>' -role ADMIN"
     fi
     say "  Phone:      install the browser phone, $EXTENSION_URL"
     say "              and add $EXTERNAL_IP in the extension's Allow Sites"
-    say ""
-    say "Next: sign in as an agent, then dial 95001 (English) / 95002 (Chinese)."
+    if [ "$_fo_seed" = demo ]; then
+        say ""
+        say "Next: sign in as an agent, then dial 95001 (English) / 95002 (Chinese)."
+    fi
     if [ "$PROVIDER" = none ]; then
         say "No provider: the bot will not answer; calls to 95001/95002 go to the support queues; the human path works."
     fi

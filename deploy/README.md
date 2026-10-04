@@ -54,16 +54,20 @@ allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
   interface, skipping loopback, link-local and TUN-proxy addresses
   (198.18.0.0/15). Pass `--external-ip <ip>` when the inference is wrong or
   phones reach the host through NAT.
-- The voice provider (`--provider openai|qwen|gateway|doubao|none`) and its
-  key. The key is read from the environment (`OPENAI_API_KEY`,
-  `ALIYUN_API_KEY` for qwen, `DOUBAO_API_KEY`, `REALTIME_API_KEY` plus
-  `AICC_PROVIDER_ENDPOINT` for gateway) or asked for at the terminal with the
-  input hidden. With `sudo`, keep an exported key with `sudo -E`. `none` runs
-  without a bot: calls to the bot numbers go to their queues.
+- The voice provider (`--provider openai|qwen|gateway|doubao|gemini|none`) and
+  its key. The key is read from the environment (`OPENAI_API_KEY`,
+  `ALIYUN_API_KEY` for qwen, `DOUBAO_API_KEY`, `GEMINI_API_KEY`,
+  `REALTIME_API_KEY` plus `AICC_PROVIDER_ENDPOINT` for gateway) or asked for at
+  the terminal with the input hidden. With `sudo`, keep an exported key with
+  `sudo -E`. `none` runs without a bot: calls to the bot numbers go to their
+  queues.
 - Secrets: `POSTGRES_PASSWORD`, `ESL_PASSWORD`, `LUA_PASSWORD` and
   `AICC_SEED_PASSWORD` are generated (32 random characters each) and written
-  to `<dir>/.env`, mode 0600. The installer prints the admin password once, on
-  the first install; afterwards it is `AICC_SEED_PASSWORD` in `.env`.
+  to `<dir>/.env`, mode 0600. With the demo seed (the default), the installer
+  prints the admin password once, on the first install; afterwards it is
+  `AICC_SEED_PASSWORD` in `.env`. An install made with `--no-demo` seeds no
+  account, so the installer prints the `aicc useradd` command that creates the
+  first administrator instead (as root on Linux).
 
 `--yes` never prompts: it accepts confirmations and fails on any value it
 would have had to ask for.
@@ -72,7 +76,7 @@ would have had to ask for.
 
 | Option | Meaning |
 |---|---|
-| `--provider P` | `openai`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
+| `--provider P` | `openai`, `qwen`, `gateway`, `doubao`, `gemini` or `none`. Only a first install chooses; later runs keep what `.env` names |
 | `--external-ip IP` | The address phones reach this host at. On a rerun, rewrites the address in `.env` |
 | `--version TAG` | The release to install. Default: the release the script came from |
 | `--no-demo` | Do not seed the demo dataset (`AICC_SEED` empty). Use it for production |
@@ -122,7 +126,9 @@ the container cannot see the Mac's interfaces, so without it the address check
 is judged against the wrong host. Each line is `PASS`, `FAIL` or `SKIP`, the
 check's name and a message; a `FAIL` also carries a code and a `fix:` line. The
 exit status is 1 if and only if a check failed. `--skip-provider` leaves out
-the provider session; `--json` prints the results as JSON.
+the provider session; `--json` prints the results as JSON. `--wait` keeps
+asking until the application is ready and its switch link is up, and gives a
+just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 
 | Check | Code on failure |
 |---|---|

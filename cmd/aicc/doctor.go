@@ -279,7 +279,7 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	sw, closeSwitch, results := checkSwitch(ctx, d)
 	defer closeSwitch()
 	out = append(out, results...)
-	out = append(out, checkBotGateway(d, sw.reader)...)
+	out = append(out, checkBotGateway(ctx, d, opts, sw.reader)...)
 	out = append(out, checkExternalIP(d, opts, sw)...)
 	// LAN media (RTP) reachability is verified by the release checklist, not by doctor.
 	out = append(out, checkProvider(ctx, d, opts)...)
@@ -486,14 +486,21 @@ func checkSwitch(ctx context.Context, d doctorDeps) (switchProfiles, func(), []d
 	return switchProfiles{reader: sw, profiles: profiles}, closeSwitch, out
 }
 
-func checkBotGateway(d doctorDeps, sw switchReader) []doctorResult {
+// botGatewayGrace bounds how long --wait keeps asking about the bot gateway
+// after the first DOWN. The switch probes aicc_bot every 30 s
+// (freeswitch/conf/sip_profiles/external/aicc_bot.xml), so an application
+// recreated seconds ago can read DOWN until its next OPTIONS is answered. The
+// bound keeps a real misconfiguration a fast failure.
+const botGatewayGrace = 45 * time.Second
+
+func checkBotGateway(ctx context.Context, d doctorDeps, opts doctorOptions, sw switchReader) []doctorResult {
 	if !d.cfg.IsBotEnabled {
 		return []doctorResult{skip(DoctorCheckBotGateway, "the AI leg is off (AICC_BOT_ENABLED)")}
 	}
 	if sw == nil {
 		return []doctorResult{skip(DoctorCheckBotGateway, "doctor could not connect to the switch")}
 	}
-	up, err := sw.GatewayUp(botGatewayName)
+	up, err := waitBotGateway(ctx, d, opts, sw)
 	switch {
 	case errors.Is(err, telephony.ErrUnknownGateway):
 		return []doctorResult{fail(DoctorCheckBotGateway,
@@ -509,6 +516,23 @@ func checkBotGateway(d doctorDeps, sw switchReader) []doctorResult {
 			"the gateway must name an IP address the switch can send to (AICC_APP_IP in the stack), never loopback; check that the app is listening on AICC_BOT_SIP_PORT")}
 	}
 	return []doctorResult{pass(DoctorCheckBotGateway, "the switch reaches the AI leg through "+botGatewayName)}
+}
+
+// waitBotGateway asks the switch once and, under --wait, until the gateway
+// answers UP or the grace is over. Structural failures (no such gateway, ESL
+// errors) are not retried.
+func waitBotGateway(ctx context.Context, d doctorDeps, opts doctorOptions, sw switchReader) (bool, error) {
+	up, err := sw.GatewayUp(botGatewayName)
+	if err != nil || up || opts.wait <= 0 {
+		return up, err
+	}
+	deadline := d.now().Add(min(opts.wait, botGatewayGrace))
+	for !up && d.now().Before(deadline) && d.sleep(ctx, time.Second) {
+		if up, err = sw.GatewayUp(botGatewayName); err != nil {
+			return up, err
+		}
+	}
+	return up, nil
 }
 
 func checkExternalIP(d doctorDeps, opts doctorOptions, sw switchProfiles) []doctorResult {

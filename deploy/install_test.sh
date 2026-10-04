@@ -269,6 +269,14 @@ env_merge "$env"
 eq 'gateway: endpoint' "$(env_get "$env" AICC_PROVIDER_ENDPOINT)" wss://gw.example.com/v1/realtime
 eq 'gateway: key' "$(env_get "$env" REALTIME_API_KEY)" sk-test
 
+# gemini: key.
+env="$TMP/gemini.env"
+PROVIDER=gemini
+PROVIDER_KEY_VAR=GEMINI_API_KEY
+env_merge "$env"
+eq 'gemini: provider' "$(env_get "$env" AICC_PROVIDER)" gemini
+eq 'gemini: key' "$(env_get "$env" GEMINI_API_KEY)" sk-test
+
 # env_set on a value with a slash, an @ and an =.
 env_set "$env" X 'a/b@c=d'
 eq 'env_set keeps the value verbatim' "$(env_get "$env" X)" 'a/b@c=d'
@@ -276,9 +284,53 @@ eq 'env_set keeps the value verbatim' "$(env_get "$env" X)" 'a/b@c=d'
 # --------------------------------------------------------------- arguments ----
 
 eq 'parse_args: --provider=' "$(parse_args --provider=none --yes && echo "$PROVIDER_FLAG $ASSUME_YES")" 'none 1'
-notok 'parse_args: bad provider' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --provider gemini" 2>/dev/null
+eq 'parse_args: --provider gemini' "$(parse_args --provider gemini && echo "$PROVIDER_FLAG")" gemini
+eq 'provider_key_var: gemini' "$(provider_key_var gemini)" GEMINI_API_KEY
+notok 'parse_args: bad provider' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --provider bogus" 2>/dev/null
 notok 'parse_args: bad address' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --external-ip 1.2.3" 2>/dev/null
 notok 'parse_args: --purge alone' sh -c "AICC_INSTALL_LIB=1; . '$here/install.sh'; parse_args --purge" 2>/dev/null
+
+# ---------------------------------------------------------------- output ----
+
+# The closing message: with demo data it names the seeded admin; without it,
+# it says how to create the first administrator instead of printing a password
+# that was never seeded.
+env="$TMP/output-no-demo.env"
+cat >"$env" <<'EOF'
+AICC_SEED=
+AICC_SEED_PASSWORD=secret
+HTTP_PORT=8080
+EOF
+ENV_FILE="$env"
+DIR=/tmp/aicc
+TAG=v0.0.0
+PROVIDER=none
+EXTERNAL_IP=192.0.2.1
+START=0
+FIRST_INSTALL=1
+OS=linux
+final_output >"$TMP/output-no-demo.txt"
+ok 'final_output: no demo names the first-admin command' grep -q 'sudo docker compose exec aicc aicc useradd' "$TMP/output-no-demo.txt"
+notok 'final_output: no demo prints no seeded password' grep -q secret "$TMP/output-no-demo.txt"
+notok 'final_output: no demo drops the demo dial line' grep -q 'dial 95001' "$TMP/output-no-demo.txt"
+FIRST_INSTALL=0
+final_output >"$TMP/output-no-demo-rerun.txt"
+ok 'final_output: no demo rerun keeps the hint' grep -q 'sudo docker compose exec aicc aicc useradd' "$TMP/output-no-demo-rerun.txt"
+OS=macos
+final_output >"$TMP/output-no-demo-macos.txt"
+notok 'final_output: macOS first-admin command has no sudo' grep -q 'sudo docker' "$TMP/output-no-demo-macos.txt"
+
+env="$TMP/output-demo.env"
+cat >"$env" <<'EOF'
+AICC_SEED=demo
+AICC_SEED_PASSWORD=secret
+HTTP_PORT=8080
+EOF
+ENV_FILE="$env"
+FIRST_INSTALL=1
+final_output >"$TMP/output-demo.txt"
+ok 'final_output: demo prints the admin password' grep -q 'admin / secret' "$TMP/output-demo.txt"
+ok 'final_output: demo keeps the dial line' grep -q 'dial 95001' "$TMP/output-demo.txt"
 
 printf '\n%d tests, %d failed\n' "$tests" "$failures"
 [ "$failures" = 0 ]

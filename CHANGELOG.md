@@ -14,6 +14,9 @@ carries the one-line installer's files.
 
 ### Added
 
+- Deploy: the one-line installer accepts `--provider gemini`, the fifth
+  engine the application already answers on. Its key, `GEMINI_API_KEY`, is
+  read from the environment like the others'.
 - Flow DSL: `global.maxDurationSec`, the call's time limit counted from the
   bot answering. Unset (or `null`) means 900 seconds, `0` turns it off, and any
   other value must be between 60 and 3600. Gemini's own provider session cap
@@ -40,6 +43,17 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Deploy: with `--no-demo` the installer's closing message says how to create
+  the first administrator with `aicc useradd` (as root on Linux) instead of
+  printing an admin password that was never seeded, and drops the demo-only
+  "dial 95001" hint (#72).
+- Deploy: `aicc doctor --wait` gives the switch's `aicc_bot` gateway up to 45
+  seconds to come back UP after the application is recreated. A provider
+  change followed by a rerun could print `FAIL BOT_GATEWAY_DOWN` for a stack
+  that was healthy by the switch's next OPTIONS probe.
+- Docs: `deploy/one-line-installer.md` now says where the generated admin
+  password lives and how the voice provider's key is passed, kept and changed
+  (#69, #70).
 - AI calls: when the model calls `transfer_to_agent` or `hangup` again while
   the call's ending is already armed, the first ending stands. A repeat used
   to replace it, wait for a turn after the latest call and restart the 10 s
