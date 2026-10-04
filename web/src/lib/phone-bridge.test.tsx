@@ -3,7 +3,7 @@ import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, PHONE_SEEN_STORAGE_KEY, usePhoneBridgeValue,
+  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, usePhoneBridgeValue,
   type PhoneBridge,
 } from '@/lib/phone-bridge'
 import { installBackend, installFakeExtension, sipSessionFixture } from '@/test/harness'
@@ -98,8 +98,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   delete document.documentElement.dataset.webSipPhone
-  // The latch outlives a page load by design, so it must not outlive a test.
-  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
 })
 
 /** Every attempt of one run of hellos gone unanswered, deadline included. */
@@ -541,100 +539,114 @@ describe('provisioning', () => {
 })
 
 /**
- * Out of reach is not uninstalled.
+ * Out of reach is not uninstalled, and the marker is what tells them apart.
  *
  * The extension holds its registration in a worker that survives the machine
- * sleeping; the content script in a sleeping tab does not. What the page sees
- * is the marker going and the hellos stopping — the same signals an uninstall
- * gives — so it keeps the one fact that separates them: whether this browser
- * has ever had the two talking.
+ * sleeping; the content script in a sleeping tab may not answer. "Lost" is
+ * only honest when a content script has marked this page, because only then
+ * is there something a reload would reach. No marker is an install wizard
+ * from the first paint, whatever this browser did on an earlier visit.
  */
 describe('an extension this page has lost', () => {
-  it('is lost, not absent, once the marker goes after a hello was answered', async () => {
+  it('is lost when the marker stays and the hellos go unanswered', async () => {
     installBackend()
     const extension = installFakeExtension()
     extension.mark()
     renderBridge()
     await waitFor(() => expect(bridge.detected).toBe(true))
-    expect(bridge.wasDetected).toBe(true)
     expect(bridge.isLost).toBe(false)
+
+    vi.useFakeTimers()
+    extension.silence()
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    // Still asking: not lost until the last attempt has gone unanswered.
+    expect(bridge.isLost).toBe(false)
+    letEveryHelloGoUnanswered()
+    expect(bridge.detected).toBe(false)
+    expect(bridge.isLost).toBe(true)
+    vi.useRealTimers()
+    await act(async () => extension.uninstall())
+  })
+
+  it('stops being lost when the extension answers again', async () => {
+    installBackend()
+    document.documentElement.dataset.webSipPhone = '1'
+    vi.useFakeTimers()
+    renderBridge()
+    letEveryHelloGoUnanswered()
+    expect(bridge.isLost).toBe(true)
+    act(() => fromExtension({ type: 'hello', nonce: lastHelloNonce(postMessage), extensionVersion: '1.4.0' }))
+    expect(bridge.detected).toBe(true)
+    expect(bridge.isLost).toBe(false)
+  })
+
+  it('is absent, not lost, the moment the marker goes', async () => {
+    installBackend()
+    const extension = installFakeExtension()
+    extension.mark()
+    renderBridge()
+    await waitFor(() => expect(bridge.detected).toBe(true))
 
     await act(async () => {
       extension.uninstall()
     })
     await waitFor(() => expect(bridge.detected).toBe(false))
-    expect(bridge.wasDetected).toBe(true)
-    expect(bridge.isLost).toBe(true)
+    expect(bridge.isLost).toBe(false)
   })
 
-  it('is absent, not lost, on a browser that has never seen one', async () => {
+  it('is absent, not lost, on a page nothing has marked', async () => {
     installBackend()
     renderBridge()
     await waitFor(() => expect(postMessage).toHaveBeenCalled())
     await act(async () => {})
     expect(bridge.detected).toBe(false)
-    expect(bridge.wasDetected).toBe(false)
     expect(bridge.isLost).toBe(false)
   })
 
-  // A fresh page load is where the real case lands: the tab slept, the
-  // content script went with it, and the page comes up knowing nothing —
-  // except what this browser wrote down the last time they spoke.
-  it('remembers across a page load that this browser has had one', async () => {
+  // The marker alone is not an accusation: the content script that wrote it
+  // may simply not have heard the first hello yet.
+  it('is not lost while the first run of hellos is still in flight', async () => {
     installBackend()
-    const extension = installFakeExtension()
-    const first = renderBridge()
-    await waitFor(() => expect(bridge.detected).toBe(true))
-    await act(async () => {
-      extension.uninstall()
-      first.unmount()
-    })
-
-    renderBridge()
-    await waitFor(() => expect(postMessage).toHaveBeenCalled())
-    expect(bridge.wasDetected).toBe(true)
-    expect(bridge.isLost).toBe(true)
-  })
-
-  // Private windows and blocked site data both make this throw. A page whose
-  // phone depends on storage being there has one more way to fail.
-  it('works, without the memory, where storage refuses to answer', async () => {
-    vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
-      throw new Error('storage is not available')
-    })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('storage is not available')
-    })
-    installBackend()
-    const extension = installFakeExtension()
-    extension.mark()
-    renderBridge()
-    await waitFor(() => expect(bridge.detected).toBe(true))
-    // Held in memory for this page load, which is all a browser that will not
-    // store it can offer — and enough for the reading that matters.
-    expect(bridge.wasDetected).toBe(true)
-    await act(async () => {
-      extension.uninstall()
-    })
-    await waitFor(() => expect(bridge.isLost).toBe(true))
-  })
-
-  // The other half of the latch: a browser that really has no extension any
-  // more must stop being told to reload and be told to install instead.
-  it('forgets the browser ever had one when a fresh page load finds nothing', async () => {
-    installBackend()
-    window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
-    // The clock is faked before the page loads, so the run of hellos this
-    // mount starts is the one that goes unanswered.
+    document.documentElement.dataset.webSipPhone = '1'
     vi.useFakeTimers()
     renderBridge()
     expect(postMessage).toHaveBeenCalled()
-    expect(bridge.isLost).toBe(true)
-
-    letEveryHelloGoUnanswered()
-    expect(bridge.wasDetected).toBe(false)
     expect(bridge.isLost).toBe(false)
-    expect(window.localStorage.getItem(PHONE_SEEN_STORAGE_KEY)).toBeNull()
+    act(() => {
+      vi.advanceTimersByTime(HELLO_TIMEOUT_MS)
+    })
+    expect(bridge.isLost).toBe(false)
+  })
+
+  // The page rendered before the content script injected: nothing says lost
+  // until the marker is there and has gone unanswered.
+  it('treats a marker that lands late as an extension to ask, not one lost', async () => {
+    installBackend()
+    vi.useFakeTimers()
+    renderBridge()
+    expect(bridge.isLost).toBe(false)
+    letEveryHelloGoUnanswered()
+    expect(bridge.isLost).toBe(false)
+
+    vi.useRealTimers()
+    const extension = installFakeExtension()
+    await act(async () => {
+      extension.mark()
+    })
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    expect(bridge.isLost).toBe(false)
+    await act(async () => extension.uninstall())
+  })
+
+  it('does not read any memory of an earlier visit: no marker is the wizard at once', async () => {
+    window.localStorage.setItem('aicc.phone.extensionSeen', '1')
+    installBackend()
+    renderBridge()
+    expect(bridge.isLost).toBe(false)
+    await act(async () => {})
+    expect(bridge.isLost).toBe(false)
   })
 })
 

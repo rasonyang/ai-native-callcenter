@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { PhoneOnboarding } from '@/components/phone-onboarding'
 import {
-  PHONE_SEEN_STORAGE_KEY, PhoneBridgeProvider, usePhoneBridgeValue, type PhoneBridge,
+  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, PhoneBridgeProvider, usePhoneBridgeValue, type PhoneBridge,
 } from '@/lib/phone-bridge'
 import {
   installBackend, installFakeExtension, renderWithProviders, type FakeExtension,
@@ -24,9 +24,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.unstubAllEnvs()
   delete document.documentElement.dataset.webSipPhone
-  // Having met the extension once is remembered per browser, which is the
-  // point of the latch and would otherwise be remembered per test run too.
-  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
+  vi.useRealTimers()
 })
 
 /** The bridge behind the card, so a test can ask for the card itself. */
@@ -47,6 +45,21 @@ function renderCard() {
   return renderWithProviders(<Card />)
 }
 
+/**
+ * The content script stays (its marker is on the page) but stops answering,
+ * and a run of hellos goes unanswered to its last attempt.
+ */
+async function goSilent(fake: FakeExtension) {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+  fake.silence()
+  act(() => {
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  act(() => {
+    vi.advanceTimersByTime(HELLO_TIMEOUT_MS * HELLO_ATTEMPTS)
+  })
+}
+
 /** The status word beside each step title, in order. */
 function steps() {
   return screen.getAllByRole('listitem').map((item) => ({
@@ -56,6 +69,16 @@ function steps() {
 }
 
 describe('an agent with no extension', () => {
+  // An earlier install on this origin is not a reason to say "reload": with
+  // no content script in the tab there is nothing to reload into (issue #75).
+  it('is shown the wizard at first paint despite a stale memory of one', async () => {
+    window.localStorage.setItem('aicc.phone.extensionSeen', '1')
+    renderCard()
+    expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
+    expect(screen.queryByText(/lost contact with this page/i)).toBeNull()
+    window.localStorage.removeItem('aicc.phone.extensionSeen')
+  })
+
   // Nothing has been seen here to lose contact with, so it is told to install.
   it('is shown the card, blocking, with nothing done', async () => {
     renderCard()
@@ -201,21 +224,19 @@ describe('as the agent works through it', () => {
 
   /**
    * The extension holds the registration in a worker that survives the
-   * machine sleeping; the content script in the sleeping tab does not, and it
-   * takes its marker with it. The phone is installed, allowed and registered
+   * machine sleeping; the content script in the sleeping tab may stop
+   * answering while its marker stays. The phone is installed, allowed and registered
    * — three undone steps would be three lies, and the agent would go looking
    * for a Web Store page to reinstall what they already have. The one true
    * thing is that this page cannot reach it, and the one cure is a reload.
    */
-  it('says it lost contact, not that nothing is installed, when the marker goes', async () => {
+  it('says it lost contact, not that nothing is installed, when the marker stays and nothing answers', async () => {
     const fake = installFakeExtension({ state: { microphone: 'GRANTED' } })
     extension = fake
     fake.mark()
     renderCard()
     await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
-    await act(async () => {
-      fake.uninstall()
-    })
+    await goSilent(fake)
     expect(await screen.findByText(/lost contact with this page/i)).toBeInTheDocument()
     expect(screen.queryByText(/set up your phone/i)).toBeNull()
     expect(screen.queryByRole('listitem')).toBeNull()
@@ -235,9 +256,7 @@ describe('as the agent works through it', () => {
     fake.mark()
     renderCard()
     await waitFor(() => expect(screen.queryByText(/set up your phone/i)).toBeNull())
-    await act(async () => {
-      fake.uninstall()
-    })
+    await goSilent(fake)
     await screen.findByText(/lost contact with this page/i)
     await act(async () => {
       bridge.openOnboarding()

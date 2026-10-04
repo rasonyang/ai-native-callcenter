@@ -85,10 +85,10 @@ const chip = (kind: PhoneChipKind, labelKey: string): PhoneChip => ({ ...CHIP[ki
  * no extension detected on this page at all, `null` is one that has said hello
  * but has not reported yet.
  *
- * `isLost` splits that first case in two. A browser that has never had the
- * extension needs to install it; one that had it a moment ago needs to reload
- * the page, because the registration is still up in the extension's own
- * worker and only the content script went away. Telling the second agent to
+ * `isLost` splits that first case in two. A page no content script has marked
+ * needs the extension installed; one that is marked but not answering needs
+ * a reload, because the registration is still up in the extension's own
+ * worker and only the page's link to it went away. Telling the second agent to
  * go and install what they already have is the defect this parameter exists
  * to prevent.
  */

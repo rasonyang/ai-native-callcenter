@@ -120,33 +120,9 @@ export const HELLO_TIMEOUT_MS = 2000
  */
 export const HELLO_ATTEMPTS = 3
 
-/**
- * Where this browser remembers that it has seen the extension answer.
- *
- * It is a latch, not a cache: nothing is read back off it but the one fact
- * that the pair have talked before on this browser, which is what separates
- * "not installed" from "installed and out of reach". Storage can be absent or
- * refused (private window, blocked site data), so every access is guarded and
- * a failure means the browser simply has no memory of it.
- */
-export const PHONE_SEEN_STORAGE_KEY = 'aicc.phone.extensionSeen'
-
-function readSeenLatch(): boolean {
-  try {
-    return window.localStorage.getItem(PHONE_SEEN_STORAGE_KEY) === '1'
-  } catch {
-    return false
-  }
-}
-
-function writeSeenLatch(seen: boolean): void {
-  try {
-    if (seen) window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
-    else window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
-  } catch {
-    // A browser that will not store it is a browser that will not remember
-    // it. Nothing above this line depends on the memory being there.
-  }
+/** Whether a content script has left its marker on this document right now. */
+function hasPresenceMarker(): boolean {
+  return document.documentElement.dataset[PRESENCE_MARKER] !== undefined
 }
 
 export type PhoneRegistration = 'UNREGISTERED' | 'REGISTERING' | 'REGISTERED' | 'FAILED'
@@ -200,16 +176,13 @@ export interface PhoneBridge {
    */
   detected: boolean
   /**
-   * The extension has answered this page at least once — in this page load or
-   * in an earlier one on this browser, which is what the stored latch adds.
-   */
-  wasDetected: boolean
-  /**
-   * The extension was there and is not answering now. It is still installed,
-   * still holding the registration in its own worker, and out of reach of
-   * this page: the content script was torn down while the tab slept, and only
-   * a navigation puts it back. Telling the agent to install it would be a
-   * lie; the honest instruction is to reload.
+   * A content script has marked this page and is not answering. It is still
+   * installed, still holding the registration in its own worker, and out of
+   * reach of this page: its context was invalidated or its worker is asleep,
+   * and only a navigation puts it back. Telling the agent to install it would
+   * be a lie; the honest instruction is to reload. Without the marker there
+   * is nothing to reload into, however it got that way: the answer is to
+   * install.
    */
   isLost: boolean
   extensionVersion: string | null
@@ -241,7 +214,6 @@ export interface PhoneBridge {
  */
 const INERT: PhoneBridge = {
   detected: false,
-  wasDetected: false,
   isLost: false,
   extensionVersion: null,
   extensionId: null,
@@ -306,8 +278,10 @@ function readExtensionMessage(event: MessageEvent): ExtensionMessage | null {
  */
 export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): PhoneBridge {
   const [detected, setDetected] = useState(false)
-  /** Seeded from the browser's own memory: an earlier page load counts. */
-  const [wasDetected, setWasDetected] = useState(readSeenLatch)
+  /** The marker is on the document; read at mount, then kept by the observer. */
+  const [isMarked, setMarked] = useState(hasPresenceMarker)
+  /** A run of hellos has gone unanswered to its last attempt since the last answer. */
+  const [isSilent, setSilent] = useState(false)
   const [extensionVersion, setExtensionVersion] = useState<string | null>(null)
   const [extensionId, setExtensionId] = useState<string | null>(null)
   const [state, setState] = useState<ExtensionState | null>(null)
@@ -315,8 +289,6 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
   const nonces = useRef(new Set<string>())
   /** The outstanding question's clock: it ticks once per unanswered hello. */
   const helloTimer = useRef<ReturnType<typeof setInterval> | null>(null)
-  /** Whether anything has answered since this page loaded. */
-  const hasAnswered = useRef(false)
 
   const clearHelloTimer = useCallback(() => {
     if (helloTimer.current === null) return
@@ -326,18 +298,12 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
 
   /**
    * The extension has spoken — a hello reply or a state, either is proof it
-   * is listening. Whatever question was outstanding has been answered, and
-   * this browser now remembers the two have met.
+   * is listening. Whatever question was outstanding has been answered.
    */
   const noteAnswered = useCallback(() => {
     clearHelloTimer()
     setDetected(true)
-    // Written once per page load. A state arrives whenever the registration
-    // moves, and none of those is news to the browser's memory.
-    if (hasAnswered.current) return
-    hasAnswered.current = true
-    setWasDetected(true)
-    writeSeenLatch(true)
+    setSilent(false)
   }, [clearHelloTimer])
 
   const post = useCallback((message: Record<string, unknown>) => {
@@ -367,14 +333,9 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
       }
       clearHelloTimer()
       setDetected(false)
-      // Nothing has ever answered this page and nothing answers now: the
-      // extension is not out of reach, it is not here. A browser that goes on
-      // claiming it saw one would keep offering "reload" to an agent who has
-      // to install it instead.
-      if (!hasAnswered.current) {
-        setWasDetected(false)
-        writeSeenLatch(false)
-      }
+      // Whether silence means "lost" or "absent" is the marker's to say, not
+      // this timer's: see `isLost`.
+      setSilent(true)
     }, HELLO_TIMEOUT_MS)
     ask()
   }, [post, clearHelloTimer])
@@ -437,6 +398,9 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
 
   useEffect(() => {
     if (!enabled) return
+    // Read afresh: the marker may have landed between the first render and
+    // this effect, before the observer below existed to hear it.
+    setMarked(hasPresenceMarker())
     sendHello()
 
     // The content script may be injected after this page mounted — a fresh
@@ -446,10 +410,15 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
     // removal is the extension saying it has gone: an invalidated instance
     // takes its marker with it (protocol R8).
     const observer = new MutationObserver(() => {
-      if (document.documentElement.dataset[PRESENCE_MARKER] !== undefined) {
+      if (hasPresenceMarker()) {
+        setMarked(true)
+        // Silence heard before the marker landed was silence from nothing.
+        setSilent(false)
         sendHello()
       } else {
         clearHelloTimer()
+        setMarked(false)
+        setSilent(false)
         setDetected(false)
       }
     })
@@ -477,11 +446,12 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
 
   return {
     detected,
-    wasDetected,
     // The one reading the setup card must not treat as "nothing installed".
-    // A page that never asked has lost nothing: an account with no phone is
-    // not an agent whose phone went quiet.
-    isLost: enabled && !detected && wasDetected,
+    // It needs the marker (something to reload into) and a run of hellos that
+    // went unanswered, so a content script that is merely about to answer, or
+    // no content script at all, never reads as lost. No marker, however the
+    // extension went, is the install wizard.
+    isLost: enabled && isMarked && isSilent && !detected,
     extensionVersion,
     extensionId,
     state,

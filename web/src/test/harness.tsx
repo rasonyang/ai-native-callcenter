@@ -427,6 +427,8 @@ export interface FakeExtension {
   report: (state: Partial<ExtensionState>) => void
   /** Writes the content script's marker, which is what a late install does. */
   mark: () => void
+  /** Stops answering but leaves the marker: a content script whose worker is gone. */
+  silence: () => void
   uninstall: () => void
 }
 
@@ -485,6 +487,9 @@ export function installFakeExtension(
     },
     mark: () => {
       document.documentElement.dataset.webSipPhone = '1'
+    },
+    silence: () => {
+      window.removeEventListener('message', onMessage)
     },
     uninstall: () => {
       window.removeEventListener('message', onMessage)
