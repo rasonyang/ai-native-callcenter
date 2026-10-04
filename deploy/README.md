@@ -155,7 +155,10 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
    the password is `AICC_SEED_PASSWORD` in `.env`).
 4. Press **Sign in** on the phone bar. The agent's device counts as registered
    only after this ([#37](https://github.com/rasonyang/ai-native-callcenter/issues/37)).
-5. Dial `95001` (English) or `95002` (Chinese) to reach the bot.
+5. Dial `95001` (English) or `95002` (Chinese) to reach the bot. The agent's
+   phone is in the `aicc` dialplan context, which hands any enabled number of
+   the platform's own to the same doorway a carrier's caller uses; a number
+   that is not one of them is dialled out through the trunk, if there is one.
 
 ### Ports and firewall
 

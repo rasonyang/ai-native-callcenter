@@ -15,7 +15,13 @@ local session = session
 if session == nil then return end
 
 local did = session:getVariable("destination_number")
-local ani = session:getVariable("caller_id_number") or ""
+-- Who is calling. A leg the platform originated for an agent (click-to-dial)
+-- carries the number it is *dialling* as its caller id, so it names its own
+-- extension separately; every other leg's caller id is the caller.
+local ani = session:getVariable("aicc_extension")
+if ani == nil or ani == "" then
+  ani = session:getVariable("caller_id_number") or ""
+end
 
 local function log(level, message)
   freeswitch.consoleLog(level, "aicc_inbound: " .. message .. "\n")
@@ -52,8 +58,15 @@ end
 
 -- One call identity, minted before any leg exists, so every event the
 -- application sees carries it from the first moment.
-local api = freeswitch.API()
-local call_id = api:executeString("create_uuid")
+--
+-- A leg that already carries an identity keeps it. Click-to-dial stamps
+-- aicc_call_id on the agent's leg before the dialplan runs, and the call the
+-- application registered under it must be the one the bot leg joins: minting
+-- a second id here would split one agent call into two.
+local call_id = session:getVariable("aicc_call_id")
+if call_id == nil or call_id == "" then
+  call_id = freeswitch.API():executeString("create_uuid")
+end
 
 session:setVariable("aicc_call_id", call_id)
 session:setVariable("aicc_did", route.number)
@@ -61,7 +74,11 @@ session:setVariable("aicc_language", route.language)
 -- Exported so every leg bridged from this one carries the same identity:
 -- without this the bot leg arrives without aicc_call_id and the application
 -- opens a second, provisional call for it.
-session:setVariable("export_vars", "aicc_call_id,aicc_did,aicc_language")
+--
+-- aicc_call_type is a hint set by whoever placed the call (click-to-dial, or
+-- the aicc dialplan for a phone dialling a DID: OUTBOUND either way). It is
+-- never set here: a carrier's caller sends none and the call is INBOUND.
+session:setVariable("export_vars", "aicc_call_id,aicc_did,aicc_language,aicc_call_type")
 
 -- The bot leg is G.711 only: it terminates RTP in the application, which
 -- speaks both laws and nothing else.
@@ -81,6 +98,10 @@ session:setVariable("sip_h_X-AICC-Call-ID", call_id)
 session:setVariable("sip_h_X-AICC-DID", route.number)
 session:setVariable("sip_h_X-AICC-Language", route.language)
 session:setVariable("sip_h_X-AICC-ANI", ani)
+local call_type = session:getVariable("aicc_call_type")
+if call_type ~= nil and call_type ~= "" then
+  session:setVariable("sip_h_X-AICC-Call-Type", call_type)
+end
 -- The caller's own channel, so the application can transfer this leg to a
 -- queue directly when the bot hands the call to a person.
 session:setVariable("sip_h_X-AICC-Channel-ID", session:getVariable("uuid"))

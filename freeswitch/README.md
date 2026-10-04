@@ -17,6 +17,7 @@ tree onto a FreeSWITCH you built yourself.
 | `CONF-DEVIATIONS.md` | The file-by-file record of every difference from that baseline, and of what was left vanilla that could still surprise a deployment. Read it before changing anything under `conf/` |
 | `scripts/aicc_xml.lua` | Serves the `directory` section (SIP users) and `callcenter.conf` from the database |
 | `scripts/aicc_inbound.lua` | Inbound entry point: answers every external number with a bot |
+| `scripts/aicc_did_route.lua` | Delivers a platform number (`luacc.dids`) dialled from an agent's phone to the public doorway; any other number falls through |
 | `scripts/aicc_queue.lua` | Queue entry point and overflow handling |
 | `scripts/aicc_track.lua` | Names the agent an internal call is ringing, so mod_callcenter stops offering them queue calls |
 | `Dockerfile` | Builds FreeSWITCH v1.11.3 from source, with this tree and `mod_audio_stream` inside it |
