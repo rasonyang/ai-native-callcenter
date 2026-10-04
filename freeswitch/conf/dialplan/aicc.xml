@@ -94,6 +94,44 @@
     </extension>
 
     <!--
+      The platform's own numbers, dialled from an agent's phone.
+
+      Numbers in luacc.dids are routed in the public context, where a carrier
+      delivers them. An agent dialling one (click-to-dial, or the keypad) is in
+      this context, so without this rule the call finds no route or, with a
+      trunk rule below, goes out to a carrier that does not own the number.
+
+      aicc_did_route.lua asks the database, while the dialplan hunts, whether
+      the number is an enabled DID; if so the leg is typed (OUTBOUND, unless
+      whoever placed it already said) and transferred to it in public:
+      the same doorway, the same aicc_inbound.lua, the same flow as a caller
+      from outside. Any other number fails the second condition and the hunt
+      goes on to the rules below, untouched.
+
+      It sits before the include on purpose: a deployment's trunk rules in
+      aicc/*.xml come after this one and so never see a platform number.
+      Queue and agent extensions are matched above and never reach it.
+    -->
+    <extension name="aicc_platform_number">
+      <condition field="destination_number" expression="^\d{3,20}$" break="on-false"/>
+      <condition field="${lua(aicc_did_route.lua ${destination_number})}" expression="^true$" break="on-false"/>
+      <!--
+        A call is INTERNAL only when it rings a registered extension; a
+        platform number is not one, so this call is OUTBOUND. A phone's own
+        INVITE carries no aicc_call_type, and after the transfer the channel
+        is in public, where an untyped call would be taken for INBOUND, so it
+        is named here. A type stamped at creation (click-to-dial) is kept:
+        break="never" lets an already typed call skip this.
+      -->
+      <condition field="${aicc_call_type}" expression="^$" break="never">
+        <action application="set" data="aicc_call_type=OUTBOUND"/>
+      </condition>
+      <condition field="destination_number" expression="^(\d{3,20})$">
+        <action application="transfer" data="$1 XML public"/>
+      </condition>
+    </extension>
+
+    <!--
       Where a deployment adds what only it has: this laptop's simulated PSTN
       trunk, somebody else's carrier, a feature code a particular floor needs.
 

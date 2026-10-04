@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 
 import { SoftphoneBar } from '@/components/softphone-bar'
 import { usePresence } from '@/lib/agent'
-import { PHONE_SEEN_STORAGE_KEY, PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
+import { PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
 import { useLogout, useSession } from '@/lib/session'
 import type { ExtensionState } from '@/lib/phone-bridge'
 import {
@@ -40,9 +40,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
   delete document.documentElement.dataset.webSipPhone
-  // Having met the extension is remembered per browser, and every test here
-  // shares one. A test about a browser that has never had it says so.
-  window.localStorage.removeItem(PHONE_SEEN_STORAGE_KEY)
 })
 
 /** The bar as it is mounted in the app shell: below the phone bridge. */
@@ -350,15 +347,15 @@ describe('the phone', () => {
     expect(await screen.findByRole('button', { name: /set up phone/i })).toBeInTheDocument()
   })
 
-  // The same silence on a browser that has had the extension means something
-  // else entirely: it is installed and registered, and only this page has
-  // lost its content script. "Set up phone" would send the agent to install
-  // what they already have.
-  it('says it lost contact when a browser that had the extension hears nothing', async () => {
-    window.localStorage.setItem(PHONE_SEEN_STORAGE_KEY, '1')
+  // A browser that once ran the extension, with nothing marking this page
+  // now, has nothing to reload into: "Set up phone" from the first paint,
+  // never "lost contact" (issue #75).
+  it('offers setup, never lost contact, when nothing has marked the page', async () => {
+    window.localStorage.setItem('aicc.phone.extensionSeen', '1')
     await renderBar({ extension: false })
-    expect(await screen.findByText(/lost contact/i)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /set up phone/i })).toBeNull()
+    expect(await screen.findByRole('button', { name: /set up phone/i })).toBeInTheDocument()
+    expect(screen.queryByText(/lost contact/i)).toBeNull()
+    window.localStorage.removeItem('aicc.phone.extensionSeen')
   })
 
   // The chip's reading (phone.test.ts) is what gates READY in the menu.

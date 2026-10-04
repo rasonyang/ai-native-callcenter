@@ -260,7 +260,7 @@ RUN echo /usr/local/freeswitch/lib > /etc/ld.so.conf.d/freeswitch.conf && ldconf
 
 # The configuration and the Lua scripts, from this repository. conf/ is a
 # complete FreeSWITCH configuration tree and replaces the vanilla one entirely;
-# scripts/ is the four aicc_*.lua files mod_lua's XML handler runs.
+# scripts/ is the aicc_*.lua files the dialplan and mod_lua's XML handler run.
 COPY conf/ /usr/local/freeswitch/conf/
 COPY scripts/ /usr/local/freeswitch/scripts/
 COPY --from=sounds /sounds/ /usr/local/freeswitch/sounds/

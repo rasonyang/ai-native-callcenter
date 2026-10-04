@@ -186,9 +186,17 @@ Pass: the criteria of step 3 for `amy`, and DevTools shows a WebSocket to
 As `wei` (step 3), open the keypad on the softphone bar, type `95001`, press
 Dial.
 
-Fallback, when the keypad call cannot be placed: ring wei's phone from the
-switch and route the answered leg to the bot (the header makes the browser
-phone answer by itself):
+The `aicc` context routes every enabled number of the platform's own (the
+Numbers page) to the same doorway a carrier's caller uses, so this is the
+normal path. The same works from the switch, with no browser: originate a leg
+in the `aicc` context and let it dial the number, as an agent's phone does:
+
+```sh
+fs 'originate {origination_caller_id_number=1001,aicc_extension=1001}loopback/95001/aicc &playback(silence_stream://20000)'
+```
+
+To have the switch ring wei's phone and then route the answered leg to the
+bot (the header makes the browser phone answer by itself):
 
 ```sh
 fs 'originate {sip_h_Call-Info=<sip:<ip>>;answer-after=0}user/1001@<ip> 95001 XML public'

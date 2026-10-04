@@ -277,7 +277,7 @@ func run() error {
 	outboundSvc := outbound.New(outbound.Config{
 		EndpointFormat: cfg.OutboundEndpoint,
 		CallerID:       cfg.OutboundCallerID,
-	}, adapter, catalogSvc,
+	}, adapter, catalogSvc, catalogSvc,
 		st.Ledger().HasCDR,
 		func(callID uuid.UUID) bool {
 			_, err := registry.Snapshot(callID)

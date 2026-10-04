@@ -163,7 +163,7 @@ The build fails if the shipped configuration loads a module the image does not c
 ## Image contents
 
 - `/usr/local/freeswitch/conf` — the aicc configuration tree, from the repository's `freeswitch/conf/`
-- `/usr/local/freeswitch/scripts` — `aicc_inbound.lua`, `aicc_queue.lua`, `aicc_track.lua`, `aicc_xml.lua` (the `mod_lua` XML handler that serves the directory and the queues from PostgreSQL)
+- `/usr/local/freeswitch/scripts` — `aicc_inbound.lua`, `aicc_did_route.lua`, `aicc_queue.lua`, `aicc_track.lua`, `aicc_xml.lua` (the `mod_lua` XML handler that serves the directory and the queues from PostgreSQL)
 - `/usr/local/freeswitch/sounds` — 8 kHz only: `freeswitch-sounds-en-us-callie-8000-1.0.53` and `freeswitch-sounds-music-8000-1.0.52`, downloaded from files.freeswitch.org during the build and verified by sha256. The wideband sets are another ~450MB and nothing here plays a prompt above narrowband.
 
 FreeSWITCH runs in the foreground as the `freeswitch` user (`-nonat -nf -nc`); `HEALTHCHECK` is `fs_cli -x status`.

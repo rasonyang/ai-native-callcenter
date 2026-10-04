@@ -31,6 +31,9 @@ const (
 	headerANI       = "X-Aicc-Ani"
 	headerChannelID = "X-Aicc-Channel-Id"
 	headerCallType  = "X-Aicc-Call-Type"
+	// Sent only by the AI-outbound bridge: the platform placed this call to a
+	// customer, so the ANI is the person answering and the DID is our number.
+	headerPlacedToCustomer = "X-Aicc-Placed-To-Customer"
 )
 
 // actionGraceCap bounds the wait between arming a transfer or hangup and the
@@ -268,13 +271,11 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 	// An outbound conversation is the same machinery with the direction
 	// stamped by whoever originated it; the default is a caller dialing in.
-	direction := callTypeInbound
-	if headers[headerCallType] == "OUTBOUND" {
-		direction = callTypeOutbound
-	}
+	direction := callTypeFromHeader(headers[headerCallType])
 	recorder := newCallRecorder(ledgerCallID, time.Now(), o.transcriptActor(ledgerCallID, direction))
 	facts := &callFacts{
 		callType:           direction,
+		isPlacedToCustomer: headers[headerPlacedToCustomer] == "true",
 		language:           flow.Lang(language),
 		fromNumber:         headers[headerANI],
 		did:                didNumber,
@@ -968,4 +969,15 @@ func (o *Orchestrator) rescue(dialog *voice.Dialog) {
 			return
 		}
 	}
+}
+
+// callTypeFromHeader reads the type hint a dialplan or the platform stamped on
+// the bot leg. Anything else, including no header (a carrier's caller), is
+// INBOUND.
+func callTypeFromHeader(v string) callType {
+	switch callType(v) {
+	case callTypeOutbound, callTypeInternal:
+		return callType(v)
+	}
+	return callTypeInbound
 }
