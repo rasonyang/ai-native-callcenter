@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -153,7 +154,7 @@ func TestATransferredCallStillWritesTheRowItKnows(t *testing.T) {
 	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
 
 	recorder.say(store.SpeakerCustomer, "转人工")
-	recorder.markTransferred()
+	recorder.markTransferred("", "")
 	recorder.markHandedOver(queueID)
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -187,7 +188,7 @@ func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 	ledger := newFakeLedger()
 	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 
-	recorder.markTransferred()
+	recorder.markTransferred("", "")
 	recorder.finish(ledger, testFacts(), discard())
 
 	if len(ledger.cdrs) != 1 {
@@ -199,6 +200,51 @@ func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 	}
 	if cdr.IsContained {
 		t.Error("a call the bot decided to hand on was marked contained")
+	}
+}
+
+// A transfer the caller hung up on leaves the bot's row as the only one, so it
+// carries the summary and reason the bot produced, under the keys the human
+// path uses, beside the business data the call was placed with. Before, the
+// row had only the business data and the summary was lost (01a0f651 and
+// 01a0f664 on the dev stack).
+func TestATransferNeverHandedOverKeepsTheBotsSummary(t *testing.T) {
+	ledger := newFakeLedger()
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	facts := testFacts()
+	facts.userData = map[string]any{"orderId": "A-1001"}
+
+	recorder.markTransferred("Caller asked to be transferred.", "Caller requested a transfer")
+	recorder.finish(ledger, facts, discard())
+
+	if len(ledger.cdrs) != 1 {
+		t.Fatalf("wrote %d cdrs", len(ledger.cdrs))
+	}
+	got := ledger.cdrs[0].UserData
+	want := map[string]any{
+		"orderId":    "A-1001",
+		"botSummary": "Caller asked to be transferred.",
+		"botReason":  "Caller requested a transfer",
+	}
+	if !maps.Equal(got, want) {
+		t.Errorf("userData = %v, want %v", got, want)
+	}
+	if len(facts.userData) != 1 {
+		t.Errorf("the call's own userData was changed: %v", facts.userData)
+	}
+}
+
+// A call that never decided to transfer writes the business data it was placed
+// with and nothing of the bot's.
+func TestARowWithoutATransferAddsNoSummary(t *testing.T) {
+	ledger := newFakeLedger()
+	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+
+	recorder.markHangup()
+	recorder.finish(ledger, testFacts(), discard())
+
+	if got := ledger.cdrs[0].UserData; got != nil {
+		t.Errorf("userData = %v, want none", got)
 	}
 }
 

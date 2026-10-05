@@ -116,7 +116,7 @@ func (a *callActions) TransferToAgent(ctx context.Context, request flow.Transfer
 	// The ledger follows the call: after a transfer the human path writes the
 	// one CDR, and the bot's share of the story goes with the caller.
 	if a.recorder != nil {
-		a.recorder.markTransferred()
+		a.recorder.markTransferred(request.Summary, request.Reason)
 		if a.facts != nil {
 			a.stampBotShare(a.facts)
 		}
