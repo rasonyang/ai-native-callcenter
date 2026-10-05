@@ -52,6 +52,11 @@ type callRecorder struct {
 	// switch was told to move them and not when the tool accepted the
 	// transfer (markHandedOver).
 	transferQueue *uuid.UUID
+	// transferSummary and transferReason are what the bot told the person it
+	// was handing to. The human path's row carries them from the caller's
+	// channel; a transfer that never ran leaves this row as the only one.
+	transferSummary string
+	transferReason  string
 	// endReason distinguishes how the conversation closed, for containment:
 	// "" (caller hung up or failure), "HANGUP" (the bot closed it properly),
 	// "TRANSFER".
@@ -127,11 +132,15 @@ func (r *callRecorder) add(speaker, kind, text string, content map[string]any) {
 }
 
 // markTransferred records the decision to hand the caller to a person. It
-// names no queue: the decision is not the handover (markHandedOver).
-func (r *callRecorder) markTransferred() {
+// names no queue: the decision is not the handover (markHandedOver). The
+// summary and reason are the decision's, so they are kept whether or not the
+// caller is ever handed over.
+func (r *callRecorder) markTransferred(summary, reason string) {
 	r.mu.Lock()
 	r.isTransferred = true
 	r.endReason = "TRANSFER"
+	r.transferSummary = summary
+	r.transferReason = reason
 	r.mu.Unlock()
 }
 
@@ -217,6 +226,8 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	endReason := r.endReason
 	hangupCause := r.hangupCause
 	transferQueue := r.transferQueue
+	transferSummary := r.transferSummary
+	transferReason := r.transferReason
 	isSessionLimited := r.isSessionLimited
 	r.mu.Unlock()
 	unbackedClaims := r.unbackedClaimList()
@@ -258,6 +269,22 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		fromNumber, toNumber = call.did, call.fromNumber
 	}
 
+	// The bot's summary goes under the keys the human path writes it with
+	// (telephony's CDRAssembler.assemble), so a reader finds the same fields
+	// whichever path wrote the row. Without it a transfer the caller hung up
+	// on lost the summary from the ledger, though the bot had produced it.
+	userData := call.userData
+	if transferSummary != "" {
+		userData = maps.Clone(call.userData)
+		if userData == nil {
+			userData = map[string]any{}
+		}
+		userData["botSummary"] = transferSummary
+		if transferReason != "" {
+			userData["botReason"] = transferReason
+		}
+	}
+
 	cdr := store.CDR{
 		CallID:     r.callID,
 		StartedAt:  r.startedAt,
@@ -285,7 +312,7 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 			!isSessionLimited,
 		HasRecording:   call.isRecordingEnabled,
 		UnbackedClaims: unbackedClaims,
-		UserData:       call.userData,
+		UserData:       userData,
 		Tech:           call.tech,
 		Legs: []store.Leg{{
 			Kind:        "BOT",
