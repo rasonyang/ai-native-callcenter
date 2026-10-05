@@ -367,8 +367,7 @@ phone's real address, as on a Linux host.
 ### Docker Desktop
 
 The installer supports Docker Desktop (Settings > Resources: at least 4 CPUs
-and 4 GB of memory), but an installer run on Docker Desktop is not yet
-verified live. An earlier manual setup was verified on an Intel Mac with
+and 4 GB of memory). An earlier manual setup was verified on an Intel Mac with
 Docker Desktop and softphones on the same Mac. For the manual quick start, in
 `deploy/.env`:
 

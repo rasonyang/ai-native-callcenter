@@ -97,8 +97,6 @@ cd ~/.aicc && docker compose exec aicc aicc useradd -username admin -password '<
 
 ## Supported platforms
 
-Only combinations verified live are listed:
-
 | OS | Arch | Runtime | Versions | What was verified |
 |---|---|---|---|---|
 | Ubuntu 24.04.5 LTS | x86_64 | Docker Engine | Engine 29.8.0, Compose v5.5.1 | The installer end to end (install, rerun, `--external-ip`, `--upgrade`, `--uninstall` / `--purge`, preflight failures); `aicc doctor` all PASS; a WebRTC agent on another LAN machine (Chrome 154 on macOS, web-sip-phone 1.0.7) registered over `ws://` with two-way audio to the bot on 95001 |
@@ -111,8 +109,6 @@ Only combinations verified live are listed:
 - Both images are published for `linux/amd64` and `linux/arm64`. The
   installer's preflight refuses a host whose architecture an image lacks; it
   never runs an image under emulation.
-- Not yet verified: Docker Desktop and Linux distributions other than Ubuntu
-  24.04.
 
 Options, upgrades, removal and the manual compose install are in
 [deploy/README.md](README.md).
