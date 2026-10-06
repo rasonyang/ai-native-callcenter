@@ -1006,6 +1006,84 @@ func TestACallerWhoSpeaksCancelsTheDeadAirWatch(t *testing.T) {
 	}
 }
 
+// Speech handled in the instant after PLAYBACK_DONE is published, before the
+// dead-air watch has started, still cancels that watch. The watch used to read
+// the idle generation only then, so it took the value the speech had already
+// moved and reported dead air over the caller; CI caught it as a flake of the
+// test above. The hook puts the speech in that instant every time.
+func TestSpeechAsPlaybackEndsCancelsTheDeadAirWatch(t *testing.T) {
+	const noInput = 150 * time.Millisecond
+
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: noInput})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	idleGeneration := func() uint64 {
+		session.mu.Lock()
+		defer session.mu.Unlock()
+		return session.idleGeneration
+	}
+	session.afterPlaybackDone = func() {
+		before := idleGeneration()
+		model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+		deadline := time.Now().Add(2 * time.Second)
+		for idleGeneration() == before {
+			if time.Now().After(deadline) {
+				t.Error("the caller's speech was never handled")
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	speakTurn(model, 1)
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+
+	deadline := time.After(2 * noInput)
+	for {
+		select {
+		case event := <-session.Events():
+			if event.Type == EventTypeNoInput {
+				t.Fatal("dead air was reported over a caller who spoke as playback ended")
+			}
+		case <-deadline:
+			return
+		}
+	}
+}
+
+// The other direction: speech that was over before the turn started says
+// nothing about whether the caller answered it, so a silence after the turn is
+// still reported, once.
+func TestSpeechBeforeTheTurnDoesNotSuppressItsDeadAir(t *testing.T) {
+	const noInput = 150 * time.Millisecond
+
+	session, _, model := startBridgeWith(t, provider.OpenAIProfile(),
+		Config{BargeGuard: -1, NoInput: noInput})
+	awaitBridgeEvent(t, session, EventTypeReady)
+
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStarted}
+	model.events <- provider.Event{Type: provider.EventTypeSpeechStopped}
+	speakTurn(model, 1)
+	awaitBridgeEvent(t, session, EventTypePlaybackDone)
+
+	reports := 0
+	deadline := time.After(3 * noInput)
+	for {
+		select {
+		case event := <-session.Events():
+			if event.Type == EventTypeNoInput {
+				reports++
+			}
+		case <-deadline:
+			if reports != 1 {
+				t.Fatalf("dead air was reported %d times, want once", reports)
+			}
+			return
+		}
+	}
+}
+
 // speakTurn plays one complete model turn of n frames.
 func speakTurn(model *fakeModel, frames int) {
 	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}

@@ -221,6 +221,9 @@ type Session struct {
 	// playbackDone is signalled when a turn's audio has finished generating and
 	// the queue should be watched until it drains.
 	playbackDone chan playbackMarker
+	// afterPlaybackDone, set only by tests, runs right after PLAYBACK_DONE is
+	// published and before the dead-air watch starts.
+	afterPlaybackDone func()
 
 	closeOnce sync.Once
 	done      chan struct{}
@@ -882,40 +885,49 @@ func (s *Session) watchPlayback() {
 			}
 		}
 
-		if !s.awaitDrained(marker.generation) {
+		idleGeneration, drained := s.awaitDrained(marker.generation)
+		if !drained {
 			continue
 		}
 		s.emit(Event{Type: EventTypePlaybackDone, Turn: marker.turn})
-		s.mu.Lock()
-		idleGeneration := s.idleGeneration
-		s.mu.Unlock()
+		if s.afterPlaybackDone != nil {
+			s.afterPlaybackDone()
+		}
 		next, hasNext = s.awaitCallerOrDeadAir(idleGeneration)
 	}
 }
 
 // awaitDrained waits for the send queue to empty, reporting false if the turn
 // was superseded — interrupted, or followed by another — while it waited.
-func (s *Session) awaitDrained(generation uint64) bool {
+//
+// It also returns the idle generation the turn's dead-air watch carries,
+// read under the same lock that confirms the drain. Speech from that instant
+// on cancels the watch: read any later, after PLAYBACK_DONE is published, a
+// caller who spoke in between had already moved the counter, the watch took
+// the moved value, and dead air was reported over them.
+func (s *Session) awaitDrained(generation uint64) (uint64, bool) {
 	ticker := time.NewTicker(frameDurationMs * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		if !s.isCurrentDrain(generation) {
-			return false
+			return 0, false
 		}
 		if s.leg.Pending() == 0 {
 			// One more frame interval so the last frame is actually on the
 			// wire, not merely off the queue.
 			select {
 			case <-s.done:
-				return false
+				return 0, false
 			case <-ticker.C:
 			}
-			return s.isCurrentDrain(generation)
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return s.idleGeneration, s.drainGeneration == generation
 		}
 		select {
 		case <-s.done:
-			return false
+			return 0, false
 		case <-ticker.C:
 		}
 	}
