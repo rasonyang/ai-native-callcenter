@@ -28,6 +28,7 @@ func encoded(audio ...byte) string {
 
 // The ordinary turn, frame for frame as the probe recorded it (m3b, m5).
 func TestANormalTurnIsTranslatedInOrder(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -74,6 +75,7 @@ func TestANormalTurnIsTranslatedInOrder(t *testing.T) {
 // the whitespace, or anything it did not recognise would pass every other test
 // here and fail on the first real call.
 func TestTheNoiseTheServiceSendsIsNotAnEvent(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -97,6 +99,7 @@ func TestTheNoiseTheServiceSendsIsNotAnEvent(t *testing.T) {
 // One frame may carry several audio parts, and every one of them is speech the
 // caller is owed.
 func TestEveryAudioPartOfAFrameIsPlayed(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -119,6 +122,7 @@ func TestEveryAudioPartOfAFrameIsPlayed(t *testing.T) {
 // The caller's words arrive on no particular schedule and nothing marks the last
 // fragment. The model answering them is what says they have finished.
 func TestWhatTheCallerSaidIsFinishedWhenTheModelAnswers(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -147,6 +151,7 @@ func TestWhatTheCallerSaidIsFinishedWhenTheModelAnswers(t *testing.T) {
 // A fragment that arrives after the model has already answered has nowhere else
 // to go: this protocol guarantees no ordering at all for these.
 func TestALateTranscriptOfTheCallerIsFinishedWhenTheTurnIsOver(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -174,6 +179,7 @@ func TestALateTranscriptOfTheCallerIsFinishedWhenTheTurnIsOver(t *testing.T) {
 // the turn and says so — which is the only announcement of the caller speaking
 // this protocol makes while the model is talking.
 func TestTheCallerTalkingOverTheModelEndsTheTurnAsSpeech(t *testing.T) {
+	requireStrict(t)
 	shapes := map[string]func(f *fakeGemini){
 		"interrupted and turnComplete in two frames": func(f *fakeGemini) {
 			f.send(interrupted())
@@ -219,6 +225,7 @@ func TestTheCallerTalkingOverTheModelEndsTheTurnAsSpeech(t *testing.T) {
 // A turn this client replaced is not a barge-in. Reporting it as one would put
 // an interruption the caller never made into the record of the call.
 func TestATurnWeReplacedIsNotBlamedOnTheCaller(t *testing.T) {
+	requireStrict(t)
 	preemptions := map[string]func(t *testing.T, session *Session){
 		"a line the flow chose": func(t *testing.T, session *Session) {
 			if err := session.SpeakText("I am transferring you now.", false); err != nil {
@@ -262,6 +269,7 @@ func TestATurnWeReplacedIsNotBlamedOnTheCaller(t *testing.T) {
 // generating. There is nothing left to close — the turn ended when the model
 // stopped — but the call still has to flush what it was about to play.
 func TestSpeechOverAFinishedTurnIsStillTheCallerTakingTheFloor(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -283,6 +291,7 @@ func TestSpeechOverAFinishedTurnIsStillTheCallerTakingTheFloor(t *testing.T) {
 // The invariant, counted across a conversation that ends its turns every way
 // this protocol can.
 func TestEveryTurnIsClosedExactlyOnce(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -341,6 +350,7 @@ func TestEveryTurnIsClosedExactlyOnce(t *testing.T) {
 // around them because the call's dead-air timer is armed in exactly one place,
 // after a turn ends, and nothing else would arm it.
 func TestAToolCallIsAWholeTurnAndTheAnswerStartsAnother(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -389,6 +399,7 @@ func TestAToolCallIsAWholeTurnAndTheAnswerStartsAnother(t *testing.T) {
 // minute and counting. Abandoning the turn would put the caller through to a
 // person because a database was slow.
 func TestTheWatchdogIsSilentWhileAToolCallIsPending(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 	session.firstAudioDeadline = 30 * time.Millisecond
@@ -453,6 +464,7 @@ func answeredSession(t *testing.T, f *fakeGemini) *Session {
 // which is one beginning and one ending, and which the flow already knows what
 // to do with.
 func TestAToolResultTheModelNeverAnswersIsReportedAsAStall(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := answeredSession(t, f)
 
@@ -479,6 +491,7 @@ func TestAToolResultTheModelNeverAnswersIsReportedAsAStall(t *testing.T) {
 // The model answering a tool result with another tool call is the conversation
 // working, not a stall — and it is half of what the live call actually did.
 func TestAToolCallAfterAToolResultIsNotAStall(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, answersWith(
 		toolCallFrame(functionCallOf("fc_2", "lookup_balance", nil))))
 	session := answeredSession(t, f)
@@ -502,6 +515,7 @@ func TestAToolCallAfterAToolResultIsNotAStall(t *testing.T) {
 
 // The ordinary ending: the model takes the answer and speaks.
 func TestSpeechAfterAToolResultIsNotAStall(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, answersWith(
 		modelAudioParts("Your balance is twelve thirty.", encoded(0x01)),
 		generationComplete()))
@@ -524,6 +538,7 @@ func TestSpeechAfterAToolResultIsNotAStall(t *testing.T) {
 // The gap between the model stopping and the server saying the playback is over
 // is seconds long, and it is not a stall either.
 func TestTheWatchdogIsSilentBetweenGenerationAndTurnComplete(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 	session.firstAudioDeadline = 30 * time.Millisecond
@@ -548,6 +563,7 @@ func TestTheWatchdogIsSilentBetweenGenerationAndTurnComplete(t *testing.T) {
 // whatever arrived. Without it the flow engine waits for a completion that is
 // never coming, and the caller hears silence.
 func TestAnAbandonedTurnIsClosedOut(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 	session.firstAudioDeadline = 40 * time.Millisecond
@@ -584,6 +600,7 @@ func TestAnAbandonedTurnIsClosedOut(t *testing.T) {
 // a fault, and failing the call over one would hang up on a caller the model
 // simply had no answer for.
 func TestATurnThatSaidNothingIsATurnAllTheSame(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -616,6 +633,7 @@ func TestATurnThatSaidNothingIsATurnAllTheSame(t *testing.T) {
 
 // A frame that is not JSON at all is not a reason to end a phone call.
 func TestAGarbledFrameIsIgnored(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -637,6 +655,7 @@ func TestAGarbledFrameIsIgnored(t *testing.T) {
 // the caller has already stopped hearing it — and the turn is reported as the
 // interruption it was rather than as a response that ran to completion.
 func TestAKeypressStopsTheTurnWithoutSayingAnything(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -676,6 +695,7 @@ func TestAKeypressStopsTheTurnWithoutSayingAnything(t *testing.T) {
 // stops on its own, so telling it again is noise it has no frame for; a keypress
 // and an application decision have nowhere to go but the fence.
 func TestTheInterruptMatrix(t *testing.T) {
+	requireStrict(t)
 	t.Run("the caller's own speech says nothing and stops nothing", func(t *testing.T) {
 		f := newFakeGemini(t, acceptSetup)
 		session := startedSession(t, f)
@@ -736,6 +756,7 @@ func TestTheInterruptMatrix(t *testing.T) {
 // the rest, and the cue that follows pre-empts the turn for real. The
 // interruption the server then reports is still the keypress, not the caller.
 func TestAKeypressThatIsThenSpokenIsStillTheKeypress(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -770,6 +791,7 @@ func TestAKeypressThatIsThenSpokenIsStillTheKeypress(t *testing.T) {
 // waiting for a connection that is going to close is a second of the transfer
 // that has to happen not happening.
 func TestGoAwayEndsTheSessionWithACauseOfItsOwn(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -806,6 +828,7 @@ func TestGoAwayEndsTheSessionWithACauseOfItsOwn(t *testing.T) {
 // The methods the call actor calls are called from the goroutine draining
 // Events. Emitting from any of them would deadlock the call.
 func TestTheConsumerGoroutineCanDriveTheSessionWithoutDeadlocking(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 

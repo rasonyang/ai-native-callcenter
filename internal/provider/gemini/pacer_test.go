@@ -103,6 +103,7 @@ func uplinkFrames(t *testing.T, f *fakeGemini, want int) [][]byte {
 // own: the server resamples whatever it is given, so this has to be true rather
 // than convenient.
 func TestAnUplinkFrameIsTheBytesAndTheRateTheyAreIn(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick := pacedSession(t, f)
 
@@ -124,6 +125,7 @@ func TestAnUplinkFrameIsTheBytesAndTheRateTheyAreIn(t *testing.T) {
 // stopped, which the server is told about so it stops holding audio it will
 // never be given the end of. It is said once per quiet, not on every tick of it.
 func TestTheEndOfTheStreamIsDeclaredOnceAfterFiftyEmptyTicks(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick := pacedSession(t, f)
 
@@ -165,6 +167,7 @@ func TestTheEndOfTheStreamIsDeclaredOnceAfterFiftyEmptyTicks(t *testing.T) {
 // The frame is not ours: the call's converter writes the next one into the same
 // buffer, and a queued frame would arrive as whatever came after it.
 func TestSendAudioCopiesWhatItIsGiven(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick := pacedSession(t, f)
 
@@ -188,6 +191,7 @@ func TestSendAudioCopiesWhatItIsGiven(t *testing.T) {
 // A write that failed is the caller's to hear about, once. The read loop reports
 // the connection itself, so the pacer does not report it twice.
 func TestAFailedWriteSurfacesOnTheNextSendAudio(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick := pacedSession(t, f)
 
@@ -354,6 +358,7 @@ func attrOf(t *testing.T, line loggedLine, key string) int64 {
 // A write that blocked is said out loud, with how long it took, while the call
 // it is delaying is still going on.
 func TestASlowWriteIsReportedWhileTheCallIsStillGoing(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -381,6 +386,7 @@ func TestASlowWriteIsReportedWhileTheCallIsStillGoing(t *testing.T) {
 // A stall is dozens of slow writes in a row, and each of them says the same
 // thing. One line a second is what makes the log readable while it lasts.
 func TestSlowWritesAreReportedAtMostOnceASecond(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -420,6 +426,7 @@ func TestSlowWritesAreReportedAtMostOnceASecond(t *testing.T) {
 // "recovered" line announced the end of was already over when the drop was
 // discovered.
 func TestDroppedAudioIsReportedWhenTheBlockedWriteReturns(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -465,6 +472,7 @@ func TestDroppedAudioIsReportedWhenTheBlockedWriteReturns(t *testing.T) {
 // write after another, and a line that repeated the running total would make one
 // caller's lost sentence look like several.
 func TestEachBlockedWriteNamesOnlyTheFramesItLost(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -494,6 +502,7 @@ func TestEachBlockedWriteNamesOnlyTheFramesItLost(t *testing.T) {
 // The closing line is what an operator reads about a call that is already over,
 // and a call whose caller was heard seconds late has these three numbers in it.
 func TestTheClosingLineSaysWhatTheUplinkCost(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -524,6 +533,7 @@ func TestTheClosingLineSaysWhatTheUplinkCost(t *testing.T) {
 // The normal case says nothing at all: a healthy uplink is not news, and a log
 // that reports every write is one nobody reads.
 func TestASocketThatKeepsUpSaysNothing(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, tick, socket, logs := stalledSession(t, f)
 
@@ -546,6 +556,7 @@ func TestASocketThatKeepsUpSaysNothing(t *testing.T) {
 
 // Whatever is queued when a call ends is audio from a call that has ended.
 func TestQueuedAudioIsDiscardedRatherThanFlushed(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
