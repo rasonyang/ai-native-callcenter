@@ -82,8 +82,8 @@ the Dockerfile names, and the sound tarballs are verified by sha256. A push
 from a dirty working tree is refused, because the image is labelled with the
 commit it came from and that label would name a commit nobody can check out.
 
-`mod_audio_stream` is compiled in the builder stage from public upstream
-(`amigniter/mod_audio_stream`) at a pinned commit, with its `libs/libwsc`
+`mod_audio_stream` is compiled in the builder stage from our fork
+(`rasonyang/mod_audio_stream`) at a pinned commit, with its `libs/libwsc`
 submodule pinned too, and `assert-audio-stream.sh` checks the result before it
 is copied into the runtime stage. That check is on the module's `DT_NEEDED`
 entry rather than on its symbols: undefined `speex_resampler_*` symbols are

@@ -36,14 +36,14 @@ ARG SOFIASIP_REF=ad36ac8f755308e8b87f98a505e83d4e408e5cc3
 ARG SPANDSP_REF=8f1e1646bdec99eac5fd2cd92c35563f736b9b89
 ARG FS_VERSION=v1.11.3
 
-# mod_audio_stream comes from public upstream at a pinned commit.
+# mod_audio_stream comes from our fork, rasonyang/mod_audio_stream, at a pinned
+# commit. Changes to the module are made there and land here as a new pin.
 #
-# The published image was built from a private fork whose two extra commits —
-# one of them the SpeexDSP fix below — are unpushed, so nothing outside the
-# author's laptop can reproduce it. Upstream main is ec2a781 as of 2026-09-09
-# and is what the fork was branched from; the fork's own public main is the
-# same commit.
-ARG MOD_AUDIO_STREAM_REPO=https://github.com/amigniter/mod_audio_stream.git
+# The pin is upstream's (amigniter) ec2a781, which the fork's main still is.
+# Upstream relicensed the module from MIT to AGPLv3 in 835e36e (2026-10-03), so
+# the fork never takes an upstream commit from 835e36e on: ec2a781 is MIT, and
+# this image is distributed.
+ARG MOD_AUDIO_STREAM_REPO=https://github.com/rasonyang/mod_audio_stream.git
 ARG MOD_AUDIO_STREAM_COMMIT=ec2a781026a1c09b0c3a6161b8b896f0b9305922
 # libs/libwsc, as pinned by that commit. Asserted during the build rather than
 # trusted, so a wrong submodule state is a build failure and not a label lie.
@@ -223,6 +223,7 @@ RUN rm -rf /usr/local/freeswitch/conf/* /usr/local/freeswitch/include /usr/local
 ########## runtime #############################################################
 FROM debian:bookworm-slim
 ARG FS_VERSION
+ARG MOD_AUDIO_STREAM_REPO
 ARG MOD_AUDIO_STREAM_COMMIT
 ARG LIBWSC_COMMIT
 ARG SOFIASIP_REF
@@ -242,6 +243,7 @@ LABEL org.opencontainers.image.title="freeswitch-aicc" \
       org.opencontainers.image.version="${VERSION}" \
       freeswitch.upstream="https://github.com/signalwire/freeswitch" \
       freeswitch.version="${FS_VERSION}" \
+      mod_audio_stream.repo="${MOD_AUDIO_STREAM_REPO}" \
       mod_audio_stream.commit="${MOD_AUDIO_STREAM_COMMIT}" \
       libwsc.commit="${LIBWSC_COMMIT}" \
       sofia-sip.commit="${SOFIASIP_REF}" \
