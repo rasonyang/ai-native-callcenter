@@ -5,6 +5,7 @@ package gemini
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -32,12 +33,25 @@ import (
 // It answers in BINARY frames and, where a test asks for it, pretty printed,
 // because that is how the real service answers. A client that read the opcode
 // or the whitespace would pass every test here and fail on the first real call.
+//
+// The server's goroutines never touch the testing.T. A test's T is dead the
+// moment the test returns, and httptest.Server.Close does not wait for a handler
+// whose connection was hijacked into a WebSocket, so a handler can outlive the
+// test and Logf on a finished T (a data race), and FailNow is forbidden off the
+// test goroutine anyway. Anything the server side finds wrong is recorded in
+// problems and reported from the cleanup, after every handler has been waited for.
 type fakeGemini struct {
 	t      *testing.T
 	server *httptest.Server
 
 	mu   sync.Mutex
 	conn *websocket.Conn
+	// conns is every connection ever accepted, so the cleanup can close them all
+	// and unblock their handlers even if a test connected twice.
+	conns    []*websocket.Conn
+	shutDown bool
+	problems []fakeProblem
+	handlers sync.WaitGroup
 	// writeMu serialises sends: replies come from the server's own goroutine
 	// while tests push events from theirs, and a WebSocket has one writer.
 	writeMu     sync.Mutex
@@ -50,6 +64,20 @@ type fakeGemini struct {
 	closeOnce sync.Once
 }
 
+// fakeProblem is something the fake saw go wrong. misuse is a test bug and fails
+// the test; otherwise it is only logged, because a write that fails after the
+// client hung up is the ordinary end of a conversation.
+type fakeProblem struct {
+	misuse bool
+	text   string
+}
+
+func (f *fakeGemini) problem(misuse bool, format string, args ...any) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.problems = append(f.problems, fakeProblem{misuse: misuse, text: fmt.Sprintf(format, args...)})
+}
+
 // newFakeGemini starts an endpoint. reply is called for each client frame on the
 // server's own goroutine and may send frames back.
 func newFakeGemini(t *testing.T, reply func(f *fakeGemini, message map[string]any)) *fakeGemini {
@@ -59,13 +87,25 @@ func newFakeGemini(t *testing.T, reply func(f *fakeGemini, message map[string]an
 	upgrader := websocket.Upgrader{}
 
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// Counted before the upgrade: Server.Close waits for a handler that has
+		// not hijacked yet, so every handler is counted by the time it returns.
+		f.handlers.Add(1)
+		defer f.handlers.Done()
 		f.recordHandshake(req)
 		conn, err := upgrader.Upgrade(w, req, nil)
 		if err != nil {
 			return
 		}
 		f.mu.Lock()
+		if f.shutDown {
+			// Server.Close returned at the hijack, before this connection was
+			// recorded, so the cleanup cannot see it: close it here.
+			f.mu.Unlock()
+			_ = conn.Close()
+			return
+		}
 		f.conn = conn
+		f.conns = append(f.conns, conn)
 		f.mu.Unlock()
 
 		for {
@@ -86,10 +126,48 @@ func newFakeGemini(t *testing.T, reply func(f *fakeGemini, message map[string]an
 			}
 		}
 	}))
-	t.Cleanup(func() {
-		f.closeOnce.Do(func() { f.server.Close() })
-	})
+	t.Cleanup(func() { f.shutdown(t) })
 	return f
+}
+
+// shutdown stops the server and waits for every handler, so that nothing the
+// fake does outlives the test, then reports what the handlers recorded.
+func (f *fakeGemini) shutdown(t *testing.T) {
+	t.Helper()
+	f.closeOnce.Do(func() { f.server.Close() })
+
+	// A hijacked connection is not the server's to close, and its handler is
+	// parked in ReadMessage: closing the sockets is what releases it.
+	f.mu.Lock()
+	f.shutDown = true
+	conns := append([]*websocket.Conn(nil), f.conns...)
+	f.mu.Unlock()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		f.handlers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Errorf("the fake provider's handler did not return after its connection closed")
+	}
+
+	f.mu.Lock()
+	problems := f.problems
+	f.problems = nil
+	f.mu.Unlock()
+	for _, p := range problems {
+		if p.misuse {
+			t.Errorf("fake provider: %s", p.text)
+		} else {
+			t.Logf("fake provider: %s", p.text)
+		}
+	}
 }
 
 // acceptSetup is the ordinary reply: the session is configured, and the noise
@@ -125,7 +203,8 @@ func (f *fakeGemini) endpoint() string {
 func (f *fakeGemini) send(event map[string]any) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		f.t.Fatalf("encode fake event: %v", err)
+		f.problem(true, "encode fake event: %v", err)
+		return
 	}
 	f.sendRaw(data)
 }
@@ -135,7 +214,8 @@ func (f *fakeGemini) send(event map[string]any) {
 func (f *fakeGemini) sendPretty(event map[string]any) {
 	data, err := json.MarshalIndent(event, "", "  ")
 	if err != nil {
-		f.t.Fatalf("encode fake event: %v", err)
+		f.problem(true, "encode fake event: %v", err)
+		return
 	}
 	f.sendRaw(data)
 }
@@ -150,19 +230,22 @@ func (f *fakeGemini) noise() {
 		"newHandle": "fake-handle-2", "resumable": true}})
 }
 
-// sendRaw pushes a pre-encoded frame, with the opcode the service uses.
+// sendRaw pushes a pre-encoded frame, with the opcode the service uses. It runs
+// on the server's goroutine as well as the test's, so it reports through
+// problems and never through the T.
 func (f *fakeGemini) sendRaw(data []byte) {
 	f.mu.Lock()
 	conn := f.conn
 	f.mu.Unlock()
 	if conn == nil {
-		f.t.Fatal("the fake provider was asked to send before the client connected")
+		f.problem(true, "asked to send before the client connected")
+		return
 	}
 
 	f.writeMu.Lock()
 	defer f.writeMu.Unlock()
 	if err := conn.WriteMessage(websocket.BinaryMessage, data); err != nil {
-		f.t.Logf("fake provider write failed: %v", err)
+		f.problem(false, "write failed: %v", err)
 	}
 }
 
