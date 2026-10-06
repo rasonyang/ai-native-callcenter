@@ -25,6 +25,7 @@ import (
 
 // The ordinary end: the caller hung up and the application closed the session.
 func TestTheCallerHangsUp(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -45,6 +46,7 @@ func TestTheCallerHangsUp(t *testing.T) {
 // open is not reported as anything: the call is over, and the only thing left to
 // say is that it is.
 func TestClosingDuringAnOpenTurn(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -68,6 +70,7 @@ func TestClosingDuringAnOpenTurn(t *testing.T) {
 // Closing twice is closing once. Both the call actor's hangup path and its
 // transfer path can reach it, and they race.
 func TestClosingIsIdempotent(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -86,6 +89,7 @@ func TestClosingIsIdempotent(t *testing.T) {
 // There is no reconnect — the conversation cannot be rebuilt — so the call has
 // to go somewhere a person can take it.
 func TestTheServerClosesTheSessionUnasked(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -118,6 +122,7 @@ func TestTheServerClosesTheSessionUnasked(t *testing.T) {
 // The close code and its reason are the whole error channel on this protocol:
 // there is no error frame, and the reason is cut off by the server at 123 bytes.
 func TestACloseCodeMidCallIsFatalAndCarriesItsReason(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	const reason = "Invalid JSON payload received. Unknown name \"nonsense\""
@@ -164,6 +169,7 @@ func TestALongCloseReasonIsCutToWhatTheProtocolCarries(t *testing.T) {
 // The socket died under the session. There is no reconnect: provider-side
 // conversation state cannot be rebuilt, so the call is routed elsewhere.
 func TestAnAbruptSocketDropIsFatal(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -193,6 +199,7 @@ func TestAnAbruptSocketDropIsFatal(t *testing.T) {
 // The call is already gone and its context with it. The session is still ended
 // — that is what stops the provider billing for one — but nothing waits.
 func TestClosingWithAnAlreadyCancelledContext(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -211,6 +218,7 @@ func TestClosingWithAnAlreadyCancelledContext(t *testing.T) {
 // Audio offered after the session began ending goes nowhere at all, whatever the
 // call actor still has in hand.
 func TestNoAudioIsTakenOnceTheSessionIsStopping(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, acceptSetup)
@@ -237,6 +245,7 @@ func TestNoAudioIsTakenOnceTheSessionIsStopping(t *testing.T) {
 // CLOSED event, one socket closed — however many things decided it at the same
 // moment.
 func TestEverythingEndsTheSessionAtOnce(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 	t.Setenv("GEMINI_API_KEY", "test-key")
 

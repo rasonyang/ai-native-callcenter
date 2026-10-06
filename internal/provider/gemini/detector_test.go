@@ -54,6 +54,7 @@ func speak(t *testing.T, session *Session, frame []byte, n int) {
 // The window: from the server saying the turn is over until the model produces
 // anything. Inside it the caller is heard; outside it nothing is said at all.
 func TestTheCallerIsHeardOnlyWhileNobodyIsSpeakingToThem(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, _ := pacedSession(t, f)
 
@@ -105,6 +106,7 @@ func TestTheCallerIsHeardOnlyWhileNobodyIsSpeakingToThem(t *testing.T) {
 // to come back — which, with a function call outstanding, was measured at over a
 // minute.
 func TestTheCallerIsHeardWhileAToolCallIsOutstanding(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, _ := pacedSession(t, f)
 
@@ -122,6 +124,7 @@ func TestTheCallerIsHeardWhileAToolCallIsOutstanding(t *testing.T) {
 // A turn the provider walked away from is never going to be declared over, so
 // nothing else would reopen the window.
 func TestTheCallerIsHeardAfterAnAbandonedTurn(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 	session.firstAudioDeadline = 40 * time.Millisecond
@@ -147,6 +150,7 @@ func TestTheCallerIsHeardAfterAnAbandonedTurn(t *testing.T) {
 // The caller may speak before the bot has said anything. Nothing is playing yet,
 // so they are heard.
 func TestTheCallerIsHeardBeforeTheBotHasSpoken(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, _ := pacedSession(t, f)
 
@@ -156,6 +160,7 @@ func TestTheCallerIsHeardBeforeTheBotHasSpoken(t *testing.T) {
 
 // A click, a moment of line noise, or the line itself is not somebody talking.
 func TestNoiseOnTheLineIsNotSpeech(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, _ := pacedSession(t, f)
 
@@ -173,6 +178,7 @@ func TestNoiseOnTheLineIsNotSpeech(t *testing.T) {
 // Nothing is said once the session has begun ending: the consumer may already
 // have stopped draining, and the call is over either way.
 func TestNothingIsHeardOnceTheSessionIsStopping(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session, _ := pacedSession(t, f)
 

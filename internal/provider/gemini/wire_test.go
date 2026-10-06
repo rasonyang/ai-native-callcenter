@@ -24,6 +24,7 @@ import (
 // The setup is the one frame that cannot be corrected afterwards. Everything in
 // it was measured, and so was the absence of everything that is not.
 func TestTheSessionIsConfiguredExactlyAsMeasured(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	startedSession(t, f)
 
@@ -50,6 +51,7 @@ func TestTheSessionIsConfiguredExactlyAsMeasured(t *testing.T) {
 // session that ends on the first frame, or a call that behaves differently for
 // reasons nobody can see.
 func TestTheSetupCarriesNoneOfTheFieldsThatRefuseIt(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	startedSession(t, f)
 
@@ -91,6 +93,7 @@ func TestTheSetupCarriesNoneOfTheFieldsThatRefuseIt(t *testing.T) {
 // the field goes out at all rather than empty — an empty voice name is not a
 // request for the default.
 func TestTheFlowsVoiceOverridesTheProfilesAndNeitherIsSentEmpty(t *testing.T) {
+	requireStrict(t)
 	t.Run("the flow names one", func(t *testing.T) {
 		f := newFakeGemini(t, acceptSetup)
 		session := testSession(t, f)
@@ -133,6 +136,7 @@ func TestTheFlowsVoiceOverridesTheProfilesAndNeitherIsSentEmpty(t *testing.T) {
 // the transcript, the CDR and the screen a supervisor reads. A language nothing
 // here speaks is no hint at all rather than a wrong one.
 func TestTheCallersLanguageIsHintedToTheTranscription(t *testing.T) {
+	requireStrict(t)
 	cases := []struct {
 		name     string
 		language string
@@ -171,6 +175,7 @@ func TestTheCallersLanguageIsHintedToTheTranscription(t *testing.T) {
 // A turn hold the flow did not choose is the server's to pick. Sending zero
 // would be a hold of no length at all.
 func TestTheTurnHoldIsSentOnlyWhenTheFlowChoseOne(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 
@@ -188,6 +193,7 @@ func TestTheTurnHoldIsSentOnlyWhenTheFlowChoseOne(t *testing.T) {
 // which lets it keep talking while a transfer is being arranged — and every tool
 // this application has is a decision the conversation cannot run ahead of.
 func TestEveryToolIsDeclaredBlocking(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 
@@ -278,6 +284,7 @@ func TestSchemaTypesAreRewrittenForTheEnumAndNothingElseIs(t *testing.T) {
 // The credential rides a header. The documented alternative is a query
 // parameter, which would put it into every URL this process logs.
 func TestTheCredentialRidesTheUpgradeAndNeverTheURL(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	startedSession(t, f)
 
@@ -309,6 +316,7 @@ func TestAMissingCredentialFailsBeforeTheCall(t *testing.T) {
 // from here: this model transcribes itself, and what the caller hears is what
 // should be recorded rather than what was asked for.
 func TestAnOpeningLineIsAskedForAsALineToRepeat(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := testSession(t, f)
 
@@ -344,6 +352,7 @@ func TestAnOpeningLineIsAskedForAsALineToRepeat(t *testing.T) {
 // With no line of its own the bot still speaks first: our bot answers the
 // telephone. An empty turn is what makes this model greet from its instructions.
 func TestWithNoOpeningLineTheModelIsAskedToGreetFromItsInstructions(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	startedSession(t, f)
 
@@ -357,6 +366,7 @@ func TestWithNoOpeningLineTheModelIsAskedToGreetFromItsInstructions(t *testing.T
 // A setup this service will not have is answered by closing the socket: there is
 // no error frame on this protocol, only a code and a sentence.
 func TestStartFailsWithTheCloseCodeAndReason(t *testing.T) {
+	requireStrict(t)
 	cases := []struct {
 		name   string
 		code   int
@@ -393,6 +403,7 @@ func TestStartFailsWithTheCloseCodeAndReason(t *testing.T) {
 // A setup nobody answers cannot hold a call open, and the bound is this client's
 // own because the context it is given may have no deadline in it.
 func TestStartFailsWhenTheSetupIsNeverAnswered(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, func(*fakeGemini, map[string]any) {})
@@ -416,6 +427,7 @@ func TestStartFailsWhenTheSetupIsNeverAnswered(t *testing.T) {
 // The caller hung up while the session was still being negotiated. Nothing may
 // be left running.
 func TestStartFailsWhenTheContextIsCancelledAndLeavesNothingBehind(t *testing.T) {
+	requireStrict(t)
 	defer noGoroutinesLeft(t)()
 
 	f := newFakeGemini(t, func(*fakeGemini, map[string]any) {})
@@ -442,6 +454,7 @@ func TestStartFailsWhenTheContextIsCancelledAndLeavesNothingBehind(t *testing.T)
 //
 
 func TestAToolResultIsByteExact(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -464,6 +477,7 @@ func TestAToolResultIsByteExact(t *testing.T) {
 // A result that is not JSON is still an answer, and goes in as the string it is
 // rather than as broken JSON the model has to guess at.
 func TestAToolResultThatIsNotJSONIsSentAsAString(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -485,6 +499,7 @@ func TestAToolResultThatIsNotJSONIsSentAsAString(t *testing.T) {
 // The model is blocked on every call it made, so it goes on only when all of
 // them have an answer — and they travel in one frame, in the order it asked.
 func TestBatchedToolResultsAreSentOnceTheSetIsComplete(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -527,6 +542,7 @@ func TestBatchedToolResultsAreSentOnceTheSetIsComplete(t *testing.T) {
 // the service, so this client does not send it — and does not report a failure
 // the caller never experienced.
 func TestACallTheServerWithdrewIsAnsweredWithNothing(t *testing.T) {
+	requireStrict(t)
 	withdrawals := map[string]func(f *fakeGemini){
 		"the caller interrupted the turn": func(f *fakeGemini) { f.send(interrupted()) },
 		"the server withdrew the call": func(f *fakeGemini) {
@@ -572,6 +588,7 @@ func TestACallTheServerWithdrewIsAnsweredWithNothing(t *testing.T) {
 }
 
 func TestAnAnswerToACallThatWasNeverMadeWritesNothing(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -590,6 +607,7 @@ func TestAnAnswerToACallThatWasNeverMadeWritesNothing(t *testing.T) {
 // replacements was measured being ignored, so this writes nothing at all — and
 // keeps the phase's own words for the next thing that is said.
 func TestUpdatingTheInstructionsWritesNothingAndTheNextCueCarriesThePhase(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
@@ -664,6 +682,7 @@ func TestThePhaseSegmentIsWhatWasAddedToTheStandingInstructions(t *testing.T) {
 // pre-empts: on this protocol a user turn with turnComplete stops whatever is
 // being said, unconditionally.
 func TestSpeakTextAsksForTheLineVerbatim(t *testing.T) {
+	requireStrict(t)
 	f := newFakeGemini(t, acceptSetup)
 	session := startedSession(t, f)
 
