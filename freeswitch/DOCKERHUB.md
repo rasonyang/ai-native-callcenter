@@ -16,7 +16,7 @@ Nothing site-specific is baked in. The image carries no database credential, no 
 
 - Platforms: `linux/amd64` and `linux/arm64`
 - FreeSWITCH: tag `v1.11.3` (sofia-sip and spandsp pinned to commits — see the image labels)
-- Extra module: `mod_audio_stream` at a pinned upstream commit, with `libwsc` linked statically and SpeexDSP linked explicitly
+- Extra module: `mod_audio_stream` from [rasonyang/mod_audio_stream](https://github.com/rasonyang/mod_audio_stream) at a pinned commit, with `libwsc` linked statically and SpeexDSP linked explicitly
 - Base image: `debian:bookworm-slim`
 
 ## Tags
