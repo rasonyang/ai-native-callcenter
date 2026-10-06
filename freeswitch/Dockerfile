@@ -39,12 +39,13 @@ ARG FS_VERSION=v1.11.3
 # mod_audio_stream comes from our fork, rasonyang/mod_audio_stream, at a pinned
 # commit. Changes to the module are made there and land here as a new pin.
 #
-# The pin is upstream's (amigniter) ec2a781, which the fork's main still is.
+# The fork is upstream's (amigniter) ec2a781 plus one commit, 3486722, which
+# fetches libs/libwsc from our fork rasonyang/libwsc; the code is unchanged.
 # Upstream relicensed the module from MIT to AGPLv3 in 835e36e (2026-10-03), so
 # the fork never takes an upstream commit from 835e36e on: ec2a781 is MIT, and
 # this image is distributed.
 ARG MOD_AUDIO_STREAM_REPO=https://github.com/rasonyang/mod_audio_stream.git
-ARG MOD_AUDIO_STREAM_COMMIT=ec2a781026a1c09b0c3a6161b8b896f0b9305922
+ARG MOD_AUDIO_STREAM_COMMIT=3486722721623e853edafdb550e4bd478dbcd6f2
 # libs/libwsc, as pinned by that commit. Asserted during the build rather than
 # trusted, so a wrong submodule state is a build failure and not a label lie.
 ARG LIBWSC_COMMIT=09d18e5db9243a996692261a7a0839c9c346bc47
