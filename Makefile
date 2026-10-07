@@ -117,10 +117,25 @@ build: web-build ## Build the single executable with the SPA embedded
 run: ## Run the server (expects dev-up and a built SPA, or use the Vite dev server)
 	go run ./cmd/aicc
 
+# Without AICC_TEST_DATABASE_URL every test that calls scratchDB skips and the
+# run stays green (see the comment in .github/workflows/ci.yml), so say so
+# after the suite, where it is not buried, whether the suite passed or failed.
+TEST_DATABASE_URL := postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable
+
 .PHONY: test
 test: ## Run Go (with -race) and frontend tests, as CI does
-	go test -race ./...
-	cd $(WEB) && npm run test
+	@status=0; \
+	( set -x; go test -race ./... && cd $(WEB) && npm run test ) || status=$$?; \
+	if [ -z "$${AICC_TEST_DATABASE_URL:-}" ]; then \
+	  printf '%s\n' '' \
+	    '************************************************************************' \
+	    'WARNING: AICC_TEST_DATABASE_URL is unset, so every database test was' \
+	    'SKIPPED: migrations, store, and much of seed and httpapi. CI runs them.' \
+	    'To run them here, start PostgreSQL (make dev-up), then:' \
+	    "  AICC_TEST_DATABASE_URL='$(TEST_DATABASE_URL)' make test" \
+	    '************************************************************************' >&2; \
+	fi; \
+	exit $$status
 
 .PHONY: lint
 lint: ## Vet Go code and lint the frontend
