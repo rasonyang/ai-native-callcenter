@@ -290,6 +290,19 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 	// the read loop: reporting them here would block Start behind a consumer
 	// that has not started draining yet.
 	if cfg.OpeningText != "" {
+		// SessionConfig.OpeningGate: the line waits until the caller's media
+		// path is up. The uplink pacer is deliberately not started before this
+		// wait. It would only declare a mute after half a second of nothing,
+		// and an idle, silent session is what the findings measured as
+		// harmless (a minute muted answered normally on unmute); the
+		// documented 10-minute idle release is far past anything the wait can
+		// last, because the UAS's first-media timeout ends such a call first.
+		// The uplink starts below, exactly as it does without a gate. With no
+		// opening line there is nothing to hold back, so no wait either.
+		if err := provider.AwaitOpeningGate(ctx, cfg.OpeningGate, conn.Done()); err != nil {
+			s.conn.Close()
+			return fmt.Errorf("wait to greet: %w", err)
+		}
 		s.mu.Lock()
 		s.pendingSpeak = cfg.OpeningText
 		s.mu.Unlock()

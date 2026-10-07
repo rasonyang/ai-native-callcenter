@@ -635,6 +635,14 @@ hand instead of pulling it.
   start, and the caller went to the number's fallback queue with nobody
   staffed. Find the reason with
   `docker compose logs aicc | grep -E 'could not run|conversation failed'`.
+- **The bot answers but the caller never hears the greeting.** The carrier's
+  media path opened after the greeting was spoken. The application logs
+  `first bot audio queued before any inbound media` with `answerToFirstAudioMs`,
+  and `first media` with `answerToFirstMediaMs` once media arrives
+  (`aicc_bot_first_media_ms`, `aicc_bot_first_audio_ms{before_media}`). Set
+  `AICC_BOT_GREETING_MEDIA_WAIT` (`0` waits for the first inbound RTP however
+  long, `3s` waits for it or 3 s) so the greeting is asked for only after media
+  has started; unset keeps the greeting immediate.
 - **The bot speaks, then about 5 s later the call goes to a queue.** The
   caller's audio does not reach the switch, so the bot leg receives no media
   and ends. The application logs `media went dead` (media that was flowing

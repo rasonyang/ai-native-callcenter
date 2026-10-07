@@ -52,6 +52,7 @@ type SessionConfig struct {
     Turn TurnDetection                         // {Mode: Semantic|VAD, SilenceMs int}
     Tools []ToolSpec                           // JSON-schema tools from the flow
     OpeningText string                         // the call's first words, as written (§6)
+    OpeningGate <-chan struct{}                // nil: ask for the first turn now; else wait for close (#98)
     InputFormat, OutputFormat media.AudioFormat
 }
 ```

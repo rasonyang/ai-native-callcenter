@@ -78,6 +78,12 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	return b.buf.Write(p)
 }
 
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func (b *syncBuffer) count(needle string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()

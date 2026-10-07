@@ -101,6 +101,11 @@ type Dialog struct {
 
 	RTP *RTPSession
 
+	// AnsweredAt is when the ACK started the call: the moment the caller is
+	// connected, whatever the media path is doing. Set once, before
+	// OnCallStarted runs, and read-only after.
+	AnsweredAt time.Time
+
 	// Stopped closes when the dialog ends, whichever side ended it.
 	Stopped chan struct{}
 
@@ -737,6 +742,7 @@ func (u *UAS) handleBye(msg *sipMessage, addr *net.UDPAddr) {
 //
 
 func (u *UAS) startCall(dialog *Dialog) {
+	dialog.AnsweredAt = time.Now()
 	if err := dialog.startMedia(); err != nil {
 		u.log.Error("media failed to start", "callId", dialog.CallID, "error", err)
 		if u.OnCallFailed != nil {

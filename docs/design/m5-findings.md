@@ -149,6 +149,17 @@ ledger.
 
 ## 5. Open: 6% of calls ended on the dead-media watchdog
 
+> Since #98 the first inbound packet is one signal, `RTPSession.MediaStarted()`,
+> which the dead-media watch's `HasReceived` reads and the greeting gate waits
+> on; `Dialog.AnsweredAt` is the real answer time. With
+> `AICC_BOT_GREETING_MEDIA_WAIT` set, the request for the greeting waits for
+> that signal (or a grace); unset it does not. Always on, each call logs
+> `first media` (`answerToFirstMediaMs`) and `first bot audio`
+> (`answerToFirstAudioMs`, `isBeforeMedia`), metered as `aicc_bot_first_media_ms`
+> and `aicc_bot_first_audio_ms{before_media}`. The session time budget
+> (`maxDurationSec`) still counts from the answer; the dead-air timer arms only
+> after a turn's playback, so a held greeting never starts it.
+
 > Since #97 the UAS tells two faults apart: `media never started` (no inbound
 > packet at all within `FirstMediaTimeout`, 30 s) and `media went dead` (media
 > was flowing and stopped for `RTPDeadTimeout`, 5 s). The figures below predate

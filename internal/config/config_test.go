@@ -3,6 +3,7 @@
 package config
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -84,6 +85,49 @@ func TestBotMediaTimeouts(t *testing.T) {
 		t.Errorf("a negative timeout was accepted: %v", err)
 	}
 }
+
+func TestBotGreetingMediaWait(t *testing.T) {
+	tests := []struct {
+		name      string
+		value     *string
+		wantGated bool
+		wantWait  time.Duration
+		wantErr   bool
+	}{
+		{name: "unset greets immediately"},
+		{name: "empty is unset", value: ptrTo("")},
+		{name: "zero waits for media however long", value: ptrTo("0"), wantGated: true},
+		{name: "a grace", value: ptrTo("3s"), wantGated: true, wantWait: 3 * time.Second},
+		{name: "a malformed value is refused, not read as unset", value: ptrTo("3 s"), wantErr: true},
+		{name: "negative is refused", value: ptrTo("-1s"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.value == nil {
+				t.Setenv("AICC_BOT_GREETING_MEDIA_WAIT", "")
+				os.Unsetenv("AICC_BOT_GREETING_MEDIA_WAIT")
+			} else {
+				t.Setenv("AICC_BOT_GREETING_MEDIA_WAIT", *tt.value)
+			}
+			c, err := Load()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AICC_BOT_GREETING_MEDIA_WAIT") {
+					t.Fatalf("Load() error = %v, want one naming the setting", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if c.IsBotGreetingGated != tt.wantGated || c.BotGreetingMediaWait != tt.wantWait {
+				t.Errorf("got gated=%v wait=%s, want gated=%v wait=%s",
+					c.IsBotGreetingGated, c.BotGreetingMediaWait, tt.wantGated, tt.wantWait)
+			}
+		})
+	}
+}
+
+func ptrTo[T any](v T) *T { return &v }
 
 func TestParsePeers(t *testing.T) {
 	t.Parallel()

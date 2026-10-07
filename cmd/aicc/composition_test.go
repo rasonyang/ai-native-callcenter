@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"reflect"
 	"slices"
 	"testing"
@@ -569,8 +570,12 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		func(store.Callback) {},
 		func(uuid.UUID, uuid.UUID) {},
 		outbound.NewCallData(),
+		true,
+		3*time.Second,
 	)
 
+	// The greeting gate is exempt only when unset, which is a real setting
+	// (today's behaviour); here it is set, so it has to arrive.
 	if missing := zeroFields(cfg, "Logger"); len(missing) > 0 {
 		t.Errorf("aicall.OrchestratorConfig fields left unset: %v", missing)
 	}
@@ -602,6 +607,45 @@ func TestBotUASCarriesTheConfiguredMediaTimeouts(t *testing.T) {
 			got.RTPDeadTimeout, got.FirstMediaTimeout, def.RTPDeadTimeout, def.FirstMediaTimeout)
 	}
 }
+
+// The greeting gate must come from configuration: unset has to stay unset
+// (no gate, today's behaviour) and 0 has to stay distinct from it.
+func TestBotConfigCarriesTheGreetingMediaWait(t *testing.T) {
+	cases := []struct {
+		name      string
+		value     *string
+		wantGated bool
+		wantWait  time.Duration
+	}{
+		{"unset greets immediately", nil, false, 0},
+		{"empty is unset", ptr(""), false, 0},
+		{"zero waits for media", ptr("0"), true, 0},
+		{"a grace waits for media or the grace", ptr("3s"), true, 3 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("AICC_ENV", "dev")
+			if tc.value == nil {
+				t.Setenv("AICC_BOT_GREETING_MEDIA_WAIT", "")
+				os.Unsetenv("AICC_BOT_GREETING_MEDIA_WAIT")
+			} else {
+				t.Setenv("AICC_BOT_GREETING_MEDIA_WAIT", *tc.value)
+			}
+			cfg, err := config.Load()
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			got := botConfig(botUAS(cfg), nil, nil, nil, nil, nil, "", provider.Profile{},
+				nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait)
+			if got.IsGreetingGated != tc.wantGated || got.GreetingMediaWait != tc.wantWait {
+				t.Errorf("orchestrator gate = %v, %s, want %v, %s",
+					got.IsGreetingGated, got.GreetingMediaWait, tc.wantGated, tc.wantWait)
+			}
+		})
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
 
 type recordingPublisher struct {
 	events []events.Event

@@ -37,6 +37,15 @@ type fakeLeg struct {
 	pendingFrames int
 	clearedCalls  int
 	stopOnce      sync.Once
+
+	// media closes when the first inbound audio has arrived; answeredAt is the
+	// answer time. A fake leg's media has already started unless a test calls
+	// holdMedia.
+	media      chan struct{}
+	mediaOnce  sync.Once
+	answeredAt time.Time
+	// firstMediaAt is when the fake's first packet "arrived".
+	firstMediaAt time.Time
 }
 
 func newFakeLeg(law media.Law) *fakeLeg {
@@ -45,8 +54,31 @@ func newFakeLeg(law media.Law) *fakeLeg {
 		frames:  make(chan []byte, 64),
 		digits:  make(chan string, 8),
 		stopped: make(chan struct{}),
+
+		media:        closedChan(),
+		answeredAt:   time.Now(),
+		firstMediaAt: time.Now(),
 	}
 }
+
+func closedChan() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
+// holdMedia makes the leg's media not yet started, until startMedia.
+func (l *fakeLeg) holdMedia() { l.media = make(chan struct{}) }
+
+// startMedia is the first inbound packet arriving.
+func (l *fakeLeg) startMedia() {
+	l.mediaOnce.Do(func() { l.firstMediaAt = time.Now(); close(l.media) })
+}
+
+func (l *fakeLeg) FirstMediaAt() time.Time { return l.firstMediaAt }
+
+func (l *fakeLeg) MediaStarted() <-chan struct{} { return l.media }
+func (l *fakeLeg) AnsweredAt() time.Time         { return l.answeredAt }
 
 func (l *fakeLeg) ID() string               { return "call-test" }
 func (l *fakeLeg) Law() media.Law           { return l.law }
