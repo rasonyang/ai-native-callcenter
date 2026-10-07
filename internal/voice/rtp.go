@@ -113,6 +113,13 @@ type RTPSession struct {
 	sent       atomic.Int64
 	sentOctets atomic.Int64
 	received   atomic.Int64
+	// mediaStarted closes, once, when the first inbound packet arrives. It is
+	// the one definition of "the caller's media path is up", shared by the
+	// dead-media watch and by anything that waits to speak (MediaStarted).
+	mediaStarted chan struct{}
+	// firstMediaNano is when the first packet arrived, stored before
+	// mediaStarted closes; zero until then.
+	firstMediaNano atomic.Int64
 	// lateTicks counts send ticks that arrived a whole frame late, which is
 	// the visible symptom of the process being starved.
 	lateTicks   atomic.Int64
@@ -139,10 +146,12 @@ func NewRTPSession(localPort int, law media.Law, dtmfPayloadType int, log *slog.
 		// sender cannot block on it — it is the same goroutine that has to
 		// notice the caller barging in. Thirty seconds of frames; anything
 		// beyond that is a runaway response and is dropped with a warning.
-		rx:     make(chan []byte, 50),
-		tx:     make(chan []byte, 1500),
-		dtmf:   make(chan string, 50),
-		jitter: newJitterBuffer(law),
+		rx:   make(chan []byte, 50),
+		tx:   make(chan []byte, 1500),
+		dtmf: make(chan string, 50),
+
+		mediaStarted: make(chan struct{}),
+		jitter:       newJitterBuffer(law),
 		// A sequence number from the lower half of the space keeps an early
 		// loss from having to reason about wrap-around.
 		seq:        uint16(rand.Uint32()) & 0x7FFF,
@@ -201,8 +210,27 @@ func (r *RTPSession) SetRemote(remote *net.UDPAddr) {
 // HasReceived reports whether any audio packet has arrived on this session.
 // LastPacketAt cannot answer that: Start seeds it with the start time.
 func (r *RTPSession) HasReceived() bool {
-	return r.received.Load() > 0
+	select {
+	case <-r.mediaStarted:
+		return true
+	default:
+		return false
+	}
 }
+
+// FirstMediaAt is when the first inbound packet arrived, zero before it.
+func (r *RTPSession) FirstMediaAt() time.Time {
+	n := r.firstMediaNano.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
+}
+
+// MediaStarted closes when the first inbound packet arrives (a DTMF event
+// packet counts: it proves the path carries media). It closes exactly once and
+// stays closed. HasReceived is this channel read without blocking.
+func (r *RTPSession) MediaStarted() <-chan struct{} { return r.mediaStarted }
 
 // LastPacketAt reports when audio last arrived, which is how a dead media path
 // is detected on a dialog that is still nominally up. Before the first packet
@@ -293,10 +321,15 @@ func (r *RTPSession) handlePacket(data []byte) {
 	if len(pkt.Payload) == 0 {
 		return
 	}
-	// The timestamp is stored before the count moves, so a watcher that sees
-	// HasReceived true never reads the Start seed from LastPacketAt.
+	// The timestamp is stored before the count moves and the channel closes,
+	// so a watcher that sees HasReceived true never reads the Start seed from
+	// LastPacketAt. Add returns 1 for exactly one packet, which is what makes
+	// the close happen once however many packets follow.
 	r.lastRTPNano.Store(time.Now().UnixNano())
-	r.received.Add(1)
+	if r.received.Add(1) == 1 {
+		r.firstMediaNano.Store(time.Now().UnixNano())
+		close(r.mediaStarted)
+	}
 
 	if r.dtmfPayloadType >= 0 && int(pkt.PayloadType) == r.dtmfPayloadType {
 		// Every packet of an event repeats until the end bit, and the end

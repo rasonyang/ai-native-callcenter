@@ -5,6 +5,7 @@ package voice
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
@@ -389,5 +390,80 @@ func TestInboundQueueDropsTheOldestWhenFull(t *testing.T) {
 	first := <-session.rx
 	if markerOf(first) == 0 {
 		t.Error("the oldest frame survived; the queue dropped new audio instead of stale audio")
+	}
+}
+
+func isMediaStarted(s *RTPSession) bool {
+	select {
+	case <-s.MediaStarted():
+		return true
+	default:
+		return false
+	}
+}
+
+func TestMediaHasNotStartedBeforeTheFirstPacket(t *testing.T) {
+	t.Parallel()
+	session := NewRTPSession(0, media.LawMu, 101, nil)
+	if isMediaStarted(session) || session.HasReceived() {
+		t.Error("media reported as started on a session that has received nothing")
+	}
+}
+
+func TestTheFirstAudioPacketStartsMedia(t *testing.T) {
+	t.Parallel()
+	session := NewRTPSession(0, media.LawMu, -1, nil)
+	packet := packRTPHeader(make([]byte, 0, 200), 1, 160, 99, 0)
+	packet = append(packet, make([]byte, media.FrameSamples)...)
+	session.handlePacket(packet)
+	if !isMediaStarted(session) || !session.HasReceived() {
+		t.Error("the first packet did not start media")
+	}
+}
+
+// A keypress packet proves the path carries media as surely as audio does.
+func TestADTMFPacketAloneStartsMedia(t *testing.T) {
+	t.Parallel()
+	session := NewRTPSession(0, media.LawMu, 101, nil)
+	session.handlePacket(dtmfPacket(t, 1000, []byte{7, 0x0A, 0, 100}))
+	if !isMediaStarted(session) {
+		t.Error("a DTMF packet did not start media")
+	}
+}
+
+func TestMediaStartedClosesOnceHoweverManyPacketsFollow(t *testing.T) {
+	t.Parallel()
+	session := NewRTPSession(0, media.LawMu, 101, nil)
+	// A second close would panic, which is what this is here to catch.
+	for i := range 500 {
+		packet := packRTPHeader(make([]byte, 0, 200), uint16(i+1), uint32(160*(i+1)), 99, 0)
+		packet = append(packet, make([]byte, media.FrameSamples)...)
+		session.handlePacket(packet)
+		if i%50 == 0 {
+			for range 3 {
+				session.handlePacket(dtmfPacket(t, uint32(i), []byte{1, 0x8A, 0, 200}))
+			}
+		}
+	}
+	if !isMediaStarted(session) {
+		t.Error("media did not start")
+	}
+}
+
+func TestFirstMediaAtIsTheFirstPacketsArrival(t *testing.T) {
+	t.Parallel()
+	session := NewRTPSession(0, media.LawMu, -1, nil)
+	if !session.FirstMediaAt().IsZero() {
+		t.Error("FirstMediaAt set before any packet")
+	}
+	before := time.Now()
+	packet := packRTPHeader(make([]byte, 0, 200), 1, 160, 99, 0)
+	packet = append(packet, make([]byte, media.FrameSamples)...)
+	session.handlePacket(packet)
+	first := session.FirstMediaAt()
+	time.Sleep(10 * time.Millisecond)
+	session.handlePacket(packet)
+	if first.Before(before) || !session.FirstMediaAt().Equal(first) {
+		t.Errorf("FirstMediaAt = %v then %v, want the first packet's time, unchanged", first, session.FirstMediaAt())
 	}
 }

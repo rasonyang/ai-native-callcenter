@@ -18,6 +18,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
@@ -131,10 +132,41 @@ type SessionConfig struct {
 	// here can only direct a model to repeat a sentence, which is best effort;
 	// an engine that speaks text outright will say it as written.
 	OpeningText string
+	// OpeningGate holds back the request for the opening turn. The session
+	// still dials and finishes its handshake at call start; only the ask for
+	// the first turn waits until the gate is closed. Nil asks immediately,
+	// which is what every call did before there was a gate.
+	//
+	// The contract every client honours: after the handshake is ready and
+	// before it asks for the first turn, wait for the gate, for ctx to end or
+	// for the session to close (AwaitOpeningGate does exactly that). Start
+	// blocks for the wait, so the caller starts its audio pumps only after the
+	// opening turn is requested and no caller audio reaches the provider
+	// ahead of it. The wait is not part of any handshake deadline. A gate the
+	// caller never closes is the caller's bug: it must close it on every path
+	// that ends the call.
+	OpeningGate <-chan struct{}
 	// InputFormat and OutputFormat are what this session's audio will be in.
 	// The caller converts to and from them.
 	InputFormat  media.AudioFormat
 	OutputFormat media.AudioFormat
+}
+
+// AwaitOpeningGate blocks until the opening gate is closed, ctx ends or closed
+// (the session's own end signal, nil for none) fires. A nil gate returns at
+// once. It returns nil only when the gate opened.
+func AwaitOpeningGate(ctx context.Context, gate <-chan struct{}, closed <-chan struct{}) error {
+	if gate == nil {
+		return nil
+	}
+	select {
+	case <-gate:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-closed:
+		return errors.New("session closed while waiting to greet")
+	}
 }
 
 // TurnMode is how the end of the caller's turn is decided.

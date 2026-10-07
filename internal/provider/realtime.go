@@ -240,6 +240,14 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		return fmt.Errorf("session rejected: %w", err)
 	}
 
+	// The session is ready; the request for the first turn may still be held
+	// back (SessionConfig.OpeningGate). The handshake deadline above is over,
+	// so a long wait is not a timeout, and nothing is sent meanwhile.
+	if err := AwaitOpeningGate(ctx, cfg.OpeningGate, r.conn.Done()); err != nil {
+		r.conn.Close()
+		return fmt.Errorf("wait to greet: %w", err)
+	}
+
 	// The opening turn is the flow's first node speaking; the caller is
 	// already on the line waiting to be greeted.
 	//

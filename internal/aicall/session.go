@@ -109,6 +109,16 @@ type Config struct {
 	// the check.
 	NoInput time.Duration
 
+	// IsGreetingGated holds the request for the opening turn until the
+	// caller's media path is up. False is the original behaviour: the greeting
+	// is asked for the moment the model session is ready. GreetingMediaWait is
+	// the grace once gated: zero waits for the first inbound RTP however long
+	// (the UAS's first-media timeout still ends a call whose media never
+	// starts), positive opens the gate at the first inbound RTP or after this
+	// long, whichever is first.
+	IsGreetingGated   bool
+	GreetingMediaWait time.Duration
+
 	// IsEndingArmed reports whether the call's ending (a transfer or a hangup)
 	// is armed and waiting for its closing line to be heard. The orchestrator
 	// owns that truth (callActions); the session only asks, and never while
@@ -200,6 +210,9 @@ type Session struct {
 	// real time. Both are zero while nothing is audible.
 	audibleSince time.Time
 	audibleUntil time.Time
+	// isFirstAudioRecorded is set when the call's first speech frame has been
+	// measured against the answer (queueFrame, under mu).
+	isFirstAudioRecorded bool
 	// timer measures caller-stopped to reply-on-the-wire, per turn.
 	timer turnTimer
 
@@ -309,6 +322,16 @@ func (s *Session) Start(ctx context.Context) error {
 	sessionCfg.InputFormat = s.uplink.To()
 	sessionCfg.OutputFormat = s.downlink.From()
 
+	// The first-media watch always runs, for the measurement; it also opens the
+	// greeting gate when the deployment asked for one. Without a gate the
+	// model's start config carries none and nothing waits.
+	var gate chan struct{}
+	if s.cfg.IsGreetingGated {
+		gate = make(chan struct{})
+		sessionCfg.OpeningGate = gate
+	}
+	go s.watchFirstMedia(ctx, gate)
+
 	if err := s.model.Start(ctx, sessionCfg); err != nil {
 		return fmt.Errorf("aicall: start model: %w", err)
 	}
@@ -339,6 +362,82 @@ func (s *Session) Start(ctx context.Context) error {
 
 	s.emit(Event{Type: EventTypeReady})
 	return nil
+}
+
+// watchFirstMedia measures answer-to-first-media and, when gate is not nil,
+// closes it on the first of: the first inbound packet (MEDIA), the grace
+// elapsing (GRACE), the leg ending or the session closing (LEG_STOPPED), or ctx
+// ending (CTX). It logs which one opened the gate, once. It keeps watching
+// after a grace expiry so the measurement still lands, and ends when the
+// call does.
+func (s *Session) watchFirstMedia(ctx context.Context, gate chan struct{}) {
+	began := time.Now()
+	var grace <-chan time.Time
+	if gate != nil && s.cfg.GreetingMediaWait > 0 {
+		timer := time.NewTimer(s.cfg.GreetingMediaWait)
+		defer timer.Stop()
+		grace = timer.C
+	}
+	open := func(reason string) {
+		if gate == nil {
+			return
+		}
+		s.log.Info("greeting gate opened", "reason", reason,
+			"waitedMs", time.Since(began).Milliseconds())
+		close(gate)
+		gate = nil
+	}
+	for {
+		select {
+		case <-s.leg.MediaStarted():
+			open("MEDIA")
+			// The packet's own arrival time: media can be up long before
+			// Start runs (lookup, flow load and the provider dial come first).
+			if answered, arrived := s.leg.AnsweredAt(), s.leg.FirstMediaAt(); !answered.IsZero() && !arrived.IsZero() {
+				ms := arrived.Sub(answered).Milliseconds()
+				obs.RecordBotFirstMedia(ms)
+				s.log.Info("first media", "answerToFirstMediaMs", ms)
+			}
+			return
+		case <-grace:
+			grace = nil
+			open("GRACE")
+		case <-s.leg.Stopped():
+			open("LEG_STOPPED")
+			return
+		case <-s.done:
+			open("LEG_STOPPED")
+			return
+		case <-ctx.Done():
+			open("CTX")
+			return
+		}
+	}
+}
+
+// recordFirstAudio measures the call's first speech frame against the answer,
+// and says whether it was queued before any inbound media. Called from
+// queueFrame under mu, once per call; every later frame costs one bool test.
+func (s *Session) recordFirstAudio() {
+	s.isFirstAudioRecorded = true
+	answered := s.leg.AnsweredAt()
+	if answered.IsZero() {
+		return
+	}
+	isBeforeMedia := true
+	select {
+	case <-s.leg.MediaStarted():
+		isBeforeMedia = false
+	default:
+	}
+	ms := time.Since(answered).Milliseconds()
+	obs.RecordBotFirstAudio(s.providerName, ms, isBeforeMedia)
+	if isBeforeMedia {
+		s.log.Warn("first bot audio queued before any inbound media: the caller cannot have heard it",
+			"answerToFirstAudioMs", ms, "isBeforeMedia", true)
+		return
+	}
+	s.log.Info("first bot audio", "answerToFirstAudioMs", ms, "isBeforeMedia", false)
 }
 
 // Close ends the call from this side and releases both halves.
@@ -510,6 +609,9 @@ func (s *Session) queueFrame(frame []byte) {
 		s.audibleUntil = s.audibleUntil.Add(frameDurationMs * time.Millisecond)
 	}
 	s.framesQueued++
+	if !s.isFirstAudioRecorded {
+		s.recordFirstAudio()
+	}
 	if totalMs, providerMs, ok := s.timer.onFirstFrame(); ok {
 		recordTurnLatency(s.log, s.providerName, totalMs, providerMs)
 	}

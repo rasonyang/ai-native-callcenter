@@ -34,6 +34,8 @@ var (
 	botInterruptions metric.Int64Counter
 	botSessionLimits metric.Int64Counter
 	botUnbacked      metric.Int64Counter
+	botFirstMedia    metric.Int64Histogram
+	botFirstAudio    metric.Int64Histogram
 
 	transcribeFramesDropped metric.Int64Counter
 	transcribeFramesSent    metric.Int64Counter
@@ -118,6 +120,19 @@ func init() {
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
 			"it is line echo and was ignored — which makes this the only measurement of "+
 			"whether that guard is set right."))
+	botFirstMedia, _ = meter.Int64Histogram("aicc_bot_first_media_ms",
+		metric.WithDescription("Per bot call: the answer to the first inbound RTP packet, "+
+			"in milliseconds. A carrier may open its media path seconds after the "+
+			"answer; this is how long, from the real answer."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(20, 50, 100, 250, 500, 1000, 2000, 4000, 6000, 9000, 15000, 30000))
+	botFirstAudio, _ = meter.Int64Histogram("aicc_bot_first_audio_ms",
+		metric.WithDescription("Per bot call: the answer to the first speech frame queued "+
+			"for the caller, in milliseconds, by provider. before_media=true says it was "+
+			"queued while no inbound media had arrived, so the caller could not "+
+			"have heard it: the greeting went into a path that did not exist yet."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(250, 500, 750, 1000, 1500, 2000, 3000, 5000, 9000, 15000, 30000))
 	webhookDeliveries, _ = meter.Int64Counter("aicc_webhook_deliveries_total",
 		metric.WithDescription("CDR deliveries that settled, by outcome. FAILED means the "+
 			"retry schedule ran out and that call was never told to that subscriber."))
@@ -180,6 +195,26 @@ func RecordProviderFirstAudio(provider string, ms int64) {
 	}
 	providerFirstAud.Record(context.Background(), ms,
 		metric.WithAttributes(attribute.String("provider", provider)))
+}
+
+// RecordBotFirstMedia publishes how long after the answer the first inbound
+// packet of a bot call arrived.
+func RecordBotFirstMedia(ms int64) {
+	if botFirstMedia == nil {
+		return
+	}
+	botFirstMedia.Record(context.Background(), ms)
+}
+
+// RecordBotFirstAudio publishes how long after the answer the bot's first
+// speech frame was queued, and whether that was before any inbound media.
+func RecordBotFirstAudio(provider string, ms int64, isBeforeMedia bool) {
+	if botFirstAudio == nil {
+		return
+	}
+	botFirstAudio.Record(context.Background(), ms, metric.WithAttributes(
+		attribute.String("provider", provider),
+		attribute.Bool("before_media", isBeforeMedia)))
 }
 
 // RecordBotInterruption counts a caller taking the floor back from the bot.

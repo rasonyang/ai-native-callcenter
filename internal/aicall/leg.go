@@ -3,6 +3,8 @@
 package aicall
 
 import (
+	"time"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
@@ -33,6 +35,14 @@ type Leg interface {
 	// having been generated is not the same as the caller having heard it, and
 	// anything that must happen after the caller hears something waits on this.
 	Pending() int
+	// MediaStarted closes when the first inbound audio arrives: the caller's
+	// media path exists from then on. It can be long after the answer.
+	MediaStarted() <-chan struct{}
+	// FirstMediaAt is when the first inbound audio arrived; zero before it.
+	FirstMediaAt() time.Time
+	// AnsweredAt is when the call was answered, which is what answer-to-first-
+	// media and answer-to-first-audio are measured from.
+	AnsweredAt() time.Time
 	// Stopped closes when the call ends, from either side.
 	Stopped() <-chan struct{}
 	// Stop ends the call.
@@ -45,12 +55,15 @@ type dialogLeg struct{ dialog *voice.Dialog }
 // FromDialog wraps an accepted SIP dialog as a leg.
 func FromDialog(dialog *voice.Dialog) Leg { return dialogLeg{dialog} }
 
-func (l dialogLeg) ID() string               { return l.dialog.CallID }
-func (l dialogLeg) Law() media.Law           { return l.dialog.RTP.Law() }
-func (l dialogLeg) Frames() <-chan []byte    { return l.dialog.RTP.Frames() }
-func (l dialogLeg) Digits() <-chan string    { return l.dialog.RTP.DTMF() }
-func (l dialogLeg) Send(frame []byte) bool   { return l.dialog.RTP.Send(frame) }
-func (l dialogLeg) ClearTx() int             { return l.dialog.RTP.ClearTx() }
-func (l dialogLeg) Pending() int             { return l.dialog.RTP.Pending() }
-func (l dialogLeg) Stopped() <-chan struct{} { return l.dialog.Stopped }
-func (l dialogLeg) Stop()                    { l.dialog.Stop() }
+func (l dialogLeg) ID() string                    { return l.dialog.CallID }
+func (l dialogLeg) Law() media.Law                { return l.dialog.RTP.Law() }
+func (l dialogLeg) Frames() <-chan []byte         { return l.dialog.RTP.Frames() }
+func (l dialogLeg) Digits() <-chan string         { return l.dialog.RTP.DTMF() }
+func (l dialogLeg) Send(frame []byte) bool        { return l.dialog.RTP.Send(frame) }
+func (l dialogLeg) ClearTx() int                  { return l.dialog.RTP.ClearTx() }
+func (l dialogLeg) Pending() int                  { return l.dialog.RTP.Pending() }
+func (l dialogLeg) MediaStarted() <-chan struct{} { return l.dialog.RTP.MediaStarted() }
+func (l dialogLeg) FirstMediaAt() time.Time       { return l.dialog.RTP.FirstMediaAt() }
+func (l dialogLeg) AnsweredAt() time.Time         { return l.dialog.AnsweredAt }
+func (l dialogLeg) Stopped() <-chan struct{}      { return l.dialog.Stopped }
+func (l dialogLeg) Stop()                         { l.dialog.Stop() }

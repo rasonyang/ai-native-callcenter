@@ -343,6 +343,15 @@ func (s *Session) Start(ctx context.Context, cfg provider.SessionConfig) error {
 		return fmt.Errorf("session refused: %w", err)
 	}
 
+	// SessionConfig.OpeningGate: the first turn is asked for only once the
+	// caller's media path is up. The setup is done, so this wait is not part
+	// of the setup deadline. The uplink pacer starts after it, as without a
+	// gate; no caller audio exists to send until Start returns.
+	if err := provider.AwaitOpeningGate(ctx, s.cfg.OpeningGate, conn.Done()); err != nil {
+		s.conn.Close()
+		return fmt.Errorf("wait to greet: %w", err)
+	}
+
 	if err := s.openTheCall(); err != nil {
 		s.conn.Close()
 		return err

@@ -75,6 +75,13 @@ type Config struct {
 	// disables either; negative is refused.
 	BotRTPDeadTimeout    time.Duration
 	BotFirstMediaTimeout time.Duration
+	// IsBotGreetingGated is whether AICC_BOT_GREETING_MEDIA_WAIT was set at
+	// all: unset greets the moment the model session is ready. When set,
+	// BotGreetingMediaWait is the grace: 0 waits for the first inbound RTP
+	// however long, positive waits for it or this long. Negative is refused.
+	IsBotGreetingGated   bool
+	botGreetingWaitErr   error // a malformed value, refused by validate
+	BotGreetingMediaWait time.Duration
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
 	// OutboundEndpoint renders a destination number into a dial string for
@@ -265,6 +272,7 @@ func parseRange(raw string) (low, high int, err error) {
 func Load() (Config, error) {
 	loadDotEnv(".env")
 
+	greetingWait, isGreetingGated, greetingErr := envDurationIfSet("AICC_BOT_GREETING_MEDIA_WAIT")
 	c := Config{
 		Env:                  env("AICC_ENV", "dev"),
 		HTTPAddr:             env("AICC_HTTP_ADDR", ":8080"),
@@ -286,6 +294,9 @@ func Load() (Config, error) {
 		BotMaxCalls:          envInt("AICC_BOT_MAX_CALLS", 220),
 		BotRTPDeadTimeout:    envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
 		BotFirstMediaTimeout: envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
+		IsBotGreetingGated:   isGreetingGated,
+		BotGreetingMediaWait: greetingWait,
+		botGreetingWaitErr:   greetingErr,
 		BotBackendBase:       env("AICC_BOT_BACKEND_BASE", ""),
 		IsBotEnabled:         envBool("AICC_BOT_ENABLED", true),
 
@@ -428,6 +439,14 @@ func (c Config) validate() error {
 			"AICC_BOT_RTP_DEAD_TIMEOUT and AICC_BOT_FIRST_MEDIA_TIMEOUT must be 0 (off) or more, got %s and %s",
 			c.BotRTPDeadTimeout, c.BotFirstMediaTimeout))
 	}
+	if c.botGreetingWaitErr != nil {
+		errs = append(errs, c.botGreetingWaitErr)
+	}
+	if c.BotGreetingMediaWait < 0 {
+		errs = append(errs, fmt.Errorf(
+			"AICC_BOT_GREETING_MEDIA_WAIT must be unset, 0 (wait for media) or a positive grace, got %s",
+			c.BotGreetingMediaWait))
+	}
 	if c.WebhookDeliveredRetentionDays < 0 || c.WebhookFailedRetentionDays < 0 {
 		errs = append(errs, fmt.Errorf(
 			"AICC_WEBHOOK_RETENTION_*_DAYS must be 0 or more, got %d and %d",
@@ -515,6 +534,21 @@ func envDuration(key string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// envDurationIfSet is envDuration for a setting where unset and zero differ:
+// ok is false when the variable is unset or empty; a malformed value is an
+// error, which validate refuses.
+func envDurationIfSet(key string) (d time.Duration, ok bool, err error) {
+	v, isSet := os.LookupEnv(key)
+	if !isSet || v == "" {
+		return 0, false, nil
+	}
+	d, err = time.ParseDuration(v)
+	if err != nil {
+		return 0, false, fmt.Errorf("%s=%q is not a duration; use 0, or a Go duration such as 500ms or 3s", key, v)
+	}
+	return d, true, nil
 }
 
 // loadDotEnv reads KEY=VALUE lines from path, without overriding existing

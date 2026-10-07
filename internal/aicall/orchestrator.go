@@ -116,6 +116,11 @@ type OrchestratorConfig struct {
 	AnnounceBotSession func(callID, flowID uuid.UUID)
 	// BackendBase is the base URL for flows' declarative HTTP tools.
 	BackendBase string
+	// IsGreetingGated and GreetingMediaWait hold each call's greeting until
+	// the caller's inbound media has started; see Config. False is the
+	// original behaviour, greeting the moment the model session is ready.
+	IsGreetingGated   bool
+	GreetingMediaWait time.Duration
 	// Profile is the provider this deployment runs, resolved at startup. The
 	// same one answers every call, whatever language it is in.
 	Profile provider.Profile
@@ -321,9 +326,11 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	}
 
 	session, err := New(FromDialog(dialog), model, profile, Config{
-		Session:       sessionConfigFor(spec, runtime, language),
-		IsEndingArmed: actions.isArmed,
-		Logger:        log,
+		Session:           sessionConfigFor(spec, runtime, language),
+		IsGreetingGated:   o.cfg.IsGreetingGated,
+		GreetingMediaWait: o.cfg.GreetingMediaWait,
+		IsEndingArmed:     actions.isArmed,
+		Logger:            log,
 	})
 	if err != nil {
 		return err
@@ -365,7 +372,9 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 // The opening line belongs here rather than beside the other announcements
 // because the first turn is asked for while the session is being started.
 // There is no moment afterwards early enough to catch it: by the time the
-// bridge is running, the greeting is already being made.
+// bridge is running, the greeting is already being made. Session.Start adds
+// the opening gate (SessionConfig.OpeningGate) when the deployment holds the
+// greeting for the caller's media; it is not part of what a flow decides.
 func sessionConfigFor(spec *flow.Spec, runtime *flow.Runtime, language string) provider.SessionConfig {
 	return provider.SessionConfig{
 		Instructions: runtime.Instructions(),

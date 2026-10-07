@@ -536,6 +536,12 @@ caller was heard is a property of the protocol and not of the seam.
 > it is what would let the call path re-arm the dead-air watch on speech the
 > engine ignored, and say in the log that a caller went unanswered.
 
+(#98: the opening-line commit can wait for the caller's media; the pacer starts
+after that wait, and no mute is declared for it, because nothing was ever fed.
+Not verified live: how long the real service tolerates a session that sent
+nothing after `session.create`; the documented bound is ten minutes, and the
+UAS's first-media timeout, 30 s by default, ends a no-media call far sooner.)
+
 **W-D4 — a held call must not be killed by the dead-media watchdog.** SIP hold —
 a re-INVITE with `sendonly` or `inactive`, or simply a held call that stops
 sending RTP — has to suspend `internal/voice`'s dead-media watch for as long as

@@ -128,6 +128,32 @@ after it still covers (gemini-findings W-G6).
    (`global.voice`, published with the persona). List them where the deployment
    documentation lists the others.
 
+## The opening gate
+
+`SessionConfig.OpeningGate` (#98) holds back the request for the call's first
+turn. Every client honours it the same way: dial and finish the handshake as
+usual, then `provider.AwaitOpeningGate(ctx, cfg.OpeningGate, <closed>)` before
+asking for the first turn (the greeting request, the cue a provider needs, the
+committed opening line). Nil asks at once, which is what a call without the
+setting does. Rules a new client keeps:
+
+- `Start` blocks on the gate and returns after the first turn is requested, so
+  the call's audio pumps start afterwards and no caller audio reaches the
+  provider ahead of the greeting. The wait is not part of any handshake
+  deadline: it runs after the handshake is confirmed.
+- It ends early with an error on ctx cancellation or the session closing, and
+  closes its socket; nothing may leak.
+- Send nothing while waiting. The uplink pacer of a client that has one starts
+  after the wait, as it does without a gate: no caller audio exists yet, and
+  doubao's measured behaviour (a minute muted with nothing sent was harmless;
+  the documented idle release is ten minutes, `doubao-findings.md` §6/§7) makes
+  an idle session safe for the length a wait can have.
+- A client that has no first turn to ask for (doubao without an opening line)
+  has nothing to hold and does not wait.
+
+The gate is built by `aicall.Session` from `AICC_BOT_GREETING_MEDIA_WAIT`; a
+client never builds one.
+
 ## What never happens
 
 **A second client for a protocol that already has one.** A vendor's dialect of

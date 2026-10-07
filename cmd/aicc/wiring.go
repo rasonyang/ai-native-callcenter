@@ -501,6 +501,8 @@ func botConfig(
 	announce func(store.Callback),
 	announceBot func(callID, flowID uuid.UUID),
 	callData aicall.CallDataSource,
+	isGreetingGated bool,
+	greetingMediaWait time.Duration,
 ) aicall.OrchestratorConfig {
 	return aicall.OrchestratorConfig{
 		UAS:                uas,
@@ -517,6 +519,10 @@ func botConfig(
 		// A call the bot finishes alone writes the only ledger row it will
 		// ever have, so the business data has to reach the bot too.
 		CallData: callData,
+		// Unset is false and zero, which is today's behaviour; the pair is
+		// the deployment's AICC_BOT_GREETING_MEDIA_WAIT.
+		IsGreetingGated:   isGreetingGated,
+		GreetingMediaWait: greetingMediaWait,
 	}
 }
 

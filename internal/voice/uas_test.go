@@ -612,6 +612,23 @@ func TestMediaThatOpensLateIsNotDeadMedia(t *testing.T) {
 	}
 }
 
+// The answer time is when the ACK started the call, and it is there before the
+// hook that starts the conversation runs.
+func TestADialogRecordsWhenItWasAnswered(t *testing.T) {
+	_, hooks, p := startUAS(t, nil)
+	before := time.Now()
+	_, dialog := p.connect(hooks)
+	if dialog.AnsweredAt.IsZero() || dialog.AnsweredAt.Before(before.Add(-time.Second)) ||
+		dialog.AnsweredAt.After(time.Now()) {
+		t.Errorf("AnsweredAt = %v, want a time just now", dialog.AnsweredAt)
+	}
+	select {
+	case <-dialog.RTP.MediaStarted():
+		t.Error("media reported started before any packet")
+	default:
+	}
+}
+
 func TestJudgeMediaAppliesEachTimeoutToItsOwnState(t *testing.T) {
 	t.Parallel()
 	cfg := Config{RTPDeadTimeout: 5 * time.Second, FirstMediaTimeout: 30 * time.Second}

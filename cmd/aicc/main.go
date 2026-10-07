@@ -316,6 +316,8 @@ func run() error {
 			announceCallback(ctx, hub),
 			announceBotSession(ctx, hub),
 			outboundSvc.Data(),
+			cfg.IsBotGreetingGated,
+			cfg.BotGreetingMediaWait,
 		))
 		if err != nil {
 			return fmt.Errorf("build ai voice leg: %w", err)
