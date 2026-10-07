@@ -35,9 +35,18 @@ type Config struct {
 	RTPPortRange [2]int
 	// CodecPreferences is the local preference order among offered codecs.
 	CodecPreferences []media.Law
-	// RTPDeadTimeout ends a call whose media has stopped arriving even though
-	// the dialog is nominally up. Zero disables the check.
+	// RTPDeadTimeout ends a call whose media was flowing and has stopped
+	// arriving even though the dialog is nominally up. It applies only after
+	// the first inbound packet; a dialog that has never received one is
+	// governed by FirstMediaTimeout. Zero disables the check.
 	RTPDeadTimeout time.Duration
+	// FirstMediaTimeout ends a call that has received no inbound RTP at all
+	// since it was answered. Media that has not started is not media that
+	// stopped: a carrier may open its media path seconds after the answer, so
+	// this is deliberately far longer than RTPDeadTimeout. Zero disables the
+	// check, leaving the caller's hangup and the SIP session timer to bound
+	// such a call.
+	FirstMediaTimeout time.Duration
 	// AckTimeout is how long an accepted INVITE waits for its ACK.
 	AckTimeout time.Duration
 	// MaxCalls is the admission limit; further INVITEs get 486 Busy Here.
@@ -58,13 +67,14 @@ func DefaultConfig() Config {
 		// Deliberately clear of the switch's own 16384-32768 range, since a
 		// development host runs both. Five hundred pairs covers the concurrent
 		// call target with room to spare.
-		RTPPortRange:     [2]int{40000, 40999},
-		CodecPreferences: []media.Law{media.LawMu, media.LawAlaw},
-		RTPDeadTimeout:   5 * time.Second,
-		AckTimeout:       3 * time.Second,
-		MaxCalls:         220,
-		IsDTMFEnabled:    true,
-		RTCPInterval:     DefaultRTCPInterval,
+		RTPPortRange:      [2]int{40000, 40999},
+		CodecPreferences:  []media.Law{media.LawMu, media.LawAlaw},
+		RTPDeadTimeout:    5 * time.Second,
+		FirstMediaTimeout: 30 * time.Second,
+		AckTimeout:        3 * time.Second,
+		MaxCalls:          220,
+		IsDTMFEnabled:     true,
+		RTCPInterval:      DefaultRTCPInterval,
 	}
 }
 
@@ -737,7 +747,7 @@ func (u *UAS) startCall(dialog *Dialog) {
 	}
 
 	go u.runMedia(dialog)
-	if u.cfg.RTPDeadTimeout > 0 {
+	if u.cfg.RTPDeadTimeout > 0 || u.cfg.FirstMediaTimeout > 0 {
 		go u.watchForDeadMedia(dialog)
 	}
 	if u.OnCallStarted != nil {
@@ -756,14 +766,64 @@ func (u *UAS) runMedia(dialog *Dialog) {
 	}
 }
 
-// watchForDeadMedia ends a call whose audio has stopped. A dialog can stay up
-// indefinitely after the media path breaks, and the caller hears nothing while
-// it does.
+// mediaState is where a dialog's inbound media stands. The two timeouts apply
+// to different states, because "never started" and "stopped" are different
+// faults with different tolerances.
+type mediaState int
+
+const (
+	// mediaNeverReceived: no inbound packet since the answer. Bounded by
+	// FirstMediaTimeout only.
+	mediaNeverReceived mediaState = iota
+	// mediaFlowing: at least one packet arrived. Bounded by RTPDeadTimeout.
+	mediaFlowing
+	// A mediaSuspended state belongs here: a held call legitimately stops
+	// sending RTP and must be bounded by neither timeout while it lasts. It is
+	// not implemented; see W-D4 in docs/design/doubao-findings.md.
+)
+
+// mediaVerdict is what the watch decides on one tick.
+type mediaVerdict int
+
+const (
+	mediaOK mediaVerdict = iota
+	mediaNeverStarted
+	mediaWentDead
+)
+
+// judgeMedia decides one tick. waited is the time since the watch began and
+// silent the time since the last packet; neither is read for the state that
+// does not use it, and the never-received decision never depends on the
+// Start-time seed behind silent.
+func judgeMedia(cfg Config, state mediaState, waited, silent time.Duration) mediaVerdict {
+	switch state {
+	case mediaNeverReceived:
+		if cfg.FirstMediaTimeout > 0 && waited >= cfg.FirstMediaTimeout {
+			return mediaNeverStarted
+		}
+	case mediaFlowing:
+		if cfg.RTPDeadTimeout > 0 && silent >= cfg.RTPDeadTimeout {
+			return mediaWentDead
+		}
+	}
+	return mediaOK
+}
+
+// watchForDeadMedia ends a call whose media never started or has stopped. A
+// dialog can stay up indefinitely after the media path breaks, and the caller
+// hears nothing while it does.
 func (u *UAS) watchForDeadMedia(dialog *Dialog) {
-	interval := min(u.cfg.RTPDeadTimeout/2, time.Second)
+	interval := time.Second
+	for _, d := range []time.Duration{u.cfg.RTPDeadTimeout, u.cfg.FirstMediaTimeout} {
+		if d > 0 {
+			interval = min(interval, d/2)
+		}
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	startedAt := time.Now()
+	state := mediaNeverReceived
 	for {
 		select {
 		case <-dialog.Stopped:
@@ -777,11 +837,21 @@ func (u *UAS) watchForDeadMedia(dialog *Dialog) {
 		if !isActive {
 			return
 		}
-		if silent := time.Since(dialog.RTP.LastPacketAt()); silent >= u.cfg.RTPDeadTimeout {
-			u.log.Warn("media went dead", "callId", dialog.CallID, "silentFor", silent)
-			u.endCall(dialog)
-			return
+		if state == mediaNeverReceived && dialog.RTP.HasReceived() {
+			state = mediaFlowing
 		}
+		waited := time.Since(startedAt)
+		silent := time.Since(dialog.RTP.LastPacketAt())
+		switch judgeMedia(u.cfg, state, waited, silent) {
+		case mediaNeverStarted:
+			u.log.Warn("media never started", "callId", dialog.CallID, "waited", waited)
+		case mediaWentDead:
+			u.log.Warn("media went dead", "callId", dialog.CallID, "silentFor", silent)
+		default:
+			continue
+		}
+		u.endCall(dialog)
+		return
 	}
 }
 

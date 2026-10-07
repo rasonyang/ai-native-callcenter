@@ -198,8 +198,15 @@ func (r *RTPSession) SetRemote(remote *net.UDPAddr) {
 	r.remoteMu.Unlock()
 }
 
+// HasReceived reports whether any audio packet has arrived on this session.
+// LastPacketAt cannot answer that: Start seeds it with the start time.
+func (r *RTPSession) HasReceived() bool {
+	return r.received.Load() > 0
+}
+
 // LastPacketAt reports when audio last arrived, which is how a dead media path
-// is detected on a dialog that is still nominally up.
+// is detected on a dialog that is still nominally up. Before the first packet
+// it is the time Start ran; ask HasReceived whether anything has come at all.
 func (r *RTPSession) LastPacketAt() time.Time {
 	return time.Unix(0, r.lastRTPNano.Load())
 }
@@ -286,8 +293,10 @@ func (r *RTPSession) handlePacket(data []byte) {
 	if len(pkt.Payload) == 0 {
 		return
 	}
-	r.received.Add(1)
+	// The timestamp is stored before the count moves, so a watcher that sees
+	// HasReceived true never reads the Start seed from LastPacketAt.
 	r.lastRTPNano.Store(time.Now().UnixNano())
+	r.received.Add(1)
 
 	if r.dtmfPayloadType >= 0 && int(pkt.PayloadType) == r.dtmfPayloadType {
 		// Every packet of an event repeats until the end bit, and the end

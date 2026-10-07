@@ -520,18 +520,120 @@ func TestInfoDigitsReachTheSameStreamAsRFC2833(t *testing.T) {
 	}
 }
 
+// sendCallerFrame delivers one inbound G.711 frame to the call, which is what
+// moves its media watch from never-received to flowing.
+func sendCallerFrame(t *testing.T, p *peer, answer *sipMessage) {
+	t.Helper()
+	uasRTP := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: parseSDP(answer.body).Port}
+	pkt := packRTPHeader(make([]byte, 0, 200), 1, 160, 0xABCD, 0)
+	pkt = append(pkt, make([]byte, media.FrameSamples)...)
+	if _, err := p.rtp.WriteToUDP(pkt, uasRTP); err != nil {
+		t.Fatalf("send rtp: %v", err)
+	}
+}
+
 // A dialog can stay up long after the media path breaks, and the caller hears
 // nothing at all while it does.
 func TestDeadMediaEndsTheCall(t *testing.T) {
 	_, hooks, p := startUAS(t, func(c *Config) {
 		c.RTPDeadTimeout = 300 * time.Millisecond
+		c.FirstMediaTimeout = 0
+	})
+	answer, dialog := p.connect(hooks)
+	sendCallerFrame(t, p, answer)
+
+	select {
+	case <-hooks.ended:
+	case <-time.After(3 * time.Second):
+		t.Fatal("a call whose inbound media stopped was never ended")
+	}
+	if !dialog.RTP.HasReceived() {
+		t.Error("the packet the test sent was never counted")
+	}
+}
+
+// Media that has not started is not media that stopped: a carrier may open its
+// path seconds after the answer. The short dead timeout must not end the call;
+// the first-media timeout does.
+func TestACallWithNoMediaYetOutlivesTheDeadTimeout(t *testing.T) {
+	_, hooks, p := startUAS(t, func(c *Config) {
+		c.RTPDeadTimeout = 150 * time.Millisecond
+		c.FirstMediaTimeout = 900 * time.Millisecond
+	})
+	started := time.Now()
+	p.connect(hooks)
+
+	select {
+	case <-hooks.ended:
+		if waited := time.Since(started); waited < 800*time.Millisecond {
+			t.Fatalf("a call that never received media ended after %s, before FirstMediaTimeout", waited)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a call that never received media was never ended at FirstMediaTimeout")
+	}
+}
+
+func TestFirstMediaTimeoutOfZeroNeverEndsAnEmptyDialog(t *testing.T) {
+	_, hooks, p := startUAS(t, func(c *Config) {
+		c.RTPDeadTimeout = 100 * time.Millisecond
+		c.FirstMediaTimeout = 0
 	})
 	p.connect(hooks)
 
 	select {
 	case <-hooks.ended:
-	case <-time.After(3 * time.Second):
-		t.Fatal("a call with no inbound media was never ended")
+		t.Fatal("the watchdog ended a dialog that never received media with FirstMediaTimeout disabled")
+	case <-time.After(800 * time.Millisecond):
+	}
+}
+
+// A call whose media opens late is healthy: the first packet after the dead
+// timeout has passed must start the flowing state, not be judged as silence.
+func TestMediaThatOpensLateIsNotDeadMedia(t *testing.T) {
+	_, hooks, p := startUAS(t, func(c *Config) {
+		c.RTPDeadTimeout = 400 * time.Millisecond
+		c.FirstMediaTimeout = 5 * time.Second
+	})
+	answer, _ := p.connect(hooks)
+
+	time.Sleep(600 * time.Millisecond) // longer than RTPDeadTimeout, with no media
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(800 * time.Millisecond)
+	for {
+		select {
+		case <-hooks.ended:
+			t.Fatal("a call whose media opened late was ended while media flowed")
+		case <-deadline:
+			return
+		case <-ticker.C:
+			sendCallerFrame(t, p, answer)
+		}
+	}
+}
+
+func TestJudgeMediaAppliesEachTimeoutToItsOwnState(t *testing.T) {
+	t.Parallel()
+	cfg := Config{RTPDeadTimeout: 5 * time.Second, FirstMediaTimeout: 30 * time.Second}
+	long := time.Hour
+	tests := []struct {
+		name          string
+		state         mediaState
+		waited, quiet time.Duration
+		want          mediaVerdict
+	}{
+		{"never received, past the dead timeout", mediaNeverReceived, 6 * time.Second, 6 * time.Second, mediaOK},
+		{"never received, at the first-media timeout", mediaNeverReceived, 30 * time.Second, 30 * time.Second, mediaNeverStarted},
+		{"flowing, quiet past the dead timeout", mediaFlowing, long, 5 * time.Second, mediaWentDead},
+		{"flowing, quiet within the dead timeout", mediaFlowing, long, time.Second, mediaOK},
+	}
+	for _, tt := range tests {
+		if got := judgeMedia(cfg, tt.state, tt.waited, tt.quiet); got != tt.want {
+			t.Errorf("%s: got %v, want %v", tt.name, got, tt.want)
+		}
+	}
+	if got := judgeMedia(Config{}, mediaNeverReceived, long, long); got != mediaOK {
+		t.Errorf("disabled first-media timeout still ended the call: %v", got)
 	}
 }
 

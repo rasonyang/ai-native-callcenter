@@ -33,6 +33,8 @@ func main() {
 		"how long the run lasts; longer than -duration replaces each call as it ends")
 	lateAfter := flag.Duration("late-after", 40*time.Millisecond,
 		"a downlink gap this long or longer counts as late")
+	uplinkAfter := flag.Duration("uplink-after", 0,
+		"send no RTP at all until this long after the answer, like a carrier whose media opens late")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -40,11 +42,12 @@ func main() {
 
 	cfg := loadgen.RunConfig{
 		Call: loadgen.CallConfig{
-			Target:    *target,
-			DID:       *did,
-			Language:  *language,
-			Duration:  *duration,
-			LateAfter: *lateAfter,
+			Target:      *target,
+			DID:         *did,
+			Language:    *language,
+			Duration:    *duration,
+			LateAfter:   *lateAfter,
+			UplinkAfter: *uplinkAfter,
 		},
 		Calls:    *calls,
 		Ramp:     *ramp,

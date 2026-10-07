@@ -58,6 +58,10 @@ type CallConfig struct {
 
 	// Duration the call stays up for once answered.
 	Duration time.Duration
+	// UplinkAfter holds the simulated caller silent: no RTP is sent at all
+	// until this long after the answer, then it behaves as usual. Zero sends
+	// from the first frame.
+	UplinkAfter time.Duration
 	// LateAfter is the downlink gap that counts as late. Two frame intervals
 	// leaves room for ordinary scheduling and catches real stalls.
 	LateAfter time.Duration
@@ -252,15 +256,19 @@ func (u *uac) stream(ctx context.Context, remote *net.UDPAddr, result *CallResul
 			break
 		}
 
-		offset := (int(sequence) * media.FrameSamples) % len(tone)
-		frame := tone[offset : offset+media.FrameSamples]
-		writeRTPHeader(packet, sequence, timestamp, ssrc)
-		copy(packet[12:], frame)
-		if _, err := u.rtp.WriteToUDP(packet, remote); err == nil {
-			result.FramesSent++
+		// Before UplinkAfter the caller sends nothing at all, not silence:
+		// that is what a carrier whose media path is not open yet looks like.
+		if now.Sub(answeredAt) >= u.cfg.UplinkAfter {
+			offset := (int(sequence) * media.FrameSamples) % len(tone)
+			frame := tone[offset : offset+media.FrameSamples]
+			writeRTPHeader(packet, sequence, timestamp, ssrc)
+			copy(packet[12:], frame)
+			if _, err := u.rtp.WriteToUDP(packet, remote); err == nil {
+				result.FramesSent++
+			}
+			sequence++
+			timestamp += media.FrameSamples
 		}
-		sequence++
-		timestamp += media.FrameSamples
 
 		// Drain whatever arrived since the last tick, measuring the gaps.
 	drain:

@@ -83,7 +83,7 @@ Captured with the M0 eslcap tool against a live AI call (`loopback/<did>/public`
 - **`CHANNEL_BRIDGE` names an arbitrary side as `Unique-ID`** (the other in `Other-Leg-Unique-ID`). Merge preference must not depend on which side the event names first.
 - **The bot DIDs live in the `public` dialplan context** (`dialplan/public/05_aicc.xml`); `default` only has the queue extensions (`7xxx`). Scripted calls must originate `loopback/<did>/public` — `/default` lands on stock demo extensions (MOH).
 - **Loopback copies originate-time variables onto both halves**, so a scaffolding marker cannot distinguish them by itself; the `-a`/`-b` name suffix does (the `-a` half is always the originate side).
-- **A caller leg that sends no RTP is dropped by the UAS's RTP-dead watchdog in ~5 s** — scripted calls that should live to the farewell need `&playback(local_stream://moh)`, not `&park()`.
+- **A caller leg that sends no RTP is dropped by the UAS's RTP-dead watchdog in ~5 s** (since #97 only once it has sent a first packet; a leg that never sends is ended by `FirstMediaTimeout`, 30 s) — scripted calls that should live to the farewell need `&playback(local_stream://moh)`, not `&park()`.
 
 ## M4.7 addendum — inline transfer and codec-pin parsing (2026-08-14, live)
 

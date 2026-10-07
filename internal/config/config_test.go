@@ -31,6 +31,10 @@ func TestLoadDefaults(t *testing.T) {
 	if low, high, err := c.QueuePool(); err != nil || low != 7000 || high != 7999 {
 		t.Errorf("QueuePool() = %d, %d, %v — want the documented 7000-7999", low, high, err)
 	}
+	if c.BotRTPDeadTimeout != 5*time.Second || c.BotFirstMediaTimeout != 30*time.Second {
+		t.Errorf("bot media timeouts = %s, %s, want the documented 5s and 30s",
+			c.BotRTPDeadTimeout, c.BotFirstMediaTimeout)
+	}
 	if c.SeedPassword != "aicc@123" {
 		t.Errorf("SeedPassword = %q, want the documented aicc@123", c.SeedPassword)
 	}
@@ -61,6 +65,23 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if c.IsDev() {
 		t.Error("IsDev() = true, want false")
+	}
+}
+
+func TestBotMediaTimeouts(t *testing.T) {
+	t.Setenv("AICC_BOT_RTP_DEAD_TIMEOUT", "0")
+	t.Setenv("AICC_BOT_FIRST_MEDIA_TIMEOUT", "45s")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if c.BotRTPDeadTimeout != 0 || c.BotFirstMediaTimeout != 45*time.Second {
+		t.Errorf("got %s, %s, want 0 (disabled) and 45s", c.BotRTPDeadTimeout, c.BotFirstMediaTimeout)
+	}
+
+	t.Setenv("AICC_BOT_FIRST_MEDIA_TIMEOUT", "-1s")
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AICC_BOT_FIRST_MEDIA_TIMEOUT") {
+		t.Errorf("a negative timeout was accepted: %v", err)
 	}
 }
 

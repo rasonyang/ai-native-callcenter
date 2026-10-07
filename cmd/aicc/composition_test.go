@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
+	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 )
 
 // Fakes that record what they were handed. None of them re-implements the
@@ -555,7 +557,8 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 	cfg := botConfig(
 		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
 			BotAdvertiseIP: "127.0.0.1", BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
-			BotMaxCalls: 10, BotAllowedPeers: "127.0.0.1"}),
+			BotMaxCalls: 10, BotAllowedPeers: "127.0.0.1",
+			BotRTPDeadTimeout: 5 * time.Second, BotFirstMediaTimeout: 30 * time.Second}),
 		&catalog.Service{},
 		&store.FlowStore{},
 		&telephony.Adapter{},
@@ -575,6 +578,28 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		t.Errorf("voice.Config fields left unset: %v — RTPDeadTimeout at zero "+
 			"disables the dead-media check and RTCPInterval at zero disables "+
 			"reporting, both without a word", missing)
+	}
+}
+
+// The two media timeouts must come from configuration: a field dropped in
+// botUAS becomes zero, which turns that check off without a word.
+func TestBotUASCarriesTheConfiguredMediaTimeouts(t *testing.T) {
+	got := botUAS(config.Config{BotRTPDeadTimeout: 8 * time.Second, BotFirstMediaTimeout: 90 * time.Second})
+	if got.RTPDeadTimeout != 8*time.Second || got.FirstMediaTimeout != 90*time.Second {
+		t.Errorf("voice.Config timeouts = %s, %s, want the configured 8s and 90s",
+			got.RTPDeadTimeout, got.FirstMediaTimeout)
+	}
+
+	t.Setenv("AICC_ENV", "dev")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load defaults: %v", err)
+	}
+	got = botUAS(cfg)
+	if def := voice.DefaultConfig(); got.RTPDeadTimeout != def.RTPDeadTimeout ||
+		got.FirstMediaTimeout != def.FirstMediaTimeout {
+		t.Errorf("default timeouts diverge: configured %s, %s vs voice defaults %s, %s",
+			got.RTPDeadTimeout, got.FirstMediaTimeout, def.RTPDeadTimeout, def.FirstMediaTimeout)
 	}
 }
 
