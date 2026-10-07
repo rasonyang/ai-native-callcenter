@@ -70,6 +70,11 @@ type Config struct {
 	BotRTPPortLow  int
 	BotRTPPortHigh int
 	BotMaxCalls    int
+	// BotRTPDeadTimeout ends a bot call whose inbound media was flowing and
+	// stopped. BotFirstMediaTimeout ends one that never received any. Zero
+	// disables either; negative is refused.
+	BotRTPDeadTimeout    time.Duration
+	BotFirstMediaTimeout time.Duration
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
 	// OutboundEndpoint renders a destination number into a dial string for
@@ -261,26 +266,28 @@ func Load() (Config, error) {
 	loadDotEnv(".env")
 
 	c := Config{
-		Env:              env("AICC_ENV", "dev"),
-		HTTPAddr:         env("AICC_HTTP_ADDR", ":8080"),
-		MetricsAddr:      env("AICC_METRICS_ADDR", "127.0.0.1:9090"),
-		DatabaseURL:      env("AICC_DATABASE_URL", "postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable"),
-		DatabaseMaxConns: int32(envInt("AICC_DATABASE_MAX_CONNS", 10)),
-		ESLAddr:          env("AICC_ESL_ADDR", "127.0.0.1:18021"),
-		ESLPassword:      env("AICC_ESL_PASSWORD", "ClueCon"),
-		SwitchDomain:     env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
-		SIPProfile:       env("AICC_SIP_PROFILE", "internal"),
-		SIPDomain:        env("AICC_SIP_DOMAIN", ""),
-		SIPWSSURL:        env("AICC_SIP_WSS_URL", ""),
-		BotSIPHost:       env("AICC_BOT_SIP_HOST", "0.0.0.0"),
-		BotSIPPort:       envInt("AICC_BOT_SIP_PORT", 6060),
-		BotAllowedPeers:  env("AICC_BOT_ALLOWED_PEERS", ""),
-		BotAdvertiseIP:   env("AICC_BOT_ADVERTISE_IP", ""),
-		BotRTPPortLow:    envInt("AICC_BOT_RTP_PORT_LOW", 40000),
-		BotRTPPortHigh:   envInt("AICC_BOT_RTP_PORT_HIGH", 40999),
-		BotMaxCalls:      envInt("AICC_BOT_MAX_CALLS", 220),
-		BotBackendBase:   env("AICC_BOT_BACKEND_BASE", ""),
-		IsBotEnabled:     envBool("AICC_BOT_ENABLED", true),
+		Env:                  env("AICC_ENV", "dev"),
+		HTTPAddr:             env("AICC_HTTP_ADDR", ":8080"),
+		MetricsAddr:          env("AICC_METRICS_ADDR", "127.0.0.1:9090"),
+		DatabaseURL:          env("AICC_DATABASE_URL", "postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable"),
+		DatabaseMaxConns:     int32(envInt("AICC_DATABASE_MAX_CONNS", 10)),
+		ESLAddr:              env("AICC_ESL_ADDR", "127.0.0.1:18021"),
+		ESLPassword:          env("AICC_ESL_PASSWORD", "ClueCon"),
+		SwitchDomain:         env("AICC_SWITCH_DOMAIN", "127.0.0.1"),
+		SIPProfile:           env("AICC_SIP_PROFILE", "internal"),
+		SIPDomain:            env("AICC_SIP_DOMAIN", ""),
+		SIPWSSURL:            env("AICC_SIP_WSS_URL", ""),
+		BotSIPHost:           env("AICC_BOT_SIP_HOST", "0.0.0.0"),
+		BotSIPPort:           envInt("AICC_BOT_SIP_PORT", 6060),
+		BotAllowedPeers:      env("AICC_BOT_ALLOWED_PEERS", ""),
+		BotAdvertiseIP:       env("AICC_BOT_ADVERTISE_IP", ""),
+		BotRTPPortLow:        envInt("AICC_BOT_RTP_PORT_LOW", 40000),
+		BotRTPPortHigh:       envInt("AICC_BOT_RTP_PORT_HIGH", 40999),
+		BotMaxCalls:          envInt("AICC_BOT_MAX_CALLS", 220),
+		BotRTPDeadTimeout:    envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
+		BotFirstMediaTimeout: envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
+		BotBackendBase:       env("AICC_BOT_BACKEND_BASE", ""),
+		IsBotEnabled:         envBool("AICC_BOT_ENABLED", true),
 
 		IsTranscriptionEnabled:  envBool("AICC_TRANSCRIPTION_ENABLED", false),
 		StreamAddr:              env("AICC_STREAM_ADDR", "127.0.0.1:8090"),
@@ -415,6 +422,11 @@ func (c Config) validate() error {
 	// call would fail with nothing on the switch's side to say why.
 	if _, err := c.BotAllowedPeerPrefixes(); err != nil {
 		errs = append(errs, fmt.Errorf("AICC_BOT_ALLOWED_PEERS: %w", err))
+	}
+	if c.BotRTPDeadTimeout < 0 || c.BotFirstMediaTimeout < 0 {
+		errs = append(errs, fmt.Errorf(
+			"AICC_BOT_RTP_DEAD_TIMEOUT and AICC_BOT_FIRST_MEDIA_TIMEOUT must be 0 (off) or more, got %s and %s",
+			c.BotRTPDeadTimeout, c.BotFirstMediaTimeout))
 	}
 	if c.WebhookDeliveredRetentionDays < 0 || c.WebhookFailedRetentionDays < 0 {
 		errs = append(errs, fmt.Errorf(

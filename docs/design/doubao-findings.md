@@ -542,7 +542,9 @@ sending RTP — has to suspend `internal/voice`'s dead-media watch for as long a
 the hold lasts. Today any hold longer than `RTPDeadTimeout` (5 s,
 `internal/voice/uas.go`) ends the AI leg, on **every** provider; §10 watched it
 happen twice. The doubao pacer's side of a hold is already correct — it mutes and
-the provider is content — so this is the leg's problem, not the client's.
+the provider is content — so this is the leg's problem, not the client's. The watch now has states (`never-received`,
+`flowing`), and hold should become its `suspended` state (see `mediaState` in
+`internal/voice/uas.go`) rather than a special case beside it.
 
 **W-D5 — the dead-air wait must be interruptible by the next playback marker.
 DONE.** In `internal/aicall/session.go`, `awaitCallerOrDeadAir` now selects on

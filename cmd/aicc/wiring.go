@@ -429,6 +429,8 @@ func botUAS(cfg config.Config) voice.Config {
 	uas.AdvertiseIP = cfg.BotAdvertiseIP
 	uas.RTPPortRange = [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh}
 	uas.MaxCalls = cfg.BotMaxCalls
+	uas.RTPDeadTimeout = cfg.BotRTPDeadTimeout
+	uas.FirstMediaTimeout = cfg.BotFirstMediaTimeout
 	return uas
 }
 

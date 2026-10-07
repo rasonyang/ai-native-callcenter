@@ -149,6 +149,11 @@ ledger.
 
 ## 5. Open: 6% of calls ended on the dead-media watchdog
 
+> Since #97 the UAS tells two faults apart: `media never started` (no inbound
+> packet at all within `FirstMediaTimeout`, 30 s) and `media went dead` (media
+> was flowing and stopped for `RTPDeadTimeout`, 5 s). The figures below predate
+> that split, so they may include dialogs that never received a packet.
+
 In the final run, 6% of calls were ended by the UAS because no RTP
 had arrived on them for around 28 seconds — while the load generator went on
 calling `WriteToUDP` on those same calls successfully. Both sides believe they

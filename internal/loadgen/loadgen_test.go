@@ -193,3 +193,21 @@ func TestFinishedCallsAreHungUp(t *testing.T) {
 		t.Fatal("the call was still up two seconds after the generator hung up")
 	}
 }
+
+func TestUplinkAfterHoldsTheCallerSilent(t *testing.T) {
+	uas, _ := startUAS(t)
+
+	result := loadgen.PlaceCall(t.Context(), loadgen.CallConfig{
+		Target:      "127.0.0.1:" + strconv.Itoa(uas.LocalPort()),
+		Duration:    600 * time.Millisecond,
+		UplinkAfter: 400 * time.Millisecond,
+	})
+	if result.Err != nil {
+		t.Fatalf("place call: %v", result.Err)
+	}
+	// 200 ms of sending at 50 pps is about ten frames; a caller that ignored
+	// the delay would have sent about thirty.
+	if result.FramesSent == 0 || result.FramesSent > 20 {
+		t.Errorf("sent %d frames, want a few: silence for 400ms, then 200ms of tone", result.FramesSent)
+	}
+}

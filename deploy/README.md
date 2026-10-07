@@ -637,7 +637,9 @@ hand instead of pulling it.
   `docker compose logs aicc | grep -E 'could not run|conversation failed'`.
 - **The bot speaks, then about 5 s later the call goes to a queue.** The
   caller's audio does not reach the switch, so the bot leg receives no media
-  and ends. The application logs `media went dead`; the switch logs
+  and ends. The application logs `media went dead` (media that was flowing
+  stopped; `AICC_BOT_RTP_DEAD_TIMEOUT`) or, if no packet ever arrived,
+  `media never started` after `AICC_BOT_FIRST_MEDIA_TIMEOUT` (30 s); the switch logs
   `aicc_inbound: bot leg vanished` and transfers the caller to the number's
   fallback queue. Check, in order
   (`docker compose exec freeswitch fs_cli -P 18021 -p aicc@123`):
