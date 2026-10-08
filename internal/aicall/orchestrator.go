@@ -316,6 +316,14 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		recorder:      recorder,
 		facts:         facts,
 	}
+	// An agent who hangs up first leaves the bot no chance to say what it ran,
+	// and it is their call's row the human path writes, so the flow and the
+	// number go onto their channel now rather than at an ending that may never
+	// come. Not aicc_bot_sec: that variable alone is what says a call was
+	// handed over.
+	if facts.isPlacedByAgent() && callerChannel != "" {
+		actions.stampBotShare(facts)
+	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(o.cfg.BackendBase),
 		o.queueNames(ctx, did.FallbackQueueID), log)
 

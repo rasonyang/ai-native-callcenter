@@ -457,6 +457,15 @@ func (a *callActions) markFinished(how string) {
 	if a.callerChannel == "" {
 		return
 	}
+	// The bot is about to close its leg, and a call an agent placed is
+	// written by the human path, which reads the bot's tally from the agent's
+	// channel. Before the mark, because it is what the dialplan acts on, and
+	// before the leg goes, because this is the last moment the bot's time is
+	// known.
+	if a.recorder != nil && a.facts.isPlacedByAgent() {
+		a.stampUnbackedClaims(a.recorder)
+		a.stampBotSec(a.recorder)
+	}
 	a.stampChannel("aicc_bot_finished", how)
 }
 
