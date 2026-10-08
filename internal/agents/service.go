@@ -1184,11 +1184,3 @@ func (s *Service) AgentByCallcenterName(name string) (uuid.UUID, bool) {
 	}
 	return uuid.Nil, false
 }
-
-// DeviceState reports what the switch has told us about an agent's phone.
-func (s *Service) DeviceState(agentID uuid.UUID) (isRegistered, isInService bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	p := s.presenceLocked(agentID)
-	return p.IsRegistered, p.IsDeviceInService
-}

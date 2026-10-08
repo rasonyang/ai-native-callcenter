@@ -44,9 +44,6 @@ type AgentService interface {
 	// is on the floor but never signed into this application; who is signed in
 	// there, if anybody, is the separate question.
 	DeviceAtExtension(extensionNumber string) (isRegistered, isInService, isKnown bool)
-	// DeviceState is the same question asked about a person rather than a
-	// number: has this agent's phone registered, and is it in service.
-	DeviceState(agentID uuid.UUID) (isRegistered, isInService bool)
 	AgentAtExtension(extensionNumber string) (agentID uuid.UUID, ok bool)
 	Roster(ctx context.Context) ([]agents.RosterEntry, error)
 

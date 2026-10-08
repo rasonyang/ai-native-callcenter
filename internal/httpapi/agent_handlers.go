@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -66,6 +67,29 @@ func presenceOf(agentID uuid.UUID, p agents.Presence) api.Presence {
 	if p.IsRegistered && p.ExtensionNumber != "" {
 		account := p.ExtensionNumber
 		out.DeviceAccount = &account
+	}
+	return out
+}
+
+// presenceView is presenceOf with the phone answered from the device table.
+//
+// The presence copy of IsRegistered is only maintained while the agent is
+// signed in at the extension: a signed-out presence neither learns of a
+// registration nor forgets one. The Presence schema names "this agent's
+// extension", which is the one signed in at, or the bound one when nobody is.
+// Only the signed-out case needs the bound-extension lookup.
+func (s *Server) presenceView(ctx context.Context, agentID uuid.UUID, p agents.Presence) api.Presence {
+	out := presenceOf(agentID, p)
+	ext := p.ExtensionNumber
+	if p.IsLoggedOut() || ext == "" {
+		ext = s.agents.BoundExtensionFor(ctx, agentID)
+	}
+	out.IsDeviceRegistered, out.DeviceAccount = false, nil
+	if ext == "" {
+		return out
+	}
+	if isRegistered, _, _ := s.agents.DeviceAtExtension(ext); isRegistered {
+		out.IsDeviceRegistered, out.DeviceAccount = true, &ext
 	}
 	return out
 }
@@ -238,7 +262,7 @@ func (s *Server) GetAgentPresence(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, presenceOf(agentID, s.agents.Presence(agentID)))
+	writeJSON(w, http.StatusOK, s.presenceView(r.Context(), agentID, s.agents.Presence(agentID)))
 }
 
 func (s *Server) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -350,7 +374,7 @@ func (s *Server) writeAgentConfigError(w http.ResponseWriter, r *http.Request, e
 func (s *Server) writePresence(w http.ResponseWriter, r *http.Request, agentID uuid.UUID, p agents.Presence, err error) {
 	switch {
 	case err == nil:
-		writeJSON(w, http.StatusOK, presenceOf(agentID, p))
+		writeJSON(w, http.StatusOK, s.presenceView(r.Context(), agentID, p))
 	case errors.Is(err, agents.ErrUnknownAgent):
 		writeError(w, http.StatusForbidden, CodeForbidden, "this account is not an agent", nil)
 	case errors.Is(err, agents.ErrExtensionInUse):

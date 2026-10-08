@@ -26,8 +26,9 @@ type loginResponse struct {
 	User auth.Identity `json:"user"`
 	// The phone, as the switch currently holds it. A screen asks this to
 	// decide whether it may offer to place a call; it is a fact about the
-	// device and not about the account, which is why it is answered from the
-	// agent service rather than from the session.
+	// device and not about the account or its presence, which is why it is
+	// answered from the device table at the bound extension rather than from
+	// the session or the presence FSM.
 	//
 	// False and nil for anybody who is not an agent — a supervisor has no
 	// phone of their own signed in — and that is the honest answer rather than
@@ -41,16 +42,18 @@ func (s *Server) deviceOf(r *http.Request, ac AuthContext) (isRegistered bool, a
 	if s.agents == nil || !ac.IsAgent() {
 		return false, nil
 	}
-	isRegistered, _ = s.agents.DeviceState(ac.AgentID)
-	if !isRegistered {
+	// Registration is a fact about the phone, not about presence: the agent
+	// has not necessarily signed in (POST /agent/login), and the phone is on
+	// the desk regardless. The number the phone registers as is the one bound
+	// to the agent; a session is only ever issued for that extension.
+	ext := s.agents.BoundExtensionFor(r.Context(), ac.AgentID)
+	if ext == "" {
 		return false, nil
 	}
-	// The number the phone registered as is the one bound to the agent: a
-	// session is only ever issued for that extension.
-	if ext := s.agents.BoundExtensionFor(r.Context(), ac.AgentID); ext != "" {
-		account = &ext
+	if isRegistered, _, _ := s.agents.DeviceAtExtension(ext); !isRegistered {
+		return false, nil
 	}
-	return true, account
+	return true, &ext
 }
 
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
