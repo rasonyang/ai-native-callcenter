@@ -94,7 +94,8 @@ type BotShare struct {
 // this path cannot see.
 //
 // It is not the only reason this path writes a row. A call an agent's phone
-// placed to a bot number is written here whoever ended it (isAgentPlaced); the
+// placed to a bot number is written here whoever ended it (isAgentPlaced, which
+// reads the originating leg's own extension and never its caller id); the
 // bot stamps aicc_bot_sec on it too, as the tally the row needs, and that
 // stamp changes nothing about who owns the row.
 func (b BotShare) HandedOver() bool { return b.IsStamped }

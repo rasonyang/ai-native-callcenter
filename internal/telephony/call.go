@@ -638,7 +638,8 @@ type PartySnapshot struct {
 	OtherNumber string     `json:"otherNumber,omitempty"`
 	AgentID     *uuid.UUID `json:"agentId,omitempty"`
 	// ExtensionNumber is the phone this leg is at, when it is one of ours; see
-	// Party.ExtensionNumber for why it is not the same question as AgentID.
+	// Party.ExtensionNumber for why it is not the same question as AgentID, and
+	// why a caller id that merely resembles an extension never sets it.
 	ExtensionNumber string     `json:"extensionNumber,omitempty"`
 	CreatedAt       time.Time  `json:"createdAt"`
 	AnsweredAt      *time.Time `json:"answeredAt,omitempty"`
