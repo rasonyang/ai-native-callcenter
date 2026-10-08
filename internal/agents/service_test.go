@@ -24,6 +24,9 @@ type fakeStore struct {
 	saveErr   error
 	profErr   error
 	rosterErr error
+	// extNumbers maps an extension id to its number, for the bindings a test
+	// edits through UpdateAgent.
+	extNumbers map[uuid.UUID]string
 }
 
 func newFakeStore() *fakeStore {
@@ -69,6 +72,17 @@ func (f *fakeStore) AgentProfile(_ context.Context, id uuid.UUID) (Profile, erro
 	return p, nil
 }
 
+func (f *fakeStore) AgentBoundTo(_ context.Context, number string) (uuid.UUID, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for id, prof := range f.profiles {
+		if prof.ExtensionNumber == number {
+			return id, true, nil
+		}
+	}
+	return uuid.Nil, false, nil
+}
+
 func (f *fakeStore) CreateAgent(_ context.Context, cfg AgentConfig) (AgentConfig, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -91,6 +105,12 @@ func (f *fakeStore) UpdateAgent(_ context.Context, cfg AgentConfig) (AgentConfig
 	}
 	prof.CallcenterName = cfg.CallcenterName
 	prof.IsAutoAnswer = cfg.IsAutoAnswer
+	prof.ExtensionID = cfg.DefaultExtensionID
+	if cfg.DefaultExtensionID == nil {
+		prof.ExtensionNumber = ""
+	} else if n, ok := f.extNumbers[*cfg.DefaultExtensionID]; ok {
+		prof.ExtensionNumber = n
+	}
 	f.profiles[cfg.AgentID] = prof
 	return cfg, nil
 }
@@ -116,6 +136,7 @@ func (f *fakeStore) Roster(context.Context) ([]RosterEntry, error) {
 			AgentID: id, UserID: prof.UserID, DisplayName: prof.DisplayName,
 			State: p.CurrentState(), Reason: p.Reason, Extension: p.ExtensionNumber,
 			EnteredAt: p.EnteredAt, WrapUpCallID: p.WrapUpCallID,
+			DefaultExtensionNumber: prof.ExtensionNumber,
 		}
 		out = append(out, entry)
 	}
@@ -252,7 +273,7 @@ func newTestService(t *testing.T) (*Service, *fakeStore, *fakeSwitch, *fakePubli
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{
 		AgentID: agentID, UserID: uuid.New(), CallcenterName: "agent-1001",
-		DisplayName: "Wei",
+		DisplayName: "Wei", ExtensionNumber: "1001",
 	}
 	return NewService(store, sw, pub), store, sw, pub, agentID
 }
@@ -262,7 +283,7 @@ func TestLoginPersistsMirrorsAndPublishes(t *testing.T) {
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
-	p, err := svc.Login(ctx, agentID, "1001")
+	p, err := svc.Login(ctx, agentID)
 	if err != nil {
 		t.Fatalf("Login() error = %v", err)
 	}
@@ -301,7 +322,7 @@ func TestReadyMirrorsAvailableToTheSwitch(t *testing.T) {
 	// it would be an agent at a phone nothing has ever heard from, which is
 	// unreachable by the same rule the wallboard uses.
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -322,7 +343,7 @@ func TestStorageFailureRollsBackAndReportsError(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	store.mu.Lock()
@@ -349,12 +370,12 @@ func TestOneExtensionOneAgent(t *testing.T) {
 	ctx := context.Background()
 
 	second := uuid.New()
-	store.profiles[second] = Profile{AgentID: second, CallcenterName: "agent-1002", DisplayName: "Li"}
+	store.profiles[second] = Profile{AgentID: second, CallcenterName: "agent-1002", DisplayName: "Li", ExtensionNumber: "1001"}
 
-	if _, err := svc.Login(ctx, first, "1001"); err != nil {
+	if _, err := svc.Login(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Login(ctx, second, "1001"); !errors.Is(err, ErrExtensionInUse) {
+	if _, err := svc.Login(ctx, second); !errors.Is(err, ErrExtensionInUse) {
 		t.Fatalf("second Login() error = %v, want ErrExtensionInUse", err)
 	}
 
@@ -362,7 +383,7 @@ func TestOneExtensionOneAgent(t *testing.T) {
 	if _, err := svc.Logout(ctx, first); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Login(ctx, second, "1001"); err != nil {
+	if _, err := svc.Login(ctx, second); err != nil {
 		t.Fatalf("Login() after the desk was freed error = %v", err)
 	}
 }
@@ -376,7 +397,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	sw := &fakeSwitch{up: true}
 	agentID := uuid.New()
 	store.profiles[agentID] = Profile{
-		AgentID: agentID, CallcenterName: "agent-1001", DisplayName: "Wei",
+		AgentID: agentID, CallcenterName: "agent-1001", DisplayName: "Wei", ExtensionNumber: "1001",
 	}
 	svc := NewService(store, sw, &fakePublisher{})
 	ctx := context.Background()
@@ -385,7 +406,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	// at a phone nothing has heard from is unreachable, and would be mirrored
 	// On Break whatever they had chosen.
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
@@ -440,7 +461,7 @@ func TestALostPhoneTakesTheAgentOutOfRoutingUnderItsOwnReason(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -502,7 +523,7 @@ func TestAReturnedPhoneWithdrawsTheReasonThePlatformSet(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -561,7 +582,7 @@ func TestAReturnedPhoneSaysNothingAboutAReasonTheAgentChose(t *testing.T) {
 			ctx := t.Context()
 
 			svc.ObserveDevice(ctx, "1001", SignalRegistered)
-			if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+			if _, err := svc.Login(ctx, agentID); err != nil {
 				t.Fatal(err)
 			}
 			if _, err := svc.NotReady(ctx, agentID, reason); err != nil {
@@ -599,7 +620,7 @@ func TestAReturnedPhoneDoesNotEndWrapUp(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	callID := uuid.New()
@@ -632,7 +653,7 @@ func TestARegistrationForAReadyAgentPublishesNoPresenceChange(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -647,8 +668,10 @@ func TestARegistrationForAReadyAgentPublishesNoPresenceChange(t *testing.T) {
 	if after := svc.Presence(agentID); after.EnteredAt != before.EnteredAt {
 		t.Error("the routine re-registration restamped a READY the agent never left")
 	}
-	if got := pub.types()[told:]; len(got) != 1 || got[0] != events.TypeDeviceRegistered {
-		t.Errorf("published %v, want DEVICE_REGISTERED alone", got)
+	// The stream was told the phone registered when it first did; a refresh of
+	// a phone that is already registered changes nothing it was told.
+	if got := pub.types()[told:]; len(got) != 0 {
+		t.Errorf("published %v, want nothing for an unchanged phone", got)
 	}
 }
 
@@ -660,7 +683,7 @@ func TestALostPhoneSaysNothingAboutAnAgentWhoWasNotReadyAnyway(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.NotReady(ctx, agentID, ReasonLunch); err != nil {
@@ -693,7 +716,7 @@ func TestAPhoneThatStopsAnsweringIsNotAPhoneThatWentAway(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -737,7 +760,7 @@ func TestEachDeviceSignalIsAnnouncedUnderItsOwnName(t *testing.T) {
 			t.Parallel()
 			svc, _, _, pub, agentID := newTestService(t)
 			ctx := context.Background()
-			if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+			if _, err := svc.Login(ctx, agentID); err != nil {
 				t.Fatal(err)
 			}
 			svc.ObserveDevice(ctx, "1001", tt.signal)
@@ -758,7 +781,7 @@ func TestAnUnreachablePhoneIsStillARegisteredOne(t *testing.T) {
 	t.Parallel()
 	svc, _, _, _, agentID := newTestService(t)
 	ctx := context.Background()
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -779,7 +802,7 @@ func TestRosterResolvesAvailability(t *testing.T) {
 	ctx := context.Background()
 
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -807,10 +830,10 @@ func TestSwitchDownDoesNotBlockSignIn(t *testing.T) {
 	store := newFakeStore()
 	sw := &fakeSwitch{up: false} // switch link is down
 	agentID := uuid.New()
-	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001"}
+	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, sw, &fakePublisher{})
 
-	if _, err := svc.Login(context.Background(), agentID, "1001"); err != nil {
+	if _, err := svc.Login(context.Background(), agentID); err != nil {
 		t.Fatalf("Login() error = %v, want sign-in to succeed with the switch down", err)
 	}
 	if len(sw.commands) != 0 {
@@ -823,7 +846,7 @@ func TestSyncSwitchRebuildsAfterReconnect(t *testing.T) {
 	svc, _, sw, _, agentID := newTestService(t)
 	ctx := context.Background()
 
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	sw.mu.Lock()
@@ -839,7 +862,7 @@ func TestSyncSwitchRebuildsAfterReconnect(t *testing.T) {
 func TestUnknownAgentIsRejected(t *testing.T) {
 	t.Parallel()
 	svc, _, _, _, _ := newTestService(t)
-	if _, err := svc.Login(context.Background(), uuid.New(), "1001"); !errors.Is(err, ErrUnknownAgent) {
+	if _, err := svc.Login(context.Background(), uuid.New()); !errors.Is(err, ErrUnknownAgent) {
 		t.Errorf("Login() error = %v, want ErrUnknownAgent", err)
 	}
 }
@@ -853,7 +876,7 @@ func TestAnAgentTheSwitchLearnsAboutComesWithItsRoutingGuards(t *testing.T) {
 	t.Parallel()
 	svc, _, sw, _, agentID := newTestService(t)
 
-	if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+	if _, err := svc.Login(t.Context(), agentID); err != nil {
 		t.Fatalf("login: %v", err)
 	}
 
@@ -878,10 +901,10 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 	t.Run("a ready agent at a working phone is taken out of routing", func(t *testing.T) {
 		t.Parallel()
 		svc, _, _, pub, agentID := newTestService(t)
-		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+		if _, err := svc.Login(t.Context(), agentID); err != nil {
 			t.Fatalf("login: %v", err)
 		}
-		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
+		svc.ObserveDevice(t.Context(), "1001", SignalRegistered)
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
@@ -904,10 +927,10 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 	t.Run("our own mirror echoing back changes nothing", func(t *testing.T) {
 		t.Parallel()
 		svc, _, _, _, agentID := newTestService(t)
-		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+		if _, err := svc.Login(t.Context(), agentID); err != nil {
 			t.Fatalf("login: %v", err)
 		}
-		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
+		svc.ObserveDevice(t.Context(), "1001", SignalRegistered)
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
@@ -935,14 +958,14 @@ func TestBeingBenchedByTheSwitchIsReadAgainstWhatWeAlreadyKnow(t *testing.T) {
 	t.Run("a lost phone is not an ignored call", func(t *testing.T) {
 		t.Parallel()
 		svc, _, _, _, agentID := newTestService(t)
-		svc.ObserveDevice(t.Context(), "1008", SignalRegistered)
-		if _, err := svc.Login(t.Context(), agentID, "1008"); err != nil {
+		svc.ObserveDevice(t.Context(), "1001", SignalRegistered)
+		if _, err := svc.Login(t.Context(), agentID); err != nil {
 			t.Fatalf("login: %v", err)
 		}
 		if _, err := svc.Ready(t.Context(), agentID); err != nil {
 			t.Fatalf("ready: %v", err)
 		}
-		svc.ObserveDevice(t.Context(), "1008", SignalUnregistered)
+		svc.ObserveDevice(t.Context(), "1001", SignalUnregistered)
 
 		got, err := svc.RingNoAnswer(t.Context(), agentID)
 		if err != nil {
@@ -981,7 +1004,7 @@ func TestEveryAgentEventStatesWhetherThePhoneIsRegistered(t *testing.T) {
 			"known registered phone in service", isRegistered, isInService, isKnown)
 	}
 
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	if isRegistered, isInService, _ := svc.DeviceAtExtension("1001"); !isRegistered || !isInService {
@@ -1019,7 +1042,7 @@ func TestReadyIsRefusedWithoutAPhoneAndChangesNothing(t *testing.T) {
 	svc, store, sw, pub, agentID := newTestService(t)
 	ctx := context.Background()
 
-	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
+	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
 	before := svc.Presence(agentID)
@@ -1171,8 +1194,8 @@ func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
 		t.Parallel()
 		svc, _, sw, _, agentID := newTestService(t)
 		ctx := t.Context()
-		svc.ObserveDevice(ctx, "1008", SignalRegistered)
-		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+		svc.ObserveDevice(ctx, "1001", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -1199,8 +1222,8 @@ func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
 		t.Parallel()
 		svc, _, sw, _, agentID := newTestService(t)
 		ctx := t.Context()
-		svc.ObserveDevice(ctx, "1008", SignalRegistered)
-		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+		svc.ObserveDevice(ctx, "1001", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -1219,11 +1242,11 @@ func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
 		t.Parallel()
 		svc, _, sw, _, agentID := newTestService(t)
 		ctx := t.Context()
-		svc.ObserveDevice(ctx, "1008", SignalRegistered)
-		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+		svc.ObserveDevice(ctx, "1001", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID); err != nil {
 			t.Fatal(err)
 		}
-		svc.ObserveDevice(ctx, "1008", SignalUnreachable)
+		svc.ObserveDevice(ctx, "1001", SignalUnreachable)
 		before := sw.count("holdoff_clear")
 
 		p, err := svc.Ready(ctx, agentID)
@@ -1243,8 +1266,8 @@ func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
 		t.Parallel()
 		svc, _, sw, _, agentID := newTestService(t)
 		ctx := t.Context()
-		svc.ObserveDevice(ctx, "1008", SignalRegistered)
-		if _, err := svc.Login(ctx, agentID, "1008"); err != nil {
+		svc.ObserveDevice(ctx, "1001", SignalRegistered)
+		if _, err := svc.Login(ctx, agentID); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := svc.Ready(ctx, agentID); err != nil {
@@ -1252,8 +1275,8 @@ func TestChoosingReadyEndsTheSwitchHoldOffFromAMissedCall(t *testing.T) {
 		}
 		before := sw.count("holdoff_clear")
 
-		svc.ObserveDevice(ctx, "1008", SignalUnregistered)
-		svc.ObserveDevice(ctx, "1008", SignalRegistered)
+		svc.ObserveDevice(ctx, "1001", SignalUnregistered)
+		svc.ObserveDevice(ctx, "1001", SignalRegistered)
 
 		if got := svc.Presence(agentID); got.CurrentState() != StateReady {
 			t.Fatalf("state = %s, want READY restored by the returning phone", got.CurrentState())

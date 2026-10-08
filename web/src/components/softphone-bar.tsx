@@ -176,7 +176,7 @@ function SignIn() {
         size="sm"
         className="h-6 px-2 text-xs"
         disabled={signIn.isPending}
-        onClick={() => signIn.mutate(undefined)}
+        onClick={() => signIn.mutate()}
       >
         <LogIn className="size-3" />
         {t('agent.signIn')}

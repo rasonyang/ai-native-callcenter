@@ -93,7 +93,7 @@ describe('presence', () => {
     await user.click(screen.getByRole('button', { name: /sign in/i }))
     await waitFor(() =>
       expect(api.commands).toContainEqual(
-        expect.objectContaining({ method: 'POST', path: '/agent/login' }),
+        expect.objectContaining({ method: 'POST', path: '/agent/login', body: undefined }),
       ),
     )
   })

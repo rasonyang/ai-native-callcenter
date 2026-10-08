@@ -166,11 +166,11 @@ Pass:
 
 - `fs 'sofia status profile internal reg'` lists wei's extension (`1001`)
   as `Registered`.
-- After **Sign in**, in the page's DevTools console,
+- In the page's DevTools console,
   `await (await fetch('/api/v1/auth/me')).json()` shows
-  `isDeviceRegistered: true`. Before **Sign in** it is `false`; that is
-  [#37](https://github.com/rasonyang/ai-native-callcenter/issues/37), not a
-  failure.
+  `isDeviceRegistered: true` once the phone has registered, before and after
+  **Sign in**: it answers for the phone at the agent's bound extension, and
+  signing in does not change it.
 
 ### 4. Agent on a second LAN machine over `ws://`
 
@@ -343,9 +343,6 @@ printed, makes the next `--check` pass that check.
 
 ## Known issues to expect
 
-- [#37](https://github.com/rasonyang/ai-native-callcenter/issues/37):
-  `isDeviceRegistered` is `false` until the agent presses **Sign in** on the
-  phone bar.
 - [#38](https://github.com/rasonyang/ai-native-callcenter/issues/38): the
   browser phone stays registered to another deployment with the same
   extension number. Remove the old deployment's host from Allow Sites.

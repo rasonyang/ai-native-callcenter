@@ -115,13 +115,9 @@ export const agentApi = {
 
   /**
    * Signs in at the extension bound to this agent in configuration. The
-   * binding is static, so a number is only ever passed to override it.
+   * request names no extension; the contract refuses a body that does.
    */
-  login: (extensionNumber?: string) =>
-    request<Presence>('/agent/login', {
-      method: 'POST',
-      body: JSON.stringify(extensionNumber ? { extensionNumber } : {}),
-    }),
+  login: () => request<Presence>('/agent/login', { method: 'POST' }),
 
   logout: () => request<Presence>('/agent/logout', { method: 'POST' }),
 
