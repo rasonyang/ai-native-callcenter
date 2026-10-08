@@ -212,17 +212,37 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 
+	// A call the agent placed reads the other way round: their own leg is the
+	// originator, so the call is theirs no matter who they reached, and
+	// whether anybody picked up is decided on the leg dialled out — the
+	// agent's own leg auto-answers in front of them and says nothing about
+	// the person being called.
+	// The question is whether an agent's *phone* placed it, which is not the
+	// same as whether the originator is an agent we can name. They coincided
+	// until a system could place a call for an agent who never signed into
+	// this application: presence then has nothing to say about them, the
+	// originator carries no agent id, and the call was recorded with talk_sec
+	// zero and a DIALING leg at the agent's own extension instead of the trunk
+	// it actually reached — every third-party call reading as no conversation
+	// at all (measured live 2026-08-26, 86 answered seconds recorded as 0).
+	// The extension is the fact that survives the logout.
+	isAgentPlaced := originator != nil &&
+		(originator.AgentID != nil || originator.ExtensionNumber != "")
+
 	if originator != nil {
 		cdr.FromNumber = originator.Number
 		cdr.HangupCause = originator.ReleaseCause
 		switch {
 		case cdr.DID == "":
 			cdr.ToNumber = originator.OtherNumber
-		case snap.CallType == events.CallTypeOutbound:
+		case snap.CallType == events.CallTypeOutbound && !isAgentPlaced:
 			// A DID on a call this platform placed is the number the call
 			// went out from, not one anybody dialled — and the leg the
 			// registry calls the originator is the customer's, because we
 			// created it. Both ends were landing in the other's column.
+			// An agent's call to a DID is OUTBOUND too and carries the DID
+			// from the bot leg, but there the originator is the agent and
+			// the DID is what they dialled (#80).
 			cdr.FromNumber, cdr.ToNumber = cdr.DID, originator.Number
 		default:
 			cdr.ToNumber = cdr.DID
@@ -264,22 +284,6 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 
-	// A call the agent placed reads the other way round: their own leg is the
-	// originator, so the call is theirs no matter who they reached, and
-	// whether anybody picked up is decided on the leg dialled out — the
-	// agent's own leg auto-answers in front of them and says nothing about
-	// the person being called.
-	// The question is whether an agent's *phone* placed it, which is not the
-	// same as whether the originator is an agent we can name. They coincided
-	// until a system could place a call for an agent who never signed into
-	// this application: presence then has nothing to say about them, the
-	// originator carries no agent id, and the call was recorded with talk_sec
-	// zero and a DIALING leg at the agent's own extension instead of the trunk
-	// it actually reached — every third-party call reading as no conversation
-	// at all (measured live 2026-08-26, 86 answered seconds recorded as 0).
-	// The extension is the fact that survives the logout.
-	isAgentPlaced := originator != nil &&
-		(originator.AgentID != nil || originator.ExtensionNumber != "")
 	dialled := dialledLegs(snap)
 	if isAgentPlaced {
 		// Only when there is one to name. An agent's phone placing a call and

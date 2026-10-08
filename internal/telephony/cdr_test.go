@@ -1016,6 +1016,45 @@ func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 	}
 }
 
+// An agent's click-to-dial to a DID is OUTBOUND and carries the DID from the
+// bot leg, like a call this platform placed to a customer — but the originator
+// is the agent and the DID is what they dialled. Once the bot handed the call
+// to a queue, this assembler owned the row and swapped its ends as though the
+// platform had placed it. Live, v0.3.0 fresh install: 1000 dialled 95001, the
+// bot transferred to support-en, and the row read 95001 → 1000 (#80).
+func TestAssembleKeepsAnAgentsCallToABotNumberInItsDirection(t *testing.T) {
+	t.Parallel()
+	agentID := uuid.New()
+	signedIn := Snapshot{
+		CallID:    uuid.New(),
+		CallType:  events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(20),
+		Bot: BotShare{Sec: 15, DID: "95001", Queue: "support-en", IsStamped: true},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "1000", AgentID: &agentID, ExtensionNumber: "1000",
+				ChannelID: "chan-agent", AnsweredAt: atPtr(0), ReleasedAt: atPtr(20)},
+		},
+	}
+	got := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), signedIn)
+	if got.FromNumber != "1000" || got.ToNumber != "95001" {
+		t.Errorf("an agent's call to a bot number landed as %q → %q, want 1000 → 95001",
+			got.FromNumber, got.ToNumber)
+	}
+
+	// The extension is what says an agent's phone placed it, signed in or not.
+	signedOut := signedIn
+	signedOut.CallID = uuid.New()
+	signedOut.Parties = []PartySnapshot{
+		{Role: RoleOriginator, Number: "1000", ExtensionNumber: "1000",
+			ChannelID: "chan-agent", AnsweredAt: atPtr(0), ReleasedAt: atPtr(20)},
+	}
+	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), signedOut)
+	if got.FromNumber != "1000" || got.ToNumber != "95001" {
+		t.Errorf("a signed-out extension's call to a bot number landed as %q → %q, "+
+			"want 1000 → 95001", got.FromNumber, got.ToNumber)
+	}
+}
+
 // Which leg faces whoever charges for the call depends on who placed it. An
 // agent dialling out sits on the originator, so the carrier's leg is the one
 // dialled — and the agent's own auto-answering phone must never be read as the
