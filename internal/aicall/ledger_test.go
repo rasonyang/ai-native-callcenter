@@ -388,8 +388,8 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 	}{
 		{"a call that came in", callTypeInbound, false, "13800138000", "95012"},
 		{"a call this platform placed", callTypeOutbound, true, "95012", "13800138000"},
-		{"an agent's call to a DID", callTypeOutbound, false, "13800138000", "95012"},
-		{"an internal call the bot answers", callTypeInternal, false, "13800138000", "95012"},
+		// An agent's call to a DID is not the bot's row to write at all; the
+		// assembler's ends are checked in telephony's cdr tests.
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := newFakeLedger()
@@ -490,5 +490,48 @@ func TestCallTypeFromHeader(t *testing.T) {
 		if got := callTypeFromHeader(in); got != want {
 			t.Errorf("callTypeFromHeader(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A call an agent placed to a bot number is the agent's, and the human path
+// writes it (#76). The bot writing it too gave a row with the bot as its only
+// leg, no agent, and a containment it did not earn.
+func TestACallAnAgentPlacedIsNotWrittenByTheBot(t *testing.T) {
+	for name, facts := range map[string]*callFacts{
+		"click-to-dial":  {callType: callTypeOutbound},
+		"internal agent": {callType: callTypeInternal},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := newFakeLedger()
+			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder.markHangup()
+			recorder.finish(ledger, facts, discard())
+			if len(ledger.cdrs) != 0 {
+				t.Fatalf("wrote %d cdrs, want none: the human path owns the row", len(ledger.cdrs))
+			}
+		})
+	}
+}
+
+// The calls that are the bot's stay the bot's: a caller from outside, and the
+// AI outbound bridge's call to a customer (typed OUTBOUND, but not an agent's).
+func TestACallNoAgentPlacedIsStillWrittenByTheBot(t *testing.T) {
+	for name, facts := range map[string]*callFacts{
+		"inbound":             testFacts(),
+		"placed to customer":  {callType: callTypeOutbound, isPlacedToCustomer: true},
+		"outbound to the bot": {callType: callTypeOutbound, isPlacedToCustomer: true, did: "95001"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			ledger := newFakeLedger()
+			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder.markHangup()
+			recorder.finish(ledger, facts, discard())
+			if len(ledger.cdrs) != 1 {
+				t.Fatalf("wrote %d cdrs, want 1", len(ledger.cdrs))
+			}
+			if facts.callType == callTypeInbound && !ledger.cdrs[0].IsContained {
+				t.Error("a contained inbound call lost its containment")
+			}
+		})
 	}
 }

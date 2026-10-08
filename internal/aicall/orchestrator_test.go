@@ -2074,3 +2074,58 @@ func TestAKeypressBeforeTheEndingIsArmedStillInterrupts(t *testing.T) {
 		t.Errorf("user text = %v, want the keypress cue", h.model.recordedUserText())
 	}
 }
+
+// The human path writes the row for a call an agent placed, and reads the
+// bot's part of it off the agent's channel: the bot hanging up has to leave
+// its tally there first.
+func TestABotThatEndsAnAgentsCallLeavesItsShareOnTheirChannel(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, _, _ := testActions(t, sw)
+	actions.facts = testFacts()
+	actions.facts.callType = callTypeOutbound
+	actions.recorder = newCallRecorder(uuid.New(), time.Now().Add(-9*time.Second), nil)
+	actions.recorder.markUnbackedClaim("TRANSFER")
+
+	actions.markFinished("HANGUP")
+
+	if got := sw.variable("aicc_bot_finished"); got != "HANGUP" {
+		t.Errorf("aicc_bot_finished = %q, want HANGUP", got)
+	}
+	if got, err := strconv.Atoi(sw.variable("aicc_bot_sec")); err != nil || got < 9 {
+		t.Errorf("aicc_bot_sec = %q, want the seconds the agent was with the bot", sw.variable("aicc_bot_sec"))
+	}
+	if got := sw.variable("aicc_bot_unbacked_claims"); got != "TRANSFER" {
+		t.Errorf("aicc_bot_unbacked_claims = %q, want TRANSFER", got)
+	}
+}
+
+// A caller from outside has no one to hand the bot's tally to when the bot
+// ends the call: it stamps aicc_bot_sec only at a handover, and nowhere else.
+func TestABotThatEndsAnInboundCallStampsNoTally(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, _, _ := testActions(t, sw)
+	actions.facts = testFacts()
+	actions.recorder = newCallRecorder(uuid.New(), time.Now().Add(-9*time.Second), nil)
+
+	actions.markFinished("HANGUP")
+
+	if got := sw.variable("aicc_bot_sec"); got != "" {
+		t.Errorf("aicc_bot_sec = %q on an inbound call the bot ended, want none", got)
+	}
+}
+
+// stampBotShare is what an agent's call carries from the start, so the flow
+// survives the agent hanging up first.
+func TestTheBotShareOfAnAgentsCallNamesTheFlow(t *testing.T) {
+	sw := &fakeSwitch{}
+	actions, _, _ := testActions(t, sw)
+	facts := testFacts()
+	actions.stampBotShare(facts)
+	if sw.variable("aicc_flow_slug") != "novanet_support" || sw.variable("aicc_did") != "95012" ||
+		sw.variable("aicc_flow_id") != facts.flowID.String() {
+		t.Errorf("share stamped = %v", sw.variables)
+	}
+	if got := sw.variable("aicc_bot_sec"); got != "" {
+		t.Errorf("aicc_bot_sec = %q: stamping the share must not read as a handover", got)
+	}
+}

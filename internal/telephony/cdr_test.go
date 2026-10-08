@@ -1248,3 +1248,158 @@ func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
 		}
 	})
 }
+
+// An agent who dials a platform number and has the bot hang up on them has
+// made a call of their own. The bot's row for it had the bot as its only leg,
+// no agent, a containment it did not earn and a bill for the whole call
+// (#76, #104); the human path writes it now, with the bot's share taken from
+// the agent's channel.
+func TestAnAgentsCallThatTheBotEndedIsTheAgentsCall(t *testing.T) {
+	t.Parallel()
+	agentID := uuid.New()
+	for _, tc := range []struct {
+		name     string
+		callType events.CallType
+		agent    *uuid.UUID
+	}{
+		{"signed in, dialled out", events.CallTypeOutbound, &agentID},
+		{"signed out, dialled out", events.CallTypeOutbound, nil},
+		{"signed in, internal", events.CallTypeInternal, &agentID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			snap := Snapshot{
+				CallID:    uuid.New(),
+				CallType:  tc.callType,
+				CreatedAt: at(0), EndedAt: atPtr(20),
+				// No handover: the bot ended the call, and stamped its tally
+				// on the agent's channel on the way (aicc_bot_sec).
+				Bot: BotShare{Sec: 18, DID: "95001", FlowSlug: "novanet_support", IsStamped: true},
+				Parties: []PartySnapshot{
+					{Role: RoleOriginator, Number: "1000", AgentID: tc.agent, ExtensionNumber: "1000",
+						ChannelID: "chan-agent", AnsweredAt: atPtr(0), ReleasedAt: atPtr(20)},
+					{Role: RoleTarget, Number: "95001", IsBotLeg: true, CreatedAt: at(1),
+						AnsweredAt: atPtr(2), ReleasedAt: atPtr(20),
+						Bridges: []BridgeSpan{{OtherChannelID: "chan-agent", StartedAt: at(2), EndedAt: at(20)}}},
+				},
+			}
+			ledger := &memoryLedger{}
+			newAssembler(ledger, staticQueues{}).CallFinished(snap)
+			awaitCDRs(t, ledger, 1)
+
+			got := ledger.cdrs[0]
+			if got.Status != store.CDRStatusAnswered || got.MissedReason != "" {
+				t.Errorf("status=%q missedReason=%q, want ANSWERED and no reason: the bot answered",
+					got.Status, got.MissedReason)
+			}
+			if got.FromNumber != "1000" || got.ToNumber != "95001" {
+				t.Errorf("%q → %q, want 1000 → 95001", got.FromNumber, got.ToNumber)
+			}
+			if tc.agent != nil {
+				if got.PrimaryAgentID == nil || *got.PrimaryAgentID != agentID ||
+					len(got.AgentIDs) != 1 || got.AgentIDs[0] != agentID {
+					t.Errorf("primary=%v agentIds=%v, want the agent who dialled",
+						got.PrimaryAgentID, got.AgentIDs)
+				}
+			} else if got.PrimaryAgentID != nil || len(got.AgentIDs) != 0 {
+				t.Errorf("primary=%v agentIds=%v, want none: nobody was signed in",
+					got.PrimaryAgentID, got.AgentIDs)
+			}
+			if got.TalkSec != 0 {
+				t.Errorf("talkSec = %d, want 0: no person was reached", got.TalkSec)
+			}
+			if got.IsContained {
+				t.Error("the bot answering an agent was counted as containing a customer")
+			}
+			if got.BillSec != 0 {
+				t.Errorf("billSec = %d, want 0: no carrier leg answered", got.BillSec)
+			}
+			if got.BotSec != 18 {
+				t.Errorf("botSec = %d, want the bot's 18", got.BotSec)
+			}
+			var kinds []string
+			for _, leg := range got.Legs {
+				kinds = append(kinds, leg.Kind+":"+leg.Label)
+			}
+			if !slices.Equal(kinds, []string{"AGENT:1000", "BOT:novanet_support"}) {
+				t.Errorf("legs = %v, want the agent and the bot", kinds)
+			}
+		})
+	}
+}
+
+// An agent's call that the bot never stamped anything on (the agent hung up
+// first) is still the agent's call.
+func TestAnAgentWhoHangsUpOnTheBotStillOwnsTheCall(t *testing.T) {
+	t.Parallel()
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(10),
+		Bot: BotShare{DID: "95001"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "1000", ExtensionNumber: "1000",
+				AnsweredAt: atPtr(0), ReleasedAt: atPtr(10)},
+			{Role: RoleTarget, Number: "95001", IsBotLeg: true, CreatedAt: at(1),
+				AnsweredAt: atPtr(2), ReleasedAt: atPtr(10),
+				Bridges: []BridgeSpan{{StartedAt: at(2), EndedAt: at(10)}}},
+		},
+	}
+	ledger := &memoryLedger{}
+	var buf bytes.Buffer
+	NewCDRAssembler(ledger, staticQueues{}, nil,
+		slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn}))).CallFinished(snap)
+	awaitCDRs(t, ledger, 1)
+	if got := ledger.cdrs[0]; got.Status != store.CDRStatusAnswered || got.BotSec != 8 {
+		t.Errorf("status=%q botSec=%d, want ANSWERED with the bot's 8 from its bridge",
+			got.Status, got.BotSec)
+	}
+	// The bot had no moment to stamp its time, so there is nothing to check
+	// the bridge against (seen live on the first such call).
+	if strings.Contains(buf.String(), "stamped duration disagrees") {
+		t.Errorf("warned about a duration nobody stamped: %s", buf.String())
+	}
+}
+
+// A caller from outside whom the bot kept is still the bot's to write.
+func TestACallerTheBotKeptIsStillLeftToTheBot(t *testing.T) {
+	t.Parallel()
+	snap := Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atPtr(40),
+		Bot: BotShare{DID: "95001"},
+		Parties: []PartySnapshot{
+			{Role: RoleOriginator, Number: "13800138000", AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+			{Role: RoleTarget, Number: "95001", IsBotLeg: true, AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
+		},
+	}
+	ledger := &memoryLedger{}
+	newAssembler(ledger, staticQueues{}).CallFinished(snap)
+	time.Sleep(100 * time.Millisecond)
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.cdrs) != 0 {
+		t.Errorf("wrote %d cdrs for a contained inbound call, want none", len(ledger.cdrs))
+	}
+}
+
+// awaitCDRs waits for the assembler's goroutine to write n rows, then gives a
+// wrong extra write time to land before the caller judges.
+func awaitCDRs(t *testing.T, ledger *memoryLedger, n int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ledger.mu.Lock()
+		got := len(ledger.cdrs)
+		ledger.mu.Unlock()
+		if got >= n {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if len(ledger.cdrs) != n {
+		t.Fatalf("wrote %d cdrs, want %d", len(ledger.cdrs), n)
+	}
+}

@@ -104,7 +104,8 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		// leg it dials towards the bot, so a share was never empty and both
 		// paths raced for every contained call, settled silently by whichever
 		// insert lost the primary key.
-		if !hasBotLeg(snap) || snap.Bot.HandedOver() {
+		originator, _ := split(snap)
+		if !hasBotLeg(snap) || snap.Bot.HandedOver() || isAgentPlaced(originator) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
 				a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)
@@ -113,6 +114,20 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		}
 		a.ingestRecording(snap)
 	}()
+}
+
+// isAgentPlaced reports whether an agent's phone placed the call, which is not
+// the same as whether the originator is an agent we can name. They coincided
+// until a system could place a call for an agent who never signed into this
+// application: presence then has nothing to say about them, the originator
+// carries no agent id, and the call was recorded with talk_sec zero and a
+// DIALING leg at the agent's own extension instead of the trunk it actually
+// reached — every third-party call reading as no conversation at all
+// (measured live 2026-08-26, 86 answered seconds recorded as 0). The
+// extension is the fact that survives the logout.
+func isAgentPlaced(originator *PartySnapshot) bool {
+	return originator != nil &&
+		(originator.AgentID != nil || originator.ExtensionNumber != "")
 }
 
 // hasBotLeg reports whether the switch dialed this call towards the AI
@@ -202,9 +217,13 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// sentence has finished playing. The channel variable the bot stamps is
 	// written when it decides to transfer, several seconds earlier, and those
 	// seconds were landing in no column at all.
+	//
+	// Only a stamped figure is compared. An agent who hangs up on a bot they
+	// dialled leaves it no moment to stamp one, and a 0 against the bridge
+	// warned on every such call with nothing wrong.
 	if bot := botLeg(snap); bot != nil {
 		if bridged := BridgedSec([]*PartySnapshot{bot}, cdr.EndedAt); bridged > 0 {
-			if drift := bridged - cdr.BotSec; drift > 2 || drift < -2 {
+			if drift := bridged - cdr.BotSec; snap.Bot.IsStamped && (drift > 2 || drift < -2) {
 				a.log.Warn("the bot's stamped duration disagrees with its bridge",
 					"callId", snap.CallID, "stampedSec", cdr.BotSec, "bridgedSec", bridged)
 			}
@@ -216,18 +235,9 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// originator, so the call is theirs no matter who they reached, and
 	// whether anybody picked up is decided on the leg dialled out — the
 	// agent's own leg auto-answers in front of them and says nothing about
-	// the person being called.
-	// The question is whether an agent's *phone* placed it, which is not the
-	// same as whether the originator is an agent we can name. They coincided
-	// until a system could place a call for an agent who never signed into
-	// this application: presence then has nothing to say about them, the
-	// originator carries no agent id, and the call was recorded with talk_sec
-	// zero and a DIALING leg at the agent's own extension instead of the trunk
-	// it actually reached — every third-party call reading as no conversation
-	// at all (measured live 2026-08-26, 86 answered seconds recorded as 0).
-	// The extension is the fact that survives the logout.
-	isAgentPlaced := originator != nil &&
-		(originator.AgentID != nil || originator.ExtensionNumber != "")
+	// the person being called. When what they reached was a bot, there is no
+	// leg dialled out and the bot's answer is the call's.
+	placed := isAgentPlaced(originator)
 
 	if originator != nil {
 		cdr.FromNumber = originator.Number
@@ -235,7 +245,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		switch {
 		case cdr.DID == "":
 			cdr.ToNumber = originator.OtherNumber
-		case snap.CallType == events.CallTypeOutbound && !isAgentPlaced:
+		case snap.CallType == events.CallTypeOutbound && !placed:
 			// A DID on a call this platform placed is the number the call
 			// went out from, not one anybody dialled — and the leg the
 			// registry calls the originator is the customer's, because we
@@ -285,7 +295,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	}
 
 	dialled := dialledLegs(snap)
-	if isAgentPlaced {
+	if placed {
 		// Only when there is one to name. An agent's phone placing a call and
 		// an agent being on it are the same event only while they are signed
 		// in; attribution stays presence's answer to give.
@@ -304,7 +314,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// which is a question about the leg facing whoever charges for it — so it
 	// is set whenever that leg was answered, including on a call the bot
 	// served and nobody took, which the carrier bills all the same.
-	billed := billedLeg(snap, originator, dialled, isAgentPlaced)
+	billed := billedLeg(snap, originator, dialled, placed)
 	switch {
 	case billed != nil && billed.AnsweredAt != nil:
 		cdr.AnsweredAt = *billed.AnsweredAt
@@ -320,7 +330,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// leg whose codec cannot meet the caller's returns a clean 200 with no
 	// media at all. Only the agent legs' own stretches count — the bot's sit
 	// on the bot's leg, and an agent's leg is never bridged to it.
-	talking := talkingLegs(snap, agentLegs, isAgentPlaced, dialled)
+	talking := talkingLegs(snap, agentLegs, placed, dialled)
 	agentTalkSec := BridgedSec(talking, cdr.EndedAt)
 	firstBridge := FirstBridgeAt(talking)
 
@@ -330,6 +340,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	// call's hid every abandoned queue call here, because every inbound call
 	// meets the bot first.
 	soughtAPerson := len(agentLegs) > 0 || !snap.Queue.JoinedAt.IsZero()
+	metBot := botLeg(snap) != nil || snap.Bot.Sec > 0
 
 	switch {
 	case !firstBridge.IsZero():
@@ -339,14 +350,23 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 			cdr.PrimaryAgentID = reached.AgentID
 			cdr.RingSec = int(firstBridge.Sub(reached.CreatedAt).Seconds())
 		}
-		if cdr.PrimaryAgentID == nil && isAgentPlaced {
+		if cdr.PrimaryAgentID == nil && placed {
 			cdr.PrimaryAgentID = originator.AgentID
 		}
 		if cdr.RingSec < 0 {
 			cdr.RingSec = 0
 		}
 
-	case !isAgentPlaced && !soughtAPerson &&
+	case !soughtAPerson && placed && metBot:
+		// An agent dialled a bot number and the bot answered them. The call
+		// is the agent's, so they are its primary agent, but no person was
+		// reached: talk_sec stays 0 (the bot's time is bot_sec) and the call
+		// is not contained, because containment counts customers the bot
+		// resolved.
+		cdr.Status = store.CDRStatusAnswered
+		cdr.PrimaryAgentID = originator.AgentID
+
+	case !placed && !soughtAPerson &&
 		(snap.Bot.Sec > 0 || (originator != nil && originator.AnsweredAt != nil)):
 		// The bot answered and the call stayed with it, or the call never
 		// sought a person at all.
@@ -358,8 +378,21 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.RingSec = ringSpan(agentLegs)
 	}
 
-	if isAgentPlaced {
+	if placed {
 		cdr.Legs = buildLegs(snap, originator, append(slices.Clone(agentLegs), dialled...), cdr.BotSec)
+		if metBot && len(dialled) == 0 {
+			// The agent is a party of a call they placed to a bot, and
+			// nothing else on the row names them.
+			leg := store.Leg{Kind: "AGENT", Label: originator.Number}
+			if originator.AnsweredAt != nil {
+				end := cdr.EndedAt
+				if originator.ReleasedAt != nil {
+					end = *originator.ReleasedAt
+				}
+				leg.DurationSec = max(0, int(end.Sub(*originator.AnsweredAt).Seconds()))
+			}
+			cdr.Legs = slices.Insert(cdr.Legs, 0, leg)
+		}
 	} else {
 		cdr.Legs = buildLegs(snap, originator, agentLegs, cdr.BotSec)
 	}

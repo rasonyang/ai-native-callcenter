@@ -101,6 +101,13 @@ if overflow == "BOT_FLOW" then
     session:setVariable("sip_h_X-AICC-DID", target)
     session:setVariable("sip_h_X-AICC-Language", language)
     session:setVariable("sip_h_X-AICC-ANI", session:getVariable("caller_id_number") or "")
+    -- The type travels as on the inbound path: an agent's own call that
+    -- overflowed here is still theirs, and the bot must not write it up as a
+    -- customer's call it contained. A customer's channel carries none.
+    local call_type = session:getVariable("aicc_call_type")
+    if call_type ~= nil and call_type ~= "" then
+      session:setVariable("sip_h_X-AICC-Call-Type", call_type)
+    end
     session:setVariable("sip_h_X-AICC-Channel-ID", session:getVariable("uuid"))
     session:setVariable("sip_h_X-AICC-Overflow-Queue", queue.name)
     session:execute("bridge",

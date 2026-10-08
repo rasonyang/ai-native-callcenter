@@ -34,7 +34,9 @@ type Ledger interface {
 // — hangup, caller hung up, contained or failed — is the bot's to write. A
 // call the bot hands to a person is not finished: the human path writes the
 // one CDR at the real end, and the bot's share travels there as channel
-// variables on the caller's leg.
+// variables on the caller's leg. A call an agent placed to a bot number is the
+// agent's call whoever it reached, so the human path writes its row whether or
+// not the bot hands it on (callFacts.isPlacedByAgent).
 type callRecorder struct {
 	callID     uuid.UUID
 	startedAt  time.Time
@@ -219,6 +221,14 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	if ledger == nil {
 		return
 	}
+	// A call an agent's phone placed to a bot number belongs to the human
+	// path, which writes the one CDR with the agent on it. Written here, the
+	// row had the bot as its only leg, no agent, was marked contained and
+	// billed the agent for the whole call (#76, #104). The bot's share has
+	// been stamped onto the agent's channel, where the assembler reads it.
+	if call.isPlacedByAgent() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -258,8 +268,7 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	// far side. On a call that came in, the far side is the caller and the DID
 	// is what they dialled. On a call the bot placed to a customer, the far
 	// side is the person answering and the DID is the number shown to them.
-	// An agent's call to a DID is not that: the ANI is the agent's extension
-	// and the DID is what they dialled, whatever its call type.
+	// A call an agent placed to a DID is not written here at all (finish).
 	//
 	// Written as though every call were inbound, an outbound row came out
 	// reversed — and its to_number was always the DID, so no AI outbound call
@@ -350,6 +359,15 @@ type callFacts struct {
 	tech               map[string]any
 	// userData is business data the request attached when it placed the call.
 	userData map[string]any
+}
+
+// isPlacedByAgent reports whether an agent's phone placed this call to the bot
+// number, as click-to-dial or the keypad do. The dialplan types such a call
+// OUTBOUND (or INTERNAL) while a caller from outside sends no type and is
+// INBOUND, and the application's own AI outbound bridge says so with
+// isPlacedToCustomer.
+func (f *callFacts) isPlacedByAgent() bool {
+	return f != nil && f.callType != callTypeInbound && !f.isPlacedToCustomer
 }
 
 // callType mirrors the domain enum without importing the events package into

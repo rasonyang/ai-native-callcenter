@@ -92,6 +92,11 @@ type BotShare struct {
 // what decides who writes the ledger row: a call the bot kept is the bot's
 // story, told from a session that holds the transcript and the containment
 // this path cannot see.
+//
+// It is not the only reason this path writes a row. A call an agent's phone
+// placed to a bot number is written here whoever ended it (isAgentPlaced); the
+// bot stamps aicc_bot_sec on it too, as the tally the row needs, and that
+// stamp changes nothing about who owns the row.
 func (b BotShare) HandedOver() bool { return b.IsStamped }
 
 // IsZero reports whether the call ever met a bot.
