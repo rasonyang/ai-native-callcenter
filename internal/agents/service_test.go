@@ -975,16 +975,17 @@ func TestEveryAgentEventStatesWhetherThePhoneIsRegistered(t *testing.T) {
 
 	// What the switch's sofia::register reaches this service as.
 	svc.ObserveDevice(ctx, "1001", SignalRegistered)
-	if isRegistered, isInService := svc.DeviceState(agentID); isRegistered || isInService {
-		t.Errorf("DeviceState = %v/%v before the agent signed in; the phone is "+
-			"known but it is not yet theirs", isRegistered, isInService)
+	// Registration is a fact about the phone: known before anybody signs in.
+	if isRegistered, isInService, isKnown := svc.DeviceAtExtension("1001"); !isRegistered || !isInService || !isKnown {
+		t.Errorf("DeviceAtExtension = %v/%v/%v before the agent signed in, want a "+
+			"known registered phone in service", isRegistered, isInService, isKnown)
 	}
 
 	if _, err := svc.Login(ctx, agentID, "1001"); err != nil {
 		t.Fatal(err)
 	}
-	if isRegistered, isInService := svc.DeviceState(agentID); !isRegistered || !isInService {
-		t.Errorf("DeviceState = %v/%v, want a registered phone in service",
+	if isRegistered, isInService, _ := svc.DeviceAtExtension("1001"); !isRegistered || !isInService {
+		t.Errorf("DeviceAtExtension = %v/%v after sign-in, want a registered phone in service",
 			isRegistered, isInService)
 	}
 

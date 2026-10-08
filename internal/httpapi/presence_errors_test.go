@@ -31,6 +31,13 @@ func (a phonelessAgents) Ready(context.Context, uuid.UUID) (agents.Presence, err
 
 func (a phonelessAgents) Presence(uuid.UUID) agents.Presence { return a.presence }
 
+// The switch's answer for the presence's own extension, which is what a
+// signed-in agent's presence is rendered against.
+func (a phonelessAgents) DeviceAtExtension(ext string) (bool, bool, bool) {
+	ok := ext == a.presence.ExtensionNumber
+	return ok && a.presence.IsRegistered, ok && a.presence.IsDeviceInService, ok
+}
+
 func TestReadyWithoutARegisteredPhoneIsRefusedByName(t *testing.T) {
 	t.Parallel()
 	svc := phonelessAgents{presence: agents.Presence{

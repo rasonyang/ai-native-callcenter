@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/sipsession"
@@ -337,9 +338,115 @@ func getMe(t *testing.T, s *Server, ac AuthContext) meAnswer {
 // for, at the extension bound to them.
 type registeredAgentPhone struct{ stubAgents }
 
-func (registeredAgentPhone) DeviceState(uuid.UUID) (bool, bool) { return true, true }
+func (registeredAgentPhone) DeviceAtExtension(extension string) (bool, bool, bool) {
+	return extension == "1001", extension == "1001", extension == "1001"
+}
 func (registeredAgentPhone) BoundExtensionFor(context.Context, uuid.UUID) string {
 	return "1001"
+}
+
+// phoneBook is an agent bound to 1001 whose presence is whatever the test set
+// and whose phone is whatever the switch last said, independent of each other
+// as they are in the real service.
+type phoneBook struct {
+	stubAgents
+	presence   agents.Presence
+	registered map[string]bool
+}
+
+func (b *phoneBook) Presence(uuid.UUID) agents.Presence { return b.presence }
+func (b *phoneBook) BoundExtensionFor(context.Context, uuid.UUID) string {
+	return "1001"
+}
+func (b *phoneBook) DeviceAtExtension(extension string) (bool, bool, bool) {
+	r, known := b.registered[extension]
+	return r, r, known
+}
+
+// The phone is on the desk whether or not the agent has signed into presence.
+func TestGetMeReportsThePhoneBeforeTheAgentSignsIn(t *testing.T) {
+	t.Parallel()
+	ac := agentWithSession(time.Now().Add(time.Hour))
+	book := &phoneBook{registered: map[string]bool{"1001": true}}
+	s := &Server{agents: book}
+
+	got := getMe(t, s, ac)
+	if !got.IsDeviceRegistered || got.DeviceAccount == nil || *got.DeviceAccount != "1001" {
+		t.Errorf("registered phone, no presence: %v/%v, want true/1001", got.IsDeviceRegistered, got.DeviceAccount)
+	}
+
+	book.registered["1001"] = false
+	got = getMe(t, s, ac)
+	if got.IsDeviceRegistered || got.DeviceAccount != nil {
+		t.Errorf("unregistered phone: %v/%v, want false/null", got.IsDeviceRegistered, got.DeviceAccount)
+	}
+}
+
+func getPresence(t *testing.T, s *Server, ac AuthContext) meAnswer {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/agent/presence", nil)
+	r = r.WithContext(contextWithAuth(r.Context(), ac))
+	w := httptest.NewRecorder()
+	s.GetAgentPresence(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("http = %d: %s", w.Code, w.Body)
+	}
+	var got meAnswer
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return got
+}
+
+// A signed-out agent's extension is the bound one, so the presence answers
+// for that phone rather than for whatever the presence last copied.
+func TestAgentPresenceReportsThePhoneWhileSignedOut(t *testing.T) {
+	t.Parallel()
+	ac := agentWithSession(time.Now().Add(time.Hour))
+	book := &phoneBook{registered: map[string]bool{"1001": true}}
+	s := &Server{agents: book}
+
+	got := getPresence(t, s, ac)
+	if !got.IsDeviceRegistered || got.DeviceAccount == nil || *got.DeviceAccount != "1001" {
+		t.Errorf("registered phone, signed out: %v/%v, want true/1001", got.IsDeviceRegistered, got.DeviceAccount)
+	}
+
+	book.registered["1001"] = false
+	got = getPresence(t, s, ac)
+	if got.IsDeviceRegistered || got.DeviceAccount != nil {
+		t.Errorf("unregistered phone, signed out: %v/%v, want false/null", got.IsDeviceRegistered, got.DeviceAccount)
+	}
+}
+
+// After a logout the presence stops being updated, so its own copy of the
+// registration goes stale; the answer must follow the switch instead.
+func TestAgentPresenceDoesNotKeepAStaleRegistrationAfterLogout(t *testing.T) {
+	t.Parallel()
+	ac := agentWithSession(time.Now().Add(time.Hour))
+	var signedIn agents.Presence
+	if err := signedIn.Login("1001", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	signedIn.IsRegistered = true
+	book := &phoneBook{presence: signedIn, registered: map[string]bool{"1001": true}}
+	s := &Server{agents: book}
+
+	if got := getPresence(t, s, ac); !got.IsDeviceRegistered {
+		t.Fatal("signed in at a registered phone: isDeviceRegistered = false")
+	}
+
+	loggedOut := signedIn
+	if err := loggedOut.Logout(time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	loggedOut.IsRegistered = true // the stale copy a logged-out presence keeps
+	book.presence = loggedOut
+	book.registered["1001"] = false // the switch drops the registration afterwards
+
+	got := getPresence(t, s, ac)
+	if got.IsDeviceRegistered || got.DeviceAccount != nil {
+		t.Errorf("after logout and unregister: %v/%v, want false/null", got.IsDeviceRegistered, got.DeviceAccount)
+	}
 }
 
 func keysOf(m map[string]any) []string {
