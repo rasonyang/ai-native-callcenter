@@ -24,6 +24,9 @@ type Store interface {
 	LogStateChange(ctx context.Context, agentID uuid.UUID, p Presence) error
 	AgentProfile(ctx context.Context, agentID uuid.UUID) (Profile, error)
 	Roster(ctx context.Context) ([]RosterEntry, error)
+	// AgentBoundTo is the agent the configuration binds an extension to; ok is
+	// false for an extension bound to nobody.
+	AgentBoundTo(ctx context.Context, extensionNumber string) (agentID uuid.UUID, ok bool, err error)
 
 	// Configuration, as administration edits it.
 	CreateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig, error)
@@ -66,6 +69,9 @@ type Profile struct {
 	// The binding is static: an agent signs in at their own extension and
 	// nowhere else, so sign-in never asks which phone they are at.
 	ExtensionNumber string
+	// ExtensionID is the same binding by identity, which is what a
+	// configuration edit is compared against.
+	ExtensionID *uuid.UUID
 }
 
 // RosterEntry is one row of the agent roster, with presence resolved.
@@ -113,6 +119,10 @@ var (
 	// ErrNoExtensionBound means configuration never gave this agent a phone,
 	// so there is nothing for them to sign in at.
 	ErrNoExtensionBound = errors.New("no extension bound to this agent")
+	// ErrAgentSignedIn refuses to rebind an agent who is signed in: the phone
+	// they are signed in at is the one they are bound to, and moving the
+	// binding under them would leave the two apart.
+	ErrAgentSignedIn = errors.New("the agent is signed in; sign out before changing their extension")
 	// ErrValidation is a rejected configuration change.
 	ErrValidation = errors.New("invalid agent configuration")
 )
@@ -143,6 +153,13 @@ type Service struct {
 	live map[uuid.UUID]*Presence
 	// devices maps extension number to its observed reachability.
 	devices map[string]deviceState
+	// announced is, per extension, the device state the last DEVICE_* event
+	// told the agent's stream. It is deliberately not devices: the reconnect
+	// sweep writes devices quietly (NoteDevice) before it announces, so
+	// comparing against devices would silence the sweep for exactly the phones
+	// that changed while the link was down. It moves only when an event is
+	// published, and an extension bound to nobody has no entry.
+	announced map[string]deviceState
 	// lastWrapUpCall is the call each agent most recently began after-call
 	// work for. It outlives the wrap-up window on purpose: an agent whose
 	// timer ran out while they were still typing the note has not lost the
@@ -191,24 +208,22 @@ func NewService(store Store, switchCtl SwitchControl, pub Publisher) *Service {
 		pub:            pub,
 		live:           make(map[uuid.UUID]*Presence),
 		devices:        make(map[string]deviceState),
+		announced:      make(map[string]deviceState),
 		lastWrapUpCall: make(map[uuid.UUID]uuid.UUID),
 		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
 
-// Login signs an agent in at an extension.
-func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber string) (Presence, error) {
+// Login signs an agent in at the extension bound to them. There is no other
+// phone to sign in at: the binding is configuration, and the phone side only
+// ever issues a credential for it.
+func (s *Service) Login(ctx context.Context, agentID uuid.UUID) (Presence, error) {
 	profile, err := s.store.AgentProfile(ctx, agentID)
 	if err != nil {
 		return Presence{}, fmt.Errorf("%w: %w", ErrUnknownAgent, err)
 	}
 
-	// The agent↔extension binding is static configuration. A caller may still
-	// name an extension explicitly, but the ordinary sign-in sends none and
-	// lands on the phone the agent is bound to.
-	if extensionNumber == "" {
-		extensionNumber = profile.ExtensionNumber
-	}
+	extensionNumber := profile.ExtensionNumber
 	if extensionNumber == "" {
 		return Presence{}, ErrNoExtensionBound
 	}
@@ -229,6 +244,7 @@ func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber 
 	// unreachable until the phone happens to re-register.
 	s.applyDeviceLocked(p)
 	snapshot := *p
+	dev := s.devices[profile.ExtensionNumber]
 	s.mu.Unlock()
 
 	if err := s.persist(ctx, agentID, snapshot); err != nil {
@@ -238,7 +254,7 @@ func (s *Service) Login(ctx context.Context, agentID uuid.UUID, extensionNumber 
 	// Registering with the switch is what makes the agent addressable at all,
 	// so it happens on sign-in rather than on first ready.
 	s.mirrorRegistration(profile, snapshot)
-	s.publish(ctx, events.TypeAgentLoggedIn, profile, snapshot)
+	s.publish(ctx, events.TypeAgentLoggedIn, profile, snapshot, dev)
 	return snapshot, nil
 }
 
@@ -463,7 +479,10 @@ func (s *Service) SetOnCall(ctx context.Context, agentID uuid.UUID, onCall bool,
 	s.mu.Unlock()
 
 	if profile, err := s.store.AgentProfile(ctx, agentID); err == nil {
-		s.publish(ctx, events.TypeAgentAvailability, profile, snapshot)
+		s.mu.Lock()
+		dev := s.devices[profile.ExtensionNumber]
+		s.mu.Unlock()
+		s.publish(ctx, events.TypeAgentAvailability, profile, snapshot, dev)
 	}
 }
 
@@ -555,9 +574,10 @@ func (s *Service) NoteDevice(extensionNumber string, isRegistered, isInService b
 
 func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, signal DeviceSignal) {
 	isRegistered, isInService := signal.state()
+	dev := deviceState{isRegistered: isRegistered, isInService: isInService}
 
 	s.mu.Lock()
-	s.devices[extensionNumber] = deviceState{isRegistered: isRegistered, isInService: isInService}
+	s.devices[extensionNumber] = dev
 
 	var (
 		agentID  uuid.UUID
@@ -575,6 +595,7 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, sig
 	s.mu.Unlock()
 
 	if !found {
+		s.announceToSignedOutAgent(ctx, extensionNumber, signal, dev)
 		return
 	}
 	profile, err := s.store.AgentProfile(ctx, agentID)
@@ -596,7 +617,12 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, sig
 	// a registered phone that stopped answering computes to (true, false) and
 	// was announced as DEVICE_UNREGISTERED, a claim about the other axis that
 	// was simply untrue. The caller knows which signal arrived; it says so.
-	s.publish(ctx, signal.eventType(), profile, snapshot)
+	//
+	// The payload carries the signal's own state, so a DEVICE_REGISTERED can
+	// never say the phone is not registered, whatever arrives next.
+	if s.claimAnnouncement(extensionNumber, dev) {
+		s.publish(ctx, signal.eventType(), profile, snapshot, dev)
+	}
 
 	// Cause, then consequence. The phone going away is what the switch said;
 	// the agent leaving READY is what this service did about it, and the two
@@ -607,6 +633,57 @@ func (s *Service) ObserveDevice(ctx context.Context, extensionNumber string, sig
 		s.releaseForLostDevice(ctx, agentID)
 	case SignalRegistered:
 		s.restoreForReturnedDevice(ctx, agentID)
+	}
+}
+
+// claimAnnouncement reports whether a device state differs from what the last
+// DEVICE_* event for the extension told the stream, and if so records it as
+// told. A REGISTER refresh of a phone that is already registered, or a sweep's
+// REACHABLE for one already reachable, claims nothing. The caller publishes
+// right after a true answer and nowhere else, which is what keeps the baseline
+// to what was actually published.
+func (s *Service) claimAnnouncement(extensionNumber string, dev deviceState) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if last, ok := s.announced[extensionNumber]; ok && last == dev {
+		return false
+	}
+	s.announced[extensionNumber] = dev
+	return true
+}
+
+// announceToSignedOutAgent tells the agent bound to an extension that their
+// phone changed, when nobody is signed in there.
+//
+// An agent who has not signed in still has a phone, and a cockpit that shows
+// it should hear when it registers. This only publishes: the agent is signed
+// out, so there is no routing to withdraw or restore, nothing for the switch
+// mirror to say, and no presence to change. An extension bound to nobody
+// reaches no agent and keeps no baseline.
+func (s *Service) announceToSignedOutAgent(ctx context.Context, extensionNumber string, signal DeviceSignal, dev deviceState) {
+	if extensionNumber == "" {
+		return
+	}
+	agentID, ok, err := s.store.AgentBoundTo(ctx, extensionNumber)
+	if err != nil || !ok {
+		return
+	}
+	profile, err := s.store.AgentProfile(ctx, agentID)
+	if err != nil {
+		return
+	}
+
+	s.mu.Lock()
+	p := *s.presenceLocked(agentID)
+	s.mu.Unlock()
+	// Signed in, and so not through this path: either at this very extension,
+	// racing the lookup above (their sign-in carries the device state itself),
+	// or somewhere else, which the restore at startup no longer permits.
+	if !p.IsLoggedOut() {
+		return
+	}
+	if s.claimAnnouncement(extensionNumber, dev) {
+		s.publish(ctx, signal.eventType(), profile, p, dev)
 	}
 }
 
@@ -714,12 +791,38 @@ func (s *Service) UpdateAgent(ctx context.Context, cfg AgentConfig) (AgentConfig
 	if err != nil {
 		return AgentConfig{}, err
 	}
+	before, err := s.store.AgentProfile(ctx, cfg.AgentID)
+	if err != nil {
+		return AgentConfig{}, err
+	}
+	if !sameExtension(before.ExtensionID, cfg.DefaultExtensionID) && !s.Presence(cfg.AgentID).IsLoggedOut() {
+		return AgentConfig{}, ErrAgentSignedIn
+	}
 	out, err := s.store.UpdateAgent(ctx, cfg)
 	if err != nil {
 		return AgentConfig{}, err
 	}
+	if !sameExtension(before.ExtensionID, out.DefaultExtensionID) {
+		// A new holder has been told nothing about this phone. Forgetting what
+		// the stream was last told lets the next signal reach them even when
+		// the phone has not changed since the previous holder heard it.
+		after, afterErr := s.store.AgentProfile(ctx, out.AgentID)
+		s.mu.Lock()
+		delete(s.announced, before.ExtensionNumber)
+		if afterErr == nil {
+			delete(s.announced, after.ExtensionNumber)
+		}
+		s.mu.Unlock()
+	}
 	s.mirrorConfig(ctx, out.AgentID)
 	return out, nil
+}
+
+func sameExtension(a, b *uuid.UUID) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return *a == *b
 }
 
 // DeleteAgent removes the agent identity. Presence is dropped with it, so a
@@ -800,7 +903,10 @@ func (s *Service) Roster(ctx context.Context) ([]RosterEntry, error) {
 			id := *p.CurrentCallID
 			rows[i].CurrentCallID = &id
 		}
-		rows[i].IsRegistered = p.IsRegistered
+		// The phone is the one bound to the agent, signed in or not: the row
+		// answers the same question as every other surface, and the stream
+		// tells a supervisor about a signed-out agent's phone too.
+		rows[i].IsRegistered = s.devices[rows[i].DefaultExtensionNumber].isRegistered
 	}
 	return rows, nil
 }
@@ -813,8 +919,13 @@ func (s *Service) Restore(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", ErrStorage, err)
 	}
 
+	type demoted struct {
+		agentID uuid.UUID
+		p       Presence
+	}
+	var signedOut []demoted
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for _, row := range rows {
 		p := s.presenceLocked(row.AgentID)
 		p.State, p.Reason, p.ExtensionNumber, p.EnteredAt = row.State, row.Reason, row.Extension, row.EnteredAt
@@ -822,7 +933,25 @@ func (s *Service) Restore(ctx context.Context) error {
 			id := *row.WrapUpCallID
 			p.WrapUpCallID = &id
 		}
+		// Signed in before sign-in was tied to the binding, at a phone that is
+		// not the agent's own. That presence has no meaning any more, so it is
+		// ended rather than carried: no event, as no stream is connected yet.
+		if !p.IsLoggedOut() && p.ExtensionNumber != row.DefaultExtensionNumber {
+			_ = p.Logout(s.now())
+			signedOut = append(signedOut, demoted{row.AgentID, *p})
+			continue
+		}
 		s.applyDeviceLocked(p)
+	}
+	s.mu.Unlock()
+
+	for _, d := range signedOut {
+		if err := s.persist(ctx, d.agentID, d.p); err != nil {
+			return err
+		}
+		if profile, err := s.store.AgentProfile(ctx, d.agentID); err == nil {
+			s.mirrorStatus(profile, d.p)
+		}
 	}
 	return nil
 }
@@ -903,6 +1032,7 @@ func (s *Service) change(ctx context.Context, agentID uuid.UUID, eventType event
 		return before, err
 	}
 	snapshot := *p
+	dev := s.devices[profile.ExtensionNumber]
 	s.mu.Unlock()
 
 	if err := s.persist(ctx, agentID, snapshot); err != nil {
@@ -914,7 +1044,7 @@ func (s *Service) change(ctx context.Context, agentID uuid.UUID, eventType event
 	}
 
 	s.mirrorStatus(profile, snapshot)
-	s.publish(ctx, eventType, profile, snapshot)
+	s.publish(ctx, eventType, profile, snapshot, dev)
 	return snapshot, nil
 }
 
@@ -1041,7 +1171,13 @@ func (s *Service) mirrorStatus(profile Profile, p Presence) {
 	}
 }
 
-func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p Presence) {
+// publish tells the agent's stream where they stand. dev is the device table's
+// entry for the agent's bound extension, read by the caller in the same
+// critical section as the presence snapshot: the phone is a fact about the
+// extension, not about the sign-in, so the payload cannot take it from the
+// presence copy (stale while signed out), and reading the table here, after
+// the lock was released, would let a later signal leak into an earlier event.
+func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p Presence, dev deviceState) {
 	if s.pub == nil {
 		return
 	}
@@ -1054,11 +1190,14 @@ func (s *Service) publish(ctx context.Context, t events.Type, profile Profile, p
 		// absent when there is no registration: a screen that has to tell
 		// "the switch holds no phone for them" from "this event does not
 		// carry the field" cannot do it from an omitted key.
-		"isDeviceRegistered": p.IsRegistered,
+		"isDeviceRegistered": false,
 		"deviceAccount":      nil,
 	}
-	if p.IsRegistered && p.ExtensionNumber != "" {
-		payload["deviceAccount"] = p.ExtensionNumber
+	// Never true with a null account: both come from the same entry, and an
+	// agent with no binding has no phone to name.
+	if dev.isRegistered && profile.ExtensionNumber != "" {
+		payload["isDeviceRegistered"] = true
+		payload["deviceAccount"] = profile.ExtensionNumber
 	}
 	if p.Reason != "" {
 		payload["reason"] = string(p.Reason)

@@ -94,6 +94,22 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 	return i, err
 }
 
+const getAgentByExtensionNumber = `-- name: GetAgentByExtensionNumber :one
+SELECT a.id
+FROM agents a
+JOIN extensions e ON e.id = a.default_extension_id
+WHERE e.number = $1
+`
+
+// The agent whose bound phone this is. uq_agents_default_extension makes the
+// answer unique, so at most one row matches.
+func (q *Queries) GetAgentByExtensionNumber(ctx context.Context, number string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getAgentByExtensionNumber, number)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getAgentByUserID = `-- name: GetAgentByUserID :one
 SELECT id, user_id, callcenter_name, is_auto_answer, default_extension_id, created_at FROM agents WHERE user_id = $1
 `

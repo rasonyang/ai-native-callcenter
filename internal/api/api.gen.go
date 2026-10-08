@@ -927,11 +927,8 @@ type Agent struct {
 	UserID openapi_types.UUID `json:"userId"`
 }
 
-// AgentLoginRequest Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to.
-type AgentLoginRequest struct {
-	// ExtensionNumber Overrides the bound extension. Omit it to use the agent's configured phone; an agent with no binding is refused with CONFLICT.
-	ExtensionNumber *string `json:"extensionNumber,omitempty"`
-}
+// AgentLoginRequest Sign-in takes no arguments: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. The body is optional, and any property in it is refused with VALIDATION_FAILED rather than quietly ignored.
+type AgentLoginRequest = map[string]interface{}
 
 // AgentNotReadyRequest defines model for AgentNotReadyRequest.
 type AgentNotReadyRequest struct {

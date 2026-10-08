@@ -92,7 +92,7 @@ export interface paths {
         put?: never;
         /**
          * Sign in to a phone
-         * @description Binds the agent to an extension and enters NOT_READY (reason LOGIN). Requires the AGENT role.
+         * @description Signs the agent in at the extension bound to them and enters NOT_READY (reason LOGIN). The request names no extension: a body carrying any property is refused with VALIDATION_FAILED before presence is touched. An agent with no bound extension is refused with CONFLICT. Requires the AGENT role.
          */
         post: operations["agentLogin"];
         delete?: never;
@@ -245,7 +245,7 @@ export interface paths {
         get?: never;
         /**
          * Rewrite an agent's configuration
-         * @description Rebinds the phone, renames the switch identifier, or changes wrap-up.
+         * @description Rebinds the phone, renames the switch identifier, or changes wrap-up. Changing or clearing the bound extension of an agent who is signed in is refused with CONFLICT; the agent signs out first.
          */
         put: operations["updateAgent"];
         post?: never;
@@ -1634,11 +1634,8 @@ export interface components {
              */
             createdAt: string;
         };
-        /** @description Sign-in takes no arguments in the ordinary case: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. */
-        AgentLoginRequest: {
-            /** @description Overrides the bound extension. Omit it to use the agent's configured phone; an agent with no binding is refused with CONFLICT. */
-            extensionNumber?: string;
-        };
+        /** @description Sign-in takes no arguments: the agent-to-extension binding is static configuration, so the platform signs the agent in at the phone they are bound to. The body is optional, and any property in it is refused with VALIDATION_FAILED rather than quietly ignored. */
+        AgentLoginRequest: Record<string, never>;
         AgentNotReadyRequest: {
             /** @description Omitted or empty defaults to BREAK. */
             reason?: components["schemas"]["NotReadyReason"];
@@ -2582,7 +2579,7 @@ export interface components {
             availability: components["schemas"]["Availability"];
             displayName: string;
             reason?: components["schemas"]["NotReadyReason"];
-            /** @description The extension bound to the agent; absent while none is. */
+            /** @description The extension the agent is signed in at; absent while signed out. deviceAccount, not this field, names a registered phone. */
             extensionNumber?: string;
             /**
              * Format: uuid
@@ -3082,7 +3079,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["AgentLoginRequest"];
             };

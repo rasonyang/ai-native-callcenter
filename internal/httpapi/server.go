@@ -26,7 +26,7 @@ import (
 
 // AgentService is the agent presence surface used by the API.
 type AgentService interface {
-	Login(ctx context.Context, agentID uuid.UUID, extensionNumber string) (agents.Presence, error)
+	Login(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
 	Logout(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
 	Ready(ctx context.Context, agentID uuid.UUID) (agents.Presence, error)
 	NotReady(ctx context.Context, agentID uuid.UUID, reason agents.Reason) (agents.Presence, error)

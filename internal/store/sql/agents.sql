@@ -11,6 +11,14 @@ SELECT * FROM agents WHERE id = $1;
 -- name: GetAgentByUserID :one
 SELECT * FROM agents WHERE user_id = $1;
 
+-- name: GetAgentByExtensionNumber :one
+-- The agent whose bound phone this is. uq_agents_default_extension makes the
+-- answer unique, so at most one row matches.
+SELECT a.id
+FROM agents a
+JOIN extensions e ON e.id = a.default_extension_id
+WHERE e.number = $1;
+
 -- name: UpdateAgent :one
 UPDATE agents
 SET callcenter_name = $2, is_auto_answer = $3, default_extension_id = $4

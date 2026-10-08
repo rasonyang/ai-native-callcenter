@@ -256,7 +256,7 @@ type stubAgents struct{}
 
 func (stubAgents) MirrorAgent(context.Context, uuid.UUID) {}
 
-func (stubAgents) Login(context.Context, uuid.UUID, string) (agents.Presence, error) {
+func (stubAgents) Login(context.Context, uuid.UUID) (agents.Presence, error) {
 	return agents.Presence{}, nil
 }
 func (stubAgents) Logout(context.Context, uuid.UUID) (agents.Presence, error) {

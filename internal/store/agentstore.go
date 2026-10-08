@@ -113,8 +113,23 @@ func (a *AgentStore) AgentProfile(ctx context.Context, agentID uuid.UUID) (agent
 		if ext, err := a.q.GetExtension(ctx, *row.DefaultExtensionID); err == nil {
 			profile.ExtensionNumber = ext.Number
 		}
+		profile.ExtensionID = row.DefaultExtensionID
 	}
 	return profile, nil
+}
+
+// AgentBoundTo reads which agent the configuration binds an extension to. The
+// binding is unique (uq_agents_default_extension), so there is at most one;
+// ok is false for an extension bound to nobody.
+func (a *AgentStore) AgentBoundTo(ctx context.Context, extensionNumber string) (agentID uuid.UUID, ok bool, err error) {
+	id, err := a.q.GetAgentByExtensionNumber(ctx, extensionNumber)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return uuid.Nil, false, nil
+	}
+	if err != nil {
+		return uuid.Nil, false, fmt.Errorf("get agent by extension: %w", err)
+	}
+	return id, true, nil
 }
 
 // CreateAgent stores a new agent identity.

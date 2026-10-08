@@ -6,3 +6,8 @@
 # Design 04-api-sse.md always specified one kind-discriminated endpoint; the
 # separate dial path was drift. The only client is this repo's own SPA.
 api path removed without deprecation POST /calls/dial
+#
+# 2026-10-08 — AgentLoginRequest.extensionNumber removed (#106). An agent signs in only at the
+# extension bound to them, and a body naming any extension is refused with 422. The only
+# client is this repository's own SPA, which never sent the field.
+api POST /agent/login request-property-removed removed the request property `extensionNumber`

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -108,19 +109,24 @@ func (s *Server) AgentLogin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	// The body is optional: an agent signs in at the extension configuration
-	// bound to them, and only names one to override it.
-	var req struct {
-		ExtensionNumber string `json:"extensionNumber"`
-	}
-	if r.ContentLength > 0 {
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil {
+	// The body is optional and has no properties: an agent signs in at the
+	// extension configuration binds to them. A request that names one, or
+	// anything else, is refused here rather than quietly corrected, before
+	// presence is touched.
+	if r.ContentLength != 0 {
+		var req map[string]json.RawMessage
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed, "malformed request body", nil)
+			return
+		}
+		if len(req) > 0 {
+			writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+				"sign-in takes no properties: the agent signs in at the extension bound to them", nil)
 			return
 		}
 	}
 
-	p, err := s.agents.Login(r.Context(), agentID, req.ExtensionNumber)
+	p, err := s.agents.Login(r.Context(), agentID)
 	s.writePresence(w, r, agentID, p, err)
 }
 
@@ -359,6 +365,8 @@ func (s *Server) writeAgentConfigError(w http.ResponseWriter, r *http.Request, e
 	switch {
 	case errors.Is(err, agents.ErrValidation):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, err.Error(), nil)
+	case errors.Is(err, agents.ErrAgentSignedIn):
+		writeError(w, http.StatusConflict, CodeConflict, err.Error(), nil)
 	case errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such agent", nil)
 	case isUniqueViolation(err):
