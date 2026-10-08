@@ -555,7 +555,7 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 		Parties: []PartySnapshot{
 			// The agent's own leg auto-answers in front of them at 0; what
 			// says the person they called picked up is the bridge at 8.
-			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ChannelID: "chan-agent",
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", ChannelID: "chan-agent",
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(30),
 				Bridges: []BridgeSpan{{OtherChannelID: "chan-out", StartedAt: at(8), EndedAt: at(30)}}},
 			{Role: RoleTarget, Number: "18688886669", ChannelID: "chan-out",
@@ -586,7 +586,7 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 	unanswered := answeredOut
 	unanswered.CallID = uuid.New()
 	unanswered.Parties = []PartySnapshot{
-		{Role: RoleOriginator, Number: "1008", AgentID: &agentID, AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
+		{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
 		{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), ReleasedAt: atPtr(12)},
 	}
 	missed := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), unanswered)
@@ -923,7 +923,7 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 		CallID: uuid.New(), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Parties: []PartySnapshot{
-			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ChannelID: "agent",
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", ChannelID: "agent",
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(40),
 				Bridges: []BridgeSpan{{OtherChannelID: "out", StartedAt: at(6), EndedAt: at(40)}}},
 			{Role: RoleTarget, Number: "18688886669", ChannelID: "out",
@@ -1094,7 +1094,7 @@ func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testin
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(12),
 		Parties: []PartySnapshot{
-			{Role: RoleOriginator, Number: "1008", AgentID: &agentID,
+			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008",
 				AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
 			{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), ReleasedAt: atPtr(12)},
 		},
@@ -1134,7 +1134,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 			CallID: uuid.New(), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(30),
 			Parties: []PartySnapshot{
-				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ExtensionNumber: "1008", ChannelID: "agent",
 					AnsweredAt: atPtr(1), ReleasedAt: atPtr(30), BilledSec: 29},
 				{Role: RoleTarget, Number: "18688886669", ChannelID: "trunk",
 					CreatedAt: at(2), ReleasedAt: atPtr(30)},
@@ -1155,7 +1155,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 			CallID: uuid.New(), CallType: events.CallTypeInternal,
 			CreatedAt: at(0), EndedAt: atPtr(30),
 			Parties: []PartySnapshot{
-				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ChannelID: "agent",
+				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ExtensionNumber: "1008", ChannelID: "agent",
 					AnsweredAt: atPtr(1), ReleasedAt: atPtr(30), BilledSec: 29},
 			},
 		})

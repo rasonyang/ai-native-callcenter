@@ -446,7 +446,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 
 	// A leg dialed towards a signed-in agent belongs to that agent's call, not
 	// to a new one: it is the delivery of a call already in a queue.
-	agentID, agentExtension, isAgentLeg := c.agentForLeg(ev)
+	agentID, agentExtension, isAgentLeg, isMatchedByCaller := c.agentForLeg(ev)
 	// Either pointer answers the same question: which call is this leg the
 	// second half of. mod_callcenter supplies one for a queue delivery; our
 	// own dialplan supplies the other for one extension calling another.
@@ -470,7 +470,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 					"channelId", ev.ChannelID, "callId", member, "error", err)
 				return
 			}
-			c.addParty(ctx, member, ev, agentID, agentExtension, isAgentLeg)
+			c.addParty(ctx, member, ev, agentID, agentExtension, isAgentLeg, isMatchedByCaller)
 			return
 		}
 		// The caller's own leg is not on the books yet. The bridge will still
@@ -491,7 +491,7 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		if err := c.registry.BindChannel(ev.ChannelID, callID); err != nil {
 			slog.WarnContext(ctx, "cannot bind channel", "channelId", ev.ChannelID, "error", err)
 		}
-		c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg)
+		c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg, isMatchedByCaller)
 		return
 	}
 
@@ -507,11 +507,11 @@ func (c *Coordinator) adopt(ctx context.Context, ev SwitchEvent) {
 		slog.WarnContext(ctx, "cannot bind channel", "channelId", ev.ChannelID, "error", err)
 		return
 	}
-	c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg)
+	c.addParty(ctx, callID, ev, agentID, agentExtension, isAgentLeg, isMatchedByCaller)
 }
 
 // addParty appends a leg to a call and announces it.
-func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchEvent, agentID uuid.UUID, agentExtension string, isAgentLeg bool) {
+func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchEvent, agentID uuid.UUID, agentExtension string, isAgentLeg, isMatchedByCaller bool) {
 	var (
 		partyID      uuid.UUID
 		callType     events.CallType
@@ -543,7 +543,14 @@ func (c *Coordinator) addParty(ctx context.Context, callID uuid.UUID, ev SwitchE
 		p.ExtensionNumber = managedExtensionOf(ev)
 		if isAgentLeg {
 			p.AgentID = &agentID
-			if p.ExtensionNumber == "" {
+			// Not when the only link between this leg and the agent is that
+			// the caller's number looks like their extension. A carrier call
+			// whose caller id happens to be 1008 is a customer's leg that
+			// presence has matched to an agent for the screen pop; it is not
+			// at 1008, and writing 1008 on it made the trunk call read as a
+			// call that phone placed (#105). The extension stays what the
+			// leg says, or where the switch delivered it.
+			if p.ExtensionNumber == "" && !isMatchedByCaller {
 				p.ExtensionNumber = agentExtension
 			}
 		}
@@ -1519,9 +1526,9 @@ func managedExtensionOf(ev SwitchEvent) string {
 // under a random contact user, so the switch's destination for a leg dialled
 // at it is a token like "g7bih4lv" — which is what the agent's own screen was
 // being told they were being rung at.
-func (c *Coordinator) agentForLeg(ev SwitchEvent) (agentID uuid.UUID, extension string, ok bool) {
+func (c *Coordinator) agentForLeg(ev SwitchEvent) (agentID uuid.UUID, extension string, ok, isMatchedByCaller bool) {
 	if c.agents == nil {
-		return uuid.Nil, "", false
+		return uuid.Nil, "", false, false
 	}
 	candidates := []string{
 		ev.Raw.Variable("dialed_user"),
@@ -1547,10 +1554,13 @@ func (c *Coordinator) agentForLeg(ev SwitchEvent) (agentID uuid.UUID, extension 
 			continue
 		}
 		if agentID, ok := c.agents.AgentAtExtension(candidate); ok {
-			return agentID, candidate, true
+			isByCaller := ev.Direction != DirectionOutbound && candidate == ev.ANI &&
+				candidate != ev.Raw.Variable("dialed_user") &&
+				candidate != ev.Raw.Variable("aicc_extension")
+			return agentID, candidate, true, isByCaller
 		}
 	}
-	return uuid.Nil, "", false
+	return uuid.Nil, "", false, false
 }
 
 // isMintedID reports whether a call's identity was minted by the dialplan.

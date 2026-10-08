@@ -98,7 +98,10 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		// handed to a person is the bot's story to write — its session holds
 		// the transcript, timings and containment this path cannot see. The
 		// bot-share stamp is what marks a handover, and only then does this
-		// path own the row.
+		// path own the row. The one other case is a call an agent's phone
+		// placed, which is the agent's whoever ended it: that is the leg
+		// saying so (isAgentPlaced), never a caller id that resembles an
+		// extension, so a carrier call from "1008" stays the bot's.
 		//
 		// "Non-empty" was not that test. The dialplan exports the DID to the
 		// leg it dials towards the bot, so a share was never empty and both
@@ -125,9 +128,17 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 // reached — every third-party call reading as no conversation at all
 // (measured live 2026-08-26, 86 answered seconds recorded as 0). The
 // extension is the fact that survives the logout.
+//
+// The extension, and only the extension: it is what the originating leg itself
+// said (aicc_extension, stamped by our own originate and by the directory for
+// an authenticated phone), so a carrier leg never has one. Presence is not a
+// witness here. A trunk call whose caller id equals a signed-in agent's
+// extension is matched to that agent for the screen pop and carries their id,
+// and reading the id as "this agent placed it" made the assembler and the bot
+// ledger both write the same customer's call, the winner decided by timing
+// (#105).
 func isAgentPlaced(originator *PartySnapshot) bool {
-	return originator != nil &&
-		(originator.AgentID != nil || originator.ExtensionNumber != "")
+	return originator != nil && originator.ExtensionNumber != ""
 }
 
 // hasBotLeg reports whether the switch dialed this call towards the AI
