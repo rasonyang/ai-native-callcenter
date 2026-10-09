@@ -28,7 +28,8 @@ go test -race ./...                               # always -race (`make test` ru
 go test -race -run TestName ./internal/voice/     # one test
 go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/  # hot paths: 0 allocs/op, CI fails otherwise
 make lint                                         # go vet + gofmt + oxlint
-sqlc generate                                     # after editing internal/store/sql/*.sql
+sqlc generate                                     # after editing internal/store/sql/*.sql or a migration (pinned version: SQLC_VERSION in Makefile)
+make sqlc-check                                   # the CI gate: regenerate + empty git diff
 # migrations: add internal/store/migrations/NNNNN_name.sql (goose); they run at server startup
 
 # dev server; prerequisites, order and ports: docs/dev-stack.md

@@ -74,9 +74,26 @@ fs-image: ## Build the switch image locally for this machine's architecture (LOA
 fs-push: ## Build and push the multi-arch switch image by hand (VERSION=v0.1.0 required; refuses a dirty tree). A release is pushed by the release workflow
 	VERSION=$(VERSION) freeswitch/build.sh
 
+# The generated files name the sqlc that wrote them, so any other version
+# rewrites every header. CI installs exactly this one (sqlc-install).
+SQLC_VERSION := 1.31.1
+
 .PHONY: generate
 generate: ## Regenerate sqlc query code
 	sqlc generate
+
+.PHONY: sqlc-install
+sqlc-install: ## Install the pinned sqlc (needs cgo)
+	go install github.com/sqlc-dev/sqlc/cmd/sqlc@v$(SQLC_VERSION)
+
+.PHONY: sqlc-check
+sqlc-check: ## CI gate: committed sqlc code matches the migrations and queries
+	@test "$$(sqlc version)" = "v$(SQLC_VERSION)" \
+		|| { echo "sqlc-check: need sqlc v$(SQLC_VERSION), have $$(sqlc version 2>/dev/null || echo none) (make sqlc-install)"; exit 1; }
+	sqlc generate
+	git diff --exit-code -- internal/store/queries
+	@untracked=$$(git ls-files --others --exclude-standard -- internal/store/queries); \
+		test -z "$$untracked" || { echo "$$untracked"; echo 'untracked generated files'; exit 1; }
 
 REDOCLY := $(WEB)/node_modules/.bin/redocly
 
