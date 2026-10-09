@@ -580,7 +580,11 @@ func hangupCauseFor(cause provider.FailureCause) string {
 }
 
 // answerToolCall runs a tool the model asked for, answers it, and follows up
-// whatever phase change the result caused.
+// whatever phase change the result caused. A result that stays in the phase
+// but changes what the phase's instruction renders (a lookup that overwrites a
+// slot the instruction quotes) re-pins the standing instructions too, before
+// the answer, so the turn it asks for already runs under the fresh text and
+// not under the previous record's.
 //
 // One move is answered differently: into a terminal phase that has a line of
 // its own, on a profile that puts that line in the tool result
@@ -615,6 +619,15 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 
 	if !o.isLineTheToolAnswer(moved, runtime) {
 		recorder.toolResult(event.ToolName, output, moved)
+		if moved == "" && runtime.IsInstructionStale() {
+			// Nothing is armed and no line is said: the phase did not change.
+			// A move later in the batch re-pins through enterPhase anyway.
+			log.Info("a tool result changed the phase's instruction; re-pinning",
+				"tool", event.ToolName, "node", runtime.Engine().NodeID())
+			if err := session.Reinstruct(runtime.Instructions()); err != nil {
+				log.Warn("could not update instructions", "error", err)
+			}
+		}
 		if err := session.AnswerTool(event.ToolCallID, output, ""); err != nil {
 			log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
 		}
