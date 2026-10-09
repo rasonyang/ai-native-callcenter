@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 
 import { StatusDot } from '@/components/status-pill'
 import { Button } from '@/components/ui/button'
-import { optionsUrl, usePhoneBridge, webStoreUrl } from '@/lib/phone-bridge'
+import { optionsUrl, useExtensionInstalled, usePhoneBridge, webStoreUrl } from '@/lib/phone-bridge'
 
 /**
  * The three things an agent does once, before their first call.
@@ -15,10 +15,14 @@ import { optionsUrl, usePhoneBridge, webStoreUrl } from '@/lib/phone-bridge'
  * remember — the rows read the extension's own state, so each one completes
  * itself as the agent does it and the card leaves when the last one does.
  *
- * Step 2 has no signal of its own: a content script only runs on a site its
- * owner allowed, so the extension answering hello at all is the proof that
- * this one is allowed. Steps 1 and 2 therefore tick together, and untick
- * together when the extension stops answering.
+ * Step 2 is the extension answering hello: a content script only runs on a
+ * site its owner allowed, so an answer is the proof that this one is allowed.
+ * Step 1 cannot share that signal, or an extension that is installed but not
+ * yet allowed here would read as not installed. It ticks on a probe of the
+ * extension's web-accessible options page, which needs no content script, or
+ * on an answer to hello (a differently keyed build misses the probe but
+ * answers once allowed). Step 2 unticks when the extension stops answering;
+ * step 1 stays while the probe still finds it.
  *
  * Nothing here asks for a refresh to notice a change. An extension that
  * injects into open tabs sets its marker and the bridge says hello again; one
@@ -36,6 +40,8 @@ export function PhoneOnboarding() {
   const isMicrophoneGranted = detected && state?.microphone === 'GRANTED'
   const isRequired = !detected || !isMicrophoneGranted
   const open = isRequired || isOnboardingForced
+  // Only the open card has a step 1 to tick; a closed one need not probe.
+  const isInstalled = useExtensionInstalled(open)
 
   if (!open) return null
 
@@ -69,7 +75,7 @@ export function PhoneOnboarding() {
           <ol className="mt-4 space-y-3">
             <Step
               number={1}
-              isDone={detected}
+              isDone={isInstalled || detected}
               title={t('phone.onboarding.install.title')}
               text={t('phone.onboarding.install.text')}
             >

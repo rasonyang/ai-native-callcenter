@@ -70,6 +70,11 @@ export interface Backend {
   transcriptState?: string
   /** Delays the transcript snapshot, so a test can land it after an event. */
   slowSnapshotMs?: number
+  /**
+   * Whether a `chrome-extension://` fetch (the install probe) resolves. Off by
+   * default, as in a browser without the extension: the request fails.
+   */
+  isExtensionInstalled?: boolean
 }
 
 const BASE = '/api/v1'
@@ -310,12 +315,18 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     transcript: initial.transcript ?? [],
     transcriptState: initial.transcriptState,
     slowSnapshotMs: initial.slowSnapshotMs,
+    isExtensionInstalled: initial.isExtensionInstalled,
   } as Backend
 
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input)
+      // The install probe is not an API request and is not recorded as one.
+      if (url.startsWith('chrome-extension://')) {
+        if (!backend.isExtensionInstalled) throw new TypeError('Failed to fetch')
+        return new Response(null)
+      }
       const path = url.startsWith(BASE) ? url.slice(BASE.length) : url
       const method = init.method ?? 'GET'
       backend.requests.push({
