@@ -8,6 +8,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -1450,6 +1452,14 @@ func startToolPath(t *testing.T, profile provider.Profile, lang string) *toolPat
 
 func startToolPathWith(t *testing.T, profile provider.Profile, lang, flowJSON string) *toolPath {
 	t.Helper()
+	return startToolPathBackend(t, profile, lang, flowJSON, "")
+}
+
+// startToolPathBackend is startToolPathWith for a flow whose tools call a
+// business backend at backendURL.
+func startToolPathBackend(t *testing.T, profile provider.Profile, lang, flowJSON,
+	backendURL string) *toolPath {
+	t.Helper()
 	// The session asks the actions whether the ending is armed, as the
 	// orchestrator wires it; the actions exist only after the session does.
 	var actionsRef atomic.Pointer[callActions]
@@ -1476,7 +1486,7 @@ func startToolPathWith(t *testing.T, profile provider.Profile, lang, flowJSON st
 	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
 	actions.recorder = recorder
 	actionsRef.Store(actions)
-	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
+	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(backendURL), nil, log)
 
 	h := &toolPath{session: session, leg: leg, model: model, actions: actions,
 		engine: engine, done: make(chan struct{})}
@@ -2127,5 +2137,113 @@ func TestTheBotShareOfAnAgentsCallNamesTheFlow(t *testing.T) {
 	}
 	if got := sw.variable("aicc_bot_sec"); got != "" {
 		t.Errorf("aicc_bot_sec = %q: stamping the share must not read as a handover", got)
+	}
+}
+
+//
+// A tool result that changes what the phase's instruction says.
+//
+
+// lookupInPlaceFlow has one phase whose instruction quotes slots its own tool
+// fills, and no rule that leaves the phase (issue #48).
+const lookupInPlaceFlow = `{
+	"id": "lookup-in-place-test",
+	"specVersion": "v2",
+	"initialNode": "report",
+	"global": {"persona": "You answer the phone."},
+	"tools": {
+		"lookup_order": {
+			"description": "Look an order up.",
+			"parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+			"http": {
+				"path": "/order",
+				"body": {"id": "{args.id}"},
+				"successWhen": {"path": "retCode", "equals": "000000"},
+				"result": {"device": "data.device", "note": "data.note"}
+			}
+		}
+	},
+	"nodes": {
+		"report": {
+			"instruction": "The order is a {slots.lookup_order.device}.",
+			"tools": ["lookup_order"]
+		}
+	}
+}`
+
+// callToolNumber has the model call a tool and waits until the wanted number
+// of tool results have been sent back.
+func (h *toolPath) callToolNumber(t *testing.T, n int, name, args string) {
+	t.Helper()
+	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	h.model.events <- provider.Event{
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_" + strconv.Itoa(n),
+		ToolName: name, ToolArgs: args,
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(h.model.recordedToolResults()) >= n {
+			time.Sleep(50 * time.Millisecond)
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("tool call %d (%s) was never answered", n, name)
+}
+
+// A lookup that stays in its phase but overwrites a slot the phase's
+// instruction quotes re-pins the instructions, ahead of the answer, so the turn
+// the answer asks for already runs under the new value. One that changes
+// nothing the instruction shows sends no extra update.
+func TestAToolResultThatChangesThePhasesInstructionRepinsItBeforeTheAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(req.Body)
+		_ = json.Unmarshal(raw, &body)
+		devices := map[any]string{"1": "phone", "2": "tablet", "3": "tablet"}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"retCode": "000000",
+			"data":    map[string]any{"device": devices[body["id"]], "note": body["id"]},
+		})
+	}))
+	defer server.Close()
+
+	h := startToolPathBackend(t, provider.OpenAIProfile(), "en", lookupInPlaceFlow, server.URL)
+
+	h.callToolNumber(t, 1, "lookup_order", `{"id":"1"}`)
+	if got := h.engine.NodeID(); got != "report" {
+		t.Fatalf("node = %q, want the call to stay in report", got)
+	}
+	if got := strings.Join(h.model.recordedCalls(), ","); got != "UpdateInstructions,SendToolResult" {
+		t.Fatalf("calls = %s, want the instructions re-pinned and then the tool answered", got)
+	}
+	h.model.mu.Lock()
+	pinned := append([]string(nil), h.model.instructions...)
+	h.model.mu.Unlock()
+	if len(pinned) != 1 || !strings.Contains(pinned[0], "The order is a phone.") {
+		t.Fatalf("instructions = %q, want one update carrying the looked-up device", pinned)
+	}
+	if h.actions.isArmed() || len(h.model.spokenLines()) != 0 {
+		t.Error("a result that did not change the phase armed an ending or said a line")
+	}
+
+	// Another order: the device changes, so the instructions follow.
+	h.callToolNumber(t, 2, "lookup_order", `{"id":"2"}`)
+	if got := strings.Join(h.model.recordedCalls(), ","); got !=
+		"UpdateInstructions,SendToolResult,UpdateInstructions,SendToolResult" {
+		t.Fatalf("calls = %s, want a re-pin ahead of the second answer", got)
+	}
+	h.model.mu.Lock()
+	pinned = append([]string(nil), h.model.instructions...)
+	h.model.mu.Unlock()
+	if len(pinned) != 2 || !strings.Contains(pinned[1], "The order is a tablet.") {
+		t.Fatalf("instructions = %q, want the second update to carry the tablet", pinned)
+	}
+
+	// A third order with the same device: only a slot nobody quotes moves.
+	h.callToolNumber(t, 3, "lookup_order", `{"id":"3"}`)
+	if got := strings.Join(h.model.recordedCalls(), ","); got !=
+		"UpdateInstructions,SendToolResult,UpdateInstructions,SendToolResult,SendToolResult" {
+		t.Fatalf("calls = %s, want the third answer with no instruction update", got)
 	}
 }

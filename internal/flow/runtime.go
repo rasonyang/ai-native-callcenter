@@ -37,6 +37,11 @@ type Runtime struct {
 	// isWrapUpTransferOpen is whether the platform can hand the caller to a
 	// person at the limit; the steer offers a transfer only then.
 	isWrapUpTransferOpen bool
+	// pinnedInstruction is the phase instruction (Engine.Instruction) as it was
+	// last rendered into the standing instructions. Only the phase's own text
+	// is kept, not the whole of Instructions: that carries a wrap-up countdown
+	// which changes with the clock and would always look stale.
+	pinnedInstruction string
 	// now is the clock; a test replaces it.
 	now func() time.Time
 }
@@ -124,6 +129,11 @@ func (r *Runtime) referencedTools() map[string]bool {
 // text should precede them. Their position is not what makes them hold: on
 // qwen, moving the confidentiality rule here changed nothing, and the concrete
 // wording did (confidentialityRule).
+//
+// Rendering is pinning: every caller sends the result to the model as its
+// standing instructions, and the phase's instruction as rendered here is what
+// IsInstructionStale compares against afterwards. Do not call this for any
+// other purpose.
 func (r *Runtime) Instructions() string {
 	spec := r.engine.Spec()
 	lang := r.engine.Lang()
@@ -148,8 +158,19 @@ func (r *Runtime) Instructions() string {
 		b.WriteString("\n\n")
 	}
 	b.WriteString(r.phasePreamble())
-	b.WriteString(r.engine.Instruction())
+	r.pinnedInstruction = r.engine.Instruction()
+	b.WriteString(r.pinnedInstruction)
 	return b.String()
+}
+
+// IsInstructionStale reports whether the current phase's instruction now
+// renders differently from the text the standing instructions were last pinned
+// with. A tool result that records slots the instruction mentions
+// ({slots.x}) changes it without leaving the phase, so a phase change is not
+// the only reason to re-pin. The comparison is on the text, so a result that
+// leaves the rendered instruction as it was reports false.
+func (r *Runtime) IsInstructionStale() bool {
+	return r.engine.Instruction() != r.pinnedInstruction
 }
 
 // BeginWrapUp tells the model, from the next Instructions on, that the call is
@@ -189,8 +210,10 @@ func (r *Runtime) EndToolBatch() { r.engine.EndToolBatch() }
 
 // Dispatch runs a tool the model asked for and returns what to send back.
 //
-// It also reports whether the phase changed, which is what the caller uses to
-// re-pin the model's standing instructions.
+// It also reports whether the phase changed. A phase change re-pins the model's
+// standing instructions, but it is not the only reason to: a result that stays
+// in the phase may still have changed what the phase's instruction renders from
+// the slots, which the caller asks IsInstructionStale about.
 func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output string, newNode string) {
 	args := parseArguments(arguments)
 

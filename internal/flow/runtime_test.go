@@ -586,3 +586,131 @@ func TestTheWrapUpSteerOffersATransferOnlyWhenItIsOpen(t *testing.T) {
 		}
 	}
 }
+
+//
+// The pinned instruction going stale inside a phase.
+//
+
+// lookupInPlaceFlow has one phase whose instruction quotes a slot the phase's
+// own tool fills, and no rule that leaves the phase.
+const lookupInPlaceFlow = `{
+	"id": "lookup-in-place-test",
+	"specVersion": "v2",
+	"initialNode": "report",
+	"global": {"persona": "You answer the phone."},
+	"tools": {
+		"lookup_order": {
+			"description": "Look an order up.",
+			"parameters": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+			"http": {
+				"path": "/order",
+				"body": {"id": "{args.id}"},
+				"successWhen": {"path": "retCode", "equals": "000000"},
+				"result": {"device": "data.device", "note": "data.note"}
+			}
+		}
+	},
+	"nodes": {
+		"report": {
+			"instruction": "The order is a {slots.lookup_order.device}.",
+			"tools": ["lookup_order"]
+		}
+	}
+}`
+
+func lookupInPlaceRuntime(t *testing.T) *Runtime {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var body map[string]any
+		raw, _ := io.ReadAll(req.Body)
+		_ = json.Unmarshal(raw, &body)
+		devices := map[any]string{"1": "phone", "2": "tablet", "3": "phone"}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"retCode": "000000",
+			"data":    map[string]any{"device": devices[body["id"]], "note": body["id"]},
+		})
+	}))
+	t.Cleanup(server.Close)
+	spec, err := Load([]byte(lookupInPlaceFlow))
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	return NewRuntime(NewEngine(spec, "en", nil, log), &fakeActions{},
+		NewBackend(server.URL), nil, log)
+}
+
+func TestAResultThatChangesThePhasesInstructionLeavesItStale(t *testing.T) {
+	t.Parallel()
+	r := lookupInPlaceRuntime(t)
+	r.Instructions()
+	if r.IsInstructionStale() {
+		t.Fatal("the instructions are stale right after they were pinned")
+	}
+
+	_, moved := r.Dispatch(t.Context(), "lookup_order", `{"id":"1"}`)
+	if moved != "" {
+		t.Fatalf("the lookup moved the call to %q, want it to stay", moved)
+	}
+	if !r.IsInstructionStale() {
+		t.Fatal("the slot the instruction quotes changed, but the pinned text is not stale")
+	}
+	if got := r.Instructions(); !strings.Contains(got, "The order is a phone.") {
+		t.Errorf("instructions do not carry the new value:\n%s", got)
+	}
+	if r.IsInstructionStale() {
+		t.Error("the instructions are still stale after they were re-rendered")
+	}
+
+	_, moved = r.Dispatch(t.Context(), "lookup_order", `{"id":"2"}`)
+	if moved != "" || !r.IsInstructionStale() {
+		t.Fatalf("a second lookup: moved %q, stale %v, want a stay and stale", moved, r.IsInstructionStale())
+	}
+	if got := r.Instructions(); !strings.Contains(got, "The order is a tablet.") {
+		t.Errorf("instructions do not carry the second value:\n%s", got)
+	}
+}
+
+// The comparison is on the rendered text: a result that writes slots the
+// instruction does not show, or the same value again, changes nothing the
+// model was told.
+func TestAResultThatLeavesTheRenderedInstructionAloneIsNotStale(t *testing.T) {
+	t.Parallel()
+	r := lookupInPlaceRuntime(t)
+	r.Dispatch(t.Context(), "lookup_order", `{"id":"1"}`)
+	r.Instructions()
+
+	// Another order, the same device: only an unquoted slot (note) moves.
+	if _, moved := r.Dispatch(t.Context(), "lookup_order", `{"id":"3"}`); moved != "" {
+		t.Fatalf("the lookup moved the call to %q", moved)
+	}
+	if r.IsInstructionStale() {
+		t.Error("the rendered instruction is unchanged, but it was reported stale")
+	}
+}
+
+// A result that moves the call changes the instruction too; the caller re-pins
+// on the move, and that is enough to clear the flag.
+func TestAMoveIsFollowedByARepinThatClearsStaleness(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"retCode": "000000",
+			"data":    map[string]any{"found": "1", "name": "Alice", "balance": "1"},
+		})
+	}))
+	defer server.Close()
+	r := testRuntime(t, &fakeActions{}, server.URL)
+	r.Instructions()
+
+	if _, moved := r.Dispatch(t.Context(), "lookup_account", `{"phone":"1"}`); moved != "report" {
+		t.Fatalf("moved to %q, want report", moved)
+	}
+	if !r.IsInstructionStale() {
+		t.Error("the phase changed, but the pinned text is not reported stale")
+	}
+	r.Instructions()
+	if r.IsInstructionStale() {
+		t.Error("stale after the new phase's instructions were pinned")
+	}
+}
