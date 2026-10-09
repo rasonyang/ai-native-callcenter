@@ -40,8 +40,8 @@ function Card() {
   )
 }
 
-function renderCard() {
-  installBackend()
+function renderCard(options: { isExtensionInstalled?: boolean } = {}) {
+  installBackend(options)
   return renderWithProviders(<Card />)
 }
 
@@ -133,6 +133,38 @@ describe('an agent with no extension', () => {
     await screen.findByText(/set up your phone/i)
     await userEvent.keyboard('{Escape}')
     expect(screen.getByText(/set up your phone/i)).toBeInTheDocument()
+  })
+})
+
+describe('an extension installed but not allowed on this site', () => {
+  // Nothing answers hello, because no content script runs here; the options
+  // page the manifest exposes is what proves the install (issue #81).
+  it('ticks the install and leaves the site step pending', async () => {
+    renderCard({ isExtensionInstalled: true })
+    await waitFor(() => expect(steps()[0].isDone).toBe(true))
+    expect(steps().map((s) => s.isDone)).toEqual([true, false, false])
+  })
+
+  it('ticks the install when the agent comes back to the tab after installing', async () => {
+    const backend = installBackend()
+    renderWithProviders(<Card />)
+    expect(await screen.findByText(/set up your phone/i)).toBeInTheDocument()
+    expect(steps()[0].isDone).toBe(false)
+    backend.isExtensionInstalled = true
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await waitFor(() => expect(steps()[0].isDone).toBe(true))
+    expect(steps()[1].isDone).toBe(false)
+  })
+
+  // A differently keyed build misses the probe; its answering is still proof.
+  it('ticks the install on an answer alone when the probe finds nothing', async () => {
+    const fake = installFakeExtension({ state: { microphone: 'DENIED' } })
+    renderCard({ isExtensionInstalled: false })
+    await waitFor(() => expect(steps()[1].isDone).toBe(true))
+    expect(steps().map((s) => s.isDone)).toEqual([true, true, false])
+    fake.uninstall()
   })
 })
 

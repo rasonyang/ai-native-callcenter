@@ -3,7 +3,8 @@ import { act, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, usePhoneBridgeValue,
+  HELLO_ATTEMPTS, HELLO_TIMEOUT_MS, WEB_SIP_PHONE_EXTENSION_ID, probeExtensionInstalled,
+  usePhoneBridgeValue,
   type PhoneBridge,
 } from '@/lib/phone-bridge'
 import { installBackend, installFakeExtension, sipSessionFixture } from '@/test/harness'
@@ -673,5 +674,42 @@ describe('where the credentials do not go', () => {
     expect(cached).not.toContain('a1Hash')
     expect(cached).not.toContain(sipSessionFixture().a1Hash)
     extension.uninstall()
+  })
+})
+
+describe('the install probe', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
+  })
+
+  it('fetches the exposed options page of the configured extension', async () => {
+    const fetchMock = vi.fn(async () => new Response(null))
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await probeExtensionInstalled()).toBe(true)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url] = fetchMock.mock.calls[0] as unknown as [string]
+    expect(url).toBe(`chrome-extension://${WEB_SIP_PHONE_EXTENSION_ID}/options.html`)
+  })
+
+  it('probes the id this build was given when it was given one', async () => {
+    const id = 'a'.repeat(32)
+    vi.stubEnv('VITE_WEB_SIP_PHONE_ID', id)
+    const fetchMock = vi.fn(async () => new Response(null))
+    vi.stubGlobal('fetch', fetchMock)
+    await probeExtensionInstalled()
+    expect((fetchMock.mock.calls[0] as unknown as [string])[0]).toBe(
+      `chrome-extension://${id}/options.html`,
+    )
+  })
+
+  it('reads a rejected request as not installed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch') }))
+    expect(await probeExtensionInstalled()).toBe(false)
+  })
+
+  it('is false without a fetch to ask', async () => {
+    vi.stubGlobal('fetch', undefined)
+    expect(await probeExtensionInstalled()).toBe(false)
   })
 })

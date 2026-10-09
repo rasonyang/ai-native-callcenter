@@ -54,6 +54,73 @@ function configuredExtensionId(): string | null {
 }
 
 /**
+ * Whether the extension is installed, whether or not this site is allowed.
+ *
+ * The hello handshake cannot say: a content script only runs on a site its
+ * owner allowed, so an installed extension that has not been given this site
+ * is as silent as none at all. The manifest exposes `options.html` to web
+ * pages (web_accessible_resources, extension 1.0.8 and later), and a fetch of
+ * it succeeds only when that extension is installed and enabled — a missing
+ * one fails the request outright. The response is opaque and never read.
+ *
+ * Only the id this build is configured with can be probed: nothing has
+ * announced another, because nothing is allowed to speak yet. A differently
+ * keyed build, or an extension older than the manifest entry, answers false
+ * here, which means "not known", not "not installed".
+ *
+ * Fails closed: no fetch, no id, a blocked or failed request, or an abort is
+ * all false.
+ */
+export async function probeExtensionInstalled(signal?: AbortSignal): Promise<boolean> {
+  const id = configuredExtensionId()
+  if (!id || typeof fetch !== 'function') return false
+  try {
+    await fetch(`chrome-extension://${id}/options.html`, {
+      mode: 'no-cors',
+      cache: 'no-store',
+      signal,
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The probe, kept current. It runs on mount and whenever the agent comes back
+ * to the tab, because installing happens in another one and the card promises
+ * not to ask for a refresh. A newer probe supersedes an older one still in
+ * flight; leaving unmounts cancel it. Nothing polls.
+ */
+export function useExtensionInstalled(enabled = true): boolean {
+  const [isInstalled, setInstalled] = useState(false)
+  useEffect(() => {
+    if (!enabled) return
+    let controller: AbortController | null = null
+    const run = () => {
+      controller?.abort()
+      const mine = new AbortController()
+      controller = mine
+      void probeExtensionInstalled(mine.signal).then((found) => {
+        if (!mine.signal.aborted) setInstalled(found)
+      })
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') run()
+    }
+    run()
+    window.addEventListener('focus', run)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      controller?.abort()
+      window.removeEventListener('focus', run)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [enabled])
+  return isInstalled
+}
+
+/**
  * The id to address the extension by: what it announced about itself first,
  * what this build was told second, and nothing at all if neither exists. A
  * link that cannot be built is not rendered — a dead one teaches the agent
