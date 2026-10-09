@@ -75,6 +75,15 @@ jobs:
       - name: Build
         run: go build ./...
 
+      # internal/store/queries is generated from the migrations and the
+      # queries. A migration that changed a view without a regenerate left it
+      # stale on main, and the next person to run sqlc inherited the
+      # diff (#111).
+      - name: sqlc generated code matches the schema
+        run: |
+          make sqlc-install
+          make sqlc-check
+
       - name: Vet
         run: go vet ./...
 

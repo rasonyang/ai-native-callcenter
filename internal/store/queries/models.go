@@ -187,6 +187,7 @@ type LuaccDid struct {
 
 type LuaccDirectory struct {
 	Number              string  `json:"number"`
+	Password            string  `json:"password"`
 	DisplayName         string  `json:"displayName"`
 	IsEnabled           bool    `json:"isEnabled"`
 	IsAutoAnswer        bool    `json:"isAutoAnswer"`
