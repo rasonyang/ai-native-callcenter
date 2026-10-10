@@ -1581,6 +1581,8 @@ export interface components {
             reason?: components["schemas"]["NotReadyReason"];
             availability: components["schemas"]["Availability"];
             extensionNumber?: string;
+            /** @description The SIP domain (digest realm) this deployment's phones register at: the domain of the agent's address of record. The same value a minted SipSession.sipDomain carries, readable without minting so a page can tell a phone registered at this deployment from one registered at another. */
+            sipDomain?: string;
             /** @description Whether the switch currently holds a registration for this agent's extension. */
             isDeviceRegistered: boolean;
             /** @description The extension number the switch holds a registration for, or null when it holds none. */

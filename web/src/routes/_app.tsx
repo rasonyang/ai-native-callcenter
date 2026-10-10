@@ -38,7 +38,7 @@ function AppLayout() {
   // Only an agent has a phone, so only an agent's page talks to the extension
   // or mints a SIP session. The context is still provided to everyone below,
   // because signing out goes through it whoever is doing it.
-  const phone = usePhoneBridgeValue(isAgent, presence?.extensionNumber)
+  const phone = usePhoneBridgeValue(isAgent, presence?.extensionNumber, presence?.sipDomain)
 
   if (!user) return null
 

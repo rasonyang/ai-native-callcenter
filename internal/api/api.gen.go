@@ -1674,6 +1674,9 @@ type Presence struct {
 	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
 	Reason *NotReadyReason `json:"reason,omitempty"`
 
+	// SIPDomain The SIP domain (digest realm) this deployment's phones register at: the domain of the agent's address of record. The same value a minted SipSession.sipDomain carries, readable without minting so a page can tell a phone registered at this deployment from one registered at another.
+	SIPDomain *string `json:"sipDomain,omitempty"`
+
 	// State Presence FSM state.
 	State AgentState `json:"state"`
 

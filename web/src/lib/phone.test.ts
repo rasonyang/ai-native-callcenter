@@ -174,6 +174,30 @@ describe('the phone chip', () => {
     },
   )
 
+  it('does not call a credential issued by another deployment ready', () => {
+    const foreign = ext({ sipDomain: 'a.example' })
+    expect(phoneChipFor(true, foreign, MINE, false, 'b.example')).toMatchObject({
+      kind: 'wrongAccount',
+      action: 'reprovision',
+      isReadyAllowed: false,
+    })
+    expect(phoneChipFor(false, foreign, MINE, false, 'b.example')).toMatchObject({
+      kind: 'wrongAccount',
+      action: 'reprovision',
+      isReadyAllowed: false,
+    })
+  })
+
+  it('judges by the account alone when either domain is unknown', () => {
+    expect(phoneChipFor(true, ext({ sipDomain: 'a.example' }), MINE)).toMatchObject({ kind: 'ready' })
+    expect(phoneChipFor(true, ext({ sipDomain: null }), MINE, false, 'b.example')).toMatchObject({
+      kind: 'ready',
+    })
+    expect(phoneChipFor(true, ext({ sipDomain: 'B.example' }), MINE, false, 'b.example')).toMatchObject({
+      kind: 'ready',
+    })
+  })
+
   /**
    * Not detected is two different browsers. One has never had the extension
    * and is told to install it; one had it a moment ago, still holds the

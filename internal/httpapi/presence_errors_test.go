@@ -92,7 +92,7 @@ func TestPresenceStatesWhoseRegistrationTheSwitchHolds(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			svc := phonelessAgents{presence: tt.presence}
-			srv := New(config.Config{}, Deps{Agents: svc, AgentDir: staffedAgent{}})
+			srv := New(config.Config{SIPDomain: "aicc.test"}, Deps{Agents: svc, AgentDir: staffedAgent{}})
 
 			w := httptest.NewRecorder()
 			srv.GetAgentPresence(w, agentRequest(http.MethodGet, "/api/v1/agent/presence", ""))
@@ -103,6 +103,9 @@ func TestPresenceStatesWhoseRegistrationTheSwitchHolds(t *testing.T) {
 			var got api.Presence
 			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
+			}
+			if got.SIPDomain == nil || *got.SIPDomain != "aicc.test" {
+				t.Errorf("sipDomain = %v, want aicc.test", got.SIPDomain)
 			}
 			if got.IsDeviceRegistered != tt.wantRegistered {
 				t.Errorf("isDeviceRegistered = %v, want %v",
