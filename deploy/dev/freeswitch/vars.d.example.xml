@@ -50,9 +50,21 @@
        There is no account to name here because the trunk neither registers nor
        challenges — identity is the source address in both directions. Put the
        peer's real address here; it does not belong in the XML this repository
-       ships, which names it as $${pstn_gateway_host} only. -->
+       ships, which names it as $${pstn_gateway_host} only.
+       host and port are the next hop: where the datagram is sent. -->
   <X-PRE-PROCESS cmd="set" data="pstn_gateway_host=REPLACE_ME"/>
   <X-PRE-PROCESS cmd="set" data="pstn_gateway_port=5080"/>
+
+  <!-- What the Request-URI names. For a single-address trunk it is the next
+       hop, as written here, and this line needs no edit. It must come after
+       host and port: the preprocessor expands $${...} as it reads. FreeSWITCH
+       has no default syntax, so a vars.xml without this line gives the gateway
+       an empty proxy; install.sh warns when it is missing.
+       Behind FreeSBC v2, host and port above are the SBC's private socket
+       (<sbc-private>:5060) and this is the carrier's directory entry,
+       <carrier-host>:16060, port included: FreeSBC answers 404 unless the
+       Request-URI matches the entry exactly. -->
+  <X-PRE-PROCESS cmd="set" data="pstn_gateway_proxy=$${pstn_gateway_host}:$${pstn_gateway_port}"/>
 
   <!-- The fallback caller id the trunk presents outbound, used only when the
        leg carries no effective_caller_id_number of its own. Make it a DID this
