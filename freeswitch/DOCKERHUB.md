@@ -88,13 +88,16 @@ DSN format: `pgsql://hostaddr=10.0.0.5 dbname=aicc user=aicc password='secret'`.
 
 ### PSTN trunk
 
-There is no trunk in the image.
+There is no trunk in the image. `PSTN_GATEWAY_HOST` and `PSTN_GATEWAY_PORT` name the transport peer: where outbound datagrams are sent (the gateway's `outbound-proxy`). A trunk with one address needs nothing more. A public carrier behind FreeSBC v2 also sets `PSTN_GATEWAY_PROXY`.
 
 | Variable | Injected into | Unset |
 |---|---|---|
-| `PSTN_GATEWAY_HOST` | vars.xml `pstn_gateway_host` | `192.0.2.1` — TEST-NET-1, reserved by RFC 5737 and routable from nowhere. An outbound PSTN call then fails to reach a gateway, which is what should happen when no trunk was configured. |
-| `PSTN_GATEWAY_PORT` | vars.xml `pstn_gateway_port` | `5080` |
+| `PSTN_GATEWAY_HOST` | vars.xml `pstn_gateway_host`, the transport peer (next hop) | `192.0.2.1` — TEST-NET-1, reserved by RFC 5737 and routable from nowhere. An outbound PSTN call then fails to reach a gateway, which is what should happen when no trunk was configured. |
+| `PSTN_GATEWAY_PORT` | vars.xml `pstn_gateway_port`, the transport peer's port | `5080` |
+| `PSTN_GATEWAY_PROXY` | vars.xml `pstn_gateway_proxy`, the `host:port` the Request-URI names (the gateway's `proxy`) | `PSTN_GATEWAY_HOST:PSTN_GATEWAY_PORT` as resolved above, so the two are one address. Behind FreeSBC v2 set the carrier's directory entry here, port included (`<carrier-host>:16060`), and point HOST/PORT at the SBC's private socket (`<sbc-private>:5060`). |
 | `PSTN_GATEWAY_CALLER_ID` | vars.xml `pstn_gateway_caller_id` | empty, so the dialplan passes the call's own `effective_caller_id_number` through instead of stamping every outbound call with one number |
+
+These variables only feed the gateway file a deployment mounts into `conf/sip_profiles/external/`; the image ships none, and the simulated PSTN uses none.
 
 ### Recordings and S3
 

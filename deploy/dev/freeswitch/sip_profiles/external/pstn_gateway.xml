@@ -30,10 +30,25 @@
   Naming the proxy here pins the dialog's route set to the address the peer is
   really at, so ACK and BYE follow the same path the INVITE did. It fixes the
   teardown rather than papering over it with a media timeout.
+
+  Two addresses, which are the same address unless a deployment says otherwise.
+  proxy is what the Request-URI names; outbound-proxy is where the datagram
+  goes, so the route-set rationale above is about outbound-proxy alone.
+
+  Single address (a LAN trunk, the simulator): pstn_gateway_proxy equals
+  $${pstn_gateway_host}:$${pstn_gateway_port}, so both parameters carry the
+  same value, byte for byte as when this file named one pair of variables.
+
+  FreeSBC v2 (a public carrier): the SBC has one private socket and the
+  carrier sits behind a directory entry. The Request-URI must name that entry,
+  <carrier-host>:<port> with the port, or FreeSBC answers 404 and forwards
+  nothing; the datagram must still go to the SBC's private socket.
+  pstn_gateway_host/port is therefore the SBC (outbound-proxy) and
+  pstn_gateway_proxy is the carrier entry (proxy).
 -->
 <include>
   <gateway name="pstn_gateway">
-    <param name="proxy" value="$${pstn_gateway_host}:$${pstn_gateway_port}"/>
+    <param name="proxy" value="$${pstn_gateway_proxy}"/>
     <param name="outbound-proxy" value="$${pstn_gateway_host}:$${pstn_gateway_port}"/>
     <param name="register" value="false"/>
     <param name="caller-id-in-from" value="true"/>

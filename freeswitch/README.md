@@ -234,6 +234,28 @@ a fragment for this seam plus the gateway that names the peer. It is version
 controlled and deliberately not shipped in the image, because a trunk belongs
 to a deployment.
 
+### The shape of a PSTN trunk
+
+Which trunk a deployment writes depends on where it sits.
+
+* **LAN only, no carrier.** No SBC is needed. Either use the simulated PSTN
+  (`deploy/freeswitch/`, which mounts no gateway file at all), or name one IP
+  trunk address: set `PSTN_GATEWAY_HOST` and `PSTN_GATEWAY_PORT` (the
+  `pstn_gateway_host` and `pstn_gateway_port` variables on a native install).
+  That is the whole configuration; `PSTN_GATEWAY_PROXY` defaults to the same
+  address.
+* **A public carrier** is expected to sit behind FreeSBC v2, and uses the
+  two-address form. `PSTN_GATEWAY_HOST`/`PORT` are the SBC's private socket,
+  the next hop the datagram is sent to (`outbound-proxy`).
+  `PSTN_GATEWAY_PROXY` is the carrier's directory entry, the `host:port` the
+  Request-URI names (`proxy`), port included: FreeSBC answers 404 unless it
+  matches the entry exactly. On a native install add the
+  `pstn_gateway_proxy` line from `vars.d.example.xml` to `vars.xml`; there is
+  no entrypoint to default it, and `install.sh` warns when it is missing.
+
+The gateway file that reads these is the worked example in
+`deploy/dev/freeswitch/sip_profiles/external/pstn_gateway.xml`.
+
 ### Where recordings go
 
 `aicc_recordings_dir` is where `record_session` writes, and it takes a URL as

@@ -225,13 +225,24 @@ esac
 # RFC 5737 for documentation and routable from nowhere. An outbound PSTN call
 # then fails to reach a gateway, which is what should happen when no trunk was
 # configured, and the address in the log says plainly that none was.
+#
+# HOST and PORT are the transport peer: where the datagram goes, the gateway's
+# outbound-proxy. PROXY is the host:port the Request-URI names, and is optional
+# because a single-address trunk has only one address to name. A carrier behind
+# FreeSBC v2 is the case that needs both: HOST:PORT is the SBC's private socket
+# and PROXY is the carrier's directory entry. Unset, PROXY follows HOST:PORT, so
+# a deployment that sets only the pair gets the gateway it always got.
+pstn_host="${PSTN_GATEWAY_HOST:-192.0.2.1}"
+pstn_port="${PSTN_GATEWAY_PORT:-5080}"
 if [ -n "${PSTN_GATEWAY_HOST:-}" ]; then
-  set_var pstn_gateway_host "$PSTN_GATEWAY_HOST"; note PSTN_GATEWAY_HOST
+  note PSTN_GATEWAY_HOST
 else
-  set_var pstn_gateway_host "192.0.2.1"
   note "pstn=none"
 fi
-set_var pstn_gateway_port "${PSTN_GATEWAY_PORT:-5080}"
+set_var pstn_gateway_host "$pstn_host"
+set_var pstn_gateway_port "$pstn_port"
+set_var pstn_gateway_proxy "${PSTN_GATEWAY_PROXY:-$pstn_host:$pstn_port}"
+if [ -n "${PSTN_GATEWAY_PROXY:-}" ]; then note PSTN_GATEWAY_PROXY; fi
 # Empty by default so the dialplan passes the call's own
 # effective_caller_id_number through, rather than stamping every outbound call
 # with one number somebody else's deployment was issued.

@@ -34,8 +34,8 @@ question.
 
 | File | Installed as | What it is |
 | --- | --- | --- |
-| `dialplan/aicc/00_pstn_gateway.xml` | `conf/dialplan/aicc/00_pstn_gateway.xml` | The outbound route: any 7-to-16-digit number, optionally `+` prefixed, bridged to the trunk with `effective_caller_id_number` passed through as the outbound caller id. |
-| `sip_profiles/external/pstn_gateway.xml` | `conf/sip_profiles/external/pstn_gateway.xml` | The gateway itself. NOREG, no ping, `outbound-proxy` pinned. |
+| `dialplan/aicc/00_pstn_gateway.xml` | `conf/dialplan/aicc/00_pstn_gateway.xml` | The outbound route: any 7-to-16-digit number, optionally `+` prefixed, bridged to the trunk with `effective_caller_id_number` passed through as the outbound caller id. Calls carrying `X-FreeSBC-Carrier` (arrived from the carrier) or `X-FSBC-Out` (already sent out by this switch) skip it, and the bridge stamps `X-FSBC-Out: 1`. |
+| `sip_profiles/external/pstn_gateway.xml` | `conf/sip_profiles/external/pstn_gateway.xml` | The gateway itself. NOREG, no ping, `outbound-proxy` pinned. `proxy` (the Request-URI) is `pstn_gateway_proxy`, `outbound-proxy` (the next hop) is `pstn_gateway_host:pstn_gateway_port`. |
 | `vars.d.example.xml` | nothing — copied by hand | The `X-PRE-PROCESS` lines `vars.xml` needs, with placeholder values. |
 | `install.sh` | — | Copies the two files in and reloads the switch. |
 
@@ -129,6 +129,17 @@ If the ACK or the BYE appears to go nowhere and the call tears down with
 public address in its Via and Contact rather than the LAN address it actually
 occupies, and in-dialog requests follow the Contact. The header comment in
 `sip_profiles/external/pstn_gateway.xml` has the whole finding.
+
+## Single address or FreeSBC v2
+
+The gateway has two addresses that are the same unless you say otherwise.
+`pstn_gateway_host`/`pstn_gateway_port` is the next hop (`outbound-proxy`);
+`pstn_gateway_proxy` is what the Request-URI names (`proxy`). A LAN trunk with
+one address sets the first pair and leaves `pstn_gateway_proxy` as
+`$${pstn_gateway_host}:$${pstn_gateway_port}`, as `vars.d.example.xml` has it.
+Behind FreeSBC v2 the pair is the SBC's private socket and `pstn_gateway_proxy`
+is the carrier's directory entry, port included. A `vars.xml` without
+`pstn_gateway_proxy` leaves the proxy empty; `install.sh` warns about it.
 
 ## Superseded files still on the live box
 

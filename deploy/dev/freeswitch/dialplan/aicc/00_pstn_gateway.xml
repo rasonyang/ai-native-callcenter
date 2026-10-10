@@ -25,13 +25,27 @@
   only the b-leg leaves the caller free to speak whatever it likes; the switch
   transcodes between the two.
 
-  Three conditions rather than one, because a fallback needs somewhere to be
+  Two gates come first, and they exist so a call never goes round the loop. A
+  call that arrived from the carrier through FreeSBC carries
+  X-FreeSBC-Carrier (inbound calls were captured arriving with
+  X-FreeSBC-Carrier: pstn), and a call this switch already sent out carries
+  X-FSBC-Out, which the bridge below stamps on the outbound INVITE so the SBC,
+  and this dialplan if the call comes back, can recognise the switch's own leg.
+  Either header means the call must not be placed into the gateway again. Each
+  gate is a condition on the header being empty (^$, which an absent header
+  expands to) with no action and the default break of on-false: a header that
+  is present fails the gate, which ends this extension before any of the
+  break="never" conditions below can set anything or place a call.
+
+  Then three conditions rather than one, because a fallback needs somewhere to be
   written before it can be overwritten: the first sets it, the second replaces
   it when the leg carries a number of its own (break="never" so a leg that
   carries none simply falls through), the third places the call.
 -->
 <include>
   <extension name="pstn_gateway_outbound">
+      <condition field="${sip_h_X-FreeSBC-Carrier}" expression="^$"/>
+      <condition field="${sip_h_X-FSBC-Out}" expression="^$"/>
       <condition field="destination_number" expression="^\+?[0-9]{7,16}$" break="never">
         <action application="set" data="trunk_clid=$${pstn_gateway_caller_id}"/>
       </condition>
@@ -46,6 +60,7 @@
              recording enabled. Runs after trunk_clid is decided and before the
              trunk leg exists, and never fails the call. -->
         <action application="lua" data="aicc_outbound.lua"/>
+        <action application="set" data="sip_h_X-FSBC-Out=1"/>
         <action application="bridge" data="{absolute_codec_string=PCMU,PCMA,origination_caller_id_number=${trunk_clid},origination_caller_id_name=${trunk_clid}}sofia/gateway/pstn_gateway/$1"/>
       </condition>
     </extension>

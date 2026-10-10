@@ -7,7 +7,9 @@
 # It copies two files and reloads. It does not touch vars.xml: that file holds
 # database passwords, and the operator edits it by hand from
 # vars.d.example.xml. If a variable this overlay needs is missing there, the
-# reload below will succeed and the calls will not — see the README.
+# reload below will succeed and the calls will not — see the README. The one
+# check made here is pstn_gateway_proxy, which a vars.xml written before it
+# existed lacks: a missing one is warned about on stderr, not fatal.
 #
 # Usage:  ./install.sh
 #         FS_ROOT=/opt/freeswitch ESL_PASSWORD=secret ./install.sh
@@ -61,6 +63,18 @@ install_file "$SRC_DIR/dialplan/aicc/00_pstn_gateway.xml" \
 	"$FS_CONF/dialplan/aicc/00_pstn_gateway.xml"
 install_file "$SRC_DIR/sip_profiles/external/pstn_gateway.xml" \
 	"$FS_CONF/sip_profiles/external/pstn_gateway.xml"
+
+# A native install has no entrypoint to default pstn_gateway_proxy, and an unset
+# $${...} expands to nothing, so the gateway would come up with an empty proxy.
+# Warn, do not fail: the files are in place and the fix is one line.
+if ! grep -q 'data="pstn_gateway_proxy=' "$FS_CONF/vars.xml"; then
+	cat >&2 <<'WARN'
+install.sh: warning: vars.xml does not set pstn_gateway_proxy, so the gateway's
+proxy will be empty. Add this line inside <include>, after pstn_gateway_host
+and pstn_gateway_port (see vars.d.example.xml):
+  <X-PRE-PROCESS cmd="set" data="pstn_gateway_proxy=$${pstn_gateway_host}:$${pstn_gateway_port}"/>
+WARN
+fi
 
 if [ ! -x "$FS_CLI" ]; then
 	echo "install.sh: no fs_cli at $FS_CLI; files are in place, reload by hand" >&2
