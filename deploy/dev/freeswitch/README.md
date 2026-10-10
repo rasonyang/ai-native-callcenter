@@ -34,7 +34,7 @@ question.
 
 | File | Installed as | What it is |
 | --- | --- | --- |
-| `dialplan/aicc/00_pstn_gateway.xml` | `conf/dialplan/aicc/00_pstn_gateway.xml` | The outbound route: any 7-to-16-digit number, optionally `+` prefixed, bridged to the trunk with `effective_caller_id_number` passed through as the outbound caller id. Calls carrying `X-FreeSBC-Carrier` (arrived from the carrier) or `X-FSBC-Out` (already sent out by this switch) skip it, and the bridge stamps `X-FSBC-Out: 1`. |
+| `dialplan/aicc/00_pstn_gateway.xml` | `conf/dialplan/aicc/00_pstn_gateway.xml` | The outbound route: any 7-to-16-digit number, optionally `+` prefixed, bridged to the trunk with `effective_caller_id_number` passed through as the outbound caller id. Calls carrying `X-FreeSBC-Carrier` (arrived from the carrier) or `X-FSBC-Out` (already sent out by this switch) skip it, and the bridge stamps `X-FSBC-Out: 1`. An AI outbound call is originated straight to `AICC_OUTBOUND_ENDPOINT`, never through this route, so it carries no `X-FSBC-Out`; on that path the `X-FreeSBC-Carrier` gate is the one that holds, by design. |
 | `sip_profiles/external/pstn_gateway.xml` | `conf/sip_profiles/external/pstn_gateway.xml` | The gateway itself. NOREG, no ping, `outbound-proxy` pinned. `proxy` (the Request-URI) is `pstn_gateway_proxy`, `outbound-proxy` (the next hop) is `pstn_gateway_host:pstn_gateway_port`. |
 | `vars.d.example.xml` | nothing — copied by hand | The `X-PRE-PROCESS` lines `vars.xml` needs, with placeholder values. |
 | `install.sh` | — | Copies the two files in and reloads the switch. |
