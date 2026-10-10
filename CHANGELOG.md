@@ -5,6 +5,111 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## v0.4.0 - 2026-10-10
+
+### Upgrade notes
+
+- Upgrade both images together. The switch image builds `mod_audio_stream`
+  from our fork (see Changed), forwards the call type on a bot overflow in
+  `aicc_queue.lua`, and takes the new optional `PSTN_GATEWAY_PROXY` setting.
+  There are no new migrations; the database schema is unchanged.
+- API contract: `POST /agent/login` no longer accepts `extensionNumber`. The
+  body is optional and a body carrying any property is refused with
+  `VALIDATION_FAILED` (422); the agent is always signed in at the extension
+  bound to them. The web client never sent the field. `PUT /agents/{agentId}`
+  that changes or clears the bound extension of a signed-in agent is now
+  refused with `CONFLICT`; the agent signs out first. `Presence` gains the
+  optional `sipDomain`. Nothing else was removed.
+- New settings, all optional: `AICC_BOT_RTP_DEAD_TIMEOUT` (default `5s`),
+  `AICC_BOT_FIRST_MEDIA_TIMEOUT` (default `30s`),
+  `AICC_BOT_GREETING_MEDIA_WAIT` (unset keeps the old behaviour), and the
+  switch's `PSTN_GATEWAY_PROXY`. A negative or malformed duration is refused
+  at startup.
+- A bot call that receives no inbound media at all is now ended after 30
+  seconds, not 5. A call whose media was flowing and stopped still ends after
+  5 seconds.
+
+### Added
+
+- Deploy: `AICC_BOT_GREETING_MEDIA_WAIT` holds the bot's first turn until the
+  caller's inbound media has started. Behind a carrier that opens its media
+  path seconds after the answer, the greeting was spoken into a path that did
+  not exist yet and the caller never heard it. The model session still opens
+  at call start. Unset greets as soon as the session is ready; `0` waits for
+  the first inbound RTP however long; a positive value waits for it or that
+  long. The logs now record `first media` and `first bot audio`
+  (`isBeforeMedia`), and the metrics `aicc_bot_first_media_ms` and
+  `aicc_bot_first_audio_ms{before_media}`, whether or not the setting is
+  used (#98).
+- Deploy: `AICC_BOT_RTP_DEAD_TIMEOUT` and `AICC_BOT_FIRST_MEDIA_TIMEOUT`
+  make the bot's two media timeouts configurable; `0` turns one off (#97).
+- Switch: `PSTN_GATEWAY_PROXY` sets the host and port the outbound
+  Request-URI names, separately from `PSTN_GATEWAY_HOST`/`PORT`, the next hop
+  the datagram goes to. A carrier behind FreeSBC v2 needs the two to differ.
+  Unset, it follows the host and port, so existing deployments are
+  unchanged (#61).
+- API: `Presence.sipDomain` is the SIP domain this deployment's phones
+  register at, readable without minting a session (#119).
+
+### Changed
+
+- Agents: the phone (`isDeviceRegistered`, `deviceAccount`) is read from the
+  switch at the agent's bound extension on every surface: the `AGENT_*` and
+  `DEVICE_*` events, `GET /agent/presence`, `GET /auth/me` and the `GET
+  /agents` roster. An agent who is signed out is told about their phone, and
+  a `DEVICE_*` event is published only when the state changed. Sign-in is
+  only at the bound extension (#106).
+- Switch: `mod_audio_stream` is built from our fork,
+  `rasonyang/mod_audio_stream`, pinned at a commit whose code is the MIT
+  release we already shipped; only the submodule URL changed, so it now
+  fetches `libwsc` from our fork too. The image gains `mod_audio_stream.repo`
+  as a label. Upstream relicensed the module to AGPLv3 after that commit and
+  the fork takes nothing from it.
+- Docs: the product has no carrier-line configuration screen or API. The
+  switch holds one gateway, the SBC's, set once at install; everything about
+  a carrier lives in the SBC's own management. The reference dialplan notes
+  that an AI outbound leg carries no `X-FSBC-Out` marker (#62).
+- Docs: the installer's "not yet verified" caveats for Docker Desktop and
+  Linux distributions other than Ubuntu 24.04 are gone.
+
+### Fixed
+
+- AI calls: a carrier that opens its media path late no longer sends every
+  inbound bot call to the fallback queue. The dead-media watch used to count
+  from the start of the call, so a call that had received no packet yet was
+  ended at 5 seconds; it now waits up to `AICC_BOT_FIRST_MEDIA_TIMEOUT` (30
+  s) and logs `media never started` (#97).
+- AI calls: speech at the moment playback ends cancels the dead-air watch.
+  `NO_INPUT` could be reported over a caller who had just spoken (#95).
+- AI calls: when a tool result changes a value the phase's instruction
+  quotes without moving the call (a second `repair_status` lookup, say), the
+  instruction is pinned again before the tool answer, so the next turn is not
+  worded from the previous record (#48).
+- CDR: a transfer the bot accepted but never handed over (the caller hung up
+  during the closing line) keeps the bot's `botSummary` and `botReason` in
+  the row's user data (#57).
+- CDR: an agent's call to a bot number is the agent's call. The row is
+  `OUTBOUND` from the agent's extension whether the bot hangs up, transfers
+  or the agent hangs up first, with the agent as primary and legs
+  `AGENT, BOT`; `bill_sec` is 0 because no carrier answered. It was written
+  by the bot ledger with no agent, counted as bot containment and billed from
+  the bot's answer (#76, #80, #104). The call type also travels on a bot
+  overflow from a queue.
+- CDR: a carrier call whose caller id equals a signed-in agent's extension
+  is no longer written as the agent's call, nor written twice. Who placed a
+  call is read from the originating leg's own extension, not from a number
+  match (#105).
+- Agents: `isDeviceRegistered` was false for an agent whose phone was
+  registered but who had not signed in, and a stale true survived a later
+  unregister (#37, #106).
+- Web: the phone setup card ticks "install the extension" as soon as the
+  extension is installed, before the site is allowed, instead of telling the
+  agent to install what they already have (#81).
+- Web: a browser that moved to another deployment, with the agent on the
+  same extension number there, mints a phone session for the new deployment
+  instead of staying registered at the old one with a chip saying Voice ready
+  (#119).
+
 ## v0.3.0 - 2026-10-04
 
 ### Upgrade notes
