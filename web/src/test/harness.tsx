@@ -132,6 +132,7 @@ export function presenceFixture(overrides: Partial<Presence> = {}): Presence {
     state: 'READY',
     availability: 'READY',
     extensionNumber: '1001',
+    sipDomain: 'aicc.local',
     isDeviceRegistered: true,
     deviceAccount: '1001',
     enteredAt: new Date().toISOString(),

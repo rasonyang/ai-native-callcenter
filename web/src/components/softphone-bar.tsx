@@ -94,6 +94,7 @@ function usePhoneChip(presence: Presence | null | undefined) {
     // them: an extension that was never installed, and one this page has
     // lost contact with while it goes on holding the registration.
     isLost,
+    presence?.sipDomain,
   )
 }
 

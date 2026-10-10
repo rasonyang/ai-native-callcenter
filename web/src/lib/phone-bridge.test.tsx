@@ -26,11 +26,13 @@ const MY_EXTENSION = '1001'
 function Host({
   enabled = true,
   myExtension,
+  mySipDomain,
 }: {
   enabled?: boolean
   myExtension?: string
+  mySipDomain?: string
 }) {
-  bridge = usePhoneBridgeValue(enabled, myExtension)
+  bridge = usePhoneBridgeValue(enabled, myExtension, mySipDomain)
   return null
 }
 
@@ -39,13 +41,17 @@ function Host({
  * because presence loads asynchronously in the real thing: `null` is a page
  * that does not know it yet, and `learnExtension` is that request landing.
  */
-function renderBridge(enabled = true, myExtension: string | null = MY_EXTENSION) {
+function renderBridge(
+  enabled = true,
+  myExtension: string | null = MY_EXTENSION,
+  mySipDomain?: string,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   })
   const tree = (ext: string | undefined) => (
     <QueryClientProvider client={queryClient}>
-      <Host enabled={enabled} myExtension={ext} />
+      <Host enabled={enabled} myExtension={ext} mySipDomain={mySipDomain} />
     </QueryClientProvider>
   )
   const view = render(tree(myExtension ?? undefined))
@@ -535,6 +541,97 @@ describe('provisioning', () => {
       bridge.reprovision()
     })
     await waitFor(() => expect(mints(api)).toBe(attempts + 1))
+    extension.uninstall()
+  })
+})
+
+describe('a credential issued by another deployment', () => {
+  const MINE = 'b.example'
+  const THEIRS = 'a.example'
+  const held = (sipDomain: string) => ({
+    credentialSource: 'PROVISIONED' as const,
+    account: MY_EXTENSION,
+    sipDomain,
+    registration: 'REGISTERED' as const,
+  })
+
+  it('mints once for our account held at another SIP domain', async () => {
+    const api = installBackend()
+    const extension = installFakeExtension({ state: held(THEIRS) })
+    renderBridge(true, MY_EXTENSION, MINE)
+    await waitFor(() => expect(mints(api)).toBe(1))
+    await act(async () => {})
+    expect(mints(api)).toBe(1)
+    extension.uninstall()
+  })
+
+  it('mints nothing for our account at our own SIP domain', async () => {
+    const api = installBackend()
+    const extension = installFakeExtension({ state: held(MINE) })
+    renderBridge(true, MY_EXTENSION, MINE)
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {})
+    expect(mints(api)).toBe(0)
+    extension.uninstall()
+  })
+
+  it('falls back to the account alone when either domain is unknown', async () => {
+    const api = installBackend()
+    const noDomain = installFakeExtension({ state: { ...held(THEIRS), sipDomain: null } })
+    renderBridge(true, MY_EXTENSION, MINE)
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {})
+    expect(mints(api)).toBe(0)
+    noDomain.uninstall()
+  })
+
+  it('falls back to the account alone when presence has no domain', async () => {
+    const api = installBackend()
+    const extension = installFakeExtension({ state: held(THEIRS) })
+    renderBridge(true, MY_EXTENSION, undefined)
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {})
+    expect(mints(api)).toBe(0)
+    extension.uninstall()
+  })
+
+  it('leaves a foreign domain alone once our own credential was seen held', async () => {
+    const api = installBackend()
+    const extension = installFakeExtension({ state: held(MINE) })
+    renderBridge(true, MY_EXTENSION, MINE)
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    await act(async () => {
+      extension.report(held(THEIRS))
+    })
+    await act(async () => {})
+    expect(mints(api)).toBe(0)
+    await act(async () => {
+      bridge.reprovision()
+    })
+    await waitFor(() => expect(mints(api)).toBe(1))
+    extension.uninstall()
+  })
+
+  it('forgets having held ours when the agent signs out', async () => {
+    const api = installBackend()
+    const extension = installFakeExtension({ state: held(MINE) })
+    const view = renderBridge(true, MY_EXTENSION, MINE)
+    await waitFor(() => expect(bridge.detected).toBe(true))
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <Host enabled={false} myExtension={MY_EXTENSION} mySipDomain={MINE} />
+      </QueryClientProvider>,
+    )
+    // Another deployment takes the phone while nobody is signed in here.
+    await act(async () => {
+      extension.report(held(THEIRS))
+    })
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <Host enabled myExtension={MY_EXTENSION} mySipDomain={MINE} />
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(mints(api)).toBe(1))
     extension.uninstall()
   })
 })

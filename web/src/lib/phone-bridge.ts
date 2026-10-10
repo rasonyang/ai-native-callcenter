@@ -341,9 +341,15 @@ function readExtensionMessage(event: MessageEvent): ExtensionMessage | null {
  * `enabled` is the agent test: only an agent has a phone to provision, and
  * only an agent's session can mint one. `myExtension` is the number that
  * agent is bound to, which is what decides whether the account the phone
- * reports is theirs.
+ * reports is theirs. `mySipDomain` is this deployment's SIP domain, which
+ * decides whether a credential for that account was issued by *this*
+ * deployment or by another one the same browser has visited.
  */
-export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): PhoneBridge {
+export function usePhoneBridgeValue(
+  enabled: boolean,
+  myExtension?: string,
+  mySipDomain?: string,
+): PhoneBridge {
   const [detected, setDetected] = useState(false)
   /** The marker is on the document; read at mount, then kept by the observer. */
   const [isMarked, setMarked] = useState(hasPresenceMarker)
@@ -509,7 +515,7 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
 
   const openOnboarding = useCallback(() => setOnboardingForced(true), [])
   const closeOnboarding = useCallback(() => setOnboardingForced(false), [])
-  const provisioning = usePhoneProvisioning(enabled, state, myExtension, provision)
+  const provisioning = usePhoneProvisioning(enabled, state, myExtension, mySipDomain, provision)
 
   return {
     detected,
@@ -551,7 +557,12 @@ export function usePhoneBridgeValue(enabled: boolean, myExtension?: string): Pho
  * somebody having said, in the extension's own Options, which account this
  * browser is to use.
  */
-function provisioningTrigger(state: ExtensionState, myExtension?: string): string | null {
+function provisioningTrigger(
+  state: ExtensionState,
+  myExtension: string | undefined,
+  mySipDomain: string | undefined,
+  hasHeldOurs: boolean,
+): string | null {
   // A manual account saved over a held provision. Ours is still there and
   // deliberately not in use, so there is nothing to replace — and minting
   // anyway would flush the registration the manual account is holding, for a
@@ -564,7 +575,22 @@ function provisioningTrigger(state: ExtensionState, myExtension?: string): strin
   if (myExtension && state.account && state.account !== myExtension) {
     return `PROVISIONED:${state.account}`
   }
+  if (
+    !hasHeldOurs &&
+    myExtension &&
+    state.account === myExtension &&
+    isForeignDomain(state, mySipDomain)
+  ) {
+    return `PROVISIONED:${state.sipDomain}:${state.account}`
+  }
   return null
+}
+
+const sameDomain = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+/** True only when both domains are known and differ. */
+export function isForeignDomain(state: ExtensionState, mySipDomain?: string): boolean {
+  return Boolean(state.sipDomain && mySipDomain && !sameDomain(state.sipDomain, mySipDomain))
 }
 
 /**
@@ -596,6 +622,7 @@ function usePhoneProvisioning(
   enabled: boolean,
   state: ExtensionState | null,
   myExtension: string | undefined,
+  mySipDomain: string | undefined,
   provision: (credentials: SipSession) => void,
 ): Pick<PhoneBridge, 'reprovision' | 'provisionErrorCode'> {
   const [provisionErrorCode, setProvisionErrorCode] = useState<ErrorCode | null>(null)
@@ -605,6 +632,10 @@ function usePhoneProvisioning(
   // A CONFLICT means no extension is bound to this account. No amount of
   // retrying binds one, so the refusal stands until something changes.
   const isRefused = useRef(false)
+  // Whether, since this page was enabled, the phone has been seen holding
+  // our own credential (our account at our domain). After that, a credential
+  // from another deployment is a takeover, not a stale leftover.
+  const hasHeldOurs = useRef(false)
 
   const mint = useCallback(async () => {
     if (!enabled || inFlight.current || isRefused.current) return
@@ -630,12 +661,23 @@ function usePhoneProvisioning(
       // Signing out clears the refusal with everything else it clears.
       lastTrigger.current = null
       isRefused.current = false
+      hasHeldOurs.current = false
       setProvisionErrorCode(null)
       return
     }
 
     if (!state) return
-    const trigger = provisioningTrigger(state, myExtension)
+    if (
+      state.credentialSource === 'PROVISIONED' &&
+      myExtension &&
+      state.account === myExtension &&
+      state.sipDomain &&
+      mySipDomain &&
+      sameDomain(state.sipDomain, mySipDomain)
+    ) {
+      hasHeldOurs.current = true
+    }
+    const trigger = provisioningTrigger(state, myExtension, mySipDomain, hasHeldOurs.current)
     if (!trigger) {
       // The phone is holding something usable. Whatever was wrong before has
       // been answered, so the next time it goes wrong is a new occasion.
@@ -645,7 +687,7 @@ function usePhoneProvisioning(
     if (trigger === lastTrigger.current) return
     lastTrigger.current = trigger
     void mint()
-  }, [enabled, state, myExtension, mint])
+  }, [enabled, state, myExtension, mySipDomain, mint])
 
   const reprovision = useCallback(() => {
     isRefused.current = false

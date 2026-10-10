@@ -1,4 +1,4 @@
-import type { ExtensionState } from './phone-bridge'
+import { isForeignDomain, type ExtensionState } from './phone-bridge'
 
 export type { SipSession } from './api'
 
@@ -97,14 +97,21 @@ export function phoneChipFor(
   extension: ExtensionState | null | undefined,
   myExtension: string | undefined,
   isLost = false,
+  mySipDomain?: string,
 ): PhoneChip {
   if (extension === undefined) {
     return isLost ? chip('lost', 'phone.chip.lost') : chip('setup', 'phone.chip.setup')
   }
   if (extension === null) return chip('connecting', 'phone.chip.connecting')
 
+  // The same account number at another deployment's SIP domain is not this
+  // agent's phone: it is registered there, not here. Judged only when both
+  // domains are known; an older extension or server reads as before.
   const isMine = Boolean(
-    extension.account && myExtension && extension.account === myExtension,
+    extension.account &&
+      myExtension &&
+      extension.account === myExtension &&
+      !isForeignDomain(extension, mySipDomain),
   )
   const isSomebodyElses = Boolean(extension.account && myExtension && !isMine)
 

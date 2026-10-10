@@ -81,6 +81,10 @@ func presenceOf(agentID uuid.UUID, p agents.Presence) api.Presence {
 // Only the signed-out case needs the bound-extension lookup.
 func (s *Server) presenceView(ctx context.Context, agentID uuid.UUID, p agents.Presence) api.Presence {
 	out := presenceOf(agentID, p)
+	if s.cfg.SIPDomain != "" {
+		domain := s.cfg.SIPDomain
+		out.SIPDomain = &domain
+	}
 	ext := p.ExtensionNumber
 	if p.IsLoggedOut() || ext == "" {
 		ext = s.agents.BoundExtensionFor(ctx, agentID)
