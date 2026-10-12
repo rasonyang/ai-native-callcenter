@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
@@ -30,11 +31,16 @@ type LedgerStore struct {
 	// onCallbackSettled announces a callback whose attempt just ended; see
 	// Store.OnCallbackSettled.
 	onCallbackSettled func(Callback)
+	// attempts is the finish routine of the campaign attempt a CDR belongs to;
+	// onAttemptFinished announces it once the CDR's transaction holds.
+	attempts          attemptFinisher
+	onAttemptFinished func(campaign.Finished)
 }
 
 // Ledger returns the call ledger.
 func (s *Store) Ledger() *LedgerStore {
-	return &LedgerStore{q: s.Queries, pool: s.Pool, onCallbackSettled: s.OnCallbackSettled}
+	return &LedgerStore{q: s.Queries, pool: s.Pool, onCallbackSettled: s.OnCallbackSettled,
+		attempts: s.finisher(), onAttemptFinished: s.OnAttemptFinished}
 }
 
 // CDR is one finished call. Field vocabulary follows the naming spec; the
@@ -229,6 +235,7 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 	// an outcome the ledger then rolled back would show a call that never
 	// happened.
 	var settled []Callback
+	var finished *campaign.Finished
 	err = txFor(ctx, l.pool, func(q *queries.Queries) error {
 		written, err := q.InsertCDR(ctx, params)
 		if err != nil || written == 0 {
@@ -243,8 +250,18 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		for _, row := range rows {
 			settled = append(settled, callbackFromRow(row))
 		}
+		// The attempt a campaign made of this call learns its outcome in the
+		// same transaction, so it never disagrees with the ledger (design 10
+		// section 5.4). Nothing is done when the write declined: that row
+		// knew less than the one already there.
+		if finished, err = l.attempts.fromCDR(ctx, q, cdr); err != nil {
+			return err
+		}
 		return enqueueFor(ctx, q, cdr)
 	})
+	if err == nil && finished != nil && l.onAttemptFinished != nil {
+		l.onAttemptFinished(*finished)
+	}
 	if err == nil && l.onCallbackSettled != nil {
 		for _, cb := range settled {
 			l.onCallbackSettled(cb)

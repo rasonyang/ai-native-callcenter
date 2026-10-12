@@ -149,6 +149,9 @@ func run() error {
 	// A callback learns how its last attempt went when that call's CDR lands;
 	// every screen that can act on one is told the same moment.
 	st.OnCallbackSettled = settledCallback(ctx, hub)
+	// A campaign contact's retry stays inside the outer calling hours. The
+	// dialer (a later slice) sets st.OnAttemptFinished to wake itself.
+	st.OutboundHours = cfg.OutboundHours
 	hub.OnDropped = func(sub events.Subscriber) {
 		slog.Warn("sse subscriber dropped", "userId", sub.UserID)
 	}

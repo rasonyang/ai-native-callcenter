@@ -17,6 +17,8 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
+	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
@@ -46,6 +48,15 @@ type Store struct {
 	// attempt just learned how it went — from a CDR landing. The store cannot
 	// reach the event stream, so whoever wires it up hands in the announcer.
 	OnCallbackSettled func(Callback)
+	// OnAttemptFinished, when set, is told about every campaign attempt whose
+	// outcome was just written or revised, after the transaction holds. The
+	// dialer's actor wakes on it; the store cannot reach the actor, so whoever
+	// wires it up hands it in.
+	OnAttemptFinished func(campaign.Finished)
+	// OutboundHours are the deployment's outer calling hours
+	// (AICC_OUTBOUND_HOURS). A campaign contact's retry is never scheduled
+	// outside them. The zero value means no outer limit.
+	OutboundHours dayrange.Range
 	// FlowPublishRules are the checks a flow must pass, beyond loading, before
 	// this deployment will let it answer a call. They depend on what the
 	// installation runs — which speech provider, today — and the store has no

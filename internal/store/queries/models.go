@@ -125,6 +125,25 @@ type Campaign struct {
 	FinishedAt         pgtype.Timestamptz `json:"finishedAt"`
 }
 
+type CampaignAttempt struct {
+	ID                uuid.UUID          `json:"id"`
+	CampaignID        uuid.UUID          `json:"campaignId"`
+	CampaignContactID uuid.UUID          `json:"campaignContactId"`
+	NumberE164        string             `json:"numberE164"`
+	CallID            uuid.UUID          `json:"callId"`
+	LegID             uuid.UUID          `json:"legId"`
+	OriginateJobID    *string            `json:"originateJobId"`
+	State             string             `json:"state"`
+	Outcome           *string            `json:"outcome"`
+	HangupCause       *string            `json:"hangupCause"`
+	TalkSec           *int32             `json:"talkSec"`
+	IsTouched         bool               `json:"isTouched"`
+	LeadIntent        *string            `json:"leadIntent"`
+	LeadNotes         *string            `json:"leadNotes"`
+	StartedAt         pgtype.Timestamptz `json:"startedAt"`
+	FinishedAt        pgtype.Timestamptz `json:"finishedAt"`
+}
+
 type CampaignContact struct {
 	ID             uuid.UUID          `json:"id"`
 	CampaignID     uuid.UUID          `json:"campaignId"`

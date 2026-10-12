@@ -384,6 +384,12 @@ func TestValidate(t *testing.T) {
 			if tt.cfg.BotMaxCalls == 0 {
 				tt.cfg.BotMaxCalls = 220
 			}
+			if tt.cfg.TrunkBreakerCount == 0 {
+				tt.cfg.TrunkBreakerCount = DefaultTrunkBreakerCount
+			}
+			if tt.cfg.ProviderBreakerCount == 0 {
+				tt.cfg.ProviderBreakerCount = DefaultProviderBreakerCount
+			}
 			err := tt.cfg.validate()
 			if tt.wantErr == "" {
 				if err != nil {

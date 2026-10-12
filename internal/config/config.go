@@ -78,6 +78,13 @@ type Config struct {
 	// OverflowHold is how long an answered outbound call waits for a bot slot
 	// before it is hung up as OVERFLOW (AICC_OVERFLOW_HOLD). 0 waits not at all.
 	OverflowHold time.Duration
+	// TrunkBreakerCount is how many consecutive TRANSIENT or ORIGINATE_FAILED
+	// attempts pause a campaign as TRUNK_FAILURE (AICC_TRUNK_BREAKER_COUNT).
+	TrunkBreakerCount int
+	// ProviderBreakerCount is how many consecutive answered calls ending
+	// BOT_FAILED pause a campaign as PROVIDER_FAILURE
+	// (AICC_PROVIDER_BREAKER_COUNT).
+	ProviderBreakerCount int
 	// BotRTPDeadTimeout ends a bot call whose inbound media was flowing and
 	// stopped. BotFirstMediaTimeout ends one that never received any. Zero
 	// disables either; negative is refused.
@@ -368,6 +375,8 @@ func Load() (Config, error) {
 		BotMaxCalls:          envInt("AICC_BOT_MAX_CALLS", 220),
 		BotInboundReserve:    envInt("AICC_BOT_INBOUND_RESERVE", 0),
 		OverflowHold:         envDuration("AICC_OVERFLOW_HOLD", DefaultOverflowHold),
+		TrunkBreakerCount:    envInt("AICC_TRUNK_BREAKER_COUNT", DefaultTrunkBreakerCount),
+		ProviderBreakerCount: envInt("AICC_PROVIDER_BREAKER_COUNT", DefaultProviderBreakerCount),
 		BotRTPDeadTimeout:    envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
 		BotFirstMediaTimeout: envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
 		IsBotGreetingGated:   isGreetingGated,
@@ -557,6 +566,14 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"AICC_OVERFLOW_HOLD must be between 0 and %s, got %s", MaxOverflowHold, c.OverflowHold))
 	}
+	if c.TrunkBreakerCount < 1 || c.TrunkBreakerCount > MaxBreakerCount {
+		errs = append(errs, fmt.Errorf(
+			"AICC_TRUNK_BREAKER_COUNT must be between 1 and %d, got %d", MaxBreakerCount, c.TrunkBreakerCount))
+	}
+	if c.ProviderBreakerCount < 1 || c.ProviderBreakerCount > MaxBreakerCount {
+		errs = append(errs, fmt.Errorf(
+			"AICC_PROVIDER_BREAKER_COUNT must be between 1 and %d, got %d", MaxBreakerCount, c.ProviderBreakerCount))
+	}
 	if c.BotRTPDeadTimeout < 0 || c.BotFirstMediaTimeout < 0 {
 		errs = append(errs, fmt.Errorf(
 			"AICC_BOT_RTP_DEAD_TIMEOUT and AICC_BOT_FIRST_MEDIA_TIMEOUT must be 0 (off) or more, got %s and %s",
@@ -663,6 +680,14 @@ func env(key, def string) string {
 const (
 	DefaultOverflowHold = 1500 * time.Millisecond
 	MaxOverflowHold     = 10 * time.Second
+)
+
+// The campaign breakers (design 10 section 7.4): how many consecutive
+// failures pause a campaign, and the largest value accepted.
+const (
+	DefaultTrunkBreakerCount    = 20
+	DefaultProviderBreakerCount = 5
+	MaxBreakerCount             = 1000
 )
 
 func envInt(key string, def int) int {

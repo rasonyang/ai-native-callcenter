@@ -44,6 +44,8 @@ var (
 	transcribeFramesSent    metric.Int64Counter
 
 	webhookDeliveries metric.Int64Counter
+
+	campaignUnmappedCause metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -154,6 +156,10 @@ func init() {
 	webhookDeliveries, _ = meter.Int64Counter("aicc_webhook_deliveries_total",
 		metric.WithDescription("CDR deliveries that settled, by outcome. FAILED means the "+
 			"retry schedule ran out and that call was never told to that subscriber."))
+	campaignUnmappedCause, _ = meter.Int64Counter("aicc_campaign_unmapped_cause_total",
+		metric.WithDescription("Campaign attempts that ended with a hangup cause the "+
+			"outcome table has no row for. Each was treated as TRANSIENT (retried within "+
+			"maxSystemRetries); a rising count means the table needs a row."))
 	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
 		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
 	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
@@ -407,4 +413,28 @@ func RecordBotHold(outcome string, ms int64) {
 	if outcome == BotHoldOverflow && botOverflow != nil {
 		botOverflow.Add(context.Background(), 1)
 	}
+}
+
+// RecordCampaignUnmappedCause counts an attempt whose hangup cause the
+// campaign outcome table does not know. The cause is a label, so it is cut to
+// a bounded alphabet and length: a free string must not mint unbounded series.
+func RecordCampaignUnmappedCause(cause string) {
+	if campaignUnmappedCause == nil {
+		return
+	}
+	label := make([]byte, 0, 40)
+	for i := 0; i < len(cause) && len(label) < 40; i++ {
+		c := cause[i]
+		if c >= 'a' && c <= 'z' {
+			c -= 'a' - 'A'
+		}
+		if (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' {
+			label = append(label, c)
+		}
+	}
+	if len(label) == 0 {
+		label = append(label, "NONE"...)
+	}
+	campaignUnmappedCause.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("cause", string(label))))
 }
