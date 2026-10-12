@@ -122,6 +122,7 @@ type fakeSwitch struct {
 	bridges    []bridged
 	transfers  []transferred
 	hangups    []hungUp
+	vars       [][3]string
 }
 
 type hungUp struct{ channelID, cause string }
@@ -169,6 +170,13 @@ func (f *fakeSwitch) BridgeToEndpoint(channelID string, _ uuid.UUID, endpoint st
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.bridges = append(f.bridges, bridged{channelID, endpoint, vars})
+	return nil
+}
+
+func (f *fakeSwitch) SetVariable(channelID, name, value string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.vars = append(f.vars, [3]string{channelID, name, value})
 	return nil
 }
 

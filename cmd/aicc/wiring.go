@@ -431,7 +431,7 @@ func flowPublishRules(cfg config.Config, profile provider.Profile) []flow.Rule {
 // the zero value — which for RTPDeadTimeout means the dead-media check is off
 // and for RTCPInterval means no reporting at all. Overriding a default cannot
 // fail that way.
-func botUAS(cfg config.Config) voice.Config {
+func botUAS(cfg config.Config, slots *voice.BotSlots) voice.Config {
 	uas := voice.DefaultConfig()
 	uas.SIPHost = cfg.BotSIPHost
 	uas.SIPPort = cfg.BotSIPPort
@@ -441,6 +441,9 @@ func botUAS(cfg config.Config) voice.Config {
 	uas.AdvertiseIP = cfg.BotAdvertiseIP
 	uas.RTPPortRange = [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh}
 	uas.MaxCalls = cfg.BotMaxCalls
+	// The counter the outbound originator reserves from; MaxCalls above is
+	// only what a UAS without one would build for itself.
+	uas.Slots = slots
 	uas.RTPDeadTimeout = cfg.BotRTPDeadTimeout
 	uas.FirstMediaTimeout = cfg.BotFirstMediaTimeout
 	return uas

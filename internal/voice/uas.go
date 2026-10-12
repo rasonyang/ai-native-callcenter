@@ -50,7 +50,12 @@ type Config struct {
 	// AckTimeout is how long an accepted INVITE waits for its ACK.
 	AckTimeout time.Duration
 	// MaxCalls is the admission limit; further INVITEs get 486 Busy Here.
+	// Ignored when Slots is set: the counter carries the one number.
 	MaxCalls int
+	// Slots is the bot-capacity counter shared with the outbound originator.
+	// Nil builds a private one from MaxCalls, which is what a deployment with
+	// no reservations (and every test that does not care) wants.
+	Slots *BotSlots
 	// IsDTMFEnabled controls whether telephone-event is answered in SDP and
 	// digits are surfaced at all.
 	IsDTMFEnabled bool
@@ -286,6 +291,11 @@ func NewUAS(cfg Config) *UAS {
 	if len(cfg.CodecPreferences) == 0 {
 		cfg.CodecPreferences = DefaultConfig().CodecPreferences
 	}
+	if cfg.Slots == nil {
+		// MaxCalls below 1 only happens in a hand-built Config; the counter
+		// refuses it, and a listener that admits nothing is the safe reading.
+		cfg.Slots, _ = NewBotSlots(BotSlotsConfig{Cap: max(cfg.MaxCalls, 1)})
+	}
 	return &UAS{
 		cfg:         cfg,
 		log:         cfg.Logger,
@@ -320,7 +330,7 @@ func (u *UAS) Start() error {
 		allowedPeers = fmt.Sprint(u.cfg.AllowedPeers)
 	}
 	u.log.Info("sip uas started", "host", u.cfg.SIPHost, "port", u.localPort,
-		"maxCalls", u.cfg.MaxCalls, "allowedPeers", allowedPeers)
+		"maxCalls", u.cfg.Slots.Cap(), "allowedPeers", allowedPeers)
 	return nil
 }
 
@@ -337,6 +347,7 @@ func (u *UAS) Stop() {
 	u.answerTimer = map[string]*time.Timer{}
 	dialogs := make([]*Dialog, 0, len(u.dialogs))
 	for _, d := range u.dialogs {
+		u.cfg.Slots.Free()
 		dialogs = append(dialogs, d)
 	}
 	u.dialogs = map[string]*Dialog{}
@@ -517,7 +528,6 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 
 	u.mu.Lock()
 	existing := u.dialogs[callID]
-	callCount := len(u.dialogs)
 	u.mu.Unlock()
 
 	// A retransmitted INVITE means our 200 OK did not arrive. Answering with
@@ -533,11 +543,33 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 		return
 	}
 
-	if callCount >= u.cfg.MaxCalls {
+	// The slot. An answered outbound leg reserved one under its own call id
+	// before it was bridged, and this INVITE is that bridge: it takes the
+	// reservation and does not compete with inbound. Anything else asks for a
+	// fresh slot, and at capacity gets 486.
+	key := reservationKey(msg)
+	switch {
+	case key != "" && u.cfg.Slots.Consume(key):
+		u.log.Info("bot slot taken from reservation", "callId", callID, "reservation", key)
+	case u.cfg.Slots.TryAcquire():
+		if key != "" {
+			u.log.Info("invite names a reservation that is gone; took a fresh slot",
+				"callId", callID, "reservation", key)
+		}
+	default:
 		u.send(buildReject(msg, "486 Busy Here", newTag()), addr)
-		u.log.Warn("invite rejected at capacity", "callId", callID, "maxCalls", u.cfg.MaxCalls)
+		u.log.Warn("invite rejected at capacity", "callId", callID,
+			"maxCalls", u.cfg.Slots.Cap(), "reservation", key)
 		return
 	}
+	// Every refusal below gives the slot back; a dialog in u.dialogs holds one
+	// until endCall, cleanup or Stop removes it.
+	isAccepted := false
+	defer func() {
+		if !isAccepted {
+			u.cfg.Slots.Free()
+		}
+	}()
 
 	u.send(build100Trying(msg), addr)
 
@@ -600,6 +632,7 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 
 	u.mu.Lock()
 	u.dialogs[callID] = dialog
+	isAccepted = true
 	u.ackTimers[callID] = time.AfterFunc(u.cfg.AckTimeout, func() {
 		u.log.Warn("no ack for accepted invite", "callId", callID)
 		u.cleanup(callID)
@@ -870,6 +903,7 @@ func (u *UAS) endCall(dialog *Dialog) {
 	if !isActive {
 		return
 	}
+	u.cfg.Slots.Free()
 
 	dialog.Stop()
 	if u.OnCallEnded != nil {
@@ -892,6 +926,7 @@ func (u *UAS) cleanup(callID string) {
 	u.mu.Unlock()
 
 	if dialog != nil {
+		u.cfg.Slots.Free()
 		dialog.Stop()
 		u.releaseRTPPort(dialog.LocalRTPPort)
 	}
@@ -906,4 +941,12 @@ func tagFrom(header string) string {
 		}
 	}
 	return ""
+}
+
+// reservationKey is the call id an outbound leg reserved its slot under: the
+// X-AICC-Call-ID header that bridgeToBot stamps on the INVITE, the same one the
+// orchestrator reads to name the call. It is not the SIP Call-ID, which the
+// switch mints for the bridge leg.
+func reservationKey(msg *sipMessage) string {
+	return strings.TrimSpace(msg.get("X-AICC-Call-ID"))
 }

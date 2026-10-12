@@ -381,6 +381,9 @@ func TestValidate(t *testing.T) {
 			if tt.cfg.BotNoInputTimeout == 0 {
 				tt.cfg.BotNoInputTimeout = DefaultBotNoInputTimeout
 			}
+			if tt.cfg.BotMaxCalls == 0 {
+				tt.cfg.BotMaxCalls = 220
+			}
 			err := tt.cfg.validate()
 			if tt.wantErr == "" {
 				if err != nil {

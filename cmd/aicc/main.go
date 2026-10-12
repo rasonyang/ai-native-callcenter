@@ -37,6 +37,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcribe"
 	"github.com/rasonyang/ai-native-callcenter/internal/transcript"
+	"github.com/rasonyang/ai-native-callcenter/internal/voice"
 	"github.com/rasonyang/ai-native-callcenter/internal/webhook"
 	"github.com/rasonyang/ai-native-callcenter/web"
 )
@@ -269,8 +270,19 @@ func run() error {
 	if postCall != nil {
 		cdrAssembler.SetRecordingOffer(postCall)
 	}
+	// The bot's capacity, one number for the UAS and for the outbound
+	// originator, which reserves a slot on answer.
+	botSlots, err := voice.NewBotSlots(voice.BotSlotsConfig{
+		Cap: cfg.BotMaxCalls, InboundReserve: cfg.BotInboundReserve,
+	})
+	if err != nil {
+		return err
+	}
+
 	// Outbound: click-to-dial and the AI outbound leg share one originator.
 	outboundSvc := outbound.New(outbound.Config{
+		Slots:          botSlots,
+		OverflowHold:   cfg.OverflowHold,
 		EndpointFormat: cfg.OutboundEndpoint,
 		SIPHeaders:     cfg.OutboundSIPHeaders,
 		CallerID:       cfg.OutboundCallerID,
@@ -343,7 +355,7 @@ func run() error {
 		reportMissingProviderKey(slog.Default(), profile, os.Getenv)
 
 		orchestrator, err := aicall.NewOrchestrator(botConfig(
-			botUAS(cfg),
+			botUAS(cfg, botSlots),
 			catalogSvc,
 			st.Flows(),
 			adapter,

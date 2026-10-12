@@ -115,6 +115,21 @@ func TestNormalizeChannelLifecycle(t *testing.T) {
 			},
 		},
 		{
+			name: "a cause of the platform's own replaces the switch's on hangup",
+			headers: map[string]string{
+				"Event-Name":                 "CHANNEL_HANGUP_COMPLETE",
+				"Unique-ID":                  "019ff973-6b3b-7481-922b-cb52677a6cad",
+				"Hangup-Cause":               "NORMAL_CLEARING",
+				"variable_aicc_hangup_cause": "OVERFLOW",
+			},
+			want: KindChannelHangup,
+			check: func(t *testing.T, got SwitchEvent) {
+				if got.HangupCause != "OVERFLOW" {
+					t.Errorf("HangupCause = %q, want OVERFLOW", got.HangupCause)
+				}
+			},
+		},
+		{
 			name: "record start carries the file path",
 			headers: map[string]string{
 				"Event-Name":       "RECORD_START",

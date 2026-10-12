@@ -459,6 +459,12 @@ func normalizeChannel(ev *esl.Event, out SwitchEvent) (SwitchEvent, bool) {
 	case "CHANNEL_HANGUP_COMPLETE":
 		out.Kind = KindChannelHangup
 		out.HangupCause = ev.GetFirst("Hangup-Cause", "variable_hangup_cause")
+		// A cause of this platform's own (OVERFLOW) cannot ride uuid_kill, which
+		// speaks the switch's vocabulary only, so the originator stamps it on
+		// the leg first and it replaces the switch's word here.
+		if own := ev.Variable(VarHangupCause); own != "" {
+			out.HangupCause = own
+		}
 		if q850, ok := ev.GetInt("variable_hangup_cause_q850"); ok {
 			out.HangupCauseQ850 = int(q850)
 		}

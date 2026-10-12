@@ -70,6 +70,12 @@ type Config struct {
 	BotRTPPortLow  int
 	BotRTPPortHigh int
 	BotMaxCalls    int
+	// BotInboundReserve is how many of BotMaxCalls an outbound reservation may
+	// not take, kept for inbound calls. 0 (the default) reserves nothing.
+	BotInboundReserve int
+	// OverflowHold is how long an answered outbound call waits for a bot slot
+	// before it is hung up as OVERFLOW (AICC_OVERFLOW_HOLD). 0 waits not at all.
+	OverflowHold time.Duration
 	// BotRTPDeadTimeout ends a bot call whose inbound media was flowing and
 	// stopped. BotFirstMediaTimeout ends one that never received any. Zero
 	// disables either; negative is refused.
@@ -345,6 +351,8 @@ func Load() (Config, error) {
 		BotRTPPortLow:        envInt("AICC_BOT_RTP_PORT_LOW", 40000),
 		BotRTPPortHigh:       envInt("AICC_BOT_RTP_PORT_HIGH", 40999),
 		BotMaxCalls:          envInt("AICC_BOT_MAX_CALLS", 220),
+		BotInboundReserve:    envInt("AICC_BOT_INBOUND_RESERVE", 0),
+		OverflowHold:         envDuration("AICC_OVERFLOW_HOLD", DefaultOverflowHold),
 		BotRTPDeadTimeout:    envDuration("AICC_BOT_RTP_DEAD_TIMEOUT", 5*time.Second),
 		BotFirstMediaTimeout: envDuration("AICC_BOT_FIRST_MEDIA_TIMEOUT", 30*time.Second),
 		IsBotGreetingGated:   isGreetingGated,
@@ -520,6 +528,17 @@ func (c Config) validate() error {
 	if _, err := c.BotAllowedPeerPrefixes(); err != nil {
 		errs = append(errs, fmt.Errorf("AICC_BOT_ALLOWED_PEERS: %w", err))
 	}
+	if c.BotMaxCalls < 1 {
+		errs = append(errs, fmt.Errorf("AICC_BOT_MAX_CALLS must be at least 1, got %d", c.BotMaxCalls))
+	} else if c.BotInboundReserve < 0 || c.BotInboundReserve >= c.BotMaxCalls {
+		errs = append(errs, fmt.Errorf(
+			"AICC_BOT_INBOUND_RESERVE must be 0 or more and below AICC_BOT_MAX_CALLS (%d), got %d",
+			c.BotMaxCalls, c.BotInboundReserve))
+	}
+	if c.OverflowHold < 0 || c.OverflowHold > MaxOverflowHold {
+		errs = append(errs, fmt.Errorf(
+			"AICC_OVERFLOW_HOLD must be between 0 and %s, got %s", MaxOverflowHold, c.OverflowHold))
+	}
 	if c.BotRTPDeadTimeout < 0 || c.BotFirstMediaTimeout < 0 {
 		errs = append(errs, fmt.Errorf(
 			"AICC_BOT_RTP_DEAD_TIMEOUT and AICC_BOT_FIRST_MEDIA_TIMEOUT must be 0 (off) or more, got %s and %s",
@@ -614,6 +633,13 @@ func env(key, def string) string {
 	}
 	return def
 }
+
+// DefaultOverflowHold is how long an answered outbound call may wait for a bot
+// slot; MaxOverflowHold bounds it, since the customer is listening to nothing.
+const (
+	DefaultOverflowHold = 1500 * time.Millisecond
+	MaxOverflowHold     = 10 * time.Second
+)
 
 func envInt(key string, def int) int {
 	if v, ok := os.LookupEnv(key); ok && v != "" {

@@ -561,7 +561,8 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
 			BotAdvertiseIP: "127.0.0.1", BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
 			BotMaxCalls: 10, BotAllowedPeers: "127.0.0.1",
-			BotRTPDeadTimeout: 5 * time.Second, BotFirstMediaTimeout: 30 * time.Second}),
+			BotRTPDeadTimeout: 5 * time.Second, BotFirstMediaTimeout: 30 * time.Second},
+			&voice.BotSlots{}),
 		&catalog.Service{},
 		&store.FlowStore{},
 		&telephony.Adapter{},
@@ -592,7 +593,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 // The two media timeouts must come from configuration: a field dropped in
 // botUAS becomes zero, which turns that check off without a word.
 func TestBotUASCarriesTheConfiguredMediaTimeouts(t *testing.T) {
-	got := botUAS(config.Config{BotRTPDeadTimeout: 8 * time.Second, BotFirstMediaTimeout: 90 * time.Second})
+	got := botUAS(config.Config{BotRTPDeadTimeout: 8 * time.Second, BotFirstMediaTimeout: 90 * time.Second}, nil)
 	if got.RTPDeadTimeout != 8*time.Second || got.FirstMediaTimeout != 90*time.Second {
 		t.Errorf("voice.Config timeouts = %s, %s, want the configured 8s and 90s",
 			got.RTPDeadTimeout, got.FirstMediaTimeout)
@@ -603,7 +604,7 @@ func TestBotUASCarriesTheConfiguredMediaTimeouts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load defaults: %v", err)
 	}
-	got = botUAS(cfg)
+	got = botUAS(cfg, nil)
 	if def := voice.DefaultConfig(); got.RTPDeadTimeout != def.RTPDeadTimeout ||
 		got.FirstMediaTimeout != def.FirstMediaTimeout {
 		t.Errorf("default timeouts diverge: configured %s, %s vs voice defaults %s, %s",
@@ -638,7 +639,7 @@ func TestBotConfigCarriesTheGreetingMediaWait(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			got := botConfig(botUAS(cfg), nil, nil, nil, nil, nil, "", provider.Profile{},
+			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, "", provider.Profile{},
 				nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout)
 			if got.IsGreetingGated != tc.wantGated || got.GreetingMediaWait != tc.wantWait {
 				t.Errorf("orchestrator gate = %v, %s, want %v, %s",
@@ -671,7 +672,7 @@ func TestBotConfigCarriesTheNoInputTimeout(t *testing.T) {
 			if err != nil {
 				t.Fatalf("load: %v", err)
 			}
-			got := botConfig(botUAS(cfg), nil, nil, nil, nil, nil, "", provider.Profile{},
+			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, "", provider.Profile{},
 				nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout)
 			if got.NoInput != tc.want {
 				t.Errorf("orchestrator NoInput = %s, want %s", got.NoInput, tc.want)

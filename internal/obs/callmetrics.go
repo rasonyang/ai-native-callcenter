@@ -36,6 +36,9 @@ var (
 	botUnbacked      metric.Int64Counter
 	botFirstMedia    metric.Int64Histogram
 	botFirstAudio    metric.Int64Histogram
+	botSlots         metric.Int64UpDownCounter
+	botOverflow      metric.Int64Counter
+	botOverflowHold  metric.Int64Histogram
 
 	transcribeFramesDropped metric.Int64Counter
 	transcribeFramesSent    metric.Int64Counter
@@ -133,6 +136,21 @@ func init() {
 			"have heard it: the greeting went into a path that did not exist yet."),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(250, 500, 750, 1000, 1500, 2000, 3000, 5000, 9000, 15000, 30000))
+	botSlots, _ = meter.Int64UpDownCounter("aicc_bot_slots",
+		metric.WithDescription("Bot capacity in use, by state: IN_USE is an accepted SIP "+
+			"dialog, RESERVED is an answered outbound leg holding a slot for the INVITE "+
+			"that has not arrived yet. Both count against AICC_BOT_MAX_CALLS."))
+	botOverflow, _ = meter.Int64Counter("aicc_bot_overflow_total",
+		metric.WithDescription("Answered outbound calls hung up because no bot slot freed "+
+			"within the overflow hold (AICC_OVERFLOW_HOLD). Each is a customer who "+
+			"answered and met no bot."))
+	botOverflowHold, _ = meter.Int64Histogram("aicc_bot_overflow_hold_ms",
+		metric.WithDescription("How long an answered outbound leg was parked waiting for a "+
+			"bot slot, in milliseconds, by outcome: RESERVED (a slot freed in time), "+
+			"OVERFLOW (none did) or ABANDONED (the customer hung up first). Calls that "+
+			"found a slot at once are not recorded."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(50, 100, 250, 500, 750, 1000, 1500, 2500))
 	webhookDeliveries, _ = meter.Int64Counter("aicc_webhook_deliveries_total",
 		metric.WithDescription("CDR deliveries that settled, by outcome. FAILED means the "+
 			"retry schedule ran out and that call was never told to that subscriber."))
@@ -355,4 +373,38 @@ func countWebhook(subscriptionID, outcome string) {
 		attribute.String("subscriptionId", subscriptionID),
 		attribute.String("outcome", outcome),
 	))
+}
+
+// The states of aicc_bot_slots.
+const (
+	BotSlotInUse    = "IN_USE"
+	BotSlotReserved = "RESERVED"
+)
+
+// The outcomes of a hold for a bot slot.
+const (
+	BotHoldReserved  = "RESERVED"
+	BotHoldOverflow  = "OVERFLOW"
+	BotHoldAbandoned = "ABANDONED"
+)
+
+// BotSlotsChanged moves the bot-capacity gauge for one state.
+func BotSlotsChanged(state string, delta int64) {
+	if botSlots == nil {
+		return
+	}
+	botSlots.Add(context.Background(), delta,
+		metric.WithAttributes(attribute.String("state", state)))
+}
+
+// RecordBotHold records an answered outbound leg that had to wait for a bot
+// slot. Only an overflow moves the overflow counter.
+func RecordBotHold(outcome string, ms int64) {
+	if botOverflowHold != nil {
+		botOverflowHold.Record(context.Background(), ms,
+			metric.WithAttributes(attribute.String("outcome", outcome)))
+	}
+	if outcome == BotHoldOverflow && botOverflow != nil {
+		botOverflow.Add(context.Background(), 1)
+	}
 }

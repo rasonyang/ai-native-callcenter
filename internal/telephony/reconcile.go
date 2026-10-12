@@ -43,6 +43,10 @@ const (
 	// the request gave it. The destination number the switch reports back may
 	// have been rewritten by the dial string; this is what the bot is told.
 	VarPlacedTo = "aicc_placed_to"
+	// VarHangupCause carries a hangup cause of this platform's own, which the
+	// switch's uuid_kill cannot (OVERFLOW). When set it replaces the switch's
+	// cause on the leg's hangup, and so in the CDR's hangupCause.
+	VarHangupCause = "aicc_hangup_cause"
 
 	// PlacedByDialAI marks the customer leg of an AI outbound call.
 	PlacedByDialAI = "DIAL_AI"

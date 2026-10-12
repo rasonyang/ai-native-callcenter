@@ -21,6 +21,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
@@ -30,7 +31,19 @@ type Switch interface {
 	BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error
 	TransferToExtension(channelID, extension, context string) error
 	Hangup(channelID, cause string) error
+	SetVariable(channelID, name, value string) error
 	Endpoint(extensionNumber string) string
+}
+
+// BotSlots is the bot-capacity counter an answered AI outbound leg takes a slot
+// from before it is bridged (voice.BotSlots). One number is shared with the
+// UAS, which consumes the reservation when the bridge's INVITE arrives.
+type BotSlots interface {
+	// ReserveWait reserves a slot under key, parking for up to hold until one
+	// frees, and gives up early when ctx is done.
+	ReserveWait(ctx context.Context, key string, hold time.Duration) (ok bool, waited time.Duration)
+	// Release gives back a reservation the INVITE has not consumed.
+	Release(key string)
 }
 
 // DIDSource answers which numbers exist and which flow serves them.
@@ -73,6 +86,12 @@ type Config struct {
 	// config layer validates it; a request is checked again at call time).
 	// Default config.DefaultOutboundRingTimeout (45s).
 	RingTimeout time.Duration
+	// Slots is the bot-capacity counter. Nil bridges without reserving, which
+	// is only right for a deployment that never fills its bot.
+	Slots BotSlots
+	// OverflowHold is how long an answered leg waits for a slot before it is
+	// hung up as OverflowCause. Zero waits not at all.
+	OverflowHold time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -137,7 +156,24 @@ type Service struct {
 	early     map[string]earlyResult
 	jobMargin time.Duration
 	failures  FailureLedger
+
+	// holds are the answered AI legs that took, or are waiting for, a bot slot,
+	// by channel id; guarded by mu. A hangup cancels the wait and releases the
+	// reservation.
+	holds map[string]*slotHold
 }
+
+// slotHold is one answered leg's claim on a bot slot.
+type slotHold struct {
+	key    string
+	cancel context.CancelFunc
+	since  time.Time
+}
+
+// OverflowCause is the hangupCause of an answered AI outbound call that no bot
+// slot could take. It is this platform's own word, not the switch's: the leg
+// is stamped with it (telephony.VarHangupCause) before it is hung up.
+const OverflowCause = "OVERFLOW"
 
 // LateAnswerCause is the hangup cause stamped on a leg that was answered after
 // its window closed. It reaches the CDR's hangupCause (a free string) as the
@@ -190,6 +226,7 @@ func New(cfg Config, sw Switch, dids DIDSource, numbers NumberPlan,
 		callData: NewCallData(),
 		log:      log,
 		pending:  map[string]*pendingLeg{},
+		holds:    map[string]*slotHold{},
 		now:      time.Now,
 	}
 }
@@ -643,6 +680,10 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 // Placing a call and adopting one that outlived a restart arm the same thing.
 func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language, to string) func() {
 	return func() {
+		key := callID.String()
+		if s.cfg.Slots != nil && !s.takeSlot(callID, customerLeg, to) {
+			return
+		}
 		botLeg := uuid.New()
 		bridgeVars := map[string]string{
 			"aicc_call_id":                    callID.String(),
@@ -661,7 +702,81 @@ func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language
 		if err := s.sw.BridgeToEndpoint(customerLeg, botLeg, target, bridgeVars); err != nil {
 			s.log.Error("ai outbound bridge to bot failed",
 				"callId", callID, "to", to, "error", err)
+			s.dropHold(customerLeg, key)
 		}
+	}
+}
+
+// takeSlot reserves a bot slot for an answered leg, parking it for up to the
+// overflow hold when none is free. It reports whether the bridge may go ahead.
+// When it may not, the leg has already been dealt with: hung up as OVERFLOW,
+// or gone because the customer hung up first.
+func (s *Service) takeSlot(callID uuid.UUID, customerLeg, to string) bool {
+	key := callID.String()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	now := s.now()
+	for id, h := range s.holds { // a hangup that raced the answer left these
+		if now.Sub(h.since) > time.Minute {
+			delete(s.holds, id)
+		}
+	}
+	s.holds[customerLeg] = &slotHold{key: key, cancel: cancel, since: now}
+	s.mu.Unlock()
+
+	ok, waited := s.cfg.Slots.ReserveWait(ctx, key, s.cfg.OverflowHold)
+	isGone := ctx.Err() != nil
+	switch {
+	case isGone:
+		// The customer hung up while parked (or between reserving and now);
+		// the hangup handler has released or will release the reservation.
+		s.cfg.Slots.Release(key)
+		if waited > 0 {
+			obs.RecordBotHold(obs.BotHoldAbandoned, waited.Milliseconds())
+		}
+		s.log.Info("customer hung up while waiting for a bot slot",
+			"callId", callID, "waitedMs", waited.Milliseconds())
+		s.dropHold(customerLeg, key)
+		return false
+	case ok:
+		if waited > 0 {
+			obs.RecordBotHold(obs.BotHoldReserved, waited.Milliseconds())
+		}
+		s.log.Info("bot slot reserved for the answered leg",
+			"callId", callID, "waitedMs", waited.Milliseconds())
+		return true
+	}
+
+	obs.RecordBotHold(obs.BotHoldOverflow, waited.Milliseconds())
+	s.log.Warn("no bot slot freed within the overflow hold; hanging up the answered leg",
+		"callId", callID, "to", to, "heldMs", waited.Milliseconds(), "cause", OverflowCause)
+	s.dropHold(customerLeg, key)
+	// The stamp first: uuid_kill takes the switch's causes only, so the
+	// platform's own word rides a channel variable the normalizer reads.
+	if err := s.sw.SetVariable(customerLeg, telephony.VarHangupCause, OverflowCause); err != nil {
+		s.log.Error("could not stamp the overflow cause on the leg",
+			"callId", callID, "channelId", customerLeg, "error", err)
+	}
+	if err := s.sw.Hangup(customerLeg, "NORMAL_CLEARING"); err != nil {
+		s.log.Error("hangup of an overflowed leg failed",
+			"callId", callID, "channelId", customerLeg, "error", err)
+	}
+	return false
+}
+
+// dropHold forgets a leg's slot claim and cancels any wait for it.
+func (s *Service) dropHold(customerLeg, key string) {
+	s.mu.Lock()
+	h := s.holds[customerLeg]
+	delete(s.holds, customerLeg)
+	s.mu.Unlock()
+	if h != nil {
+		h.cancel()
+	}
+	// Whatever was reserved and not consumed goes back; a no-op when nothing
+	// was or the INVITE took it.
+	if s.cfg.Slots != nil {
+		s.cfg.Slots.Release(key)
 	}
 }
 
@@ -781,7 +896,16 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 	case telephony.KindChannelHangup:
 		s.mu.Lock()
 		delete(s.pending, ev.ChannelID)
+		h := s.holds[ev.ChannelID]
+		delete(s.holds, ev.ChannelID)
 		s.mu.Unlock()
+		// The customer is gone: stop waiting for a slot, and give back one
+		// that was reserved for a bridge that no longer has anyone to carry.
+		// A reservation the INVITE already consumed is untouched.
+		if h != nil {
+			h.cancel()
+			s.cfg.Slots.Release(h.key)
+		}
 	}
 }
 
