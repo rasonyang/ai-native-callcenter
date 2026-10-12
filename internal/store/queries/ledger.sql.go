@@ -379,7 +379,16 @@ INSERT INTO cdrs (
     tech = EXCLUDED.tech,
     legs = EXCLUDED.legs,
     unbacked_claims = EXCLUDED.unbacked_claims
-WHERE EXCLUDED.ended_at > cdrs.ended_at
+WHERE CASE
+    -- A placement failure (an originate that never made a channel, tech
+    -- isPlacementFailure) knows the least about a call. It never replaces a
+    -- row, whatever its ended_at says.
+    WHEN EXCLUDED.tech ->> 'isPlacementFailure' = 'true' THEN false
+    -- ...and any other row replaces one, even though the real call ended
+    -- before the job result that produced the placement failure arrived.
+    WHEN cdrs.tech ->> 'isPlacementFailure' = 'true' THEN true
+    ELSE EXCLUDED.ended_at > cdrs.ended_at
+END
 `
 
 type InsertCDRParams struct {

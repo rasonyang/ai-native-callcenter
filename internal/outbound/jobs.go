@@ -75,27 +75,56 @@ type earlyResult struct {
 	at    time.Time
 }
 
-// trackJob remembers an originate's Job-UUID. A failure that was already
-// dispatched is applied at once.
-func (s *Service) trackJob(job *trackedJob) {
-	if job.jobID == "" {
-		return
-	}
+// expectLeg registers a placement before its originate is sent. The leg id is
+// minted by us, so it is known long before the bgapi reply names the job; the
+// switch's CHANNEL_CREATE for it can be dispatched before that reply is, and
+// must find the placement waiting or a call whose channel did exist would be
+// taken for one that never did.
+func (s *Service) expectLeg(job *trackedJob) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.jobs == nil {
 		s.jobs = map[string]*trackedJob{}
-		s.legJobs = map[string]string{}
+		s.legJobs = map[string]*trackedJob{}
 	}
-	if early, ok := s.early[job.jobID]; ok {
-		delete(s.early, job.jobID)
+	s.legJobs[job.legID] = job
+}
+
+// abandonLeg undoes expectLeg when the originate was never sent.
+func (s *Service) abandonLeg(job *trackedJob) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.legJobs[job.legID] == job {
+		delete(s.legJobs, job.legID)
+	}
+}
+
+// attachJob gives an expected leg the Job-UUID bgapi returned. A failure that
+// was already dispatched is applied at once.
+func (s *Service) attachJob(job *trackedJob, jobID string) {
+	s.mu.Lock()
+	if jobID == "" {
+		// Nothing to correlate with; the CDR alone will tell.
+		if s.legJobs[job.legID] == job {
+			delete(s.legJobs, job.legID)
+		}
 		s.mu.Unlock()
-		s.log.Info("originate job failed before it was tracked",
-			"callId", job.callID, "jobId", job.jobID, "cause", early.cause)
-		s.failPlacement(job, early.cause)
 		return
 	}
-	s.jobs[job.jobID] = job
-	s.legJobs[job.legID] = job.jobID
+	job.jobID = jobID
+	if early, ok := s.early[jobID]; ok {
+		delete(s.early, jobID)
+		hadChannel := job.hadChannel
+		if s.legJobs[job.legID] == job {
+			delete(s.legJobs, job.legID)
+		}
+		s.mu.Unlock()
+		s.log.Info("originate job failed before it was tracked",
+			"callId", job.callID, "jobId", jobID, "cause", early.cause)
+		s.finishJob(job, hadChannel, early.cause)
+		return
+	}
+	s.jobs[jobID] = job
 	margin := s.jobMargin
 	if margin <= 0 {
 		margin = jobMargin
@@ -114,7 +143,7 @@ func (s *Service) JobCount() int {
 // forgetJobLocked removes a job from both indexes.
 func (s *Service) forgetJobLocked(job *trackedJob) {
 	delete(s.jobs, job.jobID)
-	if s.legJobs[job.legID] == job.jobID {
+	if s.legJobs[job.legID] == job {
 		delete(s.legJobs, job.legID)
 	}
 	if job.timer != nil {
@@ -126,10 +155,8 @@ func (s *Service) forgetJobLocked(job *trackedJob) {
 func (s *Service) noteChannel(channelID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if id, ok := s.legJobs[channelID]; ok {
-		if job := s.jobs[id]; job != nil {
-			job.hadChannel = true
-		}
+	if job := s.legJobs[channelID]; job != nil {
+		job.hadChannel = true
 	}
 }
 
@@ -157,18 +184,25 @@ func (s *Service) handleJob(ev telephony.SwitchEvent) {
 	hadChannel := job.hadChannel
 	s.mu.Unlock()
 
-	switch {
-	case ev.IsJobOK:
+	if ev.IsJobOK {
 		s.log.Debug("originate job ok", "callId", job.callID, "jobId", ev.JobID)
-	case hadChannel || (s.isLive != nil && s.isLive(job.callID)):
+		return
+	}
+	s.finishJob(job, hadChannel, ev.JobCause)
+}
+
+// finishJob acts on a failed job that has already left the map, so it runs
+// once.
+func (s *Service) finishJob(job *trackedJob, hadChannel bool, cause string) {
+	if hadChannel || (s.isLive != nil && s.isLive(job.callID)) {
 		// The CDR is the single source for how a call that existed ended.
 		s.log.Info("originate job failed after the channel existed; the cdr is the record",
-			"callId", job.callID, "jobId", ev.JobID, "cause", ev.JobCause)
-	default:
-		s.log.Warn("originate failed before any channel existed",
-			"callId", job.callID, "jobId", ev.JobID, "cause", ev.JobCause)
-		s.failPlacement(job, ev.JobCause)
+			"callId", job.callID, "jobId", job.jobID, "cause", cause)
+		return
 	}
+	s.log.Warn("originate failed before any channel existed",
+		"callId", job.callID, "jobId", job.jobID, "cause", cause)
+	s.failPlacement(job, cause)
 }
 
 func (s *Service) stashEarlyLocked(jobID, cause string) {
@@ -227,27 +261,7 @@ func (s *Service) failPlacement(job *trackedJob, cause string) {
 		return
 	}
 
-	now := time.Now().UTC()
-	cdr := store.CDR{
-		CallID:      job.callID,
-		StartedAt:   job.placedAt,
-		EndedAt:     now,
-		CallType:    job.callType,
-		Language:    job.language,
-		FromNumber:  job.from,
-		ToNumber:    job.to,
-		DID:         job.did,
-		FlowID:      job.flowID,
-		Status:      store.CDRStatusFailed,
-		HangupCause: cause,
-		UserData:    userData,
-		Tech: map[string]any{
-			"originateJobId":      job.jobID,
-			"originatedChannelId": job.legID,
-		},
-		Legs: []store.Leg{{Kind: job.legKind, Label: job.legLabel, Note: cause}},
-	}
-	cdr.TotalSec = max(0, int(now.Sub(job.placedAt).Seconds()))
+	cdr := placementFailureCDR(job, cause, userData, time.Now().UTC())
 
 	// Off the dispatch loop: it must not wait on a database.
 	go func() {
@@ -263,4 +277,32 @@ func (s *Service) failPlacement(job *trackedJob, cause string) {
 				"callId", job.callID, "error", err)
 		}
 	}()
+}
+
+// placementFailureCDR is the ledger row for a call whose originate never made
+// a channel. Tech.isPlacementFailure marks it as the row that knows least: the
+// store never lets it replace another row, and any other row replaces it.
+func placementFailureCDR(job *trackedJob, cause string, userData map[string]any, now time.Time) store.CDR {
+	cdr := store.CDR{
+		CallID:      job.callID,
+		StartedAt:   job.placedAt,
+		EndedAt:     now,
+		CallType:    job.callType,
+		Language:    job.language,
+		FromNumber:  job.from,
+		ToNumber:    job.to,
+		DID:         job.did,
+		FlowID:      job.flowID,
+		Status:      store.CDRStatusFailed,
+		HangupCause: cause,
+		UserData:    userData,
+		Tech: map[string]any{
+			"isPlacementFailure":  true,
+			"originateJobId":      job.jobID,
+			"originatedChannelId": job.legID,
+		},
+		Legs: []store.Leg{{Kind: job.legKind, Label: job.legLabel, Note: cause}},
+	}
+	cdr.TotalSec = max(0, int(now.Sub(job.placedAt).Seconds()))
+	return cdr
 }
