@@ -201,8 +201,8 @@ func TestALoginsGrantIsTheDerivedOne(t *testing.T) {
 		want int
 	}{
 		{auth.RoleAgent, 8},
-		{auth.RoleSupervisor, 16},
-		{auth.RoleAdmin, 20},
+		{auth.RoleSupervisor, 18},
+		{auth.RoleAdmin, 22},
 	} {
 		got := grantedScopes(tc.role)
 		if len(got) != tc.want {
@@ -212,8 +212,8 @@ func TestALoginsGrantIsTheDerivedOne(t *testing.T) {
 				tc.role, len(got), tc.want, got)
 		}
 	}
-	if len(api.AllScopes) != 20 {
-		t.Errorf("the vocabulary has %d scopes, want 20", len(api.AllScopes))
+	if len(api.AllScopes) != 22 {
+		t.Errorf("the vocabulary has %d scopes, want 22", len(api.AllScopes))
 	}
 
 	if slices.Contains(grantedScopes(auth.RoleAgent), api.ScopeCallsCreateAI) {

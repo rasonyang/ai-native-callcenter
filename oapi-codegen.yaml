@@ -19,6 +19,7 @@ output-options:
     - CDRs
     - DID
     - DIDs
+    - DNC
     - DTMF
     - IDs
     - SSE

@@ -20,6 +20,8 @@ export type Scope =
     | 'config:write'
     | 'contacts:read'
     | 'contacts:write'
+    | 'dnc:read'
+    | 'dnc:write'
     | 'history:read:all'
     | 'history:read:own'
     | 'keys:manage'
@@ -43,6 +45,8 @@ export const SCOPES: readonly Scope[] = [
     'config:write',
     'contacts:read',
     'contacts:write',
+    'dnc:read',
+    'dnc:write',
     'history:read:all',
     'history:read:own',
     'keys:manage',
@@ -67,6 +71,8 @@ export const SCOPE_DESCRIPTIONS: Record<Scope, string> = {
     'config:write': "Change the platform's configuration, and reveal an extension's SIP password.",
     'contacts:read': "Read the customer record book.",
     'contacts:write': "Add, edit and remove customer records.",
+    'dnc:read': "Read the do-not-call list.",
+    'dnc:write': "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
     'history:read:all': "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
     'history:read:own': "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
     'keys:manage': "Create, disable and revoke API keys.",

@@ -76,6 +76,7 @@ func newFixture(t *testing.T, opts ...func(*Deps)) *fixture {
 		Auditor:  st.Ledger(),
 		Accounts: st.Accounts(),
 		Contacts: st.Contacts(),
+		DNC:      st.DNC(),
 		Keys:     APIKeys{APIKeyStore: st.APIKeys()},
 		Hub:      events.NewHub(events.NewSequence(dbSeq{st}, "events")),
 	}

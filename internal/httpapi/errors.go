@@ -47,7 +47,10 @@ const (
 	// a screen showing half a customer's details is worse than one saying the
 	// request was refused.
 	CodeUserDataTooLarge ErrorCode = "USER_DATA_TOO_LARGE"
-	CodeNotFound         ErrorCode = "NOT_FOUND"
+	// CodeNumberOnDNC refuses a call to a number on the do-not-call list.
+	// Nothing was placed and nothing was recorded.
+	CodeNumberOnDNC ErrorCode = "NUMBER_ON_DNC"
+	CodeNotFound    ErrorCode = "NOT_FOUND"
 	// CodeMethodNotAllowed answers the router's own refusal, so that a
 	// wrong method lands in the same envelope as everything else. Without
 	// it chi replies 405 with an empty body and no content type, and the

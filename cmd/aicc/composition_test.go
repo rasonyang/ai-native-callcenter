@@ -531,6 +531,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&transcript.Registry{},
 		&catalog.Service{},
 		&store.ContactStore{},
+		&store.DNCStore{},
 		&store.LedgerStore{},
 		&store.FlowStore{},
 		&store.AccountStore{},

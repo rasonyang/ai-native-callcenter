@@ -365,6 +365,8 @@ export interface paths {
          *     Idempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.
          *
          *     Authorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai. The machine-readable form is x-body-scopes: scopes a credential of either kind must hold, beyond the security block, when the named request-body property has the listed value. A security block cannot say this, because its alternatives choose between credentials, not between request bodies.
+         *
+         *     A destination on the do-not-call list is refused with 422 NUMBER_ON_DNC, for both kinds: no call is placed and no CDR is written (the CDR is the ledger of calls placed). The destination is compared as canonical E.164, completed with AICC_DEFAULT_COUNTRY_CODE when it is national; with that unset, a national number cannot be matched and is not checked, while a number written with + or 00 always is.
          */
         post: operations["createCall"];
         delete?: never;
@@ -1269,6 +1271,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dnc-numbers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the do-not-call numbers
+         * @description Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry); write the leading + URL-encoded as %2B, or it reads as a space. Needs dnc:read.
+         */
+        get: operations["listDncNumbers"];
+        put?: never;
+        /**
+         * Add a number to the do-not-call list
+         * @description The number may be written in any common form: it is canonicalised to E.164 with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE) before it is stored, so "+86 138-0013-8000", "0086 138 0013 8000" and, with country code 86, "13800138000" are one entry. A number that cannot be canonicalised is refused with 422 VALIDATION_FAILED, params {field: "number", rule: NUMBER_EMPTY | NUMBER_INVALID}.
+         *
+         *     Idempotent: adding a number that is already listed changes nothing and answers 200 with the existing entry (its original source, time and author); a new entry answers 201. Needs dnc:write.
+         */
+        post: operations["createDncNumber"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dnc-numbers/{number}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Take a number off the do-not-call list
+         * @description The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. Needs dnc:write.
+         */
+        delete: operations["deleteDncNumber"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/health": {
         parameters: {
             query?: never;
@@ -1550,7 +1598,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -2978,6 +3026,44 @@ export interface components {
             /** @description Empty until DONE. */
             segments: components["schemas"]["PostCallTranscriptionSegment"][];
         };
+        /**
+         * @description How the number got on the list: typed by a person or a system (MANUAL), loaded in bulk (IMPORT), or asked for by the customer on a call (CONVERSATION, then callId names that call).
+         * @enum {string}
+         */
+        DncSource: "MANUAL" | "IMPORT" | "CONVERSATION";
+        /** @description One do-not-call entry. */
+        DncNumber: {
+            /** @description Canonical E.164, for example +8613800138000. */
+            number: string;
+            source: components["schemas"]["DncSource"];
+            /**
+             * Format: uuid
+             * @description The call the customer asked on, for source CONVERSATION; otherwise absent.
+             */
+            callId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: uuid
+             * @description The account that added it. Absent when an API key did, or the bot; the audit trail names the key.
+             */
+            createdBy?: string;
+        };
+        DncNumberWrite: {
+            /** @description The number in any common form; see createDncNumber. */
+            number: string;
+            /**
+             * @description MANUAL (the default) or IMPORT for a bulk loader. CONVERSATION is written only by the platform.
+             * @default MANUAL
+             * @enum {string}
+             */
+            source: "MANUAL" | "IMPORT";
+        };
+        DncNumberList: {
+            items: components["schemas"]["DncNumber"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
+        };
     };
     responses: {
         /** @description The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE. */
@@ -3692,6 +3778,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
             502: components["responses"]["BadGateway"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -5242,6 +5329,99 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listDncNumbers: {
+        parameters: {
+            query?: {
+                /** @description Canonical E.164 prefix, for example +8613. Omitted or empty returns everything. */
+                prefix?: string;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DncNumberList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createDncNumber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DncNumberWrite"];
+            };
+        };
+        responses: {
+            /** @description The number was already on the list; the existing entry. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DncNumber"];
+                };
+            };
+            /** @description The number was added. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DncNumber"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteDncNumber: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Canonical E.164, for example +8613800138000. */
+                number: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };
     };

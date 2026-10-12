@@ -192,6 +192,7 @@ func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
 		Catalog:  stubCatalog{},
 		Ledger:   stubLedger(t),
 		Contacts: stubContacts{},
+		DNC:      stubDNC{},
 		Outbound: stubOutbound{},
 	})
 	router := server.router()

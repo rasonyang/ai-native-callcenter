@@ -76,6 +76,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		KeyScopes:     []string{"config:write"},
 		NeedsCSRF:     true,
 	},
+	"DELETE /dnc-numbers/{number}": {
+		OperationID:   "deleteDncNumber",
+		SessionScopes: []string{"dnc:write"},
+		KeyScopes:     []string{"dnc:write"},
+		NeedsCSRF:     true,
+	},
 	"DELETE /extensions/{extensionId}": {
 		OperationID:   "deleteExtension",
 		SessionScopes: []string{"config:write"},
@@ -209,6 +215,11 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "listDispositions",
 		SessionScopes: []string{"agent:read"},
 		KeyScopes:     []string{"agent:read"},
+	},
+	"GET /dnc-numbers": {
+		OperationID:   "listDncNumbers",
+		SessionScopes: []string{"dnc:read"},
+		KeyScopes:     []string{"dnc:read"},
 	},
 	"GET /events": {
 		OperationID:   "streamEvents",
@@ -485,6 +496,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "createDID",
 		SessionScopes: []string{"config:write"},
 		KeyScopes:     []string{"config:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /dnc-numbers": {
+		OperationID:   "createDncNumber",
+		SessionScopes: []string{"dnc:write"},
+		KeyScopes:     []string{"dnc:write"},
 		NeedsCSRF:     true,
 	},
 	"POST /extensions": {

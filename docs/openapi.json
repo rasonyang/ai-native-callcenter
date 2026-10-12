@@ -31,6 +31,8 @@
     "config:write": "Change the platform's configuration, and reveal an extension's SIP password.",
     "contacts:read": "Read the customer record book.",
     "contacts:write": "Add, edit and remove customer records.",
+    "dnc:read": "Read the do-not-call list.",
+    "dnc:write": "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
     "history:read:all": "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
     "history:read:own": "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
     "keys:manage": "Create, disable and revoke API keys.",
@@ -94,6 +96,10 @@
     {
       "name": "webhooks",
       "description": "CDR delivery to a customer's own system. A subscription names an endpoint; every finished call whose CDR matches its filter is delivered there. Read-only over HTTP for now on the screens (design 09 §11); the write operations here are how a subscription is created."
+    },
+    {
+      "name": "dnc",
+      "description": "The do-not-call list: numbers the platform never places a call to, checked on every outbound call it places."
     }
   ],
   "paths": {
@@ -1261,7 +1267,7 @@
           "calls"
         ],
         "summary": "Place a call",
-        "description": "One entry point for every call the platform places, told apart by kind.\n\nAI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.\n\nIdempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.\n\nAuthorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai. The machine-readable form is x-body-scopes: scopes a credential of either kind must hold, beyond the security block, when the named request-body property has the listed value. A security block cannot say this, because its alternatives choose between credentials, not between request bodies.",
+        "description": "One entry point for every call the platform places, told apart by kind.\n\nAI_OUTBOUND originates the customer leg with the DID as caller id; on answer the call bridges to the bot running the DID's flow. AGENT_OUTBOUND is click-to-dial: an agent's own phone is raised first and the destination is dialled when that leg answers. A signed-in agent may omit extensionNumber and place it from the phone they are signed in at; a supervisor or an API-key caller must name the extension, and the phone at it has to be registered.\n\nIdempotent by client-minted callId either way: a retry with the same id answers isDuplicate instead of redialing.\n\nAuthorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai. The machine-readable form is x-body-scopes: scopes a credential of either kind must hold, beyond the security block, when the named request-body property has the listed value. A security block cannot say this, because its alternatives choose between credentials, not between request bodies.\n\nA destination on the do-not-call list is refused with 422 NUMBER_ON_DNC, for both kinds: no call is placed and no CDR is written (the CDR is the ledger of calls placed). The destination is compared as canonical E.164, completed with AICC_DEFAULT_COUNTRY_CODE when it is national; with that unset, a national number cannot be matched and is not checked, while a number written with + or 00 always is.",
         "x-body-scopes": {
           "property": "kind",
           "values": {
@@ -1325,6 +1331,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
           },
           "502": {
             "$ref": "#/components/responses/BadGateway"
@@ -4788,6 +4797,204 @@
         ]
       }
     },
+    "/dnc-numbers": {
+      "get": {
+        "operationId": "listDncNumbers",
+        "tags": [
+          "dnc"
+        ],
+        "summary": "List the do-not-call numbers",
+        "description": "Newest first. prefix matches the start of the canonical E.164 number (a complete number finds exactly that entry); write the leading + URL-encoded as %2B, or it reads as a space. Needs dnc:read.",
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "Canonical E.164 prefix, for example +8613. Omitted or empty returns everything.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 1000000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page plus the total for the filter.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DncNumberList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "dnc:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "dnc:read"
+            ]
+          }
+        ]
+      },
+      "post": {
+        "operationId": "createDncNumber",
+        "tags": [
+          "dnc"
+        ],
+        "summary": "Add a number to the do-not-call list",
+        "description": "The number may be written in any common form: it is canonicalised to E.164 with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE) before it is stored, so \"+86 138-0013-8000\", \"0086 138 0013 8000\" and, with country code 86, \"13800138000\" are one entry. A number that cannot be canonicalised is refused with 422 VALIDATION_FAILED, params {field: \"number\", rule: NUMBER_EMPTY | NUMBER_INVALID}.\n\nIdempotent: adding a number that is already listed changes nothing and answers 200 with the existing entry (its original source, time and author); a new entry answers 201. Needs dnc:write.",
+        "security": [
+          {
+            "cookieSession": [
+              "dnc:write"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "dnc:write"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DncNumberWrite"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The number was already on the list; the existing entry.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DncNumber"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "The number was added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DncNumber"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/dnc-numbers/{number}": {
+      "delete": {
+        "operationId": "deleteDncNumber",
+        "tags": [
+          "dnc"
+        ],
+        "summary": "Take a number off the do-not-call list",
+        "description": "The path carries the canonical E.164 number with its + URL-encoded as %2B (an unencoded + also works). Anything that is not canonical is 422 VALIDATION_FAILED; a canonical number that is not listed is 404. Needs dnc:write.",
+        "security": [
+          {
+            "cookieSession": [
+              "dnc:write"
+            ],
+            "csrfHeader": []
+          },
+          {
+            "apiKeyBearer": [
+              "dnc:write"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "number",
+            "in": "path",
+            "required": true,
+            "description": "Canonical E.164, for example +8613800138000.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Removed."
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
     "/system/health": {
       "get": {
         "operationId": "getSystemHealth",
@@ -5911,6 +6118,7 @@
           "VALIDATION_FAILED",
           "TERMINAL_ANNOUNCE_REQUIRED",
           "USER_DATA_TOO_LARGE",
+          "NUMBER_ON_DNC",
           "NOT_FOUND",
           "METHOD_NOT_ALLOWED",
           "CONFLICT",
@@ -9690,6 +9898,87 @@
             "description": "Empty until DONE."
           }
         }
+      },
+      "DncSource": {
+        "type": "string",
+        "enum": [
+          "MANUAL",
+          "IMPORT",
+          "CONVERSATION"
+        ],
+        "description": "How the number got on the list: typed by a person or a system (MANUAL), loaded in bulk (IMPORT), or asked for by the customer on a call (CONVERSATION, then callId names that call)."
+      },
+      "DncNumber": {
+        "type": "object",
+        "description": "One do-not-call entry.",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "Canonical E.164, for example +8613800138000."
+          },
+          "source": {
+            "$ref": "#/components/schemas/DncSource"
+          },
+          "callId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The call the customer asked on, for source CONVERSATION; otherwise absent."
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdBy": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The account that added it. Absent when an API key did, or the bot; the audit trail names the key."
+          }
+        },
+        "required": [
+          "number",
+          "source",
+          "createdAt"
+        ]
+      },
+      "DncNumberWrite": {
+        "type": "object",
+        "properties": {
+          "number": {
+            "type": "string",
+            "description": "The number in any common form; see createDncNumber."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "MANUAL",
+              "IMPORT"
+            ],
+            "default": "MANUAL",
+            "description": "MANUAL (the default) or IMPORT for a bulk loader. CONVERSATION is written only by the platform."
+          }
+        },
+        "required": [
+          "number"
+        ]
+      },
+      "DncNumberList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DncNumber"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total rows matching the filter, for paging."
+          }
+        },
+        "required": [
+          "items",
+          "total"
+        ]
       }
     }
   }

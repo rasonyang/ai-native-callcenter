@@ -53,6 +53,12 @@ const (
 	// ScopeContactsWrite — Add, edit and remove customer records.
 	ScopeContactsWrite = "contacts:write"
 
+	// ScopeDncRead — Read the do-not-call list.
+	ScopeDncRead = "dnc:read"
+
+	// ScopeDncWrite — Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.
+	ScopeDncWrite = "dnc:write"
+
 	// ScopeHistoryReadAll — Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.
 	ScopeHistoryReadAll = "history:read:all"
 
@@ -88,6 +94,8 @@ var AllScopes = []string{
 	ScopeConfigWrite,
 	ScopeContactsRead,
 	ScopeContactsWrite,
+	ScopeDncRead,
+	ScopeDncWrite,
 	ScopeHistoryReadAll,
 	ScopeHistoryReadOwn,
 	ScopeKeysManage,
@@ -112,6 +120,8 @@ var ScopeDescriptions = map[string]string{
 	ScopeConfigWrite:    "Change the platform's configuration, and reveal an extension's SIP password.",
 	ScopeContactsRead:   "Read the customer record book.",
 	ScopeContactsWrite:  "Add, edit and remove customer records.",
+	ScopeDncRead:        "Read the do-not-call list.",
+	ScopeDncWrite:       "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
 	ScopeHistoryReadAll: "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
 	ScopeHistoryReadOwn: "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
 	ScopeKeysManage:     "Create, disable and revoke API keys.",

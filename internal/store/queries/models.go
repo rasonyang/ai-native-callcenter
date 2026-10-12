@@ -173,6 +173,14 @@ type Disposition struct {
 	IsEnabled bool   `json:"isEnabled"`
 }
 
+type DncNumber struct {
+	NumberE164 string             `json:"numberE164"`
+	Source     string             `json:"source"`
+	CallID     *uuid.UUID         `json:"callId"`
+	CreatedAt  pgtype.Timestamptz `json:"createdAt"`
+	CreatedBy  *uuid.UUID         `json:"createdBy"`
+}
+
 type Extension struct {
 	ID          uuid.UUID          `json:"id"`
 	Number      string             `json:"number"`

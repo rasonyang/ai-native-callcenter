@@ -315,6 +315,9 @@ func checkUserData(data map[string]string) error {
 
 func writeOutboundError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, outbound.ErrNumberOnDNC):
+		writeError(w, http.StatusUnprocessableEntity, CodeNumberOnDNC,
+			"that number is on the do-not-call list", nil)
 	case errors.Is(err, outbound.ErrBadNumber):
 		writeError(w, http.StatusBadRequest, CodeValidationFailed, "not a dialable number", nil)
 	case errors.Is(err, outbound.ErrNoDefaultOutbound):

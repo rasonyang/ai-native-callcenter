@@ -232,6 +232,45 @@ func (e CreateCallRequestKind) Valid() bool {
 	}
 }
 
+// Defines values for DNCNumberWriteSource.
+const (
+	DNCNumberWriteSourceIMPORT DNCNumberWriteSource = "IMPORT"
+	DNCNumberWriteSourceMANUAL DNCNumberWriteSource = "MANUAL"
+)
+
+// Valid indicates whether the value is a known member of the DNCNumberWriteSource enum.
+func (e DNCNumberWriteSource) Valid() bool {
+	switch e {
+	case DNCNumberWriteSourceIMPORT:
+		return true
+	case DNCNumberWriteSourceMANUAL:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DNCSource.
+const (
+	DNCSourceCONVERSATION DNCSource = "CONVERSATION"
+	DNCSourceIMPORT       DNCSource = "IMPORT"
+	DNCSourceMANUAL       DNCSource = "MANUAL"
+)
+
+// Valid indicates whether the value is a known member of the DNCSource enum.
+func (e DNCSource) Valid() bool {
+	switch e {
+	case DNCSourceCONVERSATION:
+		return true
+	case DNCSourceIMPORT:
+		return true
+	case DNCSourceMANUAL:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ErrorCode.
 const (
 	ErrorCodeAGENTALREADYLOGGEDIN           ErrorCode = "AGENT_ALREADY_LOGGED_IN"
@@ -253,6 +292,7 @@ const (
 	ErrorCodeMETHODNOTALLOWED               ErrorCode = "METHOD_NOT_ALLOWED"
 	ErrorCodeNOTCALLPARTY                   ErrorCode = "NOT_CALL_PARTY"
 	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
+	ErrorCodeNUMBERONDNC                    ErrorCode = "NUMBER_ON_DNC"
 	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
 	ErrorCodeRATELIMITED                    ErrorCode = "RATE_LIMITED"
 	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
@@ -305,6 +345,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeNOTCALLPARTY:
 		return true
 	case ErrorCodeNOTFOUND:
+		return true
+	case ErrorCodeNUMBERONDNC:
 		return true
 	case ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE:
 		return true
@@ -1443,6 +1485,45 @@ type DispositionCatalog struct {
 	Items []Disposition `json:"items"`
 }
 
+// DNCNumber One do-not-call entry.
+type DNCNumber struct {
+	// CallID The call the customer asked on, for source CONVERSATION; otherwise absent.
+	CallID    *openapi_types.UUID `json:"callId,omitempty"`
+	CreatedAt time.Time           `json:"createdAt"`
+
+	// CreatedBy The account that added it. Absent when an API key did, or the bot; the audit trail names the key.
+	CreatedBy *openapi_types.UUID `json:"createdBy,omitempty"`
+
+	// Number Canonical E.164, for example +8613800138000.
+	Number string `json:"number"`
+
+	// Source How the number got on the list: typed by a person or a system (MANUAL), loaded in bulk (IMPORT), or asked for by the customer on a call (CONVERSATION, then callId names that call).
+	Source DNCSource `json:"source"`
+}
+
+// DNCNumberList defines model for DncNumberList.
+type DNCNumberList struct {
+	Items []DNCNumber `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
+// DNCNumberWrite defines model for DncNumberWrite.
+type DNCNumberWrite struct {
+	// Number The number in any common form; see createDncNumber.
+	Number string `json:"number"`
+
+	// Source MANUAL (the default) or IMPORT for a bulk loader. CONVERSATION is written only by the platform.
+	Source *DNCNumberWriteSource `json:"source,omitempty"`
+}
+
+// DNCNumberWriteSource MANUAL (the default) or IMPORT for a bulk loader. CONVERSATION is written only by the platform.
+type DNCNumberWriteSource string
+
+// DNCSource How the number got on the list: typed by a person or a system (MANUAL), loaded in bulk (IMPORT), or asked for by the customer on a call (CONVERSATION, then callId names that call).
+type DNCSource string
+
 // Error The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users.
 type Error struct {
 	// Code Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
@@ -2448,6 +2529,14 @@ type ListContactsParams struct {
 	Offset      *int    `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
+// ListDNCNumbersParams defines parameters for ListDNCNumbers.
+type ListDNCNumbersParams struct {
+	// Prefix Canonical E.164 prefix, for example +8613. Omitted or empty returns everything.
+	Prefix *string `form:"prefix,omitempty" json:"prefix,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // StreamEventsParams defines parameters for StreamEvents.
 type StreamEventsParams struct {
 	// Types Comma-separated SseEventType names to narrow the stream.
@@ -2548,6 +2637,9 @@ type CreateDIDJSONRequestBody = DIDWrite
 
 // UpdateDIDJSONRequestBody defines body for UpdateDID for application/json ContentType.
 type UpdateDIDJSONRequestBody = DIDWrite
+
+// CreateDNCNumberJSONRequestBody defines body for CreateDNCNumber for application/json ContentType.
+type CreateDNCNumberJSONRequestBody = DNCNumberWrite
 
 // CreateExtensionJSONRequestBody defines body for CreateExtension for application/json ContentType.
 type CreateExtensionJSONRequestBody = ExtensionWrite
@@ -2770,6 +2862,15 @@ type ServerInterface interface {
 	// ListDispositions The wrap-up vocabulary
 	// (GET /dispositions)
 	ListDispositions(w http.ResponseWriter, r *http.Request)
+	// ListDNCNumbers List the do-not-call numbers
+	// (GET /dnc-numbers)
+	ListDNCNumbers(w http.ResponseWriter, r *http.Request, params ListDNCNumbersParams)
+	// CreateDNCNumber Add a number to the do-not-call list
+	// (POST /dnc-numbers)
+	CreateDNCNumber(w http.ResponseWriter, r *http.Request)
+	// DeleteDNCNumber Take a number off the do-not-call list
+	// (DELETE /dnc-numbers/{number})
+	DeleteDNCNumber(w http.ResponseWriter, r *http.Request, number string)
 	// StreamEvents The ordered event stream
 	// (GET /events)
 	StreamEvents(w http.ResponseWriter, r *http.Request, params StreamEventsParams)
@@ -3235,6 +3336,24 @@ func (_ Unimplemented) UpdateDID(w http.ResponseWriter, r *http.Request, didid o
 // ListDispositions The wrap-up vocabulary
 // (GET /dispositions)
 func (_ Unimplemented) ListDispositions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDNCNumbers List the do-not-call numbers
+// (GET /dnc-numbers)
+func (_ Unimplemented) ListDNCNumbers(w http.ResponseWriter, r *http.Request, params ListDNCNumbersParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateDNCNumber Add a number to the do-not-call list
+// (POST /dnc-numbers)
+func (_ Unimplemented) CreateDNCNumber(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteDNCNumber Take a number off the do-not-call list
+// (DELETE /dnc-numbers/{number})
+func (_ Unimplemented) DeleteDNCNumber(w http.ResponseWriter, r *http.Request, number string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5072,6 +5191,105 @@ func (siw *ServerInterfaceWrapper) ListDispositions(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListDNCNumbers operation middleware
+func (siw *ServerInterfaceWrapper) ListDNCNumbers(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDNCNumbersParams
+
+	// ------------- Optional query parameter "prefix" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "prefix", r.URL.Query(), &params.Prefix, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "prefix"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "prefix", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDNCNumbers(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDNCNumber operation middleware
+func (siw *ServerInterfaceWrapper) CreateDNCNumber(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDNCNumber(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDNCNumber operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDNCNumber(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "number" -------------
+	var number string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "number", chi.URLParam(r, "number"), &number, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "number", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDNCNumber(w, r, number)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StreamEvents operation middleware
 func (siw *ServerInterfaceWrapper) StreamEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -6312,6 +6530,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/dispositions", wrapper.ListDispositions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/dnc-numbers", wrapper.ListDNCNumbers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/dnc-numbers", wrapper.CreateDNCNumber)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/dnc-numbers/{number}", wrapper.DeleteDNCNumber)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/events", wrapper.StreamEvents)

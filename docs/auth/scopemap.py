@@ -33,6 +33,8 @@ VOCAB = {
     "contacts:read":    "Read the customer record book.",
     "contacts:write":   "Add, edit and remove customer records.",
     "history:read:own": "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
+    "dnc:read":         "Read the do-not-call list.",
+    "dnc:write":        "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
     "history:read:all": "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
     "reports:read":     "Read the floor's aggregates: overview, per-queue and daily.",
     "quality:review":   "Read and write quality reviews of recorded calls.",
@@ -156,6 +158,11 @@ OPS = {
     "createWebhookSubscription":(["config:write"], D, True),   # P5 lifted
     "updateWebhookSubscription":(["config:write"], D, True),
     "deleteWebhookSubscription":(["config:write"], D, True),
+
+    # Do-not-call list: a compliance control, supervisors and above.
+    "listDncNumbers":           (["dnc:read"], S, True),
+    "createDncNumber":          (["dnc:write"], S, True),
+    "deleteDncNumber":          (["dnc:write"], S, True),
 
     # Accounts.
     "createUser":               (["users:write"], D, True),

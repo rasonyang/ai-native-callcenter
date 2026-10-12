@@ -22,6 +22,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
+	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
@@ -55,6 +56,11 @@ type DIDSource interface {
 // provisioned extension or a queue's extension number.
 type NumberPlan interface {
 	IsInternalNumber(ctx context.Context, number string) (bool, error)
+}
+
+// DNCList answers whether a canonical E.164 number is on the do-not-call list.
+type DNCList interface {
+	Contains(ctx context.Context, number string) (bool, error)
 }
 
 // Config shapes how the outside world is dialed.
@@ -92,6 +98,10 @@ type Config struct {
 	// OverflowHold is how long an answered leg waits for a slot before it is
 	// hung up as OverflowCause. Zero waits not at all.
 	OverflowHold time.Duration
+	// DefaultCountryCode (digits, no "+") completes a national destination
+	// before the do-not-call check. Empty: a national number cannot be
+	// completed and is not checked.
+	DefaultCountryCode string
 }
 
 func (c Config) withDefaults() Config {
@@ -127,6 +137,7 @@ type Service struct {
 	sw      Switch
 	dids    DIDSource
 	numbers NumberPlan
+	dnc     DNCList
 	hasCDR  func(ctx context.Context, callID uuid.UUID) (bool, error)
 	isLive  func(callID uuid.UUID) bool
 	limiter *Limiter
@@ -231,6 +242,43 @@ func New(cfg Config, sw Switch, dids DIDSource, numbers NumberPlan,
 	}
 }
 
+// WithDNC installs the do-not-call list. Without one nothing is checked.
+func (s *Service) WithDNC(dnc DNCList) *Service {
+	s.dnc = dnc
+	return s
+}
+
+// checkDNC is the one choke point for the do-not-call list: Dial (click-to-dial)
+// and DialAI both call it before any state is created or any command is sent.
+//
+// The list holds canonical E.164, so the destination is canonicalised first,
+// with the deployment's default country code. KNOWN GAP: when that code is not
+// configured (AICC_DEFAULT_COUNTRY_CODE) a national number cannot be completed,
+// the check cannot match it, and the call goes through; that is logged at
+// debug. A destination written with "+" or "00" is always checked. A failing
+// lookup refuses the call: dialling a number we could not prove is allowed is
+// the worse error.
+func (s *Service) checkDNC(ctx context.Context, destination string) error {
+	if s.dnc == nil {
+		return nil
+	}
+	number, err := phonenum.Canonical(destination, s.cfg.DefaultCountryCode)
+	if err != nil {
+		s.log.DebugContext(ctx, "do-not-call check skipped: destination cannot be canonicalised",
+			"to", destination, "reason", phonenum.ReasonOf(err),
+			"hasDefaultCountryCode", s.cfg.DefaultCountryCode != "")
+		return nil
+	}
+	isListed, err := s.dnc.Contains(ctx, number)
+	if err != nil {
+		return fmt.Errorf("outbound: do-not-call lookup: %w", err)
+	}
+	if isListed {
+		return ErrNumberOnDNC
+	}
+	return nil
+}
+
 // Errors the API layer translates.
 var (
 	ErrBadNumber = fmt.Errorf("outbound: not a dialable number")
@@ -247,6 +295,10 @@ var (
 	ErrUnknownDID        = fmt.Errorf("outbound: no such DID")
 	ErrFlowless          = fmt.Errorf("outbound: the DID has no published flow")
 	ErrAlreadyPlaced     = fmt.Errorf("outbound: this call was already placed")
+	// ErrNumberOnDNC means the destination is on the do-not-call list. The
+	// call is refused before anything is recorded or sent: the CDR is the
+	// ledger of calls placed, and this one was not.
+	ErrNumberOnDNC = fmt.Errorf("outbound: the number is on the do-not-call list")
 	// ErrBadRingTimeout means a ring timeout that would let the leg ring past
 	// the answer window.
 	ErrBadRingTimeout = fmt.Errorf("outbound: ring timeout must be positive and strictly below the answer window")
@@ -347,6 +399,9 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 	userData, callcenterName := req.UserData, req.CallcenterName
 	if !isDialable(destination) || !isExtension(agentExtension) {
 		return uuid.Nil, ErrBadNumber
+	}
+	if err := s.checkDNC(ctx, destination); err != nil {
+		return uuid.Nil, err
 	}
 	ring, err := s.ringTimeout(req.RingTimeout)
 	if err != nil {
@@ -568,6 +623,9 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	}
 	if !isDialable(req.To) {
 		return uuid.Nil, ErrBadNumber
+	}
+	if err := s.checkDNC(ctx, req.To); err != nil {
+		return uuid.Nil, err
 	}
 	ring, err := s.ringTimeout(req.RingTimeout)
 	if err != nil {

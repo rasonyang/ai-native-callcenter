@@ -124,6 +124,11 @@ type Config struct {
 	outboundSIPHeadersErr error // a malformed value, refused by validate
 	// OutboundCallerID is presented on click-to-dial customer legs.
 	OutboundCallerID string
+	// DefaultCountryCode (AICC_DEFAULT_COUNTRY_CODE) is the country calling
+	// code, digits without "+", that completes a national number before it is
+	// compared with the do-not-call list. Empty means national numbers cannot
+	// be completed (see internal/outbound DNC check).
+	DefaultCountryCode string
 	// IsBotEnabled turns the whole AI leg off, for deployments that only
 	// route to people.
 	IsBotEnabled bool
@@ -389,6 +394,7 @@ func Load() (Config, error) {
 		OutboundSIPHeaders:            outboundHeaders,
 		outboundSIPHeadersErr:         outboundHeadersErr,
 		OutboundCallerID:              env("AICC_OUTBOUND_CLID", ""),
+		DefaultCountryCode:            env("AICC_DEFAULT_COUNTRY_CODE", ""),
 		RecordingBackend:              env("AICC_RECORDING_BACKEND", "FS"),
 		RecordingDir:                  env("AICC_RECORDING_DIR", ""),
 		S3Endpoint:                    env("AICC_S3_ENDPOINT", ""),
@@ -560,6 +566,9 @@ func (c Config) validate() error {
 	} else if err := ValidateOutboundRingTimeout(c.OutboundRingTimeout); err != nil {
 		errs = append(errs, err)
 	}
+	if err := ValidateDefaultCountryCode(c.DefaultCountryCode); err != nil {
+		errs = append(errs, err)
+	}
 	if c.outboundSIPHeadersErr != nil {
 		errs = append(errs, c.outboundSIPHeadersErr)
 	} else if err := ValidateOutboundSIPHeaders(c.OutboundSIPHeaders); err != nil {
@@ -719,4 +728,21 @@ func (c Config) TranscribeProviderName() string {
 		return c.TranscribeProvider
 	}
 	return c.Provider
+}
+
+// ValidateDefaultCountryCode accepts empty (unset) or 1 to 3 ASCII digits with
+// no "+" and no leading zero: a country calling code.
+func ValidateDefaultCountryCode(code string) error {
+	if code == "" {
+		return nil
+	}
+	if len(code) > 3 || code[0] == '0' {
+		return fmt.Errorf("AICC_DEFAULT_COUNTRY_CODE must be 1 to 3 digits without a leading zero or +, got %q", code)
+	}
+	for _, ch := range code {
+		if ch < '0' || ch > '9' {
+			return fmt.Errorf("AICC_DEFAULT_COUNTRY_CODE must be 1 to 3 digits without a leading zero or +, got %q", code)
+		}
+	}
+	return nil
 }

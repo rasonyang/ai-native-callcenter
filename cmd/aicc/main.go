@@ -287,12 +287,14 @@ func run() error {
 		SIPHeaders:     cfg.OutboundSIPHeaders,
 		CallerID:       cfg.OutboundCallerID,
 		RingTimeout:    cfg.OutboundRingTimeout,
+
+		DefaultCountryCode: cfg.DefaultCountryCode,
 	}, adapter, catalogSvc, catalogSvc,
 		st.Ledger().HasCDR,
 		func(callID uuid.UUID) bool {
 			_, err := registry.Snapshot(callID)
 			return err == nil
-		}, slog.Default())
+		}, slog.Default()).WithDNC(st.DNC())
 
 	// Nothing is dialled until the switch has been read for the calls that
 	// outlived a restart (internal/outbound/adopt.go).
@@ -401,6 +403,7 @@ func run() error {
 			transcripts,
 			catalogSvc,
 			st.Contacts(),
+			st.DNC(),
 			st.Ledger(),
 			st.Flows(),
 			st.Accounts(),
