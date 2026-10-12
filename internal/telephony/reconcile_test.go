@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -58,5 +59,35 @@ func TestTheListingFailingOutrightIsAnError(t *testing.T) {
 	c := NewCoordinator(reg, NewAdapter(&fakeCommander{up: true, reply: "-ERR no\n"}, "d"), noAgents{}, nullPublisher{})
 	if _, err := c.AdoptLiveChannels(t.Context()); err == nil {
 		t.Error("an unreadable switch reported success, which would open the gate")
+	}
+}
+
+// An originated leg is listed in callstate DOWN until the far end first sends
+// progress. A leg of ours in that state must be read like any other, or a
+// reconnect or restart in the first second of a dial forgets it.
+func TestAYoungLegListedAsDownIsStillRead(t *testing.T) {
+	t.Parallel()
+	id, callID := uuid.New().String(), uuid.New()
+	dump := `{"Unique-ID":"` + id + `","Call-Direction":"outbound","Answer-State":"ringing",` +
+		`"variable_aicc_call_id":"` + callID.String() + `","variable_aicc_placed_by":"DIAL_AI"}`
+	cmd := &fakeCommander{up: true, replyFor: func(c string) (string, error) {
+		switch {
+		case c == "show channels as json":
+			return `{"row_count":1,"rows":[{"uuid":"` + id + `","callstate":"DOWN","created_epoch":"1760000000"}]}`, nil
+		case strings.HasPrefix(c, "uuid_dump "):
+			return dump, nil
+		}
+		return "", nil
+	}}
+	reg := NewRegistry(nullPublisher{})
+	t.Cleanup(reg.Shutdown)
+	c := NewCoordinator(reg, NewAdapter(cmd, "aicc.test"), noAgents{}, nullPublisher{})
+
+	live, err := c.AdoptLiveChannels(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 || live[0].CallID != callID || live[0].PlacedBy != PlacedByDialAI {
+		t.Fatalf("live = %+v, want the DOWN leg read and reported", live)
 	}
 }

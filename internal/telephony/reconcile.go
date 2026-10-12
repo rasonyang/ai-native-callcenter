@@ -354,11 +354,18 @@ func (c *Coordinator) AdoptLiveChannels(ctx context.Context) ([]LiveChannel, err
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if row.callState == "HANGUP" || row.callState == "DOWN" {
+		// DOWN is not dead: an originated leg sits in DOWN from creation
+		// until the far end first answers with progress, and that is the
+		// state a leg placed a moment before a reconnect is listed in
+		// (live 2026-10-12: a ringing AI customer leg was skipped, unlogged).
+		// Only a channel already hanging up is left out.
+		if row.callState == "HANGUP" {
 			continue
 		}
 		out, err := c.adapter.DumpChannel(row.id.String())
 		if errors.Is(err, ErrChannelGone) {
+			log.Info("skipping a listed channel that is gone by the time it is read",
+				"channelId", row.id, "callstate", row.callState)
 			continue
 		}
 		if err != nil {
