@@ -45,9 +45,13 @@ func (capturedSwitch) BgAPI(string) (string, error) { return "", errors.New("rea
 func (capturedSwitch) IsUp() bool                   { return true }
 
 type fakeMigrations struct {
-	state store.MigrationState
-	err   error
+	state    store.MigrationState
+	err      error
+	dnc      int64
+	dncError error
 }
+
+func (f fakeMigrations) DNCEntryCount(context.Context) (int64, error) { return f.dnc, f.dncError }
 
 func (f fakeMigrations) MigrationStatus(context.Context) (store.MigrationState, error) {
 	return f.state, f.err
@@ -173,11 +177,11 @@ func wantState(t *testing.T, got map[DoctorCheck]doctorResult, check DoctorCheck
 		t.Errorf("%s = %s (%s), want %s", check, r.State, r.Message, state)
 	}
 	switch {
-	case r.State == DoctorStateFail && r.Fix == "":
+	case (r.State == DoctorStateFail || r.State == DoctorStateWarn) && r.Fix == "":
 		t.Errorf("%s failed without saying how to fix it", check)
-	case r.State == DoctorStateFail && r.Code != codeFor(check):
+	case (r.State == DoctorStateFail || r.State == DoctorStateWarn) && r.Code != codeFor(check):
 		t.Errorf("%s failed with code %q, want %q", check, r.Code, codeFor(check))
-	case r.State != DoctorStateFail && (r.Code != "" || r.Fix != ""):
+	case r.State != DoctorStateFail && r.State != DoctorStateWarn && (r.Code != "" || r.Fix != ""):
 		t.Errorf("%s is %s but carries code %q / fix %q", check, r.State, r.Code, r.Fix)
 	}
 }
@@ -511,7 +515,7 @@ func TestEveryDoctorCodeIsScreamingSnakeAndUnique(t *testing.T) {
 		}
 		seen[code] = true
 	}
-	for _, state := range []DoctorState{DoctorStatePass, DoctorStateFail, DoctorStateSkip} {
+	for _, state := range []DoctorState{DoctorStatePass, DoctorStateFail, DoctorStateWarn, DoctorStateSkip} {
 		if !screaming.MatchString(string(state)) {
 			t.Errorf("state %q is not SCREAMING_SNAKE_CASE", state)
 		}
@@ -538,6 +542,40 @@ func TestEveryDoctorCheckIsLowerSnakeAndUnique(t *testing.T) {
 			t.Errorf("%q is listed twice", c.check)
 		}
 		seen[c.check] = true
+	}
+}
+
+func TestAPopulatedDNCListWithoutACountryCodeWarnsButDoesNotFail(t *testing.T) {
+	populated := func(*harness) migrationReader {
+		return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dnc: 3}
+	}
+	cases := []struct {
+		name string
+		code string
+		dnc  func(*harness) migrationReader
+		want DoctorState
+	}{
+		{"entries and no code", "", populated, DoctorStateWarn},
+		{"entries and a code", "86", populated, DoctorStatePass},
+		{"empty list and no code", "", nil, DoctorStatePass},
+		{"unreadable list and no code", "", func(*harness) migrationReader {
+			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dncError: errors.New("denied")}
+		}, DoctorStateSkip},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.deps.cfg.DefaultCountryCode = c.code
+			if c.dnc != nil {
+				h.deps.openStore = func(context.Context) (migrationReader, func(), error) {
+					return c.dnc(h), func() {}, nil
+				}
+			}
+			wantState(t, h.run(), DoctorCheckDNCCountryCode, c.want)
+		})
+	}
+	if n := countFailed([]doctorResult{warn(DoctorCheckDNCCountryCode, "", "x")}); n != 0 {
+		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
 	}
 }
 

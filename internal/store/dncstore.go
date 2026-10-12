@@ -125,3 +125,9 @@ func dncFromRow(row queries.DncNumber) DNCNumber {
 		CreatedAt: row.CreatedAt.Time, CreatedBy: row.CreatedBy,
 	}
 }
+
+// DNCEntryCount is how many numbers the do-not-call list holds.
+func (s *Store) DNCEntryCount(ctx context.Context) (int64, error) {
+	_, total, err := s.DNC().List(ctx, DNCFilter{Limit: 1})
+	return total, err
+}

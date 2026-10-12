@@ -106,6 +106,12 @@ services:
       # removes exactly what the seed created.
       AICC_SEED: ${AICC_SEED-demo}
 
+      # Completes a national number (13800138000) to +86... for the do-not-call
+      # check and contact import. The binary's own default is empty; this stack
+      # defaults to China. One hyphen: `AICC_DEFAULT_COUNTRY_CODE=` in .env
+      # means unset, a deployment outside +86 sets its own code.
+      AICC_DEFAULT_COUNTRY_CODE: ${AICC_DEFAULT_COUNTRY_CODE-86}
+
       # The switch records into the shared volume; the application serves what
       # it finds there.
       AICC_RECORDING_DIR: /recordings

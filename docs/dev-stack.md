@@ -68,6 +68,11 @@ go build -o /tmp/aicc ./cmd/aicc && /tmp/aicc
 value means *unset* there, so a non-empty default cannot be blanked by leaving
 the variable empty — the setting's own comment says what to write instead.
 
+The development `.env` also sets `AICC_DEFAULT_COUNTRY_CODE=86`, so a national
+number (13800138000) is completed to `+86…` for the do-not-call check. The
+binary's default is empty; without the line a national number is never checked
+against the list, and `aicc doctor` warns about it when the list is not empty.
+
 Logs go to stderr **and** to `logs/aicc-<starttime>.log`. Read the file when
 analysing a run; it is the only copy that survives the terminal.
 

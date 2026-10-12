@@ -126,9 +126,10 @@ cd /opt/aicc && docker compose exec aicc aicc doctor --host-addrs <ip>   # ~/.ai
 
 `--host-addrs` is the host's address (comma-separated if several); on macOS
 the container cannot see the Mac's interfaces, so without it the address check
-is judged against the wrong host. Each line is `PASS`, `FAIL` or `SKIP`, the
-check's name and a message; a `FAIL` also carries a code and a `fix:` line. The
-exit status is 1 if and only if a check failed. `--skip-provider` leaves out
+is judged against the wrong host. Each line is `PASS`, `WARN`, `FAIL` or `SKIP`, the
+check's name and a message; a `FAIL` or `WARN` also carries a code and a `fix:`
+line. The exit status is 1 if and only if a check failed; a `WARN` (a working
+deployment that will not do what its operator expects) does not change it. `--skip-provider` leaves out
 the provider session; `--json` prints the results as JSON. `--wait` keeps
 asking until the application is ready and its switch link is up, and gives a
 just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
@@ -148,6 +149,7 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
+| `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
 
 ### Next: an agent's browser phone
 

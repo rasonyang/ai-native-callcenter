@@ -33,7 +33,9 @@ import (
 //
 // Each check prints one line: its state, its name and a message, and a failed
 // check also its code and a second line with what to do about it. The exit
-// status is 1 if and only if a check failed; SKIP means the check could not be
+// status is 1 if and only if a check failed; a WARN is a deployment that works
+// but will not do what its operator expects, and never changes the exit
+// status; SKIP means the check could not be
 // asked honestly here, never that it passed.
 
 // DoctorState is the outcome of one check.
@@ -42,6 +44,10 @@ type DoctorState string
 const (
 	DoctorStatePass DoctorState = "PASS"
 	DoctorStateFail DoctorState = "FAIL"
+	// DoctorStateWarn is a finding that does not stop the deployment from
+	// working. It carries a code and a fix like a failure, but the exit
+	// status ignores it.
+	DoctorStateWarn DoctorState = "WARN"
 	// DoctorStateSkip is a check that does not apply to this deployment or
 	// cannot be answered from where doctor runs.
 	DoctorStateSkip DoctorState = "SKIP"
@@ -65,6 +71,7 @@ const (
 	DoctorCheckExternalIPAdvertised DoctorCheck = "external_ip_advertised"
 	DoctorCheckProviderKey          DoctorCheck = "provider_key"
 	DoctorCheckProviderSession      DoctorCheck = "provider_session"
+	DoctorCheckDNCCountryCode       DoctorCheck = "dnc_country_code"
 )
 
 // DoctorCode names a failure. The values are stable: an installer matches on
@@ -87,6 +94,7 @@ const (
 	DoctorCodeExternalIPStale       DoctorCode = "EXTERNAL_IP_STALE"
 	DoctorCodeProviderKeyMissing    DoctorCode = "PROVIDER_KEY_MISSING"
 	DoctorCodeProviderSessionFailed DoctorCode = "PROVIDER_SESSION_FAILED"
+	DoctorCodeDNCCountryCodeUnset   DoctorCode = "DNC_COUNTRY_CODE_UNSET"
 )
 
 // doctorChecks is every check, in the order they run, with the code it fails
@@ -108,6 +116,7 @@ var doctorChecks = []struct {
 	{DoctorCheckExternalIPAdvertised, DoctorCodeExternalIPStale},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
 	{DoctorCheckProviderSession, DoctorCodeProviderSessionFailed},
+	{DoctorCheckDNCCountryCode, DoctorCodeDNCCountryCodeUnset},
 }
 
 // codeFor is the code a check fails with.
@@ -126,7 +135,7 @@ type doctorResult struct {
 	State   DoctorState `json:"state"`
 	Message string      `json:"message"`
 	// Code and Fix say what failed and what to do about it; empty unless
-	// State is FAIL.
+	// State is FAIL or WARN.
 	Code DoctorCode `json:"code,omitempty"`
 	Fix  string     `json:"fix,omitempty"`
 }
@@ -141,6 +150,8 @@ const providerProbeTimeout = 15 * time.Second
 // migrationReader is what doctor asks the database.
 type migrationReader interface {
 	MigrationStatus(ctx context.Context) (store.MigrationState, error)
+	// DNCEntryCount is how many numbers the do-not-call list holds.
+	DNCEntryCount(ctx context.Context) (int64, error)
 }
 
 // switchReader is what doctor asks the switch.
@@ -294,6 +305,10 @@ func fail(check DoctorCheck, msg, fix string) doctorResult {
 	return doctorResult{Check: check, State: DoctorStateFail, Message: msg, Code: codeFor(check), Fix: fix}
 }
 
+func warn(check DoctorCheck, msg, fix string) doctorResult {
+	return doctorResult{Check: check, State: DoctorStateWarn, Message: msg, Code: codeFor(check), Fix: fix}
+}
+
 func skip(check DoctorCheck, msg string) doctorResult {
 	return doctorResult{Check: check, State: DoctorStateSkip, Message: msg}
 }
@@ -394,6 +409,7 @@ func checkDatabase(ctx context.Context, d doctorDeps) []doctorResult {
 				"check that the postgres container is healthy and that AICC_DATABASE_URL points at it"),
 			skip(DoctorCheckMigrations, "the database did not answer"),
 			skip(DoctorCheckSchema, "the database did not answer"),
+			skip(DoctorCheckDNCCountryCode, "the database did not answer"),
 		}
 	}
 	defer closeStore()
@@ -419,7 +435,26 @@ func checkDatabase(ctx context.Context, d doctorDeps) []doctorResult {
 	} else {
 		out = append(out, pass(DoctorCheckSchema, "the schema is not ahead of this binary"))
 	}
-	return out
+	return append(out, checkDNCCountryCode(ctx, d, st))
+}
+
+// checkDNCCountryCode warns when the do-not-call list has entries but no
+// default country code is set: a national number cannot then be canonicalised,
+// so it is never checked against the list.
+func checkDNCCountryCode(ctx context.Context, d doctorDeps, st migrationReader) doctorResult {
+	if d.cfg.DefaultCountryCode != "" {
+		return pass(DoctorCheckDNCCountryCode, "AICC_DEFAULT_COUNTRY_CODE is "+d.cfg.DefaultCountryCode)
+	}
+	n, err := st.DNCEntryCount(ctx)
+	if err != nil {
+		return skip(DoctorCheckDNCCountryCode, "cannot read the do-not-call list: "+oneLine(err.Error()))
+	}
+	if n == 0 {
+		return pass(DoctorCheckDNCCountryCode, "the do-not-call list is empty")
+	}
+	return warn(DoctorCheckDNCCountryCode,
+		fmt.Sprintf("the do-not-call list holds %d number(s) but AICC_DEFAULT_COUNTRY_CODE is unset: a national number cannot be canonicalised and is not checked against the list", n),
+		"set AICC_DEFAULT_COUNTRY_CODE (digits only, e.g. 86) in .env and restart the app")
 }
 
 // switchProfiles is what the switch said about its SIP listeners, for the
@@ -708,13 +743,13 @@ func printDoctor(w io.Writer, results []doctorResult, asJSON bool) error {
 	}
 	for _, r := range results {
 		line := fmt.Sprintf("%-4s  %-*s  %s", r.State, width, r.Check, r.Message)
-		if r.State == DoctorStateFail {
+		if r.State == DoctorStateFail || r.State == DoctorStateWarn {
 			line = fmt.Sprintf("%-4s  %-*s  %s  %s", r.State, width, r.Check, r.Code, r.Message)
 		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
-		if r.State == DoctorStateFail && r.Fix != "" {
+		if (r.State == DoctorStateFail || r.State == DoctorStateWarn) && r.Fix != "" {
 			if _, err := fmt.Fprintf(w, "      fix: %s\n", r.Fix); err != nil {
 				return err
 			}
