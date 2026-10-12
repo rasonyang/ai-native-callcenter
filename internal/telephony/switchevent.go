@@ -36,6 +36,12 @@ const (
 	KindRecordStop      SwitchEventKind = "RECORD_STOP"
 )
 
+// The switch's account of a background command, which is how an originate that
+// never made a channel is heard about at all.
+const (
+	KindBackgroundJob SwitchEventKind = "BACKGROUND_JOB"
+)
+
 // Endpoint registration, observed from sofia.
 const (
 	KindDeviceRegistered   SwitchEventKind = "DEVICE_REGISTERED"
@@ -259,6 +265,14 @@ type SwitchEvent struct {
 	Digit      string
 	DurationMs int
 
+	// Background job result (KindBackgroundJob only). JobID is the Job-UUID
+	// bgapi returned. A job that succeeded has IsJobOK; one that failed has
+	// JobCause, the bare cause name ("USER_BUSY", "GATEWAY_DOWN"). A body that
+	// says neither leaves both zero.
+	JobID    string
+	IsJobOK  bool
+	JobCause string
+
 	// Recording.
 	RecordingPath string
 
@@ -296,7 +310,7 @@ type SwitchEvent struct {
 var Subscriptions = []string{
 	"CHANNEL_CREATE", "CHANNEL_ANSWER", "CHANNEL_PARK", "CHANNEL_BRIDGE",
 	"CHANNEL_UNBRIDGE", "CHANNEL_HOLD", "CHANNEL_UNHOLD",
-	"CHANNEL_HANGUP_COMPLETE", "DTMF", "RECORD_START", "RECORD_STOP",
+	"CHANNEL_HANGUP_COMPLETE", "BACKGROUND_JOB", "DTMF", "RECORD_START", "RECORD_STOP",
 	"CUSTOM", "sofia::register", "sofia::unregister", "sofia::expire",
 	"sofia::sip_user_state",
 	"callcenter::info",
@@ -377,6 +391,9 @@ func Normalize(ev *esl.Event) (SwitchEvent, bool) {
 
 	if ev.Name() == "CUSTOM" {
 		return normalizeCustom(ev, out)
+	}
+	if ev.Name() == "BACKGROUND_JOB" {
+		return normalizeBackgroundJob(ev, out)
 	}
 	return normalizeChannel(ev, out)
 }

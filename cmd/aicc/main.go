@@ -306,6 +306,9 @@ func run() error {
 	// and the bot's own session below. It deliberately never goes through the
 	// switch, so these two readers are the only ways it travels.
 	coordinator.AttachCallData(outboundSvc.Data())
+	// An originate that never makes a channel is recorded through the same
+	// single CDR write path as every other call.
+	outboundSvc.SetFailureLedger(st.Ledger())
 
 	go link.Run(ctx)
 	go dispatchSwitchEvents(ctx, link, coordinator, agentSvc, outboundSvc)
@@ -509,6 +512,9 @@ func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *tele
 					signal = agents.SignalUnreachable
 				}
 				agentSvc.ObserveDevice(ctx, ev.Extension, signal)
+			case telephony.KindBackgroundJob:
+				// A command's result belongs to whoever issued the command;
+				// outbound below is the one that issues originates.
 			default:
 				coordinator.Handle(ctx, ev)
 			}

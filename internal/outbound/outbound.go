@@ -119,6 +119,13 @@ type Service struct {
 	mu      sync.Mutex
 	pending map[string]*pendingLeg // by channel id
 	now     func() time.Time       // the clock; replaced in tests
+
+	// Originates awaiting their BACKGROUND_JOB result (jobs.go), guarded by mu.
+	jobs      map[string]*trackedJob // by Job-UUID
+	legJobs   map[string]string      // leg channel id -> Job-UUID
+	early     map[string]earlyResult
+	jobMargin time.Duration
+	failures  FailureLedger
 }
 
 // LateAnswerCause is the hangup cause stamped on a leg that was answered after
@@ -444,11 +451,18 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		return uuid.Nil, err
 	}
 	vars["effective_caller_id_number"] = clid
-	if _, err := s.sw.Originate(agentLeg, s.sw.Endpoint(agentExtension), vars); err != nil {
+	placedAt := time.Now().UTC()
+	jobID, err := s.sw.Originate(agentLeg, s.sw.Endpoint(agentExtension), vars)
+	if err != nil {
 		if s.callData != nil {
 			s.callData.Drop(callID)
 		}
 		return uuid.Nil, err
+	}
+	job := &trackedJob{
+		jobID: jobID, callID: callID, legID: agentLeg.String(), placedAt: placedAt,
+		callType: callType, from: agentExtension, to: destination,
+		legKind: "AGENT", legLabel: agentExtension,
 	}
 
 	s.arm(agentLeg.String(), func() {
@@ -457,6 +471,10 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 				"callId", callID, "destination", destination, "error", err)
 		}
 	})
+
+	// After arming: a failure already on record is applied at once, and it
+	// must find the continuation there to drop.
+	s.trackJob(job)
 
 	s.log.Info("click-to-dial placed", "callId", callID,
 		"agentExtension", agentExtension, "destination", destination)
@@ -569,11 +587,19 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 		// the bridge to the bot and any later transfer to an agent.
 		vars["sip_copy_custom_headers"] = "false"
 	}
-	if _, err := s.sw.Originate(customerLeg, endpoint, vars); err != nil {
+	placedAt := time.Now().UTC()
+	jobID, err := s.sw.Originate(customerLeg, endpoint, vars)
+	if err != nil {
 		if s.callData != nil {
 			s.callData.Drop(callID)
 		}
 		return uuid.Nil, err
+	}
+	job := &trackedJob{
+		jobID: jobID, callID: callID, legID: customerLeg.String(), placedAt: placedAt,
+		callType: "OUTBOUND", from: did.Number, to: req.To, did: did.Number,
+		language: language, flowID: did.FlowID,
+		legKind: "TRUNK", legLabel: req.To,
 	}
 
 	s.arm(customerLeg.String(), func() {
@@ -597,6 +623,8 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 				"callId", callID, "to", req.To, "error", err)
 		}
 	})
+
+	s.trackJob(job) // after arming, for the same reason as click-to-dial
 
 	s.log.Info("ai outbound placed", "callId", callID,
 		"to", req.To, "did", did.Number, "language", language)
@@ -658,10 +686,16 @@ func (s *Service) arm(channelID string, onAnswer func()) {
 // continuation, a hangup (busy, declined, expired) discards it. Fed from the
 // same dispatch loop as the coordinator.
 func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
+	if ev.Kind == telephony.KindBackgroundJob {
+		s.handleJob(ev)
+		return
+	}
 	if ev.ChannelID == "" {
 		return
 	}
 	switch ev.Kind {
+	case telephony.KindChannelCreate:
+		s.noteChannel(ev.ChannelID)
 	case telephony.KindChannelAnswer:
 		s.mu.Lock()
 		leg := s.pending[ev.ChannelID]
