@@ -552,10 +552,8 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 	case key != "" && u.cfg.Slots.Consume(key):
 		u.log.Info("bot slot taken from reservation", "callId", callID, "reservation", key)
 	case u.cfg.Slots.TryAcquire():
-		if key != "" {
-			u.log.Info("invite names a reservation that is gone; took a fresh slot",
-				"callId", callID, "reservation", key)
-		}
+		// Inbound INVITEs carry X-AICC-Call-ID too, so a key with no
+		// reservation is the ordinary case, not a lost one.
 	default:
 		u.send(buildReject(msg, "486 Busy Here", newTag()), addr)
 		u.log.Warn("invite rejected at capacity", "callId", callID,
