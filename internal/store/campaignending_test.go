@@ -37,15 +37,24 @@ func TestACDRReadsAsACampaignOutcome(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tt.cdr.CallID = uuid.New()
-			tt.cdr.TalkSec = 12
+			tt.cdr.TalkSec = 0
 			tt.cdr.EndedAt = start.Add(time.Minute)
 			got := endingFromCDR(tt.cdr)
 			if got.Outcome != tt.want {
 				t.Errorf("outcome = %s, want %s", got.Outcome, tt.want)
 			}
-			if got.HangupCause != tt.cdr.HangupCause || got.TalkSec != 12 || !got.EndedAt.Equal(tt.cdr.EndedAt) {
+			if got.HangupCause != tt.cdr.HangupCause || got.TalkSec != tt.cdr.BotSec || !got.EndedAt.Equal(tt.cdr.EndedAt) {
 				t.Errorf("ending = %+v", got)
 			}
 		})
+	}
+}
+
+// An AI call's conversation is the CDR's BotSec; TalkSec is agent time and is
+// zero on a campaign call.
+func TestAnAttemptsTalkTimeIsTheConversationWithTheBot(t *testing.T) {
+	got := endingFromCDR(CDR{Status: CDRStatusAnswered, BotSec: 41, TalkSec: 0, HangupCause: "NORMAL_CLEARING"})
+	if got.TalkSec != 41 {
+		t.Fatalf("talk = %d, want 41", got.TalkSec)
 	}
 }

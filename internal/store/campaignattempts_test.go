@@ -116,7 +116,8 @@ func cdrOf(callID uuid.UUID, cause, status string, answered bool, startedAt, end
 	}
 	if answered {
 		cdr.AnsweredAt = startedAt.Add(5 * time.Second)
-		cdr.TalkSec = int(endedAt.Sub(startedAt).Seconds()) - 5
+		// An AI call's conversation is the bot's time; no agent talks.
+		cdr.BotSec = int(endedAt.Sub(startedAt).Seconds()) - 5
 	}
 	return cdr
 }

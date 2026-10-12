@@ -216,10 +216,14 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 	if v, ok := cdr.Tech["isPlacementFailure"].(bool); ok {
 		end.IsPlacementFailure = v
 	}
+	// A campaign call never reaches an agent (design 10 section 10), so the
+	// CDR's TalkSec (agent talk time) is zero; the customer's conversation
+	// is the time with the bot, BotSec. Summing both keeps the figure right
+	// should a call ever carry agent talk time too.
 	return campaign.Ending{
 		Outcome:     campaign.Classify(end),
 		HangupCause: cdr.HangupCause,
-		TalkSec:     cdr.TalkSec,
+		TalkSec:     cdr.BotSec + cdr.TalkSec,
 		EndedAt:     cdr.EndedAt,
 	}
 }
