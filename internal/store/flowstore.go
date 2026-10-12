@@ -137,6 +137,15 @@ func (f *FlowStore) Publish(ctx context.Context, flowID uuid.UUID, note string) 
 			return err
 		}
 	}
+	// A campaign call has no way to a person (design 10 section 10), so a
+	// revision that adds one cannot go live under a campaign that has not
+	// finished. A draft is free to change; only publishing is refused.
+	if err := refuseTransferWhileCampaigned(spec,
+		func() (int64, error) { return f.q.CountLiveCampaignsOnFlow(ctx, &flowID) },
+		"PUBLISH_BLOCKED",
+		"this revision can transfer the caller to a person, and a campaign that has not finished dials with this flow; cancel the campaign or remove the transfer"); err != nil {
+		return err
+	}
 
 	revisionID, err := uuid.NewV7()
 	if err != nil {

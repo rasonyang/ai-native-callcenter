@@ -64,6 +64,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		KeyScopes:     []string{"config:write"},
 		NeedsCSRF:     true,
 	},
+	"DELETE /campaigns/{campaignId}": {
+		OperationID:   "deleteCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
 	"DELETE /contacts/{contactId}": {
 		OperationID:   "deleteContact",
 		SessionScopes: []string{"contacts:write"},
@@ -185,6 +191,21 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "getPostCallTranscription",
 		SessionScopes: []string{"history:read:own"},
 		KeyScopes:     []string{"history:read:own"},
+	},
+	"GET /campaigns": {
+		OperationID:   "listCampaigns",
+		SessionScopes: []string{"campaigns:read"},
+		KeyScopes:     []string{"campaigns:read"},
+	},
+	"GET /campaigns/{campaignId}": {
+		OperationID:   "getCampaign",
+		SessionScopes: []string{"campaigns:read"},
+		KeyScopes:     []string{"campaigns:read"},
+	},
+	"GET /campaigns/{campaignId}/contacts": {
+		OperationID:   "listCampaignContacts",
+		SessionScopes: []string{"campaigns:read"},
+		KeyScopes:     []string{"campaigns:read"},
 	},
 	"GET /cdrs": {
 		OperationID:   "listCDRs",
@@ -322,6 +343,12 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "patchUserData",
 		SessionScopes: []string{"calls:control"},
 		KeyScopes:     []string{"calls:control"},
+		NeedsCSRF:     true,
+	},
+	"PATCH /campaigns/{campaignId}": {
+		OperationID:   "updateCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
 		NeedsCSRF:     true,
 	},
 	"POST /agent/login": {
@@ -484,6 +511,42 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		OperationID:   "unmuteCall",
 		SessionScopes: []string{"calls:control"},
 		KeyScopes:     []string{"calls:control"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns": {
+		OperationID:   "createCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns/{campaignId}/cancel": {
+		OperationID:   "cancelCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns/{campaignId}/contacts": {
+		OperationID:   "importCampaignContacts",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns/{campaignId}/pause": {
+		OperationID:   "pauseCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns/{campaignId}/resume": {
+		OperationID:   "resumeCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
+		NeedsCSRF:     true,
+	},
+	"POST /campaigns/{campaignId}/start": {
+		OperationID:   "startCampaign",
+		SessionScopes: []string{"campaigns:write"},
+		KeyScopes:     []string{"campaigns:write"},
 		NeedsCSRF:     true,
 	},
 	"POST /contacts": {

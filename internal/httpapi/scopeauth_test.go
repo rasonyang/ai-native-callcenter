@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -55,6 +56,17 @@ type seeded struct {
 // real server.
 func newFixture(t *testing.T, opts ...func(*Deps)) *fixture {
 	t.Helper()
+	wrapped := make([]func(*store.Store, *Deps), len(opts))
+	for i, opt := range opts {
+		wrapped[i] = func(_ *store.Store, d *Deps) { opt(d) }
+	}
+	return newFixtureWithStore(t, wrapped...)
+}
+
+// newFixtureWithStore is newFixture for options that need the store the
+// fixture is built on (a service of its own over the same database).
+func newFixtureWithStore(t *testing.T, opts ...func(*store.Store, *Deps)) *fixture {
+	t.Helper()
 	dsn := testdb.ScratchDSN(t, "scopetest")
 
 	ctx := context.Background()
@@ -69,19 +81,21 @@ func newFixture(t *testing.T, opts ...func(*Deps)) *fixture {
 
 	cfg := config.Config{SessionCookie: "aicc_session", SessionTTL: time.Hour}
 	deps := Deps{
-		Auth:     auth.NewService(st.Queries, cfg.SessionTTL),
-		Agents:   stubAgents{},
-		AgentDir: dbDirectory{st},
-		Ledger:   st.Ledger(),
-		Auditor:  st.Ledger(),
-		Accounts: st.Accounts(),
-		Contacts: st.Contacts(),
-		DNC:      st.DNC(),
-		Keys:     APIKeys{APIKeyStore: st.APIKeys()},
-		Hub:      events.NewHub(events.NewSequence(dbSeq{st}, "events")),
+		Auth:      auth.NewService(st.Queries, cfg.SessionTTL),
+		Agents:    stubAgents{},
+		AgentDir:  dbDirectory{st},
+		Ledger:    st.Ledger(),
+		Auditor:   st.Ledger(),
+		Accounts:  st.Accounts(),
+		Contacts:  st.Contacts(),
+		DNC:       st.DNC(),
+		Campaigns: campaign.NewService(st.Campaigns(), nil, campaign.Env{DefaultCountryCode: "86"}),
+		Flows:     st.Flows(),
+		Keys:      APIKeys{APIKeyStore: st.APIKeys()},
+		Hub:       events.NewHub(events.NewSequence(dbSeq{st}, "events")),
 	}
 	for _, opt := range opts {
-		opt(&deps)
+		opt(st, &deps)
 	}
 	srv := New(cfg, deps)
 	f := &fixture{t: t, server: httptest.NewServer(srv.router()), st: st}

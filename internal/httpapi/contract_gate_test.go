@@ -64,7 +64,7 @@ func TestEveryMountedRouteDeclaresItsAuthorization(t *testing.T) {
 	t.Parallel()
 	srv := New(config.Config{Env: "dev"}, Deps{
 		Auth: &auth.Service{}, Agents: stubAgents{}, Calls: stubCalls{},
-		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{}, DNC: stubDNC{},
+		Catalog: stubCatalog{}, Ledger: stubLedger(t), Contacts: stubContacts{}, DNC: stubDNC{}, Campaigns: stubCampaigns{},
 		Outbound: stubOutbound{}, Keys: stubKeys{},
 	})
 

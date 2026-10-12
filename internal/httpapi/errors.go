@@ -51,6 +51,28 @@ const (
 	// Nothing was placed and nothing was recorded.
 	CodeNumberOnDNC ErrorCode = "NUMBER_ON_DNC"
 	CodeNotFound    ErrorCode = "NOT_FOUND"
+
+	// The campaign codes (docs/design/10-campaigns.md section 14).
+	//
+	// CodeCampaignFlowHasTransfer refuses a flow that can hand the caller to a
+	// person: a campaign call has no way to one. 422 when a campaign is being
+	// written with such a DID; 409 when publishing a revision or rebinding a
+	// DID would put one under a campaign that has not finished.
+	CodeCampaignFlowHasTransfer ErrorCode = "CAMPAIGN_FLOW_HAS_TRANSFER"
+	// CodeCampaignRingTimeoutTooLong refuses a ring timeout that is not below
+	// the originator's answer window: an answer after the window would reach
+	// a customer who hears silence.
+	CodeCampaignRingTimeoutTooLong ErrorCode = "CAMPAIGN_RING_TIMEOUT_TOO_LONG"
+	// CodeCampaignWindowOutsideLimit refuses a calling window that is not
+	// wholly inside the deployment's outer calling hours.
+	CodeCampaignWindowOutsideLimit ErrorCode = "CAMPAIGN_WINDOW_OUTSIDE_LIMIT"
+	// CodeCampaignFieldLocked refuses to change, in the campaign's current
+	// status, a field that status fixes. params.fields names them.
+	CodeCampaignFieldLocked ErrorCode = "CAMPAIGN_FIELD_LOCKED"
+	// CodeCampaignInvalidTransition refuses an operation that does not exist
+	// in the campaign's current status: starting one that is running,
+	// deleting one that has started, importing into one that has finished.
+	CodeCampaignInvalidTransition ErrorCode = "CAMPAIGN_INVALID_TRANSITION"
 	// CodeMethodNotAllowed answers the router's own refusal, so that a
 	// wrong method lands in the same envelope as everything else. Without
 	// it chi replies 405 with an empty body and no content type, and the

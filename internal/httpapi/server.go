@@ -90,6 +90,7 @@ type Server struct {
 	catalog     CatalogService
 	contacts    ContactService
 	dnc         DNCService
+	campaigns   CampaignService
 	ledger      *store.LedgerStore
 	postCall    PostCallTranscriber
 	flows       FlowService
@@ -121,6 +122,8 @@ type Deps struct {
 	Contacts ContactService
 	// DNC is the do-not-call list; nil hides its endpoints.
 	DNC DNCService
+	// Campaigns is the AI outbound campaign model; nil hides its endpoints.
+	Campaigns CampaignService
 	// Ledger serves finished calls: CDRs, transcripts, recordings, reviews.
 	Ledger *store.LedgerStore
 	// Flows are the conversations the bot runs; nil hides the flow endpoints
@@ -166,6 +169,7 @@ func New(cfg config.Config, deps Deps) *Server {
 		catalog:     deps.Catalog,
 		contacts:    deps.Contacts,
 		dnc:         deps.DNC,
+		campaigns:   deps.Campaigns,
 		ledger:      deps.Ledger,
 		postCall:    deps.PostCall,
 		flows:       deps.Flows,
@@ -373,6 +377,20 @@ func (s *Server) router() chi.Router {
 					private.Get("/dnc-numbers", op.ListDNCNumbers)
 					private.Post("/dnc-numbers", op.CreateDNCNumber)
 					private.Delete("/dnc-numbers/{number}", op.DeleteDNCNumber)
+				}
+
+				if s.campaigns != nil {
+					private.Get("/campaigns", op.ListCampaigns)
+					private.Post("/campaigns", op.CreateCampaign)
+					private.Get("/campaigns/{campaignId}", op.GetCampaign)
+					private.Patch("/campaigns/{campaignId}", op.UpdateCampaign)
+					private.Delete("/campaigns/{campaignId}", op.DeleteCampaign)
+					private.Post("/campaigns/{campaignId}/start", op.StartCampaign)
+					private.Post("/campaigns/{campaignId}/pause", op.PauseCampaign)
+					private.Post("/campaigns/{campaignId}/resume", op.ResumeCampaign)
+					private.Post("/campaigns/{campaignId}/cancel", op.CancelCampaign)
+					private.Get("/campaigns/{campaignId}/contacts", op.ListCampaignContacts)
+					private.Post("/campaigns/{campaignId}/contacts", op.ImportCampaignContacts)
 				}
 
 				// Where finished calls are sent is configuration, the same kind

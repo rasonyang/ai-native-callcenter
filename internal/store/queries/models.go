@@ -106,6 +106,43 @@ type Callback struct {
 	LastAttemptStatus *string            `json:"lastAttemptStatus"`
 }
 
+type Campaign struct {
+	ID                 uuid.UUID          `json:"id"`
+	Name               string             `json:"name"`
+	DidID              uuid.UUID          `json:"didId"`
+	Status             string             `json:"status"`
+	PauseReason        *string            `json:"pauseReason"`
+	TimeZone           string             `json:"timeZone"`
+	CallingWindow      []byte             `json:"callingWindow"`
+	DefaultCountryCode *string            `json:"defaultCountryCode"`
+	MaxConcurrent      int32              `json:"maxConcurrent"`
+	RingTimeoutSec     int32              `json:"ringTimeoutSec"`
+	RetryPolicy        []byte             `json:"retryPolicy"`
+	FollowUpQueueID    *uuid.UUID         `json:"followUpQueueId"`
+	CreatedAt          pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt          pgtype.Timestamptz `json:"updatedAt"`
+	StartedAt          pgtype.Timestamptz `json:"startedAt"`
+	FinishedAt         pgtype.Timestamptz `json:"finishedAt"`
+}
+
+type CampaignContact struct {
+	ID             uuid.UUID          `json:"id"`
+	CampaignID     uuid.UUID          `json:"campaignId"`
+	NumberE164     string             `json:"numberE164"`
+	NumberRaw      string             `json:"numberRaw"`
+	TimeZone       *string            `json:"timeZone"`
+	Slots          []byte             `json:"slots"`
+	Status         string             `json:"status"`
+	Attempts       int32              `json:"attempts"`
+	SystemFailures int32              `json:"systemFailures"`
+	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
+	LastOutcome    *string            `json:"lastOutcome"`
+	LeadIntent     *string            `json:"leadIntent"`
+	LeadNotes      *string            `json:"leadNotes"`
+	CreatedAt      pgtype.Timestamptz `json:"createdAt"`
+	UpdatedAt      pgtype.Timestamptz `json:"updatedAt"`
+}
+
 type Cdr struct {
 	CallID         uuid.UUID          `json:"callId"`
 	StartedAt      pgtype.Timestamptz `json:"startedAt"`

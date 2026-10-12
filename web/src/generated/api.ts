@@ -866,10 +866,16 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update a DID */
+        /**
+         * Update a DID
+         * @description Binding the number to a flow whose published revision can transfer the caller to a person is refused with 409 CAMPAIGN_FLOW_HAS_TRANSFER while a campaign that has not finished dials from this number.
+         */
         put: operations["updateDID"];
         post?: never;
-        /** Delete a DID */
+        /**
+         * Delete a DID
+         * @description A number a campaign dials from cannot be deleted: 409 CONFLICT until the campaign is deleted.
+         */
         delete: operations["deleteDID"];
         options?: never;
         head?: never;
@@ -933,6 +939,8 @@ export interface paths {
         /**
          * Publish the draft
          * @description Snapshots the current draft as an immutable revision and points the flow at it. Calls that start after this run the new revision; calls already in progress keep the one they started on.
+         *
+         *     A revision that can transfer the caller to a person (transfer_to_agent offered in any phase) is refused with 409 CAMPAIGN_FLOW_HAS_TRANSFER while a campaign that has not finished (DRAFT, RUNNING or PAUSED) dials from a DID answered by this flow: a campaign call has no way to a person. Cancel or finish the campaign, or remove the transfer.
          */
         post: operations["publishFlow"];
         delete?: never;
@@ -1317,6 +1325,168 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/campaigns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List campaigns
+         * @description Newest first, with each campaign's contact counts. status narrows to one status. Needs campaigns:read.
+         */
+        get: operations["listCampaigns"];
+        put?: never;
+        /**
+         * Create a campaign
+         * @description Creates a DRAFT. Nothing is dialled until it is started.
+         *
+         *     The DID must exist, be enabled and have a published flow, and that flow must not be able to transfer the caller to a person: a campaign call has no way to one, and a flow that offers transfer_to_agent in any phase (by name, by "*", or among its always-allowed tools) is refused with 422 CAMPAIGN_FLOW_HAS_TRANSFER. ringTimeoutSec must be at least 5 and below the originator's 60-second answer window (422 CAMPAIGN_RING_TIMEOUT_TOO_LONG). timeZone must be an IANA name, and every range of callingWindow must lie wholly inside the deployment's outer calling hours (AICC_OUTBOUND_HOURS) or the request is 422 CAMPAIGN_WINDOW_OUTSIDE_LIMIT. Any other bad value is 422 VALIDATION_FAILED with params {field, rule}. Needs campaigns:write.
+         */
+        post: operations["createCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a campaign
+         * @description Needs campaigns:read.
+         */
+        get: operations["getCampaign"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a draft campaign
+         * @description Only a DRAFT can be deleted, with its contacts. A campaign that has started is history: cancel it instead. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Needs campaigns:write.
+         */
+        delete: operations["deleteCampaign"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a campaign
+         * @description See CampaignPatch for which fields may change in which status. A field the status locks answers 409 CAMPAIGN_FIELD_LOCKED with params.fields; a changed callingWindow is held to the outer calling hours again, and a changed didId or ringTimeoutSec to the rules of create. The change applies to later admissions: a window narrowed on a RUNNING campaign stops new calls outside it at once, and calls already in flight finish. Needs campaigns:write.
+         */
+        patch: operations["updateCampaign"];
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a campaign
+         * @description DRAFT to RUNNING. The campaign is checked once more first (its DID, flow and window may have changed since it was written; the outer calling hours may have been narrowed), and every ACTIVE contact becomes due. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         */
+        post: operations["startCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause a campaign
+         * @description RUNNING to PAUSED with pauseReason MANUAL. New calls stop; calls in flight finish. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         */
+        post: operations["pauseCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume a campaign
+         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         */
+        post: operations["resumeCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a campaign
+         * @description DRAFT, RUNNING or PAUSED to CANCELLED, which is final. Calls in flight finish; contacts and leads stay readable. COMPLETED is not reachable through the API: the dialer completes a campaign when nothing is left to dial. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         */
+        post: operations["cancelCampaign"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/campaigns/{campaignId}/contacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List a campaign's contacts
+         * @description In import order. status and leadIntent narrow the list. Needs campaigns:read.
+         */
+        get: operations["listCampaignContacts"];
+        put?: never;
+        /**
+         * Import contacts
+         * @description Adds a list of contacts, at most 5000 per request (more is 422 VALIDATION_FAILED, params {field: "contacts", rule: TOO_MANY_ROWS}; send the list in several requests). The body is the only thing that can fail the request: a row that cannot be used is rejected on its own with a code, and never fails the others. The good rows are stored in one transaction.
+         *
+         *     The answer has one result per request row, in request order: IMPORTED (contactId is the new contact), DUPLICATE (contactId is the contact that already had the number: the first one wins and its slots are not overwritten; a number repeated inside the request is a duplicate of its first row) or REJECTED with a code (NUMBER_EMPTY, NUMBER_INVALID, TIME_ZONE_INVALID, SLOTS_TOO_MANY, SLOT_UNKNOWN, SLOT_TOO_LONG). Numbers are canonicalised to E.164 with the campaign's defaultCountryCode, else the deployment's AICC_DEFAULT_COUNTRY_CODE, so "+8613800138000" and "138 0013 8000" are one contact. The same number in two campaigns is a contact in each. Importing again what was imported before is all DUPLICATE. The do-not-call list is not consulted here: the dialer checks it before every call, so a number added to it later still stops.
+         *
+         *     Allowed in DRAFT, RUNNING and PAUSED; a COMPLETED or CANCELLED campaign answers 409 CAMPAIGN_INVALID_TRANSITION. Contacts added to a RUNNING or PAUSED campaign are due at once. Needs campaigns:write.
+         */
+        post: operations["importCampaignContacts"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/system/health": {
         parameters: {
             query?: never;
@@ -1598,7 +1768,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -3064,6 +3234,273 @@ export interface components {
             /** @description Total rows matching the filter, for paging. */
             total: number;
         };
+        /**
+         * @description DRAFT is being written and dials nothing. RUNNING dials. PAUSED has stopped admitting new calls (pauseReason says who stopped it); calls in flight finish. COMPLETED and CANCELLED are final: nothing changes, contacts and leads stay readable. COMPLETED is reached only by the dialer, when nothing is left to dial and nothing is in flight; there is no operation for it.
+         * @enum {string}
+         */
+        CampaignStatus: "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED" | "CANCELLED";
+        /**
+         * @description Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+         * @enum {string}
+         */
+        CampaignPauseReason: "MANUAL" | "TRUNK_FAILURE" | "PROVIDER_FAILURE";
+        /**
+         * @description ACTIVE is still to be dialled. DONE was answered, whatever came of it. EXHAUSTED used up maxAttempts or maxSystemRetries. INVALID_NUMBER is a number the carrier says does not exist. DNC is on the do-not-call list.
+         * @enum {string}
+         */
+        CampaignContactStatus: "ACTIVE" | "DONE" | "EXHAUSTED" | "INVALID_NUMBER" | "DNC";
+        /**
+         * @description How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+         * @enum {string}
+         */
+        CampaignOutcome: "ANSWERED" | "BOT_FAILED" | "OVERFLOW" | "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "ORIGINATE_FAILED" | "INVALID_NUMBER" | "DNC_SKIPPED";
+        /**
+         * @description The outcomes a campaign may choose to dial again. An answered number is never dialled again, and neither is an invalid or do-not-call one, so those outcomes are not choices.
+         * @enum {string}
+         */
+        CampaignRetryOutcome: "NO_ANSWER" | "BUSY" | "REJECTED" | "UNKNOWN" | "TRANSIENT" | "ORIGINATE_FAILED";
+        /**
+         * @description What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
+         * @enum {string}
+         */
+        CampaignLeadIntent: "HIGH" | "MEDIUM" | "LOW" | "NONE" | "DO_NOT_CALL";
+        /** @enum {string} */
+        Weekday: "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT" | "SUN";
+        /** @description A wall-clock range [start, end) in the contact's local time. A range whose end is before its start crosses midnight and belongs to the day it starts on (22:00-02:00 on MON runs until 02:00 on TUE). "24:00" is accepted as an end. */
+        CampaignTimeRange: {
+            /** @example 09:00 */
+            start: string;
+            /** @example 17:30 */
+            end: string;
+        };
+        /** @description When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign. */
+        CampaignCallingWindow: {
+            days: components["schemas"]["Weekday"][];
+            ranges: components["schemas"]["CampaignTimeRange"][];
+        };
+        /** @description Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec. */
+        CampaignBackoff: {
+            /** @default 300 */
+            baseSec: number;
+            /** @default 3 */
+            factor: number;
+            /** @default 14400 */
+            capSec: number;
+        };
+        /** @description A CampaignBackoff whose omitted fields take the defaults. */
+        CampaignBackoffWrite: {
+            /** @default 300 */
+            baseSec: number;
+            /** @default 3 */
+            factor: number;
+            /** @default 14400 */
+            capSec: number;
+        };
+        /** @description Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead. */
+        CampaignIntervalSec: {
+            [key: string]: number;
+        };
+        /** @description What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts. */
+        CampaignRetryPolicy: {
+            /** @default 3 */
+            maxAttempts: number;
+            /** @default 5 */
+            maxSystemRetries: number;
+            retryOutcomes: components["schemas"]["CampaignRetryOutcome"][];
+            intervalSec: components["schemas"]["CampaignIntervalSec"];
+            transientBackoff: components["schemas"]["CampaignBackoff"];
+        };
+        /** @description A retry policy as a client writes it. The object sent is the whole policy: a field left out takes its default (never the stored value), and an interval left out of intervalSec takes its default. The default retries every retryable outcome. */
+        CampaignRetryPolicyWrite: {
+            /** @default 3 */
+            maxAttempts: number;
+            /** @default 5 */
+            maxSystemRetries: number;
+            retryOutcomes?: components["schemas"]["CampaignRetryOutcome"][];
+            intervalSec?: components["schemas"]["CampaignIntervalSec"];
+            transientBackoff?: components["schemas"]["CampaignBackoffWrite"];
+        };
+        /** @description How many contacts the campaign has in each status. */
+        CampaignContactCounts: {
+            total: number;
+            active: number;
+            done: number;
+            exhausted: number;
+            invalidNumber: number;
+            dnc: number;
+        };
+        Campaign: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * Format: uuid
+             * @description The outbound DID: it names the flow every answered call talks to and the caller id.
+             */
+            didId: string;
+            /** @description That DID's number, for display. */
+            didNumber: string;
+            status: components["schemas"]["CampaignStatus"];
+            pauseReason?: components["schemas"]["CampaignPauseReason"];
+            /** @description IANA name. The zone of contacts that carry none of their own. */
+            timeZone: string;
+            callingWindow: components["schemas"]["CampaignCallingWindow"];
+            /** @description Country calling code, digits without +, that completes national numbers on import. Absent: the deployment's AICC_DEFAULT_COUNTRY_CODE applies. */
+            defaultCountryCode?: string;
+            /** @description This campaign's share of the deployment's concurrent calls. */
+            maxConcurrent: number;
+            /** @description How long each attempt rings before giving up. Always below the originator's 60-second answer window. */
+            ringTimeoutSec: number;
+            retryPolicy: components["schemas"]["CampaignRetryPolicy"];
+            /**
+             * Format: uuid
+             * @description The queue a HIGH lead's callback is filed under. Absent when none is set.
+             */
+            followUpQueueId?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Absent while DRAFT.
+             */
+            startedAt?: string;
+            /**
+             * Format: date-time
+             * @description Present once COMPLETED or CANCELLED.
+             */
+            finishedAt?: string;
+            contacts: components["schemas"]["CampaignContactCounts"];
+        };
+        /** @description A campaign to create. It starts as a DRAFT. */
+        CampaignWrite: {
+            name: string;
+            /**
+             * Format: uuid
+             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+             */
+            didId: string;
+            /** @description IANA name, for example Asia/Shanghai or America/New_York. */
+            timeZone: string;
+            callingWindow: components["schemas"]["CampaignCallingWindow"];
+            /** @default 5 */
+            maxConcurrent: number;
+            /**
+             * @description At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG.
+             * @default 30
+             */
+            ringTimeoutSec: number;
+            retryPolicy?: components["schemas"]["CampaignRetryPolicyWrite"];
+            /** @description Digits without +. Omitted: the deployment's AICC_DEFAULT_COUNTRY_CODE. */
+            defaultCountryCode?: string;
+            /** Format: uuid */
+            followUpQueueId?: string;
+        };
+        /** @description A change to a campaign. Fields present replace the stored ones; fields absent are left alone; null clears defaultCountryCode and followUpQueueId (the only two that can be unset). callingWindow and retryPolicy replace the stored object as a whole. In DRAFT every field may change; in RUNNING and PAUSED only maxConcurrent, callingWindow and retryPolicy, and they affect later admissions, not calls in flight; in a terminal status none. A field sent with the value it already has is not a change. */
+        CampaignPatch: {
+            name?: string;
+            /**
+             * Format: uuid
+             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+             */
+            didId?: string;
+            /** @description IANA name, for example Asia/Shanghai or America/New_York. */
+            timeZone?: string;
+            callingWindow?: components["schemas"]["CampaignCallingWindow"];
+            /** @default 5 */
+            maxConcurrent: number;
+            /**
+             * @description At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG.
+             * @default 30
+             */
+            ringTimeoutSec: number;
+            retryPolicy?: components["schemas"]["CampaignRetryPolicyWrite"];
+            defaultCountryCode?: string | null;
+            /** Format: uuid */
+            followUpQueueId?: string | null;
+        };
+        CampaignList: {
+            items: components["schemas"]["Campaign"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
+        };
+        CampaignContact: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            campaignId: string;
+            /** @description Canonical E.164, for example +8613800138000: the key a campaign deduplicates on. */
+            number: string;
+            /** @description The number as it was imported. */
+            numberRaw: string;
+            /** @description This contact's own zone; absent means the campaign's. */
+            timeZone?: string;
+            /** @description Handed to the flow as userData. */
+            slots: {
+                [key: string]: string;
+            };
+            status: components["schemas"]["CampaignContactStatus"];
+            /** @description Attempts that reached the customer (against maxAttempts). */
+            attempts: number;
+            /** @description Attempts that never reached the customer (against maxSystemRetries). */
+            systemFailures: number;
+            /**
+             * Format: date-time
+             * @description When it may be dialled next. Absent unless ACTIVE and the campaign has started.
+             */
+            nextAttemptAt?: string;
+            lastOutcome?: components["schemas"]["CampaignOutcome"];
+            leadIntent?: components["schemas"]["CampaignLeadIntent"];
+            leadNotes?: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        CampaignContactList: {
+            items: components["schemas"]["CampaignContact"][];
+            /** @description Total rows matching the filter, for paging. */
+            total: number;
+        };
+        CampaignContactRow: {
+            /** @description In any common form: +86 138-0013-8000, 0086 138 0013 8000 or, with the campaign's country code, 13800138000. */
+            number: string;
+            /** @description IANA name; omitted means the campaign's. */
+            timeZone?: string;
+            /** @description Business data for the flow. Every name must be one the flow reads (a userData.<name> in its instructions, announces, conditions or tool bodies); a value is at most 256 characters; at most 32 slots. Control characters, line breaks included, become spaces, and an empty value is the same as an omitted slot. */
+            slots?: {
+                [key: string]: string;
+            };
+        };
+        CampaignContactsImport: {
+            contacts: components["schemas"]["CampaignContactRow"][];
+        };
+        /** @enum {string} */
+        CampaignImportRowStatus: "IMPORTED" | "DUPLICATE" | "REJECTED";
+        /**
+         * @description Why a row was rejected. A row has one code; the checks run in the order number, time zone, slot count, slot names, slot lengths.
+         * @enum {string}
+         */
+        CampaignImportRowCode: "NUMBER_EMPTY" | "NUMBER_INVALID" | "TIME_ZONE_INVALID" | "SLOTS_TOO_MANY" | "SLOT_UNKNOWN" | "SLOT_TOO_LONG";
+        CampaignImportRowResult: {
+            /** @description Zero-based position in the request. */
+            index: number;
+            status: components["schemas"]["CampaignImportRowStatus"];
+            /**
+             * Format: uuid
+             * @description The new contact (IMPORTED) or the one that already had the number (DUPLICATE).
+             */
+            contactId?: string;
+            /** @description The canonical number, whenever the number could be read. */
+            number?: string;
+            code?: components["schemas"]["CampaignImportRowCode"];
+            /** @description For SLOT_UNKNOWN and SLOT_TOO_LONG the slot name; for TIME_ZONE_INVALID the zone. */
+            detail?: string;
+        };
+        CampaignImportResult: {
+            imported: number;
+            duplicates: number;
+            rejected: number;
+            /** @description One result per request row, in request order. */
+            rows: components["schemas"]["CampaignImportRowResult"][];
+        };
     };
     responses: {
         /** @description The request is malformed: unparseable body or an invalid identifier. Codes VALIDATION_FAILED, USER_DATA_TOO_LARGE. */
@@ -3102,7 +3539,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -3111,7 +3548,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. Publishing a flow may also answer TERMINAL_ANNOUNCE_REQUIRED, with params.nodes listing the phases at fault. */
+        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. Publishing a flow may also answer TERMINAL_ANNOUNCE_REQUIRED, with params.nodes listing the phases at fault. Campaign writes may also answer CAMPAIGN_FLOW_HAS_TRANSFER, CAMPAIGN_RING_TIMEOUT_TOO_LONG or CAMPAIGN_WINDOW_OUTSIDE_LIMIT, each with params.field naming the offender. */
         UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
@@ -4810,6 +5247,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
             503: components["responses"]["ServiceUnavailable"];
         };
@@ -5421,6 +5859,337 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listCampaigns: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CampaignStatus"];
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    createCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignWrite"];
+            };
+        };
+        responses: {
+            /** @description The stored campaign, a DRAFT. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    getCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign with its contact counts. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    deleteCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    updateCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignPatch"];
+            };
+        };
+        responses: {
+            /** @description The campaign as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    startCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    pauseCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    resumeCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    cancelCampaign: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The campaign as it now stands. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Campaign"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            422: components["responses"]["UnprocessableEntity"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    listCampaignContacts: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["CampaignContactStatus"];
+                leadIntent?: components["schemas"]["CampaignLeadIntent"];
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page plus the total for the filter. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignContactList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            500: components["responses"]["InternalError"];
+        };
+    };
+    importCampaignContacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                campaignId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CampaignContactsImport"];
+            };
+        };
+        responses: {
+            /** @description One result per row. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CampaignImportResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            /** @description The body is larger than 16 MiB. Code VALIDATION_FAILED, params.rule BODY_TOO_LARGE; send the list in several requests. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             422: components["responses"]["UnprocessableEntity"];
             500: components["responses"]["InternalError"];
         };

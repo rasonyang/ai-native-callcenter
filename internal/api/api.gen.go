@@ -196,6 +196,234 @@ func (e CallbackStatus) Valid() bool {
 	}
 }
 
+// Defines values for CampaignContactStatus.
+const (
+	CampaignContactStatusACTIVE        CampaignContactStatus = "ACTIVE"
+	CampaignContactStatusDNC           CampaignContactStatus = "DNC"
+	CampaignContactStatusDONE          CampaignContactStatus = "DONE"
+	CampaignContactStatusEXHAUSTED     CampaignContactStatus = "EXHAUSTED"
+	CampaignContactStatusINVALIDNUMBER CampaignContactStatus = "INVALID_NUMBER"
+)
+
+// Valid indicates whether the value is a known member of the CampaignContactStatus enum.
+func (e CampaignContactStatus) Valid() bool {
+	switch e {
+	case CampaignContactStatusACTIVE:
+		return true
+	case CampaignContactStatusDNC:
+		return true
+	case CampaignContactStatusDONE:
+		return true
+	case CampaignContactStatusEXHAUSTED:
+		return true
+	case CampaignContactStatusINVALIDNUMBER:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignImportRowCode.
+const (
+	CampaignImportRowCodeNUMBEREMPTY     CampaignImportRowCode = "NUMBER_EMPTY"
+	CampaignImportRowCodeNUMBERINVALID   CampaignImportRowCode = "NUMBER_INVALID"
+	CampaignImportRowCodeSLOTSTOOMANY    CampaignImportRowCode = "SLOTS_TOO_MANY"
+	CampaignImportRowCodeSLOTTOOLONG     CampaignImportRowCode = "SLOT_TOO_LONG"
+	CampaignImportRowCodeSLOTUNKNOWN     CampaignImportRowCode = "SLOT_UNKNOWN"
+	CampaignImportRowCodeTIMEZONEINVALID CampaignImportRowCode = "TIME_ZONE_INVALID"
+)
+
+// Valid indicates whether the value is a known member of the CampaignImportRowCode enum.
+func (e CampaignImportRowCode) Valid() bool {
+	switch e {
+	case CampaignImportRowCodeNUMBEREMPTY:
+		return true
+	case CampaignImportRowCodeNUMBERINVALID:
+		return true
+	case CampaignImportRowCodeSLOTSTOOMANY:
+		return true
+	case CampaignImportRowCodeSLOTTOOLONG:
+		return true
+	case CampaignImportRowCodeSLOTUNKNOWN:
+		return true
+	case CampaignImportRowCodeTIMEZONEINVALID:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignImportRowStatus.
+const (
+	CampaignImportRowStatusDUPLICATE CampaignImportRowStatus = "DUPLICATE"
+	CampaignImportRowStatusIMPORTED  CampaignImportRowStatus = "IMPORTED"
+	CampaignImportRowStatusREJECTED  CampaignImportRowStatus = "REJECTED"
+)
+
+// Valid indicates whether the value is a known member of the CampaignImportRowStatus enum.
+func (e CampaignImportRowStatus) Valid() bool {
+	switch e {
+	case CampaignImportRowStatusDUPLICATE:
+		return true
+	case CampaignImportRowStatusIMPORTED:
+		return true
+	case CampaignImportRowStatusREJECTED:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignLeadIntent.
+const (
+	CampaignLeadIntentDONOTCALL CampaignLeadIntent = "DO_NOT_CALL"
+	CampaignLeadIntentHIGH      CampaignLeadIntent = "HIGH"
+	CampaignLeadIntentLOW       CampaignLeadIntent = "LOW"
+	CampaignLeadIntentMEDIUM    CampaignLeadIntent = "MEDIUM"
+	CampaignLeadIntentNONE      CampaignLeadIntent = "NONE"
+)
+
+// Valid indicates whether the value is a known member of the CampaignLeadIntent enum.
+func (e CampaignLeadIntent) Valid() bool {
+	switch e {
+	case CampaignLeadIntentDONOTCALL:
+		return true
+	case CampaignLeadIntentHIGH:
+		return true
+	case CampaignLeadIntentLOW:
+		return true
+	case CampaignLeadIntentMEDIUM:
+		return true
+	case CampaignLeadIntentNONE:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignOutcome.
+const (
+	CampaignOutcomeANSWERED        CampaignOutcome = "ANSWERED"
+	CampaignOutcomeBOTFAILED       CampaignOutcome = "BOT_FAILED"
+	CampaignOutcomeBUSY            CampaignOutcome = "BUSY"
+	CampaignOutcomeDNCSKIPPED      CampaignOutcome = "DNC_SKIPPED"
+	CampaignOutcomeINVALIDNUMBER   CampaignOutcome = "INVALID_NUMBER"
+	CampaignOutcomeNOANSWER        CampaignOutcome = "NO_ANSWER"
+	CampaignOutcomeORIGINATEFAILED CampaignOutcome = "ORIGINATE_FAILED"
+	CampaignOutcomeOVERFLOW        CampaignOutcome = "OVERFLOW"
+	CampaignOutcomeREJECTED        CampaignOutcome = "REJECTED"
+	CampaignOutcomeTRANSIENT       CampaignOutcome = "TRANSIENT"
+	CampaignOutcomeUNKNOWN         CampaignOutcome = "UNKNOWN"
+)
+
+// Valid indicates whether the value is a known member of the CampaignOutcome enum.
+func (e CampaignOutcome) Valid() bool {
+	switch e {
+	case CampaignOutcomeANSWERED:
+		return true
+	case CampaignOutcomeBOTFAILED:
+		return true
+	case CampaignOutcomeBUSY:
+		return true
+	case CampaignOutcomeDNCSKIPPED:
+		return true
+	case CampaignOutcomeINVALIDNUMBER:
+		return true
+	case CampaignOutcomeNOANSWER:
+		return true
+	case CampaignOutcomeORIGINATEFAILED:
+		return true
+	case CampaignOutcomeOVERFLOW:
+		return true
+	case CampaignOutcomeREJECTED:
+		return true
+	case CampaignOutcomeTRANSIENT:
+		return true
+	case CampaignOutcomeUNKNOWN:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignPauseReason.
+const (
+	CampaignPauseReasonMANUAL          CampaignPauseReason = "MANUAL"
+	CampaignPauseReasonPROVIDERFAILURE CampaignPauseReason = "PROVIDER_FAILURE"
+	CampaignPauseReasonTRUNKFAILURE    CampaignPauseReason = "TRUNK_FAILURE"
+)
+
+// Valid indicates whether the value is a known member of the CampaignPauseReason enum.
+func (e CampaignPauseReason) Valid() bool {
+	switch e {
+	case CampaignPauseReasonMANUAL:
+		return true
+	case CampaignPauseReasonPROVIDERFAILURE:
+		return true
+	case CampaignPauseReasonTRUNKFAILURE:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignRetryOutcome.
+const (
+	CampaignRetryOutcomeBUSY            CampaignRetryOutcome = "BUSY"
+	CampaignRetryOutcomeNOANSWER        CampaignRetryOutcome = "NO_ANSWER"
+	CampaignRetryOutcomeORIGINATEFAILED CampaignRetryOutcome = "ORIGINATE_FAILED"
+	CampaignRetryOutcomeREJECTED        CampaignRetryOutcome = "REJECTED"
+	CampaignRetryOutcomeTRANSIENT       CampaignRetryOutcome = "TRANSIENT"
+	CampaignRetryOutcomeUNKNOWN         CampaignRetryOutcome = "UNKNOWN"
+)
+
+// Valid indicates whether the value is a known member of the CampaignRetryOutcome enum.
+func (e CampaignRetryOutcome) Valid() bool {
+	switch e {
+	case CampaignRetryOutcomeBUSY:
+		return true
+	case CampaignRetryOutcomeNOANSWER:
+		return true
+	case CampaignRetryOutcomeORIGINATEFAILED:
+		return true
+	case CampaignRetryOutcomeREJECTED:
+		return true
+	case CampaignRetryOutcomeTRANSIENT:
+		return true
+	case CampaignRetryOutcomeUNKNOWN:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CampaignStatus.
+const (
+	CampaignStatusCANCELLED CampaignStatus = "CANCELLED"
+	CampaignStatusCOMPLETED CampaignStatus = "COMPLETED"
+	CampaignStatusDRAFT     CampaignStatus = "DRAFT"
+	CampaignStatusPAUSED    CampaignStatus = "PAUSED"
+	CampaignStatusRUNNING   CampaignStatus = "RUNNING"
+)
+
+// Valid indicates whether the value is a known member of the CampaignStatus enum.
+func (e CampaignStatus) Valid() bool {
+	switch e {
+	case CampaignStatusCANCELLED:
+		return true
+	case CampaignStatusCOMPLETED:
+		return true
+	case CampaignStatusDRAFT:
+		return true
+	case CampaignStatusPAUSED:
+		return true
+	case CampaignStatusRUNNING:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CompleteCallbackRequestStatus.
 const (
 	CompleteCallbackRequestStatusDISMISSED CompleteCallbackRequestStatus = "DISMISSED"
@@ -279,6 +507,11 @@ const (
 	ErrorCodeAGENTNOTLOGGEDIN               ErrorCode = "AGENT_NOT_LOGGED_IN"
 	ErrorCodeAGENTREQUIRED                  ErrorCode = "AGENT_REQUIRED"
 	ErrorCodeCALLNOTFOUND                   ErrorCode = "CALL_NOT_FOUND"
+	ErrorCodeCAMPAIGNFIELDLOCKED            ErrorCode = "CAMPAIGN_FIELD_LOCKED"
+	ErrorCodeCAMPAIGNFLOWHASTRANSFER        ErrorCode = "CAMPAIGN_FLOW_HAS_TRANSFER"
+	ErrorCodeCAMPAIGNINVALIDTRANSITION      ErrorCode = "CAMPAIGN_INVALID_TRANSITION"
+	ErrorCodeCAMPAIGNRINGTIMEOUTTOOLONG     ErrorCode = "CAMPAIGN_RING_TIMEOUT_TOO_LONG"
+	ErrorCodeCAMPAIGNWINDOWOUTSIDELIMIT     ErrorCode = "CAMPAIGN_WINDOW_OUTSIDE_LIMIT"
 	ErrorCodeCONFLICT                       ErrorCode = "CONFLICT"
 	ErrorCodeDEVICENOTREGISTERED            ErrorCode = "DEVICE_NOT_REGISTERED"
 	ErrorCodeEXTENSIONASSIGNEDTOAGENT       ErrorCode = "EXTENSION_ASSIGNED_TO_AGENT"
@@ -319,6 +552,16 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeAGENTREQUIRED:
 		return true
 	case ErrorCodeCALLNOTFOUND:
+		return true
+	case ErrorCodeCAMPAIGNFIELDLOCKED:
+		return true
+	case ErrorCodeCAMPAIGNFLOWHASTRANSFER:
+		return true
+	case ErrorCodeCAMPAIGNINVALIDTRANSITION:
+		return true
+	case ErrorCodeCAMPAIGNRINGTIMEOUTTOOLONG:
+		return true
+	case ErrorCodeCAMPAIGNWINDOWOUTSIDELIMIT:
 		return true
 	case ErrorCodeCONFLICT:
 		return true
@@ -934,6 +1177,39 @@ func (e WebhookDeliveryStatus) Valid() bool {
 	}
 }
 
+// Defines values for Weekday.
+const (
+	WeekdayFRI Weekday = "FRI"
+	WeekdayMON Weekday = "MON"
+	WeekdaySAT Weekday = "SAT"
+	WeekdaySUN Weekday = "SUN"
+	WeekdayTHU Weekday = "THU"
+	WeekdayTUE Weekday = "TUE"
+	WeekdayWED Weekday = "WED"
+)
+
+// Valid indicates whether the value is a known member of the Weekday enum.
+func (e Weekday) Valid() bool {
+	switch e {
+	case WeekdayFRI:
+		return true
+	case WeekdayMON:
+		return true
+	case WeekdaySAT:
+		return true
+	case WeekdaySUN:
+		return true
+	case WeekdayTHU:
+		return true
+	case WeekdayTUE:
+		return true
+	case WeekdayWED:
+		return true
+	default:
+		return false
+	}
+}
+
 // APIKey An API key as it can be read back. The secret is returned once, by the create operation, and never again — this shape carries only the prefix, which is what a person recognises a key by.
 type APIKey struct {
 	CreatedAt time.Time          `json:"createdAt"`
@@ -1293,6 +1569,289 @@ type CallbackList struct {
 
 // CallbackStatus defines model for CallbackStatus.
 type CallbackStatus string
+
+// Campaign defines model for Campaign.
+type Campaign struct {
+	// CallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
+	CallingWindow CampaignCallingWindow `json:"callingWindow"`
+
+	// Contacts How many contacts the campaign has in each status.
+	Contacts  CampaignContactCounts `json:"contacts"`
+	CreatedAt time.Time             `json:"createdAt"`
+
+	// DefaultCountryCode Country calling code, digits without +, that completes national numbers on import. Absent: the deployment's AICC_DEFAULT_COUNTRY_CODE applies.
+	DefaultCountryCode *string `json:"defaultCountryCode,omitempty"`
+
+	// DIDID The outbound DID: it names the flow every answered call talks to and the caller id.
+	DIDID openapi_types.UUID `json:"didId"`
+
+	// DIDNumber That DID's number, for display.
+	DIDNumber string `json:"didNumber"`
+
+	// FinishedAt Present once COMPLETED or CANCELLED.
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+
+	// FollowUpQueueID The queue a HIGH lead's callback is filed under. Absent when none is set.
+	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
+	ID              openapi_types.UUID  `json:"id"`
+
+	// MaxConcurrent This campaign's share of the deployment's concurrent calls.
+	MaxConcurrent int    `json:"maxConcurrent"`
+	Name          string `json:"name"`
+
+	// PauseReason Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+	PauseReason *CampaignPauseReason `json:"pauseReason,omitempty"`
+
+	// RetryPolicy What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts.
+	RetryPolicy CampaignRetryPolicy `json:"retryPolicy"`
+
+	// RingTimeoutSec How long each attempt rings before giving up. Always below the originator's 60-second answer window.
+	RingTimeoutSec int `json:"ringTimeoutSec"`
+
+	// StartedAt Absent while DRAFT.
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+
+	// Status DRAFT is being written and dials nothing. RUNNING dials. PAUSED has stopped admitting new calls (pauseReason says who stopped it); calls in flight finish. COMPLETED and CANCELLED are final: nothing changes, contacts and leads stay readable. COMPLETED is reached only by the dialer, when nothing is left to dial and nothing is in flight; there is no operation for it.
+	Status CampaignStatus `json:"status"`
+
+	// TimeZone IANA name. The zone of contacts that carry none of their own.
+	TimeZone string `json:"timeZone"`
+}
+
+// CampaignBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
+type CampaignBackoff struct {
+	BaseSec int `json:"baseSec"`
+	CapSec  int `json:"capSec"`
+	Factor  int `json:"factor"`
+}
+
+// CampaignBackoffWrite A CampaignBackoff whose omitted fields take the defaults.
+type CampaignBackoffWrite struct {
+	BaseSec *int `json:"baseSec,omitempty"`
+	CapSec  *int `json:"capSec,omitempty"`
+	Factor  *int `json:"factor,omitempty"`
+}
+
+// CampaignCallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
+type CampaignCallingWindow struct {
+	Days   []Weekday           `json:"days"`
+	Ranges []CampaignTimeRange `json:"ranges"`
+}
+
+// CampaignContact defines model for CampaignContact.
+type CampaignContact struct {
+	// Attempts Attempts that reached the customer (against maxAttempts).
+	Attempts   int                `json:"attempts"`
+	CampaignID openapi_types.UUID `json:"campaignId"`
+	CreatedAt  time.Time          `json:"createdAt"`
+	ID         openapi_types.UUID `json:"id"`
+
+	// LastOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+	LastOutcome *CampaignOutcome `json:"lastOutcome,omitempty"`
+
+	// LeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
+	LeadIntent *CampaignLeadIntent `json:"leadIntent,omitempty"`
+	LeadNotes  *string             `json:"leadNotes,omitempty"`
+
+	// NextAttemptAt When it may be dialled next. Absent unless ACTIVE and the campaign has started.
+	NextAttemptAt *time.Time `json:"nextAttemptAt,omitempty"`
+
+	// Number Canonical E.164, for example +8613800138000: the key a campaign deduplicates on.
+	Number string `json:"number"`
+
+	// NumberRaw The number as it was imported.
+	NumberRaw string `json:"numberRaw"`
+
+	// Slots Handed to the flow as userData.
+	Slots map[string]string `json:"slots"`
+
+	// Status ACTIVE is still to be dialled. DONE was answered, whatever came of it. EXHAUSTED used up maxAttempts or maxSystemRetries. INVALID_NUMBER is a number the carrier says does not exist. DNC is on the do-not-call list.
+	Status CampaignContactStatus `json:"status"`
+
+	// SystemFailures Attempts that never reached the customer (against maxSystemRetries).
+	SystemFailures int `json:"systemFailures"`
+
+	// TimeZone This contact's own zone; absent means the campaign's.
+	TimeZone *string `json:"timeZone,omitempty"`
+}
+
+// CampaignContactCounts How many contacts the campaign has in each status.
+type CampaignContactCounts struct {
+	Active        int `json:"active"`
+	DNC           int `json:"dnc"`
+	Done          int `json:"done"`
+	Exhausted     int `json:"exhausted"`
+	InvalidNumber int `json:"invalidNumber"`
+	Total         int `json:"total"`
+}
+
+// CampaignContactList defines model for CampaignContactList.
+type CampaignContactList struct {
+	Items []CampaignContact `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
+// CampaignContactRow defines model for CampaignContactRow.
+type CampaignContactRow struct {
+	// Number In any common form: +86 138-0013-8000, 0086 138 0013 8000 or, with the campaign's country code, 13800138000.
+	Number string `json:"number"`
+
+	// Slots Business data for the flow. Every name must be one the flow reads (a userData.<name> in its instructions, announces, conditions or tool bodies); a value is at most 256 characters; at most 32 slots. Control characters, line breaks included, become spaces, and an empty value is the same as an omitted slot.
+	Slots *map[string]string `json:"slots,omitempty"`
+
+	// TimeZone IANA name; omitted means the campaign's.
+	TimeZone *string `json:"timeZone,omitempty"`
+}
+
+// CampaignContactStatus ACTIVE is still to be dialled. DONE was answered, whatever came of it. EXHAUSTED used up maxAttempts or maxSystemRetries. INVALID_NUMBER is a number the carrier says does not exist. DNC is on the do-not-call list.
+type CampaignContactStatus string
+
+// CampaignContactsImport defines model for CampaignContactsImport.
+type CampaignContactsImport struct {
+	Contacts []CampaignContactRow `json:"contacts"`
+}
+
+// CampaignImportResult defines model for CampaignImportResult.
+type CampaignImportResult struct {
+	Duplicates int `json:"duplicates"`
+	Imported   int `json:"imported"`
+	Rejected   int `json:"rejected"`
+
+	// Rows One result per request row, in request order.
+	Rows []CampaignImportRowResult `json:"rows"`
+}
+
+// CampaignImportRowCode Why a row was rejected. A row has one code; the checks run in the order number, time zone, slot count, slot names, slot lengths.
+type CampaignImportRowCode string
+
+// CampaignImportRowResult defines model for CampaignImportRowResult.
+type CampaignImportRowResult struct {
+	// Code Why a row was rejected. A row has one code; the checks run in the order number, time zone, slot count, slot names, slot lengths.
+	Code *CampaignImportRowCode `json:"code,omitempty"`
+
+	// ContactID The new contact (IMPORTED) or the one that already had the number (DUPLICATE).
+	ContactID *openapi_types.UUID `json:"contactId,omitempty"`
+
+	// Detail For SLOT_UNKNOWN and SLOT_TOO_LONG the slot name; for TIME_ZONE_INVALID the zone.
+	Detail *string `json:"detail,omitempty"`
+
+	// Index Zero-based position in the request.
+	Index int `json:"index"`
+
+	// Number The canonical number, whenever the number could be read.
+	Number *string                 `json:"number,omitempty"`
+	Status CampaignImportRowStatus `json:"status"`
+}
+
+// CampaignImportRowStatus defines model for CampaignImportRowStatus.
+type CampaignImportRowStatus string
+
+// CampaignIntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+type CampaignIntervalSec map[string]int
+
+// CampaignLeadIntent What a call concluded about the customer. Absent on a contact no call has recorded a lead for, which is not the same as NONE.
+type CampaignLeadIntent string
+
+// CampaignList defines model for CampaignList.
+type CampaignList struct {
+	Items []Campaign `json:"items"`
+
+	// Total Total rows matching the filter, for paging.
+	Total int `json:"total"`
+}
+
+// CampaignOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.
+type CampaignOutcome string
+
+// CampaignPatch A change to a campaign. Fields present replace the stored ones; fields absent are left alone; null clears defaultCountryCode and followUpQueueId (the only two that can be unset). callingWindow and retryPolicy replace the stored object as a whole. In DRAFT every field may change; in RUNNING and PAUSED only maxConcurrent, callingWindow and retryPolicy, and they affect later admissions, not calls in flight; in a terminal status none. A field sent with the value it already has is not a change.
+type CampaignPatch struct {
+	// CallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
+	CallingWindow      *CampaignCallingWindow `json:"callingWindow,omitempty"`
+	DefaultCountryCode *string                `json:"defaultCountryCode,omitempty"`
+
+	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+	DIDID           *openapi_types.UUID `json:"didId,omitempty"`
+	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
+	MaxConcurrent   *int                `json:"maxConcurrent,omitempty"`
+	Name            *string             `json:"name,omitempty"`
+
+	// RetryPolicy A retry policy as a client writes it. The object sent is the whole policy: a field left out takes its default (never the stored value), and an interval left out of intervalSec takes its default. The default retries every retryable outcome.
+	RetryPolicy *CampaignRetryPolicyWrite `json:"retryPolicy,omitempty"`
+
+	// RingTimeoutSec At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG.
+	RingTimeoutSec *int `json:"ringTimeoutSec,omitempty"`
+
+	// TimeZone IANA name, for example Asia/Shanghai or America/New_York.
+	TimeZone *string `json:"timeZone,omitempty"`
+}
+
+// CampaignPauseReason Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+type CampaignPauseReason string
+
+// CampaignRetryOutcome The outcomes a campaign may choose to dial again. An answered number is never dialled again, and neither is an invalid or do-not-call one, so those outcomes are not choices.
+type CampaignRetryOutcome string
+
+// CampaignRetryPolicy What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts.
+type CampaignRetryPolicy struct {
+	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+	IntervalSec      CampaignIntervalSec    `json:"intervalSec"`
+	MaxAttempts      int                    `json:"maxAttempts"`
+	MaxSystemRetries int                    `json:"maxSystemRetries"`
+	RetryOutcomes    []CampaignRetryOutcome `json:"retryOutcomes"`
+
+	// TransientBackoff Spacing of the retries of a failure that never reached the customer (TRANSIENT, ORIGINATE_FAILED): the first retry comes baseSec after the failure, each next one factor times later, never more than capSec.
+	TransientBackoff CampaignBackoff `json:"transientBackoff"`
+}
+
+// CampaignRetryPolicyWrite A retry policy as a client writes it. The object sent is the whole policy: a field left out takes its default (never the stored value), and an interval left out of intervalSec takes its default. The default retries every retryable outcome.
+type CampaignRetryPolicyWrite struct {
+	// IntervalSec Seconds to wait after an outcome that reached the customer before dialling again: NO_ANSWER, BUSY, REJECTED and UNKNOWN, each from 60 to 2592000. Defaults: 7200, 1800, 86400, 86400. TRANSIENT and ORIGINATE_FAILED follow transientBackoff instead.
+	IntervalSec      *CampaignIntervalSec    `json:"intervalSec,omitempty"`
+	MaxAttempts      *int                    `json:"maxAttempts,omitempty"`
+	MaxSystemRetries *int                    `json:"maxSystemRetries,omitempty"`
+	RetryOutcomes    *[]CampaignRetryOutcome `json:"retryOutcomes,omitempty"`
+
+	// TransientBackoff A CampaignBackoff whose omitted fields take the defaults.
+	TransientBackoff *CampaignBackoffWrite `json:"transientBackoff,omitempty"`
+}
+
+// CampaignStatus DRAFT is being written and dials nothing. RUNNING dials. PAUSED has stopped admitting new calls (pauseReason says who stopped it); calls in flight finish. COMPLETED and CANCELLED are final: nothing changes, contacts and leads stay readable. COMPLETED is reached only by the dialer, when nothing is left to dial and nothing is in flight; there is no operation for it.
+type CampaignStatus string
+
+// CampaignTimeRange A wall-clock range [start, end) in the contact's local time. A range whose end is before its start crosses midnight and belongs to the day it starts on (22:00-02:00 on MON runs until 02:00 on TUE). "24:00" is accepted as an end.
+type CampaignTimeRange struct {
+	// End Examples: 17:30
+	End string `json:"end"`
+
+	// Start Examples: 09:00
+	Start string `json:"start"`
+}
+
+// CampaignWrite A campaign to create. It starts as a DRAFT.
+type CampaignWrite struct {
+	// CallingWindow When a contact may be dialled, in that contact's own time zone (its timeZone, else the campaign's). It binds in addition to the deployment's outer calling hours (AICC_OUTBOUND_HOURS, default 08:00-21:00), and every range must lie wholly inside them: otherwise CAMPAIGN_WINDOW_OUTSIDE_LIMIT, on create and on every change. Ranges of one window may not overlap. A closed window does not pause the campaign.
+	CallingWindow CampaignCallingWindow `json:"callingWindow"`
+
+	// DefaultCountryCode Digits without +. Omitted: the deployment's AICC_DEFAULT_COUNTRY_CODE.
+	DefaultCountryCode *string `json:"defaultCountryCode,omitempty"`
+
+	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+	DIDID           openapi_types.UUID  `json:"didId"`
+	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
+	MaxConcurrent   *int                `json:"maxConcurrent,omitempty"`
+	Name            string              `json:"name"`
+
+	// RetryPolicy A retry policy as a client writes it. The object sent is the whole policy: a field left out takes its default (never the stored value), and an interval left out of intervalSec takes its default. The default retries every retryable outcome.
+	RetryPolicy *CampaignRetryPolicyWrite `json:"retryPolicy,omitempty"`
+
+	// RingTimeoutSec At least 5 and strictly below the 60-second answer window, else CAMPAIGN_RING_TIMEOUT_TOO_LONG.
+	RingTimeoutSec *int `json:"ringTimeoutSec,omitempty"`
+
+	// TimeZone IANA name, for example Asia/Shanghai or America/New_York.
+	TimeZone string `json:"timeZone"`
+}
 
 // CompleteCallbackRequest defines model for CompleteCallbackRequest.
 type CompleteCallbackRequest struct {
@@ -2406,6 +2965,9 @@ type WebhookSubscriptionWrite struct {
 	URL       string         `json:"url"`
 }
 
+// Weekday defines model for Weekday.
+type Weekday string
+
 // WrapUp One agent's after-call work for one call. The platform opens it when the call ends — a default disposition, an empty note — and the agent confirms it; isConfirmed is what separates a record somebody looked at from one nobody has. The label is captured at filing time so the record survives later edits to the vocabulary.
 type WrapUp struct {
 	AgentID          openapi_types.UUID `json:"agentId"`
@@ -2484,6 +3046,21 @@ type GetCallTranscriptParams struct {
 	// SinceSeq Return lines after this transcript seq. 0, the default, is the whole call.
 	SinceSeq *int64 `form:"sinceSeq,omitempty" json:"sinceSeq,omitempty"`
 	Limit    *int   `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListCampaignsParams defines parameters for ListCampaigns.
+type ListCampaignsParams struct {
+	Status *CampaignStatus `form:"status,omitempty" json:"status,omitempty"`
+	Limit  *int            `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int            `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListCampaignContactsParams defines parameters for ListCampaignContacts.
+type ListCampaignContactsParams struct {
+	Status     *CampaignContactStatus `form:"status,omitempty" json:"status,omitempty"`
+	LeadIntent *CampaignLeadIntent    `form:"leadIntent,omitempty" json:"leadIntent,omitempty"`
+	Limit      *int                   `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset     *int                   `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListCDRsParams defines parameters for ListCDRs.
@@ -2625,6 +3202,15 @@ type TransferCallJSONRequestBody = TransferRequest
 
 // PatchUserDataJSONRequestBody defines body for PatchUserData for application/json ContentType.
 type PatchUserDataJSONRequestBody = PatchUserDataRequest
+
+// CreateCampaignJSONRequestBody defines body for CreateCampaign for application/json ContentType.
+type CreateCampaignJSONRequestBody = CampaignWrite
+
+// UpdateCampaignJSONRequestBody defines body for UpdateCampaign for application/json ContentType.
+type UpdateCampaignJSONRequestBody = CampaignPatch
+
+// ImportCampaignContactsJSONRequestBody defines body for ImportCampaignContacts for application/json ContentType.
+type ImportCampaignContactsJSONRequestBody = CampaignContactsImport
 
 // CreateContactJSONRequestBody defines body for CreateContact for application/json ContentType.
 type CreateContactJSONRequestBody = ContactWrite
@@ -2826,6 +3412,39 @@ type ServerInterface interface {
 	// PatchUserData Attach business data to a live call
 	// (PATCH /calls/{callId}/user-data)
 	PatchUserData(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID)
+	// ListCampaigns List campaigns
+	// (GET /campaigns)
+	ListCampaigns(w http.ResponseWriter, r *http.Request, params ListCampaignsParams)
+	// CreateCampaign Create a campaign
+	// (POST /campaigns)
+	CreateCampaign(w http.ResponseWriter, r *http.Request)
+	// DeleteCampaign Delete a draft campaign
+	// (DELETE /campaigns/{campaignId})
+	DeleteCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// GetCampaign Get a campaign
+	// (GET /campaigns/{campaignId})
+	GetCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// UpdateCampaign Change a campaign
+	// (PATCH /campaigns/{campaignId})
+	UpdateCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// CancelCampaign Cancel a campaign
+	// (POST /campaigns/{campaignId}/cancel)
+	CancelCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// ListCampaignContacts List a campaign's contacts
+	// (GET /campaigns/{campaignId}/contacts)
+	ListCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID, params ListCampaignContactsParams)
+	// ImportCampaignContacts Import contacts
+	// (POST /campaigns/{campaignId}/contacts)
+	ImportCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// PauseCampaign Pause a campaign
+	// (POST /campaigns/{campaignId}/pause)
+	PauseCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// ResumeCampaign Resume a campaign
+	// (POST /campaigns/{campaignId}/resume)
+	ResumeCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
+	// StartCampaign Start a campaign
+	// (POST /campaigns/{campaignId}/start)
+	StartCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID)
 	// ListCDRs Page the ledger
 	// (GET /cdrs)
 	ListCDRs(w http.ResponseWriter, r *http.Request, params ListCDRsParams)
@@ -3264,6 +3883,72 @@ func (_ Unimplemented) UnmuteCall(w http.ResponseWriter, r *http.Request, callID
 // PatchUserData Attach business data to a live call
 // (PATCH /calls/{callId}/user-data)
 func (_ Unimplemented) PatchUserData(w http.ResponseWriter, r *http.Request, callID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCampaigns List campaigns
+// (GET /campaigns)
+func (_ Unimplemented) ListCampaigns(w http.ResponseWriter, r *http.Request, params ListCampaignsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateCampaign Create a campaign
+// (POST /campaigns)
+func (_ Unimplemented) CreateCampaign(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteCampaign Delete a draft campaign
+// (DELETE /campaigns/{campaignId})
+func (_ Unimplemented) DeleteCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCampaign Get a campaign
+// (GET /campaigns/{campaignId})
+func (_ Unimplemented) GetCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCampaign Change a campaign
+// (PATCH /campaigns/{campaignId})
+func (_ Unimplemented) UpdateCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelCampaign Cancel a campaign
+// (POST /campaigns/{campaignId}/cancel)
+func (_ Unimplemented) CancelCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCampaignContacts List a campaign's contacts
+// (GET /campaigns/{campaignId}/contacts)
+func (_ Unimplemented) ListCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID, params ListCampaignContactsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ImportCampaignContacts Import contacts
+// (POST /campaigns/{campaignId}/contacts)
+func (_ Unimplemented) ImportCampaignContacts(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PauseCampaign Pause a campaign
+// (POST /campaigns/{campaignId}/pause)
+func (_ Unimplemented) PauseCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResumeCampaign Resume a campaign
+// (POST /campaigns/{campaignId}/resume)
+func (_ Unimplemented) ResumeCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartCampaign Start a campaign
+// (POST /campaigns/{campaignId}/start)
+func (_ Unimplemented) StartCampaign(w http.ResponseWriter, r *http.Request, campaignID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4689,6 +5374,368 @@ func (siw *ServerInterfaceWrapper) PatchUserData(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PatchUserData(w, r, callID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCampaigns operation middleware
+func (siw *ServerInterfaceWrapper) ListCampaigns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCampaignsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCampaigns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCampaign operation middleware
+func (siw *ServerInterfaceWrapper) CreateCampaign(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCampaign(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCampaign operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCampaign operation middleware
+func (siw *ServerInterfaceWrapper) GetCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCampaign operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelCampaign operation middleware
+func (siw *ServerInterfaceWrapper) CancelCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCampaignContacts operation middleware
+func (siw *ServerInterfaceWrapper) ListCampaignContacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCampaignContactsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "leadIntent" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "leadIntent", r.URL.Query(), &params.LeadIntent, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "leadIntent"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "leadIntent", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCampaignContacts(w, r, campaignID, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportCampaignContacts operation middleware
+func (siw *ServerInterfaceWrapper) ImportCampaignContacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportCampaignContacts(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PauseCampaign operation middleware
+func (siw *ServerInterfaceWrapper) PauseCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PauseCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResumeCampaign operation middleware
+func (siw *ServerInterfaceWrapper) ResumeCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResumeCampaign(w, r, campaignID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartCampaign operation middleware
+func (siw *ServerInterfaceWrapper) StartCampaign(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "campaignId" -------------
+	var campaignID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "campaignId", chi.URLParam(r, "campaignId"), &campaignID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "campaignId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartCampaign(w, r, campaignID)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6494,6 +7541,39 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/calls/{callId}/user-data", wrapper.PatchUserData)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/campaigns", wrapper.ListCampaigns)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns", wrapper.CreateCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/campaigns/{campaignId}", wrapper.DeleteCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/campaigns/{campaignId}", wrapper.GetCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/campaigns/{campaignId}", wrapper.UpdateCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns/{campaignId}/cancel", wrapper.CancelCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/campaigns/{campaignId}/contacts", wrapper.ListCampaignContacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns/{campaignId}/contacts", wrapper.ImportCampaignContacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns/{campaignId}/pause", wrapper.PauseCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns/{campaignId}/resume", wrapper.ResumeCampaign)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/campaigns/{campaignId}/start", wrapper.StartCampaign)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cdrs", wrapper.ListCDRs)

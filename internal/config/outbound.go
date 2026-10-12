@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 )
 
 // The outbound ring timeout (AICC_OUTBOUND_RING_TIMEOUT) and the window an
@@ -149,4 +151,20 @@ func isHeaderTokenRune(r rune) bool {
 		return true
 	}
 	return strings.ContainsRune("-.!%*_+`~", r)
+}
+
+// DefaultOutboundHours are the outer calling hours when AICC_OUTBOUND_HOURS is
+// unset: 08:00 to 21:00 in the callee's local time, every day.
+const DefaultOutboundHours = "08:00-21:00"
+
+// ParseOutboundHours reads AICC_OUTBOUND_HOURS, "HH:MM-HH:MM". The range may
+// cross midnight (for a deployment that calls evenings and nights) but cannot
+// be empty.
+func ParseOutboundHours(raw string) (dayrange.Range, error) {
+	r, err := dayrange.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return dayrange.Range{}, fmt.Errorf("AICC_OUTBOUND_HOURS must be HH:MM-HH:MM such as %s, got %q: %w",
+			DefaultOutboundHours, raw, err)
+	}
+	return r, nil
 }

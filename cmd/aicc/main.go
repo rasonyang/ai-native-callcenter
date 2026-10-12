@@ -21,6 +21,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/aicall"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
@@ -404,6 +405,11 @@ func run() error {
 			catalogSvc,
 			st.Contacts(),
 			st.DNC(),
+			campaign.NewService(st.Campaigns(), nil, campaign.Env{
+				OutboundHours:      cfg.OutboundHours,
+				AnswerWindow:       config.OutboundAnswerWindow,
+				DefaultCountryCode: cfg.DefaultCountryCode,
+			}),
 			st.Ledger(),
 			st.Flows(),
 			st.Accounts(),

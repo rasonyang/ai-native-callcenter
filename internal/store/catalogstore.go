@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
 )
 
@@ -445,6 +446,18 @@ func (c *CatalogStore) CreateDID(ctx context.Context, d catalog.DID) (catalog.DI
 }
 
 func (c *CatalogStore) UpdateDID(ctx context.Context, d catalog.DID) (catalog.DID, error) {
+	// Binding the number to a flow that can transfer would hand a campaign
+	// that has not finished a way to a person (design 10 section 10).
+	if d.FlowID != nil {
+		if spec, err := c.publishedSpec(ctx, *d.FlowID); err != nil {
+			return catalog.DID{}, err
+		} else if err := refuseTransferWhileCampaigned(spec,
+			func() (int64, error) { return c.q.CountLiveCampaignsOnDID(ctx, d.ID) },
+			"DID_REBIND_BLOCKED",
+			"that flow can transfer the caller to a person, and a campaign that has not finished dials from this number; cancel the campaign first"); err != nil {
+			return catalog.DID{}, err
+		}
+	}
 	return c.writeDIDTx(ctx, d, func(qtx *queries.Queries) (queries.Did, error) {
 		return qtx.UpdateDID(ctx, queries.UpdateDIDParams{
 			ID:                 d.ID,
@@ -520,4 +533,20 @@ func optional(s string) *string {
 		return nil
 	}
 	return &s
+}
+
+// publishedSpec is a flow's published revision, nil when it has none.
+func (c *CatalogStore) publishedSpec(ctx context.Context, flowID uuid.UUID) (*flow.Spec, error) {
+	raw, err := c.q.GetPublishedSpec(ctx, flowID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get published flow %s: %w", flowID, err)
+	}
+	spec, err := flow.Load(raw)
+	if err != nil {
+		return nil, fmt.Errorf("published flow %s: %w", flowID, err)
+	}
+	return spec, nil
 }

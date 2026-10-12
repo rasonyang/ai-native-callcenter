@@ -217,7 +217,14 @@ func (s *Server) writeDeleted(w http.ResponseWriter, r *http.Request, err error)
 // the guard there, and a guard that reports itself as "storage down" teaches
 // the operator to retry rather than to unbind.
 func (s *Server) writeCatalogError(w http.ResponseWriter, r *http.Request, err error) {
+	if status, code, message, params, ok := campaignRefusal(err); ok {
+		writeError(w, status, code, message, params)
+		return
+	}
 	switch {
+	case violatesConstraint(err, "fk_campaigns_dids"):
+		writeError(w, http.StatusConflict, CodeConflict,
+			"a campaign dials from this number; delete or cancel the campaign first", nil)
 	case violatesConstraint(err, "fk_agents_extensions"):
 		writeError(w, http.StatusConflict, CodeExtensionAssignedToAgent,
 			"an agent has that extension as their phone; unbind them before deleting it", nil)

@@ -35,6 +35,8 @@ VOCAB = {
     "history:read:own": "Read what happened on this subject's own calls: CDRs, recordings, transcripts and their own day's numbers.",
     "dnc:read":         "Read the do-not-call list.",
     "dnc:write":        "Add numbers to the do-not-call list and take them off it. Separate from config:write because removing a number is what makes it dialable again, a compliance decision rather than a setting.",
+    "campaigns:read":   "Read AI outbound campaigns and their contact lists.",
+    "campaigns:write":  "Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.",
     "history:read:all": "Read what happened on every call, whoever took it. Widens history:read:own rather than replacing it.",
     "reports:read":     "Read the floor's aggregates: overview, per-queue and daily.",
     "quality:review":   "Read and write quality reviews of recorded calls.",
@@ -163,6 +165,20 @@ OPS = {
     "listDncNumbers":           (["dnc:read"], S, True),
     "createDncNumber":          (["dnc:write"], S, True),
     "deleteDncNumber":          (["dnc:write"], S, True),
+
+    # Campaigns: AI outbound lists that place calls to customers, supervisors
+    # and above.
+    "listCampaigns":            (["campaigns:read"], S, True),
+    "getCampaign":              (["campaigns:read"], S, True),
+    "listCampaignContacts":     (["campaigns:read"], S, True),
+    "createCampaign":           (["campaigns:write"], S, True),
+    "updateCampaign":           (["campaigns:write"], S, True),
+    "deleteCampaign":           (["campaigns:write"], S, True),
+    "startCampaign":            (["campaigns:write"], S, True),
+    "pauseCampaign":            (["campaigns:write"], S, True),
+    "resumeCampaign":           (["campaigns:write"], S, True),
+    "cancelCampaign":           (["campaigns:write"], S, True),
+    "importCampaignContacts":   (["campaigns:write"], S, True),
 
     # Accounts.
     "createUser":               (["users:write"], D, True),

@@ -18,6 +18,7 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/agents"
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
@@ -532,6 +533,7 @@ func TestEveryHTTPDependencyIsPlumbed(t *testing.T) {
 		&catalog.Service{},
 		&store.ContactStore{},
 		&store.DNCStore{},
+		&campaign.Service{},
 		&store.LedgerStore{},
 		&store.FlowStore{},
 		&store.AccountStore{},

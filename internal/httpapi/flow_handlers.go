@@ -248,6 +248,10 @@ func decodeFlowBody(w http.ResponseWriter, r *http.Request, v any) bool {
 func (s *Server) writeFlowError(w http.ResponseWriter, r *http.Request, err error) {
 	var invalid *flow.ValidationError
 	var unspeakable *flow.MissingAnnounceError
+	if status, code, message, params, ok := campaignRefusal(err); ok {
+		writeError(w, status, code, message, params)
+		return
+	}
 	switch {
 	case errors.As(err, &unspeakable):
 		// Not a malformed spec: the document is fine, and on a deployment whose

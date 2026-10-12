@@ -41,6 +41,12 @@ const (
 	// ScopeCallsReadOwn — Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.
 	ScopeCallsReadOwn = "calls:read:own"
 
+	// ScopeCampaignsRead — Read AI outbound campaigns and their contact lists.
+	ScopeCampaignsRead = "campaigns:read"
+
+	// ScopeCampaignsWrite — Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.
+	ScopeCampaignsWrite = "campaigns:write"
+
 	// ScopeConfigRead — Read the platform's configuration: extensions, queues, numbers, flows, webhook subscriptions, accounts and system health.
 	ScopeConfigRead = "config:read"
 
@@ -90,6 +96,8 @@ var AllScopes = []string{
 	ScopeCallsMonitor,
 	ScopeCallsReadAll,
 	ScopeCallsReadOwn,
+	ScopeCampaignsRead,
+	ScopeCampaignsWrite,
 	ScopeConfigRead,
 	ScopeConfigWrite,
 	ScopeContactsRead,
@@ -116,6 +124,8 @@ var ScopeDescriptions = map[string]string{
 	ScopeCallsMonitor:   "Listen in on, whisper to or barge into a call in progress. Separate from calls:control because it reaches a conversation the subject is not a party to.",
 	ScopeCallsReadAll:   "Read every live call on the floor, and receive every call's events on the stream. Widens calls:read:own rather than replacing it.",
 	ScopeCallsReadOwn:   "Read the live calls this subject is a party to. For a key, that is the calls of the agent named in X-AICC-Agent-ID.",
+	ScopeCampaignsRead:  "Read AI outbound campaigns and their contact lists.",
+	ScopeCampaignsWrite: "Create and change campaigns, start, pause, resume and cancel them, and import contacts. Separate from config:write because starting a campaign places calls to customers.",
 	ScopeConfigRead:     "Read the platform's configuration: extensions, queues, numbers, flows, webhook subscriptions, accounts and system health.",
 	ScopeConfigWrite:    "Change the platform's configuration, and reveal an extension's SIP password.",
 	ScopeContactsRead:   "Read the customer record book.",

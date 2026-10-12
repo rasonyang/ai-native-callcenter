@@ -187,13 +187,14 @@ func TestEveryMutatingRouteIsUnderTheAuditTrail(t *testing.T) {
 	server := New(config.Config{Env: "dev"}, Deps{
 		Auth: &auth.Service{},
 		// Non-nil markers so every conditional route group registers.
-		Agents:   stubAgents{},
-		Calls:    stubCalls{},
-		Catalog:  stubCatalog{},
-		Ledger:   stubLedger(t),
-		Contacts: stubContacts{},
-		DNC:      stubDNC{},
-		Outbound: stubOutbound{},
+		Agents:    stubAgents{},
+		Calls:     stubCalls{},
+		Catalog:   stubCatalog{},
+		Ledger:    stubLedger(t),
+		Contacts:  stubContacts{},
+		DNC:       stubDNC{},
+		Campaigns: stubCampaigns{},
+		Outbound:  stubOutbound{},
 	})
 	router := server.router()
 

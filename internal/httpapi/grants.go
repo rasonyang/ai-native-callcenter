@@ -58,6 +58,8 @@ var supervisorScopes = sorted(append([]string{
 	api.ScopeCallsCreateAI,
 	api.ScopeCallsMonitor,
 	api.ScopeCallsReadAll,
+	api.ScopeCampaignsRead,
+	api.ScopeCampaignsWrite,
 	api.ScopeConfigRead,
 	api.ScopeDncRead,
 	api.ScopeDncWrite,

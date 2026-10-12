@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 	"unicode"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 )
 
 // Config is the complete runtime configuration of the application.
@@ -117,6 +119,13 @@ type Config struct {
 	// unreachable by construction; validate refuses anything else.
 	OutboundRingTimeout    time.Duration
 	outboundRingTimeoutErr error // a malformed value, refused by validate
+	// OutboundHours (AICC_OUTBOUND_HOURS) are the outer calling hours: the
+	// callee's local time of day outside which no campaign dials, whatever
+	// its own calling window says (docs/design/10-campaigns.md section 8.1).
+	// A campaign's window must lie wholly inside them. A range, "HH:MM-HH:MM",
+	// that may cross midnight.
+	OutboundHours    dayrange.Range
+	outboundHoursErr error // a malformed value, refused by validate
 	// OutboundSIPHeaders are appended to the AI outbound customer leg only
 	// (AICC_OUTBOUND_SIP_HEADERS); see ParseOutboundSIPHeaders. The
 	// application names no SBC vendor, a deployment sets its own marker.
@@ -337,6 +346,7 @@ func Load() (Config, error) {
 		ringTimeout = DefaultOutboundRingTimeout
 	}
 	outboundHeaders, outboundHeadersErr := ParseOutboundSIPHeaders(env(outboundHeadersVar, ""))
+	outboundHours, outboundHoursErr := ParseOutboundHours(env("AICC_OUTBOUND_HOURS", DefaultOutboundHours))
 	c := Config{
 		Env:                  env("AICC_ENV", "dev"),
 		HTTPAddr:             env("AICC_HTTP_ADDR", ":8080"),
@@ -391,6 +401,8 @@ func Load() (Config, error) {
 		OutboundEndpoint:              env("AICC_OUTBOUND_ENDPOINT", ""),
 		OutboundRingTimeout:           ringTimeout,
 		outboundRingTimeoutErr:        ringErr,
+		OutboundHours:                 outboundHours,
+		outboundHoursErr:              outboundHoursErr,
 		OutboundSIPHeaders:            outboundHeaders,
 		outboundSIPHeadersErr:         outboundHeadersErr,
 		OutboundCallerID:              env("AICC_OUTBOUND_CLID", ""),
@@ -565,6 +577,9 @@ func (c Config) validate() error {
 		errs = append(errs, c.outboundRingTimeoutErr)
 	} else if err := ValidateOutboundRingTimeout(c.OutboundRingTimeout); err != nil {
 		errs = append(errs, err)
+	}
+	if c.outboundHoursErr != nil {
+		errs = append(errs, c.outboundHoursErr)
 	}
 	if err := ValidateDefaultCountryCode(c.DefaultCountryCode); err != nil {
 		errs = append(errs, err)
