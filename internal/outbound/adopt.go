@@ -119,6 +119,11 @@ func (s *Service) awaitReconciled(ctx context.Context) error {
 	}
 }
 
+// SetBotAbandoner says how to tell the call registry that a bot call's
+// session is gone, so its CDR is written by the telephony path instead.
+// Set before the service is used.
+func (s *Service) SetBotAbandoner(fn func(uuid.UUID)) { s.abandonBot = fn }
+
 // RecoveryReport counts what Recover did, by class.
 type RecoveryReport struct {
 	// Held: legs this process already holds; left exactly as they are.
@@ -191,6 +196,12 @@ func (s *Service) Recover(ctx context.Context, live []telephony.LiveChannel,
 			}
 			s.log.Warn("recovery: customer leg is bridged to a bot that no longer exists; hanging up",
 				"channelId", ch.ChannelID, "callId", ch.CallID, "botChannelId", ch.PeerChannelID)
+			// The session that would have written this call's row died with
+			// the process it ran in; hand the row to the call's own ledger
+			// path before the hangups finish the call.
+			if s.abandonBot != nil {
+				s.abandonBot(ch.CallID)
+			}
 			s.reap(ch.ChannelID, ReconcileCause)
 			s.reap(ch.PeerChannelID, ReconcileCause)
 			rep.OrphanedBot++

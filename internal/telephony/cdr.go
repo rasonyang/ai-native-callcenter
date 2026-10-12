@@ -121,8 +121,11 @@ func (a *CDRAssembler) CallFinished(snap Snapshot) {
 		// leg it dials towards the bot, so a share was never empty and both
 		// paths raced for every contained call, settled silently by whichever
 		// insert lost the primary key.
+		//
+		// One more owner: a bot whose session died with the process (a call
+		// recovery adopted and ended) has no one left to write the row.
 		originator, _ := split(snap)
-		if !hasBotLeg(snap) || snap.Bot.HandedOver() || isAgentPlaced(originator) {
+		if !hasBotLeg(snap) || snap.Bot.HandedOver() || isAgentPlaced(originator) || snap.IsBotAbandoned {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
 				a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)

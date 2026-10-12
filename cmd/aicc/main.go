@@ -322,6 +322,7 @@ func run() error {
 	// and the bot's own session below. It deliberately never goes through the
 	// switch, so these two readers are the only ways it travels.
 	coordinator.AttachCallData(outboundSvc.Data())
+	outboundSvc.SetBotAbandoner(coordinator.AbandonBot)
 	// An originate that never makes a channel is recorded through the same
 	// single CDR write path as every other call.
 	outboundSvc.SetFailureLedger(st.Ledger())

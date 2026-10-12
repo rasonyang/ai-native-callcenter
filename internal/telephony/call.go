@@ -336,6 +336,10 @@ type Call struct {
 	// Bot is the AI leg's share of the story, captured from the caller's
 	// channel when that leg hangs up.
 	Bot BotShare
+	// IsBotAbandoned records that the bot session that owned this call's row
+	// is gone for good: the process that ran it died, and recovery is ending
+	// the call. The row then falls to this path.
+	IsBotAbandoned bool
 
 	CreatedAt time.Time
 	EndedAt   time.Time
@@ -615,17 +619,19 @@ func (c *Call) Finish(at time.Time) bool {
 
 // Snapshot is an immutable view of a call for API responses and recovery.
 type Snapshot struct {
-	CallID    uuid.UUID       `json:"callId"`
-	CallType  events.CallType `json:"callType"`
-	State     CallState       `json:"state"`
-	Language  string          `json:"language,omitempty"`
-	QueueID   *uuid.UUID      `json:"queueId,omitempty"`
-	Parties   []PartySnapshot `json:"parties"`
-	UserData  map[string]any  `json:"userData,omitempty"`
-	Queue     QueueFacts      `json:"queue,omitzero"`
-	Bot       BotShare        `json:"-"`
-	CreatedAt time.Time       `json:"createdAt"`
-	EndedAt   *time.Time      `json:"endedAt,omitempty"`
+	CallID   uuid.UUID       `json:"callId"`
+	CallType events.CallType `json:"callType"`
+	State    CallState       `json:"state"`
+	Language string          `json:"language,omitempty"`
+	QueueID  *uuid.UUID      `json:"queueId,omitempty"`
+	Parties  []PartySnapshot `json:"parties"`
+	UserData map[string]any  `json:"userData,omitempty"`
+	Queue    QueueFacts      `json:"queue,omitzero"`
+	Bot      BotShare        `json:"-"`
+	// IsBotAbandoned: see Call.IsBotAbandoned.
+	IsBotAbandoned bool       `json:"-"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	EndedAt        *time.Time `json:"endedAt,omitempty"`
 }
 
 // PartySnapshot is an immutable view of one leg.
@@ -662,16 +668,17 @@ func (p PartySnapshot) IsActive() bool {
 // Snapshot copies the call into a value safe to hand outside the actor.
 func (c *Call) Snapshot() Snapshot {
 	s := Snapshot{
-		CallID:    c.CallID,
-		CallType:  c.CallType,
-		State:     c.State,
-		Language:  c.Language,
-		QueueID:   c.QueueID,
-		UserData:  maps.Clone(c.UserData),
-		Queue:     c.Queue,
-		Bot:       c.Bot,
-		CreatedAt: c.CreatedAt,
-		Parties:   make([]PartySnapshot, 0, len(c.Parties)),
+		CallID:         c.CallID,
+		CallType:       c.CallType,
+		State:          c.State,
+		Language:       c.Language,
+		QueueID:        c.QueueID,
+		UserData:       maps.Clone(c.UserData),
+		Queue:          c.Queue,
+		Bot:            c.Bot,
+		CreatedAt:      c.CreatedAt,
+		IsBotAbandoned: c.IsBotAbandoned,
+		Parties:        make([]PartySnapshot, 0, len(c.Parties)),
 	}
 	if !c.EndedAt.IsZero() {
 		ended := c.EndedAt

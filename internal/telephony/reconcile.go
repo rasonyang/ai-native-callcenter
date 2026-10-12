@@ -478,6 +478,15 @@ func (c *Coordinator) closeVanished(ctx context.Context, listed map[string]bool,
 	}
 }
 
+// AbandonBot says that the bot session behind a call will never write its
+// row, because the process that ran it is gone and recovery is ending the
+// call. From here the call's CDR is written by the ordinary retirement path,
+// which would otherwise leave a bot call to its session. It is a no-op for a
+// call the registry does not hold.
+func (c *Coordinator) AbandonBot(callID uuid.UUID) {
+	_ = c.registry.Do(callID, func(call *Call) { call.IsBotAbandoned = true })
+}
+
 func (c *Coordinator) replay(ctx context.Context, raw *esl.Event) {
 	if ev, ok := Normalize(raw); ok {
 		c.Handle(ctx, ev)

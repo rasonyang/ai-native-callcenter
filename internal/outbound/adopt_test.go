@@ -307,6 +307,7 @@ func newRecoveryRig(t *testing.T) *recoveryRig {
 		func(context.Context, uuid.UUID) (bool, error) { return false, nil },
 		func(uuid.UUID) bool { return false },
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
+	svc.SetBotAbandoner(coord.AbandonBot)
 	clock := &testClock{t: t0}
 	svc.now = clock.now
 	return &recoveryRig{svc: svc, coord: coord, registry: registry, sw: sw, pub: pub,

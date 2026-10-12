@@ -112,6 +112,8 @@ type Service struct {
 	isLive  func(callID uuid.UUID) bool
 	limiter *Limiter
 	log     *slog.Logger
+	// abandonBot hands a call whose bot session died to the telephony CDR path.
+	abandonBot func(uuid.UUID)
 	// callData holds what a placed call was asked to carry until the call
 	// itself exists to hold it.
 	callData *CallData
