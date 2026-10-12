@@ -400,9 +400,6 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 	if !isDialable(destination) || !isExtension(agentExtension) {
 		return uuid.Nil, ErrBadNumber
 	}
-	if err := s.checkDNC(ctx, destination); err != nil {
-		return uuid.Nil, err
-	}
 	ring, err := s.ringTimeout(req.RingTimeout)
 	if err != nil {
 		return uuid.Nil, err
@@ -429,6 +426,11 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		if s.isLive != nil && s.isLive(callID) {
 			return callID, ErrAlreadyPlaced
 		}
+	}
+	// After the idempotency check: a call already placed is reported as
+	// placed, even if its number joined the list since.
+	if err := s.checkDNC(ctx, destination); err != nil {
+		return uuid.Nil, err
 	}
 
 	if err := s.limiter.Take(ctx); err != nil {
@@ -624,9 +626,6 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	if !isDialable(req.To) {
 		return uuid.Nil, ErrBadNumber
 	}
-	if err := s.checkDNC(ctx, req.To); err != nil {
-		return uuid.Nil, err
-	}
 	ring, err := s.ringTimeout(req.RingTimeout)
 	if err != nil {
 		return uuid.Nil, err
@@ -659,6 +658,11 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 		if s.isLive != nil && s.isLive(callID) {
 			return callID, ErrAlreadyPlaced
 		}
+	}
+	// After the idempotency check: a call already placed is reported as
+	// placed, even if its number joined the list since.
+	if err := s.checkDNC(ctx, req.To); err != nil {
+		return uuid.Nil, err
 	}
 
 	if err := s.limiter.Take(ctx); err != nil {
