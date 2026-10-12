@@ -153,6 +153,9 @@ type Orchestrator struct {
 type activeCall struct {
 	session *Session
 	cancel  context.CancelFunc
+	// callID is the ledger identity the switch stamped on the INVITE; Nil
+	// when the header is missing or unreadable.
+	callID uuid.UUID
 }
 
 // NewOrchestrator prepares the AI side. Nothing listens until Start.
@@ -213,11 +216,29 @@ func (o *Orchestrator) ActiveCalls() int {
 	return len(o.calls)
 }
 
+// HasSession reports whether a conversation is running here for the call with
+// this ledger identity. A bot leg on the switch with no session behind it is a
+// leg whose conversation went with a restart.
+func (o *Orchestrator) HasSession(callID uuid.UUID) bool {
+	if callID == uuid.Nil {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, call := range o.calls {
+		if call.callID == callID {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *Orchestrator) onCallStarted(dialog *voice.Dialog) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	o.mu.Lock()
-	o.calls[dialog.CallID] = &activeCall{cancel: cancel}
+	ledgerID, _ := uuid.Parse(dialog.CustomHeaders[headerCallID])
+	o.calls[dialog.CallID] = &activeCall{cancel: cancel, callID: ledgerID}
 	o.mu.Unlock()
 	obs.CallStarted(obs.CallKindBot)
 

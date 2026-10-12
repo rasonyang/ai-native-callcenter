@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -268,6 +269,32 @@ func run() error {
 	if postCall != nil {
 		cdrAssembler.SetRecordingOffer(postCall)
 	}
+	// Outbound: click-to-dial and the AI outbound leg share one originator.
+	outboundSvc := outbound.New(outbound.Config{
+		EndpointFormat: cfg.OutboundEndpoint,
+		SIPHeaders:     cfg.OutboundSIPHeaders,
+		CallerID:       cfg.OutboundCallerID,
+		RingTimeout:    cfg.OutboundRingTimeout,
+	}, adapter, catalogSvc, catalogSvc,
+		st.Ledger().HasCDR,
+		func(callID uuid.UUID) bool {
+			_, err := registry.Snapshot(callID)
+			return err == nil
+		}, slog.Default())
+
+	// Nothing is dialled until the switch has been read for the calls that
+	// outlived a restart (internal/outbound/adopt.go).
+	outboundSvc.HoldUntilReconciled()
+
+	// The bot's sessions, for the reconcile that runs on every connect. Set
+	// once the orchestrator exists; until then no conversation can be running,
+	// which is also the truth of a cold start.
+	var botSessions atomic.Pointer[aicall.Orchestrator]
+	hasBotSession := func(callID uuid.UUID) bool {
+		o := botSessions.Load()
+		return o != nil && o.HasSession(callID)
+	}
+
 	// Every connection between the parts, in one place that a test can drive
 	// with fakes. Nothing above this line joins two services together.
 	composition{
@@ -287,20 +314,9 @@ func run() error {
 		},
 		Events: hub,
 		Log:    slog.Default(),
+		Reconcile: reconcileLive(coordinator, outboundSvc, hasBotSession,
+			slog.Default(), 2*time.Second),
 	}.connect()
-
-	// Outbound: click-to-dial and the AI outbound leg share one originator.
-	outboundSvc := outbound.New(outbound.Config{
-		EndpointFormat: cfg.OutboundEndpoint,
-		SIPHeaders:     cfg.OutboundSIPHeaders,
-		CallerID:       cfg.OutboundCallerID,
-		RingTimeout:    cfg.OutboundRingTimeout,
-	}, adapter, catalogSvc, catalogSvc,
-		st.Ledger().HasCDR,
-		func(callID uuid.UUID) bool {
-			_, err := registry.Snapshot(callID)
-			return err == nil
-		}, slog.Default())
 
 	// Business data a request attached to a call reaches the call itself here,
 	// and the bot's own session below. It deliberately never goes through the
@@ -348,6 +364,7 @@ func run() error {
 			return fmt.Errorf("start ai voice leg: %w", err)
 		}
 		defer orchestrator.Stop()
+		botSessions.Store(orchestrator)
 		slog.Info("ai voice leg listening",
 			"sipPort", cfg.BotSIPPort, "maxCalls", cfg.BotMaxCalls)
 	}

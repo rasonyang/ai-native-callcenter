@@ -118,7 +118,16 @@ type Service struct {
 
 	mu      sync.Mutex
 	pending map[string]*pendingLeg // by channel id
-	now     func() time.Time       // the clock; replaced in tests
+	// ready is the admission gate (adopt.go): nil is open. isReady records
+	// that it was opened. answered and reaped are short memories that keep a
+	// recovery pass from deciding twice about one channel.
+	ready   chan struct{}
+	isReady bool
+	// readyWait overrides reconcileWait; tests shorten it.
+	readyWait time.Duration
+	answered  map[string]time.Time
+	reaped    map[string]time.Time
+	now       func() time.Time // the clock; replaced in tests
 
 	// Originates awaiting their BACKGROUND_JOB result (jobs.go), guarded by mu.
 	jobs      map[string]*trackedJob // by Job-UUID
@@ -304,6 +313,11 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 	if err != nil {
 		return uuid.Nil, err
 	}
+	// Before anything that consults what is live: until the first reconcile
+	// the registry does not know the calls that outlived a restart.
+	if err := s.awaitReconciled(ctx); err != nil {
+		return uuid.Nil, err
+	}
 
 	callID := req.CallID
 	if callID == uuid.Nil {
@@ -345,6 +359,9 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 
 	vars := map[string]string{
 		"aicc_call_id": callID.String(),
+		// What this leg is for, so a process that did not place it (after a
+		// restart, say) can tell (telephony.AdoptLiveChannels).
+		telephony.VarPlacedBy: telephony.PlacedByDial,
 		// The identity crosses the bridge with the leg. The trunk leg the
 		// dialplan raises next inherits aicc_call_id, so it is adopted into
 		// this call the moment it exists — not merged later at the bridge,
@@ -468,12 +485,7 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		return uuid.Nil, err
 	}
 
-	s.arm(agentLeg.String(), func() {
-		if err := s.sw.TransferToExtension(agentLeg.String(), destination, "aicc"); err != nil {
-			s.log.Error("click-to-dial transfer failed",
-				"callId", callID, "destination", destination, "error", err)
-		}
-	})
+	s.arm(agentLeg.String(), s.transferOnAnswer(callID, agentLeg.String(), destination))
 
 	// After arming: a failure already on record is applied at once, and it
 	// must find the continuation there to drop.
@@ -523,6 +535,10 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 		return uuid.Nil, err
 	}
 
+	if err := s.awaitReconciled(ctx); err != nil {
+		return uuid.Nil, err
+	}
+
 	did, err := s.findDID(ctx, req.DIDNumber)
 	if err != nil {
 		return uuid.Nil, err
@@ -564,6 +580,11 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	vars := map[string]string{
 		"aicc_call_id":  callID.String(),
 		"aicc_language": language,
+		// What this leg is for and whom it dialled: enough, with the DID and
+		// the language above, for a process that did not place it to bridge
+		// the bot when the customer answers (adopt.go).
+		telephony.VarPlacedBy: telephony.PlacedByDialAI,
+		telephony.VarPlacedTo: req.To,
 		// The number this call goes out from, on the leg from the moment it
 		// exists rather than only on the bridge to the bot. A call nobody
 		// answers never reaches that bridge, so its row had neither the number
@@ -606,33 +627,51 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 		return uuid.Nil, err
 	}
 
-	s.arm(customerLeg.String(), func() {
-		botLeg := uuid.New()
-		bridgeVars := map[string]string{
-			"aicc_call_id":                    callID.String(),
-			"aicc_did":                        did.Number,
-			"aicc_language":                   language,
-			"sip_h_X-AICC-Call-ID":            callID.String(),
-			"sip_h_X-AICC-Channel-ID":         customerLeg.String(),
-			"sip_h_X-AICC-DID":                did.Number,
-			"sip_h_X-AICC-Language":           language,
-			"sip_h_X-AICC-ANI":                req.To,
-			"sip_h_X-AICC-Call-Type":          "OUTBOUND",
-			"sip_h_X-AICC-Placed-To-Customer": "true",
-		}
-		target := "sofia/gateway/" + s.cfg.BotGateway + "/" + did.Number
-		pinCodecs(bridgeVars, target)
-		if err := s.sw.BridgeToEndpoint(customerLeg.String(), botLeg, target, bridgeVars); err != nil {
-			s.log.Error("ai outbound bridge to bot failed",
-				"callId", callID, "to", req.To, "error", err)
-		}
-	})
+	s.arm(customerLeg.String(), s.bridgeToBot(callID, customerLeg.String(), did.Number, language, req.To))
 
 	s.attachJob(job, jobID) // after arming, for the same reason as click-to-dial
 
 	s.log.Info("ai outbound placed", "callId", callID,
 		"to", req.To, "did", did.Number, "language", language)
 	return callID, nil
+}
+
+// bridgeToBot is what an answered AI outbound leg does: transfer into a bridge
+// to the bot gateway with the correlation headers an inbound call carries.
+// Placing a call and adopting one that outlived a restart arm the same thing.
+func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language, to string) func() {
+	return func() {
+		botLeg := uuid.New()
+		bridgeVars := map[string]string{
+			"aicc_call_id":                    callID.String(),
+			"aicc_did":                        didNumber,
+			"aicc_language":                   language,
+			"sip_h_X-AICC-Call-ID":            callID.String(),
+			"sip_h_X-AICC-Channel-ID":         customerLeg,
+			"sip_h_X-AICC-DID":                didNumber,
+			"sip_h_X-AICC-Language":           language,
+			"sip_h_X-AICC-ANI":                to,
+			"sip_h_X-AICC-Call-Type":          "OUTBOUND",
+			"sip_h_X-AICC-Placed-To-Customer": "true",
+		}
+		target := "sofia/gateway/" + s.cfg.BotGateway + "/" + didNumber
+		pinCodecs(bridgeVars, target)
+		if err := s.sw.BridgeToEndpoint(customerLeg, botLeg, target, bridgeVars); err != nil {
+			s.log.Error("ai outbound bridge to bot failed",
+				"callId", callID, "to", to, "error", err)
+		}
+	}
+}
+
+// transferOnAnswer is what an answered click-to-dial agent leg does: go on to
+// the destination through the dialplan.
+func (s *Service) transferOnAnswer(callID uuid.UUID, agentLeg, destination string) func() {
+	return func() {
+		if err := s.sw.TransferToExtension(agentLeg, destination, "aicc"); err != nil {
+			s.log.Error("click-to-dial transfer failed",
+				"callId", callID, "destination", destination, "error", err)
+		}
+	}
 }
 
 // defaultOutboundNumber is the number a call this platform places comes from.
@@ -686,6 +725,13 @@ func (s *Service) arm(channelID string, onAnswer func()) {
 	}
 }
 
+// armUntil is arm for a leg whose window began earlier than now.
+func (s *Service) armUntil(channelID string, expiresAt time.Time, onAnswer func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pending[channelID] = &pendingLeg{onAnswer: onAnswer, expiresAt: expiresAt}
+}
+
 // HandleSwitchEvent follows originated legs: an answer fires the armed
 // continuation, a hangup (busy, declined, expired) discards it. Fed from the
 // same dispatch loop as the coordinator.
@@ -705,6 +751,9 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 		leg := s.pending[ev.ChannelID]
 		delete(s.pending, ev.ChannelID)
 		expired := leg != nil && s.now().After(leg.expiresAt)
+		if leg != nil {
+			s.noteAnswered(ev.ChannelID)
+		}
 		s.mu.Unlock()
 		if leg == nil {
 			return

@@ -97,6 +97,10 @@ type composition struct {
 	Registrations func() ([]telephony.Registration, error)
 	Events        systemPublisher
 	Log           *slog.Logger
+	// Reconcile adopts the channels the switch holds and settles the ones
+	// nobody is looking after. It runs on every connect, last: the screens are
+	// told the link is up first, and nothing above depends on it.
+	Reconcile func(context.Context)
 }
 
 // systemPublisher is the slice of the hub used to announce facts about the
@@ -147,6 +151,12 @@ func (c composition) connect() {
 	// only sign of it was that nothing happened any more.
 	c.Link.OnConnect(func(ctx context.Context) { c.announceLink(ctx, true) })
 	c.Link.OnLost(func() { c.announceLink(context.Background(), false) })
+
+	// What the switch is holding that this process knows nothing about: calls
+	// that outlived a restart, and whatever happened while the link was down.
+	if c.Reconcile != nil {
+		c.Link.OnConnect(c.Reconcile)
+	}
 
 	// Who may see a call's live transcript is decided from who is on the call,
 	// which only this side knows. Without it every transcript event falls
