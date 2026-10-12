@@ -61,6 +61,7 @@ func (*countingSwitch) BridgeToEndpoint(string, uuid.UUID, string, map[string]st
 }
 func (*countingSwitch) TransferToExtension(string, string, string) error { return nil }
 func (*countingSwitch) Hangup(string, string) error                      { return nil }
+func (*countingSwitch) SetVariable(string, string, string) error         { return nil }
 func (*countingSwitch) Endpoint(ext string) string                       { return "user/" + ext + "@test" }
 
 func (s *countingSwitch) count() int {
