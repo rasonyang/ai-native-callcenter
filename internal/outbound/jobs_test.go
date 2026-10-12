@@ -82,6 +82,7 @@ func jobService(t *testing.T) (*Service, *jobSwitch, *recordingLedger) {
 	s.sw = sw
 	s.limiter = NewLimiter(1_000_000)
 	s.cfg.AnswerWindow = 2 * time.Second
+	s.cfg.RingTimeout = time.Second
 	s.jobMargin = time.Millisecond
 	ledger := &recordingLedger{cdrs: map[uuid.UUID][]store.CDR{}}
 	s.SetFailureLedger(ledger)
@@ -300,6 +301,7 @@ func TestASilentJobIsForgottenWithoutAFinish(t *testing.T) {
 	t.Parallel()
 	s, _, ledger := jobService(t)
 	s.cfg.AnswerWindow = 10 * time.Millisecond
+	s.cfg.RingTimeout = time.Millisecond
 	if _, err := s.DialAI(context.Background(), AIDialRequest{To: "18688886666", DIDNumber: "95012"}); err != nil {
 		t.Fatal(err)
 	}
