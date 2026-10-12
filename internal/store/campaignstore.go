@@ -41,7 +41,7 @@ func (c *CampaignStore) DIDFlow(ctx context.Context, didID uuid.UUID) (campaign.
 	if err != nil {
 		return campaign.DIDFlow{}, fmt.Errorf("get did %s: %w", didID, err)
 	}
-	out := campaign.DIDFlow{ID: did.ID, Number: did.Number, IsEnabled: did.IsEnabled}
+	out := campaign.DIDFlow{ID: did.ID, Number: did.Number, IsEnabled: did.IsEnabled, AllowOutbound: did.AllowOutbound}
 	if did.FlowID == nil {
 		return out, nil
 	}

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/campaign"
 	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -456,6 +457,21 @@ func (c *CatalogStore) UpdateDID(ctx context.Context, d catalog.DID) (catalog.DI
 			"DID_REBIND_BLOCKED",
 			"that flow can transfer the caller to a person, and a campaign that has not finished dials from this number; cancel the campaign first"); err != nil {
 			return catalog.DID{}, err
+		}
+	}
+	// A campaign dials from its DID: the number cannot stop allowing outbound
+	// calls under one that has not finished.
+	if !d.AllowOutbound {
+		n, err := c.q.CountLiveCampaignsOnDID(ctx, d.ID)
+		if err != nil {
+			return catalog.DID{}, fmt.Errorf("count live campaigns: %w", err)
+		}
+		if n > 0 {
+			return catalog.DID{}, &campaign.Error{
+				Kind: campaign.ErrDIDNotOutbound, Rule: "DID_OUTBOUND_BLOCKED",
+				Message: "a campaign that has not finished dials from this number; cancel the campaign first",
+				Params:  map[string]any{"campaigns": n},
+			}
 		}
 	}
 	return c.writeDIDTx(ctx, d, func(qtx *queries.Queries) (queries.Did, error) {

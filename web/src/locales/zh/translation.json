@@ -119,6 +119,7 @@
     "USER_DATA_TOO_LARGE": "这通电话装不下这些业务数据：最多 {{maxKeys}} 个键，每个值 {{maxValueBytes}} 字节。一个都没有写入。",
     "NUMBER_ON_DNC": "该号码在免打扰名单中，未发起呼叫。",
     "CAMPAIGN_FLOW_HAS_TRANSFER": "该号码对应的流程可以把来电转给人工，而外呼活动的通话没有转人工的途径。请从流程中去掉转接，或选择其他号码。",
+    "CAMPAIGN_DID_NOT_OUTBOUND": "该外呼活动使用的号码未开启外呼。请为该号码开启外呼，或选择其他号码。",
     "CAMPAIGN_RING_TIMEOUT_TOO_LONG": "振铃超时必须短于通话可等待接听的 60 秒。",
     "CAMPAIGN_WINDOW_OUTSIDE_LIMIT": "拨打时段必须落在本部署允许的外呼时间之内。",
     "CAMPAIGN_FIELD_LOCKED": "活动已在运行、暂停或结束，这一项不能修改。",

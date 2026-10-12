@@ -178,7 +178,7 @@ func newFixture(t *testing.T, env Env) *fixture {
 	t.Helper()
 	repo := newFakeRepo()
 	did := uuid.New()
-	repo.dids[did] = DIDFlow{ID: did, Number: "95099", IsEnabled: true, Spec: testSpec(t, []string{"hangup"}, nil)}
+	repo.dids[did] = DIDFlow{ID: did, Number: "95099", IsEnabled: true, AllowOutbound: true, Spec: testSpec(t, []string{"hangup"}, nil)}
 	return &fixture{repo: repo, svc: NewService(repo, nil, env), did: did}
 }
 
@@ -245,11 +245,14 @@ func TestCreateRefusals(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, Env{})
 	transferDID, disabledDID, flowlessDID := uuid.New(), uuid.New(), uuid.New()
-	f.repo.dids[transferDID] = DIDFlow{ID: transferDID, Number: "95001", IsEnabled: true,
+	f.repo.dids[transferDID] = DIDFlow{ID: transferDID, Number: "95001", IsEnabled: true, AllowOutbound: true,
 		Spec: testSpec(t, []string{"hangup", "transfer_to_agent"}, nil)}
-	f.repo.dids[disabledDID] = DIDFlow{ID: disabledDID, Number: "95002", IsEnabled: false,
+	f.repo.dids[disabledDID] = DIDFlow{ID: disabledDID, Number: "95002", IsEnabled: false, AllowOutbound: true,
 		Spec: testSpec(t, nil, nil)}
-	f.repo.dids[flowlessDID] = DIDFlow{ID: flowlessDID, Number: "95003", IsEnabled: true}
+	f.repo.dids[flowlessDID] = DIDFlow{ID: flowlessDID, Number: "95003", IsEnabled: true, AllowOutbound: true}
+	inboundOnlyDID := uuid.New()
+	f.repo.dids[inboundOnlyDID] = DIDFlow{ID: inboundOnlyDID, Number: "95004", IsEnabled: true,
+		Spec: testSpec(t, nil, nil)}
 
 	for _, tc := range []struct {
 		name   string
@@ -263,6 +266,7 @@ func TestCreateRefusals(t *testing.T) {
 		{"unknown DID", func(n *New) { n.DIDID = uuid.New() }, ErrValidation, "DID_NOT_FOUND", "didId"},
 		{"disabled DID", func(n *New) { n.DIDID = disabledDID }, ErrValidation, "DID_DISABLED", "didId"},
 		{"DID without a published flow", func(n *New) { n.DIDID = flowlessDID }, ErrValidation, "DID_HAS_NO_PUBLISHED_FLOW", "didId"},
+		{"a DID that does not allow outbound", func(n *New) { n.DIDID = inboundOnlyDID }, ErrDIDNotOutbound, "DID_NOT_OUTBOUND", "didId"},
 		{"a flow that can transfer", func(n *New) { n.DIDID = transferDID }, ErrFlowHasTransfer, "FLOW_CAN_TRANSFER", "didId"},
 		{"unknown time zone", func(n *New) { n.TimeZone = "Mars/Olympus" }, ErrValidation, "TIME_ZONE_INVALID", "timeZone"},
 		{"Local is not a place", func(n *New) { n.TimeZone = "Local" }, ErrValidation, "TIME_ZONE_INVALID", "timeZone"},
@@ -503,7 +507,7 @@ func TestStartChecksTheCampaignAgain(t *testing.T) {
 	c, _ := f.svc.Create(context.Background(), f.validNew())
 
 	// The DID's flow gained a transfer between create and start.
-	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: true,
+	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: true, AllowOutbound: true,
 		Spec: testSpec(t, []string{"transfer_to_agent"}, nil)}
 	_, err := f.svc.Start(context.Background(), c.ID)
 	wantKind(t, err, ErrFlowHasTransfer, "")
@@ -511,8 +515,13 @@ func TestStartChecksTheCampaignAgain(t *testing.T) {
 		t.Error("a refused start left the DRAFT running")
 	}
 
+	// Or the DID stopped allowing outbound calls.
+	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: true, Spec: testSpec(t, nil, nil)}
+	_, err = f.svc.Start(context.Background(), c.ID)
+	wantKind(t, err, ErrDIDNotOutbound, "DID_NOT_OUTBOUND")
+
 	// Or the DID was disabled.
-	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: false, Spec: testSpec(t, nil, nil)}
+	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: false, AllowOutbound: true, Spec: testSpec(t, nil, nil)}
 	_, err = f.svc.Start(context.Background(), c.ID)
 	wantKind(t, err, ErrValidation, "DID_DISABLED")
 
@@ -549,7 +558,7 @@ func TestFieldLocksPerStatus(t *testing.T) {
 			t.Run(string(status)+"/"+field, func(t *testing.T) {
 				t.Parallel()
 				f := newFixture(t, Env{})
-				f.repo.dids[newDID] = DIDFlow{ID: newDID, Number: "95100", IsEnabled: true, Spec: testSpec(t, nil, nil)}
+				f.repo.dids[newDID] = DIDFlow{ID: newDID, Number: "95100", IsEnabled: true, AllowOutbound: true, Spec: testSpec(t, nil, nil)}
 				c, err := f.svc.Create(context.Background(), f.validNew())
 				if err != nil {
 					t.Fatal(err)

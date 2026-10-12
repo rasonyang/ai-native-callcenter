@@ -59,6 +59,11 @@ const (
 	// written with such a DID; 409 when publishing a revision or rebinding a
 	// DID would put one under a campaign that has not finished.
 	CodeCampaignFlowHasTransfer ErrorCode = "CAMPAIGN_FLOW_HAS_TRANSFER"
+	// CodeCampaignDIDNotOutbound refuses a DID that does not allow outbound
+	// calls: a campaign dials from its DID. 422 when a campaign is being
+	// written or started with such a DID; 409 when clearing allowOutbound on a
+	// DID would strand a campaign that has not finished.
+	CodeCampaignDIDNotOutbound ErrorCode = "CAMPAIGN_DID_NOT_OUTBOUND"
 	// CodeCampaignRingTimeoutTooLong refuses a ring timeout that is not below
 	// the originator's answer window: an answer after the window would reach
 	// a customer who hears silence.

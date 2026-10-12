@@ -333,6 +333,11 @@ func campaignRefusal(err error) (status int, code ErrorCode, message string, par
 		return http.StatusUnprocessableEntity, CodeCampaignRingTimeoutTooLong, ce.Message, params, true
 	case errors.Is(ce.Kind, campaign.ErrWindowOutsideLimit):
 		return http.StatusUnprocessableEntity, CodeCampaignWindowOutsideLimit, ce.Message, params, true
+	case errors.Is(ce.Kind, campaign.ErrDIDNotOutbound):
+		if ce.Field == "" {
+			return http.StatusConflict, CodeCampaignDIDNotOutbound, ce.Message, params, true
+		}
+		return http.StatusUnprocessableEntity, CodeCampaignDIDNotOutbound, ce.Message, params, true
 	case errors.Is(ce.Kind, campaign.ErrFlowHasTransfer):
 		// A campaign being written is refused for what it asks (422). A flow
 		// publish or a DID rebinding is refused for the state it would break

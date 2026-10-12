@@ -1251,3 +1251,74 @@ func TestContactSlotLimitsAreTheCallsOwn(t *testing.T) {
 			campaign.MaxSlotValueRunes, 4*campaign.MaxSlotValueRunes, telephony.UserDataMaxValueBytes)
 	}
 }
+
+// campaignDIDWithoutOutbound is a DID with a published flow that is not
+// allowed to place calls.
+func campaignDIDWithoutOutbound(t *testing.T, st *store.Store, number string) uuid.UUID {
+	t.Helper()
+	ctx := context.Background()
+	didID, _ := campaignDID(t, st, number, false)
+	dids, err := st.Catalog().ListDIDs(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range dids {
+		if d.ID == didID {
+			d.AllowInbound, d.AllowOutbound = true, false
+			if _, err := st.Catalog().UpdateDID(ctx, d); err != nil {
+				t.Fatalf("clear allowOutbound: %v", err)
+			}
+			return didID
+		}
+	}
+	t.Fatal("DID vanished")
+	return uuid.Nil
+}
+
+// A campaign dials from its DID, so the DID must allow outbound calls: at
+// create and on PATCH of didId (start re-validates the same way; see the
+// campaign package's TestStartChecksTheCampaignAgain).
+func TestACampaignNeedsADIDThatAllowsOutbound(t *testing.T) {
+	f := newFixture(t)
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95099", false)
+	noOutbound := campaignDIDWithoutOutbound(t, f.st, "95201")
+
+	r := f.post(admin, "/campaigns", campaignBody(noOutbound, nil))
+	wantReply(t, "create on a DID that does not allow outbound", r, http.StatusUnprocessableEntity, "CAMPAIGN_DID_NOT_OUTBOUND")
+	if got := errOf(t, r).Error.Params["field"]; got != "didId" {
+		t.Errorf("params.field = %v, want didId", got)
+	}
+
+	c := f.createCampaign(admin, didID, nil)
+	r = f.do(call{method: http.MethodPatch, path: "/campaigns/" + c.ID, cookie: admin, body: map[string]any{"didId": noOutbound.String()}})
+	wantReply(t, "PATCH didId to one that does not allow outbound", r, http.StatusUnprocessableEntity, "CAMPAIGN_DID_NOT_OUTBOUND")
+}
+
+// Clearing allowOutbound on a DID a campaign that has not finished dials from
+// is refused with 409, and allowed once the campaign is cancelled.
+func TestClearingAllowOutboundUnderALiveCampaignIsRefusedOverHTTP(t *testing.T) {
+	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
+		d.Catalog = catalog.NewService(st.Catalog(), nil, st.Catalog())
+	})
+	admin := f.seedAdmin()
+	didID, flowID := campaignDID(t, f.st, "95099", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	put := func(allowOutbound bool) reply {
+		return f.do(call{method: http.MethodPut, path: "/dids/" + didID.String(), cookie: admin, body: map[string]any{
+			"number": "95099", "language": "en", "flowId": flowID.String(), "isEnabled": true,
+			"allowInbound": true, "allowOutbound": allowOutbound,
+		}})
+	}
+	for _, step := range []string{"", "start", "pause"} {
+		if step != "" {
+			f.post(admin, "/campaigns/"+c.ID+"/"+step, nil)
+		}
+		wantReply(t, "clear allowOutbound under a campaign ("+step+")", put(false), http.StatusConflict, "CAMPAIGN_DID_NOT_OUTBOUND")
+	}
+	wantReply(t, "keep allowOutbound", put(true), http.StatusOK, "")
+
+	f.post(admin, "/campaigns/"+c.ID+"/cancel", nil)
+	wantReply(t, "clear allowOutbound after cancel", put(false), http.StatusOK, "")
+}

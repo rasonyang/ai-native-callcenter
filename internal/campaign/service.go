@@ -22,6 +22,9 @@ type DIDFlow struct {
 	ID        uuid.UUID
 	Number    string
 	IsEnabled bool
+	// AllowOutbound is the DID's "this platform can place calls from this
+	// number"; a campaign dials from it.
+	AllowOutbound bool
 	// Spec is the flow's published revision; nil when the number has no flow
 	// or its flow has never been published.
 	Spec *flow.Spec
@@ -483,6 +486,12 @@ func (s *Service) validate(ctx context.Context, c Campaign, touched changes) (Ca
 		switch {
 		case !d.IsEnabled:
 			return c, invalid("didId", "DID_DISABLED", "DID %s is disabled", d.Number)
+		case !d.AllowOutbound:
+			return c, &Error{
+				Kind: ErrDIDNotOutbound, Field: "didId", Rule: "DID_NOT_OUTBOUND",
+				Message: fmt.Sprintf("DID %s does not allow outbound calls; a campaign dials from its DID", d.Number),
+				Params:  map[string]any{"didNumber": d.Number},
+			}
 		case d.Spec == nil:
 			return c, invalid("didId", "DID_HAS_NO_PUBLISHED_FLOW",
 				"DID %s has no published flow; a campaign talks to a flow", d.Number)

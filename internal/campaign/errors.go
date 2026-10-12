@@ -24,6 +24,9 @@ var (
 	// ErrFlowHasTransfer: the DID's flow can hand the caller to a person, and
 	// a campaign call has no way to one.
 	ErrFlowHasTransfer = errors.New("campaign: the flow can transfer to a person")
+	// ErrDIDNotOutbound: the DID does not allow outbound calls, and a campaign
+	// dials from its DID.
+	ErrDIDNotOutbound = errors.New("campaign: the DID does not allow outbound calls")
 	// ErrRingTimeoutTooLong: the ring timeout is not below the answer window.
 	ErrRingTimeoutTooLong = errors.New("campaign: ring timeout is not below the answer window")
 	// ErrWindowOutsideLimit: the calling window is not inside the

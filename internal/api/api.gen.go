@@ -507,6 +507,7 @@ const (
 	ErrorCodeAGENTNOTLOGGEDIN               ErrorCode = "AGENT_NOT_LOGGED_IN"
 	ErrorCodeAGENTREQUIRED                  ErrorCode = "AGENT_REQUIRED"
 	ErrorCodeCALLNOTFOUND                   ErrorCode = "CALL_NOT_FOUND"
+	ErrorCodeCAMPAIGNDIDNOTOUTBOUND         ErrorCode = "CAMPAIGN_DID_NOT_OUTBOUND"
 	ErrorCodeCAMPAIGNFIELDLOCKED            ErrorCode = "CAMPAIGN_FIELD_LOCKED"
 	ErrorCodeCAMPAIGNFLOWHASTRANSFER        ErrorCode = "CAMPAIGN_FLOW_HAS_TRANSFER"
 	ErrorCodeCAMPAIGNINVALIDTRANSITION      ErrorCode = "CAMPAIGN_INVALID_TRANSITION"
@@ -552,6 +553,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeAGENTREQUIRED:
 		return true
 	case ErrorCodeCALLNOTFOUND:
+		return true
+	case ErrorCodeCAMPAIGNDIDNOTOUTBOUND:
 		return true
 	case ErrorCodeCAMPAIGNFIELDLOCKED:
 		return true
@@ -1771,7 +1774,7 @@ type CampaignPatch struct {
 	CallingWindow      *CampaignCallingWindow `json:"callingWindow,omitempty"`
 	DefaultCountryCode *string                `json:"defaultCountryCode,omitempty"`
 
-	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER) and allows outbound calls (CAMPAIGN_DID_NOT_OUTBOUND).
 	DIDID           *openapi_types.UUID `json:"didId,omitempty"`
 	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
 	MaxConcurrent   *int                `json:"maxConcurrent,omitempty"`
@@ -1837,7 +1840,7 @@ type CampaignWrite struct {
 	// DefaultCountryCode Digits without +. Omitted: the deployment's AICC_DEFAULT_COUNTRY_CODE.
 	DefaultCountryCode *string `json:"defaultCountryCode,omitempty"`
 
-	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+	// DIDID An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER) and allows outbound calls (CAMPAIGN_DID_NOT_OUTBOUND).
 	DIDID           openapi_types.UUID  `json:"didId"`
 	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
 	MaxConcurrent   *int                `json:"maxConcurrent,omitempty"`

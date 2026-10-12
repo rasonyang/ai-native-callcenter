@@ -868,7 +868,7 @@ export interface paths {
         get?: never;
         /**
          * Update a DID
-         * @description Binding the number to a flow whose published revision can transfer the caller to a person is refused with 409 CAMPAIGN_FLOW_HAS_TRANSFER while a campaign that has not finished dials from this number.
+         * @description Binding the number to a flow whose published revision can transfer the caller to a person is refused with 409 CAMPAIGN_FLOW_HAS_TRANSFER while a campaign that has not finished dials from this number. Setting allowOutbound to false is refused with 409 CAMPAIGN_DID_NOT_OUTBOUND while such a campaign dials from this number.
          */
         put: operations["updateDID"];
         post?: never;
@@ -1342,7 +1342,7 @@ export interface paths {
          * Create a campaign
          * @description Creates a DRAFT. Nothing is dialled until it is started.
          *
-         *     The DID must exist, be enabled and have a published flow, and that flow must not be able to transfer the caller to a person: a campaign call has no way to one, and a flow that offers transfer_to_agent in any phase (by name, by "*", or among its always-allowed tools) is refused with 422 CAMPAIGN_FLOW_HAS_TRANSFER. ringTimeoutSec must be at least 5 and below the originator's 60-second answer window (422 CAMPAIGN_RING_TIMEOUT_TOO_LONG). timeZone must be an IANA name, and every range of callingWindow must lie wholly inside the deployment's outer calling hours (AICC_OUTBOUND_HOURS) or the request is 422 CAMPAIGN_WINDOW_OUTSIDE_LIMIT. Any other bad value is 422 VALIDATION_FAILED with params {field, rule}. Needs campaigns:write.
+         *     The DID must exist, be enabled, allow outbound calls (allowOutbound; else 422 CAMPAIGN_DID_NOT_OUTBOUND) and have a published flow, and that flow must not be able to transfer the caller to a person: a campaign call has no way to one, and a flow that offers transfer_to_agent in any phase (by name, by "*", or among its always-allowed tools) is refused with 422 CAMPAIGN_FLOW_HAS_TRANSFER. ringTimeoutSec must be at least 5 and below the originator's 60-second answer window (422 CAMPAIGN_RING_TIMEOUT_TOO_LONG). timeZone must be an IANA name, and every range of callingWindow must lie wholly inside the deployment's outer calling hours (AICC_OUTBOUND_HOURS) or the request is 422 CAMPAIGN_WINDOW_OUTSIDE_LIMIT. Any other bad value is 422 VALIDATION_FAILED with params {field, rule}. Needs campaigns:write.
          */
         post: operations["createCampaign"];
         delete?: never;
@@ -1768,7 +1768,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_DID_NOT_OUTBOUND" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -3376,7 +3376,7 @@ export interface components {
             name: string;
             /**
              * Format: uuid
-             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER) and allows outbound calls (CAMPAIGN_DID_NOT_OUTBOUND).
              */
             didId: string;
             /** @description IANA name, for example Asia/Shanghai or America/New_York. */
@@ -3400,7 +3400,7 @@ export interface components {
             name?: string;
             /**
              * Format: uuid
-             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER).
+             * @description An enabled DID whose flow is published and cannot transfer to a person (CAMPAIGN_FLOW_HAS_TRANSFER) and allows outbound calls (CAMPAIGN_DID_NOT_OUTBOUND).
              */
             didId?: string;
             /** @description IANA name, for example Asia/Shanghai or America/New_York. */
@@ -3539,7 +3539,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
         Conflict: {
             headers: {
                 [name: string]: unknown;
@@ -3548,7 +3548,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. Publishing a flow may also answer TERMINAL_ANNOUNCE_REQUIRED, with params.nodes listing the phases at fault. Campaign writes may also answer CAMPAIGN_FLOW_HAS_TRANSFER, CAMPAIGN_RING_TIMEOUT_TOO_LONG or CAMPAIGN_WINDOW_OUTSIDE_LIMIT, each with params.field naming the offender. */
+        /** @description The body parsed but a field is missing or invalid. Code VALIDATION_FAILED; params.field names the offender when known. Publishing a flow may also answer TERMINAL_ANNOUNCE_REQUIRED, with params.nodes listing the phases at fault. Campaign writes and starts may also answer CAMPAIGN_FLOW_HAS_TRANSFER, CAMPAIGN_DID_NOT_OUTBOUND, CAMPAIGN_RING_TIMEOUT_TOO_LONG or CAMPAIGN_WINDOW_OUTSIDE_LIMIT, each with params.field naming the offender. */
         UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
