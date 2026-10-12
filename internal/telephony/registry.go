@@ -59,6 +59,10 @@ type Registry struct {
 	mu        sync.RWMutex
 	byCall    map[uuid.UUID]*actor
 	byChannel map[string]*actor
+	// boundAt is when this process first learned of each channel, which is
+	// what lets a reconcile tell a channel that vanished during an outage from
+	// one that appeared after its snapshot was taken.
+	boundAt map[string]time.Time
 
 	wg sync.WaitGroup
 }
@@ -139,7 +143,25 @@ func (r *Registry) BindChannel(channelID string, callID uuid.UUID) error {
 		return ErrCallNotFound
 	}
 	r.byChannel[channelID] = a
+	if r.boundAt == nil {
+		r.boundAt = map[string]time.Time{}
+	}
+	if _, seen := r.boundAt[channelID]; !seen {
+		r.boundAt[channelID] = time.Now()
+	}
 	return nil
+}
+
+// BoundChannels returns every channel the registry holds and when it first
+// learned of each.
+func (r *Registry) BoundChannels() map[string]time.Time {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[string]time.Time, len(r.byChannel))
+	for id := range r.byChannel {
+		out[id] = r.boundAt[id]
+	}
+	return out
 }
 
 // Dispatch routes a normalized switch event to the owning call actor. Events
@@ -310,6 +332,7 @@ func (r *Registry) remove(a *actor) {
 	for channelID, owner := range r.byChannel {
 		if owner == a {
 			delete(r.byChannel, channelID)
+			delete(r.boundAt, channelID)
 		}
 	}
 	retired := r.OnCallRetired

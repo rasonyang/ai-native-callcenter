@@ -133,6 +133,9 @@ type RecoveryReport struct {
 	OrphanedBot int
 	// Unrecoverable: legs of ours that could not be re-armed.
 	Unrecoverable int
+	// Resumed: legs answered while the link was down whose held continuation
+	// was run now, inside its window.
+	Resumed int
 	// Left: channels that were not for recovery to decide about.
 	Left int
 }
@@ -140,11 +143,19 @@ type RecoveryReport struct {
 // Recover applies the classes above to the channels the switch holds.
 // hasBotSession says whether an in-process bot conversation exists for a call.
 //
+// isColdStart is true for the first reconcile after the process started and
+// false for a reconnect. Only a cold start may end a call for want of a bot
+// session: on a reconnect the sessions survived, a session that ended hangs
+// its own leg up over SIP, and the lists read here are not atomic with a
+// session opening.
+//
 // It is idempotent: a leg it armed is held on the next pass, a leg it ended is
 // remembered for a while in case the switch still lists it, and a channel the
 // live process already tracks is never touched.
 func (s *Service) Recover(ctx context.Context, live []telephony.LiveChannel,
-	hasBotSession func(uuid.UUID) bool) RecoveryReport {
+	hasBotSession func(uuid.UUID) bool, isColdStart bool) RecoveryReport {
+
+	hasBot := func(id uuid.UUID) bool { return hasBotSession != nil && hasBotSession(id) }
 
 	var rep RecoveryReport
 	for _, ch := range live {
@@ -158,12 +169,24 @@ func (s *Service) Recover(ctx context.Context, live []telephony.LiveChannel,
 
 		// A customer leg on a bot with nobody behind it.
 		if ch.PeerChannelID != "" && ch.PeerIsBotLeg {
-			if hasBotSession != nil && hasBotSession(ch.CallID) {
+			if !isColdStart || hasBot(ch.CallID) {
 				rep.Left++
 				continue
 			}
-			if s.now().Sub(ch.PeerCreatedAt) < botSessionGrace {
+			if !ch.IsBridgeAgeKnown {
+				s.log.Warn("recovery: cannot tell how long the bot bridge has existed; leaving the call alone",
+					"channelId", ch.ChannelID, "callId", ch.CallID)
+				rep.Left++
+				continue
+			}
+			if ch.BridgeAge < botSessionGrace {
 				rep.Held++
+				continue
+			}
+			// Asked again at the last moment: the session may have opened
+			// while the rest of the table was being read.
+			if hasBot(ch.CallID) {
+				rep.Left++
 				continue
 			}
 			s.log.Warn("recovery: customer leg is bridged to a bot that no longer exists; hanging up",
@@ -185,20 +208,44 @@ func (s *Service) Recover(ctx context.Context, live []telephony.LiveChannel,
 
 		// Answered and not bridged. Only a leg we originated waits in park.
 		if ch.IsParked && !ch.IsInbound {
-			if s.wasJustAnswered(ch.ChannelID) {
-				rep.Held++
-				continue
-			}
-			s.dropPending(ch.ChannelID)
-			s.log.Warn("recovery: leg was answered while nobody was watching and is parked; hanging up",
-				"channelId", ch.ChannelID, "callId", ch.CallID)
-			s.reap(ch.ChannelID, ReconcileCause)
-			rep.AnsweredParked++
+			s.recoverParked(ch, &rep)
 			continue
 		}
 		rep.Left++
 	}
 	return rep
+}
+
+// recoverParked decides an originated leg that is answered and still parked.
+//
+// If this process still holds what to do on its answer, the answer was simply
+// missed (an ESL blip), and the person has waited only as long as the blip:
+// inside the window the held continuation runs. Without one, or past the
+// window, there is nobody to bring the bot, and a clean hangup beats silence.
+func (s *Service) recoverParked(ch telephony.LiveChannel, rep *RecoveryReport) {
+	if s.wasJustAnswered(ch.ChannelID) {
+		rep.Held++
+		return
+	}
+	if leg := s.takePending(ch.ChannelID); leg != nil {
+		if s.now().Before(leg.expiresAt) {
+			s.log.Info("recovery: leg was answered while the link was down; running what was armed for it",
+				"channelId", ch.ChannelID, "callId", ch.CallID)
+			s.markAnswered(ch.ChannelID)
+			leg.onAnswer()
+			rep.Resumed++
+			return
+		}
+		s.log.Warn("recovery: leg was answered after its window; hanging up",
+			"channelId", ch.ChannelID, "callId", ch.CallID, "cause", LateAnswerCause)
+		s.reap(ch.ChannelID, LateAnswerCause)
+		rep.WindowSpent++
+		return
+	}
+	s.log.Warn("recovery: leg was answered while nobody was watching and is parked; hanging up",
+		"channelId", ch.ChannelID, "callId", ch.CallID)
+	s.reap(ch.ChannelID, ReconcileCause)
+	rep.AnsweredParked++
 }
 
 func (s *Service) recoverRinging(ctx context.Context, ch telephony.LiveChannel, rep *RecoveryReport) {
@@ -210,15 +257,18 @@ func (s *Service) recoverRinging(ctx context.Context, ch telephony.LiveChannel, 
 		rep.Held++
 		return
 	}
-	if ch.CreatedAt.IsZero() {
-		s.log.Warn("recovery: ringing leg has no creation time, so its window cannot be measured; hanging up",
+	if !ch.IsAgeKnown {
+		s.log.Warn("recovery: the switch did not give a time to measure the ringing leg's window from; hanging up",
 			"channelId", ch.ChannelID, "callId", ch.CallID)
 		s.reap(ch.ChannelID, ReconcileCause)
 		rep.Unrecoverable++
 		return
 	}
-	expiresAt := ch.CreatedAt.Add(s.cfg.AnswerWindow)
-	if !s.now().Before(expiresAt) {
+	// Elapsed time is the switch's own (its clock now, minus its clock at the
+	// channel's creation); only what is left is carried over to ours.
+	left := s.cfg.AnswerWindow - ch.Age
+	expiresAt := s.now().Add(left)
+	if left <= 0 {
 		s.log.Warn("recovery: ringing leg outlived its answer window; hanging up",
 			"channelId", ch.ChannelID, "callId", ch.CallID, "cause", LateAnswerCause)
 		s.reap(ch.ChannelID, LateAnswerCause)
@@ -271,10 +321,19 @@ func (s *Service) holdsLeg(channelID string) bool {
 	return s.pending[channelID] != nil || s.legJobs[channelID] != nil
 }
 
-func (s *Service) dropPending(channelID string) {
+// takePending removes and returns what is armed on a channel.
+func (s *Service) takePending(channelID string) *pendingLeg {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	leg := s.pending[channelID]
 	delete(s.pending, channelID)
+	return leg
+}
+
+func (s *Service) markAnswered(channelID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.noteAnswered(channelID)
 }
 
 // wasJustAnswered reports an answer this process fired a continuation for a

@@ -31,7 +31,8 @@ func TestTheListingIsReadWhateverShapeTheSwitchGivesIt(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			if got := len(parseChannelList(tc.payload, quietLog())); got != tc.want {
+			rows, _, _ := parseChannelList(tc.payload, quietLog())
+			if got := len(rows); got != tc.want {
 				t.Errorf("rows = %d, want %d", got, tc.want)
 			}
 		})

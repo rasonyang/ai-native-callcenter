@@ -130,6 +130,12 @@ type chanSpec struct {
 	age         time.Duration
 	vars        map[string]string
 	peer        string
+	// bridgedAgo overrides when the bridge began (default: shortly after the
+	// channel was created). noBridgeTimes leaves out every timestamp that says
+	// when it began, and noSwitchClock leaves out the dump's own clock.
+	bridgedAgo    time.Duration
+	noBridgeTimes bool
+	noSwitchClock bool
 }
 
 func (l *liveSwitch) add(now time.Time, c chanSpec) {
@@ -150,12 +156,27 @@ func (l *liveSwitch) add(now time.Time, c chanSpec) {
 		"Caller-Channel-Created-Time": strconv.FormatInt(created.UnixMicro(), 10),
 		"Caller-Context":              "aicc",
 	}
-	if c.answered {
-		h["Caller-Channel-Answered-Time"] = strconv.FormatInt(created.Add(time.Second).UnixMicro(), 10)
+	if !c.noSwitchClock {
+		h["Event-Date-Timestamp"] = strconv.FormatInt(now.UnixMicro(), 10)
+	}
+	if c.answered && !c.noBridgeTimes {
+		answered := created.Add(time.Second)
+		if answered.After(now) {
+			answered = now
+		}
+		h["Caller-Channel-Answered-Time"] = strconv.FormatInt(answered.UnixMicro(), 10)
 	}
 	if c.peer != "" {
 		h["Other-Leg-Unique-ID"] = c.peer
-		h["Caller-Channel-Bridged-Time"] = strconv.FormatInt(created.Add(2*time.Second).UnixMicro(), 10)
+		if !c.noBridgeTimes {
+			bridged := created.Add(2 * time.Second)
+			if c.bridgedAgo > 0 {
+				bridged = now.Add(-c.bridgedAgo)
+			} else if bridged.After(now) {
+				bridged = now
+			}
+			h["Caller-Channel-Bridged-Time"] = strconv.FormatInt(bridged.UnixMicro(), 10)
+		}
 	}
 	for k, v := range c.vars {
 		h["variable_"+k] = v
@@ -260,6 +281,10 @@ type recoveryRig struct {
 	pub      *eventLog
 	clock    *testClock
 	sessions map[uuid.UUID]bool
+	// cold is true until the first pass has run, as in the application.
+	cold bool
+	// hasBotFn, when set, replaces the session lookup.
+	hasBotFn func(uuid.UUID) bool
 }
 
 func newRecoveryRig(t *testing.T) *recoveryRig {
@@ -285,10 +310,15 @@ func newRecoveryRig(t *testing.T) *recoveryRig {
 	clock := &testClock{t: t0}
 	svc.now = clock.now
 	return &recoveryRig{svc: svc, coord: coord, registry: registry, sw: sw, pub: pub,
-		clock: clock, sessions: map[uuid.UUID]bool{}}
+		clock: clock, sessions: map[uuid.UUID]bool{}, cold: true}
 }
 
-func (r *recoveryRig) hasBot(id uuid.UUID) bool { return r.sessions[id] }
+func (r *recoveryRig) hasBot(id uuid.UUID) bool {
+	if r.hasBotFn != nil {
+		return r.hasBotFn(id)
+	}
+	return r.sessions[id]
+}
 
 // reconcile is one pass, as the application runs it on a connect.
 func (r *recoveryRig) reconcile(t *testing.T) RecoveryReport {
@@ -297,7 +327,8 @@ func (r *recoveryRig) reconcile(t *testing.T) RecoveryReport {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rep := r.svc.Recover(context.Background(), live, r.hasBot)
+	rep := r.svc.Recover(context.Background(), live, r.hasBot, r.cold)
+	r.cold = false
 	r.svc.MarkReconciled()
 	return rep
 }
@@ -413,7 +444,7 @@ func buildWorld(t *testing.T, seed int64) *world {
 		w.note("answeredParked", id, c)
 	}
 
-	bridged := func(class string, n int, inbound bool, botAge func() time.Duration, hasSession bool) {
+	bridged := func(class string, n int, inbound bool, botAge func() time.Duration, hasSession bool, ba time.Duration) {
 		for range n {
 			did, lang := langOf()
 			c, cust, bot := w.id(), w.id(), w.id()
@@ -422,9 +453,9 @@ func buildWorld(t *testing.T, seed int64) *world {
 				custVars = map[string]string{"aicc_call_id": c.String(), "aicc_did": did, "aicc_language": lang}
 			}
 			sw.add(now, chanSpec{id: cust, inbound: inbound, callState: "ACTIVE", answered: true,
-				application: "bridge", age: 90 * time.Second, vars: custVars, peer: bot.String()})
+				application: "bridge", age: 90 * time.Second, vars: custVars, peer: bot.String(), bridgedAgo: ba})
 			sw.add(now, chanSpec{id: bot, callState: "ACTIVE", answered: true, application: "bridge",
-				age: botAge(), peer: cust.String(), vars: map[string]string{
+				age: botAge(), peer: cust.String(), bridgedAgo: ba, vars: map[string]string{
 					"aicc_call_id": c.String(), "aicc_did": did, "aicc_dest": did,
 				}})
 			w.note(class, cust, c)
@@ -435,10 +466,10 @@ func buildWorld(t *testing.T, seed int64) *world {
 		}
 	}
 	old := func() time.Duration { return w.seconds(30, 80) }
-	bridged("botDeadOutbound", 30, false, old, false)
-	bridged("botDeadInbound", 20, true, old, false)
-	bridged("botLive", 25, false, old, true)
-	bridged("botYoung", 10, true, func() time.Duration { return time.Second }, false)
+	bridged("botDeadOutbound", 30, false, old, false, 0)
+	bridged("botDeadInbound", 20, true, old, false, 0)
+	bridged("botLive", 25, false, old, true, 0)
+	bridged("botYoung", 10, true, func() time.Duration { return time.Second }, false, time.Second)
 
 	for range 25 { // agent phone bridged to a customer who is not the bot
 		c, agent, cust := w.id(), w.id(), w.id()
@@ -786,6 +817,8 @@ func TestAPassIsIdempotent(t *testing.T) {
 	pendingAfterFirst := rig.svc.PendingCount()
 	callsAfterFirst := rig.registry.Count()
 
+	// The switch is still clearing what was hung up, so it lists it again.
+	rig.sw.isStubborn = true
 	rig.reconcile(t)
 
 	if got := len(rig.sw.killLog); got != killsAfterFirst {
@@ -847,23 +880,59 @@ func TestALegTheLiveProcessAlreadyHoldsIsNotArmedAgain(t *testing.T) {
 	}
 }
 
-// A leg whose answer was missed while the link was down is parked and answered
-// even though the process still holds its continuation: end it, and drop the
-// continuation so it cannot fire later.
-func TestALegWhoseAnswerWasMissedDuringAReconnectIsHungUpAndDisarmed(t *testing.T) {
+// A customer who answers during an ESL blip: the answer is lost, the process
+// still holds what to do on it, and the window is open. They get the bot.
+func TestALegAnsweredDuringABlipInsideItsWindowGetsTheBot(t *testing.T) {
 	rig := newRecoveryRig(t)
+	rig.cold = false // a reconnect: the process kept its memory
 	call, id := uuid.New(), uuid.New()
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 20 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
-	rig.svc.armUntil(id.String(), t0.Add(40*time.Second), func() { t.Error("a disarmed continuation ran") })
+	ran := make(chan struct{}, 1)
+	rig.svc.armUntil(id.String(), t0.Add(40*time.Second), func() { ran <- struct{}{} })
+
+	rep := rig.reconcile(t)
+
+	select {
+	case <-ran:
+	default:
+		t.Fatal("the held continuation was not run")
+	}
+	if rep.Resumed != 1 {
+		t.Errorf("report = %+v, want one resumed", rep)
+	}
+	if cause, ok := rig.sw.killed(id.String()); ok {
+		t.Errorf("a customer who answered inside the window was hung up (%s)", cause)
+	}
+	if rig.pendingLeg(id.String()) != nil {
+		t.Error("the continuation is still armed after it ran")
+	}
+	// And a second pass does not run it again.
+	rig.reconcile(t)
+	select {
+	case <-ran:
+		t.Error("the continuation ran twice")
+	default:
+	}
+}
+
+// The same blip, but the window has closed: a clean hangup, with the late
+// answer's cause, and nothing left armed.
+func TestALegAnsweredDuringABlipAfterItsWindowIsHungUp(t *testing.T) {
+	rig := newRecoveryRig(t)
+	rig.cold = false
+	call, id := uuid.New(), uuid.New()
+	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
+		age: 70 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
+	rig.svc.armUntil(id.String(), t0.Add(-10*time.Second), func() { t.Error("a spent continuation ran") })
 
 	rig.reconcile(t)
 
-	if cause, ok := rig.sw.killed(id.String()); !ok || cause != ReconcileCause {
-		t.Errorf("killed=%v cause=%q", ok, cause)
+	if cause, ok := rig.sw.killed(id.String()); !ok || cause != LateAnswerCause {
+		t.Errorf("killed=%v cause=%q, want %s", ok, cause, LateAnswerCause)
 	}
 	if rig.pendingLeg(id.String()) != nil {
-		t.Error("the continuation of a hung-up leg is still armed")
+		t.Error("a hung-up leg is still armed")
 	}
 }
 

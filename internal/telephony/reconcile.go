@@ -70,10 +70,18 @@ type LiveChannel struct {
 	// IsBotLeg marks the leg the switch dialled towards the bot gateway.
 	IsBotLeg bool
 	// PeerIsBotLeg reports that the leg this one is bridged to is the bot
-	// gateway's; PeerCreatedAt is when that leg began, which says how long
-	// the bot has had to open a session.
-	PeerIsBotLeg  bool
-	PeerCreatedAt time.Time
+	// gateway's.
+	PeerIsBotLeg bool
+	// Age is how long the channel has existed, and BridgeAge how long it has
+	// been bridged (or, failing the bridge time, how long its peer has been
+	// answered). Both are measured on the switch's clock: the dump's own
+	// timestamp minus the channel's own, never this machine's now. The Is...
+	// flags say whether the switch gave enough to compute them; when it did
+	// not, nothing may be decided from the figure.
+	Age              time.Duration
+	IsAgeKnown       bool
+	BridgeAge        time.Duration
+	IsBridgeAgeKnown bool
 	// BridgedAt is when the bridge to the peer started, zero when unknown.
 	BridgedAt time.Time
 
@@ -126,38 +134,50 @@ var knownCallStates = []string{
 // parseChannelList reads the listing, tolerating damage. A row that cannot be
 // used is skipped with a warning; a payload cut off mid-way yields the rows
 // before the cut. Nothing here aborts the pass.
-func parseChannelList(payload string, log *slog.Logger) []listedChannel {
+//
+// listed holds the uuid of every row the switch showed, usable or not, and
+// isComplete says the whole payload was read: only a complete listing can
+// prove that a channel is gone.
+func parseChannelList(payload string, log *slog.Logger) (rows []listedChannel, listed map[string]bool, isComplete bool) {
 	dec := json.NewDecoder(strings.NewReader(payload))
-	var rows []listedChannel
+	listed = map[string]bool{}
 
 	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
 		log.Warn("channel listing is not a JSON object; nothing adopted", "error", err)
-		return nil
+		return nil, listed, false
 	}
 	for dec.More() {
 		keyTok, err := dec.Token()
 		if err != nil {
 			log.Warn("channel listing is cut off", "error", err)
-			return rows
+			return rows, listed, false
 		}
 		key, _ := keyTok.(string)
 		if key != "rows" {
 			var skip json.RawMessage
 			if err := dec.Decode(&skip); err != nil {
 				log.Warn("channel listing is cut off", "error", err)
-				return rows
+				return rows, listed, false
 			}
 			continue
 		}
 		if tok, err := dec.Token(); err != nil || tok != json.Delim('[') {
 			log.Warn("channel listing has no row array", "error", err)
-			return rows
+			return rows, listed, false
 		}
 		for dec.More() {
 			var raw json.RawMessage
 			if err := dec.Decode(&raw); err != nil {
 				log.Warn("channel listing is cut off", "error", err, "rowsRead", len(rows))
-				return rows
+				return rows, listed, false
+			}
+			var named struct {
+				UUID string `json:"uuid"`
+			}
+			if json.Unmarshal(raw, &named) == nil {
+				if id, err := uuid.Parse(named.UUID); err == nil {
+					listed[id.String()] = true
+				}
 			}
 			if row, ok := parseChannelRow(raw, log); ok {
 				rows = append(rows, row)
@@ -165,10 +185,14 @@ func parseChannelList(payload string, log *slog.Logger) []listedChannel {
 		}
 		if _, err := dec.Token(); err != nil { // the closing bracket
 			log.Warn("channel listing is cut off", "error", err)
-			return rows
+			return rows, listed, false
 		}
 	}
-	return rows
+	if _, err := dec.Token(); err != nil { // the closing brace
+		log.Warn("channel listing is cut off", "error", err)
+		return rows, listed, false
+	}
+	return rows, listed, true
 }
 
 func parseChannelRow(raw json.RawMessage, log *slog.Logger) (listedChannel, bool) {
@@ -236,6 +260,24 @@ func (d dumped) createdAt() time.Time {
 	return time.Time{}
 }
 
+// switchNow is the switch's clock when the dump was made.
+func (d dumped) switchNow() time.Time { return d.micros("Event-Date-Timestamp") }
+
+// bridgedTo is the leg this one is really bridged to. A pointer to a peer is
+// believed only when that peer is listed and points back: a stale pointer on a
+// leg whose bridge has since ended must not read as a bridge.
+func (d dumped) bridgedTo(byID map[string]dumped) string {
+	id := d.peer()
+	if id == "" {
+		return ""
+	}
+	other, ok := byID[id]
+	if !ok || other.peer() != d.get("Unique-ID") {
+		return ""
+	}
+	return id
+}
+
 func (d dumped) peer() string {
 	for _, v := range []string{
 		d.get("Other-Leg-Unique-ID"), d.variable("signal_bond"), d.variable("bridge_uuid"),
@@ -294,6 +336,9 @@ func (d dumped) event(name string, at time.Time, extra map[string]string) *esl.E
 // An error means the listing could not be had at all. Individual channels
 // that cannot be read are logged and skipped.
 func (c *Coordinator) AdoptLiveChannels(ctx context.Context) ([]LiveChannel, error) {
+	// Anything the registry learned of after this instant may be a channel the
+	// listing could not have shown.
+	snapshotStart := time.Now()
 	payload, err := c.adapter.ShowChannels()
 	if err != nil {
 		return nil, fmt.Errorf("list channels: %w", err)
@@ -302,7 +347,7 @@ func (c *Coordinator) AdoptLiveChannels(ctx context.Context) ([]LiveChannel, err
 		return nil, fmt.Errorf("list channels: %s", reply)
 	}
 	log := slog.Default()
-	rows := parseChannelList(payload, log)
+	rows, listed, isComplete := parseChannelList(payload, log)
 
 	var all []dumped
 	for _, row := range rows {
@@ -382,11 +427,11 @@ func (c *Coordinator) AdoptLiveChannels(ctx context.Context) ([]LiveChannel, err
 	}
 	bridged := map[string]bool{}
 	for _, d := range adopted {
-		id, peerID := d.get("Unique-ID"), d.peer()
+		id, peerID := d.get("Unique-ID"), d.bridgedTo(byID)
 		if peerID == "" || bridged[id] || bridged[peerID] {
 			continue
 		}
-		if _, ok := byID[peerID]; !ok || !c.registry.Owns(peerID) {
+		if !c.registry.Owns(peerID) {
 			continue
 		}
 		bridged[id], bridged[peerID] = true, true
@@ -396,9 +441,41 @@ func (c *Coordinator) AdoptLiveChannels(ctx context.Context) ([]LiveChannel, err
 		}))
 	}
 
+	if isComplete {
+		c.closeVanished(ctx, listed, snapshotStart)
+	} else {
+		log.Warn("channel listing was incomplete; no vanished channel is closed on its evidence")
+	}
+
 	log.Info("live channels adopted",
 		"listed", len(rows), "read", len(all), "ours", len(found), "adopted", len(adopted))
 	return found, nil
+}
+
+// VanishedCause is the release cause recorded on a leg whose hangup this
+// process never saw: the switch no longer has the channel, and nothing says how
+// it ended. A word of our own rather than a Q.850 name, because no switch said
+// it, and the ledger should show that the ending is an inference.
+const VanishedCause = "CHANNEL_VANISHED"
+
+// closeVanished ends, through the ordinary hangup path, every channel the
+// registry holds that a complete listing does not show. A hangup lost while
+// the link was down otherwise leaves the call open for ever: its agent
+// stays on a call and no CDR is written.
+//
+// A channel the registry learned of after the snapshot began is exempt: it
+// may have been created too late for the listing to show it.
+func (c *Coordinator) closeVanished(ctx context.Context, listed map[string]bool, snapshotStart time.Time) {
+	for id, boundAt := range c.registry.BoundChannels() {
+		if listed[id] || !boundAt.Before(snapshotStart) {
+			continue
+		}
+		slog.Warn("closing a channel the switch no longer has", "channelId", id, "cause", VanishedCause)
+		c.replay(ctx, esl.NewEvent(map[string]string{
+			"Event-Name": "CHANNEL_HANGUP_COMPLETE", "Unique-ID": id, "Hangup-Cause": VanishedCause,
+			"Event-Date-Timestamp": strconv.FormatInt(time.Now().UnixMicro(), 10),
+		}, ""))
+	}
 }
 
 func (c *Coordinator) replay(ctx context.Context, raw *esl.Event) {
@@ -415,7 +492,7 @@ func liveChannelOf(d dumped, callID uuid.UUID, byID map[string]dumped) LiveChann
 		IsInbound:     strings.EqualFold(d.get("Call-Direction"), "inbound"),
 		IsAnswered:    d.isAnswered(),
 		IsParked:      d.isParked(),
-		PeerChannelID: d.peer(),
+		PeerChannelID: d.bridgedTo(byID),
 		BridgedAt:     d.micros("Caller-Channel-Bridged-Time"),
 		Language:      d.variable("aicc_language"),
 		DID:           d.variable("aicc_did"),
@@ -423,18 +500,31 @@ func liveChannelOf(d dumped, callID uuid.UUID, byID map[string]dumped) LiveChann
 		PlacedTo:      d.variable(VarPlacedTo),
 		Destination:   d.variable("aicc_destination"),
 	}
+	now := d.switchNow()
+	if created := d.createdAt(); !now.IsZero() && !created.IsZero() && !now.Before(created) {
+		ch.Age, ch.IsAgeKnown = now.Sub(created), true
+	}
 	if ev, ok := Normalize(d.event("CHANNEL_CREATE", time.Time{}, nil)); ok {
 		ch.IsBotLeg = isBotLeg(ev)
 	}
-	// A leg whose peer is no longer listed is not bridged to anything.
-	peer, ok := byID[ch.PeerChannelID]
-	if !ok {
-		ch.PeerChannelID = ""
+	if ch.PeerChannelID == "" {
 		return ch
 	}
-	ch.PeerCreatedAt = peer.createdAt()
+	peer := byID[ch.PeerChannelID]
 	if ev, ok := Normalize(peer.event("CHANNEL_CREATE", time.Time{}, nil)); ok {
 		ch.PeerIsBotLeg = isBotLeg(ev)
+	}
+	// When the bridge began: its own stamp on either leg, else when the peer
+	// answered, which is the earliest the bridge could have been made.
+	since := d.micros("Caller-Channel-Bridged-Time")
+	if since.IsZero() {
+		since = peer.micros("Caller-Channel-Bridged-Time")
+	}
+	if since.IsZero() {
+		since = peer.micros("Caller-Channel-Answered-Time")
+	}
+	if !now.IsZero() && !since.IsZero() && !now.Before(since) {
+		ch.BridgeAge, ch.IsBridgeAgeKnown = now.Sub(since), true
 	}
 	return ch
 }

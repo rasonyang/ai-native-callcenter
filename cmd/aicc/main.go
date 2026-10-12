@@ -315,7 +315,7 @@ func run() error {
 		Events: hub,
 		Log:    slog.Default(),
 		Reconcile: reconcileLive(coordinator, outboundSvc, hasBotSession,
-			slog.Default(), 2*time.Second),
+			link.IsUp, slog.Default(), reconcileBackoffMin),
 	}.connect()
 
 	// Business data a request attached to a call reaches the call itself here,

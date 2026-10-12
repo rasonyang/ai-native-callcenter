@@ -102,6 +102,17 @@ type Coordinator struct {
 	// them and this is the only place that knows they exist.
 	observerMu sync.Mutex
 	observers  map[string]string
+
+	// handleMu makes Handle one-at-a-time. The dispatch loop is its only
+	// ordinary caller, but a reconcile replays history into it from another
+	// goroutine while a stale backlog may still be draining, and the maps this
+	// type keeps outside the call actors are not written for two callers.
+	handleMu sync.Mutex
+	// bridged remembers which peer each channel was last bridged to, so a
+	// bridge announced twice (once replayed, once by the switch) attaches the
+	// tap and addresses the transcript once.
+	bridgedMu sync.Mutex
+	bridged   map[string]string
 }
 
 // Audiences records who may see a call's live transcript. Nil leaves every
@@ -229,6 +240,8 @@ func NewCoordinator(registry *Registry, adapter *Adapter, agents AgentLookup, pu
 
 // Handle consumes one normalized switch event.
 func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
+	c.handleMu.Lock()
+	defer c.handleMu.Unlock()
 	// A harness leg is scaffolding around a scripted call — the loopback half
 	// that only exists to push audio at the system under test. It is not a
 	// party to any conversation and must never reach the ledger.
@@ -293,6 +306,9 @@ func (c *Coordinator) Handle(ctx context.Context, ev SwitchEvent) {
 		case KindChannelUnbridge, KindChannelHangup:
 			c.taps.Detach(ev.ChannelID)
 		}
+	}
+	if ev.Kind == KindChannelUnbridge || ev.Kind == KindChannelHangup {
+		c.forgetBridge(ev.ChannelID)
 	}
 
 	// The dialplan mints a call's identity after the channel already exists,
@@ -736,6 +752,9 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	// the transcription tap with it. Whether a merge was needed is a question
 	// about identity; the tap is a question about a bridge, and they are not
 	// the same question.
+	if callID == otherID && c.noteBridge(ev.ChannelID, ev.OtherChannelID) {
+		return // the same bridge again: its side effects have been done
+	}
 	keep := callID
 	if callID != otherID {
 		// Keep the identity everything else refers to. A minted id — chosen by
@@ -777,6 +796,31 @@ func (c *Coordinator) join(ctx context.Context, ev SwitchEvent) {
 	// written to the database, published to nobody, the agent's panel empty
 	// for the whole conversation.
 	c.announceAudience(keep)
+}
+
+// noteBridge records a bridge and reports whether it was already recorded.
+func (c *Coordinator) noteBridge(a, b string) (isRepeat bool) {
+	c.bridgedMu.Lock()
+	defer c.bridgedMu.Unlock()
+	if c.bridged == nil {
+		c.bridged = map[string]string{}
+	}
+	isRepeat = c.bridged[a] == b && c.bridged[b] == a
+	c.bridged[a], c.bridged[b] = b, a
+	return isRepeat
+}
+
+// forgetBridge drops a channel's bridge when it ends, so a later bridge of
+// the same channel is new.
+func (c *Coordinator) forgetBridge(channelID string) {
+	c.bridgedMu.Lock()
+	defer c.bridgedMu.Unlock()
+	if peer, ok := c.bridged[channelID]; ok {
+		delete(c.bridged, channelID)
+		if c.bridged[peer] == channelID {
+			delete(c.bridged, peer)
+		}
+	}
 }
 
 // agentDidNotAnswer takes an agent out of routing when a call the queue
