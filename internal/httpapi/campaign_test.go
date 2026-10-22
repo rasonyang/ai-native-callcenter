@@ -348,7 +348,8 @@ func TestCampaignWritesAreValidatedWithTheContractsCodes(t *testing.T) {
 func TestAWindowAcrossMidnightIsAllowedWhereTheOuterHoursAllowIt(t *testing.T) {
 	night, _ := dayrange.Parse("20:00-04:00")
 	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
-		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{OutboundHours: night})
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil,
+			campaign.Env{OutboundHours: night, OutboundEndpoint: testOutboundEndpoint})
 	})
 	admin := f.seedAdmin()
 	didID, _ := campaignDID(t, f.st, "95099", false)
@@ -1321,4 +1322,70 @@ func TestClearingAllowOutboundUnderALiveCampaignIsRefusedOverHTTP(t *testing.T) 
 
 	f.post(admin, "/campaigns/"+c.ID+"/cancel", nil)
 	wantReply(t, "clear allowOutbound after cancel", put(false), http.StatusOK, "")
+}
+
+// A deployment that cannot place an AI outbound call refuses to start a
+// campaign, and writes nothing: every contact whose attempt would fail and be
+// retried for hours is worse than a refusal that says which setting is missing
+// (#293). The campaign stays a DRAFT, so setting the endpoint and starting
+// again is the whole recovery.
+func TestStartingACampaignIsRefusedWhenTheDeploymentHasNoEndpoint(t *testing.T) {
+	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
+		// The fixture's deployment dials; this one has no dial string at all.
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{DefaultCountryCode: "86"})
+	})
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95099", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	wantReply(t, "start with no outbound endpoint",
+		f.post(admin, "/campaigns/"+c.ID+"/start", nil), http.StatusConflict, "OUTBOUND_NOT_CONFIGURED")
+
+	if v := decodeCampaign(t, f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin})); v.Status != "DRAFT" {
+		t.Errorf("status = %s, want DRAFT: a refused start changes nothing", v.Status)
+	}
+	var attempts attemptList
+	_ = json.Unmarshal(f.do(call{method: http.MethodGet,
+		path: "/campaigns/" + c.ID + "/attempts", cookie: admin}).body, &attempts)
+	if attempts.Total != 0 {
+		t.Errorf("a refused start wrote %d attempts", attempts.Total)
+	}
+}
+
+// A campaign names the business fields its flow reads, so the import screen
+// offers them instead of asking for a slot name typed from memory: a name the
+// flow does not read refuses the whole file, and a five-thousand-row file is a
+// bad place to learn that (#293).
+func TestACampaignShowsTheFieldsItsFlowReads(t *testing.T) {
+	f := newFixture(t)
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95097", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	type withFields struct {
+		FlowFields []string `json:"flowFields"`
+	}
+	one := func() withFields {
+		r := f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin})
+		var v withFields
+		if err := json.Unmarshal(r.body, &v); err != nil {
+			t.Fatalf("decode campaign: %v: %s", err, r.body)
+		}
+		return v
+	}
+	// The fixture's flow reads name, plan and city; the vocabulary is sorted.
+	if got := one().FlowFields; !slices.Equal(got, []string{"city", "name", "plan"}) {
+		t.Errorf("flowFields = %v, want [city name plan]", got)
+	}
+
+	// The list carries it too, so the campaign screen opens the import dialog
+	// without a second request.
+	r := f.do(call{method: http.MethodGet, path: "/campaigns", cookie: admin})
+	var list struct{ Items []withFields }
+	if err := json.Unmarshal(r.body, &list); err != nil {
+		t.Fatalf("decode list: %v: %s", err, r.body)
+	}
+	if len(list.Items) != 1 || !slices.Equal(list.Items[0].FlowFields, []string{"city", "name", "plan"}) {
+		t.Errorf("list flowFields = %+v, want the same three", list.Items)
+	}
 }

@@ -98,8 +98,10 @@ type reportState struct {
 }
 
 // NewReporter builds a reporter. load reads a campaign with the dialer's
-// account attached (Service.Get); emit publishes a snapshot and must not
-// block. sched nil means the wall clock.
+// account attached (Service.Load, which leaves out the flow's field names: the
+// reporter reads a campaign up to once a second per running campaign and never
+// looks at them); emit publishes a snapshot and must not block. sched nil means
+// the wall clock.
 func NewReporter(load func(ctx context.Context, id uuid.UUID) (Campaign, error), emit func(Snapshot), sched Scheduler, log *slog.Logger) *Reporter {
 	if sched == nil {
 		sched = realScheduler{}

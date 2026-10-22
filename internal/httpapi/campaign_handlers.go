@@ -423,6 +423,11 @@ func campaignRefusal(err error) (status int, code ErrorCode, message string, par
 			return http.StatusConflict, CodeCampaignFlowHasTransfer, ce.Message, params, true
 		}
 		return http.StatusUnprocessableEntity, CodeCampaignFlowHasTransfer, ce.Message, params, true
+	case errors.Is(ce.Kind, campaign.ErrOutboundNotConfigured):
+		// Not the campaign's fault and not a bad request: the deployment has
+		// nowhere to dial. 409, the status the transition refusals use, and a
+		// code that names the missing setting.
+		return http.StatusConflict, CodeOutboundNotConfigured, ce.Message, nil, true
 	}
 	return 0, "", "", nil, false
 }
@@ -548,6 +553,11 @@ func campaignOut(c campaign.Campaign) api.Campaign {
 		cc := c.DefaultCountryCode
 		out.DefaultCountryCode = &cc
 	}
+	fields := c.FlowFields
+	if fields == nil {
+		fields = []string{}
+	}
+	out.FlowFields = &fields
 	return out
 }
 

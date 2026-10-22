@@ -703,6 +703,13 @@ outside the window, and move to Tuesday 09:00.
 - **Provider breaker:** `M` consecutive answered calls (default 5) ending `BOT_FAILED` →
   `PAUSED / PROVIDER_FAILURE`. Answered contacts are not redialled, so a provider outage that does
   not stop the campaign burns one lead per answered call.
+- **No outbound endpoint (decided 2026-10-21, #293 review).** A deployment with an empty
+  `AICC_OUTBOUND_ENDPOINT` cannot place any call, so the first attempt the placer refuses
+  (`ErrNoOutboundEndpoint`) is voided — no attempt row, no retry budget, the contact due again as
+  it was — and the campaign is paused at once as `PAUSED / TRUNK_FAILURE`. One attempt is enough
+  evidence: waiting for `N` of them would spend the list's system retries on a setting, and the
+  `409 OUTBOUND_NOT_CONFIGURED` a start answers does not cover a resume, or a campaign the dialer
+  picked up after a restart.
 - Both are resumed by an operator.
 
 ---
@@ -889,12 +896,15 @@ The model judges; code records.
 - **A number added while its campaign runs:** an attempt not yet admitted is skipped
   (`DNC_SKIPPED`); one already ringing or talking is not hung up, and no retry follows because the
   contact becomes `DNC`.
-- **Comparing a single call's number (decided by the owner, 2026-10-12).** DNC entries are
-  canonical E.164 (§9.1). A single call's `to` is canonicalised with the deployment setting
-  `AICC_DEFAULT_COUNTRY_CODE` before the check. The binary's default is empty; the deploy stack and
-  the development environment set `86`. With it empty a national `to` cannot be canonicalised and
-  is not checked (a known gap), while a `+` or `00` number always is; `aicc doctor` warns when the
-  list is non-empty and the code is unset.
+- **Comparing a single call's number (decided by the owner, 2026-10-12; the default revised
+  2026-10-21, #293).** DNC entries are canonical E.164 (§9.1). A single call's `to` is
+  canonicalised with the deployment setting `AICC_DEFAULT_COUNTRY_CODE` before the check. The
+  binary's default is `1`: a national number is never ambiguous, and a deployment outside +1 sets
+  its own. The deploy stack keeps the `86` it has always set — an upgrade must not change how an
+  existing deployment's national numbers match the list — and the development `.env` sets `86`
+  too. The value cannot be blanked — `AICC_DEFAULT_COUNTRY_CODE=` reads as unset and the default
+  applies — so a national `to` is always canonicalised, while a `+` or `00` number is compared as
+  written. There is no unset state left, which is why `aicc doctor` no longer warns about one.
 
 ---
 

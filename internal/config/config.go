@@ -167,8 +167,11 @@ type Config struct {
 	OutboundCallerID string
 	// DefaultCountryCode (AICC_DEFAULT_COUNTRY_CODE) is the country calling
 	// code, digits without "+", that completes a national number before it is
-	// compared with the do-not-call list. Empty means national numbers cannot
-	// be completed (see internal/outbound DNC check).
+	// compared with the do-not-call list and imported into a campaign. It
+	// defaults to 1, so a national number is never ambiguous; a deployment
+	// outside the North American numbering plan sets its own (docs, and
+	// deploy/README.md for the stack). An empty value means unset and cannot
+	// be expressed: a non-empty default cannot be blanked.
 	DefaultCountryCode string
 	// OutboundDialForm (AICC_OUTBOUND_DIAL_FORM) is how the campaign dialer
 	// writes a number to the trunk: E164 (default), E164_NO_PLUS or NATIONAL.
@@ -451,7 +454,7 @@ func Load() (Config, error) {
 		OutboundSIPHeaders:            outboundHeaders,
 		outboundSIPHeadersErr:         outboundHeadersErr,
 		OutboundCallerID:              env("AICC_OUTBOUND_CLID", ""),
-		DefaultCountryCode:            env("AICC_DEFAULT_COUNTRY_CODE", ""),
+		DefaultCountryCode:            env("AICC_DEFAULT_COUNTRY_CODE", "1"),
 		OutboundDialForm:              dialForm,
 		outboundDialFormErr:           dialFormErr,
 		RecordingBackend:              env("AICC_RECORDING_BACKEND", "FS"),

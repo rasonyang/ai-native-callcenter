@@ -1055,6 +1055,14 @@ final_output() {
     fi
     say "  Phone:      install the browser phone, $EXTENSION_URL"
     say "              and add $EXTERNAL_IP in the extension's Allow Sites"
+    # `aicc doctor` already printed a WARN; this says what it means for the
+    # first thing an operator tries to do. A stack has no trunk of its own, so
+    # campaigns would dial nothing until a gateway is configured.
+    if [ -z "$(env_get "$ENV_FILE" AICC_OUTBOUND_ENDPOINT)" ]; then
+        say "  Campaigns:  none yet: with no AICC_OUTBOUND_ENDPOINT a campaign cannot"
+        say "              place a call. Connect a carrier (deploy/carrier.md), set"
+        say "              AICC_OUTBOUND_ENDPOINT in $ENV_FILE and rerun this installer."
+    fi
     if [ "$_fo_seed" = demo ]; then
         say ""
         say "Next: sign in as an agent, then dial 95001 (English) / 95002 (Chinese)."

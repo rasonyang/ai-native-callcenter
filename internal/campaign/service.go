@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -161,6 +162,11 @@ type Env struct {
 	// DefaultCountryCode (AICC_DEFAULT_COUNTRY_CODE) completes national
 	// numbers of campaigns that name no country code of their own.
 	DefaultCountryCode string
+	// OutboundEndpoint is AICC_OUTBOUND_ENDPOINT: the dial string a customer
+	// leg is placed with, empty when the deployment cannot dial out at all.
+	// Start reads it so a campaign that could not place a single call is
+	// refused while somebody is looking, not after hours of failed attempts.
+	OutboundEndpoint string
 }
 
 // ringTimeoutMaxSec is the largest whole number of seconds strictly below the
@@ -258,13 +264,63 @@ func (s *Service) annotate(list []Campaign) {
 	}
 }
 
-// moved annotates the campaign a transition returns.
-func (s *Service) moved(c Campaign, err error) (Campaign, error) {
+// attachFlowFields fills FlowFields on every campaign in list from the
+// published revision of the number it dials from: one lookup for the whole
+// page, because several campaigns usually dial from the same number. A number
+// with no published flow, or one the repository does not know, leaves an empty
+// list rather than a nil one, so the field is always an array on the wire.
+func (s *Service) attachFlowFields(ctx context.Context, list []Campaign) error {
+	if len(list) == 0 {
+		return nil
+	}
+	ids := make([]uuid.UUID, 0, len(list))
+	seen := make(map[uuid.UUID]bool, len(list))
+	for _, c := range list {
+		if !seen[c.DIDID] {
+			seen[c.DIDID] = true
+			ids = append(ids, c.DIDID)
+		}
+	}
+	flows, err := s.repo.DIDFlows(ctx, ids)
+	if err != nil {
+		return err
+	}
+	names := make(map[uuid.UUID][]string, len(flows))
+	for _, d := range flows {
+		names[d.ID] = flow.UserDataNames(d.Spec)
+	}
+	for i := range list {
+		fields := names[list[i].DIDID]
+		if fields == nil {
+			fields = []string{}
+		}
+		list[i].FlowFields = fields
+	}
+	return nil
+}
+
+// present fills everything a response carries beyond the stored row: the
+// dialer's view of a running campaign and the field names its flow reads.
+func (s *Service) present(ctx context.Context, list []Campaign) error {
+	s.annotate(list)
+	return s.attachFlowFields(ctx, list)
+}
+
+// moved presents the campaign a transition returns.
+//
+// The transition is committed by the time this runs, so a lookup that cannot
+// fill the read-only advice is logged and the response still goes out: told
+// the start failed, a client would retry and be answered a transition error,
+// having no way to learn the campaign is running.
+func (s *Service) moved(ctx context.Context, c Campaign, err error) (Campaign, error) {
 	if err != nil {
 		return c, err
 	}
 	list := []Campaign{c}
-	s.annotate(list)
+	if err := s.present(ctx, list); err != nil {
+		slog.Warn("campaign: cannot fill the read-only fields of a transition's response",
+			"campaignId", c.ID, "error", err)
+	}
 	return list[0], nil
 }
 
@@ -372,11 +428,22 @@ func (s *Service) Create(ctx context.Context, in New) (Campaign, error) {
 	if s.onCreated != nil {
 		s.onCreated(stored.ID)
 	}
-	return stored, nil
+	list := []Campaign{stored}
+	if err := s.present(ctx, list); err != nil {
+		slog.Warn("campaign: cannot fill the read-only fields of a create's response",
+			"campaignId", stored.ID, "error", err)
+	}
+	return list[0], nil
 }
 
-// Get returns one campaign.
-func (s *Service) Get(ctx context.Context, id uuid.UUID) (Campaign, error) {
+// Load is how the dialer reads a campaign: the stored row with the dialer's own
+// account of it attached, and nothing more. The reporter calls it up to once a
+// second for every running campaign and reads only the status, the pause reason
+// and the progress, so this read leaves out the flow's field names: filling
+// them costs a DIDFlows query and a parse of the published spec that nobody
+// here looks at, and a failure in that lookup must not drop a report about a
+// campaign the database answered perfectly well.
+func (s *Service) Load(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	c, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return c, err
@@ -386,14 +453,37 @@ func (s *Service) Get(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	return list[0], nil
 }
 
+// Get returns one campaign as a response carries it: Load, plus the field names
+// its flow reads. They are read-only advice, so a lookup that cannot fill them
+// is logged and the campaign still goes out; the import screen then offers no
+// names rather than the screen failing to open.
+func (s *Service) Get(ctx context.Context, id uuid.UUID) (Campaign, error) {
+	c, err := s.Load(ctx, id)
+	if err != nil {
+		return c, err
+	}
+	list := []Campaign{c}
+	if err := s.attachFlowFields(ctx, list); err != nil {
+		slog.Warn("campaign: cannot fill the read-only fields of a campaign's response",
+			"campaignId", id, "error", err)
+	}
+	return list[0], nil
+}
+
 // List pages campaigns, newest first.
 func (s *Service) List(ctx context.Context, f ListFilter) ([]Campaign, int64, error) {
 	if f.Status != "" && !f.Status.IsValid() {
 		return nil, 0, invalid("status", "UNKNOWN_STATUS", "%q is not a campaign status", f.Status)
 	}
 	items, total, err := s.repo.List(ctx, f)
-	s.annotate(items)
-	return items, total, err
+	if err != nil {
+		return nil, total, err
+	}
+	if err := s.present(ctx, items); err != nil {
+		// The page is the resource; the field names are advice on top of it.
+		slog.Warn("campaign: cannot fill the read-only fields of a page of campaigns", "error", err)
+	}
+	return items, total, nil
 }
 
 // mutable fields while a campaign runs or is paused; everything else is
@@ -501,7 +591,10 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, p Patch) (Campaign, 
 		s.observer.Updated(before, after)
 	}
 	list := []Campaign{after}
-	s.annotate(list)
+	if err := s.present(ctx, list); err != nil {
+		slog.Warn("campaign: cannot fill the read-only fields of an update's response",
+			"campaignId", after.ID, "error", err)
+	}
 	return list[0], nil
 }
 
@@ -541,6 +634,11 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 // Start moves DRAFT to RUNNING. The campaign is checked once more first: its
 // DID may have lost its flow or been disabled since it was written, and the
 // outer calling hours may have been narrowed.
+//
+// The deployment is checked too: with no outbound endpoint every attempt is
+// refused inside the application, classified as a system failure and retried
+// for hours, so a campaign that cannot possibly place a call is refused here
+// instead of started.
 func (s *Service) Start(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	cur, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -549,27 +647,38 @@ func (s *Service) Start(ctx context.Context, id uuid.UUID) (Campaign, error) {
 	if cur.Status != StatusDraft {
 		return Campaign{}, NewTransitionError(cur.Status, "START")
 	}
+	if s.env.OutboundEndpoint == "" {
+		return Campaign{}, &Error{
+			Kind: ErrOutboundNotConfigured,
+			Message: "this deployment has no outbound endpoint (AICC_OUTBOUND_ENDPOINT), " +
+				"so no call could be placed; see deploy/carrier.md",
+		}
+	}
 	if _, err := s.validate(ctx, cur, changes{
 		"didId": true, "timeZone": true, "callingWindow": true, "ringTimeoutSec": true,
 	}); err != nil {
 		return Campaign{}, err
 	}
-	return s.moved(s.ctl.Start(ctx, id))
+	c, err := s.ctl.Start(ctx, id)
+	return s.moved(ctx, c, err)
 }
 
 // Pause moves RUNNING to PAUSED with reason MANUAL.
 func (s *Service) Pause(ctx context.Context, id uuid.UUID) (Campaign, error) {
-	return s.moved(s.ctl.Pause(ctx, id))
+	c, err := s.ctl.Pause(ctx, id)
+	return s.moved(ctx, c, err)
 }
 
 // Resume moves PAUSED to RUNNING, whatever paused it.
 func (s *Service) Resume(ctx context.Context, id uuid.UUID) (Campaign, error) {
-	return s.moved(s.ctl.Resume(ctx, id))
+	c, err := s.ctl.Resume(ctx, id)
+	return s.moved(ctx, c, err)
 }
 
 // Cancel moves DRAFT, RUNNING or PAUSED to CANCELLED. Calls in flight finish.
 func (s *Service) Cancel(ctx context.Context, id uuid.UUID) (Campaign, error) {
-	return s.moved(s.ctl.Cancel(ctx, id))
+	c, err := s.ctl.Cancel(ctx, id)
+	return s.moved(ctx, c, err)
 }
 
 // ListContacts pages a campaign's contacts in import order.

@@ -48,7 +48,8 @@ func TestARunningCampaignShowsWhatTheDialerSaysAboutIt(t *testing.T) {
 	progress := progressFake{}
 	outer, _ := dayrange.Parse("08:00-21:00")
 	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
-		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{OutboundHours: outer, DefaultCountryCode: "86"}).
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil,
+			campaign.Env{OutboundHours: outer, DefaultCountryCode: "86", OutboundEndpoint: testOutboundEndpoint}).
 			WithDialer(progress, nil)
 	})
 	admin := f.seedAdmin()

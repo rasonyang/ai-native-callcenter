@@ -572,6 +572,7 @@ const (
 	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
 	ErrorCodeNUMBERONDNC                    ErrorCode = "NUMBER_ON_DNC"
 	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
+	ErrorCodeOUTBOUNDNOTCONFIGURED          ErrorCode = "OUTBOUND_NOT_CONFIGURED"
 	ErrorCodeRATELIMITED                    ErrorCode = "RATE_LIMITED"
 	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
 	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
@@ -643,6 +644,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeNUMBERONDNC:
 		return true
 	case ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE:
+		return true
+	case ErrorCodeOUTBOUNDNOTCONFIGURED:
 		return true
 	case ErrorCodeRATELIMITED:
 		return true
@@ -1656,6 +1659,9 @@ type Campaign struct {
 
 	// FinishedAt Present once COMPLETED or CANCELLED.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+
+	// FlowFields Read-only. The business-data names the campaign's flow reads (userData.<name>): the vocabulary a contact's imported columns may map to. Sorted, without duplicates; empty when the DID has no published flow.
+	FlowFields *[]string `json:"flowFields,omitempty"`
 
 	// FollowUpQueueID The queue a HIGH lead's callback is filed under. Absent when none is set.
 	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`

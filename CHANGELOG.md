@@ -5,6 +5,53 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Upgrade notes
+
+- The binary's default country code is now `1` (`AICC_DEFAULT_COUNTRY_CODE`), so
+  a national number is never ambiguous when nobody says otherwise. The deploy
+  stack keeps `86`, the value it has always set: an upgrade therefore cannot
+  change how an existing deployment's national numbers match the do-not-call
+  list, which a silent switch to `+1` would have done (a national
+  `13800138000` would stop matching `+8613800138000` and be dialled). A stack
+  outside +86 sets its own code in `.env`; one inside +86 writes its numbers
+  nationally, as before. The development `.env` still sets `86`. Because the
+  value can no longer be empty, `aicc doctor` drops the `dnc_country_code`
+  check and its `DNC_COUNTRY_CODE_UNSET` code: a national number is now always
+  canonicalised rather than silently left unchecked.
+- API contract: `POST /calls` answers `409 OUTBOUND_NOT_CONFIGURED` instead of
+  `503 STORAGE_DOWN` when `AICC_OUTBOUND_ENDPOINT` is empty, and
+  `POST /campaigns/{campaignId}/start` answers the same code instead of
+  creating a campaign whose every attempt would fail. `Campaign` gains the
+  read-only `flowFields`.
+- `aicc doctor` gains two warnings, neither of which changes the exit status:
+  `outbound_endpoint` (`OUTBOUND_ENDPOINT_UNSET`) when
+  `AICC_OUTBOUND_ENDPOINT` is empty, and `outbound_gateway`
+  (`OUTBOUND_GATEWAY_MISSING`) when the endpoint names a gateway the switch
+  does not have — a typo, or a gateway file that never loaded — naming the
+  gateways that do exist, and, when the gateway is there but the switch would
+  not place a call through it, the state it is in (`FAIL_WAIT`, `UNREGED`).
+
+### Changed
+
+- A campaign refuses to start on a deployment that cannot place an outbound
+  call, rather than dialling every contact into a trunk it has not been given.
+  The SPA says so in English and Chinese and points at `deploy/carrier.md`;
+  the deploy guide and the installer's closing output say it too.
+- A campaign that is already running — resumed, or picked up by a restarted
+  application — on a deployment with no `AICC_OUTBOUND_ENDPOINT` is paused on
+  the first attempt it cannot place, with that attempt voided rather than
+  retried, instead of spending the list's system retries against a setting.
+- The contact import offers the field names the campaign's flow reads (the new
+  read-only `flowFields`) in a dropdown per column, and preselects a column
+  whose header already names one, ignoring case. Typing a slot name by hand is
+  what turned a header the flow does not read into a refusal of the whole file.
+- `AICC_DEFAULT_COUNTRY_CODE=86` is how a Chinese number written nationally
+  (`13800138000`) is dialled as `+8613800138000`; a campaign's own
+  `defaultCountryCode` does the same for one campaign, and a number written
+  `+86…` needs neither.
+
 ## v0.6.0 - 2026-10-21
 
 ### Upgrade notes

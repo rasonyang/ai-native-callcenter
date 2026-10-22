@@ -123,6 +123,7 @@
     "NUMBER_ON_DNC": "That number is on the do-not-call list. No call was placed.",
     "DID_CHANNELS_EXHAUSTED": "That DID has reached its outbound line limit. No call was placed.",
     "DID_NOT_OUTBOUND": "That number is not allowed to dial out, so it cannot be the caller id. Allow outbound on the number first. No call was placed.",
+    "OUTBOUND_NOT_CONFIGURED": "This deployment cannot place outbound calls: AICC_OUTBOUND_ENDPOINT is not set. Connect a carrier (deploy/carrier.md), then try again. Nothing was dialled.",
     "CAMPAIGN_FLOW_HAS_TRANSFER": "The flow behind this number can hand the caller to a person, and a campaign call has no way to one. Remove the transfer from the flow, or choose another number.",
     "CAMPAIGN_DID_NOT_OUTBOUND": "The number this campaign dials from does not allow outbound calls. Allow outbound on the number, or choose another number.",
     "CAMPAIGN_RING_TIMEOUT_TOO_LONG": "The ring timeout must be shorter than the 60 seconds a call may take to be answered.",
@@ -920,7 +921,7 @@
     },
     "pauseExplain": {
       "MANUAL": "No new calls are placed. Calls in progress finish normally.",
-      "TRUNK_FAILURE": "Too many calls failed to reach the carrier in a row. Nothing will resume this campaign by itself: check the trunk, then resume it.",
+      "TRUNK_FAILURE": "This campaign could not place calls: either several failed in a row, or the deployment has no outbound endpoint at all (AICC_OUTBOUND_ENDPOINT). Nothing will resume it by itself: check the trunk (deploy/carrier.md), then resume it.",
       "PROVIDER_FAILURE": "Too many answered calls failed to start a bot session in a row. Nothing will resume this campaign by itself: check the voice provider, then resume it."
     },
     "counts": {
@@ -1076,7 +1077,8 @@
       "sheet": "Sheet",
       "sheetOf": "Sheet to import",
       "mapping": "Columns",
-      "mappingHint": "Pick the number column and, if the file has one, a time zone column. Other columns are ignored; choose Flow field for each one the flow reads, under the name shown. A field the flow does not read makes the row fail.",
+      "mappingHint": "Pick the number column and, if the file has one, a time zone column. A column whose header names a field the campaign's flow reads is chosen for it already; every other column is ignored until you choose one of the flow's fields. A name the flow does not read makes its row fail.",
+      "noFlowFields": "The flow behind this campaign reads no business-data fields, so only the number and the time zone can be mapped.",
       "unnamed": "Column {{n}}",
       "roleOf": "What column {{name}} is",
       "slotNameOf": "Field name for column {{name}}",

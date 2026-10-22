@@ -395,6 +395,18 @@ func (d *Dialer) dialFailed(ctx context.Context, c campaign.Campaign, f *flight,
 		// Nothing was sent: the attempt never happened.
 		d.voidAttempt(ctx, f, now)
 		return
+	case errors.Is(err, outbound.ErrNoOutboundEndpoint):
+		// This deployment has nowhere to dial, so every attempt of every
+		// campaign would come back here: no customer is reached, no contact is
+		// at fault. Void the attempt (no row, no retry budget spent) and stop
+		// the campaign now, on the first attempt, instead of spending the
+		// list's system retries on a setting nobody can fix from the list
+		// (#293). The start refusal says the same thing while an operator is
+		// looking; this covers a resume, and a campaign that was already
+		// running when the application came back without an endpoint.
+		d.voidAttempt(ctx, f, now)
+		d.pauseNoEndpoint(ctx, c.ID)
+		return
 	}
 	verdict := campaign.ClassifyDialError(err, campaign.DialErrorKinds{
 		NumberOnDNC: outbound.ErrNumberOnDNC, BadNumber: outbound.ErrBadNumber,
@@ -607,6 +619,33 @@ func (d *Dialer) judgeBreakers(ctx context.Context, f campaign.Finished) {
 		d.isDirty = true
 		d.log.Warn("dialer: campaign paused by a breaker", "campaignId", f.CampaignID, "reason", reason)
 	}
+}
+
+// pauseNoEndpoint pauses a campaign that cannot place a call at all. It is the
+// stop a breaker makes, under the reason an operator already knows: TRUNK_FAILURE
+// is "the deployment's way out is not working", and here there is no way out
+// configured rather than one that is down. aicc doctor's outbound_endpoint
+// warning names the setting to fix (deploy/carrier.md).
+//
+// Only the first attempt of a pass pauses: PauseFor is conditional on RUNNING,
+// so the attempts already in flight find the campaign PAUSED and stop there.
+func (d *Dialer) pauseNoEndpoint(ctx context.Context, id uuid.UUID) {
+	if d.halted[id] {
+		return
+	}
+	paused, err := d.st.PauseFor(ctx, id, campaign.PauseTrunkFailure)
+	if err != nil {
+		d.log.Error("dialer: cannot pause a campaign that cannot dial", "campaignId", id, "error", err)
+		return
+	}
+	if !paused {
+		return
+	}
+	d.halted[id] = true
+	d.isDirty = true
+	d.touch(id)
+	d.log.Warn("dialer: campaign paused: the deployment has no outbound endpoint (AICC_OUTBOUND_ENDPOINT); "+
+		"set it and resume, see deploy/carrier.md", "campaignId", id)
 }
 
 // account computes what the campaign is doing, completes it when the list is

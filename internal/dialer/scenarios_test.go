@@ -458,6 +458,77 @@ func TestTheTrunkBreakerTripsOnTheNthFailureAndNotTheOneBefore(t *testing.T) {
 	}
 }
 
+// A deployment with no outbound endpoint is paused by the first attempt it
+// refuses, not after the list has spent its system retries: the refusal is the
+// same for every contact, so there is nothing to retry (#293). The attempt is
+// voided, which is what "never happened" means in the ledger.
+func TestACampaignThatCannotDialIsPausedOnItsFirstAttempt(t *testing.T) {
+	r := newRig(t, opts{})
+	c := r.newCampaign("No endpoint", nil)
+	r.importContacts(c, numbers("49", 20))
+	r.placer.setFail(func(outbound.AIDialRequest) error { return outbound.ErrNoOutboundEndpoint })
+	r.start(c)
+
+	got := r.campaignNow(c)
+	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseTrunkFailure {
+		t.Fatalf("status %s/%s, want PAUSED/TRUNK_FAILURE", got.Status, got.PauseReason)
+	}
+	if n := len(r.attempts(c)); n != 0 {
+		t.Errorf("%d attempt rows, want none: a refusal before a channel voids the attempt", n)
+	}
+	if ct := r.contactOf(c, numbers("49", 1)[0].number); ct.Status != campaign.ContactActive || ct.Attempts != 0 {
+		t.Errorf("the refused contact = %s/%d attempts, want ACTIVE with none counted", ct.Status, ct.Attempts)
+	}
+
+	// Paused is paused: neither the rest of this pass nor hours of clock dial.
+	placed := r.placer.total()
+	r.tick(6 * time.Hour)
+	if r.placer.total() != placed {
+		t.Errorf("a paused campaign dialled %d more time(s)", r.placer.total()-placed)
+	}
+
+	// Resume is an operator's decision, and with the endpoint still missing the
+	// next attempt pauses it again rather than retrying the list.
+	if _, err := r.dialer().Resume(context.Background(), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	r.settle()
+	if got := r.campaignNow(c); got.Status != campaign.StatusPaused {
+		t.Errorf("a resumed campaign with no endpoint is %s, want PAUSED", got.Status)
+	}
+	if n := len(r.attempts(c)); n != 0 {
+		t.Errorf("%d attempt rows after a resume, want none", n)
+	}
+	r.noViolations()
+}
+
+// The case the start refusal cannot cover: the campaign was RUNNING when the
+// application stopped, and the endpoint is gone when it comes back. The new
+// dialer reads it from the database and pauses it on its first attempt, rather
+// than dialling the list into nothing until the retries run out (#293 review).
+func TestACampaignRunningBeforeARestartIsPausedWhenTheEndpointIsGone(t *testing.T) {
+	r := newRig(t, opts{})
+	c := r.newCampaign("Was running", nil)
+	r.importContacts(c, numbers("47", 10))
+	if _, err := r.st.Campaigns().Start(context.Background(), c.ID); err != nil {
+		t.Fatal(err)
+	}
+	r.stopDialer() // the application went down; nothing has dialled yet
+	r.placer.setFail(func(outbound.AIDialRequest) error { return outbound.ErrNoOutboundEndpoint })
+	r.startDialer()
+	r.rearm(c)
+	r.dialer().Wake()
+	r.settle()
+
+	got := r.campaignNow(c)
+	if got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseTrunkFailure {
+		t.Fatalf("status %s/%s, want PAUSED/TRUNK_FAILURE", got.Status, got.PauseReason)
+	}
+	if n := len(r.attempts(c)); n != 0 {
+		t.Errorf("%d attempt rows, want none", n)
+	}
+}
+
 func TestAnAnsweredCallBreaksTheTrunkRun(t *testing.T) {
 	r := newRig(t, opts{trunkN: 3})
 	c := r.newCampaign("Run", func(s *camSpec) { s.max = 1 })

@@ -56,7 +56,13 @@ const (
 	// CodeDIDNotOutbound refuses an AI_OUTBOUND call naming a DID whose
 	// allowOutbound is false. Nothing was placed and nothing was recorded.
 	CodeDIDNotOutbound ErrorCode = "DID_NOT_OUTBOUND"
-	CodeNotFound       ErrorCode = "NOT_FOUND"
+	// CodeOutboundNotConfigured refuses to place, or to start a campaign
+	// whose every attempt would place, an AI outbound call on a deployment
+	// with no AICC_OUTBOUND_ENDPOINT. The deployment cannot dial out at all,
+	// so this is neither a bad request nor a database fault: the code says
+	// which setting is missing.
+	CodeOutboundNotConfigured ErrorCode = "OUTBOUND_NOT_CONFIGURED"
+	CodeNotFound              ErrorCode = "NOT_FOUND"
 
 	// The campaign codes (docs/design/10-campaigns.md section 14).
 	//

@@ -45,13 +45,9 @@ func (capturedSwitch) BgAPI(string) (string, error) { return "", errors.New("rea
 func (capturedSwitch) IsUp() bool                   { return true }
 
 type fakeMigrations struct {
-	state    store.MigrationState
-	err      error
-	dnc      int64
-	dncError error
+	state store.MigrationState
+	err   error
 }
-
-func (f fakeMigrations) DNCEntryCount(context.Context) (int64, error) { return f.dnc, f.dncError }
 
 func (f fakeMigrations) MigrationStatus(context.Context) (store.MigrationState, error) {
 	return f.state, f.err
@@ -115,6 +111,9 @@ func newHarness(t *testing.T) *harness {
 			IsBotEnabled: true,
 			Provider:     "openai",
 			ESLAddr:      "freeswitch:18021",
+			// The captured switch knows this gateway, so a healthy deployment
+			// passes the outbound checks as it passes the bot gateway's.
+			OutboundEndpoint: "sofia/gateway/aicc_bot/%s",
 		},
 		getenv: func(k string) string {
 			if k == "OPENAI_API_KEY" {
@@ -326,10 +325,32 @@ type fakeStatus struct {
 	profiles []telephony.SwitchProfile
 	gateway  bool
 	gwErr    error
+	// trunks is the switch's gateway table, which carries both the names that
+	// exist and whether each would place a call now.
+	trunks []telephony.Trunk
 }
 
 func (f fakeStatus) Profiles() ([]telephony.SwitchProfile, error) { return f.profiles, nil }
 func (f fakeStatus) GatewayUp(string) (bool, error)               { return f.gateway, f.gwErr }
+func (f fakeStatus) Trunks() ([]telephony.Trunk, error)           { return f.trunks, nil }
+
+// healthyTrunks is a switch holding the bot gateway (which never registers)
+// and one carrier gateway that does.
+func healthyTrunks() []telephony.Trunk {
+	return []telephony.Trunk{
+		{Name: "aicc_bot", Profile: "external", State: "NOREG", IsUp: true},
+		{Name: "carrier_b", Profile: "external", State: "REGED", IsUp: true},
+	}
+}
+
+// externalProfiles is the listener table checkSwitch asks for; the outbound
+// checks only need it to be there and running.
+func externalProfiles() []telephony.SwitchProfile {
+	return []telephony.SwitchProfile{
+		{Name: "internal", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+		{Name: "external", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+	}
+}
 
 func TestAStoppedProfileAndADeadBotGatewayFail(t *testing.T) {
 	h := newHarness(t)
@@ -560,37 +581,111 @@ func TestEveryDoctorCheckIsLowerSnakeAndUnique(t *testing.T) {
 	}
 }
 
-func TestAPopulatedDNCListWithoutACountryCodeWarnsButDoesNotFail(t *testing.T) {
-	populated := func(*harness) migrationReader {
-		return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dnc: 3}
+// Two WARNs, neither of which changes the exit status: a deployment that takes
+// calls in works without an outbound endpoint, and one that runs campaigns does
+// not. Doctor says which, before a campaign rings nothing.
+func TestAnEmptyOutboundEndpointIsAWarningNotAFailure(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = ""
+	got := h.run()
+
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStateWarn)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateSkip)
+	if !strings.Contains(got[DoctorCheckOutboundEndpoint].Message, "AICC_OUTBOUND_ENDPOINT") {
+		t.Errorf("the warning does not name the setting: %q", got[DoctorCheckOutboundEndpoint].Message)
 	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundEndpoint]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+	}
+}
+
+func TestAnEndpointNamingAMissingGatewayIsAWarningThatListsTheOnesThereAre(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/pstn_gatewya/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true,
+			// The names the operator's own switch has: enough to see the typo.
+			trunks: healthyTrunks(),
+		}, func() {}, nil
+	}
+	got := h.run()
+
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStatePass)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	for _, want := range []string{"pstn_gatewya", "aicc_bot", "carrier_b"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the warning does not mention %q: %q", want, msg)
+		}
+	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundGateway]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+	}
+}
+
+// A carrier gateway that registers and is stuck before it ever did is not
+// reachable, whatever its OPTIONS ping says: the switch's own state (FAIL_WAIT,
+// UNREGED) is what a call would meet. The check reads the trunk table, not the
+// ping status, so it warns here — that is the silent outbound failure it exists
+// to catch (#293 review).
+func TestACarrierGatewayStuckRegisteringWarnsEvenIfItAnswersPings(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{
+			profiles: externalProfiles(),
+			// The ping side says UP.
+			gateway: true,
+			trunks: []telephony.Trunk{
+				{Name: "aicc_bot", Profile: "external", State: "NOREG", IsUp: true},
+				{Name: "carrier_b", Profile: "external", State: "FAIL_WAIT", IsUp: false},
+			},
+		}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	if !strings.Contains(msg, "carrier_b") || !strings.Contains(msg, "FAIL_WAIT") {
+		t.Errorf("the warning does not name the gateway and its state: %q", msg)
+	}
+}
+
+// A gateway that never registers by design (NOREG) is a trunk as it stands:
+// calling it down would report a fault on every healthy deployment.
+func TestAGatewayThatNeverRegistersPasses(t *testing.T) {
+	h := newHarness(t)
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStatePass)
+}
+
+// An endpoint that is not a gateway (a direct sip: dial string) has no gateway
+// to look up, and doctor says so rather than inventing a failure.
+func TestAnEndpointThatNamesNoGatewaySkipsTheGatewayCheck(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/external/2125550101@10.0.0.9"
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStatePass)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateSkip)
+}
+
+func TestTheGatewayNameIsReadOutOfTheDialString(t *testing.T) {
 	cases := []struct {
-		name string
-		code string
-		dnc  func(*harness) migrationReader
-		want DoctorState
+		endpoint string
+		name     string
+		ok       bool
 	}{
-		{"entries and no code", "", populated, DoctorStateWarn},
-		{"entries and a code", "86", populated, DoctorStatePass},
-		{"empty list and no code", "", nil, DoctorStatePass},
-		{"unreadable list and no code", "", func(*harness) migrationReader {
-			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dncError: errors.New("denied")}
-		}, DoctorStateSkip},
+		{"sofia/gateway/pstn_gateway/%s", "pstn_gateway", true},
+		{"sofia/gateway/pstn_gateway/+1%s", "pstn_gateway", true},
+		{"sofia/gateway//%s", "", false},
+		{"sofia/gateway/pstn_gateway", "", false},
+		{"sofia/external/sip:2125550101@10.0.0.9", "", false},
+		{"", "", false},
 	}
 	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			h := newHarness(t)
-			h.deps.cfg.DefaultCountryCode = c.code
-			if c.dnc != nil {
-				h.deps.openStore = func(context.Context) (migrationReader, func(), error) {
-					return c.dnc(h), func() {}, nil
-				}
-			}
-			wantState(t, h.run(), DoctorCheckDNCCountryCode, c.want)
-		})
-	}
-	if n := countFailed([]doctorResult{warn(DoctorCheckDNCCountryCode, "", "x")}); n != 0 {
-		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+		name, ok := outboundGatewayOf(c.endpoint)
+		if name != c.name || ok != c.ok {
+			t.Errorf("outboundGatewayOf(%q) = %q, %v; want %q, %v", c.endpoint, name, ok, c.name, c.ok)
+		}
 	}
 }
 

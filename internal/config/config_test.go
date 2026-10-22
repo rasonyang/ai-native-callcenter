@@ -39,6 +39,54 @@ func TestLoadDefaults(t *testing.T) {
 	if c.SeedPassword != "aicc@123" {
 		t.Errorf("SeedPassword = %q, want the documented aicc@123", c.SeedPassword)
 	}
+	// A national number with no country code is completed with this one before
+	// it is compared with the do-not-call list or imported into a campaign, so
+	// the default has to name somewhere rather than leave it ambiguous.
+	if c.DefaultCountryCode != "1" {
+		t.Errorf("DefaultCountryCode = %q, want 1", c.DefaultCountryCode)
+	}
+}
+
+func TestDefaultCountryCode(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   *string
+		want    string
+		wantErr bool
+	}{
+		{name: "unset is 1", want: "1"},
+		{name: "empty is unset", value: ptrTo(""), want: "1"},
+		{name: "a deployment outside +1 sets its own", value: ptrTo("86"), want: "86"},
+		{name: "a three-digit code", value: ptrTo("998"), want: "998"},
+		{name: "a plus is refused, the code is bare digits", value: ptrTo("+86"), wantErr: true},
+		{name: "a leading zero is refused", value: ptrTo("086"), wantErr: true},
+		{name: "four digits is refused", value: ptrTo("1234"), wantErr: true},
+		{name: "letters are refused", value: ptrTo("+one"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("AICC_ENV", "dev")
+			if tt.value == nil {
+				t.Setenv("AICC_DEFAULT_COUNTRY_CODE", "")
+				os.Unsetenv("AICC_DEFAULT_COUNTRY_CODE")
+			} else {
+				t.Setenv("AICC_DEFAULT_COUNTRY_CODE", *tt.value)
+			}
+			c, err := Load()
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "AICC_DEFAULT_COUNTRY_CODE") {
+					t.Fatalf("Load() error = %v, want one naming the setting", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if c.DefaultCountryCode != tt.want {
+				t.Errorf("DefaultCountryCode = %q, want %q", c.DefaultCountryCode, tt.want)
+			}
+		})
+	}
 }
 
 func TestLoadOverrides(t *testing.T) {

@@ -149,11 +149,21 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `switch_auth` | `SWITCH_AUTH_REJECTED` |
 | `sip_profiles` | `SWITCH_PROFILE_DOWN` |
 | `bot_gateway` | `BOT_GATEWAY_DOWN` |
+| `outbound_endpoint` | `OUTBOUND_ENDPOINT_UNSET` (a `WARN`, not a failure) |
+| `outbound_gateway` | `OUTBOUND_GATEWAY_MISSING` (a `WARN`, not a failure) |
 | `external_ip` | `EXTERNAL_IP_NOT_ON_HOST` |
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
-| `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
+
+Two of those are the outbound path a campaign needs: `outbound_endpoint` warns
+when `AICC_OUTBOUND_ENDPOINT` is empty (the deployment can take calls in but
+cannot place one), and `outbound_gateway` warns when the endpoint names a
+gateway the switch does not have — a typo, or a gateway file that never loaded
+— and lists the gateways it does have. It also warns when the gateway is there
+but the switch would not place a call through it, naming the state it is in
+(`FAIL_WAIT`, `UNREGED`, `DOWN`): a carrier gateway that registers can answer
+pings and still fail every call.
 
 ### Next: an agent's browser phone
 
@@ -433,6 +443,25 @@ Six published bilingual flows, each on an English, a Chinese and a US number (a 
   tools fail and the bot offers a transfer instead. This is expected
   ([docs/dev-stack.md](../docs/dev-stack.md)).
 
+**A campaign needs a carrier**, even on this stack. It dials its contacts
+through a gateway the switch has, so it needs a gateway file in
+`freeswitch/conf/sip_profiles/external/` and `AICC_OUTBOUND_ENDPOINT` set to the
+dial string that renders a number into that gateway, such as
+`sofia/gateway/pstn_gateway/%s`. With the endpoint empty, `POST
+/campaigns/{id}/start` answers `409 OUTBOUND_NOT_CONFIGURED` and dials nothing:
+better than a campaign whose every attempt fails and is retried for hours.
+[carrier.md](carrier.md) sets up both, and `aicc doctor` warns about each while
+it is missing (see [aicc doctor](#aicc-doctor)).
+
+The stack's country code is `86` — the same value it has always set, so
+upgrading cannot change how a deployment's national numbers match the
+do-not-call list — and a national number in an imported list is completed to
+`+86` before it is dialled. A deployment elsewhere sets its own in `.env`
+(`AICC_DEFAULT_COUNTRY_CODE=1`, say); the application's own default, for a
+container that is given none, is `1`. A number written with its code
+(`+8613800000001`) is taken as written on either, and a campaign may set
+`defaultCountryCode` for its own contacts.
+
 **Remove or re-seed the demo data:**
 
 ```sh
@@ -463,7 +492,9 @@ unregistered number is unreachable.
    shows ready.
    For many agents, [Chrome policy](chrome-policy.md) does this instead.
 4. Open the keypad, type `2125550101`, press Dial. Dialling out does not need
-   *Go ready*.
+   *Go ready*. This is the agent's keypad reaching the simulated public network
+   the demo data registers these numbers on; it is not a campaign, needs no
+   carrier and no `AICC_OUTBOUND_ENDPOINT`.
 
 wei's phone rings first and auto-answers, then the customer phone rings showing
 800-555-0199. Answer it. The call appears on the wallboard and ends as a CDR.

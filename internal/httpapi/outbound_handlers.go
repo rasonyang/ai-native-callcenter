@@ -354,8 +354,11 @@ func writeOutboundError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, CodeConflict,
 			"no number is marked as the default outbound one", nil)
 	case errors.Is(err, outbound.ErrNoOutboundEndpoint):
-		writeError(w, http.StatusServiceUnavailable, CodeStorageDown,
-			"this deployment has no outbound endpoint configured", nil)
+		// The deployment cannot dial: nothing was placed and nothing is
+		// wrong with the request. Its own code, so an operator is sent to
+		// the setting rather than to the database STORAGE_DOWN would name.
+		writeError(w, http.StatusConflict, CodeOutboundNotConfigured,
+			"this deployment has no outbound endpoint configured (AICC_OUTBOUND_ENDPOINT); see deploy/carrier.md", nil)
 	case errors.Is(err, outbound.ErrNotReady):
 		// Starting up: the calls that outlived a restart are still being
 		// accounted for, and dialling before that could double-dial one.

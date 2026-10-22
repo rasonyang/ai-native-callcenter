@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
-  buildRecords, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, runImport,
-  type ColumnRole, type ImportRecord,
+  buildRecords, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, roleFromValue, roleValue,
+  runImport, type ColumnRole, type ImportRecord,
 } from './campaign-import'
 import type { CampaignContactRow, CampaignImportResult } from './campaigns'
 import { parseCsv } from './csv'
@@ -31,6 +31,40 @@ describe('guessing what each column is', () => {
 
   it('ignores a column with no header', () => {
     expect(guessRoles(['phone', ''])[1]).toEqual({ kind: 'ignore' })
+  })
+
+  it('takes a header that names a field the flow reads, in any case', () => {
+    // The case is whatever the spreadsheet's author typed; the name is the
+    // flow's, so the mapping carries the flow's spelling, not the header's.
+    expect(guessRoles(['Phone', 'NAME', 'OrderNo', '订单号', 'notes'], ['name', 'orderNo'])).toEqual([
+      { kind: 'number' },
+      { kind: 'slot', name: 'name' },
+      { kind: 'slot', name: 'orderNo' },
+      { kind: 'ignore' },
+      { kind: 'ignore' },
+    ])
+  })
+
+  it('prefers the number and the zone over a field of the same name', () => {
+    // "phone" and "tz" are not fields the flow can be given; the roles that
+    // decide how a row is dialled win.
+    expect(guessRoles(['phone', 'tz'], ['phone', 'tz'])).toEqual([
+      { kind: 'number' },
+      { kind: 'timeZone' },
+    ])
+  })
+})
+
+describe('the value a column dropdown carries', () => {
+  it('round-trips every role', () => {
+    const roles: ColumnRole[] = [
+      { kind: 'number' }, { kind: 'timeZone' }, { kind: 'slot', name: 'orderNo' }, { kind: 'ignore' },
+    ]
+    for (const role of roles) expect(roleFromValue(roleValue(role))).toEqual(role)
+  })
+
+  it('reads the bare slot choice as a field with no name yet', () => {
+    expect(roleFromValue('slot')).toEqual({ kind: 'slot', name: '' })
   })
 })
 
