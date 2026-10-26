@@ -386,6 +386,24 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 	case billed != nil && billed.AnsweredAt != nil:
 		cdr.AnsweredAt = *billed.AnsweredAt
 		cdr.BillSec = max(0, int(cdr.EndedAt.Sub(*billed.AnsweredAt).Seconds()))
+	case placed:
+		// On an agent-placed call with no billed leg, the originator's answer
+		// is only the phone's auto-answer in front of the agent. Use the
+		// earliest answer of a leg other than the originator (the callee extension
+		// or the bot); if nobody on the far side answered, leave answeredAt unset.
+		var earliest time.Time
+		for i := range snap.Parties {
+			p := &snap.Parties[i]
+			if p.Role == RoleOriginator || p.AnsweredAt == nil {
+				continue
+			}
+			if earliest.IsZero() || p.AnsweredAt.Before(earliest) {
+				earliest = *p.AnsweredAt
+			}
+		}
+		if !earliest.IsZero() {
+			cdr.AnsweredAt = earliest
+		}
 	case originator != nil && originator.AnsweredAt != nil:
 		// Nobody charges for two extensions talking, but the call was still
 		// answered and the row should say when.
