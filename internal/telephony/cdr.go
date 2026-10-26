@@ -479,7 +479,7 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		// Whether anybody answered is the status's answer, not the
 		// originator's: an agent's phone auto-answers in front of them on
 		// every call it places, whether or not the far end ever comes up.
-		cdr.Legs = unreachedJourney(snap, originator, cdr.Status == store.CDRStatusAnswered, cdr.EndedAt)
+		cdr.Legs = unreachedJourney(snap, originator, cdr.Status == store.CDRStatusAnswered, cdr.EndedAt, cdr.ToNumber)
 	}
 	cdr.UnbackedClaims = snap.Bot.UnbackedClaims
 	if snap.Bot.Summary != "" {
@@ -1197,9 +1197,13 @@ func journeyHop(snap Snapshot, p *PartySnapshot) (kind, label string) {
 // originator stamps on the customer leg from its first moment, and why the call
 // ended by hangupCause (BOT_BRIDGE_UNCONFIRMED, OVERFLOW). A 0 s BOT hop would
 // have said the bot was there for no time at all (#313).
-func unreachedJourney(snap Snapshot, originator *PartySnapshot, answered bool, end time.Time) []store.Leg {
+func unreachedJourney(snap Snapshot, originator *PartySnapshot, answered bool, end time.Time, dialled string) []store.Leg {
 	if !answered {
-		return []store.Leg{{Kind: "DIALING", Label: originator.Number}}
+		label := dialled
+		if label == "" {
+			label = originator.Number
+		}
+		return []store.Leg{{Kind: "DIALING", Label: label}}
 	}
 	if isAgentPlaced(originator) {
 		return []store.Leg{placerLeg(originator, end)}

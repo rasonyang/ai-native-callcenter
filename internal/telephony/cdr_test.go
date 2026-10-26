@@ -2492,9 +2492,13 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			snap: Snapshot{
 				CallID: uuid.New(), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{phone},
+				Parties: []PartySnapshot{{
+					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
+					OtherNumber: "18688886660",
+					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
+				}},
 			},
-			want:   []string{"DIALING:1008:0"},
+			want:   []string{"DIALING:18688886660:0"},
 			status: store.CDRStatusNoAnswer,
 		},
 		{
@@ -2503,9 +2507,13 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			snap: Snapshot{
 				CallID: uuid.New(), CallType: events.CallTypeInternal,
 				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{phone},
+				Parties: []PartySnapshot{{
+					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
+					OtherNumber: "1002",
+					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
+				}},
 			},
-			want:   []string{"DIALING:1008:0"},
+			want:   []string{"DIALING:1002:0"},
 			status: store.CDRStatusNoAnswer,
 		},
 		{
@@ -2522,6 +2530,18 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 					Role: RoleTarget, Number: "95001", ChannelID: "bot", IsBotLeg: true,
 					CreatedAt: at(1), ReleasedAt: atPtr(6), ReleaseCause: "ORIGINATOR_CANCEL",
 				}},
+			},
+			want:   []string{"DIALING:95001:0"},
+			status: store.CDRStatusNoAnswer,
+		},
+		{
+			// A call whose dialled destination was not stamped falls back to the
+			// originator's number rather than producing an empty label.
+			name: "an unreached call with empty dialled number falls back to originator",
+			snap: Snapshot{
+				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CreatedAt: at(0), EndedAt: atPtr(6),
+				Parties: []PartySnapshot{phone},
 			},
 			want:   []string{"DIALING:1008:0"},
 			status: store.CDRStatusNoAnswer,
