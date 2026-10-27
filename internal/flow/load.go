@@ -4,6 +4,7 @@ package flow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -19,7 +20,7 @@ import (
 func Load(data []byte) (*Spec, error) {
 	var spec Spec
 	if err := json.Unmarshal(data, &spec); err != nil {
-		return nil, fmt.Errorf("flow: cannot parse: %w", err)
+		return nil, &ValidationError{FlowID: idOf(data), Problems: []string{decodeProblem(err)}}
 	}
 	for id, node := range spec.Nodes {
 		node.id = id
@@ -33,6 +34,39 @@ func Load(data []byte) (*Spec, error) {
 		return nil, err
 	}
 	return &spec, nil
+}
+
+// decodeProblem words a JSON decoding failure as one problem that names where
+// the document went wrong when the decoder knows, and never quotes the body.
+func decodeProblem(err error) string {
+	var typed *json.UnmarshalTypeError
+	var syntax *json.SyntaxError
+	switch {
+	case errors.As(err, &typed) && typed.Field != "":
+		return fmt.Sprintf("cannot parse %s: it is %s, want %s", typed.Field, typed.Value, typed.Type)
+	case errors.As(err, &typed):
+		return fmt.Sprintf("cannot parse the flow: found %s, want %s", typed.Value, typed.Type)
+	case errors.As(err, &syntax):
+		return fmt.Sprintf("cannot parse the flow: invalid JSON at byte %d", syntax.Offset)
+	}
+	// A custom decoder (a wording, a modelOnly entry) names its own field.
+	msg := err.Error()
+	if len(msg) > 300 {
+		msg = msg[:300] + "..."
+	}
+	return "cannot parse: " + msg
+}
+
+// idOf is the flow's own id when the document has a readable one, for the
+// error's heading; empty otherwise.
+func idOf(data []byte) string {
+	var head struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(data, &head) != nil {
+		return ""
+	}
+	return head.ID
 }
 
 // validate rejects anything that would fail mid-call.

@@ -60,6 +60,14 @@ carries the one-line installer's files.
   (`docs/flow-authoring.md` section 2.7.1). The flow simulator records it on
   scenarios with `isCampaign: true` and checks it with `expect.lead`. (#352)
 
+### Fixed
+
+- `POST /flows` and `PUT /flows/{flowId}` answer a spec whose JSON has the wrong
+  shape (a number for a phase `instruction`, a malformed `http.modelOnly`
+  entry, a non-text `global.toolWaitLine`) with `422 VALIDATION_FAILED` and a
+  `params.problems` entry saying what was expected, instead of
+  `503 STORAGE_DOWN`. A body that is not JSON at all is still `400`. (#354)
+
 ### Changed
 
 - A campaign refuses to start or resume on a deployment that cannot place an
