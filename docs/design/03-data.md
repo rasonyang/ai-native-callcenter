@@ -98,6 +98,10 @@ live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- DESIGNED, NE
                                    -- transcript. Left written down rather than deleted: it is a
                                    -- design that was never built, not a table somebody dropped.
 cdrs(call_id uuid pk, started_at, answered_at, ended_at,
+     -- answered_at: when the call became billable. Between two extensions it is the callee's
+     -- answer; on an agent's call to a bot number, the bot's answer; absent when nobody beyond
+     -- the placing phone answered (a phone auto-answering the call it is placing is not an
+     -- answer; bill_sec stays 0) (#330).
      call_type varchar check in ('INBOUND','OUTBOUND','CONSULT','INTERNAL'),  -- Genesys-style, caller-perspective; immutable across transfers
      language varchar,                                            -- 'en'/'zh'
      from_number text, to_number text, did text, flow_id uuid, queue_id uuid,
@@ -126,7 +130,8 @@ cdrs(call_id uuid pk, started_at, answered_at, ended_at,
      -- One hop per stretch of the call, in the order joined: TRUNK a leg to the carrier (the
      -- customer's own, or the one a person dialled out on), BOT the AI flow that served it, QUEUE
      -- one per queue stay, AGENT one of our phones. DIALING is what is left when nobody answered:
-     -- the number the call was ringing when it ended, with no duration of its own. An answered
+     -- the number the call was ringing when it ended (to_number: an agent's own extension is the
+     -- placer, from_number, never the label), with no duration of its own. An answered
      -- call is never DIALING, even when nothing joined it afterwards — its journey is the leg it
      -- was answered on, from answered to ended, which is bill_sec's window (#313). A bot that was
      -- meant to take the call and never joined is not a BOT hop, because BOT means the journey
