@@ -2493,8 +2493,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 				CallID: uuid.New(), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
-					OtherNumber: "18688886660",
+					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone", OtherNumber: "18688886660",
 					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
 				}},
 			},
@@ -2508,8 +2507,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 				CallID: uuid.New(), CallType: events.CallTypeInternal,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
-					OtherNumber: "1002",
+					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone", OtherNumber: "1002",
 					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
 				}},
 			},

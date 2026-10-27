@@ -3,10 +3,8 @@
 package telephony
 
 import (
-	"context"
 	"slices"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 
@@ -14,320 +12,146 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
-// TestDialingHopNamesDialledNumber covers Issue #331:
-// When an agent's call reaches nobody, the DIALING hop of its journey shows
-// the number the agent dialled (cdr.ToNumber), not the agent's own extension.
-// It verifies the invariant: for every unreached DIALING hop, leg.Label == cdr.ToNumber.
-func TestDialingHopNamesDialledNumber(t *testing.T) {
+// When an agent's call reached nobody, its one DIALING hop was labelled with
+// the originator's number, which on a call one of our phones placed is the
+// agent's own extension: an agent who dialled a wrong number read as having
+// dialled themselves, while the number they did dial sat in toNumber on the
+// same row. DIALING is the number being rung (the contract's LegKind), so its
+// label is toNumber on every shape; the placer stays in fromNumber (#331).
+// TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney pins the
+// gateway-down, internal and bot shapes; this one pins the rest of the issue's
+// matrix, including numbers as messy as the dialplan receives them, and holds
+// every row to the invariant that the label and toNumber are one fact.
+func TestTheDialingHopOfAnAgentsUnreachedCallNamesTheNumberDialled(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
-	agentID := uuid.New()
+	agent := uuid.New()
+
+	// A click-to-dial that stopped at the originator: the phone auto-answered
+	// 0.3-1.2 s in, and the call ended before any other leg existed.
+	dialled := func(agentID *uuid.UUID, number string, releasedMs int, cause string) Snapshot {
+		return Snapshot{
+			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CreatedAt: at(0), EndedAt: atMsPtr(releasedMs),
+			Parties: []PartySnapshot{{
+				Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: agentID,
+				OtherNumber: number, ChannelID: "phone",
+				CreatedAt: at(0), AnsweredAt: atMsPtr(600), ReleasedAt: atMsPtr(releasedMs), ReleaseCause: cause,
+			}},
+		}
+	}
 
 	for _, tc := range []struct {
-		name       string
-		snap       Snapshot
-		wantLegs   []string
-		wantTo     string
-		wantFrom   string
-		wantStatus string
+		name string
+		snap Snapshot
+		want string // the number as the row carries it, byte for byte
 	}{
-		{
-			// 1. click-to-dial 1008 -> 075512 (no dialplan route, NO_ROUTE_DESTINATION, no trunk leg)
-			name: "click-to-dial no route destination",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(1),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-					OtherNumber: "075512", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(1),
-					ReleaseCause: "NO_ROUTE_DESTINATION",
-				}},
-			},
-			wantLegs:   []string{"DIALING:075512:0"},
-			wantTo:     "075512",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 2. click-to-dial 1008 -> 18688886660, gateway down (no trunk leg)
-			name: "click-to-dial gateway down",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-					OtherNumber: "18688886660", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
-					ReleaseCause: "GATEWAY_DOWN",
-				}},
-			},
-			wantLegs:   []string{"DIALING:18688886660:0"},
-			wantTo:     "18688886660",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 3. keypad dial 1008 -> 18688886660 (inbound to switch, DestinationNumber = dialled)
-			name: "keypad dial agent hangs up before trunk exists",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(3),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-					OtherNumber: "18688886660", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(3),
-					ReleaseCause: "ORIGINATOR_CANCEL",
-				}},
-			},
-			wantLegs:   []string{"DIALING:18688886660:0"},
-			wantTo:     "18688886660",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 4. INTERNAL click-to-dial 1008 -> 1002, 1002 never rung
-			name: "internal call between extensions unreached",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeInternal,
-				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-					OtherNumber: "1002", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
-					ReleaseCause: "NO_ANSWER",
-				}},
-			},
-			wantLegs:   []string{"DIALING:1002:0"},
-			wantTo:     "1002",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 5. click-to-dial 1008 -> 95001, bot leg dialled and never answered (ORIGINATOR_CANCEL)
-			name: "click-to-dial to bot DID unreached",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(6),
-				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
-				Parties: []PartySnapshot{
-					{
-						Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-						ChannelID: "phone", CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
-					},
-					{
-						Role: RoleTarget, Number: "95001", ChannelID: "bot", IsBotLeg: true,
-						CreatedAt: at(1), ReleasedAt: atPtr(6), ReleaseCause: "ORIGINATOR_CANCEL",
-					},
-				},
-			},
-			wantLegs:   []string{"DIALING:95001:0"},
-			wantTo:     "95001",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 6. signed-out 1008 (no AgentID, ExtensionNumber only), as case 1
-			name: "signed-out extension unreached call",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(1),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: nil,
-					OtherNumber: "075512", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(1),
-					ReleaseCause: "NO_ROUTE_DESTINATION",
-				}},
-			},
-			wantLegs:   []string{"DIALING:075512:0"},
-			wantTo:     "075512",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 7. messy numbers dialled: +86 186-8888-6660, 0086..., *72, 3-digit 110
-			name: "messy dialled numbers format preservation",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(2),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agentID,
-					OtherNumber: "+86 186-8888-6660", ChannelID: "phone",
-					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(2),
-					ReleaseCause: "NO_ANSWER",
-				}},
-			},
-			wantLegs:   []string{"DIALING:+86 186-8888-6660:0"},
-			wantTo:     "+86 186-8888-6660",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 8. OtherNumber empty (originate with no destination stamped): fallback to originator
-			name: "empty destination fallback to originator number",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
-					OtherNumber: "", CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
-					ReleaseCause: "NO_ANSWER",
-				}},
-			},
-			wantLegs:   []string{"DIALING:1008:0"},
-			wantTo:     "",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 9. control: AI outbound, NO_ANSWER / USER_BUSY / 480 from trunk
-			name: "control AI outbound unanswered",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(9),
-				Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification"},
-				Parties: []PartySnapshot{{
-					Role: RoleOriginator, Number: "18688886666", ChannelID: "customer",
-					CreatedAt: at(0), ReleasedAt: atPtr(9), ReleaseCause: "NO_ANSWER",
-				}},
-			},
-			wantLegs:   []string{"DIALING:18688886666:0"},
-			wantTo:     "18688886666",
-			wantFrom:   "95099",
-			wantStatus: store.CDRStatusNoAnswer,
-		},
-		{
-			// 10. control: click-to-dial whose trunk leg exists and got 480
-			name: "control click-to-dial with trunk leg reached",
-			snap: Snapshot{
-				CallID:   uuid.New(),
-				CallType: events.CallTypeOutbound,
-				CreatedAt: at(0), EndedAt: atPtr(6),
-				Parties: []PartySnapshot{
-					{
-						Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
-						OtherNumber: "18688886660", CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(6),
-					},
-					{
-						Role: RoleTarget, Number: "18688886660", ChannelID: "trunk",
-						CreatedAt: at(1), ReleasedAt: atPtr(6), ReleaseCause: "USER_BUSY",
-					},
-				},
-			},
-			wantLegs:   []string{"TRUNK:18688886660:did not answer"},
-			wantTo:     "18688886660",
-			wantFrom:   "1008",
-			wantStatus: store.CDRStatusBusy,
-		},
+		{"a number no dialplan route matches", dialled(&agent, "075512", 1100, "NO_ROUTE_DESTINATION"), "075512"},
+		{"a keypad dial the agent abandons at 3 s before a trunk leg exists", dialled(&agent, "18688886660", 3000, "ORIGINATOR_CANCEL"), "18688886660"},
+		{"an agent who never signed in, the same shape", dialled(nil, "075512", 1100, "NO_ROUTE_DESTINATION"), "075512"},
+		{"a number with a plus, spaces and dashes", dialled(&agent, "+86 186-8888-6660", 2000, "NO_ANSWER"), "+86 186-8888-6660"},
+		{"a number with the 00 international prefix", dialled(&agent, "008618688886660", 2000, "NO_ANSWER"), "008618688886660"},
+		{"a feature code", dialled(&agent, "*72", 2000, "NO_ROUTE_DESTINATION"), "*72"},
+		{"a three-digit emergency number", dialled(&agent, "110", 2000, "NO_ROUTE_DESTINATION"), "110"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			assembler := newAssembler(&memoryLedger{}, staticQueues{})
-			cdr := assembler.assemble(context.Background(), tc.snap)
+			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), tc.snap)
 
-			if got := journey(cdr.Legs); !slices.Equal(got, tc.wantLegs) {
-				t.Errorf("legs = %v, want %v", got, tc.wantLegs)
+			if want := []string{"DIALING:" + tc.want + ":0"}; !slices.Equal(journey(cdr.Legs), want) {
+				t.Errorf("legs = %v, want %v", journey(cdr.Legs), want)
 			}
-			if cdr.ToNumber != tc.wantTo {
-				t.Errorf("ToNumber = %q, want %q", cdr.ToNumber, tc.wantTo)
+			if cdr.ToNumber != tc.want {
+				t.Errorf("toNumber = %q, want %q", cdr.ToNumber, tc.want)
 			}
-			if cdr.FromNumber != tc.wantFrom {
-				t.Errorf("FromNumber = %q, want %q", cdr.FromNumber, tc.wantFrom)
+			if cdr.FromNumber != "1008" {
+				t.Errorf("fromNumber = %q, want the placer, 1008", cdr.FromNumber)
 			}
-			if cdr.Status != tc.wantStatus {
-				t.Errorf("Status = %q, want %q", cdr.Status, tc.wantStatus)
+			if cdr.Status != store.CDRStatusNoAnswer {
+				t.Errorf("status = %s, want NO_ANSWER", cdr.Status)
 			}
-
-			// Invariant verification: if the only leg is DIALING and ToNumber is non-empty,
-			// leg.Label must strictly equal cdr.ToNumber.
-			if len(cdr.Legs) == 1 && cdr.Legs[0].Kind == "DIALING" && cdr.ToNumber != "" {
-				if cdr.Legs[0].Label != cdr.ToNumber {
-					t.Errorf("DIALING leg label %q does not match ToNumber %q", cdr.Legs[0].Label, cdr.ToNumber)
-				}
+			// The invariant: the label and toNumber are one fact.
+			if len(cdr.Legs) != 1 || cdr.Legs[0].Kind != "DIALING" || cdr.Legs[0].Label != cdr.ToNumber {
+				t.Errorf("legs %+v: the DIALING label must equal toNumber %q", cdr.Legs, cdr.ToNumber)
 			}
 		})
 	}
 }
 
-// TestDialingHop_CallFinishedPersistence verifies that an unreached click-to-dial
-// call written via CallFinished stores the DIALING leg with the dialled number in the ledger.
-func TestDialingHop_CallFinishedPersistence(t *testing.T) {
+// A call whose destination was never stamped has no toNumber to name, and the
+// label is required, so the hop falls back to the originator's number instead
+// of an empty string (#331).
+func TestADialingHopWithNoDestinationFallsBackToTheOriginator(t *testing.T) {
 	t.Parallel()
-	ledger := &memoryLedger{}
-	assembler := newAssembler(ledger, staticQueues{})
-
-	// Case 1: unreached click-to-dial to external destination
-	snap1 := Snapshot{
-		CallID:   uuid.New(),
-		CallType: events.CallTypeOutbound,
-		CreatedAt: at(0), EndedAt: atPtr(2),
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CreatedAt: at(0), EndedAt: atPtr(6),
 		Parties: []PartySnapshot{{
-			Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008",
-			OtherNumber: "075512", ChannelID: "phone",
-			CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(2),
-			ReleaseCause: "NO_ROUTE_DESTINATION",
+			Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
+			CreatedAt: at(0), AnsweredAt: atMsPtr(700), ReleasedAt: atPtr(6), ReleaseCause: "NO_ANSWER",
 		}},
+	})
+	if cdr.ToNumber != "" {
+		t.Fatalf("toNumber = %q, want empty: the fixture is meant to carry no destination", cdr.ToNumber)
 	}
-	assembler.CallFinished(snap1)
+	if want := []string{"DIALING:1008:0"}; !slices.Equal(journey(cdr.Legs), want) {
+		t.Errorf("legs = %v, want %v", journey(cdr.Legs), want)
+	}
+}
 
-	// Case 5: unreached click-to-dial to bot DID
+// The stored row is what the call detail screen and the API read. Row 1 (no
+// route, no bot) and row 5 (a bot number whose leg never answered) go through
+// CallFinished, on its own goroutine, and the ledger must hold the dialled
+// number as the hop's label (#331).
+func TestTheStoredJourneyOfAnUnreachedAgentCallNamesTheNumberDialled(t *testing.T) {
+	t.Parallel()
 	flow := uuid.New()
-	snap2 := Snapshot{
-		CallID:   uuid.New(),
-		CallType: events.CallTypeOutbound,
-		CreatedAt: at(0), EndedAt: atPtr(5),
-		Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
-		Parties: []PartySnapshot{
-			{
-				Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008",
-				ChannelID: "phone", CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(5),
+	agent := uuid.New()
+
+	for _, tc := range []struct {
+		name string
+		snap Snapshot
+		want string
+	}{
+		{
+			name: "no route",
+			snap: Snapshot{
+				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(2),
+				Parties: []PartySnapshot{{
+					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agent,
+					OtherNumber: "075512", ChannelID: "phone",
+					CreatedAt: at(0), AnsweredAt: atMsPtr(500), ReleasedAt: atPtr(2), ReleaseCause: "NO_ROUTE_DESTINATION",
+				}},
 			},
-			{
-				Role: RoleTarget, Number: "95001", ChannelID: "bot", IsBotLeg: true,
-				CreatedAt: at(1), ReleasedAt: atPtr(5), ReleaseCause: "ORIGINATOR_CANCEL",
-			},
+			want: "075512",
 		},
-	}
-	assembler.CallFinished(snap2)
-
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		ledger.mu.Lock()
-		count := len(ledger.cdrs)
-		ledger.mu.Unlock()
-		if count == 2 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("expected 2 inserted CDRs within deadline, got %d", count)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	ledger.mu.Lock()
-	defer ledger.mu.Unlock()
-
-	byID := map[uuid.UUID]store.CDR{}
-	for _, c := range ledger.cdrs {
-		byID[c.CallID] = c
-	}
-
-	cdr1, ok1 := byID[snap1.CallID]
-	if !ok1 || len(cdr1.Legs) != 1 || cdr1.Legs[0].Kind != "DIALING" || cdr1.Legs[0].Label != "075512" {
-		t.Errorf("cdr1 legs = %+v, want DIALING 075512", cdr1.Legs)
-	}
-
-	cdr2, ok2 := byID[snap2.CallID]
-	if !ok2 || len(cdr2.Legs) != 1 || cdr2.Legs[0].Kind != "DIALING" || cdr2.Legs[0].Label != "95001" {
-		t.Errorf("cdr2 legs = %+v, want DIALING 95001", cdr2.Legs)
+		{
+			name: "a bot number whose leg never answered",
+			snap: Snapshot{
+				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(5),
+				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
+				Parties: []PartySnapshot{
+					{
+						Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agent,
+						ChannelID: "phone", CreatedAt: at(0), AnsweredAt: atMsPtr(500), ReleasedAt: atPtr(5),
+					},
+					{
+						Role: RoleTarget, Number: "95001", ChannelID: "bot", IsBotLeg: true,
+						CreatedAt: at(1), ReleasedAt: atPtr(5), ReleaseCause: "ORIGINATOR_CANCEL",
+					},
+				},
+			},
+			want: "95001",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rows := finishCall(t, tc.snap)
+			if len(rows) != 1 {
+				t.Fatalf("wrote %d rows, want 1", len(rows))
+			}
+			if want := []string{"DIALING:" + tc.want + ":0"}; !slices.Equal(journey(rows[0].Legs), want) {
+				t.Errorf("stored legs = %v, want %v", journey(rows[0].Legs), want)
+			}
+		})
 	}
 }
