@@ -6,7 +6,9 @@
 package flow
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -246,10 +248,67 @@ type HTTPCall struct {
 	Body map[string]any `json:"body,omitempty"`
 	// SuccessWhen decides success; absent means any 2xx counts.
 	SuccessWhen *SuccessTest `json:"successWhen,omitempty"`
-	// ErrorFrom is the dotted path to the backend's own error message.
+	// ErrorFrom is the dotted path to the backend's own error: its message
+	// when successWhen fails on a 2xx answer, and its error code on a 4xx or
+	// 5xx answer (logged and named in the tool's error; the backend's message
+	// is never logged or shown to the model).
 	ErrorFrom string `json:"errorFrom,omitempty"`
 	// Result maps slot names to dotted paths in the response.
 	Result map[string]string `json:"result,omitempty"`
+	// ModelOnly maps output names to parts of the response that reach the
+	// model and the call transcript but are never written to a slot.
+	ModelOnly map[string]ModelOnlyField `json:"modelOnly,omitempty"`
+}
+
+// ModelOnlyField is one http.modelOnly entry. It is either a dotted path
+// (JSON string) whose value passes through as it is, or a projection (JSON
+// object {"path", "each"}) that lists the elements of an array, each cut down
+// to the fields named in Each.
+type ModelOnlyField struct {
+	// Path is a dotted path into the response.
+	Path string
+	// Each maps an output field to a dotted path inside one array element. Set
+	// only for a projection.
+	Each map[string]string
+	// IsProjection tells the object form from the string form.
+	IsProjection bool
+}
+
+type modelOnlyProjection struct {
+	Path string            `json:"path"`
+	Each map[string]string `json:"each"`
+}
+
+// UnmarshalJSON reads the string form or the strict object form; any other
+// JSON type, and any other key, is refused.
+func (f *ModelOnlyField) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return errors.New("modelOnly entry is empty")
+	}
+	switch trimmed[0] {
+	case '"':
+		*f = ModelOnlyField{}
+		return json.Unmarshal(trimmed, &f.Path)
+	case '{':
+		var p modelOnlyProjection
+		decoder := json.NewDecoder(bytes.NewReader(trimmed))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&p); err != nil {
+			return fmt.Errorf("modelOnly projection must be {\"path\", \"each\"} with string paths: %w", err)
+		}
+		*f = ModelOnlyField{Path: p.Path, Each: p.Each, IsProjection: true}
+		return nil
+	}
+	return errors.New("modelOnly entry must be a dotted path (string) or an object {\"path\", \"each\"}")
+}
+
+// MarshalJSON writes back the shape that was read.
+func (f ModelOnlyField) MarshalJSON() ([]byte, error) {
+	if !f.IsProjection {
+		return json.Marshal(f.Path)
+	}
+	return json.Marshal(modelOnlyProjection{Path: f.Path, Each: f.Each})
 }
 
 // The bounds of HTTPCall.TimeoutMs. A backend call happens inside a phone call

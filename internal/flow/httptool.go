@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/egress"
 )
@@ -258,6 +259,15 @@ func (b *Backend) Call(ctx context.Context, log *slog.Logger, tool Tool, args, s
 		return Result{}, fmt.Errorf("read response from %s: %w", parts.path, stripURL(err))
 	}
 	if response.StatusCode >= 400 {
+		// The backend's error code tells INDEX_UNAVAILABLE from
+		// UPSTREAM_TIMEOUT in the log. The body itself, and the backend's
+		// message, are never logged or returned: they are not ours to relay.
+		code := backendErrorCode(spec.ErrorFrom, payload)
+		log.Warn("http tool answered with an error status", append(fields,
+			"status", response.StatusCode, "backendError", code)...)
+		if code != "" {
+			return Result{}, fmt.Errorf("%s returned %d (%s)", parts.path, response.StatusCode, code)
+		}
 		return Result{}, fmt.Errorf("%s returned %d", parts.path, response.StatusCode)
 	}
 
@@ -290,6 +300,42 @@ func stripURL(err error) error {
 	return err
 }
 
+// maxBackendErrorLen bounds the backend's error code as logged and returned.
+const maxBackendErrorLen = 128
+
+// backendErrorCode reads the scalar at errorFrom in an error answer's JSON
+// object body. It returns "" when errorFrom is unset, the body is not an
+// object, or the path does not end at a scalar. Control characters are removed
+// and the code is cut to maxBackendErrorLen characters.
+func backendErrorCode(errorFrom string, payload []byte) string {
+	if errorFrom == "" {
+		return ""
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return ""
+	}
+	value, ok := lookupPath(decoded, errorFrom)
+	if !ok {
+		return ""
+	}
+	switch value.(type) {
+	case string, float64, bool:
+	default:
+		return ""
+	}
+	code := strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, asString(value))
+	if runes := []rune(code); len(runes) > maxBackendErrorLen {
+		code = string(runes[:maxBackendErrorLen])
+	}
+	return code
+}
+
 // resultFrom applies the success test and the field mapping.
 func resultFrom(spec *HTTPCall, response map[string]any) Result {
 	isOK := true
@@ -317,7 +363,51 @@ func resultFrom(spec *HTTPCall, response map[string]any) Result {
 			fields[name] = value
 		}
 	}
-	return Result{IsOK: true, Fields: fields}
+	var modelOnly map[string]any
+	for name, mapping := range spec.ModelOnly {
+		value, ok := mapping.extract(response)
+		if !ok {
+			continue
+		}
+		if modelOnly == nil {
+			modelOnly = make(map[string]any, len(spec.ModelOnly))
+		}
+		modelOnly[name] = value
+	}
+	return Result{IsOK: true, Fields: fields, ModelOnly: modelOnly}
+}
+
+// extract reads one modelOnly entry from a response. A path that does not
+// resolve, or a projection whose path is not an array, yields nothing. Array
+// elements that are not objects are skipped; a field of an element whose path
+// does not resolve is left out of that element.
+func (f ModelOnlyField) extract(response map[string]any) (any, bool) {
+	value, ok := lookupPath(response, f.Path)
+	if !ok {
+		return nil, false
+	}
+	if !f.IsProjection {
+		return value, true
+	}
+	elements, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := make([]any, 0, len(elements))
+	for _, element := range elements {
+		object, ok := element.(map[string]any)
+		if !ok {
+			continue
+		}
+		projected := make(map[string]any, len(f.Each))
+		for name, path := range f.Each {
+			if v, ok := lookupPath(object, path); ok {
+				projected[name] = v
+			}
+		}
+		out = append(out, projected)
+	}
+	return out, true
 }
 
 // lookupPath walks a dotted path through a decoded JSON object.
