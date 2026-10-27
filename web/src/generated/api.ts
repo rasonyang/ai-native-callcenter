@@ -368,11 +368,13 @@ export interface paths {
          *
          *     Authorization differs by kind. calls:create reaches the operation; AI_OUTBOUND additionally requires calls:create:ai, which an agent does not hold. A caller missing it is refused INSUFFICIENT_SCOPE naming calls:create:ai. The machine-readable form is x-body-scopes: scopes a credential of either kind must hold, beyond the security block, when the named request-body property has the listed value. A security block cannot say this, because its alternatives choose between credentials, not between request bodies.
          *
-         *     A destination on the do-not-call list is refused with 422 NUMBER_ON_DNC, for both kinds: no call is placed and no CDR is written (the CDR is the ledger of calls placed). The destination is compared as canonical E.164, completed with AICC_DEFAULT_COUNTRY_CODE when it is national; with that unset, a national number cannot be matched and is not checked, while a number written with + or 00 always is.
+         *     A destination on the do-not-call list is refused with 422 NUMBER_ON_DNC, for both kinds: no call is placed and no CDR is written (the CDR is the ledger of calls placed). The destination is compared as canonical E.164, completed with AICC_DEFAULT_COUNTRY_CODE when it is national (1 unless the deployment sets its own), and a number written with + or 00 is compared as written.
          *
          *     An AI_OUTBOUND request whose did is inbound-only (allowOutbound false on the DID) is refused with 422 DID_NOT_OUTBOUND: the number is never presented as caller id, no call is placed and no CDR is written. Set allowOutbound on the DID with updateDID (PUT /dids/{didId}) to allow it.
          *
          *     A call whose DID is at its outbound line limit (maxOutboundChannels on the DID) is refused with 409 DID_CHANNELS_EXHAUSTED, for both kinds: no call is placed and no CDR is written. For AGENT_OUTBOUND the DID is the number the call goes out from (the default outbound number).
+         *
+         *     An AI_OUTBOUND request on a deployment with no outbound endpoint (AICC_OUTBOUND_ENDPOINT empty) is refused with 409 OUTBOUND_NOT_CONFIGURED: no call is placed and no CDR is written. The code names the cause, where 503 STORAGE_DOWN would send the operator to a database that is not at fault.
          */
         post: operations["createCall"];
         delete?: never;
@@ -1416,7 +1418,7 @@ export interface paths {
         put?: never;
         /**
          * Start a campaign
-         * @description DRAFT to RUNNING. The campaign is checked once more first (its DID, flow and window may have changed since it was written; the outer calling hours may have been narrowed), and every ACTIVE contact becomes due. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         * @description DRAFT to RUNNING. The campaign is checked once more first (its DID, flow and window may have changed since it was written; the outer calling hours may have been narrowed), and every ACTIVE contact becomes due. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write. A deployment that cannot place an outbound call at all (`AICC_OUTBOUND_ENDPOINT` empty: the value that renders a number into the trunk's dial string) answers 409 OUTBOUND_NOT_CONFIGURED and writes no attempt, rather than starting a campaign whose every attempt would fail and be retried for hours. `deploy/carrier.md` says how to set it.
          */
         post: operations["startCampaign"];
         delete?: never;
@@ -1456,7 +1458,7 @@ export interface paths {
         put?: never;
         /**
          * Resume a campaign
-         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write.
+         * @description PAUSED to RUNNING, whatever paused it, and the pause reason is cleared. Any other status is 409 CAMPAIGN_INVALID_TRANSITION. Racing requests are decided by the database: of two simultaneous starts, or a start and a cancel, exactly one wins and the other is 409. Needs campaigns:write. A deployment that cannot place an outbound call at all (`AICC_OUTBOUND_ENDPOINT` empty) answers 409 OUTBOUND_NOT_CONFIGURED and the campaign stays PAUSED, rather than reporting RUNNING a campaign the dialer would pause again on its first attempt. `deploy/carrier.md` says how to set it.
          */
         post: operations["resumeCampaign"];
         delete?: never;
@@ -1502,7 +1504,7 @@ export interface paths {
          * Import contacts
          * @description Adds a list of contacts, at most 5000 per request (more is 422 VALIDATION_FAILED, params {field: "contacts", rule: TOO_MANY_ROWS}; send the list in several requests). The body is the only thing that can fail the request: a row that cannot be used is rejected on its own with a code, and never fails the others. The good rows are stored in one transaction.
          *
-         *     The answer has one result per request row, in request order: IMPORTED (contactId is the new contact), DUPLICATE (contactId is the contact that already had the number: the first one wins and its slots are not overwritten; a number repeated inside the request is a duplicate of its first row) or REJECTED with a code (NUMBER_EMPTY, NUMBER_INVALID, TIME_ZONE_INVALID, SLOTS_TOO_MANY, SLOT_UNKNOWN, SLOT_TOO_LONG). Numbers are canonicalised to E.164 with the campaign's defaultCountryCode, else the deployment's AICC_DEFAULT_COUNTRY_CODE, so "+8613800138000" and "138 0013 8000" are one contact. The same number in two campaigns is a contact in each. Importing again what was imported before is all DUPLICATE. The do-not-call list is not consulted here: the dialer checks it before every call, so a number added to it later still stops.
+         *     The answer has one result per request row, in request order: IMPORTED (contactId is the new contact), DUPLICATE (contactId is the contact that already had the number: the first one wins and its slots are not overwritten; a number repeated inside the request is a duplicate of its first row) or REJECTED with a code (NUMBER_EMPTY, NUMBER_INVALID, TIME_ZONE_INVALID, SLOTS_TOO_MANY, SLOT_UNKNOWN, SLOT_TOO_LONG). A slot the flow does not read is SLOT_UNKNOWN, so a column maps only to a name in the campaign's read-only flowFields. Numbers are canonicalised to E.164 with the campaign's defaultCountryCode, else the deployment's AICC_DEFAULT_COUNTRY_CODE, so "+8613800138000" and "138 0013 8000" are one contact. The same number in two campaigns is a contact in each. Importing again what was imported before is all DUPLICATE. The do-not-call list is not consulted here: the dialer checks it before every call, so a number added to it later still stops.
          *
          *     Allowed in DRAFT, RUNNING and PAUSED; a COMPLETED or CANCELLED campaign answers 409 CAMPAIGN_INVALID_TRANSITION. Contacts added to a RUNNING or PAUSED campaign are due at once. Needs campaigns:write.
          */
@@ -1814,7 +1816,7 @@ export interface components {
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
          */
-        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "DID_CHANNELS_EXHAUSTED" | "DID_NOT_OUTBOUND" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_DID_NOT_OUTBOUND" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "TRANSFER_IN_PROGRESS" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
+        ErrorCode: "INVALID_CREDENTIALS" | "SESSION_EXPIRED" | "FORBIDDEN" | "AGENT_REQUIRED" | "AGENT_IMPERSONATION_NOT_ALLOWED" | "INSUFFICIENT_SCOPE" | "VALIDATION_FAILED" | "TERMINAL_ANNOUNCE_REQUIRED" | "USER_DATA_TOO_LARGE" | "NUMBER_ON_DNC" | "DID_CHANNELS_EXHAUSTED" | "DID_NOT_OUTBOUND" | "OUTBOUND_NOT_CONFIGURED" | "CAMPAIGN_FLOW_HAS_TRANSFER" | "CAMPAIGN_DID_NOT_OUTBOUND" | "CAMPAIGN_RING_TIMEOUT_TOO_LONG" | "CAMPAIGN_WINDOW_OUTSIDE_LIMIT" | "CAMPAIGN_FIELD_LOCKED" | "CAMPAIGN_INVALID_TRANSITION" | "NOT_FOUND" | "METHOD_NOT_ALLOWED" | "CONFLICT" | "EXTENSION_IN_USE" | "EXTENSION_ASSIGNED_TO_AGENT" | "LAST_ADMIN" | "EXTENSION_POOL_EXHAUSTED" | "AGENT_ALREADY_LOGGED_IN" | "AGENT_NOT_LOGGED_IN" | "AGENT_NOT_IN_WRAP_UP" | "DEVICE_NOT_REGISTERED" | "TRANSCRIPTION_DISABLED" | "CALL_NOT_FOUND" | "NOT_CALL_PARTY" | "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE" | "TRANSFER_IN_PROGRESS" | "USER_SUSPENDED" | "SWITCH_DOWN" | "STORAGE_DOWN" | "RATE_LIMITED" | "INTERNAL";
         /** @description The single error envelope body: an error code plus interpolation params. Message is diagnostic English, never shown to end users. */
         Error: {
             code: components["schemas"]["ErrorCode"];
@@ -3361,10 +3363,10 @@ export interface components {
          */
         CampaignStatus: "DRAFT" | "RUNNING" | "PAUSED" | "COMPLETED" | "CANCELLED";
         /**
-         * @description Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+         * @description Why a campaign is PAUSED. MANUAL: an operator paused it. TRUNK_FAILURE: the trunk breaker tripped, several attempts in a row ended in a transient or originate failure. PROVIDER_FAILURE: the voice-provider breaker tripped, several answered calls in a row could not start a bot session. OUTBOUND_NOT_CONFIGURED: the dialer found AICC_OUTBOUND_ENDPOINT empty while the campaign was running; set it, then resume. Resuming is an operator's decision in every case.
          * @enum {string}
          */
-        CampaignPauseReason: "MANUAL" | "TRUNK_FAILURE" | "PROVIDER_FAILURE";
+        CampaignPauseReason: "MANUAL" | "TRUNK_FAILURE" | "PROVIDER_FAILURE" | "OUTBOUND_NOT_CONFIGURED";
         /**
          * @description ACTIVE is still to be dialled. DONE was answered, whatever came of it. EXHAUSTED used up maxAttempts or maxSystemRetries. INVALID_NUMBER is a number the carrier says does not exist. DNC is on the do-not-call list.
          * @enum {string}
@@ -3499,6 +3501,8 @@ export interface components {
             nextDialAt?: string;
             /** @description Read-only. Calls this campaign has ringing or talking right now. Absent unless RUNNING. */
             inFlight?: number;
+            /** @description Read-only. The business-data names the campaign's flow reads (userData.<name>): the vocabulary a contact's imported columns may map to. Sorted, without duplicates. Present on a single campaign (getCampaign and the responses of createCampaign, updateCampaign and every transition); absent from listCampaigns pages, and absent when the flow could not be read. An empty array means the DID has no published flow or the flow reads no userData. */
+            flowFields?: string[];
         };
         /** @description A campaign to create. It starts as a DRAFT. */
         CampaignWrite: {
@@ -3752,7 +3756,7 @@ export interface components {
                 "application/json": components["schemas"]["ErrorResponse"];
             };
         };
-        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED. Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
+        /** @description The request collides with current state. Codes CONFLICT, EXTENSION_IN_USE, EXTENSION_ASSIGNED_TO_AGENT, EXTENSION_POOL_EXHAUSTED, LAST_ADMIN, AGENT_ALREADY_LOGGED_IN, AGENT_NOT_LOGGED_IN, AGENT_NOT_IN_WRAP_UP, DEVICE_NOT_REGISTERED, TRANSCRIPTION_DISABLED, OUTBOUND_NOT_CONFIGURED (the deployment has no AICC_OUTBOUND_ENDPOINT: createCall for AI_OUTBOUND, startCampaign and resumeCampaign). Holding, retrieving and transferring an INTERNAL call answer OPERATION_NOT_ALLOWED_FOR_CALL_TYPE; transferring a caller whose previous transfer the switch has not yet confirmed answers TRANSFER_IN_PROGRESS. Campaign operations answer CAMPAIGN_INVALID_TRANSITION (the operation does not exist in the campaign's status) or CAMPAIGN_FIELD_LOCKED (params.fields lists what cannot change in that status); publishing a flow revision or rebinding a DID that would give a campaign that has not finished a way to a person answers CAMPAIGN_FLOW_HAS_TRANSFER; clearing allowOutbound on a DID such a campaign dials from answers CAMPAIGN_DID_NOT_OUTBOUND. */
         Conflict: {
             headers: {
                 [name: string]: unknown;

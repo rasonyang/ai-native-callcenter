@@ -23,6 +23,21 @@ func (q *Queries) CountDNCNumbers(ctx context.Context, prefix string) (int64, er
 	return count, err
 }
 
+const countDNCNumbersOutsideCountryCode = `-- name: CountDNCNumbersOutsideCountryCode :one
+SELECT count(*) FROM dnc_numbers
+WHERE NOT starts_with(number_e164, '+' || $1::text)
+`
+
+// How many entries are not in the country calling code (digits, no "+"). aicc
+// doctor asks it of the built-in default code: an entry elsewhere is a number a
+// national spelling would be completed to the wrong country for.
+func (q *Queries) CountDNCNumbersOutsideCountryCode(ctx context.Context, countryCode string) (int64, error) {
+	row := q.db.QueryRow(ctx, countDNCNumbersOutsideCountryCode, countryCode)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteDNCNumber = `-- name: DeleteDNCNumber :execrows
 DELETE FROM dnc_numbers WHERE number_e164 = $1
 `

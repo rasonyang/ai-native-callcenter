@@ -52,6 +52,13 @@ type seeded struct {
 	cookie  string
 }
 
+// canPlace is a deployment's answer to campaign.Placer: a campaign cannot be
+// started or resumed on one that cannot dial, and most of these tests are about
+// what happens after it can.
+type canPlace bool
+
+func (c canPlace) CanPlaceAI() bool { return bool(c) }
+
 // newFixture builds a real database, runs the real migrations, and stands up a
 // real server.
 func newFixture(t *testing.T, opts ...func(*Deps)) *fixture {
@@ -92,18 +99,20 @@ func newFixtureWithConfig(t *testing.T, configure func(*config.Config),
 		configure(&cfg)
 	}
 	deps := Deps{
-		Auth:      auth.NewService(st.Queries, cfg.SessionTTL),
-		Agents:    stubAgents{},
-		AgentDir:  dbDirectory{st},
-		Ledger:    st.Ledger(),
-		Auditor:   st.Ledger(),
-		Accounts:  st.Accounts(),
-		Contacts:  st.Contacts(),
-		DNC:       st.DNC(),
-		Campaigns: campaign.NewService(st.Campaigns(), nil, campaign.Env{DefaultCountryCode: "86"}),
-		Flows:     st.Flows(),
-		Keys:      APIKeys{APIKeyStore: st.APIKeys()},
-		Hub:       events.NewHub(events.NewSequence(dbSeq{st}, "events")),
+		Auth:     auth.NewService(st.Queries, cfg.SessionTTL),
+		Agents:   stubAgents{},
+		AgentDir: dbDirectory{st},
+		Ledger:   st.Ledger(),
+		Auditor:  st.Ledger(),
+		Accounts: st.Accounts(),
+		Contacts: st.Contacts(),
+		DNC:      st.DNC(),
+		Campaigns: campaign.NewService(st.Campaigns(), nil, campaign.Env{
+			DefaultCountryCode: "86",
+		}).WithPlacer(canPlace(true)),
+		Flows: st.Flows(),
+		Keys:  APIKeys{APIKeyStore: st.APIKeys()},
+		Hub:   events.NewHub(events.NewSequence(dbSeq{st}, "events")),
 	}
 	for _, opt := range opts {
 		opt(st, &deps)

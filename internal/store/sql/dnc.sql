@@ -26,6 +26,13 @@ WHERE (sqlc.arg('prefix')::text = '' OR starts_with(number_e164, sqlc.arg('prefi
 ORDER BY created_at DESC, number_e164
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
+-- name: CountDNCNumbersOutsideCountryCode :one
+-- How many entries are not in the country calling code (digits, no "+"). aicc
+-- doctor asks it of the built-in default code: an entry elsewhere is a number a
+-- national spelling would be completed to the wrong country for.
+SELECT count(*) FROM dnc_numbers
+WHERE NOT starts_with(number_e164, '+' || sqlc.arg('country_code')::text);
+
 -- name: CountDNCNumbers :one
 SELECT count(*) FROM dnc_numbers
 WHERE (sqlc.arg('prefix')::text = '' OR starts_with(number_e164, sqlc.arg('prefix')));

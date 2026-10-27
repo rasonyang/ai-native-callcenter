@@ -35,6 +35,7 @@ type bucket struct {
 // then completion and the account of what each campaign is doing.
 func (d *Dialer) pass(ctx context.Context) {
 	d.isDirty = false
+	clear(d.stopped)
 	now := d.clock.Now()
 	d.nextWake = now.Add(d.cfg.SafetyScan)
 
@@ -94,7 +95,7 @@ func (d *Dialer) pass(ctx context.Context) {
 			var pick *campaign.Campaign
 			for i := 0; i < n; i++ {
 				c := &live[(start+i)%n]
-				if buckets[c.ID].done || d.halted[c.ID] {
+				if buckets[c.ID].done || d.halted[c.ID] || d.stopped[c.ID] {
 					continue
 				}
 				if pick == nil || d.inflight[c.ID] < d.inflight[pick.ID] {
@@ -131,12 +132,24 @@ func (d *Dialer) pass(ctx context.Context) {
 		d.nextWake = next
 	}
 	// A pass that stopped short of the whole list asks for another at once.
-	for _, b := range buckets {
+	for id, b := range buckets {
+		if d.stopped[id] {
+			// Stopped for this pass only. Asking for another pass at once would
+			// retry a failed pause in a tight loop, so the retry waits.
+			if retry := now.Add(stoppedRetry); retry.Before(d.nextWake) {
+				d.nextWake = retry
+			}
+			continue
+		}
 		if b.blocked == "" && !b.done {
 			d.isDirty = true
 		}
 	}
 }
+
+// stoppedRetry is how long a campaign whose pause did not land waits before the
+// next pass tries again.
+const stoppedRetry = 5 * time.Second
 
 // admitOne tries to place one call for the campaign and reports whether it
 // made progress (placed one, or moved contacts out of the way).
@@ -395,6 +408,19 @@ func (d *Dialer) dialFailed(ctx context.Context, c campaign.Campaign, f *flight,
 		// Nothing was sent: the attempt never happened.
 		d.voidAttempt(ctx, f, now)
 		return
+	case errors.Is(err, outbound.ErrNoOutboundEndpoint):
+		// This deployment has nowhere to dial, so every attempt of every
+		// campaign would come back here: no customer is reached, no contact is
+		// at fault. Void the attempt (no row, no retry budget spent) and stop
+		// the campaign now, on the first attempt, instead of spending the
+		// list's system retries on a setting nobody can fix from the list
+		// (#293). The start refusal says the same thing while an operator is
+		// looking; this covers a campaign that was already running when
+		// the application came back without an endpoint (the API refuses to
+		// resume one, but the dialer must not depend on that).
+		d.voidAttempt(ctx, f, now)
+		d.pauseNoEndpoint(ctx, c.ID)
+		return
 	}
 	verdict := campaign.ClassifyDialError(err, campaign.DialErrorKinds{
 		NumberOnDNC: outbound.ErrNumberOnDNC, BadNumber: outbound.ErrBadNumber,
@@ -607,6 +633,41 @@ func (d *Dialer) judgeBreakers(ctx context.Context, f campaign.Finished) {
 		d.isDirty = true
 		d.log.Warn("dialer: campaign paused by a breaker", "campaignId", f.CampaignID, "reason", reason)
 	}
+}
+
+// pauseNoEndpoint pauses a campaign that cannot place a call at all, under its
+// own reason, OUTBOUND_NOT_CONFIGURED: the cause is a setting nobody can fix at
+// the carrier, which TRUNK_FAILURE would send them to look at. aicc doctor's
+// outbound_endpoint warning names the setting to fix (deploy/carrier.md).
+//
+// Only the first attempt of a pass pauses: PauseFor is conditional on RUNNING,
+// so the attempts already in flight find the campaign PAUSED and stop there.
+//
+// Whatever PauseFor answers, the campaign admits nothing more in this pass
+// (stopped). voidAttempt has made the refused contact due again, so a pass that
+// kept admitting would refuse the same contacts forever, and a database error
+// is enough to start that. halted is deliberately left for the success case
+// alone: only a resume clears it, and a campaign whose pause failed is still
+// RUNNING, so marking it halted would leave it never dialled again. The next
+// pass starts with stopped empty, dials, is refused, and tries the pause again.
+func (d *Dialer) pauseNoEndpoint(ctx context.Context, id uuid.UUID) {
+	if d.halted[id] || d.stopped[id] {
+		return
+	}
+	d.stopped[id] = true
+	paused, err := d.st.PauseFor(ctx, id, campaign.PauseOutboundNotConfigured)
+	if err != nil {
+		d.log.Error("dialer: cannot pause a campaign that cannot dial", "campaignId", id, "error", err)
+		return
+	}
+	if !paused {
+		return
+	}
+	d.halted[id] = true
+	d.isDirty = true
+	d.touch(id)
+	d.log.Warn("dialer: campaign paused: the deployment has no outbound endpoint (AICC_OUTBOUND_ENDPOINT); "+
+		"set it and resume, see deploy/carrier.md", "campaignId", id)
 }
 
 // account computes what the campaign is doing, completes it when the list is

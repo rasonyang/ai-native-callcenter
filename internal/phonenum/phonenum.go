@@ -59,8 +59,9 @@ const (
 //     defaultCountryCode is prefixed;
 //  4. the result must be "+", a digit 1-9, then 7 to 14 more digits.
 //
-// defaultCountryCode is digits only, without "+" (for example "86"). With it
-// empty a national number cannot be completed and is refused.
+// defaultCountryCode is digits only, without "+" (for example "86"). The
+// application always passes one (AICC_DEFAULT_COUNTRY_CODE defaults to 1); a
+// caller that passes it empty gets a national number refused.
 func Canonical(raw, defaultCountryCode string) (string, error) {
 	var b strings.Builder
 	for _, r := range raw {

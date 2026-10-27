@@ -170,7 +170,7 @@ final.
 | `name` | |
 | `did_id` | the outbound DID; it names the flow and the caller id. Must have a flow. |
 | `status` | `DRAFT \| RUNNING \| PAUSED \| COMPLETED \| CANCELLED` |
-| `pause_reason` | `MANUAL \| TRUNK_FAILURE \| PROVIDER_FAILURE`; NULL unless `PAUSED` |
+| `pause_reason` | `MANUAL \| TRUNK_FAILURE \| PROVIDER_FAILURE \| OUTBOUND_NOT_CONFIGURED`; NULL unless `PAUSED` |
 | `time_zone` | IANA name; the default for contacts that carry none (the window is evaluated per contact, §8.1) |
 | `calling_window` | jsonb: days of week and one or more `[start, end)` wall-clock ranges; must lie inside the outer calling hours (§8.1) |
 | `default_country_code` | used to normalise national numbers on import (§9) |
@@ -242,8 +242,9 @@ DRAFT ──start──▶ RUNNING ──pause──▶ PAUSED ──resume─�
                     └── no ACTIVE contact left and nothing in flight ──▶ COMPLETED
 ```
 
-- `PAUSED` is entered by an operator (`MANUAL`) or by a breaker (`TRUNK_FAILURE`,
-  `PROVIDER_FAILURE`, §7.4). Pausing stops new attempts; attempts in flight finish normally.
+- `PAUSED` is entered by an operator (`MANUAL`), by a breaker (`TRUNK_FAILURE`,
+  `PROVIDER_FAILURE`) or by the dialer finding the deployment unable to dial
+  (`OUTBOUND_NOT_CONFIGURED`), all in §7.4. Pausing stops new attempts; attempts in flight finish normally.
 - **A closed calling window is not `PAUSED`**; the campaign stays `RUNNING`. Three reasons:
   - Windows are evaluated in each contact's time zone (§8.1), so at one moment some contacts are
     inside their window and others are not. "Window closed" is a fact about contacts, which a
@@ -758,6 +759,21 @@ outside the window, and move to Tuesday 09:00.
 - **Provider breaker:** `M` consecutive answered calls (default 5) ending `BOT_FAILED` →
   `PAUSED / PROVIDER_FAILURE`. Answered contacts are not redialled, so a provider outage that does
   not stop the campaign burns one lead per answered call.
+- **No outbound endpoint (decided 2026-10-21, #293 review).** A deployment with an empty
+  `AICC_OUTBOUND_ENDPOINT` cannot place any call, so the first attempt the placer refuses
+  (`ErrNoOutboundEndpoint`) is voided — no attempt row, no retry budget, the contact due again as
+  it was — and the campaign is paused at once as `PAUSED / OUTBOUND_NOT_CONFIGURED`, a reason of
+  its own because the fix is a setting, not the carrier `TRUNK_FAILURE` sends an operator to. One
+  attempt is enough evidence: waiting for `N` of them would spend the list's system retries on a
+  setting. Whatever the pause does (it can fail on a database error), the campaign admits nothing
+  more in that pass, and the next pass tries the pause again: the voided contact is due again, and
+  a pass that kept admitting would refuse it for ever.
+- **Start and Resume refuse early.** Both ask `outbound.Service.CanPlaceAI` (the one answer; the
+  campaign service keeps no copy of the setting) and answer `409 OUTBOUND_NOT_CONFIGURED`, the
+  campaign staying `DRAFT` or `PAUSED`, after the status check (`CAMPAIGN_INVALID_TRANSITION`
+  first). Without that a resume would report `RUNNING` for the few seconds until the dialer
+  paused the campaign again. The dialer's rule above still covers a campaign that was `RUNNING`
+  when the application came back without an endpoint.
 - Both are resumed by an operator.
 
 ---
@@ -944,12 +960,15 @@ The model judges; code records.
 - **A number added while its campaign runs:** an attempt not yet admitted is skipped
   (`DNC_SKIPPED`); one already ringing or talking is not hung up, and no retry follows because the
   contact becomes `DNC`.
-- **Comparing a single call's number (decided by the owner, 2026-10-12).** DNC entries are
-  canonical E.164 (§9.1). A single call's `to` is canonicalised with the deployment setting
-  `AICC_DEFAULT_COUNTRY_CODE` before the check. The binary's default is empty; the deploy stack and
-  the development environment set `86`. With it empty a national `to` cannot be canonicalised and
-  is not checked (a known gap), while a `+` or `00` number always is; `aicc doctor` warns when the
-  list is non-empty and the code is unset.
+- **Comparing a single call's number (decided by the owner, 2026-10-12; the default revised
+  2026-10-21, #293).** DNC entries are canonical E.164 (§9.1). A single call's `to` is
+  canonicalised with the deployment setting `AICC_DEFAULT_COUNTRY_CODE` before the check. The
+  binary's default is `1`: a national number is never ambiguous, and a deployment outside +1 sets
+  its own. The deploy stack keeps the `86` it has always set — an upgrade must not change how an
+  existing deployment's national numbers match the list — and the development `.env` sets `86`
+  too. The value cannot be blanked — `AICC_DEFAULT_COUNTRY_CODE=` reads as unset and the default
+  applies — so a national `to` is always canonicalised, while a `+` or `00` number is compared as
+  written. There is no unset state left, which is why `aicc doctor` no longer warns about one.
 
 ---
 

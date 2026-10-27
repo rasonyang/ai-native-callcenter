@@ -32,6 +32,9 @@ var (
 	// ErrWindowOutsideLimit: the calling window is not inside the
 	// deployment's outer calling hours.
 	ErrWindowOutsideLimit = errors.New("campaign: calling window is outside the permitted hours")
+	// ErrOutboundNotConfigured: the deployment has no outbound endpoint, so
+	// none of this campaign's calls could be placed.
+	ErrOutboundNotConfigured = errors.New("campaign: the deployment has no outbound endpoint")
 )
 
 // Error is a refusal with the detail a client needs to fix the request.

@@ -123,6 +123,7 @@
     "NUMBER_ON_DNC": "该号码在免打扰名单中，未发起呼叫。",
     "DID_CHANNELS_EXHAUSTED": "该号码的外呼线路已达上限，未发起呼叫。",
     "DID_NOT_OUTBOUND": "该号码未开启外呼，不能作为主叫号码。请先为该号码开启外呼。未发起呼叫。",
+    "OUTBOUND_NOT_CONFIGURED": "这个部署还不能外呼：没有设置 AICC_OUTBOUND_ENDPOINT。请先按 deploy/carrier.md 接入运营商网关，再重试。没有发起任何呼叫。",
     "CAMPAIGN_FLOW_HAS_TRANSFER": "该号码对应的流程可以把来电转给人工，而外呼活动的通话没有转人工的途径。请从流程中去掉转接，或选择其他号码。",
     "CAMPAIGN_DID_NOT_OUTBOUND": "该外呼活动使用的号码未开启外呼。请为该号码开启外呼，或选择其他号码。",
     "CAMPAIGN_RING_TIMEOUT_TOO_LONG": "振铃超时必须短于通话可等待接听的 60 秒。",
@@ -916,12 +917,14 @@
     "pauseReasons": {
       "MANUAL": "已由人工暂停",
       "TRUNK_FAILURE": "已自动暂停：中继线路故障",
-      "PROVIDER_FAILURE": "已自动暂停：语音服务商故障"
+      "PROVIDER_FAILURE": "已自动暂停：语音服务商故障",
+      "OUTBOUND_NOT_CONFIGURED": "已自动暂停：部署未配置外呼出口"
     },
     "pauseExplain": {
       "MANUAL": "不会再拨出新电话，进行中的通话正常结束。",
       "TRUNK_FAILURE": "连续多个呼叫无法到达运营商。系统不会自动恢复，请检查中继线路后手动恢复。",
-      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。系统不会自动恢复，请检查语音服务商后手动恢复。"
+      "PROVIDER_FAILURE": "连续多个已接通的呼叫无法启动机器人会话。系统不会自动恢复，请检查语音服务商后手动恢复。",
+      "OUTBOUND_NOT_CONFIGURED": "拨号器发现 AICC_OUTBOUND_ENDPOINT 为空，无法发起任何呼叫。请把它设为运营商网关使用的拨号串（见 deploy/carrier.md）并重建应用，然后再恢复该活动；未设置之前无法恢复。"
     },
     "counts": {
       "total": "联系人",
@@ -1075,7 +1078,8 @@
       "sheet": "工作表",
       "sheetOf": "要导入的工作表",
       "mapping": "列",
-      "mappingHint": "选择号码列；如果文件有时区列也请指定。其余列默认忽略；流程会读取的列请选择“流程字段”，字段名如下所示。流程不读取的字段会导致该行失败。",
+      "mappingHint": "选择号码列；如果文件有时区列也请指定。表头与活动流程读取的字段同名的列会自动选中；其余列默认忽略，也可以指定为流程的某个字段。流程不读取的字段会导致该行失败。",
+      "noFlowFields": "这个活动的流程不读取任何业务字段，或其号码尚未发布流程，只能映射号码和时区。",
       "unnamed": "第 {{n}} 列",
       "roleOf": "列 {{name}} 的用途",
       "slotNameOf": "列 {{name}} 的字段名",

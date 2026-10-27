@@ -132,8 +132,9 @@ func dncFromRow(row queries.DncNumber) DNCNumber {
 	}
 }
 
-// DNCEntryCount is how many numbers the do-not-call list holds.
-func (s *Store) DNCEntryCount(ctx context.Context) (int64, error) {
-	_, total, err := s.DNC().List(ctx, DNCFilter{Limit: 1})
-	return total, err
+// DNCCountOutsideCountryCode is how many numbers on the list are not in the
+// country calling code (digits, no "+"). Country codes are prefix-free, so a
+// number is in +1 exactly when it starts with "+1".
+func (s *Store) DNCCountOutsideCountryCode(ctx context.Context, countryCode string) (int64, error) {
+	return s.Queries.CountDNCNumbersOutsideCountryCode(ctx, countryCode)
 }

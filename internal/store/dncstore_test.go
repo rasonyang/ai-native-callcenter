@@ -134,3 +134,25 @@ func TestAddingANumberToTheDNCListTellsTheDialerOnce(t *testing.T) {
 		t.Errorf("a new number: told %d, %v", told, err)
 	}
 }
+
+// aicc doctor asks how many entries lie outside the built-in country code.
+// Country codes are prefix-free, so "+1" matches exactly the numbers of +1 and
+// nothing of +1x-style codes elsewhere (+1 is not a prefix of +86, +44 or +91).
+func TestTheDNCListCountsEntriesOutsideACountryCode(t *testing.T) {
+	ctx := context.Background()
+	st, list := openDNC(t)
+	if n, err := st.DNCCountOutsideCountryCode(ctx, "1"); err != nil || n != 0 {
+		t.Fatalf("empty list: %d, %v; want 0", n, err)
+	}
+	for _, n := range []string{"+12125550101", "+14165550101", "+8613800138000", "+442071838750", "+919876543210"} {
+		if _, _, err := list.Add(ctx, n, DNCSourceManual, nil, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := st.DNCCountOutsideCountryCode(ctx, "1"); err != nil || n != 3 {
+		t.Errorf("outside +1: %d, %v; want 3", n, err)
+	}
+	if n, err := st.DNCCountOutsideCountryCode(ctx, "86"); err != nil || n != 4 {
+		t.Errorf("outside +86: %d, %v; want 4", n, err)
+	}
+}

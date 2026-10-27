@@ -45,13 +45,17 @@ func (capturedSwitch) BgAPI(string) (string, error) { return "", errors.New("rea
 func (capturedSwitch) IsUp() bool                   { return true }
 
 type fakeMigrations struct {
-	state    store.MigrationState
-	err      error
-	dnc      int64
-	dncError error
+	state store.MigrationState
+	err   error
+	// outsideUS is how many do-not-call numbers lie outside +1; outsideErr is
+	// what reading them answers.
+	outsideUS  int64
+	outsideErr error
 }
 
-func (f fakeMigrations) DNCEntryCount(context.Context) (int64, error) { return f.dnc, f.dncError }
+func (f fakeMigrations) DNCCountOutsideCountryCode(context.Context, string) (int64, error) {
+	return f.outsideUS, f.outsideErr
+}
 
 func (f fakeMigrations) MigrationStatus(context.Context) (store.MigrationState, error) {
 	return f.state, f.err
@@ -115,6 +119,9 @@ func newHarness(t *testing.T) *harness {
 			IsBotEnabled: true,
 			Provider:     "openai",
 			ESLAddr:      "freeswitch:18021",
+			// The captured switch knows this gateway, so a healthy deployment
+			// passes the outbound checks as it passes the bot gateway's.
+			OutboundEndpoint: "sofia/gateway/aicc_bot/%s",
 		},
 		getenv: func(k string) string {
 			if k == "OPENAI_API_KEY" {
@@ -326,10 +333,40 @@ type fakeStatus struct {
 	profiles []telephony.SwitchProfile
 	gateway  bool
 	gwErr    error
+	// trunks is the switch's gateway table, which carries both the names that
+	// exist and whether each would place a call now.
+	trunks    []telephony.Trunk
+	trunksErr error
+	// asked, when set, collects the names GatewayUp is asked about.
+	asked *[]string
 }
 
 func (f fakeStatus) Profiles() ([]telephony.SwitchProfile, error) { return f.profiles, nil }
-func (f fakeStatus) GatewayUp(string) (bool, error)               { return f.gateway, f.gwErr }
+func (f fakeStatus) GatewayUp(name string) (bool, error) {
+	if f.asked != nil {
+		*f.asked = append(*f.asked, name)
+	}
+	return f.gateway, f.gwErr
+}
+func (f fakeStatus) Trunks() ([]telephony.Trunk, error) { return f.trunks, f.trunksErr }
+
+// healthyTrunks is a switch holding the bot gateway (which never registers)
+// and one carrier gateway that does.
+func healthyTrunks() []telephony.Trunk {
+	return []telephony.Trunk{
+		{Name: "aicc_bot", Profile: "external", State: "NOREG", IsUp: true},
+		{Name: "carrier_b", Profile: "external", State: "REGED", IsUp: true},
+	}
+}
+
+// externalProfiles is the listener table checkSwitch asks for; the outbound
+// checks only need it to be there and running.
+func externalProfiles() []telephony.SwitchProfile {
+	return []telephony.SwitchProfile{
+		{Name: "internal", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+		{Name: "external", IsRunning: true, AdvertisedMediaIP: "192.168.31.111"},
+	}
+}
 
 func TestAStoppedProfileAndADeadBotGatewayFail(t *testing.T) {
 	h := newHarness(t)
@@ -560,37 +597,238 @@ func TestEveryDoctorCheckIsLowerSnakeAndUnique(t *testing.T) {
 	}
 }
 
-func TestAPopulatedDNCListWithoutACountryCodeWarnsButDoesNotFail(t *testing.T) {
-	populated := func(*harness) migrationReader {
-		return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dnc: 3}
+// Two WARNs, neither of which changes the exit status: a deployment that takes
+// calls in works without an outbound endpoint, and one that runs campaigns does
+// not. Doctor says which, before a campaign rings nothing.
+func TestAnEmptyOutboundEndpointIsAWarningNotAFailure(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = ""
+	got := h.run()
+
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStateWarn)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateSkip)
+	if !strings.Contains(got[DoctorCheckOutboundEndpoint].Message, "AICC_OUTBOUND_ENDPOINT") {
+		t.Errorf("the warning does not name the setting: %q", got[DoctorCheckOutboundEndpoint].Message)
 	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundEndpoint]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+	}
+}
+
+func TestAnEndpointNamingAMissingGatewayIsAWarningThatListsTheOnesThereAre(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/pstn_gatewya/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true,
+			// The names the operator's own switch has: enough to see the typo.
+			trunks: healthyTrunks(),
+		}, func() {}, nil
+	}
+	got := h.run()
+
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStatePass)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	for _, want := range []string{"pstn_gatewya", "aicc_bot", "carrier_b"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("the warning does not mention %q: %q", want, msg)
+		}
+	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundGateway]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+	}
+}
+
+// A carrier gateway that registers and is stuck before it ever did is not
+// reachable, whatever its OPTIONS ping says: the switch's own state (FAIL_WAIT,
+// UNREGED) is what a call would meet. The check reads the trunk table, not the
+// ping status, so it warns here — that is the silent outbound failure it exists
+// to catch (#293 review).
+func TestACarrierGatewayStuckRegisteringWarnsEvenIfItAnswersPings(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{
+			profiles: externalProfiles(),
+			// The ping side says UP.
+			gateway: true,
+			trunks: []telephony.Trunk{
+				{Name: "aicc_bot", Profile: "external", State: "NOREG", IsUp: true},
+				{Name: "carrier_b", Profile: "external", State: "FAIL_WAIT", IsUp: false},
+			},
+		}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	if !strings.Contains(msg, "carrier_b") || !strings.Contains(msg, "FAIL_WAIT") {
+		t.Errorf("the warning does not name the gateway and its state: %q", msg)
+	}
+}
+
+// The switch prints a gateway as profile::name, and the endpoint may be written
+// the same way. That is a gateway the switch has, not a typo.
+func TestAnEndpointQualifiedWithItsProfilePassesAndNamesTheProfileOnTheSwitch(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/external::carrier_b/%s"
+	var asked []string
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), asked: &asked}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStatePass)
+	if len(asked) == 0 || asked[len(asked)-1] != "external::carrier_b" {
+		t.Errorf("the ping status was asked about %v, want external::carrier_b", asked)
+	}
+
+	// The profile counts: the same name on another profile is not this gateway.
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/internal::carrier_b/%s"
+	got = h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+}
+
+// Doctor cannot read the trunk table: that is a warning naming the error, not a
+// failure and not a pass.
+func TestAnUnreadableTrunkTableIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunksErr: errors.New("sofia status timed out")}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	if !strings.Contains(got[DoctorCheckOutboundGateway].Message, "sofia status timed out") {
+		t.Errorf("the warning does not carry the error: %q", got[DoctorCheckOutboundGateway].Message)
+	}
+}
+
+// A gateway that never registers (NOREG) is dialable only while it answers the
+// switch's OPTIONS pings: once the carrier stops, sofia refuses every originate
+// through it, though the trunk table still says NOREG. Passing on the table
+// alone would call that a healthy trunk (#293 review).
+func TestANoregGatewayWhosePingIsDownWarns(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{
+			profiles: externalProfiles(),
+			gateway:  false,
+			trunks: []telephony.Trunk{
+				{Name: "carrier_b", Profile: "external", State: "NOREG", IsUp: true},
+			},
+		}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	msg := got[DoctorCheckOutboundGateway].Message
+	if !strings.Contains(msg, "carrier_b") || !strings.Contains(msg, "NOREG") || !strings.Contains(msg, "DOWN") {
+		t.Errorf("the warning does not name the gateway, its state and the ping: %q", msg)
+	}
+	if n := countFailed([]doctorResult{got[DoctorCheckOutboundGateway]}); n != 0 {
+		t.Errorf("countFailed = %d, want 0", n)
+	}
+}
+
+// An error reading the ping status is a warning too.
+func TestAnUnreadablePingStatusIsAWarning(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/gateway/carrier_b/%s"
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), trunks: healthyTrunks(), gwErr: errors.New("reply lost")}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateWarn)
+	if !strings.Contains(got[DoctorCheckOutboundGateway].Message, "reply lost") {
+		t.Errorf("the warning does not carry the error: %q", got[DoctorCheckOutboundGateway].Message)
+	}
+}
+
+// The upgrade hazard of the built-in country code: a deployment that never set
+// AICC_DEFAULT_COUNTRY_CODE now completes national numbers to +1, and a
+// do-not-call list in another country stops matching them. A WARN, never a
+// failure; silent when the operator chose the code or the list is all +1.
+func TestAnUnsetCountryCodeWithForeignDoNotCallNumbersWarnsButDoesNotFail(t *testing.T) {
+	ok := store.MigrationState{DBVersion: 33, LatestVersion: 33}
 	cases := []struct {
-		name string
-		code string
-		dnc  func(*harness) migrationReader
-		want DoctorState
+		name  string
+		isSet bool
+		db    fakeMigrations
+		want  DoctorState
 	}{
-		{"entries and no code", "", populated, DoctorStateWarn},
-		{"entries and a code", "86", populated, DoctorStatePass},
-		{"empty list and no code", "", nil, DoctorStatePass},
-		{"unreadable list and no code", "", func(*harness) migrationReader {
-			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}, dncError: errors.New("denied")}
-		}, DoctorStateSkip},
+		{"unset, numbers outside +1", false, fakeMigrations{state: ok, outsideUS: 3}, DoctorStateWarn},
+		{"set, numbers outside +1", true, fakeMigrations{state: ok, outsideUS: 3}, DoctorStatePass},
+		{"unset, every number in +1", false, fakeMigrations{state: ok}, DoctorStatePass},
+		{"unset, list unreadable", false, fakeMigrations{state: ok, outsideErr: errors.New("denied")}, DoctorStateSkip},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			h := newHarness(t)
-			h.deps.cfg.DefaultCountryCode = c.code
-			if c.dnc != nil {
-				h.deps.openStore = func(context.Context) (migrationReader, func(), error) {
-					return c.dnc(h), func() {}, nil
+			h.deps.cfg.DefaultCountryCode = "1"
+			h.deps.cfg.IsDefaultCountryCodeSet = c.isSet
+			h.deps.openStore = func(context.Context) (migrationReader, func(), error) {
+				return c.db, func() {}, nil
+			}
+			got := h.run()
+			wantState(t, got, DoctorCheckDNCCountryCode, c.want)
+			if c.want == DoctorStateWarn {
+				r := got[DoctorCheckDNCCountryCode]
+				for _, want := range []string{"+1", "take_message", "AICC_DEFAULT_COUNTRY_CODE"} {
+					if !strings.Contains(r.Message+r.Fix, want) {
+						t.Errorf("the warning does not mention %q: %+v", want, r)
+					}
+				}
+				if r.Code != "DNC_COUNTRY_CODE_UNSET" {
+					t.Errorf("code = %q, want DNC_COUNTRY_CODE_UNSET", r.Code)
+				}
+				if n := countFailed([]doctorResult{r}); n != 0 {
+					t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
 				}
 			}
-			wantState(t, h.run(), DoctorCheckDNCCountryCode, c.want)
 		})
 	}
-	if n := countFailed([]doctorResult{warn(DoctorCheckDNCCountryCode, "", "x")}); n != 0 {
-		t.Errorf("countFailed = %d, want 0: a WARN does not change the exit status", n)
+}
+
+// A gateway that never registers by design (NOREG) is a trunk as it stands:
+// calling it down would report a fault on every healthy deployment.
+func TestAGatewayThatNeverRegistersPasses(t *testing.T) {
+	h := newHarness(t)
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStatePass)
+}
+
+// An endpoint that is not a gateway (a direct sip: dial string) has no gateway
+// to look up, and doctor says so rather than inventing a failure.
+func TestAnEndpointThatNamesNoGatewaySkipsTheGatewayCheck(t *testing.T) {
+	h := newHarness(t)
+	h.deps.cfg.OutboundEndpoint = "sofia/external/2125550101@10.0.0.9"
+	got := h.run()
+	wantState(t, got, DoctorCheckOutboundEndpoint, DoctorStatePass)
+	wantState(t, got, DoctorCheckOutboundGateway, DoctorStateSkip)
+}
+
+func TestTheGatewayNameIsReadOutOfTheDialString(t *testing.T) {
+	cases := []struct {
+		endpoint string
+		name     string
+		profile  string
+		ok       bool
+	}{
+		{"sofia/gateway/pstn_gateway/%s", "pstn_gateway", "", true},
+		{"sofia/gateway/pstn_gateway/+1%s", "pstn_gateway", "", true},
+		{"sofia/gateway/external::pstn_gateway/%s", "pstn_gateway", "external", true},
+		{"sofia/gateway/::pstn_gateway/%s", "", "", false},
+		{"sofia/gateway/external::/%s", "", "", false},
+		{"sofia/gateway//%s", "", "", false},
+		{"sofia/gateway/pstn_gateway", "", "", false},
+		{"sofia/external/sip:2125550101@10.0.0.9", "", "", false},
+		{"", "", "", false},
+	}
+	for _, c := range cases {
+		name, profile, ok := outboundGatewayOf(c.endpoint)
+		if name != c.name || profile != c.profile || ok != c.ok {
+			t.Errorf("outboundGatewayOf(%q) = %q, %q, %v; want %q, %q, %v",
+				c.endpoint, name, profile, ok, c.name, c.profile, c.ok)
+		}
 	}
 }
 

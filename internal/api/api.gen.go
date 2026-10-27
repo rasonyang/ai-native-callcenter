@@ -390,15 +390,18 @@ func (e CampaignOutcome) Valid() bool {
 
 // Defines values for CampaignPauseReason.
 const (
-	CampaignPauseReasonMANUAL          CampaignPauseReason = "MANUAL"
-	CampaignPauseReasonPROVIDERFAILURE CampaignPauseReason = "PROVIDER_FAILURE"
-	CampaignPauseReasonTRUNKFAILURE    CampaignPauseReason = "TRUNK_FAILURE"
+	CampaignPauseReasonMANUAL                CampaignPauseReason = "MANUAL"
+	CampaignPauseReasonOUTBOUNDNOTCONFIGURED CampaignPauseReason = "OUTBOUND_NOT_CONFIGURED"
+	CampaignPauseReasonPROVIDERFAILURE       CampaignPauseReason = "PROVIDER_FAILURE"
+	CampaignPauseReasonTRUNKFAILURE          CampaignPauseReason = "TRUNK_FAILURE"
 )
 
 // Valid indicates whether the value is a known member of the CampaignPauseReason enum.
 func (e CampaignPauseReason) Valid() bool {
 	switch e {
 	case CampaignPauseReasonMANUAL:
+		return true
+	case CampaignPauseReasonOUTBOUNDNOTCONFIGURED:
 		return true
 	case CampaignPauseReasonPROVIDERFAILURE:
 		return true
@@ -572,6 +575,7 @@ const (
 	ErrorCodeNOTFOUND                       ErrorCode = "NOT_FOUND"
 	ErrorCodeNUMBERONDNC                    ErrorCode = "NUMBER_ON_DNC"
 	ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE ErrorCode = "OPERATION_NOT_ALLOWED_FOR_CALL_TYPE"
+	ErrorCodeOUTBOUNDNOTCONFIGURED          ErrorCode = "OUTBOUND_NOT_CONFIGURED"
 	ErrorCodeRATELIMITED                    ErrorCode = "RATE_LIMITED"
 	ErrorCodeSESSIONEXPIRED                 ErrorCode = "SESSION_EXPIRED"
 	ErrorCodeSTORAGEDOWN                    ErrorCode = "STORAGE_DOWN"
@@ -644,6 +648,8 @@ func (e ErrorCode) Valid() bool {
 	case ErrorCodeNUMBERONDNC:
 		return true
 	case ErrorCodeOPERATIONNOTALLOWEDFORCALLTYPE:
+		return true
+	case ErrorCodeOUTBOUNDNOTCONFIGURED:
 		return true
 	case ErrorCodeRATELIMITED:
 		return true
@@ -1665,6 +1671,9 @@ type Campaign struct {
 	// FinishedAt Present once COMPLETED or CANCELLED.
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 
+	// FlowFields Read-only. The business-data names the campaign's flow reads (userData.<name>): the vocabulary a contact's imported columns may map to. Sorted, without duplicates. Present on a single campaign (getCampaign and the responses of createCampaign, updateCampaign and every transition); absent from listCampaigns pages, and absent when the flow could not be read. An empty array means the DID has no published flow or the flow reads no userData.
+	FlowFields *[]string `json:"flowFields,omitempty"`
+
 	// FollowUpQueueID The queue a HIGH lead's callback is filed under. Absent when none is set.
 	FollowUpQueueID *openapi_types.UUID `json:"followUpQueueId,omitempty"`
 	ID              openapi_types.UUID  `json:"id"`
@@ -1679,7 +1688,7 @@ type Campaign struct {
 	// NextDialAt Read-only. When the dialer expects to place the next call: the earliest time a pending contact is due and inside its calling window. Absent when it is not RUNNING, when contacts are due now, or when nothing is pending.
 	NextDialAt *time.Time `json:"nextDialAt,omitempty"`
 
-	// PauseReason Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+	// PauseReason Why a campaign is PAUSED. MANUAL: an operator paused it. TRUNK_FAILURE: the trunk breaker tripped, several attempts in a row ended in a transient or originate failure. PROVIDER_FAILURE: the voice-provider breaker tripped, several answered calls in a row could not start a bot session. OUTBOUND_NOT_CONFIGURED: the dialer found AICC_OUTBOUND_ENDPOINT empty while the campaign was running; set it, then resume. Resuming is an operator's decision in every case.
 	PauseReason *CampaignPauseReason `json:"pauseReason,omitempty"`
 
 	// RetryPolicy What happens to a contact after an attempt ends without settling it. Two budgets are counted separately: maxAttempts is how many times the customer's phone may be rung; maxSystemRetries is how many times our own or the network's failures are retried, and those never use up maxAttempts.
@@ -1929,7 +1938,7 @@ type CampaignPatch struct {
 	TimeZone *string `json:"timeZone,omitempty"`
 }
 
-// CampaignPauseReason Why a campaign is PAUSED: an operator (MANUAL) or a breaker (TRUNK_FAILURE, PROVIDER_FAILURE). Resuming is an operator's decision in every case.
+// CampaignPauseReason Why a campaign is PAUSED. MANUAL: an operator paused it. TRUNK_FAILURE: the trunk breaker tripped, several attempts in a row ended in a transient or originate failure. PROVIDER_FAILURE: the voice-provider breaker tripped, several answered calls in a row could not start a bot session. OUTBOUND_NOT_CONFIGURED: the dialer found AICC_OUTBOUND_ENDPOINT empty while the campaign was running; set it, then resume. Resuming is an operator's decision in every case.
 type CampaignPauseReason string
 
 // CampaignRetryOutcome The outcomes a campaign may choose to dial again. An answered number is never dialled again, and neither is an invalid or do-not-call one, so those outcomes are not choices.

@@ -71,6 +71,8 @@ const (
 	DoctorCheckExternalIPAdvertised DoctorCheck = "external_ip_advertised"
 	DoctorCheckProviderKey          DoctorCheck = "provider_key"
 	DoctorCheckProviderSession      DoctorCheck = "provider_session"
+	DoctorCheckOutboundEndpoint     DoctorCheck = "outbound_endpoint"
+	DoctorCheckOutboundGateway      DoctorCheck = "outbound_gateway"
 	DoctorCheckDNCCountryCode       DoctorCheck = "dnc_country_code"
 )
 
@@ -94,7 +96,13 @@ const (
 	DoctorCodeExternalIPStale       DoctorCode = "EXTERNAL_IP_STALE"
 	DoctorCodeProviderKeyMissing    DoctorCode = "PROVIDER_KEY_MISSING"
 	DoctorCodeProviderSessionFailed DoctorCode = "PROVIDER_SESSION_FAILED"
-	DoctorCodeDNCCountryCodeUnset   DoctorCode = "DNC_COUNTRY_CODE_UNSET"
+	// DoctorCodeOutboundEndpointUnset and DoctorCodeOutboundGatewayMissing are
+	// WARNs: a deployment nobody runs campaigns on works without them.
+	DoctorCodeOutboundEndpointUnset  DoctorCode = "OUTBOUND_ENDPOINT_UNSET"
+	DoctorCodeOutboundGatewayMissing DoctorCode = "OUTBOUND_GATEWAY_MISSING"
+	// DoctorCodeDNCCountryCodeUnset is a WARN too: the upgrade hazard of the
+	// built-in country code, never a failure.
+	DoctorCodeDNCCountryCodeUnset DoctorCode = "DNC_COUNTRY_CODE_UNSET"
 )
 
 // doctorChecks is every check, in the order they run, with the code it fails
@@ -112,6 +120,8 @@ var doctorChecks = []struct {
 	{DoctorCheckSwitchAuth, DoctorCodeSwitchAuthRejected},
 	{DoctorCheckSIPProfiles, DoctorCodeSwitchProfileDown},
 	{DoctorCheckBotGateway, DoctorCodeBotGatewayDown},
+	{DoctorCheckOutboundEndpoint, DoctorCodeOutboundEndpointUnset},
+	{DoctorCheckOutboundGateway, DoctorCodeOutboundGatewayMissing},
 	{DoctorCheckExternalIP, DoctorCodeExternalIPNotOnHost},
 	{DoctorCheckExternalIPAdvertised, DoctorCodeExternalIPStale},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
@@ -150,14 +160,19 @@ const providerProbeTimeout = 15 * time.Second
 // migrationReader is what doctor asks the database.
 type migrationReader interface {
 	MigrationStatus(ctx context.Context) (store.MigrationState, error)
-	// DNCEntryCount is how many numbers the do-not-call list holds.
-	DNCEntryCount(ctx context.Context) (int64, error)
+	// DNCCountOutsideCountryCode is how many numbers on the do-not-call list
+	// are not in the given country calling code (digits, no "+").
+	DNCCountOutsideCountryCode(ctx context.Context, countryCode string) (int64, error)
 }
 
 // switchReader is what doctor asks the switch.
 type switchReader interface {
 	Profiles() ([]telephony.SwitchProfile, error)
 	GatewayUp(name string) (bool, error)
+	// Trunks is every gateway the switch holds, with the state it is in: an
+	// aborted registration (FAIL_WAIT) is a trunk that cannot place a call,
+	// which a ping status alone does not say.
+	Trunks() ([]telephony.Trunk, error)
 }
 
 // doctorOptions are the command's flags.
@@ -291,6 +306,7 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	defer closeSwitch()
 	out = append(out, results...)
 	out = append(out, checkBotGateway(ctx, d, opts, sw.reader)...)
+	out = append(out, checkOutbound(d, sw.reader)...)
 	out = append(out, checkExternalIP(d, opts, sw)...)
 	// LAN media (RTP) reachability is verified by the release checklist, not by doctor.
 	out = append(out, checkProvider(ctx, d, opts)...)
@@ -420,7 +436,8 @@ func checkDatabase(ctx context.Context, d doctorDeps) []doctorResult {
 		return append(out,
 			fail(DoctorCheckMigrations, "cannot read the schema version: "+oneLine(err.Error()),
 				"check that AICC_DATABASE_URL's role can read goose_db_version"),
-			skip(DoctorCheckSchema, "the schema version is unknown"))
+			skip(DoctorCheckSchema, "the schema version is unknown"),
+			skip(DoctorCheckDNCCountryCode, "the database did not answer"))
 	}
 	version := fmt.Sprintf("schema %d, this binary's latest %d", m.DBVersion, m.LatestVersion)
 	if m.HasPending {
@@ -438,23 +455,152 @@ func checkDatabase(ctx context.Context, d doctorDeps) []doctorResult {
 	return append(out, checkDNCCountryCode(ctx, d, st))
 }
 
-// checkDNCCountryCode warns when the do-not-call list has entries but no
-// default country code is set: a national number cannot then be canonicalised,
-// so it is never checked against the list.
+// checkDNCCountryCode warns about the upgrade hazard of the built-in country
+// code. AICC_DEFAULT_COUNTRY_CODE defaults to 1; a deployment that never set it
+// and holds do-not-call numbers outside +1 (an older one, which then refused
+// national numbers, or a stack whose .env blanks the code) now completes a
+// national number to +1 for the do-not-call check, contact import and the bot's
+// take_message callback numbers, where its list is in another country. A national
+// 13800138000 no longer matches +8613800138000 and would be dialled. A WARN, never
+// a failure: the deployment may genuinely be North American with a few foreign
+// entries.
 func checkDNCCountryCode(ctx context.Context, d doctorDeps, st migrationReader) doctorResult {
-	if d.cfg.DefaultCountryCode != "" {
+	if d.cfg.IsDefaultCountryCodeSet {
 		return pass(DoctorCheckDNCCountryCode, "AICC_DEFAULT_COUNTRY_CODE is "+d.cfg.DefaultCountryCode)
 	}
-	n, err := st.DNCEntryCount(ctx)
+	n, err := st.DNCCountOutsideCountryCode(ctx, "1")
 	if err != nil {
 		return skip(DoctorCheckDNCCountryCode, "cannot read the do-not-call list: "+oneLine(err.Error()))
 	}
 	if n == 0 {
-		return pass(DoctorCheckDNCCountryCode, "the do-not-call list is empty")
+		return pass(DoctorCheckDNCCountryCode,
+			"AICC_DEFAULT_COUNTRY_CODE is unset (+1 applies) and the do-not-call list holds no number outside +1")
 	}
 	return warn(DoctorCheckDNCCountryCode,
-		fmt.Sprintf("the do-not-call list holds %d number(s) but AICC_DEFAULT_COUNTRY_CODE is unset: a national number cannot be canonicalised and is not checked against the list", n),
-		"set AICC_DEFAULT_COUNTRY_CODE (digits only, e.g. 86) in .env and restart the app")
+		fmt.Sprintf("AICC_DEFAULT_COUNTRY_CODE is unset, so national numbers are completed to +1 for the do-not-call check, "+
+			"contact import and the bot's take_message callback numbers, but the do-not-call list holds %d number(s) outside +1", n),
+		"set AICC_DEFAULT_COUNTRY_CODE (digits only, e.g. 86) in .env and restart the app; a stack's .env that blanks it "+
+			"(AICC_DEFAULT_COUNTRY_CODE=) leaves it unset")
+}
+
+// outboundGatewayOf reads the gateway out of an outbound endpoint:
+// "sofia/gateway/<gw>/%s" dials through <gw>, and <gw> may be qualified with the
+// profile that holds it, "sofia/gateway/external::<gw>/%s", the form the switch
+// itself prints. It returns the bare name and the profile ("" when the endpoint
+// names none). A dial string that is not a gateway (a direct sip: endpoint, say)
+// has none, and reports false.
+func outboundGatewayOf(endpoint string) (name, profile string, ok bool) {
+	rest, ok := strings.CutPrefix(endpoint, "sofia/gateway/")
+	if !ok {
+		return "", "", false
+	}
+	token, _, ok := strings.Cut(rest, "/")
+	if !ok || token == "" {
+		return "", "", false
+	}
+	if p, n, qualified := strings.Cut(token, "::"); qualified {
+		if p == "" || n == "" {
+			return "", "", false
+		}
+		return n, p, true
+	}
+	return token, "", true
+}
+
+// checkOutbound reports whether this deployment can place an AI outbound call
+// at all, and whether the gateway it would dial through is one the switch holds
+// and would dial through now.
+//
+// Both are WARNs. A deployment that only takes calls in works without either;
+// one that runs campaigns does not, and the operator learns it from here
+// instead of from a campaign that rings nothing.
+func checkOutbound(d doctorDeps, sw switchReader) []doctorResult {
+	endpoint := d.cfg.OutboundEndpoint
+	if endpoint == "" {
+		return []doctorResult{
+			warn(DoctorCheckOutboundEndpoint,
+				"AICC_OUTBOUND_ENDPOINT is empty: a campaign cannot place a call, and every attempt is refused inside the application",
+				"set AICC_OUTBOUND_ENDPOINT to the dial string your trunk takes, such as "+
+					"sofia/gateway/<gateway>/%s, in .env and recreate the app (deploy/carrier.md)"),
+			skip(DoctorCheckOutboundGateway, "there is no outbound endpoint to read a gateway from"),
+		}
+	}
+	out := []doctorResult{pass(DoctorCheckOutboundEndpoint, "AICC_OUTBOUND_ENDPOINT is "+endpoint)}
+
+	name, profile, isGateway := outboundGatewayOf(endpoint)
+	switch {
+	case !isGateway:
+		return append(out, skip(DoctorCheckOutboundGateway,
+			"the endpoint does not dial through a gateway (sofia/gateway/<name>/…)"))
+	case sw == nil:
+		return append(out, skip(DoctorCheckOutboundGateway,
+			"doctor could not connect to the switch"))
+	}
+	// Two readings of the switch, and a pass needs both. The trunk table says
+	// whether the gateway is registered (a carrier gateway stuck in FAIL_WAIT
+	// or UNREGED goes nowhere, whatever its ping says); IsUp is REGED or NOREG
+	// and reads nothing else. The gateway's own status says whether it answers
+	// OPTIONS: a NOREG gateway whose carrier stopped answering is still NOREG in
+	// the table, but sofia refuses every originate through it (GATEWAY_DOWN).
+	trunks, err := sw.Trunks()
+	if err != nil {
+		return append(out, warn(DoctorCheckOutboundGateway,
+			"cannot ask the switch about "+name+": "+oneLine(err.Error()),
+			"check `docker compose logs freeswitch`"))
+	}
+	names := make([]string, 0, len(trunks))
+	var trunk *telephony.Trunk
+	for i := range trunks {
+		names = append(names, trunks[i].Name)
+		// The bare name, and the profile too when the endpoint names one.
+		if trunks[i].Name == name && (profile == "" || trunks[i].Profile == profile) && trunk == nil {
+			trunk = &trunks[i]
+		}
+	}
+	switch {
+	case trunk == nil:
+		return append(out, warn(DoctorCheckOutboundGateway,
+			"the switch has no gateway named "+name+knownGateways(names),
+			"check the name in AICC_OUTBOUND_ENDPOINT against the gateways in "+
+				"freeswitch/conf/sip_profiles/external/ (deploy/carrier.md), then recreate the freeswitch container"))
+	case !trunk.IsUp:
+		return append(out, warn(DoctorCheckOutboundGateway,
+			"the switch's gateway "+name+" is "+trunk.State+", so a call through it would not be placed",
+			"check the carrier's address and credentials in the gateway file, that its registration "+
+				"succeeds if it registers, and `docker compose logs freeswitch`"))
+	}
+	// Asked the way the endpoint spells it: the originate resolves the gateway
+	// by the same lookup, so a qualified endpoint is checked qualified and a
+	// bare one bare (as the bot gateway is).
+	query := name
+	if profile != "" {
+		query = profile + "::" + name
+	}
+	isPingUp, err := sw.GatewayUp(query)
+	if err != nil {
+		return append(out, warn(DoctorCheckOutboundGateway,
+			"cannot read the ping status of the switch's gateway "+name+": "+oneLine(err.Error()),
+			"check `docker compose logs freeswitch`"))
+	}
+	if !isPingUp {
+		return append(out, warn(DoctorCheckOutboundGateway,
+			"the switch's gateway "+name+" is "+trunk.State+" but its ping status is DOWN, so the switch would refuse a call through it",
+			"check that the carrier answers the switch's OPTIONS pings at its address, "+
+				"and `sofia status gateway "+name+"` on the switch (deploy/carrier.md)"))
+	}
+	return append(out, pass(DoctorCheckOutboundGateway, "the switch reaches "+name+" ("+trunk.State+", ping UP)"))
+}
+
+// knownGateways finishes the sentence "the switch has no gateway named X": it
+// lists the names it does have, which is what makes a typo obvious.
+func knownGateways(names []string) string {
+	switch len(names) {
+	case 0:
+		return "; it has none — add one (deploy/carrier.md)"
+	case 1:
+		return "; it has " + names[0]
+	}
+	return "; it has " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // switchProfiles is what the switch said about its SIP listeners, for the

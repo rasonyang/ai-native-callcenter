@@ -5,6 +5,70 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Upgrade notes
+
+- The binary's default country code is now `1` (`AICC_DEFAULT_COUNTRY_CODE`), so
+  a national number is never ambiguous when nobody says otherwise. The deploy
+  stack keeps `86` while its `.env` does not mention the variable, so a stack
+  that never set it behaves as before. Two kinds of deployment do change: a
+  native deployment that never set `AICC_DEFAULT_COUNTRY_CODE` (it used to
+  refuse national numbers), and a stack whose `.env` blanks the variable
+  (`AICC_DEFAULT_COUNTRY_CODE=` reaches the application as unset, so `1`
+  applies, not the stack's `86`). Both now complete national numbers to `+1`
+  for the do-not-call check, contact import and the bot's take_message callback
+  numbers: a national `13800138000` no longer matches a list entry
+  `+8613800138000` and would be dialled. Set `AICC_DEFAULT_COUNTRY_CODE` to your
+  country's code. `aicc doctor` warns about exactly this (`dnc_country_code`,
+  `DNC_COUNTRY_CODE_UNSET`, never a failure) when the variable is unset and the
+  do-not-call list holds a number outside `+1`. (#293; thanks @javayou13131)
+- API contract: `POST /calls` answers `409 OUTBOUND_NOT_CONFIGURED` instead of
+  `503 STORAGE_DOWN` when `AICC_OUTBOUND_ENDPOINT` is empty, and
+  `POST /campaigns/{campaignId}/start` and `.../resume` answer the same code
+  instead of creating, or reporting as running, a campaign whose every attempt
+  would fail; the campaign stays `DRAFT` or `PAUSED`. `CampaignPauseReason`
+  gains `OUTBOUND_NOT_CONFIGURED` (a migration widens the column's CHECK; its
+  rollback rewrites such rows to `TRUNK_FAILURE`), for a campaign the dialer
+  stopped because the endpoint was empty. `Campaign` gains the read-only
+  `flowFields`, present on a single campaign (`getCampaign` and the responses of
+  create, update and every transition), absent from `listCampaigns` pages and
+  when the flow could not be read, and `[]` when the number has no published
+  flow or the flow reads no business data. (#293; thanks @javayou13131)
+- `aicc doctor` gains `outbound_endpoint` (`OUTBOUND_ENDPOINT_UNSET`) when
+  `AICC_OUTBOUND_ENDPOINT` is empty, and `outbound_gateway`
+  (`OUTBOUND_GATEWAY_MISSING`) when the endpoint names a gateway the switch
+  does not have, naming the ones it does. The gateway passes only when the
+  switch's trunk table says it would place a call (`REGED`, or `NOREG` for one
+  that never registers) and its ping status is `UP`; otherwise the warning names
+  the state (`FAIL_WAIT`, or `NOREG` with the ping `DOWN`). A profile-qualified
+  endpoint (`sofia/gateway/external::pstn_gateway/%s`) is read correctly. None
+  changes the exit status. (#293; thanks @javayou13131)
+
+### Changed
+
+- A campaign refuses to start or resume on a deployment that cannot place an
+  outbound call, rather than dialling every contact into a trunk it has not been
+  given. The SPA says so in English and Chinese and points at
+  `deploy/carrier.md`; the deploy guide and the installer's closing output say
+  it too. (#293; thanks @javayou13131)
+- A campaign that is already running on a deployment with no
+  `AICC_OUTBOUND_ENDPOINT` (the application restarted without it) is paused on
+  the first attempt it cannot place, as `OUTBOUND_NOT_CONFIGURED`, with that
+  attempt voided rather than retried. If the pause itself fails the pass stops
+  admitting for that campaign and the next pass tries again, instead of
+  refusing the same contacts in a loop. (#293; thanks @javayou13131)
+- The contact import offers the field names the campaign's flow reads
+  (`flowFields`) in a dropdown per column, and preselects a column whose header
+  already names one, ignoring case; the first of two headers naming the same
+  field takes it. When the flow reads no fields, only the number and the time
+  zone can be mapped; when the server could not read the flow, the field name is
+  typed as before. (#293; thanks @javayou13131)
+- `AICC_DEFAULT_COUNTRY_CODE=86` is how a Chinese number written nationally
+  (`13800138000`) is dialled as `+8613800138000`; a campaign's own
+  `defaultCountryCode` does the same for one campaign, and a number written
+  `+86…` needs neither.
+
 ## v0.7.0 - 2026-10-24
 
 ### Upgrade notes

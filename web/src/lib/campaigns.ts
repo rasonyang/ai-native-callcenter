@@ -745,7 +745,9 @@ export function describeState(
       : undefined
   const isBreakerPause =
     campaign.status === 'PAUSED' &&
-    (campaign.pauseReason === 'TRUNK_FAILURE' || campaign.pauseReason === 'PROVIDER_FAILURE')
+    (campaign.pauseReason === 'TRUNK_FAILURE' ||
+      campaign.pauseReason === 'PROVIDER_FAILURE' ||
+      campaign.pauseReason === 'OUTBOUND_NOT_CONFIGURED')
   const detail = activity ?? pause
   return { status, activity, pause, isBreakerPause, line: detail ? `${status} · ${detail}` : status }
 }

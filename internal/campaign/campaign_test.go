@@ -27,6 +27,11 @@ type fakeRepo struct {
 	dids      map[uuid.UUID]DIDFlow
 	campaigns map[uuid.UUID]Campaign
 	contacts  map[uuid.UUID]map[string]uuid.UUID // campaign -> number -> contact id
+	// didFlowLookups counts DIDFlows calls: the reads that need the flow's
+	// field names cost one, the ones that do not must not.
+	didFlowLookups int
+	// didFlowsErr, when set, is what DIDFlows answers.
+	didFlowsErr error
 }
 
 func newFakeRepo() *fakeRepo {
@@ -45,6 +50,13 @@ func (r *fakeRepo) DIDFlow(_ context.Context, id uuid.UUID) (DIDFlow, error) {
 	return d, nil
 }
 func (r *fakeRepo) DIDFlows(_ context.Context, ids []uuid.UUID) ([]DIDFlow, error) {
+	r.mu.Lock()
+	r.didFlowLookups++
+	err := r.didFlowsErr
+	r.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	var out []DIDFlow
 	for _, id := range ids {
 		if d, ok := r.dids[id]; ok {
@@ -187,12 +199,17 @@ type fixture struct {
 	did  uuid.UUID
 }
 
+// canPlace is a deployment's answer to Placer.
+type canPlace bool
+
+func (c canPlace) CanPlaceAI() bool { return bool(c) }
+
 func newFixture(t *testing.T, env Env) *fixture {
 	t.Helper()
 	repo := newFakeRepo()
 	did := uuid.New()
 	repo.dids[did] = DIDFlow{ID: did, Number: "95099", IsEnabled: true, AllowOutbound: true, Spec: testSpec(t, []string{"hangup"}, nil)}
-	return &fixture{repo: repo, svc: NewService(repo, nil, env), did: did}
+	return &fixture{repo: repo, svc: NewService(repo, nil, env).WithPlacer(canPlace(true)), did: did}
 }
 
 func (f *fixture) validNew() New {
@@ -512,6 +529,207 @@ func withStatus(c Campaign, s Status) Campaign {
 		c.PauseReason = PauseManual
 	}
 	return c
+}
+
+// A deployment with nowhere to dial is refused while somebody is looking: left
+// to the dialer, every attempt would be a system failure retried for hours.
+func TestStartIsRefusedWhenTheDeploymentCannotDial(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, Env{})
+	f.svc.WithPlacer(canPlace(false))
+	c, _ := f.svc.Create(context.Background(), f.validNew())
+
+	_, err := f.svc.Start(context.Background(), c.ID)
+	wantKind(t, err, ErrOutboundNotConfigured, "")
+	if f.repo.campaigns[c.ID].Status != StatusDraft {
+		t.Error("a refused start left the DRAFT running")
+	}
+
+	// The campaign's own checks are not reached: nothing about it is wrong.
+	if _, err := f.svc.Start(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown campaign: %v, want ErrNotFound", err)
+	}
+}
+
+// Resume asks the same question, after the status: a campaign that cannot be
+// resumed is told so before the deployment is blamed, and a refused resume
+// leaves it PAUSED.
+func TestResumeIsRefusedWhenTheDeploymentCannotDial(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, Env{})
+	c, _ := f.svc.Create(context.Background(), f.validNew())
+	f.svc.WithPlacer(canPlace(false))
+
+	_, err := f.svc.Resume(context.Background(), c.ID)
+	wantKind(t, err, ErrInvalidTransition, "RESUME")
+
+	f.repo.campaigns[c.ID] = withStatus(f.repo.campaigns[c.ID], StatusPaused)
+	_, err = f.svc.Resume(context.Background(), c.ID)
+	wantKind(t, err, ErrOutboundNotConfigured, "")
+	if f.repo.campaigns[c.ID].Status != StatusPaused {
+		t.Error("a refused resume moved the campaign")
+	}
+
+	f.svc.WithPlacer(canPlace(true))
+	if _, err := f.svc.Resume(context.Background(), c.ID); err != nil {
+		t.Errorf("resume on a deployment that can dial: %v", err)
+	}
+	if _, err := f.svc.Resume(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("an unknown campaign: %v, want ErrNotFound", err)
+	}
+}
+
+// flowFields belongs to a single campaign: every answer about one carries it
+// (the SPA replaces its cached campaign with a transition's response), a page
+// carries none and costs no flow lookup, and a lookup that fails leaves it nil,
+// which the API omits, because unknown is not "reads nothing".
+func TestFlowFieldsAreForASingleCampaignAndNilWhenUnknown(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, Env{})
+	ctx := context.Background()
+	want := []string{"name", "plan"}
+	c, err := f.svc.Create(ctx, f.validNew())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.repo.campaigns[c.ID] = c
+
+	steps := []struct {
+		name string
+		run  func() (Campaign, error)
+	}{
+		{"update", func() (Campaign, error) {
+			n := "renamed"
+			return f.svc.Update(ctx, c.ID, Patch{Name: &n})
+		}},
+		{"start", func() (Campaign, error) { return f.svc.Start(ctx, c.ID) }},
+		{"pause", func() (Campaign, error) { return f.svc.Pause(ctx, c.ID) }},
+		{"resume", func() (Campaign, error) { return f.svc.Resume(ctx, c.ID) }},
+	}
+	for _, step := range steps {
+		got, err := step.run()
+		if err != nil {
+			t.Fatalf("%s: %v", step.name, err)
+		}
+		if !slices.Equal(got.FlowFields, want) {
+			t.Errorf("%s answered flowFields %v, want %v", step.name, got.FlowFields, want)
+		}
+	}
+
+	before := f.repo.didFlowLookups
+	if _, _, err := f.svc.List(ctx, ListFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if f.repo.didFlowLookups != before {
+		t.Error("List looked up DID flows")
+	}
+
+	f.repo.mu.Lock()
+	f.repo.didFlowsErr = errors.New("injected")
+	f.repo.mu.Unlock()
+	got, err := f.svc.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("a failed flow lookup failed the read: %v", err)
+	}
+	if got.FlowFields != nil {
+		t.Errorf("flowFields = %v after a failed lookup, want nil (unknown)", got.FlowFields)
+	}
+	paused, err := f.svc.Pause(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("a failed flow lookup failed a committed transition: %v", err)
+	}
+	if paused.FlowFields != nil {
+		t.Errorf("a transition answered flowFields %v after a failed lookup, want nil", paused.FlowFields)
+	}
+}
+
+// The field names a contact's columns may map to are the flow's own, read out
+// of its published revision on every read. Read-only advice: it is what the
+// import screen offers instead of asking an operator to type a name and find
+// out per row that the flow does not read it.
+func TestACampaignNamesTheFieldsItsFlowReads(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, Env{})
+	c, err := f.svc.Create(context.Background(), f.validNew())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if want := []string{"name", "plan"}; !slices.Equal(c.FlowFields, want) {
+		t.Errorf("create answered flowFields %v, want %v", c.FlowFields, want)
+	}
+
+	got, err := f.svc.Get(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if want := []string{"name", "plan"}; !slices.Equal(got.FlowFields, want) {
+		t.Errorf("get answered flowFields %v, want %v", got.FlowFields, want)
+	}
+
+	// A flow that reads no business data names none, and the list is empty
+	// rather than absent: the wire shape is always an array.
+	f.repo.dids[f.did] = DIDFlow{ID: f.did, Number: "95099", IsEnabled: true, AllowOutbound: true,
+		Spec: testSpec(t, nil, func(m map[string]any) {
+			m["nodes"].(map[string]any)["ask"].(map[string]any)["instruction"] = "Say hello."
+		})}
+	got, err = f.svc.Get(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.FlowFields == nil {
+		t.Error("flowFields is nil; it is an empty array when the flow reads nothing")
+	}
+	if len(got.FlowFields) != 0 {
+		t.Errorf("flowFields = %v, want none", got.FlowFields)
+	}
+}
+
+// The dialer's own read leaves the flow's field names out. The reporter asks for
+// a campaign up to once a second for every running campaign and never looks at
+// them, so paying a lookup — and, worse, dropping the report when that lookup
+// failed — would be a cost with no reader.
+func TestTheDialersReadDoesNotLoadTheFlowsFieldNames(t *testing.T) {
+	t.Parallel()
+	f := newFixture(t, Env{})
+	c, err := f.svc.Create(context.Background(), f.validNew())
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := f.svc.Start(context.Background(), c.ID); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	f.svc.WithDialer(progressStub{c.ID: {Activity: ActivityDialing, InFlight: 3}}, nil)
+	lookups := func() int {
+		f.repo.mu.Lock()
+		defer f.repo.mu.Unlock()
+		return f.repo.didFlowLookups
+	}
+	before := lookups()
+
+	got, err := f.svc.Load(context.Background(), c.ID)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.FlowFields != nil {
+		t.Errorf("Load answered flowFields %v, want none", got.FlowFields)
+	}
+	if got.Progress.InFlight != 3 {
+		t.Errorf("Load dropped the dialer's account: progress = %+v", got.Progress)
+	}
+	if n := lookups() - before; n != 0 {
+		t.Errorf("Load asked the repository for DID flows %d time(s)", n)
+	}
+
+	// The API's read is the one that pays for them, once.
+	if _, err := f.svc.Get(context.Background(), c.ID); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if n := lookups() - before; n != 1 {
+		t.Errorf("Get asked the repository for DID flows %d time(s), want 1", n)
+	}
+	if _, err := f.svc.Load(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("load of an unknown campaign: %v, want ErrNotFound", err)
+	}
 }
 
 func TestStartChecksTheCampaignAgain(t *testing.T) {

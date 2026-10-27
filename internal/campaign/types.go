@@ -50,6 +50,9 @@ const (
 	PauseManual          PauseReason = "MANUAL"
 	PauseTrunkFailure    PauseReason = "TRUNK_FAILURE"
 	PauseProviderFailure PauseReason = "PROVIDER_FAILURE"
+	// PauseOutboundNotConfigured: the dialer found the deployment with no
+	// outbound endpoint (AICC_OUTBOUND_ENDPOINT) while the campaign ran.
+	PauseOutboundNotConfigured PauseReason = "OUTBOUND_NOT_CONFIGURED"
 )
 
 // ContactStatus is where a contact is in a campaign.
@@ -148,6 +151,11 @@ type Campaign struct {
 	// Progress is the dialer's read-only account of a RUNNING campaign; the
 	// zero value when it is not running or the dialer has no view.
 	Progress Progress
+	// FlowFields are the business-data names the DID's flow reads
+	// (flow.UserDataNames): the vocabulary an imported column may map to. Read
+	// from the published revision on every read, never stored; empty when the
+	// number has no published flow.
+	FlowFields []string
 }
 
 // Contact is one number a campaign dials.

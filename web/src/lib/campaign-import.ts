@@ -22,22 +22,56 @@ const TIME_ZONE_HEADERS = /^(time.?zone|tz|timezone|时区)$/i
 
 /**
  * A first guess at what each column is: the first column that reads like a
- * number is the number, one that reads like a zone is the zone, and every
- * other column is ignored until the operator makes it a flow field.
+ * number is the number, one that reads like a zone is the zone, a column whose
+ * header names a field the flow reads is that field, and every other column is
+ * ignored until the operator makes it one.
+ *
+ * `fieldNames` is the campaign's `flowFields`: the only names the flow will
+ * accept, so a match has to be one of them — compared case-insensitively,
+ * because a spreadsheet header is typed by hand. Two columns can name the same
+ * field (`Name` and `name`); the first keeps it and the later ones stay ignored,
+ * since one field offered twice is a mapping the dialog refuses
+ * (DUPLICATE_SLOT) before the operator has touched anything.
  */
-export function guessRoles(header: string[]): ColumnRole[] {
+export function guessRoles(header: string[], fieldNames: readonly string[] = []): ColumnRole[] {
   const numberAt = header.findIndex((h) => NUMBER_HEADERS.test(h.trim()))
   const zoneAt = header.findIndex((h) => TIME_ZONE_HEADERS.test(h.trim()))
-  // With no header that reads like a number, the first column is the best bet.
-  const chosenNumber = numberAt >= 0 ? numberAt : 0
-  return header.map((_h, i): ColumnRole => {
+  const fieldOf = new Map(fieldNames.map((name) => [name.toLowerCase(), name]))
+  const namesField = (h: string) => fieldOf.has(h.trim().toLowerCase())
+  // With no header that reads like a number, the best bet is the first column
+  // that is not already a field the flow reads (the first column when they all
+  // are): a file headed `name,plan,phone_no` has its number in the third.
+  const firstOther = header.findIndex((h) => !namesField(h))
+  const chosenNumber = numberAt >= 0 ? numberAt : Math.max(firstOther, 0)
+  const taken = new Set<string>()
+  return header.map((h, i): ColumnRole => {
     if (i === chosenNumber) return { kind: 'number' }
     if (i === zoneAt) return { kind: 'timeZone' }
-    // Every other column starts ignored: a field the flow does not read makes
-    // the server refuse the whole row, so a column is sent only when the
-    // operator opts it in.
+    const field = fieldOf.get(h.trim().toLowerCase())
+    if (field !== undefined && !taken.has(field)) {
+      taken.add(field)
+      return { kind: 'slot', name: field }
+    }
+    // A column the flow does not read makes the server refuse the whole row,
+    // so it stays ignored until the operator opts it in.
     return { kind: 'ignore' }
   })
+}
+
+/** The value a column dropdown shows for a role. */
+export function roleValue(role: ColumnRole | undefined): string {
+  if (!role) return 'ignore'
+  return role.kind === 'slot' ? `slot:${role.name}` : role.kind
+}
+
+/** The role a column dropdown's value names. */
+export function roleFromValue(value: string): ColumnRole {
+  const slotPrefix = 'slot:'
+  // The bare "slot" is the choice that asks for a name; the dialog fills it
+  // from the column's header.
+  if (value === 'slot') return { kind: 'slot', name: '' }
+  if (value.startsWith(slotPrefix)) return { kind: 'slot', name: value.slice(slotPrefix.length) }
+  return { kind: value as Exclude<ColumnRole['kind'], 'slot'> }
 }
 
 export type RoleProblem =

@@ -413,9 +413,18 @@ describe('the contact import', () => {
     return bodies
   }
 
-  function open(onImported = vi.fn()) {
+  // Flow fields unknown by default, which is the free-name path
+  // these tests were written against; the ones about the flow's names pass
+  // them in.
+  function open(onImported = vi.fn(), flowFields?: string[]) {
     const view = renderWithProviders(
-      <CampaignImportDialog campaignId={CAMPAIGN_ID} open onOpenChange={() => {}} onImported={onImported} />,
+      <CampaignImportDialog
+        campaignId={CAMPAIGN_ID}
+        flowFields={flowFields}
+        open
+        onOpenChange={() => {}}
+        onImported={onImported}
+      />,
     )
     return { ...view, onImported }
   }
@@ -461,6 +470,79 @@ describe('the contact import', () => {
     ])
     expect(onImported).toHaveBeenCalled()
     expect(screen.getByRole('button', { name: 'Download rejected rows' })).toBeInTheDocument()
+  })
+
+  it('offers the free-typed field only when the flow cannot be read, and none when it reads nothing', async () => {
+    stubImport()
+    const file = csvFile('Phone,notes\n13800138000,keep\n')
+
+    // Unknown (flowFields absent): the name is typed, as before the server offered any.
+    const unknown = open(vi.fn(), undefined)
+    await unknown.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const unknownOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(unknownOptions).toEqual(['Number', 'Time zone', 'Flow field', 'Ignore'])
+    expect(screen.queryByText(/reads no business-data fields/)).not.toBeInTheDocument()
+    unknown.unmount()
+
+    // Known and empty: no slot option at all (any name would be SLOT_UNKNOWN on
+    // every row), and the dialog says why.
+    const empty = open(vi.fn(), [])
+    await empty.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const emptyOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(emptyOptions).toEqual(['Number', 'Time zone', 'Ignore'])
+    expect(screen.getByText(/reads no business-data fields, or its number has no published flow/)).toBeInTheDocument()
+    empty.unmount()
+
+    // Known and non-empty: the names only.
+    const named = open(vi.fn(), ['plan'])
+    await named.user.upload(screen.getByLabelText('CSV or Excel file'), file)
+    const namedOptions = within(await screen.findByLabelText('What column notes is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(namedOptions).toEqual(['Number', 'Time zone', 'plan', 'Ignore'])
+    expect(screen.queryByText(/reads no business-data fields/)).not.toBeInTheDocument()
+  })
+
+  it("offers the flow's field names and preselects a column whose header names one", async () => {
+    const bodies = stubImport()
+    const { user } = open(vi.fn(), ['name', 'orderNo'])
+    await user.upload(
+      screen.getByLabelText('CSV or Excel file'),
+      csvFile('Phone,NAME,OrderNo,订单号,notes\n13800138000,王伟,A-1,甲,keep\n'),
+    )
+
+    // A header that names a field is that field, whatever its case.
+    expect(await screen.findByLabelText('What column NAME is')).toHaveValue('slot:name')
+    expect(screen.getByLabelText('What column OrderNo is')).toHaveValue('slot:orderNo')
+    // A column the flow reads nothing from is still ignored.
+    expect(screen.getByLabelText('What column 订单号 is')).toHaveValue('ignore')
+    expect(screen.getByLabelText('What column notes is')).toHaveValue('ignore')
+
+    // The vocabulary is the flow's, so a name cannot be misspelt into a
+    // SLOT_UNKNOWN the operator only discovers row by row.
+    const offered = within(screen.getByLabelText('What column 订单号 is'))
+      .getAllByRole('option')
+      .map((option) => option.textContent)
+    expect(offered).toEqual(['Number', 'Time zone', 'name', 'orderNo', 'Ignore'])
+    expect(screen.queryByLabelText('Field name for column 订单号')).not.toBeInTheDocument()
+
+    // Two columns on one field is refused, not silently undone.
+    await user.selectOptions(screen.getByLabelText('What column 订单号 is'), 'slot:orderNo')
+    expect(screen.getByText('Two columns have the same field name.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Import/ })).toBeDisabled()
+
+    await user.selectOptions(screen.getByLabelText('What column 订单号 is'), 'ignore')
+    await user.click(screen.getByRole('button', { name: 'Import 1 row' }))
+
+    await screen.findByText('1 imported')
+    expect(bodies).toHaveLength(1)
+    expect(bodies[0].contacts).toEqual([
+      { number: '13800138000', slots: { name: '王伟', orderNo: 'A-1' } },
+    ])
   })
 
   it('sends a file of several thousand rows in requests of at most 5000', async () => {

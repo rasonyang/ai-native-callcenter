@@ -249,6 +249,13 @@ type Dialer struct {
 	schedule map[string]campaign.Schedule
 	timer    Timer
 	replies  []chan struct{}
+
+	// stopped holds the campaigns that admit nothing more for the rest of the
+	// current pass, whether or not the pause that was meant to stop them
+	// landed. Unlike halted, which only began() clears, it is emptied at the
+	// start of every pass: a campaign whose pause failed is still RUNNING, so
+	// the next pass must be free to dial it, or to try the pause again.
+	stopped map[uuid.UUID]bool
 }
 
 // flight is a call in flight: an attempt whose outcome is not written yet.
@@ -280,6 +287,7 @@ func New(cfg Config, d Deps) *Dialer {
 		ringingBy: map[uuid.UUID]int{},
 		stats:     map[uuid.UUID]*campaign.CapacityStats{},
 		halted:    map[uuid.UUID]bool{},
+		stopped:   map[uuid.UUID]bool{},
 		since:     map[uuid.UUID]time.Time{},
 		rearm:     map[uuid.UUID]bool{},
 		warnedCC:  map[uuid.UUID]bool{},

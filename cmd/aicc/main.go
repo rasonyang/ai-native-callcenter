@@ -175,7 +175,7 @@ func run() error {
 		if svc == nil {
 			return campaign.Campaign{}, errors.New("campaign service not ready")
 		}
-		return svc.Get(ctx, id)
+		return svc.Load(ctx, id)
 	}, announceCampaign(ctx, hub), nil, slog.Default())
 	defer campaignReporter.Close()
 	st.OnAttemptFinished = func(f campaign.Finished) {
@@ -493,7 +493,7 @@ func run() error {
 		OutboundHours:      cfg.OutboundHours,
 		AnswerWindow:       config.OutboundAnswerWindow,
 		DefaultCountryCode: cfg.DefaultCountryCode,
-	}).WithDialer(campaignProgress, campaignObserver).WithCreatedHook(campaignReporter.Touch)
+	}).WithDialer(campaignProgress, campaignObserver).WithCreatedHook(campaignReporter.Touch).WithPlacer(outboundSvc)
 	campaignService.Store(campaignSvc)
 
 	var spa http.Handler

@@ -8,8 +8,8 @@ import { DataTable, TBody, THead, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  buildRecords, emptySummary, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, runImport,
-  type ColumnRole, type ImportSummary,
+  buildRecords, emptySummary, guessRoles, mappingProblem, mergeSummaries, rejectedCsv, roleFromValue,
+  roleValue, runImport, type ColumnRole, type ImportSummary,
 } from '@/lib/campaign-import'
 import { IMPORT_CHUNK_SIZE, campaignApi } from '@/lib/campaigns'
 import { parseCsv } from '@/lib/csv'
@@ -72,11 +72,19 @@ interface PickedFile {
  */
 export function CampaignImportDialog({
   campaignId,
+  flowFields,
   open,
   onOpenChange,
   onImported,
 }: {
   campaignId: string
+  /**
+   * The business-data names the campaign's flow reads (the campaign's
+   * flowFields). Undefined means the server could not say, which is not the same
+   * as an empty list: the field name is then typed, as it was before the server
+   * offered any.
+   */
+  flowFields: string[] | undefined
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called whenever rows were accepted, so counters can be refreshed. */
@@ -95,6 +103,25 @@ export function CampaignImportDialog({
   const fileName = picked?.name ?? ''
   const table = picked ? picked.sheets[picked.sheetAt].table : null
   const problem = mappingProblem(roles)
+  // Every column is the number, the zone, one of the names the flow reads, or
+  // ignored. Three cases for the names: known and non-empty, the dropdown of
+  // them; known and empty, none, since any name typed would be SLOT_UNKNOWN on
+  // every row; unknown (the server could not read the flow), the free-typed
+  // "Flow field" as before, with the server's per-row SLOT_UNKNOWN as the check.
+  const isFieldNameTyped = flowFields === undefined
+  const hasNoFlowFields = flowFields !== undefined && flowFields.length === 0
+  const roleOptions = useMemo(
+    () => [
+      { value: 'number', label: t('campaign.import.roles.number') },
+      { value: 'timeZone', label: t('campaign.import.roles.timeZone') },
+      ...(flowFields ?? []).map((field) => ({ value: `slot:${field}`, label: field })),
+      ...(flowFields === undefined
+        ? [{ value: 'slot', label: t('campaign.import.roles.slot') }]
+        : []),
+      { value: 'ignore', label: t('campaign.import.roles.ignore') },
+    ],
+    [flowFields, t],
+  )
   const records = useMemo(() => (table ? buildRecords(table, roles) : []), [table, roles])
   const badShape = records.filter((r) => r.localCode).length
 
@@ -127,7 +154,7 @@ export function CampaignImportDialog({
         // sheet that has something to map. The picker reaches the others.
         const sheetAt = Math.max(0, sheets.findIndex((sheet) => sheet.table.header.length > 0))
         setPicked({ name: file.name, sheets, sheetAt, badEncoding: false, unterminatedQuote: false })
-        setRoles(guessRoles(sheets[sheetAt]?.table.header ?? []))
+        setRoles(guessRoles(sheets[sheetAt]?.table.header ?? [], flowFields ?? []))
       } catch {
         // A workbook this reader cannot open: a corrupt archive, a renamed
         // `.xls`, or a `.xlsx` whose bytes are something else entirely.
@@ -147,14 +174,14 @@ export function CampaignImportDialog({
       badEncoding: text.includes('�'),
       unterminatedQuote: parsed.hasUnterminatedQuote,
     })
-    setRoles(guessRoles(parsed.header))
+    setRoles(guessRoles(parsed.header, flowFields ?? []))
   }
 
   /** Another worksheet of the same workbook: its own header, its own guess. */
   const chooseSheet = (at: number) => {
     if (!picked) return
     setPicked({ ...picked, sheetAt: at })
-    setRoles(guessRoles(picked.sheets[at]?.table.header ?? []))
+    setRoles(guessRoles(picked.sheets[at]?.table.header ?? [], flowFields ?? []))
   }
 
   const run = async (from: number, previous: ImportSummary) => {
@@ -266,6 +293,11 @@ export function CampaignImportDialog({
                 <div>
                   <h3 className="mb-1 text-sm font-medium">{t('campaign.import.mapping')}</h3>
                   <p className="mb-2 text-xs text-muted-foreground">{t('campaign.import.mappingHint')}</p>
+                  {hasNoFlowFields && (
+                    <p className="mb-2 text-xs text-muted-foreground">
+                      {t('campaign.import.noFlowFields')}
+                    </p>
+                  )}
                   <DataTable>
                     <THead>
                       {table.header.map((name, index) => (
@@ -276,27 +308,37 @@ export function CampaignImportDialog({
                             </div>
                             <Select
                               ariaLabel={t('campaign.import.roleOf', { name })}
-                              value={roles[index]?.kind ?? 'ignore'}
-                              onChange={(kind) =>
+                              // A name typed below is not one of the offered options,
+                              // so the control keeps saying "Flow field" for it.
+                              value={
+                                roles[index]?.kind === 'slot' && isFieldNameTyped
+                                  ? 'slot'
+                                  : roleValue(roles[index])
+                              }
+                              onChange={(value) =>
                                 setRoles(
                                   roles.map((r, i): ColumnRole => {
                                     if (i === index) {
-                                      if (kind === 'slot') return { kind, name: name.trim() }
-                                      return { kind } as ColumnRole
+                                      const role = roleFromValue(value)
+                                      // The free-name choice starts from the header,
+                                      // which is usually the field's own name.
+                                      return role.kind === 'slot' && role.name === ''
+                                        ? { kind: 'slot', name: name.trim() }
+                                        : role
                                     }
-                                    // Only one column is the number, and only one the zone.
-                                    return (kind === 'number' || kind === 'timeZone') && r.kind === kind
+                                    // Only one column is the number, and only one the
+                                    // zone. Two columns with one field name are
+                                    // refused by mappingProblem, not undone here.
+                                    return (value === 'number' || value === 'timeZone') &&
+                                      r.kind === value
                                       ? { kind: 'ignore' }
                                       : r
                                   }),
                                 )
                               }
-                              options={['number', 'timeZone', 'slot', 'ignore'].map((kind) => ({
-                                value: kind,
-                                label: t(`campaign.import.roles.${kind}`),
-                              }))}
+                              options={roleOptions}
                             />
-                            {roles[index]?.kind === 'slot' && (
+                            {isFieldNameTyped && roles[index]?.kind === 'slot' && (
                               <Input
                                 aria-label={t('campaign.import.slotNameOf', { name })}
                                 className="h-7 text-xs"

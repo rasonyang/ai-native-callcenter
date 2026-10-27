@@ -124,6 +124,39 @@ describe('the sentence a campaign state reads as', () => {
     expect(provider.isBreakerPause).toBe(true)
     expect(provider.line).toContain('语音服务商')
   })
+
+  it('treats a missing outbound endpoint as a pause that needs a person', () => {
+    const words = describeState(
+      campaignFixture({ status: 'PAUSED', pauseReason: 'OUTBOUND_NOT_CONFIGURED' }), tEn, { locale: 'en', ...here },
+    )
+    expect(words.isBreakerPause).toBe(true)
+    expect(words.line).toBe('Paused · Paused automatically: this deployment has no outbound endpoint')
+  })
+})
+
+describe('the pause reasons', () => {
+  const REASONS = ['MANUAL', 'TRUNK_FAILURE', 'PROVIDER_FAILURE', 'OUTBOUND_NOT_CONFIGURED'] as const
+
+  it.each([
+    ['en', en],
+    ['zh', zh],
+  ])('has a label and an explanation for every reason in %s', (_lang, bundle) => {
+    const campaign = (bundle as unknown as {
+      campaign: { pauseReasons: Record<string, string>; pauseExplain: Record<string, string> }
+    }).campaign
+    for (const reason of REASONS) {
+      expect(campaign.pauseReasons[reason], `label ${reason}`).toBeTruthy()
+      expect(campaign.pauseExplain[reason], `explain ${reason}`).toBeTruthy()
+    }
+  })
+
+  it('names the setting a missing outbound endpoint is fixed in, and no longer hedges the trunk reason', () => {
+    expect(en.campaign.pauseExplain.OUTBOUND_NOT_CONFIGURED).toContain('AICC_OUTBOUND_ENDPOINT')
+    expect(en.campaign.pauseExplain.OUTBOUND_NOT_CONFIGURED).toContain('deploy/carrier.md')
+    expect(zh.campaign.pauseExplain.OUTBOUND_NOT_CONFIGURED).toContain('AICC_OUTBOUND_ENDPOINT')
+    expect(en.campaign.pauseExplain.TRUNK_FAILURE).not.toContain('AICC_OUTBOUND_ENDPOINT')
+    expect(zh.campaign.pauseExplain.TRUNK_FAILURE).not.toContain('AICC_OUTBOUND_ENDPOINT')
+  })
 })
 
 const editable = (status: CampaignStatus) => CAMPAIGN_FIELDS.filter((f) => isFieldEditable(status, f))

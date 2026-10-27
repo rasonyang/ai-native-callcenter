@@ -291,12 +291,12 @@ func (s *Service) WithDNC(dnc DNCList) *Service {
 // and DialAI both call it before any state is created or any command is sent.
 //
 // The list holds canonical E.164, so the destination is canonicalised first,
-// with the deployment's default country code. KNOWN GAP: when that code is not
-// configured (AICC_DEFAULT_COUNTRY_CODE) a national number cannot be completed,
-// the check cannot match it, and the call goes through; that is logged at
-// debug. A destination written with "+" or "00" is always checked. A failing
-// lookup refuses the call: dialling a number we could not prove is allowed is
-// the worse error.
+// with the deployment's default country code (AICC_DEFAULT_COUNTRY_CODE, which
+// defaults to 1, so a national number is always completed). A destination
+// written with "+" or "00" is compared as written. A number that cannot be
+// canonicalised at all is not on the list by construction; that is logged at
+// debug. A failing lookup refuses the call: dialling a number we could not
+// prove is allowed is the worse error.
 func (s *Service) checkDNC(ctx context.Context, destination string) error {
 	if s.dnc == nil {
 		return nil
@@ -783,10 +783,19 @@ func (s *Service) DialAI(ctx context.Context, req AIDialRequest) (uuid.UUID, err
 	return p.CallID, err
 }
 
+// CanPlaceAI reports whether this deployment can place an AI outbound call at
+// all: it has an outbound endpoint to render a number into. PlaceAI refuses with
+// ErrNoOutboundEndpoint exactly when this is false, and it is the one answer
+// callers (campaign start and resume) ask instead of keeping a copy of the
+// setting.
+func (s *Service) CanPlaceAI() bool {
+	return s.cfg.EndpointFormat != ""
+}
+
 // PlaceAI is DialAI that also says which originate job it started. On an error
 // the CallID is set only for ErrAlreadyPlaced and ErrPlacementUnconfirmed.
 func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, error) {
-	if s.cfg.EndpointFormat == "" {
+	if !s.CanPlaceAI() {
 		return Placement{}, ErrNoOutboundEndpoint
 	}
 	if !isDialable(req.To) {

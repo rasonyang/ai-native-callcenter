@@ -348,7 +348,8 @@ func TestCampaignWritesAreValidatedWithTheContractsCodes(t *testing.T) {
 func TestAWindowAcrossMidnightIsAllowedWhereTheOuterHoursAllowIt(t *testing.T) {
 	night, _ := dayrange.Parse("20:00-04:00")
 	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
-		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{OutboundHours: night})
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil,
+			campaign.Env{OutboundHours: night}).WithPlacer(canPlace(true))
 	})
 	admin := f.seedAdmin()
 	didID, _ := campaignDID(t, f.st, "95099", false)
@@ -1321,4 +1322,124 @@ func TestClearingAllowOutboundUnderALiveCampaignIsRefusedOverHTTP(t *testing.T) 
 
 	f.post(admin, "/campaigns/"+c.ID+"/cancel", nil)
 	wantReply(t, "clear allowOutbound after cancel", put(false), http.StatusOK, "")
+}
+
+// A deployment that cannot place an AI outbound call refuses to start a
+// campaign, and writes nothing: every contact whose attempt would fail and be
+// retried for hours is worse than a refusal that says which setting is missing
+// (#293). The campaign stays a DRAFT, so setting the endpoint and starting
+// again is the whole recovery.
+func TestStartingACampaignIsRefusedWhenTheDeploymentHasNoEndpoint(t *testing.T) {
+	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
+		// The fixture's deployment dials; this one has no dial string at all.
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{DefaultCountryCode: "86"}).
+			WithPlacer(canPlace(false))
+	})
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95099", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	wantReply(t, "start with no outbound endpoint",
+		f.post(admin, "/campaigns/"+c.ID+"/start", nil), http.StatusConflict, "OUTBOUND_NOT_CONFIGURED")
+
+	if v := decodeCampaign(t, f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin})); v.Status != "DRAFT" {
+		t.Errorf("status = %s, want DRAFT: a refused start changes nothing", v.Status)
+	}
+	var attempts attemptList
+	_ = json.Unmarshal(f.do(call{method: http.MethodGet,
+		path: "/campaigns/" + c.ID + "/attempts", cookie: admin}).body, &attempts)
+	if attempts.Total != 0 {
+		t.Errorf("a refused start wrote %d attempts", attempts.Total)
+	}
+}
+
+// Resume is refused the same way, and the campaign stays PAUSED: reporting it
+// RUNNING would be a lie until the dialer paused it again. A status that does
+// not allow a resume is still answered first.
+func TestResumingACampaignIsRefusedWhenTheDeploymentHasNoEndpoint(t *testing.T) {
+	f := newFixtureWithStore(t, func(st *store.Store, d *Deps) {
+		d.Campaigns = campaign.NewService(st.Campaigns(), nil, campaign.Env{DefaultCountryCode: "86"}).
+			WithPlacer(canPlace(false))
+	})
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95099", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	wantReply(t, "resume a draft", f.post(admin, "/campaigns/"+c.ID+"/resume", nil),
+		http.StatusConflict, "CAMPAIGN_INVALID_TRANSITION")
+
+	if _, err := f.st.Pool.Exec(context.Background(),
+		`UPDATE campaigns SET status = 'PAUSED', pause_reason = 'OUTBOUND_NOT_CONFIGURED' WHERE id = $1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	wantReply(t, "resume with no endpoint", f.post(admin, "/campaigns/"+c.ID+"/resume", nil),
+		http.StatusConflict, "OUTBOUND_NOT_CONFIGURED")
+	v := decodeCampaign(t, f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin}))
+	if v.Status != "PAUSED" || v.PauseReason == nil || *v.PauseReason != "OUTBOUND_NOT_CONFIGURED" {
+		t.Errorf("after a refused resume the campaign is %s/%v, want PAUSED/OUTBOUND_NOT_CONFIGURED", v.Status, v.PauseReason)
+	}
+}
+
+// A campaign names the business fields its flow reads, so the import screen
+// offers them instead of asking for a slot name typed from memory: a name the
+// flow does not read refuses the whole file, and a five-thousand-row file is a
+// bad place to learn that (#293).
+func TestACampaignShowsTheFieldsItsFlowReads(t *testing.T) {
+	f := newFixture(t)
+	admin := f.seedAdmin()
+	didID, _ := campaignDID(t, f.st, "95097", false)
+	c := f.createCampaign(admin, didID, nil)
+
+	type withFields struct {
+		FlowFields []string `json:"flowFields"`
+	}
+	one := func() withFields {
+		r := f.do(call{method: http.MethodGet, path: "/campaigns/" + c.ID, cookie: admin})
+		var v withFields
+		if err := json.Unmarshal(r.body, &v); err != nil {
+			t.Fatalf("decode campaign: %v: %s", err, r.body)
+		}
+		return v
+	}
+	// The fixture's flow reads name, plan and city; the vocabulary is sorted.
+	if got := one().FlowFields; !slices.Equal(got, []string{"city", "name", "plan"}) {
+		t.Errorf("flowFields = %v, want [city name plan]", got)
+	}
+
+	// Every response about one campaign carries it: the SPA replaces its cached
+	// campaign with a transition's answer, so the import dialog must still find
+	// the names after one.
+	wantFields := func(what string, body []byte) {
+		t.Helper()
+		var v withFields
+		if err := json.Unmarshal(body, &v); err != nil {
+			t.Fatalf("%s: decode: %v: %s", what, err, body)
+		}
+		if !slices.Equal(v.FlowFields, []string{"city", "name", "plan"}) {
+			t.Errorf("%s: flowFields = %v, want [city name plan]", what, v.FlowFields)
+		}
+	}
+	wantFields("create", f.do(call{method: http.MethodPost, path: "/campaigns", cookie: admin,
+		body: campaignBody(didID, func(b map[string]any) { b["name"] = "second" })}).body)
+	for _, step := range []string{"start", "pause", "resume", "cancel"} {
+		wantFields(step, f.post(admin, "/campaigns/"+c.ID+"/"+step, nil).body)
+	}
+
+	// A page does not: the SPA refetches the list on every campaign event, and a
+	// flow lookup per page would ride on each of them. The key is absent, not [].
+	r := f.do(call{method: http.MethodGet, path: "/campaigns", cookie: admin})
+	var list struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(r.body, &list); err != nil {
+		t.Fatalf("decode list: %v: %s", err, r.body)
+	}
+	if len(list.Items) == 0 {
+		t.Fatal("the list is empty")
+	}
+	for _, it := range list.Items {
+		if _, ok := it["flowFields"]; ok {
+			t.Errorf("a page of campaigns carries flowFields: %s", r.body)
+		}
+	}
 }
