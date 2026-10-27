@@ -43,10 +43,10 @@ func CanTransfer(spec *Spec) bool {
 const userDataPrefix = "userData."
 
 // UserDataNames lists the business-data names the flow reads: every
-// userData.<name> its instructions, announces, transition conditions and HTTP
-// bodies, paths and query parameters refer to. A flow does not declare its inputs anywhere else, so this
-// is the vocabulary a campaign contact's slots may use. The result is sorted
-// and free of duplicates.
+// userData.<name> its instructions, announces, declared lead notes, transition
+// conditions and HTTP bodies, paths and query parameters refer to. A flow does
+// not declare its inputs anywhere else, so this is the vocabulary a campaign
+// contact's slots may use. The result is sorted and free of duplicates.
 func UserDataNames(spec *Spec) []string {
 	if spec == nil {
 		return nil
@@ -106,6 +106,9 @@ func UserDataNames(spec *Spec) []string {
 	for _, node := range spec.Nodes {
 		addText(node.Instruction)
 		addText(node.Announce)
+		if node.Lead != nil {
+			addText(node.Lead.Notes)
+		}
 		addRules(node.Transitions)
 	}
 	for _, tool := range spec.Tools {

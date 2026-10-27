@@ -62,7 +62,9 @@ func (a *scriptedActions) Hangup(context.Context, flow.HangupRequest) (flow.Resu
 	return a.answer(flow.ToolHangup), nil
 }
 
-// RecordLead keeps the last lead, as the attempt row does. It never becomes the
+// RecordLead keeps the last lead, as the attempt row does, whether record_lead
+// or a phase's declaration wrote it; a scripted record_lead failure refuses
+// both, as an attempt no longer in flight would. It never becomes the
 // call's ending: recording a lead does not end a call.
 func (a *scriptedActions) RecordLead(_ context.Context, req flow.LeadRequest) (flow.Result, error) {
 	script, ok := a.sc.Actions[flow.ToolRecordLead]

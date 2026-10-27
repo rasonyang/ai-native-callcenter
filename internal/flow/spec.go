@@ -10,6 +10,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 )
@@ -199,9 +201,79 @@ type Node struct {
 	Transitions []Transition `json:"transitions,omitempty"`
 	// IsTerminal marks a phase the conversation does not leave.
 	IsTerminal bool `json:"isTerminal,omitempty"`
+	// Lead is the campaign lead the call records on entering this phase
+	// (DeclaredLead). Optional, and ignored on a call that is not a campaign
+	// call.
+	Lead *DeclaredLead `json:"lead,omitempty"`
 
 	// id is filled in from the map key at load time.
 	id string
+}
+
+// DeclaredLead is a lead a phase records when the call enters it, on a
+// campaign call (Runtime.OfferRecordLead), exactly as a record_lead call
+// would: the attempt keeps the last lead written, whether the model wrote it
+// or a phase did, and its side effects run once when the call ends.
+//
+// It exists for the flow that classifies the customer and closes in the same
+// move: a tool's transition goes straight into a terminal phase whose announce
+// is the goodbye, so the model has no later turn in which to call record_lead,
+// and asking it to call record_lead in the same response is a request it is
+// free to ignore (#352). A phase is entered by the engine, so the lead it
+// declares is recorded whatever the model did.
+//
+// Every entry records it again, so a phase entered twice writes twice. Only a
+// shape the loader can check is accepted: Intent is one of LeadIntents as
+// written, and every {slots.x} in Notes must be a slot the flow writes.
+type DeclaredLead struct {
+	// Intent is one of LeadIntents, in capitals.
+	Intent string `json:"intent"`
+	// Notes is rendered with {slots.x} when the phase is entered, as an
+	// announce is, then trimmed and cut to MaxLeadNotesRunes. Optional; a
+	// rendering that comes out empty records empty notes.
+	Notes Text `json:"notes,omitempty"`
+
+	// problems are what was wrong with the declaration's shape: decoding never
+	// fails on it, so that validate can report it with the phase's name, among
+	// the flow's other problems, rather than as a document that cannot be
+	// parsed. isIntentUnreadable says one of them is about the intent, which
+	// validate then does not judge a second time.
+	problems           []string
+	isIntentUnreadable bool
+}
+
+// declaredLeadFields are the keys a lead declaration may have.
+var declaredLeadFields = []string{"intent", "notes"}
+
+// UnmarshalJSON reads a lead declaration. It never fails: what is wrong with
+// the shape (not an object, a field it does not have, an intent that is not a
+// string, notes that are not text) is kept for validate to report.
+func (l *DeclaredLead) UnmarshalJSON(data []byte) error {
+	*l = DeclaredLead{}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil || fields == nil {
+		l.problems = append(l.problems, `must be an object {"intent", "notes"}`)
+		l.isIntentUnreadable = true
+		return nil
+	}
+	for _, key := range slices.Sorted(maps.Keys(fields)) {
+		if !slices.Contains(declaredLeadFields, key) {
+			l.problems = append(l.problems, fmt.Sprintf("has unknown field %q; a lead has %s",
+				key, strings.Join(declaredLeadFields, " and ")))
+		}
+	}
+	if raw, ok := fields["intent"]; ok {
+		if err := json.Unmarshal(raw, &l.Intent); err != nil {
+			l.problems = append(l.problems, "intent must be a string")
+			l.isIntentUnreadable = true
+		}
+	}
+	if raw, ok := fields["notes"]; ok {
+		if err := json.Unmarshal(raw, &l.Notes); err != nil {
+			l.problems = append(l.problems, "notes must be a string or an object keyed by language")
+		}
+	}
+	return nil
 }
 
 // ID is the node's key in the flow.

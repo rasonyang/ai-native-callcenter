@@ -114,6 +114,9 @@ func (s *Spec) validate() error {
 			report("phase %q is terminal but declares transitions", id)
 		}
 		s.validateTransitions("phase "+id, node.Transitions, &problems)
+		if node.Lead != nil {
+			validateDeclaredLead(id, node.Lead, report)
+		}
 	}
 
 	slotOwners := map[string]string{}
@@ -155,6 +158,9 @@ func (s *Spec) validate() error {
 	for id, node := range s.Nodes {
 		checkTemplate(declared, "phase "+id+" instruction", node.Instruction, report)
 		checkTemplate(declared, "phase "+id+" announce", node.Announce, report)
+		if node.Lead != nil {
+			checkTemplate(declared, "phase "+id+" lead notes", node.Lead.Notes, report)
+		}
 		checkConditions(declared, "phase "+id, node.Transitions, report)
 	}
 	checkTemplate(declared, "global.toolWaitLine", s.Global.ToolWaitLine, report)
@@ -243,6 +249,30 @@ func (e *MissingAnnounceError) Error() string {
 		"cannot be prompted to speak by text, so a phase the call does not leave "+
 		"needs an announce of its own; these have none: %s",
 		e.FlowID, strings.Join(e.Nodes, ", "))
+}
+
+// validateDeclaredLead checks a phase's lead declaration (Node.Lead): its
+// shape, and an intent the record_lead tool would accept, written exactly as
+// the enum spells it. The tool forgives a model's lower case; a flow is
+// written once, by a person, and checked here.
+func validateDeclaredLead(id string, lead *DeclaredLead, report func(string, ...any)) {
+	for _, problem := range lead.problems {
+		report("phase %q lead %s", id, problem)
+	}
+	if lead.isIntentUnreadable {
+		return
+	}
+	intents := strings.Join(LeadIntents, ", ")
+	switch {
+	case lead.Intent == "":
+		report("phase %q lead declares no intent; it is one of %s", id, intents)
+	case slices.Contains(LeadIntents, lead.Intent):
+	case slices.Contains(LeadIntents, strings.ToUpper(strings.TrimSpace(lead.Intent))):
+		report("phase %q lead intent is %q; write it as %q, in capitals", id, lead.Intent,
+			strings.ToUpper(strings.TrimSpace(lead.Intent)))
+	default:
+		report("phase %q lead intent is %q; it is one of %s", id, lead.Intent, intents)
+	}
 }
 
 // knownToolNames is everything a phase may legitimately allow: the flow's own

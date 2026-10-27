@@ -36,6 +36,15 @@ type Runtime struct {
 	denied map[string]bool
 	// isLeadOffered says this is a campaign call, which has record_lead.
 	isLeadOffered bool
+	// leadCtx is the campaign call's context (OfferRecordLead): the leads
+	// phases declare are written under it, since a phase is not always
+	// entered by a tool call with a context of its own (silence, the guards,
+	// the time limit).
+	leadCtx context.Context
+	// lastLead is the intent of the last lead this call recorded, and
+	// lastLeadBy who recorded it (record_lead, or "phase <id>"), for the log
+	// of a declared lead that replaces it.
+	lastLead, lastLeadBy string
 	// wrapUpDeadline is set once the call has used most of its time budget:
 	// when the limit falls due. Instructions renders the time left from the
 	// current clock, so a later phase change never repeats a stale figure.
@@ -61,7 +70,7 @@ func NewRuntime(engine *Engine, actions Actions, backend *Backend,
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Runtime{
+	r := &Runtime{
 		engine:   engine,
 		actions:  actions,
 		backend:  backend,
@@ -69,6 +78,10 @@ func NewRuntime(engine *Engine, actions Actions, backend *Backend,
 		builtins: builtinSchemas(engine.Lang(), queues),
 		now:      time.Now,
 	}
+	// Every way into a phase goes through the engine's enter, so this is
+	// where a phase's declared lead is caught, whatever moved the call.
+	engine.onEnter = r.recordDeclaredLead
+	return r
 }
 
 // Deny withdraws tools from this call: Tools no longer offers them and
@@ -84,12 +97,25 @@ func (r *Runtime) Deny(names ...string) {
 	}
 }
 
-// OfferRecordLead adds record_lead to this call's tools. Only a campaign call
-// does it: the tool is bound to no phase, so Tools offers it and Dispatch runs
-// it whatever the phase's allowlist says, and a call that never asked for it
-// has no such tool (it is refused like a tool outside its phase and Tools
+// OfferRecordLead makes this a campaign call. It adds record_lead to the
+// call's tools: the tool is bound to no phase, so Tools offers it and Dispatch
+// runs it whatever the phase's allowlist says, and a call that never asked for
+// it has no such tool (it is refused like a tool outside its phase and Tools
 // omits it).
-func (r *Runtime) OfferRecordLead() { r.isLeadOffered = true }
+//
+// It also makes the leads phases declare (Node.Lead) count: from here on,
+// entering a phase that declares one records it, and the phase the call is in
+// now, the initial one at the start of a call, records its own at once. ctx
+// is the call's; those writes are made under it. A second call changes
+// nothing.
+func (r *Runtime) OfferRecordLead(ctx context.Context) {
+	if r.isLeadOffered {
+		return
+	}
+	r.isLeadOffered = true
+	r.leadCtx = ctx
+	r.recordDeclaredLead()
+}
 
 // IsToolAllowed reports whether the model may call name now: the phase's
 // allowlist, less what Deny withdrew, plus record_lead on a call that offers it.
@@ -413,9 +439,8 @@ func (r *Runtime) recordLead(ctx context.Context, args map[string]any) string {
 		return Failed(fmt.Sprintf("%q is not a lead intent; use one of %s",
 			stringArg(args, "intent"), strings.Join(LeadIntents, ", ")), "").asToolOutput()
 	}
-	notes := strings.TrimSpace(stringArg(args, "notes"))
-	if utf8.RuneCountInString(notes) > MaxLeadNotesRunes {
-		notes = string([]rune(notes)[:MaxLeadNotesRunes])
+	notes, isCut := leadNotes(stringArg(args, "notes"))
+	if isCut {
 		r.log.Info("lead notes cut", "maxRunes", MaxLeadNotesRunes)
 	}
 	result, err := r.actions.RecordLead(ctx, LeadRequest{Intent: intent, Notes: notes})
@@ -425,7 +450,50 @@ func (r *Runtime) recordLead(ctx context.Context, args map[string]any) string {
 	}
 	r.log.Info("tool ran", "tool", ToolRecordLead, "node", r.engine.NodeID(),
 		"isOk", result.IsOK, "intent", intent)
+	if result.IsOK {
+		r.lastLead, r.lastLeadBy = intent, ToolRecordLead
+	}
 	return result.asToolOutput()
+}
+
+// recordDeclaredLead records the lead the phase the call has just entered
+// declares (Node.Lead), on a campaign call. It goes through the same
+// RecordLead a record_lead call does, as one more write in the order the call
+// made them: the attempt keeps whichever came last, the model's or a
+// phase's, and the side effects run once, from that value, when the call ends.
+//
+// Like record_lead it is bookkeeping, not a step of the conversation: it
+// moves nothing and counts as no turn, and a write that fails is logged and
+// the call goes on. On any other call the declaration means nothing, because
+// one flow serves campaign and single calls alike.
+func (r *Runtime) recordDeclaredLead() {
+	lead, isCut, ok := r.engine.declaredLead()
+	if !ok {
+		return
+	}
+	node := r.engine.NodeID()
+	if !r.IsToolAllowed(ToolRecordLead) {
+		r.log.Debug("declared lead ignored: not a campaign call", "node", node, "intent", lead.Intent)
+		return
+	}
+	if isCut {
+		r.log.Info("lead notes cut", "node", node, "maxRunes", MaxLeadNotesRunes)
+	}
+	result, err := r.actions.RecordLead(r.leadCtx, lead)
+	if err != nil {
+		result = Failed(err.Error(), "")
+	}
+	if !result.IsOK {
+		r.log.Warn("declared lead not recorded", "node", node, "intent", lead.Intent, "error", result.Error)
+		return
+	}
+	fields := []any{"node", node, "intent", lead.Intent,
+		"notesRunes", utf8.RuneCountInString(lead.Notes), "isReplacing", r.lastLead != ""}
+	if r.lastLead != "" {
+		fields = append(fields, "replacedIntent", r.lastLead, "replacedBy", r.lastLeadBy)
+	}
+	r.log.Info("declared lead recorded", fields...)
+	r.lastLead, r.lastLeadBy = lead.Intent, "phase "+node
 }
 
 // recordSlot runs a slot tool. A value that is empty, too long or outside the

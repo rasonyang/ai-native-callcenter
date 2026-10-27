@@ -60,7 +60,7 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		rt := flow.NewRuntime(flow.NewEngine(spec, "en", nil, log),
 			leadActions{attempts: e.attempts, callID: a.CallID}, flow.NewBackend(""), nil, log)
 		rt.Deny("transfer_to_agent", "take_message")
-		rt.OfferRecordLead()
+		rt.OfferRecordLead(ctx)
 		var answers []map[string]any
 		for _, args := range calls {
 			out, _ := rt.Dispatch(ctx, flow.ToolRecordLead, args)

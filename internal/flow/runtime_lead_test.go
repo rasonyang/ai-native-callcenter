@@ -33,7 +33,7 @@ func leadRuntime(t *testing.T, actions *fakeActions, isCampaign bool, flowJSON s
 	r := NewRuntime(NewEngine(spec, "en", nil, log), actions, NewBackend(""), nil, log)
 	if isCampaign {
 		r.Deny("transfer_to_agent", "take_message")
-		r.OfferRecordLead()
+		r.OfferRecordLead(t.Context())
 	}
 	return r
 }

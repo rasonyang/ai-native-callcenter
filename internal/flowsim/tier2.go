@@ -161,7 +161,7 @@ func runOnce(ctx context.Context, spec *flow.Spec, source BackendSource, cfg Mod
 	actions := newActions(sc)
 	engine := flow.NewEngine(spec, sc.Lang, flow.SeedSlots(sc.Caller, sc.Entry, sc.DID, sc.UserData), quiet)
 	runtime := flow.NewRuntime(engine, actions, backend, sc.Queues, quiet)
-	applyCampaign(runtime, sc)
+	applyCampaign(ctx, runtime, sc)
 	m := &modelRun{cfg: cfg, sc: sc, engine: engine, runtime: runtime, actions: actions}
 	m.report = Report{Scenario: sc.Name, Path: []string{engine.NodeID()}}
 	m.system = runtime.Instructions()
