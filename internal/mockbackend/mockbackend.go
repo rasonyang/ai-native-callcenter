@@ -30,6 +30,11 @@
 // per-tool baseUrl, a {secrets.NAME} header and a timeoutMs, which is how the
 // wait line and a backend slower than its timeout are walked on the dev stack.
 //
+// Two more endpoints stand in for aicc-knowledge, the retrieval service the
+// reference flow docs/examples/flows/knowledge_support.json calls: POST
+// /v1/search and POST /v1/facts/plans/lookup, in that service's own shapes
+// (knowledge.go).
+//
 // State lives in memory and only where a flow needs to observe its own writes
 // (an appointment booked, then rescheduled, then confirmed). Restarting resets
 // it, which is what a walkthrough wants: every run starts from the same facts.
@@ -148,6 +153,8 @@ func NewWith(opts Options) http.Handler {
 	}
 	mux.HandleFunc(secureKBPath, secureKB(opts.KBToken, s.logf,
 		serve(secureKBPath, s.logf, s.kbSearch)))
+	mux.HandleFunc("/v1/search", kbSearch(logf))
+	mux.HandleFunc("/v1/facts/plans/lookup", kbLookupPlan(logf))
 	return mux
 }
 

@@ -156,7 +156,7 @@ func validateHTTPCall(d declaredSlots, name string, tool Tool, report func(strin
 			case m[1] == "args" && !slices.Contains(required, m[2]):
 				report("tool %q path references {args.%s}, which the tool's parameters do not require; a path segment cannot be left out, so list it in required or move it to http.query", name, m[2])
 			case m[1] == "slots" && !d.has(m[2]):
-				report("tool %q path references {slots.%s}, which nothing in this flow writes", name, m[2])
+				report("tool %q path references {slots.%s}, %s", name, m[2], d.unwrittenReason(m[2]))
 			}
 		}
 	}
@@ -175,7 +175,7 @@ func validateHTTPCall(d declaredSlots, name string, tool Tool, report func(strin
 			case m[1] == "args" && !slices.Contains(declared, m[2]):
 				report("tool %q query parameter %q references {args.%s}, which is not a declared parameter of the tool", name, param, m[2])
 			case m[1] == "slots" && !d.has(m[2]):
-				report("tool %q query parameter %q references {slots.%s}, which nothing in this flow writes", name, param, m[2])
+				report("tool %q query parameter %q references {slots.%s}, %s", name, param, m[2], d.unwrittenReason(m[2]))
 			}
 		}
 	}
@@ -209,11 +209,47 @@ func validateHTTPCall(d declaredSlots, name string, tool Tool, report func(strin
 		}
 	}
 
+	validateModelOnly(name, call, report)
+
 	if bodyMentionsSecret(call.Body) {
 		report("tool %q body references a secret; {secrets.NAME} may appear only in a header value", name)
 	}
 	if tool.Collect != nil && mentionsSecret(tool.Collect.Value) {
 		report("tool %q collect value references a secret; {secrets.NAME} may appear only in a header value", name)
+	}
+}
+
+// validateModelOnly checks http.modelOnly. Its names share the output object
+// with ok, error, hint and the result fields, so none may collide.
+func validateModelOnly(name string, call *HTTPCall, report func(string, ...any)) {
+	for _, field := range sortedKeys(call.ModelOnly) {
+		mapping := call.ModelOnly[field]
+		switch {
+		case strings.TrimSpace(field) == "":
+			report("tool %q modelOnly has an output with no name", name)
+		case field == "ok" || field == "error" || field == "hint":
+			report("tool %q modelOnly output %q is a field of every tool output; choose another name", name, field)
+		}
+		if _, clash := call.Result[field]; clash {
+			report("tool %q modelOnly output %q is also a key of result; both end up in the same tool output, so give each its own name", name, field)
+		}
+		if strings.TrimSpace(mapping.Path) == "" {
+			report("tool %q modelOnly output %q has an empty path", name, field)
+		}
+		if !mapping.IsProjection {
+			continue
+		}
+		if len(mapping.Each) == 0 {
+			report("tool %q modelOnly output %q lists no fields in each", name, field)
+		}
+		for _, inner := range sortedKeys(mapping.Each) {
+			if strings.TrimSpace(inner) == "" {
+				report("tool %q modelOnly output %q has an each field with no name", name, field)
+			}
+			if strings.TrimSpace(mapping.Each[inner]) == "" {
+				report("tool %q modelOnly output %q each field %q has an empty path", name, field, inner)
+			}
+		}
 	}
 }
 

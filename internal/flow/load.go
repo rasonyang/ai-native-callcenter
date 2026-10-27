@@ -343,7 +343,7 @@ func checkTemplate(d declaredSlots, where string, text Text, report func(string,
 	for _, lang := range []string{text.EN, text.ZH} {
 		for _, name := range slotRefs(lang) {
 			if !d.has(name) {
-				report("%s references {slots.%s}, which nothing in this flow writes", where, name)
+				report("%s references {slots.%s}, %s", where, name, d.unwrittenReason(name))
 			}
 		}
 	}
@@ -356,7 +356,7 @@ func checkBody(d declaredSlots, where string, body map[string]any, report func(s
 		case string:
 			for _, m := range templateReference.FindAllStringSubmatch(x, -1) {
 				if m[1] == "slots" && !d.has(m[2]) {
-					report("%s body references {slots.%s}, which nothing in this flow writes", where, m[2])
+					report("%s body references {slots.%s}, %s", where, m[2], d.unwrittenReason(m[2]))
 				}
 			}
 		case map[string]any:
@@ -376,7 +376,7 @@ func checkConditions(d declaredSlots, where string, rules []Transition, report f
 	for i, rule := range rules {
 		for _, slot := range conditionSlots(rule.Condition) {
 			if !d.has(slot) {
-				report("%s transition %d tests slot %q, which nothing in this flow writes", where, i, slot)
+				report("%s transition %d tests slot %q, %s", where, i, slot, d.unwrittenReason(slot))
 			}
 		}
 	}
@@ -443,7 +443,7 @@ func (s *Spec) validateCollects(d declaredSlots, report func(string, ...any)) {
 			case m[1] == "args" && !slices.Contains(args, m[2]):
 				report("tool %q collect value references {args.%s}, which is not a declared parameter of the tool", name, m[2])
 			case m[1] == "slots" && !d.has(m[2]):
-				report("tool %q collect value references {slots.%s}, which nothing in this flow writes", name, m[2])
+				report("tool %q collect value references {slots.%s}, %s", name, m[2], d.unwrittenReason(m[2]))
 			}
 		}
 		if err := validateCondition(rule.When); err != nil {
@@ -451,7 +451,7 @@ func (s *Spec) validateCollects(d declaredSlots, report func(string, ...any)) {
 		}
 		for _, slot := range conditionSlots(rule.When) {
 			if !d.has(slot) {
-				report("tool %q collect when tests slot %q, which nothing in this flow writes", name, slot)
+				report("tool %q collect when tests slot %q, %s", name, slot, d.unwrittenReason(slot))
 			}
 		}
 	}

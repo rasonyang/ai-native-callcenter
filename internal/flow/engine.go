@@ -67,6 +67,10 @@ func NewEngine(spec *Spec, lang string, baseSlots map[string]any, log *slog.Logg
 	}
 	maps.Copy(e.slots, baseSlots)
 	e.slots["lang"] = e.lang
+	// The service-facing form of lang (SCREAMING, as the naming spec asks of
+	// enum values). Reserved: only the engine writes it, so a model can never
+	// choose the language a template sends.
+	e.slots["language"] = strings.ToUpper(e.lang)
 	e.collected = map[string][]string{}
 	for _, tool := range spec.Tools {
 		if tool.Collect != nil {

@@ -99,8 +99,13 @@ type Result struct {
 	// IsOK is what the model reads to decide whether the thing happened.
 	IsOK bool
 	// Fields are merged into the result the model sees and into the slots the
-	// flow's conditions read.
+	// flow's conditions read. Nothing else may be copied into slots.
 	Fields map[string]any
+	// ModelOnly is merged into the result the model sees and into the
+	// transcript, and is never written to a slot: the passages a knowledge
+	// base returned must not outlive the turn or be rendered into a later
+	// instruction (http.modelOnly).
+	ModelOnly map[string]any
 	// Hint steers the next turn. A transition overrides it with the new
 	// phase's instruction, because the flow is authoritative on progression.
 	Hint string
@@ -143,6 +148,7 @@ func TranscriptOutput(output string) string {
 func (r Result) asToolOutput() string {
 	payload := map[string]any{"ok": boolAsFlag(r.IsOK)}
 	maps.Copy(payload, r.Fields)
+	maps.Copy(payload, r.ModelOnly)
 	if r.Error != "" {
 		payload["error"] = r.Error
 	}

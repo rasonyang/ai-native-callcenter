@@ -30,7 +30,7 @@ var slotNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 // engineSlots are written by the engine itself, always present or present from
 // the first turn on.
 var engineSlots = []string{
-	"caller", "entry", "did", "lang", "node", "turns", "turnsWithoutTool",
+	"caller", "entry", "did", "lang", "language", "node", "turns", "turnsWithoutTool",
 	"lastTool", "noInput.count",
 }
 
@@ -216,6 +216,35 @@ func (d declaredSlots) has(name string) bool {
 		return d.toolHas(toolName, rest)
 	}
 	return false
+}
+
+// unwrittenReason completes "references {slots.x}, ..." for a name has()
+// refused. A name that a tool hands to the model through http.modelOnly gets
+// its own explanation, because the author's next move is different: map it in
+// result, rather than hunt for a typo.
+func (d declaredSlots) unwrittenReason(name string) string {
+	const nothing = "which nothing in this flow writes"
+	isModelOnly := func(tool Tool, field string) bool {
+		if tool.HTTP == nil {
+			return false
+		}
+		_, ok := tool.HTTP.ModelOnly[field]
+		return ok
+	}
+	if field, ok := strings.CutPrefix(name, "result."); ok {
+		for _, toolName := range slices.Sorted(maps.Keys(d.spec.Tools)) {
+			if isModelOnly(d.spec.Tools[toolName], field) {
+				return fmt.Sprintf("but %q is handed to the model only (http.modelOnly of tool %q) and is never a slot; map it in result to read it", field, toolName)
+			}
+		}
+		return nothing
+	}
+	for _, toolName := range slices.Sorted(maps.Keys(d.spec.Tools)) {
+		if field, ok := strings.CutPrefix(name, toolName+"."); ok && isModelOnly(d.spec.Tools[toolName], field) {
+			return fmt.Sprintf("but %q is handed to the model only (http.modelOnly of tool %q) and is never a slot; map it in result to read it", field, toolName)
+		}
+	}
+	return nothing
 }
 
 func (d declaredSlots) toolNames() []string {
