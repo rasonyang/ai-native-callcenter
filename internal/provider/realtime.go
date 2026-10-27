@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	syncatomic "sync/atomic"
@@ -89,6 +90,10 @@ type responseRequest struct {
 	isDirectionInConversation bool
 	// isRetry marks the one retry of a request that was never created.
 	isRetry bool
+	// isAskedAgain marks the one request for a line asked for again because
+	// the turn of its first request called a tool and said nothing
+	// (askForLineAgain).
+	isAskedAgain bool
 }
 
 // Realtime is a session against any provider speaking the realtime protocol.
@@ -197,6 +202,19 @@ type Realtime struct {
 	// it is taken out of the conversation when the response ends; see
 	// onLineCall.
 	isLineResponse bool
+	// lineTurn is the request that response was created for, and lineCalls
+	// the tools it called instead of only saying the line, each named once:
+	// what asking for the line again needs (askForLineAgain). They belong to
+	// one response, as isLineResponse does.
+	lineTurn  responseRequest
+	lineCalls []string
+	// againDirection is the direction of the line asked for again, put in the
+	// conversation as a caller message, until the provider names that item
+	// (conversation.item.created); againItemID is its name. The item steers
+	// that one turn and is taken back out when the turn ends
+	// (removeAgainDirection).
+	againDirection string
+	againItemID    string
 
 	// spokenItems are the items the response now open has begun to speak
 	// (output_item.added of a message), and unheardItems the ones the
@@ -473,7 +491,10 @@ func (r *Realtime) SendUserText(text string) error {
 // rather than verbatim, and it is the honest limit of this client — an engine
 // that speaks text outright gets its own profile and says the line as written.
 // Where the override alone loses to the conversation already there, a line
-// that ends the call is put in the conversation too (askForLine).
+// that ends the call is put in the conversation too (askForLine). A turn that
+// calls a tool instead of saying the line, and says nothing, is asked for once
+// more, with the direction in the conversation for that turn only
+// (askForLineAgain).
 //
 // The floor may already be taken, and asking for a second response while one
 // is open is refused with "conversation already has an active response". Two
@@ -699,6 +720,47 @@ func sayExactlyWithoutTools(text, language string) string {
 		"separately, so saying it breaks no rule about tool calls:\n" + text
 }
 
+// sayExactlyAfterCall is the direction of a line asked for again because its
+// first turn called tools instead of saying it (askForLineAgain): the same
+// demand, the tools it called named as not to be called now, and the two facts
+// the conversation hides from the model. The call was never carried out, and
+// the caller has not heard the line, so nothing they said before answers it.
+//
+// The second fact is the one the turn lost to. On #351's live call the phase's
+// standing instruction said "after the line, on any reply, agreement included,
+// call hangup", the caller's last words were an agreement given to the phase
+// before, and the line's turn called hangup on them.
+//
+// isToolRunningNoted adds sayExactlyWithoutTools' last sentence, on a profile
+// that needs it (NeedsToolFreeLineDirection): a wait line's turn calls the very
+// tool still running, and a model that is told its call was dropped would
+// otherwise want to make it again.
+func sayExactlyAfterCall(text string, tools []string, language string, isToolRunningNoted bool) string {
+	if strings.HasPrefix(strings.ToLower(language), "zh") {
+		called := strings.Join(tools, "、")
+		direction := "上一轮你没有说下面这句话，而是调用了 " + called + "。那次调用没有执行，现在也不需要执行。" +
+			"来电者还没有听到这句话，他之前说的话不是对这句话的回答。" +
+			"这一轮只做一件事：一字不差地说出下面这句话，不要添加任何其它内容，" +
+			"现在不要调用 " + called + "，也不要调用任何其它工具"
+		if isToolRunningNoted {
+			direction += "。这句话提到的工具已经在运行或已经运行过，结果会另外交给你，" +
+				"所以说这句话不违反关于工具调用的规则"
+		}
+		return direction + "：\n" + text
+	}
+	called := strings.Join(tools, ", ")
+	direction := "Last turn you called " + called + " instead of saying the sentence below. " +
+		"That call was not carried out, and it is not needed now. " +
+		"The caller has not heard the sentence yet, and nothing they said before was an answer to it. " +
+		"This turn does one thing only: say the sentence below word for word, add nothing else, " +
+		"and do not call " + called + " now, nor any other tool"
+	if isToolRunningNoted {
+		direction += ". Any tool the sentence mentions is already running or has already run, " +
+			"and its result will reach you separately, so saying it breaks no rule about tool calls"
+	}
+	return direction + ":\n" + text
+}
+
 // requestResponse asks the model for a turn and records that one is on its way
 // (claimFloorLocked). Between here and response.created there is nothing to
 // cancel, which is what SpeakText has to know before it asks for anything. If
@@ -847,11 +909,17 @@ func (r *Realtime) sendRetry(expired responseRequest) error {
 // moment there is something to stop.
 //
 // It reports whether the response is the one a line asked for: the request in
-// flight when it was created was a line's.
-func (r *Realtime) onResponseCreated() (isLine bool) {
+// flight when it was created was a line's; and whether that line is one asked
+// for again (askForLineAgain).
+func (r *Realtime) onResponseCreated() (isLine, isAskedAgain bool) {
 	r.mu.Lock()
 	isLine = r.isResponseRequested && r.request.kind == responseKindLine
 	r.isLineResponse = isLine
+	r.lineTurn, r.lineCalls = responseRequest{}, nil
+	if isLine {
+		r.lineTurn = r.request
+		isAskedAgain = r.request.isAskedAgain
+	}
 	r.isAnswerResponse = !isLine && r.isResultUnheard
 	r.settleRequestLocked()
 	r.isCallerSpeaking = false
@@ -878,7 +946,7 @@ func (r *Realtime) onResponseCreated() (isLine bool) {
 			r.log.Warn("could not stop the turn a spoken line replaces", "error", err)
 		}
 	}
-	return isLine
+	return isLine, isAskedAgain
 }
 
 // dispatchPendingSpeak asks for the line that was waiting, now that the turn
@@ -1430,9 +1498,10 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.mu.Unlock()
 		r.hasResponseAudio.Store(false)
 		r.isResponseOpen.Store(true)
-		isLine := r.onResponseCreated()
+		isLine, isAskedAgain := r.onResponseCreated()
 		r.signal(watchResponseStarted)
-		r.emit(Event{Type: EventTypeResponseStarted, IsSpokenLine: isLine})
+		r.emit(Event{Type: EventTypeResponseStarted, IsSpokenLine: isLine,
+			IsLineAskedAgain: isAskedAgain})
 
 	case "response.output_item.added":
 		// Only the item carrying speech can be truncated. A turn that says
@@ -1516,6 +1585,9 @@ func (r *Realtime) handle(event *wireEvent) {
 			ToolName: event.Name, ToolArgs: arguments,
 		})
 
+	case "conversation.item.created", "conversation.item.added":
+		r.noteCreatedItem(event.Item)
+
 	case "conversation.item.deleted":
 		r.log.Debug("the provider removed an item from the conversation", "itemId", event.ItemID)
 
@@ -1540,22 +1612,30 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	r.mu.Unlock()
 	cancelledFor := r.takeCancelReason()
 	r.signal(watchResponseEnded)
+	status := ""
+	if event.Response != nil {
+		status = event.Response.Status
+	}
+	// Read before removeUnfinishedCalls forgets that this was a line's turn.
+	line, lineCalls := r.takeLineTurn()
 	// Before anything asks for a turn, so that turn is made from a
 	// conversation without the calls this one left unfinished, nor the words
 	// of this one that the caller never heard.
 	r.removeUnfinishedCalls(event.Response)
 	r.removeUnheardTurn(event.Response)
+	r.removeAgainDirection(line)
 	// The floor is free: a line that was waiting for it goes out before the
 	// turn is reported, so the next words are already being made while the
 	// consumer catches up.
 	isPreemptedForSpeak := r.dispatchPendingSpeak(false)
+	// Then a line whose turn called a tool and said nothing is asked for
+	// again, unless a newer line has just taken the floor. Whatever turn was
+	// owed stays owed past it, as past the line's first request.
+	isLineAskedAgain := r.askForLineAgain(line, lineCalls, status)
 	// Then the turn a tool result answered mid-response is owed, unless the
 	// line just asked for is that turn.
-	r.releaseOwedTurn()
-
-	status := ""
-	if event.Response != nil {
-		status = event.Response.Status
+	if !isLineAskedAgain {
+		r.releaseOwedTurn()
 	}
 	// A cancelled response is a turn that was cut short, whether we asked for
 	// it or the provider decided on its own when it heard the caller. Either
@@ -1641,9 +1721,15 @@ func (r *Realtime) finishCall(itemID, callID string) {
 // the line's turn ends, as it does a call a cancelled turn left half made, so
 // that no later turn reads it as a call still waiting for its output. The
 // call the line was said over is the earlier turn's and is answered as usual.
+//
+// The tool is remembered, so that a turn which called it and said nothing can
+// be asked for again with the tool named (askForLineAgain).
 func (r *Realtime) onLineCall(event *wireEvent) bool {
 	r.mu.Lock()
 	isLine := r.isLineResponse
+	if isLine && event.Name != "" && !slices.Contains(r.lineCalls, event.Name) {
+		r.lineCalls = append(r.lineCalls, event.Name)
+	}
 	r.mu.Unlock()
 	if !isLine {
 		return false
@@ -1651,6 +1737,161 @@ func (r *Realtime) onLineCall(event *wireEvent) bool {
 	r.log.Info("the turn asked for a line called a tool; the call is not handed out and is taken back when the turn ends",
 		"tool", event.Name, "callId", event.CallID, "itemId", event.ItemID)
 	return true
+}
+
+// takeLineTurn returns the line the response now ending was asked for and the
+// tools its turn called instead (onLineCall), and forgets both: they belong to
+// that response. A response that was not a line's returns a zero request.
+func (r *Realtime) takeLineTurn() (line responseRequest, calls []string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	line, calls = r.lineTurn, r.lineCalls
+	r.lineTurn, r.lineCalls = responseRequest{}, nil
+	return line, calls
+}
+
+// askForLineAgain asks once more for a line whose turn called a tool instead
+// of saying it, and reports whether it did. The response that turn made has
+// just ended (handleResponseDone).
+//
+// qwen ignores every way a request can bar tools (W-Q8), and the direction
+// alone loses where the conversation invites a call: on #351's live call
+// 01a17c7d-b4d4-7870-883e-b82a9553f3c6 a non-terminal phase entered through a
+// slot tool asked for its line, the phase's instruction said "after the line,
+// on any reply, agreement included, call hangup", the caller's last words were
+// the agreement that moved the call there, and the line's turn called hangup.
+// onLineCall kept the call from the flow, the turn said nothing, and the caller
+// sat through nine seconds of silence until they spoke. So the line is asked
+// for once more, its direction naming what was called (sayExactlyAfterCall).
+// It costs one turn where the first fails and nothing where it does not.
+//
+// The second direction goes in the conversation as a caller message as well
+// as in the request's override, on every profile, and is taken back out when
+// its turn ends (removeAgainDirection). Replayed on the call's own session
+// (TestLiveQwenLineAfterMove, qwen-findings W-Q10), the override alone lost
+// again 9 of 9, the item said the line 9 of 9 and, left in, made the turn
+// after it answer the caller with the wrong tool 9 of 9; put in and taken out,
+// the line was said 10 of 10 and the caller's answer drew the hangup the
+// phase asked for 10 of 10.
+//
+// Only a turn the caller heard nothing of, that ran to its end, is asked for
+// again:
+//
+//   - a turn whose audio reached the consumer was heard, line or not, and
+//     asking again would say it twice. qwen saying the line and then calling
+//     the running tool (the wait line in W-Q8) is that turn;
+//   - a turn cut short was stopped by someone who wants the floor: the caller
+//     talking (the provider's own turn detection answers them), a keypress or
+//     a newer line, which pre-empts and has already been asked for
+//     (dispatchPendingSpeak);
+//   - the caller who has started speaking since the turn ended is answered by
+//     the provider's own reply, which a request here would be refused over.
+//
+// Once only. A line asked for again whose turn calls a tool too is given up,
+// with a WARN: the caller hears silence until they speak or the consumer's
+// dead-air watch prompts them, which is what every such turn cost before
+// #351, and a third ask would be a loop on a model that has made up its mind.
+//
+// A turn owed to a result or a cue that arrived while the line was on its way
+// stays owed past the line asked again, as it does past a line's retry
+// (onRequestExpired): the line's turn answers neither, and the owed turn is
+// asked for when it ends.
+func (r *Realtime) askForLineAgain(line responseRequest, calls []string, status string) bool {
+	if line.kind != responseKindLine || len(calls) == 0 {
+		return false
+	}
+	attrs := []any{"tools", calls, "isClosing", line.isClosing}
+	switch {
+	case r.hasResponseAudio.Load():
+		r.log.Debug("the turn asked for a line called a tool and was heard; not asking again", attrs...)
+		return false
+	case status != "" && status != statusCompleted:
+		r.log.Debug("the turn asked for a line called a tool and was cut short; not asking again",
+			append(attrs, "status", status)...)
+		return false
+	case line.isAskedAgain:
+		r.log.Warn("the line was asked for again and its turn called a tool instead once more; "+
+			"giving it up", attrs...)
+		return false
+	}
+
+	r.mu.Lock()
+	if r.isResponseRequested || r.pendingSpeak != "" || r.isCallerSpeaking {
+		r.mu.Unlock()
+		r.log.Debug("the turn asked for a line called a tool; the floor has moved on, not asking again", attrs...)
+		return false
+	}
+	again := responseRequest{
+		kind:      responseKindLine,
+		text:      line.text,
+		isClosing: line.isClosing,
+		direction: sayExactlyAfterCall(line.text, calls, r.cfg.Language,
+			r.profile.NeedsToolFreeLineDirection),
+		isDirectionInConversation: true,
+		isAskedAgain:              true,
+	}
+	isOwed := r.isTurnOwed
+	r.claimFloorLocked(again)
+	if isOwed {
+		r.isTurnOwed, r.isOwedPastCreate = true, true
+	}
+	r.againDirection, r.againItemID = again.direction, ""
+	r.mu.Unlock()
+
+	r.log.Info("the turn asked for a line called a tool and said nothing; asking for the line once more", attrs...)
+	if err := r.askForLine(again); err != nil {
+		r.log.Warn("could not ask again for the line its turn did not say", "error", err)
+		return false
+	}
+	return true
+}
+
+// noteCreatedItem learns the provider's name for the caller message that
+// carries the direction of a line asked for again, from the event that
+// announces it (conversation.item.created, or .added in the GA dialect), so
+// removeAgainDirection can take it out. Any other item is ignored.
+func (r *Realtime) noteCreatedItem(item *wireItem) {
+	if item == nil || item.ID == "" || item.Role != "user" || len(item.Content) == 0 {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.againDirection != "" && item.Content[0].Text == r.againDirection {
+		r.againItemID, r.againDirection = item.ID, ""
+	}
+}
+
+// removeAgainDirection takes the direction of a line asked for again out of
+// the conversation once that line's turn has ended, however it ended, before
+// anything asks for the next turn. The item was there to steer that one turn.
+// Left in, it steered the turns after it too: asked again with the item kept,
+// the line was said 9 of 9, and the caller's answer to it was then met 9 of 9
+// with the previous phase's tool instead of the hangup the phase asked for
+// (qwen-findings W-Q10). An item the provider never named stays where it is.
+func (r *Realtime) removeAgainDirection(line responseRequest) {
+	if !line.isAskedAgain {
+		return
+	}
+	r.mu.Lock()
+	itemID := r.againItemID
+	r.againItemID, r.againDirection = "", ""
+	if itemID != "" {
+		r.deleteSentAt = time.Now()
+	}
+	r.mu.Unlock()
+	if itemID == "" {
+		r.log.Debug("the direction of the line asked again was never named; it stays in the conversation")
+		return
+	}
+	if err := r.sendEvent(map[string]any{
+		"type":    "conversation.item.delete",
+		"item_id": itemID,
+	}); err != nil {
+		r.log.Debug("could not take the direction of the line asked again out of the conversation",
+			"itemId", itemID, "error", err)
+		return
+	}
+	r.log.Debug("took the direction of the line asked again out of the conversation", "itemId", itemID)
 }
 
 // removeUnfinishedCalls takes out of the conversation every function call a

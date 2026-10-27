@@ -64,7 +64,9 @@ type VoiceSession interface {
 	// SpeakText makes the bot say something the application has decided on,
 	// mid-call. Verbatim where the provider can manage it and as close as it
 	// will come otherwise — this is a request for particular words, not a brief
-	// to write from.
+	// to write from. A client may ask its engine for the line more than once
+	// to get it said (the Realtime client asks once more when the line's turn
+	// called a tool and said nothing); the caller hears it at most once.
 	//
 	// It PRE-EMPTS: whatever the model is in the middle of saying, this line
 	// replaces it, and the caller stops hearing the old one. It does NOT
@@ -257,6 +259,12 @@ type Event struct {
 	// speaking the committed text (doubao). It is this client's belief, as
 	// sure as its knowledge of which request a response answers.
 	IsSpokenLine bool
+	// IsLineAskedAgain says, with IsSpokenLine, that the turn is the line of
+	// the spoken-line turn just before it, asked for once more because that
+	// turn called a tool instead of saying it and said nothing (Realtime). It
+	// is the same line: whatever marked the first turn (an aside) marks this
+	// one too.
+	IsLineAskedAgain bool
 
 	// Err is set on EventTypeError. IsFatal means the session cannot continue:
 	// provider state is unrecoverable, so the call must be routed elsewhere

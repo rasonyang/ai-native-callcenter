@@ -52,6 +52,16 @@ type wireItem struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`
 	CallID string `json:"call_id"`
+	// Role and Content are a message's, as conversation.item.created (or
+	// .added) reports one: what lets the client recognise an item it put in
+	// the conversation itself (askForLineAgain).
+	Role    string            `json:"role"`
+	Content []wireItemContent `json:"content"`
+}
+
+type wireItemContent struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 type wireResponse struct {
