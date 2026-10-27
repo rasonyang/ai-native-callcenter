@@ -419,7 +419,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		o.queueNames(ctx, did.FallbackQueueID), log)
 	if actions.isCampaign() {
 		runtime.Deny(campaignDeniedTools...)
-		runtime.OfferRecordLead()
+		runtime.OfferRecordLead(ctx)
 	}
 
 	profile := o.cfg.Profile

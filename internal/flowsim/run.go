@@ -23,7 +23,8 @@ type Report struct {
 	Path []string
 	// Ending is the last built-in action that succeeded, or "none".
 	Ending string
-	// Lead is the last lead record_lead stored, if any.
+	// Lead is the last lead stored, by record_lead or by a phase that
+	// declares one (flow.DeclaredLead), if any.
 	Lead *flow.LeadRequest
 	// Transfer is the last successful transfer, if any.
 	Transfer *flow.TransferRequest
@@ -65,7 +66,7 @@ func RunScenario(ctx context.Context, spec *flow.Spec, source BackendSource, sc 
 	actions := newActions(sc)
 	engine := flow.NewEngine(spec, sc.Lang, flow.SeedSlots(sc.Caller, sc.Entry, sc.DID, sc.UserData), quiet)
 	runtime := flow.NewRuntime(engine, actions, backend, sc.Queues, quiet)
-	applyCampaign(runtime, sc)
+	applyCampaign(ctx, runtime, sc)
 
 	r := &runner{ctx: ctx, spec: spec, sc: sc, engine: engine, runtime: runtime, actions: actions}
 	r.report = Report{Scenario: sc.Name, Path: []string{engine.NodeID()}}
@@ -358,13 +359,15 @@ func leadProblem(want *LeadExpect, got *flow.LeadRequest) string {
 }
 
 // applyCampaign gives the runtime a campaign call's tools: no way to a person
-// and no message-taking, and record_lead (see aicall's campaign wiring).
-func applyCampaign(runtime *flow.Runtime, sc Scenario) {
+// and no message-taking, and record_lead (see aicall's campaign wiring). It is
+// also what makes the leads phases declare count, the initial phase's at
+// once, as on a campaign call.
+func applyCampaign(ctx context.Context, runtime *flow.Runtime, sc Scenario) {
 	if !sc.IsCampaign {
 		return
 	}
 	runtime.Deny(flow.ToolTransferToAgent, flow.ToolTakeMessage)
-	runtime.OfferRecordLead()
+	runtime.OfferRecordLead(ctx)
 }
 
 // subsetDiff reports the first key of want that is missing from, or differs

@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"strings"
+	"unicode/utf8"
 )
 
 // The built-in tools every flow gets. They are not HTTP calls: they ask the
@@ -43,6 +45,17 @@ var LeadIntents = []string{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCal
 // caller's) out of the callbacks table. Counted in runes, not bytes, so the
 // cap means the same in both languages and never cuts a character in half.
 const MaxLeadNotesRunes = 1000
+
+// leadNotes is notes as a lead keeps them, whoever wrote them: trimmed, and
+// cut to MaxLeadNotesRunes rather than refused, because a HIGH lead must not
+// be lost to wordy notes. isCut says they were cut.
+func leadNotes(notes string) (kept string, isCut bool) {
+	kept = strings.TrimSpace(notes)
+	if utf8.RuneCountInString(kept) <= MaxLeadNotesRunes {
+		return kept, false
+	}
+	return string([]rune(kept)[:MaxLeadNotesRunes]), true
+}
 
 // BuiltinToolNames is the closed set, for validating what a phase allows.
 var BuiltinToolNames = []string{ToolTransferToAgent, ToolTakeMessage, ToolHangup, ToolRecordLead}

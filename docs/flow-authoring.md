@@ -69,10 +69,11 @@ The loader (`flow.Load`, `internal/flow/load.go`) rejects a flow that cannot run
 | `tools` | The allowlist for this phase. `"*"` allows every tool. Empty allows only `alwaysAllowedTools`. |
 | `transitions` | Rules that move the call out of this phase (2.5). |
 | `isTerminal` | The conversation does not leave this phase. A terminal phase may not declare `transitions`. |
+| `lead` | Optional. `{"intent": "HIGH", "notes": "{slots.x}"}`: the campaign lead the call records on entering this phase (2.7.1). `intent` is one of `HIGH`, `MEDIUM`, `LOW`, `NONE`, `DO_NOT_CALL`, in capitals; `notes` is optional text (a string or per language) rendered like `announce`. Ignored on a call that is not a campaign call. |
 
 Every user-facing string (`persona`, `instruction`, `announce`, tool `description`) is either a plain string, meaning the same text in both languages, or an object `{"en": "...", "zh": "..."}`. A missing translation falls back to the other language rather than to silence. One flow serves every language; business logic is never duplicated per language, only wording. The call's `language` picks the wording and nothing else; it never selects the provider or the voice.
 
-`{slots.name}` is substituted into `instruction` and `announce` only. It is not substituted into `persona` or `rules`. A slot that is not set renders as nothing.
+`{slots.name}` is substituted into `instruction`, `announce` and a declared lead's `notes` only. It is not substituted into `persona` or `rules`. A slot that is not set renders as nothing.
 
 ### 2.4 A tool
 
@@ -247,7 +248,7 @@ Three tools exist in every flow, and a fourth on campaign calls. They are not HT
 | `transfer_to_agent` | `queue` (an enum of the deployment's queues, narrowed to the number's own queue when it has one), `reason`, `summary` (at most 600 characters, caller's language), `slots` (an object) | Arms a transfer that runs after the caller has heard the model's line. The `summary`, `reason` and `slots` ride the caller's channel to the agent. A closed or unknown queue is a refusal (`QUEUE_CLOSED`, `QUEUE_UNKNOWN`) with a hint to offer a message. A transfer the switch accepted and never ran (a stalled switch) puts the call back in the phase the tool was called in, without its `announce` and without counting a visit, and the model is told to offer a message; from then on the tool answers `TRANSFER_FAILED`. |
 | `take_message` | `message`, `callbackNumber` (optional) | Records an open callback request, defaulting the number to the caller's. |
 | `hangup` | `isFarewellSpoken` | Ends the call once the goodbye has been heard. |
-| `record_lead` | `intent` (`HIGH`, `MEDIUM`, `LOW`, `NONE` or `DO_NOT_CALL`), `notes` (optional, at most 1000 characters; longer is cut) | **Campaign calls only.** Records what the call concluded about the customer on the call's campaign attempt; the last call wins, so call it again when the customer changes their mind. It is bound to no phase: it is offered and callable in every phase whatever `tools` and `alwaysAllowedTools` say, it never moves the phase and never counts as a turn, and it is not offered on any other call. An intent outside the enum comes back as a tool error and nothing is written. The call is not ended by it. The side effects run once, when the call ends: `DO_NOT_CALL` puts the number on the do-not-call list, `HIGH` files one callback on the campaign's follow-up queue (design 10 section 11). A campaign call is offered neither `transfer_to_agent` nor `take_message`, so a flow meant for campaigns lists neither (`seed/flows/campaign_lead_followup.json` is the reference). |
+| `record_lead` | `intent` (`HIGH`, `MEDIUM`, `LOW`, `NONE` or `DO_NOT_CALL`), `notes` (optional, at most 1000 characters; longer is cut) | **Campaign calls only.** Records what the call concluded about the customer on the call's campaign attempt; the last call wins, so call it again when the customer changes their mind. It is bound to no phase: it is offered and callable in every phase whatever `tools` and `alwaysAllowedTools` say, it never moves the phase and never counts as a turn, and it is not offered on any other call. An intent outside the enum comes back as a tool error and nothing is written. The call is not ended by it. The side effects run once, when the call ends: `DO_NOT_CALL` puts the number on the do-not-call list, `HIGH` files one callback on the campaign's follow-up queue (design 10 section 11). A campaign call is offered neither `transfer_to_agent` nor `take_message`, so a flow meant for campaigns lists neither (`seed/flows/campaign_lead_followup.json` is the reference). A phase can also record the lead itself when the call enters it (2.7.1); both are writes to the same lead, and whichever came last is kept. |
 
 Two details that matter when authoring:
 
@@ -255,6 +256,28 @@ Two details that matter when authoring:
 - `reason` is a free string, not an enum, even though the design text in `docs/design/02-ai-voice.md` §6 shows one.
 
 A built-in's refusal is a conversation, not an error. When a queue is closed the model explains and offers a message. Business hours therefore belong to the queue, not to a branch in the flow.
+
+#### 2.7.1 A lead the phase declares
+
+`record_lead` depends on the model calling it, and one flow shape leaves the model no turn to do so: a tool classifies the customer and its transition moves straight into a terminal phase whose `announce` is the goodbye. Asking for `record_lead` in the same response as the classification is a request the model may ignore; on a live qwen call it called only the classification tool, the call closed, and the attempt finished with no lead, so no callback was filed (a do-not-call request would have been lost the same way). For that shape, let the phase record the lead:
+
+```json
+"close_interested": {
+  "instruction": "The customer wants the offer.",
+  "announce": {"en": "Great, we will send you the details. Goodbye.", "zh": "好的，我们会把详情发给您。再见。"},
+  "isTerminal": true,
+  "lead": {"intent": "HIGH", "notes": "Agreed: {slots.agree_words}"}
+}
+```
+
+- **When it is recorded.** Every time the call enters the phase, on a campaign call: a tool's transition, a `NO_INPUT` rule, the guards that move the call to `closingTarget` or `fallbackTarget` (5.3), the time limit (5.4), and the initial phase when the call starts. A phase entered twice records twice. Returning to a phase after a transfer the switch never ran (2.7, `transfer_to_agent`) is not entering it and records nothing.
+- **Last write wins.** A declared lead is one more write to the same lead `record_lead` writes, in the order things happened: a `record_lead` call after the call entered the phase replaces the phase's lead, and entering a phase that declares a lead replaces what the model recorded before. Inside one response the tools are taken in order, as for phase moves.
+- **Same effect as the tool.** It is stored on the attempt exactly as a `record_lead` call would store it; the side effects still run once, from the final value, when the call ends (`DO_NOT_CALL` to the do-not-call list, `HIGH` one callback).
+- **`notes`** is rendered from the slots when the phase is entered, in the call's language, then trimmed and cut to 1000 characters. It may be left out, and a rendering that comes out empty records empty notes.
+- **Not a campaign call.** The same flow may serve single outbound calls, so the declaration is not an error there; it is ignored (logged at debug level).
+- **Checked at load.** `lead` must be an object with `intent` and optionally `notes`, and nothing else; `intent` must be one of the five values exactly as written (`high` is refused); every `{slots.x}` in `notes` must be a slot the flow writes. A refusal names the phase, alongside the flow's other problems.
+
+When to declare and when to leave it to the model: declare the lead on a phase whose meaning is the outcome (the customer agreed, asked to be called later, asked never to be called again), above all on a terminal phase the classification moves into, where the model has nothing left to say. Leave it to `record_lead` where the stance is the model's judgement of a conversation that goes on, or changes as it goes ("I'll think about it", then "send me the offer"); `campaign_lead_followup` records that way, in its one working phase. The two combine: a phase records the outcome its meaning implies, and a later `record_lead` can still replace it.
 
 ### 2.8 Slot tools: facts the caller states
 
@@ -694,7 +717,7 @@ A ticket's first `plan_status` is `PROCESSING` with an `eta`; every later one is
   go test -race ./internal/flowsim/                                   # every seed flow against internal/seed/scenarios/
   ```
 
-  A scenario fixes the call's metadata (`lang`, `caller`, `did`, `userData`), whether it is a campaign call (`isCampaign`: `record_lead` is offered, `transfer_to_agent` and `take_message` are withdrawn), the queues the deployment has, the answers of the built-ins (`actions`), and a list of `steps`. A step is exactly one event: `say` (a caller utterance), `keypress`, `exchange` (the caller speaks and the bot answers in words with no tool call), `noInput`, `botTurn` (`reply` or `interrupted`), `sessionLimit`, `call` with `args` (a tool the bot calls) or `batch` (several tools in one response; the last move wins). `repeat: N` runs a step N times. A step may carry `expect`: `phase`, `isOk`, `isRefused`, `result` (a subset of what the model receives), `slots` (a subset), `announce`, `instructionContains` (the rendered instruction, so a lost `{slots.x}` is caught). The scenario's own `expect` checks the whole call: `path` (phases entered, in order), `phase`, `ending` (`hangup`, `transfer_to_agent`, `take_message` or `none`), `transfer` (`queue`, `reason`), `toolsRun`, `slots`, `lead` (`intent`, `notes`, or `isUnrecorded` for a call that never recorded one). Unknown fields are an error, so a misspelt expectation cannot pass by checking nothing.
+  A scenario fixes the call's metadata (`lang`, `caller`, `did`, `userData`), whether it is a campaign call (`isCampaign`: `record_lead` is offered, the leads phases declare are recorded, `transfer_to_agent` and `take_message` are withdrawn), the queues the deployment has, the answers of the built-ins (`actions`), and a list of `steps`. A step is exactly one event: `say` (a caller utterance), `keypress`, `exchange` (the caller speaks and the bot answers in words with no tool call), `noInput`, `botTurn` (`reply` or `interrupted`), `sessionLimit`, `call` with `args` (a tool the bot calls) or `batch` (several tools in one response; the last move wins). `repeat: N` runs a step N times. A step may carry `expect`: `phase`, `isOk`, `isRefused`, `result` (a subset of what the model receives), `slots` (a subset), `announce`, `instructionContains` (the rendered instruction, so a lost `{slots.x}` is caught). The scenario's own `expect` checks the whole call: `path` (phases entered, in order), `phase`, `ending` (`hangup`, `transfer_to_agent`, `take_message` or `none`), `transfer` (`queue`, `reason`), `toolsRun`, `slots`, `lead` (`intent`, `notes`, or `isUnrecorded` for a call that never recorded one; the last write wins, `record_lead` or a phase's declared lead). Unknown fields are an error, so a misspelt expectation cannot pass by checking nothing.
 
   ```json
   {"scenarios": [{
@@ -745,6 +768,7 @@ A ticket's first `plan_status` is `PROCESSING` with an `eta`; every later one is
 - Does an operation that can exceed its tool's `timeoutMs`, or that a bot should not complete alone, have a submit-and-check, callback or hand-over path?
 - Does every terminal phase have an `announce`, and does `closingTarget` name one of them?
 - Does the closing phase tell the model to hang up on a decline?
+- On a campaign flow: does every phase a classification moves into, and the call then closes in, declare its `lead` (2.7.1), rather than depend on the model calling `record_lead` in the same response?
 - Is `maxTurnsWithoutTool` above the longest legitimate tool-less stretch?
 - Does the flow avoid collecting secrets or digits through the model (6)?
 - Are both languages written, with the same meaning?

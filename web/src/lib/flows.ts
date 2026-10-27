@@ -55,6 +55,19 @@ export interface FlowNode {
   tools?: string[]
   transitions?: FlowTransition[]
   isTerminal?: boolean
+  /**
+   * The campaign lead the call records on entering this phase, as a
+   * record_lead call would. Ignored on a call that is not a campaign call.
+   */
+  lead?: FlowLead
+}
+
+/** The lead a phase declares (flow.DeclaredLead on the server). */
+export interface FlowLead {
+  /** The same enum record_lead takes and a campaign contact carries. */
+  intent: components['schemas']['CampaignLeadIntent']
+  /** Rendered with {slots.x} when the phase is entered, like an announce. */
+  notes?: FlowText
 }
 
 /** One argument the model fills in: a JSON Schema property, the parts a reader wants. */

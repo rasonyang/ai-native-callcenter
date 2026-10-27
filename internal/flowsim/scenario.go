@@ -40,9 +40,9 @@ type Scenario struct {
 	Entry    string         `json:"entry,omitempty"`
 	DID      string         `json:"did,omitempty"`
 	UserData map[string]any `json:"userData,omitempty"`
-	// IsCampaign makes this a campaign call: record_lead is offered, and
-	// transfer_to_agent and take_message are withdrawn, as on a call the
-	// campaign dialer placed.
+	// IsCampaign makes this a campaign call: record_lead is offered, the
+	// leads phases declare are recorded on entry, and transfer_to_agent and
+	// take_message are withdrawn, as on a call the campaign dialer placed.
 	IsCampaign bool `json:"isCampaign,omitempty"`
 	// Queues are the queue names the simulated deployment has. A transfer to
 	// any other name is refused, as on a real deployment. Empty accepts any.
@@ -184,14 +184,14 @@ type Final struct {
 	ToolsRun []string `json:"toolsRun,omitempty"`
 	// Slots is a subset of the final slots.
 	Slots map[string]any `json:"slots,omitempty"`
-	// Lead is the lead the call ended with (the last record_lead that
-	// succeeded).
+	// Lead is the lead the call ended with: the last write that succeeded,
+	// a record_lead call or the lead a phase declares, recorded on entry.
 	Lead *LeadExpect `json:"lead,omitempty"`
 }
 
 // LeadExpect is the lead a campaign call concluded. Notes is checked only when
-// given. IsUnrecorded expects that record_lead never succeeded, which is not
-// the same as the intent NONE.
+// given. IsUnrecorded expects that no lead was ever recorded, by record_lead or
+// by a phase's declaration, which is not the same as the intent NONE.
 type LeadExpect struct {
 	Intent       string `json:"intent,omitempty"`
 	Notes        string `json:"notes,omitempty"`

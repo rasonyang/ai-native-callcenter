@@ -51,6 +51,12 @@ type Engine struct {
 	isInToolBatch bool
 	batchNode     Node
 	batchMovedTo  string
+
+	// onEnter, when set, is called each time the call enters a phase, once
+	// the phase is current: it is how the runtime records the lead a phase
+	// declares (Runtime.recordDeclaredLead). NewEngine enters the initial
+	// phase before anybody can set it.
+	onEnter func()
 }
 
 // NewEngine starts a call at the flow's initial phase. baseSlots seeds
@@ -186,6 +192,19 @@ func (e *Engine) ToolWaitLine() string {
 // and the model does the talking.
 func (e *Engine) Announce() string {
 	return e.render(e.current.Announce.For(e.lang))
+}
+
+// declaredLead is the lead the current phase declares (Node.Lead), as it is
+// recorded: its notes rendered from the slots as they are now, in the call's
+// language, trimmed and cut to MaxLeadNotesRunes (isCut says they were). ok is
+// false when the phase declares none.
+func (e *Engine) declaredLead() (lead LeadRequest, isCut, ok bool) {
+	declared := e.current.Lead
+	if declared == nil {
+		return LeadRequest{}, false, false
+	}
+	notes, isCut := leadNotes(e.render(declared.Notes.For(e.lang)))
+	return LeadRequest{Intent: declared.Intent, Notes: notes}, isCut, true
 }
 
 // OnToolResult records a tool having run and moves the conversation on if a
@@ -560,6 +579,9 @@ func (e *Engine) enter(nodeID string) string {
 	e.resetTurnsWithoutTool()
 	e.slots[nodeID+".visits"] = e.countOf(nodeID+".visits") + 1
 	e.log.Info("flow entered phase", "node", nodeID, "visits", e.slots[nodeID+".visits"])
+	if e.onEnter != nil {
+		e.onEnter()
+	}
 	return nodeID
 }
 

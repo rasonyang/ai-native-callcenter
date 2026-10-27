@@ -1,0 +1,176 @@
+{
+  "scenarios": [
+    {
+      "name": "classified and closed in one move: the phase records HIGH",
+      "description": "The model never calls record_lead; the terminal phase the classification moves into declares the lead, and its notes keep braces, quotes and non-ASCII text as said; a value that quotes a template is not rendered again.",
+      "lang": "en",
+      "isCampaign": true,
+      "caller": "18688886660",
+      "steps": [
+        {"call": "agree_words", "args": {"value": "Yes — send the \"Max 50\" plan to {slots.caller}, 谢谢"}, "expect": {"phase": "pitch"}},
+        {"call": "classify", "args": {"value": "interested"}, "expect": {"phase": "close_high",
+          "announce": "Great, we will send you the details by text. Goodbye."}}
+      ],
+      "expect": {
+        "path": ["pitch", "close_high"],
+        "toolsRun": ["agree_words", "classify"],
+        "ending": "none",
+        "lead": {"intent": "HIGH", "notes": "Agreed: Yes — send the \"Max 50\" plan to {slots.caller}, 谢谢"}
+      }
+    },
+    {
+      "name": "下个月再打：阶段记录 MEDIUM，备注用中文",
+      "lang": "zh",
+      "isCampaign": true,
+      "caller": "18688886660",
+      "steps": [
+        {"call": "agree_words", "args": {"value": "下个月再打给我吧"}},
+        {"call": "classify", "args": {"value": "later"}, "expect": {"phase": "close_medium"}}
+      ],
+      "expect": {
+        "path": ["pitch", "close_medium"],
+        "lead": {"intent": "MEDIUM", "notes": "稍后回电：下个月再打给我吧"}
+      }
+    },
+    {
+      "name": "unsure: the phase records LOW with the words as the only notes",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "agree_words", "args": {"value": "  I'll think about it {maybe} 'ok'  "}},
+        {"call": "classify", "args": {"value": "unsure"}, "expect": {"phase": "close_low"}}
+      ],
+      "expect": {
+        "path": ["pitch", "close_low"],
+        "lead": {"intent": "LOW", "notes": "I'll think about it {maybe} 'ok'"}
+      }
+    },
+    {
+      "name": "not interested: the phase records NONE",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "classify", "args": {"value": "not_interested"}, "expect": {"phase": "close_none"}}
+      ],
+      "expect": {"path": ["pitch", "close_none"], "lead": {"intent": "NONE"}}
+    },
+    {
+      "name": "a do-not-call request: the phase records DO_NOT_CALL",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "agree_words", "args": {"value": "Stop calling this number."}},
+        {"call": "classify", "args": {"value": "do_not_call"}, "expect": {"phase": "close_dnc"}}
+      ],
+      "expect": {
+        "path": ["pitch", "close_dnc"],
+        "lead": {"intent": "DO_NOT_CALL", "notes": "Asked not to be called: Stop calling this number."}
+      }
+    },
+    {
+      "name": "not a campaign call: the declaration is ignored",
+      "description": "One flow serves single outbound calls too; there record_lead is not offered and no phase records anything.",
+      "lang": "en",
+      "steps": [
+        {"call": "agree_words", "args": {"value": "Yes please"}},
+        {"call": "classify", "args": {"value": "interested"}, "expect": {"phase": "close_high"}}
+      ],
+      "expect": {"path": ["pitch", "close_high"], "lead": {"isUnrecorded": true}}
+    },
+    {
+      "name": "the model records HIGH, then the phase's NONE replaces it",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "record_lead", "args": {"intent": "HIGH", "notes": "sounded keen"}, "expect": {"phase": "pitch"}},
+        {"call": "classify", "args": {"value": "not_interested"}, "expect": {"phase": "close_none"}}
+      ],
+      "expect": {"path": ["pitch", "close_none"], "toolsRun": ["record_lead", "classify"], "lead": {"intent": "NONE"}}
+    },
+    {
+      "name": "the phase records HIGH, then the model's MEDIUM in the same response replaces it",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"batch": [
+          {"call": "classify", "args": {"value": "interested"}},
+          {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "only if the price drops"}}
+        ], "expect": {"phase": "close_high"}}
+      ],
+      "expect": {"path": ["pitch", "close_high"], "lead": {"intent": "MEDIUM", "notes": "only if the price drops"}}
+    },
+    {
+      "name": "entering the objection phase again records LOW again",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "agree_words", "args": {"value": "too expensive"}},
+        {"call": "classify", "args": {"value": "objection"}, "expect": {"phase": "objection", "slots": {"objection.visits": 1}}},
+        {"call": "record_lead", "args": {"intent": "HIGH", "notes": "convinced after the discount"}, "expect": {"phase": "objection"}},
+        {"call": "classify", "args": {"value": "back"}, "expect": {"phase": "pitch"}},
+        {"call": "agree_words", "args": {"value": "still too expensive"}},
+        {"call": "classify", "args": {"value": "objection"}, "expect": {"phase": "objection", "slots": {"objection.visits": 2}}}
+      ],
+      "expect": {
+        "path": ["pitch", "objection", "pitch", "objection"],
+        "lead": {"intent": "LOW", "notes": "Objected: still too expensive"}
+      }
+    },
+    {
+      "name": "an objection, then agreement: the later phase's HIGH replaces the objection's LOW",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "agree_words", "args": {"value": "too expensive"}},
+        {"call": "classify", "args": {"value": "objection"}, "expect": {"phase": "objection"}},
+        {"call": "agree_words", "args": {"value": "fine, with the discount"}},
+        {"call": "classify", "args": {"value": "interested"}, "expect": {"phase": "close_high"}}
+      ],
+      "expect": {
+        "path": ["pitch", "objection", "close_high"],
+        "lead": {"intent": "HIGH", "notes": "Agreed: fine, with the discount"}
+      }
+    },
+    {
+      "name": "silence closes the call: the closing phase records NONE",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"noInput": true, "repeat": 2, "expect": {"phase": "pitch"}},
+        {"noInput": true, "expect": {"phase": "close_silent"}}
+      ],
+      "expect": {"path": ["pitch", "close_silent"], "lead": {"intent": "NONE", "notes": "No clear answer."}}
+    },
+    {
+      "name": "the time limit closes the call: the closing phase records NONE",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "asked about prices"}},
+        {"sessionLimit": true, "expect": {"phase": "close_silent"}}
+      ],
+      "expect": {"path": ["pitch", "close_silent"], "lead": {"intent": "NONE", "notes": "No clear answer."}}
+    },
+    {
+      "name": "replies without a tool close the call: the closing phase records NONE",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {"exchange": "What is this about?", "repeat": 3, "expect": {"phase": "pitch"}},
+        {"exchange": "And then?", "expect": {"phase": "close_silent"}}
+      ],
+      "expect": {"path": ["pitch", "close_silent"], "lead": {"intent": "NONE"}}
+    },
+    {
+      "name": "a lead the attempt no longer takes stays unrecorded",
+      "description": "The attempt refuses the write, as one no longer in flight does; the phase still moves and the call goes on.",
+      "lang": "en",
+      "isCampaign": true,
+      "actions": {"record_lead": {"isOk": false, "error": "NOT_RECORDED"}},
+      "steps": [
+        {"call": "classify", "args": {"value": "interested"}, "expect": {"phase": "close_high"}}
+      ],
+      "expect": {"path": ["pitch", "close_high"], "lead": {"isUnrecorded": true}}
+    }
+  ]
+}
