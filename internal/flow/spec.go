@@ -48,7 +48,7 @@ func (t *Text) UnmarshalJSON(data []byte) error {
 		EN string `json:"en"`
 	}
 	if err := json.Unmarshal(data, &byLang); err != nil {
-		return fmt.Errorf("text must be a string or an object keyed by language: %w", err)
+		return notKeyedByLanguage("text must be a string", data, err)
 	}
 	t.ZH, t.EN = byLang.ZH, byLang.EN
 	return nil
@@ -89,7 +89,7 @@ func (l *TextList) UnmarshalJSON(data []byte) error {
 		EN []string `json:"en"`
 	}
 	if err := json.Unmarshal(data, &byLang); err != nil {
-		return fmt.Errorf("text list must be a list or an object keyed by language: %w", err)
+		return notKeyedByLanguage("text list must be a list", data, err)
 	}
 	l.ZH, l.EN = byLang.ZH, byLang.EN
 	return nil
@@ -602,4 +602,29 @@ func Lang(language string) string {
 		return LangZH
 	}
 	return LangEN
+}
+
+// notKeyedByLanguage is the refusal for a wording that is neither its plain
+// form nor an object keyed by language. The decoder's own error would name an
+// internal struct and an offset that is relative to this value alone, so only
+// the found kind is reported; a malformed object keeps the decoder's detail.
+func notKeyedByLanguage(plain string, data []byte, err error) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '{' {
+		return fmt.Errorf("%s or an object keyed by language: %w", plain, err)
+	}
+	kind := "a number"
+	switch {
+	case len(trimmed) == 0:
+		kind = "empty"
+	case trimmed[0] == '"':
+		kind = "a string"
+	case trimmed[0] == '[':
+		kind = "a list"
+	case trimmed[0] == 't' || trimmed[0] == 'f':
+		kind = "a boolean"
+	case trimmed[0] == 'n':
+		kind = "null"
+	}
+	return fmt.Errorf("%s or an object keyed by language, not %s", plain, kind)
 }
