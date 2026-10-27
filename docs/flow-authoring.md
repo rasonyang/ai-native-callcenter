@@ -546,6 +546,10 @@ An `announce` is spoken as written, in the call's language, with `{slots.x}` ren
 
 Leave `announce` off phases where the model is answering the caller. It exists for the two ends of a call.
 
+On the Realtime engines (openai, grok, qwen, gateway), a line in a phase the call goes on from can lose to a tool call: the turn asked to say it calls a tool instead. The usual trigger is the phase's own instruction. "After the line, on any reply, call `hangup`" invites the call, and the caller's last words, often the agreement that moved the call into the phase, read as that reply ([#351](https://github.com/rasonyang/ai-native-callcenter/issues/351), on qwen). The platform never runs a call made in a line's turn. If that turn said nothing, the line is asked for once more, with the tool named as not to be called now. If the second turn calls a tool too, the line is given up (a `giving it up` WARN in the log), and the caller hears nothing until they speak or the dead-air prompt comes. Two ways to stay clear of it:
+
+- Word the instruction so that it holds while the line is still to be said: the reply it acts on is the caller's answer *to the line*, not whatever they said before it. Above all, do not tell the model it has already said the line itself. In the test flow of #351, turning "the system has played the line; output nothing until the caller speaks" into "you told the caller in your last sentence; neither speak nor call a tool until they reply" took the line from said in 9 of 9 runs to 5 of 9 on qwen (`docs/design/qwen-findings.md` W-Q10).
+- When nothing needs to follow the line, make the phase terminal and append the goodbye to its `announce`. A terminal phase's line entered through a tool travels in the tool's result, not in a turn of its own, and was said verbatim on all six follow-up live calls of #351.
 A deployment whose provider cannot be cued by text (doubao) refuses to **publish** a flow whose terminal phases have no `announce` (422 `TERMINAL_ANNOUNCE_REQUIRED`, naming the phases). Loading is unaffected. Writing an `announce` on every terminal phase makes a flow portable.
 
 ### 5.3 Closing phases and the two guards
