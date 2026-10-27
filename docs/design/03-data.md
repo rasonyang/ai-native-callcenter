@@ -98,6 +98,10 @@ live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- DESIGNED, NE
                                    -- transcript. Left written down rather than deleted: it is a
                                    -- design that was never built, not a table somebody dropped.
 cdrs(call_id uuid pk, started_at, answered_at, ended_at,
+     -- answered_at: when the call became billable. Between two extensions it is the callee's
+     -- answer; on an agent's call to a bot number, the bot's answer; absent when nobody beyond
+     -- the placing phone answered (a phone auto-answering the call it is placing is not an
+     -- answer; bill_sec stays 0) (#330).
      call_type varchar check in ('INBOUND','OUTBOUND','CONSULT','INTERNAL'),  -- Genesys-style, caller-perspective; immutable across transfers
      language varchar,                                            -- 'en'/'zh'
      from_number text, to_number text, did text, flow_id uuid, queue_id uuid,
