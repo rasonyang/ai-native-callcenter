@@ -798,7 +798,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside})
 
 	case provider.EventTypeResponseStarted:
-		s.beginTurn(event.IsSpokenLine)
+		s.beginTurn(event.IsSpokenLine, event.IsLineAskedAgain)
 
 	case provider.EventTypeResponseDone:
 		hasAudio := s.endTurn()
@@ -987,15 +987,24 @@ func (s *Session) endInterruptedTurn() bool {
 // beginTurn starts a turn. isSpokenLine is the provider's word that the turn
 // says a line (provider.Event.IsSpokenLine); it decides, with an aside owed,
 // whether this turn is the aside (SpeakAside).
-func (s *Session) beginTurn(isSpokenLine bool) {
+//
+// isLineAskedAgain is the provider's word that the turn says the line of the
+// turn just before it once more, because that turn called a tool and said
+// nothing (provider.Event.IsLineAskedAgain). If that turn was the aside, so is
+// this one: it is the wait line the caller is about to hear, and counted as a
+// reply it would be judged as a claim no tool backs ("let me check").
+func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.mu.Lock()
 	s.framesQueued = 0
 	s.turnSeq++
-	if s.isAsideOwed {
+	switch {
+	case s.isAsideOwed:
 		s.isAsideOwed = false
 		if isSpokenLine {
 			s.asideTurn = s.turnSeq
 		}
+	case isSpokenLine && isLineAskedAgain && s.asideTurn != 0 && s.asideTurn == s.turnSeq-1:
+		s.asideTurn = s.turnSeq
 	}
 	s.isResponding = true
 	s.turnOwedUntil = time.Time{}

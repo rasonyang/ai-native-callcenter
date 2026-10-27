@@ -99,8 +99,10 @@ func TestOnlyALineRequestBarsTools(t *testing.T) {
 }
 
 // lineTurnEvents ends the line's turn the fake created, with a function call
-// in it, and returns what the client reported until the turn ended.
-func lineTurnEvents(t *testing.T, f *fakeProvider, session *Realtime, status string) []Event {
+// in it, and returns what the client reported until the turn ended. isHeard
+// gives the turn audio before the call, as qwen saying the line and then
+// calling the running tool again does (W-Q8).
+func lineTurnEvents(t *testing.T, f *fakeProvider, session *Realtime, status string, isHeard bool) []Event {
 	t.Helper()
 	f.send(map[string]any{"type": "response.created"})
 	if started := awaitEvent(t, session, EventTypeResponseStarted); !started.IsSpokenLine {
@@ -108,6 +110,9 @@ func lineTurnEvents(t *testing.T, f *fakeProvider, session *Realtime, status str
 	}
 	f.send(map[string]any{"type": "response.output_item.added",
 		"item": map[string]any{"id": "item_line", "type": "message"}})
+	if isHeard {
+		f.send(map[string]any{"type": "response.audio.delta", "delta": "AAAA"})
+	}
 	f.send(map[string]any{"type": "response.output_item.added",
 		"item": map[string]any{"id": "item_dup", "type": "function_call", "call_id": "fc_dup"}})
 	f.send(map[string]any{"type": "response.function_call_arguments.done",
@@ -137,7 +142,8 @@ func lineTurnEvents(t *testing.T, f *fakeProvider, session *Realtime, status str
 // profile and however the turn ends, and it is taken out of the conversation
 // so no later turn reads it as a call still waiting for its output. The call
 // the line was said over is answered as usual, and a call in the next turn is
-// handed out as usual.
+// handed out as usual. The turn that runs to its end said the line first: one
+// that said nothing is asked for again (line_asked_again_test.go).
 func TestACallMadeInALinesTurnIsNeverHandedOut(t *testing.T) {
 	for _, profile := range []Profile{OpenAIProfile(), QwenProfile(), GrokProfile(), GatewayProfile()} {
 		for _, status := range []string{statusCompleted, statusCancelled} {
@@ -145,7 +151,7 @@ func TestACallMadeInALinesTurnIsNeverHandedOut(t *testing.T) {
 				f, session := startWaitLineCall(t, profile)
 				sayWaitLine(t, f, session)
 
-				for _, event := range lineTurnEvents(t, f, session, status) {
+				for _, event := range lineTurnEvents(t, f, session, status, status == statusCompleted) {
 					if event.Type == EventTypeToolCall {
 						t.Errorf("the line's turn handed out a call: %+v", event)
 					}

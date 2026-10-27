@@ -55,7 +55,7 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `Style` | `GA` nests audio settings under `session.audio.input/output`; `BETA` is the older flat shape. Both are in the wild. |
 | `Voice` | The profile's default voice, used only when the flow does not name one |
 | `AcceptsTemperature` | Whether `SessionConfig.Temperature` (the flow's `global.temperature`) is sent. Nil leaves the provider's default on every profile. True on qwen (`session.temperature`, documented range [0, 2), default per model and undocumented for ours). False on openai (the GA `session` object has no such field), grok (accepted and echoed for any number, but no effect on output was seen at 3 samples per value, grok-findings 5.3), gateway (none documented) and doubao (no sampling parameter in its session body). A profile without support ignores the field and logs that once per process, not once per call. Only the opening session configuration carries it: never a mid-call instruction update, and not the Realtime client's retry after a rejected `session.update`, which drops the optional fields. |
-| `AcceptsResponseToolChoice` | Whether a line's `response.create` carries `tool_choice: "none"` in its `response` object, so the turn that says a line (`SpeakText`: an announce, the wait line) does not call a tool. No other request carries it. True on openai (documented, not measured). False on qwen (accepted and ignored, as is `response.tools: []`: a line asked for over an unanswered call repeated the call; qwen-findings W-Q8), grok (undocumented, not measured) and gateway (refused as "Unsupported parameter", which would cost the line). Whatever the profile, the client never hands out a call made in a line's turn and deletes its item when the turn ends. |
+| `AcceptsResponseToolChoice` | Whether a line's `response.create` carries `tool_choice: "none"` in its `response` object, so the turn that says a line (`SpeakText`: an announce, the wait line) does not call a tool. No other request carries it. True on openai (documented, not measured). False on qwen (accepted and ignored, as is `response.tools: []`: a line asked for over an unanswered call repeated the call; qwen-findings W-Q8), grok (undocumented, not measured) and gateway (refused as "Unsupported parameter", which would cost the line). Whatever the profile, the client never hands out a call made in a line's turn and deletes its item when the turn ends; a turn that called a tool and said nothing is asked for once more (see "A line's turn that calls a tool" below). |
 | `NeedsToolFreeLineDirection` | Whether a mid-call line's direction (`SpeakText`) also bans any tool call in its turn and says the tool the line mentions is already running, in place of the plain `SayExactly`. True on qwen only: with `SayExactly` the wait line over a running tool was silent 3 of 3 (the flow's action-claim rule makes "我查一下" need a lookup call), with this direction it was said 6 of 6 with no call (qwen-findings W-Q8). The opening line and a tool result's hint keep `SayExactly`. |
 | `DropsToolResultAfterLine` | Whether a line spoken while a tool call is still owed (`SpeakText` between the call and its result) ends the turn the call belongs to, so the result sent afterwards is dropped with no error and never answered. When it is true the orchestrator says no wait line over a slow HTTP tool (#286). True on doubao only: with no line before it a result was answered 1 of 1; after a line 0 of 3 (SayHello, ChatTTSText, SayHello plus a forced audio commit) and in 3 of 3 live calls (doubao-findings W-D10). The Realtime profiles owe the result's turn past the line and answer it. The orchestrator reads it, not a client. |
 | `AcceptsG711` | Whether telephone audio passes through untouched. True removes conversion from the hot path entirely. |
@@ -111,6 +111,31 @@ included, and tools survive it. NOT MEASURED, as on qwen: conflicting or repeate
 updates, a slot value recalled verbatim, an update late in a long call. Run
 with `-count=1`. Every engine this repository ships (openai, grok, qwen, gateway, doubao) applies a
 mid-call instruction change at once; the provider layer assumes it.
+
+**A line's turn that calls a tool (#351).** A line asked for mid-call
+(`SpeakText`: a phase's `announce`, the wait line) can come back as a turn that
+calls a tool instead of saying it. The client never hands that call out and
+deletes its item when the turn ends (W-Q8). If the turn ran to its end and
+none of its audio reached the consumer, the client asks for the line once
+more, on every Realtime profile, with no branch on the name. The second
+direction names the tools the turn called as not to be called now and says the
+caller has not heard the line yet (`sayExactlyAfterCall`; on qwen it also says
+any tool the line mentions is already running, as `NeedsToolFreeLineDirection`
+does). It travels as the request's override and, on every profile, as a caller
+message ahead of it, and that message is deleted once the turn ends: it is
+there for that turn only. The client learns the message's id from the
+provider's `conversation.item.created` (`.added` in the GA dialect); a message
+never named stays. On qwen the override alone lost again 9 of 9, and the
+message left in made the next turn answer the caller with the wrong tool 9 of
+9. Once only: if the second turn calls a tool too, the line is given up with a
+WARN, and the caller hears silence until they speak or the dead-air watch
+prompts them. A turn the caller heard, a turn cut short (by the caller, a
+keypress or a newer line) and a caller who has started speaking are never asked
+again. A turn owed to a tool result or a cue stays owed past the second ask. The
+second turn's `ResponseStarted` carries `IsLineAskedAgain`, so a wait line
+asked again stays an aside in `aicall`. Doubao has no such turn: its
+`SpeakText` commits text the engine synthesises. Measured on qwen in
+qwen-findings W-Q10.
 
 ## Grok (xAI Grok Voice)
 

@@ -1177,3 +1177,103 @@ Covered by `TestAnUnheardAnswerIsNotedOnceForTheReply`,
 
 **NOT MEASURED**: the note on a live call; the English note; openai, grok and
 the gateway.
+
+## W-Q10: a mid-call line's turn calls the tool its phase invites (2026-10-27)
+
+**W-Q10 — a phase's `announce` asked for mid-call in a phase the conversation
+goes on from (`SpeakText`, not closing, override alone) is answered by a turn
+that calls a tool and says nothing, when the phase's instruction tells the model
+to call that tool on the caller's next words.** Found on live call
+01a17c7d-b4d4-7870-883e-b82a9553f3c6 (#351, `AI_OUTBOUND`, build c6586c8,
+`qwen-audio-3.1-realtime-plus`). The flow's entry phase recorded the caller's
+agreement with a slot tool and moved to a non-terminal phase whose `announce`
+was a fixed line and whose instruction said that the line had been said and
+that any reply, agreement included, means `hangup`. The line's turn called
+`hangup`; `onLineCall` (W-Q8) kept the call back and nothing asked for the line
+again, so the caller heard about 9 s of silence, spoke, and the model called
+`hangup` then. The terminal goodbye that followed rode in the tool result and
+was verbatim, as on six follow-up calls that day.
+
+**Measured.** `TestLiveQwenLineAfterMove`
+(`internal/provider/live_line_after_move_test.go`), through the product client,
+driven as the orchestrator drives the call: the caller agrees
+(`q_agree_zh.pcm` "好的。", `q_agree_en.pcm` "Okay, sure.", macOS `say`); on
+the slot tool's call the instructions are re-pinned and the result (its hint
+the new phase's instruction) is sent; when that response ends the line is asked
+for; 4 s after the last line turn ends the caller agrees again, which the
+phase's instruction says is a `hangup`. Counts are runs in which the line was
+said, out of the runs measured: a run in which the turn the slot tool's result
+asked for called `hangup` itself before the line pre-empted it is not counted
+(see below).
+
+The call's own flow (rendered by `flow.TestRenderLineAfterMoveSession` from the
+revision on the dev database and kept off the repository), zh:
+
+| Client | First ask said | Second ask said | The caller's answer drew `hangup` |
+|---|---|---|---|
+| main | 0 / 10, then 0 / 9 | never asked | 19 / 19, after the silence |
+| main, without the flow's `global.temperature` (0.5) | 0 / 5 | never asked | 5 / 5 |
+| main, persona and rules replaced by short plain ones | 0 / 5 | never asked | 5 / 5 |
+| main, the phase's instruction replaced by a one-branch one | 2 / 5 | never asked | 5 / 5 |
+| second ask, override alone | 0 / 9 | 0 / 9 (`hangup` again, given up) | 9 / 9, after the silence |
+| second ask, direction also in the conversation, left there | 0 / 9 | 9 / 9 | 0 / 9: the entry phase's slot tool instead, 9 / 9 |
+| second ask, direction also in the conversation, taken out after (shipped) | 0 / 10 | 10 / 10 | 10 / 10 |
+
+`testdata/line_after_move_flow.json` is a flow of the same shape written for
+the repository: a NovaNet Broadband speed-upgrade call, an entry phase with
+four slot tools, and a booking phase whose line confirms the upgrade time and
+whose instruction says what to call on the caller's next words. Its first
+wording, in which the instruction said the system had played the confirmation,
+drew no failure on main (zh 4 / 4, en 5 / 5 said). Saying instead that the
+model had told the caller itself in its last sentence, and must neither speak
+nor call a tool until the caller replies, drew it (zh 1 / 4, en 4 / 5 said);
+that wording ships. Main and the shipped client, run side by side:
+
+| Client | zh said | en said | zh second ask | en second ask | Answer drew `hangup` |
+|---|---|---|---|---|---|
+| main | 1 / 4, 1 / 10 | 4 / 5, 9 / 9, 7 / 10 | never asked | never asked | every run |
+| shipped | 9 / 9 | 9 / 9, 8 / 8 | 7 of 9 first asks failed, all 7 said | 1 of 17 first asks failed, said | every run |
+
+One more branch run (en) was cut short by the harness, not the client: an
+opening the provider was late to start ended the run before the move (fixed in
+the harness since). An earlier test flow with one slot tool and a one-branch
+phase instruction drew the defect once in 64 runs on main. On the shipped
+client the line asked for a second time began to play 1.5 to 2.4 s after it was
+first asked for, against 0.9 to 2.2 s for a line said at the first ask.
+
+**Why.** The standing instruction and the tool result's hint both tell the
+model that the line is already said and that the caller's next words call for
+a tool; the caller's last item is an agreement; a per-response override that
+says "say this line" loses to both. Naming the tool as not to be called now,
+and saying the caller has not heard the line yet, still loses as an override
+alone. As a caller message it wins, and then keeps steering: left in the
+history, it made the caller's next agreement read as an answer to the entry
+phase's question again.
+
+**The fix (`provider.Realtime.askForLineAgain`).** A line's turn that calls a
+tool, runs to its end and hands the consumer no audio is asked for once more,
+on every Realtime profile: the direction (`sayExactlyAfterCall`) names the
+tools the turn called as not to be called now and says the caller has not
+heard the line and that nothing they said before answers it (plus
+`sayExactlyWithoutTools`' running-tool sentence on qwen). It goes in the
+conversation as a caller message ahead of the request carrying it as the
+override, and the message is deleted when that turn ends
+(`removeAgainDirection`, its id from `conversation.item.created`). Not asked
+again: a turn the caller heard (W-Q8's "said the line, then called the running
+tool"), a turn cut short (the caller, a keypress, a newer line), a caller who
+has started speaking. Once only: a second turn that calls a tool is given up
+with a WARN, and the caller hears silence until they speak or the dead-air
+watch prompts them. A turn owed to a result or a cue stays owed past the second
+ask. The wait line asked again stays an aside (`Event.IsLineAskedAgain`).
+Covered by `internal/provider/line_asked_again_test.go` and
+`TestAnAsideAskedAgainMarksTheTurnThatSaysIt`.
+
+**Seen on the way, not fixed here.** In 18 of 300 sessions the turn the slot
+tool's result asks for (requested when the tool's response ends, before the
+batch closes and the line is asked for) called `hangup` before the line's
+cancel reached it. The orchestrator would run that call: the flow would move to
+its goodbye with the line still waiting for the floor.
+
+**NOT MEASURED**: a live call; the second ask on openai, grok and the gateway;
+the call's own flow in English; a conversation that goes on for more than one
+reply after the line.
