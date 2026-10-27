@@ -45,6 +45,21 @@ carries the one-line installer's files.
   endpoint (`sofia/gateway/external::pstn_gateway/%s`) is read correctly. None
   changes the exit status. (#293; thanks @javayou13131)
 
+### Added
+
+- A flow phase can declare the campaign lead the call records when it enters
+  that phase: `"lead": {"intent": "HIGH", "notes": "{slots.agree_words}"}`. A
+  flow whose classification tool moves straight into the closing phase now
+  records its outcome without depending on the model calling `record_lead` in
+  the same response. It is one more write to the attempt's lead, ordered with
+  the model's `record_lead` calls (the last one wins), made on every entry into
+  the phase however the call got there, and ignored on a call that is not a
+  campaign call. The callback for `HIGH` and the do-not-call entry for
+  `DO_NOT_CALL` still come once, from the final lead, when the call ends. The
+  intent and every `{slots.x}` in the notes are checked when the flow is saved
+  (`docs/flow-authoring.md` section 2.7.1). The flow simulator records it on
+  scenarios with `isCampaign: true` and checks it with `expect.lead`. (#352)
+
 ### Changed
 
 - A campaign refuses to start or resume on a deployment that cannot place an

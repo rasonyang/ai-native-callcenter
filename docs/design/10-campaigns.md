@@ -937,8 +937,16 @@ The model judges; code records.
   A model changing its mind mid-call therefore leaves no duplicate or stale callback, and nothing
   needs undoing. A DNC that takes effect at the end of the call rather than during it changes
   nothing: the call is not hung up for it, and an answered contact is not redialled anyway.
-- **Copied to the contact** when the attempt finishes (latest wins). A call that never called
-  `record_lead` leaves `lead_intent` NULL, which is not the same as `NONE`.
+- **A phase may declare the lead** (`"lead": {"intent": …, "notes": …}`, #352), which the
+  engine records when a campaign call enters that phase, through the same write: one more write,
+  ordered with the model's `record_lead` calls, and the last one wins. It exists for the flow that
+  classifies the customer and closes in the same move, where the model has no later turn in which
+  to call `record_lead`. Any phase may declare one, and entering it again writes again; `notes` is
+  rendered from the slots at entry and capped like the tool's. On a call that is not a campaign
+  call the declaration is ignored. Intent and slot references are checked when the flow loads
+  (`docs/flow-authoring.md` section 2.7.1).
+- **Copied to the contact** when the attempt finishes (latest wins). A call that recorded no lead,
+  by `record_lead` or by a phase, leaves `lead_intent` NULL, which is not the same as `NONE`.
 - **Human follow-up** is the existing claim / complete / release flow plus click-to-dial. Phase 1
   builds nothing else for it.
 - **Fixed in phase 1:** the intent enum, and "only `HIGH` files a callback". Both become
