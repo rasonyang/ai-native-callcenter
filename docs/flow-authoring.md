@@ -427,6 +427,7 @@ When the deployment configures scope keys in the service, add `"scope": { "<key>
 **The instruction pattern.** Say in the phase instruction (or `rules`):
 
 - On `HIT`, answer only from the `answer` texts, and never state a price, date or limit that is not in them.
+- An answer limited in time ("until 30 June 2026", "this offer has ended") is said with its limit, never as if it applied now, and when answers disagree the one with no end date wins. The model does not know today's date (issue [#153](https://github.com/rasonyang/ai-native-callcenter/issues/153)), so it cannot tell on its own that a date has passed; the limit in the text is all it has.
 - On `NO_MATCH` or a failure, say so honestly and offer a transfer or a message.
 - A question that needs the caller's own account goes to a person.
 - A fact comes from the lookup tool, never from FAQ text.
