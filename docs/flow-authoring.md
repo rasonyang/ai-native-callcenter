@@ -412,6 +412,7 @@ When the deployment configures scope keys in the service, add `"scope": { "<key>
 ```
 
 - **Key values are an enum, maintained by hand.** A lookup matches exactly, but a caller says "基础套餐" while the table holds `Basic`. Declare each key parameter's valid values as an `enum` with zh and en descriptions, so the model can map what the caller said. When the table gains a row the enum does not list yet, the lookup answers `NOT_FOUND` and the bot handles it as an ordinary conversation; publish does not check the enum against the service.
+- **Name the units in the tool's description.** A `row` holds bare numbers (`"monthly_fee": 129`), and the service does not say what they count. A model left to guess supplies a unit of its own: on a live call an English bot quoted a yuan fee as "$129". Say in the description what each value column is measured in (yuan, GB, minutes, months), as the reference flow does.
 - **`at` is never sent.** Every lookup uses the service's today. A question about a future date would need the model to work out a date, which it cannot do reliably; the instruction should say the bot can quote today's price only.
 - **A fact table holds facts shared by every caller.** A question about the caller's own data ("my plan", "my bill") goes to a business API tool or to a person, never to a fact lookup.
 

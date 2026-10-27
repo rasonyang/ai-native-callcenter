@@ -143,8 +143,8 @@
     },
     "lookup_plan": {
       "description": {
-        "en": "Look up the price and terms of one plan in the plan table: monthly fee, data, voice minutes, speed, contract months, early-termination fee. Use it for any question about what a plan costs or includes. It gives today's figures only. It cannot look up a plan that is not in its list.",
-        "zh": "查询套餐表中某个套餐的月费、流量、通话分钟、速率、合约期和提前解约费。凡问到套餐多少钱、包含什么，都用本工具。只提供今天的数据，列表之外的套餐查不了。"
+        "en": "Look up the price and terms of one plan in the plan table: monthly fee, data, voice minutes, speed, contract months, early-termination fee. Use it for any question about what a plan costs or includes. It gives today's figures only. It cannot look up a plan that is not in its list. The row holds bare numbers; their units are: monthly_fee and early_termination_fee in yuan (CNY), data_gb in GB, voice_minutes in minutes, speed_mbps in Mbps, contract_months in months (0 means no minimum term). Say amounts in yuan, never in dollars.",
+        "zh": "查询套餐表中某个套餐的月费、流量、通话分钟、速率、合约期和提前解约费。凡问到套餐多少钱、包含什么，都用本工具。只提供今天的数据，列表之外的套餐查不了。返回的 row 只有数字，单位如下：monthly_fee 和 early_termination_fee 是人民币元，data_gb 是 GB，voice_minutes 是分钟，speed_mbps 是 Mbps，contract_months 是月（0 表示无最低合约期）。金额一律说“元”。"
       },
       "parameters": {
         "type": "object",
