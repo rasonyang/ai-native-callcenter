@@ -1,0 +1,102 @@
+{
+  "id": "declared_lead",
+  "specVersion": "v2",
+  "initialNode": "pitch",
+  "global": {
+    "persona": {
+      "en": "You call existing NovaNet customers about a data plan upgrade. Keep it short and polite.",
+      "zh": "你代表 NovaNet 致电老客户介绍流量套餐升级。简短、礼貌。"
+    },
+    "closingTarget": "close_silent",
+    "maxTurnsWithoutTool": 3,
+    "alwaysAllowedTools": ["hangup"]
+  },
+  "tools": {
+    "agree_words": {
+      "kind": "slot",
+      "slot": "agree_words",
+      "description": {
+        "en": "Record what the customer said about the offer, in their own words.",
+        "zh": "用客户自己的话记录他对优惠的回答。"
+      }
+    },
+    "classify": {
+      "kind": "slot",
+      "slot": "answer",
+      "description": {
+        "en": "Classify the customer's answer to the offer. Call it once you know.",
+        "zh": "判断客户对优惠的回答，确定后调用。"
+      },
+      "enum": ["interested", "later", "unsure", "not_interested", "do_not_call", "objection", "back"]
+    }
+  },
+  "nodes": {
+    "pitch": {
+      "instruction": {
+        "en": "Offer the upgrade. When the customer answers, record their words with agree_words and classify the answer with classify.",
+        "zh": "介绍升级优惠。客户回答后，用 agree_words 记录原话，再用 classify 判断回答。"
+      },
+      "announce": {
+        "en": "Hello, this is NovaNet calling about a data plan upgrade for you.",
+        "zh": "您好，这里是 NovaNet，想和您介绍一个流量套餐升级。"
+      },
+      "tools": ["agree_words", "classify"],
+      "transitions": [
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "interested"}, "target": "close_high"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "later"}, "target": "close_medium"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "unsure"}, "target": "close_low"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "not_interested"}, "target": "close_none"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "do_not_call"}, "target": "close_dnc"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "objection"}, "target": "objection"}
+      ]
+    },
+    "objection": {
+      "instruction": {
+        "en": "The customer has an objection. Answer it once, then classify their answer again; use back if they want to hear the offer again.",
+        "zh": "客户有顾虑。回应一次，然后再次判断回答；客户想重新听优惠时用 back。"
+      },
+      "tools": ["agree_words", "classify"],
+      "lead": {"intent": "LOW", "notes": {"en": "Objected: {slots.agree_words}", "zh": "有顾虑：{slots.agree_words}"}},
+      "transitions": [
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "interested"}, "target": "close_high"},
+        {"on": "TOOL_RESULT", "tool": "classify", "condition": {"slot": "answer", "op": "EQ", "value": "back"}, "target": "pitch"}
+      ]
+    },
+    "close_high": {
+      "instruction": {"en": "The customer wants the upgrade.", "zh": "客户想要升级。"},
+      "announce": {"en": "Great, we will send you the details by text. Goodbye.", "zh": "好的，我们会短信发送详情给您。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "HIGH", "notes": {"en": "Agreed: {slots.agree_words}", "zh": "已同意：{slots.agree_words}"}}
+    },
+    "close_medium": {
+      "instruction": {"en": "The customer wants a call later.", "zh": "客户希望稍后再联系。"},
+      "announce": {"en": "Of course, we will call you another time. Goodbye.", "zh": "好的，我们改天再联系您。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "MEDIUM", "notes": {"en": "Call back later: {slots.agree_words}", "zh": "稍后回电：{slots.agree_words}"}}
+    },
+    "close_low": {
+      "instruction": {"en": "The customer is unsure.", "zh": "客户还不确定。"},
+      "announce": {"en": "No problem, thank you for your time. Goodbye.", "zh": "没关系，感谢您的时间。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "LOW", "notes": "{slots.agree_words}"}
+    },
+    "close_none": {
+      "instruction": {"en": "The customer is not interested.", "zh": "客户不感兴趣。"},
+      "announce": {"en": "Understood, thank you. Goodbye.", "zh": "明白了，谢谢您。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "NONE"}
+    },
+    "close_dnc": {
+      "instruction": {"en": "The customer asked not to be called again.", "zh": "客户要求不再来电。"},
+      "announce": {"en": "We will not call you again. Goodbye.", "zh": "我们不会再给您打电话了。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "DO_NOT_CALL", "notes": {"en": "Asked not to be called: {slots.agree_words}", "zh": "要求不再来电：{slots.agree_words}"}}
+    },
+    "close_silent": {
+      "instruction": {"en": "The call is being closed.", "zh": "通话即将结束。"},
+      "announce": {"en": "Thank you for your time. Goodbye.", "zh": "感谢您的时间。再见。"},
+      "isTerminal": true,
+      "lead": {"intent": "NONE", "notes": "No clear answer."}
+    }
+  }
+}
