@@ -98,6 +98,31 @@ func TestADialingHopWithNoDestinationFallsBackToTheOriginator(t *testing.T) {
 	}
 }
 
+// The rule is not only an agent's: an inbound caller who hung up before the
+// switch answered was ringing the number they dialled, so the hop names that
+// number and the caller stays in fromNumber. It used to name the caller, the
+// same contradiction from the other side (#331).
+func TestTheDialingHopOfAnUnansweredInboundCallNamesTheNumberTheCallerDialled(t *testing.T) {
+	t.Parallel()
+	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
+		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CreatedAt: at(0), EndedAt: atMsPtr(1800),
+		Parties: []PartySnapshot{{
+			Role: RoleOriginator, Number: "13800138000", OtherNumber: "95001", ChannelID: "caller",
+			CreatedAt: at(0), ReleasedAt: atMsPtr(1800), ReleaseCause: "ORIGINATOR_CANCEL",
+		}},
+	})
+	if want := []string{"DIALING:95001:0"}; !slices.Equal(journey(cdr.Legs), want) {
+		t.Errorf("legs = %v, want %v", journey(cdr.Legs), want)
+	}
+	if cdr.ToNumber != "95001" || cdr.FromNumber != "13800138000" {
+		t.Errorf("toNumber = %q, fromNumber = %q, want 95001 and the caller", cdr.ToNumber, cdr.FromNumber)
+	}
+	if cdr.Status != store.CDRStatusNoAnswer || !cdr.AnsweredAt.IsZero() {
+		t.Errorf("status = %s, answeredAt = %v, want NO_ANSWER and absent", cdr.Status, cdr.AnsweredAt)
+	}
+}
+
 // The stored row is what the call detail screen and the API read. Row 1 (no
 // route, no bot) and row 5 (a bot number whose leg never answered) go through
 // CallFinished, on its own goroutine, and the ledger must hold the dialled
