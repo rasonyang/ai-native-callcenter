@@ -23,6 +23,9 @@ type stubFlows struct {
 	summary store.FlowSummary
 	detail  store.FlowDetail
 	err     error
+	// load makes the stub read the spec as the store does, so a spec the
+	// loader refuses is refused here too.
+	load bool
 
 	createdSlug string
 	createdName string
@@ -44,11 +47,21 @@ func (f *stubFlows) Detail(context.Context, uuid.UUID) (store.FlowDetail, error)
 }
 
 func (f *stubFlows) Create(_ context.Context, slug, name string, draft []byte) (uuid.UUID, error) {
+	if f.load {
+		if _, err := flow.Load(draft); err != nil {
+			return uuid.Nil, err
+		}
+	}
 	f.createdSlug, f.createdName, f.draft = slug, name, draft
 	return f.summary.ID, f.err
 }
 
 func (f *stubFlows) UpdateDraft(_ context.Context, _ uuid.UUID, name string, draft []byte) error {
+	if f.load {
+		if _, err := flow.Load(draft); err != nil {
+			return err
+		}
+	}
 	f.createdName, f.draft = name, draft
 	return f.err
 }
