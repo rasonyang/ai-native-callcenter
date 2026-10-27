@@ -562,6 +562,63 @@ func TestAnAsideMarksOnlyTheLinesOwnTurn(t *testing.T) {
 	})
 }
 
+// #351: the wait line's turn called the running tool and said nothing, and the
+// provider asked for the line once more (provider.Event.IsLineAskedAgain). The
+// turn that says it is the aside too, so its "let me check" is judged by
+// nothing that judges the model's replies. A line asked again after a turn
+// that was not the aside (a phase's line) is not marked.
+func TestAnAsideAskedAgainMarksTheTurnThatSaysIt(t *testing.T) {
+	t.Run("the aside asked again", func(t *testing.T) {
+		session, _, model := startBridge(t, provider.QwenProfile())
+		awaitBridgeEvent(t, session, EventTypeReady)
+		if err := session.SpeakAside("One moment."); err != nil {
+			t.Fatalf("speak aside: %v", err)
+		}
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+		if done := awaitBridgeEvent(t, session, EventTypeTurnDone); !done.IsAside || done.HasAudio {
+			t.Errorf("the silent first turn: aside=%v audio=%v, want an aside with no audio",
+				done.IsAside, done.HasAudio)
+		}
+
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true,
+			IsLineAskedAgain: true}
+		model.events <- provider.Event{Type: provider.EventTypeAudioDelta,
+			Audio: make([]byte, media.FrameSamples*2)}
+		model.events <- provider.Event{Type: provider.EventTypeOutputTranscript,
+			Text: "One moment.", IsFinal: true}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+		if said := awaitBridgeEvent(t, session, EventTypeBotSaid); !said.IsAside {
+			t.Error("the line asked again: its transcript is not marked")
+		}
+		if done := awaitBridgeEvent(t, session, EventTypeTurnDone); !done.IsAside {
+			t.Error("the line asked again: its TURN_DONE is not marked")
+		}
+
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+		if done := awaitBridgeEvent(t, session, EventTypeTurnDone); done.IsAside {
+			t.Error("the turn after the line asked again is marked")
+		}
+	})
+	t.Run("a phase's line asked again", func(t *testing.T) {
+		session, _, model := startBridge(t, provider.QwenProfile())
+		awaitBridgeEvent(t, session, EventTypeReady)
+		if err := session.Speak("Your upgrade starts at midnight.", false); err != nil {
+			t.Fatalf("speak: %v", err)
+		}
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+		awaitBridgeEvent(t, session, EventTypeTurnDone)
+		model.events <- provider.Event{Type: provider.EventTypeResponseStarted, IsSpokenLine: true,
+			IsLineAskedAgain: true}
+		model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+		if done := awaitBridgeEvent(t, session, EventTypeTurnDone); done.IsAside {
+			t.Error("a phase's line asked again is marked as an aside")
+		}
+	})
+}
+
 // awaitLog waits for a line in the call's log.
 func (h *waitLinePath) awaitLog(t *testing.T, words string) {
 	t.Helper()

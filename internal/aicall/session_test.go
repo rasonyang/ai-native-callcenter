@@ -253,7 +253,7 @@ func (m *fakeModel) SpeakText(text string, isClosing bool) error {
 func (m *fakeModel) answerLinesWithATurn(session *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.onSpeak = func(string) { session.beginTurn(true) }
+	m.onSpeak = func(string) { session.beginTurn(true, false) }
 }
 
 func (m *fakeModel) Interrupt(reason provider.InterruptReason, playedMs int) error {
