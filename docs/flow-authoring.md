@@ -90,8 +90,9 @@ A declarative tool is by default an HTTP call to your backend (a second kind, th
 | `http.timeoutMs` | Optional. 500 to 10000; absent means 5000. |
 | `http.body` | A template. String values may reference `{args.x}` (the model's arguments) and `{slots.y}` (the call's slots). A value that is exactly one reference keeps its type; a reference inside text becomes text. Absent sends `{}` as JSON for `POST`, `PUT` and `PATCH`, and no body for `GET`, `DELETE`, `HEAD` and other methods. |
 | `http.successWhen` | `{ "path": "retCode", "equals": "000000" }`. Absent means any 2xx counts. |
-| `http.errorFrom` | Dotted path to the backend's own error message when `successWhen` fails. |
-| `http.result` | Map of slot name to dotted path in the response. **Only these fields are exposed.** |
+| `http.errorFrom` | Dotted path to the backend's own error. When `successWhen` fails it is the message the model reads. On a 4xx or 5xx answer a scalar at this path (for aicc-knowledge `error.code`) is the backend's error code: it is logged as `backendError` and named in the tool's error (`/v1/search returned 503 (INDEX_UNAVAILABLE)`), cut to 128 characters, and the body and the backend's message are never logged or shown to the model. |
+| `http.result` | Map of slot name to dotted path in the response. **Only these fields are exposed.** They reach the model and are written to the slots (`result.<name>`, `<tool>.<name>`). |
+| `http.modelOnly` | Optional. Map of output name to part of the response that reaches the model and the call transcript but is **never written to a slot**. Each entry is a dotted path (a string), passed through as it is (object, list or scalar), or a projection `{ "path": "items", "each": { "answer": "answer", "sourceRef": "sourceRef" } }`: `path` names an array, and each element that is an object is cut down to the `each` fields (a field that does not resolve is left out of that element; other elements are skipped). Applied on success only; a name that does not resolve is omitted. |
 | `collect` | Optional, HTTP tools only (a slot tool with `collect` does not load). Keeps a list of values across the tool's calls: `{ "slot": "repair_status.foundOrders", "value": "{args.rma}", "when": { "slot": "result.found", "op": "EQ", "value": "1" } }`. See 2.6.1. |
 
 Runtime behaviour worth designing around (`internal/flow/httptool.go`):
@@ -100,7 +101,8 @@ Runtime behaviour worth designing around (`internal/flow/httptool.go`):
 - A call is bounded by `http.timeoutMs`, **5 seconds** unless the tool says otherwise and never more than 10. A timeout, a connection failure, a connection the host policy refuses (2.4.1), a redirect (3xx, never followed), a status of 400 or above, or a body that is not a JSON object is a tool failure: the model is told the operation could not be completed and, per the built-in hint, to offer a person if it fails again.
 - A path value that cannot be a path segment (empty, `.`, `..`) or any path or query value that is an object or a list is refused before a request is made, as `ok: "0"` naming the reference (`{args.id}`) and not the value, with no recovery hint: the model can call again with a proper value.
 - A `successWhen` that does not hold is a **refusal**, not a failure: the result is `ok: "0"` with the `errorFrom` message. No `result` field is mapped on a refusal.
-- Only the fields in `http.result` ever reach the model or the slots. A whole backend response is never handed over.
+- Only the fields in `http.result` and `http.modelOnly` ever reach the model, and only `http.result` reaches the slots. A whole backend response is never handed over.
+- Use `modelOnly` for what the model should read once and the flow should forget: a list of passages kept as a slot would stay for the rest of the call and could be rendered into a later instruction. The price is that no transition, template or `collect` can read a `modelOnly` name (`result.<name>` and `<tool>.<name>` are refused at load, saying it is handed to the model only); map a field in `result` as well, under another name, when a condition needs it. A `modelOnly` name may not be `ok`, `error` or `hint`, nor a key of `result`.
 - A tool is offered to the model only if some phase's allowlist, or `alwaysAllowedTools`, names it. A tool called outside its phase is answered with `ok: "0"` and the current phase's instruction, not an error.
 
 #### 2.4.1 Another backend, credentials, templates in the URL, and the host policy
@@ -188,7 +190,8 @@ Slots are the call's structured state. They live in this application, not in the
 
 | Slot | Value |
 | --- | --- |
-| `caller`, `did`, `entry`, `lang` | Seeded at the start of the call. |
+| `caller`, `did`, `entry`, `lang` | Seeded at the start of the call. `lang` is `en` or `zh`. |
+| `language` | The call's language in the form a service expects: `EN` or `ZH`, derived from `lang`. Reserved: no slot tool, `collect` or mapping can write it, and the model never chooses it. Send it as `"language": "{slots.language}"`. |
 | `node` | The current phase id. |
 | `result.<field>` | The mapped fields of the **last** tool result, including `result.ok` (`"1"` or `"0"`). Replaced wholesale on every tool result. |
 | `<tool>.<field>` | The same fields, kept per tool until that tool runs again. |
@@ -337,42 +340,102 @@ Guidance:
 
 Policies, tariffs and FAQs do not belong in `persona`, `rules` or an `instruction`. A long standing prompt costs instruction-following and is resent whenever the instructions are re-pinned, which is every phase change.
 
-Give the flow a search tool backed by a retrieval service that lives **outside this repository** (the same boundary as the speech gateway: the extension point is a service behind the flow's backend URL, never code in this tree). A retrieval service of its own, with its own key and a longer search, is a tool with `baseUrl`, a secret `Authorization` header and `timeoutMs` (2.4.1). Keep the persona and the instructions short, and let a phase's instruction say **when** to search:
+The knowledge base is a service that lives **outside this repository** (the same boundary as the speech gateway: the extension point is a service behind the flow's backend URL, never code in this tree). The reference service is [aicc-knowledge](https://github.com/rasonyang/aicc-knowledge); its contract is its `docs/openapi.json`. It does **retrieval only**: the realtime model writes the answer, so no second generation runs inside the tool call. It has two operations, each one an ordinary HTTP tool with a `baseUrl`, a secret `Authorization` header and a `timeoutMs` (2.4.1). A complete flow that uses both is the reference flow `knowledge_support` (see below).
+
+**The reference flow.** `docs/examples/flows/knowledge_support.json` (bilingual, three phases: `help`, `finish_transfer`, `farewell`) carries both tools below exactly as shown, plus the instruction pattern. It lives outside `internal/seed/flows` on purpose: the demo seed publishes every embedded flow and must not depend on aicc-knowledge running. Its scenarios are `docs/examples/scenarios/knowledge_support.json`, and `go test ./internal/flowsim` replays them against the mock backend, which answers `/v1/search` and `/v1/facts/plans/lookup` in the service's shapes (`internal/mockbackend/knowledge.go`; a search for `kb-down` answers 503 `INDEX_UNAVAILABLE`). In development, with aicc-knowledge on its default `127.0.0.1:18480` and `AICC_TOOL_SECRET_KB_API_KEY` set in `.env` (publishing a flow that references an unset secret is refused), publish it on two test numbers:
+
+```sh
+/tmp/aicc flowadd -file docs/examples/flows/knowledge_support.json -did 95077 -language en
+/tmp/aicc flowadd -file docs/examples/flows/knowledge_support.json -did 95078 -language zh
+```
+
+**Search the FAQ (`searchFaq`).** The model supplies only the question; the language comes from the call, never from the model.
 
 ```json
-{
-  "tools": {
-    "kb_search": {
-      "description": {
-        "en": "Search the plan and policy knowledge base. Call it for any question about prices, terms, fees or policy before answering; never answer such questions from memory.",
-        "zh": "检索套餐与政策知识库。凡涉及价格、条款、费用或政策的问题，先调用本工具再回答，不要凭记忆作答。"
-      },
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "query": { "type": "string", "description": "The caller's question, in a few words" }
-        },
-        "required": ["query"]
-      },
-      "http": {
-        "path": "/api/kb/search",
-        "body": { "query": "{args.query}", "lang": "{slots.lang}" },
-        "successWhen": { "path": "retCode", "equals": "000000" },
-        "errorFrom": "retMsg",
-        "result": { "answer": "data.answer", "found": "data.found" }
-      }
+"search_kb": {
+  "description": {
+    "en": "Search the FAQ and policy knowledge base. Call it for any question about prices, terms, fees or policy before answering.",
+    "zh": "检索常见问题与政策知识库。凡涉及价格、条款、费用或政策的问题，先调用本工具再回答。"
+  },
+  "parameters": {
+    "type": "object",
+    "properties": { "query": { "type": "string", "description": "The caller's question, in a few words" } },
+    "required": ["query"]
+  },
+  "http": {
+    "baseUrl": "http://127.0.0.1:18480",
+    "path": "/v1/search",
+    "headers": { "Authorization": "Bearer {secrets.KB_API_KEY}" },
+    "timeoutMs": 3000,
+    "body": { "query": "{args.query}", "language": "{slots.language}", "topK": 3, "timeoutMs": 2500 },
+    "errorFrom": "error.code",
+    "result": { "kbStatus": "status" },
+    "modelOnly": {
+      "status": "status",
+      "items": { "path": "items", "each": { "answer": "answer", "sourceRef": "sourceRef" } }
     }
   }
 }
 ```
 
-Guidance:
+When the deployment configures scope keys in the service, add `"scope": { "<key>": "<value>" }` to the body as a literal. `topK` is 1 to 3.
 
-- **Return a short, speakable `answer`**, not documents. Whatever the tool maps goes into the model's context for that turn; a page of policy text makes a call slow to answer and hard to steer. Condense in the retrieval service.
-- **Return `found` and say what to do when it is empty** in the phase instruction (offer a person or a message), so a miss is a branch and not an invention.
-- **Allow the tool in the phases where questions arise** and no wider. A search tool in a phase does not move the call: with no transition for it, the call stays put and the conversation goes on.
-- **Do not map large fields into slots on purpose.** Mapped fields are slots, and a slot named in an instruction is re-pinned into the standing instructions.
-- A neutral retrieval contract and ready templates for particular stores are a separate piece of work, not built: see 6.
+**Look up a fact (`lookupFact`).** One HTTP tool per fact table, which declares that table's key columns as typed parameters. A single `lookup_fact(table, key)` would leave the model guessing the column names.
+
+```json
+"lookup_plan": {
+  "description": {
+    "en": "Look up the price and terms of a plan from the plan table. Use it for any question about what a plan costs or includes.",
+    "zh": "查询套餐表中某个套餐的价格与条款。凡问到套餐多少钱、包含什么，都用本工具。"
+  },
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "plan": {
+        "type": "string",
+        "enum": ["Basic", "Plan 59", "Plan 59 Plus", "Plan 99", "Fiber 500", "Fiber 1000"],
+        "description": "Plan key. 基础套餐 = Basic; 59元套餐 = Plan 59; 59元Plus套餐 = Plan 59 Plus; 99元套餐 = Plan 99; 光纤500 or 500兆光纤 = Fiber 500; 光纤1000 or 千兆光纤 = Fiber 1000."
+      }
+    },
+    "required": ["plan"]
+  },
+  "http": {
+    "baseUrl": "http://127.0.0.1:18480",
+    "path": "/v1/facts/plans/lookup",
+    "headers": { "Authorization": "Bearer {secrets.KB_API_KEY}" },
+    "timeoutMs": 3000,
+    "body": { "key": { "plan": "{args.plan}" } },
+    "errorFrom": "error.code",
+    "modelOnly": { "status": "status", "row": "row", "validFrom": "validFrom", "validTo": "validTo" }
+  }
+}
+```
+
+- **Key values are an enum, maintained by hand.** A lookup matches exactly, but a caller says "基础套餐" while the table holds `Basic`. Declare each key parameter's valid values as an `enum` with zh and en descriptions, so the model can map what the caller said. When the table gains a row the enum does not list yet, the lookup answers `NOT_FOUND` and the bot handles it as an ordinary conversation; publish does not check the enum against the service.
+- **`at` is never sent.** Every lookup uses the service's today. A question about a future date would need the model to work out a date, which it cannot do reliably; the instruction should say the bot can quote today's price only.
+- **A fact table holds facts shared by every caller.** A question about the caller's own data ("my plan", "my bill") goes to a business API tool or to a person, never to a fact lookup.
+
+**Credentials and hosts.** The key is `Authorization: Bearer {secrets.KB_API_KEY}`, read from `AICC_TOOL_SECRET_KB_API_KEY` (2.4.1). A service on the LAN or on the same host needs no entry in `AICC_TOOL_ALLOWED_HOSTS`; a public one does.
+
+**What the model gets.** The results go through `modelOnly`, so the passages reach the model for that turn and are not kept in any slot for the rest of the call. Search hands the model `status` (`HIT` or `NO_MATCH`) and each item's `answer` and `sourceRef`. `score` is withheld on purpose: the service decides `NO_MATCH` against a per-index threshold, so its `status` already applies it, and a flow must not apply a threshold of its own. A fact lookup hands over `status` (`FOUND` or `NOT_FOUND`), `row`, `validFrom` and `validTo`. The only slot written is what `result` maps (`kbStatus` above, readable by a condition as `result.kbStatus`).
+
+**Two budgets, set together.** The body's `timeoutMs` is the service's own bound on the search; the tool's `http.timeoutMs` is the engine's. Set the body's below the tool's (2500 and 3000 above), so a slow upstream is answered by the service as 504 `UPSTREAM_TIMEOUT` and not by the engine dropping the connection. The engine does not check the pair (the body is opaque to it). A search slower than 1 second gets the wait line (2.4.2); there is no retrieval-specific filler.
+
+**Failures.** A 4xx or 5xx is a tool failure the model reads as `ok: "0"`, and the service's error code is in the log, so `INDEX_UNAVAILABLE`, `UPSTREAM_UNAVAILABLE`, `UPSTREAM_TIMEOUT`, `UNAUTHORIZED` and `UNKNOWN_SCOPE_KEY` can be told apart: the log line `http tool answered with an error status` carries `status` and `backendError`.
+
+**The instruction pattern.** Say in the phase instruction (or `rules`):
+
+- On `HIT`, answer only from the `answer` texts, and never state a price, date or limit that is not in them.
+- On `NO_MATCH` or a failure, say so honestly and offer a transfer or a message.
+- A question that needs the caller's own account goes to a person.
+- A fact comes from the lookup tool, never from FAQ text.
+- A question about the caller's own data ("my plan", "my bill") goes to a business API tool or to a person, never to a fact lookup.
+
+Further guidance:
+
+- **Allow the tools in the phases where questions arise** and no wider. A search tool in a phase does not move the call: with no transition for it, the call stays put and the conversation goes on.
+- **Do not map passages into `result` on purpose.** Mapped fields are slots, and a slot named in an instruction is re-pinned into the standing instructions; that is what `modelOnly` avoids.
+- Other backends (a vendor-neutral search contract, per-vendor templates, a signing proxy) are not built: see 6.
 
 ### 4.3 Long operations
 
@@ -497,7 +560,7 @@ Say these to the business rather than working around them in the prompt.
 | --- | --- |
 | **Facts the caller states.** "I'm calling about order 1234", "my budget is 200". | Supported: a slot tool records the fact, see 2.8. Tool arguments are also kept as `<tool>.args.<k>`, and an outbound call's business data as `userData.<k>` (2.6). A list of values derived from a tool's calls ("all the orders looked up") is a `collect` list on that tool (2.6.1). Still absent: a list of values the caller merely said (a slot tool keeps only the latest), and a start-of-call lookup (issue [#84](https://github.com/rasonyang/ai-native-callcenter/issues/84)). Issue [#13](https://github.com/rasonyang/ai-native-callcenter/issues/13). |
 | **Collecting digits, a keypad menu, masked secrets.** | Not supported. Keypad input is not a flow event. Today each key reaches the model as a text cue (`(The caller pressed 5 on their keypad.)`), interrupts the bot, and asks for a reply; the model assembles the digits and follows your prompt. That is not deterministic, and digits pass through the model, the transcript and the logs. Do not collect PINs or card numbers this way. Issue [#91](https://github.com/rasonyang/ai-native-callcenter/issues/91). |
-| **Knowledge retrieval as a platform feature.** | Not provided. A knowledge tool is an ordinary HTTP tool (4.2) against a service you run. A neutral contract and store templates are planned in issue [#92](https://github.com/rasonyang/ai-native-callcenter/issues/92). |
+| **Knowledge retrieval as a platform feature.** | Supported against aicc-knowledge only: FAQ search and fact lookup are ordinary HTTP tools (4.2), issue [#92](https://github.com/rasonyang/ai-native-callcenter/issues/92). Other backends, a vendor-neutral contract and store templates are not built. |
 | **Testing a flow with a model in the loop.** | `aicc flowsim` replays scripted scenarios deterministically (8). Tier 2 (a text model as the bot and another as the caller) is opt-in and spends money (8). |
 | **Expressions, derived slots, arithmetic.** | By design the DSL has none; use a decision field (4.1). |
 | **Asynchronous tools.** | A tool call is synchronous, bounded by its `timeoutMs` (10 seconds at most); there is no way to be notified when a background job finishes. Use submit and check, or a callback (4.3). |
@@ -644,7 +707,7 @@ A ticket's first `plan_status` is `PROCESSING` with an `eta`; every later one is
   }]}
   ```
 
-  What to cover: the main path, each failure (a tool answering `found: 0` or `ok: 0`, a refused transfer, an unknown queue), silence (`noInput` three times), the turn limits (`repeat` a tool past `maxTurns`; `exchange` past `maxTurnsWithoutTool`), and a tool called in a phase that does not allow it (`isRefused`). The run prints each scenario's phase path and ending, then the phases and phase-local transitions no scenario reached. Seed scenarios live in `internal/seed/scenarios/<flow>.json` (outside the embedded `flows/` directory), and `go test` requires a scenario file per seed flow that reaches every phase.
+  What to cover: the main path, each failure (a tool answering `found: 0` or `ok: 0`, a refused transfer, an unknown queue), silence (`noInput` three times), the turn limits (`repeat` a tool past `maxTurns`; `exchange` past `maxTurnsWithoutTool`), and a tool called in a phase that does not allow it (`isRefused`). The run prints each scenario's phase path and ending, then the phases and phase-local transitions no scenario reached. The reference flow's scenarios (`docs/examples/scenarios/knowledge_support.json`) cover a covered and an uncovered question, a fact found and not found, a plan outside the enum, a question about the caller's own account and a backend that is down, each in en and zh. Seed scenarios live in `internal/seed/scenarios/<flow>.json` (outside the embedded `flows/` directory), and `go test` requires a scenario file per seed flow that reaches every phase.
 
   The simulator checks the flow's logic: transitions, allowlists, slot rendering, built-in results, the guards. It is deterministic, so it cannot tell you what a model would say or whether it would call the tool you scripted; it does not exercise audio, barge-in, playback timing or provider quirks either. Passing it does not verify a call-path change.
 

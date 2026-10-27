@@ -1,0 +1,191 @@
+{
+  "id": "knowledge_support",
+  "specVersion": "v2",
+  "entry": "knowledge_support",
+  "initialNode": "help",
+  "global": {
+    "persona": {
+      "en": "You are the voice assistant of the NovaNet Broadband hotline. You answer service and plan questions from the knowledge base and connect callers to the support team.",
+      "zh": "你是星联宽带客服热线的语音助手，依据知识库解答业务和套餐问题，并在需要时转接人工客服。"
+    },
+    "rules": {
+      "en": [
+        "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, with no lists or written formatting.",
+        "Whenever the caller asks for a person or presses 0, call transfer_to_agent immediately; announce the transfer only after the tool returns.",
+        "Never state a price, fee, date or limit that did not come from a tool result.",
+        "The hint field in tool results is your flow guidance; follow it."
+      ],
+      "zh": [
+        "这是电话语音对话：每次只说一两句短句，口语化，不用任何列表或书面格式。",
+        "用户要求人工或按 0 时，立即调用 transfer_to_agent，工具返回后再播报转接话术。",
+        "凡价格、费用、日期、限额，必须来自工具返回，严禁编造。",
+        "工具返回里的 hint 字段是流程提示，照做。"
+      ]
+    },
+    "fallbackTarget": "finish_transfer",
+    "closingTarget": "farewell",
+    "maxTurns": 30,
+    "maxTurnsWithoutTool": 10,
+    "alwaysAllowedTools": [
+      "transfer_to_agent",
+      "take_message",
+      "hangup"
+    ],
+    "transitions": [
+      {
+        "on": "TOOL_RESULT",
+        "tool": "transfer_to_agent",
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
+        "target": "finish_transfer"
+      },
+      {
+        "on": "TOOL_RESULT",
+        "tool": "hangup",
+        "condition": {
+          "slot": "result.ok",
+          "op": "EQ",
+          "value": "1"
+        },
+        "target": "farewell"
+      }
+    ]
+  },
+  "nodes": {
+    "help": {
+      "announce": {
+        "en": "Thank you for calling NovaNet Broadband. What can I help you with today?",
+        "zh": "感谢致电星联宽带，请问有什么可以帮您？"
+      },
+      "instruction": {
+        "en": "Answer the caller's questions about NovaNet services from the tools, never from memory. For a question about how a service works (installation, moving, payment, policy), call search_kb with the question in a few words. On status HIT, answer only from the answer texts and never state a price, date or limit that is not in them. On NO_MATCH, or if the tool fails, say honestly that you do not have that information and offer to transfer the caller to a person or to take a message. For a plan's price, fee, data, speed or contract term, call lookup_plan, never answer it from FAQ text. It gives today's figures only: for a future-dated question (\"next month\") quote today's figure or say that is all you can give; never invent a date. A plan that lookup_plan cannot take (for example the Senior Care plan, or any plan not in its list) is one you have no figure for: say so and offer a person or a message; never guess a price. A question about the caller's own account (\"my plan\", \"my bill\", why a charge changed) needs a person: call transfer_to_agent with queue \"support-en\", never lookup_plan. If the transfer is refused, explain why and offer to take a message. When the caller wants to finish, call hangup immediately and say goodbye after it returns.",
+        "zh": "回答用户关于 NovaNet 业务的问题，一律依据工具，不凭记忆。问到业务如何办理（安装、移机、缴费、政策）时，用几个词概括问题，调用 search_kb。返回 HIT 时只依据 answer 文本作答，凡 answer 里没有的价格、日期、限额一律不说。返回 NO_MATCH 或工具失败时，如实说明没有这方面的信息，并主动提出转人工或留言。问到某个套餐的价格、费用、流量、速率或合约期，调用 lookup_plan，不要用常见问题文本回答。它只给今天的数据：问到将来的日期（“下个月”）时，只报今天的数据或说明只能提供这些，不要编造日期。lookup_plan 查不了的套餐（例如敬老套餐，或不在其列表里的套餐）你没有数据：如实说明，并提出转人工或留言，不要猜价格。涉及用户自己账户的问题（“我的套餐”“我的账单”“这个月为什么多收了”）需要人工：调用 transfer_to_agent，queue 用“support-zh”，不要调用 lookup_plan。转接被拒绝时，说明原因并主动提出留言。用户表示要结束时，立即调用 hangup，等工具返回后再道别。"
+      },
+      "tools": [
+        "search_kb",
+        "lookup_plan"
+      ]
+    },
+    "finish_transfer": {
+      "announce": {
+        "en": "Certainly — I am putting you through to the support team now. Please stay on the line.",
+        "zh": "好的，正在为您转接人工客服，请不要挂机，稍等片刻。"
+      },
+      "instruction": {
+        "en": "The caller is connected right after this line; ask no further questions and do not say goodbye.",
+        "zh": "说完这句就会接通，不要再问问题，也不要说再见。"
+      },
+      "tools": [],
+      "isTerminal": true
+    },
+    "farewell": {
+      "announce": {
+        "en": "Thank you for calling NovaNet Broadband. Goodbye.",
+        "zh": "感谢致电星联宽带，再见。"
+      },
+      "instruction": {
+        "en": "The line hangs up once this has been said; ask no further questions.",
+        "zh": "这句话说完线路会自动挂断，不要再问问题。"
+      },
+      "tools": [],
+      "isTerminal": true
+    }
+  },
+  "tools": {
+    "search_kb": {
+      "description": {
+        "en": "Search the FAQ and policy knowledge base. Call it for any question about how a service works or about policy before answering. status HIT means the answer texts below answer it; NO_MATCH means the knowledge base has nothing.",
+        "zh": "检索常见问题与政策知识库。凡问到业务如何办理或政策，先调用本工具再回答。status 为 HIT 时依据返回的 answer 作答；NO_MATCH 表示知识库没有答案。"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The caller's question, in a few words / 用户的问题，几个词即可"
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "http": {
+        "baseUrl": "http://127.0.0.1:18480",
+        "path": "/v1/search",
+        "headers": {
+          "Authorization": "Bearer {secrets.KB_API_KEY}"
+        },
+        "timeoutMs": 3000,
+        "body": {
+          "query": "{args.query}",
+          "language": "{slots.language}",
+          "topK": 3,
+          "timeoutMs": 2500
+        },
+        "errorFrom": "error.code",
+        "result": {
+          "kbStatus": "status"
+        },
+        "modelOnly": {
+          "status": "status",
+          "items": {
+            "path": "items",
+            "each": {
+              "answer": "answer",
+              "sourceRef": "sourceRef"
+            }
+          }
+        }
+      }
+    },
+    "lookup_plan": {
+      "description": {
+        "en": "Look up the price and terms of one plan in the plan table: monthly fee, data, voice minutes, speed, contract months, early-termination fee. Use it for any question about what a plan costs or includes. It gives today's figures only. It cannot look up a plan that is not in its list.",
+        "zh": "查询套餐表中某个套餐的月费、流量、通话分钟、速率、合约期和提前解约费。凡问到套餐多少钱、包含什么，都用本工具。只提供今天的数据，列表之外的套餐查不了。"
+      },
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "enum": [
+              "Basic",
+              "Plan 59",
+              "Plan 59 Plus",
+              "Plan 99",
+              "Fiber 500",
+              "Fiber 1000"
+            ],
+            "description": "Plan key. 基础套餐 = Basic; 59元套餐 = Plan 59; 59元Plus套餐 = Plan 59 Plus; 99元套餐 = Plan 99; 光纤500 / 500兆光纤 = Fiber 500; 光纤1000 / 千兆光纤 = Fiber 1000. 基础套餐 → Basic，59元套餐 → Plan 59，59元Plus套餐 → Plan 59 Plus，99元套餐 → Plan 99，光纤500、500兆光纤 → Fiber 500，光纤1000、千兆光纤 → Fiber 1000。"
+          }
+        },
+        "required": [
+          "plan"
+        ]
+      },
+      "http": {
+        "baseUrl": "http://127.0.0.1:18480",
+        "path": "/v1/facts/plans/lookup",
+        "headers": {
+          "Authorization": "Bearer {secrets.KB_API_KEY}"
+        },
+        "timeoutMs": 3000,
+        "body": {
+          "key": {
+            "plan": "{args.plan}"
+          }
+        },
+        "errorFrom": "error.code",
+        "modelOnly": {
+          "status": "status",
+          "row": "row",
+          "validFrom": "validFrom",
+          "validTo": "validTo"
+        }
+      }
+    }
+  }
+}

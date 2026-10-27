@@ -1,0 +1,614 @@
+{
+ "scenarios": [
+  {
+   "name": "covered question (en)",
+   "description": "HIT: the bot answers from the items; only status and the mapped kbStatus exist as data, no slot holds an answer.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "how long does installation take"
+     },
+     "expect": {
+      "phase": "help",
+      "slots": {
+       "search_kb.kbStatus": "HIT"
+      },
+      "result": {
+       "status": "HIT"
+      }
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "search_kb",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "not covered (en)",
+   "description": "NO_MATCH: the bot says so and offers a person; the caller takes the offer.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "do you sell mobile phones"
+     },
+     "expect": {
+      "phase": "help",
+      "slots": {
+       "search_kb.kbStatus": "NO_MATCH"
+      },
+      "result": {
+       "status": "NO_MATCH"
+      }
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-en",
+      "reason": "CALLER_REQUEST",
+      "summary": "Asked about phones, not in the knowledge base."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "search_kb",
+     "transfer_to_agent"
+    ]
+   }
+  },
+  {
+   "name": "fact found (en)",
+   "description": "FOUND: the price comes from lookup_plan; the row reaches the model.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "call": "lookup_plan",
+     "args": {
+      "plan": "Plan 59 Plus"
+     },
+     "expect": {
+      "phase": "help",
+      "result": {
+       "status": "FOUND"
+      }
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "lookup_plan",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "fact not found (en)",
+   "description": "NOT_FOUND for a key the table lacks (the simulator does not enforce the enum, as a model that strays from it would); the bot offers a person.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "call": "lookup_plan",
+     "args": {
+      "plan": "Plan 79"
+     },
+     "expect": {
+      "phase": "help",
+      "result": {
+       "status": "NOT_FOUND"
+      }
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-en",
+      "reason": "CALLER_REQUEST",
+      "summary": "Plan 79 price, not in the plan table."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "lookup_plan",
+     "transfer_to_agent"
+    ]
+   }
+  },
+  {
+   "name": "plan the enum does not list (en)",
+   "description": "Senior Care is in the table but not in the enum: no lookup runs with a guessed key; the bot has no figure, offers a message, and takes it.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "exchange": "What does the Senior Care plan cost?"
+    },
+    {
+     "call": "take_message",
+     "args": {
+      "message": "Wants the Senior Care plan price.",
+      "callbackNumber": "8005550110"
+     },
+     "expect": {
+      "phase": "help"
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "take_message",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "caller's own account (en)",
+   "description": "A question about the caller's own bill goes to a person; no search, no lookup_plan.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "exchange": "Why is my bill higher this month?"
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-en",
+      "reason": "ACCOUNT_QUESTION",
+      "summary": "Bill higher this month; needs account access."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "transfer_to_agent"
+    ],
+    "transfer": {
+     "queue": "support-en"
+    }
+   }
+  },
+  {
+   "name": "backend down (en)",
+   "description": "search 503 INDEX_UNAVAILABLE (the mock's kb-down query): a failed tool, the bot apologises and offers; the call goes on to a transfer.",
+   "lang": "en",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550110",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "kb-down installation"
+     },
+     "expect": {
+      "isOk": false,
+      "phase": "help"
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-en",
+      "reason": "CALLER_REQUEST",
+      "summary": "Knowledge base unavailable."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "search_kb",
+     "transfer_to_agent"
+    ]
+   }
+  },
+  {
+   "name": "covered question (zh)",
+   "description": "HIT: the bot answers from the items; only status and the mapped kbStatus exist as data, no slot holds an answer.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "宽带安装要多久"
+     },
+     "expect": {
+      "phase": "help",
+      "slots": {
+       "search_kb.kbStatus": "HIT"
+      },
+      "result": {
+       "status": "HIT"
+      }
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "search_kb",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "not covered (zh)",
+   "description": "NO_MATCH: the bot says so and offers a person; the caller takes the offer.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "你们卖手机吗"
+     },
+     "expect": {
+      "phase": "help",
+      "slots": {
+       "search_kb.kbStatus": "NO_MATCH"
+      },
+      "result": {
+       "status": "NO_MATCH"
+      }
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-zh",
+      "reason": "CALLER_REQUEST",
+      "summary": "Asked about phones, not in the knowledge base."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "search_kb",
+     "transfer_to_agent"
+    ]
+   }
+  },
+  {
+   "name": "fact found (zh)",
+   "description": "FOUND: the price comes from lookup_plan; the row reaches the model.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "call": "lookup_plan",
+     "args": {
+      "plan": "Plan 59 Plus"
+     },
+     "expect": {
+      "phase": "help",
+      "result": {
+       "status": "FOUND"
+      }
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "lookup_plan",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "fact not found (zh)",
+   "description": "NOT_FOUND for a key the table lacks (the simulator does not enforce the enum, as a model that strays from it would); the bot offers a person.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "call": "lookup_plan",
+     "args": {
+      "plan": "Plan 79"
+     },
+     "expect": {
+      "phase": "help",
+      "result": {
+       "status": "NOT_FOUND"
+      }
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-zh",
+      "reason": "CALLER_REQUEST",
+      "summary": "Plan 79 price, not in the plan table."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "lookup_plan",
+     "transfer_to_agent"
+    ]
+   }
+  },
+  {
+   "name": "plan the enum does not list (zh)",
+   "description": "Senior Care is in the table but not in the enum: no lookup runs with a guessed key; the bot has no figure, offers a message, and takes it.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "exchange": "敬老套餐多少钱？"
+    },
+    {
+     "call": "take_message",
+     "args": {
+      "message": "想问敬老套餐的价格。",
+      "callbackNumber": "8005550110"
+     },
+     "expect": {
+      "phase": "help"
+     }
+    },
+    {
+     "call": "hangup",
+     "expect": {
+      "phase": "farewell"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "farewell"
+    ],
+    "ending": "hangup",
+    "toolsRun": [
+     "take_message",
+     "hangup"
+    ]
+   }
+  },
+  {
+   "name": "caller's own account (zh)",
+   "description": "A question about the caller's own bill goes to a person; no search, no lookup_plan.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "exchange": "我这个月账单怎么多了？"
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-zh",
+      "reason": "ACCOUNT_QUESTION",
+      "summary": "Bill higher this month; needs account access."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "transfer_to_agent"
+    ],
+    "transfer": {
+     "queue": "support-zh"
+    }
+   }
+  },
+  {
+   "name": "backend down (zh)",
+   "description": "search 503 INDEX_UNAVAILABLE (the mock's kb-down query): a failed tool, the bot apologises and offers; the call goes on to a transfer.",
+   "lang": "zh",
+   "queues": [
+    "support-en",
+    "support-zh"
+   ],
+   "caller": "8005550111",
+   "steps": [
+    {
+     "call": "search_kb",
+     "args": {
+      "query": "kb-down installation"
+     },
+     "expect": {
+      "isOk": false,
+      "phase": "help"
+     }
+    },
+    {
+     "call": "transfer_to_agent",
+     "args": {
+      "queue": "support-zh",
+      "reason": "CALLER_REQUEST",
+      "summary": "Knowledge base unavailable."
+     },
+     "expect": {
+      "phase": "finish_transfer"
+     }
+    }
+   ],
+   "expect": {
+    "path": [
+     "help",
+     "finish_transfer"
+    ],
+    "ending": "transfer_to_agent",
+    "toolsRun": [
+     "search_kb",
+     "transfer_to_agent"
+    ]
+   }
+  }
+ ]
+}

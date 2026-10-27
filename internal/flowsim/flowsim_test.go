@@ -17,15 +17,30 @@ import (
 const (
 	seedFlows     = "../seed/flows"
 	seedScenarios = "../seed/scenarios"
+	// Reference flows that are not seeded, because they need a service the
+	// demo does not run (docs/examples/flows/knowledge_support.json needs
+	// aicc-knowledge). The simulator serves that service from the mock.
+	exampleFlows     = "../../docs/examples/flows"
+	exampleScenarios = "../../docs/examples/scenarios"
 )
 
 // Every seed flow has scenarios, every scenario passes on the real engine and
 // the real HTTP tools, and together they reach every phase of the flow. A new
 // phase therefore arrives with a scenario that walks it.
 func TestSeedFlowsPassTheirScenarios(t *testing.T) {
-	files, err := filepath.Glob(filepath.Join(seedFlows, "*.json"))
+	passTheirScenarios(t, seedFlows, seedScenarios)
+}
+
+// The same for the reference flows under docs/examples.
+func TestExampleFlowsPassTheirScenarios(t *testing.T) {
+	passTheirScenarios(t, exampleFlows, exampleScenarios)
+}
+
+func passTheirScenarios(t *testing.T, flowsDir, scenariosDir string) {
+	t.Helper()
+	files, err := filepath.Glob(filepath.Join(flowsDir, "*.json"))
 	if err != nil || len(files) == 0 {
-		t.Fatalf("no seed flows found: %v", err)
+		t.Fatalf("no flows found in %s: %v", flowsDir, err)
 	}
 	backend := MockBackends()
 
@@ -40,7 +55,7 @@ func TestSeedFlowsPassTheirScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			scenarios, err := LoadScenarios(filepath.Join(seedScenarios, stem+".json"))
+			scenarios, err := LoadScenarios(filepath.Join(scenariosDir, stem+".json"))
 			if err != nil {
 				t.Fatalf("every seed flow needs a scenario file: %v", err)
 			}
