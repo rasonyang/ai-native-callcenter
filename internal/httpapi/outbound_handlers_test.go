@@ -5,6 +5,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -101,37 +103,57 @@ func TestUserDataIsBoundedWhereItArrives(t *testing.T) {
 		}
 	})
 
-	t.Run("the last accepted value size and the first refused", func(t *testing.T) {
-		if w, _ := placeCall(t, callWithValue(userDataMaxValueBytes)); w.Code != http.StatusCreated {
-			t.Errorf("%d bytes was refused: %d %s", userDataMaxValueBytes, w.Code, w.Body)
-		}
-		w, _ := placeCall(t, callWithValue(userDataMaxValueBytes+1))
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("%d bytes returned %d", userDataMaxValueBytes+1, w.Code)
-		}
-		if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
-			t.Errorf("code = %q, want USER_DATA_TOO_LARGE", code)
+	// Bytes, not characters, which is what is stored and shipped. The material
+	// this deployment tests with is Chinese, where one character is three
+	// bytes, and a limit that counted characters would let three times as much
+	// through than it says. So the boundary is tried in every width.
+	t.Run("the last accepted value size and the first refused, in every width", func(t *testing.T) {
+		for _, c := range userDataValuesAtTheBound {
+			w, dialer := placeCall(t, callWithValue(c.value))
+			if !c.isAccepted {
+				if w.Code != http.StatusBadRequest {
+					t.Errorf("%s (%d bytes) returned %d, want 400", c.name, len(c.value), w.Code)
+					continue
+				}
+				if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
+					t.Errorf("%s: code = %q, want USER_DATA_TOO_LARGE", c.name, code)
+				}
+				continue
+			}
+			if w.Code != http.StatusCreated {
+				t.Errorf("%s (%d bytes) was refused: %d %s", c.name, len(c.value), w.Code, w.Body)
+				continue
+			}
+			if dialer.got.UserData["note"] != c.value {
+				t.Errorf("%s reached the dialer as %d bytes, want it whole",
+					c.name, len(dialer.got.UserData["note"]))
+			}
 		}
 	})
+}
 
-	// Bytes, not characters. The material this deployment tests with is
-	// Chinese, where one character is three bytes, and a limit that counted
-	// characters would let three times as much through than it says.
-	t.Run("the limit counts bytes, which is what is stored and shipped", func(t *testing.T) {
-		value := strings.Repeat("字", userDataMaxValueBytes/3+1) // > 1024 bytes, ~342 characters
-		body, err := json.Marshal(map[string]any{
-			"kind": "AI_OUTBOUND", "to": "18600000000",
-			"userData": map[string]string{"note": value},
-		})
-		if err != nil {
-			t.Fatalf("encode: %v", err)
-		}
-		w, _ := placeCall(t, string(body))
-		if w.Code != http.StatusBadRequest {
-			t.Errorf("%d characters (%d bytes) returned %d — the limit is counting "+
-				"characters, and says bytes", len([]rune(value)), len(value), w.Code)
-		}
-	})
+// userDataValuesAtTheBound are the values on each side of the byte bound on
+// a business-data value, in each width a UTF-8 character comes in: one byte
+// (an order number), three (Chinese) and four (an emoji). In characters the
+// bound falls somewhere different in each, which is why a test written only in
+// ASCII cannot tell a byte limit from a character limit.
+//
+// Each accepted value is exactly userDataMaxValueBytes long and each refused
+// one is a byte longer: with the bound at 1024, the Chinese one is 341
+// characters and an ASCII byte, and the emoji takes bytes 1021 to 1024.
+var userDataValuesAtTheBound = []struct {
+	name       string
+	value      string
+	isAccepted bool
+}{
+	{"ASCII up to the bound", strings.Repeat("x", userDataMaxValueBytes), true},
+	{"ASCII one byte past it", strings.Repeat("x", userDataMaxValueBytes+1), false},
+	{"Chinese up to the bound",
+		strings.Repeat("字", userDataMaxValueBytes/3) + strings.Repeat("x", userDataMaxValueBytes%3), true},
+	{"Chinese one byte past it",
+		strings.Repeat("字", userDataMaxValueBytes/3) + strings.Repeat("x", userDataMaxValueBytes%3+1), false},
+	{"an emoji ending on the last byte", strings.Repeat("x", userDataMaxValueBytes-4) + "📞", true},
+	{"an emoji ending one byte past it", strings.Repeat("x", userDataMaxValueBytes-3) + "📞", false},
 }
 
 func callWithKeys(n int) string {
@@ -145,10 +167,10 @@ func callWithKeys(n int) string {
 	return string(body)
 }
 
-func callWithValue(bytes int) string {
+func callWithValue(value string) string {
 	body, _ := json.Marshal(map[string]any{
 		"kind": "AI_OUTBOUND", "to": "18600000000",
-		"userData": map[string]string{"note": strings.Repeat("x", bytes)},
+		"userData": map[string]string{"note": value},
 	})
 	return string(body)
 }
@@ -184,19 +206,27 @@ func TestClickToDialCarriesTheSameBusinessData(t *testing.T) {
 		t.Errorf("orderId = %q", got)
 	}
 
-	w, _ = agentDial(t, agentSubject(),
-		`{"kind":"AGENT_OUTBOUND","to":"18688886669","userData":`+oversizedValue()+`}`)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("an oversized value returned %d, want 400", w.Code)
+	for _, c := range userDataValuesAtTheBound {
+		body, _ := json.Marshal(map[string]any{
+			"kind": "AGENT_OUTBOUND", "to": "18688886669",
+			"userData": map[string]string{"note": c.value},
+		})
+		w, dialer := agentDial(t, agentSubject(), string(body))
+		if c.isAccepted {
+			if w.Code != http.StatusCreated || dialer.got.UserData["note"] != c.value {
+				t.Errorf("%s (%d bytes): http = %d, want 201 with the value whole: %s",
+					c.name, len(c.value), w.Code, w.Body)
+			}
+			continue
+		}
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("%s (%d bytes) returned %d, want 400", c.name, len(c.value), w.Code)
+			continue
+		}
+		if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
+			t.Errorf("%s: code = %q, want USER_DATA_TOO_LARGE", c.name, code)
+		}
 	}
-	if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
-		t.Errorf("code = %q, want USER_DATA_TOO_LARGE", code)
-	}
-}
-
-func oversizedValue() string {
-	body, _ := json.Marshal(map[string]string{"note": strings.Repeat("x", userDataMaxValueBytes+1)})
-	return string(body)
 }
 
 type recordingDialer struct {
@@ -469,13 +499,22 @@ func (dialerPresence) AgentAtExtension(extension string) (uuid.UUID, bool) {
 // The bounds are written down twice — once in the contract, once as the Go
 // constants the merge enforces — and nothing but this joins them.
 //
-// The contract states them per request schema (`maxProperties` and the value
-// `maxLength`); telephony.MergeUserData is where they are actually applied, to
-// every source of business data and not only to these two endpoints. Change
-// one and the other goes quietly out of step: a client told it may send 64
-// keys would have half of them dropped without being refused.
+// The contract states them per request schema: the key bound as
+// `maxProperties`, the value bound in the description, because it is in bytes
+// and JSON Schema's `maxLength` counts characters (#371).
+// telephony.MergeUserData is where they are actually applied, to every source
+// of business data and not only to these two endpoints. Change one and the
+// other goes quietly out of step: a client told it may send 64 keys would have
+// half of them dropped without being refused.
 func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 	t.Parallel()
+	for _, c := range userDataValuesAtTheBound {
+		if fits := len(c.value) <= telephony.UserDataMaxValueBytes; fits != c.isAccepted {
+			t.Fatalf("fixture %q is %d bytes against a bound of %d, but isAccepted = %v",
+				c.name, len(c.value), telephony.UserDataMaxValueBytes, c.isAccepted)
+		}
+	}
+
 	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.json"))
 	if err != nil {
 		t.Fatalf("read the contract: %v", err)
@@ -518,12 +557,35 @@ func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 		} else if keys != telephony.UserDataMaxKeys {
 			t.Errorf("%s allows %d keys, the merge allows %d", name, keys, telephony.UserDataMaxKeys)
 		}
-		bytes, ok := number(dig(userData, "additionalProperties", "maxLength"))
+
+		// No JSON Schema keyword counts bytes, so the value schema cannot
+		// state the bound exactly; what it must do is agree with it on both
+		// sides. First, it accepts every value the server accepts, or a client
+		// that validates against it refuses data the platform would take.
+		value, ok := dig(userData, "additionalProperties").(map[string]any)
 		if !ok {
-			t.Errorf("%s states no value maxLength", name)
-		} else if bytes != telephony.UserDataMaxValueBytes {
-			t.Errorf("%s allows %d-byte values, the merge allows %d",
-				name, bytes, telephony.UserDataMaxValueBytes)
+			t.Fatalf("%s has no value schema", name)
+		}
+		for _, c := range userDataValuesAtTheBound {
+			if c.isAccepted && !valueSchemaAdmits(t, value, c.value) {
+				t.Errorf("%s refuses %s (%d bytes, %d characters), which the server accepts",
+					name, c.name, len(c.value), utf8.RuneCountInString(c.value))
+			}
+		}
+		// Second, it never admits a value the server refuses. A character is
+		// up to four bytes, so a maxLength is safe only at a quarter of the
+		// byte bound, and that would refuse most of what the server accepts.
+		// The two checks together leave no maxLength as the only answer.
+		if chars, ok := number(value["maxLength"]); ok && 4*chars > telephony.UserDataMaxValueBytes {
+			t.Errorf("%s gives values maxLength %d, which counts characters: %d four-byte "+
+				"characters are %d bytes, and the server refuses a value over %d",
+				name, chars, chars, 4*chars, telephony.UserDataMaxValueBytes)
+		}
+		// With no keyword to carry it, the bound is the description's to say.
+		want := fmt.Sprintf("%d bytes of UTF-8", telephony.UserDataMaxValueBytes)
+		if desc, _ := dig(userData, "description").(string); !strings.Contains(desc, want) {
+			t.Errorf("%s's description does not say %q, and nothing else in the contract states the value bound",
+				name, want)
 		}
 	}
 
@@ -538,6 +600,37 @@ func TestTheUserDataBoundsAreTheOnesTheContractStates(t *testing.T) {
 			t.Errorf("%s.userData is %v, want a $ref to %s", ref.schema, got, ref.want)
 		}
 	}
+}
+
+// valueSchemaAdmits evaluates a value schema against a string the way a JSON
+// Schema validator would, for the keywords such a schema uses: maxLength and
+// minLength count characters (code points, as RFC 8259 defines them), never
+// bytes. A keyword it does not know fails the test rather than being skipped,
+// because a skipped keyword is a verdict guessed.
+func valueSchemaAdmits(t *testing.T, schema map[string]any, v string) bool {
+	t.Helper()
+	chars := float64(utf8.RuneCountInString(v))
+	admits := true
+	for keyword, arg := range schema {
+		switch keyword {
+		case "description":
+		case "type":
+			types, ok := arg.([]any)
+			if !ok {
+				types = []any{arg}
+			}
+			admits = admits && slices.Contains(types, any("string"))
+		case "maxLength":
+			n, ok := arg.(float64)
+			admits = admits && ok && chars <= n
+		case "minLength":
+			n, ok := arg.(float64)
+			admits = admits && ok && chars >= n
+		default:
+			t.Fatalf("the value schema uses %q, which this test cannot evaluate; teach it the keyword", keyword)
+		}
+	}
+	return admits
 }
 
 func (dialerDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {

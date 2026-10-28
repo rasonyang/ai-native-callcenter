@@ -2096,7 +2096,7 @@ type CreateCallRequest struct {
 	// To The number to dial: 3 to 20 digits, optionally with one leading "+" (canonical E.164, for example +8613800138000). A national number is accepted too. The number is dialled and recorded in the call ledger exactly as sent. Spaces, dashes, brackets and a second "+" are refused.
 	To string `json:"to"`
 
-	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. The value limit counts bytes, not characters: 1024 ASCII characters fit, and so do 341 Chinese characters at three bytes each, but not 342. JSON Schema's maxLength counts characters and cannot state a limit in bytes, so the value schema carries none and the server applies the limit. Omitted and {} mean the same thing: no business data. It never reaches the switch.
 	UserData *UserData `json:"userData,omitempty"`
 }
 
@@ -2554,7 +2554,7 @@ type PasswordReset struct {
 
 // PatchUserDataRequest defines model for PatchUserDataRequest.
 type PatchUserDataRequest struct {
-	// UserData An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
+	// UserData An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The bounds are UserData's. A patch of more than 32 keys, or with a value over 1024 bytes of UTF-8 (bytes, not characters, which is why the value schema carries no maxLength), is refused with 400 USER_DATA_TOO_LARGE. The bounds apply to the result too, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
 	UserData UserDataPatch `json:"userData"`
 }
 
@@ -3046,10 +3046,10 @@ type UserCreate struct {
 	Username string `json:"username"`
 }
 
-// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. The value limit counts bytes, not characters: 1024 ASCII characters fit, and so do 341 Chinese characters at three bytes each, but not 342. JSON Schema's maxLength counts characters and cannot state a limit in bytes, so the value schema carries none and the server applies the limit. Omitted and {} mean the same thing: no business data. It never reaches the switch.
 type UserData map[string]string
 
-// UserDataPatch An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The same bounds apply to the result, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
+// UserDataPatch An RFC 7386 merge patch over a call's business data: a value replaces the key, and null removes it. Keys the patch does not mention are left alone. Setting a key to the value it already holds changes nothing and is announced as nothing. The bounds are UserData's. A patch of more than 32 keys, or with a value over 1024 bytes of UTF-8 (bytes, not characters, which is why the value schema carries no maxLength), is refused with 400 USER_DATA_TOO_LARGE. The bounds apply to the result too, so a patch that would take the call past 32 keys is refused whole with 409 rather than partly applied.
 type UserDataPatch map[string]*string
 
 // UserDataResponse The call's business data after the patch, and what the patch moved. The lists are sorted and name movement only: a key set to the value it already held appears in neither.
@@ -3057,7 +3057,7 @@ type UserDataResponse struct {
 	ChangedKeys []string `json:"changedKeys"`
 	DeletedKeys []string `json:"deletedKeys"`
 
-	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. Omitted and {} mean the same thing: no business data. It never reaches the switch.
+	// UserData Business data attached to the call: the order, ticket or case this conversation is about. Flat key/value only, values strings, because this is read as a list of labelled facts and nothing renders a nested object. At most 32 keys, each value at most 1024 bytes of UTF-8; over either limit the request is refused with 400 USER_DATA_TOO_LARGE rather than truncated — a screen showing half a customer's details, with no sign the other half was sent, is worse than a gap. The value limit counts bytes, not characters: 1024 ASCII characters fit, and so do 341 Chinese characters at three bytes each, but not 342. JSON Schema's maxLength counts characters and cannot state a limit in bytes, so the value schema carries none and the server applies the limit. Omitted and {} mean the same thing: no business data. It never reaches the switch.
 	UserData UserData `json:"userData"`
 }
 

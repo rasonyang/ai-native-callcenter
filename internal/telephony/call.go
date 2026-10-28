@@ -651,7 +651,9 @@ func (c *Call) AnsweredAt() time.Time {
 }
 
 // The bounds on a call's business data, as the contract states them
-// (`UserData` in docs/openapi.json: maxProperties 32, values maxLength 1024).
+// (`UserData` in docs/openapi.json: maxProperties 32, and each value at most
+// 1024 bytes of UTF-8, said in its description because JSON Schema's
+// maxLength counts characters and cannot say it).
 //
 // They live here rather than in the HTTP layer because they are a fact about
 // what a call may carry, not about how one request happened to arrive. Every
