@@ -60,6 +60,9 @@ carries the one-line installer's files.
   Search the log for that line after upgrading and fix those flows before their
   next edit: a misspelt `announce` or `isTerminal` is a line or an ending the
   call has been running without. (#362)
+- A migration widens `api_keys.name` from 120 to 128 characters, the limit the
+  contract has always stated; no row is rewritten. Rolling it back cuts a name
+  longer than 120 characters to its first 120. (#370)
 
 ### Added
 
@@ -133,6 +136,13 @@ carries the one-line installer's files.
   the server refuses with `400 USER_DATA_TOO_LARGE`. The limit is 1024 bytes of
   UTF-8, as the server and the `UserData` description always said, and both
   descriptions now state it; the server is unchanged. (#371)
+- An API key's name of 121 to 128 characters, which the contract allows, is
+  stored instead of failing with `500 STORAGE_DOWN`, and a longer one is
+  refused with `422 VALIDATION_FAILED` (`params.field` = `name`,
+  `NAME_TOO_LONG`) on create and on rename. A user's locale over 8 characters
+  is refused with `422` (`locale`, `LOCALE_TOO_LONG`) on `POST /users` and
+  `PUT /users/{userId}` instead of `503 STORAGE_DOWN`. Both are counted in
+  characters, as the contract counts them. (#370)
 
 ### Changed
 
