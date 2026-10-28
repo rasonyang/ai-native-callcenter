@@ -5,6 +5,7 @@ package catalog
 import (
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 )
@@ -61,7 +62,8 @@ func (e *Extension) validate(requirePassword bool) error {
 func (e *Extension) validateApartFromNumber(requirePassword bool) error {
 	e.DisplayName = trim(e.DisplayName)
 
-	if requirePassword && len(e.Password) < 6 {
+	// Characters (code points), not bytes, as the API contract counts them.
+	if requirePassword && utf8.RuneCountInString(e.Password) < 6 {
 		return invalid("password", "PASSWORD_TOO_SHORT", "password must be at least 6 characters")
 	}
 	return nil

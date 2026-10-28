@@ -321,6 +321,21 @@ func TestValidate(t *testing.T) {
 			wantErr: "AICC_SEED_PASSWORD",
 		},
 		{
+			// Characters, as auth counts them (#367): seven Chinese characters
+			// are 21 bytes and still too short.
+			name: "seed password short in characters, long in bytes",
+			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
+				ExtensionRange: "1000-1999", QueueRange: "7000-7999", Seed: "demo",
+				SeedPassword: strings.Repeat("话", 7)},
+			wantErr: "AICC_SEED_PASSWORD",
+		},
+		{
+			name: "seed password of eight Chinese characters",
+			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,
+				ExtensionRange: "1000-1999", QueueRange: "7000-7999", Seed: "demo",
+				SeedPassword: strings.Repeat("话", 8)},
+		},
+		{
 			// Only the demo seed reads it, so nothing else is refused over it.
 			name: "short seed password without the demo seed",
 			cfg: Config{Env: "dev", DatabaseURL: "x", DatabaseMaxConns: 1, SessionTTL: time.Hour,

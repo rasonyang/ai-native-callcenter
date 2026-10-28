@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/dayrange"
 	"github.com/rasonyang/ai-native-callcenter/internal/egress"
@@ -748,11 +749,11 @@ func (c Config) validate() error {
 	// Checked at startup rather than at the first insert: the seed hashes it
 	// for accounts, and eight characters is the floor auth.CreateUser and
 	// auth.SetPassword enforce, so a shorter one would seed accounts nobody
-	// could set that password on again.
-	if c.Seed == "demo" && len(c.SeedPassword) < minPasswordLength {
+	// could set that password on again. Counted in characters, as auth counts.
+	if n := utf8.RuneCountInString(c.SeedPassword); c.Seed == "demo" && n < minPasswordLength {
 		errs = append(errs, fmt.Errorf(
 			"AICC_SEED_PASSWORD must be at least %d characters when AICC_SEED=demo, got %d",
-			minPasswordLength, len(c.SeedPassword)))
+			minPasswordLength, n))
 	}
 	// Not only when the demo seed runs: the stack hands the same value to the
 	// switch as its default_password whatever AICC_SEED says, and there it is
