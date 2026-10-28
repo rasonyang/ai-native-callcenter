@@ -5,20 +5,55 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.7.1 - 2026-10-28
 
 ### Security
 
 - Values that reach the switch's command line are now checked before a command
   is built, and a command holding a value the switch would read as syntax is
-  refused and never sent (GHSA-vf3r-34jf-c84h). Affects every release up to
-  and including v0.7.0. The worst path needed no account: a caller could
-  steer the bot into a transfer summary that split a switch command. The
-  others needed an agent credential, the `calls:create:ai` or `config:write`
-  scope, or network access to the bot's SIP port while
-  `AICC_BOT_ALLOWED_PEERS` is empty.
+  refused and never sent. Affects every release up to and including v0.7.0.
+  The worst path needed no account: a caller could steer the bot into a
+  transfer summary that split a switch command. The others needed an agent
+  credential, the `calls:create:ai` or `config:write` scope, or network access
+  to the bot's SIP port while `AICC_BOT_ALLOWED_PEERS` is empty.
 
 ### Upgrade notes
+
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release. The application adds three migrations, which run at startup. 00044
+  adds three nullable columns (`draft_disposition_code`, `draft_note`,
+  `draft_generated_at`) to `wrap_ups` for the AI draft of after-call work;
+  nothing is backfilled, and rolling it back drops the columns and any drafts
+  in them (the confirmed disposition and note are separate columns and stay)
+  (#138). 00045 widens the CHECK on `campaigns.pause_reason` to allow
+  `OUTBOUND_NOT_CONFIGURED`; no row is rewritten going up, and rolling it back
+  rewrites such rows to `TRUNK_FAILURE` before narrowing the constraint, so the
+  specific reason is lost (#293). 00046 widens `api_keys.name` from 120 to 128
+  characters; no row is rewritten, and rolling it back cuts a name longer than
+  120 characters to its first 120 (#370).
+- New settings, all optional: the text model that drafts after-call work,
+  `AICC_TEXT_LLM_ENDPOINT`, `AICC_TEXT_LLM_MODEL`, `TEXT_LLM_API_KEY` (a key,
+  not an `AICC_*` setting), `AICC_TEXT_LLM_TIMEOUT` (20s) and
+  `AICC_TEXT_LLM_CONTEXT_CHARS` (24000), and `AICC_WRAPUP_DRAFT_ENABLED`
+  (true). The draft is on only when the endpoint, model, key and
+  `AICC_TRANSCRIPTION_ENABLED` are all set; otherwise after-call work opens as
+  before. `AICC_DEFAULT_COUNTRY_CODE` now defaults to `1` and
+  `AICC_OUTBOUND_ENDPOINT` gains a campaign-start check, both described below.
+  The example secret in `.env.example` is now `AICC_TOOL_SECRET_KB_API_KEY`
+  (a comment only) (#138, #92, #293).
+- API contract: `make api-breaking BASE=v0.7.0` reports no error and 551
+  warnings. 550 are enum values added to responses: the error code
+  `OUTBOUND_NOT_CONFIGURED` (on the error responses of nearly every operation,
+  and as a campaign `pauseReason`) and the SSE type `AGENT_WRAP_UP_DRAFTED`; a
+  client that switches over these closed sets needs a default branch. The
+  other is `maxLength: 8` on `CreateCallRequest.language`. The breaking changes
+  pinned in `.oasdiff-breaking-ignore.txt` for this release are the request
+  patterns on `language` (`POST /calls`, `POST /dids`, `PUT /dids/{didId}`) and
+  on `TransferRequest.destination`, and `UserData`'s value `maxLength` unset
+  (#371); each is a bound the contract always described and the server always
+  applied. Additions: `getFlowRevision`, the wrap-up draft fields, the
+  `flowFields` of a campaign, and the fields described below.
 
 - The binary's default country code is now `1` (`AICC_DEFAULT_COUNTRY_CODE`), so
   a national number is never ambiguous when nobody says otherwise. The deploy
@@ -122,6 +157,31 @@ carries the one-line installer's files.
   trail records the draft save and the publish as it records any other; the
   draft save does not name the revision it came from (`docs/flow-authoring.md`
   section 8). (#363)
+- After-call work can start from an AI draft. When an answered agent leg ends,
+  the text model reads that agent's part of the call's transcript and drafts
+  the disposition and note; the agent is told through the new SSE event
+  `AGENT_WRAP_UP_DRAFTED` (`SseWrapUpDraftPayload`, sent to that agent's stream
+  only), and `CurrentWrapUp` and `WrapUp` gain `draftDispositionCode`,
+  `draftNote` and `draftGeneratedAt`. The cockpit shows the draft in fields
+  the agent has not touched, marks it "AI draft", and offers "Use AI draft"
+  on fields they have. The draft never overwrites what the agent confirmed and
+  is kept after confirmation. It needs the text model settings in the upgrade
+  notes and `AICC_TRANSCRIPTION_ENABLED`; otherwise the form opens blank as
+  before. The cockpit also no longer shows the previous call's wrap-up note
+  and disposition on a new call's sheet. (#138)
+- A flow can answer from aicc-knowledge. `slots.language` holds the call's
+  language as `EN` or `ZH` and no flow can write it; `http.modelOnly` hands
+  parts of a tool's response to the model and the transcript without putting
+  them in a slot, either as a dotted path or as a projection of each element
+  of a list; on a 4xx or 5xx answer `errorFrom` names the backend's error code
+  in the log (`backendError`) and in the tool's error, never the body. The
+  reference flow is `docs/examples/flows/knowledge_support.json`, with
+  scenarios and a deterministic `aicc-mockbackend` stand-in, and
+  `docs/flow-authoring.md` section 4.2 describes the tools. (#92)
+- The Realtime client logs the provider's own session id once per call
+  (`provider session created`, `providerSessionId`), so a call can be matched
+  to the provider's logs when several overlap. A provider that sends none gets a
+  Debug line. (#339)
 
 ### Fixed
 
@@ -170,6 +230,18 @@ carries the one-line installer's files.
   is refused with `422` (`locale`, `LOCALE_TOO_LONG`) on `POST /users` and
   `PUT /users/{userId}` instead of `503 STORAGE_DOWN`. Both are counted in
   characters, as the contract counts them. (#370)
+- The bot's RTP pacer no longer stops sending when barge-in empties the TX
+  queue between its length check and the dequeue, and `Run` no longer leaks its
+  goroutine after `Stop`. (#340; thanks @duongynhi000005-oss)
+- An agent's click-to-dial that reached nobody no longer records `answeredAt`
+  from their own phone's auto-answer, and its DIALING hop names the number
+  dialled, not the agent's extension. (#330, #331; thanks @duongynhi000005-oss)
+- A line the bot is asked to say mid-call, in a phase whose instruction invites
+  a tool such as `hangup`, is no longer swallowed on the Realtime engines when
+  the line's turn calls the tool and says nothing. The call is not carried out,
+  the line is asked for once more, and a second miss is logged at WARN
+  (`giving it up`) instead of leaving the caller in silence. Measured live on
+  qwen only. (#351)
 
 ### Changed
 
