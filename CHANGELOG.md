@@ -84,9 +84,11 @@ carries the one-line installer's files.
   no longer loads with every problem, leaving the draft as it was; the
   ordinary publish then puts it live, checking the deployment's rules again
   and appending a new revision, so the history is never rewritten. In the flow
-  editor's History tab each revision opens read-only and offers Copy to draft,
-  which asks first when the draft holds edits or changes that are not
-  published, and prefills the publish note with `Restore of <id>`. The audit
+  editor's History tab each revision opens read-only and offers Roll back to
+  this revision, which asks first when the draft holds edits or changes that
+  are not published, saves the revision as the draft and opens the publish
+  dialog with the note `Restore of <id>` filled in, so one confirm puts it
+  live; cancelling the dialog leaves the restored draft unpublished. The audit
   trail records the draft save and the publish as it records any other; the
   draft save does not name the revision it came from (`docs/flow-authoring.md`
   section 8). (#363)

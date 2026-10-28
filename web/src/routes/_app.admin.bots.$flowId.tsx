@@ -67,7 +67,7 @@ function FlowDesigner() {
   const [tab, setTab] = useState('designer')
   // The history row opened to show its spec, if any.
   const [opened, setOpened] = useState<string | null>(null)
-  // The revision waiting on "replace the draft?", while the question is open.
+  // The revision waiting on "roll back to it?", while the question is open.
   const [restoring, setRestoring] = useState<FlowRevision | null>(null)
   // The revision the draft was last copied from, until it is published or
   // saved over: what the line pointing at Publish names.
@@ -137,13 +137,17 @@ function FlowDesigner() {
     )
   }
 
-  // Copying a revision replaces the draft, so it asks first only when that
-  // loses something: edits not saved yet, or a saved draft that is not what
-  // callers hear. Otherwise the draft already is the live revision, which the
-  // history keeps.
+  // Rolling back replaces the draft, so it asks first only when that loses
+  // something: edits not saved yet, or a saved draft that is not what callers
+  // hear. Otherwise the draft already is the live revision, which the history
+  // keeps.
   const hasSomethingToLose = isDirty || data.flow.hasUnpublishedChanges
 
-  const copyToDraft = (revision: FlowRevision) => {
+  // A rollback is the revision saved as the draft, then the ordinary publish:
+  // the publish dialog opens at once with its note filled in, so one confirm
+  // puts it live. Cancelling it leaves the restored draft, and the line beside
+  // the name, pointing at Publish.
+  const rollBack = (revision: FlowRevision) => {
     restore.mutate(
       { revisionId: revision.revisionId, name: data.flow.name },
       {
@@ -157,14 +161,16 @@ function FlowDesigner() {
           setNote(t('bots.restoreNote', { id: revisionLabel(revision.revisionId) }))
           setRestoring(null)
           setTab('designer')
+          publish.reset()
+          setPublishing(true)
         },
       },
     )
   }
 
-  const askToCopy = (revision: FlowRevision) => {
+  const askToRollBack = (revision: FlowRevision) => {
     if (!hasSomethingToLose) {
-      copyToDraft(revision)
+      rollBack(revision)
       return
     }
     restore.reset()
@@ -331,9 +337,9 @@ function FlowDesigner() {
                           size="sm"
                           variant="ghost"
                           disabled={restore.isPending}
-                          onClick={() => askToCopy(revision)}
+                          onClick={() => askToRollBack(revision)}
                         >
-                          {t('bots.copyToDraft')}
+                          {t('bots.rollBack')}
                         </Button>
                       </Td>
                     </Tr>
@@ -383,11 +389,11 @@ function FlowDesigner() {
           restore.reset()
         }}
         title={t('bots.restoreTitle', { id: revisionLabel(restoring?.revisionId ?? '') })}
-        submitLabel={t('bots.replaceDraft')}
+        submitLabel={t('bots.continue')}
         isSaving={restore.isPending}
         error={restore.isError ? <Refusal error={restore.error} /> : undefined}
         onSubmit={() => {
-          if (restoring) copyToDraft(restoring)
+          if (restoring) rollBack(restoring)
         }}
       >
         {restoring && (
