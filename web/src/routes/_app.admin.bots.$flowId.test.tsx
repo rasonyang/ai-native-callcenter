@@ -440,9 +440,10 @@ describe('a publish that fails for any other reason', () => {
 })
 
 /**
- * The History tab (#363): a revision opens read-only, and Copy to draft saves
- * its spec as the draft through the ordinary PUT, asking first only when that
- * loses something. Publishing it is the ordinary Publish, its note prefilled.
+ * The History tab (#363): a revision opens read-only, and "Roll back to this
+ * revision" saves its spec as the draft through the ordinary PUT, asking first
+ * only when that loses something, then opens the ordinary publish dialog with
+ * its note prefilled, so one confirm puts it live.
  */
 
 const LIVE_ID = '01a18100-b38c-7d05-a1b3-6e2f4c8d9a17'
@@ -570,6 +571,13 @@ const editorText = () =>
 
 const pretty = (spec: unknown) => JSON.stringify(spec, null, 2)
 
+/** The publish dialog a rollback opens once the revision is the draft. */
+const publishDialog = (title = 'Publish NovaNet billing follow-up') =>
+  screen.findByRole('dialog', { name: title })
+
+const rollBackTo = async (user: Driver, label: string, button = 'Roll back to this revision') =>
+  user.click(within(rowOf(label)).getByRole('button', { name: button }))
+
 describe('a revision in the history', () => {
   // Revision ids are UUIDv7: the first eight characters are the top of the
   // millisecond clock and change about once a minute, so publishes seconds
@@ -588,20 +596,12 @@ describe('a revision in the history', () => {
     expect(ids).toEqual(['4c8d9a17', '5e7b1c60', '9a3f7b25'])
     expect(screen.queryByText('01a18100')).not.toBeInTheDocument()
 
-    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Replace the draft with revision 5e7b1c60?',
-    })
-    expect(dialog).not.toHaveTextContent('4c8d9a17')
-    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+    await rollBackTo(user, '5e7b1c60')
+    const question = await screen.findByRole('dialog', { name: 'Roll back to revision 5e7b1c60?' })
+    expect(question).not.toHaveTextContent('4c8d9a17')
+    await user.click(within(question).getByRole('button', { name: 'Continue' }))
 
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
-    )
-    const publish = screen.getByRole('button', { name: 'Publish' })
-    await waitFor(() => expect(publish).toBeEnabled())
-    await user.click(publish)
-    const publishing = await screen.findByRole('dialog')
+    const publishing = await publishDialog()
     expect(within(publishing).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
     await user.click(within(publishing).getByRole('button', { name: 'Publish' }))
     await waitFor(() => expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }]))
@@ -646,65 +646,60 @@ describe('a revision in the history', () => {
   })
 })
 
-describe('copying a revision to the draft', () => {
-  it('copies at once when there is nothing to lose, shows the spec and prefills the note', async () => {
+describe('rolling back to a revision', () => {
+  it('asks nothing when there is nothing to lose, and one confirm publishes it', async () => {
     const server = historyServer(SPEC)
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+    await rollBackTo(user, '5e7b1c60')
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    await waitFor(() => expect(server.puts).toHaveLength(1))
+    // The draft is saved first, then the publish dialog opens, and it is the
+    // only dialog there has been.
+    const publishing = await publishDialog()
+    expect(screen.getAllByRole('dialog')).toEqual([publishing])
+    expect(server.reads).toEqual([OLD_ID])
+    expect(server.puts).toHaveLength(1)
     expect(server.puts[0].name).toBe('NovaNet billing follow-up')
     expect(server.puts[0].spec).toEqual(OLD_SPEC)
+    expect(server.publishes).toEqual([])
+    expect(within(publishing).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+    // Behind it, the editor already shows the revision.
+    expect(editorText()).toBe(pretty(OLD_SPEC))
 
-    // Back in the designer, showing the restored spec, and pointed at Publish.
-    await waitFor(() => expect(editorText()).toBe(pretty(OLD_SPEC)))
-    expect(await screen.findByRole('status')).toHaveTextContent(
-      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
-    )
-    expect(screen.getByText('Unpublished changes')).toBeInTheDocument()
-    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
-
-    const publish = screen.getByRole('button', { name: 'Publish' })
-    await waitFor(() => expect(publish).toBeEnabled())
-    await user.click(publish)
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
-    await user.click(within(dialog).getByRole('button', { name: 'Publish' }))
+    await user.click(within(publishing).getByRole('button', { name: 'Publish' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }])
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
-  it('asks first when the saved draft is not what is live, naming the revision', async () => {
+  it('asks first when the saved draft is not what is live, then opens the publish dialog', async () => {
     const server = historyServer(EDITED_SPEC)
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+    await rollBackTo(user, '5e7b1c60')
 
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Replace the draft with revision 5e7b1c60?',
-    })
+    const question = await screen.findByRole('dialog', { name: 'Roll back to revision 5e7b1c60?' })
     const when = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
       new Date(OLD_AT),
     )
-    expect(dialog).toHaveTextContent('5e7b1c60')
-    expect(dialog).toHaveTextContent(when)
-    expect(dialog).toHaveTextContent(OLD_NOTE)
-    expect(dialog).toHaveTextContent(
-      "The draft becomes this revision's spec. Edits that are not saved and changes that are not published are lost. Callers hear nothing new until you publish.",
+    expect(question).toHaveTextContent('5e7b1c60')
+    expect(question).toHaveTextContent(when)
+    expect(question).toHaveTextContent(OLD_NOTE)
+    expect(question).toHaveTextContent(
+      "The draft becomes this revision's spec, and edits that are not saved and changes that are not published are lost. You confirm the publish in the next step; callers hear nothing new until then.",
     )
     expect(server.puts).toEqual([])
 
-    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+    await user.click(within(question).getByRole('button', { name: 'Continue' }))
 
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    const publishing = await publishDialog()
+    expect(screen.getAllByRole('dialog')).toEqual([publishing])
     expect(server.puts.map((put) => put.spec)).toEqual([OLD_SPEC])
-    await waitFor(() => expect(editorText()).toBe(pretty(OLD_SPEC)))
+    expect(within(publishing).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+    expect(server.publishes).toEqual([])
   })
 
   it('asks first when the editor holds edits that are not saved', async () => {
@@ -713,88 +708,132 @@ describe('copying a revision to the draft', () => {
     await user.type(await screen.findByLabelText('Name'), ' (October)')
     await openTab(user)
 
-    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
+    await rollBackTo(user, '9a3f7b25')
 
-    const dialog = await screen.findByRole('dialog', {
-      name: 'Replace the draft with revision 9a3f7b25?',
-    })
+    const question = await screen.findByRole('dialog', { name: 'Roll back to revision 9a3f7b25?' })
     // That revision was published without a note.
-    expect(dialog).toHaveTextContent('No note')
+    expect(question).toHaveTextContent('No note')
     expect(server.puts).toEqual([])
   })
 
-  it('changes nothing when the question is cancelled', async () => {
+  it('sends nothing when the question is cancelled', async () => {
     const server = historyServer(EDITED_SPEC)
     const { user } = renderEditor()
     await waitFor(() => expect(editorText()).toBe(pretty(EDITED_SPEC)))
     await openTab(user)
 
-    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
-    const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    await rollBackTo(user, '5e7b1c60')
+    const question = await screen.findByRole('dialog')
+    await user.click(within(question).getByRole('button', { name: 'Cancel' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(server.puts).toEqual([])
     expect(server.reads).toEqual([])
+    expect(server.puts).toEqual([])
+    expect(server.publishes).toEqual([])
     expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     await openTab(user, 'Designer')
     expect(editorText()).toBe(pretty(EDITED_SPEC))
     await user.click(screen.getByRole('button', { name: 'Publish' }))
-    expect(within(await screen.findByRole('dialog')).getByLabelText('Note')).toHaveValue('')
+    expect(within(await publishDialog()).getByLabelText('Note')).toHaveValue('')
   })
 
-  it('lists what the loader refused, and leaves the draft as it was', async () => {
+  it('leaves the draft restored and points at Publish when the publish is cancelled', async () => {
     const server = historyServer(SPEC)
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
+    await rollBackTo(user, '5e7b1c60')
+    const publishing = await publishDialog()
+    await user.click(within(publishing).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(server.publishes).toEqual([])
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
+    )
+    expect(editorText()).toBe(pretty(OLD_SPEC))
+    expect(screen.getByText('Unpublished changes')).toBeInTheDocument()
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+
+    // Publish is still one press away, the note still filled in.
+    const publish = screen.getByRole('button', { name: 'Publish' })
+    await waitFor(() => expect(publish).toBeEnabled())
+    await user.click(publish)
+    expect(within(await publishDialog()).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+  })
+
+  it('lists what the loader refused, leaves the draft, and opens no publish dialog', async () => {
+    const server = historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await rollBackTo(user, '9a3f7b25')
 
     const notice = await screen.findByRole('alert')
-    expect(notice).toHaveTextContent('Revision 9a3f7b25 was not copied; the draft is unchanged.')
+    expect(notice).toHaveTextContent(
+      'Rolling back to revision 9a3f7b25 was refused; the draft is unchanged.',
+    )
     expect(notice).toHaveTextContent('The server refused this spec:')
     expect(listed(notice)).toEqual(REFUSED_PROBLEMS)
     expect(server.puts).toHaveLength(1)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(server.publishes).toEqual([])
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
     await openTab(user, 'Designer')
     expect(editorText()).toBe(pretty(SPEC))
   })
 
-  it('lists the refusal in the question too, which stays open', async () => {
-    historyServer(EDITED_SPEC)
+  it('lists the refusal in the question, which stays the only dialog', async () => {
+    const server = historyServer(EDITED_SPEC)
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
-    const dialog = await screen.findByRole('dialog')
-    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+    await rollBackTo(user, '9a3f7b25')
+    const question = await screen.findByRole('dialog')
+    await user.click(within(question).getByRole('button', { name: 'Continue' }))
 
-    const inDialog = await within(dialog).findByRole('alert')
+    const inDialog = await within(question).findByRole('alert')
     expect(inDialog).toHaveTextContent('The server refused this spec:')
     expect(listed(inDialog)).toEqual(REFUSED_PROBLEMS)
-    expect(screen.getByRole('dialog')).toBe(dialog)
+    expect(screen.getAllByRole('dialog')).toEqual([question])
+    expect(server.publishes).toEqual([])
   })
 
   it('says it all in Chinese', async () => {
     await i18n.changeLanguage('zh')
-    historyServer(EDITED_SPEC)
+    const server = historyServer(EDITED_SPEC)
     const { user } = renderEditor()
     await openTab(user, '发布历史')
 
-    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: '复制到草稿' }))
-    const dialog = await screen.findByRole('dialog', { name: '用版本 5e7b1c60 替换草稿？' })
-    expect(dialog).toHaveTextContent(
-      '草稿将替换为这个版本的配置，未保存的编辑和未发布的改动都会丢失。发布之前，来电听到的内容不会改变。',
+    await rollBackTo(user, '5e7b1c60', '回滚到此版本')
+    const question = await screen.findByRole('dialog', { name: '回滚到版本 5e7b1c60？' })
+    expect(question).toHaveTextContent(
+      '草稿将替换为这个版本的配置，未保存的编辑和未发布的改动都会丢失。下一步确认发布；在此之前，来电听到的内容不会改变。',
     )
-    await user.click(within(dialog).getByRole('button', { name: '替换草稿' }))
+    await user.click(within(question).getByRole('button', { name: '继续' }))
+
+    const publishing = await publishDialog('发布 NovaNet billing follow-up')
+    expect(within(publishing).getByLabelText('备注')).toHaveValue('恢复自 5e7b1c60')
+    await user.click(within(publishing).getByRole('button', { name: '取消' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(
       '版本 5e7b1c60 已复制为草稿，发布后才会生效。',
     )
-    await user.click(screen.getByRole('button', { name: '发布' }))
-    expect(within(await screen.findByRole('dialog')).getByLabelText('备注')).toHaveValue(
-      '恢复自 5e7b1c60',
+    expect(server.publishes).toEqual([])
+  })
+
+  it('names a refused rollback in Chinese', async () => {
+    await i18n.changeLanguage('zh')
+    historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user, '发布历史')
+
+    await rollBackTo(user, '9a3f7b25', '回滚到此版本')
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '回滚到版本 9a3f7b25 被拒绝，草稿保持不变。',
     )
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })
