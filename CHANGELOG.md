@@ -44,6 +44,22 @@ carries the one-line installer's files.
   the state (`FAIL_WAIT`, or `NOREG` with the ping `DOWN`). A profile-qualified
   endpoint (`sofia/gateway/external::pstn_gateway/%s`) is read correctly. None
   changes the exit status. (#293; thanks @javayou13131)
+- A flow key the spec does not declare is now a load problem instead of being
+  dropped without a word, so saving or publishing a flow that was accepted
+  before can be refused. `POST /flows`, `PUT /flows/{flowId}`, publishing,
+  `aicc flowadd` and `aicc flowsim` answer every such key with the flow's other
+  problems (`422 VALIDATION_FAILED`, `params.problems`), naming where it is and
+  the field it is a near miss of:
+  `phase "confirm_upgrade" has unknown field "anounce"; did you mean "announce"?`.
+  This covers misspellings, fields in the wrong object, comment keys (the spec
+  has none) and keys that differ only in case, which encoding/json used to read
+  as the field. A revision already published with such a key keeps answering
+  its number: loading it for a call, for a campaign or when a number is bound
+  to the flow logs one WARN line per key
+  (`published flow has a field the spec does not declare; loading it anyway`).
+  Search the log for that line after upgrading and fix those flows before their
+  next edit: a misspelt `announce` or `isTerminal` is a line or an ending the
+  call has been running without. (#362)
 
 ### Added
 
