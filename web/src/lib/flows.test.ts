@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
+import { ApiError, type ApiErrorBody } from '@/lib/api'
 import {
-  describeRule, globalEntries, locateNodes, sameSpec, starterSpec, textFor, textListFor,
-  unreachableNodes,
+  describeRule, flowRefusal, globalEntries, locateNodes, sameSpec, starterSpec, textFor,
+  textListFor, unreachableNodes,
   type FlowSpec,
 } from '@/lib/flows'
 
@@ -174,5 +175,70 @@ describe('globalEntries', () => {
       ['fallback', 'handoff'],
       ['closing', 'farewell'],
     ])
+  })
+})
+
+const refusal = (status: number, code: ApiErrorBody['code'], params?: Record<string, unknown>) =>
+  new ApiError(status, { code, message: 'refused', params })
+
+describe('flowRefusal', () => {
+  // What the editor lists beyond the code's own sentence: one reading per
+  // refusal that names something, so the notice and the dialog agree.
+  it("reads the loader's problems, the phases at fault and the campaigns in the way", () => {
+    expect(
+      flowRefusal(
+        refusal(422, 'VALIDATION_FAILED', {
+          problems: ['phase "billing_review" has no instruction', 7, 'the flow has no id'],
+        }),
+      ),
+    ).toEqual({
+      kind: 'PROBLEMS',
+      items: ['phase "billing_review" has no instruction', 'the flow has no id'],
+    })
+    expect(
+      flowRefusal(refusal(422, 'TERMINAL_ANNOUNCE_REQUIRED', { nodes: ['goodbye', 'handed_over'] })),
+    ).toEqual({ kind: 'PHASES', items: ['goodbye', 'handed_over'] })
+    expect(
+      flowRefusal(
+        refusal(409, 'CAMPAIGN_FLOW_HAS_TRANSFER', { campaigns: 3, rule: 'PUBLISH_BLOCKED' }),
+      ),
+    ).toEqual({ kind: 'CAMPAIGNS', count: 3 })
+  })
+
+  // Everything else keeps the code's own sentence: a refusal that names
+  // nothing must not become an empty list, and the same code refusing a
+  // campaign form or a number's rebinding is not a publish refusal.
+  it.each([
+    ['STORAGE_DOWN', refusal(503, 'STORAGE_DOWN')],
+    ['NOT_FOUND', refusal(404, 'NOT_FOUND')],
+    ['a network failure', new TypeError('Failed to fetch')],
+    ['VALIDATION_FAILED without params', refusal(422, 'VALIDATION_FAILED')],
+    ['VALIDATION_FAILED with no problems', refusal(422, 'VALIDATION_FAILED', { problems: [] })],
+    [
+      'VALIDATION_FAILED naming a field',
+      refusal(422, 'VALIDATION_FAILED', { field: 'note', rule: 'NOTE_TOO_LONG' }),
+    ],
+    [
+      'TERMINAL_ANNOUNCE_REQUIRED naming no phase',
+      refusal(422, 'TERMINAL_ANNOUNCE_REQUIRED', { nodes: [] }),
+    ],
+    [
+      "the campaign form's refusal",
+      refusal(422, 'CAMPAIGN_FLOW_HAS_TRANSFER', {
+        field: 'didId',
+        rule: 'FLOW_CAN_TRANSFER',
+        didNumber: '95099',
+      }),
+    ],
+    [
+      'a rebinding refusal',
+      refusal(409, 'CAMPAIGN_FLOW_HAS_TRANSFER', { campaigns: 2, rule: 'DID_REBIND_BLOCKED' }),
+    ],
+    [
+      'a publish block without a count',
+      refusal(409, 'CAMPAIGN_FLOW_HAS_TRANSFER', { rule: 'PUBLISH_BLOCKED' }),
+    ],
+  ])('names nothing for %s', (_name, error) => {
+    expect(flowRefusal(error)).toBeNull()
   })
 })
