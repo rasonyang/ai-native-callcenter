@@ -120,7 +120,7 @@ var ErrChannelGone = errors.New("telephony: no such channel")
 
 // DumpChannel returns one channel's headers and variables as JSON.
 func (a *Adapter) DumpChannel(channelID string) (string, error) {
-	out, err := a.cmd.API("uuid_dump " + channelID + " json")
+	out, err := a.api("uuid_dump %s json", channelID)
 	if err != nil {
 		return "", fmt.Errorf("uuid_dump %s: %w", channelID, err)
 	}

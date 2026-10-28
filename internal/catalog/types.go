@@ -4,10 +4,15 @@ package catalog
 
 import (
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/switchsyntax"
 )
 
 // Extension is a SIP endpoint the switch will accept a registration for.
@@ -188,11 +193,12 @@ func (q *Queue) validate() error {
 		return invalid("name", "REQUIRED", "name is required")
 	}
 	// The name reaches the switch as part of a queue identifier, so it stays
-	// to characters that survive that trip unambiguously.
-	for _, r := range q.Name {
-		if r == '@' || r == ' ' || r == '\'' {
-			return invalid("name", "NAME_CHARSET", "name cannot contain spaces, @ or quotes")
-		}
+	// to characters that survive that trip unambiguously. It is also the data
+	// of the dialplan's callcenter application, which the switch expands
+	// before it runs it, so nothing the switch reads as syntax gets in either.
+	if strings.ContainsRune(q.Name, '@') || switchsyntax.Unsafe(q.Name) != "" {
+		return invalid("name", "NAME_CHARSET",
+			"name cannot contain spaces, @, quotes or any of \\ ^ , | { } $")
 	}
 	// Empty means "allocate one": whoever adds a queue is asking for a queue,
 	// not for 7004. A number that is given must still be a number.
@@ -215,6 +221,27 @@ func (q *Queue) validate() error {
 		}
 	default:
 		return invalid("overflow.type", "UNKNOWN_OVERFLOW_TYPE", fmt.Sprintf("unknown overflow type %q", q.Overflow.Type))
+	}
+	// The target is the end of the bot gateway's dial string (BOT_FLOW) or
+	// the destination of a dialplan transfer (FORWARD), both of which the
+	// switch expands and parses when the caller overflows.
+	q.Overflow.Target = trim(q.Overflow.Target)
+	if switchsyntax.Unsafe(q.Overflow.Target) != "" {
+		return invalid("overflow.target", "TARGET_CHARSET",
+			"an overflow target cannot contain spaces, quotes or any of \\ ^ , | { } $")
+	}
+	// The switch expands a sound before it plays it. Naming a variable is how
+	// the default works ($${hold_music}); running a command is not something a
+	// sound has any use for.
+	for _, sound := range []struct{ field, value string }{
+		{"mohSound", q.MohSound},
+		{"announceSound", q.AnnounceSound},
+		{"overflow.sound", q.Overflow.Sound},
+	} {
+		if strings.IndexFunc(sound.value, unicode.IsControl) >= 0 || switchsyntax.CallsCommand(sound.value) {
+			return invalid(sound.field, "SOUND_EXPANSION",
+				"a sound may name a variable such as $${hold_music}, and holds no other ${…} and no line breaks")
+		}
 	}
 	for _, h := range q.Hours {
 		if h.Weekday < 0 || h.Weekday > 6 {
@@ -284,6 +311,27 @@ type DID struct {
 	IsCampaignReady bool `json:"isCampaignReady"`
 }
 
+// languageTag is a lowercase BCP 47 tag: a primary language subtag of two or
+// three letters, then any further subtags of letters or digits, each after a
+// hyphen (en, zh, pt-br, zh-hans). With MaxLanguageLength it is the whole of
+// what a language may be, wherever one is written.
+var languageTag = regexp.MustCompile(`^[a-z]{2,3}(-[a-z0-9]+)*$`)
+
+// MaxLanguageLength is the longest language tag accepted, in characters; the
+// columns that hold one are varchar(8).
+const MaxLanguageLength = 8
+
+// LanguageTagRule is the refusal's sentence, shared by every entry point that
+// checks IsLanguageTag.
+const LanguageTagRule = "language must be a lowercase BCP 47 tag of at most 8 characters, such as en, zh or pt-br"
+
+// IsLanguageTag reports whether s is a language this platform accepts: a call
+// carries it to the switch and to the bot, so a value outside this shape is
+// refused where it is written, not discovered where it is used.
+func IsLanguageTag(s string) bool {
+	return len(s) <= MaxLanguageLength && languageTag.MatchString(s)
+}
+
 // MaxOutboundChannelsLimit is the largest outbound line limit a number may be given.
 const MaxOutboundChannelsLimit = 100000
 
@@ -299,7 +347,9 @@ func NewDID() DID {
 
 func (d *DID) validate() error {
 	d.Number = trim(d.Number)
-	d.Language = trim(d.Language)
+	// Not trimmed: the language is checked exactly as it was sent, so a
+	// value with a line break or a space in it is refused rather than
+	// quietly repaired.
 	d.Description = trim(d.Description)
 
 	if !digitsOnly(d.Number) {
@@ -308,8 +358,8 @@ func (d *DID) validate() error {
 	if d.Language == "" {
 		d.Language = "en"
 	}
-	if len(d.Language) > 8 {
-		return invalid("language", "LANGUAGE_SUBTAG", "language must be a short subtag such as en or zh")
+	if !IsLanguageTag(d.Language) {
+		return invalid("language", "LANGUAGE_SUBTAG", LanguageTagRule)
 	}
 	// The database refuses each of these too. Saying which field is wrong,
 	// and why, is this layer's job — a CHECK constraint's name is not an

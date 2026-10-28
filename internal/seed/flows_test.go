@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/flow"
+	"github.com/rasonyang/ai-native-callcenter/internal/switchsyntax"
 )
 
 // Voice names belong to the engine that answers, and these flows ship to
@@ -125,6 +127,34 @@ func TestOneTollFreeNumberIsTheMainLine(t *testing.T) {
 	}
 	if len(defaults) != 1 || defaults[0] != "8005550199" {
 		t.Errorf("default outbound numbers = %v, want exactly [8005550199]", defaults)
+	}
+}
+
+// The seed writes its numbers and queues straight into the tables, past the
+// API's checks, so the values it writes are held to the same rules here: a
+// language is a lowercase BCP 47 tag, and a queue's name and fallback are
+// nothing the switch would read as syntax.
+func TestTheSeedWritesOnlyWhatTheAPIWouldAccept(t *testing.T) {
+	t.Parallel()
+	for _, f := range demoFlows {
+		for _, n := range f.numbers() {
+			if !catalog.IsLanguageTag(n.language) {
+				t.Errorf("%s is seeded with language %q, which the API refuses", n.number, n.language)
+			}
+		}
+	}
+	for _, d := range demoDIDs {
+		if !catalog.IsLanguageTag(d.language) {
+			t.Errorf("history number %s has language %q, which the API refuses", d.number, d.language)
+		}
+	}
+	for _, q := range demoQueues {
+		if bad := switchsyntax.Unsafe(q.name); bad != "" || strings.Contains(q.name, "@") {
+			t.Errorf("queue %q is a name the API refuses", q.name)
+		}
+		if !catalog.IsLanguageTag(q.language) {
+			t.Errorf("queue %q serves language %q, which the API refuses", q.name, q.language)
+		}
 	}
 }
 

@@ -25,6 +25,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 	"github.com/rasonyang/ai-native-callcenter/internal/recording"
+	"github.com/rasonyang/ai-native-callcenter/internal/switchsyntax"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
@@ -349,6 +350,13 @@ var (
 	// outbound line limit (dids.max_outbound_channels). Nothing was sent and
 	// nothing is recorded: the CDR is the ledger of calls placed.
 	ErrDIDChannelsExhausted = fmt.Errorf("outbound: the DID is at its outbound line limit")
+	// ErrBadLanguage means the language the call would carry holds something
+	// the switch reads as syntax, so the bridge to the bot would be refused.
+	// Refused before anything is sent: refusing at the bridge would leave a
+	// customer who has answered on a silent line. The API refuses such a
+	// language in a request, so this is a number's language written before it
+	// did.
+	ErrBadLanguage = fmt.Errorf("outbound: the call's language cannot be sent to the switch")
 )
 
 // pinCodecs adds the G.711 pin on legs that leave through sofia. Loopback
@@ -823,6 +831,12 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 	language := req.Language
 	if language == "" {
 		language = did.Language
+	}
+	// Only what the switch would read as syntax, not the whole tag rule: a
+	// number stored as "EN" before languages were checked still places its
+	// calls, as it always did.
+	if bad := switchsyntax.Unsafe(language); bad != "" {
+		return Placement{}, fmt.Errorf("%w: %q holds %q", ErrBadLanguage, language, bad)
 	}
 
 	callID, err := s.checkPlaced(ctx, req.CallID)

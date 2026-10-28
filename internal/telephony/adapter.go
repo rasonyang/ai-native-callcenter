@@ -8,8 +8,12 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/switchsyntax"
 )
 
 // Commander issues commands to FreeSWITCH. esl.Link satisfies it.
@@ -107,15 +111,22 @@ func (a *Adapter) SetCallcenterAgentContact(name, extensionNumber string, autoAn
 	if autoAnswer {
 		vars = append(vars, "sip_auto_answer=true")
 	}
-	contact := "{" + strings.Join(vars, ",") + "}" + a.Endpoint(extensionNumber)
-	return a.exec("callcenter_config agent set contact %s '%s'", name, contact)
+	// The contact is a dial string the module expands and originates each
+	// time it offers a call, so the endpoint in it is held to what a dial
+	// string may carry.
+	endpoint := a.Endpoint(extensionNumber)
+	if bad := switchsyntax.Unsafe(endpoint); bad != "" {
+		return unsafeValue(endpoint, bad)
+	}
+	contact := "{" + strings.Join(vars, ",") + "}" + endpoint
+	return a.exec("callcenter_config agent set contact %s '%s'", name, quoted(contact))
 }
 
 // SetCallcenterAgentStatus mirrors our presence onto the switch. Our states
 // are richer than the switch's three, which is why the mapping lives in the
 // agents package rather than here.
 func (a *Adapter) SetCallcenterAgentStatus(name, status string) error {
-	return a.exec("callcenter_config agent set status %s '%s'", name, status)
+	return a.exec("callcenter_config agent set status %s '%s'", name, quoted(status))
 }
 
 // SetCallcenterAgentRejectDelay sets how long the switch waits before offering
@@ -219,7 +230,7 @@ func (a *Adapter) ReloadQueue(name string) error {
 // ListQueueMembers returns the switch's own view of who is waiting, used to
 // reconcile after a reconnect.
 func (a *Adapter) ListQueueMembers(name string) (string, error) {
-	return a.cmd.API(fmt.Sprintf("callcenter_config queue list members %s", a.QueueName(name)))
+	return a.api("callcenter_config queue list members %s", a.QueueName(name))
 }
 
 //
@@ -300,11 +311,16 @@ func (a *Adapter) Hangup(channelID, cause string) error {
 // An error wrapping esl.ErrTimeout means the transfer was written and not
 // confirmed, and may still run; see Coordinator.TransferLeg for what keeps a
 // second one from racing it.
+//
+// The extension becomes the dialplan's destination number, which the dialplan
+// matches and puts into the data of the applications it runs, expanded; it
+// and the context are held to what a dial string may carry. A space alone
+// would let the extension name a different dialplan.
 func (a *Adapter) TransferToExtension(channelID, extension, context string) error {
 	if context == "" {
 		context = "aicc"
 	}
-	return a.exec("uuid_transfer %s %s XML %s", channelID, extension, context)
+	return a.exec("uuid_transfer %s %s XML %s", channelID, dialValue(extension), dialValue(context))
 }
 
 // BridgeToEndpoint connects a live caller to a new leg.
@@ -323,12 +339,19 @@ func (a *Adapter) TransferToExtension(channelID, extension, context string) erro
 // An error wrapping esl.ErrTimeout means the bridge was written and not
 // confirmed: the new leg, under newPartyID, may still be dialled when a
 // stalled switch catches up.
+//
+// An error wrapping ErrUnsafeValue means nothing was sent: a variable or the
+// endpoint holds something the inline grammar reads as syntax (renderVars).
 func (a *Adapter) BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error {
 	all := map[string]string{"origination_uuid": newPartyID.String()}
 	for k, v := range vars {
 		all[k] = v
 	}
-	return a.exec("uuid_transfer %s 'm:^:bridge:{%s}%s' inline", channelID, renderVars(all), endpoint)
+	block, err := renderVars(all)
+	if err != nil {
+		return err
+	}
+	return a.exec("uuid_transfer %s 'm:^:bridge:{%s}%s' inline", channelID, rendered(block), dialValue(endpoint))
 }
 
 // Originate creates a new outbound leg parked and waiting, so call control
@@ -338,7 +361,9 @@ func (a *Adapter) BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpo
 // written and the switch did not confirm it: its reply did not come in time,
 // or the link closed first. The leg may still be created, under partyID, when
 // a stalled switch catches up or a job it accepted runs. esl.ErrDown means
-// nothing was written: no leg can come of it.
+// nothing was written: no leg can come of it, and neither can one of
+// ErrUnsafeValue (renderOriginateVars, and an endpoint a dial string cannot
+// carry).
 func (a *Adapter) Originate(partyID uuid.UUID, endpoint string, vars map[string]string) (string, error) {
 	all := map[string]string{
 		"origination_uuid":   partyID.String(),
@@ -347,7 +372,11 @@ func (a *Adapter) Originate(partyID uuid.UUID, endpoint string, vars map[string]
 	for k, v := range vars {
 		all[k] = v
 	}
-	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &park()", renderOriginateVars(all), endpoint))
+	block, err := renderOriginateVars(all)
+	if err != nil {
+		return "", err
+	}
+	return a.bgapi("originate {%s}%s &park()", rendered(block), dialValue(endpoint))
 }
 
 // ChannelExists asks the switch whether a channel is still up. It is how a
@@ -356,7 +385,10 @@ func (a *Adapter) Originate(partyID uuid.UUID, endpoint string, vars map[string]
 // commands in the order they were written, so whatever was sent before this
 // question has been run by the time it is answered.
 func (a *Adapter) ChannelExists(channelID string) (bool, error) {
-	cmd := "uuid_exists " + channelID
+	cmd, err := buildCommand("uuid_exists %s", channelID)
+	if err != nil {
+		return false, err
+	}
 	reply, err := a.cmd.API(cmd)
 	if err != nil {
 		return false, fmt.Errorf("%s: %w", cmd, err)
@@ -453,13 +485,25 @@ func (a *Adapter) Eavesdrop(supervisorPartyID uuid.UUID, supervisorExtension, ta
 		vars["eavesdrop_whisper_aleg"] = "true"
 		vars["eavesdrop_whisper_bleg"] = "true"
 	}
-	return a.cmd.BgAPI(fmt.Sprintf("originate {%s}%s &eavesdrop(%s)",
-		renderVars(vars), a.Endpoint(supervisorExtension), targetChannelID))
+	// Bare rather than escaped, like a bridge's: every value here is an
+	// identifier, and one that is not is refused (renderVars). The target is
+	// the eavesdrop application's data, which the switch expands.
+	block, err := renderVars(vars)
+	if err != nil {
+		return "", err
+	}
+	return a.bgapi("originate {%s}%s &eavesdrop(%s)",
+		rendered(block), dialValue(a.Endpoint(supervisorExtension)), dialValue(targetChannelID))
 }
 
 // SetVariable sets one channel variable on a live call.
+//
+// The value is the rest of the command line and is taken whole, spaces
+// included, so only a control character refuses it: a line break would end
+// the command on the event socket and start another. Free text (a summary the
+// bot wrote) is the caller's to flatten before it gets here.
 func (a *Adapter) SetVariable(channelID, name, value string) error {
-	return a.exec("uuid_setvar %s %s %s", channelID, name, value)
+	return a.exec("uuid_setvar %s %s %s", channelID, name, text(value))
 }
 
 // EndCallerWithTheirBridge restores the switch's rule that the caller's leg
@@ -568,9 +612,88 @@ func parseTrunks(out string) []Trunk {
 	return trunks
 }
 
+// ErrUnsafeValue means a command was refused before any of it was sent: a
+// value in it holds something the switch would read as syntax rather than as
+// the value. Nothing is escaped in its place (see switchsyntax): the command
+// is not built, and the caller handles it as the switch refusing it.
+var ErrUnsafeValue = errors.New("a value the switch would read as syntax")
+
+// What a command line is made of. A plain string argument is a bare word of
+// the api command line; the other kinds say where the value goes beyond it,
+// and so what it may not hold. buildCommand checks every one of them, so a method
+// of this file cannot put a value on the line unchecked by forgetting to.
+type (
+	// dialValue ends up in a dial string, an inline action, an application's
+	// data or a dialplan destination, all of which the switch parses again
+	// and expands: none of switchsyntax.Unsafe.
+	dialValue string
+	// quoted is written between single quotes: no quote, backslash or
+	// control character.
+	quoted string
+	// text is the last argument of a command that takes the rest of the line
+	// whole, spaces and all (uuid_setvar's value): no control character, so
+	// no line break ends the command early.
+	text string
+	// rendered was built and checked in this file already: a variable block.
+	rendered string
+)
+
+// buildCommand renders a command line, or refuses to when an argument would be
+// read as syntax.
+//
+// A bare argument is split from the next at a space, and ' and \ quote and
+// escape in that parser (switch_separate_string), so none of those and no
+// control character: a line break would end the command on the event socket
+// and start another.
+func buildCommand(format string, args ...any) (string, error) {
+	for _, arg := range args {
+		var value, bad string
+		switch v := arg.(type) {
+		case string:
+			value, bad = v, firstRune(v, func(r rune) bool {
+				return unicode.IsControl(r) || unicode.IsSpace(r) || r == '\'' || r == '\\'
+			})
+		case dialValue:
+			value, bad = string(v), switchsyntax.Unsafe(string(v))
+		case quoted:
+			value, bad = string(v), firstRune(string(v), func(r rune) bool {
+				return unicode.IsControl(r) || r == '\'' || r == '\\'
+			})
+		case text:
+			value, bad = string(v), firstRune(string(v), unicode.IsControl)
+		}
+		if bad != "" {
+			return "", unsafeValue(value, bad)
+		}
+	}
+	return fmt.Sprintf(format, args...), nil
+}
+
+// firstRune is the first rune of s that matches, as a string; "" for none.
+func firstRune(s string, match func(rune) bool) string {
+	if i := strings.IndexFunc(s, match); i >= 0 {
+		r, _ := utf8.DecodeRuneInString(s[i:])
+		return string(r)
+	}
+	return ""
+}
+
+// unsafeValue is the refusal. The value is quoted (%q), so a line break in it
+// cannot forge a log line, and cut short: what matters is which character.
+func unsafeValue(value, bad string) error {
+	const limit = 64
+	if len(value) > limit {
+		value = value[:limit] + "…"
+	}
+	return fmt.Errorf("%w: %q holds %q", ErrUnsafeValue, value, bad)
+}
+
 // exec runs a command and turns a switch-level error reply into a Go error.
 func (a *Adapter) exec(format string, args ...any) error {
-	cmd := fmt.Sprintf(format, args...)
+	cmd, err := buildCommand(format, args...)
+	if err != nil {
+		return err
+	}
 	reply, err := a.cmd.API(cmd)
 	slog.Debug("switch command", "command", cmd, "reply", strings.TrimSpace(reply), "error", err)
 	if err != nil {
@@ -582,8 +705,24 @@ func (a *Adapter) exec(format string, args ...any) error {
 	return nil
 }
 
-// renderVars renders channel variables in the switch's braces syntax, sorted
-// so a command is reproducible and testable.
+// api runs a command whose reply the caller reads itself.
+func (a *Adapter) api(format string, args ...any) (string, error) {
+	cmd, err := buildCommand(format, args...)
+	if err != nil {
+		return "", err
+	}
+	return a.cmd.API(cmd)
+}
+
+// bgapi runs a command in the background and returns its job id.
+func (a *Adapter) bgapi(format string, args ...any) (string, error) {
+	cmd, err := buildCommand(format, args...)
+	if err != nil {
+		return "", err
+	}
+	return a.cmd.BgAPI(cmd)
+}
+
 // escapeOriginateValue makes one value safe to put inside an originate's {…}
 // block. Every dynamic value goes through it; none is ever concatenated raw.
 //
@@ -603,6 +742,8 @@ func (a *Adapter) exec(format string, args ...any) error {
 //     a stray brace ends the block wherever it appears.
 //   - An empty value becomes ” so the key still arrives. Bare, the pair has
 //     no "=" half to split on and the switch drops it without a word.
+//
+// What no escape reaches is refused before this runs (renderOriginateVars).
 func escapeOriginateValue(v string) string {
 	v = strings.NewReplacer("{", "", "}", "").Replace(v)
 	if v == "" {
@@ -622,30 +763,85 @@ func escapeOriginateValue(v string) string {
 // inline transfer of BridgeToEndpoint is itself inside single quotes, where an
 // embedded one ends the outer quoting and the remainder runs as an inline
 // application (found live).
-func renderOriginateVars(vars map[string]string) string {
+//
+// Two things in a value are refused rather than escaped, because quoting does
+// not reach them: a control character (a line break ends the command on the
+// event socket, and the quoting that would hold a tab is the block's, not the
+// socket's), and :_:, which splits the dial string before the block is read.
+func renderOriginateVars(vars map[string]string) (string, error) {
+	keys, err := checkedKeys(vars)
+	if err != nil {
+		return "", err
+	}
 	escaped := make(map[string]string, len(vars))
-	for k, v := range vars {
+	for _, k := range keys {
+		v := vars[k]
+		bad := firstRune(v, unicode.IsControl)
+		if bad == "" && strings.Contains(v, ":_:") {
+			bad = ":_:"
+		}
+		if bad != "" {
+			return "", unsafeValue(v, bad)
+		}
 		escaped[k] = escapeOriginateValue(v)
 	}
-	return renderVars(escaped)
+	return joinVars(keys, escaped), nil
 }
 
-func renderVars(vars map[string]string) string {
+// renderVars renders channel variables in the switch's braces syntax, sorted
+// so a command is reproducible and testable.
+//
+// Joined bare, because this block rides in a grammar that cannot be quoted:
+// the single-quoted inline transfer of BridgeToEndpoint, where an embedded
+// quote ends the outer quoting and the remainder is executed as an inline
+// application (found live). The values pass through four parsers before the
+// bridge reads them — the api arguments, the inline action list split at ^,
+// the expansion of the bridge's data, the {…} block split at commas — so a
+// value holding anything one of them reads as syntax refuses the whole command
+// (switchsyntax.Unsafe). Nothing is sent: a value that cannot be carried as
+// written is not a value to guess at.
+func renderVars(vars map[string]string) (string, error) {
+	keys, err := checkedKeys(vars)
+	if err != nil {
+		return "", err
+	}
+	for _, k := range keys {
+		if bad := switchsyntax.Unsafe(vars[k]); bad != "" {
+			return "", unsafeValue(vars[k], bad)
+		}
+	}
+	return joinVars(keys, vars), nil
+}
+
+// checkedKeys returns the variable names sorted, refusing one that is empty,
+// holds an = (the pair is split at the first one) or anything else the
+// switch reads as syntax. Names are ours or the configuration's; this is the
+// check that keeps it that way.
+func checkedKeys(vars map[string]string) ([]string, error) {
 	keys := make([]string, 0, len(vars))
 	for k := range vars {
 		keys = append(keys, k)
 	}
 	slices.Sort(keys)
+	for _, k := range keys {
+		bad := switchsyntax.Unsafe(k)
+		switch {
+		case bad != "":
+		case k == "":
+			bad = "an empty name"
+		case strings.ContainsRune(k, '='):
+			bad = "="
+		}
+		if bad != "" {
+			return nil, unsafeValue(k, bad)
+		}
+	}
+	return keys, nil
+}
 
+func joinVars(keys []string, vars map[string]string) string {
 	parts := make([]string, 0, len(keys))
 	for _, k := range keys {
-		// Joined bare. This block rides in two grammars and only one of
-		// them can be quoted: the single-quoted inline transfer of
-		// BridgeToEndpoint, where an embedded quote ends the outer quoting
-		// and the remainder is executed as an inline application (found
-		// live). A raw originate line can quote, and does —
-		// renderOriginateVars wraps this. Callers reaching here keep values
-		// free of spaces, commas and quotes.
 		parts = append(parts, k+"="+vars[k])
 	}
 	return strings.Join(parts, ",")
@@ -668,7 +864,7 @@ func renderVars(vars map[string]string) string {
 func (a *Adapter) StartAudioStream(channelID, wsURL string, rateHz int, metadata string) error {
 	if metadata != "" {
 		return a.exec("uuid_audio_stream %s start %s stereo %d %s",
-			channelID, wsURL, rateHz, metadata)
+			channelID, wsURL, rateHz, text(metadata))
 	}
 	return a.exec("uuid_audio_stream %s start %s stereo %d", channelID, wsURL, rateHz)
 }

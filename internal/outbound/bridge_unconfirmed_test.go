@@ -162,6 +162,28 @@ func TestABridgeTheSwitchRefusedGivesTheSlotBackAtOnce(t *testing.T) {
 	}
 }
 
+// A bridge the adapter refused to build, because a value would be read by the
+// inline grammar as syntax, is refused like any other: nothing was sent,
+// nothing waits for it, and its bot slot goes back at once.
+func TestABridgeTheAdapterRefusedGivesTheSlotBackAtOnce(t *testing.T) {
+	t.Parallel()
+	s, sw, slots := slotted(t, 1, 0, time.Second)
+	sw.bridgeErr = fmt.Errorf("%w: %q holds %q", telephony.ErrUnsafeValue, "en'", "'")
+	_, leg := placeAI(t, s, sw)
+	answer(s, leg)
+	waitBridges(t, sw, 1)
+	waitUntil(t, func() bool { return slots.Reserved() == 0 })
+	s.mu.Lock()
+	pending := len(s.bridges)
+	s.mu.Unlock()
+	if pending != 0 {
+		t.Fatal("a refused bridge is waited for")
+	}
+	if h := sw.hangupList(); len(h) != 0 {
+		t.Errorf("a refused bridge hung the leg up: %+v", h)
+	}
+}
+
 func waitUntil(t *testing.T, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

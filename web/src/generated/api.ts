@@ -2175,7 +2175,7 @@ export interface components {
         StaffedQueue: {
             /** Format: uuid */
             queueId: string;
-            /** @description Switch-safe identifier: no spaces, @ or quotes. */
+            /** @description Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:. */
             name: string;
             displayName: string;
             /** @description The queue's answer target; a wait past it is a breach. 0 means none is configured. */
@@ -2206,7 +2206,7 @@ export interface components {
             queues: components["schemas"]["StaffedQueue"][];
         };
         TransferRequest: {
-            /** @description Queue extension or dialable number. */
+            /** @description Queue extension or dialable number: 1 to 20 digits, optionally with one leading "+". Anything else is refused with 422 VALIDATION_FAILED (params.field destination, params.rule DESTINATION_FORMAT). */
             destination: string;
         };
         DTMFRequest: {
@@ -2245,7 +2245,7 @@ export interface components {
             did?: string;
             /** @description AGENT_OUTBOUND only: the extension whose phone is raised first. A signed-in agent may leave it out — the phone they signed in at is used — and may not name another's. A supervisor or an API-key caller has no phone of their own, so they must name one. */
             extensionNumber?: string;
-            /** @description AI_OUTBOUND only: overrides the DID's language when set. */
+            /** @description AI_OUTBOUND only: overrides the DID's language when set. A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent uses the DID's language. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG), whatever the kind. */
             language?: string;
             /**
              * Format: uuid
@@ -2310,7 +2310,9 @@ export interface components {
         /** @description Where an unserved caller goes. BOT_FLOW and FORWARD need a target. */
         Overflow: {
             type: components["schemas"]["OverflowType"];
+            /** @description BOT_FLOW: the DID the bot answers on. FORWARD: the extension or number the caller is transferred to. No whitespace, control characters or quotes, and none of \ ^ , | { } $ or the sequence :_: (422 VALIDATION_FAILED, params.field overflow.target, params.rule TARGET_CHARSET). */
             target?: string;
+            /** @description ANNOUNCE_HANGUP: played before the caller is hung up. The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION). */
             sound?: string;
         };
         /** @description How a queue widens its agent search over time. */
@@ -2331,7 +2333,7 @@ export interface components {
         Queue: {
             /** Format: uuid */
             id: string;
-            /** @description Switch-safe identifier: no spaces, @ or quotes. */
+            /** @description Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:. */
             name: string;
             extNumber: string;
             displayName: string;
@@ -2352,15 +2354,17 @@ export interface components {
         };
         /** @description Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300, isEnabled true, isRecordingEnabled true). */
         QueueWrite: {
-            /** @description Switch-safe identifier: no spaces, @ or quotes. */
+            /** @description Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:. A name that breaks this is refused with 422 VALIDATION_FAILED (params.field name, params.rule NAME_CHARSET). */
             name: string;
             /** @description Omit it and the next free number in the queue pool (AICC_QUEUE_RANGE) is allocated — which is what a form should do, because whoever adds a queue is asking for a queue, not for 7004. Supplying one is for a deployment that has to match numbers it does not own. */
             extNumber?: string;
             displayName?: string;
             strategy?: components["schemas"]["Strategy"];
+            /** @description The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION). */
             mohSound?: string;
             maxWaitSec?: number;
             maxWaitNoAgentSec?: number;
+            /** @description The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION). */
             announceSound?: string;
             announceFrequencySec?: number;
             tierRules?: components["schemas"]["TierRules"];
@@ -2434,6 +2438,7 @@ export interface components {
          */
         DIDWrite: {
             number: string;
+            /** @description A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent means en. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG). */
             language?: string;
             /** Format: uuid */
             flowId?: string;

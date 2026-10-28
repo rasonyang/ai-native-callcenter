@@ -32,6 +32,13 @@ var (
 	// a bgapi job it accepted runs whatever happens to the socket. For a bgapi
 	// command the outcome is unknown, and the caller must treat it so.
 	ErrTimeout = errors.New("esl command timed out")
+	// ErrUnframable reports a command refused before any of it was written,
+	// because it holds a line break or a NUL. A command is one line ended by a
+	// blank one: a line break inside it would end it early and have the
+	// switch read the rest as headers, or as a command of its own, and every
+	// reply after it would be matched to the wrong command. Like ErrDown, the
+	// switch cannot run it; unlike ErrDown, retrying will not help.
+	ErrUnframable = errors.New("esl command holds a line break")
 )
 
 // CommandTimeout bounds a single api/bgapi round trip, from the moment the
@@ -177,6 +184,9 @@ func (c *Client) Done() <-chan struct{} { return c.closed }
 // was written, so the switch cannot run it. ErrTimeout: some or all of it was
 // written and no reply came, so the switch may run it.
 func (c *Client) command(cmd string) (string, error) {
+	if strings.ContainsAny(cmd, "\r\n\x00") {
+		return "", fmt.Errorf("%w: %q", ErrUnframable, abbrev(cmd))
+	}
 	timeout := c.timeout
 	if timeout <= 0 {
 		timeout = CommandTimeout

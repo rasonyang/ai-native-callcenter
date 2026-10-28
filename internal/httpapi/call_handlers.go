@@ -453,6 +453,10 @@ func (s *Server) callResult(w http.ResponseWriter, r *http.Request, callID uuid.
 	case errors.Is(err, telephony.ErrInvalidDTMF):
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"digits must be 0-9, A-D, * or #", map[string]any{"field": "digits"})
+	case errors.Is(err, telephony.ErrInvalidDestination):
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"a destination is an extension or a number: 1 to 20 digits with an optional leading +",
+			map[string]any{"field": "destination", "rule": "DESTINATION_FORMAT"})
 	case errors.Is(err, esl.ErrDown):
 		writeError(w, http.StatusServiceUnavailable, CodeSwitchDown, "the switch is unreachable", nil)
 	default:

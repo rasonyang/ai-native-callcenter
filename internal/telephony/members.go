@@ -59,7 +59,7 @@ func (m QueueMember) IsWaiting() bool {
 // empty too, so a misread degrades to "we could not adopt this call" rather
 // than to a call adopted with a wrong identity.
 func (a *Adapter) ChannelVariable(channelID, name string) (string, error) {
-	out, err := a.cmd.API(fmt.Sprintf("uuid_getvar %s %s", channelID, name))
+	out, err := a.api("uuid_getvar %s %s", channelID, name)
 	if err != nil {
 		return "", fmt.Errorf("read %s of %s: %w", name, channelID, err)
 	}

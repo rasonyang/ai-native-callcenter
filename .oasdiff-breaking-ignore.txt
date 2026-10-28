@@ -19,3 +19,15 @@ api POST /agent/login request-property-removed removed the request property `ext
 # holds: every value the server returns passed the 1024-byte bound on the way in, and 1024 bytes
 # are never more than 1024 characters. The description states the byte bound, which is stricter.
 api PATCH /calls/{callId}/user-data response-property-max-length-unset the `userData/additionalProperties/` response property's maxLength was unset from `1024` for the response status `200`
+#
+# 2026-10-28 — CreateCallRequest.language and DIDWrite.language gain the pattern of a lowercase
+# BCP 47 tag of at most 8 characters. Language was always documented as a lowercase BCP 47
+# subtag; values outside it never worked. Empty stays accepted: the number's language, or en.
+api POST /calls request-property-pattern-added added the pattern `^([a-z]{2,3}(-[a-z0-9]+)*)?$` to the request property `language`
+api POST /dids request-property-pattern-added added the pattern `^([a-z]{2,3}(-[a-z0-9]+)*)?$` to the request property `language`
+api PUT /dids/{didId} request-property-pattern-added added the pattern `^([a-z]{2,3}(-[a-z0-9]+)*)?$` to the request property `language`
+#
+# 2026-10-28 — TransferRequest.destination gains the pattern of an extension or a number. It was
+# always documented as a queue extension or a dialable number; a destination outside that never
+# reached a route in the dialplan.
+api POST /calls/{callId}/transfer request-property-pattern-added added the pattern `^\+?[0-9]{1,20}$` to the request property `destination`

@@ -122,8 +122,26 @@ func TestTheNumberAndLanguageAreCheckedAsTheAPIChecksThem(t *testing.T) {
 	if _, err := planDIDBinding("95001", "english-uk", flowID, nil); err == nil {
 		t.Error("an eight-character-plus language was accepted; the API refuses it")
 	}
+	// A language is a lowercase BCP 47 tag, checked as given, exactly as the
+	// API checks it.
+	for _, language := range []string{
+		"EN", "zh_CN", "en^hangup", "en'", "zh,x=y", "zh hans", "中文", "zh-hans-cn", "e", "zh-hans-x",
+		"en\nzh", "en\n", "  ", " en",
+	} {
+		if _, err := planDIDBinding("95001", language, flowID, nil); err == nil {
+			t.Errorf("language %q was accepted; the API refuses it", language)
+		}
+	}
+	for _, language := range []string{"en", "zh", "pt-br", "zh-hans"} {
+		plan, err := planDIDBinding("95001", language, flowID, nil)
+		if err != nil {
+			t.Errorf("language %q: %v", language, err)
+		} else if plan.Create.Language != language {
+			t.Errorf("language %q planned as %q", language, plan.Create.Language)
+		}
+	}
 
-	plan, err := planDIDBinding(" 95001 ", "  ", flowID, nil)
+	plan, err := planDIDBinding(" 95001 ", "", flowID, nil)
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}

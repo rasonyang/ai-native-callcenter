@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -983,8 +984,20 @@ func (a *callActions) handOnCaller() {
 	}
 }
 
+// stampChannel writes one variable onto the caller's channel.
+//
+// Some values are the model's own words (the summary and the reason of a
+// transfer), and a model writes line breaks. A line break would end the
+// command on the event socket, so the switch adapter refuses it; the stamp is
+// flattened to one line here instead, so the agent still gets the summary.
 func (a *callActions) stampChannel(name, value string) {
-	if value == "" {
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, value)
+	if strings.TrimSpace(value) == "" {
 		return
 	}
 	if err := a.orchestrator.cfg.Switch.SetVariable(a.callerChannel, name, value); err != nil {
