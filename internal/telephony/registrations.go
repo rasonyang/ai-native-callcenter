@@ -25,7 +25,7 @@ func (a *Adapter) Registrations(profile string) ([]Registration, error) {
 	if profile == "" {
 		profile = "internal"
 	}
-	out, err := a.cmd.API(fmt.Sprintf("sofia status profile %s reg", profile))
+	out, err := a.api("sofia status profile %s reg", profile)
 	if err != nil {
 		return nil, fmt.Errorf("list registrations: %w", err)
 	}

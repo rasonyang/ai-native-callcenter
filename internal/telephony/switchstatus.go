@@ -36,7 +36,7 @@ func (a *Adapter) Profiles() ([]SwitchProfile, error) {
 	}
 	profiles := parseProfiles(out)
 	for i := range profiles {
-		detail, err := a.cmd.API("sofia status profile " + profiles[i].Name)
+		detail, err := a.api("sofia status profile %s", profiles[i].Name)
 		if err != nil {
 			return nil, err
 		}
@@ -52,7 +52,7 @@ func (a *Adapter) Profiles() ([]SwitchProfile, error) {
 // matters is that the far end answers. It reports ErrUnknownGateway when the
 // switch has no gateway by that name — a configuration fault, not an outage.
 func (a *Adapter) GatewayUp(name string) (bool, error) {
-	out, err := a.cmd.API("sofia status gateway " + name)
+	out, err := a.api("sofia status gateway %s", name)
 	if err != nil {
 		return false, err
 	}
