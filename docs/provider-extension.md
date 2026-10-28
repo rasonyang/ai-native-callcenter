@@ -300,6 +300,17 @@ all, because there is no goodbye cue to send. Doubao flows should set
 documented, not enforced at publish. An entry phase with no
 `announce` is legal and means the bot answers and waits for the caller to speak.
 
+On the Realtime engines the closing line is best effort, and the platform
+checks it (issue [#262](https://github.com/rasonyang/ai-native-callcenter/issues/262)).
+When a hangup moves the call into a terminal phase with an `announce`, the words
+of the turn that follows are held against the line. A turn that does not say it,
+typically one response that ended the call with `record_lead` and `hangup` and
+was answered with the model's own confirmation, is answered by asking for the
+line once more through the closing `SpeakText`, after the caller has heard that
+turn whole; a double goodbye is possible and accepted. A second miss is logged
+at WARN and the call ends on that turn. Doubao says its line itself and is not
+checked.
+
 ## Attaching something that is not a vendor
 
 The interesting case is the one the design reserves: a **Realtime gateway** — a
