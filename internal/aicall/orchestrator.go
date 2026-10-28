@@ -597,6 +597,8 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					// of the model's ("let me check" is what it says).
 					if !event.IsAside {
 						reportClaims(event.Turn, claims.onBotSaid(event.Turn, event.Text))
+						// The words an owed closing line is held against.
+						actions.onBotSaid(event.Turn, event.Text)
 					}
 				}
 
@@ -757,6 +759,12 @@ const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
 // of the conversation, which is the tool result, over a per-response override.
 // With the line in the result it was said 7 of 7 on qwen, and as often as the
 // other path on openai (docs/design/qwen-findings.md, W-Q1).
+//
+// A line in the result is a request the model may not follow. In a batch that
+// ends the call (record_lead and hangup in one response) the single turn that
+// answers both results followed the talk phase's instruction for the first
+// instead (#262); the closing-line accounting holds that turn's words against
+// the line and asks for it once more (callActions.onTurnDone).
 //
 // Doubao keeps its own SpeakText, because that is exact by construction and a
 // direction to a model is not. A phase that is not terminal keeps it on every
@@ -1028,11 +1036,12 @@ func (o *Orchestrator) enterPhase(moved string, session *Session,
 	}
 	if runtime.Engine().IsTerminal() {
 		o.armTheEnding(moved, session, actions, log)
-		// A closing line owed to the caller keeps an audio-less turn from
-		// ending the call (callActions.expectClosingLine). Doubao says its
-		// line itself and is not asked to.
+		// A closing line owed to the caller keeps an audio-less turn, or one
+		// that says something else, from ending the call
+		// (callActions.expectClosingLine). Doubao says its line itself and is
+		// not asked to.
 		if runtime.Announce() != "" && !o.cfg.Profile.RequiresTerminalAnnounce {
-			actions.expectClosingLine()
+			actions.expectClosingLine(runtime.Announce())
 		}
 	}
 }

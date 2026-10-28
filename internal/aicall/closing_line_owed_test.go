@@ -261,7 +261,7 @@ func TestOnlyAHangupIntoALineOwesIt(t *testing.T) {
 	t.Run("transfer", func(t *testing.T) {
 		actions, session, _ := testActions(t, &fakeSwitch{})
 		actions.armAs(t.Context(), true, func() {})
-		actions.expectClosingLine()
+		actions.expectClosingLine("")
 		if actions.isLineOwed {
 			t.Fatal("a transfer owes a closing line")
 		}
@@ -274,7 +274,7 @@ func TestOnlyAHangupIntoALineOwesIt(t *testing.T) {
 	t.Run("limit-locked", func(t *testing.T) {
 		actions, _, _ := testActions(t, &fakeSwitch{})
 		actions.arm(t.Context(), func() {})
-		actions.expectClosingLine()
+		actions.expectClosingLine("")
 		actions.lockEnding()
 		if actions.isLineOwed {
 			t.Fatal("a limit-decided ending owes a closing line")
@@ -284,7 +284,7 @@ func TestOnlyAHangupIntoALineOwesIt(t *testing.T) {
 		actions, session, _ := testActions(t, &fakeSwitch{})
 		fired := make(chan struct{})
 		actions.arm(t.Context(), func() { close(fired) })
-		actions.expectClosingLine()
+		actions.expectClosingLine("")
 		armedTurn := session.currentTurn()
 		actions.onTurnDone(armedTurn+1, false, false)
 		actions.onBargeIn(0)
