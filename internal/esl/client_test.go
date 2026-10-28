@@ -205,6 +205,62 @@ func TestAPIAndBgAPI(t *testing.T) {
 	}
 }
 
+// A command is one line ended by a blank one. A value with a line break in it
+// would end the command early, and a blank line inside it would have the
+// switch run the rest as a command of its own and answer twice, so every
+// later reply would be matched to the wrong command. Such a command is refused
+// before a byte of it is written, and the link goes on as if it had never
+// been asked.
+func TestACommandWithALineBreakIsNeverWritten(t *testing.T) {
+	t.Parallel()
+	f := newFakeSwitch(t, "ClueCon")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client, err := Dial(ctx, f.addr(), "ClueCon")
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+	fc := f.waitConn(t)
+
+	for _, cmd := range []string{
+		"uuid_setvar chan-1 aicc_bot_summary wants a refund\n\nbgapi status",
+		"uuid_setvar chan-1 aicc_bot_summary wants a refund\nContent-Type: x",
+		"uuid_setvar chan-1 aicc_bot_summary wants a refund\r\n\r\napi status",
+		"uuid_setvar chan-1 aicc_bot_summary wants\x00a refund",
+	} {
+		if _, err := client.API(cmd); !errors.Is(err, ErrUnframable) {
+			t.Errorf("API(%q) error = %v, want ErrUnframable", cmd, err)
+		}
+		if _, err := client.BgAPI(cmd); !errors.Is(err, ErrUnframable) {
+			t.Errorf("BgAPI(%q) error = %v, want ErrUnframable", cmd, err)
+		}
+	}
+
+	// The next command is the first the switch hears, and its reply is its own.
+	body, err := client.API("status")
+	if err != nil {
+		t.Fatalf("API(status) error = %v", err)
+	}
+	if body != "+OK status" {
+		t.Errorf("API(status) = %q, want its own reply", body)
+	}
+	select {
+	case got := <-fc.cmds:
+		if got != "api status" {
+			t.Errorf("the switch first heard %q, want api status", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("the switch heard nothing")
+	}
+	select {
+	case got := <-fc.cmds:
+		t.Errorf("the switch heard %q as well", got)
+	default:
+	}
+}
+
 func TestCommandsMatchRepliesInOrder(t *testing.T) {
 	t.Parallel()
 	f := newFakeSwitch(t, "ClueCon")
