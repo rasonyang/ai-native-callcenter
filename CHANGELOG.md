@@ -7,6 +7,17 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Security
+
+- Values that reach the switch's command line are now checked before a command
+  is built, and a command holding a value the switch would read as syntax is
+  refused and never sent (GHSA-vf3r-34jf-c84h). Affects every release up to
+  and including v0.7.0. The worst path needed no account: a caller could
+  steer the bot into a transfer summary that split a switch command. The
+  others needed an agent credential, the `calls:create:ai` or `config:write`
+  scope, or network access to the bot's SIP port while
+  `AICC_BOT_ALLOWED_PEERS` is empty.
+
 ### Upgrade notes
 
 - The binary's default country code is now `1` (`AICC_DEFAULT_COUNTRY_CODE`), so
@@ -63,6 +74,22 @@ carries the one-line installer's files.
 - A migration widens `api_keys.name` from 120 to 128 characters, the limit the
   contract has always stated; no row is rewritten. Rolling it back cuts a name
   longer than 120 characters to its first 120. (#370)
+- Values the switch carries are held to their documented shape, and a request
+  outside it is refused with `422 VALIDATION_FAILED` naming the field and rule.
+  `CreateCallRequest.language` and `DIDWrite.language` are a lowercase BCP 47
+  tag of at most 8 characters (`en`, `zh`, `pt-br`, `zh-hans`; rule
+  `LANGUAGE_SUBTAG`), checked as sent: a language with a space or a line break
+  around it is no longer trimmed. Empty or absent still means the number's
+  language on a call and `en` on a number. `aicc flowadd -language` applies the
+  same rule. `TransferRequest.destination` is an extension or a number, 1 to 20
+  digits with an optional leading `+` (`DESTINATION_FORMAT`). A queue's name
+  (`NAME_CHARSET`) and overflow target (`TARGET_CHARSET`) hold no whitespace,
+  quotes or any of `\ ^ , | { } $`, and its sounds may name a variable such as
+  `$${hold_music}` but hold no other `${…}` (`SOUND_EXPANSION`). Numbers and
+  queues stored before this are not rewritten; saving one again asks for a
+  valid value. An AI outbound call from a number whose stored language holds
+  one of those characters is refused with `409 CONFLICT` before the customer is
+  rung.
 
 ### Added
 
