@@ -445,9 +445,9 @@ describe('a publish that fails for any other reason', () => {
  * loses something. Publishing it is the ordinary Publish, its note prefilled.
  */
 
-const LIVE_ID = '0199e1c0-1b2a-7f00-8c3d-2e4f6a8b0c11'
-const OLD_ID = '0199c4f2-5a10-7c33-8e21-6b0d9a7f3e58'
-const REFUSED_ID = '0199a7d3-2c4e-7b11-9f02-4e8c1a6d5b93'
+const LIVE_ID = '01a18100-b38c-7d05-a1b3-6e2f4c8d9a17'
+const OLD_ID = '01a18100-b369-7c1e-8f42-3a9d5e7b1c60'
+const REFUSED_ID = '01a18100-a7f0-7e2a-b6c1-0d4e9a3f7b25'
 const OLD_NOTE = '十月停网补偿话术，按客服组意见调整'
 const OLD_AT = '2026-10-12T06:30:00Z'
 
@@ -503,7 +503,7 @@ function historyServer(draft: FlowSpec) {
   const publishes: Array<{ note?: string }> = []
   const reads: string[] = []
   let detail: FlowDetail = {
-    flow: flowFixture({ hasUnpublishedChanges: !sameSpec(draft, SPEC) }),
+    flow: flowFixture({ publishedRevisionId: LIVE_ID, hasUnpublishedChanges: !sameSpec(draft, SPEC) }),
     draftSpec: draft as FlowDetail['draftSpec'],
     revisions: [
       { revisionId: LIVE_ID, note: 'First billing follow-up', createdAt: at, isPublished: true },
@@ -571,28 +571,64 @@ const editorText = () =>
 const pretty = (spec: unknown) => JSON.stringify(spec, null, 2)
 
 describe('a revision in the history', () => {
+  // Revision ids are UUIDv7: the first eight characters are the top of the
+  // millisecond clock and change about once a minute, so publishes seconds
+  // apart share them. They are named by their random tail instead.
+  it('names two revisions published in the same minute apart, everywhere', async () => {
+    expect(LIVE_ID.slice(0, 8)).toBe(OLD_ID.slice(0, 8))
+    expect(OLD_ID.slice(0, 8)).toBe(REFUSED_ID.slice(0, 8))
+    const server = historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    const ids = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].firstChild?.textContent)
+    expect(ids).toEqual(['4c8d9a17', '5e7b1c60', '9a3f7b25'])
+    expect(screen.queryByText('01a18100')).not.toBeInTheDocument()
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Replace the draft with revision 5e7b1c60?',
+    })
+    expect(dialog).not.toHaveTextContent('4c8d9a17')
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
+    )
+    const publish = screen.getByRole('button', { name: 'Publish' })
+    await waitFor(() => expect(publish).toBeEnabled())
+    await user.click(publish)
+    const publishing = await screen.findByRole('dialog')
+    expect(within(publishing).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+    await user.click(within(publishing).getByRole('button', { name: 'Publish' }))
+    await waitFor(() => expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }]))
+  })
+
   it('opens read-only and closes again, changing nothing', async () => {
     const server = historyServer(SPEC)
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: 'View' }))
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'View' }))
 
-    const view = await screen.findByRole('region', { name: 'Spec of revision 0199c4f2' })
+    const view = await screen.findByRole('region', { name: 'Spec of revision 5e7b1c60' })
     expect(view).toHaveTextContent('Mention the October outage credit first.')
     expect(view).toHaveTextContent('先告知十月停网补偿。')
     expect(view.tagName).toBe('PRE')
     expect(within(view).queryByRole('textbox')).not.toBeInTheDocument()
     expect(view).not.toHaveAttribute('contenteditable')
-    expect(within(rowOf('0199c4f2')).getByRole('button', { name: 'Hide' })).toHaveAttribute(
+    expect(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Hide' })).toHaveAttribute(
       'aria-expanded',
       'true',
     )
     expect(server.reads).toEqual([OLD_ID])
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: 'Hide' }))
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Hide' }))
     expect(
-      screen.queryByRole('region', { name: 'Spec of revision 0199c4f2' }),
+      screen.queryByRole('region', { name: 'Spec of revision 5e7b1c60' }),
     ).not.toBeInTheDocument()
     expect(server.puts).toEqual([])
   })
@@ -602,9 +638,9 @@ describe('a revision in the history', () => {
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199a7d3')).getByRole('button', { name: 'View' }))
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'View' }))
 
-    const view = await screen.findByRole('region', { name: 'Spec of revision 0199a7d3' })
+    const view = await screen.findByRole('region', { name: 'Spec of revision 9a3f7b25' })
     expect(view).toHaveTextContent('"anounce"')
     expect(view).toHaveTextContent('lookup_account_by_postcode')
   })
@@ -616,7 +652,7 @@ describe('copying a revision to the draft', () => {
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     await waitFor(() => expect(server.puts).toHaveLength(1))
@@ -626,7 +662,7 @@ describe('copying a revision to the draft', () => {
     // Back in the designer, showing the restored spec, and pointed at Publish.
     await waitFor(() => expect(editorText()).toBe(pretty(OLD_SPEC)))
     expect(await screen.findByRole('status')).toHaveTextContent(
-      'Revision 0199c4f2 is now the draft. Publish it to put it live.',
+      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
     )
     expect(screen.getByText('Unpublished changes')).toBeInTheDocument()
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
@@ -635,11 +671,11 @@ describe('copying a revision to the draft', () => {
     await waitFor(() => expect(publish).toBeEnabled())
     await user.click(publish)
     const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByLabelText('Note')).toHaveValue('Restore of 0199c4f2')
+    expect(within(dialog).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
     await user.click(within(dialog).getByRole('button', { name: 'Publish' }))
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
-    expect(server.publishes).toEqual([{ note: 'Restore of 0199c4f2' }])
+    expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }])
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   })
 
@@ -648,15 +684,15 @@ describe('copying a revision to the draft', () => {
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
 
     const dialog = await screen.findByRole('dialog', {
-      name: 'Replace the draft with revision 0199c4f2?',
+      name: 'Replace the draft with revision 5e7b1c60?',
     })
     const when = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
       new Date(OLD_AT),
     )
-    expect(dialog).toHaveTextContent('0199c4f2')
+    expect(dialog).toHaveTextContent('5e7b1c60')
     expect(dialog).toHaveTextContent(when)
     expect(dialog).toHaveTextContent(OLD_NOTE)
     expect(dialog).toHaveTextContent(
@@ -677,10 +713,10 @@ describe('copying a revision to the draft', () => {
     await user.type(await screen.findByLabelText('Name'), ' (October)')
     await openTab(user)
 
-    await user.click(within(rowOf('0199a7d3')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
 
     const dialog = await screen.findByRole('dialog', {
-      name: 'Replace the draft with revision 0199a7d3?',
+      name: 'Replace the draft with revision 9a3f7b25?',
     })
     // That revision was published without a note.
     expect(dialog).toHaveTextContent('No note')
@@ -693,7 +729,7 @@ describe('copying a revision to the draft', () => {
     await waitFor(() => expect(editorText()).toBe(pretty(EDITED_SPEC)))
     await openTab(user)
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
 
@@ -713,10 +749,10 @@ describe('copying a revision to the draft', () => {
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199a7d3')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
 
     const notice = await screen.findByRole('alert')
-    expect(notice).toHaveTextContent('Revision 0199a7d3 was not copied; the draft is unchanged.')
+    expect(notice).toHaveTextContent('Revision 9a3f7b25 was not copied; the draft is unchanged.')
     expect(notice).toHaveTextContent('The server refused this spec:')
     expect(listed(notice)).toEqual(REFUSED_PROBLEMS)
     expect(server.puts).toHaveLength(1)
@@ -730,7 +766,7 @@ describe('copying a revision to the draft', () => {
     const { user } = renderEditor()
     await openTab(user)
 
-    await user.click(within(rowOf('0199a7d3')).getByRole('button', { name: 'Copy to draft' }))
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
     const dialog = await screen.findByRole('dialog')
     await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
 
@@ -746,19 +782,19 @@ describe('copying a revision to the draft', () => {
     const { user } = renderEditor()
     await openTab(user, '发布历史')
 
-    await user.click(within(rowOf('0199c4f2')).getByRole('button', { name: '复制到草稿' }))
-    const dialog = await screen.findByRole('dialog', { name: '用版本 0199c4f2 替换草稿？' })
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: '复制到草稿' }))
+    const dialog = await screen.findByRole('dialog', { name: '用版本 5e7b1c60 替换草稿？' })
     expect(dialog).toHaveTextContent(
       '草稿将替换为这个版本的配置，未保存的编辑和未发布的改动都会丢失。发布之前，来电听到的内容不会改变。',
     )
     await user.click(within(dialog).getByRole('button', { name: '替换草稿' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(
-      '版本 0199c4f2 已复制为草稿，发布后才会生效。',
+      '版本 5e7b1c60 已复制为草稿，发布后才会生效。',
     )
     await user.click(screen.getByRole('button', { name: '发布' }))
     expect(within(await screen.findByRole('dialog')).getByLabelText('备注')).toHaveValue(
-      '恢复自 0199c4f2',
+      '恢复自 5e7b1c60',
     )
   })
 })

@@ -23,9 +23,17 @@ export type FlowRevision = components['schemas']['FlowRevision']
 /** One revision with the spec it stored, served as stored. */
 export type FlowRevisionDetail = components['schemas']['FlowRevisionDetail']
 
-/** How a revision is named on screen: the first eight characters of its id. */
+/**
+ * How a revision is named on screen: the last eight hex characters of its id.
+ *
+ * Not the first eight. A revision id is a UUIDv7, whose leading characters
+ * are the top bits of the millisecond timestamp and change only about once a
+ * minute, so two publishes a few seconds apart shared a label everywhere it
+ * appeared, the "Restore of …" note kept in the history and the audit log
+ * included. The tail is the id's random part.
+ */
 export function revisionLabel(revisionId: string): string {
-  return revisionId.slice(0, 8)
+  return revisionId.slice(-8)
 }
 
 /** A caller-facing string: one wording everywhere, or one per language. */
