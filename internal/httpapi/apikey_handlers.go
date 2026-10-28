@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -68,10 +69,8 @@ func (s *Server) CreateAPIKey(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-			"a key needs a name saying what it is for", map[string]any{"field": "name"})
+	name, ok := keyName(w, req.Name)
+	if !ok {
 		return
 	}
 	scopes, ok := checkedScopes(w, req.Scopes)
@@ -132,10 +131,8 @@ func (s *Server) UpdateAPIKey(w http.ResponseWriter, r *http.Request, keyID uuid
 	}
 	var name *string
 	if req.Name != nil {
-		trimmed := strings.TrimSpace(*req.Name)
-		if trimmed == "" {
-			writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
-				"a key needs a name saying what it is for", map[string]any{"field": "name"})
+		trimmed, ok := keyName(w, *req.Name)
+		if !ok {
 			return
 		}
 		name = &trimmed
@@ -177,6 +174,31 @@ func (s *Server) RevokeAPIKey(w http.ResponseWriter, r *http.Request, keyID uuid
 		return
 	}
 	writeJSON(w, http.StatusOK, apiKeyResponse(key))
+}
+
+// maxKeyNameLength is the contract's maxLength for APIKeyWrite.name and
+// APIKeyUpdate.name, and the width of api_keys.name.
+const maxKeyNameLength = 128
+
+// keyName is the name a key is written with, trimmed, or a 422 naming the
+// field. Checked here rather than left to the column: a name the column
+// refuses would surface as STORAGE_DOWN, which tells an integrator to retry a
+// request that can never succeed (#370). Counted in characters (code points),
+// as the contract's maxLength and the varchar column both count, never in
+// bytes.
+func keyName(w http.ResponseWriter, raw string) (string, bool) {
+	name := strings.TrimSpace(raw)
+	if name == "" {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"a key needs a name saying what it is for", map[string]any{"field": "name"})
+		return "", false
+	}
+	if utf8.RuneCountInString(name) > maxKeyNameLength {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			"a key's name is at most 128 characters", map[string]any{"field": "name", "rule": "NAME_TOO_LONG"})
+		return "", false
+	}
+	return name, true
 }
 
 // checkedScopes refuses a name that is not in the vocabulary rather than
