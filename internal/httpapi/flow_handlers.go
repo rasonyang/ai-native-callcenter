@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -216,7 +217,9 @@ func (s *Server) PublishFlow(w http.ResponseWriter, r *http.Request, flowID uuid
 	if in.Note != nil {
 		note = strings.TrimSpace(*in.Note)
 	}
-	if len(note) > 200 {
+	// Characters, as the contract's maxLength counts them: a note in Chinese
+	// is three bytes a character and gets the same 200 as one in English.
+	if utf8.RuneCountInString(note) > 200 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"the note is longer than 200 characters", map[string]any{"field": "note", "rule": "NOTE_TOO_LONG"})
 		return
@@ -253,9 +256,11 @@ func flowOut(row store.FlowSummary) api.Flow {
 	}
 }
 
+// flowName counts in characters (code points), as the contract's maxLength
+// does, never in bytes.
 func flowName(w http.ResponseWriter, raw string) (string, bool) {
 	name := strings.TrimSpace(raw)
-	if name == "" || len(name) > 120 {
+	if name == "" || utf8.RuneCountInString(name) > 120 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a flow needs a name of at most 120 characters", map[string]any{"field": "name", "rule": "NAME_TOO_LONG"})
 		return "", false
