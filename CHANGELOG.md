@@ -119,6 +119,14 @@ carries the one-line installer's files.
   finish or cancel them, or remove the transfer. It used to show the error
   code's sentence alone, and for the campaign block the campaign form's advice
   to choose another number. (#361)
+- A publish note of up to 200 characters is accepted in any script. The server
+  counted the limit in bytes, so a note of 67 or more Chinese characters was
+  refused with `422 VALIDATION_FAILED` (`NOTE_TOO_LONG`) although the editor
+  let the author type it. A flow name had the same fault against its
+  120-character limit (`NAME_TOO_LONG`). Account passwords (at least 8
+  characters) and extension passwords (at least 6) are counted the same way,
+  so a shorter one is now refused even when its bytes reach the minimum, as
+  the contract always said; `AICC_SEED_PASSWORD` is checked to match. (#367)
 
 ### Changed
 
