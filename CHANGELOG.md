@@ -75,6 +75,21 @@ carries the one-line installer's files.
   intent and every `{slots.x}` in the notes are checked when the flow is saved
   (`docs/flow-authoring.md` section 2.7.1). The flow simulator records it on
   scenarios with `isCampaign: true` and checks it with `expect.lead`. (#352)
+- An earlier revision of a flow can be read and restored.
+  `GET /flows/{flowId}/revisions/{revisionId}` (`getFlowRevision`,
+  `config:read`) serves a revision with the spec it stored, as stored, even
+  when today's loader refuses it; a revision of another flow answers 404.
+  Restoring is that read followed by the ordinary draft save
+  (`PUT /flows/{flowId}`), which runs the loader and refuses a revision that
+  no longer loads with every problem, leaving the draft as it was; the
+  ordinary publish then puts it live, checking the deployment's rules again
+  and appending a new revision, so the history is never rewritten. In the flow
+  editor's History tab each revision opens read-only and offers Copy to draft,
+  which asks first when the draft holds edits or changes that are not
+  published, and prefills the publish note with `Restore of <id>`. The audit
+  trail records the draft save and the publish as it records any other; the
+  draft save does not name the revision it came from (`docs/flow-authoring.md`
+  section 8). (#363)
 
 ### Fixed
 
