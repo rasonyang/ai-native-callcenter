@@ -3,6 +3,7 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -31,6 +32,7 @@ type FlowService interface {
 	List(ctx context.Context) ([]store.FlowSummary, error)
 	Summary(ctx context.Context, flowID uuid.UUID) (store.FlowSummary, error)
 	Detail(ctx context.Context, flowID uuid.UUID) (store.FlowDetail, error)
+	Revision(ctx context.Context, flowID, revisionID uuid.UUID) (store.FlowRevision, error)
 	Create(ctx context.Context, slug, name string, draft []byte) (uuid.UUID, error)
 	UpdateDraft(ctx context.Context, flowID uuid.UUID, name string, draft []byte) error
 	Publish(ctx context.Context, flowID uuid.UUID, note string) error
@@ -95,6 +97,43 @@ func (s *Server) GetFlow(w http.ResponseWriter, r *http.Request, flowID uuid.UUI
 		Flow:      flowOut(detail.Flow),
 		DraftSpec: spec,
 		Revisions: revisions,
+	})
+}
+
+// GetFlowRevision serves one revision with the spec it stored, as stored.
+//
+// Nothing loads it on the way out: a revision published before today's loader
+// tightened a rule is exactly the one a reader needs to see in order to fix
+// it. Restoring it is this read followed by UpdateFlowDraft, where the loader
+// does run, so there is one write path and one set of rules.
+func (s *Server) GetFlowRevision(w http.ResponseWriter, r *http.Request, flowID, revisionID uuid.UUID) {
+	if s.flows == nil {
+		writeError(w, http.StatusServiceUnavailable, CodeStorageDown, "cannot read flows", nil)
+		return
+	}
+	rev, err := s.flows.Revision(r.Context(), flowID, revisionID)
+	if err != nil {
+		s.writeFlowError(w, r, err)
+		return
+	}
+	// Numbers keep the text the column holds rather than passing through a
+	// float64: what is served is what was stored, whatever an older version
+	// wrote there.
+	decoder := json.NewDecoder(bytes.NewReader(rev.Spec))
+	decoder.UseNumber()
+	var spec api.FlowSpec
+	if err := decoder.Decode(&spec); err != nil {
+		slog.ErrorContext(r.Context(), "stored flow revision is not an object",
+			"flowId", flowID, "revisionId", revisionID, "error", err)
+		writeError(w, http.StatusInternalServerError, CodeInternal, "the stored revision cannot be read", nil)
+		return
+	}
+	writeJSON(w, http.StatusOK, api.FlowRevisionDetail{
+		RevisionID:  rev.ID,
+		Note:        rev.Note,
+		CreatedAt:   rev.CreatedAt,
+		IsPublished: rev.IsPublished,
+		Spec:        spec,
 	})
 }
 
@@ -275,6 +314,8 @@ func (s *Server) writeFlowError(w http.ResponseWriter, r *http.Request, err erro
 			invalid.Error(), map[string]any{"problems": problems})
 	case errors.Is(err, store.ErrFlowNotFound):
 		writeError(w, http.StatusNotFound, CodeNotFound, "no such flow", nil)
+	case errors.Is(err, store.ErrFlowRevisionNotFound):
+		writeError(w, http.StatusNotFound, CodeNotFound, "this flow has no such revision", nil)
 	case isUniqueViolation(err):
 		writeError(w, http.StatusConflict, CodeConflict, "that slug is already in use", nil)
 	default:

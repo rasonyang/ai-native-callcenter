@@ -78,3 +78,12 @@ FROM flow_revisions r
 JOIN flows f ON f.id = r.flow_id
 WHERE r.flow_id = $1
 ORDER BY r.created_at DESC, r.id DESC;
+
+-- One revision of one flow, with the spec it stored. Asking with another
+-- flow's id finds nothing: a revision is only ever read through its own flow.
+-- name: GetFlowRevision :one
+SELECT r.id, r.note, r.created_at, r.spec,
+       (r.id IS NOT DISTINCT FROM f.published_revision_id)::boolean AS is_published
+FROM flow_revisions r
+JOIN flows f ON f.id = r.flow_id
+WHERE r.flow_id = $1 AND r.id = $2;

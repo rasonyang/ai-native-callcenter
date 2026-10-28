@@ -3451,7 +3451,7 @@
           "flows"
         ],
         "summary": "Replace the draft",
-        "description": "Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems.",
+        "description": "Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems.\n\nThis is also the second half of restoring an earlier revision: send the `spec` `getFlowRevision` served. A revision the loader no longer accepts is refused like any other spec, and the draft is unchanged.",
         "security": [
           {
             "cookieSession": [
@@ -3593,6 +3593,72 @@
             "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
+      }
+    },
+    "/flows/{flowId}/revisions/{revisionId}": {
+      "get": {
+        "operationId": "getFlowRevision",
+        "tags": [
+          "flows"
+        ],
+        "summary": "One revision, with its spec",
+        "description": "A publish that happened, with the spec it stored. `publishedRevisionId` on the flow names the one live calls run, so this is also how to read what callers hear while the draft holds changes that are not published.\n\nThe spec is served exactly as it was stored, even when today's loader would refuse it: a revision published before a rule existed is the one a reader most needs to see in order to fix it.\n\nRestoring an earlier revision is two calls, for an integration as for the SPA: read the revision here, then save its `spec` as the draft with `updateFlowDraft`. The save runs the loader, so a revision that no longer loads is refused with 422 and every problem, and the draft is left as it was. Nothing a caller hears changes until `publishFlow` puts the restored draft live, which checks the deployment's publish rules again and appends a new revision; the history is never rewritten.\n\nA revision of another flow answers 404, as one that does not exist does.",
+        "parameters": [
+          {
+            "name": "flowId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "revisionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The revision and the spec it stored.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FlowRevisionDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        },
+        "security": [
+          {
+            "cookieSession": [
+              "config:read"
+            ]
+          },
+          {
+            "apiKeyBearer": [
+              "config:read"
+            ]
+          }
+        ]
       }
     },
     "/cdrs": {
@@ -8721,7 +8787,7 @@
       },
       "FlowRevision": {
         "type": "object",
-        "description": "A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer.",
+        "description": "A publish that happened: which snapshot, when, and why. A revision is immutable and is never deleted or rewritten; publishing again appends one. Its spec is not in this listing, so a flow with a long history does not ship every document it ever was: `getFlowRevision` serves one revision with its spec, which is also the first step of restoring it to the draft.",
         "properties": {
           "revisionId": {
             "type": "string",
@@ -8747,6 +8813,26 @@
           "isPublished"
         ]
       },
+      "FlowRevisionDetail": {
+        "type": "object",
+        "description": "One revision with the spec it stored, as it was stored. No loader runs on the way out: a revision that today's rules refuse is served unchanged, and saving it as the draft is where those rules are applied.",
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/FlowRevision"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "spec": {
+                "$ref": "#/components/schemas/FlowSpec"
+              }
+            },
+            "required": [
+              "spec"
+            ]
+          }
+        ]
+      },
       "FlowDetail": {
         "type": "object",
         "description": "One flow: what it is, what its draft says, and every time it has been published.",
@@ -8762,7 +8848,7 @@
             "items": {
               "$ref": "#/components/schemas/FlowRevision"
             },
-            "description": "Newest first."
+            "description": "Newest first. Each one's spec is read with `getFlowRevision`."
           }
         },
         "required": [

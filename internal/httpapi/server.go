@@ -336,6 +336,7 @@ func (s *Server) router() chi.Router {
 					private.Get("/flows/{flowId}", op.GetFlow)
 					private.Put("/flows/{flowId}", op.UpdateFlowDraft)
 					private.Post("/flows/{flowId}/publish", op.PublishFlow)
+					private.Get("/flows/{flowId}/revisions/{revisionId}", op.GetFlowRevision)
 				}
 
 				if s.ledger != nil {

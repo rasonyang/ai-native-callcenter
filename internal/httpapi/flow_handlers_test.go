@@ -20,9 +20,10 @@ import (
 
 // stubFlows answers whatever a case needs and remembers what it was handed.
 type stubFlows struct {
-	summary store.FlowSummary
-	detail  store.FlowDetail
-	err     error
+	summary  store.FlowSummary
+	detail   store.FlowDetail
+	revision store.FlowRevision
+	err      error
 	// load makes the stub read the spec as the store does, so a spec the
 	// loader refuses is refused here too.
 	load bool
@@ -44,6 +45,10 @@ func (f *stubFlows) Summary(context.Context, uuid.UUID) (store.FlowSummary, erro
 
 func (f *stubFlows) Detail(context.Context, uuid.UUID) (store.FlowDetail, error) {
 	return f.detail, f.err
+}
+
+func (f *stubFlows) Revision(context.Context, uuid.UUID, uuid.UUID) (store.FlowRevision, error) {
+	return f.revision, f.err
 }
 
 func (f *stubFlows) Create(_ context.Context, slug, name string, draft []byte) (uuid.UUID, error) {
@@ -166,6 +171,7 @@ func TestFlowFailuresAreToldApart(t *testing.T) {
 	}{
 		{"a slug already taken", &pgconn.PgError{Code: "23505"}, http.StatusConflict},
 		{"a flow that is gone", store.ErrFlowNotFound, http.StatusNotFound},
+		{"a revision the flow does not have", store.ErrFlowRevisionNotFound, http.StatusNotFound},
 		{"storage down", context.DeadlineExceeded, http.StatusServiceUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,6 +237,33 @@ func TestCreatingAFlowDoesNotPublishIt(t *testing.T) {
 	// decoded document rather than passed through by accident.
 	if _, err := flow.Load(f.draft); err != nil {
 		t.Errorf("the stored draft is not loadable: %v", err)
+	}
+}
+
+// A revision is served as the column holds it, numbers included: one an older
+// version wrote beyond what a float64 carries comes back digit for digit
+// rather than rounded into a different document.
+func TestARevisionIsServedDigitForDigit(t *testing.T) {
+	t.Parallel()
+	f := flowStub()
+	f.revision = store.FlowRevision{
+		FlowRevisionSummary: store.FlowRevisionSummary{
+			ID: uuid.New(), Note: "imported", CreatedAt: time.Now(), IsPublished: false,
+		},
+		Spec: []byte(`{"id": "probe", "global": {"maxTurns": 12345678901234567890, "temperature": 0.70}}`),
+	}
+	s := &Server{flows: f}
+	rec := httptest.NewRecorder()
+
+	s.GetFlowRevision(rec, httptest.NewRequest(http.MethodGet, "/", nil), f.summary.ID, f.revision.ID)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	for _, want := range []string{`12345678901234567890`, `0.70`, `"note":"imported"`, `"isPublished":false`} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Errorf("body lacks %s: %s", want, rec.Body.String())
+		}
 	}
 }
 

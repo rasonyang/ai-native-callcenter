@@ -20,6 +20,21 @@ import { ApiError, request } from './api'
 export type Flow = components['schemas']['Flow']
 export type FlowDetail = components['schemas']['FlowDetail']
 export type FlowRevision = components['schemas']['FlowRevision']
+/** One revision with the spec it stored, served as stored. */
+export type FlowRevisionDetail = components['schemas']['FlowRevisionDetail']
+
+/**
+ * How a revision is named on screen: the last eight hex characters of its id.
+ *
+ * Not the first eight. A revision id is a UUIDv7, whose leading characters
+ * are the top bits of the millisecond timestamp and change only about once a
+ * minute, so two publishes a few seconds apart shared a label everywhere it
+ * appeared, the "Restore of …" note kept in the history and the audit log
+ * included. The tail is the id's random part.
+ */
+export function revisionLabel(revisionId: string): string {
+  return revisionId.slice(-8)
+}
 
 /** A caller-facing string: one wording everywhere, or one per language. */
 export type FlowText = string | { zh?: string; en?: string }
@@ -403,6 +418,9 @@ export const flowsApi = {
 
   get: (flowId: string) => request<FlowDetail>(`/flows/${flowId}`),
 
+  getRevision: (flowId: string, revisionId: string) =>
+    request<FlowRevisionDetail>(`/flows/${flowId}/revisions/${revisionId}`),
+
   create: (slug: string, name: string, spec: FlowSpec) =>
     request<Flow>('/flows', {
       method: 'POST',
@@ -435,10 +453,30 @@ export function useFlow(flowId: string) {
   })
 }
 
+const revisionKey = (flowId: string, revisionId: string) =>
+  [...FLOWS_KEY, flowId, 'revisions', revisionId] as const
+
+/** A revision never changes once published, so one read of it is enough. */
+const revisionQuery = (flowId: string, revisionId: string) => ({
+  queryKey: revisionKey(flowId, revisionId),
+  queryFn: () => flowsApi.getRevision(flowId, revisionId),
+  staleTime: Infinity,
+})
+
+/** One revision with the spec it stored. */
+export function useFlowRevision(flowId: string, revisionId: string) {
+  return useQuery(revisionQuery(flowId, revisionId))
+}
+
 /**
- * The three writes, sharing one invalidation: saving a draft changes whether
- * the flow has unpublished changes, and publishing changes what every number
+ * The writes, sharing one invalidation: saving a draft changes whether the
+ * flow has unpublished changes, and publishing changes what every number
  * pointing at it says — the list is wrong after either.
+ *
+ * Restoring is not a write of its own. It is the revision's spec saved as the
+ * draft through the same PUT a typed edit uses, so the loader judges it the
+ * same way, and the usual publish is what puts it live. That is also all an
+ * integration has to do.
  */
 export function useFlowMutations(flowId?: string) {
   const queryClient = useQueryClient()
@@ -459,6 +497,15 @@ export function useFlowMutations(flowId?: string) {
     }),
     publish: useMutation({
       mutationFn: (note: string) => flowsApi.publish(flowId ?? '', note),
+      onSuccess: invalidate,
+    }),
+    restore: useMutation({
+      mutationFn: async ({ revisionId, name }: { revisionId: string; name: string }) => {
+        const revision = await queryClient.fetchQuery(revisionQuery(flowId ?? '', revisionId))
+        const spec = revision.spec as FlowSpec
+        await flowsApi.updateDraft(flowId ?? '', name, spec)
+        return { spec }
+      },
       onSuccess: invalidate,
     }),
   }

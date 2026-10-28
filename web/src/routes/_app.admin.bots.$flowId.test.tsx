@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ReactElement } from 'react'
 
 import type { ApiErrorBody } from '@/lib/api'
-import type { Flow, FlowDetail, FlowSpec } from '@/lib/flows'
+import { sameSpec, type Flow, type FlowDetail, type FlowSpec } from '@/lib/flows'
 import i18n from '@/lib/i18n'
 import { renderWithProviders } from '@/test/harness'
 
@@ -436,5 +436,365 @@ describe('a publish that fails for any other reason', () => {
     }
 
     await republishes(refused)
+  })
+})
+
+/**
+ * The History tab (#363): a revision opens read-only, and Copy to draft saves
+ * its spec as the draft through the ordinary PUT, asking first only when that
+ * loses something. Publishing it is the ordinary Publish, its note prefilled.
+ */
+
+const LIVE_ID = '01a18100-b38c-7d05-a1b3-6e2f4c8d9a17'
+const OLD_ID = '01a18100-b369-7c1e-8f42-3a9d5e7b1c60'
+const REFUSED_ID = '01a18100-a7f0-7e2a-b6c1-0d4e9a3f7b25'
+const OLD_NOTE = '十月停网补偿话术，按客服组意见调整'
+const OLD_AT = '2026-10-12T06:30:00Z'
+
+/** The billing follow-up as it was before the October credit moved. */
+const OLD_SPEC: FlowSpec = {
+  ...SPEC,
+  global: {
+    ...SPEC.global,
+    persona: {
+      en: 'You are the billing assistant for NovaNet Broadband. Mention the October outage credit first.',
+      zh: '你是 NovaNet 宽带的账单助手。先告知十月停网补偿。',
+    },
+  },
+}
+
+/** A revision an older version stored, which today's loader refuses. */
+const REFUSED_SPEC = {
+  ...SPEC,
+  nodes: {
+    ...SPEC.nodes,
+    verify_account_holder: {
+      instruction: 'Confirm the account holder by their postcode.',
+      anounce: 'Thanks for calling NovaNet billing.',
+      tools: ['lookup_account_by_postcode'],
+    },
+  },
+} as FlowSpec
+
+const REFUSED_PROBLEMS = [
+  'phase "verify_account_holder" has unknown field "anounce"; did you mean "announce"?',
+  'phase "verify_account_holder" allows unknown tool "lookup_account_by_postcode"',
+]
+
+/** The draft with an edit saved but not published. */
+const EDITED_SPEC: FlowSpec = {
+  ...SPEC,
+  global: { ...SPEC.global, closingTarget: 'handed_to_billing_team' },
+}
+
+const SPECS: Record<string, FlowSpec> = {
+  [LIVE_ID]: SPEC,
+  [OLD_ID]: OLD_SPEC,
+  [REFUSED_ID]: REFUSED_SPEC,
+}
+
+/**
+ * The flow with three revisions, newest first. `draft` is what is saved; the
+ * live revision is SPEC, so any other draft has unpublished changes. A PUT of
+ * the refused revision's spec is answered as the loader answers it.
+ */
+function historyServer(draft: FlowSpec) {
+  const puts: Array<{ name: string; spec: FlowSpec }> = []
+  const publishes: Array<{ note?: string }> = []
+  const reads: string[] = []
+  let detail: FlowDetail = {
+    flow: flowFixture({ publishedRevisionId: LIVE_ID, hasUnpublishedChanges: !sameSpec(draft, SPEC) }),
+    draftSpec: draft as FlowDetail['draftSpec'],
+    revisions: [
+      { revisionId: LIVE_ID, note: 'First billing follow-up', createdAt: at, isPublished: true },
+      { revisionId: OLD_ID, note: OLD_NOTE, createdAt: OLD_AT, isPublished: false },
+      { revisionId: REFUSED_ID, note: '', createdAt: '2026-10-05T02:00:00Z', isPublished: false },
+    ],
+  }
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const path = String(input).replace('/api/v1', '')
+      const method = init.method ?? 'GET'
+      const body = typeof init.body === 'string' ? JSON.parse(init.body) : {}
+      if (path === `/flows/${FLOW_ID}` && method === 'GET') return json(detail)
+      const revision = /^\/flows\/[^/]+\/revisions\/([^/]+)$/.exec(path)
+      if (revision && method === 'GET') {
+        const id = revision[1]
+        reads.push(id)
+        const summary = detail.revisions.find((r) => r.revisionId === id)
+        return json({ ...summary, spec: SPECS[id] })
+      }
+      if (path === `/flows/${FLOW_ID}` && method === 'PUT') {
+        puts.push(body)
+        if (sameSpec(body.spec, REFUSED_SPEC)) {
+          return json(
+            {
+              error: {
+                code: 'VALIDATION_FAILED',
+                message: 'flow novanet_billing_followup is not usable',
+                params: { problems: REFUSED_PROBLEMS },
+              },
+            },
+            422,
+          )
+        }
+        detail = {
+          ...detail,
+          draftSpec: body.spec,
+          flow: { ...detail.flow, hasUnpublishedChanges: !sameSpec(body.spec, SPEC) },
+        }
+        return json(detail.flow)
+      }
+      if (path === `/flows/${FLOW_ID}/publish` && method === 'POST') {
+        publishes.push(body)
+        detail = publishedDetail(detail, body.note ?? '')
+        return json(detail.flow)
+      }
+      return json({ items: [] })
+    }),
+  )
+  return { puts, publishes, reads }
+}
+
+type Driver = ReturnType<typeof renderEditor>['user']
+
+async function openTab(user: Driver, tab = 'History') {
+  await user.click(await screen.findByRole('tab', { name: tab }))
+}
+
+const rowOf = (label: string) => screen.getByText(label).closest('tr') as HTMLElement
+
+const editorText = () =>
+  screen.getByLabelText<HTMLTextAreaElement>(/^(Flow spec JSON|流程配置 JSON)$/).value
+
+const pretty = (spec: unknown) => JSON.stringify(spec, null, 2)
+
+describe('a revision in the history', () => {
+  // Revision ids are UUIDv7: the first eight characters are the top of the
+  // millisecond clock and change about once a minute, so publishes seconds
+  // apart share them. They are named by their random tail instead.
+  it('names two revisions published in the same minute apart, everywhere', async () => {
+    expect(LIVE_ID.slice(0, 8)).toBe(OLD_ID.slice(0, 8))
+    expect(OLD_ID.slice(0, 8)).toBe(REFUSED_ID.slice(0, 8))
+    const server = historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    const ids = screen
+      .getAllByRole('row')
+      .slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].firstChild?.textContent)
+    expect(ids).toEqual(['4c8d9a17', '5e7b1c60', '9a3f7b25'])
+    expect(screen.queryByText('01a18100')).not.toBeInTheDocument()
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Replace the draft with revision 5e7b1c60?',
+    })
+    expect(dialog).not.toHaveTextContent('4c8d9a17')
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
+    )
+    const publish = screen.getByRole('button', { name: 'Publish' })
+    await waitFor(() => expect(publish).toBeEnabled())
+    await user.click(publish)
+    const publishing = await screen.findByRole('dialog')
+    expect(within(publishing).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+    await user.click(within(publishing).getByRole('button', { name: 'Publish' }))
+    await waitFor(() => expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }]))
+  })
+
+  it('opens read-only and closes again, changing nothing', async () => {
+    const server = historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'View' }))
+
+    const view = await screen.findByRole('region', { name: 'Spec of revision 5e7b1c60' })
+    expect(view).toHaveTextContent('Mention the October outage credit first.')
+    expect(view).toHaveTextContent('先告知十月停网补偿。')
+    expect(view.tagName).toBe('PRE')
+    expect(within(view).queryByRole('textbox')).not.toBeInTheDocument()
+    expect(view).not.toHaveAttribute('contenteditable')
+    expect(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Hide' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    )
+    expect(server.reads).toEqual([OLD_ID])
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Hide' }))
+    expect(
+      screen.queryByRole('region', { name: 'Spec of revision 5e7b1c60' }),
+    ).not.toBeInTheDocument()
+    expect(server.puts).toEqual([])
+  })
+
+  it('shows a revision the loader refuses as it was stored', async () => {
+    historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'View' }))
+
+    const view = await screen.findByRole('region', { name: 'Spec of revision 9a3f7b25' })
+    expect(view).toHaveTextContent('"anounce"')
+    expect(view).toHaveTextContent('lookup_account_by_postcode')
+  })
+})
+
+describe('copying a revision to the draft', () => {
+  it('copies at once when there is nothing to lose, shows the spec and prefills the note', async () => {
+    const server = historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    await waitFor(() => expect(server.puts).toHaveLength(1))
+    expect(server.puts[0].name).toBe('NovaNet billing follow-up')
+    expect(server.puts[0].spec).toEqual(OLD_SPEC)
+
+    // Back in the designer, showing the restored spec, and pointed at Publish.
+    await waitFor(() => expect(editorText()).toBe(pretty(OLD_SPEC)))
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'Revision 5e7b1c60 is now the draft. Publish it to put it live.',
+    )
+    expect(screen.getByText('Unpublished changes')).toBeInTheDocument()
+    expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument()
+
+    const publish = screen.getByRole('button', { name: 'Publish' })
+    await waitFor(() => expect(publish).toBeEnabled())
+    await user.click(publish)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Note')).toHaveValue('Restore of 5e7b1c60')
+    await user.click(within(dialog).getByRole('button', { name: 'Publish' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(server.publishes).toEqual([{ note: 'Restore of 5e7b1c60' }])
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('asks first when the saved draft is not what is live, naming the revision', async () => {
+    const server = historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Replace the draft with revision 5e7b1c60?',
+    })
+    const when = new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(
+      new Date(OLD_AT),
+    )
+    expect(dialog).toHaveTextContent('5e7b1c60')
+    expect(dialog).toHaveTextContent(when)
+    expect(dialog).toHaveTextContent(OLD_NOTE)
+    expect(dialog).toHaveTextContent(
+      "The draft becomes this revision's spec. Edits that are not saved and changes that are not published are lost. Callers hear nothing new until you publish.",
+    )
+    expect(server.puts).toEqual([])
+
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(server.puts.map((put) => put.spec)).toEqual([OLD_SPEC])
+    await waitFor(() => expect(editorText()).toBe(pretty(OLD_SPEC)))
+  })
+
+  it('asks first when the editor holds edits that are not saved', async () => {
+    const server = historyServer(SPEC)
+    const { user } = renderEditor()
+    await user.type(await screen.findByLabelText('Name'), ' (October)')
+    await openTab(user)
+
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
+
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Replace the draft with revision 9a3f7b25?',
+    })
+    // That revision was published without a note.
+    expect(dialog).toHaveTextContent('No note')
+    expect(server.puts).toEqual([])
+  })
+
+  it('changes nothing when the question is cancelled', async () => {
+    const server = historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await waitFor(() => expect(editorText()).toBe(pretty(EDITED_SPEC)))
+    await openTab(user)
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: 'Copy to draft' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(server.puts).toEqual([])
+    expect(server.reads).toEqual([])
+    expect(screen.getByRole('tab', { name: 'History' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await openTab(user, 'Designer')
+    expect(editorText()).toBe(pretty(EDITED_SPEC))
+    await user.click(screen.getByRole('button', { name: 'Publish' }))
+    expect(within(await screen.findByRole('dialog')).getByLabelText('Note')).toHaveValue('')
+  })
+
+  it('lists what the loader refused, and leaves the draft as it was', async () => {
+    const server = historyServer(SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
+
+    const notice = await screen.findByRole('alert')
+    expect(notice).toHaveTextContent('Revision 9a3f7b25 was not copied; the draft is unchanged.')
+    expect(notice).toHaveTextContent('The server refused this spec:')
+    expect(listed(notice)).toEqual(REFUSED_PROBLEMS)
+    expect(server.puts).toHaveLength(1)
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+    await openTab(user, 'Designer')
+    expect(editorText()).toBe(pretty(SPEC))
+  })
+
+  it('lists the refusal in the question too, which stays open', async () => {
+    historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await openTab(user)
+
+    await user.click(within(rowOf('9a3f7b25')).getByRole('button', { name: 'Copy to draft' }))
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Replace draft' }))
+
+    const inDialog = await within(dialog).findByRole('alert')
+    expect(inDialog).toHaveTextContent('The server refused this spec:')
+    expect(listed(inDialog)).toEqual(REFUSED_PROBLEMS)
+    expect(screen.getByRole('dialog')).toBe(dialog)
+  })
+
+  it('says it all in Chinese', async () => {
+    await i18n.changeLanguage('zh')
+    historyServer(EDITED_SPEC)
+    const { user } = renderEditor()
+    await openTab(user, '发布历史')
+
+    await user.click(within(rowOf('5e7b1c60')).getByRole('button', { name: '复制到草稿' }))
+    const dialog = await screen.findByRole('dialog', { name: '用版本 5e7b1c60 替换草稿？' })
+    expect(dialog).toHaveTextContent(
+      '草稿将替换为这个版本的配置，未保存的编辑和未发布的改动都会丢失。发布之前，来电听到的内容不会改变。',
+    )
+    await user.click(within(dialog).getByRole('button', { name: '替换草稿' }))
+
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '版本 5e7b1c60 已复制为草稿，发布后才会生效。',
+    )
+    await user.click(screen.getByRole('button', { name: '发布' }))
+    expect(within(await screen.findByRole('dialog')).getByLabelText('备注')).toHaveValue(
+      '恢复自 5e7b1c60',
+    )
   })
 })
