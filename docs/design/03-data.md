@@ -15,9 +15,10 @@ users(id uuid pk, username citext unique, password_hash text, display_name text,
       status varchar check in ('ACTIVE','SUSPENDED') default 'ACTIVE',
       created_at, last_login_at)
 sessions(id uuid pk, user_id fk, token_hash bytea, ip inet, created_at, expires_at)   -- revocable cookie sessions
-api_keys(id uuid pk, name varchar(120), key_hash bytea unique, key_prefix varchar(16),
+api_keys(id uuid pk, name varchar(128), key_hash bytea unique, key_prefix varchar(16),
          status varchar check in ('ENABLED','REVOKED') default 'ENABLED',
-         scopes text[], created_at, created_by uuid, last_used_at, revoked_at)   -- 00029, 2026-08-31
+         scopes text[], created_at, created_by uuid, last_used_at, revoked_at)   -- 00029, 2026-08-31;
+                                   -- name widened from 120 to the contract's 128 by 00046 (#370)
                                    -- the second credential (04 §2). What it replaces was one shared
                                    -- secret in AICC_API_KEY, sent as X-AICC-Api-Key, reaching two
                                    -- operations while standing in for a supervisor nobody could name.
