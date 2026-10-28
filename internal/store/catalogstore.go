@@ -563,7 +563,7 @@ func (c *CatalogStore) publishedSpec(ctx context.Context, flowID uuid.UUID) (*fl
 	if err != nil {
 		return nil, fmt.Errorf("get published flow %s: %w", flowID, err)
 	}
-	spec, err := flow.Load(raw)
+	spec, err := loadStoredRevision(ctx, flowID, raw)
 	if err != nil {
 		return nil, fmt.Errorf("published flow %s: %w", flowID, err)
 	}

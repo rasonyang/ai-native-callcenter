@@ -103,9 +103,27 @@ func (f *FlowStore) PublishedSpec(ctx context.Context, flowID uuid.UUID) (*flow.
 		}
 		return nil, fmt.Errorf("load published flow %s: %w", flowID, err)
 	}
-	spec, err := flow.Load(raw)
+	spec, err := loadStoredRevision(ctx, flowID, raw)
 	if err != nil {
 		return nil, fmt.Errorf("published flow %s: %w", flowID, err)
+	}
+	return spec, nil
+}
+
+// loadStoredRevision loads a published revision on a read path: a call
+// resolving its number's flow, a campaign loading its own. A field the spec
+// does not declare is logged, one warning each, and the flow runs: a row
+// stored before the loader refused such a key, or by a version that declares
+// it, must never stop a number from answering. Every write path refuses the
+// same key (flow.Load).
+func loadStoredRevision(ctx context.Context, flowID uuid.UUID, raw []byte) (*flow.Spec, error) {
+	spec, unknown, err := flow.LoadTolerant(raw)
+	if err != nil {
+		return nil, err
+	}
+	for _, field := range unknown {
+		slog.WarnContext(ctx, "published flow has a field the spec does not declare; loading it anyway",
+			"flowId", flowID, "specId", spec.ID, "problem", field.String())
 	}
 	return spec, nil
 }
