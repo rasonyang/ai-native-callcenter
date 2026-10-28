@@ -74,13 +74,25 @@ type FlowSummary struct {
 }
 
 // FlowRevisionSummary is one publish that happened. The snapshot itself is not
-// carried: this records that a publish occurred, not what to roll back to.
+// carried: a history of thirty publishes has no business shipping thirty
+// specs, and Revision reads the one that is wanted.
 type FlowRevisionSummary struct {
 	ID          uuid.UUID
 	Note        string
 	CreatedAt   time.Time
 	IsPublished bool
 }
+
+// FlowRevision is one publish with the spec it stored, byte for byte as the
+// column holds it.
+type FlowRevision struct {
+	FlowRevisionSummary
+	Spec []byte
+}
+
+// ErrFlowRevisionNotFound is asked for a revision the flow does not have:
+// one that does not exist, or one that belongs to another flow.
+var ErrFlowRevisionNotFound = errors.New("store: no such revision of this flow")
 
 // FlowDetail is one flow with the draft an author edits and the publishes
 // behind it.
@@ -287,6 +299,30 @@ func (f *FlowStore) Detail(ctx context.Context, flowID uuid.UUID) (FlowDetail, e
 		})
 	}
 	return FlowDetail{Flow: summary, DraftSpec: draft, Revisions: revisions}, nil
+}
+
+// Revision is one revision of a flow with the spec it stored.
+//
+// Nothing loads the spec. A revision published before today's loader
+// tightened a rule is the one a reader most needs to see in order to fix it,
+// and restoring it goes through UpdateDraft, which refuses it there with every
+// problem it has. Revisions are immutable, so this is a read of history, never
+// a way to change it.
+func (f *FlowStore) Revision(ctx context.Context, flowID, revisionID uuid.UUID) (FlowRevision, error) {
+	row, err := f.q.GetFlowRevision(ctx, queries.GetFlowRevisionParams{FlowID: flowID, ID: revisionID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return FlowRevision{}, ErrFlowRevisionNotFound
+		}
+		return FlowRevision{}, fmt.Errorf("read revision %s of flow %s: %w", revisionID, flowID, err)
+	}
+	return FlowRevision{
+		FlowRevisionSummary: FlowRevisionSummary{
+			ID: row.ID, Note: row.Note,
+			CreatedAt: row.CreatedAt.Time, IsPublished: row.IsPublished,
+		},
+		Spec: row.Spec,
+	}, nil
 }
 
 // timeOrNil keeps "never happened" distinct from the zero instant.

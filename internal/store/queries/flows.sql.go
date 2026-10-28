@@ -128,6 +128,42 @@ func (q *Queries) GetFlowDraft(ctx context.Context, id uuid.UUID) ([]byte, error
 	return draft_spec, err
 }
 
+const getFlowRevision = `-- name: GetFlowRevision :one
+SELECT r.id, r.note, r.created_at, r.spec,
+       (r.id IS NOT DISTINCT FROM f.published_revision_id)::boolean AS is_published
+FROM flow_revisions r
+JOIN flows f ON f.id = r.flow_id
+WHERE r.flow_id = $1 AND r.id = $2
+`
+
+type GetFlowRevisionParams struct {
+	FlowID uuid.UUID `json:"flowId"`
+	ID     uuid.UUID `json:"id"`
+}
+
+type GetFlowRevisionRow struct {
+	ID          uuid.UUID          `json:"id"`
+	Note        string             `json:"note"`
+	CreatedAt   pgtype.Timestamptz `json:"createdAt"`
+	Spec        []byte             `json:"spec"`
+	IsPublished bool               `json:"isPublished"`
+}
+
+// One revision of one flow, with the spec it stored. Asking with another
+// flow's id finds nothing: a revision is only ever read through its own flow.
+func (q *Queries) GetFlowRevision(ctx context.Context, arg GetFlowRevisionParams) (GetFlowRevisionRow, error) {
+	row := q.db.QueryRow(ctx, getFlowRevision, arg.FlowID, arg.ID)
+	var i GetFlowRevisionRow
+	err := row.Scan(
+		&i.ID,
+		&i.Note,
+		&i.CreatedAt,
+		&i.Spec,
+		&i.IsPublished,
+	)
+	return i, err
+}
+
 const getFlowSummary = `-- name: GetFlowSummary :one
 SELECT f.id, f.slug, f.name, f.published_revision_id, f.published_at,
        f.created_at, f.updated_at,
