@@ -1,6 +1,36 @@
 {
   "scenarios": [
     {
+      "name": "a stance and the hangup in one response still end in the finish phase with its own line",
+      "description": "The model may send record_lead and hangup together (#262). The batch is judged in the phase it was made in and the hangup moves the call to finish, whose line is said as written. The simulator runs only the flow: that the caller then hears that line, and not the model's own confirmation, is held by internal/aicall (closing-line accounting).",
+      "lang": "en",
+      "isCampaign": true,
+      "caller": "18688886666",
+      "steps": [
+        {"say": "Sounds good, send me the details. Bye."},
+        {"batch": [
+          {"call": "record_lead", "args": {"intent": "HIGH", "notes": "wants the details"}},
+          {"call": "hangup"}
+        ], "expect": {"phase": "finish", "announce": "Thank you for your time, and sorry for the interruption. Have a good day, goodbye."}}
+      ],
+      "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "HIGH"}}
+    },
+    {
+      "name": "回答意向并说再见:记录和挂断在同一次响应里,仍进入结束阶段并说结束语",
+      "description": "模型可能把 record_lead 和 hangup 放进同一次响应(#262)。批次按发出时所在的阶段判断,hangup 把通话带到 finish,结束语照原文说出。模拟器只运行流程;来电者随后听到的是这句结束语而不是模型自己的确认,由 internal/aicall 的结束语核对保证。",
+      "lang": "zh",
+      "isCampaign": true,
+      "caller": "18688886666",
+      "steps": [
+        {"say": "好的,把资料发给我吧,再见。"},
+        {"batch": [
+          {"call": "record_lead", "args": {"intent": "HIGH", "notes": "想要资料"}},
+          {"call": "hangup"}
+        ], "expect": {"phase": "finish", "announce": "感谢您的时间,打扰了,祝您生活愉快,再见。"}}
+      ],
+      "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "HIGH"}}
+    },
+    {
       "name": "a customer who wants the offer is a HIGH lead",
       "description": "record_lead is callable in the one working phase although no allowlist names it, does not move the phase, and the call ends through hangup.",
       "lang": "en",

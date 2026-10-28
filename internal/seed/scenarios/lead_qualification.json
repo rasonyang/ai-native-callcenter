@@ -1,6 +1,34 @@
 {
   "scenarios": [
     {
+      "name": "a stance and the hangup in one response end in finish with its line",
+      "description": "record_interest and hangup in one response (#262): the batch is judged in greet and the hangup moves the call to finish, whose line is said as written. The simulator runs only the flow; that the caller hears the line itself is held by internal/aicall.",
+      "lang": "en",
+      "caller": "13900001111",
+      "steps": [
+        {"say": "I'm interested, but I have to go. Bye."},
+        {"batch": [
+          {"call": "record_interest", "args": {"value": "mid"}},
+          {"call": "hangup"}
+        ], "expect": {"phase": "finish", "announce": "Thanks for your time, goodbye."}}
+      ],
+      "expect": {"path": ["greet", "finish"], "ending": "hangup", "slots": {"interest": "mid"}}
+    },
+    {
+      "name": "表态和挂断在同一次响应里,进入结束阶段并说结束语",
+      "description": "record_interest 与 hangup 同一次响应(#262):批次按 greet 判断,hangup 把通话带到 finish,结束语照原文说出。模拟器只运行流程;来电者是否听到这句原文由 internal/aicall 保证。",
+      "lang": "zh",
+      "caller": "13900001111",
+      "steps": [
+        {"say": "有点兴趣,不过我得走了,再见。"},
+        {"batch": [
+          {"call": "record_interest", "args": {"value": "mid"}},
+          {"call": "hangup"}
+        ], "expect": {"phase": "finish", "announce": "感谢您的时间,再见。"}}
+      ],
+      "expect": {"path": ["greet", "finish"], "ending": "hangup", "slots": {"interest": "mid"}}
+    },
+    {
       "name": "caller answers all three questions",
       "description": "Slot tools write the facts; lead_submit sends them to the backend and a grade A moves the call to the terminal phase with the advisor line, so the platform ends the call after it. The model never calls hangup.",
       "lang": "en",

@@ -67,6 +67,16 @@ carries the one-line installer's files.
   entry, a non-text `global.toolWaitLine`) with `422 VALIDATION_FAILED` and a
   `params.problems` entry saying what was expected, instead of
   `503 STORAGE_DOWN`. A body that is not JSON at all is still `400`. (#354)
+- A call that ends with a tool and `hangup` in one response (`record_lead` and
+  `hangup`, say) no longer ends as if the closing line had been heard when the
+  model answered with a confirmation of its own, sometimes with no goodbye at
+  all. On the Realtime engines the words of the turn after the closing move are
+  held against the phase's line; a turn that does not say it is heard whole and
+  the line is asked for once more, so a caller may hear a goodbye of the model's
+  own before the line. A second miss is logged at WARN
+  (`the closing line was not said; ending the call without it`) and the call
+  ends. Doubao, transfers and flows without a closing line are unchanged.
+  (#262)
 
 ### Changed
 

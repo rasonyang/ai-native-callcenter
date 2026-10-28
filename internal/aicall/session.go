@@ -1033,6 +1033,18 @@ func (s *Session) isHoldingTheFloor() bool {
 		(s.framesQueued > 0 && s.leg.Pending() > 0)
 }
 
+// isTurnGenerating reports whether a turn is being made or has been asked for
+// and has not started: a request for a line now would cut it off or be
+// refused. Unlike isHoldingTheFloor, the tail of a finished turn still playing
+// does not count: the provider is free, and a line asked for behind it queues
+// after it.
+func (s *Session) isTurnGenerating() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isResponding ||
+		(!s.turnOwedUntil.IsZero() && time.Now().Before(s.turnOwedUntil))
+}
+
 // queuedPlayout is how long the audio queued for the caller takes to play.
 func (s *Session) queuedPlayout() time.Duration {
 	return time.Duration(s.leg.Pending()) * frameDurationMs * time.Millisecond

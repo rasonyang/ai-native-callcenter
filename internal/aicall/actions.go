@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -87,9 +88,27 @@ type callActions struct {
 	// finished since: the caller has not heard the line (expectClosingLine,
 	// #207). While it holds, a turn with no audio is not the line: it does not
 	// run the ending (onPlaybackDone) and does not count as the line spoken
-	// (onTurnDone). It is cleared when the model insists on hangup after its
+	// (onTurnDone). Nor is a turn whose words do not say the line (#262): it is
+	// answered by asking for the line once more. It is cleared when the model insists on hangup after its
 	// one refusal, and by lockEnding.
 	isLineOwed bool
+	// closingLine is the rendered line the caller is owed while isLineOwed
+	// holds, in the language the flow wrote it in (expectClosingLine). The
+	// words of the turns after the arming one are compared with it (onTurnDone,
+	// #262).
+	closingLine string
+	// said holds the words the model has spoken, by turn, in the turns after
+	// the arming one while the line is owed (onBotSaid). A turn's entry is
+	// consumed when the turn finishes.
+	said map[int]string
+	// isLineAskedAgain says the one transcript-driven request for the line has
+	// been spent (onTurnDone): a turn after the arming one did not say it.
+	isLineAskedAgain bool
+	// notLineThrough is the latest turn judged not to be the line. The ending
+	// does not run on the playback of that turn or any before it
+	// (onPlaybackDone): the caller has heard something else, and the line is
+	// still to come. 0 is none.
+	notLineThrough int
 	// isLineRefused says the one refusal of a hangup made while the line is
 	// owed has been spent (refuseHangupWhileLineOwed).
 	isLineRefused bool
@@ -417,6 +436,10 @@ func (a *callActions) armAs(_ context.Context, isTransfer bool, action func()) {
 	a.isInterrupted = false
 	a.isHangupRefused = false
 	a.isLineOwed = false
+	a.closingLine = ""
+	a.said = nil
+	a.isLineAskedAgain = false
+	a.notLineThrough = 0
 	a.isLineRefused = false
 	graceCap := a.graceCap
 	if graceCap <= 0 {
@@ -532,14 +555,37 @@ func (a *callActions) interruptedHangupHint() string {
 // (#207). It does nothing for a transfer, for an ending the time limit has
 // decided, or when nothing is armed. The orchestrator calls it after the phase
 // has been entered, on profiles that do not speak the line themselves
-// (doubao's RequiresTerminalAnnounce).
-func (a *callActions) expectClosingLine() {
+// (doubao's RequiresTerminalAnnounce), with the line as rendered for the call.
+//
+// The line is kept so the words of the turn that follows can be held against
+// it (onTurnDone, #262): a model that answers a tool batch ending the call
+// with its own confirmation, not the line, has not said the line. An empty line
+// cannot be compared, and any turn with audio counts as it.
+func (a *callActions) expectClosingLine(line string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.armed == nil || a.isArmedTransfer || a.isEndingLocked || a.isLineSpoken {
 		return
 	}
 	a.isLineOwed = true
+	a.closingLine = line
+}
+
+// onBotSaid collects the words of a final transcript of the model's, for the
+// turn it belongs to, while the closing line is owed. A turn can carry several;
+// they are joined. The arming turn's own words are not kept: it spoke before the
+// ending was armed and is not the line.
+func (a *callActions) onBotSaid(turn int, text string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.armed == nil || !a.isLineOwed || a.closingLine == "" || turn <= a.armedInTurn ||
+		turn <= a.notLineThrough || text == "" {
+		return
+	}
+	if a.said == nil {
+		a.said = map[int]string{}
+	}
+	a.said[turn] = strings.TrimSpace(a.said[turn] + " " + text)
 }
 
 // refuseHangupWhileLineOwed reports whether this hangup is the one to refuse:
@@ -674,13 +720,18 @@ func (a *callActions) disarm() {
 // The same holds while the closing line is owed and unheard (isLineOwed, #207):
 // the tool result that carried the line can be answered with a bare hangup, an
 // audio-less turn that is not the line, and the caller was hung up on without
-// a word. A turn with other words (a paraphrase) has audio and ends the call.
-// A flow with no closing line (or a hangup outside a terminal phase) owes
+// a word. A turn with other words (a paraphrase) has audio, but onTurnDone has
+// judged it by its words and asked for the line again (#262), so it does not
+// end the call either. A flow with no closing line (or a hangup outside a terminal phase) owes
 // nothing and keeps the rule above: an audio-less repeat of hangup ends it.
+//
+// A turn that onTurnDone judged not to be the line (notLineThrough) does not
+// run the ending either, whatever it played: the line is on its way in a turn
+// after it, and that turn's playback is the one the ending waits for.
 func (a *callActions) onPlaybackDone(turn int, hasAudio bool) {
 	a.mu.Lock()
 	if a.armed == nil || turn <= a.armedInTurn || (a.isInterrupted && !hasAudio) ||
-		(a.isLineOwed && !a.isLineSpoken && !hasAudio) {
+		(a.isLineOwed && !a.isLineSpoken && !hasAudio) || turn <= a.notLineThrough {
 		a.mu.Unlock()
 		return
 	}
@@ -706,18 +757,94 @@ func (a *callActions) onPlaybackDone(turn int, hasAudio bool) {
 //
 // While the closing line is owed a turn with no audio is not the line either
 // (hasAudio, #207): it neither marks the line spoken nor moves the cap.
+//
+// A turn with audio is still not the line unless its words say it (#262). A
+// model that ends the call with record_lead and hangup in one response answers
+// both results in one turn, and that turn followed the talk phase's instruction
+// ("confirm what you noted") instead of the line, and the call ended as if the
+// line had been heard. So the words of the turn (onBotSaid) are held against
+// the line (saysTheClosingLine), and a turn that does not say it is answered
+// by asking for the line once more, whether or not that turn said a goodbye of
+// its own: the flow's exact words matter more than a double farewell. The
+// caller hears that turn whole, then the line, because the request goes out
+// now, with the turn finished, while its tail is still playing: the line
+// generates behind the tail and queues after it, and nothing is flushed. A
+// second turn that misses ends the call on its own playback, logged at WARN,
+// since a third request would only drag the call out. A turn with no
+// transcript cannot be judged and counts as the line, as before.
+//
+// The request is held back while a later turn is already being made
+// (isTurnGenerating): asking over it would cut it off, and it may be the line.
+// It is judged when it finishes, and the request not spent here is still
+// there for it.
 func (a *callActions) onTurnDone(turn int, isInterrupted, hasAudio bool) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.armed == nil || turn <= a.armedInTurn || isInterrupted ||
 		(a.isLineOwed && !hasAudio) {
+		a.mu.Unlock()
 		return
 	}
-	a.isLineSpoken = true
-	playout := a.session.queuedPlayout() + lineDrainMargin
-	if due := time.Now().Add(playout); due.After(a.capDue) {
-		a.startCapLocked(playout)
+	var ask string
+	if a.isLineOwed {
+		words := a.said[turn]
+		for judged := range a.said {
+			if judged <= turn {
+				delete(a.said, judged)
+			}
+		}
+		switch {
+		case a.closingLine == "" || words == "":
+			a.log.Debug("no words were transcribed for the turn after the closing move; "+
+				"counting it as the closing line", "turn", turn)
+		default:
+			coverage, isSaid := saysTheClosingLine(a.closingLine, words)
+			switch {
+			case isSaid:
+			case a.isLineAskedAgain:
+				a.log.Warn("the closing line was not said; ending the call without it",
+					"turn", turn, "coverage", coverage)
+			default:
+				a.log.Info("the turn after the closing move did not say the closing line; "+
+					"the line is asked for once more", "turn", turn, "coverage", coverage)
+				a.notLineThrough = turn
+				// The line generates while this turn's tail plays and plays
+				// behind it; the cap covers both.
+				a.startCapLocked(a.capAfterLineAskLocked())
+				if a.session.isTurnGenerating() {
+					a.log.Info("a later turn is already being made; judging it before asking",
+						"turn", turn)
+					a.mu.Unlock()
+					return
+				}
+				a.isLineAskedAgain = true
+				ask = a.closingLine
+			}
+		}
 	}
+	if ask == "" {
+		a.isLineSpoken = true
+		playout := a.session.queuedPlayout() + lineDrainMargin
+		if due := time.Now().Add(playout); due.After(a.capDue) {
+			a.startCapLocked(playout)
+		}
+	}
+	a.mu.Unlock()
+	if ask != "" {
+		if err := a.session.Speak(ask, true); err != nil {
+			a.log.Warn("could not ask for the closing line again; the cap ends the call", "error", err)
+		}
+	}
+}
+
+// capAfterLineAskLocked is how long the wait for a requested line is bounded:
+// the usual grace on top of the audio still queued, which the line plays behind.
+// The caller holds mu.
+func (a *callActions) capAfterLineAskLocked() time.Duration {
+	graceCap := a.graceCap
+	if graceCap <= 0 {
+		graceCap = actionGraceCap
+	}
+	return graceCap + a.session.queuedPlayout()
 }
 
 // closingTailAck is how much of the closing line may still be unplayed when
