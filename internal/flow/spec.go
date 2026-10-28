@@ -10,8 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 )
@@ -37,16 +35,20 @@ type Text struct {
 	EN string
 }
 
+// textByLang is the object form of a Text. Its tags are the keys that form
+// takes, for the decoder and for the unknown-field check alike.
+type textByLang struct {
+	ZH string `json:"zh"`
+	EN string `json:"en"`
+}
+
 func (t *Text) UnmarshalJSON(data []byte) error {
 	var plain string
 	if err := json.Unmarshal(data, &plain); err == nil {
 		t.ZH, t.EN = plain, plain
 		return nil
 	}
-	var byLang struct {
-		ZH string `json:"zh"`
-		EN string `json:"en"`
-	}
+	var byLang textByLang
 	if err := json.Unmarshal(data, &byLang); err != nil {
 		return notKeyedByLanguage("text must be a string", data, err)
 	}
@@ -78,16 +80,20 @@ type TextList struct {
 	EN []string
 }
 
+// textListByLang is the object form of a TextList, as textByLang is of a
+// Text.
+type textListByLang struct {
+	ZH []string `json:"zh"`
+	EN []string `json:"en"`
+}
+
 func (l *TextList) UnmarshalJSON(data []byte) error {
 	var flat []string
 	if err := json.Unmarshal(data, &flat); err == nil {
 		l.ZH, l.EN = flat, flat
 		return nil
 	}
-	var byLang struct {
-		ZH []string `json:"zh"`
-		EN []string `json:"en"`
-	}
+	var byLang textListByLang
 	if err := json.Unmarshal(data, &byLang); err != nil {
 		return notKeyedByLanguage("text list must be a list", data, err)
 	}
@@ -237,17 +243,15 @@ type DeclaredLead struct {
 	// fails on it, so that validate can report it with the phase's name, among
 	// the flow's other problems, rather than as a document that cannot be
 	// parsed. isIntentUnreadable says one of them is about the intent, which
-	// validate then does not judge a second time.
+	// validate then does not judge a second time. A field a lead does not have
+	// is found where every other one is (unknownFields), by the tags above.
 	problems           []string
 	isIntentUnreadable bool
 }
 
-// declaredLeadFields are the keys a lead declaration may have.
-var declaredLeadFields = []string{"intent", "notes"}
-
 // UnmarshalJSON reads a lead declaration. It never fails: what is wrong with
-// the shape (not an object, a field it does not have, an intent that is not a
-// string, notes that are not text) is kept for validate to report.
+// the shape (not an object, an intent that is not a string, notes that are
+// not text) is kept for validate to report.
 func (l *DeclaredLead) UnmarshalJSON(data []byte) error {
 	*l = DeclaredLead{}
 	var fields map[string]json.RawMessage
@@ -255,12 +259,6 @@ func (l *DeclaredLead) UnmarshalJSON(data []byte) error {
 		l.problems = append(l.problems, `must be an object {"intent", "notes"}`)
 		l.isIntentUnreadable = true
 		return nil
-	}
-	for _, key := range slices.Sorted(maps.Keys(fields)) {
-		if !slices.Contains(declaredLeadFields, key) {
-			l.problems = append(l.problems, fmt.Sprintf("has unknown field %q; a lead has %s",
-				key, strings.Join(declaredLeadFields, " and ")))
-		}
 	}
 	if raw, ok := fields["intent"]; ok {
 		if err := json.Unmarshal(raw, &l.Intent); err != nil {
@@ -351,8 +349,9 @@ type modelOnlyProjection struct {
 	Each map[string]string `json:"each"`
 }
 
-// UnmarshalJSON reads the string form or the strict object form; any other
-// JSON type, and any other key, is refused.
+// UnmarshalJSON reads the string form or the object form; any other JSON type
+// is refused. A key the object form does not have is found where every other
+// unknown field is (unknownFields), by modelOnlyProjection's tags.
 func (f *ModelOnlyField) UnmarshalJSON(data []byte) error {
 	trimmed := bytes.TrimSpace(data)
 	if len(trimmed) == 0 {
@@ -364,9 +363,7 @@ func (f *ModelOnlyField) UnmarshalJSON(data []byte) error {
 		return json.Unmarshal(trimmed, &f.Path)
 	case '{':
 		var p modelOnlyProjection
-		decoder := json.NewDecoder(bytes.NewReader(trimmed))
-		decoder.DisallowUnknownFields()
-		if err := decoder.Decode(&p); err != nil {
+		if err := json.Unmarshal(trimmed, &p); err != nil {
 			return fmt.Errorf("modelOnly projection must be {\"path\", \"each\"} with string paths: %w", err)
 		}
 		*f = ModelOnlyField{Path: p.Path, Each: p.Each, IsProjection: true}

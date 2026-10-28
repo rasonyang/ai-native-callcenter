@@ -16,8 +16,47 @@ import (
 // a transition to a phase that does not exist should be a startup failure, not
 // a conversation that dead-ends.
 
-// Load parses and validates one flow.
+// Load parses and validates one flow, and refuses a field the spec does not
+// declare, reported with every other problem in one ValidationError.
+//
+// It is the loader of everything that writes a flow or is about to run one
+// from a file: create, update draft, publish, aicc flowadd and aicc flowsim.
+// A misspelt key is the author's to fix while they are looking at it; read
+// back later, the same key is a line a caller never hears.
 func Load(data []byte) (*Spec, error) {
+	spec, unknown, err := LoadTolerant(data)
+	if len(unknown) == 0 {
+		return spec, err
+	}
+	// The unknown fields go first: a misspelt key is often why a later
+	// problem exists ("intialNode" leaves initialNode unset).
+	problems := make([]string, 0, len(unknown))
+	for _, field := range unknown {
+		problems = append(problems, field.String())
+	}
+	invalid := &ValidationError{FlowID: idOf(data)}
+	if errors.As(err, &invalid) {
+		problems = append(problems, invalid.Problems...)
+	}
+	return nil, &ValidationError{FlowID: invalid.FlowID, Problems: problems}
+}
+
+// LoadTolerant is Load for a revision that is already stored: a field the spec
+// does not declare is returned, for the caller to log, rather than refused.
+// Every other problem still refuses the flow.
+//
+// It is the loader of the read paths, a call resolving its number's published
+// revision and a campaign loading its flow. A row written before the loader
+// knew to refuse such a key, or by a later version that declares it, must not
+// stop a number from answering.
+func LoadTolerant(data []byte) (*Spec, []UnknownField, error) {
+	unknown := unknownFields(data)
+	spec, err := load(data)
+	return spec, unknown, err
+}
+
+// load parses and validates one flow, blind to keys the spec does not declare.
+func load(data []byte) (*Spec, error) {
 	var spec Spec
 	if err := json.Unmarshal(data, &spec); err != nil {
 		return nil, &ValidationError{FlowID: idOf(data), Problems: []string{decodeProblem(err)}}
