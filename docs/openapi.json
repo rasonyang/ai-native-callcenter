@@ -7981,7 +7981,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Switch-safe identifier: no spaces, @ or quotes."
+            "description": "Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \\ ^ , | { } $ or the sequence :_:."
           },
           "displayName": {
             "type": "string"
@@ -8076,7 +8076,8 @@
         "properties": {
           "destination": {
             "type": "string",
-            "description": "Queue extension or dialable number."
+            "pattern": "^\\+?[0-9]{1,20}$",
+            "description": "Queue extension or dialable number: 1 to 20 digits, optionally with one leading \"+\". Anything else is refused with 422 VALIDATION_FAILED (params.field destination, params.rule DESTINATION_FORMAT)."
           }
         },
         "required": [
@@ -8156,7 +8157,9 @@
           },
           "language": {
             "type": "string",
-            "description": "AI_OUTBOUND only: overrides the DID's language when set."
+            "maxLength": 8,
+            "pattern": "^([a-z]{2,3}(-[a-z0-9]+)*)?$",
+            "description": "AI_OUTBOUND only: overrides the DID's language when set. A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent uses the DID's language. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG), whatever the kind."
           },
           "callbackId": {
             "type": "string",
@@ -8301,10 +8304,12 @@
             "$ref": "#/components/schemas/OverflowType"
           },
           "target": {
-            "type": "string"
+            "type": "string",
+            "description": "BOT_FLOW: the DID the bot answers on. FORWARD: the extension or number the caller is transferred to. No whitespace, control characters or quotes, and none of \\ ^ , | { } $ or the sequence :_: (422 VALIDATION_FAILED, params.field overflow.target, params.rule TARGET_CHARSET)."
           },
           "sound": {
-            "type": "string"
+            "type": "string",
+            "description": "ANNOUNCE_HANGUP: played before the caller is hung up. The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION)."
           }
         },
         "required": [
@@ -8362,7 +8367,7 @@
           },
           "name": {
             "type": "string",
-            "description": "Switch-safe identifier: no spaces, @ or quotes."
+            "description": "Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \\ ^ , | { } $ or the sequence :_:."
           },
           "extNumber": {
             "type": "string",
@@ -8443,7 +8448,7 @@
         "properties": {
           "name": {
             "type": "string",
-            "description": "Switch-safe identifier: no spaces, @ or quotes."
+            "description": "Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \\ ^ , | { } $ or the sequence :_:. A name that breaks this is refused with 422 VALIDATION_FAILED (params.field name, params.rule NAME_CHARSET)."
           },
           "extNumber": {
             "type": "string",
@@ -8457,7 +8462,8 @@
             "$ref": "#/components/schemas/Strategy"
           },
           "mohSound": {
-            "type": "string"
+            "type": "string",
+            "description": "The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION)."
           },
           "maxWaitSec": {
             "type": "integer"
@@ -8466,7 +8472,8 @@
             "type": "integer"
           },
           "announceSound": {
-            "type": "string"
+            "type": "string",
+            "description": "The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION)."
           },
           "announceFrequencySec": {
             "type": "integer"
@@ -8663,7 +8670,9 @@
           },
           "language": {
             "type": "string",
-            "maxLength": 8
+            "maxLength": 8,
+            "pattern": "^([a-z]{2,3}(-[a-z0-9]+)*)?$",
+            "description": "A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent means en. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG)."
           },
           "flowId": {
             "type": "string",

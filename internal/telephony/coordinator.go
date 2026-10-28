@@ -56,6 +56,11 @@ var (
 	ErrUserDataWouldNotFit = errors.New("the call has no room for this business data")
 	ErrNoAgentLeg          = errors.New("no agent leg on this call")
 	ErrInvalidDTMF         = errors.New("not a DTMF sequence")
+	// ErrInvalidDestination means a transfer named something that is not an
+	// extension or a number. The destination becomes the dialplan's
+	// destination number, which the switch matches and expands, so it is
+	// digits with an optional leading "+" and nothing else.
+	ErrInvalidDestination = errors.New("not an extension or a dialable number")
 	// ErrNotForCallType reports an operation this kind of call does not offer.
 	// One extension calling another is two people on a line, not a call being
 	// handled: there is no third party to pass it to and no queue to put it
@@ -1342,6 +1347,22 @@ func (c *Coordinator) PatchUserData(callID, agentID uuid.UUID, patch map[string]
 	return result, change, nil
 }
 
+// isDestination reports whether a transfer may be sent to s: an extension, a
+// queue's extension or a number, which is 1 to 20 digits with an optional
+// leading "+". The contract's TransferRequest.destination says the same.
+func isDestination(s string) bool {
+	digits := strings.TrimPrefix(s, "+")
+	if digits == "" || len(digits) > 20 {
+		return false
+	}
+	for _, r := range digits {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // isDTMF reports whether every character is a tone the DTMF alphabet has.
 func isDTMF(digits string) bool {
 	if digits == "" || len(digits) > 32 {
@@ -1429,6 +1450,9 @@ func (c *Coordinator) agentLegAndCause(callID, agentID uuid.UUID) (string, strin
 func (c *Coordinator) Transfer(ctx context.Context, callID, agentID uuid.UUID, destination string) error {
 	if strings.TrimSpace(destination) == "" {
 		return fmt.Errorf("transfer destination is required")
+	}
+	if !isDestination(destination) {
+		return fmt.Errorf("%w: %q", ErrInvalidDestination, destination)
 	}
 	// The caller is the leg that must survive the transfer. The requesting
 	// agent's own live leg is the permission: the caller's leg is somebody

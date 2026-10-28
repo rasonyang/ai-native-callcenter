@@ -2090,7 +2090,7 @@ type CreateCallRequest struct {
 	// Kind AI_OUTBOUND hands the answered customer to the bot; AGENT_OUTBOUND rings an agent's phone first and dials the destination when they pick up. Both produce a call of type OUTBOUND. Left out, it is AGENT_OUTBOUND: a plain {to} is a click-to-dial.
 	Kind *CreateCallRequestKind `json:"kind,omitempty"`
 
-	// Language AI_OUTBOUND only: overrides the DID's language when set.
+	// Language AI_OUTBOUND only: overrides the DID's language when set. A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent uses the DID's language. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG), whatever the kind.
 	Language *string `json:"language,omitempty"`
 
 	// To The number to dial: 3 to 20 digits, optionally with one leading "+" (canonical E.164, for example +8613800138000). A national number is accepted too. The number is dialled and recorded in the call ledger exactly as sent. Spaces, dashes, brackets and a second "+" are refused.
@@ -2198,10 +2198,12 @@ type DIDWrite struct {
 	FlowID          *openapi_types.UUID `json:"flowId,omitempty"`
 
 	// IsDefaultOutbound The number an agent's call goes out from when nothing names one. At most one number in the deployment carries this, enforced by the database rather than by whoever remembers to clear the last one.
-	IsDefaultOutbound  *bool   `json:"isDefaultOutbound,omitempty"`
-	IsEnabled          *bool   `json:"isEnabled,omitempty"`
-	IsRecordingEnabled *bool   `json:"isRecordingEnabled,omitempty"`
-	Language           *string `json:"language,omitempty"`
+	IsDefaultOutbound  *bool `json:"isDefaultOutbound,omitempty"`
+	IsEnabled          *bool `json:"isEnabled,omitempty"`
+	IsRecordingEnabled *bool `json:"isRecordingEnabled,omitempty"`
+
+	// Language A lowercase BCP 47 tag of at most 8 characters: a primary language subtag of two or three letters, optionally followed by hyphenated subtags of letters or digits (en, zh, pt-br, zh-hans). Empty or absent means en. Any other value is refused with 422 VALIDATION_FAILED (params.field language, params.rule LANGUAGE_SUBTAG).
+	Language *string `json:"language,omitempty"`
 
 	// MaxOutboundChannels How many outbound calls this number may carry at once, ringing and talking together: what the carrier sells per number. Absent means no limit. Inbound lines are separate and are neither counted nor limited. Every call the platform places from the number (single calls, campaigns, click-to-dial) takes a line before it is originated and gives it back when the call ends; a call an agent dials by hand through the number counts while it lasts. A single call or click-to-dial over the limit is refused with 409 DID_CHANNELS_EXHAUSTED, and a campaign waits (activity AT_CAPACITY). Writing the number without this property clears the limit.
 	MaxOutboundChannels *int   `json:"maxOutboundChannels,omitempty"`
@@ -2500,7 +2502,10 @@ type NotReadyReason string
 
 // Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
 type Overflow struct {
-	Sound  *string      `json:"sound,omitempty"`
+	// Sound ANNOUNCE_HANGUP: played before the caller is hung up. The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION).
+	Sound *string `json:"sound,omitempty"`
+
+	// Target BOT_FLOW: the DID the bot answers on. FORWARD: the extension or number the caller is transferred to. No whitespace, control characters or quotes, and none of \ ^ , | { } $ or the sequence :_: (422 VALIDATION_FAILED, params.field overflow.target, params.rule TARGET_CHARSET).
 	Target *string      `json:"target,omitempty"`
 	Type   OverflowType `json:"type"`
 }
@@ -2671,7 +2676,7 @@ type Queue struct {
 	MaxWaitSec               int                `json:"maxWaitSec"`
 	MohSound                 string             `json:"mohSound"`
 
-	// Name Switch-safe identifier: no spaces, @ or quotes.
+	// Name Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:.
 	Name string `json:"name"`
 
 	// Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
@@ -2758,7 +2763,9 @@ type QueueReportList struct {
 
 // QueueWrite Create or update a queue. Omitted fields take server defaults (strategy LONGEST_IDLE_AGENT, overflow ANNOUNCE_HANGUP, mohSound $${hold_music}, tierRules.waitSec 300, isEnabled true, isRecordingEnabled true).
 type QueueWrite struct {
-	AnnounceFrequencySec     *int    `json:"announceFrequencySec,omitempty"`
+	AnnounceFrequencySec *int `json:"announceFrequencySec,omitempty"`
+
+	// AnnounceSound The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION).
 	AnnounceSound            *string `json:"announceSound,omitempty"`
 	DiscardAbandonedAfterSec *int    `json:"discardAbandonedAfterSec,omitempty"`
 	DisplayName              *string `json:"displayName,omitempty"`
@@ -2771,9 +2778,11 @@ type QueueWrite struct {
 	IsRecordingEnabled       *bool            `json:"isRecordingEnabled,omitempty"`
 	MaxWaitNoAgentSec        *int             `json:"maxWaitNoAgentSec,omitempty"`
 	MaxWaitSec               *int             `json:"maxWaitSec,omitempty"`
-	MohSound                 *string          `json:"mohSound,omitempty"`
 
-	// Name Switch-safe identifier: no spaces, @ or quotes.
+	// MohSound The switch expands a sound before it plays it: it may name a variable (${name} or $${name}), but holds no other ${…} and no control characters. Anything else is refused with 422 VALIDATION_FAILED (params.rule SOUND_EXPANSION).
+	MohSound *string `json:"mohSound,omitempty"`
+
+	// Name Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:. A name that breaks this is refused with 422 VALIDATION_FAILED (params.field name, params.rule NAME_CHARSET).
 	Name string `json:"name"`
 
 	// Overflow Where an unserved caller goes. BOT_FLOW and FORWARD need a target.
@@ -2921,7 +2930,7 @@ type StaffQueueRequest struct {
 type StaffedQueue struct {
 	DisplayName string `json:"displayName"`
 
-	// Name Switch-safe identifier: no spaces, @ or quotes.
+	// Name Switch-safe identifier: no whitespace or control characters, no @ or quotes, and none of \ ^ , | { } $ or the sequence :_:.
 	Name    string             `json:"name"`
 	QueueID openapi_types.UUID `json:"queueId"`
 
@@ -2983,7 +2992,7 @@ type TranscriptionState string
 
 // TransferRequest defines model for TransferRequest.
 type TransferRequest struct {
-	// Destination Queue extension or dialable number.
+	// Destination Queue extension or dialable number: 1 to 20 digits, optionally with one leading "+". Anything else is refused with 422 VALIDATION_FAILED (params.field destination, params.rule DESTINATION_FORMAT).
 	Destination string `json:"destination"`
 }
 

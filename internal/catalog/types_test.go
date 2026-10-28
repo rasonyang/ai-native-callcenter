@@ -244,6 +244,116 @@ func TestDIDValidation(t *testing.T) {
 	}
 }
 
+// A number's language rides every call on it to the switch and to the bot, so
+// it is a lowercase BCP 47 tag of at most eight characters and nothing else.
+// Checked as sent: a line break or a space is refused, not trimmed away.
+func TestADIDLanguageIsALowercaseLanguageTag(t *testing.T) {
+	t.Parallel()
+	someFlow := uuid.New()
+	for _, language := range []string{"en", "zh", "pt-br", "zh-hans", "yue", "es-419", "zh-hk"} {
+		d := DID{Number: "95011", Language: language, AllowInbound: true, FlowID: &someFlow}
+		if err := d.validate(); err != nil {
+			t.Errorf("language %q was refused: %v", language, err)
+		} else if d.Language != language {
+			t.Errorf("language %q was stored as %q", language, d.Language)
+		}
+	}
+	for _, language := range []string{
+		"EN", "zh_CN", "en^hangup", "en'", "zh,x=y", "zh hans", "中文", "zh-hans-cn",
+		"e", "zh-hans-x", "en\nzh", "en\n", " en", "en-", "en--us", "-en", "engl", "en.us",
+		"en$", "en{", "en}", `en\`, "en|x", "en\t", "en\r",
+	} {
+		d := DID{Number: "95011", Language: language, AllowInbound: true, FlowID: &someFlow}
+		err := d.validate()
+		var invalid *ValidationError
+		if !errors.As(err, &invalid) {
+			t.Errorf("language %q was accepted (err %v)", language, err)
+			continue
+		}
+		if invalid.Field != "language" || invalid.Rule != "LANGUAGE_SUBTAG" {
+			t.Errorf("language %q: field/rule = %q/%q, want language/LANGUAGE_SUBTAG",
+				language, invalid.Field, invalid.Rule)
+		}
+	}
+}
+
+// The values a queue sends to the switch end up in places the switch parses:
+// the name is the callcenter application's data, the overflow target the end
+// of a dial string or a transfer's destination, and the sounds are expanded
+// before they play. Each refuses what the switch would read as syntax.
+func TestAQueueRefusesWhatTheSwitchWouldReadAsSyntax(t *testing.T) {
+	t.Parallel()
+	valid := func() Queue {
+		return Queue{Name: "support-en", ExtNumber: "7001",
+			Overflow: Overflow{Type: OverflowBotFlow, Target: "95012"}}
+	}
+	tests := []struct {
+		name        string
+		mutate      func(q *Queue)
+		field, rule string
+	}{
+		{"a name with a dollar", func(q *Queue) { q.Name = "q${system(id)}" }, "name", "NAME_CHARSET"},
+		{"a name with a line break", func(q *Queue) { q.Name = "support\nen" }, "name", "NAME_CHARSET"},
+		{"a name with a tab", func(q *Queue) { q.Name = "support\ten" }, "name", "NAME_CHARSET"},
+		{"a name with a comma", func(q *Queue) { q.Name = "support,en" }, "name", "NAME_CHARSET"},
+		{"a name with a caret", func(q *Queue) { q.Name = "support^en" }, "name", "NAME_CHARSET"},
+		{"a name with a backslash", func(q *Queue) { q.Name = `support\en` }, "name", "NAME_CHARSET"},
+		{"a name with a brace", func(q *Queue) { q.Name = "support{en}" }, "name", "NAME_CHARSET"},
+		{"a target with a space", func(q *Queue) { q.Overflow.Target = "95012 inline" }, "overflow.target", "TARGET_CHARSET"},
+		{"a target with a comma", func(q *Queue) { q.Overflow.Target = "95012,loopback/1" }, "overflow.target", "TARGET_CHARSET"},
+		{"a target with a dollar", func(q *Queue) { q.Overflow.Target = "${system(id)}" }, "overflow.target", "TARGET_CHARSET"},
+		{"a target with a pipe", func(q *Queue) { q.Overflow.Target = "95012|loopback/1" }, "overflow.target", "TARGET_CHARSET"},
+		{"a target with the enterprise separator", func(q *Queue) {
+			q.Overflow = Overflow{Type: OverflowForward, Target: "1001:_:1002"}
+		}, "overflow.target", "TARGET_CHARSET"},
+		{"a target with a quote", func(q *Queue) {
+			q.Overflow = Overflow{Type: OverflowForward, Target: "1001'"}
+		}, "overflow.target", "TARGET_CHARSET"},
+		{"hold music that runs a command", func(q *Queue) { q.MohSound = "${system(id)}" }, "mohSound", "SOUND_EXPANSION"},
+		{"an announcement that runs a command", func(q *Queue) { q.AnnounceSound = "${system id}" }, "announceSound", "SOUND_EXPANSION"},
+		{"an overflow sound that runs a command", func(q *Queue) {
+			q.Overflow = Overflow{Type: OverflowAnnounceHangup, Sound: "ivr/x.wav${bg_system(id)}"}
+		}, "overflow.sound", "SOUND_EXPANSION"},
+		{"an overflow sound with a line break", func(q *Queue) {
+			q.Overflow = Overflow{Type: OverflowAnnounceHangup, Sound: "ivr/x.wav\n"}
+		}, "overflow.sound", "SOUND_EXPANSION"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			q := valid()
+			tt.mutate(&q)
+			err := q.validate()
+			var invalid *ValidationError
+			if !errors.As(err, &invalid) {
+				t.Fatalf("validate() = %v, want a refusal", err)
+			}
+			if invalid.Field != tt.field || invalid.Rule != tt.rule {
+				t.Errorf("field/rule = %q/%q, want %q/%q", invalid.Field, invalid.Rule, tt.field, tt.rule)
+			}
+		})
+	}
+
+	// What queues are actually configured with still passes: the stored
+	// default, a stream, a file, a tone, and a name that is not ASCII.
+	for _, mutate := range []func(q *Queue){
+		func(q *Queue) { q.MohSound = "$${hold_music}" },
+		func(q *Queue) { q.MohSound = "local_stream://moh" },
+		func(q *Queue) { q.AnnounceSound = "${sounds_dir}/en/us/callie/ivr/8000/ivr-hold.wav" },
+		func(q *Queue) {
+			q.Overflow = Overflow{Type: OverflowAnnounceHangup, Sound: "tone_stream://%(250,0,500)"}
+		},
+		func(q *Queue) { q.Overflow = Overflow{Type: OverflowForward, Target: "+8613800138000"} },
+		func(q *Queue) { q.Name = "售后.vip_queue-2" },
+	} {
+		q := valid()
+		mutate(&q)
+		if err := q.validate(); err != nil {
+			t.Errorf("an ordinary queue was refused: %v (%+v)", err, q)
+		}
+	}
+}
+
 // The refusal names its field and rule, which is what lets a form highlight
 // the input instead of printing a sentence at the bottom about nothing in
 // particular (walkthrough step 11).

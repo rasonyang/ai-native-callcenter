@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/auth"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -470,6 +471,11 @@ func ensureFlowAndNumbers(ctx context.Context, st *store.Store, log *slog.Logger
 		}
 
 		for _, n := range f.numbers() {
+			// Written straight into the table, so the API's rule is applied
+			// here: a language rides every call on the number to the switch.
+			if !catalog.IsLanguageTag(n.language) {
+				return fmt.Errorf("seed number %s: language %q: %s", n.number, n.language, catalog.LanguageTagRule)
+			}
 			// Every flag the CHECKs read is stated: dids_go_somewhere wants a
 			// direction, dids_default_outbound_dials_out wants the default to
 			// be able to dial out. The default flag is also conditional on no

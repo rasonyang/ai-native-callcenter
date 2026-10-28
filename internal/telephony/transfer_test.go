@@ -23,6 +23,37 @@ func TestAnAgentOnTheCallTransfersTheCaller(t *testing.T) {
 	}
 }
 
+// The destination becomes the dialplan's destination number, and an agent on
+// the call is the one choosing it. Anything but an extension or a number is
+// refused before the switch is touched; a space alone would let it name a
+// dialplan of its own.
+func TestATransferGoesOnlyToAnExtensionOrANumber(t *testing.T) {
+	t.Parallel()
+	for _, destination := range []string{
+		"system:id inline", "7001 XML default", "7001'", "${system(id)}", "7001,7002", "7001\n",
+		"7001\n\nbgapi status", "+", "++8613800138000", "1-800-FLOWERS", "７００１", "123456789012345678901",
+		"support-en",
+	} {
+		c, cmd, callID, agentID := onACallWithAnAgent(t)
+		err := c.Transfer(t.Context(), callID, agentID, destination)
+		if !errors.Is(err, ErrInvalidDestination) {
+			t.Errorf("transfer to %q returned %v, want ErrInvalidDestination", destination, err)
+		}
+		if len(cmd.sent) != 0 {
+			t.Errorf("transfer to %q reached the switch: %q", destination, cmd.sent)
+		}
+	}
+	for _, destination := range []string{"7001", "1", "+8613800138000", "12345678901234567890"} {
+		c, cmd, callID, agentID := onACallWithAnAgent(t)
+		if err := c.Transfer(t.Context(), callID, agentID, destination); err != nil {
+			t.Errorf("transfer to %q: %v", destination, err)
+		}
+		if want := "uuid_transfer caller-chan " + destination + " XML aicc"; cmd.last() != want {
+			t.Errorf("transfer sent %q, want %q", cmd.last(), want)
+		}
+	}
+}
+
 // A call id is not an authority. An agent who is not on the call, knowing its
 // id, could otherwise move a colleague's customer to another queue and end the
 // colleague's call under them (#239). The refusal comes before the switch is

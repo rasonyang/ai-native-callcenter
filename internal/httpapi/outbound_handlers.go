@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
@@ -59,6 +60,14 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 				map[string]any{"maxKeys": userDataMaxKeys, "maxValueBytes": userDataMaxValueBytes})
 			return
 		}
+	}
+	// The language rides the call to the switch and to the bot, so it is the
+	// tag the contract describes or nothing. Checked whatever the kind, as the
+	// contract states it, and as sent: empty means the DID's own.
+	if req.Language != nil && *req.Language != "" && !catalog.IsLanguageTag(*req.Language) {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, catalog.LanguageTagRule,
+			map[string]any{"field": "language", "rule": "LANGUAGE_SUBTAG"})
+		return
 	}
 
 	switch kind {
@@ -373,6 +382,12 @@ func writeOutboundError(w http.ResponseWriter, r *http.Request, err error) {
 			"the DID does not allow outbound calls; set allowOutbound on it first", nil)
 	case errors.Is(err, outbound.ErrFlowless):
 		writeError(w, http.StatusConflict, CodeConflict, "the DID has no published flow", nil)
+	case errors.Is(err, outbound.ErrBadLanguage):
+		// The request's own language was checked on arrival, so this is the
+		// number's: something the operator fixes on the number, like a
+		// missing flow.
+		writeError(w, http.StatusConflict, CodeConflict,
+			"the DID's language is not a language tag a call can carry; correct it on the number", nil)
 	case errors.Is(err, esl.ErrDown):
 		// The link to the switch is not up and the originate was not sent: the
 		// same answer every call operation gives for it. An originate written

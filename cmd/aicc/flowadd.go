@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/catalog"
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/store/queries"
@@ -28,7 +29,7 @@ func runFlowAdd(args []string) error {
 	slug := fs.String("slug", "", "stable identifier (defaults to the spec's id)")
 	name := fs.String("name", "", "display name (defaults to the slug)")
 	didNumber := fs.String("did", "", "point this number at the flow; the number is created if it does not exist")
-	language := fs.String("language", "en", "greeting language for a number this command creates (a short subtag such as en or zh); an existing number keeps its own")
+	language := fs.String("language", "en", "greeting language for a number this command creates (a lowercase BCP 47 tag such as en, zh or pt-br); an existing number keeps its own")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -139,20 +140,21 @@ type didBinding struct {
 //
 // The checks mirror catalog.DID.validate (internal/catalog/types.go), which is
 // what the HTTP CreateDID operation applies: a number is digits only, and a
-// language is a short subtag, defaulting to en. They are repeated rather than
-// called because validate is unexported and the catalog service needs a switch
-// connection this command does not have.
+// language is a lowercase BCP 47 tag (catalog.IsLanguageTag), defaulting to
+// en. They are repeated rather than called because validate is unexported and
+// the catalog service needs a switch connection this command does not have.
 func planDIDBinding(number, language string, flowID uuid.UUID, existing *queries.Did) (didBinding, error) {
 	number = strings.TrimSpace(number)
-	language = strings.TrimSpace(language)
 	if !digitsOnly(number) {
 		return didBinding{}, fmt.Errorf("number %q: a number must be digits", number)
 	}
 	if language == "" {
 		language = "en"
 	}
-	if len(language) > 8 {
-		return didBinding{}, fmt.Errorf("language %q: must be a short subtag such as en or zh", language)
+	// Checked as sent and by the API's own rule: a language rides every call
+	// on the number to the switch and to the bot.
+	if !catalog.IsLanguageTag(language) {
+		return didBinding{}, fmt.Errorf("language %q: %s", language, catalog.LanguageTagRule)
 	}
 
 	if existing == nil {
