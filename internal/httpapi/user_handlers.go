@@ -44,6 +44,25 @@ type AccountService interface {
 // so the characters are refused at the door rather than mangled behind it.
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
 
+// maxLocaleLength is the contract's maxLength for UserCreate.locale and
+// UserUpdate.locale, and the width of users.locale.
+const maxLocaleLength = 8
+
+// localeFits refuses a locale longer than the contract allows with a 422
+// naming the field. Without it the column was the only bound, and a longer
+// value came back as STORAGE_DOWN (#370). Counted in characters, as maxLength
+// and the varchar column both count. The contract names no set of locales and
+// no pattern, so the length is all there is to check.
+func localeFits(w http.ResponseWriter, locale *string) bool {
+	if locale == nil || utf8.RuneCountInString(*locale) <= maxLocaleLength {
+		return true
+	}
+	writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+		"a locale is at most 8 characters, such as en or zh",
+		map[string]any{"field": "locale", "rule": "LOCALE_TOO_LONG"})
+	return false
+}
+
 // ListUsers serves every account with what belongs to it.
 func (s *Server) ListUsers(w http.ResponseWriter, r *http.Request) {
 	if s.accounts == nil {
@@ -90,6 +109,9 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if utf8.RuneCountInString(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a password is at least 8 characters", map[string]any{"field": "password", "rule": "PASSWORD_MIN_8"})
+		return
+	}
+	if !localeFits(w, in.Locale) {
 		return
 	}
 
@@ -167,6 +189,9 @@ func (s *Server) UpdateUser(w http.ResponseWriter, r *http.Request, userID uuid.
 	if in.Status != api.UserStatusACTIVE && in.Status != api.UserStatusSUSPENDED {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"unknown status", map[string]any{"field": "status", "rule": "UNKNOWN_STATUS"})
+		return
+	}
+	if !localeFits(w, in.Locale) {
 		return
 	}
 	displayName := strings.TrimSpace(deref(in.DisplayName))
