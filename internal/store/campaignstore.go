@@ -53,7 +53,7 @@ func (c *CampaignStore) DIDFlow(ctx context.Context, didID uuid.UUID) (campaign.
 	if err != nil {
 		return campaign.DIDFlow{}, fmt.Errorf("get published flow %s: %w", *did.FlowID, err)
 	}
-	if out.Spec, err = flow.Load(raw); err != nil {
+	if out.Spec, err = loadStoredRevision(ctx, *did.FlowID, raw); err != nil {
 		return campaign.DIDFlow{}, fmt.Errorf("published flow %s: %w", *did.FlowID, err)
 	}
 	return out, nil
@@ -81,7 +81,7 @@ func (c *CampaignStore) DIDFlows(ctx context.Context, didIDs []uuid.UUID) ([]cam
 			return nil, fmt.Errorf("get published flows: %w", err)
 		}
 		for _, r := range rows {
-			spec, err := flow.Load(r.Spec)
+			spec, err := loadStoredRevision(ctx, r.ID, r.Spec)
 			if err != nil {
 				// One unreadable revision must not hide every number from a
 				// list; its numbers count as having no usable flow. A create

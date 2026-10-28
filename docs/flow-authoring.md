@@ -30,6 +30,10 @@ A flow that has grown past a handful of phases usually has one of three symptoms
 
 The loader (`flow.Load`, `internal/flow/load.go`) rejects a flow that cannot run, and reports every problem at once. Dialect version is `"specVersion": "v2"`.
 
+**Unknown fields are errors.** Every key must be a field this section declares, spelt as it is spelt here, case included. Any other key is a problem that names the object it is in, and suggests a field when exactly one is a near miss: `phase "confirm_upgrade" has unknown field "anounce"; did you mean "announce"?`. A small object lists its fields instead (`phase "close" lead has unknown field "comment"; a lead has intent and notes`). That covers a misspelling (`anounce`, `isterminal`, `maxDurationSecs`), a field in the wrong object (`transitions` inside a tool) and a comment: the spec has no comment field. The refusal comes with the flow's other problems on every write: `POST /flows`, `PUT /flows/{flowId}`, publishing, `aicc flowadd` and `aicc flowsim`. Keys you name yourself are not fields and are not checked: phase and tool names, the keys of `http.query`, `http.headers`, `http.body` and `http.result`, `modelOnly` output names and a projection's `each`, and everything inside a tool's `parameters`, which is a JSON Schema the model receives as written.
+
+A revision stored before this check existed may still carry such a key. It keeps answering its number: loading it for a call, for a campaign or when a number is bound to the flow logs a warning per key (`published flow has a field the spec does not declare; loading it anyway`, with the problem) and the call runs as before. Saving or publishing that flow again is refused until the key is fixed.
+
 ### 2.1 Top level
 
 | Field | Meaning |
@@ -712,7 +716,7 @@ A ticket's first `plan_status` is `PROCESSING` with an `eta`; every later one is
 
 ## 8. Verifying a flow
 
-- **Load.** `aicc flowadd -file <flow>.json -did <number>` loads and publishes (the same slug updates and republishes). With `-did`, a number that does not exist is created **inbound only** (`allowInbound=true`, `allowOutbound=false`), and the command prints that; it cannot be the caller id of an AI outbound call (`POST /calls` with `AI_OUTBOUND` answers `422 DID_NOT_OUTBOUND`) until `allowOutbound` is set on it with `PUT /dids/{didId}` (`updateDID`). A number that already exists keeps all its flags and only its flow changes; the command prints the flags it kept. The same validation runs on `POST /flows` and `PUT /flows/{flowId}` (a spec the loader rejects is refused with 422 listing every problem). Publishing can additionally refuse with `TERMINAL_ANNOUNCE_REQUIRED` (5.2).
+- **Load.** `aicc flowadd -file <flow>.json -did <number>` loads and publishes (the same slug updates and republishes). With `-did`, a number that does not exist is created **inbound only** (`allowInbound=true`, `allowOutbound=false`), and the command prints that; it cannot be the caller id of an AI outbound call (`POST /calls` with `AI_OUTBOUND` answers `422 DID_NOT_OUTBOUND`) until `allowOutbound` is set on it with `PUT /dids/{didId}` (`updateDID`). A number that already exists keeps all its flags and only its flow changes; the command prints the flags it kept. The same validation runs on `POST /flows` and `PUT /flows/{flowId}` (a spec the loader rejects is refused with 422 listing every problem, unknown fields included). Publishing can additionally refuse with `TERMINAL_ANNOUNCE_REQUIRED` (5.2).
 - **Backend.** Run `go run ./cmd/aicc-mockbackend` and point `AICC_BOT_BACKEND_BASE` at it to walk the seeded flows against deterministic fixtures (`docs/dev-stack.md`). For a new flow, write the equivalent handlers for your endpoints. Test the failure paths on purpose: a tool that times out, a `found: 0`, an unknown decision value.
 - **Scenarios (the flow simulator).** `aicc flowsim` replays a scripted call against your flow on the real `flow.Engine` and `flow.Runtime`, with the flow's real HTTP tools served by the mock backend, and needs no database, switch or model:
 
@@ -776,3 +780,4 @@ A ticket's first `plan_status` is `PROCESSING` with an `eta`; every later one is
 - Is `maxTurnsWithoutTool` above the longest legitimate tool-less stretch?
 - Does the flow avoid collecting secrets or digits through the model (6)?
 - Are both languages written, with the same meaning?
+- Did a save list an unknown field? Fix its spelling, or move it where it belongs, rather than delete it: a misspelt `announce` or `isTerminal` is a line or an ending the published flow has been running without (2).
