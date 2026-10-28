@@ -2379,7 +2379,7 @@ type FlowDetail struct {
 	// Flow A flow's identity and publication state. The draft is what an author edits; a revision is an immutable copy taken at publish time. Calls only ever run the published revision, so an edit in progress can never change what a live number does.
 	Flow Flow `json:"flow"`
 
-	// Revisions Newest first.
+	// Revisions Newest first. Each one's spec is read with `getFlowRevision`.
 	Revisions []FlowRevision `json:"revisions"`
 }
 
@@ -2406,7 +2406,7 @@ type FlowPublish struct {
 	Note *string `json:"note,omitempty"`
 }
 
-// FlowRevision A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer.
+// FlowRevision A publish that happened: which snapshot, when, and why. A revision is immutable and is never deleted or rewritten; publishing again appends one. Its spec is not in this listing, so a flow with a long history does not ship every document it ever was: `getFlowRevision` serves one revision with its spec, which is also the first step of restoring it to the draft.
 type FlowRevision struct {
 	CreatedAt time.Time `json:"createdAt"`
 
@@ -2416,6 +2416,25 @@ type FlowRevision struct {
 	// Note Why it was published; empty when none was given.
 	Note       string             `json:"note"`
 	RevisionID openapi_types.UUID `json:"revisionId"`
+}
+
+// FlowRevisionDetail One revision with the spec it stored, as it was stored. No loader runs on the way out: a revision that today's rules refuse is served unchanged, and saving it as the draft is where those rules are applied.
+type FlowRevisionDetail struct {
+	CreatedAt time.Time `json:"createdAt"`
+
+	// IsPublished This is the revision live calls run.
+	IsPublished bool `json:"isPublished"`
+
+	// Note Why it was published; empty when none was given.
+	Note       string             `json:"note"`
+	RevisionID openapi_types.UUID `json:"revisionId"`
+
+	// Spec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
+	//
+	// One deployment-dependent rule comes with that field: where the deployment's speech provider cannot be prompted into a turn by text, a phase the conversation does not leave has no way to say anything unless it carries its own line, so publishing a flow whose terminal phases lack one is refused with TERMINAL_ANNOUNCE_REQUIRED. Which provider answers is a property of the installation, not of this request.
+	//
+	// The document is deliberately opaque to this contract. Its dialect is defined and validated by the server's loader, which is the same code a live call parses the published revision with; restating that shape here would be a second definition, free to drift from the one that actually runs. A spec the loader rejects is refused with 422 and every problem it found, so what can be stored is exactly what could run.
+	Spec FlowSpec `json:"spec"`
 }
 
 // FlowSpec One complete conversation flow in the v2 flow DSL: the bot's persona, rules and voice, the phases a call moves through, the tools each phase allows, the transitions between them, and optionally each phase's `announce` — a line the bot says as written on entering it, rather than a brief it improvises from.
@@ -3761,6 +3780,9 @@ type ServerInterface interface {
 	// PublishFlow Publish the draft
 	// (POST /flows/{flowId}/publish)
 	PublishFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID)
+	// GetFlowRevision One revision, with its spec
+	// (GET /flows/{flowId}/revisions/{revisionId})
+	GetFlowRevision(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID, revisionID openapi_types.UUID)
 	// GetOpenAPI This contract
 	// (GET /openapi.json)
 	GetOpenAPI(w http.ResponseWriter, r *http.Request)
@@ -4355,6 +4377,12 @@ func (_ Unimplemented) UpdateFlowDraft(w http.ResponseWriter, r *http.Request, f
 // PublishFlow Publish the draft
 // (POST /flows/{flowId}/publish)
 func (_ Unimplemented) PublishFlow(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetFlowRevision One revision, with its spec
+// (GET /flows/{flowId}/revisions/{revisionId})
+func (_ Unimplemented) GetFlowRevision(w http.ResponseWriter, r *http.Request, flowID openapi_types.UUID, revisionID openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6987,6 +7015,41 @@ func (siw *ServerInterfaceWrapper) PublishFlow(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// GetFlowRevision operation middleware
+func (siw *ServerInterfaceWrapper) GetFlowRevision(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "flowId" -------------
+	var flowID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "flowId", chi.URLParam(r, "flowId"), &flowID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "flowId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "revisionId" -------------
+	var revisionID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "revisionId", chi.URLParam(r, "revisionId"), &revisionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revisionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFlowRevision(w, r, flowID, revisionID)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetOpenAPI operation middleware
 func (siw *ServerInterfaceWrapper) GetOpenAPI(w http.ResponseWriter, r *http.Request) {
 
@@ -8029,6 +8092,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/flows/{flowId}/publish", wrapper.PublishFlow)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/flows/{flowId}/revisions/{revisionId}", wrapper.GetFlowRevision)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/openapi.json", wrapper.GetOpenAPI)

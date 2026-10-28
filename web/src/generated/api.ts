@@ -926,6 +926,8 @@ export interface paths {
         /**
          * Replace the draft
          * @description Edits the draft, not what answers the phone: the published revision keeps running until the draft is published. Validation is the loader's, so a rejected spec comes back as 422 with params.problems.
+         *
+         *     This is also the second half of restoring an earlier revision: send the `spec` `getFlowRevision` served. A revision the loader no longer accepts is refused like any other spec, and the draft is unchanged.
          */
         put: operations["updateFlowDraft"];
         post?: never;
@@ -951,6 +953,32 @@ export interface paths {
          *     A revision that can transfer the caller to a person (transfer_to_agent offered in any phase) is refused with 409 CAMPAIGN_FLOW_HAS_TRANSFER while a campaign that has not finished (DRAFT, RUNNING or PAUSED) dials from a DID answered by this flow: a campaign call has no way to a person. Cancel or finish the campaign, or remove the transfer.
          */
         post: operations["publishFlow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/flows/{flowId}/revisions/{revisionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One revision, with its spec
+         * @description A publish that happened, with the spec it stored. `publishedRevisionId` on the flow names the one live calls run, so this is also how to read what callers hear while the draft holds changes that are not published.
+         *
+         *     The spec is served exactly as it was stored, even when today's loader would refuse it: a revision published before a rule existed is the one a reader most needs to see in order to fix it.
+         *
+         *     Restoring an earlier revision is two calls, for an integration as for the SPA: read the revision here, then save its `spec` as the draft with `updateFlowDraft`. The save runs the loader, so a revision that no longer loads is refused with 422 and every problem, and the draft is left as it was. Nothing a caller hears changes until `publishFlow` puts the restored draft live, which checks the deployment's publish rules again and appends a new revision; the history is never rewritten.
+         *
+         *     A revision of another flow answers 404, as one that does not exist does.
+         */
+        get: operations["getFlowRevision"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2463,7 +2491,7 @@ export interface components {
         FlowList: {
             items: components["schemas"]["Flow"][];
         };
-        /** @description A publish that happened: which snapshot, when, and why. The stored spec is not served — a revision is a record of publication, and reading one back is rollback, which this surface does not offer. */
+        /** @description A publish that happened: which snapshot, when, and why. A revision is immutable and is never deleted or rewritten; publishing again appends one. Its spec is not in this listing, so a flow with a long history does not ship every document it ever was: `getFlowRevision` serves one revision with its spec, which is also the first step of restoring it to the draft. */
         FlowRevision: {
             /** Format: uuid */
             revisionId: string;
@@ -2474,11 +2502,15 @@ export interface components {
             /** @description This is the revision live calls run. */
             isPublished: boolean;
         };
+        /** @description One revision with the spec it stored, as it was stored. No loader runs on the way out: a revision that today's rules refuse is served unchanged, and saving it as the draft is where those rules are applied. */
+        FlowRevisionDetail: components["schemas"]["FlowRevision"] & {
+            spec: components["schemas"]["FlowSpec"];
+        };
         /** @description One flow: what it is, what its draft says, and every time it has been published. */
         FlowDetail: {
             flow: components["schemas"]["Flow"];
             draftSpec: components["schemas"]["FlowSpec"];
-            /** @description Newest first. */
+            /** @description Newest first. Each one's spec is read with `getFlowRevision`. */
             revisions: components["schemas"]["FlowRevision"][];
         };
         /** @description A new flow, stored as a draft. Creating does not publish: a number pointing at an unpublished flow reaches no bot, so going live stays a separate, deliberate act. */
@@ -5481,6 +5513,33 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             422: components["responses"]["UnprocessableEntity"];
+            503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    getFlowRevision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                flowId: string;
+                revisionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The revision and the spec it stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FlowRevisionDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             503: components["responses"]["ServiceUnavailable"];
         };
     };

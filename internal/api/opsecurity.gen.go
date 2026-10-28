@@ -277,6 +277,11 @@ var OperationSecurityByRoute = map[string]OperationSecurity{
 		SessionScopes: []string{"config:read"},
 		KeyScopes:     []string{"config:read"},
 	},
+	"GET /flows/{flowId}/revisions/{revisionId}": {
+		OperationID:   "getFlowRevision",
+		SessionScopes: []string{"config:read"},
+		KeyScopes:     []string{"config:read"},
+	},
 	"GET /openapi.json": {
 		OperationID:   "getOpenAPI",
 		IsAnonymous:   true,

@@ -135,6 +135,7 @@ OPS = {
     "listDIDs":                 (["config:read"], D, True),
     "listFlows":                (["config:read"], D, True),
     "getFlow":                  (["config:read"], D, True),
+    "getFlowRevision":          (["config:read"], D, True),
     "listUsers":                (["config:read"], D, True),
     "getSystemHealth":          (["config:read"], D, True),
     "listWebhookSubscriptions": (["config:read"], D, True),
