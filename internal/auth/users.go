@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -32,7 +33,8 @@ func (s *Service) CreateUser(ctx context.Context, in NewUser) (Identity, error) 
 	if in.Username == "" {
 		return Identity{}, fmt.Errorf("%w: username is required", ErrValidation)
 	}
-	if len(in.Password) < 8 {
+	// Characters (code points), not bytes, as the API contract counts them.
+	if utf8.RuneCountInString(in.Password) < 8 {
 		return Identity{}, fmt.Errorf("%w: password must be at least 8 characters", ErrValidation)
 	}
 	if !in.Role.Valid() {
@@ -71,7 +73,7 @@ func (s *Service) CreateUser(ctx context.Context, in NewUser) (Identity, error) 
 // SetPassword replaces a user's password and revokes their sessions, so a
 // password change ends any session opened with the old one.
 func (s *Service) SetPassword(ctx context.Context, userID uuid.UUID, password string) error {
-	if len(password) < 8 {
+	if utf8.RuneCountInString(password) < 8 {
 		return fmt.Errorf("%w: password must be at least 8 characters", ErrValidation)
 	}
 	hash, err := HashPassword(password)

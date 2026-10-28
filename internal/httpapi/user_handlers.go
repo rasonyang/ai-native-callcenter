@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -84,7 +85,9 @@ func (s *Server) CreateUser(w http.ResponseWriter, r *http.Request) {
 			"unknown role", map[string]any{"field": "role", "rule": "UNKNOWN_ROLE"})
 		return
 	}
-	if len(in.Password) < 8 {
+	// Characters, as the contract's minLength counts them: three Chinese
+	// characters are nine bytes and still three characters.
+	if utf8.RuneCountInString(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a password is at least 8 characters", map[string]any{"field": "password", "rule": "PASSWORD_MIN_8"})
 		return
@@ -210,7 +213,7 @@ func (s *Server) ResetUserPassword(w http.ResponseWriter, r *http.Request, userI
 	if !decode(w, r, &in) {
 		return
 	}
-	if len(in.Password) < 8 {
+	if utf8.RuneCountInString(in.Password) < 8 {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"a password is at least 8 characters", map[string]any{"field": "password", "rule": "PASSWORD_MIN_8"})
 		return
