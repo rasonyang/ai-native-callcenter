@@ -48,9 +48,16 @@ export function RecordDialog({
           <form onSubmit={submit} className="mt-4 space-y-3">
             {children}
             {error && (
-              <p role="alert" className="text-xs" style={{ color: 'var(--state-breach)' }}>
+              // A block, not a paragraph: a refusal may carry a list (every
+              // problem a flow's loader found), and a long one scrolls here
+              // rather than pushing the buttons below the window.
+              <div
+                role="alert"
+                className="max-h-60 overflow-y-auto text-xs"
+                style={{ color: 'var(--state-breach)' }}
+              >
                 {error}
-              </p>
+              </div>
             )}
             <div className="flex justify-end gap-2 pt-2">
               <Dialog.Close asChild>

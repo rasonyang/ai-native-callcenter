@@ -13,10 +13,10 @@ import { describeError, fieldErrorText } from '@/lib/errors'
 import {
   DEFAULT_MAX_DURATION_SEC,
   describeRule,
+  flowRefusal,
   globalEntries,
   locateNodes,
   sameSpec,
-  specProblems,
   textFor,
   textListFor,
   unreachableNodes,
@@ -111,7 +111,6 @@ function FlowDesigner() {
     return <p className="text-xs text-muted-foreground">{describeError(error, t)}</p>
   }
 
-  const problems = specProblems(save.error)
   // Not a text comparison: the column is jsonb, so a saved draft comes back in
   // the server's key order rather than the author's, and comparing the text
   // would leave every saved flow marked unsaved — and Publish, which wants a
@@ -175,25 +174,16 @@ function FlowDesigner() {
       </div>
 
       {parseError && <Notice tone="breach">{t('bots.notJson', { message: parseError })}</Notice>}
-      {problems.length > 0 && (
+      {save.isError && (
         <Notice tone="breach">
-          <span className="font-medium">{t('bots.refused')}</span>
-          <ul className="mt-1 list-disc pl-4">
-            {problems.map((problem) => (
-              // Verbatim from the loader. These name phases, tools and
-              // operators out of the document itself, and a translation would
-              // be a paraphrase of the only precise thing we have.
-              <li key={problem} className="font-mono text-xs">
-                {problem}
-              </li>
-            ))}
-          </ul>
+          <Refusal error={save.error} />
         </Notice>
       )}
-      {problems.length === 0 && save.isError && (
-        <Notice tone="breach">{describeError(save.error, t)}</Notice>
+      {publish.isError && (
+        <Notice tone="breach">
+          <Refusal error={publish.error} />
+        </Notice>
       )}
-      {publish.isError && <Notice tone="breach">{describeError(publish.error, t)}</Notice>}
       {orphans.length > 0 && (
         <Notice tone="ringing">{t('bots.unreachable', { nodes: orphans.join(', ') })}</Notice>
       )}
@@ -275,7 +265,7 @@ function FlowDesigner() {
         title={t('bots.publishTitle', { name: data.flow.name })}
         submitLabel={t('bots.publish')}
         isSaving={publish.isPending}
-        error={publish.isError ? describeError(publish.error, t) : undefined}
+        error={publish.isError ? <Refusal error={publish.error} /> : undefined}
         onSubmit={() =>
           publish.mutate(note.trim(), {
             onSuccess: () => {
@@ -290,6 +280,37 @@ function FlowDesigner() {
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} />
         </Field>
       </RecordDialog>
+    </>
+  )
+}
+
+/**
+ * Why the server refused a save or a publish: what it named, when it named
+ * something, else the code's own sentence. The one rendering for the notice
+ * above the editor and the publish dialog, so the two say the same thing.
+ */
+function Refusal({ error }: { error: unknown }) {
+  const { t } = useTranslation()
+  const refusal = flowRefusal(error)
+  if (!refusal) return <>{describeError(error, t)}</>
+  if (refusal.kind === 'CAMPAIGNS') {
+    return <>{t('bots.publishBlocked', { count: refusal.count })}</>
+  }
+  return (
+    <>
+      <span className="font-medium">
+        {refusal.kind === 'PROBLEMS' ? t('bots.refused') : t('bots.refusedPhases')}
+      </span>
+      <ul className="mt-1 list-disc pl-4">
+        {refusal.items.map((item, index) => (
+          // Verbatim from the server. These name phases, tools and operators
+          // out of the document itself, and a translation would be a
+          // paraphrase of the only precise thing we have.
+          <li key={`${index}:${item}`} className="break-words font-mono text-xs">
+            {item}
+          </li>
+        ))}
+      </ul>
     </>
   )
 }
