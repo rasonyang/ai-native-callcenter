@@ -347,9 +347,55 @@ export function describeCondition(condition: FlowCondition | undefined): string 
 /** The problems the loader reported, if this failure is one it reported. */
 export function specProblems(error: unknown): string[] {
   if (!(error instanceof ApiError)) return []
-  const problems = error.params.problems
-  if (!Array.isArray(problems)) return []
-  return problems.filter((p): p is string => typeof p === 'string')
+  return strings(error.params.problems)
+}
+
+/**
+ * What a refused save or publish named, beyond its code.
+ *
+ * - PROBLEMS: the loader's report (VALIDATION_FAILED, params.problems). A save
+ *   gets it for what was typed; a publish gets it when the stored draft no
+ *   longer loads, after an upgrade tightened a rule.
+ * - PHASES: the phases that break a rule of this deployment
+ *   (TERMINAL_ANNOUNCE_REQUIRED, params.nodes).
+ * - CAMPAIGNS: how many campaigns that have not finished dial with this flow,
+ *   when the revision could hand a campaign call to a person
+ *   (CAMPAIGN_FLOW_HAS_TRANSFER with rule PUBLISH_BLOCKED, params.campaigns).
+ *
+ * null for any other failure, and for one of these that names nothing: the
+ * editor then shows the code's own sentence, never an empty list.
+ */
+export type FlowRefusal =
+  | { kind: 'PROBLEMS' | 'PHASES'; items: string[] }
+  | { kind: 'CAMPAIGNS'; count: number }
+
+export function flowRefusal(error: unknown): FlowRefusal | null {
+  if (!(error instanceof ApiError)) return null
+  switch (error.code) {
+    case 'VALIDATION_FAILED': {
+      const items = specProblems(error)
+      return items.length > 0 ? { kind: 'PROBLEMS', items } : null
+    }
+    case 'TERMINAL_ANNOUNCE_REQUIRED': {
+      const items = strings(error.params.nodes)
+      return items.length > 0 ? { kind: 'PHASES', items } : null
+    }
+    case 'CAMPAIGN_FLOW_HAS_TRANSFER': {
+      // The same code refuses a campaign written onto a number whose flow can
+      // transfer, and a number rebound to such a flow. Those are worded for
+      // the forms that make them, not for someone publishing.
+      if (error.params.rule !== 'PUBLISH_BLOCKED') return null
+      const count = error.params.campaigns
+      return typeof count === 'number' && count > 0 ? { kind: 'CAMPAIGNS', count } : null
+    }
+    default:
+      return null
+  }
+}
+
+function strings(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string')
 }
 
 export const flowsApi = {

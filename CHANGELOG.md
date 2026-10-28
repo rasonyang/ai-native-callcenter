@@ -77,6 +77,15 @@ carries the one-line installer's files.
   (`the closing line was not said; ending the call without it`) and the call
   ends. Doubao, transfers and flows without a closing line are unchanged.
   (#262)
+- A refused Publish in the flow editor says what the server named, in the
+  notice and in the publish dialog, as a refused Save draft already did: every
+  problem when the stored draft no longer loads (`VALIDATION_FAILED`), the
+  phases that need a line of their own (`TERMINAL_ANNOUNCE_REQUIRED`), and for
+  a revision that can transfer while campaigns that have not finished dial with
+  the flow (`CAMPAIGN_FLOW_HAS_TRANSFER`), how many campaigns and the way out:
+  finish or cancel them, or remove the transfer. It used to show the error
+  code's sentence alone, and for the campaign block the campaign form's advice
+  to choose another number. (#361)
 
 ### Changed
 
