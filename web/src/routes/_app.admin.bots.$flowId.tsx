@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useTranslation } from 'react-i18next'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { Play } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
@@ -16,12 +16,15 @@ import {
   flowRefusal,
   globalEntries,
   locateNodes,
+  revisionLabel,
   sameSpec,
   textFor,
   textListFor,
   unreachableNodes,
   useFlow,
   useFlowMutations,
+  useFlowRevision,
+  type FlowRevision,
   type FlowSpec,
   type FlowTool,
   type SpecLang,
@@ -47,7 +50,7 @@ function FlowDesigner() {
   const { flowId } = Route.useParams()
   const { t, i18n } = useTranslation()
   const { data, isPending, isError, error } = useFlow(flowId)
-  const { save, publish } = useFlowMutations(flowId)
+  const { save, publish, restore } = useFlowMutations(flowId)
 
   const [name, setName] = useState('')
   const [text, setText] = useState('')
@@ -61,6 +64,14 @@ function FlowDesigner() {
   const [selected, setSelected] = useState<string | null>(null)
   const [publishing, setPublishing] = useState(false)
   const [note, setNote] = useState('')
+  const [tab, setTab] = useState('designer')
+  // The history row opened to show its spec, if any.
+  const [opened, setOpened] = useState<string | null>(null)
+  // The revision waiting on "replace the draft?", while the question is open.
+  const [restoring, setRestoring] = useState<FlowRevision | null>(null)
+  // The revision the draft was last copied from, until it is published or
+  // saved over: what the line pointing at Publish names.
+  const [restoredFrom, setRestoredFrom] = useState<string | null>(null)
   // The last document that parsed, so an in-progress edit does not blank the
   // graph beside it — a half-typed brace is not a reason to lose the picture.
   const [spec, setSpec] = useState<FlowSpec>({})
@@ -119,7 +130,45 @@ function FlowDesigner() {
 
   const onSave = () => {
     if (parseError) return
-    save.mutate({ name: name.trim() || data.flow.name, spec })
+    restore.reset()
+    save.mutate(
+      { name: name.trim() || data.flow.name, spec },
+      { onSuccess: () => setRestoredFrom(null) },
+    )
+  }
+
+  // Copying a revision replaces the draft, so it asks first only when that
+  // loses something: edits not saved yet, or a saved draft that is not what
+  // callers hear. Otherwise the draft already is the live revision, which the
+  // history keeps.
+  const hasSomethingToLose = isDirty || data.flow.hasUnpublishedChanges
+
+  const copyToDraft = (revision: FlowRevision) => {
+    restore.mutate(
+      { revisionId: revision.revisionId, name: data.flow.name },
+      {
+        onSuccess: ({ spec: restored }) => {
+          setName(data.flow.name)
+          setText(JSON.stringify(restored, null, 2))
+          setSpec(restored)
+          setParseError(null)
+          setSelected(null)
+          setRestoredFrom(revision.revisionId)
+          setNote(t('bots.restoreNote', { id: revisionLabel(revision.revisionId) }))
+          setRestoring(null)
+          setTab('designer')
+        },
+      },
+    )
+  }
+
+  const askToCopy = (revision: FlowRevision) => {
+    if (!hasSomethingToLose) {
+      copyToDraft(revision)
+      return
+    }
+    restore.reset()
+    setRestoring(revision)
   }
 
   return (
@@ -171,6 +220,11 @@ function FlowDesigner() {
           onChange={(e) => setName(e.target.value)}
         />
         {isDirty && <span className="text-xs text-muted-foreground">{t('bots.unsaved')}</span>}
+        {restoredFrom && !isDirty && data.flow.hasUnpublishedChanges && (
+          <span role="status" className="text-xs text-muted-foreground">
+            {t('bots.restored', { id: revisionLabel(restoredFrom) })}
+          </span>
+        )}
       </div>
 
       {parseError && <Notice tone="breach">{t('bots.notJson', { message: parseError })}</Notice>}
@@ -184,11 +238,19 @@ function FlowDesigner() {
           <Refusal error={publish.error} />
         </Notice>
       )}
+      {restore.isError && (
+        <Notice tone="breach">
+          <p className="mb-1">
+            {t('bots.restoreRefused', { id: revisionLabel(restore.variables?.revisionId ?? '') })}
+          </p>
+          <Refusal error={restore.error} />
+        </Notice>
+      )}
       {orphans.length > 0 && (
         <Notice tone="ringing">{t('bots.unreachable', { nodes: orphans.join(', ') })}</Notice>
       )}
 
-      <Tabs defaultValue="designer">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="designer">{t('bots.tabs.designer')}</TabsTrigger>
           <TabsTrigger value="tools">{t('bots.tabs.tools')}</TabsTrigger>
@@ -235,25 +297,56 @@ function FlowDesigner() {
               <Th>{t('bots.revision')}</Th>
               <Th>{t('bots.note')}</Th>
               <Th align="right">{t('bots.createdAt')}</Th>
+              <Th />
             </THead>
             <TBody>
               {data.revisions.length === 0 && (
-                <TableMessage colSpan={3}>{t('bots.neverPublished')}</TableMessage>
+                <TableMessage colSpan={4}>{t('bots.neverPublished')}</TableMessage>
               )}
-              {data.revisions.map((revision) => (
-                <Tr key={revision.revisionId}>
-                  <Td className="font-mono text-xs">
-                    {revision.revisionId.slice(0, 8)}
-                    {revision.isPublished && (
-                      <span className="ml-2 text-xs text-primary">{t('bots.live')}</span>
+              {data.revisions.map((revision) => {
+                const isOpen = opened === revision.revisionId
+                return (
+                  <Fragment key={revision.revisionId}>
+                    <Tr>
+                      <Td className="font-mono text-xs">
+                        {revisionLabel(revision.revisionId)}
+                        {revision.isPublished && (
+                          <span className="ml-2 text-xs text-primary">{t('bots.live')}</span>
+                        )}
+                      </Td>
+                      <Td className="text-muted-foreground">{revision.note || '—'}</Td>
+                      <Td align="right" className="tabular text-muted-foreground">
+                        {dateFormat.format(new Date(revision.createdAt))}
+                      </Td>
+                      <Td align="right" className="whitespace-nowrap">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          aria-expanded={isOpen}
+                          onClick={() => setOpened(isOpen ? null : revision.revisionId)}
+                        >
+                          {isOpen ? t('bots.hide') : t('bots.view')}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={restore.isPending}
+                          onClick={() => askToCopy(revision)}
+                        >
+                          {t('bots.copyToDraft')}
+                        </Button>
+                      </Td>
+                    </Tr>
+                    {isOpen && (
+                      <Tr className="h-auto hover:bg-transparent">
+                        <Td colSpan={4} className="pb-3">
+                          <RevisionSpec flowId={flowId} revisionId={revision.revisionId} />
+                        </Td>
+                      </Tr>
                     )}
-                  </Td>
-                  <Td className="text-muted-foreground">{revision.note || '—'}</Td>
-                  <Td align="right" className="tabular text-muted-foreground">
-                    {dateFormat.format(new Date(revision.createdAt))}
-                  </Td>
-                </Tr>
-              ))}
+                  </Fragment>
+                )
+              })}
             </TBody>
           </DataTable>
         </TabsContent>
@@ -271,6 +364,7 @@ function FlowDesigner() {
             onSuccess: () => {
               setPublishing(false)
               setNote('')
+              setRestoredFrom(null)
             },
           })
         }
@@ -279,6 +373,34 @@ function FlowDesigner() {
         <Field label={t('bots.note')} error={fieldErrorText(publish.error, 'note', t)}>
           <Input value={note} onChange={(e) => setNote(e.target.value)} maxLength={200} />
         </Field>
+      </RecordDialog>
+
+      <RecordDialog
+        open={restoring !== null}
+        onOpenChange={(open) => {
+          if (open) return
+          setRestoring(null)
+          restore.reset()
+        }}
+        title={t('bots.restoreTitle', { id: revisionLabel(restoring?.revisionId ?? '') })}
+        submitLabel={t('bots.replaceDraft')}
+        isSaving={restore.isPending}
+        error={restore.isError ? <Refusal error={restore.error} /> : undefined}
+        onSubmit={() => {
+          if (restoring) copyToDraft(restoring)
+        }}
+      >
+        {restoring && (
+          <dl className="grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs">
+            <dt className="text-muted-foreground">{t('bots.revision')}</dt>
+            <dd className="font-mono">{revisionLabel(restoring.revisionId)}</dd>
+            <dt className="text-muted-foreground">{t('bots.createdAt')}</dt>
+            <dd className="tabular">{dateFormat.format(new Date(restoring.createdAt))}</dd>
+            <dt className="text-muted-foreground">{t('bots.note')}</dt>
+            <dd className="break-words">{restoring.note || t('bots.noNote')}</dd>
+          </dl>
+        )}
+        <p className="text-xs text-muted-foreground">{t('bots.restoreWarning')}</p>
       </RecordDialog>
     </>
   )
@@ -312,6 +434,31 @@ function Refusal({ error }: { error: unknown }) {
         ))}
       </ul>
     </>
+  )
+}
+
+/**
+ * One revision's spec, read-only, drawn the way the editor draws the draft.
+ * It is served as stored, so a revision today's loader refuses is still shown
+ * whole: that is the one a reader needs to see in order to fix it.
+ */
+function RevisionSpec({ flowId, revisionId }: { flowId: string; revisionId: string }) {
+  const { t } = useTranslation()
+  const { data, isPending, isError, error } = useFlowRevision(flowId, revisionId)
+  const html = useMemo(() => (data ? paint(JSON.stringify(data.spec, null, 2), null) : ''), [data])
+
+  if (isPending) return <p className="text-xs text-muted-foreground">{t('common.loading')}</p>
+  if (isError || !data) {
+    return <p className="text-xs text-muted-foreground">{describeError(error, t)}</p>
+  }
+  return (
+    <pre
+      role="region"
+      tabIndex={0}
+      aria-label={t('bots.revisionSpec', { id: revisionLabel(revisionId) })}
+      className="m-0 max-h-[420px] overflow-auto whitespace-pre rounded-md border bg-background p-3 font-mono text-[13px] leading-5"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   )
 }
 
