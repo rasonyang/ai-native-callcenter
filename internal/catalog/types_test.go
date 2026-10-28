@@ -30,6 +30,30 @@ func TestExtensionValidation(t *testing.T) {
 			onCreate: true,
 			wantErr:  "password",
 		},
+		// #367: six characters as the contract counts them (code points), not
+		// six bytes. Five Chinese characters are fifteen bytes and still five.
+		{
+			name:     "five Chinese characters are too short a password",
+			ext:      Extension{Number: "1001", Password: strings.Repeat("话", 5)},
+			onCreate: true,
+			wantErr:  "password",
+		},
+		{
+			name:     "six Chinese characters are a long enough password",
+			ext:      Extension{Number: "1001", Password: strings.Repeat("话", 6)},
+			onCreate: true,
+		},
+		{
+			name:     "five emoji and Chinese characters are too short a password",
+			ext:      Extension{Number: "1001", Password: "📞话📞话📞"},
+			onCreate: true,
+			wantErr:  "password",
+		},
+		{
+			name:     "six emoji and Chinese characters are a long enough password",
+			ext:      Extension{Number: "1001", Password: "📞话📞话📞话"},
+			onCreate: true,
+		},
 		{
 			name:     "an edit may leave the password alone",
 			ext:      Extension{Number: "1001"},
