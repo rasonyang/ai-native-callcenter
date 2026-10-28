@@ -457,12 +457,15 @@ function RevisionSpec({ flowId, revisionId }: { flowId: string; revisionId: stri
   if (isError || !data) {
     return <p className="text-xs text-muted-foreground">{describeError(error, t)}</p>
   }
+  // w-0 min-w-full: the spec's longest line must scroll inside this box, not
+  // size the table cell, or it widens the whole table and pushes the other
+  // columns (and the row's buttons) off the right edge.
   return (
     <pre
       role="region"
       tabIndex={0}
       aria-label={t('bots.revisionSpec', { id: revisionLabel(revisionId) })}
-      className="m-0 max-h-[420px] overflow-auto whitespace-pre rounded-md border bg-background p-3 font-mono text-[13px] leading-5"
+      className="m-0 w-0 min-w-full max-h-[420px] overflow-auto whitespace-pre rounded-md border bg-background p-3 font-mono text-[13px] leading-5"
       dangerouslySetInnerHTML={{ __html: html }}
     />
   )

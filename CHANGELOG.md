@@ -5,6 +5,15 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Fixed
+
+- Opening a revision in the flow editor's History tab no longer pushes the
+  table's other columns, and every row's View and Roll back to this revision,
+  off the right edge. The revision's spec now scrolls inside its own box
+  instead of widening the table to its longest line. (#363)
+
 ## v0.7.1 - 2026-10-28
 
 ### Security
