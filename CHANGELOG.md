@@ -127,6 +127,12 @@ carries the one-line installer's files.
   characters) and extension passwords (at least 6) are counted the same way,
   so a shorter one is now refused even when its bytes reach the minimum, as
   the contract always said; `AICC_SEED_PASSWORD` is checked to match. (#367)
+- The contract's `UserData` and `UserDataPatch` no longer give a value
+  `maxLength: 1024`. JSON Schema counts `maxLength` in characters, so a client
+  that validated against it accepted 1024 Chinese characters (3072 bytes) that
+  the server refuses with `400 USER_DATA_TOO_LARGE`. The limit is 1024 bytes of
+  UTF-8, as the server and the `UserData` description always said, and both
+  descriptions now state it; the server is unchanged. (#371)
 
 ### Changed
 

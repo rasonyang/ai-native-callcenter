@@ -101,15 +101,35 @@ func TestAPatchThatMovedNothingStillAnswersWithBothLists(t *testing.T) {
 
 func TestTheAnswerToAPatchSaysWhichKeysWereTheProblem(t *testing.T) {
 	t.Parallel()
-	t.Run("a value too long is refused before the call is touched", func(t *testing.T) {
-		calls := &patchingCalls{}
-		w := patchUserData(t, calls,
-			`{"userData":{"note":"`+strings.Repeat("x", userDataMaxValueBytes+1)+`"}}`)
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("http = %d: %s", w.Code, w.Body)
-		}
-		if calls.got != nil {
-			t.Error("the call was asked to merge a patch the handler could already see was too big")
+	// The same byte bound as a new call's, at the same boundary in every
+	// width: the last byte under is taken, and the first byte over is refused
+	// before the call is touched.
+	t.Run("the last accepted value size and the first refused, in every width", func(t *testing.T) {
+		for _, c := range userDataValuesAtTheBound {
+			calls := &patchingCalls{}
+			body, err := json.Marshal(map[string]any{"userData": map[string]string{"note": c.value}})
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			w := patchUserData(t, calls, string(body))
+			if c.isAccepted {
+				if w.Code != http.StatusOK {
+					t.Errorf("%s (%d bytes) was refused: %d %s", c.name, len(c.value), w.Code, w.Body)
+				} else if calls.got["note"] != c.value {
+					t.Errorf("%s reached the call as %#v, want it whole", c.name, calls.got["note"])
+				}
+				continue
+			}
+			if w.Code != http.StatusBadRequest {
+				t.Errorf("%s (%d bytes) returned %d, want 400", c.name, len(c.value), w.Code)
+				continue
+			}
+			if code := errorCodeOf(t, w); code != string(CodeUserDataTooLarge) {
+				t.Errorf("%s: code = %q, want USER_DATA_TOO_LARGE", c.name, code)
+			}
+			if calls.got != nil {
+				t.Errorf("%s: the call was asked to merge a patch the handler could already see was too big", c.name)
+			}
 		}
 	})
 

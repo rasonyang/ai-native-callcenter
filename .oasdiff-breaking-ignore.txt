@@ -12,3 +12,10 @@ api path removed without deprecation POST /calls/dial
 # breaking change in 0.x, shipped without a deprecation release and communicated directly to
 # the existing integrations (#125); see "Breaking (API)" under v0.4.0 in CHANGELOG.md.
 api POST /agent/login request-property-removed removed the request property `extensionNumber`
+#
+# 2026-10-28 — UserData's value maxLength 1024 removed (#371). JSON Schema counts maxLength in
+# characters and the limit is 1024 bytes of UTF-8, so on a request it let a validating client send
+# 1024 Chinese characters the server refuses. On this response it removes a promise that still
+# holds: every value the server returns passed the 1024-byte bound on the way in, and 1024 bytes
+# are never more than 1024 characters. The description states the byte bound, which is stricter.
+api PATCH /calls/{callId}/user-data response-property-max-length-unset the `userData/additionalProperties/` response property's maxLength was unset from `1024` for the response status `200`
