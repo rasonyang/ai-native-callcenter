@@ -86,6 +86,25 @@ export function Td({
   )
 }
 
+/**
+ * A full-width row under a record: an opened spec, a player, a form. It owns
+ * the colSpan, the padding and a row that does not highlight on hover. The
+ * wrapper is w-0 min-w-full, so it has no intrinsic width: whatever it holds
+ * fills the card and scrolls inside its own box. Without that, a long
+ * unbroken line sizes the table to itself and pushes the other columns, and
+ * the row's buttons, off the right edge. The wrapper does not scroll itself
+ * (it would clip a focus ring); the content brings its own overflow.
+ */
+export function DetailRow({ columns, children }: { columns: number; children: ReactNode }) {
+  return (
+    <Tr className="h-auto hover:bg-transparent">
+      <Td colSpan={columns} className="pb-3">
+        <div className="w-0 min-w-full">{children}</div>
+      </Td>
+    </Tr>
+  )
+}
+
 /** A muted row for the empty, loading and failed states. */
 export function TableMessage({ colSpan, children }: { colSpan: number; children: ReactNode }) {
   return (
