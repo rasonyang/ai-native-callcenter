@@ -7,6 +7,16 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Changed
+
+- On a campaign call, while the call is in a phase that declares a `lead`, the
+  model's `record_lead` is now refused: it is answered with an error, nothing is
+  written, and the phase's lead stands. Before, a stray `record_lead` made after
+  the call entered such a phase (or batched after the move into it) replaced the
+  declared lead, for instance a `NONE` over a `HIGH` so that no callback was
+  filed. The tool is still offered, and a phase without a declared lead is
+  unchanged. In the flow simulator such a call comes back `isRefused`. (#358)
+
 ### Fixed
 
 - Opening a revision in the flow editor's History tab no longer pushes the

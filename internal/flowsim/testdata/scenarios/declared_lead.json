@@ -88,31 +88,33 @@
       "expect": {"path": ["pitch", "close_none"], "toolsRun": ["record_lead", "classify"], "lead": {"intent": "NONE"}}
     },
     {
-      "name": "the phase records HIGH, then the model's MEDIUM in the same response replaces it",
+      "name": "the phase records HIGH, then the model's MEDIUM in the same response is refused",
+      "description": "The call is in close_high when record_lead is dispatched, so it is refused and the declared lead stands.",
       "lang": "en",
       "isCampaign": true,
       "steps": [
         {"batch": [
           {"call": "classify", "args": {"value": "interested"}},
           {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "only if the price drops"}}
-        ], "expect": {"phase": "close_high"}}
+        ], "expect": {"phase": "close_high", "isRefused": true}}
       ],
-      "expect": {"path": ["pitch", "close_high"], "lead": {"intent": "MEDIUM", "notes": "only if the price drops"}}
+      "expect": {"path": ["pitch", "close_high"], "toolsRun": ["classify"], "lead": {"intent": "HIGH", "notes": "Agreed:"}}
     },
     {
-      "name": "entering the objection phase again records LOW again",
+      "name": "entering the objection phase again records LOW again; the model's record_lead in it is refused",
       "lang": "en",
       "isCampaign": true,
       "steps": [
         {"call": "agree_words", "args": {"value": "too expensive"}},
         {"call": "classify", "args": {"value": "objection"}, "expect": {"phase": "objection", "slots": {"objection.visits": 1}}},
-        {"call": "record_lead", "args": {"intent": "HIGH", "notes": "convinced after the discount"}, "expect": {"phase": "objection"}},
+        {"call": "record_lead", "args": {"intent": "HIGH", "notes": "convinced after the discount"}, "expect": {"phase": "objection", "isRefused": true}},
         {"call": "classify", "args": {"value": "back"}, "expect": {"phase": "pitch"}},
         {"call": "agree_words", "args": {"value": "still too expensive"}},
         {"call": "classify", "args": {"value": "objection"}, "expect": {"phase": "objection", "slots": {"objection.visits": 2}}}
       ],
       "expect": {
         "path": ["pitch", "objection", "pitch", "objection"],
+        "toolsRun": ["agree_words", "classify", "classify", "agree_words", "classify"],
         "lead": {"intent": "LOW", "notes": "Objected: still too expensive"}
       }
     },
@@ -171,6 +173,383 @@
         {"call": "classify", "args": {"value": "interested"}, "expect": {"phase": "close_high"}}
       ],
       "expect": {"path": ["pitch", "close_high"], "lead": {"isUnrecorded": true}}
+    },
+    {
+      "name": "a stray record_lead(NONE) in the terminal phase is refused: the declared HIGH stands",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "yes please"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "interested"
+          },
+          "expect": {
+            "phase": "close_high"
+          }
+        },
+        {
+          "call": "record_lead",
+          "args": {
+            "intent": "NONE",
+            "notes": "no thanks"
+          },
+          "expect": {
+            "phase": "close_high",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "Agreed: yes please"
+        }
+      }
+    },
+    {
+      "name": "qwen batches the classification and record_lead(NONE): the declared HIGH stands",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {
+          "batch": [
+            {
+              "call": "classify",
+              "args": {
+                "value": "interested"
+              }
+            },
+            {
+              "call": "record_lead",
+              "args": {
+                "intent": "NONE",
+                "notes": "not interested"
+              }
+            }
+          ],
+          "expect": {
+            "phase": "close_high",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "Agreed:"
+        }
+      }
+    },
+    {
+      "name": "record_lead before the move in the same response is written, then replaced on entry",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {
+          "batch": [
+            {
+              "call": "record_lead",
+              "args": {
+                "intent": "MEDIUM",
+                "notes": "maybe"
+              }
+            },
+            {
+              "call": "classify",
+              "args": {
+                "value": "interested"
+              }
+            }
+          ],
+          "expect": {
+            "phase": "close_high",
+            "isRefused": false
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "record_lead",
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "Agreed:"
+        }
+      }
+    },
+    {
+      "name": "a stray record_lead in the objection phase is refused: the declared LOW stands",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "too dear"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "objection"
+          },
+          "expect": {
+            "phase": "objection"
+          }
+        },
+        {
+          "call": "record_lead",
+          "args": {
+            "intent": "DO_NOT_CALL"
+          },
+          "expect": {
+            "phase": "objection",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "objection"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify"
+        ],
+        "lead": {
+          "intent": "LOW",
+          "notes": "Objected: too dear"
+        }
+      }
+    },
+    {
+      "name": "a record_lead after the call left the declared phase in the same response is accepted",
+      "lang": "en",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "too dear"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "objection"
+          },
+          "expect": {
+            "phase": "objection"
+          }
+        },
+        {
+          "batch": [
+            {
+              "call": "classify",
+              "args": {
+                "value": "back"
+              }
+            },
+            {
+              "call": "record_lead",
+              "args": {
+                "intent": "MEDIUM",
+                "notes": "will think"
+              }
+            }
+          ],
+          "expect": {
+            "phase": "pitch",
+            "isRefused": false
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "objection",
+          "pitch"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify",
+          "classify",
+          "record_lead"
+        ],
+        "lead": {
+          "intent": "MEDIUM",
+          "notes": "will think"
+        }
+      }
+    },
+    {
+      "name": "refused record_lead with long notes (over 1000 characters): nothing is written",
+      "lang": "zh",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "好的"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "interested"
+          },
+          "expect": {
+            "phase": "close_high"
+          }
+        },
+        {
+          "call": "record_lead",
+          "args": {
+            "intent": "NONE",
+            "notes": "很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 很长的备注 "
+          },
+          "expect": {
+            "phase": "close_high",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "已同意：好的"
+        }
+      }
+    },
+    {
+      "name": "refused record_lead with multi-line notes with CJK and quotes: nothing is written",
+      "lang": "zh",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "好的"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "interested"
+          },
+          "expect": {
+            "phase": "close_high"
+          }
+        },
+        {
+          "call": "record_lead",
+          "args": {
+            "intent": "NONE",
+            "notes": "第一行\n\"second\" {line}\n\t第三行 谢谢\n"
+          },
+          "expect": {
+            "phase": "close_high",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "已同意：好的"
+        }
+      }
+    },
+    {
+      "name": "refused record_lead with empty notes: nothing is written",
+      "lang": "zh",
+      "isCampaign": true,
+      "steps": [
+        {
+          "call": "agree_words",
+          "args": {
+            "value": "好的"
+          }
+        },
+        {
+          "call": "classify",
+          "args": {
+            "value": "interested"
+          },
+          "expect": {
+            "phase": "close_high"
+          }
+        },
+        {
+          "call": "record_lead",
+          "args": {
+            "intent": "NONE",
+            "notes": ""
+          },
+          "expect": {
+            "phase": "close_high",
+            "isRefused": true
+          }
+        }
+      ],
+      "expect": {
+        "path": [
+          "pitch",
+          "close_high"
+        ],
+        "toolsRun": [
+          "agree_words",
+          "classify"
+        ],
+        "lead": {
+          "intent": "HIGH",
+          "notes": "已同意：好的"
+        }
+      }
     }
   ]
 }

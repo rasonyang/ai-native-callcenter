@@ -210,6 +210,15 @@ func (r *runner) call(name string, args map[string]any) error {
 				"a model would be refused the same way. Add it to the phase's \"tools\", or fix the transition that left the call in this phase",
 				name, node, strings.Join(r.engine.AllowedTools(), ", "))
 		}
+	} else if name == flow.ToolRecordLead && r.runtime.IsLeadSetByPhase() {
+		// Judged here, just before this tool, so inside a batch a move made
+		// by an earlier tool counts.
+		r.lastRefused = true
+		if !r.expectsRefusal() {
+			return fmt.Errorf("the tool %q is refused in phase %q: it declares its own lead, "+
+				"so a model's record_lead there is refused and the declared lead stays. "+
+				"Mark the step \"isRefused\", or remove the call", name, node)
+		}
 	} else if !r.isOffered(name) {
 		return fmt.Errorf("the tool %q is allowed in phase %q but never offered to the model (Runtime.Tools omits it)", name, node)
 	}

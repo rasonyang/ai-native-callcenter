@@ -73,6 +73,7 @@ export interface FlowNode {
   /**
    * The campaign lead the call records on entering this phase, as a
    * record_lead call would. Ignored on a call that is not a campaign call.
+   * While the call is in this phase the model's record_lead is refused.
    */
   lead?: FlowLead
 }

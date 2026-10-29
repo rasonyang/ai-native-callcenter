@@ -193,7 +193,9 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// call runs one campaign call: the model's tool calls in order (name,
-	// arguments), then the CDR, then a revision of it when isRevised.
+	// arguments), then the CDR, then a revision of it when isRevised. Every
+	// call must succeed, except a record_lead made in a phase that declares
+	// its own lead, which must be refused (#358).
 	call := func(contact campaign.Contact, isRevised bool, calls ...[2]string) campaign.Attempt {
 		t.Helper()
 		a := e.begin(t, contact, start)
@@ -202,7 +204,11 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		rt.Deny("transfer_to_agent", "take_message")
 		rt.OfferRecordLead(ctx)
 		for _, tool := range calls {
-			if out, _ := rt.Dispatch(ctx, tool[0], tool[1]); !strings.Contains(out, `"ok":"1"`) {
+			want := `"ok":"1"`
+			if tool[0] == flow.ToolRecordLead && rt.IsLeadSetByPhase() {
+				want = `"ok":"0"`
+			}
+			if out, _ := rt.Dispatch(ctx, tool[0], tool[1]); !strings.Contains(out, want) {
 				t.Fatalf("%s %s: %s", tool[0], tool[1], out)
 			}
 		}
@@ -254,11 +260,14 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 			t.Errorf("contact = %+v", ct)
 		}
 	})
-	t.Run("the phase's NONE, then the model's HIGH, files one", func(t *testing.T) {
+	t.Run("the phase's NONE, then the model's HIGH, which is refused, files nothing", func(t *testing.T) {
 		a := call(contacts[3], false,
 			[2]string{"classify", `{"value": "no"}`}, [2]string{flow.ToolRecordLead, `{"intent": "HIGH", "notes": "changed their mind"}`})
-		if n, msg := callbacksOf(a.CallID); n != 1 || msg != "changed their mind" {
+		if n, msg := callbacksOf(a.CallID); n != 0 {
 			t.Errorf("callbacks = %d %q", n, msg)
+		}
+		if ct := e.contact(t, c, contacts[3].ID); ct.LeadIntent != campaign.LeadNone || ct.LeadNotes != "" {
+			t.Errorf("contact = %+v", ct)
 		}
 	})
 }

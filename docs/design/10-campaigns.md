@@ -939,8 +939,10 @@ The model judges; code records.
   nothing: the call is not hung up for it, and an answered contact is not redialled anyway.
 - **A phase may declare the lead** (`"lead": {"intent": …, "notes": …}`, #352), which the
   engine records when a campaign call enters that phase, through the same write: one more write,
-  ordered with the model's `record_lead` calls, and the last one wins. It exists for the flow that
-  classifies the customer and closes in the same move, where the model has no later turn in which
+  ordered with the model's `record_lead` calls, and the last one wins, except that while the call
+  is in a phase that declares a lead the model's `record_lead` is refused (answered `ok: 0`,
+  nothing written, logged at Info), so the phase's outcome stands (#358). It exists for the flow
+  that classifies the customer and closes in the same move, where the model has no later turn in which
   to call `record_lead`. Any phase may declare one, and entering it again writes again; `notes` is
   rendered from the slots at entry and capped like the tool's. On a call that is not a campaign
   call the declaration is ignored. Intent and slot references are checked when the flow loads
