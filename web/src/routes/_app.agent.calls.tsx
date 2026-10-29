@@ -6,7 +6,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
 import { RecordingPlayer } from '@/components/recording-player'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { DataTable, DetailRow, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -151,11 +151,9 @@ function MyCallsPage() {
               </Td>
             </Tr>
             {openCallId === row.callId && (
-              <Tr>
-                <Td colSpan={COLUMN_COUNT}>
-                  <MyRecording callId={row.callId} />
-                </Td>
-              </Tr>
+              <DetailRow columns={COLUMN_COUNT}>
+                <MyRecording callId={row.callId} />
+              </DetailRow>
             )}
             </Fragment>
           ))}

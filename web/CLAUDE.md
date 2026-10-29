@@ -22,6 +22,10 @@ day, NOT a marketing site.
 
 ## Density rules (this is an ops console — dense by default)
 - Table row height 36px, cell text 13px, header 12px uppercase tracking-wide text-secondary
+- Content inside a table never sizes the table. A full-width row under a record
+  is a `DetailRow`, never a hand-built `<Td colSpan>` (`src/test/table-rows.test.ts`
+  fails on one). A cell holding free text that can be long (names, URLs, notes)
+  carries a width bound: `max-w-*` with wrapping or truncation.
 - Sidebar width 220px, nav item height 32px, icon 16px
 - KPI stat cards: label 12px secondary on top, value 24px semibold below, delta 12px
 - Buttons: h-8 (32px) default, h-9 for primary page actions only
