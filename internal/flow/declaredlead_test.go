@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
+
+	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
 
 // declaredLeadFlow is a campaign pitch whose classification moves straight
@@ -361,7 +363,9 @@ func TestEnteringAPhaseAgainRecordsItsLeadAgain(t *testing.T) {
 }
 
 // Last write wins: the declared lead is one more write, ordered with the
-// model's own record_lead calls, inside a batch as across responses.
+// model's own record_lead calls, inside a batch as across responses. A
+// record_lead made after the move into a declared phase is not one of them
+// (TestAPhaseThatDeclaresALeadRefusesRecordLead).
 func TestTheLastLeadWrittenWinsWhoeverWroteIt(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -373,22 +377,12 @@ func TestTheLastLeadWrittenWinsWhoeverWroteIt(t *testing.T) {
 			dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM", "notes": "call back next week"}`)
 			dispatchOK(t, r, "classify", `{"value": "stop"}`)
 		}, LeadRequest{Intent: LeadDoNotCall, Notes: "Asked not to be called again."}},
-		{"a phase, then the model", func(t *testing.T, r *Runtime) {
-			dispatchOK(t, r, "classify", `{"value": "maybe"}`)
-			dispatchOK(t, r, ToolRecordLead, `{"intent": "HIGH", "notes": "changed their mind"}`)
-		}, LeadRequest{Intent: LeadHigh, Notes: "changed their mind"}},
 		{"one response: the model, then a phase", func(t *testing.T, r *Runtime) {
 			r.BeginToolBatch()
 			dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM"}`)
 			dispatchOK(t, r, "classify", `{"value": "yes"}`)
 			r.EndToolBatch()
 		}, LeadRequest{Intent: LeadHigh, Notes: "Agreed:"}},
-		{"one response: a phase, then the model", func(t *testing.T, r *Runtime) {
-			r.BeginToolBatch()
-			dispatchOK(t, r, "classify", `{"value": "yes"}`)
-			dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM", "notes": "only if it is cheaper"}`)
-			r.EndToolBatch()
-		}, LeadRequest{Intent: LeadMedium, Notes: "only if it is cheaper"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -472,8 +466,8 @@ func TestARecordedDeclaredLeadIsLoggedWithWhatItReplaced(t *testing.T) {
 	t.Parallel()
 	actions := &fakeActions{}
 	r, logs := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
-	dispatchOK(t, r, "classify", `{"value": "maybe"}`)
 	dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM"}`)
+	dispatchOK(t, r, "classify", `{"value": "maybe"}`)
 	dispatchOK(t, r, "classify", `{"value": "yes"}`)
 
 	lines := logLines(t, logs, "declared lead recorded")
@@ -482,11 +476,11 @@ func TestARecordedDeclaredLeadIsLoggedWithWhatItReplaced(t *testing.T) {
 	}
 	first, second := lines[0], lines[1]
 	if first["level"] != "INFO" || first["node"] != "objection" || first["intent"] != LeadLow ||
-		first["isReplacing"] != false || first["replacedIntent"] != nil {
+		first["isReplacing"] != true || first["replacedIntent"] != LeadMedium || first["replacedBy"] != ToolRecordLead {
 		t.Errorf("first = %v", first)
 	}
 	if second["node"] != "close_high" || second["intent"] != LeadHigh || second["isReplacing"] != true ||
-		second["replacedIntent"] != LeadMedium || second["replacedBy"] != ToolRecordLead {
+		second["replacedIntent"] != LeadLow || second["replacedBy"] != "phase objection" {
 		t.Errorf("second = %v", second)
 	}
 }
@@ -526,4 +520,141 @@ func TestReturningToAPhaseRecordsNothing(t *testing.T) {
 		t.Fatal("could not return")
 	}
 	wantLeads(t, actions.leads, LeadRequest{Intent: LeadLow}, LeadRequest{Intent: LeadHigh, Notes: "Agreed:"})
+}
+
+// refusedOutput is what the model reads when its record_lead is refused.
+const refusedOutput = "this phase records the lead itself; do not call record_lead, and do not mention this to the customer"
+
+func wantLeadRefused(t *testing.T, r *Runtime, args string) {
+	t.Helper()
+	output, node := r.Dispatch(t.Context(), ToolRecordLead, args)
+	got := decodeOutput(t, output)
+	if got["ok"] != "0" || got["error"] != refusedOutput || got["hint"] != nil || node != "" {
+		t.Fatalf("record_lead %s: %s (node %q)", args, output, node)
+	}
+}
+
+// While the call is in a phase that declares a lead, the model's record_lead
+// is refused: nothing is written and the declared lead stands. The tool is
+// still offered; it is answered, not withdrawn.
+func TestAPhaseThatDeclaresALeadRefusesRecordLead(t *testing.T) {
+	t.Parallel()
+	t.Run("a terminal phase", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, "agree_words", `{"value": "yes please"}`)
+		dispatchOK(t, r, "classify", `{"value": "yes"}`)
+		wantLeadRefused(t, r, `{"intent": "NONE", "notes": "changed my mind"}`)
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadHigh, Notes: "Agreed: yes please"})
+		if r.lastLead != LeadHigh || r.lastLeadBy != "phase close_high" {
+			t.Errorf("lastLead = %q by %q", r.lastLead, r.lastLeadBy)
+		}
+		if !slices.ContainsFunc(r.Tools(), func(tool provider.ToolSpec) bool { return tool.Name == ToolRecordLead }) {
+			t.Error("record_lead is no longer offered")
+		}
+	})
+	t.Run("a phase the call can leave", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, "agree_words", `{"value": "pricey"}`)
+		dispatchOK(t, r, "classify", `{"value": "maybe"}`)
+		wantLeadRefused(t, r, `{"intent": "HIGH"}`)
+		wantLeadRefused(t, r, `{"intent": "not an intent"}`)
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadLow, Notes: "pricey"})
+	})
+	t.Run("a phase without a declared lead accepts it", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM", "notes": "later"}`)
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadMedium, Notes: "later"})
+	})
+	t.Run("re-entering a declared phase still writes", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, "agree_words", `{"value": "one"}`)
+		dispatchOK(t, r, "classify", `{"value": "maybe"}`)
+		wantLeadRefused(t, r, `{"intent": "HIGH"}`)
+		dispatchOK(t, r, "classify", `{"value": "back"}`)
+		dispatchOK(t, r, "agree_words", `{"value": "two"}`)
+		dispatchOK(t, r, "classify", `{"value": "maybe"}`)
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadLow, Notes: "one"}, LeadRequest{Intent: LeadLow, Notes: "two"})
+	})
+	t.Run("a non-campaign call is refused as before", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, false, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, "classify", `{"value": "yes"}`)
+		if r.IsLeadSetByPhase() {
+			t.Error("IsLeadSetByPhase on a call that records no leads")
+		}
+		output, _ := r.Dispatch(t.Context(), ToolRecordLead, `{"intent": "HIGH"}`)
+		got := decodeOutput(t, output)
+		if got["ok"] != "0" || !strings.Contains(got["error"].(string), "not available in the current phase") {
+			t.Errorf("output = %s", output)
+		}
+		wantLeads(t, actions.leads)
+	})
+}
+
+// The phase judged is the one the call is in when the tool is dispatched, not
+// the one the response was made in.
+func TestRecordLeadInABatchIsJudgedInThePhaseTheCallIsIn(t *testing.T) {
+	t.Parallel()
+	t.Run("before the move: written, then replaced on entry", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		r.BeginToolBatch()
+		dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM"}`)
+		dispatchOK(t, r, "classify", `{"value": "yes"}`)
+		r.EndToolBatch()
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadMedium}, LeadRequest{Intent: LeadHigh, Notes: "Agreed:"})
+	})
+	t.Run("after the move into a declared phase: refused", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		r.BeginToolBatch()
+		dispatchOK(t, r, "classify", `{"value": "yes"}`)
+		wantLeadRefused(t, r, `{"intent": "NONE", "notes": "no thanks"}`)
+		r.EndToolBatch()
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadHigh, Notes: "Agreed:"})
+	})
+	t.Run("after the call left the declared phase: accepted", func(t *testing.T) {
+		t.Parallel()
+		actions := &fakeActions{}
+		r, _ := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+		dispatchOK(t, r, "classify", `{"value": "maybe"}`)
+		r.BeginToolBatch()
+		dispatchOK(t, r, "classify", `{"value": "back"}`)
+		dispatchOK(t, r, ToolRecordLead, `{"intent": "MEDIUM", "notes": "left the phase"}`)
+		r.EndToolBatch()
+		wantLeads(t, actions.leads, LeadRequest{Intent: LeadLow}, LeadRequest{Intent: LeadMedium, Notes: "left the phase"})
+	})
+}
+
+// The refusal line names the phase and both intents, and never the notes.
+func TestTheLeadRefusalIsLoggedWithoutTheNotes(t *testing.T) {
+	t.Parallel()
+	actions := &fakeActions{}
+	r, logs := declaredLeadRuntime(t, actions, true, declaredLeadFlow, LangEN, nil)
+	dispatchOK(t, r, "classify", `{"value": "yes"}`)
+	wantLeadRefused(t, r, `{"intent": " none ", "notes": "ZEBRA-NOTES the customer's private words"}`)
+
+	lines := logLines(t, logs, "lead refused: the phase declares its own")
+	if len(lines) != 1 {
+		t.Fatalf("refusal lines = %v", lines)
+	}
+	line := lines[0]
+	if line["level"] != "INFO" || line["tool"] != ToolRecordLead || line["node"] != "close_high" ||
+		line["intent"] != LeadNone || line["declaredIntent"] != LeadHigh {
+		t.Errorf("line = %v", line)
+	}
+	if strings.Contains(logs.String(), "ZEBRA-NOTES") {
+		t.Error("the notes reached the log")
+	}
 }

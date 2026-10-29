@@ -305,7 +305,8 @@ func (m *modelRun) botTurn(ctx context.Context) error {
 		before := m.engine.NodeID()
 		m.runtime.BeginToolBatch()
 		for _, call := range resp.ToolCalls {
-			isAllowed := m.runtime.IsToolAllowed(call.Name)
+			isAllowed := m.runtime.IsToolAllowed(call.Name) &&
+				!(call.Name == flow.ToolRecordLead && m.runtime.IsLeadSetByPhase())
 			output, _ := m.runtime.Dispatch(ctx, call.Name, call.Arguments)
 			m.log(fmt.Sprintf("TOOL %s(%s) -> %s", call.Name, call.Arguments, flow.TranscriptOutput(output)))
 			if isAllowed {

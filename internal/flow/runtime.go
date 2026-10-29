@@ -126,6 +126,15 @@ func (r *Runtime) IsToolAllowed(name string) bool {
 	return !r.denied[name] && r.engine.IsToolAllowed(name)
 }
 
+// IsLeadSetByPhase reports whether the phase the call is in declares its own
+// lead (Node.Lead) on a call that records leads. While it holds, Dispatch
+// refuses record_lead: the phase owns the lead, so a stray call cannot
+// overwrite it. record_lead is still offered and still counts as allowed
+// (IsToolAllowed); the refusal is an answer, not a withdrawal.
+func (r *Runtime) IsLeadSetByPhase() bool {
+	return r.isLeadOffered && r.engine.current.Lead != nil
+}
+
 // Engine exposes the phase machine.
 func (r *Runtime) Engine() *Engine { return r.engine }
 
@@ -429,11 +438,26 @@ func (r *Runtime) run(ctx context.Context, name string, args map[string]any) (Re
 // silence or of replies without a tool that closingTarget watches (a model
 // that logged a lead on every turn would otherwise never be closed).
 //
-// A refusal is a result the model reads and corrects, and nothing is stored.
-// Notes over MaxLeadNotesRunes are cut rather than refused: a HIGH lead must
-// not be lost because the model was wordy.
+// While the phase the call is in declares its own lead, the call is refused,
+// whatever it says: the phase is judged at dispatch, so a record_lead made
+// after a tool moved the call into such a phase is refused, and one made
+// before the move is taken and then replaced on entry. The refusal carries no
+// hint, so nothing invites a retry and a closing line riding in a sibling
+// tool's answer is not diluted.
+//
+// Any other refusal is a result the model reads and corrects, and nothing is
+// stored. Notes over MaxLeadNotesRunes are cut rather than refused: a HIGH
+// lead must not be lost because the model was wordy.
 func (r *Runtime) recordLead(ctx context.Context, args map[string]any) string {
 	intent := strings.ToUpper(strings.TrimSpace(stringArg(args, "intent")))
+	if r.IsLeadSetByPhase() {
+		// Never the notes: they are the customer's words.
+		r.log.Info("lead refused: the phase declares its own",
+			"tool", ToolRecordLead, "node", r.engine.NodeID(),
+			"intent", intent, "declaredIntent", r.engine.current.Lead.Intent)
+		return Failed("this phase records the lead itself; do not call record_lead, "+
+			"and do not mention this to the customer", "").asToolOutput()
+	}
 	if !slices.Contains(LeadIntents, intent) {
 		r.log.Info("lead not recorded", "reason", "unknown intent", "intent", stringArg(args, "intent"))
 		return Failed(fmt.Sprintf("%q is not a lead intent; use one of %s",
