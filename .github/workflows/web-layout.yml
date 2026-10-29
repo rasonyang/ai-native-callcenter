@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The web layout tests, in a real Chromium. ci.yml's web job runs the same
+# screens under jsdom, which computes no layout, so a table widened past its
+# card passes every one of those tests (#363, shipped in v0.7.1). These tests
+# measure boxes against each other instead (web/src/test/layout.ts).
+#
+# Its own workflow, and only for a change under web/: the job installs a
+# browser, which is the slowest thing in the web gate, and a Go-only change
+# cannot move a layout. Contract changes reach the SPA through the generated
+# files under web/src/generated, which are under web/.
+name: web-layout
+
+on:
+  pull_request:
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-layout.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'web/**'
+      - '.github/workflows/web-layout.yml'
+
+concurrency:
+  group: web-layout-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  layout:
+    name: layout
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      # Keyed on the exact Playwright version (package.json pins it): a new
+      # version wants a new browser build, and the same version never does.
+      - name: Read the pinned Playwright version
+        id: playwright
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v4
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+      # The browser download is what the cache saves. The system libraries
+      # (and the CJK font the Chinese runs need) live outside the cache, so
+      # they are installed on every run.
+      - name: Install Chromium
+        if: steps.browsers.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium's system dependencies
+        if: steps.browsers.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      - name: Layout tests
+        run: npm run test:browser

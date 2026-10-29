@@ -75,6 +75,12 @@ export interface Backend {
    * default, as in a browser without the extension: the request fails.
    */
   isExtensionInstalled?: boolean
+  /**
+   * Answers the paths the built-in routes do not know (the admin screens'
+   * endpoints), ahead of them. Return a `Response`, any other value to be sent
+   * as JSON, or `undefined` to fall through to the defaults.
+   */
+  handle?: (request: RecordedRequest) => unknown
 }
 
 const BASE = '/api/v1'
@@ -319,6 +325,7 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
     transcriptState: initial.transcriptState,
     slowSnapshotMs: initial.slowSnapshotMs,
     isExtensionInstalled: initial.isExtensionInstalled,
+    handle: initial.handle,
   } as Backend
 
   vi.stubGlobal(
@@ -332,11 +339,15 @@ export function installBackend(initial: Partial<Backend> = {}): Backend {
       }
       const path = url.startsWith(BASE) ? url.slice(BASE.length) : url
       const method = init.method ?? 'GET'
-      backend.requests.push({
+      const recorded = {
         method,
         path,
         body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
-      })
+      }
+      backend.requests.push(recorded)
+
+      const handled = backend.handle?.(recorded)
+      if (handled !== undefined) return handled instanceof Response ? handled : json(handled)
 
       if (path.includes('/transcript')) {
         if (backend.slowSnapshotMs) {
