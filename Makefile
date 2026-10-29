@@ -174,6 +174,13 @@ test: ## Run Go (with -race) and frontend tests, as CI does
 	fi; \
 	exit $$status
 
+# Layout tests in real Chromium (web/vitest.browser.config.ts). Not part of
+# `make test`: they need a browser, installed once with the command below, and
+# CI runs them in their own workflow (.github/workflows/web-layout.yml).
+.PHONY: test-browser
+test-browser: ## Run the web layout tests in headless Chromium (first time: cd web && npx playwright install chromium)
+	cd $(WEB) && npm run test:browser
+
 # A new or changed test with goroutines, fakes, sockets or timers runs here
 # before its pull request (CONTRIBUTING.md): PKG is required and never ./...
 COUNT ?= 20
