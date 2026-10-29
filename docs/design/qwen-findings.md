@@ -1277,3 +1277,230 @@ its goodbye with the line still waiting for the floor.
 **NOT MEASURED**: a live call; the second ask on openai, grok and the gateway;
 the call's own flow in English; a conversation that goes on for more than one
 reply after the line.
+
+## W-Q11: the opening line's direction stays the caller's first message and a later turn says the opener again (2026-10-29)
+
+**W-Q11 — on qwen the opening line's say-exactly direction is put in the
+conversation as a caller message (`NeedsCueForFirstTurn`) and used to stay
+there for the whole call; the turn that answers tool results with nothing of
+its own to say sometimes fulfils it a second time and speaks the opener word
+for word.** Found on live call 28100b13-e746-444a-b8f1-e213e09591f6 (#360,
+provider session `sess_O9ucxDrBNjCVSvVfX4x2E`, 2026-10-28, build 4e71a20, the
+#262 live round, `AI_OUTBOUND`, `qwen-audio-3.1-realtime-plus`,
+`campaign_lead_followup` en). The caller said "Stop calling." 2.7 s into the
+opener; the model called `record_lead` and `hangup` in one response; the turn
+that answered both results said the whole opener again (about 10 s) before the
+closing line. It is not tied to the cut: the control below, where the caller
+waits for the opener to be heard whole and then declines, repeated it too.
+
+**Measured.** `TestLiveQwenCutOpener` (`internal/provider/live_cut_opener_test.go`),
+through the product client, driven as the orchestrator and `aicall.Session`
+drive a call: the opening turn is consumed, at the cell's offset the caller
+speaks (macOS `say` clips in `testdata/q_*.pcm`), the first
+`input_audio_buffer.speech_started` gets `Interrupt(SPEECH, playedMs)`, and
+`record_lead` and `hangup` are answered as the orchestrator answers them (the
+phase moves to the closing phase, the closing line rides in `hangup`'s answer).
+The session's setup is `campaign_lead_followup`'s, rendered by
+`flow.TestRenderCutOpenerSession` into `testdata/cut_opener.json`. The client's
+frames pass through a local proxy that logs the provider's events and carries
+the treatments. A run is a repeat when a turn after the cut carries at least
+half of the opener's word trigrams (character 4-grams in zh).
+
+First round, the client as it was (T0), with treatments applied by the proxy.
+Counts are repeats out of runs:
+
+| Cell | T0 (main) | T1: the direction deleted when the opening response ends | T2: the cut opener's item rewritten to what was heard, direction kept |
+|---|---|---|---|
+| en stop@2700 | 2 / 45 | 0 | 4 / 25 |
+| en stop@1000, @5000, @11500 | 1 / 15 each | 0 | |
+| en control (no interruption) | 1 / 10 | 0 | |
+| en bye, drive, stop2 | 0 | 0 | |
+| zh stop@2700 | 3 / 40 | 0 | 1 / 10 |
+| zh control | 1 / 10 | 0 | |
+| zh other cells | 0 | 0 | |
+| all cells pooled | 10 / 245 | 0 / ~210 (0 / ~235 with the 25 runs that also had T2) | no benefit |
+
+Pooled, T0 against the direction deleted: 10 / 245 against 0 / 235 (T1 runs
+and the T1-with-T2 runs), Fisher exact, one-sided p = 0.001. The history edit that matters is the direction,
+not the cut opener's item: T2 alone rewrote the cut opener to the heard prefix
+and kept the direction, and repeated as often as main.
+
+Wire facts, all from the proxy's log: qwen sends no acknowledgement of
+`conversation.item.truncate` and the cut opener's item keeps its full text
+(W-Q9); `conversation.item.delete` of the direction is accepted and
+`conversation.item.deleted` is echoed; the opening response completes about
+2.2 s in, long before the caller speaks, so the delete is sent while the
+opener is still being played out; in the T1 runs the opener was still said in
+full in turn 1.
+
+**The fix (`provider.Realtime.removeOpeningDirection`).** Where the opening
+request put its direction in the conversation (qwen, with `OpeningText`), the
+item is deleted when the response that answers that request ends, whatever its
+status, from `handleResponseDone` before anything it releases is asked for,
+like W-Q10's `removeAgainDirection`; its id comes from
+`conversation.item.created` (`noteCreatedItem`) and an item the provider never
+named stays. An opening request that is retried (`onRequestExpired`), or
+replaced by a line waiting for the floor, keeps the direction until the
+response that finally answers it has ended; the caller taking the floor over
+the opener cancels the response and the delete still follows. Nothing is sent
+on openai, grok or the gateway (no cue item), and the bare greeting cue of a
+flow with no opening line stays (not measured). Covered by
+`internal/provider/opening_direction_test.go`.
+
+**Measured again on the shipped client.** The same probe, with the proxy
+swallowing the client's delete of the opening direction for "main" (the
+client's behaviour before the fix) and leaving the client untouched for
+"shipped". Every run also checks that the opener was said in turn 1 (its
+transcript covers at least half of it) and that the provider echoed
+`conversation.item.deleted` for the direction. Repeats / runs:
+
+| Cell | en main | en shipped | zh main | zh shipped |
+|---|---|---|---|---|
+| stop@2700 | 3 / 40 | 0 / 30 | 0 / 40 | 0 / 30 |
+| stop@1000 | | 0 / 10 | | 0 / 10 |
+| stop@11500 (en) or @9800 (zh), the last second | | 0 / 10 | | 0 / 10 |
+| control | | 0 / 10 | | 0 / 10 |
+| bye | | 0 / 10 | | 0 / 10 |
+| drive | | 0 / 10 | | 0 / 10 |
+| stop2 | | 0 / 10 | | 0 / 10 |
+| all cells | 3 / 40 | 0 / 90 | 0 / 40 | 0 / 90 |
+
+The opener was said in turn 1 in every run (all 300 runs of the cells above and
+the "who" cells below), the delete was echoed in every shipped run and in none of the main
+runs. The proxy therefore reproduces the old wire; its repeat rate on this
+setup is lower than the first round's (main 3 / 80 here, 10 / 245 there), so
+the first round's count is the one the p-value rests on. Pooling every main
+run of both rounds against every shipped run: 13 / 325 against 0 / 180, one-sided
+p = 0.003. The closing line was said (coverage of at least 0.6) in 19 / 30 (en)
+and 28 / 30 (zh) shipped stop@2700 runs against 30 / 40 and 40 / 40 on main; the
+shipped runs that did not say it ended with an improvised "Goodbye." or "I'll make sure you're not
+contacted again." in the turn that answered the results.
+
+**"Who is this?"** The caller asks "Who is this?" / "你是谁？" over the opener at
+2.7 s. Repeating the opener there is acceptable; losing who is calling is not.
+A reply identifies when it names the company or the assistant. Of 10 runs in
+each cell, every reply identified, on main and shipped, en and zh (40 / 40);
+none repeated the opener whole. What changed is the wording: on main the
+reply was often the opener's own first sentence again (zh main 10 / 10 are
+"我是星讯手机的 AI 语音助手。"), and now it is a fresh, shorter answer. The word
+"AI" is in 7 / 10 en and 10 / 10 zh replies on main and in 1 / 10 en and 3 / 10
+zh replies on shipped. Every reply of the shipped client:
+
+- en: "This is the StarCom Mobile assistant calling to follow up on your interest
+  in our 5G Plan." / "This is the outbound voice assistant from StarCom Mobile,
+  calling to follow up on your interest in our 5G Plan." / "This is the StarCom
+  Mobile AI assistant calling to follow up on your recent inquiry about our 5G
+  Plan." / "This is the StarCom Mobile assistant calling about the 5G Plan you
+  asked about." / "This is the StarCom Mobile assistant calling about your
+  interest in our 5G Plan." / "Hi Chen, this is the StarCom Mobile assistant
+  following up on your interest in our 5G Plan. We have a special offer of 20%
+  off the first six months, would you like to hear more …" / "This is StarCom
+  Mobile calling about the 5G Plan you asked about." / "Hi Chen, this is the
+  StarCom Mobile assistant following up on your interest in our 5G Plan. We
+  currently have an offer of 20% off the first six months, are you still
+  interested …" / "This is the StarCom Mobile assistant calling about the 5G
+  Plan you asked about. We have an offer of 20% off the first six months, and I
+  wanted to see if you're interested." / "This is the StarCom Mobile assistant
+  calling about your recent inquiry into our 5G Plan."
+- zh: "我是星讯手机的语音助手，想跟您聊聊之前咨询过的 5G Plan 优惠活动。" /
+  "我是星讯手机的语音助手，代表星讯手机对近期咨询过产品的客户做一次简短的电话回访。请问您对我们的 5G Plan 优惠活动有兴趣吗？" /
+  "我是星讯手机的语音助手，代表公司对您近期咨询的产品做一次简短回访。" /
+  "我是星讯手机的语音助手，代表星讯手机给您做个简短的回访。请问您最近有关注我们的5G Plan吗？" /
+  "我是星讯手机的语音助手，代表公司对您进行电话回访。" /
+  "我是星讯手机的语音助手，代表公司对您近期咨询的5G Plan做个简短回访。请问您现在方便聊几句吗？" /
+  "我是星讯手机的 AI 助手，这次来电是想了解一下您对 5G Plan 优惠活动的意向。" /
+  "我是星讯手机的语音助手，代表星讯手机对您做一次简短的电话回访。请问您现在方便吗？" /
+  "我是星讯手机的 AI 助手，代表星讯手机对您近期咨询的 5G Plan 做一次简短回访。目前有个优惠活动，首六个月可享 20% 折扣，请问您有兴趣了解一下吗？" /
+  "我是星讯手机的 AI 语音助手，今天来电是想了解一下您对 5G Plan 优惠活动的意向。"
+
+The company is always named, but the AI disclosure is not. It had been
+carried by the leftover direction, which made the model re-say the opener's
+first sentence; without it the seed flow's rule "You are an AI assistant; say so
+honestly if asked." was left to decide, and it did not always.
+
+**The rule change.** `internal/seed/flows/campaign_lead_followup.json` now says,
+in both languages, that when the caller asks who you are, who is calling, or
+whether you are a person, you say you are StarCom Mobile's AI voice assistant
+(zh: 星讯手机的 AI 语音助手). The fixture was re-rendered from the changed flow
+and the "who" probe now counts a reply as disclosing when it says it is an AI.
+On the shipped client with the new rule, over the opener at 2.7 s, n = 20 per
+language: identified 20 / 20 and disclosed the AI 20 / 20 in en, identified
+20 / 20 and disclosed 20 / 20 in zh, and no reply repeated the opener whole
+(the first sentence-length answers are "This is StarCom Mobile's AI voice
+assistant calling to follow up on your interest in our 5G Plan." in en and,
+in 18 of 20 zh runs, exactly "我是星讯手机的 AI 语音助手。", in the other two
+followed by "请问有什么可以帮您？"). The deployment owns the wording: a flow that
+must disclose the AI on other turns says so in its instructions.
+
+**Stop at 2.7 s on the new fixture**, repeats / closing line said / other, n = 30
+per cell (opener said in turn 1 and, for shipped, the delete echoed, in every
+run):
+
+| Client | en | zh |
+|---|---|---|
+| main (delete swallowed) | 1 / 23 / 6 | 1 / 29 / 0 |
+| shipped | 0 / 21 / 9 | 0 / 30 / 0 |
+
+**Headline.** None of the 180 non-"who" shipped runs of the first fixture, nor
+of the 60 on the new one, repeated the opener; main (the first round's T0, the
+second round's swallowed delete and the new fixture's) repeated 15 / 385
+across all of them, one-sided Fisher p = 0.0006 against 0 / 240 shipped. The closing line: the
+earlier suspicion that the shipped client says it less often in zh does not
+hold. On the new fixture the closing line was missed in 9 / 60 shipped and
+8 / 60 main stop@2700 runs (p = 0.5), zh 0 / 30 and 1 / 30 (p = 1.0). On the
+first fixture it was missed in 13 / 60 shipped against 10 / 80 main (p = 0.11),
+and pooled over both fixtures 22 / 120 against 18 / 140 (p = 0.15): a
+difference of this size is not established either way. The runs that missed it
+ended on an improvised "Goodbye." or "I've noted your request and will stop
+calling." in the turn that answered the results; the rule change did not move
+the stance or the closing behaviour.
+
+**Live calls (2026-10-29).** 17 calls on the dev stack, a build of this branch
+(5ca168f plus the fix), `qwen-audio-3.1-realtime-plus`, `campaign_lead_followup`
+with the new AI rule on DID 95061 (en) and 95062 (zh), one single-contact
+campaign per call to the owner's softphone; the owner answered and spoke the
+shape asked for. Each call was checked from the debug log (barge-in, the
+direction's removal and the provider's confirmation, tools, #262's second ask,
+the hang-up), the stored transcript and the CDR. Totals: the opener repeated
+0 / 17; the direction deleted and the deletion confirmed by qwen 17 / 17
+(including two openings qwen cancelled itself, calls 8 and 13); the closing
+line said verbatim before the hang-up 17 / 17 (3 of them on #262's second ask);
+every CDR NORMAL_CLEARING; "Who is this?" answered with the AI identity 3 / 3
+(calls 4, 11, 15). "Cut" is the caller's playedMs at the interruption.
+
+| # | Shape | Call id | Cut | Outcome |
+|---|---|---|---|---|
+| 1 | en stop, under 1 s | 86fa1ea1-f9c3-4454-90ed-84ef3b423491 | 5820 | stop, DNC, hang-up |
+| 2 | en stop, ~3 s | 5dae0d99-3313-4e8b-913b-c3fc596616a8 | 3240 | stop, DNC |
+| 3 | en stop, last second | 636ee3a9-11e3-48f5-a140-38b07f2fe348 | 11080 | stop, DNC |
+| 4 | en who | 96a6e839-82ab-4edf-b74d-576bad43a81a | 9700 | AI identity, then stop, DNC |
+| 5 | en stance + bye | 9bf25ee0-a99a-4631-8131-b62dcd5af45d | 4040 | fragment reply deleted (W-Q9), DNC, closing line on the second ask |
+| 6 | en half word, mixed | c41b1562-42ed-4c99-b085-61e28b155013 | 3400 | fragment reply deleted, one fresh question, stop, DNC |
+| 7 | en control, no cut | 522ff001-bfa0-41ba-a9be-d70bdedadacb | none | opener heard whole, stop, DNC |
+| 8 | zh stop, under 1 s | da8631b5-8faa-4099-8e1b-818f60b12e24 | 1340 (qwen cancelled the opener) | re-introduced in its own words, AI disclosed, stop, DNC |
+| 9 | zh stop, ~3 s | 262d2ccd-0158-4e01-abaa-9b520c74e01d | 2260 | stop, DNC |
+| 10 | zh stop, last second | 38af2716-7894-4197-9dd6-af7393e836b5 | none (spoke after the opener) | one question, stop, DNC, closing line on the second ask |
+| 11 | zh who | 5e0628dd-fb34-44ca-b622-8ee54de23fa5 | none (asked after the opener) | AI identity, stop, DNC |
+| 12 | zh stance + bye | bfe6749a-0b33-40be-baf8-d5866a397d7f | 2800 | stop, DNC |
+| 13 | zh half word, mixed | 20ad5c8c-dd3b-4768-b14b-9587aab2917c | 2340 (provider) | fragment reply deleted, stop, DNC |
+| 14 | zh control, no cut | d29e267b-13fc-4798-83e4-5c30b065252c | none | stop, DNC |
+| 15 | zh who over the opener | b49e6d3c-9d87-4e21-9741-5103a9ce4364 | 2980 | AI identity, stop, DNC |
+| 16 | zh stop, last second | 5c5c3d6a-fd5b-49a6-b7c6-d05ddf5bcdc0 | none (spoke after the opener) | stop, DNC |
+| 17 | en stop, immediately | 12dec4f7-1bad-405b-a28b-e98a8e2591cd | 1560 | fragment reply deleted, stop, DNC, closing line on the second ask |
+
+Not reached live: a cut inside the first second (the earliest was 1340 ms: the
+800 ms barge guard plus reaction time), and a zh cut in the opener's last second
+(twice the owner spoke just after it ended; the probe covers it, zh shipped
+stop@9800 0 / 10).
+
+**NOT MEASURED**: real caller recordings (the clips are synthesised by `say`; the live
+calls were the owner's voice, 17 of them);
+the bare
+greeting cue of a flow with no opening line, which stays in the conversation;
+openai, grok and the gateway, which are unchanged by construction (no cue item,
+no new frame; `wire_golden_test.go` and `opening_direction_test.go`); the
+retry (`onRequestExpired`) and replaced-by-a-line paths of the opening request,
+which `opening_direction_test.go` covers and no call reached; the no-input path of the cue experiment earlier in this document, where removing
+the cues left the opening direction as the last caller item and the model
+answered it; other flows than
+`campaign_lead_followup`; other qwen models.

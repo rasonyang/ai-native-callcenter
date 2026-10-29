@@ -19,6 +19,15 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- On qwen, a turn later in the call no longer sometimes speaks the opening
+  line again. The opening line's direction was kept in the conversation as the
+  caller's first message for the whole call, and a turn that answered tool
+  results with nothing of its own to say could fulfil it a second time, word
+  for word, before the goodbye. It is now removed when the opening turn ends;
+  the opener itself is still said in full. The follow-up reference flow's AI
+  rule now says to answer "who is this?" and "are you a person?" with the
+  company's AI voice assistant, so that answer no longer depends on that
+  leftover. (#360)
 - Opening a revision in the flow editor's History tab no longer pushes the
   table's other columns, and every row's View and Roll back to this revision,
   off the right edge. The revision's spec now scrolls inside its own box

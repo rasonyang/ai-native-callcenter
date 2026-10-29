@@ -215,6 +215,18 @@ type Realtime struct {
 	// (removeAgainDirection).
 	againDirection string
 	againItemID    string
+	// openingDirection is the direction of the opening line, put in the
+	// conversation as the caller's first message where the profile needs a cue
+	// for its first turn (NeedsCueForFirstTurn) and a line is named, until the
+	// provider names that item; openingItemID is its name. isOpeningResponse says
+	// the response now open answers the opening request. isOpeningDropped says
+	// the opening request was never created and a line took its place, so the
+	// next response is the one that answers it. The item steers the opening
+	// turn and is taken back out when that turn ends (removeOpeningDirection).
+	openingDirection  string
+	openingItemID     string
+	isOpeningResponse bool
+	isOpeningDropped  bool
 
 	// spokenItems are the items the response now open has begun to speak
 	// (output_item.added of a message), and unheardItems the ones the
@@ -391,6 +403,13 @@ func (r *Realtime) Start(ctx context.Context, cfg SessionConfig) error {
 		cue = direction
 	}
 	if r.profile.NeedsCueForFirstTurn {
+		if cfg.OpeningText != "" {
+			// Learned from the event that announces the item, which can
+			// arrive before sendEvent returns (noteCreatedItem).
+			r.mu.Lock()
+			r.openingDirection, r.openingItemID = cue, ""
+			r.mu.Unlock()
+		}
 		if err := r.sendEvent(userTextItem(cue)); err != nil {
 			r.conn.Close()
 			return fmt.Errorf("prompt opening turn: %w", err)
@@ -833,6 +852,9 @@ func (r *Realtime) onRequestExpired(gen uint64) {
 	switch {
 	case r.pendingSpeak != "":
 		outcome = obs.ResponseUnansweredSuperseded
+		// The line that takes the opening's place is made with the opening's
+		// direction in view, so its turn is the one that answers it.
+		r.isOpeningDropped = r.isOpeningDropped || expired.kind == responseKindOpening
 	case !expired.isRetry:
 		outcome = obs.ResponseUnansweredRetried
 		retry.isRetry = true
@@ -916,6 +938,11 @@ func (r *Realtime) onResponseCreated() (isLine, isAskedAgain bool) {
 	isLine = r.isResponseRequested && r.request.kind == responseKindLine
 	r.isLineResponse = isLine
 	r.lineTurn, r.lineCalls = responseRequest{}, nil
+	r.isOpeningResponse = r.isResponseRequested &&
+		(r.request.kind == responseKindOpening || r.isOpeningDropped)
+	if r.isOpeningResponse {
+		r.isOpeningDropped = false
+	}
 	if isLine {
 		r.lineTurn = r.request
 		isAskedAgain = r.request.isAskedAgain
@@ -1624,6 +1651,7 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	r.removeUnfinishedCalls(event.Response)
 	r.removeUnheardTurn(event.Response)
 	r.removeAgainDirection(line)
+	r.removeOpeningDirection()
 	// The floor is free: a line that was waiting for it goes out before the
 	// turn is reported, so the next words are already being made while the
 	// consumer catches up.
@@ -1847,17 +1875,21 @@ func (r *Realtime) askForLineAgain(line responseRequest, calls []string, status 
 }
 
 // noteCreatedItem learns the provider's name for the caller message that
-// carries the direction of a line asked for again, from the event that
-// announces it (conversation.item.created, or .added in the GA dialect), so
-// removeAgainDirection can take it out. Any other item is ignored.
+// carries the direction of a line asked for again, or of the opening line,
+// from the event that announces it (conversation.item.created, or .added in
+// the GA dialect), so removeAgainDirection or removeOpeningDirection can take
+// it out. Any other item is ignored.
 func (r *Realtime) noteCreatedItem(item *wireItem) {
 	if item == nil || item.ID == "" || item.Role != "user" || len(item.Content) == 0 {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.againDirection != "" && item.Content[0].Text == r.againDirection {
+	switch text := item.Content[0].Text; {
+	case r.againDirection != "" && text == r.againDirection:
 		r.againItemID, r.againDirection = item.ID, ""
+	case r.openingDirection != "" && text == r.openingDirection:
+		r.openingItemID, r.openingDirection = item.ID, ""
 	}
 }
 
@@ -1892,6 +1924,50 @@ func (r *Realtime) removeAgainDirection(line responseRequest) {
 		return
 	}
 	r.log.Debug("took the direction of the line asked again out of the conversation", "itemId", itemID)
+}
+
+// removeOpeningDirection takes the direction of the opening line out of the
+// conversation once the response that answers the opening request has ended,
+// however it ended (completed, or cancelled by the caller taking the floor),
+// before anything asks for the next turn. The item was there to get the first
+// turn made. Left in, it stayed the caller's first message for the whole call,
+// and a later turn that answered tool results with nothing of its own to say
+// sometimes fulfilled it again and spoke the opener word for word: 15 of 385
+// probe runs on the old wire, 0 of 240 with the item taken out at this moment
+// (one-sided p = 0.0006), and 0 of 17 live calls (qwen-findings W-Q11). The
+// opener is still said in full by the turn that was asked for it.
+//
+// Only a named direction (the opening line) goes: the bare greeting cue of a
+// call whose flow names no line is not measured and stays. An opening request
+// that is retried keeps the direction until the response that finally answers
+// it ends. An item the provider never named stays where it is.
+func (r *Realtime) removeOpeningDirection() {
+	r.mu.Lock()
+	isOpening := r.isOpeningResponse
+	r.isOpeningResponse = false
+	if !isOpening || (r.openingDirection == "" && r.openingItemID == "") {
+		r.mu.Unlock()
+		return
+	}
+	itemID := r.openingItemID
+	r.openingItemID, r.openingDirection = "", ""
+	if itemID != "" {
+		r.deleteSentAt = time.Now()
+	}
+	r.mu.Unlock()
+	if itemID == "" {
+		r.log.Debug("the direction of the opening line was never named; it stays in the conversation")
+		return
+	}
+	if err := r.sendEvent(map[string]any{
+		"type":    "conversation.item.delete",
+		"item_id": itemID,
+	}); err != nil {
+		r.log.Debug("could not take the direction of the opening line out of the conversation",
+			"itemId", itemID, "error", err)
+		return
+	}
+	r.log.Debug("took the direction of the opening line out of the conversation", "itemId", itemID)
 }
 
 // removeUnfinishedCalls takes out of the conversation every function call a
