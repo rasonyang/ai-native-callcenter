@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // #351: a line's turn that calls a tool instead of saying the line, and says
@@ -98,6 +99,28 @@ func sayTheLineAskedAgain(t *testing.T, f *fakeProvider, session *Realtime) {
 	f.send(map[string]any{"type": "response.done",
 		"response": map[string]any{"status": statusCompleted}})
 	awaitEvent(t, session, EventTypeResponseDone)
+}
+
+// awaitAgainDirectionNamed waits until the client has read the provider's
+// conversation.item.created for the direction of the line asked again and
+// learned its id. The fake announces the item from its read loop
+// (announceItems), and the test ends the line's turn from its own goroutine:
+// without this wait the two frames can reach the client in either order, and
+// a direction not yet named cannot be taken out. Only a fake that names caller
+// messages ever names it, so a test waits for it only on one.
+func awaitAgainDirectionNamed(t *testing.T, session *Realtime) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		session.mu.Lock()
+		isNamed := session.againItemID != ""
+		session.mu.Unlock()
+		if isNamed {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("the client never learned the provider's name for the direction of the line asked again")
 }
 
 // directionOf is the per-response override a request carries.
@@ -193,6 +216,7 @@ func TestALineWhoseTurnCalledAToolIsAskedForAgain(t *testing.T) {
 				t.Errorf("caller items %q, want %q", texts, wantTexts)
 			}
 
+			awaitAgainDirectionNamed(t, session)
 			sayTheLineAskedAgain(t, f, session)
 			f.awaitMessages("response.create", 3)
 			f.awaitMessages("conversation.item.delete", 2)
@@ -225,6 +249,7 @@ func TestALineAskedAgainThatCallsAToolIsGivenUp(t *testing.T) {
 	f.awaitMessages("response.create", 2)
 	callInsteadOfTheLine(t, f, session, "hangup", "fc_first")
 	f.awaitMessages("response.create", 3)
+	awaitAgainDirectionNamed(t, session)
 	if started := callInsteadOfTheLine(t, f, session, "hangup", "fc_second"); !started.IsLineAskedAgain {
 		t.Error("the line's second turn is not reported as asked again")
 	}
@@ -267,6 +292,7 @@ func TestOnlyTheDirectionAskedAgainIsTakenOut(t *testing.T) {
 		if len(texts) != 2 || texts[0] != sayExactlyWithoutTools(phaseLine, "en") || texts[1] != want {
 			t.Fatalf("caller items %q, want the closing line's own and %q", texts, want)
 		}
+		awaitAgainDirectionNamed(t, session)
 		sayTheLineAskedAgain(t, f, session)
 		f.awaitMessages("conversation.item.delete", 2)
 		if got := deletedIDs(f); got[0] != "item_fc_line" || got[1] != ids[1] {
@@ -400,6 +426,7 @@ func TestACallerWhoTalksOverTheLineAskedAgainTakesTheFloor(t *testing.T) {
 	f.awaitMessages("response.create", 2)
 	callInsteadOfTheLine(t, f, session, "hangup", "fc_line")
 	f.awaitMessages("response.create", 3)
+	awaitAgainDirectionNamed(t, session)
 
 	f.send(map[string]any{"type": "response.created"})
 	awaitEvent(t, session, EventTypeResponseStarted)
