@@ -46,7 +46,7 @@ document explains the shape, not the package inventory.
 - **FreeSWITCH owns**: SIP registration (agents), trunks, bridging, mod_callcenter queues (waiting/MOH/distribution), recording capture, transcoding on non-bot legs.
 - **aicc (Go) owns**: call control (ESL), agent/queue/flow/user configuration, the AI voice leg (SIP UAS + RTP + provider bridge), flow engine, SSE fan-out, CDR/transcripts/reports, recording storage/lifecycle, SPA.
 - **PostgreSQL owns**: all durable state. mod_lua reads dedicated `luacc.*` views (contract, see 03).
-- **The provider is chosen at startup, not per call (A1)**: `AICC_PROVIDER` picks one value for the whole deployment; a DID's `language` shapes greeting, prompt and voice only. Four values (`openai`, `grok`, `qwen`, `gateway`) are profiles of the OpenAI-Realtime client; `doubao` speaks ByteDance's protocol and has a client of its own (A6 as amended, `doubao-findings.md`).
+- **The provider is chosen at startup, not per call (A1)**: `AICC_PROVIDER` picks one value for the whole deployment; a DID's `language` sets the greeting and the prompt language only, never the provider or the voice (the flow's `global.voice` owns the voice, A7). Four values (`openai`, `grok`, `qwen`, `gateway`) are profiles of the OpenAI-Realtime client; `doubao` speaks ByteDance's protocol and has a client of its own (A6 as amended, `doubao-findings.md`).
 - **Outside this repo, by design (phase1-decisions A6)**: any cascaded speech pipeline. ASR + LLM + TTS compose inside a separate *OpenAI Realtime Gateway* service that exposes the Realtime protocol; aicc reaches it exactly as it reaches OpenAI — an endpoint override — and carries no cascade code, interface, stub or TODO.
 
 ## 2. Runtime topologies

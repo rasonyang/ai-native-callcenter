@@ -169,7 +169,7 @@ On start and every ESL reconnect: load live-call snapshots from PG, `show channe
 
 ## 7. FreeSWITCH configuration diffs (for approval — the complete set)
 
-**D1 `autoload_configs/modules.conf.xml`**: `<load module="mod_callcenter"/>` (shipped, `modules.conf.xml:158`); the stale custom-TTS module `<load>` line deleted. *Status: landed — the repo's image loads it, and `deploy/` starts from a clean file.*
+**D1 `autoload_configs/modules.conf.xml`**: `<load module="mod_callcenter"/>` (shipped in `freeswitch/conf`); the stale custom-TTS module `<load>` line deleted. *Status: landed — the repo's image loads it, and `deploy/` starts from a clean file.*
 
 **D2 `vars.xml`**: `global_codec_prefs=OPUS,G722,PCMU,PCMA8` → `…,PCMA` (typo fix; restores A-law).
 

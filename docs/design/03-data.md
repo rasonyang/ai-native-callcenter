@@ -247,6 +247,9 @@ wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
                                    -- so the filing regularly precedes the ledger row. The label is
                                    -- captured at filing time — history does not change meaning when
                                    -- somebody renames a word.
+                                   -- draft_disposition_code, draft_note, draft_generated_at (00044):
+                                   -- the AI wrap-up draft, kept apart from what the agent files and
+                                   -- kept after confirmation; draft_generated_at NULL means no draft.
 contacts(id uuid pk, phone_number text unique, name text, company text, email text,
          tags text[], notes text, created_at, updated_at, updated_by)
                                    -- updated_by follows the *agent's* user id, and is NULL when the
@@ -267,7 +270,7 @@ agent_states.wrap_up_call_id uuid  -- which call the after-call work is for, so 
 seq_blocks(name text pk, value bigint)                            -- SSE hi/lo blocks (100k)
 webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; DDL and rationale in 09 §4
 -- Added after this inventory was written; each is documented where it is designed rather than
--- restated here:
+-- restated here (internal/store/migrations is the authoritative list):
 --   sip_sessions (00031)                    one active SIP credential per agent (01 §3, G4)
 --   call_transcriptions / call_transcription_segments (00035)
 --                                           post-call ASR of a recording, two channels
@@ -275,6 +278,7 @@ webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; 
 --   campaigns / campaign_contacts (00037), campaign_attempts (00038)
 --                                           AI outbound campaigns (10 §3)
 --   cdrs.campaign_id (00039), dids.max_outbound_channels (00040)   (10 §3.5, §6.6)
+--   campaign_contacts.last_attempt_id / last_call_id (00042)        (10 §3.2, §14)
 ```
 
 ## 3. CDR semantics (from cti-server, extended)
