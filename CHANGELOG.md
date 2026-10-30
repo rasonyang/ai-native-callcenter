@@ -33,6 +33,14 @@ carries the one-line installer's files.
   off the right edge. The revision's spec now scrolls inside its own box
   instead of widening the table to its longest line. (#363)
 
+### Docs and CI
+
+- `web/package-lock.json` is written by npm 11, so CI's three web jobs and the
+  image's `web` stage now install with Node 24, which ships it, and
+  `devEngines` in `web/package.json` makes any other npm major stop with
+  `EBADDEVENGINES`. Before, they ran npm 10, which refused a lock npm 11 had
+  written. `CONTRIBUTING.md` says how the lock is kept. (#389)
+
 ## v0.7.1 - 2026-10-28
 
 ### Security

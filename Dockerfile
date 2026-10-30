@@ -20,7 +20,8 @@ ARG BASE_IMAGE=gcr.io/distroless/static-debian12:nonroot
 # half of npm ci and go build took the v0.1.0-rc.3 release past fifty minutes.
 
 # --- the single-page application --------------------------------------------
-FROM --platform=$BUILDPLATFORM node:22-alpine AS web
+# Node 24 ships npm 11, the npm that writes web/package-lock.json (#389).
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
