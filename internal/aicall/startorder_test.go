@@ -48,8 +48,9 @@ func TestNoCallerAudioReachesTheModelBeforeItsStartReturns(t *testing.T) {
 	started := make(chan error, 1)
 	go func() { started <- session.Start(t.Context()) }()
 
-	for range 10 {
-		leg.frames <- make([]byte, media.FrameSamples)
+	// Three frames: within the uplink's 100 ms backlog, so none is dropped.
+	for i := range 3 {
+		leg.frames <- callerFrame(media.LawMu, byte(0x40+i))
 	}
 	time.Sleep(150 * time.Millisecond)
 	if got := len(model.receivedAudio()); got != 0 {
@@ -60,11 +61,20 @@ func TestNoCallerAudioReachesTheModelBeforeItsStartReturns(t *testing.T) {
 	if err := <-started; err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for len(model.receivedAudio()) < 10 && time.Now().Before(deadline) {
+	// The uplink clock sends one frame per 20 ms, and a slot with nothing
+	// queued yet carries a fill; the queued frames arrive in order among them.
+	var heard []byte
+	deadline := time.Now().Add(5 * time.Second)
+	for len(heard) < 3 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
+		heard = heard[:0]
+		for _, frame := range model.receivedAudio() {
+			if frame[0] != media.SilenceFrame(media.LawMu)[0] {
+				heard = append(heard, frame[0])
+			}
+		}
 	}
-	if got := len(model.receivedAudio()); got != 10 {
-		t.Errorf("%d frames reached the model after Start, want the 10 queued", got)
+	if string(heard) != "\x40\x41\x42" {
+		t.Errorf("the model heard real frames %#x after Start, want the 3 queued in order", heard)
 	}
 }

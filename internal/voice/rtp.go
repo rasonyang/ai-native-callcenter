@@ -113,6 +113,9 @@ type RTPSession struct {
 	sent       atomic.Int64
 	sentOctets atomic.Int64
 	received   atomic.Int64
+	// rxDropped counts inbound frames deliver discarded because the consumer
+	// fell behind.
+	rxDropped atomic.Int64
 	// mediaStarted closes, once, when the first inbound packet arrives. It is
 	// the one definition of "the caller's media path is up", shared by the
 	// dead-media watch and by anything that waits to speak (MediaStarted).
@@ -378,14 +381,20 @@ func (r *RTPSession) deliver(frame []byte) {
 	select {
 	case stale := <-r.rx:
 		media.PutBytes(stale)
+		r.rxDropped.Add(1)
 	default:
 	}
 	select {
 	case r.rx <- frame:
 	default:
 		media.PutBytes(frame)
+		r.rxDropped.Add(1)
 	}
 }
+
+// RxDropped is how many inbound frames were discarded because the consumer
+// fell behind.
+func (r *RTPSession) RxDropped() int64 { return r.rxDropped.Load() }
 
 // Run paces outbound audio and returns when the session stops.
 //

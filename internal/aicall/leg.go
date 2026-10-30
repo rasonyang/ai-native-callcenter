@@ -31,6 +31,9 @@ type Leg interface {
 	Send(frame []byte) bool
 	// ClearTx drops queued audio and reports how many frames went with it.
 	ClearTx() int
+	// RxDropped is how many inbound frames the leg discarded because the
+	// consumer fell behind, oldest first.
+	RxDropped() int64
 	// Pending is how many frames are queued but not yet on the wire. Audio
 	// having been generated is not the same as the caller having heard it, and
 	// anything that must happen after the caller hears something waits on this.
@@ -66,4 +69,5 @@ func (l dialogLeg) MediaStarted() <-chan struct{} { return l.dialog.RTP.MediaSta
 func (l dialogLeg) FirstMediaAt() time.Time       { return l.dialog.RTP.FirstMediaAt() }
 func (l dialogLeg) AnsweredAt() time.Time         { return l.dialog.AnsweredAt }
 func (l dialogLeg) Stopped() <-chan struct{}      { return l.dialog.Stopped }
+func (l dialogLeg) RxDropped() int64              { return l.dialog.RTP.RxDropped() }
 func (l dialogLeg) Stop()                         { l.dialog.Stop() }
