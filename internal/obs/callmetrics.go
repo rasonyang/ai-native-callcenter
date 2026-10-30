@@ -30,6 +30,11 @@ var (
 	jitterLost         metric.Int64Counter
 	jitterDropped      metric.Int64Counter
 	jitterFilled       metric.Int64Counter
+	uplinkReceived     metric.Int64Counter
+	uplinkSent         metric.Int64Counter
+	uplinkFilled       metric.Int64Counter
+	uplinkDropBacklog  metric.Int64Counter
+	uplinkDropRx       metric.Int64Counter
 	providerFirstAud   metric.Int64Histogram
 	providerErrors     metric.Int64Counter
 	providerSessions   metric.Int64Counter
@@ -100,6 +105,18 @@ func init() {
 		metric.WithDescription("Inbound frames that arrived too late to be of use."))
 	jitterFilled, _ = meter.Int64Counter("aicc_jitter_filled_total",
 		metric.WithDescription("Silence frames substituted for missing inbound audio."))
+	uplinkReceived, _ = meter.Int64Counter("aicc_uplink_frames_received_total",
+		metric.WithDescription("Caller frames that reached the AI leg's 20 ms uplink clock."))
+	uplinkSent, _ = meter.Int64Counter("aicc_uplink_frames_sent_total",
+		metric.WithDescription("Frames the uplink clock fed the provider, real and filled."))
+	uplinkFilled, _ = meter.Int64Counter("aicc_uplink_frames_filled_total",
+		metric.WithDescription("Silence frames the uplink clock sent because the caller's "+
+			"phone sent nothing for that 20 ms slot."))
+	uplinkDropBacklog, _ = meter.Int64Counter("aicc_uplink_frames_dropped_backlog_total",
+		metric.WithDescription("Caller frames dropped because the uplink backlog passed 100 ms."))
+	uplinkDropRx, _ = meter.Int64Counter("aicc_uplink_frames_dropped_rx_total",
+		metric.WithDescription("Caller frames the RTP session dropped because the consumer "+
+			"fell behind."))
 	providerFirstAud, _ = meter.Int64Histogram("aicc_provider_first_audio_ms",
 		metric.WithDescription("Provider share of turn latency: caller stopped speaking "+
 			"to the first byte of the reply."),
@@ -234,6 +251,22 @@ func RecordRTPHealth(sent, lateTicks, lost, dropped, filled int64) {
 		jitterLost:    lost,
 		jitterDropped: dropped,
 		jitterFilled:  filled,
+	} {
+		if instrument != nil && value > 0 {
+			instrument.Add(ctx, value)
+		}
+	}
+}
+
+// RecordUplinkClock publishes one AI leg's uplink clock counters when it ends.
+func RecordUplinkClock(received, sent, filled, droppedBacklog, droppedRx int64) {
+	ctx := context.Background()
+	for instrument, value := range map[metric.Int64Counter]int64{
+		uplinkReceived:    received,
+		uplinkSent:        sent,
+		uplinkFilled:      filled,
+		uplinkDropBacklog: droppedBacklog,
+		uplinkDropRx:      droppedRx,
 	} {
 		if instrument != nil && value > 0 {
 			instrument.Add(ctx, value)

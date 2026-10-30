@@ -396,6 +396,9 @@ func TestInboundQueueDropsTheOldestWhenFull(t *testing.T) {
 	if markerOf(first) == 0 {
 		t.Error("the oldest frame survived; the queue dropped new audio instead of stale audio")
 	}
+	if got := session.RxDropped(); got != 10 {
+		t.Errorf("RxDropped = %d, want the 10 frames pushed out", got)
+	}
 }
 
 func isMediaStarted(s *RTPSession) bool {

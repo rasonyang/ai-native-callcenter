@@ -4,6 +4,7 @@ package obs
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -116,5 +117,48 @@ func TestACallThatEndsBeforeItsFirstWordIsForgotten(t *testing.T) {
 	outboundStages.Unlock()
 	if tracked {
 		t.Error("an ended call is still tracked")
+	}
+}
+
+// uplinkTotals reads the aicc_uplink_* counters.
+func uplinkTotals(t *testing.T, reader sdkmetric.Reader) map[string]uint64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]uint64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			if !strings.HasPrefix(m.Name, "aicc_uplink_") {
+				continue
+			}
+			for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+				out[m.Name] += uint64(dp.Value)
+			}
+		}
+	}
+	return out
+}
+
+func TestTheUplinkClockPublishesItsCountersWhenTheLegEnds(t *testing.T) {
+	reader := useTestReader()
+	before := uplinkTotals(t, reader)
+
+	RecordUplinkClock(103, 123, 115, 95, 7)
+	RecordUplinkClock(10, 12, 3, 0, 0) // a second call; zero counts publish nothing
+
+	got := delta(uplinkTotals(t, reader), before)
+	want := map[string]uint64{
+		"aicc_uplink_frames_received_total":        113,
+		"aicc_uplink_frames_sent_total":            135,
+		"aicc_uplink_frames_filled_total":          118,
+		"aicc_uplink_frames_dropped_backlog_total": 95,
+		"aicc_uplink_frames_dropped_rx_total":      7,
+	}
+	for name, value := range want {
+		if got[name] != value {
+			t.Errorf("%s = %d, want %d", name, got[name], value)
+		}
 	}
 }

@@ -41,6 +41,18 @@ carries the one-line installer's files.
   truncates in the breadcrumb (the full name is in its tooltip) and wraps in
   the page title instead of pushing the page's buttons out of the window.
   (#383)
+- On an AI call, the provider now hears the caller on the call's own clock.
+  A phone that stopped sending while its user was silent (silence suppression)
+  left the provider with no audio for that stretch, and what followed could
+  arrive in a burst, so the provider's input timeline ran short and then
+  jumped, which upsets its turn detection and echo cancellation. The provider
+  now gets one 20 ms frame for every 20 ms of the call: the oldest frame
+  waiting from the caller, or silence in its input format when none is. A
+  backlog past 100 ms drops its oldest frames rather than catching up, and
+  nothing is sent while a transfer is being settled. The dead-media and
+  first-media checks still follow real packets only. Each call logs one
+  `ai uplink clock` line when it ends and adds to the new
+  `aicc_uplink_frames_*_total` counters. (#393)
 
 ### Docs and CI
 

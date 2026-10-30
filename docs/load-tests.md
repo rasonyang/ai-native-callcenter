@@ -99,6 +99,7 @@ OPENAI_API_KEY=not-a-key \
 | `aicc_calls_active{kind}` | `SWITCH` is every call the switch carries, `BOT` the subset the model answers; they overlap |
 | `aicc_rtp_late_ticks_total` / `aicc_rtp_frames_sent_total` | The ratio is the late-tick rate — send ticks the caller would hear as a stutter |
 | `aicc_jitter_lost_total` / `_dropped_total` / `_filled_total` | Inbound media health |
+| `aicc_uplink_frames_{received,sent,filled,dropped_backlog,dropped_rx}_total` | The AI leg's 20 ms uplink clock: `sent` follows elapsed slots, `filled` is slots the caller sent nothing for, the two `dropped` counts are frames the 100 ms bound or the RTP queue discarded |
 | `aicc_turn_latency_ms{provider}` | Caller stopped speaking to first reply frame |
 | `aicc_provider_first_audio_ms{provider}` | The provider's share of that |
 | `aicc_provider_ws_errors_total` | Sessions that ended on an error |

@@ -3,12 +3,15 @@
 package aicall
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -46,6 +49,8 @@ type fakeLeg struct {
 	answeredAt time.Time
 	// firstMediaAt is when the fake's first packet "arrived".
 	firstMediaAt time.Time
+	// rxDropped is what the fake reports as discarded inbound frames.
+	rxDropped atomic.Int64
 }
 
 func newFakeLeg(law media.Law) *fakeLeg {
@@ -76,6 +81,7 @@ func (l *fakeLeg) startMedia() {
 }
 
 func (l *fakeLeg) FirstMediaAt() time.Time { return l.firstMediaAt }
+func (l *fakeLeg) RxDropped() int64        { return l.rxDropped.Load() }
 
 func (l *fakeLeg) MediaStarted() <-chan struct{} { return l.media }
 func (l *fakeLeg) AnsweredAt() time.Time         { return l.answeredAt }
@@ -395,6 +401,25 @@ func callerFrame(law media.Law, marker byte) []byte {
 // Audio path.
 //
 
+// firstRealFrame waits for the first frame the model was sent that is not a
+// fill: the uplink clock sends silence for every slot before the caller's
+// frame is queued, so the caller's audio is not necessarily the first thing
+// the model receives.
+func firstRealFrame(t *testing.T, model *fakeModel, isFill func([]byte) bool) []byte {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, frame := range model.receivedAudio() {
+			if !isFill(frame) {
+				return frame
+			}
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("caller audio never reached the model")
+	return nil
+}
+
 // Where the provider takes G.711, the caller's bytes must reach it untouched —
 // that is the entire point of negotiating passthrough.
 func TestCallerAudioReachesTheModelUntouchedOnThePassthroughPath(t *testing.T) {
@@ -403,22 +428,15 @@ func TestCallerAudioReachesTheModelUntouchedOnThePassthroughPath(t *testing.T) {
 
 	leg.frames <- callerFrame(media.LawMu, 0x42)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if received := model.receivedAudio(); len(received) > 0 {
-			frame := received[0]
-			if len(frame) != media.FrameSamples {
-				t.Fatalf("model got %d bytes, want an untouched %d-byte frame",
-					len(frame), media.FrameSamples)
-			}
-			if frame[0] != 0x42 {
-				t.Errorf("the frame was altered: first byte %#x", frame[0])
-			}
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	frame := firstRealFrame(t, model, func(f []byte) bool {
+		return isAllSilence(f, media.SilenceFrame(media.LawMu))
+	})
+	if len(frame) != media.FrameSamples {
+		t.Fatalf("model got %d bytes, want an untouched %d-byte frame", len(frame), media.FrameSamples)
 	}
-	t.Fatal("caller audio never reached the model")
+	if !bytes.Equal(frame, callerFrame(media.LawMu, 0x42)) {
+		t.Errorf("the frame was altered: first byte %#x", frame[0])
+	}
 }
 
 // Where it does not, the same audio must arrive converted to the rate the
@@ -429,19 +447,13 @@ func TestCallerAudioIsConvertedForAProviderThatNeedsLinearAudio(t *testing.T) {
 
 	leg.frames <- callerFrame(media.LawMu, 0x42)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if received := model.receivedAudio(); len(received) > 0 {
-			// 160 companded samples at 8 kHz become 320 linear samples at
-			// 16 kHz, two bytes each.
-			if want := media.FrameSamples * 2 * 2; len(received[0]) != want {
-				t.Fatalf("model got %d bytes, want %d", len(received[0]), want)
-			}
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	// Linear silence is zeros; the caller's frame is not.
+	frame := firstRealFrame(t, model, func(f []byte) bool { return !slices.ContainsFunc(f, func(b byte) bool { return b != 0 }) })
+	// 160 companded samples at 8 kHz become 320 linear samples at 16 kHz, two
+	// bytes each.
+	if want := media.FrameSamples * 2 * 2; len(frame) != want {
+		t.Fatalf("model got %d bytes, want %d", len(frame), want)
 	}
-	t.Fatal("caller audio never reached the model")
 }
 
 // The tail of a sentence is a fraction of a frame. Dropping it clips the last

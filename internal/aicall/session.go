@@ -163,9 +163,9 @@ const (
 // Session is one AI call.
 //
 // Audio moves through it on two pumps that never block each other: caller
-// audio goes up as the wire delivers it, and model audio comes down into a
-// queue the RTP session drains on its own clock. Nothing here paces anything;
-// pacing belongs to the leg that has to meet a deadline.
+// audio goes up on a 20 ms clock (uplinkClock), and model audio comes down into
+// a queue the RTP session drains on its own clock. The downlink is not paced
+// here; pacing belongs to the leg that has to meet a deadline.
 type Session struct {
 	leg   Leg
 	model provider.VoiceSession
@@ -176,10 +176,18 @@ type Session struct {
 	// the stages of an AI outbound call's time to the first word.
 	ledgerCallID uuid.UUID
 
-	cfg      Config
-	uplink   *media.Converter
-	downlink *media.Converter
-	framer   *framer
+	cfg    Config
+	uplink *media.Converter
+	// uplinkSilence is the fill frame for a slot with no caller audio, in the
+	// provider's input format.
+	uplinkSilence []byte
+	// uplinkNow is the uplink clock's time source, time.Now. uplinkTicks, when
+	// non-nil, replaces its 20 ms ticker. A test sets both before Start to run
+	// the uplink in virtual time.
+	uplinkNow   func() time.Time
+	uplinkTicks <-chan time.Time
+	downlink    *media.Converter
+	framer      *framer
 	// playBuffer is reused across chunks; only the model-event pump writes it.
 	playBuffer []byte
 
@@ -309,19 +317,21 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 	}
 
 	return &Session{
-		leg:          leg,
-		model:        model,
-		log:          log,
-		providerName: profile.Name,
-		cfg:          cfg,
-		uplink:       uplink,
-		downlink:     downlink,
-		framer:       newFramer(law),
-		playBuffer:   make([]byte, 0, 8*media.FrameSamples),
-		events:       make(chan Event, 128),
-		playbackDone: make(chan playbackMarker, 8),
-		rearm:        make(chan struct{}, 1),
-		done:         make(chan struct{}),
+		leg:           leg,
+		model:         model,
+		log:           log,
+		providerName:  profile.Name,
+		cfg:           cfg,
+		uplink:        uplink,
+		uplinkSilence: uplinkSilenceFrame(input),
+		uplinkNow:     time.Now,
+		downlink:      downlink,
+		framer:        newFramer(law),
+		playBuffer:    make([]byte, 0, 8*media.FrameSamples),
+		events:        make(chan Event, 128),
+		playbackDone:  make(chan playbackMarker, 8),
+		rearm:         make(chan struct{}, 1),
+		done:          make(chan struct{}),
 	}, nil
 }
 
@@ -623,12 +633,27 @@ func (s *Session) turnState() (turn int, isAside bool) {
 // Audio.
 //
 
-// pumpCallerAudio moves the caller's voice to the model.
+// pumpCallerAudio moves the caller's voice to the model on a 20 ms wall
+// clock (uplinkClock): one frame per slot, the oldest queued real frame or,
+// when none is queued, silence. A phone that stops sending (silence
+// suppression) therefore leaves the provider a continuous timeline, and
+// frames that arrive in a burst are not forwarded in one.
 func (s *Session) pumpCallerAudio() {
 	defer s.wg.Done()
 
 	frames := s.leg.Frames()
 	converted := make([]byte, 0, media.FrameSamples*8)
+	// The clock starts before the ticker, so tick k always finds k slots owed.
+	now := s.uplinkNow
+	clock := newUplinkClock(now())
+	defer s.finishUplink(clock)
+
+	ticks := s.uplinkTicks
+	if ticks == nil {
+		ticker := time.NewTicker(uplinkSlot)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
 
 	for {
 		select {
@@ -638,14 +663,17 @@ func (s *Session) pumpCallerAudio() {
 			if !ok {
 				return
 			}
-			if s.isHushed.Load() {
-				media.PutBytes(frame)
-				continue
+			clock.push(frame)
+		case <-ticks:
+			// select chooses at random between a frame and a tick that are
+			// both ready, so take what has arrived before judging a slot empty.
+			if !takeArrived(clock, frames) {
+				return
 			}
-			converted = s.uplink.Convert(converted, frame)
-			media.PutBytes(frame)
-
-			if err := s.model.SendAudio(converted); err != nil {
+			// The time is read here, not taken from the tick: a tick that was
+			// waiting while this goroutine ran late carries the time it fired.
+			var err error
+			if converted, err = s.sendDueSlots(clock, now(), converted); err != nil {
 				// A model that cannot be fed is a call that cannot continue.
 				// Nothing names this one: a socket that stopped taking audio
 				// has not said why.
@@ -654,6 +682,81 @@ func (s *Session) pumpCallerAudio() {
 			}
 		}
 	}
+}
+
+// takeArrived queues every frame already waiting on the leg. It reports false
+// once the leg's queue has closed.
+func takeArrived(clock *uplinkClock, frames <-chan []byte) bool {
+	for {
+		select {
+		case frame, ok := <-frames:
+			if !ok {
+				return false
+			}
+			clock.push(frame)
+		default:
+			return true
+		}
+	}
+}
+
+// sendDueSlots feeds the model one frame for every slot that has elapsed by
+// now: the oldest queued caller frame, or silence. Hushed, the slots pass and
+// nothing is sent, fills included. converted is the conversion buffer, handed
+// back for reuse.
+func (s *Session) sendDueSlots(clock *uplinkClock, now time.Time, converted []byte) ([]byte, error) {
+	for n := clock.owed(now); n > 0; n-- {
+		frame := clock.pop()
+		if s.isHushed.Load() {
+			if frame != nil {
+				media.PutBytes(frame)
+				clock.stats.DroppedHushed++
+			}
+			continue
+		}
+		var err error
+		converted, err = s.feedSlot(clock, frame, converted)
+		if frame != nil {
+			media.PutBytes(frame)
+		}
+		if err != nil {
+			return converted, err
+		}
+	}
+	return converted, nil
+}
+
+// feedSlot gives the model one slot: the frame converted, or silence when
+// frame is nil. It does not take ownership of frame.
+func (s *Session) feedSlot(clock *uplinkClock, frame, converted []byte) ([]byte, error) {
+	out := s.uplinkSilence
+	if frame == nil {
+		clock.stats.Filled++
+	} else {
+		converted = s.uplink.Convert(converted, frame)
+		out = converted
+	}
+	clock.stats.Sent++
+	return converted, s.model.SendAudio(out)
+}
+
+// finishUplink releases what the clock still holds and reports its counters:
+// one log line and the matching metrics.
+func (s *Session) finishUplink(clock *uplinkClock) {
+	queued := clock.queued()
+	clock.release()
+	st := clock.stats
+	droppedRx := s.leg.RxDropped()
+	obs.RecordUplinkClock(st.Received, st.Sent, st.Filled, st.DroppedBacklog, droppedRx)
+	s.log.Info("ai uplink clock",
+		"framesReceived", st.Received,
+		"framesSent", st.Sent,
+		"framesFilled", st.Filled,
+		"framesDroppedBacklog", st.DroppedBacklog,
+		"framesDroppedRx", droppedRx,
+		"framesDroppedHushed", st.DroppedHushed,
+		"framesQueued", queued,
+		"maxBacklogFrames", st.MaxBacklog)
 }
 
 // playAudio converts one chunk of model speech and queues it on the leg.
