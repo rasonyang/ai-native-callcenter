@@ -139,7 +139,7 @@ FreeSWITCH gets its directory and `callcenter.conf` from PostgreSQL through mod_
 
 ## Frontend
 
-`web/CLAUDE.md` is the binding design system; read it before any UI work. i18n: react-i18next, en (default) and zh, no hardcoded user-facing strings. Routes live under `web/src/routes/` (TanStack Router; a parent route needs `<Outlet/>`, or use `_app.section.index.tsx`). Screen guards use `requireRole` in `beforeLoad`.
+Node 24 / npm 11 own `web/package-lock.json`: CI and the image install with them and `devEngines` rejects another npm major (`CONTRIBUTING.md`, #389). `web/CLAUDE.md` is the binding design system; read it before any UI work. i18n: react-i18next, en (default) and zh, no hardcoded user-facing strings. Routes live under `web/src/routes/` (TanStack Router; a parent route needs `<Outlet/>`, or use `_app.section.index.tsx`). Screen guards use `requireRole` in `beforeLoad`.
 
 ## Packaging and release
 

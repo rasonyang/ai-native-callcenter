@@ -76,3 +76,16 @@ second check covered:
    `time.Sleep` of tens of milliseconds there, and confirm the test fails. Fix
    the test or the harness, confirm it passes with the sleep still in place,
    then remove the sleep.
+
+## The web lockfile belongs to npm 11
+
+Node 24 and npm 11 own `web/package-lock.json`. CI (the `web`, `contract` and
+`layout` jobs) and the image's `web` stage install with them. `devEngines` in
+`web/package.json` makes any other npm major stop with `EBADDEVENGINES`, so a
+lock is never written or installed by the wrong one.
+
+The reason is that npm 10 and npm 11 disagree about optional peers, and npm 10
+drops the `libc` fields npm 11 writes (#389). A lock written by npm 11 can fail
+`npm ci` under npm 10, and one rewritten by npm 10 loses information. After a
+web dependency change, commit the lock npm 11 wrote; do not regenerate it from
+scratch.
