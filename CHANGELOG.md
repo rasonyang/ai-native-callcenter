@@ -32,6 +32,15 @@ carries the one-line installer's files.
   table's other columns, and every row's View and Roll back to this revision,
   off the right edge. The revision's spec now scrolls inside its own box
   instead of widening the table to its longest line. (#363)
+- An agent's screens no longer scroll sideways at 1024px, or at 1280px in
+  English. Below 1280px the top bar keeps one row: the phone status, the
+  stream status and the language name collapse to their dot or icon (the text
+  stays in the tooltip and for screen readers), the time in state is hidden,
+  and the call field narrows to fit, showing the whole number wherever there is
+  room. Every control stays on screen. On every screen, a long record name now
+  truncates in the breadcrumb (the full name is in its tooltip) and wraps in
+  the page title instead of pushing the page's buttons out of the window.
+  (#383)
 
 ## v0.7.1 - 2026-10-28
 

@@ -7,7 +7,14 @@ import { SUPPORTED_LANGUAGES, type Language } from '@/lib/i18n'
 const LABELS: Record<Language, string> = { en: 'English', zh: '中文' }
 
 /** Cycles the interface language; the choice persists in localStorage. */
-export function LanguageSwitch({ className }: { className?: string }) {
+export function LanguageSwitch({
+  className,
+  isCollapsible = false,
+}: {
+  className?: string
+  /** Below xl the name of the language gives way to the icon (the top bar is short of room). */
+  isCollapsible?: boolean
+}) {
   const { i18n, t } = useTranslation()
   const current = (SUPPORTED_LANGUAGES.find((l) => i18n.language.startsWith(l)) ??
     'en') as Language
@@ -26,7 +33,7 @@ export function LanguageSwitch({ className }: { className?: string }) {
       onClick={() => void i18n.changeLanguage(next)}
     >
       <Languages />
-      {LABELS[current]}
+      <span className={isCollapsible ? 'max-xl:hidden' : undefined}>{LABELS[current]}</span>
     </Button>
   )
 }

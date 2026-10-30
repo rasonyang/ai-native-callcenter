@@ -352,8 +352,8 @@ describe('the phone', () => {
   // the minting rules; this is the bar's reading of the result.
   it('names the extension it is registered at, and provisions nothing', async () => {
     const { api } = await renderBar()
-    const chip = await screen.findByText(/phone ready/i)
-    expect(chip.closest('span')).toHaveTextContent('Phone ready · 1001')
+    const chip = await screen.findByTitle('Phone ready · 1001')
+    expect(chip).toHaveTextContent('Phone ready · 1001')
     expect(api.commands.some((r) => r.path === '/agent/sip-session')).toBe(false)
   })
 

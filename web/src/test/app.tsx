@@ -48,11 +48,13 @@ export function renderApp(
      * that answers, so the setup card does not cover the screen.
      */
     role?: 'ADMIN' | 'AGENT' | 'SUPERVISOR'
+    /** What the agent's stand-in phone reports; the default is a phone that is registered. */
+    extension?: Parameters<typeof installFakeExtension>[0]
   } = {},
 ) {
   const role = options.role ?? 'ADMIN'
   previousExtension?.uninstall()
-  previousExtension = role === 'AGENT' ? installFakeExtension() : undefined
+  previousExtension = role === 'AGENT' ? installFakeExtension(options.extension) : undefined
   const installed = installBackend({
     session:
       role === 'AGENT'

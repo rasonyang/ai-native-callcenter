@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useMutation } from '@tanstack/react-query'
 import {
-  ChevronDown, Grid3x3, LogIn, LogOut, Mic, MicOff, Pause, Phone, PhoneIncoming,
-  PhoneOff, PhoneOutgoing, Play, Shuffle,
+  ChevronDown, ExternalLink, Grid3x3, LogIn, LogOut, Mic, MicOff, Pause, Phone, PhoneIncoming,
+  PhoneOff, PhoneOutgoing, Play, RefreshCw, Shuffle,
 } from 'lucide-react'
 import { DropdownMenu, Popover } from 'radix-ui'
 
@@ -41,7 +41,7 @@ export function SoftphoneBar() {
   const call = calls?.items?.[0]
   if (presence.state === 'LOGGED_OUT') {
     return (
-      <div className="flex h-10 items-center gap-1 rounded-md border bg-card px-2">
+      <div data-softphone-bar className="flex h-10 items-center gap-1 rounded-md border bg-card px-2">
         <SignIn />
       </div>
     )
@@ -52,7 +52,7 @@ export function SoftphoneBar() {
   // it. The phone comes first because none of the rest means anything without
   // one.
   return (
-    <div className="flex h-10 shrink-0 items-center gap-1 rounded-md border bg-card pl-1.5 pr-1">
+    <div data-softphone-bar className="flex h-10 shrink-[100] items-center gap-1 rounded-md border bg-card pl-1.5 pr-1">
       <PhoneChip chip={chip} extensionNumber={presence.extensionNumber} />
       <Divider />
       <PresenceControl
@@ -64,7 +64,13 @@ export function SoftphoneBar() {
         isPhoneReady={chip.isReadyAllowed}
       />
       <Divider />
-      <span className="flex w-56 min-w-0 items-center px-1.5">
+      {/* The only segment that shrinks. It is as wide as the number on the
+          line, between a floor that still shows most of a 14-digit number and
+          a cap, so a short number does not leave a gap and the bar gives
+          way here before the breadcrumb does. The bar has no min-w-0, so it
+          is never narrower than its content; below xl the labels of the other
+          segments collapse instead (`max-xl:`). */}
+      <span className="flex min-w-32 max-w-56 items-center px-1.5">
         <CallInfo call={call} />
       </span>
       <Divider />
@@ -124,20 +130,32 @@ function PhoneChip({
   // Nothing is set up yet, so the chip is the way into setting it up.
   if (chip.action === 'setup') {
     return (
-      <Button variant="ghost" size="sm" className="gap-1.5" onClick={openOnboarding}>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="gap-1.5"
+        title={label}
+        aria-label={label}
+        onClick={openOnboarding}
+      >
         <StatusDot color={chip.dot} />
-        {label}
+        <span className="max-xl:sr-only">{label}</span>
       </Button>
     )
   }
 
   return (
     <span className="flex items-center gap-1.5">
-      <Badge className="gap-1.5">
+      {/* Below xl only the dot stays visible; the text is still read out and
+          the title carries it for the pointer. */}
+      <Badge
+        className="gap-1.5"
+        title={chip.kind === 'ready' && extensionNumber ? `${label} \u00b7 ${extensionNumber}` : label}
+      >
         <StatusDot color={chip.dot} />
-        {label}
+        <span className="max-xl:sr-only">{label}</span>
         {chip.kind === 'ready' && extensionNumber && (
-          <span className="tabular">{` \u00b7 ${extensionNumber}`}</span>
+          <span className="tabular max-xl:sr-only">{` \u00b7 ${extensionNumber}`}</span>
         )}
       </Badge>
       {/* An override is undone where it was made, so the chip links there
@@ -150,14 +168,26 @@ function PhoneChip({
             href={optionsUrl('account', extensionId) ?? undefined}
             target="_blank"
             rel="noopener noreferrer"
+            title={t('phone.openOptions')}
+            aria-label={t('phone.openOptions')}
           >
-            {t('phone.openOptions')}
+            <ExternalLink className="xl:hidden" />
+            <span className="max-xl:sr-only">{t('phone.openOptions')}</span>
           </a>
         </Button>
       )}
       {(chip.action === 'retry' || chip.action === 'reprovision') && (
-        <Button variant="ghost" size="sm" onClick={reprovision}>
-          {chip.action === 'retry' ? t('phone.retry') : t('phone.reprovision')}
+        <Button
+          variant="ghost"
+          size="sm"
+          title={chip.action === 'retry' ? t('phone.retry') : t('phone.reprovision')}
+          aria-label={chip.action === 'retry' ? t('phone.retry') : t('phone.reprovision')}
+          onClick={reprovision}
+        >
+          <RefreshCw className="xl:hidden" />
+          <span className="max-xl:sr-only">
+            {chip.action === 'retry' ? t('phone.retry') : t('phone.reprovision')}
+          </span>
         </Button>
       )}
     </span>
@@ -174,10 +204,10 @@ function SignIn() {
   const { signIn } = usePresenceActions()
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex min-w-0 items-center gap-2">
       <Button
         size="sm"
-        className="h-6 px-2 text-xs"
+        className="h-6 shrink-0 px-2 text-xs"
         disabled={signIn.isPending}
         onClick={() => signIn.mutate()}
       >
@@ -185,11 +215,19 @@ function SignIn() {
         {t('agent.signIn')}
       </Button>
       {signIn.isError ? (
-        <span className="text-xs" style={{ color: 'var(--state-breach)' }}>
+        // The refusal is a sentence the server's copy sets, up to a few
+        // lines long; it keeps one line and the button stays whole.
+        <span
+          className="line-clamp-1 min-w-0 max-w-sm text-xs"
+          style={{ color: 'var(--state-breach)' }}
+          title={describeError(signIn.error, t)}
+        >
           {describeError(signIn.error, t)}
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground">{t('agent.signInPrompt')}</span>
+        <span className="line-clamp-1 min-w-0 max-w-sm text-xs text-muted-foreground">
+          {t('agent.signInPrompt')}
+        </span>
       )}
     </div>
   )
@@ -246,7 +284,7 @@ function PresenceControl({
             // long the phone has been gone; it is the time since this state was
             // entered, whatever the state is.
             <span
-              className="tabular text-xs text-muted-foreground"
+              className="tabular text-xs text-muted-foreground max-xl:hidden"
               title={t('phone.timeInState')}
             >
               {formatDuration(elapsedSec, { padMinutes: true })}
@@ -322,7 +360,10 @@ const PARTY_STATE_COLOR: Record<PartyState, string> = {
   RELEASED: 'var(--state-offline)',
 }
 
-/** Who is on the line and for how long. Fixed width, so nothing jitters. */
+/**
+ * Who is on the line and for how long. The number takes the room it needs
+ * and the field around it clamps it to one line.
+ */
 function CallInfo({ call }: { call?: CallSnapshot }) {
   const { t } = useTranslation()
   // Who "I" am comes from the session. Both parties of an extension-to-extension
@@ -339,6 +380,8 @@ function CallInfo({ call }: { call?: CallSnapshot }) {
     return <span className="truncate text-xs text-muted-foreground">{t('agent.idle')}</span>
   }
 
+  const number = other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')
+
   // Which way the call went is the agent's own position in it, not the call
   // type: an internal call is outgoing for whoever placed it and incoming for
   // whoever was rung.
@@ -349,11 +392,15 @@ function CallInfo({ call }: { call?: CallSnapshot }) {
         className="size-3.5 shrink-0"
         style={{ color: PARTY_STATE_COLOR[mine?.state ?? 'RINGING'] }}
       />
-      <span className="tabular truncate text-sm font-medium">
+      {/* The number may break anywhere (`break-all`), so its least width is
+          one character and the bar's least width does not depend on how long
+          the number is; `line-clamp-1` shows the first line with an
+          ellipsis, and its widest is still the whole number. */}
+      <span className="tabular line-clamp-1 min-w-0 break-all text-sm font-medium" title={number}>
         {/* A leg the switch has not raised yet, or has not reached this
             snapshot, is still a number the agent knows: it rides their own
             leg, which is where the ledger reads it from too. */}
-        {other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')}
+        {number}
       </span>
       {isEstablished ? (
         <span className="tabular shrink-0 text-xs text-muted-foreground">

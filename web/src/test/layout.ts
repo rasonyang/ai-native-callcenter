@@ -75,6 +75,12 @@ function scrollsX(el: Element): boolean {
   return overflow === 'auto' || overflow === 'scroll'
 }
 
+/** Whether the element clips its content on purpose (`truncate`, `line-clamp`). */
+function clips(el: Element): boolean {
+  const style = getComputedStyle(el)
+  return style.overflowX !== 'visible' || style.textOverflow === 'ellipsis'
+}
+
 function isVisible(el: Element): boolean {
   const rect = el.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0 && getComputedStyle(el).visibility !== 'hidden'
@@ -176,6 +182,11 @@ export interface LayoutOptions {
 /**
  * Collects every layout violation on screen and fails once with all of them.
  *
+ * 0. The top bar holds together: no child of `<header>` overlaps the next, and
+ *    no header child, nor a direct child of the softphone bar, has content
+ *    wider than its box. Scrolling the page is not the only way to overflow:
+ *    a flex item squeezed below its content paints over its neighbour and
+ *    leaves the document exactly as wide as the window.
  * 1. Nothing scrolls the page sideways: the document and every `main` (the
  *    shell's own scroll container, which is where a too-wide page actually
  *    scrolls, since the shell is exactly viewport-high).
@@ -199,6 +210,29 @@ export async function expectLayout(ctx: LayoutContext, options: LayoutOptions = 
     if (el.scrollWidth > el.clientWidth + SLOP) {
       add('no-page-scroll', el,
         `scrolls sideways: scrollWidth ${el.scrollWidth}px > clientWidth ${el.clientWidth}px`)
+    }
+  }
+
+  // 0. The top bar. An element that clips on purpose (`truncate`) is exempt:
+  // its content is meant to be wider than its box.
+  const header = document.querySelector('header')
+  if (header) {
+    const kids = [...header.children].filter(isVisible)
+    for (let i = 0; i + 1 < kids.length; i++) {
+      const a = kids[i].getBoundingClientRect()
+      const b = kids[i + 1].getBoundingClientRect()
+      if (a.right > b.left + SLOP) {
+        add('header-overlap', kids[i],
+          `ends at ${px(a.right)}, past where the next item ${describeEl(kids[i + 1])} starts, ${px(b.left)}`)
+      }
+    }
+    const bar = header.querySelector('[data-softphone-bar]')
+    for (const el of [...kids, ...(bar ? [...bar.children] : [])]) {
+      if (clips(el) || !isVisible(el)) continue
+      if (el.scrollWidth > el.clientWidth + SLOP) {
+        add('header-contains-content', el,
+          `content is ${el.scrollWidth}px wide in a box ${el.clientWidth}px wide, so it paints over its neighbour`)
+      }
     }
   }
 
