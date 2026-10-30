@@ -1,10 +1,11 @@
 # Grok voice realtime — live findings (2026-10-15)
 
-Measurement only. No Grok `Profile` exists and none was added; this records
-what the xAI voice realtime API did on the wire, so the decision whether the
-shared OpenAI-Realtime client (`internal/provider/realtime.go`) can serve it as
-a profile can be made on facts. The test is `internal/provider/live_grok_test.go`
-(gated by `AICC_LIVE_PROVIDER_TEST` and `XAI_API_KEY`):
+Measurement, and the record behind a profile that now exists. When this file
+was written no Grok `Profile` had been added; one was, the same day
+(`AICC_PROVIDER=grok`, `GrokProfile()` in `internal/provider/profile.go`, commit
+`44cce39`), and the trait values in it are what the arms below measured. The
+test is `internal/provider/live_grok_test.go` (gated by
+`AICC_LIVE_PROVIDER_TEST` and `XAI_API_KEY`):
 
     AICC_LIVE_PROVIDER_TEST=1 go test -count=1 -run LiveGrok -v ./internal/provider/
 

@@ -306,8 +306,8 @@ whatever built the image, and a future one can drop it without anybody noticing
 — but "a stack told to transcribe cannot start without it". The failure it
 prevents is the quiet one: the application healthy, the switch healthy, calls
 connecting, agents answering, and the transcript panel saying "Connecting…" for
-ever while nothing anywhere reports a fault
-(`docs/design/08-transcription.md` §B.5).
+ever while nothing anywhere reports a fault. The guard is
+`freeswitch/docker-entrypoint.sh`.
 
 If you build the module yourself, run `assert-audio-stream.sh` against the
 result.

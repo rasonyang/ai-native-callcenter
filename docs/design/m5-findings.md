@@ -1,8 +1,7 @@
 # M5 findings — packaging, and what putting it under load revealed
 
 The evidence record for the packaging milestone, in the same role
-[`m0-findings.md`](m0-findings.md) and [`m4-cleanup-findings.md`](m4-cleanup-findings.md)
-play for theirs. Everything here was found by running the thing, not by reading
+[`m0-findings.md`](m0-findings.md) plays for M0. Everything here was found by running the thing, not by reading
 it. Where a design document said otherwise, it has been amended in place — 03
 §6 for the seed, 06 §8 for the capacity metrics and the harness.
 
@@ -213,7 +212,7 @@ L3 builds on this harness.
   What decided it was not the emulation: the third-party base had no package
   manager and no FreeSWITCH headers, so `mod_audio_stream` could not be
   compiled into it at all, and live transcription needs it
-  (`08-transcription.md` §B.5).
+  (`freeswitch/README.md` describes the boot-time guard).
 
 ---
 
