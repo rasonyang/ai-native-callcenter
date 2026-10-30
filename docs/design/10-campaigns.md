@@ -1,7 +1,12 @@
 # AI Outbound Campaigns — Design
 
-Date: 2026-10-11, committed 2026-10-12 · Status: **accepted design; phase 1 not built** — no code,
-no contract change yet; the facts in §0 were re-verified against `main` at `83e26a3` · Issue:
+Date: 2026-10-11, committed 2026-10-12 · Status: **built** — phase 1 shipped as slices S1–S6
+(§17): `internal/campaign`, `internal/dialer`, migrations 00036–00040/00042/00045, the contract operations
+(`/campaigns*`, `/dnc-numbers`, `CAMPAIGN_UPDATED`), the SPA screens, and the metrics with the
+`aicc_` prefix the rest of the instrument set uses. The design body below is the record of why;
+where it says "sketch" or "final shapes come with the PR", the contract is now the answer. The
+facts in §0 were re-verified against `main` at `83e26a3`, so their line numbers are pinned to that
+commit and will not resolve on today's tree · Issue:
 [#89](https://github.com/rasonyang/ai-native-callcenter/issues/89) · Written under
 [#154](https://github.com/rasonyang/ai-native-callcenter/issues/154) · Prerequisite:
 [#62](https://github.com/rasonyang/ai-native-callcenter/issues/62) (done) · Author: agent session
@@ -1086,15 +1091,17 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
 | `AICC_OVERFLOW_TIGHTEN_RATE` / `AICC_OVERFLOW_STOP_RATE` | `1%` / `3%` | 6.5 |
 | `AICC_TRUNK_BREAKER_COUNT` / `AICC_PROVIDER_BREAKER_COUNT` | `20` / `5` | 7.4 |
 
-**Metrics:**
+**Metrics** (names as built — every instrument carries the `aicc_` prefix and lives in
+`internal/obs/callmetrics.go`):
 
-- `campaign_attempts_total{outcome}`
-- `dialer_in_flight{kind=ringing|talking}`
-- `dialer_admission_blocked_total{reason}`
-- `bot_slots{state=in_use|reserved}`
-- `did_outbound_in_use{did}`
-- `campaign_answer_rate_ucb{campaign}`, `campaign_overflow_total`, `outbound_overflow_hold_seconds`
-- `outbound_first_audio_seconds{stage}`
+- `aicc_campaign_attempts_total{outcome}`
+- `aicc_dialer_in_flight{kind=ringing|talking}`
+- `aicc_dialer_admission_blocked_total{reason}`
+- `aicc_bot_slots{state=in_use|reserved}`
+- `aicc_did_outbound_in_use{did}`
+- `aicc_campaign_answer_rate_ucb{campaign}`, `aicc_campaign_overflow_total`, `aicc_bot_overflow_hold_ms`
+- `aicc_outbound_first_audio_seconds{stage}`
+- and two the design did not name: `aicc_bot_overflow_total`, `aicc_campaign_unmapped_cause_total`
 
 **SPA (in phase 1):**
 
@@ -1240,7 +1247,8 @@ Added by this design:
 
 Added when the draft was committed (#154). Every slice and prerequisite is its own issue on
 Project #3 and links to the section it implements. The prerequisites are each useful without
-campaigns; none needs one.
+campaigns; none needs one. **All of them shipped**; the table is the mapping from section to
+issue and the order they landed in, not a status list.
 
 **Prerequisites** (§15):
 

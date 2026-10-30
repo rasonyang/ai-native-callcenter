@@ -40,7 +40,7 @@ Design levers that keep this honest (already in 02): `sync.Pool` on every per-fr
 
 ## 5. FreeSWITCH machine impact (informative, per mandate)
 
-250 concurrent calls ≈ 500 channels: bot legs PCMU-pinned (no transcode); agent legs OPUS↔PCMU transcode ≈ 0.5–1 core for 50 calls (optionally pin agent extensions to PCMU to eliminate); recording 250 streams ≈ 4MB/s sequential disk; RTP relay is kernel-bound and comfortable on a 4–8 core host; `max-sessions 1000` / `sessions-per-second 100` (D7) suffice. FS RTP range 16384–32768 disjoint from the bot's 40000–40999.
+250 concurrent calls ≈ 500 channels: bot legs PCMU-pinned (no transcode); agent legs OPUS↔PCMU transcode ≈ 0.5–1 core for 50 calls (optionally pin agent extensions to PCMU to eliminate); recording 250 streams ≈ 4MB/s sequential disk; RTP relay is kernel-bound and comfortable on a 4–8 core host; `max-sessions 1000` / `sessions-per-second 100` (D7) suffice. The image's own RTP range does not: 16384–16584 is 200 ports at one pair per leg, about 100 legs, and 500 channels need at least 1,000 ports. The Linux installer sets 16384–29999; the manual quick start (16384–16484) and the macOS installer (16384–16583) are narrower, and `RTP_START`/`RTP_END` widen them (the compose files publish what it is set to), kept disjoint from the bot's range.
 
 ## 6. Metrics (OTel; the budget's runtime enforcement)
 
@@ -48,7 +48,7 @@ Design levers that keep this honest (already in 02): `sync.Pool` on every per-fr
 
 ## 7. Load test & validation plan
 
-Harness pieces (repo deliverables, also used in CI smoke): **mock provider** (in-process `VoiceSession`: scripted turns, configurable first-audio/VAD delays, zero WAN) and a **UAC load generator** built on the voice package's client-side test code (INVITE + 20ms PCMU tone/pcap RTP, asserts downlink pacing).
+Harness pieces (repo deliverables, also used in CI smoke): **mock provider** — a Realtime *server* the application reaches by endpoint, with scripted turns, configurable first-audio/VAD delays and zero WAN (§8 explains why it is a server rather than an in-process `VoiceSession`) — and a **UAC load generator** built on the voice package's client-side test code (INVITE + 20ms PCMU tone/pcap RTP, asserts downlink pacing).
 
 | Stage | Setup | Pass criteria |
 |---|---|---|

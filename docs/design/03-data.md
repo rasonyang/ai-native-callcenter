@@ -4,7 +4,7 @@ Naming here follows [07-naming.md](07-naming.md) (mandatory): tables plural snak
 
 ## 1. Ownership & tooling
 
-One PostgreSQL 18 instance. App database `aicc` with schemas: `public` (app tables, owned by Go migrations) and `luacc` (**views only** — the FreeSWITCH/Lua read contract). mod_callcenter's runtime tables live in a **dedicated database `aicc_fs`** in the same instance (M0 finding: the module creates unqualified `public` tables named `agents`/`tiers`/`members`, which would collide with ours in a shared database; created/managed by FS, never by us). Migrations: **goose** (embedded SQL, run automatically at startup, `goose up` CLI escape hatch). All DB access through sqlc-generated code (`internal/store/queries/*.sql` → one generated package); no raw SQL in services.
+One PostgreSQL 18 instance. App database `aicc` with schemas: `public` (app tables, owned by Go migrations) and `luacc` (**views only** — the FreeSWITCH/Lua read contract). mod_callcenter's runtime tables live in a **dedicated database `aicc_fs`** in the same instance (M0 finding: the module creates unqualified `public` tables named `agents`/`tiers`/`members`, which would collide with ours in a shared database; created/managed by FS, never by us). Migrations: **goose** (embedded SQL, run automatically at startup, `goose up` CLI escape hatch). All DB access through sqlc-generated code (`internal/store/sql/*.sql` → `internal/store/queries/*.go`, one generated package, `sqlc.yaml`); no raw SQL in services.
 
 ## 2. Tables (condensed; authoritative DDL lives in migrations)
 
@@ -36,7 +36,7 @@ api_keys(id uuid pk, name varchar(128), key_hash bytea unique, key_prefix varcha
 agents(id uuid pk, user_id uuid unique fk,
        is_auto_answer bool default false, default_extension_id uuid null fk)   -- wrap_up_time_sec dropped in 00012: after-call work has no deadline
 agent_states(agent_id pk fk, state varchar check in ('LOGGED_OUT','NOT_READY','READY'),
-             reason varchar null,          -- 'LOGIN','BREAK','LUNCH','TRAINING','AFTER_CALL_WORK','SYSTEM','SUPERVISOR'
+             reason varchar null,          -- 'LOGIN','BREAK','LUNCH','TRAINING','AFTER_CALL_WORK','SYSTEM','SUPERVISOR','DEVICE_LOST'
              extension_number text null, entered_at timestamptz,
              wrap_up_call_id uuid null)   -- THE row, written in-request; entered_at is what the cockpit counts up from
 agent_state_logs(id bigserial, agent_id, state, reason, entered_at, exited_at)        -- occupancy/reports
@@ -67,7 +67,7 @@ queues(id uuid pk, ext_number text unique ★,                 -- dialable 7xxx
 queue_agents(queue_id fk, agent_id fk, level int default 1, position int default 1, pk(queue_id,agent_id))
 dids(id uuid pk, number text unique ★, language varchar ★,   -- BCP 47 lowercase 'en'/'zh' (external standard, see 07 §7)
      flow_id uuid null → flows ON DELETE RESTRICT,            -- every external number answers with a bot flow; null only between `POST /dids` and `flowadd -did` (00003, 00008)
-                                                              -- target: NOT NULL; blocked on a /flows read endpoint + DID form picker (see m4-cleanup-findings.md)
+                                                              -- target: NOT NULL; blocked on a DID form that can pick a flow (there is a /flows read endpoint)
      fallback_queue_id uuid null ★,                           -- only for "the bot cannot run": provider outage, capacity
      is_recording_enabled bool ★, description text, is_enabled bool ★)
 -- trunks(...) was here and is GONE (00021, 2026-08-25). Zero rows in every deployment:
@@ -91,8 +91,8 @@ Spec = **DSL v2** (v1 re-keyed to lowerCamelCase per 07 §7: `specVersion`, `ini
 **Calls & artifacts**
 ```sql
 live_calls(call_id uuid pk, snapshot jsonb, updated_at)          -- DESIGNED, NEVER MIGRATED (see below)
-                                   -- Amended 2026-08-31: this table does not exist. `rg live_calls .`
-                                   -- matches this file and the audits that noticed (08 §G-17).
+                                   -- Amended 2026-08-31: this table does not exist, and `rg live_calls .`
+                                   -- matches only this note.
                                    -- The registry's snapshot
                                    -- is in memory only, so a restart mid-call loses the in-flight
                                    -- tail — accepted, and the same thing that happens to the bot
@@ -178,11 +178,12 @@ quality_reviews(id uuid pk, recording_id fk, call_id, reviewer_id fk,
                                    -- everything else.
                                    -- DECIDED 2026-08-20 (D1): the review UI is deferred to the
                                    -- next phase. The API is complete and keeps its contract
-                                   -- (POST /recordings/{id}/reviews, ListCallReviews), and the
-                                   -- frontend does not reference it — so this table is written to
-                                   -- and never read back, deliberately and with a date on it
-                                   -- rather than as an oversight somebody rediscovers. Nothing
-                                   -- here is a gap to close until that phase.
+                                   -- (POST /recordings/{recordingId}/reviews, GET /calls/{callId}/reviews
+                                   -- → ListQualityReviewsByCall), and the frontend does not
+                                   -- reference it, so the scores are written and readable but
+                                   -- nobody looks at them yet — deliberately and with a date on it
+                                   -- rather than as an oversight somebody rediscovers. The read
+                                   -- path exists; the missing piece is the screen.
 callbacks(id uuid pk, call_id, queue_id, phone_number text, message text,
           status varchar check in ('OPEN','CLAIMED','DONE','DISMISSED'),   -- CLAIMED added 00006
           created_at, handled_by, handled_at,
@@ -246,6 +247,9 @@ wrap_ups(call_id, agent_id, disposition_code text, disposition_label text,
                                    -- so the filing regularly precedes the ledger row. The label is
                                    -- captured at filing time — history does not change meaning when
                                    -- somebody renames a word.
+                                   -- draft_disposition_code, draft_note, draft_generated_at (00044):
+                                   -- the AI wrap-up draft, kept apart from what the agent files and
+                                   -- kept after confirmation; draft_generated_at NULL means no draft.
 contacts(id uuid pk, phone_number text unique, name text, company text, email text,
          tags text[], notes text, created_at, updated_at, updated_by)
                                    -- updated_by follows the *agent's* user id, and is NULL when the
@@ -265,6 +269,16 @@ agent_states.wrap_up_call_id uuid  -- which call the after-call work is for, so 
 -- AICC_RECORDING_RETENTION_DAYS. recordings.deleted_at is untouched and stays load-bearing.
 seq_blocks(name text pk, value bigint)                            -- SSE hi/lo blocks (100k)
 webhook_subscriptions(…) / webhook_deliveries(…)                  -- 00026; DDL and rationale in 09 §4
+-- Added after this inventory was written; each is documented where it is designed rather than
+-- restated here (internal/store/migrations is the authoritative list):
+--   sip_sessions (00031)                    one active SIP credential per agent (01 §3, G4)
+--   call_transcriptions / call_transcription_segments (00035)
+--                                           post-call ASR of a recording, two channels
+--   dnc_numbers (00036)                     the global do-not-call list (10 §3.4, §12)
+--   campaigns / campaign_contacts (00037), campaign_attempts (00038)
+--                                           AI outbound campaigns (10 §3)
+--   cdrs.campaign_id (00039), dids.max_outbound_channels (00040)   (10 §3.5, §6.6)
+--   campaign_contacts.last_attempt_id / last_call_id (00042)        (10 §3.2, §14)
 ```
 
 ## 3. CDR semantics (from cti-server, extended)
@@ -285,15 +299,19 @@ luacc.dids       (number, language, is_recording_enabled, fallback_queue_ext_num
                  -- resolved by the application, so the flow catalogue never enters the
                  -- switch contract.
 luacc.queues     (name, ext_number, strategy, moh_sound, max_wait_sec, max_wait_no_agent_sec,
-                  announce_sound, announce_frequency_sec, tier_rules,
+                  announce_sound, announce_frequency_sec, is_tier_rules_applied, tier_rule_wait_sec,
                   discard_abandoned_after_sec, is_abandoned_resume_allowed,
-                  is_recording_enabled, overflow, is_enabled)
+                  is_recording_enabled, overflow_type, overflow_target, overflow_sound, is_enabled)
+                 -- the jsonb inputs are flattened here on purpose: mod_lua ships no JSON
+                 -- parser, so the switch-side scripts must never decode a document
+                 -- (tier_rules → is_tier_rules_applied + tier_rule_wait_sec;
+                 --  overflow → overflow_type + overflow_target + overflow_sound)
 ```
 Rules: Lua role `aicc_lua` has SELECT on `luacc.*` only; **any migration touching the base tables must re-assert these view shapes and is reviewed as a schema+Lua pair** (the shared-contract mandate). Views are versioned in the same migration files. Upstream token mapping (e.g. `LONGEST_IDLE_AGENT` → `longest-idle-agent`) happens **inside the Lua scripts/Go adapter**, never in views or app code (07 §5).
 
 ## 5. Recording storage
 
-Key rule (both backends): `recordings/YYYY/MM/DD/<call_id>.wav` (UTC date of call start; stereo WAV: caller left / bot+agent right via `RECORD_STEREO=true`). Dev backend `FS`: `AICC_RECORDING_DIR` root; FreeSWITCH writes directly there (`record_session` path templated by Lua) — same-host assumption documented. Prod backend `S3`: FS records to a local spool; aicc uploads on `RECORD_STOP`/hangup (minio-go, 3 retries), inserts the `recordings` row, deletes the spool file. Playback: `GET /api/v1/recordings/{id}/audio` streams (filesystem read; S3 presigned redirect when the S3 backend is configured). The docker-compose demo runs on the filesystem backend — no object store ships with it. Retention: daily job deletes storage objects + stamps `deleted_at` where `age > settings.retentionDays` (0 = keep forever); transcripts/CDRs retained independently.
+Key rule (both backends): `recordings/YYYY/MM/DD/<call_id>.wav` (UTC date of call start; stereo WAV: caller left / bot+agent right via `RECORD_STEREO=true`). Dev backend `FS`: `AICC_RECORDING_DIR` root; FreeSWITCH writes directly there (`record_session` path templated by Lua) — same-host assumption documented. Prod backend `S3`: FS records to a local spool; aicc uploads on `RECORD_STOP`/hangup (minio-go, 3 retries), inserts the `recordings` row, deletes the spool file. Playback: `GET /api/v1/recordings/{recordingId}/audio` streams (filesystem read; S3 presigned redirect when the S3 backend is configured). The docker-compose demo runs on the filesystem backend — no object store ships with it. Retention: a daily sweeper deletes storage objects and stamps `deleted_at` for rows older than `AICC_RECORDING_RETENTION_DAYS` (0 = keep forever, the default); transcripts and CDRs are retained independently.
 
 ## 6. Seed data (docker-compose demo)
 

@@ -11,8 +11,9 @@ FreeSWITCH ──INVITE/RTP──► internal/voice (UAS + RTPSession)
                         aicall session actor ◄── internal/flow (engine, tools)
                                 │ VoiceSession events/audio
                                 ▼
-                        internal/provider — one OpenAI-Realtime client × Profile
-                        (openai | grok | qwen | any endpoint speaking the protocol)
+                        internal/provider — VoiceSession, answered by one of two clients:
+                        the OpenAI-Realtime client × Profile (openai | grok |
+                        qwen | gateway) or internal/provider/doubao
 ```
 
 `internal/voice` is the golang-bot port (custom UAS; pion/rtp wire format). Port fixes applied during the port (T4): 200-OK retransmission until ACK (timer G-ish, 500ms×2 backoff, cap 3s), idempotent re-200 on INVITE retransmission, correct `487` CSeq method on CANCEL, no BYE after remote BYE, `a=ptime:20` in SDP answers, `MaxCalls` configurable (default 220), DTMF payload type taken from SDP offer (not hardcoded 101), RFC 3550 §5.1 checklist retained (random SSRC/seq/ts, SSRC collision regen, regen on remote addr change, unknown PT ignored).
@@ -21,7 +22,7 @@ One thing the port carried wrong and #250 fixed, invisible here because this top
 
 #325 finished the in-dialog path. The bot's INVITE comes straight from the switch on the LAN, so its route set is normally empty and the BYE goes to the INVITE's source, deliberately not the Contact: the source is the address that already reached the bot, while the Contact can carry the address the switch advertises outward (ext-sip-ip). With a route set, the BYE goes to the first entry's address (§8.1.2) when that is a `sip:` URI over UDP to an IP literal; a hostname (never resolved), `sips:`, another transport, IPv6 on the bot's IPv4 socket or an unparseable entry falls back to the INVITE's source with a warning naming the entry. A first entry without `;lr` is a strict router and gets the §12.2.1.1 form: its URI is the Request-URI, the rest of the set follows, and the Contact is the last `Route`. Every BYE carries `Max-Forwards: 70` and a random Via branch; the branch had been the Call-ID's first eight characters. The callee simulator follows the same next-hop rule, with the Contact as its no-route-set destination.
 
-**Ports**: SIP UDP `:6060` (takes over the `aicc_bot` gateway target). RTP pool `40000–40999` (even RTP / odd RTCP pairs → 500 concurrent pairs ≥ 220 MaxCalls with headroom), configurable; deliberately outside FS's 16384–32768 since dev co-locates both on one host.
+**Ports**: SIP UDP `:6060` (takes over the `aicc_bot` gateway target). RTP pool `40000–40999` (even RTP / odd RTCP pairs → 500 concurrent pairs ≥ 220 MaxCalls with headroom), configurable; deliberately outside the switch's 16384–16584 since dev co-locates both on one host.
 
 **Kept from golang-bot verbatim**: 20ms ticker pacing with late-tick resync (no catch-up bursts), TX prebuffer 3 frames (60ms) + 2-tick underrun grace, reorder-only jitter buffer (4-frame window, ≥25-frame gap resync, codec-correct silence fill), RTP dead timeout (5s default), minimal RTCP SR/RR (one-way-dead detection), OPTIONS→200, INFO+RFC2833 DTMF merge, advertise-IP route-probe toward the peer's media address.
 
@@ -54,8 +55,9 @@ type VoiceSession interface {
 
 type SessionConfig struct {
     Instructions string; Voice string
+    Temperature *float64                       // nil = the provider's default; only Profile.AcceptsTemperature sends it
     Language string                            // "en"|"zh" (informs prompts, not routing)
-    Turn TurnDetection                         // {Mode: Semantic|VAD, SilenceMs int}
+    Turn TurnDetection                         // {SilenceMs int} — server VAD only; semantic turn detection was removed (#225)
     Tools []ToolSpec                           // JSON-schema tools from the flow
     OpeningText string                         // the call's first words, as written (§6)
     OpeningGate <-chan struct{}                // nil: ask for the first turn now; else wait for close (#98)
@@ -108,7 +110,7 @@ WS hygiene (mandatory, absent in golang-bot): ping/pong keepalive (15s), read de
 
 Session bring-up: `Start` = WS dial → `session.update` (instructions, voice, formats, turn detection, tools) → wait `session.updated` → **[Qwen only] synthetic greeting cue** → greeting `response.create` (flow's initial node). ⚠ **M3-verified**: Qwen rejects `response.create` on an empty conversation (`conversation has no messages or no user message`), so the opening turn is prompted with a `conversation.item.create` user text item — a stage direction, never recorded as caller speech. Carried as the profile trait `NeedsCueForFirstTurn` (false for OpenAI, which greets unprompted) with a default cue in the session's language inside the Realtime client.
 
-Where the entry phase names its own opening line (`SessionConfig.OpeningText`, from `announce` in §6), that last request carries it: `response.create` with `response.instructions` set to a say-exactly direction in the session's language, one frame on both dialects — the type discriminator the GA session object needs has no counterpart on a response object. On a `NeedsCueForFirstTurn` provider the direction *is* the cue item as well, because the conversation still may not be empty and a cue saying anything else would steer one turn two ways. The item is the caller's first message and is deleted when the response that answers the opening request ends, however it ended: left in, it stayed there for the whole call and a later turn answering tool results with nothing of its own to say sometimes fulfilled it again, speaking the opener word for word (`removeOpeningDirection`, qwen-findings W-Q11, #360). The bare greeting cue of a call with no opening line is not measured and stays. With no opening line the request is the bare `{"type":"response.create"}` it always was, byte for byte. Preflight (java-bot pattern): on aicc startup and on config change, a background check dials each configured provider, round-trips one greeting + one tool call, and surfaces status on the admin health panel.
+Where the entry phase names its own opening line (`SessionConfig.OpeningText`, from `announce` in §6), that last request carries it: `response.create` with `response.instructions` set to a say-exactly direction in the session's language, one frame on both dialects — the type discriminator the GA session object needs has no counterpart on a response object. On a `NeedsCueForFirstTurn` provider the direction *is* the cue item as well, because the conversation still may not be empty and a cue saying anything else would steer one turn two ways. The item is the caller's first message and is deleted when the response that answers the opening request ends, however it ended: left in, it stayed there for the whole call and a later turn answering tool results with nothing of its own to say sometimes fulfilled it again, speaking the opener word for word (`removeOpeningDirection`, qwen-findings W-Q11, #360). The bare greeting cue of a call with no opening line is not measured and stays. With no opening line the request is the bare `{"type":"response.create"}` it always was, byte for byte. There is **no provider preflight**: `/system/health` reports stream counters and the switch's trunks, and a provider that refuses a session surfaces as a fatal error the flow handles on the call (see §6).
 
 ## 5. Barge-in — unified semantics (mandated comparison)
 
@@ -189,7 +191,7 @@ Tracked per session from usage/turn counts: at **80% of budget** the engine inje
 
 | Hop | p50 est. | Knob |
 |---|---|---|
-| Turn detection hold | 400–600ms | `SilenceMs=500` — M0-verified accepted on both providers. **`smart_turn` is 2000 ms fixed** (M0) and therefore excluded from the budget: flows selecting it target ≈2.7 s p50 instead |
+| Turn detection hold | 400–600ms | `SilenceMs=500` — M0-verified accepted on both providers. Semantic turn detection (`qwen`'s `smart_turn`, OpenAI's `semantic_vad`) is not offered: it was removed in #225, no flow field ever selected it, and qwen's fixed 2000 ms hold would put p50 at ≈2.7 s |
 | Provider first audio delta | 400–700ms | model tier; region proximity (Qwen Beijing; OpenAI intl route) |
 | aicc pipeline (decode+resample+b64+queue) | <5ms | pooled, measured per-frame |
 | RTP prebuffer | 60ms | 3 frames (jitter absorb) |

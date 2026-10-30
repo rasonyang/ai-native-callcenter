@@ -92,12 +92,14 @@ just published; a number that is already there keeps every other column and
 only changes its flow. `-language` (default `en`) picks the greeting language
 of a number this creates — an existing one keeps its own.
 
-Or take the whole demo dataset instead — accounts, queues, six published
-bilingual flows, each behind an English, a Chinese and a toll-free number
+Or take the whole demo dataset instead — accounts, queues, seven published
+bilingual flows, and a week of history — with `AICC_SEED=demo` on one boot.
+Six of the flows each answer an English, a Chinese and a toll-free number
 (95001/95002/8005550199, 95011/95012/8005550191 … 95051/95052/8005550195 — the
 toll-free numbers are the fictional 800-555-0190 … 0199 block, and 8005550199 is
-the main line and the default outbound number), and a week of history — with
-`AICC_SEED=demo` on one boot.
+the main line and the default outbound number). The seventh,
+`campaign_lead_followup`, is outbound-only: 95061/95062 and no toll-free number,
+because a campaign flow has no way to a person and answers no inbound call.
 `AICC_SEED=fresh` removes exactly that again. Existing data always wins, so a
 second boot with `demo` changes nothing.
 
