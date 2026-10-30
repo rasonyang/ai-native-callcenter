@@ -242,7 +242,7 @@ func TestIsCampaignReadyAgreesWithCreatingACampaign(t *testing.T) {
 		refusal string
 	}{"a flow republished", flipDID, true, ""})
 
-	attempt := func(id uuid.UUID, wantReady bool, refusal string) {
+	attempt := func(t *testing.T, id uuid.UUID, wantReady bool, refusal string) {
 		t.Helper()
 		r := f.post(admin, "/campaigns", campaignBody(id, nil))
 		if wantReady {
@@ -260,7 +260,7 @@ func TestIsCampaignReadyAgreesWithCreatingACampaign(t *testing.T) {
 			if got := *listedDID(t, f, admin, tc.id).IsCampaignReady; got != tc.ready {
 				t.Errorf("isCampaignReady = %v, want %v", got, tc.ready)
 			}
-			attempt(tc.id, tc.ready, tc.refusal)
+			attempt(t, tc.id, tc.ready, tc.refusal)
 		})
 	}
 
@@ -285,7 +285,7 @@ func TestIsCampaignReadyAgreesWithCreatingACampaign(t *testing.T) {
 			t.Errorf("after publishing transfer=%v: isCampaignReady = %v, want %v", transfer, got, want)
 		}
 		refusal := "CAMPAIGN_FLOW_HAS_TRANSFER"
-		attempt(flipDID, want, refusal)
+		attempt(t, flipDID, want, refusal)
 	}
 
 	// The write responses carry it too.

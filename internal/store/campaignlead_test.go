@@ -53,8 +53,10 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	// call runs one campaign call: the model's record_lead calls in order,
-	// then the CDR. It returns the model's answers.
-	call := func(contact campaign.Contact, calls ...string) (campaign.Attempt, []map[string]any) {
+	// then the CDR. It returns the model's answers. It takes the subtest's t:
+	// a FailNow on the parent from a subtest would end the parent and skip,
+	// unreported, every later subtest.
+	call := func(t *testing.T, contact campaign.Contact, calls ...string) (campaign.Attempt, []map[string]any) {
 		t.Helper()
 		a := e.begin(t, contact, start)
 		rt := flow.NewRuntime(flow.NewEngine(spec, "en", nil, log),
@@ -82,7 +84,7 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 	}
 
 	t.Run("HIGH files one callback with the notes", func(t *testing.T) {
-		a, answers := call(contacts[0], `{"intent":"HIGH","notes":"send the offer"}`)
+		a, answers := call(t, contacts[0], `{"intent":"HIGH","notes":"send the offer"}`)
 		if answers[0]["ok"] != "1" {
 			t.Fatalf("answer = %v", answers[0])
 		}
@@ -94,7 +96,7 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("HIGH then MEDIUM leaves MEDIUM and no callback", func(t *testing.T) {
-		a, _ := call(contacts[1], `{"intent":"HIGH","notes":"yes"}`, `{"intent":"MEDIUM","notes":"later"}`)
+		a, _ := call(t, contacts[1], `{"intent":"HIGH","notes":"yes"}`, `{"intent":"MEDIUM","notes":"later"}`)
 		if n, _ := callbacksOf(a.CallID); n != 0 {
 			t.Errorf("%d callbacks", n)
 		}
@@ -103,13 +105,13 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("MEDIUM then HIGH files exactly one callback", func(t *testing.T) {
-		a, _ := call(contacts[2], `{"intent":"MEDIUM"}`, `{"intent":"HIGH","notes":"ok send it"}`)
+		a, _ := call(t, contacts[2], `{"intent":"MEDIUM"}`, `{"intent":"HIGH","notes":"ok send it"}`)
 		if n, msg := callbacksOf(a.CallID); n != 1 || msg != "ok send it" {
 			t.Errorf("callbacks = %d %q", n, msg)
 		}
 	})
 	t.Run("DO_NOT_CALL lists the number as CONVERSATION with the call id", func(t *testing.T) {
-		a, _ := call(contacts[3], `{"intent":"DO_NOT_CALL","notes":"stop"}`)
+		a, _ := call(t, contacts[3], `{"intent":"DO_NOT_CALL","notes":"stop"}`)
 		listed, _, err := e.st.DNC().List(ctx, DNCFilter{Prefix: contacts[3].Number})
 		if err != nil || len(listed) != 1 || listed[0].Source != DNCSourceConversation ||
 			listed[0].CallID == nil || *listed[0].CallID != a.CallID {
@@ -120,7 +122,7 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("an invalid intent is refused to the model and nothing is written", func(t *testing.T) {
-		a, answers := call(contacts[4], `{"intent":"BANANAS","notes":"x"}`)
+		a, answers := call(t, contacts[4], `{"intent":"BANANAS","notes":"x"}`)
 		if answers[0]["ok"] != "0" || !strings.Contains(answers[0]["error"].(string), "not a lead intent") {
 			t.Errorf("answer = %v", answers[0])
 		}
@@ -133,7 +135,7 @@ func TestARecordedLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("a call that never calls record_lead leaves NULL, not NONE", func(t *testing.T) {
-		a, _ := call(contacts[5])
+		a, _ := call(t, contacts[5])
 		var intent *string
 		if err := e.st.Pool.QueryRow(ctx,
 			`SELECT lead_intent FROM campaign_attempts WHERE call_id=$1`, a.CallID).Scan(&intent); err != nil || intent != nil {
@@ -195,8 +197,9 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 	// call runs one campaign call: the model's tool calls in order (name,
 	// arguments), then the CDR, then a revision of it when isRevised. Every
 	// call must succeed, except a record_lead made in a phase that declares
-	// its own lead, which must be refused (#358).
-	call := func(contact campaign.Contact, isRevised bool, calls ...[2]string) campaign.Attempt {
+	// its own lead, which must be refused (#358). It takes the subtest's t, as
+	// the other lead test's call does.
+	call := func(t *testing.T, contact campaign.Contact, isRevised bool, calls ...[2]string) campaign.Attempt {
 		t.Helper()
 		a := e.begin(t, contact, start)
 		rt := flow.NewRuntime(flow.NewEngine(spec, "en", nil, log),
@@ -229,7 +232,7 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 	}
 
 	t.Run("HIGH files exactly one callback with the rendered notes, even when the CDR is revised", func(t *testing.T) {
-		a := call(contacts[0], true,
+		a := call(t, contacts[0], true,
 			[2]string{"said", `{"value": "send it to me, \"today\" 好的"}`}, [2]string{"classify", `{"value": "yes"}`})
 		if n, msg := callbacksOf(a.CallID); n != 1 || msg != `Agreed: send it to me, "today" 好的` {
 			t.Errorf("callbacks = %d %q", n, msg)
@@ -239,7 +242,7 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("DO_NOT_CALL lists the number as CONVERSATION with the call id", func(t *testing.T) {
-		a := call(contacts[1], false,
+		a := call(t, contacts[1], false,
 			[2]string{"said", `{"value": "stop calling"}`}, [2]string{"classify", `{"value": "stop"}`})
 		listed, _, err := e.st.DNC().List(ctx, DNCFilter{Prefix: contacts[1].Number})
 		if err != nil || len(listed) != 1 || listed[0].Source != DNCSourceConversation ||
@@ -251,7 +254,7 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("the model's HIGH, then the phase's NONE, files nothing", func(t *testing.T) {
-		a := call(contacts[2], false,
+		a := call(t, contacts[2], false,
 			[2]string{flow.ToolRecordLead, `{"intent": "HIGH", "notes": "keen"}`}, [2]string{"classify", `{"value": "no"}`})
 		if n, _ := callbacksOf(a.CallID); n != 0 {
 			t.Errorf("%d callbacks", n)
@@ -261,7 +264,7 @@ func TestADeclaredLeadReachesTheContactTheCallbackAndTheDNCList(t *testing.T) {
 		}
 	})
 	t.Run("the phase's NONE, then the model's HIGH, which is refused, files nothing", func(t *testing.T) {
-		a := call(contacts[3], false,
+		a := call(t, contacts[3], false,
 			[2]string{"classify", `{"value": "no"}`}, [2]string{flow.ToolRecordLead, `{"intent": "HIGH", "notes": "changed their mind"}`})
 		if n, msg := callbacksOf(a.CallID); n != 0 {
 			t.Errorf("callbacks = %d %q", n, msg)
