@@ -8,7 +8,7 @@ import { AGENT_ID } from '@/test/harness'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, words } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
 import {
-  agentBarOverflows, at1024, cellBounds, knownBy, truncateFloor, shellChrome,
+  at1024, cellBounds, knownBy, truncateFloor,
 } from '@/test/layout-known-issues'
 
 /**
@@ -64,7 +64,7 @@ describe('callbacks with ordinary requests', () => {
     render(oneOfEach())
     await loaded(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [at1024, truncateFloor]) })
+  }, { knownIssue: knownBy([at1024, truncateFloor]) })
 })
 
 describe('callbacks with hostile messages', () => {
@@ -79,7 +79,7 @@ describe('callbacks with hostile messages', () => {
     ])
     await loaded(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [at1024, truncateFloor]) })
+  }, { knownIssue: knownBy([at1024, truncateFloor]) })
 })
 
 describe('callbacks with hostile numbers', () => {
@@ -87,7 +87,12 @@ describe('callbacks with hostile numbers', () => {
     render(oneOfEach({ phoneNumber: digits(40, 1) }))
     await loaded(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [agentBarOverflows, cellBounds]) })
+  }, {
+    // The phone column is the one that widens the table, and only where the
+    // card is narrow enough for it to reach the card's edge.
+    knownIssue: cellBounds,
+    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en'),
+  })
 
   layoutTest('agent/callbacks (unbreakable numbers)', async (ctx) => {
     render([
@@ -97,5 +102,5 @@ describe('callbacks with hostile numbers', () => {
     ])
     await loaded(3)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [() => true, cellBounds]) })
+  }, { knownIssue: knownBy([() => true, cellBounds]) })
 })

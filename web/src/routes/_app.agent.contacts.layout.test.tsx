@@ -8,7 +8,7 @@ import { contactFixture } from '@/test/harness'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
 import {
-  agentBarOverflows, at1024, cellBounds, knownBy, narrowTables, shellChrome,
+  at1024, cellBounds, knownBy, narrowTables,
 } from '@/test/layout-known-issues'
 
 /**
@@ -48,7 +48,7 @@ describe('contacts with ordinary people', () => {
     ])
     await loaded(4)
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: agentBarOverflows })
+  })
 })
 
 describe('contacts at the contract limits', () => {
@@ -59,7 +59,7 @@ describe('contacts at the contract limits', () => {
     ])
     await loaded(2)
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: agentBarOverflows })
+  })
 
   layoutTest('agent/contacts (200-character names and companies, with spaces)', async (ctx) => {
     render([
@@ -68,7 +68,7 @@ describe('contacts at the contract limits', () => {
     ])
     await loaded(2)
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: agentBarOverflows })
+  })
 
   // One column at a time, at the contract limit and as other unbreakable runs;
   // the other columns keep ordinary values.
@@ -86,7 +86,7 @@ describe('contacts at the contract limits', () => {
       ])
       await loaded(4)
       await expectLayout(ctx)
-    }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [() => true, cellBounds]) })
+    }, { knownIssue: knownBy([() => true, cellBounds]) })
   }
 
   // Also overflows the card on its own at 1024 (830px in 754px); that is
@@ -95,18 +95,18 @@ describe('contacts at the contract limits', () => {
     render([contact(1, { tags: maxTags(1) }), contact(2, { tags: maxTags(2) }), contact(3)])
     await loaded(3)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([agentBarOverflows, shellChrome], [at1024, narrowTables]) })
+  }, { knownIssue: knownBy([at1024, narrowTables]) })
 
   layoutTest('agent/contacts (twenty short tags)', async (ctx) => {
     render([contact(1, { tags: Array.from({ length: 20 }, (_, i) => `tag-${i}`) }), contact(2)])
     await loaded(2)
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: agentBarOverflows })
+  })
 
   layoutTest('agent/contacts (notes at the contract limit)', async (ctx) => {
     // Not a table column, so the notes must not reach the page at all.
     render([contact(1, { notes: maxLengthOf('ContactWrite', 'notes', 7) }), contact(2, { notes: mixedNote().repeat(40).slice(0, 4000) })])
     await loaded(2)
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: agentBarOverflows })
+  })
 })

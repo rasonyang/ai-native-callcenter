@@ -8,7 +8,7 @@ import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, shellChrome, textWrap, truncateFloor } from '@/test/layout-known-issues'
+import { cellBounds, textWrap, truncateFloor } from '@/test/layout-known-issues'
 
 /**
  * One campaign: header, counters, and the contacts, leads and attempts tabs
@@ -167,19 +167,19 @@ describe('campaign detail header', () => {
     render({ campaign: campaign({ name: maxLengthOf('CampaignWrite', 'name') }) })
     await drawn()
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome })
+  })
 
   layoutTest('campaigns/$campaignId header (200-character name, Chinese)', async (ctx) => {
     render({ campaign: campaign({ name: chineseRun(200) }) })
     await drawn()
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome })
+  })
 
   layoutTest('campaigns/$campaignId header (mixed name)', async (ctx) => {
     render({ campaign: campaign({ name: mixedNote().slice(0, 200) }) })
     await drawn()
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome, knownIssueWhen: (ctx) => ctx.viewport.width <= 1280 })
+  })
 
   layoutTest('campaigns/$campaignId header (40-digit DID number)', async (ctx) => {
     render({ campaign: campaign({ didNumber: digits(40) }) })

@@ -20,16 +20,6 @@ export interface KnownIssue {
 }
 
 /**
- * The top bar and softphone bar do not shrink (the agent screens overflow the
- * window at 1024, and at 1280 in English), the breadcrumb is `shrink-0` so it
- * takes a long flow or campaign name whole, and a long name in the page `h1`.
- */
-export const shellChrome: KnownIssue = {
-  issue: 383,
-  reason: 'the shell chrome (top bar, softphone bar, breadcrumb, page h1) does not shrink or wrap',
-}
-
-/**
  * A table cell holding free text or a number from a user, a customer or a flow
  * author has no width bound and nothing to break at, so a hostile value widens
  * the table.
@@ -81,14 +71,6 @@ export function knownBy(
     return hit.length > 0 ? hit : undefined
   }
 }
-
-/**
- * The agent top bar needs about 1305px in English and 1165px in Chinese (the
- * softphone bar is 678px and does not shrink), so the document scrolls
- * sideways at 1024, and at 1280 in English.
- */
-export const agentBarOverflows = (ctx: LayoutContext) =>
-  ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en')
 
 export const at1024 = (ctx: LayoutContext) => ctx.viewport.width === 1024
 export const below1920 = (ctx: LayoutContext) => ctx.viewport.width < 1920

@@ -197,7 +197,7 @@ describe('call detail with 40-digit numbers in the title', () => {
     render({ cdr: cdr({ fromNumber: asciiRun(6000, 23), did: longUrl() }) })
     await drawn()
     await check(ctx)
-  }, { knownIssue: textWrap })
+  }, { knownIssue: textWrap, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
 })
 
 describe('call detail with a hostile transcript', () => {

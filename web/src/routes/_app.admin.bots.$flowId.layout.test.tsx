@@ -8,7 +8,7 @@ import {
   asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote, nestedJson, words,
 } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, narrowTables, shellChrome, textWrap } from '@/test/layout-known-issues'
+import { cellBounds, narrowTables, textWrap } from '@/test/layout-known-issues'
 
 /**
  * The bot editor's History, Tools and Persona tabs, fed values that cannot
@@ -301,11 +301,6 @@ describe('bot editor, a flow name at the contract limit', () => {
     await openTab(user, 'bots.tabs.persona')
     await screen.findByText(i18n.t('bots.runtime'))
     await expectLayout(ctx)
-  }, {
-    // The breadcrumb takes the whole name on one line and pushes the top bar's
-    // controls out of the window; there is room for it from 1280 in Chinese.
-    knownIssue: shellChrome,
-    knownIssueWhen: (ctx) => ctx.viewport.width < 1280 || (ctx.viewport.width === 1280 && ctx.lang === 'en'),
   })
 
   layoutTest('bots/$flowId header (120-character name, no spaces)', async (ctx) => {
@@ -313,5 +308,5 @@ describe('bot editor, a flow name at the contract limit', () => {
     await openTab(user, 'bots.tabs.persona')
     await screen.findByText(i18n.t('bots.runtime'))
     await expectLayout(ctx)
-  }, { knownIssue: shellChrome })
+  })
 })

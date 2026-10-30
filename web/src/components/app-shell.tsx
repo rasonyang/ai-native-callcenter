@@ -85,9 +85,11 @@ export function AppShell({
         <header className="flex h-12 shrink-0 items-center gap-4 border-b bg-card pl-6 pr-14">
           <Breadcrumb pathname={pathname} role={user.role} />
           {softphone}
-          <div className="ml-auto flex items-center gap-2">
-            <StreamIndicator status={streamStatus} />
-            <LanguageSwitch />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            {/* With the softphone bar beside it the header is short of room
+                below xl, so these two drop their text and keep their icon. */}
+            <StreamIndicator status={streamStatus} isCollapsible={Boolean(softphone)} />
+            <LanguageSwitch isCollapsible={Boolean(softphone)} />
             <UserMenu user={user} deviceState={deviceState} />
           </div>
         </header>
@@ -107,20 +109,32 @@ function Breadcrumb({ pathname, role }: { pathname: string; role: Role }) {
   const detail = useBreadcrumbDetail()
   const crumbs = breadcrumbFor(pathname, role, detail)
 
+  // The softphone bar carries shrink-[100], so it takes nearly all of a
+  // shortfall (down to its floor) and this keeps its natural width; only once
+  // the bar can give no more does the last segment truncate, or when a
+  // record's name is long enough to need the room alone. Whatever still does
+  // not fit is clipped, never painted over the bar. A factor under 1
+  // would not do: flex scales the free space by it.
   return (
-    <div className="flex shrink-0 items-center gap-1.5 text-sm">
+    <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm">
       {crumbs.map((crumb, index) => {
         // A record's own name is text the operator gave it, never a key.
         const text = crumb.labelKey ? t(crumb.labelKey) : (crumb.label ?? '')
+        const isLast = index === crumbs.length - 1
         return (
-          <span key={(crumb.labelKey ?? crumb.label) + String(index)} className="flex items-center gap-1.5">
+          <span
+            key={(crumb.labelKey ?? crumb.label) + String(index)}
+            className={cn('flex items-center gap-1.5', isLast ? 'min-w-0' : 'shrink-0')}
+          >
             {index > 0 && <span className="text-muted-foreground/50">/</span>}
             {crumb.to ? (
               <Link to={crumb.to} className="text-muted-foreground hover:text-primary">
                 {text}
               </Link>
             ) : (
-              <span className="font-medium">{text}</span>
+              <span className="truncate font-medium" title={text}>
+                {text}
+              </span>
             )}
           </span>
         )
@@ -202,7 +216,14 @@ function UserMenu({ user, deviceState }: { user: Identity; deviceState?: DeviceS
  * different things is worse than no indicator. Monochrome at rest, amber only
  * when the stream is degraded.
  */
-function StreamIndicator({ status }: { status: StreamStatus }) {
+function StreamIndicator({
+  status,
+  isCollapsible,
+}: {
+  status: StreamStatus
+  /** Below xl the text collapses to the icon; it stays readable to a screen reader. */
+  isCollapsible: boolean
+}) {
   const { t } = useTranslation()
   if (status === 'connected') {
     return (
@@ -211,7 +232,7 @@ function StreamIndicator({ status }: { status: StreamStatus }) {
         title={t('stream.connectedHint')}
       >
         <Radio className="size-3" />
-        {t('stream.connected')}
+        <span className={cn(isCollapsible && 'max-xl:sr-only')}>{t('stream.connected')}</span>
       </div>
     )
   }
@@ -222,7 +243,9 @@ function StreamIndicator({ status }: { status: StreamStatus }) {
       title={t('stream.degradedHint')}
     >
       <Radio className={cn('size-3', status === 'reconnecting' && 'animate-pulse')} />
-      {t(status === 'reconnecting' ? 'stream.reconnecting' : 'stream.offline')}
+      <span className={cn(isCollapsible && 'max-xl:sr-only')}>
+        {t(status === 'reconnecting' ? 'stream.reconnecting' : 'stream.offline')}
+      </span>
     </div>
   )
 }
