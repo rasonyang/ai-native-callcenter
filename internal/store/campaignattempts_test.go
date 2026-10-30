@@ -576,7 +576,7 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 	c, contacts := e.campaign(t, "Leads", "4", 6, nil)
 	start := ny(t, "2026-06-01 10:00")
 
-	callbacks := func(callID uuid.UUID) []Callback {
+	callbacks := func(t *testing.T, callID uuid.UUID) []Callback {
 		rows, err := e.st.Pool.Query(ctx, `SELECT id, call_id, queue_id, phone_number, message FROM callbacks WHERE call_id=$1`, callID)
 		if err != nil {
 			t.Fatal(err)
@@ -592,7 +592,7 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 		}
 		return out
 	}
-	answer := func(a campaign.Attempt) {
+	answer := func(t *testing.T, a campaign.Attempt) {
 		t.Helper()
 		if err := e.ledger.InsertCDR(ctx, cdrOf(a.CallID, "NORMAL_CLEARING", CDRStatusAnswered, true, start, start.Add(time.Minute))); err != nil {
 			t.Fatal(err)
@@ -604,15 +604,15 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 		if ok, err := e.attempts.SetLead(ctx, a.CallID, campaign.LeadHigh, "wants the offer by email"); err != nil || !ok {
 			t.Fatal(ok, err)
 		}
-		if got := callbacks(a.CallID); len(got) != 0 {
+		if got := callbacks(t, a.CallID); len(got) != 0 {
 			t.Fatalf("a callback was filed before the call ended: %+v", got)
 		}
-		answer(a)
+		answer(t, a)
 		// A later revision of the same call.
 		if err := e.ledger.InsertCDR(ctx, cdrOf(a.CallID, "MEDIA_OR_PROVIDER_FAILURE", CDRStatusFailed, true, start, start.Add(2*time.Minute))); err != nil {
 			t.Fatal(err)
 		}
-		got := callbacks(a.CallID)
+		got := callbacks(t, a.CallID)
 		if len(got) != 1 || got[0].PhoneNumber != contacts[0].Number || got[0].Message != "wants the offer by email" ||
 			got[0].QueueID == nil || *got[0].QueueID != e.queueID {
 			t.Fatalf("callbacks = %+v, want one for %s on the follow-up queue", got, contacts[0].Number)
@@ -626,8 +626,8 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 		a := e.begin(t, contacts[1], start)
 		_, _ = e.attempts.SetLead(ctx, a.CallID, campaign.LeadHigh, "maybe")
 		_, _ = e.attempts.SetLead(ctx, a.CallID, campaign.LeadMedium, "on second thought, later")
-		answer(a)
-		if got := callbacks(a.CallID); len(got) != 0 {
+		answer(t, a)
+		if got := callbacks(t, a.CallID); len(got) != 0 {
 			t.Errorf("HIGH then MEDIUM filed %+v", got)
 		}
 		if ct := e.contact(t, c, contacts[1].ID); ct.LeadIntent != campaign.LeadMedium {
@@ -637,16 +637,16 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 		b := e.begin(t, contacts[2], start)
 		_, _ = e.attempts.SetLead(ctx, b.CallID, campaign.LeadMedium, "")
 		_, _ = e.attempts.SetLead(ctx, b.CallID, campaign.LeadHigh, "send the offer")
-		answer(b)
-		if got := callbacks(b.CallID); len(got) != 1 {
+		answer(t, b)
+		if got := callbacks(t, b.CallID); len(got) != 1 {
 			t.Errorf("MEDIUM then HIGH filed %d callbacks, want 1", len(got))
 		}
 	})
 	t.Run("DO_NOT_CALL goes on the list once and ends the contact", func(t *testing.T) {
 		a := e.begin(t, contacts[3], start)
 		_, _ = e.attempts.SetLead(ctx, a.CallID, campaign.LeadDoNotCall, "stop calling me")
-		answer(a)
-		answer(a) // the identical CDR again
+		answer(t, a)
+		answer(t, a) // the identical CDR again
 		listed, _, err := e.st.DNC().List(ctx, DNCFilter{Prefix: contacts[3].Number})
 		if err != nil || len(listed) != 1 {
 			t.Fatalf("not on the list: %v %v", listed, err)
@@ -663,17 +663,17 @@ func TestLeadsAreActedOnOnceWhenTheCallEnds(t *testing.T) {
 		if ct := e.contact(t, c, contacts[3].ID); ct.Status != campaign.ContactDoNotCall || ct.NextAttemptAt != nil {
 			t.Errorf("contact = %+v, want DNC", ct)
 		}
-		if got := callbacks(a.CallID); len(got) != 0 {
+		if got := callbacks(t, a.CallID); len(got) != 0 {
 			t.Errorf("a DO_NOT_CALL filed a callback: %+v", got)
 		}
 	})
 	t.Run("no lead: NULL, not NONE, and an earlier lead survives a call that records none", func(t *testing.T) {
 		a := e.begin(t, contacts[4], start)
-		answer(a)
+		answer(t, a)
 		if ct := e.contact(t, c, contacts[4].ID); ct.LeadIntent != "" || ct.Status != campaign.ContactDone {
 			t.Errorf("contact = %+v", ct)
 		}
-		if got := callbacks(a.CallID); len(got) != 0 {
+		if got := callbacks(t, a.CallID); len(got) != 0 {
 			t.Errorf("callbacks = %+v", got)
 		}
 		// An earlier lead on a contact that is then dialled again.

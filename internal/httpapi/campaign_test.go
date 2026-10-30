@@ -476,7 +476,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	didID, _ := campaignDID(t, f.st, "95099", false)
 
 	// reach puts a fresh campaign in a status.
-	reach := func(status string) campaignView {
+	reach := func(t *testing.T, status string) campaignView {
 		c := f.createCampaign(admin, didID, nil)
 		id := c.ID
 		move := func(action string) {
@@ -540,7 +540,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	for _, a := range actions {
 		for _, status := range all {
 			t.Run(a.name+" from "+status, func(t *testing.T) {
-				c := reach(status)
+				c := reach(t, status)
 				if c.Status != status {
 					t.Fatalf("setup left the campaign %s, want %s", c.Status, status)
 				}
@@ -577,7 +577,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	wantReply(t, "not a uuid", f.do(call{method: http.MethodGet, path: "/campaigns/not-a-uuid", cookie: admin}), 400, "VALIDATION_FAILED")
 
 	// A breaker's pause is resumed by an operator like any other.
-	b := reach("RUNNING")
+	b := reach(t, "RUNNING")
 	if _, err := f.st.Pool.Exec(context.Background(),
 		`UPDATE campaigns SET status = 'PAUSED', pause_reason = 'TRUNK_FAILURE' WHERE id = $1`, b.ID); err != nil {
 		t.Fatal(err)
@@ -592,7 +592,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	}
 
 	// The refusal says which status it found.
-	cc := reach("CANCELLED")
+	cc := reach(t, "CANCELLED")
 	r = f.post(admin, "/campaigns/"+cc.ID+"/start", nil)
 	if got := errOf(t, r).Error.Params["status"]; got != "CANCELLED" {
 		t.Errorf("params.status = %v", got)

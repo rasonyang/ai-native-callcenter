@@ -89,7 +89,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 		}
 	}
 
-	contacts := func(campaignID, cookie, bearer string) map[string]leadLinkContact {
+	contacts := func(t *testing.T, campaignID, cookie, bearer string) map[string]leadLinkContact {
 		t.Helper()
 		r := f.do(call{method: http.MethodGet, path: "/campaigns/" + campaignID + "/contacts", cookie: cookie, bearer: bearer})
 		if r.status != 200 {
@@ -119,7 +119,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 		return out
 	}
 
-	before := contacts(first.ID, admin, "")
+	before := contacts(t, first.ID, admin, "")
 	for n, c := range before {
 		if c.LastCallID != nil || c.LastAttemptID != nil {
 			t.Errorf("%s names a call before its first attempt: %+v", n, c)
@@ -134,10 +134,10 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 	at := time.Now().Add(-time.Hour).UTC()
 	callA := answeredCampaignCall(t, f.st, uuid.MustParse(before[shared].ID), campaign.LeadHigh, "first wave: wants the offer", at)
 	callNoLead := answeredCampaignCall(t, f.st, uuid.MustParse(before["+8613800138001"].ID), "", "", at)
-	secondContacts := contacts(second.ID, admin, "")
+	secondContacts := contacts(t, second.ID, admin, "")
 	callB := answeredCampaignCall(t, f.st, uuid.MustParse(secondContacts[shared].ID), campaign.LeadHigh, "second wave: call after 6", at.Add(10*time.Minute))
 
-	callbacks := func(query, cookie, bearer string) []leadLinkCallback {
+	callbacks := func(t *testing.T, query, cookie, bearer string) []leadLinkCallback {
 		t.Helper()
 		r := f.do(call{method: http.MethodGet, path: "/callbacks" + query, cookie: cookie, bearer: bearer})
 		if r.status != 200 {
@@ -151,7 +151,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 		}
 		return page.Items
 	}
-	if all := callbacks("", admin, ""); len(all) != 3 {
+	if all := callbacks(t, "", admin, ""); len(all) != 3 {
 		t.Fatalf("the queue holds %d callbacks, want 3 (one inbound, two HIGH leads)", len(all))
 	}
 
@@ -172,35 +172,35 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 				{first.ID, callA, "first wave: wants the offer"},
 				{second.ID, callB, "second wave: call after 6"},
 			} {
-				lead := contacts(w.campaignID, cr.cookie, cr.bearer)[shared]
+				lead := contacts(t, w.campaignID, cr.cookie, cr.bearer)[shared]
 				if lead.LeadIntent == nil || *lead.LeadIntent != "HIGH" ||
 					lead.LastCallID == nil || *lead.LastCallID != w.call.CallID.String() ||
 					lead.LastAttemptID == nil || *lead.LastAttemptID != w.call.ID.String() {
 					t.Fatalf("lead = %+v, want HIGH on call %s", lead, w.call.CallID)
 				}
-				got := callbacks("?callId="+*lead.LastCallID, cr.cookie, cr.bearer)
+				got := callbacks(t, "?callId="+*lead.LastCallID, cr.cookie, cr.bearer)
 				if len(got) != 1 || got[0].CallID == nil || *got[0].CallID != *lead.LastCallID || got[0].Message != w.message {
 					t.Errorf("callbacks of %s = %+v, want exactly its own", *lead.LastCallID, got)
 				}
 			}
 			// A call that filed nothing, and a call nobody placed: empty.
-			if got := callbacks("?callId="+callNoLead.CallID.String(), cr.cookie, cr.bearer); len(got) != 0 {
+			if got := callbacks(t, "?callId="+callNoLead.CallID.String(), cr.cookie, cr.bearer); len(got) != 0 {
 				t.Errorf("a call with no lead resolves to %+v", got)
 			}
-			if got := callbacks("?callId="+uuid.NewString(), cr.cookie, cr.bearer); len(got) != 0 {
+			if got := callbacks(t, "?callId="+uuid.NewString(), cr.cookie, cr.bearer); len(got) != 0 {
 				t.Errorf("an unknown call resolves to %+v", got)
 			}
 		})
 	}
 
-	noLead := contacts(first.ID, admin, "")["+8613800138001"]
+	noLead := contacts(t, first.ID, admin, "")["+8613800138001"]
 	if noLead.LeadIntent != nil || noLead.LastCallID == nil || *noLead.LastCallID != callNoLead.CallID.String() {
 		t.Errorf("a call that recorded no lead: %+v", noLead)
 	}
-	if never := contacts(first.ID, admin, "")["+8613800138002"]; never.LastCallID != nil {
+	if never := contacts(t, first.ID, admin, "")["+8613800138002"]; never.LastCallID != nil {
 		t.Errorf("a contact never dialled names %v", *never.LastCallID)
 	}
-	if got := callbacks("?callId="+inboundCall.String()+"&status=OPEN", admin, ""); len(got) != 1 || got[0].Message != "inbound: billing question" {
+	if got := callbacks(t, "?callId="+inboundCall.String()+"&status=OPEN", admin, ""); len(got) != 1 || got[0].Message != "inbound: billing question" {
 		t.Errorf("the inbound callback by its call = %+v", got)
 	}
 	r := f.do(call{method: http.MethodGet, path: "/callbacks?callId=not-a-uuid", cookie: admin})

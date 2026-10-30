@@ -95,7 +95,7 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 	t1 := ny(t, "2026-06-01 10:00")
 	t2 := ny(t, "2026-06-02 10:00")
 
-	callbacksOf := func(callID uuid.UUID) []Callback {
+	callbacksOf := func(t *testing.T, callID uuid.UUID) []Callback {
 		t.Helper()
 		rows, err := e.ledger.ListCallbacks(ctx, "", &callID, 50, 0)
 		if err != nil {
@@ -103,7 +103,7 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 		}
 		return rows
 	}
-	highUnknown := func(ct campaign.Contact) campaign.Attempt {
+	highUnknown := func(t *testing.T, ct campaign.Contact) campaign.Attempt {
 		t.Helper()
 		a := e.begin(t, ct, t1)
 		if ok, err := e.attempts.SetLead(ctx, a.CallID, campaign.LeadHigh, "send the offer"); err != nil || !ok {
@@ -119,7 +119,7 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 			got.LastCallID == nil || *got.LastCallID != a.CallID {
 			t.Fatalf("after the UNKNOWN HIGH call: %+v", got)
 		}
-		if cbs := callbacksOf(a.CallID); len(cbs) != 1 {
+		if cbs := callbacksOf(t, a.CallID); len(cbs) != 1 {
 			t.Fatalf("the HIGH call filed %d callbacks, want 1", len(cbs))
 		}
 		return a
@@ -127,7 +127,7 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 
 	t.Run("HIGH then LOW", func(t *testing.T) {
 		ct := contacts[0]
-		first := highUnknown(ct)
+		first := highUnknown(t, ct)
 		second := e.begin(t, ct, t2)
 		if ok, err := e.attempts.SetLead(ctx, second.CallID, campaign.LeadLow, "not now"); err != nil || !ok {
 			t.Fatal(ok, err)
@@ -141,11 +141,11 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 			got.LastAttemptID == nil || *got.LastAttemptID != second.ID {
 			t.Errorf("contact = %+v, want LOW linked to the second call %s", got, second.CallID)
 		}
-		cbs := callbacksOf(first.CallID)
+		cbs := callbacksOf(t, first.CallID)
 		if len(cbs) != 1 || cbs[0].Status != "OPEN" || cbs[0].Message != "send the offer" {
 			t.Errorf("the first call's callback = %+v, want it left OPEN as filed", cbs)
 		}
-		if cbs := callbacksOf(second.CallID); len(cbs) != 0 {
+		if cbs := callbacksOf(t, second.CallID); len(cbs) != 0 {
 			t.Errorf("the LOW call filed %+v", cbs)
 		}
 	})
@@ -154,7 +154,7 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 	// contact while the link names the retry's call, which filed nothing.
 	t.Run("HIGH then no lead", func(t *testing.T) {
 		ct := contacts[1]
-		first := highUnknown(ct)
+		first := highUnknown(t, ct)
 		second := e.begin(t, ct, t2)
 		if err := e.ledger.InsertCDR(ctx, cdrOf(second.CallID, "NO_ANSWER", CDRStatusNoAnswer, false, t2, t2.Add(30*time.Second))); err != nil {
 			t.Fatal(err)
@@ -163,10 +163,10 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 		if got.LeadIntent != campaign.LeadHigh || got.LastCallID == nil || *got.LastCallID != second.CallID {
 			t.Errorf("contact = %+v, want HIGH kept and the link on the second call", got)
 		}
-		if cbs := callbacksOf(first.CallID); len(cbs) != 1 {
+		if cbs := callbacksOf(t, first.CallID); len(cbs) != 1 {
 			t.Errorf("the first call's callback = %+v, want it kept", cbs)
 		}
-		if cbs := callbacksOf(*got.LastCallID); len(cbs) != 0 {
+		if cbs := callbacksOf(t, *got.LastCallID); len(cbs) != 0 {
 			t.Errorf("the second call filed %+v", cbs)
 		}
 	})
