@@ -202,6 +202,7 @@
     "activeCall": "当前通话",
     "contact": "客户",
     "noContact": "尚未识别来电客户。",
+    "idle": "空闲",
     "today": "今日",
     "dialOut": "外呼",
     "dialPlaceholder": "客户号码…",
@@ -330,6 +331,7 @@
   },
   "admin": {
     "extensionsHint": "交换机接受注册的端点。话机随它归属的账号一并创建。",
+    "addExtension": "新增分机",
     "editExtension": "编辑分机",
     "noExtensions": "尚未配置分机。",
     "deleteExtensionConfirm": "确认删除分机 {{number}}？该话机将无法注册。",
@@ -337,6 +339,7 @@
     "displayName": "显示名称",
     "enabled": "可注册",
     "password": "密码",
+    "generate": "生成",
     "passwordUnchangedHint": "留空则保持原密码不变。",
     "routingHint": "队列及其分配方式，修改后立即下发到交换机。",
     "addQueue": "新增队列",
