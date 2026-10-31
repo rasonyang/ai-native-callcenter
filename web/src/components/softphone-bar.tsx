@@ -52,7 +52,7 @@ export function SoftphoneBar() {
   // it. The phone comes first because none of the rest means anything without
   // one.
   return (
-    <div data-softphone-bar className="flex h-10 shrink-[100] items-center gap-1 rounded-md border bg-card pl-1.5 pr-1">
+    <div data-softphone-bar className="flex h-10 shrink-[10000] items-center gap-1 rounded-md border bg-card pl-1.5 pr-1">
       <PhoneChip chip={chip} extensionNumber={presence.extensionNumber} />
       <Divider />
       <PresenceControl

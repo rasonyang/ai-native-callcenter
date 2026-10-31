@@ -41,6 +41,11 @@ carries the one-line installer's files.
   truncates in the breadcrumb (the full name is in its tooltip) and wraps in
   the page title instead of pushing the page's buttons out of the window.
   (#383)
+- An agent's breadcrumb no longer loses its last character while the call
+  field in the top bar still has room to give: on a call at 1024px in Chinese,
+  the dashboard read "工作台 / 工作…". The call field now takes the whole of a
+  shortfall until it is at its narrowest, and only then does the breadcrumb
+  truncate. (#405)
 - On an AI call, the provider now hears the caller on the call's own clock.
   A phone that stopped sending while its user was silent (silence suppression)
   left the provider with no audio for that stretch, and what followed could
