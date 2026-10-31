@@ -80,3 +80,84 @@ describe('the phone setup copy', () => {
     expect(keysOf(en.phone).toSorted()).toEqual(keysOf(zh.phone).toSorted())
   })
 })
+
+/**
+ * Every literal translation key the SPA uses, in both languages.
+ *
+ * react-i18next answers a key it does not know with the key itself, and the
+ * app falls back from zh to en, so a missing entry renders as "agent.idle" on
+ * the softphone bar and nothing fails (#396, #337). This reads the source,
+ * collects each `t('…')`, `t("…")`, `t(`…`)` (no `${`), `i18n.t('…')` and
+ * `<Trans i18nKey="…">`, and checks every one against each bundle directly, so
+ * a zh gap is not hidden by the en fallback.
+ *
+ * Dynamic keys (`t(`reasons.${r}`)`, `t(variable)`) are out of reach of a
+ * source scan; the per-group tests above cover those.
+ */
+const SOURCES = import.meta.glob(
+  [
+    '/src/**/*.{ts,tsx}',
+    '!/src/**/*.test.{ts,tsx}',
+    '!/src/test/**',
+    '!/src/generated/**',
+    '!/src/routeTree.gen.ts',
+  ],
+  { query: '?raw', import: 'default', eager: true },
+) as Record<string, string>
+
+const KEY_CALL = /(?<![\w$.])(?:i18n\.)?t\(\s*(?:'([^'\n]*)'|"([^"\n]*)"|`([^`$\n]*)`)\s*[,)]/g
+const TRANS_KEY = /\bi18nKey=(?:"([^"\n]*)"|'([^'\n]*)'|\{`([^`$\n]*)`\})/g
+
+type UsedKey = { key: string; where: string }
+
+function usedKeys(): UsedKey[] {
+  const found: UsedKey[] = []
+  for (const [file, source] of Object.entries(SOURCES)) {
+    for (const pattern of [KEY_CALL, TRANS_KEY]) {
+      for (const match of source.matchAll(pattern)) {
+        const key = match[1] ?? match[2] ?? match[3]
+        const line = source.slice(0, match.index).split('\n').length
+        found.push({ key, where: `${file.replace(/^\//, 'web/')}:${line}` })
+      }
+    }
+  }
+  return found
+}
+
+function lookup(bundle: unknown, key: string): unknown {
+  let node = bundle
+  for (const part of key.split('.')) {
+    if (typeof node !== 'object' || node === null) return undefined
+    node = (node as Record<string, unknown>)[part]
+  }
+  return node
+}
+
+function isText(value: unknown): boolean {
+  return typeof value === 'string' && value.trim() !== ''
+}
+
+// A plural key resolves through its forms: English needs one and other, Chinese
+// has only other. The bare key is accepted too when it is a string.
+function resolves(bundle: unknown, key: string, forms: string[]): boolean {
+  if (isText(lookup(bundle, key))) return true
+  return forms.every((form) => isText(lookup(bundle, `${key}_${form}`)))
+}
+
+describe('every literal translation key the SPA uses', () => {
+  const used = usedKeys()
+
+  it('scans the whole source tree', () => {
+    expect(Object.keys(SOURCES).length).toBeGreaterThan(75)
+    expect(used.length).toBeGreaterThan(850)
+  })
+
+  it('is defined in both languages', () => {
+    const missing: string[] = []
+    for (const { key, where } of used) {
+      if (!resolves(en, key, ['one', 'other'])) missing.push(`en  ${key}  (${where})`)
+      if (!resolves(zh, key, ['other'])) missing.push(`zh  ${key}  (${where})`)
+    }
+    expect(missing, `keys with no entry:\n${missing.join('\n')}\n`).toEqual([])
+  })
+})

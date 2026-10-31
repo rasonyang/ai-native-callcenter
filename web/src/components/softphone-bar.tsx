@@ -69,8 +69,10 @@ export function SoftphoneBar() {
           a cap, so a short number does not leave a gap and the bar gives
           way here before the breadcrumb does. The bar has no min-w-0, so it
           is never narrower than its content; below xl the labels of the other
-          segments collapse instead (`max-xl:`). */}
-      <span className="flex min-w-32 max-w-56 items-center px-1.5">
+          segments collapse instead (`max-xl:`). With no call it is empty and
+          keeps its floor, so the call controls to its right do not move when
+          a call rings. */}
+      <span data-call-field className="flex min-w-32 max-w-56 items-center px-1.5">
         <CallInfo call={call} />
       </span>
       <Divider />
@@ -362,7 +364,8 @@ const PARTY_STATE_COLOR: Record<PartyState, string> = {
 
 /**
  * Who is on the line and for how long. The number takes the room it needs
- * and the field around it clamps it to one line.
+ * and the field around it clamps it to one line. With no call there is
+ * nothing to say, so it says nothing: no word for the absence of a call.
  */
 function CallInfo({ call }: { call?: CallSnapshot }) {
   const { t } = useTranslation()
@@ -376,9 +379,7 @@ function CallInfo({ call }: { call?: CallSnapshot }) {
   const isEstablished = mine?.state === 'TALKING' || mine?.state === 'HELD'
   const elapsedSec = useElapsedSec(isEstablished ? (mine?.answeredAt ?? mine?.createdAt) : undefined)
 
-  if (!call) {
-    return <span className="truncate text-xs text-muted-foreground">{t('agent.idle')}</span>
-  }
+  if (!call) return null
 
   const number = other?.number ?? mine?.otherNumber ?? t('call.unknownNumber')
 
