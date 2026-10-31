@@ -4,7 +4,7 @@ import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError, fieldErrorText } from '@/lib/errors'
@@ -75,42 +75,52 @@ function NumbersPage() {
         <THead>
           <Th>{t('admin.number')}</Th>
           <Th>{t('admin.direction')}</Th>
-          <Th>{t('admin.language')}</Th>
+          <Th className="hidden xl:table-cell">{t('admin.language')}</Th>
           <Th align="right">{t('admin.maxOutboundChannels')}</Th>
           <Th>{t('admin.botFlow')}</Th>
           <Th>{t('admin.fallbackQueue')}</Th>
-          <Th>{t('admin.recording')}</Th>
-          <Th>{t('admin.description')}</Th>
+          <Th className="hidden xl:table-cell">{t('admin.recording')}</Th>
           <Th align="right">{t('supervisor.actions')}</Th>
         </THead>
         <TBody>
-          {isPending && <TableMessage colSpan={9}>{t('common.loading')}</TableMessage>}
-          {isError && <TableMessage colSpan={9}>{describeError(error, t)}</TableMessage>}
+          {isPending && <TableMessage colSpan={8}>{t('common.loading')}</TableMessage>}
+          {isError && <TableMessage colSpan={8}>{describeError(error, t)}</TableMessage>}
           {!isPending && rows.length === 0 && (
-            <TableMessage colSpan={9}>{t('admin.noNumbers')}</TableMessage>
+            <TableMessage colSpan={8}>{t('admin.noNumbers')}</TableMessage>
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="tabular font-medium">{row.number}</Td>
+              <Td className="tabular font-medium">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
+                {/* The description labels the number, so it sits under it, and
+                    Language and Recording show from xl up (both are in the edit
+                    dialog): nine columns do not fit the 754px card at 1024. */}
+                {row.description && (
+                  <CellText maxWidth="max-w-48" className="text-xs font-normal text-muted-foreground">
+                    {row.description}
+                  </CellText>
+                )}
+              </Td>
               <Td className="text-xs text-muted-foreground">
                 {directionOf(row, t)}
                 {row.isDefaultOutbound && (
                   <span className="ml-1.5 text-primary">{t('admin.defaultOutboundMark')}</span>
                 )}
               </Td>
-              <Td className="text-xs text-muted-foreground">{row.language}</Td>
+              <Td className="hidden text-xs text-muted-foreground xl:table-cell">{row.language}</Td>
               <Td align="right" className="tabular text-xs text-muted-foreground">
                 {row.allowOutbound ? (row.maxOutboundChannels ?? t('admin.noChannelLimit')) : '—'}
               </Td>
               <Td className="text-xs text-muted-foreground">
                 {/* Named, not an id fragment: the flow catalogue exists now. */}
-                {flowName(row.flowId)}
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-24">{flowName(row.flowId)}</CellText>
               </Td>
-              <Td className="text-xs text-muted-foreground">{queueName(row.fallbackQueueId)}</Td>
               <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-24">{queueName(row.fallbackQueueId)}</CellText>
+              </Td>
+              <Td className="hidden text-xs text-muted-foreground xl:table-cell">
                 {row.isRecordingEnabled ? t('common.yes') : t('common.no')}
               </Td>
-              <Td className="text-xs text-muted-foreground">{row.description || '—'}</Td>
               <Td align="right">
                 <Button
                   size="icon-sm"

@@ -6,8 +6,7 @@ import { Fragment, useEffect, useState } from 'react'
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
 import { RecordingPlayer } from '@/components/recording-player'
-import { DataTable, DetailRow, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
-import { Badge } from '@/components/ui/badge'
+import { CellText, DataTable, DetailRow, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
@@ -110,21 +109,23 @@ function MyCallsPage() {
             <Fragment key={row.callId}>
             <Tr>
               <Td className="tabular">{timeFormat.format(new Date(row.startedAt))}</Td>
-              <Td className="tabular">{customerOf(row) || '—'}</Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{customerOf(row) || '—'}</CellText>
+              </Td>
               <Td className="text-xs text-muted-foreground">
-                {row.legs.find((leg) => leg.kind === 'QUEUE')?.label || '—'}
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-20">
+                  {row.legs.find((leg) => leg.kind === 'QUEUE')?.label || '—'}
+                </CellText>
               </Td>
               <Td>
                 {row.wrapUp?.dispositionLabel ? (
-                  <Badge>{row.wrapUp.dispositionLabel}</Badge>
+                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-24 xl:min-w-upto-36" pill>{row.wrapUp.dispositionLabel}</CellText>
                 ) : (
                   <span className="text-xs text-muted-foreground">{t('myCalls.notFiled')}</span>
                 )}
               </Td>
-              <Td className="max-w-md">
-                <span className="block truncate text-xs text-muted-foreground" title={row.wrapUp?.note}>
-                  {row.wrapUp?.note || '—'}
-                </span>
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-md">{row.wrapUp?.note || '—'}</CellText>
               </Td>
               <Td align="right" className="tabular">
                 {formatDuration(row.talkSec)}

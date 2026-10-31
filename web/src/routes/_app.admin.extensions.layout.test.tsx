@@ -8,7 +8,7 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Extensions: the number (digits, no length bound in the contract), the
@@ -105,10 +105,6 @@ describe('extensions, 40-digit numbers', () => {
     renderExtensions(numberExtensions)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // 776px of table in a 754px card, English only: the Chinese headers are shorter.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en',
   })
 })
 
@@ -117,7 +113,7 @@ describe('extensions, hostile display names', () => {
     renderExtensions(displayNameExtensions)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('extensions, owners with the longest name and username the contract accepts', () => {
@@ -125,7 +121,7 @@ describe('extensions, owners with the longest name and username the contract acc
     renderExtensions(ownerExtensions, ownerUsers)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds, knownIssueWhen: (ctx) => ctx.viewport.width < 1920 })
+  })
 })
 
 describe('extensions, the reveal dialog of a 40-digit number', () => {

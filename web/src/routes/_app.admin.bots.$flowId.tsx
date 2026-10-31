@@ -5,7 +5,7 @@ import { Play } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog } from '@/components/record-dialog'
-import { DataTable, DetailRow, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, DetailRow, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
@@ -320,7 +320,11 @@ function FlowDesigner() {
                           <span className="ml-2 text-xs text-primary">{t('bots.live')}</span>
                         )}
                       </Td>
-                      <Td className="text-muted-foreground">{revision.note || '—'}</Td>
+                      <Td className="text-muted-foreground">
+                        <CellText maxWidth="max-w-md" wrap>
+                          {revision.note || '—'}
+                        </CellText>
+                      </Td>
                       <Td align="right" className="tabular text-muted-foreground">
                         {dateFormat.format(new Date(revision.createdAt))}
                       </Td>
@@ -974,22 +978,34 @@ function ToolTable({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         ))}
         {tools.map(([toolName, tool]) => (
           <Tr key={toolName} className="h-auto">
-            <Td className="py-2 align-top font-mono text-xs font-medium">{toolName}</Td>
-            <Td className="max-w-72 py-2 align-top text-muted-foreground">
-              {textFor(tool.description, lang)}
+            <Td className="py-2 align-top font-mono text-xs font-medium">
+              <CellText maxWidth="max-w-40" wrap>
+                {toolName}
+              </CellText>
+            </Td>
+            <Td className="py-2 align-top text-muted-foreground">
+              <CellText maxWidth="max-w-72" wrap>
+                {textFor(tool.description, lang)}
+              </CellText>
             </Td>
             <Td className="py-2 align-top font-mono text-xs">
-              {tool.kind === 'slot'
-                ? t('bots.slotTool', { slot: tool.slot ?? '—' })
-                : `${tool.http?.method ?? 'POST'} ${tool.http?.path ?? '—'}`}
+              <CellText maxWidth="max-w-56" wrap>
+                {tool.kind === 'slot'
+                  ? t('bots.slotTool', { slot: tool.slot ?? '—' })
+                  : `${tool.http?.method ?? 'POST'} ${tool.http?.path ?? '—'}`}
+              </CellText>
             </Td>
             <Td className="py-2 align-top text-xs text-muted-foreground">
-              <Parameters tool={tool} />
+              <CellText maxWidth="max-w-64" wrap>
+                <Parameters tool={tool} />
+              </CellText>
             </Td>
             <Td className="py-2 align-top font-mono text-xs text-muted-foreground">
-              {Object.entries(tool.http?.result ?? {})
-                .map(([slot, path]) => `${slot} ← ${path}`)
-                .join('; ') || '—'}
+              <CellText maxWidth="max-w-56" wrap>
+                {Object.entries(tool.http?.result ?? {})
+                  .map(([slot, path]) => `${slot} ← ${path}`)
+                  .join('; ') || '—'}
+              </CellText>
             </Td>
           </Tr>
         ))}
@@ -1007,11 +1023,11 @@ function Parameters({ tool }: { tool: FlowTool }) {
   const { t } = useTranslation()
   if (tool.kind === 'slot') {
     return (
-      <span>
+      <span className="flex flex-wrap gap-x-1">
         <span className="font-mono text-foreground">value</span>
-        <span className="ml-1 font-mono">string</span>
+        <span className="font-mono">string</span>
         {tool.enum && tool.enum.length > 0 && (
-          <span className="ml-1 font-mono">{tool.enum.join(' | ')}</span>
+          <span className="font-mono">{tool.enum.join(' | ')}</span>
         )}
       </span>
     )
@@ -1022,18 +1038,18 @@ function Parameters({ tool }: { tool: FlowTool }) {
   return (
     <ul className="grid gap-1">
       {properties.map(([name, p]) => (
-        <li key={name}>
+        <li key={name} className="flex flex-wrap gap-x-1">
           <span className="font-mono text-foreground">{name}</span>
-          {p.type && <span className="ml-1 font-mono">{p.type}</span>}
+          {p.type && <span className="font-mono">{p.type}</span>}
           {required.has(name) && (
-            <span className="ml-1 text-primary" title={t('bots.required')}>
+            <span className="text-primary" title={t('bots.required')}>
               *
             </span>
           )}
           {p.enum && p.enum.length > 0 && (
-            <span className="ml-1 font-mono">{p.enum.map(String).join(' | ')}</span>
+            <span className="font-mono">{p.enum.map(String).join(' | ')}</span>
           )}
-          {p.description && <span className="block">{p.description}</span>}
+          {p.description && <span className="basis-full">{p.description}</span>}
         </li>
       ))}
     </ul>

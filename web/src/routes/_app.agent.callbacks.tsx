@@ -6,7 +6,7 @@ import { Ban, Check, Hand, PhoneOutgoing, Undo2 } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { callApi } from '@/lib/api'
 import { describeError } from '@/lib/errors'
@@ -86,11 +86,13 @@ function CallbacksPage() {
           {rows.map((row) => (
             <Tr key={row.id}>
               <Td className="tabular">{timeFormat.format(new Date(row.createdAt))}</Td>
-              <Td className="tabular font-medium">{row.phoneNumber}</Td>
-              <Td className="max-w-md">
-                <span className="block truncate" title={row.message}>
+              <Td className="tabular font-medium">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.phoneNumber}</CellText>
+              </Td>
+              <Td>
+                <CellText maxWidth="max-w-md" title={row.message || undefined}>
                   {row.message || '—'}
-                </span>
+                </CellText>
               </Td>
               <Td>
                 <StatusPill callback={row} isMine={row.handledBy === user?.userId} />

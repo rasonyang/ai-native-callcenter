@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
@@ -119,15 +119,19 @@ function AuditTrail() {
               <Td>
                 <ActorCell entry={row} unknownLabel={t('audit.deletedAccount')} />
               </Td>
-              <Td className="font-mono text-xs">{row.action}</Td>
-              <Td className="text-muted-foreground">
-                {row.targetKind ? `${row.targetKind} ${shortId(row.targetId)}` : '—'}
+              <Td className="font-mono text-xs">
+                <CellText maxWidth="max-w-96">{row.action}</CellText>
               </Td>
-              <Td className="max-w-96 truncate text-xs text-muted-foreground">
-                {describeDetail(row)}
+              <Td className="text-muted-foreground">
+                <CellText maxWidth="max-w-48" minWidth="min-w-upto-32">
+                  {row.targetKind ? `${row.targetKind} ${shortId(row.targetId)}` : '—'}
+                </CellText>
+              </Td>
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-96">{describeDetail(row)}</CellText>
               </Td>
               <Td align="right" className="tabular text-muted-foreground">
-                {row.ip ?? '—'}
+                <CellText maxWidth="max-w-72" minWidth="min-w-upto-28" className="text-right">{row.ip ?? '—'}</CellText>
               </Td>
             </Tr>
           ))}
@@ -167,13 +171,22 @@ function AuditTrail() {
  */
 function ActorCell({ entry, unknownLabel }: { entry: AuditEntry; unknownLabel: string }) {
   if (entry.actorUsername) {
-    return <span className="font-medium">{entry.actorUsername}</span>
+    return (
+      <CellText maxWidth="max-w-48" minWidth="min-w-upto-32" className="font-medium">
+        {entry.actorUsername}
+      </CellText>
+    )
   }
   if (entry.actorId) {
     return (
-      <span className="text-muted-foreground" title={entry.actorId}>
-        {unknownLabel} {shortId(entry.actorId)}
-      </span>
+      <CellText
+        maxWidth="max-w-48"
+        minWidth="min-w-upto-32"
+        className="text-muted-foreground"
+        title={entry.actorId}
+      >
+        {`${unknownLabel} ${shortId(entry.actorId)}`}
+      </CellText>
     )
   }
   return <span className="text-muted-foreground">—</span>

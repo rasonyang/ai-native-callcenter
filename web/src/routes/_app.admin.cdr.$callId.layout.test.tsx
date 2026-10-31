@@ -6,7 +6,7 @@ import type { CDR, RecordingRow, TranscriptLine } from '@/lib/ledger'
 import { renderApp } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, nestedJson } from '@/test/hostile'
 import { expectLayout, LayoutViolation, layoutTest, restoreLanguage, settle, type LayoutContext } from '@/test/layout'
-import { narrowTables, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * One call's page: the journey, the facts, the call's userData (written by
@@ -139,30 +139,27 @@ describe('call detail with an ordinary call', () => {
     render()
     await drawn()
     await check(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 })
 
 describe('call detail with hostile userData, facts and hangup cause', () => {
   // userData is arbitrary JSON from flows and integrations: a key and a value
   // with no break opportunity, a URL, a value nested 30 deep (shown as one
   // line of JSON), Chinese with no punctuation.
-  // One field at a time, so a fixed one turns its own group green.
-  const hostile: Array<[name: string, call: () => CDR, only1024?: boolean]> = [
+  // One field at a time, so a fixed one turns its own group green. A value
+  // nested 30 deep scrolls inside its own box, so that group passes.
+  const hostile: Array<[name: string, call: () => CDR, isContained?: boolean]> = [
     ['hangup cause', () => cdr({ hangupCause: asciiRun(6000, 31) })],
     ['userData value', () => cdr({ userData: { token: asciiRun(6000, 2), crmLookup: longUrl(), note: chineseRun(3000) } })],
     ['userData key', () => cdr({ userData: { [asciiRun(300, 1)]: 'x', [chineseRun(100, 5)]: digits(40) } })],
     ['userData nested JSON', () => cdr({ userData: { context: nestedJson(30), summary: mixedNote() } }), true],
   ]
-  for (const [name, call, only1024] of hostile) {
+  for (const [name, call, isContained] of hostile) {
     layoutTest(`cdr/$callId facts and userData (${name})`, async (ctx) => {
       render({ cdr: call() })
       await drawn()
       await check(ctx)
-    }, only1024
-      // A value nested 30 deep scrolls inside its own box; what fails at 1024
-      // is the ordinary Journey card above.
-      ? { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 }
-      : { knownIssue: textWrap })
+    }, isContained ? {} : { knownIssue: textWrap })
   }
 })
 
@@ -191,13 +188,13 @@ describe('call detail with 40-digit numbers in the title', () => {
     render({ cdr: cdr({ fromNumber: digits(40, 21), did: digits(40, 22), toNumber: digits(40, 22) }) })
     await drawn()
     await check(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 
   layoutTest('cdr/$callId title (unbreakable numbers)', async (ctx) => {
     render({ cdr: cdr({ fromNumber: asciiRun(6000, 23), did: longUrl() }) })
     await drawn()
     await check(ctx)
-  }, { knownIssue: textWrap, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 })
 
 describe('call detail with a hostile transcript', () => {

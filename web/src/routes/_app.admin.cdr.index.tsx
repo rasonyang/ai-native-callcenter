@@ -5,7 +5,7 @@ import { Loader2, Play, Square } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { describeError } from '@/lib/errors'
@@ -103,8 +103,16 @@ function CDRExplorer() {
                   {timeFormat.format(new Date(row.startedAt))}
                 </Link>
               </Td>
-              <Td className="tabular">{row.fromNumber || '—'}</Td>
-              <Td className="tabular">{row.did || '—'}</Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-28">
+                  {row.fromNumber || '—'}
+                </CellText>
+              </Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-28">
+                  {row.did || '—'}
+                </CellText>
+              </Td>
               <Td className="text-xs text-muted-foreground">
                 {row.legs.map((leg) => t(`cdr.legs.${leg.kind}`)).join(' → ') || '—'}
               </Td>
@@ -249,7 +257,7 @@ function StatusCell(props: {
 }) {
   const { t } = useTranslation()
   return (
-    <span className="flex items-center gap-1.5 text-xs">
+    <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
       <span
         className="size-2 rounded-full"
         style={{ backgroundColor: STATUS_COLOR[props.status] ?? 'var(--state-offline)' }}

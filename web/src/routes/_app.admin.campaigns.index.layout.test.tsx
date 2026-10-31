@@ -4,7 +4,6 @@ import type { Campaign } from '@/lib/campaigns'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds } from '@/test/layout-known-issues'
 
 /**
  * The campaign list. A campaign's name is bounded by the contract (200
@@ -74,7 +73,7 @@ describe('campaign list with names at the contract limit', () => {
     render(statusRows({ name: maxLengthOf('CampaignWrite', 'name') }), 120)
     await waitForRows(5)
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 
   layoutTest('campaigns (200-character names, Chinese)', async (ctx) => {
     render(statusRows({ name: chineseRun(200) }))
@@ -94,7 +93,7 @@ describe('campaign list with hostile DID numbers and counters', () => {
     render(statusRows({ didNumber: digits(40) }))
     await waitForRows(5)
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 
   layoutTest('campaigns (unbreakable DID numbers)', async (ctx) => {
     render([
@@ -104,7 +103,7 @@ describe('campaign list with hostile DID numbers and counters', () => {
     ])
     await waitForRows(3)
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 
   // Counters in the millions: the "37 active · 120 done ..." sentence grows.
   layoutTest('campaigns (counters in the millions)', async (ctx) => {

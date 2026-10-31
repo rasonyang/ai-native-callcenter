@@ -5,7 +5,7 @@ import { KeyRound, Pencil, Phone, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import type { Role } from '@/lib/api'
 import { describeError, fieldErrorText } from '@/lib/errors'
@@ -104,8 +104,12 @@ function UsersAdmin() {
           )}
           {rows.map((user) => (
             <Tr key={user.userId}>
-              <Td className="font-medium">{user.username}</Td>
-              <Td className="text-muted-foreground">{user.displayName}</Td>
+              <Td className="font-medium">
+                <CellText maxWidth="max-w-48" minWidth="min-w-upto-24">{user.username}</CellText>
+              </Td>
+              <Td className="text-muted-foreground">
+                <CellText maxWidth="max-w-48" minWidth="min-w-upto-32">{user.displayName}</CellText>
+              </Td>
               <Td>{t(`roles.${user.role}`)}</Td>
               <Td>
                 <span
@@ -123,7 +127,9 @@ function UsersAdmin() {
                 {/* Absent, not blank: an administrator has no phone because
                     they take no calls, which is different from a phone that
                     was unbound. */}
-                {user.extensionNumber ?? (
+                {user.extensionNumber ? (
+                  <CellText maxWidth="max-w-40" minWidth="min-w-upto-16">{user.extensionNumber}</CellText>
+                ) : (
                   <span className="flex items-center gap-2">
                     <span className="text-muted-foreground">{t('users.noPhone')}</span>
                     {/* A call-taking account with no phone cannot sign in.

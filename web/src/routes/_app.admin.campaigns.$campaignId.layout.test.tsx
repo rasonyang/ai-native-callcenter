@@ -8,7 +8,7 @@ import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, textWrap, truncateFloor } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * One campaign: header, counters, and the contacts, leads and attempts tabs
@@ -226,7 +226,7 @@ describe('campaign detail, contacts tab', () => {
     await drawn()
     await waitForRows(5)
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en' })
+  })
 
   layoutTest('campaigns/$campaignId contacts (unbreakable numbers)', async (ctx) => {
     render({
@@ -239,7 +239,7 @@ describe('campaign detail, contacts tab', () => {
     await drawn()
     await waitForRows(3)
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('campaign detail, attempts tab', () => {
@@ -257,7 +257,7 @@ describe('campaign detail, attempts tab', () => {
     await openTab(user, 'campaign.tabs.attempts')
     await screen.findAllByText(i18n.t('campaign.openCall'))
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 
   // The hangup cause is the switch's token on a real call; on an attempt the
   // contract leaves it a free string, and "Open call" must stay reachable.
@@ -274,7 +274,7 @@ describe('campaign detail, attempts tab', () => {
       await openTab(user, 'campaign.tabs.attempts')
       await screen.findAllByText(i18n.t('campaign.openCall'))
       await expectLayout(ctx)
-    }, { knownIssue: cellBounds })
+    })
   }
 })
 
@@ -297,7 +297,7 @@ describe('campaign detail, leads tab', () => {
     await openTab(user, 'campaign.tabs.leads')
     await screen.findAllByText(i18n.t('campaign.openCall'))
     await expectLayout(ctx)
-  }, { knownIssue: truncateFloor, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en' })
+  })
 
   // One column at a time. The notes cell truncates, so only the number can
   // size the table.
@@ -313,7 +313,7 @@ describe('campaign detail, leads tab', () => {
     await openTab(user, 'campaign.tabs.leads')
     await screen.findAllByText(i18n.t('campaign.openCall'))
     await expectLayout(ctx)
-  }, { knownIssue: truncateFloor, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en' })
+  })
 
   layoutTest('campaigns/$campaignId leads (unbreakable numbers)', async (ctx) => {
     const { user } = render({
@@ -327,5 +327,5 @@ describe('campaign detail, leads tab', () => {
     await openTab(user, 'campaign.tabs.leads')
     await screen.findAllByText(i18n.t('campaign.openCall'))
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })

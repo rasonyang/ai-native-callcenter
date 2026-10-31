@@ -4,7 +4,6 @@ import type { CDR } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, narrowTables } from '@/test/layout-known-issues'
 
 /**
  * The CDR explorer. Its text cells are the caller's number and the dialled
@@ -98,7 +97,7 @@ describe('CDR explorer with every enum cell at its widest', () => {
     render(enumRows())
     await waitForRows(4)
     await expectLayout(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en' })
+  })
 })
 
 // One column at a time: the other keeps ordinary numbers.
@@ -113,7 +112,7 @@ describe('CDR explorer with 40-digit numbers', () => {
       render(enumRows().map((row, i) => Object.assign(row, put(digits(40, 10 + i), i))), 500)
       await waitForRows(4)
       await expectLayout(ctx)
-    }, { knownIssue: cellBounds, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en') })
+    })
   }
 })
 
@@ -130,6 +129,6 @@ describe('CDR explorer with numbers that cannot break', () => {
       ])
       await waitForRows(4)
       await expectLayout(ctx)
-    }, { knownIssue: cellBounds })
+    })
   }
 })

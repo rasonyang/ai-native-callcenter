@@ -125,3 +125,13 @@
 .tabular {
   font-variant-numeric: tabular-nums;
 }
+
+/*
+ * min-w-upto-N: a content-limited floor, min(the value's natural width, N * 4px).
+ * calc-size() reads max-content as a number, so a short value's min-content
+ * equals its max-content (its column never shrinks) and a long one floors at N.
+ * A browser without calc-size drops the declaration: no floor, never overflow.
+ */
+@utility min-w-upto-* {
+  min-width: calc-size(max-content, min(size, --spacing(--value(integer))));
+}

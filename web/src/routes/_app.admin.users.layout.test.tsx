@@ -7,7 +7,7 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Users: username (contract limit 64), display name (120), the allocated
@@ -82,10 +82,6 @@ describe('users, usernames at the contract limit', () => {
     renderUsers(usernameUsers)
     await screen.findByText('ordinary_user')
     await expectLayout(ctx)
-  }, {
-    // 882px (zh) / 989px (en) of table in a 754px card at 1024; 1280 holds it.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024,
   })
 })
 
@@ -94,10 +90,6 @@ describe('users, display names at the contract limit', () => {
     renderUsers(displayNameUsers)
     await screen.findByText('Ordinary Name')
     await expectLayout(ctx)
-  }, {
-    // 1295px (zh) / 1420px (en) of table in a 754 / 1010px card at 1024 / 1280.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width < 1920,
   })
 })
 
@@ -106,10 +98,6 @@ describe('users, a 40-digit extension', () => {
     renderUsers(extensionUsers)
     await screen.findByText('Ordinary Name')
     await expectLayout(ctx)
-  }, {
-    // 818px of table in a 754px card, English only: the Chinese headers are shorter.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en',
   })
 })
 

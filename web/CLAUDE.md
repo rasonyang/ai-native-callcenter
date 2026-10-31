@@ -24,10 +24,23 @@ day, NOT a marketing site.
 - Table row height 36px, cell text 13px, header 12px uppercase tracking-wide text-secondary
 - Content inside a table never sizes the table. A full-width row under a record
   is a `DetailRow`, never a hand-built `<Td colSpan>` (`src/test/table-rows.test.ts`
-  fails on one). A cell holding free text that can be long (names, URLs, notes)
-  carries a width bound: `max-w-*` with wrapping or truncation.
+  fails on one). A cell that shows a value somebody typed (names, numbers, ids,
+  URLs, notes, errors) is a `CellText` (`src/components/table.tsx`) with a
+  `max-w-*` sized for a real value: it truncates with the full value in `title`,
+  or `wrap`s where the whole value must stay readable. A short value that must
+  read in full (a phone number, a name) also gets a `min-w-upto-*` floor, which
+  holds min(the value, N) and so reserves no room it does not use. A `max-w-*`
+  on the cell alone is a floor, not a bound: table layout never makes a column narrower than
+  its cell's min-content, and a `truncate` value, or one with no break
+  opportunity, has the whole value as its min-content.
   `npm run test:browser` checks this in Chromium (`*.layout.test.tsx`, helpers in
   `src/test/layout.ts`); a screen that shows typed text gets a layout test.
+- The narrowest desktop viewport is 1024px, which leaves a 754px card beside the
+  sidebar. No page scrolls sideways there. Common and core business tables read
+  in full there with ordinary data. A table that cannot fit without losing
+  information users need may scroll inside its own card, never the page, and the
+  change that does so names the table and the reason. The layout tests' smallest
+  viewport (`VIEWPORTS` in `src/test/layout.ts`) stays 1024×768.
 - Sidebar width 220px, nav item height 32px, icon 16px
 - KPI stat cards: label 12px secondary on top, value 24px semibold below, delta 12px
 - Buttons: h-8 (32px) default, h-9 for primary page actions only

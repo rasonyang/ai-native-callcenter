@@ -7,9 +7,6 @@ import { renderApp, waitForRows } from '@/test/app'
 import { AGENT_ID } from '@/test/harness'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, words } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import {
-  at1024, cellBounds, knownBy, truncateFloor,
-} from '@/test/layout-known-issues'
 
 /**
  * The callbacks queue. A callback is made by the bot from what the caller
@@ -64,7 +61,7 @@ describe('callbacks with ordinary requests', () => {
     render(oneOfEach())
     await loaded(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([at1024, truncateFloor]) })
+  })
 })
 
 describe('callbacks with hostile messages', () => {
@@ -79,7 +76,7 @@ describe('callbacks with hostile messages', () => {
     ])
     await loaded(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([at1024, truncateFloor]) })
+  })
 })
 
 describe('callbacks with hostile numbers', () => {
@@ -87,11 +84,6 @@ describe('callbacks with hostile numbers', () => {
     render(oneOfEach({ phoneNumber: digits(40, 1) }))
     await loaded(5)
     await expectLayout(ctx)
-  }, {
-    // The phone column is the one that widens the table, and only where the
-    // card is narrow enough for it to reach the card's edge.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en'),
   })
 
   layoutTest('agent/callbacks (unbreakable numbers)', async (ctx) => {
@@ -102,5 +94,5 @@ describe('callbacks with hostile numbers', () => {
     ])
     await loaded(3)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([() => true, cellBounds]) })
+  })
 })

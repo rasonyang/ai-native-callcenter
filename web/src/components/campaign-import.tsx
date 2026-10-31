@@ -4,7 +4,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -360,8 +360,8 @@ export function CampaignImportDialog({
                       {table.rows.slice(0, PREVIEW_ROWS).map((row) => (
                         <Tr key={row.line}>
                           {table.header.map((_, i) => (
-                            <Td key={i} className="max-w-48 truncate text-xs">
-                              {row.cells[i] ?? ''}
+                            <Td key={i} className="text-xs">
+                              <CellText maxWidth="max-w-48">{row.cells[i] ?? ''}</CellText>
                             </Td>
                           ))}
                         </Tr>

@@ -60,7 +60,7 @@ function CallDetail() {
             {t('cdr.journey')}
           </h2>
           <Journey cdr={cdr} />
-          <dl className="mt-4 grid grid-cols-3 gap-x-4 gap-y-3">
+          <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 xl:grid-cols-3">
             <Fact label={t('cdr.status')}>
               {cdr.missedReason
                 ? t(`cdr.missedReasons.${cdr.missedReason}`)

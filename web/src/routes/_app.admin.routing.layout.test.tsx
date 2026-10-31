@@ -8,7 +8,7 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Queues & Routing: a queue's display name and switch name (neither bounded in
@@ -116,7 +116,7 @@ describe('queues, hostile display names', () => {
     renderRouting(displayNameQueues)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('queues, hostile switch names', () => {
@@ -124,7 +124,7 @@ describe('queues, hostile switch names', () => {
     renderRouting(nameQueues)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('queues, 40-digit extensions', () => {
@@ -132,11 +132,6 @@ describe('queues, 40-digit extensions', () => {
     renderRouting(extensionQueues)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // 1063px of table in a 1010px card at 1280 (English), and in 754px at 1024
-    // in both languages (817px in Chinese); 1920 holds it.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en'),
   })
 })
 

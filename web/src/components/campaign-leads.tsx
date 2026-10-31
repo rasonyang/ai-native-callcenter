@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import {
   LEAD_INTENTS, isPlacedCall, useCampaignContacts, type Campaign, type CampaignContact,
   type CampaignLeadIntent,
@@ -62,10 +62,12 @@ export function CampaignLeads({ campaign }: { campaign: Campaign }) {
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="tabular">{row.number}</Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
+              </Td>
               <Td className="text-xs">{row.leadIntent ? t(`campaign.intents.${row.leadIntent}`) : '—'}</Td>
-              <Td className="max-w-96 truncate text-xs text-muted-foreground">
-                <span title={row.leadNotes}>{row.leadNotes || '—'}</span>
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-96">{row.leadNotes || '—'}</CellText>
               </Td>
               <Td className="text-xs text-muted-foreground">
                 {row.leadIntent === 'HIGH' && row.lastCallId ? <CallbackStatus callId={row.lastCallId} /> : '—'}

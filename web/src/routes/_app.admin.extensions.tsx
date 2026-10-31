@@ -8,7 +8,7 @@ import { Dialog, Popover } from 'radix-ui'
 import { CopyButton } from '@/components/copy-button'
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { describeError, fieldErrorText } from '@/lib/errors'
 import { useUsers } from '@/lib/users'
@@ -73,15 +73,21 @@ function ExtensionsPage() {
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="tabular font-medium">{row.number}</Td>
-              <Td>{row.displayName}</Td>
+              <Td className="tabular font-medium">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-16">{row.number}</CellText>
+              </Td>
+              <Td>
+                <CellText maxWidth="max-w-48" minWidth="min-w-upto-32">{row.displayName}</CellText>
+              </Td>
               <Td className="text-muted-foreground">
                 {/* Who sits here. Named rather than "assigned": the question
                     an operator brings to this table is whose phone 1008 is,
                     and a yes does not answer it. A phone arrives with its
                     account now, so an unassigned one is one whose account was
                     deleted — worth seeing, not worth hiding behind a blank. */}
-                {ownerOf(row.agentId) ?? (
+                {ownerOf(row.agentId) ? (
+                  <CellText maxWidth="max-w-64" minWidth="min-w-upto-32">{ownerOf(row.agentId)}</CellText>
+                ) : (
                   <span className="text-xs">{t('admin.unassigned')}</span>
                 )}
               </Td>

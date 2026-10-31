@@ -10,23 +10,11 @@
  * `issue` is the follow-up issue that tracks the fix.
  */
 
-import type { LayoutContext } from './layout'
-
 export interface KnownIssue {
   /** The follow-up issue that tracks the fix. */
   issue: number
   /** One line: what overflows and why. */
   reason: string
-}
-
-/**
- * A table cell holding free text or a number from a user, a customer or a flow
- * author has no width bound and nothing to break at, so a hostile value widens
- * the table.
- */
-export const cellBounds: KnownIssue = {
-  issue: 384,
-  reason: 'a table cell with user-supplied text or digits has no width bound and no break',
 }
 
 /**
@@ -38,39 +26,3 @@ export const textWrap: KnownIssue = {
   issue: 385,
   reason: 'text outside a table (dialog title, popover, description, card) does not wrap',
 }
-
-/**
- * Tables or cards that overflow at 1024 (or 1280) with ordinary, realistic
- * data: too many columns, or a fixed-width part, for the card at that width.
- */
-export const narrowTables: KnownIssue = {
-  issue: 386,
-  reason: 'a table or card overflows at 1024 or 1280 with ordinary data',
-}
-
-/**
- * A `max-w-* truncate` cell whose bound the table's auto layout also treats as
- * the column's minimum width (`truncate` is nowrap), so the table cannot shrink
- * below it however narrow the window is (#379): My Calls and Callbacks notes,
- * webhook URLs and delivery errors, the audit Request column, lead notes.
- */
-export const truncateFloor: KnownIssue = {
-  issue: 379,
-  reason: 'a max-w-* truncate cell is the column\'s minimum width, so the table cannot shrink below it',
-}
-
-/**
- * For a group that fails for several reasons at different combinations: every
- * entry whose predicate holds for the combination, or none.
- */
-export function knownBy(
-  ...rules: Array<[when: (ctx: LayoutContext) => boolean, issue: KnownIssue]>
-): (ctx: LayoutContext) => KnownIssue[] | undefined {
-  return (ctx) => {
-    const hit = rules.filter(([when]) => when(ctx)).map(([, issue]) => issue)
-    return hit.length > 0 ? hit : undefined
-  }
-}
-
-export const at1024 = (ctx: LayoutContext) => ctx.viewport.width === 1024
-export const below1920 = (ctx: LayoutContext) => ctx.viewport.width < 1920

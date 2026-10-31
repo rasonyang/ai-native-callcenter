@@ -7,7 +7,7 @@ import { Dialog } from 'radix-ui'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, Select, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError, fieldErrorText } from '@/lib/errors'
@@ -93,10 +93,18 @@ function RoutingPage() {
           {rows.map((row, index) => (
             <Tr key={row.id}>
               <Td>
-                <span className="font-medium">{row.displayName}</span>
-                <span className="ml-2 text-xs text-muted-foreground">{row.name}</span>
+                <div className="flex items-baseline gap-2">
+                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-16" className="font-medium">
+                    {row.displayName}
+                  </CellText>
+                  <CellText maxWidth="max-w-40" className="text-xs text-muted-foreground">
+                    {row.name}
+                  </CellText>
+                </div>
               </Td>
-              <Td className="tabular">{row.extNumber}</Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-16">{row.extNumber}</CellText>
+              </Td>
               <Td className="text-xs text-muted-foreground">
                 {t(`admin.strategies.${row.strategy}`)}
               </Td>
