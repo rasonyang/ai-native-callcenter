@@ -131,12 +131,15 @@ export function Td({
  * min-content == max-content and never shrinks, an empty one reserves only its
  * own width, and a long one floors at N so only the difference shrinks. Pick N
  * as the width an ordinary value of that kind needs: a phone number or DID 32
- * (E.164 is at most 15 digits and a `+`), an IPv4 address 28, an extension 16,
+ * (E.164 is at most 15 digits and a `+`), or 29 where the table is tight (a
+ * +86 mobile is 14 characters, 114px), an IPv4 address 28, an extension 16,
  * a short name 24 to 32. N is the content width: the cell's own `px-4` is on
  * top. Free text (notes, messages, request bodies, URLs, errors) gets none and
  * absorbs the shrink. The floors of a table, plus its columns that cannot
- * shrink, must fit the 754px card at 1024, or the table overflows again (the
- * layout tests fail it).
+ * shrink, must fit the 739px card at 1024, or the table overflows again (the
+ * layout tests fail it). 739 is the card with a classic 15px scrollbar on
+ * `main` (Windows, or a Mac that always shows scrollbars); the layout tests keep
+ * that scrollbar on. Overlay scrollbars give 754.
  *
  * A tight table can pair two: `min-w-upto-24 xl:min-w-upto-36` keeps the
  * 1024 floor small and raises it where the card has room (1280 and up).

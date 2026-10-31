@@ -66,6 +66,24 @@ carries the one-line installer's files.
   go under the name, and a long name, tag or userData value truncates with the
   whole value in its tooltip. From 1280px the three columns are unchanged.
   (#406)
+- On My Calls, an agent no longer scrolls the table sideways to reach Listen.
+  A truncated note held its column at 448px, so the table could not get
+  narrower than about 1150px, at 1280px as at 1024px. Across the console, a
+  table cell that shows a value someone typed (a name, a number, a note, a URL,
+  an error) no longer widens its table: one long value, such as a name without
+  spaces or a 40-digit number, used to push the table far past its card and
+  the row's buttons out of reach. Such a value now truncates with the whole
+  value in its tooltip, or wraps where all of it must be read (a revision's
+  publish note, a tool's definition, a webhook filter). A short value, such as
+  a phone number, keeps its full width while longer free text gives way.
+  (#379, #384)
+- At 1024px, the narrowest supported desktop width, every list table now fits
+  its card with ordinary data, also when the page shows a classic scrollbar.
+  A tool's parameters wrap between their parts. Numbers shows the description
+  under the number, and its Language and Recording from 1280px up, as Queues &
+  Routing does its Recording; each stays in the edit dialog. The CDR status
+  cell, a user's "Assign a phone" cell and contact tags wrap, and the call
+  detail's facts are two columns below 1280px. (#386)
 - On an AI call, the provider now hears the caller on the call's own clock.
   A phone that stopped sending while its user was silent (silence suppression)
   left the provider with no audio for that stretch, and what followed could

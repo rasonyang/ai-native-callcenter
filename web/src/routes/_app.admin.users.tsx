@@ -130,7 +130,7 @@ function UsersAdmin() {
                 {user.extensionNumber ? (
                   <CellText maxWidth="max-w-40" minWidth="min-w-upto-16">{user.extensionNumber}</CellText>
                 ) : (
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-muted-foreground">{t('users.noPhone')}</span>
                     {/* A call-taking account with no phone cannot sign in.
                         Saving it unchanged is what gives it one, from the

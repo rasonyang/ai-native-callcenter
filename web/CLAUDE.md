@@ -35,8 +35,9 @@ day, NOT a marketing site.
   opportunity, has the whole value as its min-content.
   `npm run test:browser` checks this in Chromium (`*.layout.test.tsx`, helpers in
   `src/test/layout.ts`); a screen that shows typed text gets a layout test.
-- The narrowest desktop viewport is 1024px, which leaves a 754px card beside the
-  sidebar. No page scrolls sideways there. Common and core business tables read
+- The narrowest desktop viewport is 1024px, which leaves a 739px card beside the
+  sidebar once a classic scrollbar takes its 15px (Windows always shows one; the
+  layout tests force it). No page scrolls sideways there. Common and core business tables read
   in full there with ordinary data. A table that cannot fit without losing
   information users need may scroll inside its own card, never the page, and the
   change that does so names the table and the reason. The layout tests' smallest

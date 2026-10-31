@@ -101,7 +101,7 @@ function CampaignsPage() {
                 {row.status === 'RUNNING' ? (row.inFlight ?? 0) : '—'}
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.didNumber}</CellText>
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-29">{row.didNumber}</CellText>
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
                 {created.format(new Date(row.createdAt))}

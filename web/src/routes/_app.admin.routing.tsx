@@ -81,7 +81,9 @@ function RoutingPage() {
           <Th align="right">{t('supervisor.staffed')}</Th>
           <Th>{t('admin.maxWait')}</Th>
           <Th>{t('admin.overflow')}</Th>
-          <Th>{t('admin.recording')}</Th>
+          {/* Recording shows from xl up (it is in the edit dialog): at 1024 its
+              header is wider than its yes/no, and the queue name needs the room. */}
+          <Th className="hidden xl:table-cell">{t('admin.recording')}</Th>
           <Th align="right">{t('supervisor.actions')}</Th>
         </THead>
         <TBody>
@@ -94,7 +96,7 @@ function RoutingPage() {
             <Tr key={row.id}>
               <Td>
                 <div className="flex items-baseline gap-2">
-                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-16" className="font-medium">
+                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-32" className="font-medium">
                     {row.displayName}
                   </CellText>
                   <CellText maxWidth="max-w-40" className="text-xs text-muted-foreground">
@@ -117,7 +119,7 @@ function RoutingPage() {
               <Td className="text-xs text-muted-foreground">
                 {t(`admin.overflowTypes.${row.overflow.type}`)}
               </Td>
-              <Td className="text-xs text-muted-foreground">
+              <Td className="hidden text-xs text-muted-foreground xl:table-cell">
                 {row.isRecordingEnabled ? t('common.yes') : t('common.no')}
               </Td>
               <Td align="right">

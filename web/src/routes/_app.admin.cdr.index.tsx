@@ -104,7 +104,7 @@ function CDRExplorer() {
                 </Link>
               </Td>
               <Td className="tabular">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-28">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-29">
                   {row.fromNumber || '—'}
                 </CellText>
               </Td>

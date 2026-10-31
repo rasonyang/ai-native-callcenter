@@ -110,16 +110,16 @@ function MyCallsPage() {
             <Tr>
               <Td className="tabular">{timeFormat.format(new Date(row.startedAt))}</Td>
               <Td className="tabular">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{customerOf(row) || '—'}</CellText>
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-29 xl:min-w-upto-32">{customerOf(row) || '—'}</CellText>
               </Td>
               <Td className="text-xs text-muted-foreground">
-                <CellText maxWidth="max-w-40" minWidth="min-w-upto-20">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-16">
                   {row.legs.find((leg) => leg.kind === 'QUEUE')?.label || '—'}
                 </CellText>
               </Td>
               <Td>
                 {row.wrapUp?.dispositionLabel ? (
-                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-24 xl:min-w-upto-36" pill>{row.wrapUp.dispositionLabel}</CellText>
+                  <CellText maxWidth="max-w-48" minWidth="min-w-upto-20 xl:min-w-upto-36" pill>{row.wrapUp.dispositionLabel}</CellText>
                 ) : (
                   <span className="text-xs text-muted-foreground">{t('myCalls.notFiled')}</span>
                 )}

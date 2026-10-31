@@ -30,7 +30,10 @@ export default defineConfig({
       enabled: true,
       provider: 'playwright',
       headless: true,
-      instances: [{ browser: 'chromium' }],
+      // Playwright launches headless Chromium with --hide-scrollbars, which
+      // measures every card 15px wider than a Windows browser, or a Mac with
+      // "always show scrollbars", gives it. Keep the classic scrollbar.
+      instances: [{ browser: 'chromium', launch: { ignoreDefaultArgs: ['--hide-scrollbars'] } }],
       // A failed run writes nothing into the tree; the assertion message names
       // the element and its measured size, which a screenshot would not.
       screenshotFailures: false,

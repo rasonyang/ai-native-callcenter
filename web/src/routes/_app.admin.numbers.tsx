@@ -94,7 +94,7 @@ function NumbersPage() {
                 <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
                 {/* The description labels the number, so it sits under it, and
                     Language and Recording show from xl up (both are in the edit
-                    dialog): nine columns do not fit the 754px card at 1024. */}
+                    dialog): nine columns do not fit the 739px card at 1024. */}
                 {row.description && (
                   <CellText maxWidth="max-w-48" className="text-xs font-normal text-muted-foreground">
                     {row.description}
