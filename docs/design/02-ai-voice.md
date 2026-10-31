@@ -24,7 +24,7 @@ One thing the port carried wrong and #250 fixed, invisible here because this top
 
 **Ports**: SIP UDP `:6060` (takes over the `aicc_bot` gateway target). RTP pool `40000–40999` (even RTP / odd RTCP pairs → 500 concurrent pairs ≥ 220 MaxCalls with headroom), configurable; deliberately outside the switch's 16384–16584 since dev co-locates both on one host.
 
-**Kept from golang-bot verbatim**: 20ms ticker pacing with late-tick resync (no catch-up bursts), TX prebuffer 3 frames (60ms) + 2-tick underrun grace, reorder-only jitter buffer (4-frame window, ≥25-frame gap resync, codec-correct silence fill), RTP dead timeout (5s default), minimal RTCP SR/RR (one-way-dead detection), OPTIONS→200, INFO+RFC2833 DTMF merge, advertise-IP route-probe toward the peer's media address.
+**Kept from golang-bot verbatim**: 20ms ticker pacing with late-tick resync (no catch-up bursts), TX prebuffer 3 frames (60ms) + 2-tick underrun grace, reorder-only jitter buffer (4-frame window, ≥25-frame gap resync, codec-correct silence fill), RTP dead timeout (5s default), minimal RTCP SR/RR (one-way-dead detection), OPTIONS→200, INFO+RFC2833 DTMF merge, advertise-IP route-probe toward the peer's media address (replaced in #349: the answer names the address the INVITE was sent to).
 
 ## 2. Codec & sample-rate paths (per direction, per provider)
 

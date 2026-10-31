@@ -50,9 +50,6 @@ services:
       # The bot's SIP and RTP ports are on the host's interfaces now, so only
       # the switch may send to them: it dials from FS_LOCAL_IP.
       AICC_BOT_ALLOWED_PEERS: 127.0.0.1,${FS_LOCAL_IP:?set FS_LOCAL_IP in .env to this host's LAN address}
-      # Route probing could answer with a TUN proxy's address; the switch sends
-      # to the LAN address it dialled.
-      AICC_BOT_ADVERTISE_IP: ${FS_LOCAL_IP:?set FS_LOCAL_IP in .env to this host's LAN address}
       AICC_BOT_RTP_PORT_LOW: "30000"
       AICC_BOT_RTP_PORT_HIGH: "30999"
 

@@ -583,7 +583,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 	t.Parallel()
 	cfg := botConfig(
 		botUAS(config.Config{BotSIPHost: "127.0.0.1", BotSIPPort: 6060,
-			BotAdvertiseIP: "127.0.0.1", BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
+			BotRTPPortLow: 40000, BotRTPPortHigh: 40999,
 			BotMaxCalls: 10, BotAllowedPeers: "127.0.0.1",
 			BotRTPDeadTimeout: 5 * time.Second, BotFirstMediaTimeout: 30 * time.Second},
 			&voice.BotSlots{}),

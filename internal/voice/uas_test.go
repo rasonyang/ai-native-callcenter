@@ -38,7 +38,6 @@ func startUAS(t *testing.T, adjust func(*Config)) (*UAS, *callHooks, *peer) {
 	cfg := DefaultConfig()
 	cfg.SIPHost = "127.0.0.1"
 	cfg.SIPPort = 0 // let the OS pick, so tests never collide
-	cfg.AdvertiseIP = "127.0.0.1"
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	if adjust != nil {
 		adjust(&cfg)

@@ -33,6 +33,12 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- The bot's calls bound their RTP and RTCP ports on every interface, even with
+  `AICC_BOT_SIP_HOST` set to a single address. Each call's RTP and RTCP sockets
+  now bind the address the switch sent the INVITE to, and the SDP answer names
+  that address; before, the answer named a route probe towards the switch (or
+  `AICC_BOT_ADVERTISE_IP`). An INVITE whose destination address cannot be
+  determined is refused with 500. (#349)
 - A click-to-dial agent or an AI outbound customer could be left on an answered
   leg that stayed silent and was never connected. The transfer was sent the
   moment the leg answered, while the switch was still finishing the originate;
@@ -146,6 +152,14 @@ carries the one-line installer's files.
   warns, and the image's architecture is checked once the pull has put it in
   the local daemon (`PREFLIGHT_IMAGE_ARCH` if it is wrong). `--check` only
   warns. (#348)
+
+### Removed
+
+- `AICC_BOT_ADVERTISE_IP`. The bot's SDP answer now names the address the
+  switch sent the INVITE to, which the switch can by definition send media to,
+  so there is nothing left to override (#349). A deployment that still sets it
+  starts, and logs one warning that the setting is ignored. `deploy/compose.linux.yml`
+  no longer sets it.
 
 ### Docs and CI
 

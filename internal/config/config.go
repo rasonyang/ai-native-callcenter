@@ -55,7 +55,9 @@ type Config struct {
 	SIPWSSURL string
 
 	// The AI voice leg. The SIP port is the target of the switch's bot
-	// gateway; the RTP range sits clear of the switch's own.
+	// gateway; the RTP range sits clear of the switch's own. BotSIPHost is where
+	// SIP listens; each call's SDP answer and RTP/RTCP sockets use the address
+	// the switch sent the INVITE to.
 	BotSIPHost string
 	BotSIPPort int
 	// BotAllowedPeers lists the addresses, comma-separated IPs or CIDRs, that
@@ -70,11 +72,9 @@ type Config struct {
 	// whose own address is public would be refused. A deployment that exposes
 	// the bot's ports names its switch here. Parsed by BotAllowedPeerPrefixes.
 	BotAllowedPeers string
-	// BotAdvertiseIP overrides route probing in SDP answers; empty probes.
-	BotAdvertiseIP string
-	BotRTPPortLow  int
-	BotRTPPortHigh int
-	BotMaxCalls    int
+	BotRTPPortLow   int
+	BotRTPPortHigh  int
+	BotMaxCalls     int
 	// BotInboundReserve is how many of BotMaxCalls an outbound reservation may
 	// not take, kept for inbound calls (AICC_BOT_INBOUND_RESERVE). 0 (the
 	// default) reserves nothing at reservation time. IsBotInboundReserveSet says
@@ -437,7 +437,6 @@ func Load() (Config, error) {
 		BotSIPHost:              env("AICC_BOT_SIP_HOST", "0.0.0.0"),
 		BotSIPPort:              envInt("AICC_BOT_SIP_PORT", 6060),
 		BotAllowedPeers:         env("AICC_BOT_ALLOWED_PEERS", ""),
-		BotAdvertiseIP:          env("AICC_BOT_ADVERTISE_IP", ""),
 		BotRTPPortLow:           envInt("AICC_BOT_RTP_PORT_LOW", 40000),
 		BotRTPPortHigh:          envInt("AICC_BOT_RTP_PORT_HIGH", 40999),
 		BotMaxCalls:             envInt("AICC_BOT_MAX_CALLS", 220),
