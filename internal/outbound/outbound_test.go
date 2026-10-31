@@ -292,10 +292,27 @@ func testServiceWithEndpoint(t *testing.T, sw *fakeSwitch,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 }
 
-func answer(s *Service, channelID string) {
+// answerOnly is the leg's CHANNEL_ANSWER and nothing else: the originate has
+// not reported yet, so the continuation must not run (#333).
+func answerOnly(s *Service, channelID string) {
 	s.HandleSwitchEvent(telephony.SwitchEvent{
 		Kind: telephony.KindChannelAnswer, ChannelID: channelID,
 	})
+}
+
+// released is the originate's +OK for a leg, carrying only the leg it named
+// (JobChannelID), as the switch reports it to every listener.
+func released(s *Service, channelID string) {
+	s.HandleSwitchEvent(telephony.SwitchEvent{
+		Kind: telephony.KindBackgroundJob, JobChannelID: channelID, IsJobOK: true,
+	})
+}
+
+// answer is a leg that answered and whose originate then finished: the moment
+// its continuation runs.
+func answer(s *Service, channelID string) {
+	answerOnly(s, channelID)
+	released(s, channelID)
 }
 
 func waitTransfers(t *testing.T, sw *fakeSwitch, want int) {

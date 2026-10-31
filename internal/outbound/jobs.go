@@ -19,9 +19,14 @@ import (
 // can be matched to the call it belongs to.
 //
 // One source finishes a call. If the switch created the channel, the CDR
-// assembled from its events is the record and the job result is only logged.
-// If it never did, this is the only record there will be, and it writes the
-// CDR itself.
+// assembled from its events is the record and a failed job result is only
+// logged. If it never did, this is the only record there will be, and it
+// writes the CDR itself.
+//
+// A successful result has a second job: the originate owns its leg until it
+// writes +OK, so that is the moment the leg's armed continuation may run (the
+// answer alone is not enough, #333). Every +OK ends in settleJob, or in
+// releaseLeg for a leg whose job is no longer tracked.
 
 const (
 	// jobMargin is how long past the answer window a job may stay silent
@@ -252,6 +257,13 @@ func (s *Service) handleJob(ev telephony.SwitchEvent) {
 			s.stashEarlyLocked(ev.JobID, ev.JobCause)
 		}
 		s.mu.Unlock()
+		// A +OK for a leg still armed but whose job is forgotten releases it:
+		// an unconfirmed placement adopted by its window, or a ringing leg
+		// re-armed after a restart whose originate the previous process sent
+		// (the switch tells every listener).
+		if ev.IsJobOK && ev.JobChannelID != "" {
+			s.releaseLeg(ev.JobChannelID)
+		}
 		return
 	}
 	if !ev.IsJobOK && ev.JobCause == "" {
@@ -274,6 +286,7 @@ func (s *Service) settleJob(job *trackedJob, hadChannel, isOK bool, cause string
 	if isOK {
 		s.unclaim(job.callID)
 		s.log.Debug("originate job ok", "callId", job.callID, "jobId", job.jobID)
+		s.releaseLeg(job.legID)
 		return
 	}
 	s.finishJob(job, hadChannel, cause)
@@ -284,6 +297,11 @@ func (s *Service) settleJob(job *trackedJob, hadChannel, isOK bool, cause string
 func (s *Service) finishJob(job *trackedJob, hadChannel bool, cause string) {
 	if hadChannel || (s.isLive != nil && s.isLive(job.callID)) {
 		// The CDR is the single source for how a call that existed ended.
+		// No +OK will release the leg, and a transfer onto a dying leg helps
+		// nobody, so what is armed for it goes.
+		s.mu.Lock()
+		delete(s.pending, job.legID)
+		s.mu.Unlock()
 		s.unclaim(job.callID)
 		s.log.Info("originate job failed after the channel existed; the cdr is the record",
 			"callId", job.callID, "jobId", job.jobID, "cause", cause)

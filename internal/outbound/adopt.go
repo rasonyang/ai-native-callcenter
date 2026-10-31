@@ -244,21 +244,33 @@ func (s *Service) Recover(ctx context.Context, live []telephony.LiveChannel,
 
 // recoverParked decides an originated leg that is answered and still parked.
 //
-// If this process still holds what to do on its answer, the answer was simply
-// missed (an ESL blip), and the person has waited only as long as the blip:
-// inside the window the held continuation runs. Without one, or past the
-// window, there is nobody to bring the bot, and a clean hangup beats silence.
+// A parked leg has no originate holding it, so whatever this process still
+// holds for it may run now, without waiting for the originate's +OK.
+//
+// If it holds what to do, the answer or the +OK was simply missed (an ESL
+// blip), and the person has waited only as long as the blip. A leg whose
+// answer was seen runs the rest, whatever the window says: it was in time. One
+// never seen answering runs inside the window and is hung up past it. Without
+// anything held, a leg whose continuation fired a moment ago is only parked
+// because the bridge command is on its way; any other has nobody to bring the
+// bot, and a clean hangup beats silence.
 func (s *Service) recoverParked(ch telephony.LiveChannel, rep *RecoveryReport) {
-	if s.wasJustAnswered(ch.ChannelID) {
-		rep.Held++
-		return
-	}
 	if leg := s.takePending(ch.ChannelID); leg != nil {
+		if !leg.answeredAt.IsZero() {
+			s.log.Info("recovery: leg was answered and its originate result was lost; running what was armed for it",
+				"channelId", ch.ChannelID, "callId", ch.CallID)
+			leg.cont.proceed()
+			rep.Resumed++
+			return
+		}
 		if s.now().Before(leg.expiresAt) {
 			s.log.Info("recovery: leg was answered while the link was down; running what was armed for it",
 				"channelId", ch.ChannelID, "callId", ch.CallID)
 			s.markAnswered(ch.ChannelID)
-			leg.onAnswer()
+			if leg.cont.onAnswer != nil {
+				leg.cont.onAnswer()
+			}
+			leg.cont.proceed()
 			rep.Resumed++
 			return
 		}
@@ -266,6 +278,10 @@ func (s *Service) recoverParked(ch telephony.LiveChannel, rep *RecoveryReport) {
 			"channelId", ch.ChannelID, "callId", ch.CallID, "cause", LateAnswerCause)
 		s.reap(ch.ChannelID, LateAnswerCause)
 		rep.WindowSpent++
+		return
+	}
+	if s.wasJustAnswered(ch.ChannelID) {
+		rep.Held++
 		return
 	}
 	s.log.Warn("recovery: leg was answered while nobody was watching and is parked; hanging up",
@@ -315,7 +331,7 @@ func (s *Service) recoverRinging(ctx context.Context, ch telephony.LiveChannel, 
 		return
 	}
 
-	var onAnswer func()
+	var cont continuation
 	switch ch.PlacedBy {
 	case telephony.PlacedByDialAI:
 		did, err := s.findDID(ctx, ch.DID)
@@ -330,7 +346,7 @@ func (s *Service) recoverRinging(ctx context.Context, ch telephony.LiveChannel, 
 		if language == "" {
 			language = did.Language
 		}
-		onAnswer = s.bridgeToBot(ch.CallID, ch.ChannelID, did.Number, language, ch.PlacedTo, did.IsRecordingEnabled, campaignRefOf(ch))
+		cont = s.bridgeToBot(ch.CallID, ch.ChannelID, did.Number, language, ch.PlacedTo, did.IsRecordingEnabled, campaignRefOf(ch))
 	case telephony.PlacedByDial:
 		if !isDialable(ch.Destination) {
 			s.log.Warn("recovery: click-to-dial leg has no destination to go on to; hanging up",
@@ -339,13 +355,13 @@ func (s *Service) recoverRinging(ctx context.Context, ch telephony.LiveChannel, 
 			rep.Unrecoverable++
 			return
 		}
-		onAnswer = s.transferOnAnswer(ch.CallID, ch.ChannelID, ch.Destination)
+		cont = s.transferOnAnswer(ch.CallID, ch.ChannelID, ch.Destination)
 	default:
 		rep.Left++
 		return
 	}
 
-	s.armUntil(ch.ChannelID, expiresAt, onAnswer)
+	s.armUntil(ch.ChannelID, expiresAt, cont)
 	s.log.Info("recovery: ringing leg re-armed for what is left of its answer window",
 		"channelId", ch.ChannelID, "callId", ch.CallID, "placedBy", ch.PlacedBy,
 		"remainingMs", expiresAt.Sub(s.now()).Milliseconds())
@@ -387,8 +403,9 @@ func (s *Service) markAnswered(channelID string) {
 	s.noteAnswered(channelID)
 }
 
-// wasJustAnswered reports an answer this process fired a continuation for a
-// moment ago: the leg is parked only because the bridge command is on its way.
+// wasJustAnswered reports an answer this process saw a moment ago. Asked only
+// once nothing is left armed for the leg, it means the continuation ran: the
+// leg is parked only because the bridge command is on its way.
 func (s *Service) wasJustAnswered(channelID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()

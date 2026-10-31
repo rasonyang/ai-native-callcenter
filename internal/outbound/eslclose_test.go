@@ -261,14 +261,15 @@ func TestAnOriginateWhoseLinkClosesAfterTheWriteIsUnconfirmed(t *testing.T) {
 			// connection, rings and answers.
 			pushESLEvent(t, conn, "Event-Name: CHANNEL_CREATE\nUnique-ID: "+leg+"\nCall-Direction: outbound\n")
 			pushESLEvent(t, conn, "Event-Name: CHANNEL_ANSWER\nUnique-ID: "+leg+"\nCall-Direction: outbound\n")
+
+			// Its job result, matched by the leg its command named: the
+			// originate has let go, so the answered leg is sent on.
+			pushESLEvent(t, conn, "Event-Name: BACKGROUND_JOB\nJob-UUID: job-late\nJob-Command: originate\n"+
+				"Job-Command-Arg: {origination_uuid="+leg+"}sofia/x\nContent-Length: 41\n\n+OK "+leg+"\n")
 			eventually(t, "the answered leg to be sent on", func() bool { return len(p.sw.commands(c.done(leg))) == 1 })
 			if hangups := p.sw.commands("api uuid_kill "); len(hangups) != 0 {
 				t.Errorf("hangups = %v: the adopted leg was taken for a late one", hangups)
 			}
-
-			// Its job result, matched by the leg its command named.
-			pushESLEvent(t, conn, "Event-Name: BACKGROUND_JOB\nJob-UUID: job-late\nJob-Command: originate\n"+
-				"Job-Command-Arg: {origination_uuid="+leg+"}sofia/x\nContent-Length: 41\n\n+OK "+leg+"\n")
 			eventually(t, "the placement to be settled", func() bool { return !p.s.IsPlacing(callID) })
 			if rows := p.ledger.get(callID); len(rows) != 0 {
 				t.Errorf("placement-failure rows %+v for a call that exists", rows)
