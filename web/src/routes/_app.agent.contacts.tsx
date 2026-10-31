@@ -5,8 +5,7 @@ import { Pencil, Plus } from 'lucide-react'
 
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
-import { Badge } from '@/components/ui/badge'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { ConfirmDelete } from '@/routes/_app.admin.extensions'
 import { describeError, fieldErrorText } from '@/lib/errors'
@@ -115,15 +114,22 @@ function ContactsPage() {
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="font-medium">{row.name || '—'}</Td>
-              <Td className="tabular">{row.phoneNumber}</Td>
-              <Td className="text-xs text-muted-foreground">{row.company || '—'}</Td>
+              <Td className="font-medium">
+                <CellText maxWidth="max-w-64" minWidth="min-w-upto-32 xl:min-w-upto-48">{row.name || '—'}</CellText>
+              </Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.phoneNumber}</CellText>
+              </Td>
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-72" minWidth="min-w-upto-32 xl:min-w-upto-72">{row.company || '—'}</CellText>
+              </Td>
               <Td>
-                <span className="flex flex-wrap items-center gap-1">
+                {/* Tags wrap inside a bounded cell; one long tag truncates in its pill. */}
+                <div className="flex max-w-xs flex-wrap items-center gap-1">
                   {row.tags.map((tag) => (
-                    <Badge key={tag}>{tag}</Badge>
+                    <CellText key={tag} maxWidth="max-w-40" minWidth="min-w-upto-16" pill>{tag}</CellText>
                   ))}
-                </span>
+                </div>
               </Td>
               <Td className="tabular text-xs text-muted-foreground">
                 {row.lastCallAt ? dateFormat.format(new Date(row.lastCallAt)) : t('contacts.never')}

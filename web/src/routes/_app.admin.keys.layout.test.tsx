@@ -8,7 +8,7 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * API Keys: name (contract limit 128, #370), the non-secret prefix, the scope
@@ -88,11 +88,6 @@ describe('API keys, names at the contract limit', () => {
     renderKeys(nameKeys)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // 1508px (zh) / 1536px (en) of table in a 754 / 1010px card at 1024 / 1280;
-    // the actions end up past the card's right edge. 1920 holds it.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width < 1920,
   })
 })
 
@@ -101,7 +96,7 @@ describe('API keys, an unbreakable key prefix', () => {
     renderKeys(prefixKeys)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('API keys, every scope', () => {

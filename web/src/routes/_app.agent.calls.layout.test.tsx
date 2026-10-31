@@ -9,9 +9,6 @@ import {
   asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote, words,
 } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import {
-  below1920, cellBounds, knownBy, truncateFloor,
-} from '@/test/layout-known-issues'
 
 /**
  * My Calls, as an agent sees it: inside the cockpit shell, with the softphone
@@ -107,14 +104,14 @@ describe('my calls with ordinary calls', () => {
     render(ordinary())
     await waitForRows(4)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([below1920, truncateFloor]) })
+  })
 
   layoutTest('agent/calls (recording row open)', async (ctx) => {
     const { user } = render(ordinary())
     await waitForRows(4)
     await openRecording(user)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([below1920, truncateFloor]) })
+  })
 })
 
 describe('my calls with notes of every kind', () => {
@@ -130,7 +127,7 @@ describe('my calls with notes of every kind', () => {
     ])
     await waitForRows(5)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([below1920, truncateFloor]) })
+  })
 })
 
 describe('my calls with hostile numbers, queues and dispositions', () => {
@@ -142,7 +139,7 @@ describe('my calls with hostile numbers, queues and dispositions', () => {
     ])
     await waitForRows(3)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([below1920, cellBounds]) })
+  })
 
   // One column at a time; the other cells keep ordinary values.
   for (const [column, put] of [
@@ -154,7 +151,7 @@ describe('my calls with hostile numbers, queues and dispositions', () => {
       render([put(asciiRun(6000, 1), 1), put(chineseRun(3000, 2), 2), put(longUrl(), 3), call(4)])
       await waitForRows(4)
       await expectLayout(ctx)
-    }, { knownIssue: knownBy([() => true, cellBounds]) })
+    })
   }
 
   layoutTest('agent/calls (hostile calls, recording row open)', async (ctx) => {
@@ -165,5 +162,5 @@ describe('my calls with hostile numbers, queues and dispositions', () => {
     await waitForRows(2)
     await openRecording(user)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([below1920, truncateFloor]) })
+  })
 })

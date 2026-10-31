@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useMemo, useState } from 'react'
 
 import { PageHeader } from '@/components/page-header'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import {
@@ -79,12 +79,16 @@ function Webhooks() {
               }
               className={sub.subscriptionId === selected ? 'bg-muted' : 'cursor-pointer'}
             >
-              <Td className="font-medium">{sub.name}</Td>
-              <Td className="max-w-96 truncate font-mono text-xs text-muted-foreground">
-                {sub.url}
+              <Td className="font-medium">
+                <CellText maxWidth="max-w-48" minWidth="min-w-upto-32">{sub.name}</CellText>
+              </Td>
+              <Td className="font-mono text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-96">{sub.url}</CellText>
               </Td>
               <Td className="text-xs text-muted-foreground">
-                {describeFilter(sub.filter, t('webhooks.everyCall'))}
+                <CellText maxWidth="max-w-72" wrap>
+                  {describeFilter(sub.filter, t('webhooks.everyCall'))}
+                </CellText>
               </Td>
               <Td className="text-xs text-muted-foreground">
                 {sub.hasAuthToken ? t('webhooks.tokenSet') : t('webhooks.tokenNone')}
@@ -156,8 +160,10 @@ function Deliveries({
               <Td align="right" className="tabular text-muted-foreground">
                 {row.lastStatusCode ?? '—'}
               </Td>
-              <Td className="max-w-80 truncate text-xs text-muted-foreground">
-                {row.lastError || '—'}
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-md" title={row.lastError || undefined}>
+                  {row.lastError || '—'}
+                </CellText>
               </Td>
             </Tr>
           ))}

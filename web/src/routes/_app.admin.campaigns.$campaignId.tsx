@@ -12,7 +12,7 @@ import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNameThisPage } from '@/lib/breadcrumb'
@@ -341,8 +341,10 @@ function ContactsTab({ campaign }: { campaign: Campaign }) {
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="tabular" >
-                <span title={row.numberRaw}>{row.number}</span>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32" title={row.numberRaw}>
+                  {row.number}
+                </CellText>
               </Td>
               <Td className="text-xs">{t(`campaign.contactStatuses.${row.status}`)}</Td>
               <Td align="right" className="tabular text-xs">
@@ -419,11 +421,15 @@ function AttemptsTab({ campaign }: { campaign: Campaign }) {
           {rows.map((row) => (
             <Tr key={row.id}>
               <Td className="tabular text-xs">{time.format(new Date(row.startedAt))}</Td>
-              <Td className="tabular">{row.number}</Td>
+              <Td className="tabular">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.number}</CellText>
+              </Td>
               <Td className="text-xs">
                 {row.outcome ? t(`campaign.outcomes.${row.outcome}`) : t('campaign.attemptStates.DIALING')}
               </Td>
-              <Td className="text-xs text-muted-foreground">{row.hangupCause || '—'}</Td>
+              <Td className="text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-36">{row.hangupCause || '—'}</CellText>
+              </Td>
               <Td align="right" className="tabular text-xs">
                 {row.talkSec === undefined ? '—' : formatDuration(row.talkSec)}
               </Td>

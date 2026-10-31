@@ -8,7 +8,7 @@ import {
   asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote, nestedJson, words,
 } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, narrowTables, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * The bot editor's History, Tools and Persona tabs, fed values that cannot
@@ -247,25 +247,24 @@ describe('bot editor, History tab with a 200-character revision note and no spac
     await openTab(user, 'bots.tabs.history')
     await screen.findAllByRole('button', { name: i18n.t('bots.rollBack') })
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('bot editor, Tools tab', () => {
-  // The control. If ordinary data does not fit, no hostile result means anything;
-  // today it is 10px too wide at 1024 in English.
+  // The control. If ordinary data does not fit, no hostile result means anything.
   layoutTest('bots/$flowId Tools (ordinary data)', async (ctx) => {
     const { user } = renderEditor({ ordinary: true })
     await openTab(user, 'bots.tabs.tools')
     await within(await screen.findByRole('table')).findByText('lookup_account')
     await expectLayout(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en' })
+  })
 
   layoutTest('bots/$flowId Tools', async (ctx) => {
     const { user } = renderEditor()
     await openTab(user, 'bots.tabs.tools')
     await within(await screen.findByRole('table')).findByText('lookup_account')
     await expectLayout(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 
   // A 2,000-character URL as a tool's path, a 6,000-character token in its
   // description: the HTTP call and description cells size the table.
@@ -274,7 +273,7 @@ describe('bot editor, Tools tab', () => {
     await openTab(user, 'bots.tabs.tools')
     await within(await screen.findByRole('table')).findByText('lookup_account')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('bot editor, Persona and rules tab', () => {

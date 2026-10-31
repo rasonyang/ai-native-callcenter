@@ -7,7 +7,7 @@ import { CampaignState, ContactCounts } from '@/components/campaign-state'
 import { PageHeader } from '@/components/page-header'
 import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { buttonVariants } from '@/components/ui/button'
 import { CAMPAIGN_STATUSES, useCampaigns, type CampaignStatus } from '@/lib/campaigns'
 import { describeError } from '@/lib/errors'
@@ -86,9 +86,9 @@ function CampaignsPage() {
                 <Link
                   to="/admin/campaigns/$campaignId"
                   params={{ campaignId: row.id }}
-                  className="text-foreground hover:text-primary"
+                  className="block text-foreground hover:text-primary"
                 >
-                  {row.name}
+                  <CellText maxWidth="max-w-xs" minWidth="min-w-upto-24 xl:min-w-upto-56">{row.name}</CellText>
                 </Link>
               </Td>
               <Td>
@@ -100,7 +100,9 @@ function CampaignsPage() {
               <Td align="right" className="tabular">
                 {row.status === 'RUNNING' ? (row.inFlight ?? 0) : '—'}
               </Td>
-              <Td className="tabular text-xs text-muted-foreground">{row.didNumber}</Td>
+              <Td className="tabular text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-29">{row.didNumber}</CellText>
+              </Td>
               <Td className="tabular text-xs text-muted-foreground">
                 {created.format(new Date(row.createdAt))}
               </Td>

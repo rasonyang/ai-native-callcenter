@@ -3,8 +3,7 @@ import { describe } from 'vitest'
 import type { AuditEntry } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, nestedJson } from '@/test/hostile'
-import { expectLayout, layoutTest, restoreLanguage, type LayoutContext } from '@/test/layout'
-import { at1024, below1920, cellBounds, knownBy, narrowTables, truncateFloor } from '@/test/layout-known-issues'
+import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
 
 /**
  * The audit trail. The contract bounds none of its text fields: the actor's
@@ -53,7 +52,7 @@ describe('audit trail with ordinary entries', () => {
     ], 130)
     await waitForRows(3)
     await expectLayout(ctx)
-  }, { knownIssue: truncateFloor, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 })
 
 describe('audit trail with the longest real values', () => {
@@ -71,13 +70,12 @@ describe('audit trail with the longest real values', () => {
     ])
     await waitForRows(2)
     await expectLayout(ctx)
-  }, { knownIssue: narrowTables, knownIssueWhen: (ctx) => ctx.viewport.width < 1920 })
+  })
 })
 
 describe('audit trail with a long request body', () => {
-  // A stored request is shown on one line and cut by the cell (max-w-96
-  // truncate), so the cell is contained. Its 384px still widens a table that
-  // has no room for it at 1024.
+  // A stored request is shown on one line and cut by the cell (CellText), so
+  // the cell is contained and gives way when the table has no room for it.
   layoutTest('audit (long request body)', async (ctx) => {
     render([
       entry(1, {
@@ -88,7 +86,7 @@ describe('audit trail with a long request body', () => {
     ])
     await waitForRows(1)
     await expectLayout(ctx)
-  }, { knownIssue: truncateFloor, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 })
 
 /**
@@ -103,18 +101,6 @@ const columns: Array<[name: string, put: (value: string) => Partial<AuditEntry>]
   ['request', (v) => ({ detail: { request: v } })],
 ]
 
-/**
- * Even the ordinary rows overflow the card at 1024 (the group above; the 384px Request cell is the column's floor, #379), so every
- * group fails there for that reason as well as for its own. The request cell
- * is clipped, so it has no reason of its own. A 40-digit value is 369px: it
- * fits the larger cards but not the 754px one, and not the action column at
- * 1280.
- */
-const knownFor = (name: string, cellWhen: (ctx: LayoutContext) => boolean) =>
-  name === 'request'
-    ? knownBy([at1024, truncateFloor])
-    : knownBy([at1024, truncateFloor], [cellWhen, cellBounds])
-
 describe('audit trail with unbreakable text in one column', () => {
   for (const [name, put] of columns) {
     layoutTest(`audit (unbreakable ${name})`, async (ctx) => {
@@ -126,20 +112,20 @@ describe('audit trail with unbreakable text in one column', () => {
       ])
       await waitForRows(4)
       await expectLayout(ctx)
-    }, { knownIssue: knownFor(name, () => true) })
+    })
   }
 
   layoutTest('audit (nested JSON request)', async (ctx) => {
     render([entry(1, { detail: { request: JSON.stringify(nestedJson(30)) } }), entry(2, { detail: nestedJson(30) as never })])
     await waitForRows(2)
     await expectLayout(ctx)
-  }, { knownIssue: knownFor('request', () => false) })
+  })
 
   layoutTest('audit (mixed Chinese, English and emoji actor)', async (ctx) => {
     render([entry(1, { actorUsername: mixedNote() }), entry(2)])
     await waitForRows(2)
     await expectLayout(ctx)
-  }, { knownIssue: knownFor('request', () => false) })
+  })
 })
 
 describe('audit trail with 40-digit values in one column', () => {
@@ -148,6 +134,6 @@ describe('audit trail with 40-digit values in one column', () => {
       render([entry(1, put(digits(40, 1))), entry(2)])
       await waitForRows(2)
       await expectLayout(ctx)
-    }, { knownIssue: knownFor(name, name === 'action' ? at1024 : below1920) })
+    })
   }
 })

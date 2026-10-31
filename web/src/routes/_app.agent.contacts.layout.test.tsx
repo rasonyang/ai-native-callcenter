@@ -7,9 +7,6 @@ import { renderApp, waitForRows } from '@/test/app'
 import { contactFixture } from '@/test/harness'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import {
-  at1024, cellBounds, knownBy, narrowTables,
-} from '@/test/layout-known-issues'
 
 /**
  * The agent's contact book. The contract bounds the phone number (32), the
@@ -86,16 +83,14 @@ describe('contacts at the contract limits', () => {
       ])
       await loaded(4)
       await expectLayout(ctx)
-    }, { knownIssue: knownBy([() => true, cellBounds]) })
+    })
   }
 
-  // Also overflows the card on its own at 1024 (830px in 754px); that is
-  // hidden behind the top bar while the bar fails, and shows once it is fixed.
   layoutTest('agent/contacts (twenty 40-character tags)', async (ctx) => {
     render([contact(1, { tags: maxTags(1) }), contact(2, { tags: maxTags(2) }), contact(3)])
     await loaded(3)
     await expectLayout(ctx)
-  }, { knownIssue: knownBy([at1024, narrowTables]) })
+  })
 
   layoutTest('agent/contacts (twenty short tags)', async (ctx) => {
     render([contact(1, { tags: Array.from({ length: 20 }, (_, i) => `tag-${i}`) }), contact(2)])

@@ -7,7 +7,6 @@ import {
   asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote,
 } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, truncateFloor } from '@/test/layout-known-issues'
 
 /**
  * Webhooks: subscriptions (name, URL, filter) and the selected one's recent
@@ -122,11 +121,6 @@ describe('webhooks, names at the contract limit', () => {
     renderWebhooks(nameSubscriptions, [])
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // The table is 1446px (zh) / 1539px (en) in a card of 754 / 1010px at
-    // 1024 / 1280; at 1920 the card is 1650px and holds it.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width < 1920,
   })
 })
 
@@ -136,7 +130,7 @@ describe('webhooks, filters with long values', () => {
     renderWebhooks(filterSubscriptions, [])
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('webhooks, deliveries with hostile errors', () => {
@@ -146,5 +140,5 @@ describe('webhooks, deliveries with hostile errors', () => {
     await user.click(await screen.findByText('Billing warehouse'))
     await screen.findAllByText('2147483647', { selector: 'td.tabular' })
     await expectLayout(ctx)
-  }, { knownIssue: truncateFloor, knownIssueWhen: (ctx) => ctx.viewport.width === 1024 })
+  })
 })

@@ -7,7 +7,7 @@ import { Popover } from 'radix-ui'
 import { CopyButton } from '@/components/copy-button'
 import { PageHeader } from '@/components/page-header'
 import { Field, Input, RecordDialog, useRecordForm } from '@/components/record-dialog'
-import { DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
 import { describeError, fieldErrorText } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
@@ -107,8 +107,12 @@ function KeysPage() {
             // secondary text, which is the Offline semantic this design system
             // already uses for something that is no longer live.
             <Tr key={key.id} className={revoked ? 'text-muted-foreground' : undefined}>
-              <Td className={revoked ? undefined : 'font-medium'}>{key.name}</Td>
-              <Td className="font-mono text-xs text-muted-foreground">{key.keyPrefix}…</Td>
+              <Td className={revoked ? undefined : 'font-medium'}>
+                <CellText maxWidth="max-w-64" minWidth="min-w-upto-32">{key.name}</CellText>
+              </Td>
+              <Td className="font-mono text-xs text-muted-foreground">
+                <CellText maxWidth="max-w-40" minWidth="min-w-upto-24" title={`${key.keyPrefix}…`}>{`${key.keyPrefix}…`}</CellText>
+              </Td>
               <Td className="text-xs text-muted-foreground">
                 {key.scopes.length === 0 ? t('keys.noScopes') : key.scopes.join(' ')}
               </Td>

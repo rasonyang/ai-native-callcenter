@@ -8,7 +8,7 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { cellBounds, narrowTables, textWrap } from '@/test/layout-known-issues'
+import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Numbers: the DID (digits, no length bound), the description (no bound), the
@@ -99,10 +99,6 @@ describe('numbers, ordinary data', () => {
     await screen.findByText('售后热线')
     await screen.findAllByText('Billing follow-up')
     await expectLayout(ctx)
-  }, {
-    // The control. 867px of table in a 754px card; Chinese headers are shorter.
-    knownIssue: narrowTables,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en',
   })
 })
 
@@ -111,10 +107,6 @@ describe('numbers, 40-digit numbers', () => {
     renderNumbers(numberDIDs)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // 1150px (en) / 872px (zh) of table; the card is 754px at 1024, 1010px at 1280.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 || (ctx.viewport.width === 1280 && ctx.lang === 'en'),
   })
 })
 
@@ -123,7 +115,7 @@ describe('numbers, hostile descriptions', () => {
     renderNumbers(descriptionDIDs)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('numbers, an 8-character language tag', () => {
@@ -131,10 +123,6 @@ describe('numbers, an 8-character language tag', () => {
     renderNumbers(languageDIDs)
     await screen.findByText('Ordinary')
     await expectLayout(ctx)
-  }, {
-    // Nothing here is the tag's fault: the same ordinary overflow as the control.
-    knownIssue: narrowTables,
-    knownIssueWhen: (ctx) => ctx.viewport.width === 1024 && ctx.lang === 'en',
   })
 })
 
@@ -144,10 +132,6 @@ describe('numbers, a bot flow named at the contract limit', () => {
     await screen.findByText('Ordinary')
     await screen.findAllByText(maxLengthOf('FlowCreate', 'name'))
     await expectLayout(ctx)
-  }, {
-    // 1702px (en) / 1379px (zh) of table; 1650px at 1920 holds only the Chinese one.
-    knownIssue: cellBounds,
-    knownIssueWhen: (ctx) => ctx.viewport.width < 1920 || ctx.lang === 'en',
   })
 })
 
@@ -157,7 +141,7 @@ describe('numbers, a fallback queue with a hostile name', () => {
     await screen.findByText('Ordinary')
     await screen.findAllByText(asciiRun(300, 93))
     await expectLayout(ctx)
-  }, { knownIssue: cellBounds })
+  })
 })
 
 describe('numbers, deleting a 40-digit number', () => {
