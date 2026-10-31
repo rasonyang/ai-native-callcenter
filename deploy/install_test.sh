@@ -113,6 +113,157 @@ wifi_route='   route to: default
 eq 'macos: a hardware default goes first, once' \
     "$(macos_candidate_ifaces "$wifi_route" "$hwports" | tr '\n' ' ')" 'en1 en0 bridge0 '
 
+# ------------------------------------------------------- host address ----
+
+lo_addrs='127.0.0.1,::1,192.168.31.111,10.0.0.5,127.0.0.0/8,10.0.0.0/24'
+ok 'ip_on_host: exact address' ip_on_host 192.168.31.111 "$lo_addrs"
+ok 'ip_on_host: 127.0.0.2 in 127.0.0.0/8' ip_on_host 127.0.0.2 "$lo_addrs"
+notok 'ip_on_host: 127.0.0.2 against 127.0.0.1 only' ip_on_host 127.0.0.2 127.0.0.1,::1
+notok 'ip_on_host: a NAT address' ip_on_host 203.0.113.9 "$lo_addrs"
+ok 'ip_on_host: last address of a /24' ip_on_host 10.0.0.255 10.0.0.0/24
+ok 'ip_on_host: first address of a /24' ip_on_host 10.0.0.0 10.0.0.0/24
+notok 'ip_on_host: next /24 is outside' ip_on_host 10.0.1.0 10.0.0.0/24
+notok 'ip_on_host: previous /24 is outside' ip_on_host 9.255.255.255 10.0.0.0/8
+ok 'ip_on_host: a /32 is its address' ip_on_host 10.0.0.7 10.0.0.7/32
+notok 'ip_on_host: a /32 is only its address' ip_on_host 10.0.0.8 10.0.0.7/32
+ok 'ip_on_host: /0 is everything' ip_on_host 203.0.113.9 0.0.0.0/0
+notok 'ip_on_host: empty list' ip_on_host 127.0.0.2 ''
+notok 'ip_on_host: an IPv6 range is ignored' ip_on_host 127.0.0.2 ::1/128
+
+# resolve_address with the host stubbed: a default route on 192.168.31.111.
+infer_address() { printf '192.168.31.111\n'; }
+host_addrs() { printf '%s\n' "$lo_addrs"; }
+ENV_FILE="$TMP/resolve.env"
+rm -f "$ENV_FILE"
+MODE=install
+OS=linux
+resolve_with() { # flag-value -> "EXTERNAL LOCAL"
+    EXTERNAL_IP_FLAG=$1
+    resolve_address >/dev/null 2>&1
+    printf '%s %s\n' "$EXTERNAL_IP" "$LOCAL_IP"
+}
+eq 'resolve: no flag takes the inferred address twice' "$(resolve_with '')" '192.168.31.111 192.168.31.111'
+eq 'resolve: --external-ip 127.0.0.2 binds it too' "$(resolve_with 127.0.0.2)" '127.0.0.2 127.0.0.2'
+eq 'resolve: --external-ip on an interface binds it too' "$(resolve_with 10.0.0.5)" '10.0.0.5 10.0.0.5'
+# An address that is not the host's is refused before anything is set.
+resolve_refused=$( (
+    EXTERNAL_IP_FLAG=203.0.113.9
+    resolve_address
+    printf 'reached=after\n'
+) 2>&1) && _rr=0 || _rr=$?
+eq 'resolve: an address that is not on the host exits 1' "$_rr" 1
+case $resolve_refused in *PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: an address that is not on the host names the tag' "$_f" yes
+case $resolve_refused in *reached=after*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a refusal sets nothing' "$_f" no
+notok 'resolve: a refusal writes no .env' test -e "$TMP/resolve-refused.env"
+# A prompted address is judged the same way.
+can_prompt() { return 0; }
+ask() { REPLY=$PROMPT_REPLY; }
+resolve_prompted() { # reply -> output; no default route to infer from
+    (
+        infer_address() { :; }
+        PROMPT_REPLY=$1
+        EXTERNAL_IP_FLAG=''
+        resolve_address
+        printf 'result %s %s\n' "$EXTERNAL_IP" "${LOCAL_IP:-}"
+    ) 2>&1
+}
+case $(resolve_prompted 203.0.113.9) in *PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a prompted address that is not on the host is refused' "$_f" yes
+case $(resolve_prompted 127.0.0.2) in *'result 127.0.0.2 127.0.0.2'*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a prompted loopback address is taken and bound' "$_f" yes
+unset -f can_prompt ask
+# A host whose addresses cannot be listed: warn and accept.
+case $( (
+    host_addrs() { :; }
+    EXTERNAL_IP_FLAG=203.0.113.9
+    resolve_address
+) 2>&1) in *'accepting 203.0.113.9'*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: unlistable host addresses warn and accept' "$_f" yes
+OS=macos
+eq 'resolve: macOS never follows' "$(resolve_with 127.0.0.2)" '127.0.0.2 192.168.31.111'
+OS=linux
+printf 'FS_EXTERNAL_IP=10.0.0.5\nFS_LOCAL_IP=10.0.0.5\n' >"$ENV_FILE"
+eq 'resolve: a rerun without a flag keeps .env' "$(resolve_with '')" '10.0.0.5 10.0.0.5'
+# Drop the stubs: sourcing again restores the real functions.
+unset -f infer_address host_addrs can_prompt ask
+EXTERNAL_IP_FLAG=''
+# shellcheck source=deploy/install.sh
+. "$here/install.sh"
+
+# -------------------------------------------------------------- images ----
+
+# A stubbed docker. preflight_fail exits, so each case runs in a subshell and
+# reports what it printed and how it ended.
+ARCH=arm64
+image_run() {
+    # shellcheck disable=SC2317
+    docker() {
+        case $1 in
+        image) [ -n "$IMG_LOCAL" ] && printf '%s\n' "$IMG_LOCAL" ;;
+        manifest)
+            [ -n "$MANIFEST_OUT" ] || return 0
+            printf '%s\n' "$MANIFEST_OUT"
+            return "$MANIFEST_RC"
+            ;;
+        esac
+    }
+    DEFERRED_IMAGES=
+    image_arch_ok example/app:v1
+    printf 'deferred=[%s]\n' "$DEFERRED_IMAGES"
+}
+image_case() { # name want-status want-text-in-output
+    _ic_out=$( (image_run) 2>&1) && _ic_rc=0 || _ic_rc=$?
+    eq "image: $1 (status)" "$_ic_rc" "$2"
+    case $_ic_out in *"$3"*) _ic_has=yes ;; *) _ic_has=no ;; esac
+    eq "image: $1 (output has '$3')" "$_ic_has" yes
+}
+IMG_LOCAL='linux/arm64' MANIFEST_OUT='' MANIFEST_RC=0
+image_case 'a local image of this architecture' 0 'image example/app:v1 (local'
+IMG_LOCAL='linux/amd64'
+image_case 'a local image of another architecture' 1 'PREFLIGHT_IMAGE_ARCH'
+IMG_LOCAL='' MANIFEST_OUT='{"manifests":[{"platform":{"architecture":"arm64","os":"linux"}}]}' MANIFEST_RC=0
+image_case 'a manifest with the architecture' 0 'image example/app:v1 (linux/arm64)'
+MANIFEST_OUT='{"manifests":[{"platform":{"architecture":"amd64","os":"linux"}}]}'
+image_case 'a manifest without it' 1 'PREFLIGHT_IMAGE_ARCH'
+MANIFEST_OUT='no such manifest: docker.io/example/app:v1' MANIFEST_RC=1
+image_case 'no such manifest' 1 'PREFLIGHT_IMAGE_UNAVAILABLE'
+MANIFEST_OUT='failed to configure transport: error pinging v2 registry: Get "https://registry-1.docker.io/v2/": read tcp 10.0.0.2:1->1.2.3.4:443: read: connection reset by peer' MANIFEST_RC=1
+image_case 'a network error defers the image' 0 'deferred=[example/app:v1]'
+image_case 'a network error warns about registry-mirrors' 0 'registry-mirrors'
+unset IMG_LOCAL MANIFEST_OUT MANIFEST_RC
+
+# After the pull, a deferred image is judged as a local one.
+recheck_case() { # local-answer
+    (
+        # shellcheck disable=SC2317
+        docker() { [ -n "$IMG_LOCAL" ] && printf '%s\n' "$IMG_LOCAL"; }
+        DEFERRED_IMAGES='example/app:v1'
+        recheck_deferred_images
+    ) >/dev/null 2>&1
+}
+IMG_LOCAL='linux/arm64'
+ok 'recheck: pulled with this architecture' recheck_case
+IMG_LOCAL='linux/amd64'
+notok 'recheck: pulled with another architecture' recheck_case
+IMG_LOCAL=''
+notok 'recheck: not local after the pull' recheck_case
+unset IMG_LOCAL
+
+# The post-pull failure must not claim nothing was written.
+recheck_out=$( (
+    # shellcheck disable=SC2317
+    docker() { return 1; }
+    DIR=/opt/aicc
+    DEFERRED_IMAGES='example/app:v1'
+    recheck_deferred_images
+) 2>&1) || true
+case $recheck_out in *'files and .env are in /opt/aicc; no container was created'*) _f=yes ;; *) _f=no ;; esac
+eq 'recheck failure prints the honest footer' "$_f" yes
+case $recheck_out in *'Nothing was installed or started.'*) _f=yes ;; *) _f=no ;; esac
+eq 'recheck failure does not print the preflight footer' "$_f" no
+
 # ---------------------------------------------------------- exclusions ----
 
 ok 'excluded: TUN 198.18.0.1' ip_excluded 198.18.0.1

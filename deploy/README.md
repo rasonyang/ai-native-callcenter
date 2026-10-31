@@ -40,20 +40,32 @@ from `releases/download/<tag>/install.sh`, or pass `--version <tag>`.
 
 **Before it changes anything, it checks the host.** Each failed check prints a
 stable tag (`FAIL PREFLIGHT_…`), what is wrong and the command that fixes it,
-then stops with nothing written or started. `--check` runs only these checks.
+then stops with nothing written or started (one exception: the architecture
+check of an image the registry could not be read for runs after the pull, when
+the release's files and `.env` are already written; no container is created or
+changed). `--check` runs only these checks.
 They cover: Docker Engine 24.0.0 or later and Compose 2.24.4 or later (not the
 snap package, not rootless), on macOS Docker Desktop or Colima 0.9.0 or later
 with the `grpc` port forwarder, at least 4 CPUs and 4 GiB for the runtime,
-both images published for this host's architecture, no other stack named
+both images published for this host's architecture (read from the registry
+with `docker manifest inspect`, which does not use the daemon's
+`registry-mirrors`: when the registry cannot be reached directly the installer
+warns, and checks the architecture after the pull instead; a tag the registry
+says does not exist still stops it), no other stack named
 `aicc`, the stack's ports free, and on Linux an active ufw or firewalld
 allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
 
 **What it asks, and what it works out itself:**
 
-- The LAN address phones reach this host at: inferred from the default route's
-  interface, skipping loopback, link-local and TUN-proxy addresses
-  (198.18.0.0/15). Pass `--external-ip <ip>` when the inference is wrong or
-  phones reach the host through NAT.
+- The LAN address the switch binds and advertises: inferred from the default
+  route's interface, skipping loopback, link-local and TUN-proxy addresses
+  (198.18.0.0/15). The switch stays on the LAN and public traffic reaches it
+  through an edge SBC, so `--external-ip <ip>` (for when the inference is
+  wrong) must be one of this host's own addresses: its LAN address, or a
+  loopback address an SBC on the same host forwards to (127.0.0.2 counts, as
+  part of 127.0.0.0/8). Any other address, a NAT's or a public one, is refused
+  with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`. On Linux the address you give is
+  also `FS_LOCAL_IP`, where the switch and the bot bind.
 - The voice provider (`--provider openai|grok|qwen|gateway|doubao|none`) and
   its key. The key is read from the environment (`OPENAI_API_KEY`,
   `XAI_API_KEY` for grok, `ALIYUN_API_KEY` for qwen, `DOUBAO_API_KEY`,
@@ -80,7 +92,7 @@ would have had to ask for.
 | Option | Meaning |
 |---|---|
 | `--provider P` | `openai`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
-| `--external-ip IP` | The address phones reach this host at. On a rerun, rewrites the address in `.env` |
+| `--external-ip IP` | One of this host's own addresses: its LAN address, or a loopback address an edge SBC on this host forwards to; anything else is refused (`PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`). On a rerun, rewrites the address in `.env`. On Linux it is also `FS_LOCAL_IP` |
 | `--version TAG` | The release to install. Default: the release the script came from |
 | `--no-demo` | Do not seed the demo dataset (`AICC_SEED` empty). Use it for production |
 | `--upgrade` | Back up the database, then move an install to `--version` |
@@ -128,7 +140,10 @@ cd /opt/aicc && sudo docker compose exec aicc aicc doctor --host-addrs <ip>   # 
 cd ~/.aicc && docker compose exec aicc aicc doctor --host-addrs <ip>           # macOS
 ```
 
-`--host-addrs` is the host's address (comma-separated if several); on macOS
+`--host-addrs` is the host's address (comma-separated if several; an entry may
+be an IPv4 range such as `127.0.0.0/8`, which is how the installer passes
+Linux's loopback, where 127.0.0.2 is local though `ip addr` lists only
+127.0.0.1); on macOS
 the container cannot see the Mac's interfaces, so without it the address check
 is judged against the wrong host. Each line is `PASS`, `WARN`, `FAIL` or `SKIP`, the
 check's name and a message; a `FAIL` or `WARN` also carries a code and a `fix:`

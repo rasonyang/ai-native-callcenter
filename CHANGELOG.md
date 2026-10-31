@@ -9,6 +9,15 @@ carries the one-line installer's files.
 
 ### Changed
 
+- `install.sh --external-ip`, and an address typed at the installer's prompt,
+  is now refused unless it is one of this host's own addresses (one `ip addr`
+  or `ifconfig` lists, or inside a range of the kernel's local table such as
+  127.0.0.0/8), with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`, in `--check` too.
+  The switch stays on the LAN and public traffic reaches it through an edge
+  SBC, so a NAT or public address could only produce a stack that
+  `aicc doctor` fails; the LAN address, or a loopback address an SBC on the
+  same host forwards to, is what belongs there. Before, any IPv4 address was
+  written to `.env`. (#421)
 - On a campaign call, while the call is in a phase that declares a `lead`, the
   model's `record_lead` is now refused: it is answered with an error, nothing is
   written, and the phase's lead stands. Before, a stray `record_lead` made after
@@ -109,6 +118,26 @@ carries the one-line installer's files.
   a caller could hear two closing lines, the model's own and then the flow's
   (#350). They now say the closing line is spoken for the model, as the other
   seeded flows do.
+- `aicc doctor` no longer fails `EXTERNAL_IP_NOT_ON_HOST` for an address such
+  as 127.0.0.2 that Linux treats as the host's own because it lies in
+  127.0.0.0/8, although `ip addr` lists only 127.0.0.1/8. `--host-addrs` now
+  accepts IPv4 ranges, the installer passes the ranges of the kernel's local
+  table along with the addresses, and without the flag a loopback interface
+  covers its whole network; any other network still counts only its own
+  address. The PASS line names the entry that matched. (#347)
+- `install.sh --external-ip 127.0.0.2` on Linux no longer leaves `FS_LOCAL_IP`
+  on the default route's address, which made the switch bind the public
+  interface. The address given with the flag (or at the prompt) is now also
+  `FS_LOCAL_IP`, and a rerun without the flag keeps what `.env` says. (#346)
+- The installer's image preflight no longer aborts a host whose Docker daemon
+  pulls through `registry-mirrors` while Docker Hub itself is unreachable.
+  `docker manifest inspect`, which reads the registry directly, failed there
+  with a network error and the install stopped with
+  `PREFLIGHT_IMAGE_UNAVAILABLE` before a pull that would have worked. Now only
+  the registry's own "no such manifest" answer stops it; any other failure
+  warns, and the image's architecture is checked once the pull has put it in
+  the local daemon (`PREFLIGHT_IMAGE_ARCH` if it is wrong). `--check` only
+  warns. (#348)
 
 ### Docs and CI
 

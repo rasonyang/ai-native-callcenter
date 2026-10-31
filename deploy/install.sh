@@ -46,14 +46,16 @@ pass() { printf 'PASS %s\n' "$*"; }
 
 # preflight_fail TAG message [fix...]: a stable tag an operator can search for,
 # what is wrong, and each command that fixes it. Nothing has been written or
-# started when this runs.
+# started when this runs, except in the check after the pull
+# (recheck_deferred_images), which sets FAIL_FOOTER to say what is on disk.
+FAIL_FOOTER="Nothing was installed or started."
 preflight_fail() {
     printf 'FAIL %s: %s\n' "$1" "$2" >&2
     shift 2
     for _pf_fix in "$@"; do
         printf '  fix: %s\n' "$_pf_fix" >&2
     done
-    say "Nothing was installed or started." >&2
+    say "$FAIL_FOOTER" >&2
     exit 1
 }
 
@@ -65,9 +67,11 @@ Usage: install.sh [options]
 
   --provider P        the voice provider: openai, grok, qwen, gateway, doubao
                       or none (none: the bot never answers; the human path works)
-  --external-ip IP    the address phones reach this host at (default: the
-                      address of the default route's interface); on a rerun,
-                      rewrites the address in .env
+  --external-ip IP    this host's own address the switch binds and advertises:
+                      its LAN address (default: the address of the default
+                      route's interface) or a loopback address an edge SBC on
+                      this host forwards to, e.g. 127.0.0.2; anything else is
+                      refused. On a rerun, rewrites the address in .env
   --version TAG       the release to install (default: this script's release)
   --no-demo           do not seed the demo dataset (AICC_SEED empty)
   --upgrade           back up the database, then move an install to --version
@@ -601,22 +605,39 @@ preflight_macos_runtime() {
     pass "resources $_pm_cpus CPUs, $((_pm_mem / 1048576)) MiB"
 }
 
+# image_local_arch_ok IMAGE: 0 when the image is in the local daemon and runs
+# natively here, 1 when it is not local; a local image of another architecture
+# fails the preflight.
+image_local_arch_ok() {
+    _il_have=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null) || return 1
+    [ "$_il_have" = "linux/$ARCH" ] ||
+        preflight_fail PREFLIGHT_IMAGE_ARCH "$1 on this host is $_il_have, not linux/$ARCH" \
+            "docker image rm $1 (it is pulled again for linux/$ARCH)"
+    pass "image $1 (local, linux/$ARCH)"
+}
+
 # image_arch_ok IMAGE: the image runs natively here. A local image (an
 # override built on this host, or one already pulled) is judged by itself;
 # otherwise the registry's manifest list must name this architecture. Never
 # emulated: an amd64 switch under Rosetta or QEMU is not something to debug a
-# call on.
+# call on. `docker manifest inspect` talks to the registry directly and does
+# not use the daemon's registry-mirrors, so only the registry's definite "no
+# such manifest" fails here; any other failure (network, TLS, auth) defers the
+# image to DEFERRED_IMAGES, which compose_up checks once the pull has put it
+# in the local daemon.
 image_arch_ok() {
-    if _ia_have=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null); then
-        [ "$_ia_have" = "linux/$ARCH" ] ||
-            preflight_fail PREFLIGHT_IMAGE_ARCH "$1 on this host is $_ia_have, not linux/$ARCH" \
-                "docker image rm $1 (it is pulled again for linux/$ARCH)"
-        pass "image $1 (local, linux/$ARCH)"
+    image_local_arch_ok "$1" && return 0
+    if ! _ia_manifest=$(docker manifest inspect "$1" 2>&1); then
+        case $_ia_manifest in
+        *'no such manifest'*)
+            preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "$1 is not published: the registry has no such manifest" \
+                "check the tag (docker manifest inspect $1)"
+            ;;
+        esac
+        warn "could not read the manifest of $1 from its registry ($(printf '%s' "$_ia_manifest" | head -n 1)); docker manifest inspect does not use the daemon's registry-mirrors. Its architecture is checked after the pull."
+        DEFERRED_IMAGES="${DEFERRED_IMAGES:+$DEFERRED_IMAGES }$1"
         return 0
     fi
-    _ia_manifest=$(docker manifest inspect "$1" 2>/dev/null) ||
-        preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "cannot read the manifest of $1 from its registry" \
-            "check the tag and this host's access to Docker Hub (docker manifest inspect $1)"
     if printf '%s\n' "$_ia_manifest" | tr -d ' \t\n' | grep -q "\"architecture\":\"$ARCH\""; then
         pass "image $1 (linux/$ARCH)"
         return 0
@@ -625,11 +646,25 @@ image_arch_ok() {
         "run on an amd64 or arm64 host the release is built for"
 }
 
+# recheck_deferred_images: after the pull, the images the preflight could not
+# read a manifest for are local, and are judged as local images are.
+recheck_deferred_images() {
+    FAIL_FOOTER="The release's files and .env are in $DIR; no container was created or changed (on an upgrade the old containers are still running)."
+    for _rd_image in $DEFERRED_IMAGES; do
+        image_local_arch_ok "$_rd_image" ||
+            preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "$_rd_image is not in the local daemon after the pull" \
+                "docker pull $_rd_image"
+    done
+    DEFERRED_IMAGES=
+    FAIL_FOOTER="Nothing was installed or started."
+}
+
 preflight_images() {
     APP_IMAGE=${AICC_IMAGE:-$(env_get "$ENV_FILE" AICC_IMAGE)}
     APP_IMAGE=${APP_IMAGE:-rasonyang/ai-native-callcenter:$TAG}
     FS_IMAGE=${AICC_FS_IMAGE:-$(env_get "$ENV_FILE" AICC_FS_IMAGE)}
     FS_IMAGE=${FS_IMAGE:-rasonyang/freeswitch-aicc:$TAG}
+    DEFERRED_IMAGES=
     for _pi_image in "$APP_IMAGE" "$FS_IMAGE" postgres:18; do
         image_arch_ok "$_pi_image"
     done
@@ -745,27 +780,67 @@ infer_address() {
     done
 }
 
+# host_addrs: this host's addresses, comma-separated, for doctor's
+# --host-addrs. On Linux also the IPv4 ranges of the kernel's local table
+# (127.0.0.0/8 for lo): the whole prefix is local though `ip addr` lists only
+# 127.0.0.1/8. macOS does not route 127.0.0.2 to lo0 without an alias, and
+# ifconfig lists aliases, so it needs nothing more.
 host_addrs() {
     if [ "$OS" = linux ]; then
         ip -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'
+        ip -4 -o route show table local type local 2>/dev/null | awk '$2 ~ /\// { print $2 }'
     else
         ifconfig 2>/dev/null | awk '$1 == "inet" || $1 == "inet6" { print $2 }' | sed 's/%.*//'
     fi | paste -s -d, -
 }
 
+# ip_on_host IP ADDRS: IP is one of the comma-separated ADDRS (host_addrs'
+# output) or inside one of its IPv4 ranges (a/b/c/d/len). Pure, so the tests
+# feed it fixtures.
+ip_on_host() {
+    awk -v ip="$1" -v list="$2" '
+        function num(s,   p) {
+            if (split(s, p, ".") != 4) return -1
+            for (i = 1; i <= 4; i++) if (p[i] !~ /^[0-9]+$/ || p[i] > 255) return -1
+            return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4]
+        }
+        BEGIN {
+            want = num(ip)
+            n = split(list, e, ",")
+            for (k = 1; k <= n; k++) {
+                if (e[k] == ip) exit 0
+                if (index(e[k], "/") == 0 || want < 0) continue
+                split(e[k], c, "/")
+                base = num(c[1])
+                if (base < 0 || c[2] !~ /^[0-9]+$/ || c[2] > 32) continue
+                size = 2 ^ (32 - c[2])
+                if (int(want / size) == int(base / size)) exit 0
+            }
+            exit 1
+        }'
+}
+
 # resolve_address: what goes into FS_EXTERNAL_IP (and FS_LOCAL_IP on Linux).
-# An explicit --external-ip wins and is written; otherwise .env's value stands
-# on a rerun even when the host's address has moved (doctor then says so), and
-# a first install takes the inferred one.
+# The switch stays on the LAN and public traffic reaches it through an edge
+# SBC, so the address is always one of this host's own: its LAN address, or a
+# loopback address an SBC on the same host forwards to (127.0.0.2). An address
+# given by --external-ip or at the prompt must be one (a host whose addresses
+# cannot be listed gets a warning instead). It wins and is written; otherwise
+# .env's value stands on a rerun even when the host's address has moved
+# (doctor then says so), and a first install takes the inferred one. On Linux
+# FS_LOCAL_IP, where the switch and the bot bind, is a given address, else the
+# inferred one, else (a plain rerun) what .env says.
 resolve_address() {
     INFERRED=$(infer_address)
     REWRITE_ADDRESS=0
     REWRITE_COMPOSE=0
+    ADDRESS_GIVEN=0
     if [ "$MODE" = upgrade ]; then REWRITE_COMPOSE=1; fi
     if [ -n "$EXTERNAL_IP_FLAG" ]; then
         EXTERNAL_IP=$EXTERNAL_IP_FLAG
         REWRITE_ADDRESS=1
         REWRITE_COMPOSE=1
+        ADDRESS_GIVEN=1
     elif env_has "$ENV_FILE" FS_EXTERNAL_IP; then
         EXTERNAL_IP=$(env_get "$ENV_FILE" FS_EXTERNAL_IP)
         if [ -n "$INFERRED" ] && [ "$INFERRED" != "$EXTERNAL_IP" ]; then
@@ -776,17 +851,30 @@ resolve_address() {
     fi
     if [ -z "$EXTERNAL_IP" ]; then
         if can_prompt; then
-            ask "The address phones reach this host at: "
+            ask "This host's LAN address (the one the switch binds): "
             EXTERNAL_IP=$REPLY
+            ADDRESS_GIVEN=1
         fi
         [ -n "$EXTERNAL_IP" ] || die "could not work out this host's address; pass --external-ip <ip>"
     fi
     is_ipv4 "$EXTERNAL_IP" || die "'$EXTERNAL_IP' is not an IPv4 address; pass --external-ip <ip>"
-    # The switch and the bot bind the LAN address; phones may reach the host
-    # at another (a NAT's), which is what --external-ip is for.
+    if [ "$ADDRESS_GIVEN" = 1 ]; then
+        _ra_addrs=$(host_addrs)
+        if [ -z "$_ra_addrs" ]; then
+            warn "could not list this host's addresses; accepting $EXTERNAL_IP without checking it is one of them"
+        elif ! ip_on_host "$EXTERNAL_IP" "$_ra_addrs"; then
+            preflight_fail PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST "$EXTERNAL_IP is not one of this host's own addresses" \
+                "the switch stays on the LAN and public traffic reaches it through the edge SBC: pass this host's LAN address${INFERRED:+ ($INFERRED)}" \
+                "or the loopback address an SBC on this host forwards to, e.g. --external-ip 127.0.0.2"
+        fi
+    fi
     LOCAL_IP=${INFERRED:-$EXTERNAL_IP}
-    if [ "$OS" = linux ] && [ "$REWRITE_ADDRESS" = 0 ] && env_has "$ENV_FILE" FS_LOCAL_IP; then
-        LOCAL_IP=$(env_get "$ENV_FILE" FS_LOCAL_IP)
+    if [ "$OS" = linux ]; then
+        if [ "$ADDRESS_GIVEN" = 1 ]; then
+            LOCAL_IP=$EXTERNAL_IP
+        elif [ "$REWRITE_ADDRESS" = 0 ] && env_has "$ENV_FILE" FS_LOCAL_IP; then
+            LOCAL_IP=$(env_get "$ENV_FILE" FS_LOCAL_IP)
+        fi
     fi
     pass "address $EXTERNAL_IP${INFERRED:+ (inferred $INFERRED)}"
 }
@@ -982,6 +1070,7 @@ compose_up() {
         logs_hint
         die "docker compose pull failed"
     }
+    recheck_deferred_images
     say "Starting the stack"
     dc up -d --no-build --remove-orphans || {
         logs_hint
