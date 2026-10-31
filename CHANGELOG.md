@@ -16,6 +16,11 @@ carries the one-line installer's files.
   declared lead, for instance a `NONE` over a `HIGH` so that no callback was
   filed. The tool is still offered, and a phase without a declared lead is
   unchanged. In the flow simulator such a call comes back `isRefused`. (#358)
+- The seeded `novanet_support`, `mobile_support` and `field_service_appointment`
+  flows changed (see Fixed). The seed never replaces a flow that already
+  exists, so a deployment seeded earlier keeps its published revision; load
+  the new ones from `internal/seed/flows/` with `aicc flowadd` if you use
+  them.
 
 ### Fixed
 
@@ -53,6 +58,12 @@ carries the one-line installer's files.
   first-media checks still follow real packets only. Each call logs one
   `ai uplink clock` line when it ends and adds to the new
   `aicc_uplink_frames_*_total` counters. (#393)
+- The seeded `novanet_support`, `mobile_support` and `field_service_appointment`
+  flows, and the `knowledge_support` example flow, no longer tell the model to
+  say goodbye after `hangup`. Their terminal phase already says the goodbye, so
+  a caller could hear two closing lines, the model's own and then the flow's
+  (#350). They now say the closing line is spoken for the model, as the other
+  seeded flows do.
 
 ### Docs and CI
 
