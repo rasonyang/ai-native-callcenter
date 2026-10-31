@@ -136,7 +136,21 @@ type RTPSession struct {
 	// sequence number of the packet this tick is about to send. Set it before Run.
 	beforeTxRecv func()
 
+	// bindIP is the local address the RTP socket (and the RTCP socket beside
+	// it) binds. Nil means every IPv4 interface. The UAS sets it to the address
+	// the switch sent the INVITE to, the one its SDP answer names, so no media
+	// port is open on any other interface.
+	bindIP net.IP
+
 	log *slog.Logger
+}
+
+// bindAddr is the address the session's sockets bind.
+func (r *RTPSession) bindAddr() net.IP {
+	if r.bindIP == nil {
+		return net.IPv4zero
+	}
+	return r.bindIP
 }
 
 // NewRTPSession prepares a session. Nothing is bound until Start.
@@ -194,7 +208,7 @@ func (r *RTPSession) Start(remote *net.UDPAddr) error {
 	r.remoteAddr = remote
 	r.remoteMu.Unlock()
 
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero, Port: r.LocalPort})
+	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: r.bindAddr(), Port: r.LocalPort})
 	if err != nil {
 		return err
 	}

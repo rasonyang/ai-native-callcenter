@@ -6,8 +6,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -528,7 +530,6 @@ func botUAS(cfg config.Config, slots *voice.BotSlots) voice.Config {
 	// Validated when the configuration was loaded, so a list that does not
 	// parse never reaches here.
 	uas.AllowedPeers, _ = cfg.BotAllowedPeerPrefixes()
-	uas.AdvertiseIP = cfg.BotAdvertiseIP
 	uas.RTPPortRange = [2]int{cfg.BotRTPPortLow, cfg.BotRTPPortHigh}
 	uas.MaxCalls = cfg.BotMaxCalls
 	// The counter the outbound originator reserves from; MaxCalls above is
@@ -787,4 +788,22 @@ func wrapUpDrafter(cfg config.Config, st wrapupdraft.Store, pub wrapupdraft.Publ
 		BudgetChars: cfg.TextLLMContextChars,
 		Settle:      wrapupdraft.DefaultSettle,
 	}, log)
+}
+
+// removedSettings are AICC_* variables an earlier release read and this one
+// does not, with what replaced them. A deployment that still sets one starts
+// and is told, once.
+var removedSettings = map[string]string{
+	"AICC_BOT_ADVERTISE_IP": "the bot answers with the address the switch sent the INVITE to, and binds its media there",
+}
+
+// warnRemovedSettings logs one WARN per removed setting the environment still
+// carries. Call it after config.Load, so a value set only in .env is seen.
+func warnRemovedSettings(lookup func(string) (string, bool)) {
+	for _, name := range slices.Sorted(maps.Keys(removedSettings)) {
+		if value, ok := lookup(name); ok && value != "" {
+			slog.Warn("setting is no longer read and is ignored", "setting", name,
+				"value", value, "now", removedSettings[name])
+		}
+	}
 }

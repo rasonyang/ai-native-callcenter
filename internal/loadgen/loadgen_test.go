@@ -139,7 +139,6 @@ func startUAS(t *testing.T) (*voice.UAS, chan *voice.Dialog) {
 	cfg := voice.DefaultConfig()
 	cfg.SIPHost = "127.0.0.1"
 	cfg.SIPPort = 0
-	cfg.AdvertiseIP = "127.0.0.1"
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	uas := voice.NewUAS(cfg)
@@ -169,7 +168,7 @@ func freePort(t *testing.T) int {
 // in the product rather than a defect in the harness.
 func TestFinishedCallsAreHungUp(t *testing.T) {
 	cfg := voice.DefaultConfig()
-	cfg.SIPHost, cfg.SIPPort, cfg.AdvertiseIP = "127.0.0.1", 0, "127.0.0.1"
+	cfg.SIPHost, cfg.SIPPort = "127.0.0.1", 0
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	uas := voice.NewUAS(cfg)
 	ended := make(chan *voice.Dialog, 4)

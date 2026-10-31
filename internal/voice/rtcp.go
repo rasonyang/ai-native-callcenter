@@ -139,13 +139,14 @@ type RTCPSession struct {
 	quality RemoteQuality
 }
 
-// NewRTCPSession binds the RTP port plus one and reports to the peer's RTP
-// port plus one, which is the convention every switch this talks to follows.
+// NewRTCPSession binds the RTP session's address on the RTP port plus one and
+// reports to the peer's RTP port plus one, which is the convention every switch
+// this talks to follows.
 func NewRTCPSession(session *RTPSession, remoteRTP *net.UDPAddr,
 	interval time.Duration, log *slog.Logger) (*RTCPSession, error) {
 
 	conn, err := net.ListenUDP("udp4",
-		&net.UDPAddr{IP: net.IPv4zero, Port: session.LocalPort + 1})
+		&net.UDPAddr{IP: session.bindAddr(), Port: session.LocalPort + 1})
 	if err != nil {
 		return nil, err
 	}

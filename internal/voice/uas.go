@@ -13,23 +13,23 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/net/ipv4"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 )
 
 // Config parameterises the user agent server.
 type Config struct {
 	// SIPHost and SIPPort are where INVITEs are accepted. This is the target
-	// of the switch's bot gateway.
+	// of the switch's bot gateway. Each call's SDP answer and its RTP and RTCP
+	// sockets use the address the switch sent that INVITE to, so a wildcard
+	// SIPHost still leaves media on the one address the switch dialled.
 	SIPHost string
 	SIPPort int
 	// AllowedPeers are the addresses allowed to send SIP to the bot and RTP to
 	// its calls. Empty allows every peer. Anything else is dropped before it is
 	// parsed: no response, no dialog, no port, no provider session.
 	AllowedPeers []netip.Prefix
-	// AdvertiseIP is the address written into SDP answers. Empty means probe
-	// the route towards the peer's media address, which is the only thing that
-	// works when the listener is bound to every interface.
-	AdvertiseIP string
 	// RTPPortRange is inclusive. Each call takes an even port for RTP and the
 	// odd one above it for RTCP, so the usable capacity is half the range.
 	RTPPortRange [2]int
@@ -304,6 +304,7 @@ type UAS struct {
 	OnCallFailed func(*Dialog, error)
 
 	conn      *net.UDPConn
+	pconn     *ipv4.PacketConn // reads u.conn with each datagram's destination
 	localPort int
 	allowed   peerACL
 	denied    deniedPeerLog
@@ -349,7 +350,13 @@ func (u *UAS) Start() error {
 	if err != nil {
 		return err
 	}
+	pconn := ipv4.NewPacketConn(conn)
+	if err := pconn.SetControlMessage(ipv4.FlagDst, true); err != nil {
+		_ = conn.Close()
+		return fmt.Errorf("sip listener cannot report destination addresses: %w", err)
+	}
 	u.conn = conn
+	u.pconn = pconn
 	u.localPort = conn.LocalAddr().(*net.UDPAddr).Port
 
 	u.mu.Lock()
@@ -456,9 +463,10 @@ func (u *UAS) allocateRTPPort() (int, error) {
 
 // newRTPSession prepares a call's media, accepting it only from the peers the
 // signalling is accepted from.
-func (u *UAS) newRTPSession(port int, law media.Law, dtmfPayloadType int) *RTPSession {
+func (u *UAS) newRTPSession(port int, local net.IP, law media.Law, dtmfPayloadType int) *RTPSession {
 	session := NewRTPSession(port, law, dtmfPayloadType, u.log)
 	session.allowed = u.allowed
+	session.bindIP = local
 	return session
 }
 
@@ -469,30 +477,6 @@ func (u *UAS) releaseRTPPort(port int) {
 	u.mu.Unlock()
 }
 
-// advertiseIP decides what address to put in the SDP answer.
-//
-// The probe goes towards the peer's *media* address, not the source of its
-// signalling: a switch may signal from the loopback while its media stack is
-// bound to a LAN address, and answering with 127.0.0.1 produces a call that
-// connects and then has no audio in either direction.
-func (u *UAS) advertiseIP(peerIP string, peerPort int) string {
-	if u.cfg.AdvertiseIP != "" {
-		return u.cfg.AdvertiseIP
-	}
-	if bound := u.conn.LocalAddr().(*net.UDPAddr).IP.String(); bound != "0.0.0.0" && bound != "::" {
-		return bound
-	}
-	if peerPort == 0 {
-		peerPort = 5060
-	}
-	probe, err := net.Dial("udp4", net.JoinHostPort(peerIP, fmt.Sprint(peerPort)))
-	if err != nil {
-		return "127.0.0.1"
-	}
-	defer probe.Close()
-	return probe.LocalAddr().(*net.UDPAddr).IP.String()
-}
-
 //
 // Signalling.
 //
@@ -500,9 +484,13 @@ func (u *UAS) advertiseIP(peerIP string, peerPort int) string {
 func (u *UAS) readLoop() {
 	buf := make([]byte, 65536)
 	for {
-		n, addr, err := u.conn.ReadFromUDP(buf)
+		n, cm, src, err := u.pconn.ReadFrom(buf)
 		if err != nil {
 			return // closed
+		}
+		addr, ok := src.(*net.UDPAddr)
+		if !ok {
+			continue
 		}
 		// Checked before anything else, including parsing. A peer outside the
 		// list gets silence rather than a 403, whatever it sent — OPTIONS
@@ -516,11 +504,24 @@ func (u *UAS) readLoop() {
 		}
 		data := make([]byte, n)
 		copy(data, buf[:n])
-		u.handleMessage(data, addr)
+		u.handleMessage(data, addr, u.destination(cm))
 	}
 }
 
-func (u *UAS) handleMessage(data []byte, addr *net.UDPAddr) {
+// destination is the local address a datagram was sent to: the listener's own
+// address when it is bound to one, else the one the kernel reports. Nil when it
+// cannot be told.
+func (u *UAS) destination(cm *ipv4.ControlMessage) net.IP {
+	if bound := u.conn.LocalAddr().(*net.UDPAddr).IP; !bound.IsUnspecified() {
+		return bound
+	}
+	if cm != nil && cm.Dst != nil && !cm.Dst.IsUnspecified() {
+		return cm.Dst
+	}
+	return nil
+}
+
+func (u *UAS) handleMessage(data []byte, addr *net.UDPAddr, local net.IP) {
 	msg, err := parseSIP(data)
 	if err != nil {
 		u.log.Error("sip parse failed", "from", addr.String(), "error", err)
@@ -532,7 +533,7 @@ func (u *UAS) handleMessage(data []byte, addr *net.UDPAddr) {
 		isRunning := u.isRunning
 		u.mu.Unlock()
 		if isRunning {
-			u.handleInvite(msg, addr)
+			u.handleInvite(msg, addr, local)
 		}
 	case methodAck:
 		u.handleAck(msg)
@@ -555,7 +556,7 @@ func (u *UAS) send(data []byte, addr *net.UDPAddr) {
 	}
 }
 
-func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
+func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 	receivedAt := time.Now()
 	callID := msg.callID()
 
@@ -626,6 +627,12 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 		return
 	}
 
+	if local == nil {
+		u.log.Error("cannot tell which local address the invite was sent to", "callId", callID)
+		u.send(buildReject(msg, "500 Server Internal Error", ""), addr)
+		return
+	}
+
 	localRTPPort, err := u.allocateRTPPort()
 	if err != nil {
 		u.log.Error("no rtp port for call", "callId", callID, "error", err)
@@ -638,7 +645,7 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 		dtmfPayloadType = offer.DTMFPayloadType
 	}
 
-	localIP := u.advertiseIP(offer.IP, offer.Port)
+	localIP := local.String()
 	sessionID := rand.Uint32()
 	localTag := fmt.Sprintf("aicc-%d", sessionID)
 
@@ -656,7 +663,7 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 		LocalRTPPort:  localRTPPort,
 		LocalIP:       localIP,
 		LocalSIPPort:  u.localPort,
-		RTP:           u.newRTPSession(localRTPPort, law, dtmfPayloadType),
+		RTP:           u.newRTPSession(localRTPPort, local, law, dtmfPayloadType),
 		InviteAt:      receivedAt,
 		Stopped:       make(chan struct{}),
 		rtcpInterval:  u.cfg.RTCPInterval,
@@ -685,7 +692,7 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr) {
 
 	u.log.Info("invite accepted", "callId", callID, "codec", law.String(),
 		"remoteRtp", fmt.Sprintf("%s:%d", offer.IP, offer.Port),
-		"advertiseIp", localIP, "rtpPort", localRTPPort,
+		"localIp", localIP, "rtpPort", localRTPPort,
 		"dtmfPayloadType", dtmfPayloadType, "headers", dialog.CustomHeaders)
 }
 

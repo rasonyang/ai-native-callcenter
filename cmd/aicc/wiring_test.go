@@ -318,3 +318,22 @@ func TestTheWrapUpDraftIsInertUnlessEverythingItNeedsIsConfigured(t *testing.T) 
 		}
 	}
 }
+
+func TestARemovedSettingStillSetIsWarnedAboutOnce(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	env := map[string]string{"AICC_BOT_ADVERTISE_IP": "192.0.2.1"}
+	warnRemovedSettings(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+	if got := strings.Count(buf.String(), "AICC_BOT_ADVERTISE_IP"); got != 1 {
+		t.Errorf("warned %d times, want once:\n%s", got, buf.String())
+	}
+
+	buf.Reset()
+	warnRemovedSettings(func(string) (string, bool) { return "", false })
+	if buf.Len() != 0 {
+		t.Errorf("warned with the setting unset:\n%s", buf.String())
+	}
+}

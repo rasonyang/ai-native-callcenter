@@ -103,6 +103,7 @@ func run() error {
 	}()
 
 	slog.Info("starting", "service", cfg.ServiceName, "env", cfg.Env, "httpAddr", cfg.HTTPAddr)
+	warnRemovedSettings(os.LookupEnv)
 
 	st, err := retryOpen(ctx, storeWaitBudget, func(ctx context.Context) (*store.Store, error) {
 		return store.Open(ctx, cfg.DatabaseURL, cfg.DatabaseMaxConns)
