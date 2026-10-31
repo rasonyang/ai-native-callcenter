@@ -601,22 +601,39 @@ preflight_macos_runtime() {
     pass "resources $_pm_cpus CPUs, $((_pm_mem / 1048576)) MiB"
 }
 
+# image_local_arch_ok IMAGE: 0 when the image is in the local daemon and runs
+# natively here, 1 when it is not local; a local image of another architecture
+# fails the preflight.
+image_local_arch_ok() {
+    _il_have=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null) || return 1
+    [ "$_il_have" = "linux/$ARCH" ] ||
+        preflight_fail PREFLIGHT_IMAGE_ARCH "$1 on this host is $_il_have, not linux/$ARCH" \
+            "docker image rm $1 (it is pulled again for linux/$ARCH)"
+    pass "image $1 (local, linux/$ARCH)"
+}
+
 # image_arch_ok IMAGE: the image runs natively here. A local image (an
 # override built on this host, or one already pulled) is judged by itself;
 # otherwise the registry's manifest list must name this architecture. Never
 # emulated: an amd64 switch under Rosetta or QEMU is not something to debug a
-# call on.
+# call on. `docker manifest inspect` talks to the registry directly and does
+# not use the daemon's registry-mirrors, so only the registry's definite "no
+# such manifest" fails here; any other failure (network, TLS, auth) defers the
+# image to DEFERRED_IMAGES, which compose_up checks once the pull has put it
+# in the local daemon.
 image_arch_ok() {
-    if _ia_have=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$1" 2>/dev/null); then
-        [ "$_ia_have" = "linux/$ARCH" ] ||
-            preflight_fail PREFLIGHT_IMAGE_ARCH "$1 on this host is $_ia_have, not linux/$ARCH" \
-                "docker image rm $1 (it is pulled again for linux/$ARCH)"
-        pass "image $1 (local, linux/$ARCH)"
+    image_local_arch_ok "$1" && return 0
+    if ! _ia_manifest=$(docker manifest inspect "$1" 2>&1); then
+        case $_ia_manifest in
+        *'no such manifest'*)
+            preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "$1 is not published: the registry has no such manifest" \
+                "check the tag (docker manifest inspect $1)"
+            ;;
+        esac
+        warn "could not read the manifest of $1 from its registry ($(printf '%s' "$_ia_manifest" | head -n 1)); docker manifest inspect does not use the daemon's registry-mirrors. Its architecture is checked after the pull."
+        DEFERRED_IMAGES="${DEFERRED_IMAGES:+$DEFERRED_IMAGES }$1"
         return 0
     fi
-    _ia_manifest=$(docker manifest inspect "$1" 2>/dev/null) ||
-        preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "cannot read the manifest of $1 from its registry" \
-            "check the tag and this host's access to Docker Hub (docker manifest inspect $1)"
     if printf '%s\n' "$_ia_manifest" | tr -d ' \t\n' | grep -q "\"architecture\":\"$ARCH\""; then
         pass "image $1 (linux/$ARCH)"
         return 0
@@ -625,11 +642,23 @@ image_arch_ok() {
         "run on an amd64 or arm64 host the release is built for"
 }
 
+# recheck_deferred_images: after the pull, the images the preflight could not
+# read a manifest for are local, and are judged as local images are.
+recheck_deferred_images() {
+    for _rd_image in $DEFERRED_IMAGES; do
+        image_local_arch_ok "$_rd_image" ||
+            preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "$_rd_image is not in the local daemon after the pull" \
+                "docker pull $_rd_image"
+    done
+    DEFERRED_IMAGES=
+}
+
 preflight_images() {
     APP_IMAGE=${AICC_IMAGE:-$(env_get "$ENV_FILE" AICC_IMAGE)}
     APP_IMAGE=${APP_IMAGE:-rasonyang/ai-native-callcenter:$TAG}
     FS_IMAGE=${AICC_FS_IMAGE:-$(env_get "$ENV_FILE" AICC_FS_IMAGE)}
     FS_IMAGE=${FS_IMAGE:-rasonyang/freeswitch-aicc:$TAG}
+    DEFERRED_IMAGES=
     for _pi_image in "$APP_IMAGE" "$FS_IMAGE" postgres:18; do
         image_arch_ok "$_pi_image"
     done
@@ -1019,6 +1048,7 @@ compose_up() {
         logs_hint
         die "docker compose pull failed"
     }
+    recheck_deferred_images
     say "Starting the stack"
     dc up -d --no-build --remove-orphans || {
         logs_hint

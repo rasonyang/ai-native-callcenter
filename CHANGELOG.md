@@ -98,6 +98,15 @@ carries the one-line installer's files.
   127.0.0.0/8), `FS_LOCAL_IP` follows it; an address that is not the host's, a
   NAT's, still leaves `FS_LOCAL_IP` on the inferred LAN address, and a rerun
   without the flag keeps what `.env` says. (#346)
+- The installer's image preflight no longer aborts a host whose Docker daemon
+  pulls through `registry-mirrors` while Docker Hub itself is unreachable.
+  `docker manifest inspect`, which reads the registry directly, failed there
+  with a network error and the install stopped with
+  `PREFLIGHT_IMAGE_UNAVAILABLE` before a pull that would have worked. Now only
+  the registry's own "no such manifest" answer stops it; any other failure
+  warns, and the image's architecture is checked once the pull has put it in
+  the local daemon (`PREFLIGHT_IMAGE_ARCH` if it is wrong). `--check` only
+  warns. (#348)
 
 ### Docs and CI
 

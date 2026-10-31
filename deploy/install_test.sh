@@ -157,6 +157,65 @@ EXTERNAL_IP_FLAG=''
 # shellcheck source=deploy/install.sh
 . "$here/install.sh"
 
+# -------------------------------------------------------------- images ----
+
+# A stubbed docker. preflight_fail exits, so each case runs in a subshell and
+# reports what it printed and how it ended.
+ARCH=arm64
+image_run() {
+    # shellcheck disable=SC2317
+    docker() {
+        case $1 in
+        image) [ -n "$IMG_LOCAL" ] && printf '%s\n' "$IMG_LOCAL" ;;
+        manifest)
+            [ -n "$MANIFEST_OUT" ] || return 0
+            printf '%s\n' "$MANIFEST_OUT"
+            return "$MANIFEST_RC"
+            ;;
+        esac
+    }
+    DEFERRED_IMAGES=
+    image_arch_ok example/app:v1
+    printf 'deferred=[%s]\n' "$DEFERRED_IMAGES"
+}
+image_case() { # name want-status want-text-in-output
+    _ic_out=$( (image_run) 2>&1) && _ic_rc=0 || _ic_rc=$?
+    eq "image: $1 (status)" "$_ic_rc" "$2"
+    case $_ic_out in *"$3"*) _ic_has=yes ;; *) _ic_has=no ;; esac
+    eq "image: $1 (output has '$3')" "$_ic_has" yes
+}
+IMG_LOCAL='linux/arm64' MANIFEST_OUT='' MANIFEST_RC=0
+image_case 'a local image of this architecture' 0 'image example/app:v1 (local'
+IMG_LOCAL='linux/amd64'
+image_case 'a local image of another architecture' 1 'PREFLIGHT_IMAGE_ARCH'
+IMG_LOCAL='' MANIFEST_OUT='{"manifests":[{"platform":{"architecture":"arm64","os":"linux"}}]}' MANIFEST_RC=0
+image_case 'a manifest with the architecture' 0 'image example/app:v1 (linux/arm64)'
+MANIFEST_OUT='{"manifests":[{"platform":{"architecture":"amd64","os":"linux"}}]}'
+image_case 'a manifest without it' 1 'PREFLIGHT_IMAGE_ARCH'
+MANIFEST_OUT='no such manifest: docker.io/example/app:v1' MANIFEST_RC=1
+image_case 'no such manifest' 1 'PREFLIGHT_IMAGE_UNAVAILABLE'
+MANIFEST_OUT='failed to configure transport: error pinging v2 registry: Get "https://registry-1.docker.io/v2/": read tcp 10.0.0.2:1->1.2.3.4:443: read: connection reset by peer' MANIFEST_RC=1
+image_case 'a network error defers the image' 0 'deferred=[example/app:v1]'
+image_case 'a network error warns about registry-mirrors' 0 'registry-mirrors'
+unset IMG_LOCAL MANIFEST_OUT MANIFEST_RC
+
+# After the pull, a deferred image is judged as a local one.
+recheck_case() { # local-answer
+    (
+        # shellcheck disable=SC2317
+        docker() { [ -n "$IMG_LOCAL" ] && printf '%s\n' "$IMG_LOCAL"; }
+        DEFERRED_IMAGES='example/app:v1'
+        recheck_deferred_images
+    ) >/dev/null 2>&1
+}
+IMG_LOCAL='linux/arm64'
+ok 'recheck: pulled with this architecture' recheck_case
+IMG_LOCAL='linux/amd64'
+notok 'recheck: pulled with another architecture' recheck_case
+IMG_LOCAL=''
+notok 'recheck: not local after the pull' recheck_case
+unset IMG_LOCAL
+
 # ---------------------------------------------------------- exclusions ----
 
 ok 'excluded: TUN 198.18.0.1' ip_excluded 198.18.0.1

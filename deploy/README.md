@@ -44,7 +44,11 @@ then stops with nothing written or started. `--check` runs only these checks.
 They cover: Docker Engine 24.0.0 or later and Compose 2.24.4 or later (not the
 snap package, not rootless), on macOS Docker Desktop or Colima 0.9.0 or later
 with the `grpc` port forwarder, at least 4 CPUs and 4 GiB for the runtime,
-both images published for this host's architecture, no other stack named
+both images published for this host's architecture (read from the registry
+with `docker manifest inspect`, which does not use the daemon's
+`registry-mirrors`: when the registry cannot be reached directly the installer
+warns, and checks the architecture after the pull instead; a tag the registry
+says does not exist still stops it), no other stack named
 `aicc`, the stack's ports free, and on Linux an active ufw or firewalld
 allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
 
