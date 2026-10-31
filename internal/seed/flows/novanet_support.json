@@ -15,7 +15,7 @@
         "Whenever the caller asks for a person or presses 0, call transfer_to_agent immediately; announce the transfer only after the tool returns.",
         "Never invent account facts. General service questions may be answered briefly from your own knowledge.",
         "The hint field in tool results is your flow guidance; follow it.",
-        "When the caller clearly wants to end the call, call hangup immediately, then say goodbye after it returns."
+        "When the caller clearly wants to end the call, call hangup immediately and do not thank them or say goodbye yourself: the closing line is spoken for you."
       ],
       "zh": [
         "这是电话语音对话：每次只说一两句短句，口语化，不用任何列表或书面格式。",
@@ -23,7 +23,7 @@
         "用户要求人工或按 0 时，立即调用 transfer_to_agent，工具返回后再播报转接话术。",
         "严禁编造账户信息。一般性服务问题可以简短解答。",
         "工具返回里的 hint 字段是流程提示，照做。",
-        "用户明确表示要结束通话时，立即调用 hangup，工具返回后再道别。"
+        "用户明确表示要结束通话时，立即调用 hangup，不要自己致谢或道别：结束语由系统说。"
       ]
     },
     "fallbackTarget": "need_transfer",
@@ -64,8 +64,8 @@
         "zh": "感谢致电 NovaNet，请问有什么可以帮您？"
       },
       "instruction": {
-        "en": "Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, call transfer_to_agent with queue \"support-en\". If the transfer is refused, explain why and offer to take a message instead. When the caller wants to finish, call hangup immediately instead of saying goodbye yourself; say goodbye after the tool returns, and the call ends once you have.",
-        "zh": "了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，调用 transfer_to_agent，queue 参数用 “support-zh”。如果转接被拒绝，向用户说明原因并主动提出留言。用户表示要结束时，立即调用 hangup，不要自己先说再见；等工具返回后再道别，道别说完线路会自动挂断。"
+        "en": "Understand what the caller needs. Answer brief general questions yourself. When they need account-specific help or ask for a person, call transfer_to_agent with queue \"support-en\". If the transfer is refused, explain why and offer to take a message instead. When the caller wants to finish, call hangup immediately and do not thank them or say goodbye yourself; the closing line is spoken for you, and the call ends after it.",
+        "zh": "了解来电者的需求。一般性问题可以直接简短解答。涉及账户的具体问题或用户要求人工时，调用 transfer_to_agent，queue 参数用 “support-zh”。如果转接被拒绝，向用户说明原因并主动提出留言。用户表示要结束时，立即调用 hangup，不要自己致谢或道别；结束语由系统说，说完线路会自动挂断。"
       },
       "tools": [],
       "transitions": [

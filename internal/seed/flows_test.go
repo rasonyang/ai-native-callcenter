@@ -4,6 +4,7 @@ package seed
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -244,6 +245,38 @@ func TestNoEntryInstructionStillAsksForTheGreeting(t *testing.T) {
 					t.Errorf("%s: the %s instruction of %q still says %q, so the caller "+
 						"is greeted twice", file, lang, spec.InitialNode, leftover)
 				}
+			}
+		}
+	}
+}
+
+// Every shipped flow ends a call in a terminal phase whose announce is the
+// goodbye, so a rule or instruction that still tells the model to say goodbye
+// after hangup has the caller hear two closing lines: the model's own, often a
+// thank-you in the response that calls the tool, and then the line as written
+// (issue #350).
+func TestNoInstructionStillAsksForAGoodbyeAfterHangup(t *testing.T) {
+	t.Parallel()
+	leftovers := map[string][]string{
+		flow.LangEN: {"then say goodbye", "say goodbye after"},
+		flow.LangZH: {"再道别"},
+	}
+	for file, spec := range shippedFlows(t) {
+		for _, lang := range []string{flow.LangEN, flow.LangZH} {
+			check := func(where, text string) {
+				for _, leftover := range leftovers[lang] {
+					if strings.Contains(text, leftover) {
+						t.Errorf("%s: the %s %s still says %q, so the caller hears "+
+							"two closing lines: the model's own, then the terminal "+
+							"phase's announce", file, lang, where, leftover)
+					}
+				}
+			}
+			for _, rule := range spec.Global.Rules.For(lang) {
+				check("global rules", rule)
+			}
+			for id, node := range spec.Nodes {
+				check("instruction of "+strconv.Quote(id), node.Instruction.For(lang))
 			}
 		}
 	}
