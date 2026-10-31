@@ -645,7 +645,7 @@ func TestARearmedAILegBridgesTheBotWhenAnswered(t *testing.T) {
 	w := buildWorld(t, worldSeed)
 	id := w.byClass["ringAIOK"][0]
 	call := w.callOf[id]
-	w.rig.svc.HandleSwitchEvent(telephony.SwitchEvent{Kind: telephony.KindChannelAnswer, ChannelID: id})
+	answer(w.rig.svc, id)
 	cmd := waitForTransfer(t, w.rig.sw, id)
 
 	did, lang := "95099", "en"
@@ -692,7 +692,7 @@ func TestRingingClickToDialLegIsRearmedToTheDestination(t *testing.T) {
 	if w.rig.pendingLeg(id) == nil {
 		t.Fatalf("click-to-dial leg %s was not re-armed", id)
 	}
-	w.rig.svc.HandleSwitchEvent(telephony.SwitchEvent{Kind: telephony.KindChannelAnswer, ChannelID: id})
+	answer(w.rig.svc, id)
 	cmd := waitForTransfer(t, w.rig.sw, id)
 	if !strings.Contains(cmd, "XML aicc") {
 		t.Errorf("click-to-dial leg went somewhere other than the dialplan: %s", cmd)
@@ -867,7 +867,7 @@ func TestALegTheLiveProcessAlreadyHoldsIsNotArmedAgain(t *testing.T) {
 		vars: aiVars(call, "95099", "en", "18688886666")})
 
 	ran := 0
-	rig.svc.armUntil(id.String(), t0.Add(50*time.Second), func() { ran++ })
+	rig.svc.armUntil(id.String(), t0.Add(50*time.Second), continuation{proceed: func() { ran++ }})
 	before := rig.pendingLeg(id.String())
 
 	rep := rig.reconcile(t)
@@ -892,7 +892,7 @@ func TestALegAnsweredDuringABlipInsideItsWindowGetsTheBot(t *testing.T) {
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 20 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
 	ran := make(chan struct{}, 1)
-	rig.svc.armUntil(id.String(), t0.Add(40*time.Second), func() { ran <- struct{}{} })
+	rig.svc.armUntil(id.String(), t0.Add(40*time.Second), continuation{proceed: func() { ran <- struct{}{} }})
 
 	rep := rig.reconcile(t)
 
@@ -927,7 +927,7 @@ func TestALegAnsweredDuringABlipAfterItsWindowIsHungUp(t *testing.T) {
 	call, id := uuid.New(), uuid.New()
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 70 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
-	rig.svc.armUntil(id.String(), t0.Add(-10*time.Second), func() { t.Error("a spent continuation ran") })
+	rig.svc.armUntil(id.String(), t0.Add(-10*time.Second), continuation{proceed: func() { t.Error("a spent continuation ran") }})
 
 	rig.reconcile(t)
 
@@ -957,7 +957,7 @@ func TestARearmedLegAnsweredAfterItsWindowIsNotBridged(t *testing.T) {
 	}
 
 	rig.clock.advance(20 * time.Second)
-	rig.svc.HandleSwitchEvent(telephony.SwitchEvent{Kind: telephony.KindChannelAnswer, ChannelID: id.String()})
+	answer(rig.svc, id.String())
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
@@ -984,7 +984,7 @@ func TestARearmedLegAnsweredInsideItsWindowIsBridged(t *testing.T) {
 	rig.reconcile(t)
 
 	rig.clock.advance(8 * time.Second)
-	rig.svc.HandleSwitchEvent(telephony.SwitchEvent{Kind: telephony.KindChannelAnswer, ChannelID: id.String()})
+	answer(rig.svc, id.String())
 	waitForTransfer(t, rig.sw, id.String())
 }
 

@@ -248,11 +248,36 @@ func ringTimeoutVar(d time.Duration) string {
 	return strconv.Itoa(int((d + time.Second - 1) / time.Second))
 }
 
-// pendingLeg is a continuation armed on an originated channel: what to do
-// the moment somebody answers it.
+// continuation is what an originated leg does once somebody has answered it.
+// It has two parts because two different moments matter. The switch's
+// originate owns the leg until it writes its +OK (the BACKGROUND_JOB result),
+// and a transfer that lands earlier is overwritten by the originate's own
+// &park() continuation, leaving the person on a silent leg (#333). So the
+// answer itself only starts the clocks (onAnswer), and the move that talks to
+// the switch (proceed) waits for the +OK as well.
+type continuation struct {
+	// onAnswer, when set, runs on the event goroutine at the in-time
+	// CHANNEL_ANSWER, once; it must not block.
+	onAnswer func()
+	// proceed runs, once, off the event goroutine, when the leg was answered
+	// in time and the originate has let go of it.
+	proceed func()
+}
+
+// pendingLeg is a continuation armed on an originated channel. It fires when
+// both signals are in, in either order: the leg's CHANNEL_ANSWER (in time)
+// and its originate job's +OK. They come from different switch threads, so
+// whichever is second takes the entry out of Service.pending under the lock,
+// which is what makes the continuation run once.
 type pendingLeg struct {
-	onAnswer  func()
+	cont continuation
+	// expiresAt ends the wait for an answer. An answer inside it is in time
+	// by definition: it no longer applies once answeredAt is set.
 	expiresAt time.Time
+	// answeredAt is when the in-time answer was seen; zero until then.
+	answeredAt time.Time
+	// isReleased is set when the originate's +OK was seen.
+	isReleased bool
 }
 
 // New builds the service. hasCDR and isLive make retries idempotent: a call
@@ -977,9 +1002,10 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 type campaignRef struct{ campaignID, attemptID uuid.UUID }
 
 // SetAnswerObserver installs a function told, once per call, that the
-// customer answered and the bridge to the bot is being made (before any bot
-// slot is taken). It runs on the event goroutine and must not block. Set
-// before the service is used.
+// customer answered, at the answer itself: before the bridge to the bot, which
+// also waits for the originate's result, and before any bot slot is taken. It
+// runs on the event goroutine and must not block. Set before the service is
+// used.
 func (s *Service) SetAnswerObserver(f func(callID uuid.UUID)) { s.onAnswered = f }
 
 // SetCallStart installs the lookup of a call's start time (the registry's
@@ -1012,13 +1038,14 @@ func (s *Service) startRecording(callID uuid.UUID, customerLeg string) {
 // bridgeToBot is what an answered AI outbound leg does: transfer into a bridge
 // to the bot gateway with the correlation headers an inbound call carries.
 // Placing a call and adopting one that outlived a restart arm the same thing.
-func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language, to string, record bool, ref campaignRef) func() {
-	return func() {
+func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language, to string, record bool, ref campaignRef) continuation {
+	return continuation{onAnswer: func() {
 		// The first stage of the time to the first word starts here.
 		obs.OutboundAnswered(callID, time.Now())
 		if s.onAnswered != nil {
 			s.onAnswered(callID)
 		}
+	}, proceed: func() {
 		key := callID.String()
 		if s.cfg.Slots != nil && !s.takeSlot(callID, customerLeg, to) {
 			return
@@ -1068,7 +1095,7 @@ func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language
 				"callId", callID, "to", to, "error", err)
 			s.dropHold(customerLeg, key)
 		}
-	}
+	}}
 }
 
 // takeSlot reserves a bot slot for an answered leg, parking it for up to the
@@ -1144,9 +1171,10 @@ func (s *Service) dropHold(customerLeg, key string) {
 }
 
 // transferOnAnswer is what an answered click-to-dial agent leg does: go on to
-// the destination through the dialplan.
-func (s *Service) transferOnAnswer(callID uuid.UUID, agentLeg, destination string) func() {
-	return func() {
+// the destination through the dialplan. It has nothing to do at the answer
+// itself, only once the originate has let go of the leg.
+func (s *Service) transferOnAnswer(callID uuid.UUID, agentLeg, destination string) continuation {
+	return continuation{proceed: func() {
 		err := s.sw.TransferToExtension(agentLeg, destination, "aicc")
 		switch {
 		case err == nil:
@@ -1160,7 +1188,7 @@ func (s *Service) transferOnAnswer(callID uuid.UUID, agentLeg, destination strin
 			s.log.Error("click-to-dial transfer failed",
 				"callId", callID, "destination", destination, "error", err)
 		}
-	}
+	}}
 }
 
 // defaultOutboundNumber is the number a call this platform places comes from.
@@ -1204,26 +1232,51 @@ func (s *Service) findDID(ctx context.Context, number string) (catalog.DID, erro
 	return catalog.DID{}, ErrUnknownDID
 }
 
-// arm registers what to do when a channel answers.
-func (s *Service) arm(channelID string, onAnswer func()) {
+// arm registers what to do once a channel has answered and its originate has
+// let go of it.
+func (s *Service) arm(channelID string, cont continuation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pending[channelID] = &pendingLeg{
-		onAnswer:  onAnswer,
+		cont:      cont,
 		expiresAt: s.now().Add(s.cfg.AnswerWindow),
 	}
 }
 
 // armUntil is arm for a leg whose window began earlier than now.
-func (s *Service) armUntil(channelID string, expiresAt time.Time, onAnswer func()) {
+func (s *Service) armUntil(channelID string, expiresAt time.Time, cont continuation) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pending[channelID] = &pendingLeg{onAnswer: onAnswer, expiresAt: expiresAt}
+	s.pending[channelID] = &pendingLeg{cont: cont, expiresAt: expiresAt}
 }
 
-// HandleSwitchEvent follows originated legs: an answer fires the armed
-// continuation, a hangup (busy, declined, expired) discards it. Fed from the
-// same dispatch loop as the coordinator.
+// releaseLeg records the originate's +OK for a leg: the switch has let go of
+// it. If the leg was already answered in time its continuation runs now;
+// otherwise the answer will run it. No entry (never armed, already run,
+// hung up) is nothing to do.
+func (s *Service) releaseLeg(legID string) {
+	s.mu.Lock()
+	leg := s.pending[legID]
+	if leg == nil {
+		s.mu.Unlock()
+		return
+	}
+	leg.isReleased = true
+	if leg.answeredAt.IsZero() {
+		s.mu.Unlock()
+		return
+	}
+	delete(s.pending, legID)
+	s.mu.Unlock()
+	// The continuation talks to the switch; the dispatch loop must not wait
+	// on that.
+	go leg.cont.proceed()
+}
+
+// HandleSwitchEvent follows originated legs: an answer in time starts the
+// armed continuation's clocks and, once the originate's +OK is in as well,
+// runs it; a hangup (busy, declined, expired) discards it. Fed from the same
+// dispatch loop as the coordinator.
 func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 	if ev.Kind == telephony.KindBackgroundJob {
 		s.handleJob(ev)
@@ -1240,15 +1293,28 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 	case telephony.KindChannelAnswer:
 		s.mu.Lock()
 		leg := s.pending[ev.ChannelID]
-		delete(s.pending, ev.ChannelID)
-		expired := leg != nil && s.now().After(leg.expiresAt)
-		if leg != nil {
-			s.noteAnswered(ev.ChannelID)
-		}
-		s.mu.Unlock()
 		if leg == nil {
+			s.mu.Unlock()
 			return
 		}
+		if !leg.answeredAt.IsZero() {
+			s.mu.Unlock() // a repeated answer: the first one counts
+			return
+		}
+		now := s.now()
+		expired := now.After(leg.expiresAt)
+		var fire bool
+		if expired {
+			delete(s.pending, ev.ChannelID)
+		} else {
+			leg.answeredAt = now
+			if leg.isReleased {
+				delete(s.pending, ev.ChannelID)
+				fire = true
+			}
+		}
+		s.noteAnswered(ev.ChannelID)
+		s.mu.Unlock()
 		if expired {
 			// Never leave an answered leg parked: the person on it would
 			// hear nothing. Hang it up with a distinct cause, which is what
@@ -1263,9 +1329,14 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 			})
 			return
 		}
-		// The continuation talks to the switch; the dispatch loop must not
-		// wait on that.
-		go leg.onAnswer()
+		if leg.cont.onAnswer != nil {
+			leg.cont.onAnswer()
+		}
+		if fire {
+			// The originate had already let go; the dispatch loop must not
+			// wait on the switch.
+			go leg.cont.proceed()
+		}
 	case telephony.KindChannelHangup:
 		s.lines.Unobserve(ev.ChannelID)
 		s.mu.Lock()
@@ -1283,15 +1354,23 @@ func (s *Service) HandleSwitchEvent(ev telephony.SwitchEvent) {
 	}
 }
 
-// PendingCount reports how many originated legs still await an answer.
+// PendingCount reports how many originated legs still await their
+// continuation: an answer, or the originate's result after one.
 func (s *Service) PendingCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Expired entries are only garbage; sweeping here keeps the map honest
-	// without a background goroutine.
+	// without a background goroutine. An entry answered in time is past its
+	// window by definition and waits for the +OK instead; a hangup removes
+	// it, and one whose +OK never comes goes once the job margin has passed
+	// since the answer (the job's own backstop gives up at the same point).
 	now := s.now()
 	for id, leg := range s.pending {
-		if now.After(leg.expiresAt) {
+		if leg.answeredAt.IsZero() {
+			if now.After(leg.expiresAt) {
+				delete(s.pending, id)
+			}
+		} else if now.Sub(leg.answeredAt) > s.margin() {
 			delete(s.pending, id)
 		}
 	}

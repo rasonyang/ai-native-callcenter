@@ -33,6 +33,14 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A click-to-dial agent or an AI outbound customer could be left on an answered
+  leg that stayed silent and was never connected. The transfer was sent the
+  moment the leg answered, while the switch was still finishing the originate;
+  the originate's own park then replaced it. The transfer now waits for both
+  the answer and the originate's result, in either order, and is not sent at
+  all if the originate failed or the leg hung up first. A leg found answered
+  and parked after an ESL reconnect is still sent on, which also covers a
+  result lost with the link. (#333)
 - An agent with no call no longer sees the raw key `agent.idle` in the call
   field of the softphone bar; the field is now empty until a call arrives, and
   keeps its width so the call controls do not move. The add-extension dialog's

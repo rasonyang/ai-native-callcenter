@@ -166,17 +166,17 @@ func (s *Service) IsPlacing(callID uuid.UUID) bool {
 }
 
 // holdUnconfirmed keeps an expected leg tracked after its originate timed out,
-// for the answer window plus the job margin, with onAnswer armed for as long:
-// its channel may appear at any point of that window, and its own answer
-// window is counted from then (noteChannel). A placement that a job result
-// already finished is left alone.
+// for the answer window plus the job margin, with the continuation armed for
+// as long: its channel may appear at any point of that window, and its own
+// answer window is counted from then (noteChannel). A placement that a job
+// result already finished is left alone.
 //
 // The job's result may have been dispatched before this runs, between the
 // originate's timeout and now (handleJob kept it on the job). It is applied
 // here, once the placement is held, as a later one would be: a failure
 // before any channel is recorded at once with the switch's cause, not as
 // PLACEMENT_UNCONFIRMED when the window ends.
-func (s *Service) holdUnconfirmed(job *trackedJob, onAnswer func()) {
+func (s *Service) holdUnconfirmed(job *trackedJob, cont continuation) {
 	if s.beforeHold != nil {
 		s.beforeHold(job.legID)
 	}
@@ -187,7 +187,7 @@ func (s *Service) holdUnconfirmed(job *trackedJob, onAnswer func()) {
 	}
 	job.hasReturned = true
 	window := s.cfg.AnswerWindow + s.margin()
-	s.pending[job.legID] = &pendingLeg{onAnswer: onAnswer, expiresAt: s.now().Add(window)}
+	s.pending[job.legID] = &pendingLeg{cont: cont, expiresAt: s.now().Add(window)}
 	job.isUnconfirmed = true
 	job.timer = s.afterFunc(window, func() { s.unconfirmedExpired(job) })
 	res := job.result

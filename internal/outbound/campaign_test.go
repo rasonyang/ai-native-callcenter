@@ -93,7 +93,7 @@ func TestARecoveredCampaignLegKeepsItsCampaignOnTheBridge(t *testing.T) {
 	if rep.Rearmed != 1 {
 		t.Fatalf("report = %+v, want the leg re-armed", rep)
 	}
-	rig.svc.HandleSwitchEvent(telephony.SwitchEvent{Kind: telephony.KindChannelAnswer, ChannelID: id.String()})
+	answer(rig.svc, id.String())
 	cmd := waitForTransfer(t, rig.sw, id.String())
 	for _, want := range []string{
 		"sip_h_X-AICC-Campaign-ID=" + campaignID.String(),
