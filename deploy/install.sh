@@ -759,10 +759,39 @@ host_addrs() {
     fi | paste -s -d, -
 }
 
+# ip_on_host IP ADDRS: IP is one of the comma-separated ADDRS (host_addrs'
+# output) or inside one of its IPv4 ranges (a/b/c/d/len). Pure, so the tests
+# feed it fixtures.
+ip_on_host() {
+    awk -v ip="$1" -v list="$2" '
+        function num(s,   p) {
+            if (split(s, p, ".") != 4) return -1
+            for (i = 1; i <= 4; i++) if (p[i] !~ /^[0-9]+$/ || p[i] > 255) return -1
+            return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4]
+        }
+        BEGIN {
+            want = num(ip)
+            n = split(list, e, ",")
+            for (k = 1; k <= n; k++) {
+                if (e[k] == ip) exit 0
+                if (index(e[k], "/") == 0 || want < 0) continue
+                split(e[k], c, "/")
+                base = num(c[1])
+                if (base < 0 || c[2] !~ /^[0-9]+$/ || c[2] > 32) continue
+                size = 2 ^ (32 - c[2])
+                if (int(want / size) == int(base / size)) exit 0
+            }
+            exit 1
+        }'
+}
+
 # resolve_address: what goes into FS_EXTERNAL_IP (and FS_LOCAL_IP on Linux).
 # An explicit --external-ip wins and is written; otherwise .env's value stands
 # on a rerun even when the host's address has moved (doctor then says so), and
-# a first install takes the inferred one.
+# a first install takes the inferred one. FS_LOCAL_IP is where the switch and
+# the bot bind: the inferred LAN address, except that on Linux an explicit
+# --external-ip that is the host's own address (127.0.0.2 included, via
+# 127.0.0.0/8) is bound too; one that is not (a NAT's) leaves the LAN address.
 resolve_address() {
     INFERRED=$(infer_address)
     REWRITE_ADDRESS=0
@@ -793,6 +822,8 @@ resolve_address() {
     LOCAL_IP=${INFERRED:-$EXTERNAL_IP}
     if [ "$OS" = linux ] && [ "$REWRITE_ADDRESS" = 0 ] && env_has "$ENV_FILE" FS_LOCAL_IP; then
         LOCAL_IP=$(env_get "$ENV_FILE" FS_LOCAL_IP)
+    elif [ "$OS" = linux ] && [ "$REWRITE_ADDRESS" = 1 ] && ip_on_host "$EXTERNAL_IP" "$(host_addrs)"; then
+        LOCAL_IP=$EXTERNAL_IP
     fi
     pass "address $EXTERNAL_IP${INFERRED:+ (inferred $INFERRED)}"
 }

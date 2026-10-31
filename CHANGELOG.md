@@ -91,6 +91,13 @@ carries the one-line installer's files.
   table along with the addresses, and without the flag a loopback interface
   covers its whole network; any other network still counts only its own
   address. The PASS line names the entry that matched. (#347)
+- `install.sh --external-ip 127.0.0.2` on Linux no longer leaves `FS_LOCAL_IP`
+  on the default route's address, which made the switch bind the public
+  interface. When the explicit address is one of the host's own (an address
+  `ip addr` lists, or one inside a range of the kernel's local table such as
+  127.0.0.0/8), `FS_LOCAL_IP` follows it; an address that is not the host's, a
+  NAT's, still leaves `FS_LOCAL_IP` on the inferred LAN address, and a rerun
+  without the flag keeps what `.env` says. (#346)
 
 ### Docs and CI
 

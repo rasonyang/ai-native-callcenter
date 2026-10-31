@@ -113,6 +113,50 @@ wifi_route='   route to: default
 eq 'macos: a hardware default goes first, once' \
     "$(macos_candidate_ifaces "$wifi_route" "$hwports" | tr '\n' ' ')" 'en1 en0 bridge0 '
 
+# ------------------------------------------------------- host address ----
+
+lo_addrs='127.0.0.1,::1,192.168.31.111,10.0.0.5,127.0.0.0/8,10.0.0.0/24'
+ok 'ip_on_host: exact address' ip_on_host 192.168.31.111 "$lo_addrs"
+ok 'ip_on_host: 127.0.0.2 in 127.0.0.0/8' ip_on_host 127.0.0.2 "$lo_addrs"
+notok 'ip_on_host: 127.0.0.2 against 127.0.0.1 only' ip_on_host 127.0.0.2 127.0.0.1,::1
+notok 'ip_on_host: a NAT address' ip_on_host 203.0.113.9 "$lo_addrs"
+ok 'ip_on_host: last address of a /24' ip_on_host 10.0.0.255 10.0.0.0/24
+ok 'ip_on_host: first address of a /24' ip_on_host 10.0.0.0 10.0.0.0/24
+notok 'ip_on_host: next /24 is outside' ip_on_host 10.0.1.0 10.0.0.0/24
+notok 'ip_on_host: previous /24 is outside' ip_on_host 9.255.255.255 10.0.0.0/8
+ok 'ip_on_host: a /32 is its address' ip_on_host 10.0.0.7 10.0.0.7/32
+notok 'ip_on_host: a /32 is only its address' ip_on_host 10.0.0.8 10.0.0.7/32
+ok 'ip_on_host: /0 is everything' ip_on_host 203.0.113.9 0.0.0.0/0
+notok 'ip_on_host: empty list' ip_on_host 127.0.0.2 ''
+notok 'ip_on_host: an IPv6 range is ignored' ip_on_host 127.0.0.2 ::1/128
+
+# resolve_address with the host stubbed: a default route on 192.168.31.111.
+infer_address() { printf '192.168.31.111\n'; }
+host_addrs() { printf '%s\n' "$lo_addrs"; }
+ENV_FILE="$TMP/resolve.env"
+rm -f "$ENV_FILE"
+MODE=install
+OS=linux
+resolve_with() { # flag-value -> "EXTERNAL LOCAL"
+    EXTERNAL_IP_FLAG=$1
+    resolve_address >/dev/null 2>&1
+    printf '%s %s\n' "$EXTERNAL_IP" "$LOCAL_IP"
+}
+eq 'resolve: no flag takes the inferred address twice' "$(resolve_with '')" '192.168.31.111 192.168.31.111'
+eq 'resolve: --external-ip 127.0.0.2 binds it too' "$(resolve_with 127.0.0.2)" '127.0.0.2 127.0.0.2'
+eq 'resolve: --external-ip on an interface binds it too' "$(resolve_with 10.0.0.5)" '10.0.0.5 10.0.0.5'
+eq 'resolve: a NAT address leaves the LAN address' "$(resolve_with 203.0.113.9)" '203.0.113.9 192.168.31.111'
+OS=macos
+eq 'resolve: macOS never follows' "$(resolve_with 127.0.0.2)" '127.0.0.2 192.168.31.111'
+OS=linux
+printf 'FS_EXTERNAL_IP=10.0.0.5\nFS_LOCAL_IP=10.0.0.5\n' >"$ENV_FILE"
+eq 'resolve: a rerun without a flag keeps .env' "$(resolve_with '')" '10.0.0.5 10.0.0.5'
+# Drop the stubs: sourcing again restores the real functions.
+unset -f infer_address host_addrs
+EXTERNAL_IP_FLAG=''
+# shellcheck source=deploy/install.sh
+. "$here/install.sh"
+
 # ---------------------------------------------------------- exclusions ----
 
 ok 'excluded: TUN 198.18.0.1' ip_excluded 198.18.0.1
