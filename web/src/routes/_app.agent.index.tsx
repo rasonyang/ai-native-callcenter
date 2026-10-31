@@ -58,24 +58,30 @@ function AgentCockpit() {
   const lastCall = useLastCall(signedIn, call)
 
   return (
-    <div className="flex h-full min-h-0 gap-4">
-      <div className="flex w-[320px] shrink-0 flex-col gap-4">
+    // From xl the cockpit is three columns that fill the page's height. Below
+    // it the two side columns (320 + 280) leave the middle one about 124px at
+    // 1024, too narrow for the caller card, so the right column's cards move
+    // under the middle column's: two columns, the second about 420px, and the
+    // page scrolls instead of fitting the viewport. DOM order stays left,
+    // middle, right, so focus order is the visual order in both layouts.
+    <div className="grid min-h-0 grid-cols-[320px_minmax(0,1fr)] grid-rows-[auto_1fr] items-start gap-4 xl:flex xl:h-full xl:items-stretch">
+      <div className="row-span-2 flex w-[320px] shrink-0 flex-col gap-4">
         {call ? <CallPanel call={call} /> : signedIn ? <DialCard /> : null}
         <QueueCard signedIn={signedIn} />
         <CallbacksCard />
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4 xl:flex-1">
         <CallerCard call={call} lastCall={lastCall} />
         <LiveTranscriptBoundary
           callId={call?.callId}
           myAgentId={presence?.agentId}
           streamStatus={streamStatus}
-          className="min-h-0 flex-1"
+          className="h-64 xl:h-auto xl:min-h-0 xl:flex-1"
         />
       </div>
 
-      <div className="flex w-[280px] shrink-0 flex-col gap-4">
+      <div className="flex min-w-0 flex-col gap-4 xl:w-[280px] xl:shrink-0">
         <WrapUpCard call={call} lastCall={lastCall} />
         <TodayCard />
       </div>
@@ -646,6 +652,7 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
   const dateFormat = new Intl.DateTimeFormat(i18n.language, {
     year: 'numeric', month: 'short', day: 'numeric',
   })
+  const callerName = contact?.name || number || t('call.unknownNumber')
   // The heading carries the name where there is one, so everything else the
   // agent might read out loud lines up beneath it.
   const subline = [
@@ -655,18 +662,28 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
   ].filter((part): part is string => Boolean(part))
 
   return (
-    <section className="rounded-md border bg-card p-4">
+    <section data-caller-card className="rounded-md border bg-card p-4">
       <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className={cn('text-lg font-semibold', !contact && 'tabular')}>
-              {contact?.name || number || t('call.unknownNumber')}
+        <div className="min-w-0 flex-1">
+          {/* Wraps: tags and call badges drop under the name instead of
+              running under the clock. A name longer than the row is cut and
+              carries its whole value in the title. */}
+          <div data-caller-name-row className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span
+              title={callerName}
+              className={cn('min-w-0 max-w-full truncate text-lg font-semibold', !contact && 'tabular')}
+            >
+              {callerName}
             </span>
-            {contact?.tags.map((tag) => <Badge key={tag}>{tag}</Badge>)}
+            {contact?.tags.map((tag) => (
+              <Badge key={tag} className="max-w-full">
+                <span title={tag} className="truncate">{tag}</span>
+              </Badge>
+            ))}
             {call && <CallBadges call={call} />}
           </div>
           {subline.length > 0 && (
-            <div className="tabular mt-0.5 text-sm text-muted-foreground">
+            <div className="tabular mt-0.5 break-words text-sm text-muted-foreground">
               {subline.join(' · ')}
             </div>
           )}
@@ -680,12 +697,12 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
             when this customer was last spoken to, which is the number an
             agent reads before ringing them back. */}
         {call ? (
-          <div className="shrink-0 text-right">
+          <div data-caller-clock className="shrink-0 text-right">
             <div className="text-xs text-muted-foreground">{t('agent.started')}</div>
             <div className="tabular text-sm">{formatClock(call.createdAt)}</div>
           </div>
         ) : lastContactAt ? (
-          <div className="shrink-0 text-right">
+          <div data-caller-clock className="shrink-0 text-right">
             <div className="text-xs text-muted-foreground">{t('agent.lastContact')}</div>
             <div className="tabular text-sm">{dateFormat.format(new Date(lastContactAt))}</div>
           </div>
@@ -693,15 +710,15 @@ function CallerCard({ call, lastCall }: { call?: CallSnapshot; lastCall: LastCal
       </div>
 
       {contact?.notes && (
-        <p className="mt-3 border-t pt-3 text-sm text-muted-foreground">{contact.notes}</p>
+        <p className="mt-3 break-words border-t pt-3 text-sm text-muted-foreground">{contact.notes}</p>
       )}
 
       {userData.length > 0 && (
-        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t pt-3">
+        <dl className="mt-3 grid grid-cols-[repeat(2,minmax(0,1fr))] gap-x-4 gap-y-1 border-t pt-3">
           {userData.map(([key, value]) => (
-            <div key={key} className="flex items-baseline justify-between gap-2">
-              <dt className="truncate text-xs text-muted-foreground">{key}</dt>
-              <dd className="tabular truncate text-sm">{String(value)}</dd>
+            <div key={key} className="flex min-w-0 items-baseline justify-between gap-2">
+              <dt title={key} className="max-w-[50%] truncate text-xs text-muted-foreground">{key}</dt>
+              <dd title={String(value)} className="tabular min-w-0 truncate text-sm">{String(value)}</dd>
             </div>
           ))}
         </dl>
@@ -755,7 +772,7 @@ function CallID({ callID }: { callID: string }) {
         // The whole uuid, on the element the pointer is already over.
         title={callID}
         aria-label={t('agent.copyCallId')}
-        className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        className="mt-1 flex max-w-full flex-wrap items-center gap-x-1.5 text-xs text-muted-foreground hover:text-foreground"
         onClick={async () => {
           const copying = callID
           const isCopied = await copyText(copying)

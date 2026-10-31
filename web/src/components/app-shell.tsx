@@ -109,12 +109,17 @@ function Breadcrumb({ pathname, role }: { pathname: string; role: Role }) {
   const detail = useBreadcrumbDetail()
   const crumbs = breadcrumbFor(pathname, role, detail)
 
-  // The softphone bar carries shrink-[100], so it takes nearly all of a
+  // The softphone bar carries shrink-[10000], so it takes the whole of a
   // shortfall (down to its floor) and this keeps its natural width; only once
   // the bar can give no more does the last segment truncate, or when a
-  // record's name is long enough to need the room alone. Whatever still does
-  // not fit is clipped, never painted over the bar. A factor under 1
-  // would not do: flex scales the free space by it.
+  // record's name is long enough to need the room alone. Flex shares a
+  // shortfall by factor x base size, and Chrome lays out in 1/64px: at
+  // shrink-[100] this still took about 1/500 of it, a few units short of its
+  // text, and `truncate` swapped the last character for an ellipsis while the
+  // bar had room to give. At 10000 its share of any shortfall the bar can
+  // absorb (96px) is under 1/64px. Whatever still does not fit is clipped,
+  // never painted over the bar. A factor under 1 would not do: flex scales
+  // the free space by it.
   return (
     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden text-sm">
       {crumbs.map((crumb, index) => {

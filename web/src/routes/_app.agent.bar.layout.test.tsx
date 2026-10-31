@@ -80,15 +80,32 @@ function expectNumberWhole(ctx: LayoutContext, number: string) {
   }
 }
 
-/** The breadcrumb's last segment shows all of its text. */
+/**
+ * The breadcrumb's last segment shows all of its text. Precise on purpose:
+ * Chrome lays out in 1/64px, and a box a few units narrower than its text
+ * already swaps the last character for an ellipsis while scrollWidth and
+ * clientWidth, rounded to whole pixels, still agree. So the box's fractional
+ * width is compared with the text's own, measured with a Range, which is not
+ * clipped by the box.
+ */
 function expectBreadcrumbWhole(ctx: LayoutContext) {
   const last = document.querySelector('header')!.children[0].lastElementChild!.lastElementChild!
-  if (last.scrollWidth > last.clientWidth + 1) {
+  const range = document.createRange()
+  range.selectNodeContents(last)
+  const textWidth = range.getBoundingClientRect().width
+  const boxWidth = last.getBoundingClientRect().width
+  if (textWidth > boxWidth + 0.005) {
     throw new LayoutViolation(
       `${ctx.screen} @ ${ctx.viewport.width} [${ctx.lang}]: the breadcrumb "${last.textContent}" is cut `
-      + `(${last.clientWidth}px of ${last.scrollWidth}px) while the call field could have given way`,
+      + `(${boxWidth.toFixed(3)}px of ${textWidth.toFixed(3)}px) while the call field could have given way`,
     )
   }
+}
+
+/** The call field is wider than the floor it shrinks to (`min-w-32`, 128px). */
+function callFieldIsAboveItsFloor(): boolean {
+  const field = document.querySelector<HTMLElement>('[data-softphone-bar] > span.min-w-32')!
+  return field.getBoundingClientRect().width > 128 + 1
 }
 
 describe('the agent top bar on a call', () => {
@@ -190,4 +207,24 @@ describe('the signed-out agent top bar', () => {
     })
     await expectBarReachable(ctx)
   })
+})
+
+describe('the breadcrumb on the agent dashboard, on a call', () => {
+  // The call field gives way first: wherever it is above its floor the
+  // breadcrumb's last segment (the section name) is whole; at its floor the
+  // breadcrumb may truncate.
+  for (const number of ['18688886666', '+8613800138000']) {
+    layoutTest(`agent dashboard breadcrumb (${number})`, async (ctx) => {
+      renderApp('/agent', { contacts: [], ...onCall(number) }, { role: 'AGENT' })
+      // The cockpit has its own transfer button; wait for the bar's.
+      await waitFor(() => {
+        if (!document.querySelector('header')?.querySelector(`[title="${i18n.t('call.transfer')}"]`)) {
+          throw new Error('the bar is not on the call yet')
+        }
+      })
+      await expectBarReachable(ctx)
+      numberOnTheLine(number)
+      if (callFieldIsAboveItsFloor()) expectBreadcrumbWhole(ctx)
+    })
+  }
 })
