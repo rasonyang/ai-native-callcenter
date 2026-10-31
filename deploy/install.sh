@@ -67,9 +67,11 @@ Usage: install.sh [options]
 
   --provider P        the voice provider: openai, grok, qwen, gateway, doubao
                       or none (none: the bot never answers; the human path works)
-  --external-ip IP    the address phones reach this host at (default: the
-                      address of the default route's interface); on a rerun,
-                      rewrites the address in .env
+  --external-ip IP    this host's own address the switch binds and advertises:
+                      its LAN address (default: the address of the default
+                      route's interface) or a loopback address an edge SBC on
+                      this host forwards to, e.g. 127.0.0.2; anything else is
+                      refused. On a rerun, rewrites the address in .env
   --version TAG       the release to install (default: this script's release)
   --no-demo           do not seed the demo dataset (AICC_SEED empty)
   --upgrade           back up the database, then move an install to --version
@@ -819,21 +821,26 @@ ip_on_host() {
 }
 
 # resolve_address: what goes into FS_EXTERNAL_IP (and FS_LOCAL_IP on Linux).
-# An explicit --external-ip wins and is written; otherwise .env's value stands
-# on a rerun even when the host's address has moved (doctor then says so), and
-# a first install takes the inferred one. FS_LOCAL_IP is where the switch and
-# the bot bind: the inferred LAN address, except that on Linux an explicit
-# --external-ip that is the host's own address (127.0.0.2 included, via
-# 127.0.0.0/8) is bound too; one that is not (a NAT's) leaves the LAN address.
+# The switch stays on the LAN and public traffic reaches it through an edge
+# SBC, so the address is always one of this host's own: its LAN address, or a
+# loopback address an SBC on the same host forwards to (127.0.0.2). An address
+# given by --external-ip or at the prompt must be one (a host whose addresses
+# cannot be listed gets a warning instead). It wins and is written; otherwise
+# .env's value stands on a rerun even when the host's address has moved
+# (doctor then says so), and a first install takes the inferred one. On Linux
+# FS_LOCAL_IP, where the switch and the bot bind, is a given address, else the
+# inferred one, else (a plain rerun) what .env says.
 resolve_address() {
     INFERRED=$(infer_address)
     REWRITE_ADDRESS=0
     REWRITE_COMPOSE=0
+    ADDRESS_GIVEN=0
     if [ "$MODE" = upgrade ]; then REWRITE_COMPOSE=1; fi
     if [ -n "$EXTERNAL_IP_FLAG" ]; then
         EXTERNAL_IP=$EXTERNAL_IP_FLAG
         REWRITE_ADDRESS=1
         REWRITE_COMPOSE=1
+        ADDRESS_GIVEN=1
     elif env_has "$ENV_FILE" FS_EXTERNAL_IP; then
         EXTERNAL_IP=$(env_get "$ENV_FILE" FS_EXTERNAL_IP)
         if [ -n "$INFERRED" ] && [ "$INFERRED" != "$EXTERNAL_IP" ]; then
@@ -844,19 +851,30 @@ resolve_address() {
     fi
     if [ -z "$EXTERNAL_IP" ]; then
         if can_prompt; then
-            ask "The address phones reach this host at: "
+            ask "This host's LAN address (the one the switch binds): "
             EXTERNAL_IP=$REPLY
+            ADDRESS_GIVEN=1
         fi
         [ -n "$EXTERNAL_IP" ] || die "could not work out this host's address; pass --external-ip <ip>"
     fi
     is_ipv4 "$EXTERNAL_IP" || die "'$EXTERNAL_IP' is not an IPv4 address; pass --external-ip <ip>"
-    # The switch and the bot bind the LAN address; phones may reach the host
-    # at another (a NAT's), which is what --external-ip is for.
+    if [ "$ADDRESS_GIVEN" = 1 ]; then
+        _ra_addrs=$(host_addrs)
+        if [ -z "$_ra_addrs" ]; then
+            warn "could not list this host's addresses; accepting $EXTERNAL_IP without checking it is one of them"
+        elif ! ip_on_host "$EXTERNAL_IP" "$_ra_addrs"; then
+            preflight_fail PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST "$EXTERNAL_IP is not one of this host's own addresses" \
+                "the switch stays on the LAN and public traffic reaches it through the edge SBC: pass this host's LAN address${INFERRED:+ ($INFERRED)}" \
+                "or the loopback address an SBC on this host forwards to, e.g. --external-ip 127.0.0.2"
+        fi
+    fi
     LOCAL_IP=${INFERRED:-$EXTERNAL_IP}
-    if [ "$OS" = linux ] && [ "$REWRITE_ADDRESS" = 0 ] && env_has "$ENV_FILE" FS_LOCAL_IP; then
-        LOCAL_IP=$(env_get "$ENV_FILE" FS_LOCAL_IP)
-    elif [ "$OS" = linux ] && [ "$REWRITE_ADDRESS" = 1 ] && ip_on_host "$EXTERNAL_IP" "$(host_addrs)"; then
-        LOCAL_IP=$EXTERNAL_IP
+    if [ "$OS" = linux ]; then
+        if [ "$ADDRESS_GIVEN" = 1 ]; then
+            LOCAL_IP=$EXTERNAL_IP
+        elif [ "$REWRITE_ADDRESS" = 0 ] && env_has "$ENV_FILE" FS_LOCAL_IP; then
+            LOCAL_IP=$(env_get "$ENV_FILE" FS_LOCAL_IP)
+        fi
     fi
     pass "address $EXTERNAL_IP${INFERRED:+ (inferred $INFERRED)}"
 }

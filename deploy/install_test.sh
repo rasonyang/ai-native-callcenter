@@ -145,14 +145,49 @@ resolve_with() { # flag-value -> "EXTERNAL LOCAL"
 eq 'resolve: no flag takes the inferred address twice' "$(resolve_with '')" '192.168.31.111 192.168.31.111'
 eq 'resolve: --external-ip 127.0.0.2 binds it too' "$(resolve_with 127.0.0.2)" '127.0.0.2 127.0.0.2'
 eq 'resolve: --external-ip on an interface binds it too' "$(resolve_with 10.0.0.5)" '10.0.0.5 10.0.0.5'
-eq 'resolve: a NAT address leaves the LAN address' "$(resolve_with 203.0.113.9)" '203.0.113.9 192.168.31.111'
+# An address that is not the host's is refused before anything is set.
+resolve_refused=$( (
+    EXTERNAL_IP_FLAG=203.0.113.9
+    resolve_address
+    printf 'reached=after\n'
+) 2>&1) && _rr=0 || _rr=$?
+eq 'resolve: an address that is not on the host exits 1' "$_rr" 1
+case $resolve_refused in *PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: an address that is not on the host names the tag' "$_f" yes
+case $resolve_refused in *reached=after*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a refusal sets nothing' "$_f" no
+notok 'resolve: a refusal writes no .env' test -e "$TMP/resolve-refused.env"
+# A prompted address is judged the same way.
+can_prompt() { return 0; }
+ask() { REPLY=$PROMPT_REPLY; }
+resolve_prompted() { # reply -> output; no default route to infer from
+    (
+        infer_address() { :; }
+        PROMPT_REPLY=$1
+        EXTERNAL_IP_FLAG=''
+        resolve_address
+        printf 'result %s %s\n' "$EXTERNAL_IP" "${LOCAL_IP:-}"
+    ) 2>&1
+}
+case $(resolve_prompted 203.0.113.9) in *PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a prompted address that is not on the host is refused' "$_f" yes
+case $(resolve_prompted 127.0.0.2) in *'result 127.0.0.2 127.0.0.2'*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: a prompted loopback address is taken and bound' "$_f" yes
+unset -f can_prompt ask
+# A host whose addresses cannot be listed: warn and accept.
+case $( (
+    host_addrs() { :; }
+    EXTERNAL_IP_FLAG=203.0.113.9
+    resolve_address
+) 2>&1) in *'accepting 203.0.113.9'*) _f=yes ;; *) _f=no ;; esac
+eq 'resolve: unlistable host addresses warn and accept' "$_f" yes
 OS=macos
 eq 'resolve: macOS never follows' "$(resolve_with 127.0.0.2)" '127.0.0.2 192.168.31.111'
 OS=linux
 printf 'FS_EXTERNAL_IP=10.0.0.5\nFS_LOCAL_IP=10.0.0.5\n' >"$ENV_FILE"
 eq 'resolve: a rerun without a flag keeps .env' "$(resolve_with '')" '10.0.0.5 10.0.0.5'
 # Drop the stubs: sourcing again restores the real functions.
-unset -f infer_address host_addrs
+unset -f infer_address host_addrs can_prompt ask
 EXTERNAL_IP_FLAG=''
 # shellcheck source=deploy/install.sh
 . "$here/install.sh"

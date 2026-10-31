@@ -9,6 +9,15 @@ carries the one-line installer's files.
 
 ### Changed
 
+- `install.sh --external-ip`, and an address typed at the installer's prompt,
+  is now refused unless it is one of this host's own addresses (one `ip addr`
+  or `ifconfig` lists, or inside a range of the kernel's local table such as
+  127.0.0.0/8), with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`, in `--check` too.
+  The switch stays on the LAN and public traffic reaches it through an edge
+  SBC, so a NAT or public address could only produce a stack that
+  `aicc doctor` fails; the LAN address, or a loopback address an SBC on the
+  same host forwards to, is what belongs there. Before, any IPv4 address was
+  written to `.env`. (#421)
 - On a campaign call, while the call is in a phase that declares a `lead`, the
   model's `record_lead` is now refused: it is answered with an error, nothing is
   written, and the phase's lead stands. Before, a stray `record_lead` made after
@@ -93,11 +102,8 @@ carries the one-line installer's files.
   address. The PASS line names the entry that matched. (#347)
 - `install.sh --external-ip 127.0.0.2` on Linux no longer leaves `FS_LOCAL_IP`
   on the default route's address, which made the switch bind the public
-  interface. When the explicit address is one of the host's own (an address
-  `ip addr` lists, or one inside a range of the kernel's local table such as
-  127.0.0.0/8), `FS_LOCAL_IP` follows it; an address that is not the host's, a
-  NAT's, still leaves `FS_LOCAL_IP` on the inferred LAN address, and a rerun
-  without the flag keeps what `.env` says. (#346)
+  interface. The address given with the flag (or at the prompt) is now also
+  `FS_LOCAL_IP`, and a rerun without the flag keeps what `.env` says. (#346)
 - The installer's image preflight no longer aborts a host whose Docker daemon
   pulls through `registry-mirrors` while Docker Hub itself is unreachable.
   `docker manifest inspect`, which reads the registry directly, failed there

@@ -57,14 +57,15 @@ allowing the stack's ports ([Ports and firewall](#ports-and-firewall)).
 
 **What it asks, and what it works out itself:**
 
-- The LAN address phones reach this host at: inferred from the default route's
-  interface, skipping loopback, link-local and TUN-proxy addresses
-  (198.18.0.0/15). Pass `--external-ip <ip>` when the inference is wrong or
-  phones reach the host through NAT. On Linux the switch and the bot bind
-  `FS_LOCAL_IP`, the inferred LAN address; an `--external-ip` that is one of
-  this host's own addresses (127.0.0.2 counts, as part of 127.0.0.0/8) is
-  bound too, and one that is not (a NAT's) leaves `FS_LOCAL_IP` on the LAN
-  address.
+- The LAN address the switch binds and advertises: inferred from the default
+  route's interface, skipping loopback, link-local and TUN-proxy addresses
+  (198.18.0.0/15). The switch stays on the LAN and public traffic reaches it
+  through an edge SBC, so `--external-ip <ip>` (for when the inference is
+  wrong) must be one of this host's own addresses: its LAN address, or a
+  loopback address an SBC on the same host forwards to (127.0.0.2 counts, as
+  part of 127.0.0.0/8). Any other address, a NAT's or a public one, is refused
+  with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`. On Linux the address you give is
+  also `FS_LOCAL_IP`, where the switch and the bot bind.
 - The voice provider (`--provider openai|grok|qwen|gateway|doubao|none`) and
   its key. The key is read from the environment (`OPENAI_API_KEY`,
   `XAI_API_KEY` for grok, `ALIYUN_API_KEY` for qwen, `DOUBAO_API_KEY`,
@@ -91,7 +92,7 @@ would have had to ask for.
 | Option | Meaning |
 |---|---|
 | `--provider P` | `openai`, `qwen`, `gateway`, `doubao` or `none`. Only a first install chooses; later runs keep what `.env` names |
-| `--external-ip IP` | The address phones reach this host at. On a rerun, rewrites the address in `.env`. On Linux, an address that is the host's own is also `FS_LOCAL_IP` |
+| `--external-ip IP` | One of this host's own addresses: its LAN address, or a loopback address an edge SBC on this host forwards to; anything else is refused (`PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`). On a rerun, rewrites the address in `.env`. On Linux it is also `FS_LOCAL_IP` |
 | `--version TAG` | The release to install. Default: the release the script came from |
 | `--no-demo` | Do not seed the demo dataset (`AICC_SEED` empty). Use it for production |
 | `--upgrade` | Back up the database, then move an install to `--version` |
