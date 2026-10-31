@@ -46,6 +46,14 @@ carries the one-line installer's files.
   the dashboard read "工作台 / 工作…". The call field now takes the whole of a
   shortfall until it is at its narrowest, and only then does the breadcrumb
   truncate. (#405)
+- At 1024px the agent dashboard's middle column was about 124px wide, so on a
+  call the "Started" clock covered the contact's tags and the caller's details
+  wrapped one word per line. Below 1280px the dashboard now has two columns:
+  after-call work and today's figures sit under the caller card and the live
+  transcript, and the page scrolls. The caller card's name row wraps, so tags
+  go under the name, and a long name, tag or userData value truncates with the
+  whole value in its tooltip. From 1280px the three columns are unchanged.
+  (#406)
 - On an AI call, the provider now hears the caller on the call's own clock.
   A phone that stopped sending while its user was silent (silence suppression)
   left the provider with no audio for that stretch, and what followed could
