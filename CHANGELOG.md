@@ -31,6 +31,13 @@ carries the one-line installer's files.
   `admin.addExtension` and `admin.generate`, which had no entry in either
   language. A test now fails when a literal translation key used in the SPA is
   missing from either locale. (#396, #337)
+- The switch image no longer ships the `internal-ipv6` and `external-ipv6` SIP
+  profiles. With host networking (the Linux overlay and the one-line installer,
+  or a native install) on a host with a global IPv6 address, both bound that
+  public address whatever `FS_LOCAL_IP` said: `external-ipv6` on 5080 in the
+  `public` context with no authentication and no inbound ACL, `internal-ipv6`
+  on 5060. That was a second way in that did not pass through the edge SBC.
+  IPv6 toward carriers or remote phones belongs on the edge SBC. (#422)
 - On qwen, a turn later in the call no longer sometimes speaks the opening
   line again. The opening line's direction was kept in the conversation as the
   caller's first message for the whole call, and a turn that answered tool
