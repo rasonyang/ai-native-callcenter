@@ -205,6 +205,12 @@ describe('call controls', () => {
     expect(await screen.findByText(CALLER)).toBeInTheDocument()
   })
 
+  // No word for the absence of a call, not even "Idle" (issue #396).
+  it('leaves the call field empty with no call', async () => {
+    await renderBar()
+    expect(document.querySelector('[data-softphone-bar] [data-call-field]')).toBeEmptyDOMElement()
+  })
+
   it('cannot mute or hang up with no call', async () => {
     await renderBar()
     expect(await screen.findByRole('button', { name: /^mute$/i })).toBeDisabled()

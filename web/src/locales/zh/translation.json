@@ -202,7 +202,6 @@
     "activeCall": "当前通话",
     "contact": "客户",
     "noContact": "尚未识别来电客户。",
-    "idle": "空闲",
     "today": "今日",
     "dialOut": "外呼",
     "dialPlaceholder": "客户号码…",

@@ -19,12 +19,13 @@ carries the one-line installer's files.
 
 ### Fixed
 
-- An idle agent's softphone bar now reads "Idle" instead of the raw key
-  `agent.idle`, and the add-extension dialog's title and its Generate button
-  read "Add extension" and "Generate" instead of `admin.addExtension` and
-  `admin.generate`; the keys had no entry in either language. A test now fails
-  when a literal translation key used in the SPA is missing from either locale.
-  (#396, #337)
+- An agent with no call no longer sees the raw key `agent.idle` in the call
+  field of the softphone bar; the field is now empty until a call arrives, and
+  keeps its width so the call controls do not move. The add-extension dialog's
+  title and its Generate button read "Add extension" and "Generate" instead of
+  `admin.addExtension` and `admin.generate`, which had no entry in either
+  language. A test now fails when a literal translation key used in the SPA is
+  missing from either locale. (#396, #337)
 - On qwen, a turn later in the call no longer sometimes speaks the opening
   line again. The opening line's direction was kept in the conversation as the
   caller's first message for the whole call, and a turn that answered tool
