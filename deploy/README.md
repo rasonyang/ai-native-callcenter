@@ -128,7 +128,10 @@ cd /opt/aicc && sudo docker compose exec aicc aicc doctor --host-addrs <ip>   # 
 cd ~/.aicc && docker compose exec aicc aicc doctor --host-addrs <ip>           # macOS
 ```
 
-`--host-addrs` is the host's address (comma-separated if several); on macOS
+`--host-addrs` is the host's address (comma-separated if several; an entry may
+be an IPv4 range such as `127.0.0.0/8`, which is how the installer passes
+Linux's loopback, where 127.0.0.2 is local though `ip addr` lists only
+127.0.0.1); on macOS
 the container cannot see the Mac's interfaces, so without it the address check
 is judged against the wrong host. Each line is `PASS`, `WARN`, `FAIL` or `SKIP`, the
 check's name and a message; a `FAIL` or `WARN` also carries a code and a `fix:`

@@ -745,9 +745,15 @@ infer_address() {
     done
 }
 
+# host_addrs: this host's addresses, comma-separated, for doctor's
+# --host-addrs. On Linux also the IPv4 ranges of the kernel's local table
+# (127.0.0.0/8 for lo): the whole prefix is local though `ip addr` lists only
+# 127.0.0.1/8. macOS does not route 127.0.0.2 to lo0 without an alias, and
+# ifconfig lists aliases, so it needs nothing more.
 host_addrs() {
     if [ "$OS" = linux ]; then
         ip -o addr show 2>/dev/null | awk '{ split($4, a, "/"); print a[1] }'
+        ip -4 -o route show table local type local 2>/dev/null | awk '$2 ~ /\// { print $2 }'
     else
         ifconfig 2>/dev/null | awk '$1 == "inet" || $1 == "inet6" { print $2 }' | sed 's/%.*//'
     fi | paste -s -d, -

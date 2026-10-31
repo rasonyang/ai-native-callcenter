@@ -474,6 +474,54 @@ func TestTheExternalAddressIsLookedForAmongTheHostsOwn(t *testing.T) {
 	}
 }
 
+// Linux makes the whole prefix of a loopback address local, so 127.0.0.2 is on
+// the host though only 127.0.0.1/8 is listed. A non-loopback network is not
+// like that: a /24 on eth0 makes only its own address local.
+func TestALoopbackRangeIsTheHostsOwn(t *testing.T) {
+	ipnet := func(cidr string) net.Addr {
+		ip, n, err := net.ParseCIDR(cidr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n.IP = ip
+		return n
+	}
+	cases := []struct {
+		name       string
+		externalIP string
+		hostAddrs  []string
+		ifaces     []net.Addr
+		want       DoctorState
+		message    string
+	}{
+		{"a range from the installer", "127.0.0.2", []string{"127.0.0.1", "127.0.0.0/8"}, nil,
+			DoctorStatePass, "127.0.0.2 is within 127.0.0.0/8 of --host-addrs"},
+		{"the installer lists only 127.0.0.1", "127.0.0.2", []string{"127.0.0.1"}, nil, DoctorStateFail, ""},
+		{"outside the range", "128.0.0.2", []string{"127.0.0.0/8"}, nil, DoctorStateFail, ""},
+		{"a non-loopback interface covers only itself", "10.0.0.9", nil,
+			[]net.Addr{ipnet("10.0.0.2/24")}, DoctorStateFail, ""},
+		{"a non-loopback interface address itself", "10.0.0.2", nil,
+			[]net.Addr{ipnet("10.0.0.2/24")}, DoctorStatePass, ""},
+		{"a loopback interface covers its network", "127.0.0.3", nil,
+			[]net.Addr{ipnet("127.0.0.1/8")}, DoctorStatePass, "127.0.0.3 is within 127.0.0.0/8"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.opts.externalIP = tc.externalIP
+			h.opts.hostAddrs = tc.hostAddrs
+			if tc.ifaces != nil {
+				h.deps.interfaceAddrs = func() ([]net.Addr, error) { return tc.ifaces, nil }
+			}
+			got := h.run()
+			wantState(t, got, DoctorCheckExternalIP, tc.want)
+			if !strings.Contains(got[DoctorCheckExternalIP].Message, tc.message) {
+				t.Errorf("message %q does not contain %q", got[DoctorCheckExternalIP].Message, tc.message)
+			}
+		})
+	}
+}
+
 // The captured switch advertises 192.168.31.111; an operator who changed
 // FS_EXTERNAL_IP and only restarted the switch still has the old one there.
 func TestASwitchStillAdvertisingAnOldAddressIsStale(t *testing.T) {

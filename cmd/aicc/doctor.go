@@ -210,7 +210,7 @@ func runDoctor(args []string) error {
 	wait := fs.Duration("wait", 0, "keep polling /readyz up to this long until the app is ready and its switch link is up (0: ask once)")
 	readyzURL := fs.String("readyz-url", "", "the app's readiness URL (default: derived from AICC_METRICS_ADDR)")
 	externalIP := fs.String("external-ip", "", "the address phones reach the switch at (default: $FS_EXTERNAL_IP)")
-	hostAddrs := fs.String("host-addrs", "", "comma-separated addresses of the host (default: this namespace's interfaces)")
+	hostAddrs := fs.String("host-addrs", "", "comma-separated addresses of the host; an entry may be an IPv4 CIDR range such as 127.0.0.0/8, which Linux treats as all local (default: this namespace's interfaces)")
 	skipProvider := fs.Bool("skip-provider", false, "do not open a session with the speech provider")
 	asJSON := fs.Bool("json", false, "print the results as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -736,11 +736,11 @@ func checkExternalIP(d doctorDeps, opts doctorOptions, sw switchProfiles) []doct
 		switch {
 		case err != nil:
 			out = append(out, skip(DoctorCheckExternalIP, "cannot list this host's addresses: "+oneLine(err.Error())))
-		case slices.ContainsFunc(addrs, want.Equal):
-			out = append(out, pass(DoctorCheckExternalIP, opts.externalIP+" is one of "+source))
+		case hostCovers(addrs, want) != "":
+			out = append(out, pass(DoctorCheckExternalIP, hostCoverMessage(opts.externalIP, hostCovers(addrs, want), source)))
 		default:
 			out = append(out, fail(DoctorCheckExternalIP,
-				opts.externalIP+" is not one of "+source+": "+joinIPs(addrs),
+				opts.externalIP+" is not one of "+source+": "+joinHostAddrs(addrs),
 				"set FS_EXTERNAL_IP to this host's own address (or pass --host-addrs when doctor cannot see the host's interfaces), then `docker compose up -d`"))
 		}
 	}
@@ -771,41 +771,88 @@ func checkExternalIP(d doctorDeps, opts doctorOptions, sw switchProfiles) []doct
 	return out
 }
 
+// hostAddr is one thing the host answers to: a single address, or (net set) a
+// whole range. Linux makes the entire prefix of an address on a loopback
+// device local, so 127.0.0.2 is on the host though only 127.0.0.1/8 is listed.
+type hostAddr struct {
+	ip  net.IP
+	net *net.IPNet
+}
+
+func (h hostAddr) String() string {
+	if h.net != nil {
+		return h.net.String()
+	}
+	return h.ip.String()
+}
+
+// hostCovers returns the entry that covers want ("" when none does).
+func hostCovers(addrs []hostAddr, want net.IP) string {
+	for _, a := range addrs {
+		if a.net != nil && a.net.Contains(want) {
+			return a.String()
+		}
+		if a.net == nil && a.ip.Equal(want) {
+			return a.String()
+		}
+	}
+	return ""
+}
+
+func hostCoverMessage(ip, entry, source string) string {
+	if strings.Contains(entry, "/") {
+		return ip + " is within " + entry + " of " + source
+	}
+	return ip + " is one of " + source
+}
+
+func joinHostAddrs(addrs []hostAddr) string {
+	s := make([]string, len(addrs))
+	for i, a := range addrs {
+		s[i] = a.String()
+	}
+	return strings.Join(s, ", ")
+}
+
 // hostAddresses is --host-addrs when given, and this namespace's interfaces
 // otherwise. Inside a container on a bridge network those are the container's
-// own, which is why the installer passes the host's.
-func hostAddresses(d doctorDeps, opts doctorOptions) ([]net.IP, string, error) {
+// own, which is why the installer passes the host's. A loopback network on an
+// interface covers its whole range; any other network counts only its own
+// address (a /24 on eth0 does not make the subnet local).
+func hostAddresses(d doctorDeps, opts doctorOptions) ([]hostAddr, string, error) {
 	if len(opts.hostAddrs) > 0 {
-		var ips []net.IP
+		var out []hostAddr
 		for _, a := range opts.hostAddrs {
+			if strings.Contains(a, "/") {
+				if _, n, err := net.ParseCIDR(a); err == nil {
+					out = append(out, hostAddr{net: n})
+				}
+				continue
+			}
 			if ip := net.ParseIP(a); ip != nil {
-				ips = append(ips, ip)
+				out = append(out, hostAddr{ip: ip})
 			}
 		}
-		return ips, "--host-addrs", nil
+		return out, "--host-addrs", nil
 	}
 	addrs, err := d.interfaceAddrs()
 	if err != nil {
 		return nil, "", err
 	}
-	var ips []net.IP
+	var out []hostAddr
 	for _, a := range addrs {
 		switch v := a.(type) {
 		case *net.IPNet:
-			ips = append(ips, v.IP)
+			if v.IP.IsLoopback() {
+				out = append(out, hostAddr{ip: v.IP, net: &net.IPNet{IP: v.IP.Mask(v.Mask), Mask: v.Mask}})
+			} else {
+				out = append(out, hostAddr{ip: v.IP})
+			}
 		case *net.IPAddr:
-			ips = append(ips, v.IP)
+			out = append(out, hostAddr{ip: v.IP})
 		}
 	}
-	return ips, "this namespace's addresses", nil
-}
-
-func joinIPs(ips []net.IP) string {
-	s := make([]string, len(ips))
-	for i, ip := range ips {
-		s[i] = ip.String()
-	}
-	return strings.Join(s, ", ")
+	return out, "this namespace's addresses", nil
 }
 
 func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResult {

@@ -84,6 +84,13 @@ carries the one-line installer's files.
   a caller could hear two closing lines, the model's own and then the flow's
   (#350). They now say the closing line is spoken for the model, as the other
   seeded flows do.
+- `aicc doctor` no longer fails `EXTERNAL_IP_NOT_ON_HOST` for an address such
+  as 127.0.0.2 that Linux treats as the host's own because it lies in
+  127.0.0.0/8, although `ip addr` lists only 127.0.0.1/8. `--host-addrs` now
+  accepts IPv4 ranges, the installer passes the ranges of the kernel's local
+  table along with the addresses, and without the flag a loopback interface
+  covers its whole network; any other network still counts only its own
+  address. The PASS line names the entry that matched. (#347)
 
 ### Docs and CI
 
