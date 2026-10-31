@@ -216,6 +216,19 @@ IMG_LOCAL=''
 notok 'recheck: not local after the pull' recheck_case
 unset IMG_LOCAL
 
+# The post-pull failure must not claim nothing was written.
+recheck_out=$( (
+    # shellcheck disable=SC2317
+    docker() { return 1; }
+    DIR=/opt/aicc
+    DEFERRED_IMAGES='example/app:v1'
+    recheck_deferred_images
+) 2>&1) || true
+case $recheck_out in *'files and .env are in /opt/aicc; no container was created'*) _f=yes ;; *) _f=no ;; esac
+eq 'recheck failure prints the honest footer' "$_f" yes
+case $recheck_out in *'Nothing was installed or started.'*) _f=yes ;; *) _f=no ;; esac
+eq 'recheck failure does not print the preflight footer' "$_f" no
+
 # ---------------------------------------------------------- exclusions ----
 
 ok 'excluded: TUN 198.18.0.1' ip_excluded 198.18.0.1

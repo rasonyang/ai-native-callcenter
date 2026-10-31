@@ -40,7 +40,10 @@ from `releases/download/<tag>/install.sh`, or pass `--version <tag>`.
 
 **Before it changes anything, it checks the host.** Each failed check prints a
 stable tag (`FAIL PREFLIGHT_…`), what is wrong and the command that fixes it,
-then stops with nothing written or started. `--check` runs only these checks.
+then stops with nothing written or started (one exception: the architecture
+check of an image the registry could not be read for runs after the pull, when
+the release's files and `.env` are already written; no container is created or
+changed). `--check` runs only these checks.
 They cover: Docker Engine 24.0.0 or later and Compose 2.24.4 or later (not the
 snap package, not rootless), on macOS Docker Desktop or Colima 0.9.0 or later
 with the `grpc` port forwarder, at least 4 CPUs and 4 GiB for the runtime,

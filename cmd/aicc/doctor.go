@@ -733,11 +733,16 @@ func checkExternalIP(d doctorDeps, opts doctorOptions, sw switchProfiles) []doct
 			"set FS_EXTERNAL_IP in deploy/.env to the host address phones reach, then `docker compose up -d`"))
 	default:
 		addrs, source, err := hostAddresses(d, opts)
+		var covering hostAddr
+		var found bool
+		if err == nil {
+			covering, found = hostCovers(addrs, want)
+		}
 		switch {
 		case err != nil:
 			out = append(out, skip(DoctorCheckExternalIP, "cannot list this host's addresses: "+oneLine(err.Error())))
-		case hostCovers(addrs, want) != "":
-			out = append(out, pass(DoctorCheckExternalIP, hostCoverMessage(opts.externalIP, hostCovers(addrs, want), source)))
+		case found:
+			out = append(out, pass(DoctorCheckExternalIP, hostCoverMessage(opts.externalIP, covering, source)))
 		default:
 			out = append(out, fail(DoctorCheckExternalIP,
 				opts.externalIP+" is not one of "+source+": "+joinHostAddrs(addrs),
@@ -786,22 +791,22 @@ func (h hostAddr) String() string {
 	return h.ip.String()
 }
 
-// hostCovers returns the entry that covers want ("" when none does).
-func hostCovers(addrs []hostAddr, want net.IP) string {
+// hostCovers returns the entry that covers want.
+func hostCovers(addrs []hostAddr, want net.IP) (hostAddr, bool) {
 	for _, a := range addrs {
 		if a.net != nil && a.net.Contains(want) {
-			return a.String()
+			return a, true
 		}
 		if a.net == nil && a.ip.Equal(want) {
-			return a.String()
+			return a, true
 		}
 	}
-	return ""
+	return hostAddr{}, false
 }
 
-func hostCoverMessage(ip, entry, source string) string {
-	if strings.Contains(entry, "/") {
-		return ip + " is within " + entry + " of " + source
+func hostCoverMessage(ip string, entry hostAddr, source string) string {
+	if entry.net != nil {
+		return ip + " is within " + entry.String() + " of " + source
 	}
 	return ip + " is one of " + source
 }

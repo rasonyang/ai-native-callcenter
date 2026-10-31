@@ -46,14 +46,16 @@ pass() { printf 'PASS %s\n' "$*"; }
 
 # preflight_fail TAG message [fix...]: a stable tag an operator can search for,
 # what is wrong, and each command that fixes it. Nothing has been written or
-# started when this runs.
+# started when this runs, except in the check after the pull
+# (recheck_deferred_images), which sets FAIL_FOOTER to say what is on disk.
+FAIL_FOOTER="Nothing was installed or started."
 preflight_fail() {
     printf 'FAIL %s: %s\n' "$1" "$2" >&2
     shift 2
     for _pf_fix in "$@"; do
         printf '  fix: %s\n' "$_pf_fix" >&2
     done
-    say "Nothing was installed or started." >&2
+    say "$FAIL_FOOTER" >&2
     exit 1
 }
 
@@ -645,12 +647,14 @@ image_arch_ok() {
 # recheck_deferred_images: after the pull, the images the preflight could not
 # read a manifest for are local, and are judged as local images are.
 recheck_deferred_images() {
+    FAIL_FOOTER="The release's files and .env are in $DIR; no container was created or changed (on an upgrade the old containers are still running)."
     for _rd_image in $DEFERRED_IMAGES; do
         image_local_arch_ok "$_rd_image" ||
             preflight_fail PREFLIGHT_IMAGE_UNAVAILABLE "$_rd_image is not in the local daemon after the pull" \
                 "docker pull $_rd_image"
     done
     DEFERRED_IMAGES=
+    FAIL_FOOTER="Nothing was installed or started."
 }
 
 preflight_images() {

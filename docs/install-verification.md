@@ -358,7 +358,7 @@ next case.
 | Runtime stopped | A, B, C | A: `sudo systemctl stop docker.socket docker`; B: quit Docker Desktop; C: `colima stop` | `PREFLIGHT_DOCKER_DAEMON_DOWN` |
 | Port 8080 taken | A, B, C | `python3 -m http.server 8080` in another terminal | `PREFLIGHT_PORT_IN_USE` |
 | Image for another architecture | A, B, C | `curl -fsSL "$URL" \| sudo AICC_IMAGE=arm64v8/alpine:3.20 sh -s -- --check` (an arm64-only image on an x86_64 host; on B and C without `sudo`) | `PREFLIGHT_IMAGE_ARCH` |
-| Tag that is not published | A, B, C | `curl -fsSL "$URL" \| sudo AICC_IMAGE=rasonyang/ai-native-callcenter:v0.0.0-none sh -s -- --check` (on B and C without `sudo`) | `PREFLIGHT_IMAGE_UNAVAILABLE` |
+| Tag that is not published | A, B, C | `curl -fsSL "$URL" \| sudo AICC_IMAGE=rasonyang/ai-native-callcenter:v0.0.0-none sh -s -- --check` (on B and C without `sudo`); only on a host that reaches Docker Hub directly: behind a registry mirror it warns and `--check` passes | `PREFLIGHT_IMAGE_UNAVAILABLE` |
 | Firewall without the stack's ports | A | `sudo ufw allow OpenSSH && sudo ufw enable` | `PREFLIGHT_FIREWALL` |
 | Too few resources | B, C | B: Settings > Resources, 2 CPUs and 2 GB, Apply & restart; C: `colima stop && colima start --vm-type qemu --port-forwarder grpc --cpu 2 --memory 2` | `PREFLIGHT_RESOURCES` |
 | Colima's `ssh` forwarder | C | `colima stop && colima start --vm-type qemu --port-forwarder ssh --cpu 4 --memory 4` | `PREFLIGHT_COLIMA_PORT_FORWARDER` |
