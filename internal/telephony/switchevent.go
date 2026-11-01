@@ -6,6 +6,7 @@
 package telephony
 
 import (
+	"path"
 	"slices"
 	"strconv"
 	"strings"
@@ -40,6 +41,15 @@ const (
 // never made a channel is heard about at all.
 const (
 	KindBackgroundJob SwitchEventKind = "BACKGROUND_JOB"
+)
+
+// The switch's own account of a fault it raises no event for. It arrives as a
+// CRIT-level log line (esl log frame) and is recognised by its exact text.
+const (
+	// KindSwitchRTPPortsExhausted: a leg could not be given an RTP port because
+	// the switch's range is used up. ChannelID is the leg that failed and Media
+	// is audio, video or text.
+	KindSwitchRTPPortsExhausted SwitchEventKind = "SWITCH_RTP_PORTS_EXHAUSTED"
 )
 
 // Endpoint registration, observed from sofia.
@@ -305,6 +315,10 @@ type SwitchEvent struct {
 	// still be matched to its result. Empty for any other job.
 	JobChannelID string
 
+	// Media is the kind of media a SWITCH_RTP_PORTS_EXHAUSTED leg wanted:
+	// audio, video or text.
+	Media string
+
 	// Recording.
 	RecordingPath string
 
@@ -409,6 +423,10 @@ func inboundUserData(ev *esl.Event) map[string]any {
 func Normalize(ev *esl.Event) (SwitchEvent, bool) {
 	if ev == nil {
 		return SwitchEvent{}, false
+	}
+
+	if ev.IsLog() {
+		return normalizeLog(ev)
 	}
 
 	out := SwitchEvent{
@@ -669,4 +687,41 @@ func epochSeconds(v string) time.Time {
 		return time.Time{}
 	}
 	return time.Unix(sec, 0).UTC()
+}
+
+// normalizeLog is the only place a forwarded switch log line becomes a domain
+// event. It recognises exactly one line, the CRIT "No <media> RTP ports
+// available!" of switch_core_media.c, which is all the switch says when a leg
+// finds its range used up (no event is fired for it). Everything else maps to
+// nothing.
+func normalizeLog(ev *esl.Event) (SwitchEvent, bool) {
+	const crit = 2
+	if level, ok := ev.GetInt("Log-Level"); !ok || level > crit {
+		return SwitchEvent{}, false
+	}
+	if path.Base(ev.Get("Log-File")) != "switch_core_media.c" {
+		return SwitchEvent{}, false
+	}
+	// The body is the whole formatted line, not just the message (switch_log.c):
+	// "2026-11-01 01:03:16.790420 97.83% [CRIT] switch_core_media.c:8191 No audio
+	// RTP ports available!\n". The message is what the line ends with.
+	rest, ok := strings.CutSuffix(strings.TrimSpace(ev.Body), " RTP ports available!")
+	if !ok {
+		return SwitchEvent{}, false
+	}
+	i := strings.LastIndex(rest, "No ")
+	if i < 0 || (i > 0 && rest[i-1] != ' ') {
+		return SwitchEvent{}, false
+	}
+	media := rest[i+len("No "):]
+	if media != "audio" && media != "video" && media != "text" {
+		return SwitchEvent{}, false
+	}
+	return SwitchEvent{
+		Kind:       KindSwitchRTPPortsExhausted,
+		OccurredAt: time.Now().UTC(),
+		ChannelID:  ev.Get("User-Data"),
+		Media:      media,
+		Raw:        ev,
+	}, true
 }

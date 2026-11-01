@@ -212,7 +212,7 @@ services:
       # The media range, published below from the same two variables so the
       # two can never disagree.
       FS_RTP_START_PORT: ${RTP_START:-16384}
-      FS_RTP_END_PORT: ${RTP_END:-16484}
+      FS_RTP_END_PORT: ${RTP_END:-16483}
     volumes:
       # Recordings are written here by the switch and read by the application.
       - recordings:/usr/local/freeswitch/recordings
@@ -233,12 +233,14 @@ services:
       - "${SIP_BIND:-0.0.0.0}:5060:5060/udp"
       - "${SIP_BIND:-0.0.0.0}:5060:5060/tcp"
       - "${SIP_BIND:-0.0.0.0}:5066:5066/tcp"
-      # Media. Ports are allocated as RTP and RTCP pairs, so the range carries
-      # half as many calls as it has ports; widen RTP_START and RTP_END
-      # together when a deployment needs more. On a bridge network each
+      # Media. Ports are allocated as RTP and RTCP pairs (even port RTP, odd
+      # port RTCP), one pair per leg, and a call holds two legs. The default
+      # 16384-16483 carries 50 legs, about 25 calls, and its last RTCP port
+      # (16483) is inside the range. Widen RTP_START and RTP_END together
+      # when a deployment needs more. On a bridge network each
       # published port costs one proxy process, so a range wider than the
       # traffic is paid for at every start.
-      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-16384}-${RTP_END:-16484}:${RTP_START:-16384}-${RTP_END:-16484}/udp"
+      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-16384}-${RTP_END:-16483}:${RTP_START:-16384}-${RTP_END:-16483}/udp"
 
 # The compose network gets a fixed subnet so the application can have a fixed
 # address in it. Change AICC_SUBNET and AICC_APP_IP together if this range is

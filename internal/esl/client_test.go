@@ -128,6 +128,9 @@ func (f *fakeSwitch) serve(conn net.Conn) {
 				close(fc.heardDone)
 				return
 			}
+		case strings.HasPrefix(cmd, "log "):
+			fc.cmds <- cmd
+			fmt.Fprint(conn, "Content-Type: command/reply\nReply-Text: +OK log level 2 [2]\n\n")
 		case strings.HasPrefix(cmd, "api "):
 			fc.cmds <- cmd
 			body := "+OK " + strings.TrimPrefix(cmd, "api ")
@@ -450,5 +453,121 @@ func TestLinkReportsDownWhenDisconnected(t *testing.T) {
 	}
 	if _, err := link.API("status"); !errors.Is(err, ErrDown) {
 		t.Errorf("API() = %v, want ErrDown", err)
+	}
+}
+
+// pushLog sends a log line as mod_event_socket frames it: the log's own
+// headers on the outside and the text as the body.
+func (fc *fakeConn) pushLog(level int, file, userData, text string) {
+	fmt.Fprintf(fc.Conn, "Content-Type: log/data\nContent-Length: %d\nLog-Level: %d\nText-Channel: 0\n"+
+		"Log-File: %s\nLog-Func: switch_core_media_choose_port\nLog-Line: 1234\nUser-Data: %s\n\n%s",
+		len(text), level, file, userData, text)
+}
+
+func TestALogFrameIsDeliveredAndKeepsRepliesInStep(t *testing.T) {
+	t.Parallel()
+	f := newFakeSwitch(t, "ClueCon")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	client, err := Dial(ctx, f.addr(), "ClueCon")
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer client.Close()
+	fc := f.waitConn(t)
+
+	if err := client.SubscribeLogs("2"); err != nil {
+		t.Fatalf("SubscribeLogs() error = %v", err)
+	}
+	if got := <-fc.cmds; got != "log 2" {
+		t.Errorf("sent %q, want log 2", got)
+	}
+
+	// An event, a log frame and an event around an api round trip.
+	fc.pushEvent("Event-Name: CHANNEL_ANSWER\nUnique-ID: a\n")
+	fc.pushLog(2, "switch_core_media.c", "019ff973-6b32-7557-b7c4-11b3fdb692f0", "No audio RTP ports available!\n")
+	reply, err := client.API("status")
+	if err != nil || reply != "+OK status" {
+		t.Fatalf("API() = %q, %v: a log frame put the replies out of step", reply, err)
+	}
+	fc.pushEvent("Event-Name: CHANNEL_HANGUP\nUnique-ID: a\n")
+
+	var got []*Event
+	for range 3 {
+		select {
+		case ev := <-client.Events():
+			got = append(got, ev)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("only %d of 3 frames arrived", len(got))
+		}
+	}
+	if got[0].IsLog() || got[0].Name() != "CHANNEL_ANSWER" {
+		t.Errorf("first frame = %v, want the CHANNEL_ANSWER event", got[0].Headers())
+	}
+	logEv := got[1]
+	if !logEv.IsLog() {
+		t.Fatalf("second frame is not a log event: %v", logEv.Headers())
+	}
+	for header, want := range map[string]string{
+		"Log-Level": "2", "Log-File": "switch_core_media.c", "Log-Line": "1234",
+		"User-Data": "019ff973-6b32-7557-b7c4-11b3fdb692f0", "Content-Type": "log/data",
+	} {
+		if v := logEv.Get(header); v != want {
+			t.Errorf("%s = %q, want %q", header, v, want)
+		}
+	}
+	if logEv.Body != "No audio RTP ports available!\n" {
+		t.Errorf("Body = %q", logEv.Body)
+	}
+	if got[2].IsLog() || got[2].Name() != "CHANNEL_HANGUP" {
+		t.Errorf("third frame = %v, want the CHANNEL_HANGUP event", got[2].Headers())
+	}
+}
+
+func TestTheLinkSubscribesToLogsOnEveryConnect(t *testing.T) {
+	t.Parallel()
+	f := newFakeSwitch(t, "ClueCon")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	link := NewLink(f.addr(), "ClueCon", []string{"CHANNEL_ANSWER"})
+	link.SubscribeLogs("2")
+	go link.Run(ctx)
+
+	for connection := 1; connection <= 2; connection++ {
+		fc := f.waitConn(t)
+		var cmds []string
+		for len(cmds) < 2 {
+			select {
+			case c := <-fc.cmds:
+				cmds = append(cmds, c)
+			case <-time.After(3 * time.Second):
+				t.Fatalf("connection %d sent only %v", connection, cmds)
+			}
+		}
+		if cmds[0] != "event plain CHANNEL_ANSWER" || cmds[1] != "log 2" {
+			t.Errorf("connection %d sent %v, want the event subscription then log 2", connection, cmds)
+		}
+		if connection == 1 {
+			fc.Conn.Close()
+		}
+	}
+}
+
+func TestALinkWithoutLogsDoesNotAskForThem(t *testing.T) {
+	t.Parallel()
+	f := newFakeSwitch(t, "ClueCon")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	link := NewLink(f.addr(), "ClueCon", []string{"CHANNEL_ANSWER"})
+	go link.Run(ctx)
+	fc := f.waitConn(t)
+	<-fc.cmds
+	select {
+	case c := <-fc.cmds:
+		t.Errorf("unexpected command %q", c)
+	case <-time.After(300 * time.Millisecond):
 	}
 }

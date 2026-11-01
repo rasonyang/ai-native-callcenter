@@ -162,3 +162,34 @@ func TestTheUplinkClockPublishesItsCountersWhenTheLegEnds(t *testing.T) {
 		}
 	}
 }
+
+func TestSwitchRTPExhaustionIsCountedByMedia(t *testing.T) {
+	reader := useTestReader()
+	read := func() map[string]int64 {
+		var rm metricdata.ResourceMetrics
+		if err := reader.Collect(context.Background(), &rm); err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]int64{}
+		for _, sm := range rm.ScopeMetrics {
+			for _, m := range sm.Metrics {
+				if m.Name != "aicc_switch_rtp_ports_exhausted_total" {
+					continue
+				}
+				for _, dp := range m.Data.(metricdata.Sum[int64]).DataPoints {
+					media, _ := dp.Attributes.Value("media")
+					out[media.AsString()] += dp.Value
+				}
+			}
+		}
+		return out
+	}
+	before := read()
+	RecordSwitchRTPExhausted("audio")
+	RecordSwitchRTPExhausted("audio")
+	RecordSwitchRTPExhausted("video")
+	after := read()
+	if after["audio"]-before["audio"] != 2 || after["video"]-before["video"] != 1 {
+		t.Errorf("before %v after %v: want audio +2, video +1", before, after)
+	}
+}

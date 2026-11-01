@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
+	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
 
 // AgentLookup is the agent service as call control needs it: who is at which
@@ -250,6 +251,28 @@ func (c *Coordinator) AttachCDR(assembler *CDRAssembler) {
 func NewCoordinator(registry *Registry, adapter *Adapter, agents AgentLookup, pub Publisher) *Coordinator {
 	return &Coordinator{registry: registry, adapter: adapter, agents: agents, pub: pub,
 		waiting: NewWaitingLine()}
+}
+
+// ReportRTPPortsExhausted answers the switch saying a leg found its RTP range
+// used up: an ERROR log an operator can act on, and a counter.
+//
+// It does not go through Handle and takes no call actor's mailbox, so it can
+// neither wait behind a call nor hold the event pump up. The call is named only
+// when the registry already binds the leg to one (a map read under a read
+// lock), as for a bound leg whose re-INVITE needs a new port. Most legs fail
+// before that: measured on the e2e stack (#417), neither an outbound callee
+// leg nor the switch's new leg to the bot was bound when its line arrived, and
+// an inbound INVITE the switch answers 488 never is.
+func (c *Coordinator) ReportRTPPortsExhausted(ctx context.Context, ev SwitchEvent) {
+	obs.RecordSwitchRTPExhausted(ev.Media)
+	attrs := []any{"legId", ev.ChannelID}
+	if callID, ok := c.registry.CallForChannel(ev.ChannelID); ok {
+		attrs = append(attrs, "callId", callID)
+	}
+	attrs = append(attrs, "media", ev.Media,
+		"fix", "widen the switch's RTP range (FS_RTP_START_PORT/FS_RTP_END_PORT on the switch image, "+
+			"RTP_START/RTP_END in deploy/.env) and publish the same range")
+	slog.ErrorContext(ctx, "switch out of RTP ports", attrs...)
 }
 
 // Handle consumes one normalized switch event.

@@ -144,6 +144,15 @@ func (c *Client) Subscribe(names ...string) error {
 	return err
 }
 
+// SubscribeLogs asks the switch to forward its log lines at level and more
+// severe ones ("log 2" is CRIT and worse; a name such as "crit" works too).
+// They arrive on Events() as log events (Event.IsLog). The subscription is per
+// connection, so a reconnecting caller repeats it.
+func (c *Client) SubscribeLogs(level string) error {
+	_, err := c.command("log " + level)
+	return err
+}
+
 // API runs a blocking api command and returns its response body.
 func (c *Client) API(cmd string) (string, error) { return c.command("api " + cmd) }
 
@@ -280,6 +289,9 @@ type message struct {
 	contentType string
 	replyText   string
 	body        string
+	// headers are the frame's own headers, which a log frame carries on the
+	// outside (its body is only the log text).
+	headers textproto.MIMEHeader
 }
 
 func (c *Client) readMessage() (message, error) {
@@ -291,6 +303,7 @@ func (c *Client) readMessage() (message, error) {
 	msg := message{
 		contentType: headers.Get("Content-Type"),
 		replyText:   headers.Get("Reply-Text"),
+		headers:     headers,
 	}
 
 	if cl := headers.Get("Content-Length"); cl != "" {
@@ -327,8 +340,13 @@ func (c *Client) readLoop() {
 			}
 			c.deliverReply(reply{body: body})
 
-		case "text/event-plain":
-			ev := parseEventBody(msg.body)
+		case "text/event-plain", logContentType:
+			var ev *Event
+			if msg.contentType == logContentType {
+				ev = parseLogFrame(msg)
+			} else {
+				ev = parseEventBody(msg.body)
+			}
 			select {
 			case c.events <- ev:
 			case <-c.closed:

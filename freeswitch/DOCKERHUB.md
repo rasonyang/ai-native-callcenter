@@ -130,7 +130,7 @@ Both optional. Unset, each uses the SQLite database inside the container, which 
 
 | Variable | Injected into | Description |
 |---|---|---|
-| `FS_RTP_START_PORT` / `FS_RTP_END_PORT` | switch.conf.xml | Optional. A widened range has to be published on the container too, or media from outside the host arrives at a port nothing is listening on. |
+| `FS_RTP_START_PORT` / `FS_RTP_END_PORT` | switch.conf.xml | Optional. The image ships 16384-29999, which carries 6,808 legs. Each leg holds one RTP/RTCP pair (even port RTP, odd port RTCP), and a call holds two legs (the caller plus the agent or the bot gateway; a supervisor's eavesdrop adds one). Publish exactly the range you set, or media from outside the host arrives at a port nothing is listening on. An odd end is rounded down with one warning at the first call, and an end below the start is not refused (the switch allocates anywhere in 0-65535). When the range is full the switch logs `No audio RTP ports available!`: a leg it places fails with `DESTINATION_OUT_OF_ORDER` before any INVITE is sent, and an INVITE it receives is answered `488` (`INCOMPATIBLE_DESTINATION`). |
 
 ### Live transcription
 
@@ -149,9 +149,9 @@ At startup the entrypoint prints one `[entrypoint] injected: ...` line naming th
 | 5066/tcp | SIP over WebSocket |
 | 7443/tcp | SIP over WSS |
 | 18021/tcp | ESL |
-| 16384-32768/udp | RTP |
+| 16384-29999/udp | RTP (6,808 legs) |
 
-`--network host` is the simplest arrangement for SIP and RTP. On a bridge network, set `FS_EXTERNAL_IP`, narrow `FS_RTP_START_PORT`/`FS_RTP_END_PORT`, and publish that range.
+`--network host` is the simplest arrangement for SIP and RTP. On a bridge network, set `FS_EXTERNAL_IP`, narrow `FS_RTP_START_PORT`/`FS_RTP_END_PORT` (the default 16384-29999 is 13,616 ports, and each published port costs a proxy process), and publish exactly that range. For example, 16384-16483 carries 50 legs, about 25 calls.
 
 ## Volumes
 

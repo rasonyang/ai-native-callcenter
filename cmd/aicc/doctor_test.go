@@ -31,9 +31,20 @@ import (
 // capturedSwitch answers with the replies captured from a live v0.1.1 switch
 // (internal/telephony/testdata/switchstatus), so doctor is tested against what
 // a real switch says rather than what somebody remembered it saying.
-type capturedSwitch struct{ t *testing.T }
+type capturedSwitch struct {
+	t *testing.T
+	// conf is the switch.conf XML xml_locate answers with; empty is a switch
+	// on the image's default range.
+	conf string
+}
 
 func (c capturedSwitch) API(cmd string) (string, error) {
+	if strings.HasPrefix(cmd, "xml_locate configuration") {
+		if c.conf != "" {
+			return c.conf, nil
+		}
+		return switchConfXML("16384", "29999"), nil
+	}
 	name := strings.ReplaceAll(cmd, " ", "_") + ".txt"
 	b, err := os.ReadFile(filepath.Join("..", "..", "internal", "telephony", "testdata", "switchstatus", name))
 	if err != nil {
@@ -134,7 +145,7 @@ func newHarness(t *testing.T) *harness {
 			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}}, func() {}, nil
 		},
 		dialSwitch: func(context.Context) (switchReader, func(), error) {
-			return telephony.NewAdapter(capturedSwitch{t}, "aicc.test"), func() {}, nil
+			return telephony.NewAdapter(capturedSwitch{t: t}, "aicc.test"), func() {}, nil
 		},
 		sessions: func(provider.Profile, *slog.Logger) (provider.VoiceSession, error) {
 			return h.session, nil
@@ -337,6 +348,9 @@ type fakeStatus struct {
 	// exist and whether each would place a call now.
 	trunks    []telephony.Trunk
 	trunksErr error
+	// conf and confErr answer the switch.conf lookup.
+	conf    string
+	confErr error
 	// asked, when set, collects the names GatewayUp is asked about.
 	asked *[]string
 }
@@ -349,6 +363,7 @@ func (f fakeStatus) GatewayUp(name string) (bool, error) {
 	return f.gateway, f.gwErr
 }
 func (f fakeStatus) Trunks() ([]telephony.Trunk, error) { return f.trunks, f.trunksErr }
+func (f fakeStatus) SwitchConf() (string, error)        { return f.conf, f.confErr }
 
 // healthyTrunks is a switch holding the bot gateway (which never registers)
 // and one carrier gateway that does.
@@ -936,5 +951,155 @@ func TestACodeIsPrintedOnlyOnAFailure(t *testing.T) {
 
 	if n := countFailed([]doctorResult{fail(DoctorCheckSwitchLink, "", "x"), skip(DoctorCheckSchema, "")}); n != 1 {
 		t.Errorf("countFailed = %d, want 1 — a SKIP is not a failure", n)
+	}
+}
+
+// switchConfXML is what xml_locate prints for switch.conf: the whole tree, of
+// which the two RTP params are the part doctor reads. An empty value leaves the
+// param out, as a switch.conf that does not set it.
+func switchConfXML(start, end string) string {
+	var params string
+	if end != "" {
+		params += `      <param name="rtp-end-port" value="` + end + `"></param>` + "\n"
+	}
+	if start != "" {
+		params += `      <param name="rtp-start-port" value="` + start + `"></param>` + "\n"
+	}
+	return `<configuration name="switch.conf" description="Core Configuration">
+  <cli-keybindings>
+    <key name="1" value="help"/>
+  </cli-keybindings>
+  <settings>
+      <param name="colorize-console" value="true"></param>
+` + params + `      <param name="max-sessions" value="1000"></param>
+  </settings>
+</configuration>
+`
+}
+
+func rtpHarness(t *testing.T, conf string, botMaxCalls int, isBotEnabled bool) doctorResult {
+	t.Helper()
+	h := newHarness(t)
+	h.deps.cfg.IsBotEnabled = isBotEnabled
+	h.deps.cfg.BotMaxCalls = botMaxCalls
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return telephony.NewAdapter(capturedSwitch{t: t, conf: conf}, "aicc.test"), func() {}, nil
+	}
+	r, ok := h.run()[DoctorCheckSwitchRTPRange]
+	if !ok {
+		t.Fatal("switch_rtp_range was not reported")
+	}
+	return r
+}
+
+func TestTheSwitchRTPRangeIsReadAndCounted(t *testing.T) {
+	const eavesdrop = "a call holds two (the caller and the agent or the bot), a supervisor's eavesdrop adds one"
+	cases := []struct {
+		name       string
+		start, end string
+		bot        int
+		isBot      bool
+		wantState  DoctorState
+		wantCode   DoctorCode
+		wantInMsg  []string
+	}{
+		{name: "unset is the built-in default", wantState: DoctorStatePass, isBot: true,
+			wantInMsg: []string{"sets no RTP range", "built-in 16384–32768", "8,193 media legs", eavesdrop}},
+		{name: "the image default", start: "16384", end: "29999", bot: 220, isBot: true, wantState: DoctorStatePass,
+			wantInMsg: []string{"16384–29999, RTP on the even ports 16384–29998", "6,808 media legs", eavesdrop}},
+		{name: "macOS", start: "16384", end: "16583", bot: 50, isBot: true, wantState: DoctorStatePass,
+			wantInMsg: []string{"16384–16583", "100 media legs"}},
+		{name: "quick start range with the default bot cap is narrow", start: "16384", end: "16483", bot: 220, isBot: true,
+			wantState: DoctorStateWarn, wantCode: DoctorCodeSwitchRTPRangeNarrow,
+			wantInMsg: []string{"50 media legs", "AICC_BOT_MAX_CALLS", "440"}},
+		{name: "odd start", start: "16385", end: "16484", isBot: false, wantState: DoctorStatePass,
+			wantInMsg: []string{"16385–16484, RTP on the even ports 16386–16484", "50 media legs"}},
+		{name: "end equals an even start holds one leg", start: "16384", end: "16384", isBot: false, wantState: DoctorStatePass,
+			wantInMsg: []string{"1 media legs"}},
+		{name: "end equals an odd start holds none", start: "16385", end: "16385", isBot: false,
+			wantState: DoctorStateFail, wantCode: DoctorCodeSwitchRTPRangeInvalid, wantInMsg: []string{"no even port pair", "0 media legs"}},
+		{name: "inverted", start: "16394", end: "16384", isBot: true, wantState: DoctorStateFail, wantCode: DoctorCodeSwitchRTPRangeInvalid,
+			wantInMsg: []string{"16394–16384", "does not refuse it", "anywhere in 1–65535", "memory"}},
+		{name: "very wide", start: "1024", end: "65535", bot: 220, isBot: true, wantState: DoctorStatePass,
+			wantInMsg: []string{"1024–65535, RTP on the even ports 1024–65534", "32,256 media legs"}},
+		{name: "non-numeric", start: "sixteen", end: "29999", isBot: true, wantState: DoctorStateFail, wantCode: DoctorCodeSwitchRTPRangeInvalid,
+			wantInMsg: []string{"rtp-start-port", "sixteen"}},
+		{name: "out of range", start: "16384", end: "70000", isBot: true, wantState: DoctorStateFail, wantCode: DoctorCodeSwitchRTPRangeInvalid,
+			wantInMsg: []string{"rtp-end-port", "70000"}},
+		{name: "bot off is never narrow", start: "16384", end: "16483", bot: 220, isBot: false, wantState: DoctorStatePass},
+		{name: "exactly two legs per bot call is enough", start: "16384", end: "16483", bot: 25, isBot: true, wantState: DoctorStatePass},
+		{name: "one leg short of it is narrow", start: "16384", end: "16481", bot: 25, isBot: true,
+			wantState: DoctorStateWarn, wantCode: DoctorCodeSwitchRTPRangeNarrow, wantInMsg: []string{"49 media legs", "50 legs"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := rtpHarness(t, switchConfXML(tc.start, tc.end), tc.bot, tc.isBot)
+			if r.State != tc.wantState || r.Code != tc.wantCode {
+				t.Fatalf("state %s code %q (%s), want %s %q", r.State, r.Code, r.Message, tc.wantState, tc.wantCode)
+			}
+			for _, want := range tc.wantInMsg {
+				if !strings.Contains(r.Message, want) {
+					t.Errorf("message %q lacks %q", r.Message, want)
+				}
+			}
+			if (r.State == DoctorStateFail || r.State == DoctorStateWarn) && r.Fix == "" {
+				t.Error("no fix")
+			}
+			if r.State == DoctorStatePass && (r.Code != "" || r.Fix != "") {
+				t.Errorf("a PASS carries code %q / fix %q", r.Code, r.Fix)
+			}
+		})
+	}
+}
+
+func TestAHalfSetRangeSaysWhichSideIsTheDefault(t *testing.T) {
+	r := rtpHarness(t, switchConfXML("", "29999"), 0, false)
+	if r.State != DoctorStatePass || !strings.Contains(r.Message, "rtp-start-port is unset: FreeSWITCH's built-in 16384") {
+		t.Errorf("got %s %q", r.State, r.Message)
+	}
+	// An end below the built-in start is an inverted range, whoever set it.
+	r = rtpHarness(t, switchConfXML("", "16000"), 0, false)
+	if r.State != DoctorStateFail {
+		t.Errorf("got %s %q, want FAIL", r.State, r.Message)
+	}
+}
+
+func TestAnUnreadableSwitchConfIsAWarningNotAFailure(t *testing.T) {
+	for name, conf := range map[string]string{
+		"error reply":  "-ERR no reply",
+		"empty":        "",
+		"other config": `<configuration name="modules.conf"><settings/></configuration>`,
+		"not xml":      "garbage <<<",
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+				return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), conf: conf}, func() {}, nil
+			}
+			wantState(t, h.run(), DoctorCheckSwitchRTPRange, DoctorStateWarn)
+		})
+	}
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), confErr: errors.New("link dropped")}, func() {}, nil
+	}
+	wantState(t, h.run(), DoctorCheckSwitchRTPRange, DoctorStateWarn)
+}
+
+func TestTheRTPRangeIsSkippedWhenTheSwitchWasNotReachable(t *testing.T) {
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return nil, nil, errors.New("connection refused")
+	}
+	wantState(t, h.run(), DoctorCheckSwitchRTPRange, DoctorStateSkip)
+}
+
+func TestTheNarrowWarningDoesNotChangeTheExitStatus(t *testing.T) {
+	r := rtpHarness(t, switchConfXML("16384", "16483"), 220, true)
+	if r.State != DoctorStateWarn {
+		t.Fatalf("state %s", r.State)
+	}
+	if countFailed([]doctorResult{r}) != 0 {
+		t.Error("a WARN counted as a failure")
 	}
 }
