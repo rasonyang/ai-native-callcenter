@@ -152,7 +152,7 @@ func TestBothProducersShareOneActorAndOneSequence(t *testing.T) {
 	hub := events.NewHub(events.NewSequence(&blockReserver{}, "events"))
 	reg := transcript.NewRegistry(rows, hub, discardLog())
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	actor := reg.For(callID, "INBOUND", time.Now().Add(-time.Minute))
 	t.Cleanup(func() { reg.Close(callID) })
 
@@ -188,7 +188,7 @@ func TestBothProducersShareOneActorAndOneSequence(t *testing.T) {
 	waitUntil(t, func() bool { return len(rows.all()) == 2 }, "the bot phase to be written")
 
 	// --- the transfer: the switch taps the agent's leg --------------------
-	claim := Claim{CallID: callID, AgentID: uuid.New(), PartyID: uuid.New(),
+	claim := Claim{CallID: callID, AgentID: uuid.Must(uuid.NewV7()), PartyID: uuid.Must(uuid.NewV7()),
 		Channel: "agent-chan", Language: "en", Expires: time.Now().Add(time.Minute)}
 	dial := "ws://" + srv.Addr() + StreamPath + "?t=" + url.QueryEscape(srv.Token(claim))
 

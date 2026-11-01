@@ -16,7 +16,7 @@ func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, n
 
 func TestTheListingIsReadWhateverShapeTheSwitchGivesIt(t *testing.T) {
 	t.Parallel()
-	a, b := uuid.New(), uuid.New()
+	a, b := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	cases := map[string]struct {
 		payload string
 		want    int
@@ -67,7 +67,7 @@ func TestTheListingFailingOutrightIsAnError(t *testing.T) {
 // reconnect or restart in the first second of a dial forgets it.
 func TestAYoungLegListedAsDownIsStillRead(t *testing.T) {
 	t.Parallel()
-	id, callID := uuid.New().String(), uuid.New()
+	id, callID := uuid.Must(uuid.NewV7()).String(), uuid.Must(uuid.NewV7())
 	dump := `{"Unique-ID":"` + id + `","Call-Direction":"outbound","Answer-State":"ringing",` +
 		`"variable_aicc_call_id":"` + callID.String() + `","variable_aicc_placed_by":"DIAL_AI"}`
 	cmd := &fakeCommander{up: true, replyFor: func(c string) (string, error) {

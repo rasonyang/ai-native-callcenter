@@ -101,7 +101,7 @@ func TestImportRefusesAnEmptyOrOversizedRequestAndATerminalCampaign(t *testing.T
 			t.Errorf("import into %s: %v", status, err)
 		}
 	}
-	if _, err := f.svc.ImportContacts(ctx, uuid.New(), rows[:1]); err == nil {
+	if _, err := f.svc.ImportContacts(ctx, uuid.Must(uuid.NewV7()), rows[:1]); err == nil {
 		t.Error("an unknown campaign")
 	}
 }

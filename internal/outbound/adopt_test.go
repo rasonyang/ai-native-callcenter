@@ -152,7 +152,7 @@ func (l *liveSwitch) add(now time.Time, c chanSpec) {
 		"Unique-ID":                   c.id.String(),
 		"Call-Direction":              dir,
 		"Answer-State":                state,
-		"Channel-Name":                "sofia/external/" + c.id.String()[:8],
+		"Channel-Name":                "sofia/external/" + c.id.String()[28:],
 		"Caller-Channel-Created-Time": strconv.FormatInt(created.UnixMicro(), 10),
 		"Caller-Context":              "aicc",
 	}
@@ -298,7 +298,7 @@ func newRecoveryRig(t *testing.T) *recoveryRig {
 	t.Cleanup(registry.Shutdown)
 	coord := telephony.NewCoordinator(registry, adapter, noAgentsAtAll{}, pub)
 
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	dids := fakeDIDs{
 		{Number: "95099", Language: "en", FlowID: &flowID, IsEnabled: true, AllowInbound: true, AllowOutbound: true},
 		{Number: "95088", Language: "zh", FlowID: &flowID, IsEnabled: true, AllowInbound: true, AllowOutbound: true},
@@ -846,7 +846,7 @@ func TestAPassIsIdempotent(t *testing.T) {
 func TestAChannelStillBeingClearedIsNotHungUpTwice(t *testing.T) {
 	rig := newRecoveryRig(t)
 	rig.sw.isStubborn = true
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 30 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
 
@@ -862,7 +862,7 @@ func TestAChannelStillBeingClearedIsNotHungUpTwice(t *testing.T) {
 // What the live process holds is not armed again, whatever the switch says.
 func TestALegTheLiveProcessAlreadyHoldsIsNotArmedAgain(t *testing.T) {
 	rig := newRecoveryRig(t)
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 10 * time.Second,
 		vars: aiVars(call, "95099", "en", "18688886666")})
 
@@ -888,7 +888,7 @@ func TestALegTheLiveProcessAlreadyHoldsIsNotArmedAgain(t *testing.T) {
 func TestALegAnsweredDuringABlipInsideItsWindowGetsTheBot(t *testing.T) {
 	rig := newRecoveryRig(t)
 	rig.cold = false // a reconnect: the process kept its memory
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 20 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
 	ran := make(chan struct{}, 1)
@@ -924,7 +924,7 @@ func TestALegAnsweredDuringABlipInsideItsWindowGetsTheBot(t *testing.T) {
 func TestALegAnsweredDuringABlipAfterItsWindowIsHungUp(t *testing.T) {
 	rig := newRecoveryRig(t)
 	rig.cold = false
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 70 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
 	rig.svc.armUntil(id.String(), t0.Add(-10*time.Second), continuation{proceed: func() { t.Error("a spent continuation ran") }})
@@ -943,7 +943,7 @@ func TestALegAnsweredDuringABlipAfterItsWindowIsHungUp(t *testing.T) {
 // so the answer is not bridged and the leg is ended.
 func TestARearmedLegAnsweredAfterItsWindowIsNotBridged(t *testing.T) {
 	rig := newRecoveryRig(t)
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 48 * time.Second,
 		vars: aiVars(call, "95099", "en", "18688886666")})
 
@@ -978,7 +978,7 @@ func TestARearmedLegAnsweredAfterItsWindowIsNotBridged(t *testing.T) {
 // And with the same leg answered inside what was left, the bot arrives.
 func TestARearmedLegAnsweredInsideItsWindowIsBridged(t *testing.T) {
 	rig := newRecoveryRig(t)
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 48 * time.Second,
 		vars: aiVars(call, "95099", "en", "18688886666")})
 	rig.reconcile(t)
@@ -993,10 +993,10 @@ func TestATruncatedListingAdoptsWhatArrived(t *testing.T) {
 	rig := newRecoveryRig(t)
 	var ids []uuid.UUID
 	for range 5 {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		ids = append(ids, id)
 		rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 10 * time.Second,
-			vars: aiVars(uuid.New(), "95099", "en", "18688886666")})
+			vars: aiVars(uuid.Must(uuid.NewV7()), "95099", "en", "18688886666")})
 	}
 	full := rig.sw.listing()
 	rig.sw.truncateAt = strings.Index(full, ids[3].String()) + 20 // cut inside the fourth row
@@ -1102,7 +1102,7 @@ func TestARearmedLegHasNoJobSoThePlacementFailurePathCannotMisfire(t *testing.T)
 	ledger := &recordingLedger{cdrs: map[uuid.UUID][]store.CDR{}}
 	rig.svc.SetFailureLedger(ledger)
 
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 10 * time.Second,
 		vars: aiVars(call, "95099", "en", "18688886666")})
 	rig.reconcile(t)
@@ -1126,7 +1126,7 @@ func TestARearmedLegHasNoJobSoThePlacementFailurePathCannotMisfire(t *testing.T)
 // The registry hears each adopted call once and keeps its real timings.
 func TestAdoptedCallsKeepTheirSwitchTimings(t *testing.T) {
 	rig := newRecoveryRig(t)
-	call, cust, bot := uuid.New(), uuid.New(), uuid.New()
+	call, cust, bot := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: cust, callState: "ACTIVE", answered: true, application: "bridge",
 		age: 90 * time.Second, peer: bot.String(), vars: aiVars(call, "95099", "en", "18688886666")})
 	rig.sw.add(t0, chanSpec{id: bot, callState: "ACTIVE", answered: true, application: "bridge",

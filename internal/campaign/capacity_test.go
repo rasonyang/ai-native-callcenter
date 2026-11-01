@@ -209,7 +209,7 @@ func TestAnOverflowTurnsItsAnsweredSampleIntoAnOverflow(t *testing.T) {
 	s := NewCapacityStats(0.01, 0.03)
 	ids := make([]uuid.UUID, 50)
 	for i := range ids {
-		ids[i] = uuid.New()
+		ids[i] = uuid.Must(uuid.NewV7())
 		s.Answered(ids[i])
 	}
 	if s.OverflowRate() != 0 {
@@ -223,7 +223,7 @@ func TestAnOverflowTurnsItsAnsweredSampleIntoAnOverflow(t *testing.T) {
 		t.Errorf("mode %v, want tightened at 2%%", s.Mode())
 	}
 	// A sample that has left the window is counted as a new overflow.
-	s.Overflowed(uuid.New())
+	s.Overflowed(uuid.Must(uuid.NewV7()))
 	if got := s.OverflowRate(); got != 2.0/51 {
 		t.Errorf("overflow rate %.4f, want 2/51", got)
 	}

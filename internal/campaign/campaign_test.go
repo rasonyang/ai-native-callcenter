@@ -207,7 +207,7 @@ func (c canPlace) CanPlaceAI() bool { return bool(c) }
 func newFixture(t *testing.T, env Env) *fixture {
 	t.Helper()
 	repo := newFakeRepo()
-	did := uuid.New()
+	did := uuid.Must(uuid.NewV7())
 	repo.dids[did] = DIDFlow{ID: did, Number: "95099", IsEnabled: true, AllowOutbound: true, Spec: testSpec(t, []string{"hangup"}, nil)}
 	return &fixture{repo: repo, svc: NewService(repo, nil, env).WithPlacer(canPlace(true)), did: did}
 }
@@ -274,13 +274,13 @@ func TestCreateAppliesDefaultsAndCanonicalForm(t *testing.T) {
 func TestCreateRefusals(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, Env{})
-	transferDID, disabledDID, flowlessDID := uuid.New(), uuid.New(), uuid.New()
+	transferDID, disabledDID, flowlessDID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	f.repo.dids[transferDID] = DIDFlow{ID: transferDID, Number: "95001", IsEnabled: true, AllowOutbound: true,
 		Spec: testSpec(t, []string{"hangup", "transfer_to_agent"}, nil)}
 	f.repo.dids[disabledDID] = DIDFlow{ID: disabledDID, Number: "95002", IsEnabled: false, AllowOutbound: true,
 		Spec: testSpec(t, nil, nil)}
 	f.repo.dids[flowlessDID] = DIDFlow{ID: flowlessDID, Number: "95003", IsEnabled: true, AllowOutbound: true}
-	inboundOnlyDID := uuid.New()
+	inboundOnlyDID := uuid.Must(uuid.NewV7())
 	f.repo.dids[inboundOnlyDID] = DIDFlow{ID: inboundOnlyDID, Number: "95004", IsEnabled: true,
 		Spec: testSpec(t, nil, nil)}
 
@@ -293,7 +293,7 @@ func TestCreateRefusals(t *testing.T) {
 	}{
 		{"empty name", func(n *New) { n.Name = "  " }, ErrValidation, "EMPTY", "name"},
 		{"name over 200 characters", func(n *New) { n.Name = strings.Repeat("名", 201) }, ErrValidation, "TOO_LONG", "name"},
-		{"unknown DID", func(n *New) { n.DIDID = uuid.New() }, ErrValidation, "DID_NOT_FOUND", "didId"},
+		{"unknown DID", func(n *New) { n.DIDID = uuid.Must(uuid.NewV7()) }, ErrValidation, "DID_NOT_FOUND", "didId"},
 		{"disabled DID", func(n *New) { n.DIDID = disabledDID }, ErrValidation, "DID_DISABLED", "didId"},
 		{"DID without a published flow", func(n *New) { n.DIDID = flowlessDID }, ErrValidation, "DID_HAS_NO_PUBLISHED_FLOW", "didId"},
 		{"a DID that does not allow outbound", func(n *New) { n.DIDID = inboundOnlyDID }, ErrDIDNotOutbound, "DID_NOT_OUTBOUND", "didId"},
@@ -518,7 +518,7 @@ func TestEveryActionFromEveryStatus(t *testing.T) {
 	}
 	// Nothing in the API completes a campaign: COMPLETED is the dialer's.
 	f := newFixture(t, Env{})
-	if _, err := f.svc.Start(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Start(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown campaign: %v, want ErrNotFound", err)
 	}
 }
@@ -546,7 +546,7 @@ func TestStartIsRefusedWhenTheDeploymentCannotDial(t *testing.T) {
 	}
 
 	// The campaign's own checks are not reached: nothing about it is wrong.
-	if _, err := f.svc.Start(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Start(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown campaign: %v, want ErrNotFound", err)
 	}
 }
@@ -574,7 +574,7 @@ func TestResumeIsRefusedWhenTheDeploymentCannotDial(t *testing.T) {
 	if _, err := f.svc.Resume(context.Background(), c.ID); err != nil {
 		t.Errorf("resume on a deployment that can dial: %v", err)
 	}
-	if _, err := f.svc.Resume(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Resume(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNotFound) {
 		t.Errorf("an unknown campaign: %v, want ErrNotFound", err)
 	}
 }
@@ -727,7 +727,7 @@ func TestTheDialersReadDoesNotLoadTheFlowsFieldNames(t *testing.T) {
 	if n := lookups() - before; n != 1 {
 		t.Errorf("Get asked the repository for DID flows %d time(s), want 1", n)
 	}
-	if _, err := f.svc.Load(context.Background(), uuid.New()); !errors.Is(err, ErrNotFound) {
+	if _, err := f.svc.Load(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNotFound) {
 		t.Errorf("load of an unknown campaign: %v, want ErrNotFound", err)
 	}
 }
@@ -769,7 +769,7 @@ func TestFieldLocksPerStatus(t *testing.T) {
 	t.Parallel()
 	str := func(s string) *string { return &s }
 	num := func(n int) *int { return &n }
-	newDID := uuid.New()
+	newDID := uuid.Must(uuid.NewV7())
 
 	patches := map[string]Patch{
 		"name":               {Name: str("Renamed")},
@@ -777,7 +777,7 @@ func TestFieldLocksPerStatus(t *testing.T) {
 		"timeZone":           {TimeZone: str("America/New_York")},
 		"defaultCountryCode": {DefaultCountryCode: str("1")},
 		"ringTimeoutSec":     {RingTimeoutSec: num(20)},
-		"followUpQueueId":    {FollowUpQueueID: func() *uuid.UUID { u := uuid.New(); return &u }()},
+		"followUpQueueId":    {FollowUpQueueID: func() *uuid.UUID { u := uuid.Must(uuid.NewV7()); return &u }()},
 		"maxConcurrent":      {MaxConcurrent: num(9)},
 		"callingWindow":      {CallingWindow: &CallingWindow{Days: []string{"SAT"}, Ranges: []TimeRange{{"10:00", "11:00"}}}},
 		"retryPolicy":        {RetryPolicy: func() *RetryPolicy { p := DefaultRetryPolicy(); p.MaxAttempts = 7; return &p }()},
@@ -875,7 +875,7 @@ func TestPatchClearsTheTwoOptionalFields(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, Env{})
 	in := f.validNew()
-	q := uuid.New()
+	q := uuid.Must(uuid.NewV7())
 	in.FollowUpQueueID = &q
 	in.DefaultCountryCode = "86"
 	c, err := f.svc.Create(context.Background(), in)

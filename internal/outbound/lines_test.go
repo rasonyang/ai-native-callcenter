@@ -25,7 +25,7 @@ func limitedService(t *testing.T, n *int) (*Service, *fakeSwitch) {
 	t.Helper()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	s.dids = fakeDIDs{
 		{Number: "95012", Language: "zh", FlowID: &flowID, IsEnabled: true, AllowInbound: true,
 			AllowOutbound: true, MaxOutboundChannels: n},
@@ -50,7 +50,7 @@ func TestLinesReserveStopsAtTheLimitUnderContention(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if l.Reserve(uuid.New(), "95555", intp(3)) {
+			if l.Reserve(uuid.Must(uuid.NewV7()), "95555", intp(3)) {
 				granted.Add(1)
 			}
 		}()
@@ -64,7 +64,7 @@ func TestLinesReserveStopsAtTheLimitUnderContention(t *testing.T) {
 func TestLinesReserveIsIdempotentPerCallAndPerDID(t *testing.T) {
 	t.Parallel()
 	l := NewLines()
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	for i := 0; i < 3; i++ {
 		if !l.Reserve(id, "95555", intp(1)) {
 			t.Fatal("a retried reservation was refused")
@@ -79,7 +79,7 @@ func TestLinesReserveIsIdempotentPerCallAndPerDID(t *testing.T) {
 	if l.InUse("95555") != 0 {
 		t.Fatal("line not given back")
 	}
-	if !l.Reserve(uuid.New(), "95555", nil) || !l.Reserve(uuid.New(), "95555", nil) {
+	if !l.Reserve(uuid.Must(uuid.NewV7()), "95555", nil) || !l.Reserve(uuid.Must(uuid.NewV7()), "95555", nil) {
 		t.Fatal("no limit must mean no refusal")
 	}
 }
@@ -88,11 +88,11 @@ func TestADIDAtItsLimitRefusesTheSingleCallAndSendsNothing(t *testing.T) {
 	t.Parallel()
 	s, sw := limitedService(t, intp(2))
 	for i := 0; i < 2; i++ {
-		if err := dialAI(s, uuid.New(), "95012"); err != nil {
+		if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	extra := uuid.New()
+	extra := uuid.Must(uuid.NewV7())
 	err := dialAI(s, extra, "95012")
 	if !errors.Is(err, ErrDIDChannelsExhausted) {
 		t.Fatalf("err = %v, want ErrDIDChannelsExhausted", err)
@@ -130,7 +130,7 @@ func TestTheLineIsTakenBeforeTheOriginateIsSent(t *testing.T) {
 	s, _ := limitedService(t, intp(5))
 	var seen atomic.Int32
 	s.sw = &hookSwitch{fakeSwitch: &fakeSwitch{}, before: func() { seen.Store(int32(s.LinesInUse("95012"))) }}
-	if err := dialAI(s, uuid.New(), "95012"); err != nil {
+	if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); err != nil {
 		t.Fatal(err)
 	}
 	if seen.Load() != 1 {
@@ -169,7 +169,7 @@ func TestOriginatesFiredInTheSameInstantDoNotSlipPastTheLimit(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := dialAI(s, uuid.New(), "95012"); errors.Is(err, ErrDIDChannelsExhausted) {
+			if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); errors.Is(err, ErrDIDChannelsExhausted) {
 				refused.Add(1)
 			}
 		}()
@@ -186,7 +186,7 @@ func TestAFailedOriginateGivesTheLineBack(t *testing.T) {
 	t.Parallel()
 	s, _ := limitedService(t, intp(1))
 	s.sw = &hookSwitch{fakeSwitch: &fakeSwitch{}, err: errors.New("switch down")}
-	if err := dialAI(s, uuid.New(), "95012"); err == nil {
+	if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); err == nil {
 		t.Fatal("setup: the originate should fail")
 	}
 	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "13912345678"}); err == nil {
@@ -202,7 +202,7 @@ func TestAnOriginateThatNeverMadeAChannelGivesTheLineBack(t *testing.T) {
 	s, sw, _ := jobService(t)
 	s.dids = fakeDIDs{{Number: "95012", Language: "zh", FlowID: ptrUUID(), IsEnabled: true, AllowOutbound: true,
 		MaxOutboundChannels: intp(1)}}
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	if err := dialAI(s, id, "95012"); err != nil {
 		t.Fatal(err)
 	}
@@ -219,12 +219,12 @@ func TestAnOriginateThatNeverMadeAChannelGivesTheLineBack(t *testing.T) {
 	}
 }
 
-func ptrUUID() *uuid.UUID { id := uuid.New(); return &id }
+func ptrUUID() *uuid.UUID { id := uuid.Must(uuid.NewV7()); return &id }
 
 func TestACallEndingGivesTheLineBackWhateverItsEnding(t *testing.T) {
 	t.Parallel()
 	s, _ := limitedService(t, intp(2))
-	a, b := uuid.New(), uuid.New()
+	a, b := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if err := dialAI(s, a, "95012"); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestACallEndingGivesTheLineBackWhateverItsEnding(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.CallEnded(a) // unanswered: the ring-out call finished
-	if err := dialAI(s, uuid.New(), "95012"); err != nil {
+	if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); err != nil {
 		t.Fatalf("the freed line was not available: %v", err)
 	}
 	s.CallEnded(b)
@@ -260,7 +260,7 @@ func TestLinesNeverLeakAndNeverExceedTheLimitUnderRandomEndings(t *testing.T) {
 				if rng.Intn(5) == 0 {
 					hs.err = errors.New("originate failed")
 				}
-				id := uuid.New()
+				id := uuid.Must(uuid.NewV7())
 				err := dialAI(s, id, "95012")
 				switch {
 				case err == nil:
@@ -272,7 +272,7 @@ func TestLinesNeverLeakAndNeverExceedTheLimitUnderRandomEndings(t *testing.T) {
 				}
 			case 2: // click-to-dial from the other DID
 				hs.err = nil
-				id := uuid.New()
+				id := uuid.Must(uuid.NewV7())
 				_, err := s.Dial(context.Background(), AgentDialRequest{CallID: id, AgentExtension: "1008", To: "13912345678"})
 				if err == nil {
 					live = append(live, id)
@@ -320,12 +320,12 @@ func handDialled(channel, did, destination string, call uuid.UUID, mod func(*tel
 func TestAHandDialledTrunkLegIsCountedAndUncounted(t *testing.T) {
 	t.Parallel()
 	s, _ := limitedService(t, intp(2))
-	s.HandleSwitchEvent(handDialled("ch-1", "95011", "13900000001", uuid.New(), nil))
-	s.HandleSwitchEvent(handDialled("ch-1", "95011", "13900000001", uuid.New(), nil)) // duplicate event
+	s.HandleSwitchEvent(handDialled("ch-1", "95011", "13900000001", uuid.Must(uuid.NewV7()), nil))
+	s.HandleSwitchEvent(handDialled("ch-1", "95011", "13900000001", uuid.Must(uuid.NewV7()), nil)) // duplicate event
 	if s.LinesInUse("95011") != 1 {
 		t.Fatalf("in use %d, want 1", s.LinesInUse("95011"))
 	}
-	s.HandleSwitchEvent(handDialled("ch-2", "95011", "13900000002", uuid.New(), nil))
+	s.HandleSwitchEvent(handDialled("ch-2", "95011", "13900000002", uuid.Must(uuid.NewV7()), nil))
 	// The limit now bites a single call, though AICC placed neither of those.
 	if _, err := s.Dial(context.Background(), AgentDialRequest{AgentExtension: "1008", To: "13912345678"}); !errors.Is(err, ErrDIDChannelsExhausted) {
 		t.Fatalf("err = %v, want the hand-dialled calls to have taken the lines", err)
@@ -348,13 +348,13 @@ func TestLegsThatAreNotCarrierLinesAreNotObserved(t *testing.T) {
 		return func(ev *telephony.SwitchEvent) { ev.CallTypeHint = h }
 	}
 	for name, ev := range map[string]telephony.SwitchEvent{
-		"the leg towards the bot":   handDialled("a", "95011", "95011", uuid.New(), nil),
-		"a queue delivery":          handDialled("b", "95011", "tok", uuid.New(), func(e *telephony.SwitchEvent) { e.MemberChannelID = "caller" }),
-		"an extension to extension": handDialled("c", "95011", "1007", uuid.New(), func(e *telephony.SwitchEvent) { e.ParentChannelID = "x" }),
-		"an internal destination":   handDialled("d", "95011", "1007", uuid.New(), nil),
-		"a call typed inbound":      handDialled("e", "95011", "13900000001", uuid.New(), hint("INBOUND")),
-		"an inbound direction":      handDialled("f", "95011", "13900000001", uuid.New(), func(e *telephony.SwitchEvent) { e.Direction = telephony.DirectionInbound }),
-		"no DID on it":              handDialled("g", "", "13900000001", uuid.New(), nil),
+		"the leg towards the bot":   handDialled("a", "95011", "95011", uuid.Must(uuid.NewV7()), nil),
+		"a queue delivery":          handDialled("b", "95011", "tok", uuid.Must(uuid.NewV7()), func(e *telephony.SwitchEvent) { e.MemberChannelID = "caller" }),
+		"an extension to extension": handDialled("c", "95011", "1007", uuid.Must(uuid.NewV7()), func(e *telephony.SwitchEvent) { e.ParentChannelID = "x" }),
+		"an internal destination":   handDialled("d", "95011", "1007", uuid.Must(uuid.NewV7()), nil),
+		"a call typed inbound":      handDialled("e", "95011", "13900000001", uuid.Must(uuid.NewV7()), hint("INBOUND")),
+		"an inbound direction":      handDialled("f", "95011", "13900000001", uuid.Must(uuid.NewV7()), func(e *telephony.SwitchEvent) { e.Direction = telephony.DirectionInbound }),
+		"no DID on it":              handDialled("g", "", "13900000001", uuid.Must(uuid.NewV7()), nil),
 	} {
 		s.HandleSwitchEvent(ev)
 		if n := s.LinesInUse("95011"); n != 0 {
@@ -388,14 +388,14 @@ func TestAClickToDialIsCountedOnceWhenItsTrunkLegAppears(t *testing.T) {
 func TestRecoveryRebuildsTheLinesFromTheSwitch(t *testing.T) {
 	t.Parallel()
 	s, _ := limitedService(t, intp(5))
-	placed := uuid.New()
+	placed := uuid.Must(uuid.NewV7())
 	live := []telephony.LiveChannel{
 		{ChannelID: "cust-1", CallID: placed, PlacedBy: telephony.PlacedByDialAI, DID: "95012"},
-		{ChannelID: "cust-2", CallID: uuid.New(), PlacedBy: telephony.PlacedByDialAI, DID: "95012", PeerChannelID: "bot-2", PeerIsBotLeg: true, IsAnswered: true},
-		{ChannelID: "bot-2", CallID: uuid.New(), IsBotLeg: true, DID: "95012"},
-		{ChannelID: "hand-1", CallID: uuid.New(), DID: "95011", OutboundLineDID: "95011", DialedNumber: "13900000009"},
-		{ChannelID: "in-1", CallID: uuid.New(), IsInbound: true, DID: "95012"},
-		{ChannelID: "ext-1", CallID: uuid.New(), DID: "95011", OutboundLineDID: "95011", DialedNumber: "1007"},
+		{ChannelID: "cust-2", CallID: uuid.Must(uuid.NewV7()), PlacedBy: telephony.PlacedByDialAI, DID: "95012", PeerChannelID: "bot-2", PeerIsBotLeg: true, IsAnswered: true},
+		{ChannelID: "bot-2", CallID: uuid.Must(uuid.NewV7()), IsBotLeg: true, DID: "95012"},
+		{ChannelID: "hand-1", CallID: uuid.Must(uuid.NewV7()), DID: "95011", OutboundLineDID: "95011", DialedNumber: "13900000009"},
+		{ChannelID: "in-1", CallID: uuid.Must(uuid.NewV7()), IsInbound: true, DID: "95012"},
+		{ChannelID: "ext-1", CallID: uuid.Must(uuid.NewV7()), DID: "95011", OutboundLineDID: "95011", DialedNumber: "1007"},
 	}
 	s.Recover(context.Background(), live, nil, true)
 	if got := s.LinesInUse("95012"); got != 2 {
@@ -424,7 +424,7 @@ func TestAReservationNobodyReleasedIsSweptWhenItsCallIsNotLive(t *testing.T) {
 	l := NewLines()
 	now := time.Unix(1_000_000, 0)
 	l.now = func() time.Time { return now }
-	gone, alive := uuid.New(), uuid.New()
+	gone, alive := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	l.Reserve(gone, "95555", nil)
 	l.Reserve(alive, "95555", nil)
 	now = now.Add(5 * time.Minute)
@@ -443,7 +443,7 @@ func TestLinesFreedObserverIsToldOnEveryRelease(t *testing.T) {
 	l := NewLines()
 	var n atomic.Int32
 	l.SetOnFree(func() { n.Add(1) })
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	l.Reserve(id, "1", nil)
 	l.Observe("ch", uuid.Nil, "1")
 	l.Release(id)
@@ -458,7 +458,7 @@ func TestADIDWithoutALimitIsNeverRefused(t *testing.T) {
 	t.Parallel()
 	s, _ := limitedService(t, nil)
 	for i := 0; i < 50; i++ {
-		if err := dialAI(s, uuid.New(), "95012"); err != nil {
+		if err := dialAI(s, uuid.Must(uuid.NewV7()), "95012"); err != nil {
 			t.Fatalf("call %d: %v", i, err)
 		}
 	}

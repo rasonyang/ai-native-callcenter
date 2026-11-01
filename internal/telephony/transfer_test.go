@@ -62,7 +62,7 @@ func TestAnAgentNotOnTheCallCannotTransferIt(t *testing.T) {
 	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 
-	err := c.Transfer(t.Context(), callID, uuid.New(), "2001")
+	err := c.Transfer(t.Context(), callID, uuid.Must(uuid.NewV7()), "2001")
 	if !errors.Is(err, ErrNotCallParty) {
 		t.Fatalf("transfer by an agent not on the call returned %v, want ErrNotCallParty", err)
 	}
@@ -96,7 +96,7 @@ func TestAnAgentWhoseLegEndedCannotTransferTheCall(t *testing.T) {
 func TestEitherAgentOnATwoAgentCallCanTransferIt(t *testing.T) {
 	t.Parallel()
 	c, cmd, callID, firstID := onACallWithAnAgent(t)
-	secondID := uuid.New()
+	secondID := uuid.Must(uuid.NewV7())
 	if err := c.registry.Do(callID, func(call *Call) {
 		second := call.AddParty("second-agent-chan", "1002", call.CreatedAt)
 		second.State = PartyTalking

@@ -68,6 +68,7 @@ const (
 	DoctorCheckSwitchReachable      DoctorCheck = "switch_reachable"
 	DoctorCheckSwitchAuth           DoctorCheck = "switch_auth"
 	DoctorCheckSIPProfiles          DoctorCheck = "sip_profiles"
+	DoctorCheckSwitchUUID           DoctorCheck = "switch_uuid"
 	DoctorCheckBotGateway           DoctorCheck = "bot_gateway"
 	DoctorCheckExternalIP           DoctorCheck = "external_ip"
 	DoctorCheckExternalIPAdvertised DoctorCheck = "external_ip_advertised"
@@ -94,6 +95,7 @@ const (
 	DoctorCodeSwitchUnreachable     DoctorCode = "SWITCH_UNREACHABLE"
 	DoctorCodeSwitchAuthRejected    DoctorCode = "SWITCH_AUTH_REJECTED"
 	DoctorCodeSwitchProfileDown     DoctorCode = "SWITCH_PROFILE_DOWN"
+	DoctorCodeSwitchUUIDNotV7       DoctorCode = "SWITCH_UUID_NOT_V7"
 	DoctorCodeBotGatewayDown        DoctorCode = "BOT_GATEWAY_DOWN"
 	DoctorCodeExternalIPNotOnHost   DoctorCode = "EXTERNAL_IP_NOT_ON_HOST"
 	DoctorCodeExternalIPStale       DoctorCode = "EXTERNAL_IP_STALE"
@@ -128,6 +130,7 @@ var doctorChecks = []struct {
 	{DoctorCheckSwitchReachable, DoctorCodeSwitchUnreachable},
 	{DoctorCheckSwitchAuth, DoctorCodeSwitchAuthRejected},
 	{DoctorCheckSIPProfiles, DoctorCodeSwitchProfileDown},
+	{DoctorCheckSwitchUUID, DoctorCodeSwitchUUIDNotV7},
 	{DoctorCheckBotGateway, DoctorCodeBotGatewayDown},
 	{DoctorCheckOutboundEndpoint, DoctorCodeOutboundEndpointUnset},
 	{DoctorCheckOutboundGateway, DoctorCodeOutboundGatewayMissing},
@@ -185,6 +188,8 @@ type switchReader interface {
 	Trunks() ([]telephony.Trunk, error)
 	// SwitchConf is the switch's core configuration as XML.
 	SwitchConf() (string, error)
+	// UUIDVersion is the version of a UUID the switch mints now.
+	UUIDVersion() (int, error)
 }
 
 // doctorOptions are the command's flags.
@@ -317,6 +322,7 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	sw, closeSwitch, results := checkSwitch(ctx, d)
 	defer closeSwitch()
 	out = append(out, results...)
+	out = append(out, checkSwitchUUID(sw.reader)...)
 	out = append(out, checkBotGateway(ctx, d, opts, sw.reader)...)
 	out = append(out, checkOutbound(d, sw.reader)...)
 	out = append(out, checkExternalIP(d, opts, sw)...)
@@ -403,7 +409,11 @@ func checkApp(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorRes
 		}
 	}
 	var out []doctorResult
-	if reply.status != http.StatusOK {
+	if reply.status != http.StatusOK && reply.lines["database"] == "ok" && strings.HasPrefix(reply.lines["switch-uuid"], "NOT_V7") {
+		out = append(out, fail(DoctorCheckApp,
+			fmt.Sprintf("%s answered %d: %s", opts.readyzURL, reply.status, reply.head),
+			"the switch mints UUIDs that are not v7; see the switch_uuid check below"))
+	} else if reply.status != http.StatusOK {
 		out = append(out, fail(DoctorCheckApp,
 			fmt.Sprintf("%s answered %d: %s", opts.readyzURL, reply.status, reply.head),
 			"the app cannot reach its database; see the database check below and `docker compose logs aicc`"))
@@ -679,6 +689,25 @@ func checkSwitch(ctx context.Context, d doctorDeps) (switchProfiles, func(), []d
 		out = append(out, pass(DoctorCheckSIPProfiles, "SIP profiles internal and external are running"))
 	}
 	return switchProfiles{reader: sw, profiles: profiles}, closeSwitch, out
+}
+
+// checkSwitchUUID asks the switch for a UUID and requires a v7: the dialplan
+// mints the call id of every inbound DID call, and the database refuses one
+// that is not. Not being able to ask is a SKIP, never a pass.
+func checkSwitchUUID(sw switchReader) []doctorResult {
+	if sw == nil {
+		return []doctorResult{skip(DoctorCheckSwitchUUID, "doctor could not connect to the switch")}
+	}
+	v, err := sw.UUIDVersion()
+	switch {
+	case err != nil:
+		return []doctorResult{skip(DoctorCheckSwitchUUID, "cannot ask the switch for a UUID: "+oneLine(err.Error()))}
+	case v != 7:
+		return []doctorResult{fail(DoctorCheckSwitchUUID,
+			fmt.Sprintf("the switch mints UUID version %d, not 7; inbound call ids would be refused", v),
+			"set uuid-version=7 in switch.conf.xml and restart the switch; it needs FreeSWITCH 1.11 or later (1.10 ignores it)")}
+	}
+	return []doctorResult{pass(DoctorCheckSwitchUUID, "the switch mints v7 UUIDs")}
 }
 
 // botGatewayGrace bounds how long --wait keeps asking about the bot gateway

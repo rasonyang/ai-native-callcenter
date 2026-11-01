@@ -81,7 +81,7 @@ func TestAPlacementFailureRoundTripsThroughTheLedger(t *testing.T) {
 	}
 	ledger := st.Ledger()
 
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	callID := uuid.Must(uuid.NewV7())
 	job := &trackedJob{
 		jobID: "job-1", callID: callID, legID: uuid.NewString(),

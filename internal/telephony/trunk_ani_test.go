@@ -38,7 +38,7 @@ func (signedInDirectory) BenchForNoAnswer(context.Context, uuid.UUID)           
 // the assembler is the one.
 func TestWhoWritesACallIsDecidedByTheSwitchNotByTheCallersNumber(t *testing.T) {
 	t.Parallel()
-	weiID, benID := uuid.New(), uuid.New()
+	weiID, benID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	const (
 		weiExt = "1008" // wei, signed in
 		benExt = "1001" // ben, signed in: the queue delivers handed-over calls to him
@@ -120,7 +120,7 @@ func TestWhoWritesACallIsDecidedByTheSwitchNotByTheCallersNumber(t *testing.T) {
 			c := NewCoordinator(registry, nil, directory, nullPublisher{})
 			ctx := t.Context()
 
-			minted := uuid.New().String()
+			minted := uuid.Must(uuid.NewV7()).String()
 			exported := map[string]string{
 				"variable_aicc_call_id":  minted,
 				"variable_aicc_did":      "95001",

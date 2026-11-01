@@ -7,6 +7,17 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Breaking (API)
+
+- `POST /calls`: a `callId` sent by the client must now be a UUIDv7 (RFC 9562:
+  version 7, the RFC 4122 variant). Any other id, the nil UUID included, is
+  refused with 422 `VALIDATION_FAILED` `{"field": "callId", "rule": "UUID_V7"}`
+  before anything is dialled or written. Before, any UUID was accepted. Leaving
+  `callId` out still works: the server mints one, always a v7 now. An
+  integration that mints its own ids switches to a v7 generator, for example
+  `uuid.NewV7` in Go or `uuidv7()` in PostgreSQL 18. Recorded in
+  `.oasdiff-breaking-ignore.txt`. (#400)
+
 ### Changed
 
 - The switch image's own RTP range is now 16384-29999 (6,808 legs, one RTP/RTCP
@@ -38,6 +49,26 @@ carries the one-line installer's files.
   exists, so a deployment seeded earlier keeps its published revision; load
   the new ones from `internal/seed/flows/` with `aicc flowadd` if you use
   them.
+- Every id the server mints is now a UUIDv7, so call ids are time-ordered.
+  This covers the call ids of campaign calls, callback dials and the bot's
+  fallback; the leg ids the app gives the switch; agent, API key and seeded
+  ids; and the demo seed's history. A database seeded earlier keeps its
+  history. Calls placed by earlier versions keep their v4 ids.
+  - Migration 00047: the database now refuses a new `cdrs` or
+    `campaign_attempts` row whose call id is not a v7, and a campaign whose id
+    is not. Rows written earlier keep their ids and can still be updated.
+  - A call still in progress across the upgrade whose v4 id the previous
+    version minted (a callback dial, a campaign call, a client-supplied v4)
+    has its CDR refused. Upgrade between such calls. (#400)
+- At every ESL connect the app asks the switch to mint a UUID (`create_uuid`),
+  because the switch mints the call id of every inbound DID call. FreeSWITCH
+  1.10 ignores `uuid-version=7`; the shipped `switch.conf.xml` sets it.
+  - If the switch mints anything but a v7, `/readyz` answers 503. This is the
+    first switch fact that fails readiness.
+  - A new `switch-uuid:` line in `/readyz` reads `v7`, `unknown` or
+    `NOT_V7 version=N`.
+  - `aicc doctor` has a matching `switch_uuid` check (`SWITCH_UUID_NOT_V7`).
+    (#400)
 
 ### Added
 
@@ -200,6 +231,12 @@ carries the one-line installer's files.
   `devEngines` in `web/package.json` makes any other npm major stop with
   `EBADDEVENGINES`. Before, they ran npm 10, which refused a lock npm 11 had
   written. `CONTRIBUTING.md` says how the lock is kept. (#389)
+- A test (`internal/uuidgate`) fails when non-test Go code calls `uuid.New`,
+  `uuid.NewString`, `uuid.NewRandom` or `uuid.NewRandomFromReader`.
+  - Ids are minted with `uuid.NewV7`.
+  - Random tokens that are not ids use `crypto/rand`: the SIP Call-IDs, tags and
+    branches of the load and callee simulators, and the audio stream's token
+    nonce. (#400)
 
 ## v0.7.1 - 2026-10-28
 

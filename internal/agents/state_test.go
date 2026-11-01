@@ -148,7 +148,7 @@ func TestWrapUpHoldsUntilItIsFiled(t *testing.T) {
 	t.Parallel()
 	var p Presence
 	signedInAtAWorkingPhone(&p)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if err := p.StartWrapUp(callID, now); err != nil {
 		t.Fatal(err)
 	}

@@ -95,7 +95,7 @@ func TestEndCallRefusesACallWithNoExtensionLeg(t *testing.T) {
 func TestEndCallOnAnUnknownCallIsRefused(t *testing.T) {
 	t.Parallel()
 	c, _, _, _ := onACallWithAnAgent(t)
-	if err := c.EndCall(t.Context(), uuid.New()); err == nil {
+	if err := c.EndCall(t.Context(), uuid.Must(uuid.NewV7())); err == nil {
 		t.Error("ending a call that does not exist reported success")
 	}
 }

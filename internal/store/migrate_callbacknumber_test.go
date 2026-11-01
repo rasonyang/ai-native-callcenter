@@ -38,7 +38,7 @@ func TestMigrationRepairsACallbackNumberMadeOfWords(t *testing.T) {
 	t0 := time.Date(2026, 10, 22, 9, 0, 0, 0, time.UTC)
 	cdr := func(callType, from, to, did string) uuid.UUID {
 		t.Helper()
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		exec(`INSERT INTO cdrs (call_id, started_at, ended_at, call_type, from_number, to_number, did, status)
 		      VALUES ($1, $2, $3, $4, $5, $6, $7, 'ANSWERED')`,
 			id, t0, t0.Add(time.Minute), callType, from, to, did)
@@ -46,7 +46,7 @@ func TestMigrationRepairsACallbackNumberMadeOfWords(t *testing.T) {
 	}
 	callback := func(callID *uuid.UUID, phone string) uuid.UUID {
 		t.Helper()
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		exec(`INSERT INTO callbacks (id, call_id, phone_number, message) VALUES ($1, $2, $3, 'call me back')`,
 			id, callID, phone)
 		return id
@@ -56,7 +56,7 @@ func TestMigrationRepairsACallbackNumberMadeOfWords(t *testing.T) {
 	placed := cdr("OUTBOUND", "95301", "18688886660", "95301")
 	agentToBot := cdr("OUTBOUND", "1008", "95012", "95012")
 	noNumber := cdr("INBOUND", "anonymous", "95012", "95012")
-	missingCDR := uuid.New()
+	missingCDR := uuid.Must(uuid.NewV7())
 
 	cases := []struct {
 		name string

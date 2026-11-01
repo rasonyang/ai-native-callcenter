@@ -18,8 +18,10 @@ package streamin
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -181,7 +183,7 @@ func (s *Server) Token(c Claim) string {
 	// and a revocation belong to one attachment rather than to a channel.
 	payload := fmt.Sprintf("%s|%s|%s|%s|%s|%d|%s",
 		c.CallID, c.PartyID, c.AgentID, c.Channel, c.Language, c.Expires.Unix(),
-		uuid.NewString())
+		nonce())
 	mac := hmac.New(sha256.New, s.cfg.Secret)
 	mac.Write([]byte(payload))
 	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." +
@@ -641,4 +643,13 @@ func (s *Server) giveUpOn(token string, exp *expectation) {
 	if actor, ok := s.cfg.Transcripts.Lookup(exp.claim.CallID); ok {
 		actor.State(transcript.StateError, "STREAM_NEVER_CONNECTED", nil)
 	}
+}
+
+// nonce is 128 random bits as hex; it is a token, not an id.
+func nonce() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }

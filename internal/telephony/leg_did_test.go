@@ -71,7 +71,7 @@ func TestAStampedTrunkLegIsTypedByItsCalleeAsBefore(t *testing.T) {
 
 func TestAStampedTrunkLegDoesNotMakeAHumanCallADIDCall(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	hangup := func(extra map[string]string) SwitchEvent {
 		ev, ok := Normalize(event(trunkLegHeaders("CHANNEL_HANGUP_COMPLETE", extra)))
 		if !ok {
@@ -92,7 +92,7 @@ func TestAStampedTrunkLegDoesNotMakeAHumanCallADIDCall(t *testing.T) {
 		var bot BotShare
 		bot.Merge(ev.Bot)
 		snap := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(30), Bot: bot,
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "1008", OtherNumber: "18688886669", AgentID: &agentID, ExtensionNumber: "1008", ChannelID: "chan-agent",

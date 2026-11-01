@@ -99,14 +99,14 @@ func TestMonitorRefusesAnAgentWhoIsNotOnTheCall(t *testing.T) {
 	c, cmd, callID, _ := onACallWithAnAgent(t)
 	before := len(cmd.sent)
 
-	err := c.Monitor(t.Context(), callID, uuid.New(), "1099", "LISTEN")
+	err := c.Monitor(t.Context(), callID, uuid.Must(uuid.NewV7()), "1099", "LISTEN")
 	if !errors.Is(err, ErrNoAgentLeg) {
 		t.Fatalf("err = %v, want ErrNoAgentLeg", err)
 	}
 	if len(cmd.sent) != before {
 		t.Errorf("the switch was sent %v for a refused request", cmd.sent[before:])
 	}
-	if err := c.Monitor(t.Context(), uuid.New(), uuid.New(), "1099", "LISTEN"); !errors.Is(err, ErrCallNotFound) {
+	if err := c.Monitor(t.Context(), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "1099", "LISTEN"); !errors.Is(err, ErrCallNotFound) {
 		t.Errorf("unknown call: err = %v, want ErrCallNotFound", err)
 	}
 }

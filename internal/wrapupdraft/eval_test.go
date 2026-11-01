@@ -91,8 +91,8 @@ func loadEvalCases(t testing.TB) []evalCase {
 // agent id whose draft it is.
 func (c evalCase) transcript(t testing.TB) ([]store.TranscriptLine, uuid.UUID) {
 	t.Helper()
-	agent, other := uuid.New(), uuid.New()
-	agentParty, otherParty := uuid.New(), uuid.New()
+	agent, other := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	agentParty, otherParty := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	var out []store.TranscriptLine
 	add := func(turn string, party, agentID *uuid.UUID) {
 		who, text, ok := strings.Cut(turn, ": ")

@@ -21,7 +21,7 @@ func TestTheLaterEndingRowKeepsTheCallsEarlierStart(t *testing.T) {
 	ctx := context.Background()
 
 	created := time.Now().Add(-10 * time.Minute).Truncate(time.Millisecond)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	row := func(startedAt, answeredAt time.Time, endedAfter time.Duration, ringSec, totalSec int) CDR {
 		return CDR{
 			CallID: callID, StartedAt: startedAt, AnsweredAt: answeredAt,
@@ -55,7 +55,7 @@ func TestTheLaterEndingRowKeepsTheCallsEarlierStart(t *testing.T) {
 
 	// A bot provisional row and the human path's row, both from creation: the
 	// later ending replaces and the start stays the creation time.
-	callID = uuid.New()
+	callID = uuid.Must(uuid.NewV7())
 	if err := ledger.InsertCDR(ctx, row(created, created.Add(3*time.Second), 60*time.Second, 3, 60)); err != nil {
 		t.Fatal(err)
 	}

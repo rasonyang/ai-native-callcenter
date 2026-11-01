@@ -577,7 +577,7 @@ func TestNormalizeReadsTheQueueDeliveryStamp(t *testing.T) {
 // non-empty share whole let the DID-only half shut the rest out.
 func TestBotShareMergesAcrossLegs(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 
 	// What the bot leg carries when it hangs up at the transfer.
 	got := BotShare{DID: "95001"}

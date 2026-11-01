@@ -17,7 +17,7 @@ import (
 // have been.
 func serviceWithLanguage(t *testing.T, sw *fakeSwitch, language string) *Service {
 	t.Helper()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	dids := fakeDIDs{{Number: "95012", Language: language, FlowID: &flowID, IsEnabled: true,
 		AllowInbound: true, AllowOutbound: true, IsDefaultOutbound: true}}
 	return New(Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw, dids, provisioned(),

@@ -12,6 +12,8 @@ package loadgen
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -149,10 +151,10 @@ type uac struct {
 }
 
 func (u *uac) identify() {
-	u.callID = uuid.NewString()
-	u.tag = uuid.NewString()[:8]
-	u.branch = "z9hG4bK" + uuid.NewString()[:12]
-	u.aiccCall = uuid.NewString()
+	u.callID = randomHex(16)
+	u.tag = randomHex(4)
+	u.branch = "z9hG4bK" + randomHex(6)
+	u.aiccCall = uuid.Must(uuid.NewV7()).String()
 	u.cseq = 1
 }
 
@@ -179,7 +181,7 @@ func (u *uac) invite(ctx context.Context) (string, error) {
 	request := u.message("INVITE", map[string]string{
 		"Content-Type":      "application/sdp",
 		"X-AICC-Call-Id":    u.aiccCall,
-		"X-AICC-Channel-Id": uuid.NewString(),
+		"X-AICC-Channel-Id": uuid.Must(uuid.NewV7()).String(),
 		"X-AICC-Did":        u.cfg.DID,
 		"X-AICC-Language":   u.cfg.Language,
 		"X-AICC-Ani":        u.cfg.From,
@@ -449,4 +451,14 @@ func mediaAddress(answer string) (*net.UDPAddr, error) {
 		return nil, fmt.Errorf("answer has no media address (host %q port %d)", host, port)
 	}
 	return net.ResolveUDPAddr("udp", net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// randomHex returns n random bytes as 2n hex characters. SIP tokens (Call-ID,
+// tags, branches) are random, not ids: a UUIDv7's leading hex is a timestamp.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := cryptorand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }

@@ -32,7 +32,7 @@ type recordingOutbound struct {
 
 func (o *recordingOutbound) DialAI(_ context.Context, req outbound.AIDialRequest) (uuid.UUID, error) {
 	o.got = req
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 func placeCall(t *testing.T, body string) (*httptest.ResponseRecorder, *recordingOutbound) {
@@ -44,7 +44,7 @@ func placeCall(t *testing.T, body string) (*httptest.ResponseRecorder, *recordin
 	// Placing an AI call is an operations decision, and the check for it lives
 	// in the handler rather than on the route.
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleSupervisor,
+		UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleSupervisor,
 	}))
 	s.CreateCall(w, r)
 	return w, dialer
@@ -236,15 +236,15 @@ type recordingDialer struct {
 
 func (d *recordingDialer) Dial(_ context.Context, req outbound.AgentDialRequest) (uuid.UUID, error) {
 	d.got = req
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 // agentSubject is a signed-in agent: an account with an agent identity and an
 // agent's grant.
 func agentSubject() AuthContext {
 	return AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "mina",
-		AgentID: uuid.New(), scopes: grantedScopes(auth.RoleAgent),
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "mina",
+		AgentID: uuid.Must(uuid.NewV7()), scopes: grantedScopes(auth.RoleAgent),
 	}
 }
 
@@ -252,7 +252,7 @@ func agentSubject() AuthContext {
 // scopes to place a call of either kind.
 func keySubject() AuthContext {
 	return AuthContext{
-		Kind: SubjectKey, SubjectID: uuid.New(), SubjectName: "crm-integration",
+		Kind: SubjectKey, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "crm-integration",
 		scopes: []string{api.ScopeCallsCreate, api.ScopeCallsCreateAI},
 	}
 }
@@ -439,7 +439,7 @@ func TestAnAgentMayNotPlaceAnAICall(t *testing.T) {
 // client-minted id is carried through to the service that keeps the record.
 func TestAClickToDialCarriesTheClientMintedIDThroughToTheService(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	w, dialer := agentDial(t, keySubject(),
 		`{"kind":"AGENT_OUTBOUND","to":"13912345678","extensionNumber":"1009","callId":"`+
 			callID.String()+`"}`)
@@ -455,7 +455,7 @@ func TestAClickToDialCarriesTheClientMintedIDThroughToTheService(t *testing.T) {
 type dialerDirectory struct{}
 
 func (dialerDirectory) AgentIDForUser(*http.Request, uuid.UUID) (uuid.UUID, error) {
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 func (dialerDirectory) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) {
@@ -491,7 +491,7 @@ func (dialerPresence) DeviceAtExtension(extension string) (isRegistered, isInSer
 
 func (dialerPresence) AgentAtExtension(extension string) (uuid.UUID, bool) {
 	if extension == "1008" {
-		return uuid.New(), true
+		return uuid.Must(uuid.NewV7()), true
 	}
 	return uuid.Nil, false
 }
@@ -634,7 +634,7 @@ func valueSchemaAdmits(t *testing.T, schema map[string]any, v string) bool {
 }
 
 func (dialerDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 // A canonical E.164 number reaches the dialer untouched, for both kinds: the

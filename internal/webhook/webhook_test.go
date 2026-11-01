@@ -147,16 +147,16 @@ func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, code int, reason
 }
 
 func pending(attempt int) store.WebhookDelivery {
-	return pendingFor(uuid.New(), attempt)
+	return pendingFor(uuid.Must(uuid.NewV7()), attempt)
 }
 
 // pendingFor is pending for a named subscription, for the tests about what one
 // subscription is subjected to.
 func pendingFor(subscriptionID uuid.UUID, attempt int) store.WebhookDelivery {
 	return store.WebhookDelivery{
-		DeliveryID:     uuid.New(),
+		DeliveryID:     uuid.Must(uuid.NewV7()),
 		SubscriptionID: subscriptionID,
-		CallID:         uuid.New(),
+		CallID:         uuid.Must(uuid.NewV7()),
 		Revision:       1,
 		Payload:        json.RawMessage(`{"callId":"c-1","talkSec":40}`),
 		Status:         store.DeliveryPending,
@@ -384,7 +384,7 @@ func TestOneSubscriptionIsNeverHitByMoreThanTheCap(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	sub := uuid.New()
+	sub := uuid.Must(uuid.NewV7())
 	const count = 10
 	due := make([]store.WebhookDelivery, 0, count)
 	for range count {
@@ -430,7 +430,7 @@ func TestASlowSubscriberDoesNotHoldUpAnotherOne(t *testing.T) {
 	// One more than the cap each, so both subscriptions have a delivery that
 	// has to wait for a slot.
 	const each = PerSubscriptionConcurrency + 1
-	subA, subB := uuid.New(), uuid.New()
+	subA, subB := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	var due []store.WebhookDelivery
 	quickIDs := map[uuid.UUID]bool{}
 	for range each {

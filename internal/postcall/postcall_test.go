@@ -182,7 +182,7 @@ func (f *fakeLedger) GetCDR(_ context.Context, id uuid.UUID) (store.CDR, error) 
 }
 
 func (f *fakeLedger) addRecording(sec int) store.Recording {
-	r := store.Recording{ID: uuid.New(), CallID: uuid.New(), ObjectKey: "k", DurationSec: sec}
+	r := store.Recording{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), ObjectKey: "k", DurationSec: sec}
 	f.recs[r.CallID] = []store.Recording{r}
 	return r
 }
@@ -323,7 +323,7 @@ func TestDurationBoundsAndTheDailyCap(t *testing.T) {
 	cfg.DailyMaxAudioSec = 600
 	s := newService(db, fakeAudio{}, &fakeRecognizer{}, cfg)
 	judge := func(sec int) string {
-		v, err := s.Judge(context.Background(), uuid.New(), sec, true, false)
+		v, err := s.Judge(context.Background(), uuid.Must(uuid.NewV7()), sec, true, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -620,7 +620,7 @@ func TestAManualRequest(t *testing.T) {
 	s := newService(db, fakeAudio{}, &fakeRecognizer{}, cfg)
 
 	// No recording.
-	if _, err := s.Request(ctx, uuid.New()); !errors.Is(err, ErrNoRecording) {
+	if _, err := s.Request(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, ErrNoRecording) {
 		t.Errorf("no recording: %v", err)
 	}
 
@@ -798,16 +798,16 @@ func channelsOf(t *testing.T, cdr *store.CDR, speechLeft bool) []string {
 // left channel is the person on the phone, not the customer.
 func TestTheChannelsFollowTheRecordedLeg(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 	cases := []struct {
 		name       string
 		cdr        *store.CDR
 		speechLeft bool
 		want       string
 	}{
-		{"click-to-dial, left", &store.CDR{CallType: "OUTBOUND", AgentIDs: []uuid.UUID{uuid.New()}}, true, store.ChannelFarEnd},
+		{"click-to-dial, left", &store.CDR{CallType: "OUTBOUND", AgentIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}}, true, store.ChannelFarEnd},
 		{"signed-out phone, left", &store.CDR{CallType: "OUTBOUND"}, true, store.ChannelFarEnd},
-		{"click-to-dial, right", &store.CDR{CallType: "OUTBOUND", AgentIDs: []uuid.UUID{uuid.New()}}, false, store.ChannelCustomer},
+		{"click-to-dial, right", &store.CDR{CallType: "OUTBOUND", AgentIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}}, false, store.ChannelCustomer},
 		{"inbound", &store.CDR{CallType: "INBOUND"}, true, store.ChannelCustomer},
 		{"AI outbound by bot seconds", &store.CDR{CallType: "OUTBOUND", BotSec: 12}, true, store.ChannelCustomer},
 		{"AI outbound by flow", &store.CDR{CallType: "OUTBOUND", FlowID: &flow}, true, store.ChannelCustomer},

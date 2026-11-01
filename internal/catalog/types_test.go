@@ -197,7 +197,7 @@ func TestQueueDefaults(t *testing.T) {
 
 func TestDIDValidation(t *testing.T) {
 	t.Parallel()
-	someFlow := uuid.New()
+	someFlow := uuid.Must(uuid.NewV7())
 	tests := []struct {
 		name    string
 		did     DID
@@ -249,7 +249,7 @@ func TestDIDValidation(t *testing.T) {
 // Checked as sent: a line break or a space is refused, not trimmed away.
 func TestADIDLanguageIsALowercaseLanguageTag(t *testing.T) {
 	t.Parallel()
-	someFlow := uuid.New()
+	someFlow := uuid.Must(uuid.NewV7())
 	for _, language := range []string{"en", "zh", "pt-br", "zh-hans", "yue", "es-419", "zh-hk"} {
 		d := DID{Number: "95011", Language: language, AllowInbound: true, FlowID: &someFlow}
 		if err := d.validate(); err != nil {

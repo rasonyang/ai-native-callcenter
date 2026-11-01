@@ -42,7 +42,7 @@ type answeredAtCase struct {
 // answeredAt is set exactly when a leg other than the placing phone answered.
 func checkAnsweredAt(t *testing.T, tc answeredAtCase) {
 	t.Helper()
-	queues := staticQueues{"support": uuid.New(), "internal_queue": uuid.New()}
+	queues := staticQueues{"support": uuid.Must(uuid.NewV7()), "internal_queue": uuid.Must(uuid.NewV7())}
 	cdr := newAssembler(&memoryLedger{}, queues).assemble(t.Context(), tc.snap)
 
 	switch {
@@ -106,7 +106,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "1 click-to-dial, gateway down: no trunk leg, the agent hangs up at 0.8 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(800),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(800),
 				Parties: []PartySnapshot{placingPhone(&agent1, "1008", 500, atMsPtr(800))},
 			},
 			wantStatus: store.CDRStatusNoAnswer,
@@ -114,7 +114,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "2 click-to-dial, trunk 480 CALL_REJECTED at 4 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(4),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(4),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(4)),
 					trunk(600, nil, atPtr(4), "CALL_REJECTED"),
@@ -125,7 +125,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "3 click-to-dial, trunk USER_BUSY at 2 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(2),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(2),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(2)),
 					trunk(600, nil, atPtr(2), causeUserBusy),
@@ -136,7 +136,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "4a click-to-dial, trunk rings out NO_ANSWER at 30 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(30)),
 					trunk(600, nil, atPtr(30), "NO_ANSWER"),
@@ -148,7 +148,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 			// Early media is not an answer: the trunk leg never got one.
 			name: "4b click-to-dial, early media (183) then UNALLOCATED_NUMBER",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(3),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(3),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 700, atPtr(3)),
 					trunk(800, nil, atPtr(3), "UNALLOCATED_NUMBER"),
@@ -159,7 +159,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "5 click-to-dial to a customer, answered at 8 s, talked 22 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(30), talk(8, 30)),
 					func() PartySnapshot {
@@ -174,7 +174,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "6 click-to-dial, trunk answered but codec mismatch, no bridge",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(10),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(10),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(10)),
 					trunk(600, atPtr(2), atPtr(10), ""),
@@ -185,7 +185,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "7 click-to-dial 1008 to 1002, which never rings",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(5),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(5),
 				Parties: []PartySnapshot{placingPhone(&agent1, "1008", 500, atPtr(5))},
 			},
 			wantStatus: store.CDRStatusNoAnswer,
@@ -193,7 +193,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "8 click-to-dial 1008 to 1002, rings 6 s, answered, 40 s talk: 1002's answer, not 1008's",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(46),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(46),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(46), talk(6, 46)),
 					extension(&agent2, 600, atPtr(6), atPtr(46), talk(6, 46)),
@@ -207,7 +207,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 			// disturbed by the rule.
 			name: "9 keypad dial 1008 to 1002, answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
 				Parties: []PartySnapshot{
 					func() PartySnapshot {
 						p := placingPhone(&agent1, "1008", 0, atPtr(20), talk(6, 20))
@@ -222,7 +222,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "10 1008 to 1002 with nobody signed in at 1002 (extension only), answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(20), talk(5, 20)),
 					extension(nil, 600, atPtr(5), atPtr(20), talk(5, 20)),
@@ -233,7 +233,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "11 click-to-dial 1008 to 95001, the bot answers at 1.5 s and hangs up at 40 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(40), Bot: bot,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(40), Bot: bot,
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(40)),
 					{
@@ -247,7 +247,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "12 click-to-dial 1008 to 95001, no bot slot: the bot leg never answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(5), Bot: bot,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(5), Bot: bot,
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(5)),
 					{
@@ -261,7 +261,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "13 signed-out 1008 (extension only) click-to-dial, trunk 480",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(4),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(4),
 				Parties: []PartySnapshot{
 					placingPhone(nil, "1008", 500, atPtr(4)),
 					trunk(600, nil, atPtr(4), "CALL_REJECTED"),
@@ -272,7 +272,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "14 control: INBOUND, bot answers, abandoned in the queue after 25 s: the caller's answer",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInbound, CreatedAt: at(0), EndedAt: atPtr(26),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound, CreatedAt: at(0), EndedAt: atPtr(26),
 				Parties: []PartySnapshot{
 					{
 						Role: RoleOriginator, Number: "13800138000", ChannelID: "caller",
@@ -290,7 +290,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "15 control: AI outbound, customer answers, BOT_BRIDGE_UNCONFIRMED after 30 s (#313)",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
 				Bot: BotShare{DID: "95099", FlowID: &flowID, FlowSlug: "lead_gen"},
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "18688886666", ChannelID: "customer",
@@ -303,7 +303,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 		{
 			name: "16 control: INTERNAL on a dialplan-spawned leg keeps the originator's answer",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(10),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(10),
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "1008", ChannelID: "spawned",
 					CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(10),
@@ -316,7 +316,7 @@ func TestAnAgentsCallRecordsTheFarSidesAnswerNotTheirOwnPhones(t *testing.T) {
 			// switch's, not a person's, and nobody bills an internal call.
 			name: "17 handset dial into a queue extension the queue answered and nobody took",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(20),
 				Parties:    []PartySnapshot{placingPhone(&agent1, "1008", 500, atPtr(20))},
 				QueueStays: []QueueFacts{{Name: "internal_queue", JoinedAt: atMs(500), LeftAt: at(20), Cause: "ABANDONED"}},
 			},
@@ -357,7 +357,7 @@ func TestAnAgentsCallAnswerSurvivesLegsThatArriveOutOfOrder(t *testing.T) {
 			// auto-answer: the second leg outran its caller.
 			name: "a callee leg created before the originator's auto-answer",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 1200, atPtr(30)),
 					callee(300, atPtr(6), atPtr(30)),
@@ -370,7 +370,7 @@ func TestAnAgentsCallAnswerSurvivesLegsThatArriveOutOfOrder(t *testing.T) {
 			// answer is the second leg's, and it is billed from there.
 			name: "two dialled legs where only the second answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(30)),
 					dialledTrunk(600, nil, atPtr(5), "NO_ANSWER"),
@@ -384,7 +384,7 @@ func TestAnAgentsCallAnswerSurvivesLegsThatArriveOutOfOrder(t *testing.T) {
 			// when the later leg is listed first.
 			name: "two far-side legs answered, the later one listed first",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(30)),
 					callee(900, atPtr(9), atPtr(30)),
@@ -398,7 +398,7 @@ func TestAnAgentsCallAnswerSurvivesLegsThatArriveOutOfOrder(t *testing.T) {
 			// its release.
 			name: "a far-side leg with an answer and no release",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(30),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, nil),
 					callee(600, atPtr(6), nil),
@@ -411,7 +411,7 @@ func TestAnAgentsCallAnswerSurvivesLegsThatArriveOutOfOrder(t *testing.T) {
 			// answered, billed from that second, for less than a second.
 			name: "the agent hangs up 0.2 s after the far end answers",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(8200),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(8200),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atMsPtr(8200)),
 					dialledTrunk(600, atPtr(8), atMsPtr(8200), "ORIGINATOR_CANCEL"),
@@ -446,7 +446,7 @@ func TestTheStoredRowOfAnAgentsCallCarriesTheFarSidesAnswer(t *testing.T) {
 		{
 			name: "gateway down: no answer is stored",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(800),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atMsPtr(800),
 				Parties: []PartySnapshot{placingPhone(&agent1, "1008", 500, atMsPtr(800))},
 			},
 			wantStatus: store.CDRStatusNoAnswer,
@@ -454,7 +454,7 @@ func TestTheStoredRowOfAnAgentsCallCarriesTheFarSidesAnswer(t *testing.T) {
 		{
 			name: "1002 answers at 6 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(46),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal, CreatedAt: at(0), EndedAt: atPtr(46),
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(46), BridgeSpan{StartedAt: at(6), EndedAt: at(46)}),
 					{
@@ -469,7 +469,7 @@ func TestTheStoredRowOfAnAgentsCallCarriesTheFarSidesAnswer(t *testing.T) {
 		{
 			name: "the bot answers an agent's call to 95001 at 1.5 s",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(40),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(40),
 				Bot: BotShare{DID: "95001", FlowID: &flowID, FlowSlug: "novanet_support"},
 				Parties: []PartySnapshot{
 					placingPhone(&agent1, "1008", 500, atPtr(40)),

@@ -2230,7 +2230,7 @@ export interface components {
         CreateCallRequest: {
             /**
              * Format: uuid
-             * @description Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
+             * @description Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing. Optional: left out, the server mints one. It must be a UUIDv7 (version nibble 7, RFC 4122 variant), so call ids are time-ordered; any other UUID, the nil UUID included, is refused with 422 VALIDATION_FAILED, params {"field":"callId","rule":"UUID_V7"}, before anything is dialled or written.
              */
             callId?: string;
             /**

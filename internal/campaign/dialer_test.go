@@ -21,8 +21,8 @@ func (o *observerStub) Imported(uuid.UUID)         { o.imported++ }
 
 func TestOnlyARunningCampaignIsAnnotatedWithWhatTheDialerSays(t *testing.T) {
 	f := newFixture(t, Env{})
-	running := Campaign{ID: uuid.New(), Status: StatusRunning}
-	paused := Campaign{ID: uuid.New(), Status: StatusPaused}
+	running := Campaign{ID: uuid.Must(uuid.NewV7()), Status: StatusRunning}
+	paused := Campaign{ID: uuid.Must(uuid.NewV7()), Status: StatusPaused}
 	f.repo.campaigns[running.ID] = running
 	f.repo.campaigns[paused.ID] = paused
 	f.svc.WithDialer(progressStub{
@@ -71,10 +71,10 @@ func TestTheObserverHearsAboutImportsAndPatches(t *testing.T) {
 
 func TestListingAttemptsRefusesAnUnknownOutcomeAndAnUnknownCampaign(t *testing.T) {
 	f := newFixture(t, Env{})
-	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.New(), AttemptFilter{Outcome: "NOPE"}); !errors.Is(err, ErrValidation) {
+	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.Must(uuid.NewV7()), AttemptFilter{Outcome: "NOPE"}); !errors.Is(err, ErrValidation) {
 		t.Errorf("unknown outcome: %v", err)
 	}
-	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.New(), AttemptFilter{}); !errors.Is(err, ErrNotFound) {
+	if _, _, err := f.svc.ListAttempts(context.Background(), uuid.Must(uuid.NewV7()), AttemptFilter{}); !errors.Is(err, ErrNotFound) {
 		t.Errorf("unknown campaign: %v", err)
 	}
 }

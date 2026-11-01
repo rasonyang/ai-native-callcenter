@@ -143,7 +143,7 @@ func (p *fakePlacer) PlaceAI(ctx context.Context, req outbound.AIDialRequest) (o
 	p.calls = append(p.calls, pc)
 	p.live[req.CallID] = pc
 	p.byNumber[req.To] = req.CallID
-	return outbound.Placement{CallID: req.CallID, JobID: "job-" + req.CallID.String()[:8]}, nil
+	return outbound.Placement{CallID: req.CallID, JobID: "job-" + req.CallID.String()[28:]}, nil
 }
 
 func (p *fakePlacer) isLive(id uuid.UUID) bool {

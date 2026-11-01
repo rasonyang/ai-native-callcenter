@@ -71,7 +71,7 @@ func TestTheWrapUpVocabularyShipsWithTheSchema(t *testing.T) {
 func TestAWrapUpKeepsTheWordsItWasFiledUnder(t *testing.T) {
 	ledger, _, pool := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	filed, err := confirm(t, ledger, callID, agentID, "RESOLVED", "replaced the router")
 	if err != nil {
@@ -117,7 +117,7 @@ func TestAWrapUpKeepsTheWordsItWasFiledUnder(t *testing.T) {
 func TestAWrapUpFiledBeforeTheCallEndsStillLandsOnIt(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	if _, err := confirm(t, ledger, callID, agentID, "FOLLOW_UP_REQUIRED", ""); err != nil {
 		t.Fatalf("FileWrapUp() before the CDR error = %v", err)
@@ -143,7 +143,7 @@ func TestAWrapUpFiledBeforeTheCallEndsStillLandsOnIt(t *testing.T) {
 func TestFilingTwiceReplaces(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	if _, err := confirm(t, ledger, callID, agentID, "OTHER", "first thought"); err != nil {
 		t.Fatal(err)
@@ -170,7 +170,7 @@ func TestFilingTwiceReplaces(t *testing.T) {
 func TestAnUnknownDispositionIsRefused(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 
-	_, err := confirm(t, ledger, uuid.New(), uuid.New(), "NOT_A_CODE", "")
+	_, err := confirm(t, ledger, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), "NOT_A_CODE", "")
 	if !errors.Is(err, ErrUnknownDisposition) {
 		t.Errorf("ConfirmWrapUp() error = %v, want ErrUnknownDisposition", err)
 	}
@@ -181,8 +181,8 @@ func TestAnUnknownDispositionIsRefused(t *testing.T) {
 func TestEachAgentSeesTheirOwnFilingOnTheirOwnCalls(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
-	callID := uuid.New()
-	first, second := uuid.New(), uuid.New()
+	callID := uuid.Must(uuid.NewV7())
+	first, second := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	if _, err := confirm(t, ledger, callID, first, "FOLLOW_UP_REQUIRED", "handed to L2"); err != nil {
 		t.Fatal(err)
@@ -344,13 +344,13 @@ func TestAContactsLastCallComesFromTheLedger(t *testing.T) {
 	older := time.Now().Add(-48 * time.Hour).Truncate(time.Second)
 	newer := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
 	if err := ledger.InsertCDR(ctx, CDR{
-		CallID: uuid.New(), StartedAt: older, EndedAt: older.Add(time.Minute),
+		CallID: uuid.Must(uuid.NewV7()), StartedAt: older, EndedAt: older.Add(time.Minute),
 		CallType: "INBOUND", Status: CDRStatusAnswered, FromNumber: created.PhoneNumber,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := ledger.InsertCDR(ctx, CDR{
-		CallID: uuid.New(), StartedAt: newer, EndedAt: newer.Add(time.Minute),
+		CallID: uuid.Must(uuid.NewV7()), StartedAt: newer, EndedAt: newer.Add(time.Minute),
 		CallType: "OUTBOUND", Status: CDRStatusAnswered, ToNumber: created.PhoneNumber,
 	}); err != nil {
 		t.Fatal(err)
@@ -453,7 +453,7 @@ func TestTheAgentsDayReadsTheLedgerAndThePresenceHistory(t *testing.T) {
 	ctx := context.Background()
 	// The presence history is foreign-keyed to a real agent, so the day needs
 	// one to belong to.
-	me, somebodyElse := insertAgent(t, pool, "wei"), uuid.New()
+	me, somebodyElse := insertAgent(t, pool, "wei"), uuid.Must(uuid.NewV7())
 
 	// The window is a fixed hour, so nothing depends on when the test runs.
 	from := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
@@ -472,7 +472,7 @@ func TestTheAgentsDayReadsTheLedgerAndThePresenceHistory(t *testing.T) {
 	} {
 		agent := c.agent
 		if err := ledger.InsertCDR(ctx, CDR{
-			CallID: uuid.New(), StartedAt: c.at, EndedAt: c.at.Add(time.Minute),
+			CallID: uuid.Must(uuid.NewV7()), StartedAt: c.at, EndedAt: c.at.Add(time.Minute),
 			CallType: "INBOUND", Status: CDRStatusAnswered,
 			PrimaryAgentID: &agent, AgentIDs: []uuid.UUID{agent}, TalkSec: c.talkSec,
 		}); err != nil {
@@ -540,7 +540,7 @@ func TestAnAgentWhoDidNothingHasAnEmptyDay(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	from := time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
 
-	day, err := ledger.ReportAgentDay(context.Background(), uuid.New(), from, from.Add(time.Hour))
+	day, err := ledger.ReportAgentDay(context.Background(), uuid.Must(uuid.NewV7()), from, from.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ReportAgentDay() error = %v", err)
 	}
@@ -564,7 +564,7 @@ func confirm(t *testing.T, ledger *LedgerStore, callID, agentID uuid.UUID,
 func insertAgent(t *testing.T, pool *pgxpool.Pool, username string) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
-	userID, agentID := uuid.New(), uuid.New()
+	userID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO users (id, username, password_hash, display_name, role)
 		VALUES ($1, $2::text, 'x', $2::text, 'AGENT')`, userID, username); err != nil {
@@ -593,7 +593,7 @@ func insertAgent(t *testing.T, pool *pgxpool.Pool, username string) uuid.UUID {
 func TestALaterEndingReplacesTheRowThatSawLessOfTheCall(t *testing.T) {
 	ledger, _, pool := workspaceStore(t)
 	ctx := context.Background()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	started := time.Now().Add(-10 * time.Minute).UTC().Truncate(time.Second)
 
 	row := func(endedAt time.Time, talkSec int, agentIDs []uuid.UUID) CDR {

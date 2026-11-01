@@ -424,7 +424,7 @@ func TestARevisionIsRestoredThroughTheDraftAndTheUsualPublish(t *testing.T) {
 	}
 
 	// The usual publish appends revision 31, which is revision 5 again.
-	note := "Restore of " + h.revision(restoredRevision).String()[:8]
+	note := "Restore of " + h.revision(restoredRevision).String()[28:]
 	wantReply(t, "publish", f.do(call{method: http.MethodPost, path: flowPath + "/publish", cookie: h.admin,
 		body: map[string]any{"note": note}}), http.StatusOK, "")
 	after := readFlow(t, f, h)
@@ -487,7 +487,7 @@ func TestARevisionIsRestoredThroughTheDraftAndTheUsualPublish(t *testing.T) {
 	transfer := readRevision(t, f, h, h.revision(transferRevision))
 	wantReply(t, "restore the transfer revision", put(transfer.Spec), http.StatusOK, "")
 	blocked := f.do(call{method: http.MethodPost, path: flowPath + "/publish", cookie: h.admin,
-		body: map[string]any{"note": "Restore of " + h.revision(transferRevision).String()[:8]}})
+		body: map[string]any{"note": "Restore of " + h.revision(transferRevision).String()[28:]}})
 	wantReply(t, "publish the transfer revision", blocked, http.StatusConflict, "CAMPAIGN_FLOW_HAS_TRANSFER")
 	var refusal errView
 	if err := json.Unmarshal(blocked.body, &refusal); err != nil {

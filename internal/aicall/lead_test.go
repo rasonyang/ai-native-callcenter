@@ -34,7 +34,7 @@ func TestRecordLeadWritesTheAttemptOfThisCall(t *testing.T) {
 	leads := &fakeLeads{ok: true}
 	actions.orchestrator.cfg.Leads = leads
 	actions.campaignID = "c-1"
-	actions.recorder = &callRecorder{callID: uuid.New()}
+	actions.recorder = &callRecorder{callID: uuid.Must(uuid.NewV7())}
 
 	result, err := actions.RecordLead(t.Context(), flow.LeadRequest{Intent: "HIGH", Notes: "wants the offer"})
 	if err != nil || !result.IsOK {
@@ -56,7 +56,7 @@ func TestRecordLeadFailureIsAConversationNotAnError(t *testing.T) {
 		actions, _, _ := testActions(t, &fakeSwitch{})
 		actions.orchestrator.cfg.Leads = leads
 		actions.campaignID = "c-1"
-		actions.recorder = &callRecorder{callID: uuid.New()}
+		actions.recorder = &callRecorder{callID: uuid.Must(uuid.NewV7())}
 
 		result, err := actions.RecordLead(t.Context(), flow.LeadRequest{Intent: "HIGH"})
 		if err != nil || result.IsOK || result.Error == "" || result.Hint == "" {

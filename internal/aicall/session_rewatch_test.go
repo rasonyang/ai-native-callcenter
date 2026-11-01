@@ -69,7 +69,7 @@ func TestAFailedRepromptStillLetsRepeatedSilenceClose(t *testing.T) {
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
-	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	// The orchestrator's loop, reduced to its reaction to NO_INPUT.

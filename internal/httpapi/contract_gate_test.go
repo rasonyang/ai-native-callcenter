@@ -417,11 +417,11 @@ type callOperation struct {
 }
 
 func callOperations() []callOperation {
-	agent := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), AgentID: uuid.New(),
+	agent := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		scopes: grantedScopes(auth.RoleAgent)}
-	supervisor := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), AgentID: uuid.New(),
+	supervisor := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		scopes: grantedScopes(auth.RoleSupervisor)}
-	system := AuthContext{Kind: SubjectKey, SubjectID: uuid.New()}
+	system := AuthContext{Kind: SubjectKey, SubjectID: uuid.Must(uuid.NewV7())}
 	// agentChannel: the call is gone, or the agent has no live leg on it.
 	onlyTheirLeg := []string{"telephony.ErrCallNotFound", "telephony.ErrNoAgentLeg"}
 	// handledChannel: agentChannel, refused first on an INTERNAL call.
@@ -536,7 +536,7 @@ func TestEveryCallOperationDeclaresWhatItAnswers(t *testing.T) {
 			}
 
 			srv := &Server{calls: failingCalls{err: err}, agents: dialerPresence{}}
-			callID := uuid.New()
+			callID := uuid.Must(uuid.NewV7())
 			r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String(),
 				strings.NewReader(op.body))
 			r = r.WithContext(contextWithAuth(r.Context(), op.as))

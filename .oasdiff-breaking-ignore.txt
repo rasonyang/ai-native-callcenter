@@ -31,3 +31,9 @@ api PUT /dids/{didId} request-property-pattern-added added the pattern `^([a-z]{
 # always documented as a queue extension or a dialable number; a destination outside that never
 # reached a route in the dialplan.
 api POST /calls/{callId}/transfer request-property-pattern-added added the pattern `^\+?[0-9]{1,20}$` to the request property `destination`
+#
+# 2026-11-01 — CreateCallRequest.callId gains the pattern of a UUIDv7 (#400). Every call id is
+# time-ordered from this version on; a client-minted id that is not a v7 is refused with 422
+# VALIDATION_FAILED (rule UUID_V7) before anything is dialled. The field stays optional: left out,
+# the server mints a v7. Response schemas carry no pattern, because older calls keep their v4 ids.
+api POST /calls request-property-pattern-added added the pattern `^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$` to the request property `callId`

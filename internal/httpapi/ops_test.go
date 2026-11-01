@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
@@ -40,7 +41,7 @@ func TestReadyReportsEachDependencyOnItsOwnLine(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200", code)
 	}
-	want := "ready\ndatabase: ok\nswitch: up\nmigrations: 33/33\n"
+	want := "ready\ndatabase: ok\nswitch: up\nmigrations: 33/33\nswitch-uuid: unknown\n"
 	if body != want {
 		t.Fatalf("body %q, want %q", body, want)
 	}
@@ -57,7 +58,7 @@ func TestASwitchThatIsDownIsReportedButStillReady(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200", code)
 	}
-	want := "ready\ndatabase: ok\nswitch: down\nmigrations: 32/33\n"
+	want := "ready\ndatabase: ok\nswitch: down\nmigrations: 32/33\nswitch-uuid: unknown\n"
 	if body != want {
 		t.Fatalf("body %q, want %q", body, want)
 	}
@@ -77,7 +78,7 @@ func TestADatabaseThatDoesNotAnswerIsNotReady(t *testing.T) {
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d, want 503", code)
 	}
-	want := "dial tcp: connection refused\ndatabase: dial tcp: connection refused\nswitch: up\nmigrations: unknown\n"
+	want := "dial tcp: connection refused\ndatabase: dial tcp: connection refused\nswitch: up\nmigrations: unknown\nswitch-uuid: unknown\n"
 	if body != want {
 		t.Fatalf("body %q, want %q", body, want)
 	}
@@ -97,8 +98,52 @@ func TestAMigrationStatusItCannotReadIsUnknown(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status %d, want 200", code)
 	}
-	want := "ready\ndatabase: ok\nswitch: up\nmigrations: unknown\n"
+	want := "ready\ndatabase: ok\nswitch: up\nmigrations: unknown\nswitch-uuid: unknown\n"
 	if body != want {
 		t.Fatalf("body %q, want %q", body, want)
+	}
+}
+
+func uuidReadiness(st SwitchUUIDStatus) Readiness {
+	return Readiness{
+		Ping:       func(context.Context) error { return nil },
+		IsSwitchUp: func() bool { return true },
+		Migrations: migrationsAt(33, 33),
+		SwitchUUID: func() SwitchUUIDStatus { return st },
+	}
+}
+
+// The one switch fact that fails readiness: a switch minting anything but v7
+// would lose every inbound CDR to the database's call id check.
+func TestASwitchThatMintsANonV7UUIDIsNotReady(t *testing.T) {
+	code, body := readyz(t, uuidReadiness(SwitchUUIDStatus{Checked: true, Version: 4}))
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status %d, want 503", code)
+	}
+	want := "the switch mints UUID version 4, not 7\ndatabase: ok\nswitch: up\nmigrations: 33/33\n" +
+		"switch-uuid: NOT_V7 version=4 (set uuid-version=7 in switch.conf.xml; needs FreeSWITCH 1.11 or later)\n"
+	if body != want {
+		t.Fatalf("body %q, want %q", body, want)
+	}
+}
+
+func TestASwitchThatMintsV7IsReady(t *testing.T) {
+	code, body := readyz(t, uuidReadiness(SwitchUUIDStatus{Checked: true, Version: 7}))
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	want := "ready\ndatabase: ok\nswitch: up\nmigrations: 33/33\nswitch-uuid: v7\n"
+	if body != want {
+		t.Fatalf("body %q, want %q", body, want)
+	}
+}
+
+func TestAnUnknownSwitchUUIDDoesNotFailReadiness(t *testing.T) {
+	code, body := readyz(t, uuidReadiness(SwitchUUIDStatus{}))
+	if code != http.StatusOK {
+		t.Fatalf("status %d, want 200", code)
+	}
+	if want := "switch-uuid: unknown\n"; !strings.HasSuffix(body, want) {
+		t.Fatalf("body %q lacks %q", body, want)
 	}
 }

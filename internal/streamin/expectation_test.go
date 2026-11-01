@@ -89,7 +89,7 @@ func TestARefusedStreamIsNotAlsoReportedAsNeverConnected(t *testing.T) {
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 
 	claim := Claim{
-		CallID: uuid.New(), PartyID: uuid.New(), AgentID: uuid.New(),
+		CallID: uuid.Must(uuid.NewV7()), PartyID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		Channel: "agent-chan", Expires: time.Now().Add(time.Minute),
 	}
 	token := s.Token(claim)
@@ -133,7 +133,7 @@ func TestAStreamRefusedBeforeItsExpectationIsNotReportedMissing(t *testing.T) {
 	t.Cleanup(func() { _ = s.Stop(context.Background()) })
 
 	claim := Claim{
-		CallID: uuid.New(), PartyID: uuid.New(), AgentID: uuid.New(),
+		CallID: uuid.Must(uuid.NewV7()), PartyID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		Channel: "agent-chan", Expires: time.Now().Add(time.Minute),
 	}
 	token := s.Token(claim)

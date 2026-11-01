@@ -4,6 +4,8 @@ package calleesim
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,8 +14,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/google/uuid"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/voice"
@@ -196,7 +196,7 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &dialog{
 		s: s, invite: msg, from: from, behaviour: behaviour, ctx: ctx, cancel: cancel,
-		toTag: uuid.NewString()[:8],
+		toTag: randomHex(4),
 		ackCh: make(chan struct{}),
 		rec: DialogRecord{
 			CallID: msg.CallID(), Number: number, Attempt: attempt, IsExpected: known,
@@ -562,4 +562,14 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, s.Report().Dialogs)
 	})
 	return mux
+}
+
+// randomHex returns n random bytes as 2n hex characters. SIP tokens (Call-ID,
+// tags, branches) are random, not ids: a UUIDv7's leading hex is a timestamp.
+func randomHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err)
+	}
+	return hex.EncodeToString(b)
 }

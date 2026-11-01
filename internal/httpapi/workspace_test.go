@@ -27,7 +27,7 @@ import (
 // from the platform rather than from the request, which is the property these
 // tests exist to hold.
 
-var workspaceAgentID = uuid.New()
+var workspaceAgentID = uuid.Must(uuid.NewV7())
 
 // recordingAgents is the presence service with the two wrap-up calls
 // observable, so "did the handler end after-call work" is answerable.
@@ -84,7 +84,7 @@ func agentRequest(method, target, body string) *http.Request {
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
 	}
 	return r.WithContext(contextWithIdentity(r.Context(),
-		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}, uuid.New()))
+		auth.Identity{UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleAgent}, uuid.Must(uuid.NewV7())))
 }
 
 // Nothing is required any more: the record already exists with a disposition
@@ -136,10 +136,10 @@ func TestTheOpenRecordSurvivesAReload(t *testing.T) {
 // the same rule that decides which queue events reach their event stream.
 func TestTheWaitingListIsTheAgentsOwnQueues(t *testing.T) {
 	t.Parallel()
-	staffed := []uuid.UUID{uuid.New(), uuid.New()}
-	somebody_elses := uuid.New()
+	staffed := []uuid.UUID{uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())}
+	somebody_elses := uuid.Must(uuid.NewV7())
 	calls := &waitingCalls{answer: []telephony.WaitingCall{
-		{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
+		{CallID: uuid.Must(uuid.NewV7()), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
 	}}
 	srv := New(config.Config{}, Deps{
 		Agents: &recordingAgents{}, AgentDir: staffedAgent{queues: staffed}, Calls: calls,
@@ -231,14 +231,14 @@ func TestTheAgentWorkspaceOperationsAskForTheOwnScopedCapability(t *testing.T) {
 // the one view of who is waiting available only to the people already busy.
 func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
 	t.Parallel()
-	staffed := []uuid.UUID{uuid.New()}
+	staffed := []uuid.UUID{uuid.Must(uuid.NewV7())}
 	calls := &waitingCalls{
 		answer: []telephony.WaitingCall{
-			{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en"},
+			{CallID: uuid.Must(uuid.NewV7()), QueueID: staffed[0], QueueName: "support-en"},
 		},
 		everyone: []telephony.WaitingCall{
-			{CallID: uuid.New(), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
-			{CallID: uuid.New(), QueueID: uuid.New(), QueueName: "support-zh", FromNumber: "18688886669"},
+			{CallID: uuid.Must(uuid.NewV7()), QueueID: staffed[0], QueueName: "support-en", FromNumber: "13800138000"},
+			{CallID: uuid.Must(uuid.NewV7()), QueueID: uuid.Must(uuid.NewV7()), QueueName: "support-zh", FromNumber: "18688886669"},
 		},
 	}
 	// A directory that would refuse: a supervisor is nobody's agent.
@@ -246,15 +246,15 @@ func TestTheWaitingListIsEveryQueueForASupervisor(t *testing.T) {
 		Agents: &recordingAgents{}, AgentDir: noAgentDir{}, Calls: calls,
 		Catalog: queueCatalogStub{queues: []catalog.Queue{
 			{ID: staffed[0], Name: "support-en", DisplayName: "Support EN"},
-			{ID: uuid.New(), Name: "support-zh", DisplayName: "Support ZH"},
-			{ID: uuid.New(), Name: "sales", DisplayName: "Sales"},
+			{ID: uuid.Must(uuid.NewV7()), Name: "support-zh", DisplayName: "Support ZH"},
+			{ID: uuid.Must(uuid.NewV7()), Name: "sales", DisplayName: "Sales"},
 		}},
 	})
 
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/calls/waiting", nil)
 	r = r.WithContext(contextWithIdentity(r.Context(),
-		auth.Identity{UserID: uuid.New(), Role: auth.RoleSupervisor}))
+		auth.Identity{UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleSupervisor}))
 	srv.ListWaitingCalls(w, r)
 
 	if w.Code != http.StatusOK {
@@ -298,7 +298,7 @@ func (noAgentDir) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) 
 }
 
 func (staffedAgent) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 func (noAgentDir) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {

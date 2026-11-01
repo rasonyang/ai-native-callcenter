@@ -27,8 +27,8 @@ func TestTheAgentBoundToAPhoneFollowsTheBinding(t *testing.T) {
 	}
 	t.Cleanup(st.Close)
 
-	ext1, ext2, ext3 := uuid.New(), uuid.New(), uuid.New()
-	user, agent := uuid.New(), uuid.New()
+	ext1, ext2, ext3 := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	user, agent := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	for _, s := range []struct {
 		sql  string
 		args []any

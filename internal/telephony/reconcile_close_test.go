@@ -46,7 +46,7 @@ func releasedWith(pub *capturingPublisher, cause string) bool {
 func TestAChannelThatVanishedDuringAnOutageIsClosedThroughTheHangupPath(t *testing.T) {
 	t.Parallel()
 	c, registry, pub := closeFixture(t, func() string { return emptyListing })
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": callID.String()}
 	c.Handle(t.Context(), raw("CHANNEL_CREATE", "lost-chan", "inbound", vars))
 	waitFor(t, func() bool { return registry.Owns("lost-chan") })
@@ -65,7 +65,7 @@ func TestAChannelThatVanishedDuringAnOutageIsClosedThroughTheHangupPath(t *testi
 // The same on a reconnect, which is where it matters: the registry is warm.
 func TestAChannelStillListedIsNotClosed(t *testing.T) {
 	t.Parallel()
-	id := uuid.New().String()
+	id := uuid.Must(uuid.NewV7()).String()
 	c, registry, _ := closeFixture(t, func() string {
 		return `{"row_count":1,"rows":[{"uuid":"` + id + `","callstate":"ACTIVE"}]}`
 	})
@@ -135,7 +135,7 @@ func TestTheSameBridgeTwiceAttachesTheTapOnce(t *testing.T) {
 	c.AttachAudiences(audiences)
 
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
 	vars := map[string]string{"variable_aicc_call_id": minted, "variable_aicc_language": "en"}
 	c.Handle(ctx, raw("CHANNEL_CREATE", callerChan, "inbound", vars))

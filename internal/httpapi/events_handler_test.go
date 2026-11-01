@@ -91,7 +91,7 @@ func serveEventsWith(t *testing.T, hub *events.Hub, id auth.Identity, dir AgentD
 
 func TestEventStreamHeadersAndFraming(t *testing.T) {
 	hub := events.NewHub(events.NewSequence(&stubReserver{}, "events"))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	body := serveEvents(t, hub, auth.Identity{Role: auth.RoleSupervisor}, "", func() {
 		hub.Publish(context.Background(), events.Event{
@@ -177,7 +177,7 @@ func TestEventStreamReplaysAfterLastEventID(t *testing.T) {
 // transcript actor publishes an empty scope, which used to reach every agent
 // in the building.
 func TestTranscriptOnTheStreamMatchesWhoMayReadItOverREST(t *testing.T) {
-	onTheCall, elsewhere := uuid.New(), uuid.New()
+	onTheCall, elsewhere := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	botPhase := events.Event{Type: events.TypeCallTranscript,
 		Payload: map[string]any{"text": "thanks for calling", "speaker": "BOT"}}
 	humanPhase := events.Event{Type: events.TypeCallTranscript,
@@ -239,8 +239,8 @@ func TestACallbackReachesAnAgentWhoIsOnNothing(t *testing.T) {
 	hub := events.NewHub(events.NewSequence(&stubReserver{}, "events"))
 	srv := New(config.Config{SessionCookie: "aicc_session"}, Deps{Hub: hub})
 
-	agentID := uuid.New()
-	sub, _, _ := hub.Subscribe(events.Subscriber{UserID: uuid.New(), AgentID: &agentID}, 0)
+	agentID := uuid.Must(uuid.NewV7())
+	sub, _, _ := hub.Subscribe(events.Subscriber{UserID: uuid.Must(uuid.NewV7()), AgentID: &agentID}, 0)
 	defer sub.Close()
 
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -257,5 +257,5 @@ func TestACallbackReachesAnAgentWhoIsOnNothing(t *testing.T) {
 }
 
 func (f fixedAgent) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }

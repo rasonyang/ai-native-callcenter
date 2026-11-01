@@ -81,7 +81,7 @@ func (s *APIKeyStore) Issue(ctx context.Context, name string, scopes []string,
 		scopes = []string{}
 	}
 	row, err := s.q.CreateAPIKey(ctx, queries.CreateAPIKeyParams{
-		ID:        uuid.New(),
+		ID:        uuid.Must(uuid.NewV7()),
 		Name:      name,
 		KeyHash:   digest[:],
 		KeyPrefix: secret[:keyPrefixLen],

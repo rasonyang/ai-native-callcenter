@@ -14,7 +14,7 @@ import (
 // deadBot adds a customer leg bridged to an old bot leg. The returned ids are
 // the customer's and the bot's.
 func deadBot(rig *recoveryRig, mutate func(cust, bot *chanSpec)) (string, string) {
-	call, cust, bot := uuid.New(), uuid.New(), uuid.New()
+	call, cust, bot := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	c := chanSpec{id: cust, callState: "ACTIVE", answered: true, application: "bridge",
 		age: 90 * time.Second, peer: bot.String(), vars: aiVars(call, "95099", "en", "18688886666")}
 	b := chanSpec{id: bot, callState: "ACTIVE", answered: true, application: "bridge",
@@ -132,9 +132,9 @@ func TestAStalePeerPointerIsNotABridge(t *testing.T) {
 // nothing about how much of the window is left.
 func TestElapsedTimeComesFromTheSwitchClockNotOurs(t *testing.T) {
 	rig := newRecoveryRig(t)
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 48 * time.Second,
-		vars: aiVars(uuid.New(), "95099", "en", "18688886666")})
+		vars: aiVars(uuid.Must(uuid.NewV7()), "95099", "en", "18688886666")})
 	rig.clock.advance(time.Hour)
 
 	rep := rig.reconcile(t)
@@ -149,9 +149,9 @@ func TestElapsedTimeComesFromTheSwitchClockNotOurs(t *testing.T) {
 
 func TestARingingLegWhoseAgeTheSwitchDidNotGiveIsHungUpNotGuessed(t *testing.T) {
 	rig := newRecoveryRig(t)
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 10 * time.Second, noSwitchClock: true,
-		vars: aiVars(uuid.New(), "95099", "en", "18688886666")})
+		vars: aiVars(uuid.Must(uuid.NewV7()), "95099", "en", "18688886666")})
 
 	rig.reconcile(t)
 

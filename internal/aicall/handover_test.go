@@ -135,7 +135,7 @@ func newHandoverCall(t *testing.T) *handoverCall {
 		t.Fatalf("load flow: %v", err)
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	ticks := make(chan time.Time)
 	actions := &callActions{
 		orchestrator:  o,

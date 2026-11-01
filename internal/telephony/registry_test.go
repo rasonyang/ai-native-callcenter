@@ -68,7 +68,7 @@ func newTestRegistry(t *testing.T) (*Registry, *recorder) {
 func TestRegistryRoutesEventsToTheOwningCall(t *testing.T) {
 	t.Parallel()
 	reg, rec := newTestRegistry(t)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "zh", false, testTime)
 	if err != nil {
@@ -120,7 +120,7 @@ func TestDispatchIgnoresUnknownChannels(t *testing.T) {
 func TestCallEndsWhenEveryLegReleases(t *testing.T) {
 	t.Parallel()
 	reg, rec := newTestRegistry(t)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false, testTime)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestCallEndsWhenEveryLegReleases(t *testing.T) {
 func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
 	t.Parallel()
 	reg, _ := newTestRegistry(t)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInternal, "en", false, testTime)
 	if err != nil {
@@ -191,7 +191,7 @@ func TestIllegalTransitionsDoNotCorruptState(t *testing.T) {
 func TestSnapshotsAreSerializedWithMutations(t *testing.T) {
 	t.Parallel()
 	reg, _ := newTestRegistry(t)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false, testTime)
 	if err != nil {
@@ -236,7 +236,7 @@ func TestSnapshotsAreSerializedWithMutations(t *testing.T) {
 func TestDuplicateCallIDIsRejected(t *testing.T) {
 	t.Parallel()
 	reg, _ := newTestRegistry(t)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	if _, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false, testTime); err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestDuplicateCallIDIsRejected(t *testing.T) {
 func TestOperationsOnUnknownCalls(t *testing.T) {
 	t.Parallel()
 	reg, _ := newTestRegistry(t)
-	unknown := uuid.New()
+	unknown := uuid.Must(uuid.NewV7())
 
 	if _, err := reg.Snapshot(unknown); err != ErrCallNotFound {
 		t.Errorf("Snapshot() error = %v, want ErrCallNotFound", err)
@@ -313,7 +313,7 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 				mu.Unlock()
 			}
 
-			callID := uuid.New()
+			callID := uuid.Must(uuid.NewV7())
 			call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", false, testTime)
 			if err != nil {
 				t.Fatal(err)
@@ -372,7 +372,7 @@ func TestRetirementFiresOnEveryEndingAndFinishOnlyOnTheExpectedOne(t *testing.T)
 // agent is told about their own.
 func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	for _, tc := range []struct {
 		name    string
 		who     events.Subscriber
@@ -381,7 +381,7 @@ func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 		{name: "the agent whose leg it was", wantSaw: true,
 			who: events.Subscriber{AgentID: &agentID}},
 		{name: "an agent on another call", wantSaw: false,
-			who: events.Subscriber{AgentID: ptr(uuid.New())}},
+			who: events.Subscriber{AgentID: ptr(uuid.Must(uuid.NewV7()))}},
 		{name: "a supervisor", wantSaw: true,
 			who: events.Subscriber{SeesEveryCall: true}},
 	} {
@@ -394,7 +394,7 @@ func TestTheAgentIsToldTheirOwnLegEnded(t *testing.T) {
 			sub, _, _ := hub.Subscribe(tc.who, 0)
 			defer sub.Close()
 
-			callID := uuid.New()
+			callID := uuid.Must(uuid.NewV7())
 			call, err := reg.CreateCall(context.Background(), callID, events.CallTypeInbound, "en", true, testTime)
 			if err != nil {
 				t.Fatal(err)
@@ -457,7 +457,7 @@ func TestTheCallSaysWhenItIsBeingRecorded(t *testing.T) {
 	registry := NewRegistry(pub)
 	t.Cleanup(registry.Shutdown)
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInbound, "zh", true, testTime); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -528,7 +528,7 @@ func TestCallTimelineIsTheCallsStartAndTheCarrierLegsAnswer(t *testing.T) {
 
 	created := time.Date(2026, 10, 12, 14, 46, 22, 0, time.UTC)
 	answered := created.Add(22 * time.Second)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := reg.CreateCall(t.Context(), callID, events.CallTypeOutbound, "en", true, created); err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +558,7 @@ func TestCallTimelineIsTheCallsStartAndTheCarrierLegsAnswer(t *testing.T) {
 		t.Fatalf("after the answer: got %v, %v, %v; want %v, %v, true", gotCreated, gotAnswered, ok, created, answered)
 	}
 
-	if _, _, ok := reg.CallTimeline(uuid.New()); ok {
+	if _, _, ok := reg.CallTimeline(uuid.Must(uuid.NewV7())); ok {
 		t.Error("an unknown call reported a timeline")
 	}
 }

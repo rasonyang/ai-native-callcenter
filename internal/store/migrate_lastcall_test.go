@@ -26,8 +26,8 @@ func TestMigrationBackfillsAContactsLastCall(t *testing.T) {
 		t.Fatalf("migrating to 41 failed: %v", err)
 	}
 
-	didID, campaignID := uuid.New(), uuid.New()
-	never, once, twice, inFlight := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	didID, campaignID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	never, once, twice, inFlight := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, q, args...); err != nil {
@@ -51,13 +51,13 @@ func TestMigrationBackfillsAContactsLastCall(t *testing.T) {
 		lead              *string
 	}
 	high, low := "HIGH", "LOW"
-	onceAtt := attempt{uuid.New(), once, uuid.New(), t0, true, &high}
+	onceAtt := attempt{uuid.Must(uuid.NewV7()), once, uuid.Must(uuid.NewV7()), t0, true, &high}
 	// Inserted later-first, so a backfill that ordered by insertion would pick
 	// the wrong one.
-	twiceSecond := attempt{uuid.New(), twice, uuid.New(), t0.Add(26 * time.Hour), true, &low}
-	twiceFirst := attempt{uuid.New(), twice, uuid.New(), t0.Add(time.Hour), true, &high}
-	flightFirst := attempt{uuid.New(), inFlight, uuid.New(), t0, true, nil}
-	flightNow := attempt{uuid.New(), inFlight, uuid.New(), t0.Add(48 * time.Hour), false, nil}
+	twiceSecond := attempt{uuid.Must(uuid.NewV7()), twice, uuid.Must(uuid.NewV7()), t0.Add(26 * time.Hour), true, &low}
+	twiceFirst := attempt{uuid.Must(uuid.NewV7()), twice, uuid.Must(uuid.NewV7()), t0.Add(time.Hour), true, &high}
+	flightFirst := attempt{uuid.Must(uuid.NewV7()), inFlight, uuid.Must(uuid.NewV7()), t0, true, nil}
+	flightNow := attempt{uuid.Must(uuid.NewV7()), inFlight, uuid.Must(uuid.NewV7()), t0.Add(48 * time.Hour), false, nil}
 	for _, a := range []attempt{onceAtt, twiceSecond, twiceFirst, flightFirst, flightNow} {
 		var number string
 		if err := db.QueryRowContext(ctx, `SELECT number_e164 FROM campaign_contacts WHERE id = $1`, a.contact).Scan(&number); err != nil {
@@ -67,11 +67,11 @@ func TestMigrationBackfillsAContactsLastCall(t *testing.T) {
 			exec(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id,
 			          state, outcome, is_touched, lead_intent, started_at, finished_at)
 			      VALUES ($1, $2, $3, $4, $5, $6, 'FINISHED', 'ANSWERED', true, $7, $8, $8)`,
-				a.id, campaignID, a.contact, number, a.call, uuid.New(), a.lead, a.started)
+				a.id, campaignID, a.contact, number, a.call, uuid.Must(uuid.NewV7()), a.lead, a.started)
 		} else {
 			exec(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, started_at)
 			      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-				a.id, campaignID, a.contact, number, a.call, uuid.New(), a.started)
+				a.id, campaignID, a.contact, number, a.call, uuid.Must(uuid.NewV7()), a.started)
 		}
 	}
 

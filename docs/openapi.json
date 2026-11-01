@@ -8132,7 +8132,8 @@
           "callId": {
             "type": "string",
             "format": "uuid",
-            "description": "Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing."
+            "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+            "description": "Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing. Optional: left out, the server mints one. It must be a UUIDv7 (version nibble 7, RFC 4122 variant), so call ids are time-ordered; any other UUID, the nil UUID included, is refused with 422 VALIDATION_FAILED, params {\"field\":\"callId\",\"rule\":\"UUID_V7\"}, before anything is dialled or written."
           },
           "kind": {
             "type": "string",

@@ -48,7 +48,7 @@ func TestParseJobResult(t *testing.T) {
 // placement whose bgapi reply timed out can still be matched to it (#221).
 func TestAnOriginateJobNamesTheChannelItWasAskedFor(t *testing.T) {
 	t.Parallel()
-	leg := uuid.New()
+	leg := uuid.Must(uuid.NewV7())
 	a, cmd := newTestAdapter()
 	if _, err := a.Originate(leg, "sofia/gateway/pstn/18688886660", map[string]string{
 		"aicc_call_id": uuid.NewString(), "origination_caller_id_name": "Dial 1, 2",
@@ -88,7 +88,7 @@ func TestAnOriginateThatTimesOutSaysSo(t *testing.T) {
 	t.Parallel()
 	a, cmd := newTestAdapter()
 	cmd.err = fmt.Errorf("%w: bgapi originate …", esl.ErrTimeout)
-	if _, err := a.Originate(uuid.New(), "sofia/gateway/pstn/1", nil); !errors.Is(err, esl.ErrTimeout) {
+	if _, err := a.Originate(uuid.Must(uuid.NewV7()), "sofia/gateway/pstn/1", nil); !errors.Is(err, esl.ErrTimeout) {
 		t.Fatalf("Originate error = %v, want esl.ErrTimeout", err)
 	}
 }

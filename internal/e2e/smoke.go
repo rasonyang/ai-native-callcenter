@@ -197,7 +197,7 @@ func runCall(ctx context.Context, cfg SmokeConfig, c *httpc, sum *Summary, col *
 		return fmt.Errorf("simulator report: %w", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	sum.CallID = callID.String()
 	kind := api.CreateCallRequestKind("AI_OUTBOUND")
 	cid := callID

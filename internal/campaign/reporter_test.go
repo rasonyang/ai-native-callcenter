@@ -70,7 +70,7 @@ type reportRig struct {
 }
 
 func newRig() *reportRig {
-	r := &reportRig{clock: &fakeClock{}, id: uuid.New()}
+	r := &reportRig{clock: &fakeClock{}, id: uuid.Must(uuid.NewV7())}
 	r.cam = Campaign{ID: r.id, Status: StatusRunning, Progress: Progress{Activity: ActivityDialing, InFlight: 1}}
 	r.rep = NewReporter(func(context.Context, uuid.UUID) (Campaign, error) {
 		r.mu.Lock()
@@ -153,7 +153,7 @@ func TestAFinalStatusIsNeverDropped(t *testing.T) {
 }
 
 func TestOnlyARunningCampaignCarriesTheDialersAccount(t *testing.T) {
-	c := Campaign{ID: uuid.New(), Status: StatusPaused, PauseReason: PauseManual,
+	c := Campaign{ID: uuid.Must(uuid.NewV7()), Status: StatusPaused, PauseReason: PauseManual,
 		Progress: Progress{Activity: ActivityDialing, InFlight: 2}}
 	s := SnapshotOf(c)
 	if s.Activity != "" || s.InFlight != 0 || s.PauseReason != PauseManual {

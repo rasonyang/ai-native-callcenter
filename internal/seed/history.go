@@ -225,7 +225,7 @@ func businessMoment(rng *rand.Rand) time.Duration {
 // oneCall writes one believable story into a CDR and its queue movements.
 func oneCall(startedAt time.Time, agents []AgentRef, queues map[string]QueueRef, rng *rand.Rand) (store.CDR, []QueueEventRow) {
 	did := demoDIDs[rng.Intn(len(demoDIDs))]
-	callID := deterministicUUID(rng)
+	callID := deterministicUUIDv7(startedAt, rng)
 	caller := "138" + digits(rng, 8)
 
 	cdr := store.CDR{
@@ -500,14 +500,21 @@ func digits(rng *rand.Rand, n int) string {
 	return string(out)
 }
 
-// deterministicUUID derives ids from the seeded stream, so the whole history
-// is byte-stable across installs.
-func deterministicUUID(rng *rand.Rand) uuid.UUID {
+// deterministicUUIDv7 derives a call id from the seeded stream: a UUIDv7 whose
+// 48-bit unix-millisecond timestamp is the call's start, like every other call
+// id, and whose remaining bits come from rng, so the random part is the same on
+// every install.
+func deterministicUUIDv7(at time.Time, rng *rand.Rand) uuid.UUID {
 	var b [16]byte
+	// All 16 bytes are drawn, as the v4 version did, so the rest of the
+	// history's stream is unchanged; the first six are then replaced.
 	for i := range b {
 		b[i] = byte(rng.Intn(256))
 	}
-	b[6] = (b[6] & 0x0f) | 0x40 // version 4
-	b[8] = (b[8] & 0x3f) | 0x80 // RFC 4122 variant
+	ms := uint64(at.UnixMilli())
+	b[0], b[1], b[2] = byte(ms>>40), byte(ms>>32), byte(ms>>24)
+	b[3], b[4], b[5] = byte(ms>>16), byte(ms>>8), byte(ms)
+	b[6] = (b[6] & 0x0f) | 0x70 // version 7
+	b[8] = (b[8] & 0x3f) | 0x80 // RFC 9562 variant
 	return uuid.UUID(b)
 }

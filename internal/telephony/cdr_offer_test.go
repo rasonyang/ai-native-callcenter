@@ -36,14 +36,14 @@ func (o offerRecorder) OfferRecording(rec store.Recording, bot, human bool) {
 }
 
 func recordedCall(parties ...PartySnapshot) Snapshot {
-	return Snapshot{CallID: uuid.New(), CallType: events.CallTypeInbound, CreatedAt: at(0), EndedAt: atPtr(60), Parties: parties}
+	return Snapshot{CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound, CreatedAt: at(0), EndedAt: atPtr(60), Parties: parties}
 }
 
 // Post-call transcription is told about a booked recording, and about who
 // answered on the far end, which is what its live-transcript rule needs.
 func TestABookedRecordingIsOfferedWithWhoAnswered(t *testing.T) {
 	t.Parallel()
-	agent := uuid.New()
+	agent := uuid.Must(uuid.NewV7())
 	caller := PartySnapshot{Role: RoleOriginator, Number: "13800138000", AnsweredAt: atPtr(0)}
 	bot := PartySnapshot{Role: RoleTarget, IsBotLeg: true, AnsweredAt: atPtr(0)}
 	human := PartySnapshot{Role: RoleTarget, AgentID: &agent, AnsweredAt: atPtr(30)}

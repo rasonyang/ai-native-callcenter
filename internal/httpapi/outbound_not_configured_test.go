@@ -36,7 +36,7 @@ func TestAnAIOutboundCallIsRefusedWhenTheDeploymentHasNoEndpoint(t *testing.T) {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	sw := &countingSwitch{}
 	// No EndpointFormat: exactly the deployment the issue is about.
 	svc := outbound.New(
@@ -56,14 +56,14 @@ func TestAnAIOutboundCallIsRefusedWhenTheDeploymentHasNoEndpoint(t *testing.T) {
 
 	// Both kinds of credential reach the operation and get the same answer.
 	session := AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "ada",
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "ada",
 		scopes: grantedScopes(auth.RoleAdmin),
 	}
 	for _, c := range []struct {
 		name string
 		ac   AuthContext
 	}{{"session cookie", session}, {"API key", keySubject()}} {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		status, code, _ := s.dial(c.ac, fmt.Sprintf(
 			`{"kind":"AI_OUTBOUND","did":"95011","to":"13912345678","callId":"%s"}`, id))
 		if status != http.StatusConflict || code != "OUTBOUND_NOT_CONFIGURED" {

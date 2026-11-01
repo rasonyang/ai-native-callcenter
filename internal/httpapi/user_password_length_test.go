@@ -75,7 +75,7 @@ func TestAnAccountPasswordIsCountedInCharacters(t *testing.T) {
 			})))
 		}},
 		{"reset a password", func(t *testing.T, s *Server, w http.ResponseWriter, password string) {
-			s.ResetUserPassword(w, post(jsonBody(t, map[string]any{"password": password})), uuid.New())
+			s.ResetUserPassword(w, post(jsonBody(t, map[string]any{"password": password})), uuid.Must(uuid.NewV7()))
 		}},
 	}
 	for _, write := range writes {

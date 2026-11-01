@@ -31,7 +31,7 @@ func TestACallFromADIDAtItsLimitIsRefusedWith409AndLeavesNoTrace(t *testing.T) {
 		t.Fatal(err)
 	}
 	one := 1
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	sw := &countingSwitch{}
 	svc := outbound.New(
 		outbound.Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw,
@@ -46,11 +46,11 @@ func TestACallFromADIDAtItsLimitIsRefusedWith409AndLeavesNoTrace(t *testing.T) {
 		cfg: config.Config{}, outbound: svc, agents: dialerPresence{}, agentDir: dialerDirectory{},
 	}}
 
-	first := uuid.New()
+	first := uuid.Must(uuid.NewV7())
 	if status, code, _ := s.dial(keySubject(), `{"kind":"AI_OUTBOUND","did":"95201","to":"13800138000","callId":"`+first.String()+`"}`); status != http.StatusCreated {
 		t.Fatalf("the first call: %d %s, want 201", status, code)
 	}
-	second := uuid.New()
+	second := uuid.Must(uuid.NewV7())
 	status, code, _ := s.dial(keySubject(), `{"kind":"AI_OUTBOUND","did":"95201","to":"13900139000","callId":"`+second.String()+`"}`)
 	if status != http.StatusConflict || code != "DID_CHANNELS_EXHAUSTED" {
 		t.Fatalf("the call over the limit: %d %s, want 409 DID_CHANNELS_EXHAUSTED", status, code)

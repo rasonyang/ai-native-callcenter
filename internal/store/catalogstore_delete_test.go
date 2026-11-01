@@ -39,7 +39,7 @@ func TestDeletingWhatIsNotThereSaysSoRatherThanReportingSuccess(t *testing.T) {
 	t.Cleanup(st.Close)
 
 	cat := st.Catalog()
-	absent := uuid.New()
+	absent := uuid.Must(uuid.NewV7())
 
 	for _, tc := range []struct {
 		name string
@@ -86,9 +86,9 @@ func TestACallCanBeAskedForItsQueueJourney(t *testing.T) {
 	t.Cleanup(st.Close)
 
 	ledger := st.Ledger()
-	callID, queueID := uuid.New(), uuid.New()
-	otherCall := uuid.New()
-	agentA, agentB := uuid.New(), uuid.New()
+	callID, queueID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	otherCall := uuid.Must(uuid.NewV7())
+	agentA, agentB := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	at := func(sec int) time.Time {
 		return time.Date(2026, 8, 24, 10, 0, sec, 0, time.UTC)
 	}
@@ -148,7 +148,7 @@ func TestACallCanBeAskedForItsQueueJourney(t *testing.T) {
 	}
 
 	// A call that never entered a queue has no journey, and that is an answer.
-	empty, err := ledger.QueueEventsByCall(ctx, uuid.New())
+	empty, err := ledger.QueueEventsByCall(ctx, uuid.Must(uuid.NewV7()))
 	if err != nil {
 		t.Fatalf("read an empty journey: %v", err)
 	}
@@ -176,13 +176,13 @@ func TestTheAuditTrailCanBeSearched(t *testing.T) {
 	ledger := st.Ledger()
 
 	// One real account and one that will be gone by the time anybody reads.
-	actor := uuid.New()
+	actor := uuid.Must(uuid.NewV7())
 	if _, err := st.Pool.Exec(ctx,
 		`INSERT INTO users (id, username, password_hash, display_name, role)
 		 VALUES ($1,'auditadmin','x','Audit Admin','ADMIN')`, actor); err != nil {
 		t.Fatalf("seed the actor: %v", err)
 	}
-	ghost := uuid.New()
+	ghost := uuid.Must(uuid.NewV7())
 
 	at := func(sec int) time.Time { return time.Date(2026, 8, 24, 9, 0, sec, 0, time.UTC) }
 	for _, row := range []struct {

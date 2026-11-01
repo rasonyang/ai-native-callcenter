@@ -353,6 +353,16 @@ type fakeStatus struct {
 	confErr error
 	// asked, when set, collects the names GatewayUp is asked about.
 	asked *[]string
+	// uuidVersion is what the switch mints; zero means v7.
+	uuidVersion int
+	uuidErr     error
+}
+
+func (f fakeStatus) UUIDVersion() (int, error) {
+	if f.uuidVersion == 0 {
+		return 7, f.uuidErr
+	}
+	return f.uuidVersion, f.uuidErr
 }
 
 func (f fakeStatus) Profiles() ([]telephony.SwitchProfile, error) { return f.profiles, nil }
@@ -1102,4 +1112,32 @@ func TestTheNarrowWarningDoesNotChangeTheExitStatus(t *testing.T) {
 	if countFailed([]doctorResult{r}) != 0 {
 		t.Error("a WARN counted as a failure")
 	}
+}
+
+// The captured reply is a real switch's create_uuid: a v7.
+func TestASwitchThatMintsV7PassesTheUUIDCheck(t *testing.T) {
+	h := newHarness(t)
+	got := h.run()
+	wantState(t, got, DoctorCheckSwitchUUID, DoctorStatePass)
+}
+
+func TestASwitchThatMintsV4FailsTheUUIDCheck(t *testing.T) {
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), uuidVersion: 4}, func() {}, nil
+	}
+	got := h.run()
+	wantState(t, got, DoctorCheckSwitchUUID, DoctorStateFail)
+	r := got[DoctorCheckSwitchUUID]
+	if r.Code != DoctorCodeSwitchUUIDNotV7 || !strings.Contains(r.Fix, "uuid-version=7") {
+		t.Fatalf("code %q fix %q", r.Code, r.Fix)
+	}
+}
+
+func TestAUUIDItCannotReadIsSkippedNotPassed(t *testing.T) {
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), uuidErr: errors.New("timeout")}, func() {}, nil
+	}
+	wantState(t, h.run(), DoctorCheckSwitchUUID, DoctorStateSkip)
 }

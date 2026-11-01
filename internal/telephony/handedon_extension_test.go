@@ -38,7 +38,7 @@ func stampedAt(sec int, vars map[string]string) map[string]string {
 // leg, which releases wei's), and the onward leg.
 func TestALegHandedToOurPhoneIsAnAgentsLegWhoeverIsSignedIn(t *testing.T) {
 	t.Parallel()
-	weiID, test1ID := uuid.New(), uuid.New()
+	weiID, test1ID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	const (
 		weiExt   = "1008"
 		test1Ext = "1020"
@@ -113,7 +113,7 @@ func TestALegHandedToOurPhoneIsAnAgentsLegWhoeverIsSignedIn(t *testing.T) {
 			c := NewCoordinator(registry, adapter, directory, nullPublisher{})
 			ctx := t.Context()
 
-			minted := uuid.New()
+			minted := uuid.Must(uuid.NewV7())
 			const weiChan, customerChan, onwardChan = "wei-chan", "customer-chan", "onward-chan"
 			// The leg click-to-dial originates at user/1008: stamped by our
 			// originate, and at the registration token the directory resolved.
@@ -268,7 +268,7 @@ func TestALegHandedToOurPhoneIsAnAgentsLegWhoeverIsSignedIn(t *testing.T) {
 // — the switch writes dialed_user onto the caller's own channel as it bridges.
 func TestACarrierCallerWhoseNumberLooksLikeAnExtensionIsAtNoPhone(t *testing.T) {
 	t.Parallel()
-	weiID, benID := uuid.New(), uuid.New()
+	weiID, benID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	const benExt = "1001"
 	for _, tc := range []struct {
 		name, ani string
@@ -291,7 +291,7 @@ func TestACarrierCallerWhoseNumberLooksLikeAnExtensionIsAtNoPhone(t *testing.T) 
 			c := NewCoordinator(registry, nil, directory, nullPublisher{})
 			ctx := t.Context()
 
-			minted := uuid.New()
+			minted := uuid.Must(uuid.NewV7())
 			const callerChan, benChan = "caller-chan", "ben-chan"
 			callerVars := map[string]string{
 				"variable_aicc_call_id":     minted.String(),

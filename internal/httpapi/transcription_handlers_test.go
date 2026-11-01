@@ -107,7 +107,7 @@ func TestReadingAPostCallTranscription(t *testing.T) {
 func TestAPendingRunServesNoSegments(t *testing.T) {
 	f := newFixture(t)
 	callID := uuid.Must(uuid.NewV7())
-	if _, err := f.st.Ledger().EnqueueTranscription(context.Background(), callID, uuid.New(), 30); err != nil {
+	if _, err := f.st.Ledger().EnqueueTranscription(context.Background(), callID, uuid.Must(uuid.NewV7()), 30); err != nil {
 		t.Fatal(err)
 	}
 	_, secret := f.issueKey(f.seedAdmin(), "history:read:own", "history:read:all")
@@ -126,7 +126,7 @@ func TestAPendingRunServesNoSegments(t *testing.T) {
 }
 
 func TestRequestingAPostCallTranscription(t *testing.T) {
-	callID := uuid.New().String()
+	callID := uuid.Must(uuid.NewV7()).String()
 	path := "/calls/" + callID + "/transcription"
 
 	t.Run("a deployment with it off says so", func(t *testing.T) {

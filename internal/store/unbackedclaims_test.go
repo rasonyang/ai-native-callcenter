@@ -18,7 +18,7 @@ func TestTheUnbackedClaimsColumnTakesTheWholeVocabulary(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if err := ledger.InsertCDR(ctx, CDR{
 		CallID: callID, StartedAt: time.Now().Add(-time.Minute), EndedAt: time.Now(),
 		CallType: "INBOUND", Status: CDRStatusAnswered, UnbackedClaims: UnbackedClaims,
@@ -33,7 +33,7 @@ func TestTheUnbackedClaimsColumnTakesTheWholeVocabulary(t *testing.T) {
 		t.Errorf("read back %v, want %v", cdr.UnbackedClaims, UnbackedClaims)
 	}
 
-	plain := uuid.New()
+	plain := uuid.Must(uuid.NewV7())
 	if err := ledger.InsertCDR(ctx, CDR{
 		CallID: plain, StartedAt: time.Now().Add(-time.Minute), EndedAt: time.Now(),
 		CallType: "INBOUND", Status: CDRStatusAnswered,
@@ -45,7 +45,7 @@ func TestTheUnbackedClaimsColumnTakesTheWholeVocabulary(t *testing.T) {
 	}
 
 	if err := ledger.InsertCDR(ctx, CDR{
-		CallID: uuid.New(), StartedAt: time.Now().Add(-time.Minute), EndedAt: time.Now(),
+		CallID: uuid.Must(uuid.NewV7()), StartedAt: time.Now().Add(-time.Minute), EndedAt: time.Now(),
 		CallType: "INBOUND", Status: CDRStatusAnswered, UnbackedClaims: []string{"PROMISE"},
 	}); err == nil {
 		t.Error("the column took a claim outside the vocabulary")

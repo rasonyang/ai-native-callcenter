@@ -67,7 +67,7 @@ func newAssembler(ledger *memoryLedger, queues staticQueues) *CDRAssembler {
 func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 	t.Parallel()
 	contained := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Parties: []PartySnapshot{
@@ -84,7 +84,7 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 
 	// A real handover: the bot stamped the caller's channel on its way out.
 	transferred := contained
-	transferred.CallID = uuid.New()
+	transferred.CallID = uuid.Must(uuid.NewV7())
 	transferred.Bot = BotShare{Sec: 20, DID: "95012", IsStamped: true}
 
 	ledger := &memoryLedger{}
@@ -120,7 +120,7 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 func TestAnImmediateHandoverIsStillAHandover(t *testing.T) {
 	t.Parallel()
 	snap := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Bot: BotShare{Sec: 0, DID: "95012", IsStamped: true},
@@ -169,12 +169,12 @@ func idPtr(id uuid.UUID) *uuid.UUID { return &id }
 // here first.
 func TestTheDurationsMeasureTheCallRatherThanPartitionIt(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
-	queueID := uuid.New()
-	flowID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
+	queueID := uuid.Must(uuid.NewV7())
+	flowID := uuid.Must(uuid.NewV7())
 
 	snap := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeInbound,
 		Language:  "zh",
 		CreatedAt: at(0),
@@ -264,7 +264,7 @@ func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
-				CallID:    uuid.New(),
+				CallID:    uuid.Must(uuid.NewV7()),
 				CallType:  tt.callType,
 				CreatedAt: at(0),
 				EndedAt:   atPtr(20),
@@ -292,7 +292,7 @@ func TestACallThatNeverSoughtAPersonHasNoMissedReason(t *testing.T) {
 // Missed-reason precedence, caller phase first, from recorded facts only.
 func TestMissedReasons(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	tests := []struct {
 		name string
@@ -372,7 +372,7 @@ func TestMissedReasons(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			tt.snap.CallID = uuid.New()
+			tt.snap.CallID = uuid.Must(uuid.NewV7())
 			tt.snap.CallType = events.CallTypeInbound
 			tt.snap.CreatedAt = at(0)
 			tt.snap.EndedAt = atPtr(300)
@@ -393,7 +393,7 @@ func TestMissedReasons(t *testing.T) {
 func TestBotOnlyCallIsAnswered(t *testing.T) {
 	t.Parallel()
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Bot: BotShare{Sec: 40, DID: "95012"},
 		Parties: []PartySnapshot{
@@ -414,10 +414,10 @@ func TestBotOnlyCallIsAnswered(t *testing.T) {
 func TestQueueEventsAreRecorded(t *testing.T) {
 	t.Parallel()
 	ledger := &memoryLedger{}
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	assembler := newAssembler(ledger, staticQueues{"support-en": queueID})
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	events := []SwitchEvent{
 		{Kind: KindQueueMemberJoined, Queue: "support-en", OccurredAt: at(0), JoinedAt: at(0)},
 		{Kind: KindQueueAgentOffered, Queue: "support-en", OccurredAt: at(5)},
@@ -460,7 +460,7 @@ func TestQueueEventsAreRecorded(t *testing.T) {
 func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
 	t.Parallel()
 	ledger := &memoryLedger{}
-	assembler := newAssembler(ledger, staticQueues{"support-en": uuid.New()})
+	assembler := newAssembler(ledger, staticQueues{"support-en": uuid.Must(uuid.NewV7())})
 
 	assembler.QueueEvent(t.Context(), SwitchEvent{
 		Kind: KindQueueMemberLeft, Queue: "support-en",
@@ -503,7 +503,7 @@ func TestAnAbandonedMemberIsRecordedAsAbandoned(t *testing.T) {
 func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.T) {
 	t.Parallel()
 	snap := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(30),
 		Parties: []PartySnapshot{
@@ -552,10 +552,10 @@ func TestACallPlacedForAnAgentWhoNeverSignedInIsStillTheirPhonesCall(t *testing.
 // conversation, with no agent, no ring and no talk time (found live).
 func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	answeredOut := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(30),
 		Parties: []PartySnapshot{
@@ -590,7 +590,7 @@ func TestAssembleAttributesCallsTheAgentPlaced(t *testing.T) {
 	}
 
 	unanswered := answeredOut
-	unanswered.CallID = uuid.New()
+	unanswered.CallID = uuid.Must(uuid.NewV7())
 	unanswered.Parties = []PartySnapshot{
 		{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", AnsweredAt: atPtr(0), ReleasedAt: atPtr(12)},
 		{Role: RoleTarget, Number: "18688886669", CreatedAt: at(2), ReleasedAt: atPtr(12)},
@@ -627,7 +627,7 @@ func journey(legs []store.Leg) []string {
 // new leg is dialled to 1020 and bridged to the customer's.
 func TestAnAgentWhoPlacedACallAndHandedItOnIsInItsJourney(t *testing.T) {
 	t.Parallel()
-	wei, test1, ben := uuid.New(), uuid.New(), uuid.New()
+	wei, test1, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	// wei's phone auto-answers the click at 1, the customer answers at 6 and
 	// the two talk until wei transfers at 26.
@@ -716,7 +716,7 @@ func TestAnAgentWhoPlacedACallAndHandedItOnIsInItsJourney(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.snap.CallID = uuid.New()
+			tc.snap.CallID = uuid.Must(uuid.NewV7())
 			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), tc.snap)
 			if got := journey(cdr.Legs); !slices.Equal(got, tc.want) {
 				t.Errorf("legs = %v, want %v", got, tc.want)
@@ -736,13 +736,13 @@ func TestAnAgentWhoPlacedACallAndHandedItOnIsInItsJourney(t *testing.T) {
 // it is not a handover. The journey stays the one leg they dialled.
 func TestAnAgentWhoHangsUpFirstHandedNothingOn(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	ms := func(sec int, milli int) *time.Time {
 		t := at(sec).Add(time.Duration(milli) * time.Millisecond)
 		return &t
 	}
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: ms(30, 40),
 		Parties: []PartySnapshot{
 			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", ChannelID: "agent",
@@ -779,7 +779,7 @@ func ms(sec, milli int) *time.Time {
 // behind it carries the switch's own NORMAL_CLEARING.
 func TestTheCauseOfAHandedOnCallIsTheLegThatEndedIt(t *testing.T) {
 	t.Parallel()
-	wei, test1, ben := uuid.New(), uuid.New(), uuid.New()
+	wei, test1, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	placer := PartySnapshot{Role: RoleOriginator, Number: "1008", AgentID: &wei, ExtensionNumber: "1008",
 		ChannelID: "wei", CreatedAt: at(0), AnsweredAt: atPtr(1), ReleasedAt: atPtr(26),
@@ -935,7 +935,7 @@ func TestTheCauseOfAHandedOnCallIsTheLegThatEndedIt(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.snap.CallID = uuid.New()
+			tc.snap.CallID = uuid.Must(uuid.NewV7())
 			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), tc.snap)
 			if cdr.HangupCause != tc.want {
 				t.Errorf("hangupCause = %q, want %q", cdr.HangupCause, tc.want)
@@ -953,7 +953,7 @@ func TestTheCauseOfAHandedOnCallIsTheLegThatEndedIt(t *testing.T) {
 	t.Run("no transfer, the agent hangs up first", func(t *testing.T) {
 		t.Parallel()
 		snap := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: ms(30, 40),
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "1008", AgentID: &wei, ExtensionNumber: "1008", ChannelID: "wei",
@@ -979,7 +979,7 @@ func TestTheCauseOfAHandedOnCallIsTheLegThatEndedIt(t *testing.T) {
 // witness, never the digits.
 func TestALegAtOneOfOurPhonesIsAnAgentsLeg(t *testing.T) {
 	t.Parallel()
-	wei, test1 := uuid.New(), uuid.New()
+	wei, test1 := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	placer := PartySnapshot{Role: RoleOriginator, Number: "1008", AgentID: &wei, ExtensionNumber: "1008",
 		ChannelID: "wei", CreatedAt: at(0), AnsweredAt: atPtr(1), ReleasedAt: atPtr(26),
@@ -1026,7 +1026,7 @@ func TestALegAtOneOfOurPhonesIsAnAgentsLeg(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			snap := Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: ms(56, 20),
 				Parties: []PartySnapshot{placer, customer, tc.target},
 			}
@@ -1047,7 +1047,7 @@ func TestALegAtOneOfOurPhonesIsAnAgentsLeg(t *testing.T) {
 // before it existed.
 func TestAnInboundJourneyIsInTheOrderItHappened(t *testing.T) {
 	t.Parallel()
-	wei, ben := uuid.New(), uuid.New()
+	wei, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	for _, tc := range []struct {
 		name string
@@ -1093,7 +1093,7 @@ func TestAnInboundJourneyIsInTheOrderItHappened(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			tc.snap.CallID = uuid.New()
+			tc.snap.CallID = uuid.Must(uuid.NewV7())
 			cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), tc.snap)
 			if got := journey(cdr.Legs); !slices.Equal(got, tc.want) {
 				t.Errorf("legs = %v, want %v", got, tc.want)
@@ -1110,10 +1110,10 @@ func TestAnInboundJourneyIsInTheOrderItHappened(t *testing.T) {
 // across the board.
 func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(175),
 		Bot:   BotShare{Sec: 9, DID: "95001"},
 		Queue: QueueFacts{Name: "support-en", JoinedAt: at(16), LeftAt: at(175), Cause: "Cancel"},
@@ -1166,9 +1166,9 @@ func TestACallNobodyAnsweredIsNotAnsweredByTheBotHavingSpoken(t *testing.T) {
 // on one call and "" on the next.
 func TestTheBotLegOfATransferredCallNamesTheFlow(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(60),
 		Bot: BotShare{Sec: 20, FlowID: &flow, FlowSlug: "mobile_support", DID: "95012", IsStamped: true},
 		Parties: []PartySnapshot{
@@ -1212,7 +1212,7 @@ func TestATransferredCallKeepsTheBotsUnbackedClaims(t *testing.T) {
 	merged := BotShare{DID: "95001"}
 	merged.Merge(share)
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(60),
 		Bot: merged,
 		Parties: []PartySnapshot{
@@ -1235,10 +1235,10 @@ func TestATransferredCallKeepsTheBotsUnbackedClaims(t *testing.T) {
 // ledger booked 58 because it read only the first leg that answered.
 func TestTalkTimeCountsEveryAgentTheCallReached(t *testing.T) {
 	t.Parallel()
-	wei, ben := uuid.New(), uuid.New()
+	wei, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(200),
 		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), BridgedAt: at(100)},
 		Parties: []PartySnapshot{
@@ -1271,10 +1271,10 @@ func TestTalkTimeCountsEveryAgentTheCallReached(t *testing.T) {
 // INCOMPATIBLE_DESTINATION of 2026-08-20 did.
 func TestALegThatAnsweredWithoutABridgeReachedNobody(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), LeftAt: at(40), Cause: "Cancel"},
 		Parties: []PartySnapshot{
@@ -1303,10 +1303,10 @@ func TestALegThatAnsweredWithoutABridgeReachedNobody(t *testing.T) {
 // instead of a person, but the agent has not left the call.
 func TestHoldCountsAsTalk(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(100),
 		Queue: QueueFacts{Name: "support-en", JoinedAt: at(2), BridgedAt: at(10)},
 		Parties: []PartySnapshot{
@@ -1332,10 +1332,10 @@ func TestHoldCountsAsTalk(t *testing.T) {
 // bot spoke, nobody took it, and the carrier billed all 142 seconds.
 func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	missed := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(142),
 		Bot:   BotShare{Sec: 12, DID: "95001"},
 		Queue: QueueFacts{Name: "support-en", JoinedAt: at(21), LeftAt: at(142), Cause: "Cancel"},
@@ -1365,7 +1365,7 @@ func TestBillingRunsFromTheSwitchAnsweringNotTheAgent(t *testing.T) {
 	// And on a call an agent did take, billing still runs from the caller's
 	// own answer, not from the agent's pickup.
 	took := missed
-	took.CallID = uuid.New()
+	took.CallID = uuid.Must(uuid.NewV7())
 	took.Parties = []PartySnapshot{
 		{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
 			AnsweredAt: atPtr(0), ReleasedAt: atPtr(142)},
@@ -1389,7 +1389,7 @@ func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
 	t.Parallel()
 	base := func(switchBilled int) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 			CreatedAt: at(0), EndedAt: atPtr(103),
 			Bot: BotShare{Sec: 9, DID: "95001"},
 			Parties: []PartySnapshot{
@@ -1422,12 +1422,12 @@ func TestBillableTimeIsCheckedAgainstTheSwitch(t *testing.T) {
 // longer than the thing it was for.
 func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	// An agent placing an outbound call: their own leg answers at 0, the
 	// person they called answers at 6.
 	outbound := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Parties: []PartySnapshot{
 			{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008", ChannelID: "agent",
@@ -1450,7 +1450,7 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 
 	// Two extensions: nobody charges for it, but it was still answered.
 	internal := outbound
-	internal.CallID = uuid.New()
+	internal.CallID = uuid.Must(uuid.NewV7())
 	internal.CallType = events.CallTypeInternal
 	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), internal)
 	if got.BillSec != 0 {
@@ -1463,7 +1463,7 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 
 	// Inbound is unchanged: the caller's own leg is the one facing the carrier.
 	inbound := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Parties: []PartySnapshot{
 			{Role: RoleOriginator, Number: "18688886669", ChannelID: "caller",
@@ -1487,9 +1487,9 @@ func TestBillingIgnoresTheAgentsOwnAutoAnsweredLeg(t *testing.T) {
 // from=18688886669 to=95002.
 func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	placed := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(30),
 		Bot: BotShare{Sec: 12, DID: "95002"},
@@ -1514,7 +1514,7 @@ func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 	// The branch that must not move with it: on a call that came in, the DID
 	// is what the caller dialled and stays the destination.
 	arrived := placed
-	arrived.CallID = uuid.New()
+	arrived.CallID = uuid.Must(uuid.NewV7())
 	arrived.CallType = events.CallTypeInbound
 	got = newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), arrived)
 	if got.FromNumber != "18688886669" || got.ToNumber != "95002" {
@@ -1531,9 +1531,9 @@ func TestAssembleGivesAnOutboundCallOnADIDItsRealDirection(t *testing.T) {
 // bot transferred to support-en, and the row read 95001 → 1000 (#80).
 func TestAssembleKeepsAnAgentsCallToABotNumberInItsDirection(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	signedIn := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(20),
 		Bot: BotShare{Sec: 15, DID: "95001", Queue: "support-en", IsStamped: true},
@@ -1550,7 +1550,7 @@ func TestAssembleKeepsAnAgentsCallToABotNumberInItsDirection(t *testing.T) {
 
 	// The extension is what says an agent's phone placed it, signed in or not.
 	signedOut := signedIn
-	signedOut.CallID = uuid.New()
+	signedOut.CallID = uuid.Must(uuid.NewV7())
 	signedOut.Parties = []PartySnapshot{
 		{Role: RoleOriginator, Number: "1000", ExtensionNumber: "1000",
 			ChannelID: "chan-agent", AnsweredAt: atPtr(0), ReleasedAt: atPtr(20)},
@@ -1571,9 +1571,9 @@ func TestAssembleKeepsAnAgentsCallToABotNumberInItsDirection(t *testing.T) {
 // Live, 2026-08-23: bill_sec 0 against the switch's own 21 on that same leg.
 func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	placed := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(30),
 		Bot: BotShare{Sec: 12, DID: "95002"},
@@ -1597,7 +1597,7 @@ func TestAssembleBillsTheLegFacingTheCarrierOnEitherKindOfOutboundCall(t *testin
 	// picked up. Their own phone auto-answered in front of them, and that is
 	// not a billable call.
 	unanswered := Snapshot{
-		CallID:    uuid.New(),
+		CallID:    uuid.Must(uuid.NewV7()),
 		CallType:  events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(12),
 		Parties: []PartySnapshot{
@@ -1629,7 +1629,7 @@ func assemblerLogging(buf *bytes.Buffer) *CDRAssembler {
 // to quieten it.
 func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	t.Run("an unanswered dial-out is silent", func(t *testing.T) {
 		t.Parallel()
@@ -1638,7 +1638,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 		// which never answered, so nothing.
 		var buf bytes.Buffer
 		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(30),
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ExtensionNumber: "1008", ChannelID: "agent",
@@ -1659,7 +1659,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 		t.Parallel()
 		var buf bytes.Buffer
 		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeInternal,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal,
 			CreatedAt: at(0), EndedAt: atPtr(30),
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "1008", AgentID: idPtr(agentID), ExtensionNumber: "1008", ChannelID: "agent",
@@ -1683,7 +1683,7 @@ func TestTheBillingAlarmRingsForTheLegItActuallyBilled(t *testing.T) {
 		// since it answered, and the switch is made to say 40.
 		var buf bytes.Buffer
 		cdr := assemblerLogging(&buf).assemble(t.Context(), Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(21),
 			Bot: BotShare{Sec: 21, DID: "95002"},
 			Parties: []PartySnapshot{
@@ -1711,7 +1711,7 @@ func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
 		// 95009 is served by nobody, so aicc_inbound rejects before a second
 		// leg exists. The only leg there is knows its own destination.
 		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 			CreatedAt: at(0), EndedAt: atPtr(0),
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "18688886669", OtherNumber: "95009",
@@ -1735,7 +1735,7 @@ func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
 		// The DID rides the customer's leg from creation, so the row takes the
 		// direction a platform-placed call has even though nothing answered.
 		cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(0),
 			Bot: BotShare{DID: "95002"},
 			Parties: []PartySnapshot{
@@ -1763,7 +1763,7 @@ func TestACallThatNeverConnectedStillRecordsWhoItWasBetween(t *testing.T) {
 // the agent's channel.
 func TestAnAgentsCallThatTheBotEndedIsTheAgentsCall(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	for _, tc := range []struct {
 		name     string
 		callType events.CallType
@@ -1776,7 +1776,7 @@ func TestAnAgentsCallThatTheBotEndedIsTheAgentsCall(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			snap := Snapshot{
-				CallID:    uuid.New(),
+				CallID:    uuid.Must(uuid.NewV7()),
 				CallType:  tc.callType,
 				CreatedAt: at(0), EndedAt: atPtr(20),
 				// No handover: the bot ended the call, and stamped its tally
@@ -1840,7 +1840,7 @@ func TestAnAgentsCallThatTheBotEndedIsTheAgentsCall(t *testing.T) {
 func TestAnAgentWhoHangsUpOnTheBotStillOwnsTheCall(t *testing.T) {
 	t.Parallel()
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(10),
 		Bot: BotShare{DID: "95001"},
 		Parties: []PartySnapshot{
@@ -1871,7 +1871,7 @@ func TestAnAgentWhoHangsUpOnTheBotStillOwnsTheCall(t *testing.T) {
 func TestACallerTheBotKeptIsStillLeftToTheBot(t *testing.T) {
 	t.Parallel()
 	snap := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Bot: BotShare{DID: "95001"},
 		Parties: []PartySnapshot{
@@ -1931,7 +1931,7 @@ func finishCall(t *testing.T, snap Snapshot) []store.CDR {
 	t.Helper()
 	ledger := &memoryLedger{}
 	storage := finishedStorage{reached: make(chan struct{})}
-	a := NewCDRAssembler(ledger, staticQueues{"support": uuid.New()}, storage,
+	a := NewCDRAssembler(ledger, staticQueues{"support": uuid.Must(uuid.NewV7())}, storage,
 		slog.New(slog.NewTextHandler(io.Discard, nil)))
 	a.flushWait = 0
 	a.CallFinished(snap)
@@ -1952,14 +1952,14 @@ func finishCall(t *testing.T, snap Snapshot) []store.CDR {
 // from neither side (#313).
 func TestABotThatNeverAnsweredLeavesTheRowToThisPath(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
-	agentID := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
+	agentID := uuid.Must(uuid.NewV7())
 
 	// An AI outbound call: the customer's leg is the originator, answered on
 	// the trunk, with the DID's flow stamped on it when it was placed.
 	outbound := func(endedAt int, cause string, bot PartySnapshot) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(endedAt),
 			Bot: BotShare{DID: "95099", FlowID: &flow},
 			Parties: []PartySnapshot{{
@@ -1973,7 +1973,7 @@ func TestABotThatNeverAnsweredLeavesTheRowToThisPath(t *testing.T) {
 	// bridges to the bot, and exports the DID to the bot's leg.
 	refusedInbound := func(endedAt int, cause string, more ...PartySnapshot) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 			CreatedAt: at(0), EndedAt: atPtr(endedAt),
 			Bot: BotShare{DID: "95001"},
 			Parties: append([]PartySnapshot{{
@@ -2072,7 +2072,7 @@ func TestABotThatNeverAnsweredLeavesTheRowToThisPath(t *testing.T) {
 // its primary key, and the one that ends later wins (store.InsertCDR).
 func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 	answeredBot := func(number string) PartySnapshot {
 		return PartySnapshot{
 			Role: RoleTarget, Number: number, ChannelID: "bot", IsBotLeg: true,
@@ -2081,7 +2081,7 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 		}
 	}
 	keptOutbound := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification"},
 		Parties: []PartySnapshot{{
@@ -2091,7 +2091,7 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 		}, answeredBot("95099")},
 	}
 	keptInbound := Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
 		Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
 		Parties: []PartySnapshot{{
@@ -2101,7 +2101,7 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 		}, answeredBot("95001")},
 	}
 	handedOver := keptOutbound
-	handedOver.CallID = uuid.New()
+	handedOver.CallID = uuid.Must(uuid.NewV7())
 	handedOver.Bot = BotShare{Sec: 39, DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification",
 		IsStamped: true}
 
@@ -2136,12 +2136,12 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 // auto-answers and says nothing about the far end.
 func TestAnUnansweredOutboundCallToABusyCalleeIsBusy(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 
 	// platform: the customer's leg is the originator, because we created it.
 	platform := func(cause string, bot bool) Snapshot {
 		s := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(9),
 			Bot: BotShare{DID: "95099"},
 			Parties: []PartySnapshot{{
@@ -2167,7 +2167,7 @@ func TestAnUnansweredOutboundCallToABusyCalleeIsBusy(t *testing.T) {
 			far.AnsweredAt = atPtr(8)
 		}
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(12),
 			Parties: []PartySnapshot{
 				{Role: RoleOriginator, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008",
@@ -2178,7 +2178,7 @@ func TestAnUnansweredOutboundCallToABusyCalleeIsBusy(t *testing.T) {
 	}
 	inbound := func(cause string) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeInbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 			Queue:     QueueFacts{JoinedAt: at(0), LeftAt: at(30), Cause: "Timeout"},
 			CreatedAt: at(0), EndedAt: atPtr(30),
 			Parties: []PartySnapshot{
@@ -2288,14 +2288,14 @@ func TestAnUnansweredOutboundCallToABusyCalleeIsBusy(t *testing.T) {
 // the customer was answered on the trunk whatever failed after that.
 func TestAnAnsweredCallThatReachedNobodyIsTheTrunkItWasAnsweredOn(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 
 	// The originator of a call this platform placed is the customer's own leg,
 	// created towards the trunk. The flow is stamped on it when it is placed,
 	// so the row knows what the call was for even when the bot never joined.
 	unreached := func(cause string, answeredAt, endedAt int, withFlow bool) Snapshot {
 		s := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(endedAt),
 			Bot: BotShare{DID: "95099"},
 			Parties: []PartySnapshot{{
@@ -2373,7 +2373,7 @@ func TestAnAnsweredCallThatReachedNobodyIsTheTrunkItWasAnsweredOn(t *testing.T) 
 			// as bill_sec does, and the leg is still the trunk.
 			name: "the customer hung up 0.3 s after answering",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: ms(0, 300),
 				Bot: BotShare{DID: "95099", FlowID: &flow},
 				Parties: []PartySnapshot{{
@@ -2433,10 +2433,10 @@ func TestAnAnsweredCallThatReachedNobodyIsTheTrunkItWasAnsweredOn(t *testing.T) 
 // trunk hop to every AI call.
 func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
 	unanswered := func(cause string) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(9),
 			Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification"},
 			Parties: []PartySnapshot{{
@@ -2490,7 +2490,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			// dialled out: the trunk leg never existed.
 			name: "a click-to-dial whose trunk leg never came up",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone", OtherNumber: "18688886660",
@@ -2504,7 +2504,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			// The same between two extensions: the far phone was never rung.
 			name: "a call between our own phones that reached nobody",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone", OtherNumber: "1002",
@@ -2521,7 +2521,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			// agent's own phone picking up is all that happened.
 			name: "an agent's call to a DID the bot never answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
 				Parties: []PartySnapshot{phone, {
@@ -2537,7 +2537,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			// originator's number rather than producing an empty label.
 			name: "an unreached call with empty dialled number falls back to originator",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{phone},
 			},
@@ -2551,7 +2551,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			// a TRUNK here would be a carrier leg there was none of.
 			name: "an internal call on a leg the dialplan spawned",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeInternal,
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInternal,
 				CreatedAt: at(0), EndedAt: atPtr(6),
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "7001", ChannelID: "spawned",
@@ -2580,7 +2580,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 	t.Run("the bot answered and kept the call", func(t *testing.T) {
 		t.Parallel()
 		snap := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(45),
 			Bot: BotShare{Sec: 45, FlowID: &flow, FlowSlug: "lead_qualification", DID: "95099"},
 			Parties: []PartySnapshot{
@@ -2601,9 +2601,9 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 
 	t.Run("the bot answered and handed the call to a queue and an agent", func(t *testing.T) {
 		t.Parallel()
-		agentID := uuid.New()
+		agentID := uuid.Must(uuid.NewV7())
 		snap := Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(200),
 			Bot:   BotShare{Sec: 30, FlowID: &flow, FlowSlug: "lead_qualification", DID: "95099", IsStamped: true},
 			Queue: QueueFacts{Name: "support-en", JoinedAt: at(32), BridgedAt: at(60)},

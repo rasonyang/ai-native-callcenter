@@ -60,7 +60,7 @@ func (stubKeys) Revoke(context.Context, uuid.UUID) (store.APIKey, error) {
 // audit trail can recognise.
 func aKey(secret string, scopes ...string) stubKeys {
 	return stubKeys{secret: secret, subject: KeySubject{
-		KeyID: uuid.New(), Name: "crm-integration", Scopes: scopes,
+		KeyID: uuid.Must(uuid.NewV7()), Name: "crm-integration", Scopes: scopes,
 	}}
 }
 
@@ -74,7 +74,7 @@ type keyedDialer struct {
 
 func (d *keyedDialer) Dial(context.Context, outbound.AgentDialRequest) (uuid.UUID, error) {
 	d.placed = true
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 func keyedServer(t *testing.T, keys KeyService) (http.Handler, *keyedDialer) {
@@ -289,7 +289,7 @@ func (noAgents) QueuesForAgent(*http.Request, uuid.UUID) ([]uuid.UUID, error) { 
 // 2026-08-26 while verifying third-party dialling).
 func TestASystemCanEndTheCallItPlaced(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	w, calls := hangupAs(t, callID, noAgents{}, func(r *http.Request) {
 		r.Header.Set("Authorization", "Bearer s3cret")
 	})
@@ -309,12 +309,12 @@ func TestASystemCanEndTheCallItPlaced(t *testing.T) {
 // staffed on the floor.
 func TestASupervisorCanEndACallTheyAreNotOn(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	calls := &endingCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: noAgents{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
 	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(),
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()),
 		scopes: grantedScopes(auth.RoleSupervisor),
 	}))
 	w := httptest.NewRecorder()
@@ -337,12 +337,12 @@ func TestASupervisorCanEndACallTheyAreNotOn(t *testing.T) {
 // stepped out.
 func TestAnAgentStillEndsOnlyTheirOwnLeg(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	calls := &endingCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/hangup", nil)
 	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), AgentID: uuid.New(),
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		scopes: grantedScopes(auth.RoleAgent),
 	}))
 	w := httptest.NewRecorder()

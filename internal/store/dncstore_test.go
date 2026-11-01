@@ -33,8 +33,8 @@ func openDNC(t *testing.T) (*Store, *DNCStore) {
 func TestTheDNCListAddsOnceAndForgetsOnRequest(t *testing.T) {
 	ctx := context.Background()
 	_, list := openDNC(t)
-	author := uuid.New()
-	call := uuid.New()
+	author := uuid.Must(uuid.NewV7())
+	call := uuid.Must(uuid.NewV7())
 
 	first, isNew, err := list.Add(ctx, "+8613800138000", DNCSourceManual, nil, &author)
 	if err != nil || !isNew {

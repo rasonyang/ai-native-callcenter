@@ -59,7 +59,7 @@ func TestAnAIOutboundCallFromAnInboundOnlyDIDIsRefused(t *testing.T) {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	dids := &editableDIDs{dids: []catalog.DID{
 		{Number: "95301", Language: "en", FlowID: &flowID, IsEnabled: true, AllowInbound: true},
 		{Number: "95302", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true},
@@ -84,7 +84,7 @@ func TestAnAIOutboundCallFromAnInboundOnlyDIDIsRefused(t *testing.T) {
 
 	// Both kinds of credential reach the operation and get the same answer.
 	session := AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "ada",
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "ada",
 		scopes: grantedScopes(auth.RoleAdmin),
 	}
 	callers := []struct {
@@ -93,7 +93,7 @@ func TestAnAIOutboundCallFromAnInboundOnlyDIDIsRefused(t *testing.T) {
 	}{{"session cookie", session}, {"API key", keySubject()}}
 
 	dial := func(ac AuthContext, did string) (int, string, uuid.UUID) {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		status, code, _ := s.dial(ac, fmt.Sprintf(
 			`{"kind":"AI_OUTBOUND","did":%q,"to":"13912345678","callId":"%s"}`, did, id))
 		return status, code, id

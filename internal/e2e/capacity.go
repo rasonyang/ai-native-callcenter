@@ -434,7 +434,7 @@ func (cr *capacityRun) placeDirect(ctx context.Context, d *driver) error {
 	d.rep.Latency["startToAllRingingMs"] = float64(cr.allRinging.Sub(d.startedAt).Milliseconds())
 	kind := api.CreateCallRequestKind("AI_OUTBOUND")
 	for _, ds := range cr.sc.Direct {
-		callID := uuid.New()
+		callID := uuid.Must(uuid.NewV7())
 		did := cr.directDID.Number
 		var created api.CreateCallResponse
 		placed := time.Now().UTC()

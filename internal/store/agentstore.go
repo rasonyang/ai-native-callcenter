@@ -135,7 +135,7 @@ func (a *AgentStore) AgentBoundTo(ctx context.Context, extensionNumber string) (
 // CreateAgent stores a new agent identity.
 func (a *AgentStore) CreateAgent(ctx context.Context, cfg agents.AgentConfig) (agents.AgentConfig, error) {
 	row, err := a.q.CreateAgent(ctx, queries.CreateAgentParams{
-		ID:                 uuid.New(),
+		ID:                 uuid.Must(uuid.NewV7()),
 		UserID:             cfg.UserID,
 		CallcenterName:     cfg.CallcenterName,
 		IsAutoAnswer:       cfg.IsAutoAnswer,

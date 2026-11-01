@@ -86,7 +86,7 @@ func (f *fakeStore) AgentBoundTo(_ context.Context, number string) (uuid.UUID, b
 func (f *fakeStore) CreateAgent(_ context.Context, cfg AgentConfig) (AgentConfig, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	cfg.AgentID = uuid.New()
+	cfg.AgentID = uuid.Must(uuid.NewV7())
 	f.profiles[cfg.AgentID] = Profile{
 		AgentID:        cfg.AgentID,
 		UserID:         cfg.UserID,
@@ -270,9 +270,9 @@ func newTestService(t *testing.T) (*Service, *fakeStore, *fakeSwitch, *fakePubli
 	sw := &fakeSwitch{up: true}
 	pub := &fakePublisher{}
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{
-		AgentID: agentID, UserID: uuid.New(), CallcenterName: "agent-1001",
+		AgentID: agentID, UserID: uuid.Must(uuid.NewV7()), CallcenterName: "agent-1001",
 		DisplayName: "Wei", ExtensionNumber: "1001",
 	}
 	return NewService(store, sw, pub), store, sw, pub, agentID
@@ -369,7 +369,7 @@ func TestOneExtensionOneAgent(t *testing.T) {
 	svc, store, _, _, first := newTestService(t)
 	ctx := context.Background()
 
-	second := uuid.New()
+	second := uuid.Must(uuid.NewV7())
 	store.profiles[second] = Profile{AgentID: second, CallcenterName: "agent-1002", DisplayName: "Li", ExtensionNumber: "1001"}
 
 	if _, err := svc.Login(ctx, first); err != nil {
@@ -395,7 +395,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	sw := &fakeSwitch{up: true}
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{
 		AgentID: agentID, CallcenterName: "agent-1001", DisplayName: "Wei", ExtensionNumber: "1001",
 	}
@@ -409,7 +409,7 @@ func TestWrapUpDoesNotEndByItself(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatalf("StartWrapUp() error = %v", err)
 	}
 	if got := svc.Presence(agentID); got.Reason != ReasonAfterCallWork {
@@ -623,7 +623,7 @@ func TestAReturnedPhoneDoesNotEndWrapUp(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
 		t.Fatal(err)
 	}
@@ -808,7 +808,7 @@ func TestRosterResolvesAvailability(t *testing.T) {
 	if _, err := svc.Ready(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	svc.SetOnCall(ctx, agentID, true, uuid.New())
+	svc.SetOnCall(ctx, agentID, true, uuid.Must(uuid.NewV7()))
 
 	rows, err := svc.Roster(ctx)
 	if err != nil {
@@ -829,7 +829,7 @@ func TestSwitchDownDoesNotBlockSignIn(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	sw := &fakeSwitch{up: false} // switch link is down
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, sw, &fakePublisher{})
 
@@ -862,7 +862,7 @@ func TestSyncSwitchRebuildsAfterReconnect(t *testing.T) {
 func TestUnknownAgentIsRejected(t *testing.T) {
 	t.Parallel()
 	svc, _, _, _, _ := newTestService(t)
-	if _, err := svc.Login(context.Background(), uuid.New()); !errors.Is(err, ErrUnknownAgent) {
+	if _, err := svc.Login(context.Background(), uuid.Must(uuid.NewV7())); !errors.Is(err, ErrUnknownAgent) {
 		t.Errorf("Login() error = %v, want ErrUnknownAgent", err)
 	}
 }

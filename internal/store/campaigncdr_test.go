@@ -41,7 +41,7 @@ func TestACDRNamesItsCampaignAndTheFiltersFollow(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A call that is nobody's campaign's.
-	plain := uuid.New()
+	plain := uuid.Must(uuid.NewV7())
 	if err := e.ledger.InsertCDR(ctx, cdrOf(plain, "NORMAL_CLEARING", CDRStatusAnswered, true, start, end)); err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestMigrationsLeaveExistingCDRsWithoutACampaign(t *testing.T) {
 	if err := goose.UpToContext(ctx, db, "migrations", 38); err != nil {
 		t.Fatalf("migrating to 38: %v", err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := db.ExecContext(ctx, `INSERT INTO cdrs (call_id, started_at, ended_at, call_type, from_number, to_number, status)
 		VALUES ($1, now() - interval '1 minute', now(), 'OUTBOUND', '95001', '+8613000000000', 'ANSWERED')`, callID); err != nil {
 		t.Fatalf("seed a CDR: %v", err)

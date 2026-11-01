@@ -65,7 +65,7 @@ type shape struct {
 func tp(t time.Time) *time.Time { return &t }
 
 func caller(start, end time.Time) telephony.PartySnapshot {
-	return telephony.PartySnapshot{PartyID: uuid.New(), ChannelID: "caller-" + uuid.NewString(),
+	return telephony.PartySnapshot{PartyID: uuid.Must(uuid.NewV7()), ChannelID: "caller-" + uuid.NewString(),
 		Role: telephony.RoleOriginator, Number: "+8613900001111",
 		CreatedAt: start, AnsweredAt: tp(start), ReleasedAt: tp(end), ReleaseCause: "NORMAL_CLEARING"}
 }
@@ -73,7 +73,7 @@ func caller(start, end time.Time) telephony.PartySnapshot {
 // agent is a delivery to an agent: answered and bridged to the caller from
 // answered to released, or rung and never picked up when answered is zero.
 func agent(callerChan, number string, id uuid.UUID, created, answered, released time.Time) telephony.PartySnapshot {
-	p := telephony.PartySnapshot{PartyID: uuid.New(), ChannelID: number + "-" + uuid.NewString(),
+	p := telephony.PartySnapshot{PartyID: uuid.Must(uuid.NewV7()), ChannelID: number + "-" + uuid.NewString(),
 		Role: telephony.RoleTarget, Number: number, AgentID: &id,
 		CreatedAt: created, ReleasedAt: tp(released), ReleaseCause: "NO_ANSWER"}
 	if !answered.IsZero() {
@@ -95,12 +95,12 @@ func TestQueueReportsCountATwoQueueCallUnderItsFirstQueue(t *testing.T) {
 		t.Fatalf("migrate: %v", err)
 	}
 	ledger := st.Ledger()
-	sales, support := uuid.New(), uuid.New()
+	sales, support := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	inserted := make(chan uuid.UUID, 1)
 	asm := telephony.NewCDRAssembler(&signallingLedger{LedgerStore: ledger, inserted: inserted},
 		queueNames{"sales": sales, "support": support}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
-	wei, ben, carol := uuid.New(), uuid.New(), uuid.New()
+	wei, ben, carol := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	origin := time.Date(2026, time.October, 20, 9, 0, 0, 0, time.UTC)
 	sec := func(t time.Time, s int) time.Time { return t.Add(time.Duration(s) * time.Second) }
 
@@ -172,7 +172,7 @@ func TestQueueReportsCountATwoQueueCallUnderItsFirstQueue(t *testing.T) {
 				},
 			}
 		}
-		sh.snap.CallID = uuid.New()
+		sh.snap.CallID = uuid.Must(uuid.NewV7())
 		sh.snap.CallType = events.CallTypeInbound
 		sh.snap.State = telephony.CallEnded
 		sh.snap.CreatedAt = s

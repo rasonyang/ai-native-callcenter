@@ -18,7 +18,7 @@ import (
 // they record. The flow id makes both AI numbers.
 func recordingService(t *testing.T, sw *fakeSwitch) *Service {
 	t.Helper()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	dids := fakeDIDs{
 		{Number: "95201", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true, IsRecordingEnabled: true},
 		{Number: "95202", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true, IsRecordingEnabled: false},

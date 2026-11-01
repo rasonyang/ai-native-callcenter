@@ -141,7 +141,7 @@ func TestClickToDialAcceptsAPlusDestinationButNotAPlusExtension(t *testing.T) {
 	t.Parallel()
 	s := testService(t, &fakeSwitch{}, nil)
 	if _, err := s.Dial(context.Background(), AgentDialRequest{
-		CallID: uuid.New(), AgentExtension: "+1002", To: "13912345678",
+		CallID: uuid.Must(uuid.NewV7()), AgentExtension: "+1002", To: "13912345678",
 	}); !errors.Is(err, ErrBadNumber) {
 		t.Errorf("a + extension: error = %v, want ErrBadNumber", err)
 	}

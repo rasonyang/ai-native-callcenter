@@ -288,7 +288,7 @@ func TestAMessyMixOfSwitchBehavioursPlacesEachCallOnceAndRecordsItOnce(t *testin
 		callIDs = 300
 		window  = 3 * time.Second
 	)
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	zero := 0
 	dids := fakeDIDs{
 		{Number: "95099", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true},

@@ -278,7 +278,7 @@ func testService(t *testing.T, sw *fakeSwitch, history map[uuid.UUID]bool) *Serv
 func testServiceWithEndpoint(t *testing.T, sw *fakeSwitch,
 	history map[uuid.UUID]bool, endpointFormat string) *Service {
 	t.Helper()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	// One number that answers and one the deployment dials out from: a
 	// click-to-dial is refused without the second, by design (D9).
 	dids := fakeDIDs{
@@ -510,7 +510,7 @@ func TestDialAIBridgesTheAnsweredCustomerToTheBot(t *testing.T) {
 // A retry with the same call id never redials a finished or running call.
 func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	sw := &fakeSwitch{}
 	s := testService(t, sw, map[uuid.UUID]bool{callID: true})
 
@@ -530,7 +530,7 @@ func TestDialAIIsIdempotentAgainstTheLedger(t *testing.T) {
 // talking on the first call.
 func TestAClickToDialIsIdempotentAgainstTheLedger(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	sw := &fakeSwitch{}
 	s := testService(t, sw, map[uuid.UUID]bool{callID: true})
 
@@ -710,7 +710,7 @@ func TestDialAIStampsTheDIDOnTheLegThatMayNeverBeAnswered(t *testing.T) {
 func TestAClickToDialWithNoDefaultNumberIsRefusedRatherThanGuessed(t *testing.T) {
 	t.Parallel()
 	sw := &fakeSwitch{}
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	svc := New(Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s"}, sw,
 		fakeDIDs{{Number: "95012", Language: "zh", FlowID: &flowID,
 			IsEnabled: true, AllowInbound: true, AllowOutbound: true}},

@@ -134,7 +134,7 @@ func newClaimsHarness(t *testing.T) *claimsHarness {
 	awaitBridgeEvent(t, session, EventTypeReady)
 
 	h := &claimsHarness{session: session, leg: leg, model: model,
-		sw: &orderedSwitch{}, logs: &syncBuffer{}, queueID: uuid.New(),
+		sw: &orderedSwitch{}, logs: &syncBuffer{}, queueID: uuid.Must(uuid.NewV7()),
 		done: make(chan struct{})}
 	log := slog.New(slog.NewTextHandler(h.logs, nil))
 
@@ -157,7 +157,7 @@ func newClaimsHarness(t *testing.T) *claimsHarness {
 		t.Fatalf("load flow: %v", err)
 	}
 	engine := flow.NewEngine(spec, "zh", nil, log)
-	h.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	h.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	h.actions = &callActions{orchestrator: o, session: session, log: log,
 		callerChannel: "chan-9", recorder: h.recorder, facts: testFacts()}
 	h.runtime = flow.NewRuntime(engine, h.actions, flow.NewBackend(""), nil, log)

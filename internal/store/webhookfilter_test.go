@@ -13,12 +13,12 @@ import (
 // first anyone knows is a customer reconciling a month and finding a gap.
 func TestAFilterAsksForWhatItNamesAndNothingMore(t *testing.T) {
 	t.Parallel()
-	support := uuid.New()
-	sales := uuid.New()
+	support := uuid.Must(uuid.NewV7())
+	sales := uuid.Must(uuid.NewV7())
 
-	internal := CDR{CallID: uuid.New(), CallType: "INTERNAL", Status: "ANSWERED"}
+	internal := CDR{CallID: uuid.Must(uuid.NewV7()), CallType: "INTERNAL", Status: "ANSWERED"}
 	answered := CDR{
-		CallID: uuid.New(), CallType: "OUTBOUND", DID: "95001",
+		CallID: uuid.Must(uuid.NewV7()), CallType: "OUTBOUND", DID: "95001",
 		Status: "ANSWERED", QueueID: &support, IsContained: false,
 	}
 

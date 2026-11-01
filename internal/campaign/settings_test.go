@@ -103,8 +103,8 @@ func TestReadyDIDsIsTheCreateRule(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t, Env{})
 	mk := func(enabled, outbound bool, spec []string, published bool) uuid.UUID {
-		id := uuid.New()
-		d := DIDFlow{ID: id, Number: id.String()[:8], IsEnabled: enabled, AllowOutbound: outbound}
+		id := uuid.Must(uuid.NewV7())
+		d := DIDFlow{ID: id, Number: id.String()[28:], IsEnabled: enabled, AllowOutbound: outbound}
 		if published {
 			d.Spec = testSpec(t, spec, nil)
 		}
@@ -118,7 +118,7 @@ func TestReadyDIDsIsTheCreateRule(t *testing.T) {
 		mk(true, true, nil, false),
 		mk(false, true, []string{"hangup"}, true),
 		mk(true, false, []string{"hangup"}, true),
-		uuid.New(), // unknown
+		uuid.Must(uuid.NewV7()), // unknown
 	}
 	ready, err := f.svc.ReadyDIDs(context.Background(), ids)
 	if err != nil {

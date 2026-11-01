@@ -163,6 +163,7 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `switch_reachable` | `SWITCH_UNREACHABLE` |
 | `switch_auth` | `SWITCH_AUTH_REJECTED` |
 | `sip_profiles` | `SWITCH_PROFILE_DOWN` |
+| `switch_uuid` | `SWITCH_UUID_NOT_V7` |
 | `bot_gateway` | `BOT_GATEWAY_DOWN` |
 | `outbound_endpoint` | `OUTBOUND_ENDPOINT_UNSET` (a `WARN`, not a failure) |
 | `outbound_gateway` | `OUTBOUND_GATEWAY_MISSING` (a `WARN`, not a failure) |
@@ -172,6 +173,13 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
 | `switch_rtp_range` | `SWITCH_RTP_RANGE_INVALID`, `SWITCH_RTP_RANGE_NARROW` (a `WARN`, not a failure) |
 | `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
+
+`switch_uuid` asks the switch to mint a UUID and requires version 7: the
+switch mints the call id of every inbound DID call, and the database refuses
+any other. It needs FreeSWITCH 1.11 or later with `uuid-version=7` in
+`switch.conf.xml` (the shipped image has both). The application checks the same
+at every switch connect, and `/readyz` answers 503 with a `switch-uuid:
+NOT_V7 ...` line while the switch does not mint v7.
 
 `dnc_country_code` warns when `AICC_DEFAULT_COUNTRY_CODE` is not set (the
 application's default, `1`, applies) and the do-not-call list holds a number

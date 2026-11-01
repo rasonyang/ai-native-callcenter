@@ -17,7 +17,7 @@ import (
 func TestWrapUpNamesTheCallItIsFor(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	ctx := context.Background()
@@ -25,7 +25,7 @@ func TestWrapUpNamesTheCallItIsFor(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	p, err := svc.StartWrapUp(ctx, agentID, callID)
 	if err != nil {
 		t.Fatalf("StartWrapUp() error = %v", err)
@@ -51,7 +51,7 @@ func TestWrapUpNamesTheCallItIsFor(t *testing.T) {
 func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	ctx := context.Background()
@@ -62,7 +62,7 @@ func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatal(err)
 	}
 	p, err := svc.EndWrapUp(ctx, agentID)
@@ -74,7 +74,7 @@ func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 	}
 
 	// The agent chose lunch; completing a wrap-up must not drag them back.
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.NotReady(ctx, agentID, ReasonLunch); err != nil {
@@ -95,7 +95,7 @@ func TestEndWrapUpReturnsToReadyOnlyFromWrapUp(t *testing.T) {
 func TestTheLastWrappedCallOutlivesTheState(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	svc.now = func() time.Time { return now }
@@ -104,7 +104,7 @@ func TestTheLastWrappedCallOutlivesTheState(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestStartingWrapUpAnnouncesTheAgentIsNotReady(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
 	pub := &fakePublisher{}
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, pub)
 	ctx := context.Background()
@@ -141,7 +141,7 @@ func TestStartingWrapUpAnnouncesTheAgentIsNotReady(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
 		t.Fatalf("StartWrapUp() error = %v", err)
 	}
@@ -164,8 +164,8 @@ func TestStartingWrapUpAnnouncesTheAgentIsNotReady(t *testing.T) {
 func TestRestoreRecoversTheWrapUpCall(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
-	callID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
+	callID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	store.presence[agentID] = Presence{
 		State: StateNotReady, Reason: ReasonAfterCallWork, ExtensionNumber: "1001",
@@ -212,7 +212,7 @@ func (o *openedWrapUps) all() [][2]uuid.UUID {
 func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	ledger := &openedWrapUps{}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
@@ -222,7 +222,7 @@ func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := svc.StartWrapUp(ctx, agentID, callID); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestAfterCallWorkOpensItsRecordAtOnce(t *testing.T) {
 func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	svc.AttachWrapUps(&openedWrapUps{err: errors.New("the database is down")})
@@ -247,7 +247,7 @@ func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	p, err := svc.StartWrapUp(ctx, agentID, uuid.New())
+	p, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7()))
 	if err != nil {
 		t.Fatalf("StartWrapUp() error = %v, want the presence change to stand", err)
 	}
@@ -267,7 +267,7 @@ func TestAfterCallWorkStartsEvenIfTheRecordCannotBeOpened(t *testing.T) {
 func TestEndingWrapUpWithNoPhoneLandsInDeviceLostRatherThanFailing(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
 	ctx := context.Background()
@@ -276,7 +276,7 @@ func TestEndingWrapUpWithNoPhoneLandsInDeviceLostRatherThanFailing(t *testing.T)
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatal(err)
 	}
 	// The browser tab closed while the note was being typed.
@@ -331,7 +331,7 @@ func TestTheDraftStartsOnlyOnceTheRecordIsOpen(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			store := newFakeStore()
-			agentID := uuid.New()
+			agentID := uuid.Must(uuid.NewV7())
 			store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 			drafts := &recordedDrafts{}
 			svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
@@ -341,7 +341,7 @@ func TestTheDraftStartsOnlyOnceTheRecordIsOpen(t *testing.T) {
 			if _, err := svc.Login(ctx, agentID); err != nil {
 				t.Fatal(err)
 			}
-			callID := uuid.New()
+			callID := uuid.Must(uuid.NewV7())
 			p, err := svc.StartWrapUp(ctx, agentID, callID)
 			if err != nil || !p.IsInWrapUp() {
 				t.Fatalf("StartWrapUp() = %+v, %v; after-call work must begin either way", p, err)
@@ -363,7 +363,7 @@ func TestTheDraftStartsOnlyOnceTheRecordIsOpen(t *testing.T) {
 func TestTheDraftIsToldWhichLegJustEnded(t *testing.T) {
 	t.Parallel()
 	store := newFakeStore()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store.profiles[agentID] = Profile{AgentID: agentID, CallcenterName: "agent-1001", ExtensionNumber: "1001"}
 	drafts := &recordedDrafts{}
 	svc := NewService(store, &fakeSwitch{up: true}, &fakePublisher{})
@@ -373,12 +373,12 @@ func TestTheDraftIsToldWhichLegJustEnded(t *testing.T) {
 	if _, err := svc.Login(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	party := uuid.New()
-	svc.BeginAfterCallWork(ctx, agentID, uuid.New(), party)
+	party := uuid.Must(uuid.NewV7())
+	svc.BeginAfterCallWork(ctx, agentID, uuid.Must(uuid.NewV7()), party)
 	if _, err := svc.EndWrapUp(ctx, agentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.StartWrapUp(ctx, agentID, uuid.New()); err != nil {
+	if _, err := svc.StartWrapUp(ctx, agentID, uuid.Must(uuid.NewV7())); err != nil {
 		t.Fatal(err)
 	}
 	drafts.mu.Lock()

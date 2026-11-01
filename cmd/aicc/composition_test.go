@@ -354,7 +354,7 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	})
 
 	t.Run("a finished call retires its transcript without displacing the cdr", func(t *testing.T) {
-		f.registry.OnCallFinished(telephony.Snapshot{CallID: uuid.New()})
+		f.registry.OnCallFinished(telephony.Snapshot{CallID: uuid.Must(uuid.NewV7())})
 		if f.priorFinished != 1 {
 			t.Errorf("the existing finish hook ran %d times, want 1 — a CDR is not "+
 				"something to lose in order to free a goroutine", f.priorFinished)
@@ -365,7 +365,7 @@ func TestConnectMakesEveryConnection(t *testing.T) {
 	})
 
 	t.Run("a retired call detaches its taps without displacing what listened", func(t *testing.T) {
-		callID := uuid.New()
+		callID := uuid.Must(uuid.NewV7())
 		f.registry.OnCallRetired(callID)
 		if f.priorRetired != 1 {
 			t.Errorf("the existing retire hook ran %d times, want 1", f.priorRetired)
@@ -405,7 +405,7 @@ func TestNoTapMeansNoTapConnections(t *testing.T) {
 	if f.coordinator.taps != nil {
 		t.Errorf("a tap was attached with transcription off: %#v", f.coordinator.taps)
 	}
-	f.registry.OnCallRetired(uuid.New())
+	f.registry.OnCallRetired(uuid.Must(uuid.NewV7()))
 	if f.priorRetired != 1 {
 		t.Errorf("the existing retire hook ran %d times, want 1", f.priorRetired)
 	}
@@ -732,7 +732,7 @@ func (r *recordingPublisher) Publish(_ context.Context, ev events.Event, sc even
 func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
 	t.Parallel()
 	pub := &recordingPublisher{}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	announceCallback(t.Context(), pub)(store.Callback{CallID: &callID})
 
@@ -757,7 +757,7 @@ func TestABotCallbackIsAnnouncedToEveryone(t *testing.T) {
 func TestTheStartOfAConversationIsAnnouncedToSupervision(t *testing.T) {
 	t.Parallel()
 	pub := &recordingPublisher{}
-	callID, flowID := uuid.New(), uuid.New()
+	callID, flowID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	announceBotSession(t.Context(), pub)(callID, flowID)
 
@@ -854,7 +854,7 @@ func TestACampaignUpdateIsAnnouncedToSupervisionOnly(t *testing.T) {
 	t.Parallel()
 	pub := &recordingPublisher{}
 	next := time.Date(2026, 6, 1, 10, 0, 0, 0, time.UTC)
-	snap := campaign.Snapshot{CampaignID: uuid.New(), Status: campaign.StatusRunning,
+	snap := campaign.Snapshot{CampaignID: uuid.Must(uuid.NewV7()), Status: campaign.StatusRunning,
 		Activity: campaign.ActivityWaitingRetry, NextDialAt: &next, InFlight: 2,
 		Contacts: campaign.ContactCounts{Total: 10, Active: 7, Done: 3}}
 
