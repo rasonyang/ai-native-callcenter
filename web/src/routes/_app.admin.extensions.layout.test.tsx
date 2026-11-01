@@ -8,7 +8,6 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Extensions: the number (digits, no length bound in the contract), the
@@ -141,5 +140,5 @@ describe('extensions, deleting a 40-digit number', () => {
     await user.click(screen.getAllByTitle(i18n.t('common.delete'))[0])
     await screen.findByText(i18n.t('admin.deleteExtensionConfirm', { number: digits(40) }))
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })

@@ -8,7 +8,6 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Queues & Routing: a queue's display name and switch name (neither bounded in
@@ -158,7 +157,7 @@ describe('queues, the staffing dialog of a queue with a hostile name', () => {
     await user.click(screen.getAllByTitle(i18n.t('admin.staff'))[0])
     await screen.findByText('Ordinary agent')
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('queues, deleting a queue with a hostile name', () => {
@@ -169,5 +168,5 @@ describe('queues, deleting a queue with a hostile name', () => {
     await user.click(screen.getAllByTitle(i18n.t('common.delete'))[0])
     await screen.findByText(i18n.t('admin.deleteQueueConfirm', { name: target.displayName }))
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })

@@ -8,7 +8,6 @@ import {
   asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote, nestedJson, words,
 } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * The bot editor's History, Tools and Persona tabs, fed values that cannot
@@ -289,7 +288,7 @@ describe('bot editor, Persona and rules tab', () => {
     await openTab(user, 'bots.tabs.persona')
     await screen.findByText(i18n.t('bots.runtime'))
     await expectLayout(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('bot editor, a flow name at the contract limit', () => {

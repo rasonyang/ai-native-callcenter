@@ -6,7 +6,6 @@ import type { CDR, RecordingRow, TranscriptLine } from '@/lib/ledger'
 import { renderApp } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, nestedJson } from '@/test/hostile'
 import { expectLayout, LayoutViolation, layoutTest, restoreLanguage, settle, type LayoutContext } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * One call's page: the journey, the facts, the call's userData (written by
@@ -148,18 +147,18 @@ describe('call detail with hostile userData, facts and hangup cause', () => {
   // line of JSON), Chinese with no punctuation.
   // One field at a time, so a fixed one turns its own group green. A value
   // nested 30 deep scrolls inside its own box, so that group passes.
-  const hostile: Array<[name: string, call: () => CDR, isContained?: boolean]> = [
+  const hostile: Array<[name: string, call: () => CDR]> = [
     ['hangup cause', () => cdr({ hangupCause: asciiRun(6000, 31) })],
     ['userData value', () => cdr({ userData: { token: asciiRun(6000, 2), crmLookup: longUrl(), note: chineseRun(3000) } })],
     ['userData key', () => cdr({ userData: { [asciiRun(300, 1)]: 'x', [chineseRun(100, 5)]: digits(40) } })],
-    ['userData nested JSON', () => cdr({ userData: { context: nestedJson(30), summary: mixedNote() } }), true],
+    ['userData nested JSON', () => cdr({ userData: { context: nestedJson(30), summary: mixedNote() } })],
   ]
-  for (const [name, call, isContained] of hostile) {
+  for (const [name, call] of hostile) {
     layoutTest(`cdr/$callId facts and userData (${name})`, async (ctx) => {
       render({ cdr: call() })
       await drawn()
       await check(ctx)
-    }, isContained ? {} : { knownIssue: textWrap })
+    })
   }
 })
 
@@ -180,7 +179,7 @@ describe('call detail with hostile leg labels', () => {
     })
     await drawn()
     await check(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('call detail with 40-digit numbers in the title', () => {
@@ -214,7 +213,7 @@ describe('call detail with a hostile transcript', () => {
     })
     await drawn()
     await check(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('call detail with a hostile recording', () => {
@@ -227,5 +226,5 @@ describe('call detail with a hostile recording', () => {
     })
     await drawn()
     await check(ctx)
-  }, { knownIssue: textWrap })
+  })
 })

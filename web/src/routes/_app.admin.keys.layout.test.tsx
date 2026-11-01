@@ -8,7 +8,6 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * API Keys: name (contract limit 128, #370), the non-secret prefix, the scope
@@ -126,7 +125,7 @@ describe('API keys, revoking a key with a 128-character name', () => {
     await user.click(screen.getAllByTitle(i18n.t('keys.revoke'))[0])
     await screen.findByText(i18n.t('keys.revokeConfirm', { name: maxLengthOf('APIKeyWrite', 'name') }))
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('API keys, the one-time secret dialog', () => {
@@ -144,5 +143,5 @@ describe('API keys, the one-time secret dialog', () => {
     await screen.findByText(/^Authorization: Bearer /)
     expectDialogFits(ctx)
     await expectLayout(ctx)
-  }, { knownIssue: textWrap })
+  })
 })

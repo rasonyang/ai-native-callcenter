@@ -44,7 +44,7 @@ export function RecordDialog({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/20" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-card p-4 shadow-md">
-          <Dialog.Title className="text-base font-medium">{title}</Dialog.Title>
+          <Dialog.Title className="text-base font-medium wrap-anywhere">{title}</Dialog.Title>
           <form onSubmit={submit} className="mt-4 space-y-3">
             {children}
             {error && (

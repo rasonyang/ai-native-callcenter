@@ -8,7 +8,6 @@ import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * One campaign: header, counters, and the contacts, leads and attempts tabs
@@ -197,7 +196,7 @@ describe('campaign detail header', () => {
     render({ campaign: campaign({ didNumber: asciiRun(6000, 1) }) })
     await drawn()
     await expectLayout(ctx)
-  }, { knownIssue: textWrap })
+  })
 
   layoutTest('campaigns/$campaignId counters in the millions', async (ctx) => {
     render({

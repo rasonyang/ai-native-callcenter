@@ -7,7 +7,6 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Users: username (contract limit 64), display name (120), the allocated
@@ -109,7 +108,7 @@ describe('users, the password dialog of a 64-character username', () => {
     await pointer.click(screen.getAllByTitle(i18n.t('users.resetPassword'))[0])
     await screen.findByRole('dialog')
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })
 
 describe('users, the edit dialog of a 120-character display name', () => {
