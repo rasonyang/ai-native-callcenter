@@ -244,6 +244,7 @@ func TestIsCampaignReadyAgreesWithCreatingACampaign(t *testing.T) {
 
 	attempt := func(t *testing.T, id uuid.UUID, wantReady bool, refusal string) {
 		t.Helper()
+		f := f.in(t)
 		r := f.post(admin, "/campaigns", campaignBody(id, nil))
 		if wantReady {
 			wantReply(t, "create", r, http.StatusCreated, "")
@@ -257,6 +258,7 @@ func TestIsCampaignReadyAgreesWithCreatingACampaign(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			f := f.in(t)
 			if got := *listedDID(t, f, admin, tc.id).IsCampaignReady; got != tc.ready {
 				t.Errorf("isCampaignReady = %v, want %v", got, tc.ready)
 			}

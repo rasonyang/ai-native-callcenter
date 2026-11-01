@@ -64,6 +64,7 @@ func TestADraftWithAnUnknownFieldIsRefusedNamingIt(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f := f.in(t)
 			got := f.do(call{method: http.MethodPut, path: "/flows/" + flow.FlowID, cookie: admin, body: map[string]any{
 				"name": "Upgrade", "spec": unknownFieldSpec(tc.extra),
 			}})

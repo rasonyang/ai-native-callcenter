@@ -45,6 +45,17 @@ type fixture struct {
 	agent, other seeded
 }
 
+// in is the fixture as seen from t, for a subtest. The fixture keeps the t it
+// was built with and its helpers call f.t.Fatal*; used from a subtest as built,
+// they call FailNow on the parent from the subtest's goroutine, and Go blames
+// the parent and never runs the later subtests (#395). A subtest, and a closure
+// it calls, starts with f := f.in(t). The copy shares the server and the store.
+func (f *fixture) in(t *testing.T) *fixture {
+	g := *f
+	g.t = t
+	return &g
+}
+
 type seeded struct {
 	userID  uuid.UUID
 	agentID uuid.UUID
@@ -350,6 +361,7 @@ func TestASessionMayNeverActForAnotherAgent(t *testing.T) {
 		{"an administrator", f.seedAdmin()},
 	} {
 		t.Run(who.name, func(t *testing.T) {
+			f := f.in(t)
 			// /auth/me is the least interesting endpoint there is, which is the
 			// point: the rule is not about the endpoint, so pick one that is
 			// always mounted and cannot answer 404 over the real assertion.

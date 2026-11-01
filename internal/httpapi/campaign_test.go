@@ -311,6 +311,7 @@ func TestCampaignWritesAreValidatedWithTheContractsCodes(t *testing.T) {
 		{"no calling window", func(b map[string]any) { delete(b, "callingWindow") }, 422, "VALIDATION_FAILED", "callingWindow.days"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f := f.in(t)
 			r := f.post(admin, "/campaigns", campaignBody(didID, tc.mutate))
 			wantReply(t, tc.name, r, tc.status, tc.code)
 			if tc.field != "" {
@@ -477,6 +478,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 
 	// reach puts a fresh campaign in a status.
 	reach := func(t *testing.T, status string) campaignView {
+		f := f.in(t)
 		c := f.createCampaign(admin, didID, nil)
 		id := c.ID
 		move := func(action string) {
@@ -504,7 +506,7 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 
 	type action struct {
 		name string
-		do   func(id string) reply
+		do   func(f *fixture, id string) reply
 		// allowed: status -> expected HTTP status; others are refused with
 		// refusedStatus/refusedCode.
 		allowed       map[string]int
@@ -514,25 +516,25 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	all := []string{"DRAFT", "RUNNING", "PAUSED", "COMPLETED", "CANCELLED"}
 	nonTerminal := map[string]int{"DRAFT": 200, "RUNNING": 200, "PAUSED": 200}
 	actions := []action{
-		{"start", func(id string) reply { return f.post(admin, "/campaigns/"+id+"/start", nil) },
+		{"start", func(f *fixture, id string) reply { return f.post(admin, "/campaigns/"+id+"/start", nil) },
 			map[string]int{"DRAFT": 200}, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"pause", func(id string) reply { return f.post(admin, "/campaigns/"+id+"/pause", nil) },
+		{"pause", func(f *fixture, id string) reply { return f.post(admin, "/campaigns/"+id+"/pause", nil) },
 			map[string]int{"RUNNING": 200}, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"resume", func(id string) reply { return f.post(admin, "/campaigns/"+id+"/resume", nil) },
+		{"resume", func(f *fixture, id string) reply { return f.post(admin, "/campaigns/"+id+"/resume", nil) },
 			map[string]int{"PAUSED": 200}, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"cancel", func(id string) reply { return f.post(admin, "/campaigns/"+id+"/cancel", nil) },
+		{"cancel", func(f *fixture, id string) reply { return f.post(admin, "/campaigns/"+id+"/cancel", nil) },
 			nonTerminal, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"delete", func(id string) reply {
+		{"delete", func(f *fixture, id string) reply {
 			return f.do(call{method: http.MethodDelete, path: "/campaigns/" + id, cookie: admin})
 		},
 			map[string]int{"DRAFT": 204}, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"import", func(id string) reply {
+		{"import", func(f *fixture, id string) reply {
 			return f.post(admin, "/campaigns/"+id+"/contacts", map[string]any{"contacts": []map[string]any{{"number": "+8613800138000"}}})
 		}, nonTerminal, 409, "CAMPAIGN_INVALID_TRANSITION"},
-		{"rename", func(id string) reply {
+		{"rename", func(f *fixture, id string) reply {
 			return f.do(call{method: http.MethodPatch, path: "/campaigns/" + id, cookie: admin, body: map[string]any{"name": "Renamed"}})
 		}, map[string]int{"DRAFT": 200}, 409, "CAMPAIGN_FIELD_LOCKED"},
-		{"change maxConcurrent", func(id string) reply {
+		{"change maxConcurrent", func(f *fixture, id string) reply {
 			return f.do(call{method: http.MethodPatch, path: "/campaigns/" + id, cookie: admin, body: map[string]any{"maxConcurrent": 11}})
 		}, nonTerminal, 409, "CAMPAIGN_FIELD_LOCKED"},
 	}
@@ -540,11 +542,12 @@ func TestEveryCampaignActionFromEveryStatusThroughTheAPI(t *testing.T) {
 	for _, a := range actions {
 		for _, status := range all {
 			t.Run(a.name+" from "+status, func(t *testing.T) {
+				f := f.in(t)
 				c := reach(t, status)
 				if c.Status != status {
 					t.Fatalf("setup left the campaign %s, want %s", c.Status, status)
 				}
-				r := a.do(c.ID)
+				r := a.do(f, c.ID)
 				if want, ok := a.allowed[status]; ok {
 					wantReply(t, a.name+" from "+status, r, want, "")
 					return
@@ -1129,6 +1132,7 @@ func TestOnlyScopedCredentialsReachCampaigns(t *testing.T) {
 
 	for _, o := range ops {
 		t.Run(o.name, func(t *testing.T) {
+			f := f.in(t)
 			// An agent's session reaches none of it.
 			r := f.do(call{method: o.method, path: o.path, body: o.body, cookie: f.agent.cookie})
 			wantReply(t, "agent", r, http.StatusForbidden, "INSUFFICIENT_SCOPE")

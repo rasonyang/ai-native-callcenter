@@ -46,6 +46,7 @@ func TestACallNobodyAnsweredHasNoAnsweredAtOnTheWire(t *testing.T) {
 		{"11 the bot answered an agent's call at 1.5 s", row("OUTBOUND", 1500*time.Millisecond, store.CDRStatusAnswered), ptr(started.Add(1500 * time.Millisecond))},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f := f.in(t)
 			if err := f.st.Ledger().InsertCDR(ctx, tc.cdr); err != nil {
 				t.Fatalf("InsertCDR: %v", err)
 			}
