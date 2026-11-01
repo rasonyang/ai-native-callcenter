@@ -130,6 +130,7 @@ func TestSavingACallTakerWithoutAPhoneGivesThemOne(t *testing.T) {
 
 	for _, role := range []string{"AGENT", "SUPERVISOR"} {
 		t.Run(role, func(t *testing.T) {
+			f := f.in(t)
 			before := f.phoneless("amy-"+role, role)
 			got := f.saveUnchanged(admin, before)
 			if got.status != http.StatusOK {

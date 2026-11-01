@@ -358,6 +358,7 @@ func TestEveryRevisionIsServedWithTheSpecItStored(t *testing.T) {
 			http.StatusBadRequest, "VALIDATION_FAILED"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			f := f.in(t)
 			wantReply(t, "GET", f.do(call{method: http.MethodGet, path: tc.path, cookie: h.admin}), tc.status, tc.code)
 		})
 	}

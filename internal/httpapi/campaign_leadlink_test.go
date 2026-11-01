@@ -91,6 +91,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 
 	contacts := func(t *testing.T, campaignID, cookie, bearer string) map[string]leadLinkContact {
 		t.Helper()
+		f := f.in(t)
 		r := f.do(call{method: http.MethodGet, path: "/campaigns/" + campaignID + "/contacts", cookie: cookie, bearer: bearer})
 		if r.status != 200 {
 			t.Fatalf("list contacts: %d %s", r.status, r.body)
@@ -139,6 +140,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 
 	callbacks := func(t *testing.T, query, cookie, bearer string) []leadLinkCallback {
 		t.Helper()
+		f := f.in(t)
 		r := f.do(call{method: http.MethodGet, path: "/callbacks" + query, cookie: cookie, bearer: bearer})
 		if r.status != 200 {
 			t.Fatalf("callbacks%s: %d %s", query, r.status, r.body)
