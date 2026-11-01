@@ -10634,7 +10634,7 @@
           "url": {
             "type": "string",
             "format": "uri",
-            "description": "Where deliveries are POSTed. HTTPS."
+            "description": "Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it."
           },
           "filter": {
             "$ref": "#/components/schemas/WebhookFilter"
@@ -10726,7 +10726,8 @@
           "url": {
             "type": "string",
             "format": "uri",
-            "maxLength": 2048
+            "maxLength": 2048,
+            "description": "Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it."
           },
           "filter": {
             "$ref": "#/components/schemas/WebhookFilter"

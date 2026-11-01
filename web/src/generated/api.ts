@@ -3192,7 +3192,7 @@ export interface components {
             name: string;
             /**
              * Format: uri
-             * @description Where deliveries are POSTed. HTTPS.
+             * @description Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
              */
             url: string;
             filter: components["schemas"]["WebhookFilter"];
@@ -3220,7 +3220,10 @@ export interface components {
         /** @description Create or update a subscription. authToken is write-only: send it to set or replace it, omit it to leave it as it is, send an empty string to clear it. */
         WebhookSubscriptionWrite: {
             name: string;
-            /** Format: uri */
+            /**
+             * Format: uri
+             * @description Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
+             */
             url: string;
             filter?: components["schemas"]["WebhookFilter"];
             /** @description The customer's own credential, presented as `Authorization: Bearer <token>` on every delivery. It is theirs, not one of this deployment's own API keys, which point the other way and must never be used here (design 09 §8). */

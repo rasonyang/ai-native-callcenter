@@ -263,7 +263,10 @@ last-revision-wins per `callId`, and the contract must say so in as many words.
 Per-request timeout 10s. A 2xx is success; everything else, timeouts included, retries. 4xx
 other than 408/429 is arguably permanent, but telling "your payload is malformed" from "our WAF
 hiccuped" by status code is guesswork, so all failures are treated alike and the attempt cap
-ends it.
+ends it. Redirects are not followed (`CheckRedirect` returns `http.ErrUseLastResponse`): Go's
+client turns a redirected POST into a body-less GET, and the redirected page's 2xx would read as
+delivered. A 3xx is a failed attempt like any other, so the subscription URL must be the final
+one (#412).
 
 **Failure is announced (Q3):** a counter in `internal/obs/callmetrics.go` — the one place every
 instrument name lives — **and** a WARN naming the subscription, the call and the last status.
