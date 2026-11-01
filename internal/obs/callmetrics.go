@@ -42,6 +42,7 @@ var (
 	botInterruptions   metric.Int64Counter
 	botSessionLimits   metric.Int64Counter
 	botUnbacked        metric.Int64Counter
+	botClaimCues       metric.Int64Counter
 	botFirstMedia      metric.Int64Histogram
 	botFirstAudio      metric.Int64Histogram
 	botSlots           metric.Int64UpDownCounter
@@ -148,6 +149,13 @@ func init() {
 			"from the bot's own transcript, so a signal rather than proof; counted before "+
 			"anything acts on it, and labelled by provider to say whether one engine "+
 			"does it and the others do not."))
+	botClaimCues, _ = meter.Int64Counter("aicc_bot_claim_cues_total",
+		metric.WithDescription("Cues the platform sent after a bot turn claimed a lookup, "+
+			"transfer or message no tool call backed, by claim, provider, trigger "+
+			"(PLAYBACK_DONE: asked once the caller had heard the promise; NO_INPUT: asked "+
+			"in place of the dead-air prompt) and outcome (BACKED: the turn that answered "+
+			"the cue made a tool call; NOT_BACKED: it did not). The rate of BACKED is how "+
+			"often the second ask fixes the first."))
 	botInterruptions, _ = meter.Int64Counter("aicc_bot_interruptions_total",
 		metric.WithDescription("Times a caller took the floor back from the bot, by what "+
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
@@ -371,6 +379,26 @@ func RecordUnbackedClaim(claim, provider string) {
 	}
 	botUnbacked.Add(context.Background(), 1, metric.WithAttributes(
 		attribute.String("claim", claim), attribute.String("provider", provider)))
+}
+
+// Outcome values of a claim cue (RecordClaimCue).
+const (
+	ClaimCueBacked    = "BACKED"
+	ClaimCueNotBacked = "NOT_BACKED"
+)
+
+// RecordClaimCue counts one claim cue whose answering turn has finished (#438):
+// the platform told the model its last reply promised a lookup, transfer or
+// message that no tool call made true, and named the tool. trigger says what
+// made it ask (PLAYBACK_DONE or NO_INPUT), outcome whether the turn that
+// answered called a tool (ClaimCueBacked) or not (ClaimCueNotBacked).
+func RecordClaimCue(claim, provider, trigger, outcome string) {
+	if botClaimCues == nil {
+		return
+	}
+	botClaimCues.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("claim", claim), attribute.String("provider", provider),
+		attribute.String("trigger", trigger), attribute.String("outcome", outcome)))
 }
 
 // RecordProviderSessionStarted counts one conversation session being opened.

@@ -2639,7 +2639,7 @@ export interface components {
             /** @description True when the bot finished the conversation without a human. */
             isContained: boolean;
             hasRecording: boolean;
-            /** @description Each kind of claim the bot made with no tool call behind it, once. Absent when it made none. It changes nothing about the call: a call can be contained and still carry one, and a containment figure that should not count a caller who was told something that never happened leaves such calls out. */
+            /** @description Each kind of claim the bot made with no tool call behind it, once. Absent when it made none. Recording one does not change whether the call counts as contained: a call can be contained and still carry one, and a containment figure that should not count a caller who was told something that never happened leaves such calls out. */
             unbackedClaims?: components["schemas"]["UnbackedClaim"][];
             userData?: {
                 [key: string]: unknown;

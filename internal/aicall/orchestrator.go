@@ -625,7 +625,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					enforceLimit(limitCallerSilent)
 					continue
 				}
-				o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), log)
+				o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, log)
 				claims.consumeFarewell()
 
 			case EventTypeTurnDone:
@@ -642,6 +642,9 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					event.Turn == wall.toolCallTurn, actions.isArmed()))
 				if event.IsInterrupted {
 					claims.onTurnInterrupted()
+				}
+				if out, ok := claims.takeCueOutcome(); ok {
+					o.reportClaimCueOutcome(out, event.Turn, event.IsInterrupted, log)
 				}
 				actions.onTurnDone(event.Turn, event.IsInterrupted, event.HasAudio)
 				wall.onTurnDone(event.Turn, event.IsInterrupted, runtime)
@@ -677,7 +680,13 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				if isApplicationAside(event, &wall) {
 					continue
 				}
+				// The wall's close, when this turn crossed it, wins over a
+				// re-ask: the call is ending, not being asked to act.
+				isWallClosing := wall.crossedInTurn != 0 && wall.crossedInTurn == event.Turn
 				o.handlePlaybackDone(event.Turn, event.HasAudio, &wall, session, runtime, actions, log)
+				if c := claims.onPlaybackDone(event.Turn); c != nil && !isWallClosing {
+					o.reAskClaim(*c, event.Turn, &claims, session, runtime, actions, log)
+				}
 
 			case EventTypeFailed:
 				if actions.isSettlingHandover() {
@@ -724,17 +733,75 @@ func (o *Orchestrator) after(d time.Duration) <-chan time.Time {
 }
 
 // reportUnbackedClaim records a claim the bot made with no tool call behind
-// it (claimWatch). It changes nothing about the call: it is counted, logged
-// and written to the call's record, so the rate can be measured — and the
-// engines compared — before anything is made to act on it (#44). The log
-// carries the words that matched and not the line, which is the transcript's
-// to keep.
+// it (claimWatch). It is counted, logged and written to the call's record, so
+// the rate can be measured and the engines compared (#44); what is done about
+// a lookup, transfer or message claim is reAskClaim's and handleDeadAir's
+// (#438). The log carries the words that matched and not the line, which is
+// the transcript's to keep.
 func (o *Orchestrator) reportUnbackedClaim(turn int, c claim, recorder *callRecorder,
 	log *slog.Logger) {
 	log.Warn("the bot claimed an action no tool call backs",
 		"claim", c.kind, "turn", turn, "phrase", c.phrase)
 	obs.RecordUnbackedClaim(c.kind, o.cfg.Profile.Name)
 	recorder.markUnbackedClaim(c.kind)
+}
+
+// reAskClaim asks the model once, at the end of the turn that made it, to do
+// what an unbacked lookup, transfer or message claim said it was doing (#438).
+// The caller has heard the promise by now and is waiting; the model is the only
+// one who can make it true, and the cue says which tool and that nothing has
+// run. It is not sent when the call is ending or being handed over, when the
+// phase is terminal, or when the bot has the floor again.
+func (o *Orchestrator) reAskClaim(c claim, turn int, claims *claimWatch, session *Session,
+	runtime *flow.Runtime, actions *callActions, log *slog.Logger) {
+
+	if actions.isArmed() || actions.isSettlingHandover() || runtime.Engine().IsTerminal() ||
+		session.isHoldingTheFloor() {
+		return
+	}
+	o.sendClaimCue(c, turn, claimCueOnPlayback, false, claims, session, runtime, actions, log)
+}
+
+// sendClaimCue sends the cue for a claim and records that the next finished
+// turn answers it. A dead-air cue that could not be sent leaves the silence
+// watched, as handleDeadAir's own does (#228). One sent at PLAYBACK_DONE needs
+// nothing of the kind: the session arms the dead-air watch after every
+// PLAYBACK_DONE itself, and a stray re-arm request would outlive that cycle.
+func (o *Orchestrator) sendClaimCue(c claim, turn int, trigger string, isCallerSilent bool,
+	claims *claimWatch, session *Session, runtime *flow.Runtime, actions *callActions,
+	log *slog.Logger) {
+
+	tools := claimTools(runtime, c.kind)
+	cue := claimCue(runtime.Engine().Lang(), c, tools, isCallerSilent)
+	if err := session.SendCue(cue); err != nil {
+		log.Warn("could not re-ask an unbacked claim", "claim", c.kind, "turn", turn,
+			"trigger", trigger, "error", err)
+		if trigger == claimCueOnNoInput && !actions.isArmed() {
+			session.RewatchDeadAir()
+		}
+		return
+	}
+	claims.cueSent(c.kind, trigger)
+	log.Info("asked the bot to act on a claim no tool call backs",
+		"claim", c.kind, "turn", turn, "trigger", trigger, "tools", tools)
+}
+
+// reportClaimCueOutcome records how a claim cue fared once the turn that
+// answered it is done: backed when that turn called a tool. A turn the caller
+// cut off with no call in it says nothing about the cue.
+func (o *Orchestrator) reportClaimCueOutcome(out claimCueOutcome, turn int, isInterrupted bool,
+	log *slog.Logger) {
+
+	if isInterrupted && !out.isBacked {
+		return
+	}
+	outcome := obs.ClaimCueNotBacked
+	if out.isBacked {
+		outcome = obs.ClaimCueBacked
+	}
+	log.Info("a claim cue was answered", "claim", out.kind, "turn", turn,
+		"trigger", out.trigger, "outcome", outcome)
+	obs.RecordClaimCue(out.kind, o.cfg.Profile.Name, out.trigger, outcome)
 }
 
 // hangupCauseMediaOrProvider is what a failed AI call is released with: the
@@ -1084,8 +1151,12 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 // closing target ends it, through the path every engine-decided ending takes.
 // Not when an ending is already armed, in a terminal phase, on a campaign
 // call, or in a flow with no closing target: those keep the cue.
+//
+// claims is the call's claim watch (nil when there is none to consult). A
+// lookup, transfer or message the bot promised and never made (#438) gets the
+// claim cue in place of the generic one, which would ask for the promise again.
 func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
-	actions *callActions, isFarewellUnhung bool, log *slog.Logger) {
+	actions *callActions, isFarewellUnhung bool, claims *claimWatch, log *slog.Logger) {
 
 	moved := runtime.OnNoInput()
 	// A move that carried words of its own has already asked for the next
@@ -1109,6 +1180,16 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 			}
 			return
 		}
+	}
+
+	// A caller waiting on a lookup, transfer or message the bot promised and
+	// never made (#438) is not waiting for "the current question", which the
+	// model has defined as that promise: the cue names the tool instead. Not
+	// when the flow has just moved to a closing phase, whose goodbye is next.
+	if c := claims.standingClaim(); c != nil && !actions.isArmed() && !(moved != "" && runtime.Engine().IsTerminal()) {
+		o.sendClaimCue(*c, claims.standingTurn, claimCueOnNoInput, true, claims, session,
+			runtime, actions, log)
+		return
 	}
 
 	// A model that closed the conversation in words and never called hangup

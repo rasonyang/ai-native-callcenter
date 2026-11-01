@@ -137,3 +137,87 @@ func TestClaimWatchReportsOnlyWhatNoToolBacks(t *testing.T) {
 		}
 	})
 }
+
+// The state a re-ask is made from: which turn is owed one, and what takes it back.
+func TestClaimWatchStandsForTheLatestUnbackedActionableClaim(t *testing.T) {
+	t.Parallel()
+	const lookup = "好的，我帮您查询一下。"
+
+	t.Run("owed at the claim turn's playback, once", func(t *testing.T) {
+		var w claimWatch
+		w.onBotSaid(3, lookup)
+		w.onTurnDone(3, false, false)
+		if w.standingClaim() == nil || w.standingClaim().kind != store.UnbackedClaimLookup {
+			t.Fatalf("standing = %v, want the lookup", w.standingClaim())
+		}
+		if c := w.onPlaybackDone(2); c != nil {
+			t.Errorf("re-ask owed at another turn's playback: %v", c)
+		}
+		if c := w.onPlaybackDone(3); c == nil {
+			t.Error("no re-ask at the claim turn's playback")
+		}
+		if c := w.onPlaybackDone(3); c != nil {
+			t.Error("the re-ask was owed twice")
+		}
+		if w.standingClaim() == nil {
+			t.Error("a re-ask took the claim from the dead-air path before a cue was sent")
+		}
+		w.cueSent(store.UnbackedClaimLookup, claimCueOnPlayback)
+		if w.standingClaim() != nil {
+			t.Error("a claim cue was sent and the claim still stands")
+		}
+	})
+	t.Run("the answer to a cue is not owed one but still stands", func(t *testing.T) {
+		var w claimWatch
+		w.cueSent(store.UnbackedClaimLookup, claimCueOnPlayback)
+		w.onBotSaid(4, lookup)
+		w.onTurnDone(4, false, false)
+		if c := w.onPlaybackDone(4); c != nil {
+			t.Errorf("the answer to a cue was re-asked: %v", c)
+		}
+		if w.standingClaim() == nil {
+			t.Error("a second promise does not stand for the dead-air cue")
+		}
+		out, ok := w.takeCueOutcome()
+		if !ok || out.isBacked {
+			t.Errorf("outcome = %+v, %v; want a cue that was not backed", out, ok)
+		}
+		if _, again := w.takeCueOutcome(); again {
+			t.Error("the outcome was reported twice")
+		}
+	})
+	t.Run("a tool call, a later turn and an interruption take it back", func(t *testing.T) {
+		var w claimWatch
+		w.onBotSaid(1, lookup)
+		w.onTurnDone(1, false, false)
+		w.onToolCall()
+		if w.standingClaim() != nil {
+			t.Error("a tool call left the claim standing")
+		}
+		w.onBotSaid(2, lookup)
+		w.onTurnDone(2, false, false)
+		w.onTurnDone(3, false, false)
+		if w.standingClaim() != nil {
+			t.Error("a later turn left the claim standing")
+		}
+		w.onBotSaid(4, lookup)
+		w.onTurnDone(4, false, false)
+		w.onTurnInterrupted()
+		if w.standingClaim() != nil || w.onPlaybackDone(4) != nil {
+			t.Error("an interrupted turn left the claim standing")
+		}
+		w.onBotSaid(5, "Goodbye.")
+		w.onTurnDone(5, false, false)
+		if w.standingClaim() != nil {
+			t.Error("a farewell stands for a claim cue; it has its own path")
+		}
+	})
+	t.Run("the first actionable claim in detection order", func(t *testing.T) {
+		var w claimWatch
+		w.onBotSaid(1, "再见。好的，我马上为您转接人工客服，我帮您查询一下。")
+		w.onTurnDone(1, false, false)
+		if c := w.standingClaim(); c == nil || c.kind != store.UnbackedClaimTransfer {
+			t.Errorf("standing = %v, want the transfer", c)
+		}
+	})
+}

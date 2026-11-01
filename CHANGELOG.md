@@ -83,6 +83,20 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- AI calls: a lookup, transfer or message the bot promised without calling the
+  tool ("好的，我帮您查询一下 RMA1003 的维修进度。", nothing run) is now acted on
+  once. When the caller has heard the promise, the model gets one cue that
+  quotes it, says nothing ran and names the tool to call (the flow's backend
+  tools for a lookup, `transfer_to_agent`, `take_message`; a phase with none
+  gets a cue to say plainly that it was not done). A caller who goes quiet
+  instead is no longer sent the dead-air prompt that asked the model to repeat
+  "the current question", which was the promise, every ~14 s until they hung
+  up; the same cue replaces it. The reply to a cue is never re-asked at its
+  own playback, and no re-ask is made with an ending armed, a handover
+  settling, a terminal phase, or after the caller talked over the promise. New
+  metric `aicc_bot_claim_cues_total{claim,provider,trigger,outcome}`: `BACKED`
+  when the turn that answered the cue made a tool call. Goodbyes keep their
+  existing handling. No API shape, CDR or database change. (#438)
 - A webhook delivery whose subscription URL answered with a redirect (301, 302,
   303, 307 or 308) could be marked DELIVERED without the subscriber ever
   receiving the CDR: the client followed the redirect, which turns the POST into

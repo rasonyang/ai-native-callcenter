@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/flow"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
@@ -24,6 +25,13 @@ import (
 // question, a condition, a "can" or "would you like". A claim missed here is
 // one the conversation already hid; a claim invented here would make the
 // count one nobody trusts, so the patterns err narrow.
+//
+// A claim is first measured (#44) and, for the kinds a tool can make true, then
+// acted on once (#438): LOOKUP, TRANSFER and MESSAGE. The caller who has heard
+// the promise is re-asked once, at the end of the turn's playback, with a cue
+// that names the tool; a caller who goes quiet instead gets the same cue in
+// place of the dead-air prompt, which would otherwise ask the model to repeat
+// the promise as "the current question". FAREWELL has its own path (#147).
 
 // claim is one kind of action a bot line claims, and the words that claimed it.
 type claim struct {
@@ -153,6 +161,124 @@ type claimWatch struct {
 	// with nothing behind it: no tool call, no armed ending (#147). The next
 	// turn of any kind, or a tool call, takes it back.
 	isFarewellUnhung bool
+
+	// standing is the first actionable claim (claimIsActionable) of the latest
+	// finished turn that nothing backed, nil when there is none. A tool call,
+	// the next turn done, an interrupted turn, or a cue sent for it takes it
+	// back (#438).
+	standing *claim
+	// standingTurn is the turn standing was said in.
+	standingTurn int
+	// reAskTurn is the turn whose playback is owed a re-ask: standing's turn,
+	// unless that turn answered a claim cue (a claim cue is sent once, so the
+	// reply to one is never re-asked at its playback). 0 is none.
+	reAskTurn int
+	// playedTurn is the latest turn whose playback finished, so a claim read
+	// from a transcript that arrived after the caller heard the turn is not
+	// re-asked (the dead-air path still covers it).
+	playedTurn int
+	// cue is the claim cue sent whose answer has not finished yet; its next
+	// finished turn is that answer.
+	cue *claimCueSent
+	// lastDoneAnswered says the latest finished turn was the answer to a claim
+	// cue, for a transcript that arrives late.
+	lastDoneAnswered bool
+	// isLastDoneInterrupted says the caller talked over the latest finished
+	// turn: nothing in it was heard to the end.
+	isLastDoneInterrupted bool
+	// outcome is the answer to a claim cue that has just finished, until
+	// takeCueOutcome reads it.
+	outcome *claimCueOutcome
+}
+
+// claimCueSent is a claim cue waiting for the turn that answers it.
+type claimCueSent struct {
+	kind    string
+	trigger string
+}
+
+// claimCueOutcome is how a claim cue fared: whether the turn that answered it
+// made a tool call.
+type claimCueOutcome struct {
+	kind     string
+	trigger  string
+	isBacked bool
+}
+
+// claimIsActionable says a tool call can make the claim true. A goodbye is
+// not: it has its own path (#147).
+func claimIsActionable(kind string) bool {
+	switch kind {
+	case store.UnbackedClaimLookup, store.UnbackedClaimTransfer, store.UnbackedClaimMessage:
+		return true
+	}
+	return false
+}
+
+// firstActionable is the first claim of found, in detection order, a tool can
+// make true.
+func firstActionable(found []claim) *claim {
+	for i := range found {
+		if claimIsActionable(found[i].kind) {
+			c := found[i]
+			return &c
+		}
+	}
+	return nil
+}
+
+// stand makes found's first actionable claim the one standing for turn.
+func (w *claimWatch) stand(turn int, found []claim) {
+	w.standing, w.standingTurn, w.reAskTurn = nil, 0, 0
+	c := firstActionable(found)
+	if c == nil {
+		return
+	}
+	w.standing, w.standingTurn = c, turn
+	if !w.lastDoneAnswered && !w.isLastDoneInterrupted && turn > w.playedTurn {
+		w.reAskTurn = turn
+	}
+}
+
+// standingClaim is the claim a silent caller is waiting on, nil when none.
+func (w *claimWatch) standingClaim() *claim {
+	if w == nil {
+		return nil
+	}
+	return w.standing
+}
+
+// consumeStanding takes the standing claim back once a cue has been sent for it.
+func (w *claimWatch) consumeStanding() { w.standing, w.standingTurn, w.reAskTurn = nil, 0, 0 }
+
+// onPlaybackDone is the caller having heard a turn to its end. It returns the
+// claim to re-ask when that turn is the one owed a re-ask. The owed re-ask is
+// always taken, so a gate that skips it does not leave it for a later playback.
+func (w *claimWatch) onPlaybackDone(turn int) *claim {
+	w.playedTurn = max(w.playedTurn, turn)
+	if w.reAskTurn == 0 || w.reAskTurn != turn || w.standing == nil {
+		return nil
+	}
+	c := w.standing
+	w.reAskTurn = 0
+	return c
+}
+
+// cueSent records that a claim cue went out: the next finished turn answers it.
+func (w *claimWatch) cueSent(kind, trigger string) {
+	w.cue = &claimCueSent{kind: kind, trigger: trigger}
+	w.consumeStanding()
+}
+
+// takeCueOutcome returns the outcome of the claim cue whose answer just
+// finished, once.
+func (w *claimWatch) takeCueOutcome() (claimCueOutcome, bool) {
+	if w.outcome == nil {
+		return claimCueOutcome{}, false
+	}
+	out := *w.outcome
+	w.outcome = nil
+	return out, true
 }
 
 // hasFarewellWithoutHangup reports whether the bot's last finished turn said
@@ -161,11 +287,18 @@ type claimWatch struct {
 func (w *claimWatch) hasFarewellWithoutHangup() bool { return w.isFarewellUnhung }
 
 // onToolCall takes the farewell back: the model is acting after all.
-func (w *claimWatch) onToolCall() { w.isFarewellUnhung = false }
+func (w *claimWatch) onToolCall() {
+	w.isFarewellUnhung = false
+	w.consumeStanding()
+}
 
 // onTurnInterrupted takes the farewell back: a turn the caller talked over was
 // not heard to the end, so nothing was said that the call could be left on.
-func (w *claimWatch) onTurnInterrupted() { w.isFarewellUnhung = false }
+func (w *claimWatch) onTurnInterrupted() {
+	w.isFarewellUnhung = false
+	w.isLastDoneInterrupted = true
+	w.consumeStanding()
+}
 
 // consumeFarewell takes the farewell back once it has been acted on.
 func (w *claimWatch) consumeFarewell() { w.isFarewellUnhung = false }
@@ -194,6 +327,9 @@ func (w *claimWatch) onBotSaid(turn int, text string) []claim {
 		}
 		found := detectClaims(text)
 		w.isFarewellUnhung = w.isFarewellUnhung || hasFarewell(found)
+		if w.standing == nil {
+			w.stand(turn, found)
+		}
 		return found
 	case turn < w.lastDoneTurn:
 		return nil
@@ -215,6 +351,13 @@ func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
 	w.lastDoneTurn = turn
 	w.isLastDoneBacked = isBacked
 	w.isFarewellUnhung = false
+	w.standing, w.standingTurn, w.reAskTurn = nil, 0, 0
+	w.lastDoneAnswered = w.cue != nil
+	w.isLastDoneInterrupted = false
+	if w.cue != nil {
+		w.outcome = &claimCueOutcome{kind: w.cue.kind, trigger: w.cue.trigger, isBacked: isToolCall}
+		w.cue = nil
+	}
 
 	text := w.pending[turn]
 	for pendingTurn := range w.pending {
@@ -227,5 +370,116 @@ func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
 	}
 	found := detectClaims(text)
 	w.isFarewellUnhung = hasFarewell(found)
+	w.stand(turn, found)
 	return found
+}
+
+// Trigger values of a claim cue: what made the platform ask.
+const (
+	claimCueOnPlayback = "PLAYBACK_DONE"
+	claimCueOnNoInput  = "NO_INPUT"
+)
+
+// claimTools are the tools the current phase lets the model call to make the
+// claim true: the flow's backend tools for a lookup, transfer_to_agent for a
+// transfer, take_message for a message. Empty when the phase offers none.
+func claimTools(runtime *flow.Runtime, kind string) []string {
+	switch kind {
+	case store.UnbackedClaimLookup:
+		var names []string
+		for _, spec := range runtime.Tools() {
+			if runtime.IsHTTPTool(spec.Name) {
+				names = append(names, spec.Name)
+			}
+		}
+		return names
+	case store.UnbackedClaimTransfer:
+		if runtime.IsToolAllowed(flow.ToolTransferToAgent) {
+			return []string{flow.ToolTransferToAgent}
+		}
+	case store.UnbackedClaimMessage:
+		if runtime.IsToolAllowed(flow.ToolTakeMessage) {
+			return []string{flow.ToolTakeMessage}
+		}
+	}
+	return nil
+}
+
+// claimCue tells the model that its last reply promised something no tool call
+// made true, and what to do now. The wording is concrete on purpose: it quotes
+// the promise, says nothing is happening, names the tool and says to call it
+// before speaking, because a general reminder is what the model already failed
+// to follow (actionClaimRule). isCallerSilent is the dead-air trigger: the
+// caller has gone quiet waiting for it.
+func claimCue(lang string, c claim, tools []string, isCallerSilent bool) string {
+	if lang == flow.LangZH {
+		return claimCueZH(c, tools, isCallerSilent)
+	}
+	return claimCueEN(c, tools, isCallerSilent)
+}
+
+func claimCueEN(c claim, tools []string, isCallerSilent bool) string {
+	var b strings.Builder
+	b.WriteString("(")
+	if isCallerSilent {
+		b.WriteString("The caller has been silent, waiting for you. ")
+	}
+	b.WriteString("Your last reply told the caller \"" + c.phrase + "\", but ")
+	if len(tools) == 0 {
+		b.WriteString("nothing happened: you have no tool here that can do that. " +
+			"Tell the caller plainly that it was not done, and say what you can do instead. " +
+			"Do not claim it again.)")
+		return b.String()
+	}
+	var happening, missing, again string
+	switch c.kind {
+	case store.UnbackedClaimTransfer:
+		happening = "no transfer was made, so the caller is not being put through"
+		missing = "what it needs (for example which queue or why)"
+		again = "that you are transferring them"
+	case store.UnbackedClaimMessage:
+		happening = "no message was saved, so nothing has been recorded"
+		missing = "what it needs (for example the message or a callback number)"
+		again = "that it is saved"
+	default:
+		happening = "no lookup ran, so nothing is being looked up"
+		missing = "what it needs (for example which order)"
+		again = "that you are checking"
+	}
+	b.WriteString(happening + " and the caller is waiting. Call " + strings.Join(tools, " or ") +
+		" now, without saying anything first. If you do not have " + missing +
+		", ask the caller for it instead. Do not say again " + again + ".)")
+	return b.String()
+}
+
+func claimCueZH(c claim, tools []string, isCallerSilent bool) string {
+	var b strings.Builder
+	b.WriteString("（")
+	if isCallerSilent {
+		b.WriteString("来电者一直没有说话，在等你。")
+	}
+	b.WriteString("你上一轮对来电者说了“" + c.phrase + "”，但")
+	if len(tools) == 0 {
+		b.WriteString("实际什么都没有发生：你在这里没有任何工具能做这件事。" +
+			"请直接告诉来电者这件事没有办成，并说明你能做什么。不要再说你在做这件事。）")
+		return b.String()
+	}
+	var happening, missing, again string
+	switch c.kind {
+	case store.UnbackedClaimTransfer:
+		happening = "没有调用任何转接工具，转接并没有发生，来电者没有被接通"
+		missing = "转接需要的信息（例如转到哪个队列、为什么）"
+		again = "你在转接"
+	case store.UnbackedClaimMessage:
+		happening = "没有调用任何留言工具，留言并没有被记录"
+		missing = "留言需要的信息（例如留言内容或回电号码）"
+		again = "已经记录"
+	default:
+		happening = "没有调用任何查询工具，查询并没有发生"
+		missing = "要查什么"
+		again = "你在查"
+	}
+	b.WriteString(happening + "，来电者在等。现在就调用 " + strings.Join(tools, " 或 ") +
+		"，调用之前不要说话。如果不知道" + missing + "，就直接问来电者。不要再说" + again + "。）")
+	return b.String()
 }

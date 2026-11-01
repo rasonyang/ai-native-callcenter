@@ -83,9 +83,10 @@ type CDR struct {
 	HasRecording bool   `json:"hasRecording"`
 	// UnbackedClaims is what the bot told the caller it was doing, or had
 	// done, in a turn with no tool call behind it: each kind once
-	// (UnbackedClaim*), empty when it made none. It changes nothing about the
-	// call; it is there so that a conversation which reads as contained can be
-	// told apart from one where the caller was promised something that never
+	// (UnbackedClaim*), empty when it made none. Recording it does not change
+	// IsContained (the bot may act on a claim while the call runs, #438); it
+	// is there so that a conversation which reads as contained can be told
+	// apart from one where the caller was promised something that never
 	// happened.
 	UnbackedClaims []string `json:"unbackedClaims,omitempty"`
 

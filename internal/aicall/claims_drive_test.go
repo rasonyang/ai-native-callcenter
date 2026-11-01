@@ -130,7 +130,15 @@ type claimsHarness struct {
 // whose only open queue is "support" on 7001.
 func newClaimsHarness(t *testing.T) *claimsHarness {
 	t.Helper()
-	session, leg, model := startBridge(t, provider.OpenAIProfile())
+	return newClaimsHarnessWith(t, claimsFlow, "zh", "", Config{BargeGuard: -1, NoInput: -1})
+}
+
+// newClaimsHarnessWith runs the same call on a flow of the test's own, in a
+// language, with a backend the flow's HTTP tools call (empty for none) and a
+// session configuration.
+func newClaimsHarnessWith(t *testing.T, flowJSON, lang, backendURL string, cfg Config) *claimsHarness {
+	t.Helper()
+	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(), cfg)
 	awaitBridgeEvent(t, session, EventTypeReady)
 
 	h := &claimsHarness{session: session, leg: leg, model: model,
@@ -152,15 +160,15 @@ func newClaimsHarness(t *testing.T) *claimsHarness {
 	}
 	h.o = o
 
-	spec, err := flow.Load([]byte(claimsFlow))
+	spec, err := flow.Load([]byte(flowJSON))
 	if err != nil {
 		t.Fatalf("load flow: %v", err)
 	}
-	engine := flow.NewEngine(spec, "zh", nil, log)
+	engine := flow.NewEngine(spec, lang, nil, log)
 	h.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	h.actions = &callActions{orchestrator: o, session: session, log: log,
 		callerChannel: "chan-9", recorder: h.recorder, facts: testFacts()}
-	h.runtime = flow.NewRuntime(engine, h.actions, flow.NewBackend(""), nil, log)
+	h.runtime = flow.NewRuntime(engine, h.actions, flow.NewBackend(backendURL), nil, log)
 
 	go func() {
 		defer close(h.done)
