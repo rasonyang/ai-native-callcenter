@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,9 +32,16 @@ func discard() *slog.Logger { return slog.New(slog.DiscardHandler) }
 // a function of its own server only.
 func newWorker(t *testing.T, st Store, m Metrics) *Worker {
 	t.Helper()
+	return newWorkerLogging(t, st, m, discard())
+}
+
+// newWorkerLogging is newWorker with a logger, for the tests that assert what
+// an operator is told.
+func newWorkerLogging(t *testing.T, st Store, m Metrics, log *slog.Logger) *Worker {
+	t.Helper()
 	tr := &http.Transport{}
 	t.Cleanup(tr.CloseIdleConnections)
-	w := New(st, m, discard())
+	w := New(st, m, log)
 	w.client.Transport = tr
 	return w
 }
@@ -53,6 +61,9 @@ type fakeStore struct {
 	// reasons keeps why each delivery was rescheduled or failed, so an
 	// assertion that a delivery was not marked delivered can say why.
 	reasons map[uuid.UUID]string
+	// codes keeps the status code each rescheduled or failed delivery was
+	// settled with (last_status_code).
+	codes map[uuid.UUID]int
 	// deliveredCh announces each settled delivery, so a test can wait on
 	// progress instead of sleeping and hoping.
 	deliveredCh chan uuid.UUID
@@ -66,6 +77,7 @@ func newFakeStore(url, token string, due ...store.WebhookDelivery) *fakeStore {
 		failed:      map[uuid.UUID]string{},
 		rescheduled: map[uuid.UUID]time.Time{},
 		reasons:     map[uuid.UUID]string{},
+		codes:       map[uuid.UUID]int{},
 		deliveredCh: make(chan uuid.UUID, 256),
 	}
 }
@@ -116,17 +128,19 @@ func (f *fakeStore) deliveredCount() int {
 	return len(f.delivered)
 }
 
-func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, at time.Time, _ int, reason string) error {
+func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, at time.Time, code int, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rescheduled[id] = at
+	f.codes[id] = code
 	f.reasons[id] = reason
 	return nil
 }
 
-func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, _ int, reason string) error {
+func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, code int, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.codes[id] = code
 	f.failed[id] = reason
 	f.reasons[id] = reason
 	return nil
@@ -456,6 +470,131 @@ func TestASlowSubscriberDoesNotHoldUpAnotherOne(t *testing.T) {
 	}
 	if n := st.deliveredCount(); n != 2*each {
 		t.Errorf("delivered = %d, want %d", n, 2*each)
+	}
+}
+
+// lockedBuffer is a log sink the worker's goroutines and the test can share.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// redirectingServer answers /old with the given redirect to /new, and /new
+// with 200, counting how often /new was reached.
+func redirectingServer(t *testing.T, code int) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/old":
+			http.Redirect(w, r, "/new", code)
+		case "/new":
+			hits.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &hits
+}
+
+// A redirect is a failed attempt, not a delivery. Go's client would turn the
+// redirected POST into a body-less GET, and the page it lands on answering
+// 2xx would mark a delivery the subscriber never received as DELIVERED.
+func TestARedirectIsAFailedAttemptAndIsNotFollowed(t *testing.T) {
+	t.Parallel()
+	for _, code := range []int{301, 302, 303, 307, 308} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			t.Parallel()
+			srv, hits := redirectingServer(t, code)
+
+			// The control: the target accepts a delivery posted straight to it.
+			ctl := pending(1)
+			ctlStore := newFakeStore(srv.URL+"/new", "t", ctl)
+			newWorker(t, ctlStore, nil).drain(t.Context())
+			if _, ok := ctlStore.delivered[ctl.DeliveryID]; !ok {
+				t.Fatalf("the control delivery to /new was not delivered: %s", ctlStore.whyNot(ctl.DeliveryID))
+			}
+			hits.Store(0)
+
+			d := pending(1)
+			st := newFakeStore(srv.URL+"/old", "t", d)
+			w := newWorker(t, st, nil)
+			base := time.Date(2026, 8, 26, 10, 0, 0, 0, time.UTC)
+			w.now = func() time.Time { return base }
+			w.drain(t.Context())
+
+			if _, ok := st.delivered[d.DeliveryID]; ok {
+				t.Fatalf("a %d was recorded as delivered", code)
+			}
+			at, ok := st.rescheduled[d.DeliveryID]
+			if !ok {
+				t.Fatalf("a %d was not rescheduled: %s", code, st.whyNot(d.DeliveryID))
+			}
+			if want := base.Add(Backoff[1]); !at.Equal(want) {
+				t.Errorf("next attempt at %v, want %v", at, want)
+			}
+			if got := st.codes[d.DeliveryID]; got != code {
+				t.Errorf("recorded status code = %d, want %d", got, code)
+			}
+			if r := st.reasons[d.DeliveryID]; !strings.Contains(r, "redirect") {
+				t.Errorf("reason %q does not say it was a redirect", r)
+			}
+			if _, failed := st.failed[d.DeliveryID]; failed {
+				t.Error("one redirect gave up on the delivery")
+			}
+			if n := hits.Load(); n != 0 {
+				t.Errorf("the redirect target was reached %d times, want 0", n)
+			}
+		})
+	}
+}
+
+// A redirect on the last attempt ends the delivery like any other failure:
+// FAILED with the 3xx, counted, and announced to the operator.
+func TestARedirectOnTheLastAttemptFailsTheDeliveryAndSaysSo(t *testing.T) {
+	t.Parallel()
+	srv, _ := redirectingServer(t, http.StatusMovedPermanently)
+
+	d := pending(len(Backoff))
+	st := newFakeStore(srv.URL+"/old", "t", d)
+	counted := &countingMetrics{}
+	logs := &lockedBuffer{}
+	log := slog.New(slog.NewTextHandler(logs, nil))
+	newWorkerLogging(t, st, counted, log).drain(t.Context())
+
+	if _, ok := st.failed[d.DeliveryID]; !ok {
+		t.Fatalf("the delivery was not failed: %s", st.whyNot(d.DeliveryID))
+	}
+	if _, ok := st.rescheduled[d.DeliveryID]; ok {
+		t.Error("it was rescheduled past the end of the schedule")
+	}
+	if got := st.codes[d.DeliveryID]; got != http.StatusMovedPermanently {
+		t.Errorf("recorded status code = %d, want 301", got)
+	}
+	counted.mu.Lock()
+	failed := counted.failed
+	counted.mu.Unlock()
+	if failed != 1 {
+		t.Errorf("failures counted = %d, want 1", failed)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "giving up on a webhook delivery") ||
+		!strings.Contains(out, "lastStatus=301") {
+		t.Errorf("no WARN with lastStatus=301 was logged:\n%s", out)
 	}
 }
 

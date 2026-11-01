@@ -3181,7 +3181,7 @@ type WebhookSubscription struct {
 	SubscriptionID openapi_types.UUID `json:"subscriptionId"`
 	UpdatedAt      time.Time          `json:"updatedAt"`
 
-	// URL Where deliveries are POSTed. HTTPS.
+	// URL Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
 	URL string `json:"url"`
 }
 
@@ -3199,7 +3199,9 @@ type WebhookSubscriptionWrite struct {
 	Filter    *WebhookFilter `json:"filter,omitempty"`
 	IsEnabled *bool          `json:"isEnabled,omitempty"`
 	Name      string         `json:"name"`
-	URL       string         `json:"url"`
+
+	// URL Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
+	URL string `json:"url"`
 }
 
 // Weekday defines model for Weekday.

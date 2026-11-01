@@ -104,8 +104,15 @@ func New(st Store, metrics Metrics, log *slog.Logger) *Worker {
 		log = slog.Default()
 	}
 	return &Worker{
-		store:   st,
-		client:  &http.Client{Timeout: RequestTimeout},
+		store: st,
+		client: &http.Client{
+			Timeout: RequestTimeout,
+			// A followed 301/302/303 turns the POST into a body-less GET, and
+			// the redirected page answering 2xx would mark a delivery the
+			// subscriber never received as DELIVERED. A 3xx is a failed
+			// attempt; the subscription URL must be the final one (#412).
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 		metrics: metrics,
 		log:     log,
 		batch:   20,
@@ -235,7 +242,11 @@ func (w *Worker) deliver(ctx context.Context, d store.WebhookDelivery) {
 		}
 		return
 	}
-	w.settle(ctx, d, resp.StatusCode, fmt.Sprintf("HTTP %d", resp.StatusCode))
+	reason := fmt.Sprintf("HTTP %d", resp.StatusCode)
+	if resp.StatusCode >= 300 && resp.StatusCode < 400 {
+		reason += ": a redirect, which is not followed; the subscription URL must be the endpoint itself"
+	}
+	w.settle(ctx, d, resp.StatusCode, reason)
 }
 
 // settle reschedules a failed attempt or gives up on it.

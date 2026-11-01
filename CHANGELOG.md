@@ -33,6 +33,14 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A webhook delivery whose subscription URL answered with a redirect (301, 302,
+  303, 307 or 308) could be marked DELIVERED without the subscriber ever
+  receiving the CDR: the client followed the redirect, which turns the POST into
+  a body-less GET, and the page it landed on (an `https://` front for an
+  `http://` URL, a moved path, an SSO login page) answered 2xx. A redirect is
+  now a failed attempt, retried on the normal schedule and ending FAILED at the
+  cap, with `HTTP 301: a redirect, which is not followed; ...` as the delivery's
+  last error. Point the subscription at the final URL. (#412)
 - The bot's calls bound their RTP and RTCP ports on every interface, even with
   `AICC_BOT_SIP_HOST` set to a single address. Each call's RTP and RTCP sockets
   now bind the address the switch sent the INVITE to, and the SDP answer names
