@@ -1547,7 +1547,7 @@ type CDR struct {
 	// The other durations do not partition this one. botSec, queueWaitSec, ringSec and talkSec each measure a stretch of the call in its own terms and those stretches overlap — ringing happens inside the queue's window, most obviously — so subtracting them from totalSec to find unaccounted time yields a number that means nothing. Adding them can exceed totalSec on a perfectly ordinary call. The three the caller passes through in order — botSec, queueWaitSec, talkSec — are consecutive and do fit.
 	TotalSec int `json:"totalSec"`
 
-	// UnbackedClaims Each kind of claim the bot made with no tool call behind it, once. Absent when it made none. It changes nothing about the call: a call can be contained and still carry one, and a containment figure that should not count a caller who was told something that never happened leaves such calls out.
+	// UnbackedClaims Each kind of claim the bot made with no tool call behind it, once. Absent when it made none. Recording one does not change whether the call counts as contained: a call can be contained and still carry one, and a containment figure that should not count a caller who was told something that never happened leaves such calls out.
 	UnbackedClaims *[]UnbackedClaim        `json:"unbackedClaims,omitempty"`
 	UserData       *map[string]interface{} `json:"userData,omitempty"`
 

@@ -124,8 +124,9 @@ cdrs(call_id uuid pk, started_at, answered_at, ended_at,
      unbacked_claims text[] check <@ ('TRANSFER','LOOKUP','MESSAGE','FAREWELL'))
                                        -- added 2026-10-01 (00034, #44): each kind of claim the bot made in a
                                        -- turn with no tool call behind it ("I'm transferring you" with no
-                                       -- transfer_to_agent). Detected from the bot's transcript; changes no
-                                       -- call behaviour and not is_contained. Reaches the human path's row
+                                       -- transfer_to_agent). Detected from the bot's transcript. The column
+                                       -- changes nothing, not is_contained either; the call acts on a lookup,
+                                       -- transfer or message claim once, with a cue (#438). Reaches the human path's row
                                        -- through the aicc_bot_unbacked_claims channel variable.
      -- legs: [{"kind":"TRUNK"|"DIALING"|"BOT"|"QUEUE"|"AGENT","label":…,"durationSec":…,"note":…}]
      -- One hop per stretch of the call, in the order joined: TRUNK a leg to the carrier (the
