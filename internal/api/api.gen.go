@@ -2075,7 +2075,7 @@ type ContactWrite struct {
 
 // CreateCallRequest Ask the platform to place a call. Which fields apply depends on kind.
 type CreateCallRequest struct {
-	// CallID Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing.
+	// CallID Client-minted id making the request idempotent: a retry with the same id answers isDuplicate instead of redialing. Optional: left out, the server mints one. It must be a UUIDv7 (version nibble 7, RFC 4122 variant), so call ids are time-ordered; any other UUID, the nil UUID included, is refused with 422 VALIDATION_FAILED, params {"field":"callId","rule":"UUID_V7"}, before anything is dialled or written.
 	CallID *openapi_types.UUID `json:"callId,omitempty"`
 
 	// CallbackID AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it.

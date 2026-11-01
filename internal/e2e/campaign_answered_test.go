@@ -172,7 +172,7 @@ func fakeRun(t *testing.T) *RunView {
 	busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
 	attempt := func(o *api.CampaignOutcome) api.CampaignAttempt {
 		end := base.Add(time.Minute)
-		return api.CampaignAttempt{ID: uuid.New(), CallID: uuid.New(), State: attemptFinished, Outcome: o, FinishedAt: &end}
+		return api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), State: attemptFinished, Outcome: o, FinishedAt: &end}
 	}
 	a03 := []api.CampaignAttempt{attempt(&busy), attempt(&busy)}
 	a04 := []api.CampaignAttempt{attempt(&busy), attempt(&answered)}

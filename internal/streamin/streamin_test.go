@@ -185,7 +185,7 @@ func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
 	t.Parallel()
 	s := testServer(t)
 	claim := Claim{
-		CallID: uuid.New(), PartyID: uuid.New(), AgentID: uuid.New(),
+		CallID: uuid.Must(uuid.NewV7()), PartyID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		Channel: "chan-1", Expires: time.Now().Add(time.Minute),
 	}
 	token := s.Token(claim)
@@ -204,7 +204,7 @@ func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
 	if _, err := s.verify("garbage"); err == nil {
 		t.Error("a malformed token verified")
 	}
-	expired := s.Token(Claim{CallID: uuid.New(), Channel: "c", Expires: time.Now().Add(-time.Second)})
+	expired := s.Token(Claim{CallID: uuid.Must(uuid.NewV7()), Channel: "c", Expires: time.Now().Add(-time.Second)})
 	if _, err := s.verify(expired); err == nil {
 		t.Error("an expired token verified")
 	}
@@ -222,7 +222,7 @@ func TestTokenRoundTripsAndRefusesTampering(t *testing.T) {
 func TestATokenCannotBeReplayed(t *testing.T) {
 	t.Parallel()
 	s := testServer(t)
-	token := s.Token(Claim{CallID: uuid.New(), Channel: "c", Expires: time.Now().Add(time.Minute)})
+	token := s.Token(Claim{CallID: uuid.Must(uuid.NewV7()), Channel: "c", Expires: time.Now().Add(time.Minute)})
 	if !s.claimToken(token) {
 		t.Fatal("the first use of a token was refused")
 	}
@@ -234,11 +234,11 @@ func TestATokenCannotBeReplayed(t *testing.T) {
 // The metadata frame confirms an identity; it must never be able to change one.
 func TestMetadataMustAgreeWithTheToken(t *testing.T) {
 	t.Parallel()
-	claim := Claim{CallID: uuid.New(), Channel: "chan-1"}
+	claim := Claim{CallID: uuid.Must(uuid.NewV7()), Channel: "chan-1"}
 	if err := checkMetadata([]byte(`{"callId":"`+claim.CallID.String()+`","channelId":"chan-1"}`), claim); err != nil {
 		t.Errorf("matching metadata was refused: %v", err)
 	}
-	if err := checkMetadata([]byte(`{"callId":"`+uuid.New().String()+`"}`), claim); err == nil {
+	if err := checkMetadata([]byte(`{"callId":"`+uuid.Must(uuid.NewV7()).String()+`"}`), claim); err == nil {
 		t.Error("metadata naming a different call was accepted")
 	}
 	if err := checkMetadata([]byte(`{"channelId":"someone-else"}`), claim); err == nil {
@@ -320,7 +320,7 @@ func TestAnAttachThatNeverConnectsSaysSo(t *testing.T) {
 	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	reg.For(callID, "INBOUND", time.Now())
 	t.Cleanup(func() { reg.Close(callID) })
 
@@ -352,7 +352,7 @@ func TestAConnectedStreamIsNotReportedMissing(t *testing.T) {
 	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	reg.For(callID, "INBOUND", time.Now())
 	t.Cleanup(func() { reg.Close(callID) })
 
@@ -387,7 +387,7 @@ func TestAStreamThatArrivesBeforeItsExpectationIsNotReportedMissing(t *testing.T
 	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	reg.For(callID, "INBOUND", time.Now())
 	t.Cleanup(func() { reg.Close(callID) })
 
@@ -463,7 +463,7 @@ func TestAStreamRevokedDuringItsUpgradeIsStillRefused(t *testing.T) {
 	t.Parallel()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	reg.For(callID, "INBOUND", time.Now())
 	t.Cleanup(func() { reg.Close(callID) })
 

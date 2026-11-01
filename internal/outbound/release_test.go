@@ -388,7 +388,7 @@ func TestARearmedLegIsReleasedByTheResultOfAnotherProcessesOriginate(t *testing.
 	for _, kind := range []string{"ai", "click-to-dial"} {
 		t.Run(kind, func(t *testing.T) {
 			rig := newRecoveryRig(t)
-			call, id := uuid.New(), uuid.New()
+			call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 			vars := aiVars(call, "95099", "en", "18688886666")
 			if kind == "click-to-dial" {
 				vars = map[string]string{
@@ -423,7 +423,7 @@ func TestARearmedLegIsReleasedByTheResultOfAnotherProcessesOriginate(t *testing.
 // that turns up afterwards finds nothing to do.
 func TestALostResultIsPickedUpByRecoveryOfTheParkedLeg(t *testing.T) {
 	rig := newRecoveryRig(t)
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	var answered atomic.Int32
 	rig.svc.SetAnswerObserver(func(uuid.UUID) { answered.Add(1) })
 	rig.sw.add(t0, chanSpec{id: id, callState: "RINGING", age: 10 * time.Second,
@@ -469,7 +469,7 @@ func TestALostResultIsPickedUpByRecoveryOfTheParkedLeg(t *testing.T) {
 func TestAParkedLegWhoseContinuationJustFiredIsHeld(t *testing.T) {
 	rig := newRecoveryRig(t)
 	rig.cold = false
-	call, id := uuid.New(), uuid.New()
+	call, id := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	rig.sw.add(t0, chanSpec{id: id, callState: "ACTIVE", answered: true, application: "park",
 		age: 20 * time.Second, vars: aiVars(call, "95099", "en", "18688886666")})
 	ran := make(chan struct{}, 2)

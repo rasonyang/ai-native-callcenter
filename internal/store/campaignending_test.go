@@ -36,7 +36,7 @@ func TestACDRReadsAsACampaignOutcome(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.cdr.CallID = uuid.New()
+			tt.cdr.CallID = uuid.Must(uuid.NewV7())
 			tt.cdr.TalkSec = 0
 			tt.cdr.EndedAt = start.Add(time.Minute)
 			got := endingFromCDR(tt.cdr)

@@ -19,7 +19,7 @@ import (
 
 func TestDialAIOnlyGoesOutFromANumberThatAllowsOutbound(t *testing.T) {
 	t.Parallel()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	for _, tc := range []struct {
 		name string
 		did  catalog.DID
@@ -67,13 +67,13 @@ func TestDialAIOnlyGoesOutFromANumberThatAllowsOutbound(t *testing.T) {
 // Nothing is left behind by a refusal, however often it repeats.
 func TestARefusedInboundOnlyDIDLeavesNoStateBehind(t *testing.T) {
 	t.Parallel()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 	s.dids = fakeDIDs{{Number: "95100", FlowID: &flowID, IsEnabled: true, AllowInbound: true}}
 
 	for i := 0; i < 50; i++ {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		if _, err := s.DialAI(context.Background(),
 			AIDialRequest{CallID: id, To: "13912345678", DIDNumber: "95100"}); !errors.Is(err, ErrDIDNotOutbound) {
 			t.Fatalf("request %d: %v, want ErrDIDNotOutbound", i, err)
@@ -100,7 +100,7 @@ func TestARefusedInboundOnlyDIDLeavesNoStateBehind(t *testing.T) {
 // same DID closed again is refused on the next request.
 func TestADIDFlippedToInboundOnlyIsRefusedFromTheNextRequest(t *testing.T) {
 	t.Parallel()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
 	did := catalog.DID{Number: "95100", FlowID: &flowID, IsEnabled: true, AllowInbound: true, AllowOutbound: true}

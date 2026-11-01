@@ -433,3 +433,33 @@ func TestRecordingsDirFallsBackAndRefusesWhenNoneIsSet(t *testing.T) {
 		t.Error("a switch with no recordings directory started a recording")
 	}
 }
+
+func TestUUIDVersionReadsTheVersionTheSwitchMints(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		reply   string
+		err     error
+		want    int
+		wantErr bool
+	}{
+		{name: "v7", reply: "01a194aa-7013-7351-baff-08e95de7603b", want: 7},
+		{name: "v7 with a trailing newline", reply: "01a194aa-7013-7351-baff-08e95de7603b\n", want: 7},
+		{name: "v4", reply: "3f1c1e0e-5c6d-4a3b-9a55-0d6f1b2c7e11", want: 4},
+		{name: "garbage", reply: "-ERR no such command", wantErr: true},
+		{name: "command error", err: errors.New("timeout"), wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a, c := newTestAdapter()
+			c.replyFor = func(string) (string, error) { return tc.reply, tc.err }
+			got, err := a.UUIDVersion()
+			if (err != nil) != tc.wantErr || got != tc.want {
+				t.Fatalf("UUIDVersion() = %d, %v; want %d, error=%v", got, err, tc.want, tc.wantErr)
+			}
+			if c.last() != "create_uuid" {
+				t.Errorf("sent %q, want create_uuid", c.last())
+			}
+		})
+	}
+}

@@ -195,7 +195,7 @@ func TestAskingForAFlowThatIsNotThereSaysSo(t *testing.T) {
 	}
 	t.Cleanup(st.Close)
 	flows := st.Flows()
-	absent := uuid.New()
+	absent := uuid.Must(uuid.NewV7())
 
 	if _, err := flows.Summary(ctx, absent); !errors.Is(err, ErrFlowNotFound) {
 		t.Errorf("summary error = %v, want ErrFlowNotFound", err)

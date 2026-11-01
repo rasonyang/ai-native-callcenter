@@ -312,7 +312,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger, pass
 	// needs to see the whole product: administration and supervision are
 	// role-gated, so a demo with agents only hides most of the screens.
 	for _, p := range demoPeople {
-		userID := uuid.New()
+		userID := uuid.Must(uuid.NewV7())
 		// An account that already exists keeps its password and its role,
 		// like every other seeded row: the seed runs on every boot, and an
 		// operator who changed a password must not have it put back. Until
@@ -333,7 +333,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger, pass
 			INSERT INTO extensions (id, number, password, display_name)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (number) DO NOTHING`,
-			uuid.New(), p.ext, password, p.display); err != nil {
+			uuid.Must(uuid.NewV7()), p.ext, password, p.display); err != nil {
 			return nil, nil, err
 		}
 		if _, err := st.Pool.Exec(ctx, `
@@ -341,7 +341,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger, pass
 			SELECT $1, u.id, 'agent-' || $2::text FROM users u
 			WHERE u.username = $2 AND NOT EXISTS (
 				SELECT 1 FROM agents a WHERE a.user_id = u.id)`,
-			uuid.New(), p.username); err != nil {
+			uuid.Must(uuid.NewV7()), p.username); err != nil {
 			return nil, nil, err
 		}
 		// Bind the agent to their phone. Without this the demo creates
@@ -376,7 +376,7 @@ func ensureEntities(ctx context.Context, st *store.Store, log *slog.Logger, pass
 			                    sla_threshold_sec, discard_abandoned_after_sec)
 			VALUES ($1, $2, $3, $4, 20, 60)
 			ON CONFLICT (name) DO NOTHING`,
-			uuid.New(), q.name, q.ext, q.display); err != nil {
+			uuid.Must(uuid.NewV7()), q.name, q.ext, q.display); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -489,7 +489,7 @@ func ensureFlowAndNumbers(ctx context.Context, st *store.Store, log *slog.Logger
 				       $8 AND NOT EXISTS (SELECT 1 FROM dids WHERE is_default_outbound)
 				FROM queues q WHERE q.name = $5
 				ON CONFLICT (number) DO NOTHING`,
-				uuid.New(), n.number, n.language, flowID, n.queue, n.description,
+				uuid.Must(uuid.NewV7()), n.number, n.language, flowID, n.queue, n.description,
 				n.allowOutbound, n.isDefaultOutbound, n.allowInbound()); err != nil {
 				return fmt.Errorf("seed number %s: %w", n.number, err)
 			}

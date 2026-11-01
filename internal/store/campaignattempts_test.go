@@ -169,7 +169,7 @@ func TestTheWriteAheadRowTakesTheContactOutOfThePool(t *testing.T) {
 	if got, err := e.attempts.Get(ctx, a.CallID); err != nil || got.OriginateJobID != "job-1" {
 		t.Errorf("get = %+v %v", got, err)
 	}
-	if _, err := e.attempts.Get(ctx, uuid.New()); !errors.Is(err, campaign.ErrNoAttempt) {
+	if _, err := e.attempts.Get(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, campaign.ErrNoAttempt) {
 		t.Errorf("unknown call: %v", err)
 	}
 	// A contact that is not ACTIVE cannot be begun.
@@ -179,7 +179,7 @@ func TestTheWriteAheadRowTakesTheContactOutOfThePool(t *testing.T) {
 	if _, err := e.attempts.Begin(ctx, contacts[1].ID, now); !errors.Is(err, campaign.ErrContactNotDialable) {
 		t.Errorf("a DONE contact: %v", err)
 	}
-	if _, err := e.attempts.Begin(ctx, uuid.New(), now); !errors.Is(err, campaign.ErrContactNotDialable) {
+	if _, err := e.attempts.Begin(ctx, uuid.Must(uuid.NewV7()), now); !errors.Is(err, campaign.ErrContactNotDialable) {
 		t.Errorf("an unknown contact: %v", err)
 	}
 }
@@ -238,7 +238,7 @@ func TestACDRFinishesItsAttemptInItsOwnTransaction(t *testing.T) {
 	a := e.begin(t, contacts[0], ny(t, "2026-06-01 10:00"))
 
 	// A CDR for a call that is not a campaign's touches no attempt.
-	if err := e.ledger.InsertCDR(ctx, cdrOf(uuid.New(), "NORMAL_CLEARING", CDRStatusAnswered, true,
+	if err := e.ledger.InsertCDR(ctx, cdrOf(uuid.Must(uuid.NewV7()), "NORMAL_CLEARING", CDRStatusAnswered, true,
 		ny(t, "2026-06-01 10:00"), ny(t, "2026-06-01 10:03"))); err != nil {
 		t.Fatal(err)
 	}
@@ -518,7 +518,7 @@ func TestEndingsWithNoCDR(t *testing.T) {
 	if ct := e.contact(t, c, contacts[2].ID); ct.SystemFailures != 1 || ct.Attempts != 0 {
 		t.Errorf("counted twice: %+v", ct)
 	}
-	if _, err := e.attempts.Finish(ctx, uuid.New(), campaign.Ending{Outcome: campaign.OutcomeUnknown}); !errors.Is(err, campaign.ErrNoAttempt) {
+	if _, err := e.attempts.Finish(ctx, uuid.Must(uuid.NewV7()), campaign.Ending{Outcome: campaign.OutcomeUnknown}); !errors.Is(err, campaign.ErrNoAttempt) {
 		t.Errorf("unknown call: %v", err)
 	}
 	if _, err := e.attempts.Finish(ctx, e.begin(t, contacts[4], now).CallID, campaign.Ending{Outcome: "NOPE"}); err == nil {

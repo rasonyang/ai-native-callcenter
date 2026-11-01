@@ -19,8 +19,8 @@ func onACallWithAnAgent(t *testing.T) (*Coordinator, *fakeCommander, uuid.UUID, 
 	c := NewCoordinator(registry, NewAdapter(cmd, "aicc.test"), noAgents{}, nullPublisher{})
 
 	ctx := t.Context()
-	callID := uuid.New()
-	agentID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
+	agentID := uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(ctx, callID, "INBOUND", "en", true, testTime); err != nil {
 		t.Fatalf("create call: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestDTMFRejectsAnythingThatIsNotATone(t *testing.T) {
 func TestMuteAndDTMFRefuseAnAgentWhoIsNotOnTheCall(t *testing.T) {
 	t.Parallel()
 	c, cmd, callID, _ := onACallWithAnAgent(t)
-	stranger := uuid.New()
+	stranger := uuid.Must(uuid.NewV7())
 
 	for name, act := range map[string]func() error{
 		"mute":   func() error { return c.Mute(t.Context(), callID, stranger) },

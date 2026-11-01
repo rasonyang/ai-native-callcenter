@@ -22,7 +22,7 @@ func TestMigrationAddsTheWrapUpDraftWithoutTouchingRecords(t *testing.T) {
 	if err := goose.UpToContext(ctx, db, "migrations", 43); err != nil {
 		t.Fatalf("migrating to 43 failed: %v", err)
 	}
-	confirmed, open, agent := uuid.New(), uuid.New(), uuid.New()
+	confirmed, open, agent := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	exec := func(q string, args ...any) {
 		t.Helper()
 		if _, err := db.ExecContext(ctx, q, args...); err != nil {

@@ -93,7 +93,7 @@ func newDNCStack(t *testing.T, countryCode string) *dncStack {
 	if err := st.Migrate(ctx); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	sw := &countingSwitch{}
 	svc := outbound.New(
 		outbound.Config{EndpointFormat: "sofia/gateway/pstn_gateway/%s", DefaultCountryCode: countryCode},
@@ -172,7 +172,7 @@ func (s *dncStack) hasCDR(id uuid.UUID) bool {
 // no originate, no ledger row.
 func TestADNCNumberStopsEveryCallToItInWhateverFormat(t *testing.T) {
 	s := newDNCStack(t, "86")
-	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), ActorUserID: uuid.New()}
+	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), ActorUserID: uuid.Must(uuid.NewV7())}
 
 	if code, body := s.add(person, "+86 138-0013-8000"); code != http.StatusCreated {
 		t.Fatalf("add: %d %s", code, body)
@@ -193,7 +193,7 @@ func TestADNCNumberStopsEveryCallToItInWhateverFormat(t *testing.T) {
 		{"click-to-dial by an agent, plus form of a 00 entry", agentSubject(), `{"to":"+8613912345678","callId":"%s"}`},
 		{"click-to-dial by a system naming the phone", keySubject(), `{"kind":"AGENT_OUTBOUND","extensionNumber":"1009","to":"+8613800138000","callId":"%s"}`},
 	} {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		status, code, _ := s.dial(tc.ac, fmt.Sprintf(tc.body, id))
 		if status != http.StatusUnprocessableEntity || code != "NUMBER_ON_DNC" {
 			t.Errorf("%s: %d %s, want 422 NUMBER_ON_DNC", tc.name, status, code)
@@ -219,7 +219,7 @@ func TestADNCNumberStopsEveryCallToItInWhateverFormat(t *testing.T) {
 // Taking a number off the list makes it dialable at once.
 func TestARemovedNumberDialsAgain(t *testing.T) {
 	s := newDNCStack(t, "86")
-	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), ActorUserID: uuid.New()}
+	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), ActorUserID: uuid.Must(uuid.NewV7())}
 	s.add(person, "13800138000")
 
 	body := `{"kind":"AI_OUTBOUND","did":"95012","to":"+8613800138000"}`
@@ -249,7 +249,7 @@ func TestARemovedNumberDialsAgain(t *testing.T) {
 // matched and the call goes through. A number with a plus is checked anyway.
 func TestWithoutACountryCodeOnlyTheCompleteFormIsChecked(t *testing.T) {
 	s := newDNCStack(t, "")
-	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), ActorUserID: uuid.New()}
+	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), ActorUserID: uuid.Must(uuid.NewV7())}
 	if code, body := s.add(person, "+8613800138000"); code != http.StatusCreated {
 		t.Fatalf("add: %d %s", code, body)
 	}
@@ -271,7 +271,7 @@ func TestWithoutACountryCodeOnlyTheCompleteFormIsChecked(t *testing.T) {
 // independent tally.
 func TestAMessyListLoadedOneByOne(t *testing.T) {
 	s := newDNCStack(t, "86")
-	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), ActorUserID: uuid.New()}
+	person := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), ActorUserID: uuid.Must(uuid.NewV7())}
 	rng := rand.New(rand.NewSource(20261012))
 
 	render := func(national string) string {

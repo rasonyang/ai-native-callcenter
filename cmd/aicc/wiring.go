@@ -117,6 +117,9 @@ type composition struct {
 	// nobody is looking after. It runs on every connect, last: the screens are
 	// told the link is up first, and nothing above depends on it.
 	Reconcile func(context.Context)
+	// SwitchUUID asserts on every connect that the switch mints v7 UUIDs, and
+	// forgets the result when the link is lost. Nil is allowed.
+	SwitchUUID *switchUUIDCheck
 }
 
 // systemPublisher is the slice of the hub used to announce facts about the
@@ -170,6 +173,12 @@ func (c composition) connect() {
 	// only sign of it was that nothing happened any more.
 	c.Link.OnConnect(func(ctx context.Context) { c.announceLink(ctx, true) })
 	c.Link.OnLost(func() { c.announceLink(context.Background(), false) })
+
+	// The switch mints the call id of every inbound DID call; it must be a v7.
+	if c.SwitchUUID != nil {
+		c.Link.OnConnect(c.SwitchUUID.onConnect)
+		c.Link.OnLost(c.SwitchUUID.onLost)
+	}
 
 	// What the switch is holding that this process knows nothing about: calls
 	// that outlived a restart, and whatever happened while the link was down.

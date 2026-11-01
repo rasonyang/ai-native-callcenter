@@ -105,7 +105,7 @@ func TestPartyTimestamps(t *testing.T) {
 
 func TestFirstPartyIsOriginator(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	if c.State != CallCreated {
 		t.Errorf("new call state = %s, want CREATED", c.State)
 	}
@@ -144,7 +144,7 @@ func TestCallTypeIsStampedOnce(t *testing.T) {
 	t.Parallel()
 	// The caller-perspective type must survive the whole call, including the
 	// transfer that replaces every original party.
-	c := NewCall(uuid.New(), events.CallTypeOutbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeOutbound, testTime)
 	c.AddParty("chan-a", "+8613800138000", testTime)
 	bot := c.AddParty("chan-bot", "aicc-bot", testTime)
 
@@ -166,7 +166,7 @@ func TestCallTypeIsStampedOnce(t *testing.T) {
 
 func TestAnsweredAtIsTheEarliestAnswer(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	caller := c.AddParty("chan-a", "+86138", testTime)
 	bot := c.AddParty("chan-bot", "bot", testTime)
 
@@ -186,7 +186,7 @@ func TestAnsweredAtIsTheEarliestAnswer(t *testing.T) {
 
 func TestMergeUserData(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-1", "intent": "billing"})
 	c.MergeUserData(map[string]any{"intent": "refund", "customerName": "Wei"})
 	c.MergeUserData(map[string]any{"ticketId": nil})
@@ -211,7 +211,7 @@ func TestMergeUserData(t *testing.T) {
 // as changes, every one of those would announce a change nobody made.
 func TestAMergeReportsOnlyWhatMoved(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-1", "intent": "billing"})
 
 	same := c.MergeUserData(map[string]any{"ticketId": "T-1"})
@@ -243,7 +243,7 @@ func TestAMergeReportsOnlyWhatMoved(t *testing.T) {
 // number on an agent's screen with nothing to say the other half existed.
 func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	c.MergeUserData(map[string]any{"note": "the short one"})
 
 	got := c.MergeUserData(map[string]any{
@@ -262,7 +262,7 @@ func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
 	}
 
 	// Bytes, not characters: four Chinese characters are twelve bytes.
-	c2 := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c2 := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	overInBytes := strings.Repeat("客", UserDataMaxValueBytes/3+1)
 	if len([]rune(overInBytes)) > UserDataMaxValueBytes {
 		t.Fatal("the fixture is over the bound in characters too, so it proves nothing")
@@ -278,7 +278,7 @@ func TestAnOversizeValueIsDroppedAndTheOldOneStands(t *testing.T) {
 func TestTheKeysThatSurviveAFullCallAreAlwaysTheSameOnes(t *testing.T) {
 	t.Parallel()
 	fill := func() *Call {
-		c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+		c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 		seed := map[string]any{}
 		for i := range UserDataMaxKeys - 1 {
 			seed[fmt.Sprintf("seed%02d", i)] = "v"
@@ -308,7 +308,7 @@ func TestTheKeysThatSurviveAFullCallAreAlwaysTheSameOnes(t *testing.T) {
 // a later patch's to displace.
 func TestAFullCallStillTakesADeleteAndAReplacement(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	seed := map[string]any{}
 	for i := range UserDataMaxKeys {
 		seed[fmt.Sprintf("seed%02d", i)] = "v"
@@ -387,7 +387,7 @@ func TestALegThatAnsweredItselfHasNotStartedAConversation(t *testing.T) {
 
 func TestFinishRequiresAllPartiesReleased(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInbound, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, testTime)
 	a := c.AddParty("chan-a", "+86138", testTime)
 	b := c.AddParty("chan-b", "1001", testTime)
 
@@ -417,7 +417,7 @@ func TestFinishRequiresAllPartiesReleased(t *testing.T) {
 
 func TestSnapshotIsADetachedCopy(t *testing.T) {
 	t.Parallel()
-	c := NewCall(uuid.New(), events.CallTypeInternal, testTime)
+	c := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInternal, testTime)
 	p := c.AddParty("chan-a", "1001", testTime)
 	c.MergeUserData(map[string]any{"ticketId": "T-7"})
 	if err := p.apply(TriggerAnswer, testTime.Add(time.Second)); err != nil {

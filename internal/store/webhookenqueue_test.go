@@ -70,7 +70,7 @@ func TestWritingACDRQueuesItForEverySubscriptionThatWantsIt(t *testing.T) {
 		t.Fatalf("create the disabled subscription: %v", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, time.Now().UTC(), 40)); err != nil {
 		t.Fatalf("write the cdr: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestAWriteThatChangesNothingQueuesNothing(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	ended := time.Now().UTC()
 	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, ended, 40)); err != nil {
 		t.Fatalf("first write: %v", err)
@@ -152,7 +152,7 @@ func TestAFullerCDRAfterDeliverySendsACorrection(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	short := time.Now().UTC().Add(-4 * time.Minute)
 	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short, 30)); err != nil {
 		t.Fatalf("short write: %v", err)
@@ -201,7 +201,7 @@ func TestAFullerCDRBeforeDeliveryReplacesWhatIsQueued(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	short := time.Now().UTC().Add(-4 * time.Minute)
 	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short, 30)); err != nil {
 		t.Fatalf("short write: %v", err)

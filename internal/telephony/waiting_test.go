@@ -20,9 +20,9 @@ import (
 // registry's side. These pin what the coordinator makes of the queue events.
 
 var (
-	supportEN = QueueSummary{ID: uuid.New(), Name: "support-en",
+	supportEN = QueueSummary{ID: uuid.Must(uuid.NewV7()), Name: "support-en",
 		DisplayName: "English Support", SLAThresholdSec: 20}
-	supportZH = QueueSummary{ID: uuid.New(), Name: "support-zh",
+	supportZH = QueueSummary{ID: uuid.Must(uuid.NewV7()), Name: "support-zh",
 		DisplayName: "中文支持", SLAThresholdSec: 30}
 )
 
@@ -278,7 +278,7 @@ func TestAWaitingCallCarriesTheCallItBelongsTo(t *testing.T) {
 	c, pub := waitingFixture(t)
 	ctx := context.Background()
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := c.registry.CreateCall(ctx, callID, events.CallTypeInbound, "zh", true, testTime); err != nil {
 		t.Fatal(err)
 	}

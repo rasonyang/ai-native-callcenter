@@ -75,7 +75,7 @@ func (a *AttemptStore) Begin(ctx context.Context, contactID uuid.UUID, now time.
 		}
 		row, err := q.InsertCampaignAttempt(ctx, queries.InsertCampaignAttemptParams{
 			ID: id, CampaignID: claimed.CampaignID, CampaignContactID: contactID,
-			NumberE164: claimed.NumberE164, CallID: uuid.New(), LegID: uuid.New(),
+			NumberE164: claimed.NumberE164, CallID: uuid.Must(uuid.NewV7()), LegID: uuid.Must(uuid.NewV7()),
 			StartedAt: pgtype.Timestamptz{Time: now, Valid: true},
 		})
 		var pgErr *pgconn.PgError

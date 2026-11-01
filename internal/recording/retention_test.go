@@ -64,7 +64,7 @@ func due(n int) ([]Expired, []uuid.UUID) {
 	var out []Expired
 	var ids []uuid.UUID
 	for i := range n {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		ids = append(ids, id)
 		out = append(out, Expired{ID: id, Key: string(rune('a'+i)) + ".wav"})
 	}

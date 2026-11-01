@@ -118,7 +118,7 @@ func tapRigFor(t *testing.T) *tapRig {
 	t.Helper()
 	pub := &statePub{}
 	reg := transcript.NewRegistry(nil, pub, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	reg.For(callID, "INBOUND", time.Now())
 	t.Cleanup(func() { reg.Close(callID) })
 
@@ -304,7 +304,7 @@ func TestDetachCallIsIdempotent(t *testing.T) {
 func TestDetachCallLeavesAnotherCallsTapAlone(t *testing.T) {
 	t.Parallel()
 	tap, sw, callID := tapFixture(t)
-	other := uuid.New()
+	other := uuid.Must(uuid.NewV7())
 	tap.Attach(callID, nil, nil, "chan-a", "en")
 	tap.Attach(other, nil, nil, "chan-b", "en")
 
@@ -365,7 +365,7 @@ func TestPauseReportsTheSwitchBeingDownSeparately(t *testing.T) {
 func TestReattachingUnderANewCallStopsTheOldStream(t *testing.T) {
 	t.Parallel()
 	tap, sw, absorbed := tapFixture(t)
-	kept := uuid.New()
+	kept := uuid.Must(uuid.NewV7())
 
 	tap.Attach(absorbed, nil, nil, "chan-a", "en")
 	tap.Attach(kept, nil, nil, "chan-a", "en")
@@ -442,7 +442,7 @@ func TestAStreamTheModuleEndedIsNotStoppedAgain(t *testing.T) {
 func TestAStreamEndingCannotRetireALaterCallsTap(t *testing.T) {
 	t.Parallel()
 	tap, sw, absorbed := tapFixture(t)
-	kept := uuid.New()
+	kept := uuid.Must(uuid.NewV7())
 	tap.Attach(absorbed, nil, nil, "chan-a", "en")
 	first := tap.tokenOn("chan-a")
 	tap.Attach(kept, nil, nil, "chan-a", "en") // the leg was folded into another call

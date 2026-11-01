@@ -40,7 +40,7 @@ func throughTheRegistry(t *testing.T, legs []liveLeg, evs []SwitchEvent) Snapsho
 	reg.OnCallFinished = func(s Snapshot) { finished <- s }
 	t.Cleanup(reg.Shutdown)
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	call, err := reg.CreateCall(t.Context(), callID, events.CallTypeInbound, "en", false, at(legs[0].created))
 	if err != nil {
 		t.Fatal(err)
@@ -152,8 +152,8 @@ func noNegativeDuration(t *testing.T, cdr store.CDR) {
 // caller went through them; the row is the first queue and its wait.
 func TestACallAnsweredInTwoQueuesShowsBothStays(t *testing.T) {
 	t.Parallel()
-	wei, ben, carol := uuid.New(), uuid.New(), uuid.New()
-	sales, support := uuid.New(), uuid.New()
+	wei, ben, carol := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	sales, support := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911112222", created: 0},
@@ -239,8 +239,8 @@ func TestACallAnsweredInTwoQueuesShowsBothStays(t *testing.T) {
 // the call is ANSWERED: a person was reached, which is the existing rule.
 func TestACallerWhoGaveUpInTheSecondQueueAfterBeingAnswered(t *testing.T) {
 	t.Parallel()
-	wei, ben := uuid.New(), uuid.New()
-	sales, support := uuid.New(), uuid.New()
+	wei, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	sales, support := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911113333", created: 0},
@@ -291,8 +291,8 @@ func TestACallerWhoGaveUpInTheSecondQueueAfterBeingAnswered(t *testing.T) {
 // caller gave up in support, and sales timing them out is how they got there.
 func TestACallerTimedOutOfOneQueueAndLeftTheNext(t *testing.T) {
 	t.Parallel()
-	carol, ben := uuid.New(), uuid.New()
-	sales, support := uuid.New(), uuid.New()
+	carol, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	sales, support := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	for _, tc := range []struct {
 		name        string
@@ -366,8 +366,8 @@ func TestACallerTimedOutOfOneQueueAndLeftTheNext(t *testing.T) {
 // it joined, which is the only thing that tells it from the second stay.
 func TestARequeuedCallerHasTwoStaysInOneQueue(t *testing.T) {
 	t.Parallel()
-	wei, ben := uuid.New(), uuid.New()
-	support := uuid.New()
+	wei, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	support := uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911115555", created: 0},
@@ -419,8 +419,8 @@ func TestARequeuedCallerHasTwoStaysInOneQueue(t *testing.T) {
 // shape every older test builds).
 func TestASingleQueueCallReadsAsItAlwaysDid(t *testing.T) {
 	t.Parallel()
-	wei := uuid.New()
-	support := uuid.New()
+	wei := uuid.Must(uuid.NewV7())
+	support := uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911116666", created: 0},
@@ -472,7 +472,7 @@ func TestAMergedCallKeepsBothHalvesQueueStays(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, &capturingPublisher{})
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
@@ -539,8 +539,8 @@ func TestAMergedCallKeepsBothHalvesQueueStays(t *testing.T) {
 // second stay, and the call came out with two QUEUE legs, one of them 0 s.
 func TestAReannouncedJoinIsOneStay(t *testing.T) {
 	t.Parallel()
-	wei := uuid.New()
-	support := uuid.New()
+	wei := uuid.Must(uuid.NewV7())
+	support := uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911117777", created: 0},
@@ -581,8 +581,8 @@ func TestAReannouncedJoinIsOneStay(t *testing.T) {
 // the caller's abandonment with Terminated.
 func TestALateEndOfAnEarlierStayLeavesTheLaterOneAlone(t *testing.T) {
 	t.Parallel()
-	wei := uuid.New()
-	support := uuid.New()
+	wei := uuid.Must(uuid.NewV7())
+	support := uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "+8613911118888", created: 0},
@@ -629,8 +629,8 @@ func TestALateEndOfAnEarlierStayLeavesTheLaterOneAlone(t *testing.T) {
 // with its 5 s wait, and both queues are in the journey.
 func TestTheLiveTwoQueueCallKeepsBothQueues(t *testing.T) {
 	t.Parallel()
-	agent := uuid.New()
-	supportEN, wtQueue := uuid.New(), uuid.New()
+	agent := uuid.Must(uuid.NewV7())
+	supportEN, wtQueue := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	snap := throughTheRegistry(t, []liveLeg{
 		{channel: "caller", number: "18688886666", created: 0},
@@ -697,7 +697,7 @@ func TestAQueueEventFindsItsStayAtTheSwitchsGranularity(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			call := NewCall(uuid.New(), events.CallTypeInbound, at(0))
+			call := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, at(0))
 			call.JoinQueue("support", time.Time{}, at(10).Add(joinLag))
 			call.QueueStay("support", tc.joined).BridgedAt = at(20)
 			if n := len(call.QueueStays); n != 1 || !call.QueueStays[0].BridgedAt.Equal(at(20)) {
@@ -708,7 +708,7 @@ func TestAQueueEventFindsItsStayAtTheSwitchsGranularity(t *testing.T) {
 
 	t.Run("two stays in one queue", func(t *testing.T) {
 		t.Parallel()
-		call := NewCall(uuid.New(), events.CallTypeInbound, at(0))
+		call := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, at(0))
 		call.JoinQueue("support", time.Time{}, at(10).Add(joinLag))
 		call.QueueStay("support", at(10)).BridgedAt = at(20)
 		call.JoinQueue("support", time.Time{}, at(60).Add(joinLag))
@@ -722,7 +722,7 @@ func TestAQueueEventFindsItsStayAtTheSwitchsGranularity(t *testing.T) {
 
 	t.Run("a queue with no stay", func(t *testing.T) {
 		t.Parallel()
-		call := NewCall(uuid.New(), events.CallTypeInbound, at(0))
+		call := NewCall(uuid.Must(uuid.NewV7()), events.CallTypeInbound, at(0))
 		call.JoinQueue("sales", time.Time{}, at(2).Add(joinLag))
 		call.QueueStay("support", at(40)).BridgedAt = at(50)
 		if n := len(call.QueueStays); n != 2 || call.QueueStays[1].Name != "support" ||

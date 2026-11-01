@@ -61,7 +61,7 @@ func (f fakeNames) CallcenterName(_ context.Context, agentID uuid.UUID) (string,
 	if agentID == f.missing {
 		return "", fmt.Errorf("no such agent")
 	}
-	return "agent-" + agentID.String()[:4], nil
+	return "agent-" + agentID.String()[32:], nil
 }
 
 // A switch restart forgets its tiers. Presence is already rebuilt on reconnect;
@@ -71,8 +71,8 @@ func (f fakeNames) CallcenterName(_ context.Context, agentID uuid.UUID) (string,
 // is invisible from this side, which is why it is restored unconditionally.
 func TestSyncTiersRestoresEveryQueuesStaffing(t *testing.T) {
 	t.Parallel()
-	support, sales := uuid.New(), uuid.New()
-	alice, bob := uuid.New(), uuid.New()
+	support, sales := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	alice, bob := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	store := &fakeStore{
 		queues: []Queue{{ID: support, Name: "support-en"}, {ID: sales, Name: "sales"}},
@@ -104,10 +104,10 @@ func TestSyncTiersRestoresEveryQueuesStaffing(t *testing.T) {
 
 func TestSyncTiersDoesNothingWhenTheSwitchIsDown(t *testing.T) {
 	t.Parallel()
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
-		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: uuid.New(), Level: 1, Position: 1}}},
+		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: uuid.Must(uuid.NewV7()), Level: 1, Position: 1}}},
 	}
 	sw := &fakeSwitch{isUp: false}
 	NewService(store, sw, fakeNames{}).SyncTiers(context.Background())
@@ -122,8 +122,8 @@ func TestSyncTiersDoesNothingWhenTheSwitchIsDown(t *testing.T) {
 // routing.
 func TestSyncTiersSkipsAMissingAgentAndKeepsGoing(t *testing.T) {
 	t.Parallel()
-	queueID := uuid.New()
-	gone, present := uuid.New(), uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
+	gone, present := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues: []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{
@@ -148,7 +148,7 @@ func TestSyncTiersSkipsAMissingAgentAndKeepsGoing(t *testing.T) {
 // nothing, with our own database insisting they are staffed.
 func TestSigningInAddsTheTierThatCouldNotBeAddedWhileSignedOut(t *testing.T) {
 	t.Parallel()
-	queueID, agentID := uuid.New(), uuid.New()
+	queueID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 2}}},
@@ -175,14 +175,14 @@ func TestSigningInAddsTheTierThatCouldNotBeAddedWhileSignedOut(t *testing.T) {
 // was signed out leaves the switch still offering them its calls.
 func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
 	t.Parallel()
-	queueID, agentID := uuid.New(), uuid.New()
+	queueID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues: []Queue{{ID: queueID, Name: "support-en"}},
 		// Nobody staffs it any more.
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {}},
 	}
 	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
-		"agent-" + agentID.String()[:4]: {"support-en"},
+		"agent-" + agentID.String()[32:]: {"support-en"},
 	}}
 	svc := NewService(store, sw, fakeNames{})
 
@@ -201,9 +201,9 @@ func TestSigningInRemovesATierThisSystemNoLongerHolds(t *testing.T) {
 // against actual, and zero against zero satisfies it.
 func TestAnAgentWhoStaffsNothingStaysAtZero(t *testing.T) {
 	t.Parallel()
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	store := &fakeStore{
-		queues:   []Queue{{ID: uuid.New(), Name: "support-en"}},
+		queues:   []Queue{{ID: uuid.Must(uuid.NewV7()), Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{},
 	}
 	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{}}
@@ -219,8 +219,8 @@ func TestAnAgentWhoStaffsNothingStaysAtZero(t *testing.T) {
 // because it runs on every registration.
 func TestAMatchingSwitchIsNotTouched(t *testing.T) {
 	t.Parallel()
-	queueID, agentID := uuid.New(), uuid.New()
-	name := "agent-" + agentID.String()[:4]
+	queueID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	name := "agent-" + agentID.String()[32:]
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 1}}},
@@ -239,14 +239,14 @@ func TestAMatchingSwitchIsNotTouched(t *testing.T) {
 // and it is the one that leaves the switch offering calls on behalf of nobody.
 func TestReconnectRemovesATierForAnAgentThisSystemDoesNotStaff(t *testing.T) {
 	t.Parallel()
-	queueID, staffed := uuid.New(), uuid.New()
+	queueID, staffed := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: staffed, Level: 1, Position: 1}}},
 	}
 	sw := &fakeSwitch{isUp: true, onSwitch: map[string][]string{
 		// Staffed here and known to the switch: nothing to do.
-		"agent-" + staffed.String()[:4]: {"support-en"},
+		"agent-" + staffed.String()[32:]: {"support-en"},
 		// Known only to the switch. There is no agent id to look up, and none
 		// is needed: the tier is deleted by the name the switch reported.
 		"agent-ghost": {"support-en"},
@@ -282,7 +282,7 @@ func (d deferringSwitch) AddCallcenterTier(string, string, int, int) error {
 // becomes background noise and then becomes unread.
 func TestATierForAnAgentTheSwitchHasNotMetIsDeferredNotFailed(t *testing.T) {
 	t.Parallel()
-	queueID, agentID := uuid.New(), uuid.New()
+	queueID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	store := &fakeStore{
 		queues:   []Queue{{ID: queueID, Name: "support-en"}},
 		staffing: map[uuid.UUID][]QueueAgent{queueID: {{AgentID: agentID, Level: 1, Position: 1}}},

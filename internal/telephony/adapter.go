@@ -402,6 +402,25 @@ func (a *Adapter) ChannelExists(channelID string) (bool, error) {
 	return false, fmt.Errorf("%s: unexpected reply %q", cmd, strings.TrimSpace(reply))
 }
 
+// UUIDVersion asks the switch to mint a UUID and returns its version nibble.
+//
+// The switch mints the call id of every inbound DID call (the dialplan's
+// create_uuid), and a call id must be a v7 UUID. FreeSWITCH 1.10 ignores
+// uuid-version=7 and mints v4, so the application asks, on api because the
+// caller needs the reply inline, and does not take the configuration's word
+// for it. The UUID is thrown away: create_uuid reserves nothing on the switch.
+func (a *Adapter) UUIDVersion() (int, error) {
+	reply, err := a.cmd.API("create_uuid")
+	if err != nil {
+		return 0, fmt.Errorf("create_uuid: %w", err)
+	}
+	id, err := uuid.Parse(strings.TrimSpace(reply))
+	if err != nil {
+		return 0, fmt.Errorf("create_uuid: unexpected reply %q", strings.TrimSpace(reply))
+	}
+	return int(id.Version()), nil
+}
+
 // StartRecording and StopRecording control a call's recording.
 func (a *Adapter) StartRecording(channelID, path string) error {
 	return a.exec("uuid_record %s start %s", channelID, path)

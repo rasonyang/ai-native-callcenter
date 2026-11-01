@@ -45,7 +45,7 @@ func TestTheTimeWindowOfTheListingsIsFromInclusiveToExclusive(t *testing.T) {
 
 	byCall := map[uuid.UUID]string{}
 	for _, m := range offsets {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		byCall[id] = fmt.Sprintf("m%+d", m)
 		if err := ledger.InsertCDR(ctx, CDR{
 			CallID: id, StartedAt: at(m), EndedAt: at(m).Add(3 * time.Minute),
@@ -57,7 +57,7 @@ func TestTheTimeWindowOfTheListingsIsFromInclusiveToExclusive(t *testing.T) {
 	}
 	// A row the status filter would drop, to be sure the window composes with
 	// the other optional filters rather than replacing them.
-	missed := uuid.New()
+	missed := uuid.Must(uuid.NewV7())
 	byCall[missed] = "missed@20"
 	if err := ledger.InsertCDR(ctx, CDR{
 		CallID: missed, StartedAt: at(20), EndedAt: at(21),
@@ -66,8 +66,8 @@ func TestTheTimeWindowOfTheListingsIsFromInclusiveToExclusive(t *testing.T) {
 		t.Fatalf("InsertCDR(missed): %v", err)
 	}
 
-	actor := uuid.New()
-	other := uuid.New()
+	actor := uuid.Must(uuid.NewV7())
+	other := uuid.Must(uuid.NewV7())
 	byAudit := map[int64]string{}
 	for _, m := range offsets {
 		var id int64
@@ -187,7 +187,7 @@ func TestABusyCallListsApartFromANoAnswerCall(t *testing.T) {
 	for i, st := range []string{CDRStatusBusy, CDRStatusBusy, CDRStatusNoAnswer, CDRStatusAnswered} {
 		cause := map[string]string{CDRStatusBusy: "USER_BUSY", CDRStatusNoAnswer: "NO_ANSWER", CDRStatusAnswered: "NORMAL_CLEARING"}[st]
 		if err := ledger.InsertCDR(ctx, CDR{
-			CallID: uuid.New(), StartedAt: start.Add(time.Duration(i) * time.Minute),
+			CallID: uuid.Must(uuid.NewV7()), StartedAt: start.Add(time.Duration(i) * time.Minute),
 			EndedAt:  start.Add(time.Duration(i)*time.Minute + 20*time.Second),
 			CallType: "OUTBOUND", Status: st, HangupCause: cause, FromNumber: "95099", ToNumber: "1868888666" + fmt.Sprint(i),
 		}); err != nil {

@@ -94,7 +94,7 @@ func TestAProvisionalCallCollapsesIntoItsMintedIdentity(t *testing.T) {
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan := "caller-chan"
 	botChan := "bot-chan"
 	mintedVars := map[string]string{
@@ -199,7 +199,7 @@ func settle(t *testing.T) {
 
 // oneAgent is a directory with a single signed-in agent, so a leg dialed at
 // their extension is recognised as a delivery rather than a new call.
-var testAgentID = uuid.New()
+var testAgentID = uuid.Must(uuid.NewV7())
 
 const agentExtension = "1001"
 
@@ -324,7 +324,7 @@ func TestTheTapGoesOnEvenWhenThereIsNothingToMerge(t *testing.T) {
 	c.AttachAudiences(audiences)
 
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
 	vars := map[string]string{"variable_aicc_call_id": minted, "variable_aicc_language": "en"}
 
@@ -403,7 +403,7 @@ func TestOnlyACallWithACustomerOnItIsTranscribed(t *testing.T) {
 			c.AttachTranscripts(transcripts)
 
 			ctx := t.Context()
-			minted := uuid.New().String()
+			minted := uuid.Must(uuid.NewV7()).String()
 			callerChan, agentChan := "caller-chan", "agent-chan"
 			vars := map[string]string{
 				"variable_aicc_call_id":   minted,
@@ -475,7 +475,7 @@ func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
 	c.AttachTaps(taps)
 
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
 	// The dialplan stamps the language alongside the call id, as it does live.
 	vars := map[string]string{"variable_aicc_call_id": minted, "variable_aicc_language": "zh"}
@@ -521,7 +521,7 @@ func TestTheTapGoesOnTheAgentLegAtTheBridge(t *testing.T) {
 func bridgeAnAgentLeg(t *testing.T, c *Coordinator, taps *recordingTapper) string {
 	t.Helper()
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
 	vars := map[string]string{"variable_aicc_call_id": minted}
 
@@ -553,7 +553,7 @@ func TestHoldOnAnUntappedLegCommandsNothing(t *testing.T) {
 
 	ctx := t.Context()
 	_ = bridgeAnAgentLeg(t, c, taps)
-	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	vars := map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}
 	c.Handle(ctx, raw("CHANNEL_HOLD", "caller-chan", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_UNHOLD", "caller-chan", "inbound", vars))
 
@@ -580,7 +580,7 @@ func TestHoldPausesTheTapAndUnholdResumesIt(t *testing.T) {
 	// the tap swallowed a pause on a channel it did not hold — the swallow was
 	// the whole of what the test proved.
 	agentChan := bridgeAnAgentLeg(t, c, taps)
-	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	vars := map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}
 	c.Handle(ctx, raw("CHANNEL_HOLD", agentChan, "outbound", vars))
 	c.Handle(ctx, raw("CHANNEL_UNHOLD", agentChan, "outbound", vars))
 	c.Handle(ctx, raw("CHANNEL_UNBRIDGE", agentChan, "outbound", vars))
@@ -604,7 +604,7 @@ func TestNoTapperMeansNoTranscriptionPath(t *testing.T) {
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 
 	ctx := t.Context()
-	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	vars := map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}
 	c.Handle(ctx, raw("CHANNEL_CREATE", "a", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_HOLD", "a", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_BRIDGE", "a", "inbound",
@@ -676,7 +676,7 @@ func TestAnAgentLegAddressesTheTranscriptToThatAgent(t *testing.T) {
 	c.AttachAudiences(audiences)
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 
 	// The bot phase: a caller and nobody else.
@@ -721,7 +721,7 @@ func TestAMergeTellsTheMovedAgentTheCallHasANewIdentity(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
@@ -766,7 +766,7 @@ func TestTheSurvivingCallKeepsItsOwnBusinessData(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, &capturingPublisher{})
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
@@ -832,7 +832,7 @@ func TestTheCallIsToldWhenItsBusinessDataMoves(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
 
@@ -909,7 +909,7 @@ func TestAMergeAnnouncesTheBusinessDataItBroughtAndNothingElse(t *testing.T) {
 		c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 		ctx := t.Context()
-		minted := uuid.New()
+		minted := uuid.Must(uuid.NewV7())
 		vars := map[string]string{"variable_aicc_call_id": minted.String()}
 		c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
 		c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
@@ -973,7 +973,7 @@ func TestARefusedPatchWritesNothingAndAnnouncesNothing(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound",
@@ -1048,7 +1048,7 @@ func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound",
 		map[string]string{"variable_aicc_call_id": minted.String()}))
 
@@ -1056,7 +1056,7 @@ func TestOnlyAnAgentOnTheCallMayAttachDataToIt(t *testing.T) {
 	if _, _, err := c.PatchUserData(minted, testAgentID, map[string]any{"orderId": "A"}); !errors.Is(err, ErrNotCallParty) {
 		t.Errorf("err = %v, want ErrNotCallParty", err)
 	}
-	if _, _, err := c.PatchUserData(uuid.New(), testAgentID, map[string]any{"orderId": "A"}); !errors.Is(err, ErrCallNotFound) {
+	if _, _, err := c.PatchUserData(uuid.Must(uuid.NewV7()), testAgentID, map[string]any{"orderId": "A"}); !errors.Is(err, ErrCallNotFound) {
 		t.Errorf("err = %v, want ErrCallNotFound for a call that does not exist", err)
 	}
 	if ev, _, ok := pub.find(events.TypeCallUserData); ok {
@@ -1080,7 +1080,7 @@ func TestACallCanArriveCarryingBusinessData(t *testing.T) {
 		registry := NewRegistry(pub)
 		c := NewCoordinator(registry, nil, oneAgent{}, pub)
 
-		minted := uuid.New()
+		minted := uuid.Must(uuid.NewV7())
 		vars["variable_aicc_call_id"] = minted.String()
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
 		waitFor(t, func() bool { _, err := registry.Snapshot(minted); return err == nil })
@@ -1176,7 +1176,7 @@ func TestTheCauseSentToTheSwitchIsTheOneTheLegDeserves(t *testing.T) {
 	c := NewCoordinator(registry, adapter, oneAgent{}, nullPublisher{})
 
 	ctx := t.Context()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
@@ -1225,7 +1225,7 @@ func TestACallBeginsWhenTheSwitchSaysItDid(t *testing.T) {
 	// A switch clock well away from ours, so a startedAt taken from time.Now()
 	// cannot pass by accident.
 	switchTime := testTime.Add(-2 * time.Hour)
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	ev := raw("CHANNEL_CREATE", "caller-chan", "inbound",
 		map[string]string{"variable_aicc_call_id": minted.String()})
 	ev.OccurredAt = switchTime
@@ -1376,7 +1376,7 @@ func TestAnAgentLessLegReachesNoAgentsStream(t *testing.T) {
 		t.Fatal("the caller is bound to no call")
 	}
 	// A call that knows its queue must still not address a leg to it.
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	if err := registry.Do(callID, func(call *Call) { call.QueueID = &queueID }); err != nil {
 		t.Fatalf("setting the queue: %v", err)
 	}
@@ -1553,7 +1553,7 @@ func TestQueueDeliveryLegJoinsTheCallerImmediately(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 
 	ctx := t.Context()
-	minted := uuid.New().String()
+	minted := uuid.Must(uuid.NewV7()).String()
 	callerChan, agentChan := "caller-chan", "agent-chan"
 	// Context "public" is how a call off the carrier arrives, which is what
 	// makes this an INBOUND call rather than an extension calling an extension.
@@ -1617,8 +1617,8 @@ func TestTheBotShareSurvivesTheLegThatHangsUpFirst(t *testing.T) {
 	c := NewCoordinator(registry, nil, noAgents{}, nullPublisher{})
 
 	ctx := t.Context()
-	minted := uuid.New().String()
-	flowID := uuid.New()
+	minted := uuid.Must(uuid.NewV7()).String()
+	flowID := uuid.Must(uuid.NewV7())
 	callerChan, botChan := "caller-chan", "bot-chan"
 	// aicc_inbound.lua exports aicc_call_id, aicc_did and aicc_language, so
 	// the leg dialled towards the bot answers for the DID and nothing else.
@@ -1679,7 +1679,7 @@ func TestARingingLegNamesTheExtensionNotTheContactToken(t *testing.T) {
 	// agent's leg names them. A lone agent leg is the originator of its own
 	// call and is dialling, not ringing — that is PARTY_DIALING's subject.
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound",
-		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+		map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}))
 	c.Handle(ctx, raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
 		// What a browser phone's leg actually looks like: the destination is
 		// the registration token, and only dialed_user names the extension.
@@ -1711,7 +1711,7 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 	ctx := t.Context()
 
 	agentID := testAgentID
-	internalID := uuid.New()
+	internalID := uuid.Must(uuid.NewV7())
 	call, err := registry.CreateCall(ctx, internalID, events.CallTypeInternal, "en", true, testTime)
 	if err != nil {
 		t.Fatal(err)
@@ -1739,7 +1739,7 @@ func TestInternalCallsRefuseTheControlsThatMeanNothingOnThem(t *testing.T) {
 	// to act on, the refusal that comes back is about the call's own state —
 	// which is how we know the type check let it through rather than that the
 	// operation happened to fail.
-	inboundID := uuid.New()
+	inboundID := uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(ctx, inboundID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
@@ -1766,8 +1766,8 @@ func TestACallPassedOnLeavesTheFirstAgentsScreen(t *testing.T) {
 	c := NewCoordinator(registry, nil, oneAgent{}, nullPublisher{})
 	ctx := t.Context()
 
-	wei, ben := uuid.New(), uuid.New()
-	callID := uuid.New()
+	wei, ben := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(ctx, callID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
@@ -1898,7 +1898,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		c := NewCoordinator(registry, nil, noAgents{}, pub)
 
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound",
-			map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+			map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}))
 
 		ev, scope, ok := pub.find(events.TypePartyDialing)
 		if !ok {
@@ -2012,7 +2012,7 @@ func TestTheLegThatStartsACallAnnouncesThatItIsDialling(t *testing.T) {
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
 		c := NewCoordinator(registry, nil, oneAgent{}, pub)
-		minted := uuid.New().String()
+		minted := uuid.Must(uuid.NewV7()).String()
 		vars := map[string]string{"variable_aicc_call_id": minted}
 
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
@@ -2049,7 +2049,7 @@ func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
 		t.Cleanup(registry.Shutdown)
 		pub := &capturingPublisher{}
 		c := NewCoordinator(registry, nil, oneAgent{}, pub)
-		minted := uuid.New().String()
+		minted := uuid.Must(uuid.NewV7()).String()
 
 		// wei's leg: placed by click-to-dial, so it presents the destination
 		// as its own caller id.
@@ -2092,7 +2092,7 @@ func TestTheRungAgentIsToldWhoIsActuallyCallingThem(t *testing.T) {
 
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "customer-chan", "inbound",
 			map[string]string{
-				"variable_aicc_call_id": uuid.New().String(),
+				"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String(),
 				"Caller-ANI":            "13800138000",
 			}))
 		c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound",
@@ -2124,7 +2124,7 @@ func (d stashedData) CallData(callID uuid.UUID) map[string]any { return d[callID
 // here when the call is placed and picked up when the call comes into being.
 func TestBusinessDataAttachedToAPlacedCallReachesTheAgent(t *testing.T) {
 	t.Parallel()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	sent := map[string]any{"ticketId": "T-1", "tier": "VIP", "订单": "ORD-9"}
 
 	registry := NewRegistry(nullPublisher{})
@@ -2169,7 +2169,7 @@ func TestBusinessDataAttachedToAPlacedCallReachesTheAgent(t *testing.T) {
 // to another.
 func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
 	t.Parallel()
-	somebodyElse := uuid.New()
+	somebodyElse := uuid.Must(uuid.NewV7())
 
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)
@@ -2178,7 +2178,7 @@ func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
 	c.AttachCallData(stashedData{somebodyElse: {"ticketId": "not-yours"}})
 
 	c.Handle(t.Context(), raw("CHANNEL_CREATE", "caller-chan", "inbound",
-		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+		map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}))
 	c.Handle(t.Context(), raw("CHANNEL_CREATE", "agent-chan", "outbound", map[string]string{
 		"variable_dialed_user":            agentExtension,
 		"variable_cc_member_session_uuid": "caller-chan",
@@ -2201,7 +2201,7 @@ func TestAnInboundCallCarriesNoBusinessDataOfItsOwn(t *testing.T) {
 // promise was only true of the events that happened to keep it.
 func TestEveryCallEventRepeatsTheContextTheEnvelopePromises(t *testing.T) {
 	t.Parallel()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	sent := map[string]any{"orderId": "9999000000000000"}
 
 	registry := NewRegistry(nullPublisher{})
@@ -2218,7 +2218,7 @@ func TestEveryCallEventRepeatsTheContextTheEnvelopePromises(t *testing.T) {
 			"variable_dialed_user":  agentExtension,
 		}))
 	c.Handle(t.Context(), raw("CHANNEL_CREATE", "far-chan", "inbound",
-		map[string]string{"variable_aicc_call_id": uuid.New().String()}))
+		map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}))
 	c.Handle(t.Context(), raw("CHANNEL_BRIDGE", "agent-chan", "outbound",
 		map[string]string{"Other-Leg-Unique-ID": "far-chan"}))
 
@@ -2287,7 +2287,7 @@ func TestALegTheAgentPlacedIsNotAlsoAnnouncedAsRinging(t *testing.T) {
 // within twelve milliseconds, the first one already on its way out (C46).
 func TestACallTheAgentPlacedKeepsItsMintedIdentityInOneMove(t *testing.T) {
 	t.Parallel()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 
 	registry := NewRegistry(nullPublisher{})
 	t.Cleanup(registry.Shutdown)

@@ -56,13 +56,13 @@ func newPhones(t *testing.T) *phones {
 	t.Helper()
 	f := &phones{
 		store: newFakeStore(), sw: &fakeSwitch{up: true}, pub: &scopedPublisher{},
-		a: uuid.New(), b: uuid.New(), c: uuid.New(), d: uuid.New(),
+		a: uuid.Must(uuid.NewV7()), b: uuid.Must(uuid.NewV7()), c: uuid.Must(uuid.NewV7()), d: uuid.Must(uuid.NewV7()),
 	}
 	f.store.extNumbers = map[uuid.UUID]string{}
 	bind := func(id uuid.UUID, name, number string) {
-		prof := Profile{AgentID: id, UserID: uuid.New(), CallcenterName: name, DisplayName: name}
+		prof := Profile{AgentID: id, UserID: uuid.Must(uuid.NewV7()), CallcenterName: name, DisplayName: name}
 		if number != "" {
-			extID := uuid.New()
+			extID := uuid.Must(uuid.NewV7())
 			f.store.extNumbers[extID] = number
 			prof.ExtensionNumber, prof.ExtensionID = number, &extID
 		}
@@ -394,7 +394,7 @@ func TestASignedInAgentCannotBeRebound(t *testing.T) {
 		t.Fatal(err)
 	}
 	prof := f.store.profiles[f.a]
-	other := uuid.New()
+	other := uuid.Must(uuid.NewV7())
 	f.store.extNumbers[other] = "1009"
 	events0 := len(f.pub.all())
 

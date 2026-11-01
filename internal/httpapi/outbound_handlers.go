@@ -27,6 +27,15 @@ type OutboundService interface {
 	DialAI(ctx context.Context, req outbound.AIDialRequest) (uuid.UUID, error)
 }
 
+// callIDMustBeV7 is the refusal's sentence for a client-minted callId.
+const callIDMustBeV7 = "callId must be a UUIDv7 (version 7, RFC 4122 variant); leave it out to have one minted"
+
+// isUUIDv7 reports whether id is a version 7 UUID of the RFC 4122 variant. The
+// nil UUID is neither.
+func isUUIDv7(id uuid.UUID) bool {
+	return id.Version() == 7 && id.Variant() == uuid.RFC4122
+}
+
 // CreateCall places a call: one entry point, told apart by kind.
 //
 // Both kinds create an OUTBOUND call and both are idempotent by a
@@ -67,6 +76,15 @@ func (s *Server) CreateCall(w http.ResponseWriter, r *http.Request) {
 	if req.Language != nil && *req.Language != "" && !catalog.IsLanguageTag(*req.Language) {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, catalog.LanguageTagRule,
 			map[string]any{"field": "language", "rule": "LANGUAGE_SUBTAG"})
+		return
+	}
+
+	// A client-minted id is a UUIDv7 or nothing (#400): call ids are
+	// time-ordered. Checked before any path can dial or write, the callback's
+	// attempt mark included. Omitted, the server mints one.
+	if req.CallID != nil && !isUUIDv7(*req.CallID) {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed, callIDMustBeV7,
+			map[string]any{"field": "callId", "rule": "UUID_V7"})
 		return
 	}
 
@@ -231,7 +249,7 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 			return
 		}
 		if dial.CallID == uuid.Nil {
-			dial.CallID = uuid.New()
+			dial.CallID = uuid.Must(uuid.NewV7())
 		}
 		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, ac.ActorUserID)
 		if err != nil {

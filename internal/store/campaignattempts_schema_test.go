@@ -20,7 +20,7 @@ func TestTheSchemaRefusesWhatTheAttemptModelForbids(t *testing.T) {
 	ins := func(number, cols, vals string) string {
 		return fmt.Sprintf(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id%s)
 			VALUES ('%s', '%s', '%s', '%s', '%s', '%s'%s)`,
-			cols, uuid.New(), c.ID, ct.ID, number, uuid.New(), uuid.New(), vals)
+			cols, uuid.Must(uuid.NewV7()), c.ID, ct.ID, number, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), vals)
 	}
 	violation(t, e.st, "ck_campaign_attempts_number_e164", ins("0138", "", ""))
 	violation(t, e.st, "ck_campaign_attempts_outcome", ins(ct.Number, ", state, outcome, finished_at", ", 'FINISHED', 'MAYBE', now()"))
@@ -32,7 +32,7 @@ func TestTheSchemaRefusesWhatTheAttemptModelForbids(t *testing.T) {
 	violation(t, e.st, "ck_campaign_attempts_lead_intent", ins(ct.Number, ", lead_intent", ", 'WARM'"))
 	violation(t, e.st, "fk_campaign_attempts_campaigns",
 		fmt.Sprintf(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id) VALUES ('%s', '%s', '%s', '%s', '%s', '%s')`,
-			uuid.New(), uuid.New(), ct.ID, ct.Number, uuid.New(), uuid.New()))
+			uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), ct.ID, ct.Number, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())))
 
 	// Every outcome the contact column accepts, the attempt column accepts,
 	// and finished attempts share a number freely.
@@ -48,8 +48,8 @@ func TestTheSchemaRefusesWhatTheAttemptModelForbids(t *testing.T) {
 	violation(t, e.st, "uq_campaign_attempts_dialing_number_e164",
 		fmt.Sprintf(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id)
 			VALUES ('%s','%s','%s','%s','%s','%s'),('%s','%s','%s','%s','%s','%s')`,
-			uuid.New(), c.ID, other.ID, other.Number, uuid.New(), uuid.New(),
-			uuid.New(), c.ID, other.ID, other.Number, uuid.New(), uuid.New()))
+			uuid.Must(uuid.NewV7()), c.ID, other.ID, other.Number, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()),
+			uuid.Must(uuid.NewV7()), c.ID, other.ID, other.Number, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())))
 
 	var callID uuid.UUID
 	if err := e.st.Pool.QueryRow(ctx, `SELECT call_id FROM campaign_attempts LIMIT 1`).Scan(&callID); err != nil {
@@ -57,7 +57,7 @@ func TestTheSchemaRefusesWhatTheAttemptModelForbids(t *testing.T) {
 	}
 	violation(t, e.st, "uq_campaign_attempts_call_id",
 		fmt.Sprintf(`INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id, state, outcome, finished_at)
-			VALUES ('%s','%s','%s','%s','%s','%s','FINISHED','BUSY',now())`, uuid.New(), c.ID, ct.ID, ct.Number, callID, uuid.New()))
+			VALUES ('%s','%s','%s','%s','%s','%s','FINISHED','BUSY',now())`, uuid.Must(uuid.NewV7()), c.ID, ct.ID, ct.Number, callID, uuid.Must(uuid.NewV7())))
 }
 
 // A deployment that already holds campaigns and their contacts migrates to
@@ -72,7 +72,7 @@ func TestTheAttemptsMigrationKeepsExistingCampaigns(t *testing.T) {
 		t.Fatalf("migrating to 37: %v", err)
 	}
 
-	didID, campaignID, contactID := uuid.New(), uuid.New(), uuid.New()
+	didID, campaignID, contactID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if _, err := db.ExecContext(ctx, `INSERT INTO dids (id, number, language, allow_inbound, allow_outbound) VALUES ($1, '95099', 'en', false, true)`, didID); err != nil {
 		t.Skipf("cannot seed a DID with this schema: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestTheAttemptsMigrationKeepsExistingCampaigns(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO campaign_attempts (id, campaign_id, campaign_contact_id, number_e164, call_id, leg_id)
-		VALUES ($1, $2, $3, '+8613800138000', $4, $5)`, uuid.New(), campaignID, contactID, uuid.New(), uuid.New()); err != nil {
+		VALUES ($1, $2, $3, '+8613800138000', $4, $5)`, uuid.Must(uuid.NewV7()), campaignID, contactID, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())); err != nil {
 		t.Errorf("an old contact cannot be dialled after the migration: %v", err)
 	}
 	// Rolling the migration back leaves the campaigns and contacts alone.

@@ -57,12 +57,12 @@ func monitorAs(t *testing.T, srv *Server, callID uuid.UUID, body string) *httpte
 	// directory the server was built with is what supplies it.
 	agentID := []uuid.UUID{}
 	if srv.agentDir != nil {
-		if resolved, err := srv.agentDir.AgentIDForUser(r, uuid.New()); err == nil {
+		if resolved, err := srv.agentDir.AgentIDForUser(r, uuid.Must(uuid.NewV7())); err == nil {
 			agentID = append(agentID, resolved)
 		}
 	}
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleSupervisor,
+		UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleSupervisor,
 	}, agentID...))
 	w := httptest.NewRecorder()
 	srv.MonitorCall(w, r, callID)
@@ -75,7 +75,7 @@ func TestASupervisorListensFromTheirBoundPhone(t *testing.T) {
 	t.Parallel()
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: deskedSupervisor{}, agentDir: dialerDirectory{}}
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	w := monitorAs(t, srv, callID, `{"mode":"WHISPER","agentId":"`+agentID.String()+`"}`)
 	if w.Code != http.StatusAccepted {
@@ -96,7 +96,7 @@ func TestAStaffedSupervisorListensFromTheSeatTheySignedInAt(t *testing.T) {
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: dialerDirectory{}}
 
-	w := monitorAs(t, srv, uuid.New(), `{"mode":"LISTEN","agentId":"`+uuid.New().String()+`"}`)
+	w := monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"LISTEN","agentId":"`+uuid.Must(uuid.NewV7()).String()+`"}`)
 	if w.Code != http.StatusAccepted {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
@@ -113,7 +113,7 @@ func TestAnAccountWithNoPhoneCannotListen(t *testing.T) {
 	calls := &monitoringCalls{}
 	srv := &Server{calls: calls, agents: dialerPresence{}, agentDir: noAgents{}}
 
-	w := monitorAs(t, srv, uuid.New(), `{"mode":"LISTEN","agentId":"`+uuid.New().String()+`"}`)
+	w := monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"LISTEN","agentId":"`+uuid.Must(uuid.NewV7()).String()+`"}`)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("http = %d: %s", w.Code, w.Body)
 	}
@@ -128,33 +128,33 @@ func TestAnAccountWithNoPhoneCannotListen(t *testing.T) {
 func TestMonitorRefusals(t *testing.T) {
 	t.Parallel()
 	calls := &monitoringCalls{err: telephony.ErrNoAgentLeg}
-	self := uuid.New()
+	self := uuid.Must(uuid.NewV7())
 	srv := &Server{calls: calls, agents: deskedSupervisor{}, agentDir: oneAgentDirectory{agentID: self}}
-	other := uuid.New().String()
+	other := uuid.Must(uuid.NewV7()).String()
 
-	w := monitorAs(t, srv, uuid.New(), `{"mode":"LISTEN","agentId":"`+other+`"}`)
+	w := monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"LISTEN","agentId":"`+other+`"}`)
 	if w.Code != http.StatusConflict {
 		t.Errorf("agent not on the call: http = %d, want 409", w.Code)
 	}
 	calls.err = telephony.ErrCallNotFound
-	w = monitorAs(t, srv, uuid.New(), `{"mode":"LISTEN","agentId":"`+other+`"}`)
+	w = monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"LISTEN","agentId":"`+other+`"}`)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("unknown call: http = %d, want 404", w.Code)
 	}
 	calls.err = errors.New("boom")
-	w = monitorAs(t, srv, uuid.New(), `{"mode":"SHOUT","agentId":"`+other+`"}`)
+	w = monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"SHOUT","agentId":"`+other+`"}`)
 	if w.Code != http.StatusUnprocessableEntity {
 		t.Errorf("unknown mode: http = %d, want 422", w.Code)
 	}
 	if calls.mode == "SHOUT" {
 		t.Error("an unknown mode reached the switch")
 	}
-	w = monitorAs(t, srv, uuid.New(), `{"mode":"LISTEN","agentId":"`+self.String()+`"}`)
+	w = monitorAs(t, srv, uuid.Must(uuid.NewV7()), `{"mode":"LISTEN","agentId":"`+self.String()+`"}`)
 	if w.Code != http.StatusConflict {
 		t.Errorf("monitoring yourself: http = %d, want 409", w.Code)
 	}
 }
 
 func (oneAgentDirectory) UserIDForAgent(*http.Request, uuid.UUID) (uuid.UUID, error) {
-	return uuid.New(), nil
+	return uuid.Must(uuid.NewV7()), nil
 }

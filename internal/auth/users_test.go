@@ -32,7 +32,7 @@ func TestAPasswordShortInCharactersIsRefusedHoweverManyBytesItIs(t *testing.T) {
 			if !errors.Is(err, ErrValidation) {
 				t.Errorf("CreateUser() error = %v, want ErrValidation", err)
 			}
-			if err := s.SetPassword(context.Background(), uuid.New(), password); !errors.Is(err, ErrValidation) {
+			if err := s.SetPassword(context.Background(), uuid.Must(uuid.NewV7()), password); !errors.Is(err, ErrValidation) {
 				t.Errorf("SetPassword() error = %v, want ErrValidation", err)
 			}
 		})

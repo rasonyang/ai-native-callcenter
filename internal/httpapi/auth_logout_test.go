@@ -133,7 +133,7 @@ func TestWebSignOutOfANonAgentTouchesNeither(t *testing.T) {
 	t.Parallel()
 	rec := &orderedSignOut{}
 	supervisor := AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "priya",
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "priya",
 		SessionExpiresAt: time.Now().Add(time.Hour),
 	}
 

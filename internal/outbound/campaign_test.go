@@ -21,7 +21,7 @@ func TestACampaignAttemptPinsItsLegAndCarriesTheCampaignOnTheLegAndTheBridge(t *
 	t.Parallel()
 	sw := &fakeSwitch{}
 	s := testService(t, sw, nil)
-	callID, legID, campaignID, attemptID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	callID, legID, campaignID, attemptID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	var heard []uuid.UUID
 	var mu sync.Mutex
@@ -84,7 +84,7 @@ func TestASingleCallCarriesNoCampaignHeaders(t *testing.T) {
 // Recovery re-arms a ringing campaign leg and the bridge still says whose it is.
 func TestARecoveredCampaignLegKeepsItsCampaignOnTheBridge(t *testing.T) {
 	rig := newRecoveryRig(t)
-	callID, id, campaignID, attemptID := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	callID, id, campaignID, attemptID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	vars := aiVars(callID, "95099", "en", "18688886666")
 	vars[telephony.VarCampaignID] = campaignID.String()
 	vars[telephony.VarAttemptID] = attemptID.String()

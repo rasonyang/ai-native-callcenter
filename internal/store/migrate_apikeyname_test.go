@@ -27,7 +27,7 @@ func TestMigrationWidensAnAPIKeyNameTo128Characters(t *testing.T) {
 	}
 	insert := func(name string) (uuid.UUID, error) {
 		t.Helper()
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		_, err := db.ExecContext(ctx, `INSERT INTO api_keys (id, name, key_hash, key_prefix, scopes)
 		      VALUES ($1, $2, $3, 'aicc_test', '{calls:read:all}')`, id, name, id[:])
 		return id, err

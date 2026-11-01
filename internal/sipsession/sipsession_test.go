@@ -111,7 +111,7 @@ func TestIssueMintsACredentialThePhoneCanRegisterWith(t *testing.T) {
 	sw := &fakeSwitch{up: true}
 	svc, _ := newService(t, st, fakeDirectory{extension: "1001"}, sw)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	expires := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
 	issued, err := svc.Issue(context.Background(), agentID, expires)
 	if err != nil {
@@ -156,7 +156,7 @@ func TestEveryCredentialIsItsOwnSecret(t *testing.T) {
 
 	seen := map[string]bool{}
 	for range 64 {
-		issued, err := svc.Issue(context.Background(), uuid.New(), time.Now().Add(time.Hour))
+		issued, err := svc.Issue(context.Background(), uuid.Must(uuid.NewV7()), time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatalf("Issue: %v", err)
 		}
@@ -176,7 +176,7 @@ func TestASecondIssueReplacesTheFirstAndFlushesIt(t *testing.T) {
 	dir := &mutableDirectory{extension: "1001"}
 	svc, _ := newService(t, st, dir, sw)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	first, err := svc.Issue(context.Background(), agentID, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("first Issue: %v", err)
@@ -214,7 +214,7 @@ func TestIssueRefusesAnAgentWithNoPhone(t *testing.T) {
 	t.Parallel()
 	svc, _ := newService(t, newFakeStore(), fakeDirectory{extension: ""}, &fakeSwitch{up: true})
 
-	_, err := svc.Issue(context.Background(), uuid.New(), time.Now().Add(time.Hour))
+	_, err := svc.Issue(context.Background(), uuid.Must(uuid.NewV7()), time.Now().Add(time.Hour))
 	if !errors.Is(err, ErrNoExtensionBound) {
 		t.Fatalf("err = %v, want ErrNoExtensionBound", err)
 	}
@@ -229,7 +229,7 @@ func TestASwitchThatIsDownStillLetsASessionBeIssued(t *testing.T) {
 	sw := &fakeSwitch{up: false}
 	svc, _ := newService(t, st, fakeDirectory{extension: "1001"}, sw)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	if _, err := svc.Issue(context.Background(), agentID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("first Issue: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestRevokeEndsTheSessionAndTheRegistration(t *testing.T) {
 	sw := &fakeSwitch{up: true}
 	svc, _ := newService(t, st, fakeDirectory{extension: "1001"}, sw)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	if _, err := svc.Issue(context.Background(), agentID, time.Now().Add(time.Hour)); err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestNeitherThePasswordNorTheHashIsEverLogged(t *testing.T) {
 	sw := &fakeSwitch{up: true}
 	svc, logged := newService(t, st, fakeDirectory{extension: "1001"}, sw)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	issued, err := svc.Issue(context.Background(), agentID, time.Now().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Issue: %v", err)

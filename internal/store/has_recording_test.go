@@ -19,7 +19,7 @@ func TestARecordedFlagSurvivesALaterCDRWrite(t *testing.T) {
 	ctx := context.Background()
 
 	start := time.Now().Add(-5 * time.Minute).Truncate(time.Millisecond)
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	row := func(endedAfter time.Duration) CDR {
 		return CDR{
 			CallID: callID, StartedAt: start, AnsweredAt: start,

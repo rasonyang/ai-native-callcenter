@@ -91,7 +91,7 @@ func TestAnOmittedBooleanTakesTheDeclaredDefault(t *testing.T) {
 	t.Run("update reads the same way as create", func(t *testing.T) {
 		c := &recordingCatalog{}
 		s := &Server{catalog: c}
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 
 		s.UpdateExtension(httptest.NewRecorder(), post(`{"number":"1099"}`), id)
 		if !c.extension.IsEnabled {
@@ -174,7 +174,7 @@ func TestDeletingAnExtensionAnAgentWorksAtIsRefusedAsAConflict(t *testing.T) {
 		s := &Server{catalog: c}
 		w := httptest.NewRecorder()
 
-		s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
+		s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.Must(uuid.NewV7()))
 
 		if w.Code != http.StatusConflict {
 			t.Errorf("SQLSTATE %s: http = %d, want 409", code, w.Code)
@@ -193,7 +193,7 @@ func TestAnUnrelatedDeleteFailureIsNotTheBindingConflict(t *testing.T) {
 	s := &Server{catalog: c}
 	w := httptest.NewRecorder()
 
-	s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.New())
+	s.DeleteExtension(w, httptest.NewRequest(http.MethodDelete, "/", nil), uuid.Must(uuid.NewV7()))
 
 	if w.Code == http.StatusConflict {
 		t.Errorf("an unrelated constraint was reported as the agent binding: %s", w.Body.String())
@@ -210,16 +210,16 @@ func TestDeletingSomethingThatIsNotThereIsNotFound(t *testing.T) {
 		call func(*Server, http.ResponseWriter, *http.Request)
 	}{
 		{"extension", func(s *Server, w http.ResponseWriter, r *http.Request) {
-			s.DeleteExtension(w, r, uuid.New())
+			s.DeleteExtension(w, r, uuid.Must(uuid.NewV7()))
 		}},
 		{"queue", func(s *Server, w http.ResponseWriter, r *http.Request) {
-			s.DeleteQueue(w, r, uuid.New())
+			s.DeleteQueue(w, r, uuid.Must(uuid.NewV7()))
 		}},
 		{"did", func(s *Server, w http.ResponseWriter, r *http.Request) {
-			s.DeleteDID(w, r, uuid.New())
+			s.DeleteDID(w, r, uuid.Must(uuid.NewV7()))
 		}},
 		{"queue staffing", func(s *Server, w http.ResponseWriter, r *http.Request) {
-			s.UnstaffQueue(w, r, uuid.New(), uuid.New())
+			s.UnstaffQueue(w, r, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()))
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -290,7 +290,7 @@ func TestAnOmittedIntegerTakesTheDeclaredDefault(t *testing.T) {
 		s := &Server{catalog: c}
 
 		s.UpdateQueue(httptest.NewRecorder(),
-			post(`{"name":"support-zh","extNumber":"7001"}`), uuid.New())
+			post(`{"name":"support-zh","extNumber":"7001"}`), uuid.Must(uuid.NewV7()))
 
 		if c.queue.SLAThresholdSec != 20 {
 			t.Errorf("slaThresholdSec = %d after an update that omitted it, want 20",

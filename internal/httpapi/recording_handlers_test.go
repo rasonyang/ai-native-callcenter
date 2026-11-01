@@ -13,8 +13,8 @@ import (
 // The ownership rule behind agent playback: the same line /cdrs/mine draws.
 func TestAgentWasOnCall(t *testing.T) {
 	t.Parallel()
-	mine := uuid.New()
-	other := uuid.New()
+	mine := uuid.Must(uuid.NewV7())
+	other := uuid.Must(uuid.NewV7())
 
 	if agentWasOnCall(store.CDR{PrimaryAgentID: &other}, mine) {
 		t.Error("somebody else's call was granted")

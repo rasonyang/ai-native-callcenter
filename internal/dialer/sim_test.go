@@ -124,7 +124,7 @@ func (s *simStore) Begin(_ context.Context, contactID uuid.UUID, now time.Time) 
 	cid := s.owner[contactID]
 	s.next[cid]++ // contacts are taken in order
 	a := campaign.Attempt{
-		ID: uuid.New(), CampaignID: cid, ContactID: contactID, CallID: uuid.New(), LegID: uuid.New(),
+		ID: uuid.Must(uuid.NewV7()), CampaignID: cid, ContactID: contactID, CallID: uuid.Must(uuid.NewV7()), LegID: uuid.Must(uuid.NewV7()),
 		State: campaign.AttemptDialing, StartedAt: now,
 	}
 	s.attempts[a.CallID] = a
@@ -326,7 +326,7 @@ func newSim(t *testing.T, sp simSpec) *sim {
 			did = sp.dids[i]
 		}
 		c := campaign.Campaign{
-			ID: uuid.New(), Name: fmt.Sprintf("c%d", i), DIDNumber: did, Status: campaign.StatusRunning,
+			ID: uuid.Must(uuid.NewV7()), Name: fmt.Sprintf("c%d", i), DIDNumber: did, Status: campaign.StatusRunning,
 			TimeZone: zone, MaxConcurrent: max(sp.maxConcurrent, 1), RingTimeoutSec: 30,
 			CallingWindow: campaign.CallingWindow{Days: everyDay, Ranges: []campaign.TimeRange{{Start: "09:00", End: "18:00"}}},
 			RetryPolicy:   campaign.DefaultRetryPolicy(),

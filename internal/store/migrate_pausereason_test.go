@@ -23,7 +23,7 @@ func TestMigrationAllowsThePauseReasonOfAMissingEndpoint(t *testing.T) {
 	if err := goose.UpToContext(ctx, db, "migrations", 44); err != nil {
 		t.Fatalf("migrating to 44 failed: %v", err)
 	}
-	didID := uuid.New()
+	didID := uuid.Must(uuid.NewV7())
 	exec := func(q string, args ...any) error {
 		_, err := db.ExecContext(ctx, q, args...)
 		return err
@@ -33,7 +33,7 @@ func TestMigrationAllowsThePauseReasonOfAMissingEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	insert := func(reason string) (uuid.UUID, error) {
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		return id, exec(`INSERT INTO campaigns (id, name, did_id, time_zone, calling_window, max_concurrent,
 		          ring_timeout_sec, retry_policy, status, pause_reason)
 		      VALUES ($1, $2, $3, 'UTC', '{}', 1, 30, '{}', 'PAUSED', $4)`, id, reason, didID, reason)
@@ -56,7 +56,7 @@ func TestMigrationAllowsThePauseReasonOfAMissingEndpoint(t *testing.T) {
 	if err := exec(`INSERT INTO campaigns (id, name, did_id, time_zone, calling_window, max_concurrent,
 	          ring_timeout_sec, retry_policy, status, pause_reason)
 	      VALUES ($1, 'running', $2, 'UTC', '{}', 1, 30, '{}', 'RUNNING', 'OUTBOUND_NOT_CONFIGURED')`,
-		uuid.New(), didID); err == nil {
+		uuid.Must(uuid.NewV7()), didID); err == nil {
 		t.Error("a campaign that is not PAUSED was given a pause reason")
 	}
 

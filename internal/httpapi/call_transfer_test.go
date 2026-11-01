@@ -50,7 +50,7 @@ func transferAs(t *testing.T, srv *Server, callID, agentID uuid.UUID) *httptest.
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/transfer",
 		strings.NewReader(`{"destination":"2001"}`))
 	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), AgentID: agentID,
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: agentID,
 		scopes: grantedScopes(auth.RoleAgent),
 	}))
 	w := httptest.NewRecorder()
@@ -70,7 +70,7 @@ func TestOnlyAnAgentOnTheCallCanTransferItOverHTTP(t *testing.T) {
 		telephony.NewAdapter(sw, "aicc.test"), unstaffedFloor{}, silentHub{})
 	srv := &Server{calls: coordinator}
 
-	callID, wei, amy := uuid.New(), uuid.New(), uuid.New()
+	callID, wei, amy := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	createdAt := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
 	if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInbound, "en", true, createdAt); err != nil {
 		t.Fatal(err)
@@ -112,7 +112,7 @@ func controlAs(t *testing.T, srv *Server, path string, serve func(*Server, http.
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/"+path,
 		strings.NewReader(body))
 	r = r.WithContext(contextWithAuth(r.Context(), AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), AgentID: agentID,
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: agentID,
 		scopes: grantedScopes(auth.RoleAgent),
 	}))
 	w := httptest.NewRecorder()
@@ -146,7 +146,7 @@ func TestAnInternalCallRefusesHoldRetrieveAndTransferAsTheContractSays(t *testin
 			telephony.NewAdapter(sw, "aicc.test"), unstaffedFloor{}, silentHub{})}
 
 		// wei at 1008 called amy at 1009, and both are talking.
-		callID, wei, amy := uuid.New(), uuid.New(), uuid.New()
+		callID, wei, amy := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 		if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInternal, "en", false, createdAt); err != nil {
 			t.Fatal(err)
 		}
@@ -190,7 +190,7 @@ func TestAnInternalCallRefusesHoldRetrieveAndTransferAsTheContractSays(t *testin
 		srv := &Server{calls: telephony.NewCoordinator(registry,
 			telephony.NewAdapter(sw, "aicc.test"), unstaffedFloor{}, silentHub{})}
 
-		callID, wei := uuid.New(), uuid.New()
+		callID, wei := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 		if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInbound, "en", true, createdAt); err != nil {
 			t.Fatal(err)
 		}

@@ -64,7 +64,7 @@ func TestAnOutboundCallRecordsEachStageOfItsFirstWordOnce(t *testing.T) {
 	reader := useTestReader()
 	before := stageCounts(t, reader)
 
-	id, other := uuid.New(), uuid.New()
+	id, other := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	t0 := time.Now()
 	OutboundAnswered(id, t0)
 	// A call that was not entered at the answer records nothing.
@@ -95,7 +95,7 @@ func TestAProviderThatSpeaksBeforeItsSessionIsReadyStillRecordsAllStages(t *test
 	reader := useTestReader()
 	before := stageCounts(t, reader)
 
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	t0 := time.Now()
 	OutboundAnswered(id, t0)
 	OutboundInvited(id, t0.Add(50*time.Millisecond))
@@ -109,7 +109,7 @@ func TestAProviderThatSpeaksBeforeItsSessionIsReadyStillRecordsAllStages(t *test
 }
 
 func TestACallThatEndsBeforeItsFirstWordIsForgotten(t *testing.T) {
-	id := uuid.New()
+	id := uuid.Must(uuid.NewV7())
 	OutboundAnswered(id, time.Now())
 	OutboundForget(id)
 	outboundStages.Lock()

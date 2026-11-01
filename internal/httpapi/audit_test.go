@@ -82,14 +82,14 @@ func trailServer(auditor *fakeAuditor, identity auth.Identity) http.Handler {
 
 func TestAuditTrail(t *testing.T) {
 	t.Parallel()
-	userID := uuid.New()
+	userID := uuid.Must(uuid.NewV7())
 	identity := auth.Identity{UserID: userID, Role: auth.RoleAdmin}
 
 	t.Run("a successful mutation is recorded with actor, action and target", func(t *testing.T) {
 		auditor := &fakeAuditor{}
 		server := trailServer(auditor, identity)
 
-		queueID := uuid.New()
+		queueID := uuid.Must(uuid.NewV7())
 		req := httptest.NewRequest(http.MethodPost,
 			"/api/v1/queues/"+queueID.String()+"/agents", strings.NewReader(`{"agentId":"x"}`))
 		server.ServeHTTP(httptest.NewRecorder(), req)
@@ -529,7 +529,7 @@ func auditIdentities() []struct {
 	ac   AuthContext
 	want store.AuditSubject
 } {
-	userID, keyID, agentID := uuid.New(), uuid.New(), uuid.New()
+	userID, keyID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	return []struct {
 		name string
 		ac   AuthContext
@@ -585,7 +585,7 @@ func TestAnAuditRowOutlivesTheClient(t *testing.T) {
 			server := auditedRoute(&Server{auditor: auditor}, id.ac,
 				func(http.ResponseWriter, *http.Request) { hangUp() })
 
-			queueID := uuid.New()
+			queueID := uuid.Must(uuid.NewV7())
 			req := httptest.NewRequestWithContext(ctx, http.MethodPost,
 				"/api/v1/queues/"+queueID.String()+"/agents", strings.NewReader(`{"agentId":"x"}`))
 			rec := httptest.NewRecorder()
@@ -621,7 +621,7 @@ func TestAnAuditRowOutlivesAClosedConnection(t *testing.T) {
 		}))
 	defer server.Close()
 
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	ctx, hangUp := context.WithCancel(context.Background())
 	defer hangUp()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -693,7 +693,7 @@ func (l *failureLog) records() []slog.Record {
 // otherwise write into. The handler also keeps only this test's path.
 func TestAStalledAuditStoreIsGivenUpOn(t *testing.T) {
 	id := auditIdentities()[1]
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	path := "/api/v1/queues/" + queueID.String() + "/agents"
 
 	logged := &failureLog{path: path}
@@ -772,7 +772,7 @@ func TestARevealedPasswordIsRecordedAfterTheClientLeft(t *testing.T) {
 			auditor := &storeAuditor{}
 			s := &Server{auditor: auditor, catalog: revealCatalog{hangUp: hangUp}}
 
-			extensionID := uuid.New()
+			extensionID := uuid.Must(uuid.NewV7())
 			r := chi.NewRouter()
 			r.Get("/api/v1/extensions/{extensionId}/password", func(w http.ResponseWriter, req *http.Request) {
 				s.RevealExtensionPassword(w, req.WithContext(contextWithAuth(req.Context(), id.ac)), extensionID)

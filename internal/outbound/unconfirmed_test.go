@@ -111,7 +111,7 @@ func stalledService(t *testing.T, window, margin time.Duration, dids fakeDIDs) s
 	live := &liveSet{ids: map[uuid.UUID]bool{}}
 	clock := &stallClock{now: time.Date(2026, 10, 21, 9, 51, 0, 0, time.UTC)}
 	if dids == nil {
-		flowID := uuid.New()
+		flowID := uuid.Must(uuid.NewV7())
 		dids = fakeDIDs{
 			{Number: "95099", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true, IsRecordingEnabled: true},
 			{Number: "95011", Language: "en", IsEnabled: true, AllowOutbound: true, IsDefaultOutbound: true},
@@ -379,7 +379,7 @@ func TestAnUnconfirmedClickToDialGoesOnToTheDestinationWhenTheAgentLegAnswers(t 
 // stalled, put at most one originate per callId on the switch.
 func TestConcurrentRetriesDuringAStallDialEachCallIDAtMostOnce(t *testing.T) {
 	t.Parallel()
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	zero := 0
 	dids := fakeDIDs{
 		{Number: "95099", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true},

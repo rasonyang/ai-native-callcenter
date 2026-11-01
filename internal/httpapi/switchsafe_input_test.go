@@ -123,7 +123,7 @@ func TestANumbersUnsafeStoredLanguageIsAConflict(t *testing.T) {
 	w := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls",
 		strings.NewReader(`{"kind":"AI_OUTBOUND","to":"18600000000","did":"95011"}`))
-	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{UserID: uuid.New(), Role: auth.RoleSupervisor}))
+	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleSupervisor}))
 	s.CreateCall(w, r)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("http = %d, want 409: %s", w.Code, w.Body)
@@ -137,10 +137,10 @@ func TestANumbersUnsafeStoredLanguageIsAConflict(t *testing.T) {
 // extension or a number, or a 422 naming the field.
 func TestATransferToAnythingButAnExtensionOrANumberIsRefused(t *testing.T) {
 	t.Parallel()
-	agent := AuthContext{Kind: SubjectUser, SubjectID: uuid.New(), AgentID: uuid.New(),
+	agent := AuthContext{Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), AgentID: uuid.Must(uuid.NewV7()),
 		scopes: grantedScopes(auth.RoleAgent)}
 	srv := &Server{calls: failingCalls{err: telephony.ErrInvalidDestination}, agents: dialerPresence{}}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	r := httptest.NewRequest(http.MethodPost, "/api/v1/calls/"+callID.String()+"/transfer",
 		strings.NewReader(`{"destination":"system:id inline"}`))
 	r = r.WithContext(contextWithAuth(r.Context(), agent))

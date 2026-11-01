@@ -18,7 +18,7 @@ import (
 func TestAWrapUpDraftIsWrittenOnceAndNeverOverAConfirmedRecord(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	code := "FOLLOW_UP_REQUIRED"
 
 	// No record yet: nothing to write to, and no error.
@@ -70,7 +70,7 @@ func TestAWrapUpDraftIsWrittenOnceAndNeverOverAConfirmedRecord(t *testing.T) {
 func TestADraftNeverLandsOnAConfirmedRecord(t *testing.T) {
 	ledger, _, _ := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if err := ledger.OpenWrapUp(ctx, callID, agentID); err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestADraftNeverLandsOnAConfirmedRecord(t *testing.T) {
 func TestADraftCodeDisabledSincePromptingIsDropped(t *testing.T) {
 	ledger, _, pool := workspaceStore(t)
 	ctx := context.Background()
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if err := ledger.OpenWrapUp(ctx, callID, agentID); err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +110,7 @@ func TestADraftCodeDisabledSincePromptingIsDropped(t *testing.T) {
 	}
 
 	// A draft that suggests none is stored as one with a note and no code.
-	call2 := uuid.New()
+	call2 := uuid.Must(uuid.NewV7())
 	if err := ledger.OpenWrapUp(ctx, call2, agentID); err != nil {
 		t.Fatal(err)
 	}

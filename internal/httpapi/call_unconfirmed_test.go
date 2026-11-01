@@ -76,7 +76,7 @@ func TestAStalledSwitchNeitherFailsNorDuplicatesCallControl(t *testing.T) {
 	byChannel := map[string]int{}
 	at := time.Date(2026, 10, 22, 10, 0, 0, 0, time.UTC)
 	for i := range seats {
-		st := seat{callID: uuid.New(), agentID: uuid.New(),
+		st := seat{callID: uuid.Must(uuid.NewV7()), agentID: uuid.Must(uuid.NewV7()),
 			caller: fmt.Sprintf("caller-%d", i), agent: fmt.Sprintf("agent-%d", i)}
 		seats[i] = st
 		byChannel[st.caller], byChannel[st.agent] = i, i

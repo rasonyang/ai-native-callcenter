@@ -355,7 +355,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	// bot's rows and the human path's rows meet on the same key.
 	ledgerCallID, err := uuid.Parse(headers[headerCallID])
 	if err != nil {
-		ledgerCallID = uuid.New()
+		ledgerCallID = uuid.Must(uuid.NewV7())
 		log.Warn("bot leg carried no parseable call id; minted one",
 			"header", headers[headerCallID], "callId", ledgerCallID)
 	}

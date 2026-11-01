@@ -36,25 +36,25 @@ func TestACallbackRemembersHowItsLastAttemptWent(t *testing.T) {
 	st.OnCallbackSettled = func(cb Callback) { announced = append(announced, cb) }
 	ledger := st.Ledger()
 
-	holder, stranger := uuid.New(), uuid.New()
+	holder, stranger := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	cb, err := ledger.InsertCallback(ctx, nil, nil, "18600000000", "call me back")
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
 	// Nobody has claimed it: a dial cannot be recorded against it.
-	if _, err := ledger.MarkCallbackAttempt(ctx, cb.ID, uuid.New(), holder); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := ledger.MarkCallbackAttempt(ctx, cb.ID, uuid.Must(uuid.NewV7()), holder); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("attempt on an unclaimed callback: got %v, want no rows", err)
 	}
 	if _, err := ledger.ClaimCallback(ctx, cb.ID, holder); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
 	// Somebody else's claim is not this caller's to dial from either.
-	if _, err := ledger.MarkCallbackAttempt(ctx, cb.ID, uuid.New(), stranger); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := ledger.MarkCallbackAttempt(ctx, cb.ID, uuid.Must(uuid.NewV7()), stranger); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("attempt by a non-holder: got %v, want no rows", err)
 	}
 
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	marked, err := ledger.MarkCallbackAttempt(ctx, cb.ID, callID, holder)
 	if err != nil {
 		t.Fatalf("mark attempt: %v", err)

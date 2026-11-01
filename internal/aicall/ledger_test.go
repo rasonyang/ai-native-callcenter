@@ -38,14 +38,14 @@ func (f *fakeLedger) InsertCDR(_ context.Context, cdr store.CDR) error {
 func (f *fakeLedger) InsertCallback(_ context.Context, callID, queueID *uuid.UUID, phone, message string) (store.Callback, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	cb := store.Callback{ID: uuid.New(), CallID: callID, QueueID: queueID,
+	cb := store.Callback{ID: uuid.Must(uuid.NewV7()), CallID: callID, QueueID: queueID,
 		PhoneNumber: phone, Message: message, Status: store.CallbackStatusOpen}
 	f.callbacks = append(f.callbacks, cb)
 	return cb, nil
 }
 
 func testFacts() *callFacts {
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	return &callFacts{
 		callType: callTypeInbound, language: "zh", fromNumber: "13800138000",
 		did: "95012", flowID: &flowID, flowSlug: "novanet_support",
@@ -94,7 +94,7 @@ func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, ni
 // A call the bot finished itself is contained, and the ledger says so.
 func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 	ledger := newFakeLedger()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now().Add(-30*time.Second))
 
 	recorder.say(store.SpeakerBot, "感谢致电 NovaNet")
@@ -153,8 +153,8 @@ func TestAHangupCallWritesAContainedCDRAndTheTranscript(t *testing.T) {
 // bot writes only what it alone saw — the transcript.
 func TestATransferredCallStillWritesTheRowItKnows(t *testing.T) {
 	ledger := newFakeLedger()
-	callID := uuid.New()
-	queueID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
+	queueID := uuid.Must(uuid.NewV7())
 	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
 
 	recorder.say(store.SpeakerCustomer, "转人工")
@@ -190,7 +190,7 @@ func TestATransferredCallStillWritesTheRowItKnows(t *testing.T) {
 // on the dev stack).
 func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markTransferred("", "")
 	recorder.finish(ledger, testFacts(), discard())
@@ -214,7 +214,7 @@ func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 // 01a0f664 on the dev stack).
 func TestATransferNeverHandedOverKeepsTheBotsSummary(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	facts := testFacts()
 	facts.userData = map[string]any{"orderId": "A-1001"}
 
@@ -242,7 +242,7 @@ func TestATransferNeverHandedOverKeepsTheBotsSummary(t *testing.T) {
 // with and nothing of the bot's.
 func TestARowWithoutATransferAddsNoSummary(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markHangup()
 	recorder.finish(ledger, testFacts(), discard())
@@ -256,7 +256,7 @@ func TestARowWithoutATransferAddsNoSummary(t *testing.T) {
 // once and in a stable order.
 func TestUnbackedClaimsReachTheRow(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markUnbackedClaim(store.UnbackedClaimTransfer)
 	recorder.markUnbackedClaim(store.UnbackedClaimLookup)
@@ -271,7 +271,7 @@ func TestUnbackedClaimsReachTheRow(t *testing.T) {
 	}
 
 	clean := newFakeLedger()
-	newCallRecorder(uuid.New(), time.Now(), nil).finish(clean, testFacts(), discard())
+	newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil).finish(clean, testFacts(), discard())
 	if claims := clean.cdrs[0].UnbackedClaims; claims != nil {
 		t.Errorf("a call with no claims wrote %v", claims)
 	}
@@ -280,7 +280,7 @@ func TestUnbackedClaimsReachTheRow(t *testing.T) {
 // A caller who hangs up mid-conversation is answered but not contained.
 func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.say(store.SpeakerBot, "你好")
 
 	recorder.finish(ledger, testFacts(), discard()) // no end reason: caller left
@@ -299,7 +299,7 @@ func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 // A failed conversation is a FAILED row with its cause.
 func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.markFailed("MEDIA_OR_PROVIDER_FAILURE")
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -315,7 +315,7 @@ func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 
 // A nil ledger writes nothing and panics nowhere.
 func TestANilLedgerIsANoOp(t *testing.T) {
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.say(store.SpeakerBot, "hello")
 	recorder.finish(nil, testFacts(), discard())
 }
@@ -327,7 +327,7 @@ func TestTakeMessagePersistsAndAnnouncesACallback(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.orchestrator.cfg.Ledger = ledger
-	actions.recorder = newCallRecorder(uuid.New(), time.Now(), nil)
+	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.facts = testFacts()
 	var announced []store.Callback
 	actions.orchestrator.cfg.AnnounceCallback = func(cb store.Callback) {
@@ -360,7 +360,7 @@ func TestTakeMessagePersistsAndAnnouncesACallback(t *testing.T) {
 // 2026-08-21: a 34-second contained call billed as free).
 func TestAContainedCallIsStillBilled(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now().Add(-40*time.Second), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-40*time.Second), nil)
 	recorder.answeredAt = time.Now().Add(-34 * time.Second)
 	recorder.markHangup()
 	recorder.finish(ledger, testFacts(), discard())
@@ -397,7 +397,7 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 
 			facts := testFacts()
@@ -432,7 +432,7 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 // the hint is instruction text, and the transcript is read by people. The
 // phase the call moved to is recorded in its place.
 func TestAToolResultIsRecordedWithoutItsHint(t *testing.T) {
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	recorder, transcripts, flushTranscript := recorderWithTranscript(t, callID, time.Now())
 
 	recorder.toolResult("transfer_to_agent",
@@ -471,7 +471,7 @@ func TestAToolResultIsRecordedWithoutItsHint(t *testing.T) {
 // path; a transferred call's row is the human path's (#230).
 func TestACallEndedByTheTimeLimitIsNotContained(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.markSessionLimit()
 	recorder.markHangup()
 
@@ -508,7 +508,7 @@ func TestACallAnAgentPlacedIsNotWrittenByTheBot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 			recorder.finish(ledger, facts, discard())
 			if len(ledger.cdrs) != 0 {
@@ -528,7 +528,7 @@ func TestACallNoAgentPlacedIsStillWrittenByTheBot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.New(), time.Now().Add(-10*time.Second), nil)
+			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 			recorder.finish(ledger, facts, discard())
 			if len(ledger.cdrs) != 1 {
@@ -571,7 +571,7 @@ func TestABotRowTakesItsTimelineFromTheCall(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			session := time.Now().Add(-talk)
-			r := newCallRecorder(uuid.New(), session, nil)
+			r := newCallRecorder(uuid.Must(uuid.NewV7()), session, nil)
 			var created, answered time.Time
 			if tt.hasCreated {
 				created = session.Add(-tt.createdBefore)

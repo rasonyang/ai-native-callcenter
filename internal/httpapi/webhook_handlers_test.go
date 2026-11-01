@@ -35,7 +35,7 @@ func (s *stubWebhooks) Get(context.Context, uuid.UUID) (store.WebhookSubscriptio
 func (s *stubWebhooks) Create(_ context.Context, in store.WebhookSubscriptionWrite) (store.WebhookSubscription, error) {
 	s.calls++
 	s.written = in
-	return store.WebhookSubscription{SubscriptionID: uuid.New(), Name: in.Name, URL: in.URL, Filter: in.Filter}, nil
+	return store.WebhookSubscription{SubscriptionID: uuid.Must(uuid.NewV7()), Name: in.Name, URL: in.URL, Filter: in.Filter}, nil
 }
 
 func (s *stubWebhooks) Update(_ context.Context, id uuid.UUID, in store.WebhookSubscriptionWrite) (store.WebhookSubscription, error) {
@@ -104,7 +104,7 @@ func TestAnUnknownFilterKeyIsRefusedWhenTheSubscriptionIsWritten(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		s.UpdateWebhookSubscription(w,
-			post(`{"name":"x","url":"https://example.com/h","filter":{"queue_id":["9d"]}}`), uuid.New())
+			post(`{"name":"x","url":"https://example.com/h","filter":{"queue_id":["9d"]}}`), uuid.Must(uuid.NewV7()))
 
 		if w.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status = %d, want 422: %s", w.Code, w.Body)

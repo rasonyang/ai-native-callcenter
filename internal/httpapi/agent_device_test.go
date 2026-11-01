@@ -151,9 +151,9 @@ func newDeviceFloor(t *testing.T) *deviceFloor {
 			profiles: map[uuid.UUID]agents.Profile{}, numbers: map[uuid.UUID]string{},
 			presence: map[uuid.UUID]agents.Presence{},
 		},
-		stream: &streamRecorder{}, wei: uuid.New(), ben: uuid.New(), weiExt: uuid.New(),
+		stream: &streamRecorder{}, wei: uuid.Must(uuid.NewV7()), ben: uuid.Must(uuid.NewV7()), weiExt: uuid.Must(uuid.NewV7()),
 	}
-	benExt := uuid.New()
+	benExt := uuid.Must(uuid.NewV7())
 	f.store.numbers[f.weiExt], f.store.numbers[benExt] = "1001", "1002"
 	f.store.profiles[f.wei] = agents.Profile{AgentID: f.wei, CallcenterName: "wei", DisplayName: "Wei", ExtensionNumber: "1001", ExtensionID: &f.weiExt}
 	f.store.profiles[f.ben] = agents.Profile{AgentID: f.ben, CallcenterName: "ben", DisplayName: "Ben", ExtensionNumber: "1002", ExtensionID: &benExt}
@@ -170,7 +170,7 @@ func (f *deviceFloor) as(agentID uuid.UUID, method, target, body string) *http.R
 		r = httptest.NewRequest(method, target, strings.NewReader(body))
 	}
 	return r.WithContext(contextWithIdentity(r.Context(),
-		auth.Identity{UserID: uuid.New(), Role: auth.RoleAgent}, agentID))
+		auth.Identity{UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleAgent}, agentID))
 }
 
 func (f *deviceFloor) login(agentID uuid.UUID, body string) *httptest.ResponseRecorder {
@@ -289,7 +289,7 @@ func TestSignInWithAnEmptyBodyOrNoBodyLandsAtTheBoundExtension(t *testing.T) {
 func TestSignInWithNoBindingIsAConflict(t *testing.T) {
 	t.Parallel()
 	f := newDeviceFloor(t)
-	drifter := uuid.New()
+	drifter := uuid.Must(uuid.NewV7())
 	f.store.profiles[drifter] = agents.Profile{AgentID: drifter, DisplayName: "Dee"}
 	if w := f.login(drifter, `{}`); w.Code != http.StatusConflict {
 		t.Errorf("status = %d, want 409: %s", w.Code, w.Body)
@@ -303,7 +303,7 @@ func TestRebindingASignedInAgentIsAConflictThatChangesNothing(t *testing.T) {
 		t.Fatalf("sign-in: %d %s", w.Code, w.Body)
 	}
 	told := f.stream.count()
-	other := uuid.New()
+	other := uuid.Must(uuid.NewV7())
 	f.store.numbers[other] = "1009"
 
 	for name, body := range map[string]string{

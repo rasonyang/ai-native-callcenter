@@ -43,7 +43,7 @@ func (r *retirer) For(id uuid.UUID, _ events.CallType, _ time.Time) *transcript.
 func TestRetiringATranscriptWorksWithNoPredecessor(t *testing.T) {
 	t.Parallel()
 	transcripts := &retirer{}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	retireTranscriptWithCall(nil, transcripts)(telephony.Snapshot{CallID: callID})
 
@@ -60,7 +60,7 @@ func (d *detacher) DetachCall(id uuid.UUID) { d.calls = append(d.calls, id) }
 func TestDetachingTapsWorksWithNoPredecessor(t *testing.T) {
 	t.Parallel()
 	taps := &detacher{}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 
 	detachTapsWithCall(nil, taps)(callID)
 
@@ -78,7 +78,7 @@ func (l *lineGiver) CallEnded(id uuid.UUID) { l.ended = append(l.ended, id) }
 func TestAPlacedCallsLineIsReleasedOnFinishAndOnRetire(t *testing.T) {
 	t.Parallel()
 	lines := &lineGiver{}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	var priorRan int
 
 	releaseLinesOnFinish(func(telephony.Snapshot) { priorRan++ }, lines)(telephony.Snapshot{CallID: callID})

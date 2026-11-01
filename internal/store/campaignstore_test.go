@@ -115,7 +115,7 @@ func TestACampaignRoundTripsThroughTheStore(t *testing.T) {
 		t.Errorf("retry policy = %+v", got.RetryPolicy)
 	}
 
-	if _, err := cs.Get(ctx, uuid.New()); !errors.Is(err, campaign.ErrNotFound) {
+	if _, err := cs.Get(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, campaign.ErrNotFound) {
 		t.Errorf("an unknown id: %v", err)
 	}
 
@@ -131,11 +131,11 @@ func TestACampaignRoundTripsThroughTheStore(t *testing.T) {
 	}
 
 	// A missing DID is a typed refusal, not a storage error.
-	bad := newCampaign(uuid.New(), "No such DID")
+	bad := newCampaign(uuid.Must(uuid.NewV7()), "No such DID")
 	if _, err := cs.Create(ctx, bad); !errors.Is(err, campaign.ErrDIDNotFound) {
 		t.Errorf("unknown DID: %v", err)
 	}
-	q := uuid.New()
+	q := uuid.Must(uuid.NewV7())
 	bad = newCampaign(didID, "No such queue")
 	bad.FollowUpQueueID = &q
 	if _, err := cs.Create(ctx, bad); !errors.Is(err, campaign.ErrQueueNotFound) {
@@ -173,7 +173,7 @@ func TestTheSchemaRefusesWhatTheModelForbids(t *testing.T) {
 		max_concurrent, ring_timeout_sec, retry_policy, finished_at) VALUES `
 	row := func(status, reason, window string, maxConc, ring int, finished string) string {
 		return fmt.Sprintf(`('%s', 'x', '%s', '%s', %s, 'UTC', %s, %d, %d, '{}', %s)`,
-			uuid.New(), didID, status, reason, window, maxConc, ring, finished)
+			uuid.Must(uuid.NewV7()), didID, status, reason, window, maxConc, ring, finished)
 	}
 	ok := `'{}'`
 	violation(t, st, "ck_campaigns_status", base+row("BOGUS", "NULL", ok, 1, 30, "NULL"))
@@ -186,15 +186,15 @@ func TestTheSchemaRefusesWhatTheModelForbids(t *testing.T) {
 	violation(t, st, "ck_campaigns_finished_at", base+row("RUNNING", "NULL", ok, 1, 30, "now()"))
 	violation(t, st, "fk_campaigns_dids",
 		fmt.Sprintf(`INSERT INTO campaigns (id, name, did_id, time_zone, calling_window, max_concurrent, ring_timeout_sec, retry_policy)
-			VALUES ('%s', 'x', '%s', 'UTC', '{}', 1, 30, '{}')`, uuid.New(), uuid.New()))
+			VALUES ('%s', 'x', '%s', 'UTC', '{}', 1, 30, '{}')`, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())))
 	violation(t, st, "ck_campaigns_name", fmt.Sprintf(`INSERT INTO campaigns (id, name, did_id, time_zone, calling_window, max_concurrent, ring_timeout_sec, retry_policy)
-			VALUES ('%s', '  ', '%s', 'UTC', '{}', 1, 30, '{}')`, uuid.New(), didID))
+			VALUES ('%s', '  ', '%s', 'UTC', '{}', 1, 30, '{}')`, uuid.Must(uuid.NewV7()), didID))
 	violation(t, st, "ck_campaigns_default_country_code", fmt.Sprintf(`INSERT INTO campaigns (id, name, did_id, time_zone, calling_window, max_concurrent, ring_timeout_sec, retry_policy, default_country_code)
-			VALUES ('%s', 'x', '%s', 'UTC', '{}', 1, 30, '{}', '+86')`, uuid.New(), didID))
+			VALUES ('%s', 'x', '%s', 'UTC', '{}', 1, 30, '{}', '+86')`, uuid.Must(uuid.NewV7()), didID))
 
 	ins := func(number, cols, vals string) string {
 		return fmt.Sprintf(`INSERT INTO campaign_contacts (id, campaign_id, number_e164, number_raw%s)
-			VALUES ('%s', '%s', '%s', 'raw'%s)`, cols, uuid.New(), c.ID, number, vals)
+			VALUES ('%s', '%s', '%s', 'raw'%s)`, cols, uuid.Must(uuid.NewV7()), c.ID, number, vals)
 	}
 	violation(t, st, "ck_campaign_contacts_number_e164", ins("13800138000", "", ""))
 	violation(t, st, "ck_campaign_contacts_number_e164", ins("+0123456789", "", ""))
@@ -210,7 +210,7 @@ func TestTheSchemaRefusesWhatTheModelForbids(t *testing.T) {
 		ins("+8613800138000", ", status, next_attempt_at", ", 'DONE', now()"))
 	violation(t, st, "fk_campaign_contacts_campaigns",
 		fmt.Sprintf(`INSERT INTO campaign_contacts (id, campaign_id, number_e164, number_raw) VALUES ('%s', '%s', '+8613800138000', 'x')`,
-			uuid.New(), uuid.New()))
+			uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())))
 
 	// Every outcome and every intent the design names is accepted.
 	for i, outcome := range []string{"ANSWERED", "BOT_FAILED", "OVERFLOW", "NO_ANSWER", "BUSY", "REJECTED",
@@ -237,7 +237,7 @@ func TestTheSchemaRefusesWhatTheModelForbids(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := st.Pool.Exec(ctx, fmt.Sprintf(`INSERT INTO campaign_contacts (id, campaign_id, number_e164, number_raw)
-		VALUES ('%s', '%s', '+8613100000000', 'x')`, uuid.New(), other.ID)); err != nil {
+		VALUES ('%s', '%s', '+8613100000000', 'x')`, uuid.Must(uuid.NewV7()), other.ID)); err != nil {
 		t.Errorf("the same number in a second campaign: %v", err)
 	}
 }
@@ -358,7 +358,7 @@ func TestTransitionsAreConditionalUpdates(t *testing.T) {
 			t.Errorf("%s of a CANCELLED campaign: %v", name, err)
 		}
 	}
-	if _, err := cs.Start(ctx, uuid.New()); !errors.Is(err, campaign.ErrNotFound) {
+	if _, err := cs.Start(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, campaign.ErrNotFound) {
 		t.Errorf("start of an unknown campaign: %v", err)
 	}
 }
@@ -489,7 +489,7 @@ func TestAnImportIsOneTransaction(t *testing.T) {
 	if _, err := cs.ImportContacts(ctx, c.ID, contactsFor("8", 1)); !errors.Is(err, campaign.ErrInvalidTransition) {
 		t.Errorf("import into CANCELLED: %v", err)
 	}
-	if _, err := cs.ImportContacts(ctx, uuid.New(), contactsFor("8", 1)); !errors.Is(err, campaign.ErrNotFound) {
+	if _, err := cs.ImportContacts(ctx, uuid.Must(uuid.NewV7()), contactsFor("8", 1)); !errors.Is(err, campaign.ErrNotFound) {
 		t.Errorf("import into an unknown campaign: %v", err)
 	}
 }

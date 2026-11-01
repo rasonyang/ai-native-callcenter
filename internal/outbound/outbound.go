@@ -529,7 +529,7 @@ func (s *Service) Dial(ctx context.Context, req AgentDialRequest) (uuid.UUID, er
 		return uuid.Nil, err
 	}
 
-	agentLeg := uuid.New()
+	agentLeg := uuid.Must(uuid.NewV7())
 
 	// Before the originate, for the same reason as an AI call: the agent's
 	// leg can reach the registry while this function is still running.
@@ -908,7 +908,7 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 
 	customerLeg := req.LegID
 	if customerLeg == uuid.Nil {
-		customerLeg = uuid.New()
+		customerLeg = uuid.Must(uuid.NewV7())
 	}
 	vars := map[string]string{
 		"aicc_call_id":  callID.String(),
@@ -1053,7 +1053,7 @@ func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language
 		if record {
 			s.startRecording(callID, customerLeg)
 		}
-		botLeg := uuid.New()
+		botLeg := uuid.Must(uuid.NewV7())
 		bridgeVars := map[string]string{
 			"aicc_call_id":                    callID.String(),
 			"aicc_did":                        didNumber,

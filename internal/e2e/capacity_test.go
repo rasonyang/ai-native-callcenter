@@ -155,7 +155,7 @@ func fakeK1(t *testing.T) *RunView {
 	const campaignDID, directDID = "95000001", "95000002"
 	answered, overflow := api.CampaignOutcome("ANSWERED"), api.CampaignOutcome(outcomeOverflow)
 	done := api.CampaignContactStatus("DONE")
-	campaignID := uuid.New()
+	campaignID := uuid.Must(uuid.NewV7())
 	v := &RunView{Form: phonenum.FormE164, Cases: K1.Cases}
 	rv := RegionView{Region: r, DID: api.DID{Number: campaignDID}, Campaign: api.Campaign{ID: campaignID}}
 	cause := func(s string) *string { return &s }
@@ -167,7 +167,7 @@ func fakeK1(t *testing.T) *RunView {
 		}
 		v.Dialogs = append(v.Dialogs, answeredDialog(key, campaignDID, i, 5000+i, end, by, peak))
 		finished := at(end)
-		a := api.CampaignAttempt{ID: uuid.New(), CallID: uuid.New(), Number: r.Number(cs), State: attemptFinished, Outcome: outcome, FinishedAt: &finished, StartedAt: at(0)}
+		a := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished, Outcome: outcome, FinishedAt: &finished, StartedAt: at(0)}
 		ct := api.CampaignContact{Number: r.Number(cs), Status: done, Attempts: 1}
 		rv.Contacts = append(rv.Contacts, ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a}, Contact: &ct})
 		answeredAt := at(5000 + i)
@@ -176,7 +176,7 @@ func fakeK1(t *testing.T) *RunView {
 	v.Regions = []RegionView{rv}
 	for i, ds := range K1.Direct {
 		dlg := answeredDialog(ds.DialKey(phonenum.FormE164), directDID, 100+i, 300+i, 12300+i, calleesim.EndedByCallee, 5000)
-		id := uuid.New()
+		id := uuid.Must(uuid.NewV7())
 		v.Direct = append(v.Direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(phonenum.FormE164), DID: directDID, CallID: id.String(), Dialog: &dlg,
 			CDRs: []api.CDR{{CallID: id, HangupCause: cause("NORMAL_CLEARING"), Legs: []api.Leg{{Kind: "BOT"}}}}})
 	}
@@ -316,7 +316,7 @@ func fakeK2(t *testing.T) *RunView {
 	at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
 	const did = "95000003"
 	noAnswer, exhausted := api.CampaignOutcome("NO_ANSWER"), api.CampaignContactStatus("EXHAUSTED")
-	campaignID := uuid.New()
+	campaignID := uuid.Must(uuid.NewV7())
 	v := &RunView{Form: phonenum.FormE164, Cases: K2.Cases}
 	rv := RegionView{Region: r, DID: api.DID{Number: did}, Campaign: api.Campaign{ID: campaignID}}
 	cause := "NO_ANSWER"
@@ -328,7 +328,7 @@ func fakeK2(t *testing.T) *RunView {
 			End: &calleesim.EndRecord{Method: calleesim.EndedWithCancel, By: calleesim.EndedByCaller, At: at(start + 7468)},
 		})
 		end := at(start + 7470)
-		a := api.CampaignAttempt{ID: uuid.New(), CallID: uuid.New(), State: attemptFinished, Outcome: &noAnswer, FinishedAt: &end, StartedAt: at(start)}
+		a := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), State: attemptFinished, Outcome: &noAnswer, FinishedAt: &end, StartedAt: at(start)}
 		ct := api.CampaignContact{Number: r.Number(cs), Status: exhausted, Attempts: 1}
 		rv.Contacts = append(rv.Contacts, ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a}, Contact: &ct})
 		rv.CDRs = append(rv.CDRs, api.CDR{CallID: a.CallID, HangupCause: &cause, CampaignID: &campaignID})

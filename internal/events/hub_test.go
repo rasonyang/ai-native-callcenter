@@ -91,10 +91,10 @@ func TestPublishStampsEnvelope(t *testing.T) {
 
 func TestScopingByIdentity(t *testing.T) {
 	t.Parallel()
-	agentA := uuid.New()
-	agentB := uuid.New()
-	queue1 := uuid.New()
-	queue2 := uuid.New()
+	agentA := uuid.Must(uuid.NewV7())
+	agentB := uuid.Must(uuid.NewV7())
+	queue1 := uuid.Must(uuid.NewV7())
+	queue2 := uuid.Must(uuid.NewV7())
 
 	tests := []struct {
 		name string
@@ -275,7 +275,7 @@ func TestReplayAppliesTheScopeTheEventWasPublishedUnder(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
-	alice, bob := uuid.New(), uuid.New()
+	alice, bob := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	// Prime the sequence: seq 1 minus one is 0, which Subscribe reads as a
 	// fresh stream rather than a resume point.
@@ -314,12 +314,12 @@ func TestReplayStillGivesSupervisorsEverything(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
-	agent := uuid.New()
+	agent := uuid.Must(uuid.NewV7())
 
 	h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
 
 	first := h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{agent}})
-	h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{uuid.New()}})
+	h.Publish(ctx, Event{Type: TypeCallTranscript}, Scope{AgentIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}})
 
 	sub, replay, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, first.Seq-1)
 	defer sub.Close()
@@ -335,7 +335,7 @@ func TestCampaignUpdatesReachSupervisionAndNoAgent(t *testing.T) {
 	t.Parallel()
 	h, _ := newTestHub()
 	ctx := context.Background()
-	agent, queue := uuid.New(), uuid.New()
+	agent, queue := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	h.Publish(ctx, Event{Type: TypeSystemLink}, Scope{})
 	sup, _, _ := h.Subscribe(Subscriber{SeesEveryCall: true}, 0)
@@ -344,7 +344,7 @@ func TestCampaignUpdatesReachSupervisionAndNoAgent(t *testing.T) {
 	defer ag.Close()
 
 	first := h.Publish(ctx, Event{Type: TypeCampaignUpdated,
-		Payload: map[string]any{"campaignId": uuid.New()}}, Scope{})
+		Payload: map[string]any{"campaignId": uuid.Must(uuid.NewV7())}}, Scope{})
 
 	select {
 	case ev := <-sup.C:

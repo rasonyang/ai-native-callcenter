@@ -127,7 +127,7 @@ func TestAHighLeadLinksToItsCallbackByCallID(t *testing.T) {
 	}
 
 	// An older, unrelated callback for the shared number, from an inbound call.
-	inboundCall := uuid.New()
+	inboundCall := uuid.Must(uuid.NewV7())
 	if _, err := f.st.Ledger().InsertCallback(ctx, &inboundCall, nil, "13800138000", "inbound: billing question"); err != nil {
 		t.Fatal(err)
 	}

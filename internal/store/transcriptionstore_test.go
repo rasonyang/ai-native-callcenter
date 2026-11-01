@@ -16,7 +16,7 @@ import (
 func TestTheTranscriptionQueueLifecycle(t *testing.T) {
 	st, ctx := liveStore(t)
 	l := st.Ledger()
-	callID, recID := uuid.New(), uuid.New()
+	callID, recID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 
 	// Enqueue is idempotent.
 	if ok, err := l.EnqueueTranscription(ctx, callID, recID, 120); err != nil || !ok {
@@ -114,9 +114,9 @@ func TestTheTranscriptionQueueLifecycle(t *testing.T) {
 func TestAFailedRunCanBeRequeuedAndAStrandedOneIsReset(t *testing.T) {
 	st, ctx := liveStore(t)
 	l := st.Ledger()
-	a, b := uuid.New(), uuid.New()
+	a, b := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	for _, id := range []uuid.UUID{a, b} {
-		if _, err := l.EnqueueTranscription(ctx, id, uuid.New(), 60); err != nil {
+		if _, err := l.EnqueueTranscription(ctx, id, uuid.Must(uuid.NewV7()), 60); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +131,7 @@ func TestAFailedRunCanBeRequeuedAndAStrandedOneIsReset(t *testing.T) {
 	if run, _ := l.GetTranscription(ctx, first.CallID); run.Status != TranscriptionFailed || run.Error != "gave up" {
 		t.Fatalf("failed run = %+v", run)
 	}
-	if ok, _ := l.RequeueTranscription(ctx, first.CallID, uuid.New(), 60); !ok {
+	if ok, _ := l.RequeueTranscription(ctx, first.CallID, uuid.Must(uuid.NewV7()), 60); !ok {
 		t.Error("a FAILED run could not be requeued")
 	}
 
@@ -143,7 +143,7 @@ func TestAFailedRunCanBeRequeuedAndAStrandedOneIsReset(t *testing.T) {
 	if run, _ := l.GetTranscription(ctx, second.CallID); run.Status != TranscriptionPending || run.Attempts != 1 {
 		t.Errorf("stranded run = %+v", run)
 	}
-	if _, err := l.GetTranscription(ctx, uuid.New()); !errors.Is(err, pgx.ErrNoRows) {
+	if _, err := l.GetTranscription(ctx, uuid.Must(uuid.NewV7())); !errors.Is(err, pgx.ErrNoRows) {
 		t.Errorf("an unknown call: %v", err)
 	}
 }
@@ -152,7 +152,7 @@ func TestTheDailyAudioCountsWhatWasStarted(t *testing.T) {
 	st, ctx := liveStore(t)
 	l := st.Ledger()
 	for _, sec := range []int{60, 120} {
-		if _, err := l.EnqueueTranscription(ctx, uuid.New(), uuid.New(), sec); err != nil {
+		if _, err := l.EnqueueTranscription(ctx, uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), sec); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -172,7 +172,7 @@ func TestTheDailyAudioCountsWhatWasStarted(t *testing.T) {
 func TestLiveSpeakersAndTheBackfillQuery(t *testing.T) {
 	st, ctx := liveStore(t)
 	l := st.Ledger()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	for i, sp := range []string{"CUSTOMER", "BOT", "CUSTOMER"} {
 		if _, err := st.Pool.Exec(ctx, `INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content)
 			VALUES ($1, $2, now(), $3, 'TEXT', '{}')`, callID, i+1, sp); err != nil {
@@ -193,11 +193,11 @@ func TestLiveSpeakersAndTheBackfillQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other := uuid.New()
+	other := uuid.Must(uuid.NewV7())
 	if _, err := l.InsertRecording(ctx, Recording{CallID: other, Backend: RecordingBackendFS, ObjectKey: "b.wav"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.EnqueueTranscription(ctx, other, uuid.New(), 5); err != nil {
+	if _, err := l.EnqueueTranscription(ctx, other, uuid.Must(uuid.NewV7()), 5); err != nil {
 		t.Fatal(err)
 	}
 	got, err := l.CallsAwaitingTranscription(ctx, time.Now().Add(-time.Hour), 10)
@@ -218,9 +218,9 @@ func TestMigrationAddsPostCallTranscriptionBesideExistingRows(t *testing.T) {
 	if err := goose.UpToContext(ctx, db, "migrations", 34); err != nil {
 		t.Fatalf("migrating to 34: %v", err)
 	}
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	if _, err := db.ExecContext(ctx, `INSERT INTO recordings (id, call_id, backend, object_key, duration_sec)
-		VALUES ($1, $2, 'FS', 'x.wav', 30)`, uuid.New(), callID); err != nil {
+		VALUES ($1, $2, 'FS', 'x.wav', 30)`, uuid.Must(uuid.NewV7()), callID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO transcripts (call_id, seq, occurred_at, speaker, kind, content)
@@ -235,7 +235,7 @@ func TestMigrationAddsPostCallTranscriptionBesideExistingRows(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT (SELECT count(*) FROM recordings) + (SELECT count(*) FROM transcripts)`).Scan(&n); err != nil || n != 2 {
 		t.Errorf("existing rows = %d, %v; the migration disturbed them", n, err)
 	}
-	if _, err := db.ExecContext(ctx, `INSERT INTO call_transcriptions (call_id, recording_id, status) VALUES ($1, $2, 'QUEUED')`, callID, uuid.New()); err == nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO call_transcriptions (call_id, recording_id, status) VALUES ($1, $2, 'QUEUED')`, callID, uuid.Must(uuid.NewV7())); err == nil {
 		t.Error("a status outside PENDING/RUNNING/DONE/FAILED was accepted")
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO call_transcription_segments (call_id, seq, channel, offset_ms, end_ms, text) VALUES ($1, 1, 'BOT', 0, 1, 'x')`, callID); err == nil {

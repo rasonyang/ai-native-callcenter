@@ -46,7 +46,7 @@ func placeWith(t *testing.T, svc OutboundService, ac AuthContext, body string) *
 
 func supervisorSubject() AuthContext {
 	return AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "sam",
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "sam",
 		scopes: grantedScopes(auth.RoleSupervisor),
 	}
 }
@@ -57,7 +57,7 @@ func supervisorSubject() AuthContext {
 // (#221). The body is the 201 body: no isDuplicate.
 func TestAnUnconfirmedPlacementAnswers202WithTheCallID(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	unconfirmed := fmt.Errorf("%w: %w", outbound.ErrPlacementUnconfirmed,
 		fmt.Errorf("%w: bgapi originate …", esl.ErrTimeout))
 	svc := erringOutbound{callID: callID, err: unconfirmed}
@@ -93,7 +93,7 @@ func TestAnUnconfirmedPlacementAnswers202WithTheCallID(t *testing.T) {
 // service's ErrAlreadyPlaced, and answers 200 isDuplicate.
 func TestARetryOfAnUnconfirmedPlacementIsADuplicate(t *testing.T) {
 	t.Parallel()
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	w := placeWith(t, erringOutbound{callID: callID, err: outbound.ErrAlreadyPlaced}, supervisorSubject(),
 		`{"kind":"AI_OUTBOUND","to":"18688886660","did":"95099","callId":"`+callID.String()+`"}`)
 	if w.Code != http.StatusOK {

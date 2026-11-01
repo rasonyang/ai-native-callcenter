@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -457,15 +458,49 @@ func (s *Server) router() chi.Router {
 
 // Readiness is what the ops listener's /readyz asks of the process.
 //
-// Only Ping decides the status code. The switch link and the schema version
-// are reported beside it, one "name: value" line each, so an installer or an
-// operator can read why a deployment is unhealthy without the probe that
-// restarts containers acting on it: an app whose switch is down still serves
-// its API, and restarting it would not bring the switch back.
+// Only Ping decides the status code, with one exception. The switch link and
+// the schema version are reported beside it, one "name: value" line each, so
+// an installer or an operator can read why a deployment is unhealthy without
+// the probe that restarts containers acting on it: an app whose switch is down
+// still serves its API, and restarting it would not bring the switch back.
+//
+// The exception is SwitchUUID, the one switch fact that fails readiness. A
+// switch that mints a UUID of any version but 7 is a configuration fault, not
+// an outage: every inbound DID call takes its call id from the switch, the
+// database refuses a call id that is not v7, and so every inbound CDR would be
+// lost while the app looked healthy. Readiness is the place that stops a
+// rollout onto such a switch. An unknown result (not checked yet, link lost,
+// the command failed) never fails readiness, for the reason a down switch
+// does not.
 type Readiness struct {
 	Ping       func(context.Context) error
 	IsSwitchUp func() bool
 	Migrations func(context.Context) (store.MigrationState, error)
+	// SwitchUUID is what the app last learned of the UUIDs the switch mints.
+	// Nil reports unknown.
+	SwitchUUID func() SwitchUUIDStatus
+}
+
+// SwitchUUIDStatus is the result of asking the switch to mint a UUID.
+type SwitchUUIDStatus struct {
+	// Checked is false while the result is unknown.
+	Checked bool
+	// Version is the UUID version the switch minted; meaningful when Checked.
+	Version int
+}
+
+// IsViolation reports a switch known to mint something other than v7.
+func (s SwitchUUIDStatus) IsViolation() bool { return s.Checked && s.Version != 7 }
+
+// line is the status's /readyz value.
+func (s SwitchUUIDStatus) line() string {
+	switch {
+	case !s.Checked:
+		return "unknown"
+	case s.Version == 7:
+		return "v7"
+	}
+	return fmt.Sprintf("NOT_V7 version=%d (set uuid-version=7 in switch.conf.xml; needs FreeSWITCH 1.11 or later)", s.Version)
 }
 
 // readyzTimeout bounds one readiness report, so a wedged database answers the
@@ -481,6 +516,7 @@ const readyzTimeout = 3 * time.Second
 //	database: ok           (or the database error)
 //	switch: up|down
 //	migrations: <db>/<latest>  (or "unknown")
+//	switch-uuid: v7|unknown|NOT_V7 version=<n> (...)  (NOT_V7 answers 503)
 func MetricsHandler(metrics http.Handler, ready Readiness) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics)
@@ -508,11 +544,20 @@ func MetricsHandler(metrics http.Handler, ready Readiness) http.Handler {
 			}
 		}
 
+		var swUUID SwitchUUIDStatus
+		if ready.SwitchUUID != nil {
+			swUUID = ready.SwitchUUID()
+		}
+		if swUUID.IsViolation() && status == http.StatusOK {
+			status = http.StatusServiceUnavailable
+			head = "the switch mints UUID version " + strconv.Itoa(swUUID.Version) + ", not 7"
+		}
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(status)
-		_, _ = fmt.Fprintf(w, "%s\ndatabase: %s\nswitch: %s\nmigrations: %s\n",
-			head, database, sw, migrations)
+		_, _ = fmt.Fprintf(w, "%s\ndatabase: %s\nswitch: %s\nmigrations: %s\nswitch-uuid: %s\n",
+			head, database, sw, migrations, swUUID.line())
 	})
 	return mux
 }

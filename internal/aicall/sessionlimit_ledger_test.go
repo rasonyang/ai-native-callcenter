@@ -50,7 +50,7 @@ func sessionLimitLedger(t *testing.T) (*store.LedgerStore, *telephony.CDRAssembl
 	}
 	ledger := st.Ledger()
 	inserted := make(chan uuid.UUID, 16)
-	queueID := uuid.New()
+	queueID := uuid.Must(uuid.NewV7())
 	asm := telephony.NewCDRAssembler(&signallingLedger{LedgerStore: ledger, inserted: inserted},
 		queueNames{"support": queueID}, nil, discard())
 	return ledger, asm, inserted, queueID
@@ -84,7 +84,7 @@ func sessionLimitSnapshot(callID uuid.UUID, base, end time.Time, cause, summary 
 	hasAgent, stamped bool) telephony.Snapshot {
 
 	at := func(sec int) *time.Time { v := base.Add(time.Duration(sec) * time.Second); return &v }
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	snap := telephony.Snapshot{
 		CallID:    callID,
 		CallType:  events.CallTypeInbound,
@@ -94,12 +94,12 @@ func sessionLimitSnapshot(callID uuid.UUID, base, end time.Time, cause, summary 
 		UserData:  map[string]any{"crmTicket": "T-0042 / 工单"},
 		Parties: []telephony.PartySnapshot{
 			{
-				PartyID: uuid.New(), ChannelID: "chan-caller", Role: telephony.RoleOriginator,
+				PartyID: uuid.Must(uuid.NewV7()), ChannelID: "chan-caller", Role: telephony.RoleOriginator,
 				State: telephony.PartyReleased, Number: "13800138000", OtherNumber: "95012",
 				CreatedAt: base, AnsweredAt: at(0), ReleasedAt: &end, ReleaseCause: cause,
 			},
 			{
-				PartyID: uuid.New(), ChannelID: "chan-bot", Role: telephony.RoleTarget,
+				PartyID: uuid.Must(uuid.NewV7()), ChannelID: "chan-bot", Role: telephony.RoleTarget,
 				State: telephony.PartyReleased, Number: "95012", IsBotLeg: true,
 				CreatedAt: base, AnsweredAt: at(0), ReleasedAt: at(65), ReleaseCause: "NORMAL_CLEARING",
 				Bridges: []telephony.BridgeSpan{{OtherChannelID: "chan-caller", StartedAt: base, EndedAt: *at(65)}},
@@ -121,11 +121,11 @@ func sessionLimitSnapshot(callID uuid.UUID, base, end time.Time, cause, summary 
 		snap.Queue.Cause = "Cancel"
 		return snap
 	}
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	snap.Queue.BridgedAt = *at(81)
 	snap.Queue.AgentID = &agentID
 	snap.Parties = append(snap.Parties, telephony.PartySnapshot{
-		PartyID: uuid.New(), ChannelID: "chan-agent", Role: telephony.RoleTarget,
+		PartyID: uuid.Must(uuid.NewV7()), ChannelID: "chan-agent", Role: telephony.RoleTarget,
 		State: telephony.PartyReleased, Number: "1008", AgentID: &agentID, ExtensionNumber: "1008",
 		CreatedAt: *at(70), AnsweredAt: at(81), ReleasedAt: &end, ReleaseCause: "NORMAL_CLEARING",
 		Bridges: []telephony.BridgeSpan{{OtherChannelID: "chan-caller", StartedAt: *at(81), EndedAt: end}},
@@ -156,7 +156,7 @@ func TestASessionLimitTransferKeepsTheFinalLegsCause(t *testing.T) {
 				}
 				name := fmt.Sprintf("cause %q/summary %s/%s", cause, summary.name, order)
 				t.Run(name, func(t *testing.T) {
-					callID := uuid.New()
+					callID := uuid.Must(uuid.NewV7())
 					base := time.Now().Add(-2 * time.Minute).Truncate(time.Millisecond)
 					// The caller's leg outlives the bot's session. The bot's row
 					// ends when it finishes (now), so the human path's ending
@@ -245,7 +245,7 @@ func TestASessionLimitTheBotEndedKeepsSessionLimit(t *testing.T) {
 		{"caller gone before the handover", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			callID := uuid.New()
+			callID := uuid.Must(uuid.NewV7())
 			base := time.Now().Add(-70 * time.Second).Truncate(time.Millisecond)
 			recorder := newCallRecorder(callID, base, nil)
 			recorder.markSessionLimit()

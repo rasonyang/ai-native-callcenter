@@ -670,13 +670,13 @@ func TestMigrationsDropAReasonNoCallCanHave(t *testing.T) {
 	} {
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, missed_reason)
-			VALUES (gen_random_uuid(), now(), now(), 'INBOUND', 'NO_ANSWER', $1)`, reason); err != nil {
+			VALUES (uuidv7(), now(), now(), 'INBOUND', 'NO_ANSWER', $1)`, reason); err != nil {
 			t.Errorf("a call could not be filed under %s, which the assembler decides: %v", reason, err)
 		}
 	}
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO cdrs (call_id, started_at, ended_at, call_type, status, missed_reason)
-		VALUES (gen_random_uuid(), now(), now(), 'INBOUND', 'NO_ANSWER', 'OUT_OF_HOURS')`); err == nil {
+		VALUES (uuidv7(), now(), now(), 'INBOUND', 'NO_ANSWER', 'OUT_OF_HOURS')`); err == nil {
 		t.Error("OUT_OF_HOURS was accepted after the migration that removed it")
 	}
 }

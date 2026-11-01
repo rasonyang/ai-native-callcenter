@@ -108,7 +108,7 @@ func (p *presenceCalls) tookOffCall(agentID uuid.UUID) bool {
 func answerAndEndAnAgentLeg(t *testing.T, c *Coordinator, answered bool) uuid.UUID {
 	t.Helper()
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	vars := map[string]string{"variable_aicc_call_id": minted.String()}
 	callerChan, agentChan := "caller-chan", "agent-chan"
 
@@ -208,7 +208,7 @@ func TestTheCallersLegEndingStartsNobodysAfterCallWork(t *testing.T) {
 	c := NewCoordinator(registry, nil, agents, nullPublisher{})
 
 	ctx := t.Context()
-	vars := map[string]string{"variable_aicc_call_id": uuid.New().String()}
+	vars := map[string]string{"variable_aicc_call_id": uuid.Must(uuid.NewV7()).String()}
 	c.Handle(ctx, raw("CHANNEL_CREATE", "caller-chan", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_ANSWER", "caller-chan", "inbound", vars))
 	c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", "caller-chan", "inbound", vars))
@@ -242,7 +242,7 @@ const customerNumber = "13800138000"
 func clickToDial(t *testing.T, c *Coordinator, callType events.CallType, callee string, answered bool) uuid.UUID {
 	t.Helper()
 	ctx := t.Context()
-	minted := uuid.New()
+	minted := uuid.Must(uuid.NewV7())
 	agentChan, farChan := "agent-chan", "far-chan"
 	agentVars := map[string]string{
 		"variable_aicc_call_id":   minted.String(),

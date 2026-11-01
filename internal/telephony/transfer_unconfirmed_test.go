@@ -93,7 +93,7 @@ func onAStalledCall(t *testing.T) *stalledCall {
 	clock := &manualClock{now: testTime}
 	c.now = clock.Now
 
-	callID, agentID := uuid.New(), uuid.New()
+	callID, agentID := uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7())
 	if _, err := registry.CreateCall(t.Context(), callID, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestATransferOnItsWayMovesWithItsLegInAMerge(t *testing.T) {
 	if err := s.c.Transfer(t.Context(), s.callID, s.agentID, "7001"); !errors.Is(err, esl.ErrTimeout) {
 		t.Fatalf("transfer: %v", err)
 	}
-	kept := uuid.New()
+	kept := uuid.Must(uuid.NewV7())
 	if _, err := s.c.registry.CreateCall(t.Context(), kept, events.CallTypeInbound, "en", true, testTime); err != nil {
 		t.Fatal(err)
 	}

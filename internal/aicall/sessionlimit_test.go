@@ -83,7 +83,7 @@ func newLimitHarness(t *testing.T, setup limitSetup) *limitHarness {
 		t.Fatalf("load flow: %v", err)
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
-	recorder := newCallRecorder(uuid.New(), time.Now(), nil)
+	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 		recorder: recorder,

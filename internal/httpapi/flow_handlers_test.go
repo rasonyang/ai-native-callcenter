@@ -82,7 +82,7 @@ const validSpecBody = `{"id":"probe","specVersion":"v2","initialNode":"welcome",
 
 func flowStub() *stubFlows {
 	return &stubFlows{summary: store.FlowSummary{
-		ID: uuid.New(), Slug: "probe", Name: "Probe",
+		ID: uuid.Must(uuid.NewV7()), Slug: "probe", Name: "Probe",
 		HasUnpublishedChanges: true,
 		CreatedAt:             time.Now(), UpdatedAt: time.Now(),
 	}}
@@ -248,7 +248,7 @@ func TestARevisionIsServedDigitForDigit(t *testing.T) {
 	f := flowStub()
 	f.revision = store.FlowRevision{
 		FlowRevisionSummary: store.FlowRevisionSummary{
-			ID: uuid.New(), Note: "imported", CreatedAt: time.Now(), IsPublished: false,
+			ID: uuid.Must(uuid.NewV7()), Note: "imported", CreatedAt: time.Now(), IsPublished: false,
 		},
 		Spec: []byte(`{"id": "probe", "global": {"maxTurns": 12345678901234567890, "temperature": 0.70}}`),
 	}

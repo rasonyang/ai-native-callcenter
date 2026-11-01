@@ -64,7 +64,7 @@ func newFixture(t *testing.T) (*Actor, *fakeStore, *fakePub, func()) {
 	t.Helper()
 	st, pub := &fakeStore{}, &fakePub{}
 	reg := NewRegistry(st, pub, discard())
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	actor := reg.For(callID, "INBOUND", time.Now().UTC().Add(-10*time.Second))
 	var once sync.Once
 	flush := func() { once.Do(func() { reg.Close(callID) }) }
@@ -194,7 +194,7 @@ func TestAudienceIsEmptyUntilAnAgentJoins(t *testing.T) {
 	// entitled to the whole transcript anyway — which is what the backfill is.
 	waitForEvents(t, pub, 1)
 
-	agentID := uuid.New()
+	agentID := uuid.Must(uuid.NewV7())
 	actor.SetAudience([]uuid.UUID{agentID})
 	actor.Post(final(store.SpeakerHumanAgent, "how can I help"))
 	flush()
@@ -227,7 +227,7 @@ func TestAStoreFailureStillReachesTheStream(t *testing.T) {
 	t.Parallel()
 	st, pub := &fakeStore{err: context.DeadlineExceeded}, &fakePub{}
 	reg := NewRegistry(st, pub, discard())
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	actor := reg.For(callID, "INBOUND", time.Now().UTC())
 	actor.Post(final(store.SpeakerBot, "still spoken"))
 	reg.Close(callID)
@@ -258,7 +258,7 @@ func TestOffsetIsMeasuredFromAnswer(t *testing.T) {
 func TestTheRegistryReturnsOneActorPerCall(t *testing.T) {
 	t.Parallel()
 	reg := NewRegistry(&fakeStore{}, &fakePub{}, discard())
-	callID := uuid.New()
+	callID := uuid.Must(uuid.NewV7())
 	t.Cleanup(func() { reg.Close(callID) })
 
 	first := reg.For(callID, "INBOUND", time.Now())
@@ -269,7 +269,7 @@ func TestTheRegistryReturnsOneActorPerCall(t *testing.T) {
 	if _, ok := reg.Lookup(callID); !ok {
 		t.Error("the actor was not findable by call id")
 	}
-	if _, ok := reg.Lookup(uuid.New()); ok {
+	if _, ok := reg.Lookup(uuid.Must(uuid.NewV7())); ok {
 		t.Error("an unknown call produced an actor")
 	}
 }

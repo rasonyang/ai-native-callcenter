@@ -34,13 +34,13 @@ func (c *patchingCalls) PatchUserData(_, _ uuid.UUID, patch map[string]any) (
 func patchUserData(t *testing.T, calls *patchingCalls, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	s := &Server{calls: calls, agentDir: dialerDirectory{}}
-	r := httptest.NewRequest(http.MethodPatch, "/api/v1/calls/"+uuid.New().String()+"/user-data",
+	r := httptest.NewRequest(http.MethodPatch, "/api/v1/calls/"+uuid.Must(uuid.NewV7()).String()+"/user-data",
 		strings.NewReader(body))
 	r = r.WithContext(contextWithIdentity(r.Context(), auth.Identity{
-		UserID: uuid.New(), Role: auth.RoleAgent,
-	}, uuid.New()))
+		UserID: uuid.Must(uuid.NewV7()), Role: auth.RoleAgent,
+	}, uuid.Must(uuid.NewV7())))
 	w := httptest.NewRecorder()
-	s.PatchUserData(w, r, uuid.New())
+	s.PatchUserData(w, r, uuid.Must(uuid.NewV7()))
 	return w
 }
 

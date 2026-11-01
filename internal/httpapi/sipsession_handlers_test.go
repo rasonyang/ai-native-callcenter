@@ -70,8 +70,8 @@ func createSession(t *testing.T, ac AuthContext, phones SIPSessionService) (*htt
 // moment, which is what the phone's credential has to follow.
 func agentWithSession(expiresAt time.Time) AuthContext {
 	return AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "mina",
-		AgentID: uuid.New(), SessionExpiresAt: expiresAt,
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "mina",
+		AgentID: uuid.Must(uuid.NewV7()), SessionExpiresAt: expiresAt,
 		scopes: grantedScopes(auth.RoleAgent),
 	}
 }
@@ -151,8 +151,8 @@ func TestAKeyGetsTheDeploymentsSessionLifetime(t *testing.T) {
 	t.Parallel()
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 	ac := AuthContext{
-		Kind: SubjectKey, SubjectID: uuid.New(), SubjectName: "crm",
-		AgentID: uuid.New(), scopes: grantedScopes(auth.RoleAgent),
+		Kind: SubjectKey, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "crm",
+		AgentID: uuid.Must(uuid.NewV7()), scopes: grantedScopes(auth.RoleAgent),
 	}
 
 	before := time.Now()
@@ -205,7 +205,7 @@ func TestASupervisorWithNoAgentIdentityIsRefused(t *testing.T) {
 	t.Parallel()
 	phones := &fakeSIPSessions{issued: phoneCredential()}
 	ac := AuthContext{
-		Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "priya",
+		Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "priya",
 		SessionExpiresAt: time.Now().Add(time.Hour),
 		scopes:           grantedScopes(auth.RoleSupervisor),
 	}
@@ -303,7 +303,7 @@ func TestGetMeReportsTheDeviceTheSwitchHolds(t *testing.T) {
 	t.Run("not an agent", func(t *testing.T) {
 		s := &Server{agents: registeredAgentPhone{}}
 		supervisor := AuthContext{
-			Kind: SubjectUser, SubjectID: uuid.New(), SubjectName: "priya",
+			Kind: SubjectUser, SubjectID: uuid.Must(uuid.NewV7()), SubjectName: "priya",
 			scopes: grantedScopes(auth.RoleSupervisor),
 		}
 		got := getMe(t, s, supervisor)

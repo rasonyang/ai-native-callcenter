@@ -24,13 +24,13 @@ import (
 // every row to the invariant that the label and toNumber are one fact.
 func TestTheDialingHopOfAnAgentsUnreachedCallNamesTheNumberDialled(t *testing.T) {
 	t.Parallel()
-	agent := uuid.New()
+	agent := uuid.Must(uuid.NewV7())
 
 	// A click-to-dial that stopped at the originator: the phone auto-answered
 	// 0.3-1.2 s in, and the call ended before any other leg existed.
 	dialled := func(agentID *uuid.UUID, number string, releasedMs int, cause string) Snapshot {
 		return Snapshot{
-			CallID: uuid.New(), CallType: events.CallTypeOutbound,
+			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atMsPtr(releasedMs),
 			Parties: []PartySnapshot{{
 				Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: agentID,
@@ -83,7 +83,7 @@ func TestTheDialingHopOfAnAgentsUnreachedCallNamesTheNumberDialled(t *testing.T)
 func TestADialingHopWithNoDestinationFallsBackToTheOriginator(t *testing.T) {
 	t.Parallel()
 	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeOutbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(6),
 		Parties: []PartySnapshot{{
 			Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", ChannelID: "phone",
@@ -105,7 +105,7 @@ func TestADialingHopWithNoDestinationFallsBackToTheOriginator(t *testing.T) {
 func TestTheDialingHopOfAnUnansweredInboundCallNamesTheNumberTheCallerDialled(t *testing.T) {
 	t.Parallel()
 	cdr := newAssembler(&memoryLedger{}, staticQueues{}).assemble(t.Context(), Snapshot{
-		CallID: uuid.New(), CallType: events.CallTypeInbound,
+		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atMsPtr(1800),
 		Parties: []PartySnapshot{{
 			Role: RoleOriginator, Number: "13800138000", OtherNumber: "95001", ChannelID: "caller",
@@ -129,8 +129,8 @@ func TestTheDialingHopOfAnUnansweredInboundCallNamesTheNumberTheCallerDialled(t 
 // number as the hop's label (#331).
 func TestTheStoredJourneyOfAnUnreachedAgentCallNamesTheNumberDialled(t *testing.T) {
 	t.Parallel()
-	flow := uuid.New()
-	agent := uuid.New()
+	flow := uuid.Must(uuid.NewV7())
+	agent := uuid.Must(uuid.NewV7())
 
 	for _, tc := range []struct {
 		name string
@@ -140,7 +140,7 @@ func TestTheStoredJourneyOfAnUnreachedAgentCallNamesTheNumberDialled(t *testing.
 		{
 			name: "no route",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(2),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(2),
 				Parties: []PartySnapshot{{
 					Role: RoleOriginator, Number: "1008", ExtensionNumber: "1008", AgentID: &agent,
 					OtherNumber: "075512", ChannelID: "phone",
@@ -152,7 +152,7 @@ func TestTheStoredJourneyOfAnUnreachedAgentCallNamesTheNumberDialled(t *testing.
 		{
 			name: "a bot number whose leg never answered",
 			snap: Snapshot{
-				CallID: uuid.New(), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(5),
+				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound, CreatedAt: at(0), EndedAt: atPtr(5),
 				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
 				Parties: []PartySnapshot{
 					{

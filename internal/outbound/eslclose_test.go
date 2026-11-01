@@ -156,7 +156,7 @@ func eslService(t *testing.T) eslPlacement {
 	link.OnConnect(func(context.Context) { connects <- struct{}{} })
 	go link.Run(ctx)
 
-	flowID := uuid.New()
+	flowID := uuid.Must(uuid.NewV7())
 	dids := fakeDIDs{
 		{Number: "95099", Language: "en", FlowID: &flowID, IsEnabled: true, AllowOutbound: true},
 		{Number: "95011", Language: "en", IsEnabled: true, AllowOutbound: true, IsDefaultOutbound: true},
