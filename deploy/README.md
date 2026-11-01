@@ -170,6 +170,7 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
+| `switch_rtp_range` | `SWITCH_RTP_RANGE_INVALID`, `SWITCH_RTP_RANGE_NARROW` (a `WARN`, not a failure) |
 | `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
 
 `dnc_country_code` warns when `AICC_DEFAULT_COUNTRY_CODE` is not set (the
@@ -178,6 +179,16 @@ outside `+1`: national numbers are then completed to `+1` for the do-not-call
 check, contact import and the bot's take_message callback numbers, and a
 national number from another country stops matching its list entry. Set
 `AICC_DEFAULT_COUNTRY_CODE` to your country's code.
+
+`switch_rtp_range` reads the switch's configured `rtp-start-port` and
+`rtp-end-port` over ESL and prints them with the number of legs they carry
+(one RTP/RTCP pair each). It fails with `SWITCH_RTP_RANGE_INVALID` when the end
+is below the start, a value is outside 1-65535 or is not a number, or the range
+holds no pair; the fix is to set `RTP_START` and `RTP_END` (the switch's
+`FS_RTP_START_PORT` and `FS_RTP_END_PORT`) to a valid range and recreate the
+switch. It warns with `SWITCH_RTP_RANGE_NARROW` when the bot is enabled and the
+legs are fewer than 2 x `AICC_BOT_MAX_CALLS`; widen the range (and publish it)
+or lower `AICC_BOT_MAX_CALLS`. It does not test that RTP reaches the switch.
 
 Two of those are the outbound path a campaign needs: `outbound_endpoint` warns
 when `AICC_OUTBOUND_ENDPOINT` is empty (the deployment can take calls in but
@@ -209,12 +220,29 @@ whose ping status is `DOWN` warns too.
 
 | Overlay | Switch media (RTP) | Bot media | How ports reach the stack |
 |---|---|---|---|
-| `compose.linux.yml` (installer, Linux) | `16384-29999/udp` | `30000-30999/udp`, bot SIP `6060` | Host networking: the switch and the application bind the host's addresses; nothing is published |
-| `compose.macos.yml` (installer, macOS) | `16384-16583/udp` (100 RTP/RTCP pairs) | not published | The `netns` container publishes 8080/tcp, 5060/udp+tcp, 5066/tcp and the RTP range |
-| none (manual quick start) | `16384-16484/udp` | not published | Published by the switch and application containers |
+| `compose.linux.yml` (installer, Linux) | `16384-29999/udp` (6,808 legs) | `30000-30999/udp`, bot SIP `6060` | Host networking: the switch and the application bind the host's addresses; nothing is published |
+| `compose.macos.yml` (installer, macOS) | `16384-16583/udp` (100 legs) | not published | The `netns` container publishes 8080/tcp, 5060/udp+tcp, 5066/tcp and the RTP range |
+| none (manual quick start) | `16384-16483/udp` (50 legs) | not published | Published by the switch and application containers |
 
 `RTP_START` and `RTP_END` in `.env` move the switch's range; on macOS each
 published port costs a forwarder in the VM, so widen it with care.
+
+The switch allocates one RTP/RTCP pair per media leg (the even port is RTP, the
+odd port above it RTCP), and the end port is inclusive. A call holds two legs,
+the caller and the agent or the `aicc_bot` gateway; a supervisor's eavesdrop
+adds one. A range of N legs therefore carries about N/2 calls. Loopback legs
+hold none. An odd end port, as in the defaults, keeps the last pair's RTCP port
+inside the published range; the switch logs one `Rounding odd end port` warning
+at the first call, which is expected.
+
+When the range is the limit, the switch logs `No audio RTP ports available!`:
+a leg it places fails with `DESTINATION_OUT_OF_ORDER` before any INVITE is
+sent, and an INVITE it receives is answered `488` (`INCOMPATIBLE_DESTINATION`).
+The application then logs an ERROR
+`switch out of RTP ports` (with `legId`, `callId` when known, `media` and
+`fix`) and counts `aicc_switch_rtp_ports_exhausted_total{media}`.
+`aicc doctor`'s `switch_rtp_range` check prints the range and the legs it
+carries.
 
 On Linux with an active ufw or firewalld, the preflight fails with
 `PREFLIGHT_FIREWALL` until these are allowed (and prints the exact commands):
@@ -569,7 +597,7 @@ Published ports (on `HTTP_BIND` or `SIP_BIND`):
 | 8080/tcp | API, event stream and web interface |
 | 5060/udp, 5060/tcp | SIP signalling |
 | 5066/tcp | Browser phone WebSocket transport |
-| 16384-16484/udp | Media to phones off this host |
+| 16384-16483/udp | Media to phones off this host |
 
 ESL, the metrics listener, and the AI leg's SIP and RTP are not published.
 
@@ -755,6 +783,15 @@ hand instead of pulling it.
   ([rasonyang/web-sip-phone#13](https://github.com/rasonyang/web-sip-phone/issues/13)).
   Remove the old deployment's host from the extension's Allow Sites, then sign
   in again on the new one.
+- **Calls fail with `DESTINATION_OUT_OF_ORDER`, or the callee answers, hears
+  silence and is dropped, when many calls are up.** The switch ran out of RTP
+  ports (`No audio RTP ports available!` in its log). Look for the ERROR
+  `switch out of RTP ports` in the application's log, the counter
+  `aicc_switch_rtp_ports_exhausted_total`, and `aicc doctor`'s
+  `switch_rtp_range`. On an AI outbound call the callee leg can take the last
+  port and answer, then the bot leg fails; the CDR reads `ANSWERED`,
+  `DESTINATION_OUT_OF_ORDER`, `billSec` 0. Widen `RTP_START`/`RTP_END` (and
+  publish the same range), see [Ports and firewall](#ports-and-firewall).
 - **A `401` or a failed handshake.** The provider rejected the key: it is wrong,
   or not enabled for the realtime model shown in the `voice provider selected`
   log line.

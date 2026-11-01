@@ -313,7 +313,7 @@ ENV FS_ESL_PORT=18021 \
 
 WORKDIR /usr/local/freeswitch
 VOLUME ["/usr/local/freeswitch/db", "/usr/local/freeswitch/log", "/usr/local/freeswitch/recordings", "/usr/local/freeswitch/storage"]
-EXPOSE 5060/udp 5060/tcp 5080/udp 5080/tcp 5066/tcp 7443/tcp 18021/tcp 16384-32768/udp
+EXPOSE 5060/udp 5060/tcp 5080/udp 5080/tcp 5066/tcp 7443/tcp 18021/tcp 16384-29999/udp
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD fs_cli -H 127.0.0.1 -P "${FS_ESL_PORT}" -p "${FS_ESL_PASSWORD}" -x status | grep -q 'UP' || exit 1

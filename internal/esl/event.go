@@ -21,6 +21,8 @@ type Event struct {
 	headers map[string]string
 	// Body carries the event body when one is present (rare for plain events).
 	Body string
+	// isLog marks a forwarded log line, set only by the frame parser.
+	isLog bool
 }
 
 // NewEvent builds an Event from decoded headers; used by tests and parsing.
@@ -120,4 +122,31 @@ func parseEventBody(payload string) *Event {
 		headers[name] = value
 	}
 	return &Event{headers: headers, Body: body}
+}
+
+// logContentType is the frame type of a forwarded log line.
+const logContentType = "log/data"
+
+// IsLog reports whether this is a forwarded switch log line rather than an
+// event. Its headers are the frame's own (Content-Type, Log-Level,
+// Text-Channel, Log-File, Log-Func, Log-Line, User-Data, the last being the
+// uuid of the session the line was logged for) and Body is the log text.
+func (e *Event) IsLog() bool { return e != nil && e.isLog }
+
+// NewLogEvent builds a log line as the client delivers one; for tests.
+func NewLogEvent(headers map[string]string, body string) *Event {
+	return &Event{headers: headers, Body: body, isLog: true}
+}
+
+// parseLogFrame turns a "log/data" frame into an Event. Unlike an event, a
+// log line's headers sit on the outer frame and the body is the text itself.
+func parseLogFrame(msg message) *Event {
+	headers := make(map[string]string, len(msg.headers))
+	for name, values := range msg.headers {
+		if len(values) > 0 {
+			headers[name] = values[0]
+		}
+	}
+	headers["Content-Type"] = logContentType
+	return &Event{headers: headers, Body: msg.body, isLog: true}
 }

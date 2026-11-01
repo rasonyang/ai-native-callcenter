@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -74,6 +76,7 @@ const (
 	DoctorCheckOutboundEndpoint     DoctorCheck = "outbound_endpoint"
 	DoctorCheckOutboundGateway      DoctorCheck = "outbound_gateway"
 	DoctorCheckDNCCountryCode       DoctorCheck = "dnc_country_code"
+	DoctorCheckSwitchRTPRange       DoctorCheck = "switch_rtp_range"
 )
 
 // DoctorCode names a failure. The values are stable: an installer matches on
@@ -103,6 +106,12 @@ const (
 	// DoctorCodeDNCCountryCodeUnset is a WARN too: the upgrade hazard of the
 	// built-in country code, never a failure.
 	DoctorCodeDNCCountryCodeUnset DoctorCode = "DNC_COUNTRY_CODE_UNSET"
+	// DoctorCodeSwitchRTPRangeInvalid is a FAIL: a range no call can use or one
+	// the switch accepts and a firewall will not pass. DoctorCodeSwitchRTPRangeNarrow
+	// is a WARN: a range too small for the bot's own calls. One check, two codes;
+	// the table below lists the failing one.
+	DoctorCodeSwitchRTPRangeInvalid DoctorCode = "SWITCH_RTP_RANGE_INVALID"
+	DoctorCodeSwitchRTPRangeNarrow  DoctorCode = "SWITCH_RTP_RANGE_NARROW"
 )
 
 // doctorChecks is every check, in the order they run, with the code it fails
@@ -124,6 +133,7 @@ var doctorChecks = []struct {
 	{DoctorCheckOutboundGateway, DoctorCodeOutboundGatewayMissing},
 	{DoctorCheckExternalIP, DoctorCodeExternalIPNotOnHost},
 	{DoctorCheckExternalIPAdvertised, DoctorCodeExternalIPStale},
+	{DoctorCheckSwitchRTPRange, DoctorCodeSwitchRTPRangeInvalid},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
 	{DoctorCheckProviderSession, DoctorCodeProviderSessionFailed},
 	{DoctorCheckDNCCountryCode, DoctorCodeDNCCountryCodeUnset},
@@ -173,6 +183,8 @@ type switchReader interface {
 	// aborted registration (FAIL_WAIT) is a trunk that cannot place a call,
 	// which a ping status alone does not say.
 	Trunks() ([]telephony.Trunk, error)
+	// SwitchConf is the switch's core configuration as XML.
+	SwitchConf() (string, error)
 }
 
 // doctorOptions are the command's flags.
@@ -308,7 +320,9 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	out = append(out, checkBotGateway(ctx, d, opts, sw.reader)...)
 	out = append(out, checkOutbound(d, sw.reader)...)
 	out = append(out, checkExternalIP(d, opts, sw)...)
-	// LAN media (RTP) reachability is verified by the release checklist, not by doctor.
+	// The RTP range is read and judged (checkSwitchRTPRange); that the range is
+	// reachable on the LAN is still verified by the release checklist, not by doctor.
+	out = append(out, checkSwitchRTPRange(d, sw.reader)...)
 	out = append(out, checkProvider(ctx, d, opts)...)
 	return out
 }
@@ -974,3 +988,163 @@ func countFailed(results []doctorResult) int {
 
 // oneLine keeps an error on the line it is printed on.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// FreeSWITCH's built-in RTP port range, used when switch.conf sets none (or 0).
+const (
+	defaultRTPStart = 16384
+	defaultRTPEnd   = 32768
+)
+
+// rtpRange is the switch's RTP range as it will be allocated.
+type rtpRange struct {
+	start, end int
+	// startSet and endSet say whether switch.conf names the value; a missing
+	// one is the switch's built-in default.
+	startSet, endSet bool
+}
+
+// evenStart and evenEnd are the ports the allocator really uses: only even
+// ports carry RTP, an odd start is rounded up and an odd end down.
+func (r rtpRange) evenStart() int { return r.start + r.start%2 }
+func (r rtpRange) evenEnd() int   { return r.end - r.end%2 }
+
+// legs is how many media legs the range holds, one even port each.
+func (r rtpRange) legs() int {
+	if r.evenEnd() < r.evenStart() {
+		return 0
+	}
+	return (r.evenEnd()-r.evenStart())/2 + 1
+}
+
+// describe states the range as configured, the even ports it really uses where
+// rounding applies, and how many legs that is.
+func (r rtpRange) describe() string {
+	var b strings.Builder
+	switch {
+	case !r.startSet && !r.endSet:
+		fmt.Fprintf(&b, "the switch sets no RTP range, so it uses FreeSWITCH's built-in %d–%d", r.start, r.end)
+	case !r.startSet:
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-start-port is unset: FreeSWITCH's built-in %d)", r.start, r.end, r.start)
+	case !r.endSet:
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-end-port is unset: FreeSWITCH's built-in %d)", r.start, r.end, r.end)
+	default:
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d", r.start, r.end)
+	}
+	if r.legs() > 0 && (r.start%2 != 0 || r.end%2 != 0) {
+		fmt.Fprintf(&b, ", RTP on the even ports %d–%d", r.evenStart(), r.evenEnd())
+	}
+	return b.String()
+}
+
+// withThousands writes 6808 as 6,808.
+func withThousands(n int) string {
+	s := strconv.Itoa(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "," + s[i:]
+	}
+	return s
+}
+
+// legsText is what a leg count means: a call holds two legs.
+func legsText(n int) string {
+	return withThousands(n) + " media legs; a call holds two (the caller and the agent or the bot), a supervisor's eavesdrop adds one"
+}
+
+// parseSwitchRTPRange reads the range out of the XML `xml_locate` returns for
+// switch.conf. A param that is missing, empty or 0 is the built-in default, as
+// the switch itself reads it.
+func parseSwitchRTPRange(conf string) (rtpRange, error) {
+	var doc struct {
+		XMLName xml.Name `xml:"configuration"`
+		Name    string   `xml:"name,attr"`
+		Params  []struct {
+			Name  string `xml:"name,attr"`
+			Value string `xml:"value,attr"`
+		} `xml:"settings>param"`
+	}
+	if err := xml.Unmarshal([]byte(strings.TrimSpace(conf)), &doc); err != nil {
+		return rtpRange{}, fmt.Errorf("the reply is not switch.conf XML: %w", err)
+	}
+	if doc.Name != "switch.conf" {
+		return rtpRange{}, fmt.Errorf("the reply is configuration %q, not switch.conf", doc.Name)
+	}
+	r := rtpRange{start: defaultRTPStart, end: defaultRTPEnd}
+	for _, p := range doc.Params {
+		var target *int
+		var set *bool
+		switch p.Name {
+		case "rtp-start-port":
+			target, set = &r.start, &r.startSet
+		case "rtp-end-port":
+			target, set = &r.end, &r.endSet
+		default:
+			continue
+		}
+		v := strings.TrimSpace(p.Value)
+		if v == "" || v == "0" {
+			continue
+		}
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 || n > 65535 {
+			return rtpRange{}, rtpValueError{fmt.Sprintf("%s is %q, not a port between 1 and 65535", p.Name, v)}
+		}
+		*target, *set = n, true
+	}
+	return r, nil
+}
+
+// rtpValueError is a configured value that is not a usable port, as opposed to
+// a reply doctor could not read at all.
+type rtpValueError struct{ msg string }
+
+func (e rtpValueError) Error() string { return e.msg }
+
+// checkSwitchRTPRange prints the switch's RTP range and how many legs it
+// carries, and judges it.
+//
+// xml_locate shows the configured text. The core reads the range once at
+// startup, so a reloadxml can move what this says away from what the running
+// allocator uses; a restart of the switch brings them together. Nothing over
+// the event socket reports the allocator's own state.
+func checkSwitchRTPRange(d doctorDeps, sw switchReader) []doctorResult {
+	const check = DoctorCheckSwitchRTPRange
+	if sw == nil {
+		return []doctorResult{skip(check, "doctor could not connect to the switch")}
+	}
+	conf, err := sw.SwitchConf()
+	if err != nil {
+		return []doctorResult{warn(check, "cannot read the switch's RTP range: "+oneLine(err.Error()),
+			"check `docker compose logs freeswitch`")}
+	}
+	r, err := parseSwitchRTPRange(conf)
+	if err != nil {
+		if errors.As(err, new(rtpValueError)) {
+			return []doctorResult{fail(check, "the switch's RTP range is invalid: "+err.Error(),
+				"set FS_RTP_START_PORT and FS_RTP_END_PORT on the switch image (RTP_START and RTP_END in deploy/.env) to ports between 1 and 65535, start below end, and publish the same range")}
+		}
+		return []doctorResult{warn(check, "cannot read the switch's RTP range: "+oneLine(err.Error()),
+			"check that the switch has a switch.conf and `docker compose logs freeswitch`")}
+	}
+
+	switch {
+	case r.end < r.start:
+		return []doctorResult{fail(check,
+			fmt.Sprintf("%s: the end is below the start. The switch does not refuse it but allocates ports anywhere in 1–65535, "+
+				"which a firewall or a published range will not pass, and its memory grows", r.describe()),
+			"set FS_RTP_END_PORT above FS_RTP_START_PORT on the switch image (RTP_START and RTP_END in deploy/.env) and publish the same range")}
+	case r.legs() == 0:
+		return []doctorResult{fail(check,
+			fmt.Sprintf("%s: it holds no even port pair, so 0 media legs and every call fails", r.describe()),
+			"widen the range: FS_RTP_START_PORT/FS_RTP_END_PORT on the switch image (RTP_START/RTP_END in deploy/.env), and publish the same range")}
+	}
+
+	msg := r.describe() + ", " + legsText(r.legs())
+	if need := 2 * d.cfg.BotMaxCalls; d.cfg.IsBotEnabled && r.legs() < need {
+		return []doctorResult{{Check: check, State: DoctorStateWarn, Code: DoctorCodeSwitchRTPRangeNarrow,
+			Message: fmt.Sprintf("%s. The AI leg alone can hold %d calls (AICC_BOT_MAX_CALLS) at two legs each, %s legs, more than the range has",
+				msg, d.cfg.BotMaxCalls, withThousands(need)),
+			Fix: "widen RTP_START/RTP_END in deploy/.env (on macOS each published port costs a forwarder in the VM) " +
+				"and the switch's FS_RTP_START_PORT/FS_RTP_END_PORT, or lower AICC_BOT_MAX_CALLS"}}
+	}
+	return []doctorResult{pass(check, msg)}
+}

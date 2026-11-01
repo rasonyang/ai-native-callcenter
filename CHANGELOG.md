@@ -9,6 +9,14 @@ carries the one-line installer's files.
 
 ### Changed
 
+- The switch image's own RTP range is now 16384-29999 (6,808 legs, one RTP/RTCP
+  pair each; a call holds two legs), the Linux installer's range, instead of
+  16384-16584 (101 legs). The odd end keeps the last pair's RTCP port inside the
+  range; the switch logs one `Rounding odd end port` warning at the first call.
+  The manual quick start's default moves from 16384-16484 to 16384-16483 (50
+  legs, every RTCP port inside the published range); the macOS installer's
+  16384-16583 is unchanged. `.env` files that set `RTP_START`/`RTP_END` keep
+  their values. (#417)
 - `install.sh --external-ip`, and an address typed at the installer's prompt,
   is now refused unless it is one of this host's own addresses (one `ip addr`
   or `ifconfig` lists, or inside a range of the kernel's local table such as
@@ -31,6 +39,17 @@ carries the one-line installer's files.
   the new ones from `internal/seed/flows/` with `aicc flowadd` if you use
   them.
 
+### Added
+
+- When the switch runs out of RTP ports the application now says so: an ERROR
+  log line `switch out of RTP ports` (`legId`, `callId` when known, `media`,
+  `fix`) and a counter `aicc_switch_rtp_ports_exhausted_total{media}`. `aicc
+  doctor` gets a `switch_rtp_range` check that prints the switch's range and
+  the legs it carries, fails with `SWITCH_RTP_RANGE_INVALID` (end below start,
+  a value outside 1-65535 or not a number, or no pair in the range) and warns
+  with `SWITCH_RTP_RANGE_NARROW` when the bot is enabled and the legs are fewer
+  than 2 x `AICC_BOT_MAX_CALLS`. (#417)
+
 ### Fixed
 
 - A webhook delivery whose subscription URL answered with a redirect (301, 302,
@@ -41,6 +60,11 @@ carries the one-line installer's files.
   now a failed attempt, retried on the normal schedule and ending FAILED at the
   cap, with `HTTP 301: a redirect, which is not followed; ...` as the delivery's
   last error. Point the subscription at the final URL. (#412)
+- The switch image's Docker Hub page listed the RTP ports as 16384-32768/udp,
+  a range the image did not ship, and the comment in `switch.conf.xml` named
+  variables nothing reads (`AICC_FS_RTP_START`/`AICC_FS_RTP_END`; the real ones
+  are `FS_RTP_START_PORT`/`FS_RTP_END_PORT`) and counted ports as legs. Both now
+  state the shipped range and how many legs it carries. (#417)
 - The bot's calls bound their RTP and RTCP ports on every interface, even with
   `AICC_BOT_SIP_HOST` set to a single address. Each call's RTP and RTCP sockets
   now bind the address the switch sent the INVITE to, and the SDP answer names

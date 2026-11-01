@@ -25,6 +25,8 @@ type Link struct {
 	password string
 	// subscriptions are re-applied after every successful connect.
 	subscriptions []string
+	// logLevel, when set, is the "log" subscription applied beside them.
+	logLevel string
 
 	events chan *Event
 
@@ -48,6 +50,10 @@ func NewLink(addr, password string, subscriptions []string) *Link {
 		events:        make(chan *Event, 1024),
 	}
 }
+
+// SubscribeLogs makes every connection also ask for the switch's log lines at
+// level and above (see Client.SubscribeLogs). Call it before Run.
+func (l *Link) SubscribeLogs(level string) { l.logLevel = level }
 
 // Events is the stable event stream across reconnects.
 func (l *Link) Events() <-chan *Event { return l.events }
@@ -92,7 +98,11 @@ func (l *Link) Run(ctx context.Context) {
 		}
 
 		client.timeout = l.timeout
-		if err := client.Subscribe(l.subscriptions...); err != nil {
+		err = client.Subscribe(l.subscriptions...)
+		if err == nil && l.logLevel != "" {
+			err = client.SubscribeLogs(l.logLevel)
+		}
+		if err != nil {
 			slog.WarnContext(ctx, "esl subscribe failed", "error", err)
 			client.Close()
 			if !sleepCtx(ctx, backoff) {

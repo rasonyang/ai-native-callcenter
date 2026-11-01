@@ -200,6 +200,9 @@ func run() error {
 	// Telephony: one link to the switch, a command adapter over it, the live
 	// call registry, and the agent presence service.
 	link := esl.NewLink(cfg.ESLAddr, cfg.ESLPassword, telephony.Subscriptions)
+	// CRIT and worse: the switch raises no event when it runs out of RTP ports,
+	// only a CRIT log line (telephony.KindSwitchRTPPortsExhausted).
+	link.SubscribeLogs("2")
 	adapter := telephony.NewAdapter(link, cfg.SwitchDomain)
 	registry := telephony.NewRegistry(hub)
 	defer registry.Shutdown()
@@ -659,6 +662,8 @@ func dispatchSwitchEvents(ctx context.Context, link *esl.Link, coordinator *tele
 					signal = agents.SignalUnreachable
 				}
 				agentSvc.ObserveDevice(ctx, ev.Extension, signal)
+			case telephony.KindSwitchRTPPortsExhausted:
+				coordinator.ReportRTPPortsExhausted(ctx, ev)
 			case telephony.KindBackgroundJob:
 				// A command's result belongs to whoever issued the command;
 				// outbound below is the one that issues originates.

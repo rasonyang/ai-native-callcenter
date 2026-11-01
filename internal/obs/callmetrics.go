@@ -60,6 +60,8 @@ var (
 	didOutboundInUse      metric.Int64UpDownCounter
 	campaignAnswerUCB     metric.Float64Gauge
 	campaignOverflow      metric.Int64Counter
+
+	switchRTPExhausted metric.Int64Counter
 )
 
 // CallKind labels a live call. The two populations overlap rather than sum:
@@ -216,6 +218,10 @@ func init() {
 			"bot audio frame queued. Each stage is recorded once per call."),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.2, 0.3, 0.5, 0.75, 1, 1.5, 2, 3, 5, 10))
+	switchRTPExhausted, _ = meter.Int64Counter("aicc_switch_rtp_ports_exhausted_total",
+		metric.WithDescription("Legs the switch could not give an RTP port because its range "+
+			"is used up, by media (audio, video, text). The switch raises no event for it; "+
+			"the leg just fails to set up, so this is the only place it shows."))
 	transcribeFramesSent, _ = meter.Int64Counter("aicc_transcribe_frames_sent_total",
 		metric.WithDescription("Audio frames handed to a recognition session, by speaker."))
 	transcribeFramesDropped, _ = meter.Int64Counter("aicc_transcribe_frames_dropped_total",
@@ -679,4 +685,13 @@ func recordOutboundStage(stage string, d time.Duration) {
 	}
 	outboundFirstAudio.Record(context.Background(), max(d, 0).Seconds(),
 		metric.WithAttributes(attribute.String("stage", stage)))
+}
+
+// RecordSwitchRTPExhausted counts a leg the switch could not give an RTP port.
+func RecordSwitchRTPExhausted(media string) {
+	if switchRTPExhausted == nil {
+		return
+	}
+	switchRTPExhausted.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("media", media)))
 }

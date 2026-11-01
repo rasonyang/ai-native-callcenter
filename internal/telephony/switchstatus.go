@@ -92,3 +92,10 @@ func statusField(out, key string) string {
 	}
 	return ""
 }
+
+// SwitchConf is the switch's core configuration (switch.conf) as XML, the text
+// the switch holds now: the RTP port range is in it. It is the configured text
+// and not the running allocator's state, which a reload can leave behind.
+func (a *Adapter) SwitchConf() (string, error) {
+	return a.cmd.API("xml_locate configuration configuration name switch.conf")
+}
