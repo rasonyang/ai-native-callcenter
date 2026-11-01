@@ -274,7 +274,7 @@ function RevealPassword({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/20" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[440px] -translate-x-1/2 -translate-y-1/2 rounded-md border bg-card p-4 shadow-md">
-          <Dialog.Title className="text-base font-medium">
+          <Dialog.Title className="text-base font-medium wrap-anywhere">
             {t('admin.revealTitle', { number: extension.number })}
           </Dialog.Title>
           <p className="mt-1 text-xs text-muted-foreground">{t('admin.revealHint')}</p>
@@ -322,7 +322,7 @@ export function ConfirmDelete({ label, onConfirm }: { label: string; onConfirm: 
           sideOffset={4}
           className="z-50 w-64 rounded-md border bg-popover p-3 text-sm shadow-md"
         >
-          <p className="mb-3 text-xs text-muted-foreground">{label}</p>
+          <p className="mb-3 text-xs text-muted-foreground wrap-anywhere">{label}</p>
           <div className="flex justify-end gap-2">
             <Popover.Close asChild>
               <Button size="sm" variant="ghost">

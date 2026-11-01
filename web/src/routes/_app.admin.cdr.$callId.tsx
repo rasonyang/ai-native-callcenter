@@ -54,8 +54,8 @@ function CallDetail() {
         description={`${startFormat.format(new Date(cdr.startedAt))} · ${cdr.callId}`}
       />
 
-      <div className="mb-4 grid grid-cols-[1fr_360px] items-start gap-4">
-        <div className="rounded-md border bg-card p-4">
+      <div className="mb-4 grid grid-cols-[minmax(0,1fr)_360px] items-start gap-4">
+        <div className="min-w-0 rounded-md border bg-card p-4">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t('cdr.journey')}
           </h2>
@@ -99,7 +99,7 @@ function CallDetail() {
           )}
         </div>
 
-        <div className="rounded-md border bg-card p-4">
+        <div className="min-w-0 rounded-md border bg-card p-4">
           <h2 className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t('cdr.recording')}
           </h2>
@@ -109,7 +109,7 @@ function CallDetail() {
             recordings.map((recording) => (
               <div key={recording.id} className="mb-2 last:mb-0">
                 <RecordingPlayer src={recordingAudioUrl(recording.id)} durationSec={recording.durationSec} />
-                <p className="mt-1 text-xs text-muted-foreground tabular">
+                <p className="mt-1 text-xs text-muted-foreground tabular wrap-anywhere">
                   {formatDuration(recording.durationSec)} ·{' '}
                   {(recording.sizeBytes / 1024 / 1024).toFixed(1)} MB · {recording.backend}
                 </p>
@@ -145,9 +145,9 @@ function Journey({ cdr }: { cdr: CDR }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       {cdr.legs.map((leg, index) => (
-        <span key={index} className="flex items-center gap-1.5">
+        <span key={index} className="flex min-w-0 items-center gap-1.5">
           {index > 0 && <span className="text-muted-foreground/50">→</span>}
-          <span className="rounded-full border px-2 py-0.5">
+          <span className="min-w-0 rounded-full border px-2 py-0.5 wrap-anywhere">
             {t(`cdr.legs.${leg.kind}`)}
             {leg.label && <span className="ml-1 text-muted-foreground">{leg.label}</span>}
             <span className="ml-1 tabular text-muted-foreground">
@@ -162,9 +162,9 @@ function Journey({ cdr }: { cdr: CDR }) {
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="text-[13px]">{children}</dd>
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground wrap-anywhere">{label}</dt>
+      <dd className="text-[13px] wrap-anywhere">{children}</dd>
     </div>
   )
 }
@@ -210,7 +210,7 @@ function TranscriptRow({ entry, startedAt }: { entry: TranscriptLine; startedAt:
       >
         {t(`cdr.speakers.${entry.speaker}`)}
       </span>
-      <span className="min-w-0 flex-1">{body}</span>
+      <span className="min-w-0 flex-1 wrap-anywhere">{body}</span>
     </li>
   )
 }

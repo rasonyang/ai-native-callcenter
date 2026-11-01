@@ -522,7 +522,7 @@ function ConfirmRevoke({ label, onConfirm }: { label: string; onConfirm: () => v
           sideOffset={4}
           className="z-50 w-64 rounded-md border bg-popover p-3 text-sm shadow-md"
         >
-          <p className="mb-3 text-xs text-muted-foreground">{label}</p>
+          <p className="mb-3 text-xs text-muted-foreground wrap-anywhere">{label}</p>
           <div className="flex justify-end gap-2">
             <Popover.Close asChild>
               <Button size="sm" variant="ghost">

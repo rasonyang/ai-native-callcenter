@@ -17,12 +17,3 @@ export interface KnownIssue {
   reason: string
 }
 
-/**
- * Non-table text that does not wrap: dialog titles, delete and revoke
- * popovers, the page description, the Persona and rules cards, and the facts,
- * userData, journey, transcript, recording and title of the call detail.
- */
-export const textWrap: KnownIssue = {
-  issue: 385,
-  reason: 'text outside a table (dialog title, popover, description, card) does not wrap',
-}

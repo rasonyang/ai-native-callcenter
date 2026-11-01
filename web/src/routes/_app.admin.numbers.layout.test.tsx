@@ -8,7 +8,6 @@ import { renderApp } from '@/test/app'
 import { expectDialogFits } from '@/test/dialog-layout'
 import { asciiRun, chineseRun, digits, maxLengthOf, mixedNote } from '@/test/hostile'
 import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
-import { textWrap } from '@/test/layout-known-issues'
 
 /**
  * Numbers: the DID (digits, no length bound), the description (no bound), the
@@ -151,5 +150,5 @@ describe('numbers, deleting a 40-digit number', () => {
     await user.click(screen.getAllByTitle(i18n.t('common.delete'))[0])
     await screen.findByText(i18n.t('admin.deleteNumberConfirm', { number: digits(40) }))
     expectDialogFits(ctx)
-  }, { knownIssue: textWrap })
+  })
 })

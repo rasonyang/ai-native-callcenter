@@ -1066,7 +1066,7 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           {t('bots.persona')}
         </h2>
-        <p className="mt-1.5 text-sm">{textFor(spec.global?.persona, lang) || '—'}</p>
+        <p className="mt-1.5 text-sm wrap-anywhere">{textFor(spec.global?.persona, lang) || '—'}</p>
       </section>
 
       <section className="rounded-md border bg-card p-4">
@@ -1075,7 +1075,7 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
         </h2>
         <ul className="mt-1.5 list-disc pl-4">
           {rules.map((rule) => (
-            <li key={rule} className="text-sm text-muted-foreground">
+            <li key={rule} className="text-sm text-muted-foreground wrap-anywhere">
               {rule}
             </li>
           ))}
@@ -1129,9 +1129,9 @@ function Persona({ spec, lang }: { spec: FlowSpec; lang: SpecLang }) {
 
 function Fact({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5">{children}</dd>
+    <div className="min-w-0">
+      <dt className="text-xs text-muted-foreground wrap-anywhere">{label}</dt>
+      <dd className="mt-0.5 wrap-anywhere">{children}</dd>
     </div>
   )
 }
