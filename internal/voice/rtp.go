@@ -100,6 +100,10 @@ type RTPSession struct {
 	seq       uint16 // send loop only
 
 	conn *net.UDPConn
+	// prebound is a socket the UAS bound before it answered the INVITE. Start
+	// uses it instead of binding; Stop closes it even when Start never ran.
+	// Immutable once the session is shared. Nil (calleesim) binds in Start.
+	prebound *net.UDPConn
 	// allowed is the peer list the UAS accepts signalling from, applied to
 	// every inbound packet; empty accepts any source. Set before Start.
 	allowed    peerACL
@@ -208,9 +212,13 @@ func (r *RTPSession) Start(remote *net.UDPAddr) error {
 	r.remoteAddr = remote
 	r.remoteMu.Unlock()
 
-	conn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: r.bindAddr(), Port: r.LocalPort})
-	if err != nil {
-		return err
+	conn := r.prebound
+	if conn == nil {
+		var err error
+		conn, err = net.ListenUDP("udp4", &net.UDPAddr{IP: r.bindAddr(), Port: r.LocalPort})
+		if err != nil {
+			return err
+		}
 	}
 	r.conn = conn
 	r.LocalPort = conn.LocalAddr().(*net.UDPAddr).Port
@@ -307,6 +315,11 @@ func (r *RTPSession) PushDTMF(digit string) {
 }
 
 func (r *RTPSession) Stop() {
+	// A pre-bound socket of a session that never started has no running flag
+	// to gate on; closing twice is harmless.
+	if r.prebound != nil {
+		_ = r.prebound.Close()
+	}
 	if !r.running.CompareAndSwap(true, false) {
 		return
 	}

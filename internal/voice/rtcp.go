@@ -150,6 +150,14 @@ func NewRTCPSession(session *RTPSession, remoteRTP *net.UDPAddr,
 	if err != nil {
 		return nil, err
 	}
+	return newRTCPSessionOn(conn, session, remoteRTP, interval, log), nil
+}
+
+// newRTCPSessionOn wraps an already bound RTCP socket (the UAS binds it before
+// the 200 OK). Stop closes it whether or not the session ever started.
+func newRTCPSessionOn(conn *net.UDPConn, session *RTPSession, remoteRTP *net.UDPAddr,
+	interval time.Duration, log *slog.Logger) *RTCPSession {
+
 	if interval <= 0 {
 		interval = DefaultRTCPInterval
 	}
@@ -163,7 +171,7 @@ func NewRTCPSession(session *RTPSession, remoteRTP *net.UDPAddr,
 		interval: interval,
 		cname:    "aicc",
 		log:      log,
-	}, nil
+	}
 }
 
 func (s *RTCPSession) Start() {

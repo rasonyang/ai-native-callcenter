@@ -5,7 +5,6 @@ package voice
 import (
 	"encoding/json"
 	"log/slog"
-	"math/rand/v2"
 	"strings"
 	"testing"
 	"time"
@@ -35,15 +34,9 @@ func newLogCapture() *logCapture {
 	return c
 }
 
-// configure points a test UAS at the capture and gives it an RTP window of its
-// own: a random 200 ports in 41000-48799, away from the 40000-40999 default
-// every other UAS test binds. Under make test-stress a concurrent go test ./...
-// runs those tests in other processes, and a port one of them holds fails the
-// call before there is anything to log.
+// configure points a test UAS at the capture.
 func (c *logCapture) configure(cfg *Config) {
 	cfg.Logger = c.logger
-	low := 41000 + rand.IntN(39)*200
-	cfg.RTPPortRange = [2]int{low, low + 199}
 }
 
 func (c *logCapture) records(t *testing.T) []logRecord {
