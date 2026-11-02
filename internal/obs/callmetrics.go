@@ -36,6 +36,7 @@ var (
 	uplinkDropBacklog  metric.Int64Counter
 	uplinkDropRx       metric.Int64Counter
 	providerFirstAud   metric.Int64Histogram
+	turnUnanswered     metric.Int64Counter
 	providerErrors     metric.Int64Counter
 	providerSessions   metric.Int64Counter
 	providerUnanswered metric.Int64Counter
@@ -120,6 +121,11 @@ func init() {
 	uplinkDropRx, _ = meter.Int64Counter("aicc_uplink_frames_dropped_rx_total",
 		metric.WithDescription("Caller frames the RTP session dropped because the consumer "+
 			"fell behind."))
+	turnUnanswered, _ = meter.Int64Counter("aicc_turn_unanswered_total",
+		metric.WithDescription("Caller turns the engine never answered before the "+
+			"application stepped in with a dead-air check, a cue or a line of its own, by "+
+			"provider. Excluded from aicc_turn_latency_ms: the reply that follows is the "+
+			"application's, not the engine's answer."))
 	providerFirstAud, _ = meter.Int64Histogram("aicc_provider_first_audio_ms",
 		metric.WithDescription("Provider share of turn latency: caller stopped speaking "+
 			"to the first byte of the reply."),
@@ -289,12 +295,25 @@ func RecordUplinkClock(received, sent, filled, droppedBacklog, droppedRx int64) 
 }
 
 // RecordTurnLatency publishes one turn's whole wait: the caller falling silent
-// to the first reply frame reaching the RTP queue.
+// to the first reply frame reaching the RTP queue. A turn the engine never
+// answered before the application stepped in is not recorded here; see
+// RecordTurnUnanswered.
 func RecordTurnLatency(provider string, ms int64) {
 	if turnLatency == nil {
 		return
 	}
 	turnLatency.Record(context.Background(), ms,
+		metric.WithAttributes(attribute.String("provider", provider)))
+}
+
+// RecordTurnUnanswered counts one caller turn the engine never answered before
+// the application stepped in. It is the other half of RecordTurnLatency: a
+// dropped turn shows here and nowhere in the latency histograms.
+func RecordTurnUnanswered(provider string) {
+	if turnUnanswered == nil {
+		return
+	}
+	turnUnanswered.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("provider", provider)))
 }
 

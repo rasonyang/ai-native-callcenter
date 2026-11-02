@@ -126,6 +126,13 @@ carries the one-line installer's files.
   its words are left out of the transcript. A terminal phase without an
   `announce` keeps the model's own goodbye. The `hangup` tool no longer takes
   `isFarewellSpoken`; a model that still sends it is ignored. (#441)
+- AI calls: a caller turn the engine dropped is no longer recorded as a turn
+  latency of 8-9 s. When the dead-air check, a cue or a phase's line goes out
+  before the engine has answered the caller, the turn is logged as
+  `caller turn went unanswered` (with its `reason`: `NO_INPUT`, `CUE` or
+  `LINE`) and counted in the new `aicc_turn_unanswered_total{provider}`;
+  it no longer feeds `aicc_turn_latency_ms` or `aicc_provider_first_audio_ms`.
+  A slow tool call before the reply is still latency. (#404)
 - AI calls: a lookup, transfer or message the bot promised without calling the
   tool ("好的，我帮您查询一下 RMA1003 的维修进度。", nothing run) is now acted on
   once. When the caller has heard the promise, the model gets one cue that
