@@ -2169,6 +2169,9 @@ func TestAKeypressAfterTheEndingIsArmedLeavesTheClosingLineAlone(t *testing.T) {
 	h.actions.armed = func() { armedAction(); close(fired) }
 	h.actions.mu.Unlock()
 	cues := len(h.model.recordedUserText())
+	// The hangup itself muted the turn that made it (#441): one flush, before
+	// any key.
+	clearsBefore := h.leg.clears()
 
 	// Before the closing line has spoken: the turn the tool result asked for
 	// is being made and has no audio yet.
@@ -2192,7 +2195,7 @@ func TestAKeypressAfterTheEndingIsArmedLeavesTheClosingLineAlone(t *testing.T) {
 	if got := h.model.recordedUserText(); len(got) != cues {
 		t.Errorf("a keypress asked the model for a turn: %v", got[cues:])
 	}
-	if h.leg.clears() != 0 {
+	if h.leg.clears() != clearsBefore {
 		t.Error("a keypress flushed the closing line")
 	}
 	select {

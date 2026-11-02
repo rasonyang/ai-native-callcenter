@@ -43,12 +43,7 @@
         "Description": "End the call. Call this as soon as the caller wants to finish, without saying goodbye first; say goodbye afterwards, when the result tells you to.",
         "Parameters": {
           "type": "object",
-          "properties": {
-            "isFarewellSpoken": {
-              "type": "boolean",
-              "description": "Whether you have already said goodbye"
-            }
-          }
+          "properties": {}
         }
       },
       {
@@ -135,12 +130,7 @@
         "Description": "结束通话。用户表示要结束时立即调用，不要先道别；工具返回后再道别，道别说完线路自动挂断。",
         "Parameters": {
           "type": "object",
-          "properties": {
-            "isFarewellSpoken": {
-              "type": "boolean",
-              "description": "Whether you have already said goodbye"
-            }
-          }
+          "properties": {}
         }
       },
       {

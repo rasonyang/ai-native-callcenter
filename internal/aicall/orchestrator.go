@@ -591,7 +591,15 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				}
 
 			case EventTypeBotSaid:
-				if event.IsFinal {
+				// Words of a muted turn (answerToolCall) were not heard: not
+				// a line the bot said, and none that counts for a claim or
+				// for the closing line.
+				isMuted := event.IsFinal && session.isMutedTurn(event.Turn)
+				if isMuted {
+					log.Info("left a muted turn's words out of the transcript",
+						"turn", event.Turn, "text", event.Text)
+				}
+				if event.IsFinal && !isMuted {
 					recorder.say(store.SpeakerBot, event.Text)
 					// A wait line is the application's words, not a claim
 					// of the model's ("let me check" is what it says).
@@ -849,6 +857,14 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 
 	recorder.toolCall(event.ToolName, event.ToolArgs)
 	output, moved := o.dispatch(ctx, event, batch, session, runtime, actions, log)
+
+	// Into a closing phase that has a line of its own, the line is the only
+	// goodbye (#441): whatever the response that made this call says is not
+	// played, on either path below. Before the answer, which is what brings
+	// the line's turn into being; the muting is fenced off at that turn.
+	if moved != "" && runtime.Engine().IsTerminal() && runtime.Announce() != "" {
+		session.MuteTurn(event.Turn, event.ToolName)
+	}
 
 	if !o.isLineTheToolAnswer(moved, runtime) {
 		recorder.toolResult(event.ToolName, output, moved)

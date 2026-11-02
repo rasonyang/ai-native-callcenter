@@ -228,6 +228,13 @@ type Session struct {
 	// was dropped, for the log.
 	isCutOff     bool
 	cutOffChunks int
+	// mutedTurn is the latest turn muted by MuteTurn, zero for none. It is
+	// never cleared: turn numbers only grow, so "is this turn muted" is
+	// mutedTurn == turn for good, which is how the transcript of a muted turn
+	// is told from the next one's however late it arrives (isMutedTurn).
+	// muteLog is what the turn-end line reports; nil once logged.
+	mutedTurn int
+	muteLog   *muteRecord
 	// turnOwedUntil is when an asked-for turn that has not started yet stops
 	// counting as the bot's floor; zero is none. See askedForATurn.
 	turnOwedUntil time.Time
@@ -1033,6 +1040,81 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Unplayed: unplayed})
 }
 
+// muteRecord is what a muted turn reports when it ends (logMuted).
+type muteRecord struct {
+	tool     string
+	playedMs int
+	// flushedMs is the audio the flush took out of the leg's queue.
+	flushedMs int
+}
+
+// MuteTurn makes the caller stop hearing a turn that has called a tool whose
+// move lands in a terminal phase with an announce: the announce is the call's
+// only goodbye, and the turn that carried the call is not it (#441). The
+// orchestrator calls it once the tool has run and before the result is
+// answered, so the announce's turn is not yet there to be caught.
+//
+// It is a local barge-in and nothing more. The queue is flushed, the rest of
+// the turn's audio is dropped through the same fence a barge-in raises
+// (isCutOff, lifted by the next turn's ResponseStarted, so the announce's turn
+// and every later one play), and the provider is NOT told. No response.cancel:
+// the response finishes on its own and its function call is answered as ever,
+// and a cancel after generation has ended is rejected. No history trim either:
+// Interrupt(playedMs) cancels an open response and truncates or deletes the
+// item of one that holds a call we are about to answer, and it would race the
+// announce's own response.create for the client's notion of the current item.
+// The model's history keeps what it said; the caller heard the announce
+// instead, which is the line the model is told is spoken for it.
+//
+// The flush empties the whole queue, so the tail of an earlier turn still
+// playing goes with it. Nothing separates them in the leg's queue, and the
+// bot has no business speaking over the closing phase it is entering; the
+// turns that can have a tail queued are those a caller never talks over.
+//
+// Played time is frames queued less frames flushed, as in barge-in. A turn
+// that is not the current one (it ended and another began) is left alone.
+func (s *Session) MuteTurn(turn int, tool string) {
+	// One hold: a turn that began between the check and the flush (doubao is
+	// full duplex) would have its own frames flushed.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if turn == 0 || s.turnSeq != turn {
+		return
+	}
+	isGenerating := s.isResponding
+	s.mutedTurn = turn
+	if isGenerating {
+		s.isCutOff = true
+	}
+	// The turn goes on if it is still being generated: not its end.
+	playedMs, _, cleared := s.stopPlaybackLocked(false)
+	s.muteLog = &muteRecord{tool: tool, playedMs: playedMs, flushedMs: cleared * frameDurationMs}
+	if !isGenerating {
+		s.logMuted()
+	}
+}
+
+// logMuted reports a muted turn, with what was dropped of it. The caller holds
+// mu.
+func (s *Session) logMuted() {
+	if s.muteLog == nil {
+		return
+	}
+	s.log.Info("muted the turn that called a tool into a closing phase with its own line",
+		"turn", s.mutedTurn, "tool", s.muteLog.tool, "playedMs", s.muteLog.playedMs,
+		"flushedMs", s.muteLog.flushedMs,
+		"droppedChunks", s.cutOffChunks)
+	s.muteLog = nil
+}
+
+// isMutedTurn reports whether a turn's audio was muted (MuteTurn), and so
+// whether its words are ones the caller did not hear.
+func (s *Session) isMutedTurn(turn int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return turn != 0 && turn == s.mutedTurn
+}
+
 // tellTheModelWhatWasHeard reports the interruption and how much of the turn
 // reached the caller, so the provider's history matches the conversation that
 // actually happened.
@@ -1055,8 +1137,14 @@ func (s *Session) tellTheModelWhatWasHeard(reason provider.InterruptReason, play
 func (s *Session) stopPlayback(endsTheTurn bool) (playedMs int, hadQueued bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	playedMs, hadQueued, _ = s.stopPlaybackLocked(endsTheTurn)
+	return playedMs, hadQueued
+}
 
-	cleared := s.leg.ClearTx()
+// stopPlaybackLocked is stopPlayback with mu held. It also reports how many
+// frames the flush took out of the leg's queue.
+func (s *Session) stopPlaybackLocked(endsTheTurn bool) (playedMs int, hadQueued bool, cleared int) {
+	cleared = s.leg.ClearTx()
 	s.framer.reset()
 
 	// What was queued, less what never made it out of the queue. Anything
@@ -1075,7 +1163,7 @@ func (s *Session) stopPlayback(endsTheTurn bool) (playedMs int, hadQueued bool) 
 	s.drainGeneration++
 	s.idleGeneration++
 
-	return played * frameDurationMs, hadQueued
+	return played * frameDurationMs, hadQueued, cleared
 }
 
 // endInterruptedTurn accounts for an interruption event and reports whether it
@@ -1112,6 +1200,8 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.isResponding = true
 	s.turnOwedUntil = time.Time{}
 	s.openTurns = min(s.openTurns+1, 2)
+	// A muted turn that was cut short never reached its end.
+	s.logMuted()
 	if s.isCutOff {
 		if s.cutOffChunks > 0 {
 			s.log.Debug("dropped the audio of a response that was cut off",
@@ -1187,6 +1277,7 @@ func (s *Session) endTurn() (hasAudio bool) {
 	s.isResponding = false
 	s.openTurns = max(s.openTurns-1, 0)
 	s.drainGeneration++
+	s.logMuted()
 	hasAudio = s.framesQueued > 0
 	if hasAudio {
 		s.audioTurns++

@@ -88,12 +88,10 @@ type MessageRequest struct {
 	CallbackNumber string `json:"callbackNumber"`
 }
 
-// HangupRequest ends the call.
-type HangupRequest struct {
-	// IsFarewellSpoken says whether the model has already said goodbye. When it
-	// has not, the application gives it the chance before the line drops.
-	IsFarewellSpoken bool `json:"isFarewellSpoken"`
-}
+// HangupRequest ends the call. It takes no argument: whether the farewell is
+// the model's or the phase's announce is decided by the flow (a terminal phase
+// with an announce speaks it alone), not by the model's claim about itself.
+type HangupRequest struct{}
 
 // LeadRequest is the model recording the stance of a campaign customer. Intent
 // is one of LeadIntents and Notes is within MaxLeadNotesRunes by the time the
@@ -268,9 +266,7 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 			Description: Text{EN: hangupDescription, ZH: hangupDescription},
 			Parameters: json.RawMessage(`{
 				"type": "object",
-				"properties": {
-					"isFarewellSpoken": {"type": "boolean", "description": "Whether you have already said goodbye"}
-				}
+				"properties": {}
 			}`),
 		},
 	}
