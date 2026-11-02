@@ -43,7 +43,7 @@ func (c capturedSwitch) API(cmd string) (string, error) {
 		if c.conf != "" {
 			return c.conf, nil
 		}
-		return switchConfXML("16384", "29999"), nil
+		return switchConfXML("20000", "25999"), nil
 	}
 	name := strings.ReplaceAll(cmd, " ", "_") + ".txt"
 	b, err := os.ReadFile(filepath.Join("..", "..", "internal", "telephony", "testdata", "switchstatus", name))
@@ -127,9 +127,11 @@ func newHarness(t *testing.T) *harness {
 	now := time.Unix(1_800_000_000, 0)
 	h.deps = doctorDeps{
 		cfg: config.Config{
-			IsBotEnabled: true,
-			Provider:     "openai",
-			ESLAddr:      "freeswitch:18021",
+			IsBotEnabled:   true,
+			BotRTPPortLow:  26000,
+			BotRTPPortHigh: 29999,
+			Provider:       "openai",
+			ESLAddr:        "freeswitch:18021",
 			// The captured switch knows this gateway, so a healthy deployment
 			// passes the outbound checks as it passes the bot gateway's.
 			OutboundEndpoint: "sofia/gateway/aicc_bot/%s",
@@ -141,6 +143,8 @@ func newHarness(t *testing.T) *harness {
 			return ""
 		},
 		http: &http.Client{Timeout: time.Second},
+		// A Linux default, so the harness never reads the machine running it.
+		ephemeralPorts: func() (int, int, error) { return 32768, 60999, nil },
 		openStore: func(context.Context) (migrationReader, func(), error) {
 			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}}, func() {}, nil
 		},
@@ -1015,8 +1019,8 @@ func TestTheSwitchRTPRangeIsReadAndCounted(t *testing.T) {
 	}{
 		{name: "unset is the built-in default", wantState: DoctorStatePass, isBot: true,
 			wantInMsg: []string{"sets no RTP range", "built-in 16384–32768", "8,193 media legs", eavesdrop}},
-		{name: "the image default", start: "16384", end: "29999", bot: 220, isBot: true, wantState: DoctorStatePass,
-			wantInMsg: []string{"16384–29999, RTP on the even ports 16384–29998", "6,808 media legs", eavesdrop}},
+		{name: "the image default", start: "20000", end: "25999", bot: 220, isBot: true, wantState: DoctorStatePass,
+			wantInMsg: []string{"20000–25999, RTP on the even ports 20000–25998", "3,000 media legs", eavesdrop}},
 		{name: "macOS", start: "16384", end: "16583", bot: 50, isBot: true, wantState: DoctorStatePass,
 			wantInMsg: []string{"16384–16583", "100 media legs"}},
 		{name: "quick start range with the default bot cap is narrow", start: "16384", end: "16483", bot: 220, isBot: true,
@@ -1140,4 +1144,117 @@ func TestAUUIDItCannotReadIsSkippedNotPassed(t *testing.T) {
 		return fakeStatus{profiles: externalProfiles(), gateway: true, trunks: healthyTrunks(), uuidErr: errors.New("timeout")}, func() {}, nil
 	}
 	wantState(t, h.run(), DoctorCheckSwitchUUID, DoctorStateSkip)
+}
+
+// botRangeRun runs doctor against a switch with the given switch.conf and the
+// bot on the given range, and returns the two bot-range results.
+func botRangeRun(t *testing.T, conf string, low, high int, isBot bool, eph func() (int, int, error)) map[DoctorCheck]doctorResult {
+	t.Helper()
+	h := newHarness(t)
+	h.deps.cfg.IsBotEnabled = isBot
+	h.deps.cfg.BotRTPPortLow, h.deps.cfg.BotRTPPortHigh = low, high
+	h.deps.ephemeralPorts = eph
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return telephony.NewAdapter(capturedSwitch{t: t, conf: conf}, "aicc.test"), func() {}, nil
+	}
+	return h.run()
+}
+
+func TestTheBotAndTheSwitchMayNotShareARTPPort(t *testing.T) {
+	cases := []struct {
+		name       string
+		start, end string
+		low, high  int
+		overlap    bool
+		wantInMsg  string
+	}{
+		{"identical", "26000", "29999", 26000, 29999, true, "bot=26000-29999, switch=26000-29999"},
+		{"bot inside the switch", "20000", "32000", 26000, 29999, true, ""},
+		{"switch inside the bot", "27000", "28000", 26000, 29999, true, ""},
+		{"bot low equals the switch end", "20000", "26000", 26000, 29999, true, ""},
+		{"bot low one past the switch end", "20000", "25999", 26000, 29999, false, "switch=20000-25999"},
+		{"bot high equals the switch start", "29999", "35000", 26000, 29999, true, ""},
+		{"bot high one below the switch start", "30000", "35000", 26000, 29999, false, ""},
+		{"unset switch range is FreeSWITCH's built-in", "", "", 26000, 29999, true, "switch=16384-32768 (FreeSWITCH's built-in default"},
+		{"unset switch range clear of a high bot", "", "", 40000, 40999, false, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := botRangeRun(t, switchConfXML(tc.start, tc.end), tc.low, tc.high, true, nil)
+			r := got[DoctorCheckBotRTPRange]
+			if tc.overlap {
+				if r.State != DoctorStateFail || r.Code != DoctorCodeBotRTPRangeOverlapsSwitch ||
+					!strings.Contains(r.Fix, "AICC_BOT_RTP_PORT_LOW") || !strings.Contains(r.Fix, "RTP_START") {
+					t.Fatalf("%+v", r)
+				}
+			} else if r.State != DoctorStatePass || r.Code != "" {
+				t.Fatalf("%+v", r)
+			}
+			if !strings.Contains(r.Message, tc.wantInMsg) {
+				t.Errorf("message %q lacks %q", r.Message, tc.wantInMsg)
+			}
+		})
+	}
+}
+
+func TestNoOverlapVerdictWithoutAnAbleBotOrASwitchToJudge(t *testing.T) {
+	// The bot is off.
+	got := botRangeRun(t, switchConfXML("26000", "29999"), 26000, 29999, false, nil)
+	wantState(t, got, DoctorCheckBotRTPRange, DoctorStateSkip)
+	wantState(t, got, DoctorCheckBotRTPEphemeral, DoctorStateSkip)
+	// The switch's range is invalid: only SWITCH_RTP_RANGE_INVALID speaks.
+	for _, conf := range []string{switchConfXML("sixteen", "29999"), switchConfXML("29999", "26000"), switchConfXML("26001", "26001")} {
+		got = botRangeRun(t, conf, 26000, 29999, true, nil)
+		wantState(t, got, DoctorCheckSwitchRTPRange, DoctorStateFail)
+		wantState(t, got, DoctorCheckBotRTPRange, DoctorStateSkip)
+	}
+	// The conf cannot be read.
+	got = botRangeRun(t, "garbage <<<", 26000, 29999, true, nil)
+	wantState(t, got, DoctorCheckBotRTPRange, DoctorStateSkip)
+}
+
+func TestTheBotRangeIsSkippedWhenTheSwitchWasNotReachable(t *testing.T) {
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) { return nil, nil, errors.New("refused") }
+	wantState(t, h.run(), DoctorCheckBotRTPRange, DoctorStateSkip)
+}
+
+func TestTheBotRangeInTheOSEphemeralRangeWarns(t *testing.T) {
+	linux := func() (int, int, error) { return parseEphemeralLinux("32768\t60999\n") }
+	macos := func() (int, int, error) { return parseEphemeralDarwin("49152\n", "65535\n") }
+	cases := []struct {
+		name      string
+		low, high int
+		eph       func() (int, int, error)
+		wantWarn  bool
+	}{
+		{"linux, the old default", 40000, 40999, linux, true},
+		{"linux, the new default", 26000, 29999, linux, false},
+		{"linux, straddling the edge", 32000, 33000, linux, true},
+		{"macOS, inside", 50000, 50999, macos, true},
+		{"macOS, the old default is clear", 40000, 40999, macos, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := botRangeRun(t, switchConfXML("20000", "25999"), tc.low, tc.high, true, tc.eph)
+			r := got[DoctorCheckBotRTPEphemeral]
+			if tc.wantWarn {
+				if r.State != DoctorStateWarn || r.Code != DoctorCodeBotRTPRangeEphemeral || r.Fix == "" {
+					t.Fatalf("%+v", r)
+				}
+			} else if r.State != DoctorStatePass {
+				t.Fatalf("%+v", r)
+			}
+		})
+	}
+}
+
+func TestAnUnreadableEphemeralRangeIsNotAWarning(t *testing.T) {
+	got := botRangeRun(t, switchConfXML("20000", "25999"), 40000, 40999, true, func() (int, int, error) { return 0, 0, errors.New("no /proc") })
+	wantState(t, got, DoctorCheckBotRTPEphemeral, DoctorStateSkip)
+	got = botRangeRun(t, switchConfXML("20000", "25999"), 40000, 40999, true, nil)
+	wantState(t, got, DoctorCheckBotRTPEphemeral, DoctorStateSkip)
+	if _, _, err := parseEphemeralLinux("garbage"); err == nil {
+		t.Error("accepted garbage")
+	}
 }
