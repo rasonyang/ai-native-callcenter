@@ -83,6 +83,16 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Web: a page that fails to load (the server restarting, a network blip, a 502
+  from a proxy, a page that breaks while rendering) now shows a designed,
+  translated error state with "Try again" instead of the router's stock
+  "Something went wrong!" with its raw message. Inside the application the
+  sidebar, top bar and an agent's call controls stay and the error takes the
+  page's place; before sign-in is proved it fills the screen. Once the server
+  answers again, "Try again" lands on the requested page without signing in. The
+  session check now gives up on a server that never answers after 10 seconds,
+  and a proxy's HTML 502 is treated as a server failure rather than a parse
+  error. (#327)
 - AI calls: a lookup, transfer or message the bot promised without calling the
   tool ("好的，我帮您查询一下 RMA1003 的维修进度。", nothing run) is now acted on
   once. When the caller has heard the promise, the model gets one cue that

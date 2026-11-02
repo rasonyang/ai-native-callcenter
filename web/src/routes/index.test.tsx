@@ -1,10 +1,12 @@
-import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router'
+import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { QueryClient } from '@tanstack/react-query'
 import { act, screen, waitFor } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Identity } from '@/lib/api'
-import { routeTree } from '@/routeTree.gen'
+import { ApiError, type Identity } from '@/lib/api'
+import i18n from '@/lib/i18n'
+import type * as ContactsModule_ from '@/lib/contacts'
+import { createAppRouter } from '@/router'
 import {
   cdrFixture, identityFixture, installBackend, presenceFixture, renderWithProviders,
 } from '@/test/harness'
@@ -24,17 +26,46 @@ import {
  * writes to the cache is what the page reads. Every `/auth/me` is counted.
  */
 
+type ContactsModule = typeof ContactsModule_
+
+// One page is made to fail while it renders, to see what the layout does with
+// an error that is not a failed request.
+const throwingPage = vi.hoisted(() => ({ isThrowing: false }))
+vi.mock('@/lib/contacts', async (importOriginal) => {
+  const original = await importOriginal<ContactsModule>()
+  return {
+    ...original,
+    useContacts: (...args: Parameters<typeof original.useContacts>) => {
+      // The way a page usually breaks: a TypeError, the same type fetch
+      // rejects with when the network fails, so the copy must not mistake it.
+      if (throwingPage.isThrowing) throw new TypeError("Cannot read properties of undefined (reading 'map')")
+      return original.useContacts(...args)
+    },
+  }
+})
+
 afterEach(() => {
+  vi.restoreAllMocks()
   vi.useRealTimers()
   vi.unstubAllGlobals()
 })
 
 const SESSION_KEY = ['session']
+/** A valid UUIDv7, for the deep link. */
+const CDR_ID = '019a0000-0000-7000-8000-000000000221'
+/** `loadSession`'s bound on `/me`, which the test drives past. */
+const SESSION_CHECK_TIMEOUT = 10_000
+/** The error state's heading in each language. */
+const TITLES = {
+  en: "Can't reach the server",
+  zh: '无法连接服务器',
+  unexpected: "This page couldn't be loaded",
+}
 /** A query that belongs to whoever is signed in. */
 const THEIR_PRESENCE_KEY = ['agent', 'presence']
 
 /** How `/auth/me` answers. */
-type MeAnswer = 'SESSION' | 'UNAVAILABLE' | 'UNREACHABLE'
+type MeAnswer = 'SESSION' | 'UNAVAILABLE' | 'BAD_GATEWAY_HTML' | 'UNREACHABLE' | 'HANGS'
 
 /**
  * The backend, with `/auth/me` counted and able to fail the ways a server
@@ -69,6 +100,25 @@ function installServer(session: Identity | null) {
       if (String(input) === '/api/v1/auth/me') {
         server.meRequests++
         if (server.me === 'UNREACHABLE') return Promise.reject(new TypeError('Failed to fetch'))
+        // A server that accepted the connection and never answers: only the
+        // caller's abort ends it, as it does in a browser.
+        if (server.me === 'HANGS') {
+          return new Promise<Response>((_, reject) => {
+            init?.signal?.addEventListener('abort', () =>
+              reject(new DOMException('The operation was aborted.', 'AbortError')),
+            )
+          })
+        }
+        // What a proxy in front of a restarting server answers.
+        if (server.me === 'BAD_GATEWAY_HTML') {
+          return Promise.resolve(
+            new Response('<html><body><h1>502 Bad Gateway</h1></body></html>', {
+              status: 502,
+              statusText: 'Bad Gateway',
+              headers: { 'content-type': 'text/html' },
+            }),
+          )
+        }
         if (server.me === 'UNAVAILABLE') {
           return Promise.resolve(
             new Response(JSON.stringify({ error: { code: 'INTERNAL', message: 'restarting' } }), {
@@ -141,9 +191,8 @@ function seedEarlierSession(queryClient: QueryClient, user: Identity) {
 function renderApp(path: string, queryClient = appQueryClient()) {
   FakeEventSource.opened = []
   vi.stubGlobal('EventSource', FakeEventSource)
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
+  const router = createAppRouter({
+    queryClient,
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   // Every location the reader was shown, in order. A redirect that happens in
@@ -250,29 +299,232 @@ describe('the site root', () => {
 })
 
 describe('a /me that fails without a 401', () => {
-  // A server that is restarting has signed nobody out. Both ways in show the
-  // error and keep the session, so the reader recovers by reloading, not by
-  // signing in again.
-  it.each([
-    ['answers 503', '/', 'UNAVAILABLE'],
-    ['answers 503', '/agent', 'UNAVAILABLE'],
-    ['never arrives', '/', 'UNREACHABLE'],
-    ['never arrives', '/agent', 'UNREACHABLE'],
-  ] as const)('that %s is shown at %s, with the session kept', async (_, path, answer) => {
-    const server = installServer(identityFixture())
-    server.me = answer
-    const queryClient = appQueryClient()
-    const user = identityFixture()
-    seedEarlierSession(queryClient, user)
-    const app = renderApp(path, queryClient)
+  // A server that is restarting has signed nobody out. Every way in shows the
+  // designed error state and keeps the session, so the reader recovers with
+  // "Try again", not by signing in again.
+  const FAILURES = [
+    ['a 503', 'UNAVAILABLE'],
+    ['a 502 with an HTML body', 'BAD_GATEWAY_HTML'],
+    ['a network error', 'UNREACHABLE'],
+    ['no answer at all', 'HANGS'],
+  ] as const
+  const PATHS = [
+    ['/', 'AGENT', false],
+    ['/agent', 'AGENT', true],
+    ['/supervisor', 'SUPERVISOR', true],
+    ['/admin', 'ADMIN', true],
+    [`/admin/cdr/${CDR_ID}`, 'ADMIN', true],
+  ] as const
+  /** What a reader must never see: the developer strings behind the failure. */
+  const RAW = ['restarting', 'Failed to fetch', 'Bad Gateway', 'aborted', '502']
 
-    expect(await screen.findByText('Something went wrong!')).toBeVisible()
-    expect(server.meRequests).toBe(1)
-    expect(app.router.state.location.pathname).toBe(path)
-    expect(app.sawSignInForm()).toBe(false)
-    expect(queryClient.getQueryData(SESSION_KEY)).toEqual(user)
-    expect(queryClient.getQueryState(THEIR_PRESENCE_KEY)?.isInvalidated).toBe(false)
+  /** Drives the check past its timeout when the server never answers. */
+  async function failUntilShown(
+    meRequests: () => number, answer: MeAnswer, language: 'en' | 'zh', hasShell: boolean,
+  ) {
+    const title = TITLES[language]
+    if (answer === 'HANGS') {
+      // The check's timer starts once it has asked.
+      await waitFor(() => expect(meRequests()).toBe(1))
+      await vi.advanceTimersByTimeAsync(SESSION_CHECK_TIMEOUT)
+    }
+    expect(await screen.findByRole('heading', { name: title })).toBeVisible()
+    expect(Boolean(document.querySelector('aside'))).toBe(hasShell)
+  }
+
+  describe.each([
+    ['en', 'Try again'],
+    ['zh', '重试'],
+  ] as const)('in %s', (language, retry) => {
+    beforeEach(async () => {
+      await i18n.changeLanguage(language)
+    })
+    afterEach(async () => {
+      await i18n.changeLanguage('en')
+    })
+
+    it.each(
+      FAILURES.flatMap(([failure, answer]) =>
+        PATHS.flatMap(([path, role, isUnderApp]) =>
+          [false, true].map(
+            (hasEarlierSession) =>
+              [
+                `${failure} at ${path}${hasEarlierSession ? ' with an earlier session' : ' on a fresh tab'}`,
+                answer, path, role, isUnderApp, hasEarlierSession,
+              ] as const,
+          ),
+        ),
+      ).filter(([, answer, path, , , hasEarlierSession]) =>
+        // The full cross product in English; zh covers every failure kind, both
+        // variants and both kinds of path (the strings are the same in all).
+        language === 'en' || path === '/' || path === '/admin' || (answer === 'UNAVAILABLE' && hasEarlierSession),
+      ),
+    )('shows %s', async (_label, answer, path, role, isUnderApp, hasEarlierSession) => {
+      // shouldAdvanceTime: Testing Library's own waits settle on a
+      // setTimeout(0), which a frozen clock would never fire.
+      if (answer === 'HANGS') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldAdvanceTime: true })
+      const warn = vi.spyOn(console, 'warn')
+      const server = installServer(identityFixture({ role }))
+      server.me = answer
+      const queryClient = appQueryClient()
+      const user = identityFixture({ role })
+      if (hasEarlierSession) seedEarlierSession(queryClient, user)
+      const app = renderApp(path, queryClient)
+
+      // Under `_app` with a user proved earlier the shell stays; without one
+      // (and at `/`, which has none) the error draws its own frame.
+      await failUntilShown(() => server.meRequests, answer, language, isUnderApp && hasEarlierSession)
+      expect(screen.queryByRole('heading', { name: TITLES[language === 'en' ? 'zh' : 'en'] })).not.toBeInTheDocument()
+      const text = document.body.textContent ?? ''
+      for (const raw of RAW) expect(text).not.toContain(raw)
+      expect(screen.getByRole('button', { name: retry })).toBeVisible()
+      expect(server.meRequests).toBe(1)
+      expect(app.sawSignInForm()).toBe(false)
+      expect(app.router.state.location.pathname).toBe(path)
+      expect(queryClient.getQueryData(SESSION_KEY) ?? null).toEqual(hasEarlierSession ? user : null)
+      expect(warn.mock.calls.flat().join(' ')).not.toContain("wasn't caught by any route")
+      app.stop()
+    })
+  })
+
+  it('logs the error to the console, for whoever is diagnosing it', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const server = installServer(identityFixture())
+    server.me = 'UNAVAILABLE'
+    const app = renderApp('/agent')
+    expect(await screen.findByRole('heading', { name: TITLES.en })).toBeVisible()
+    expect(log.mock.calls.some((call) => call.some((arg) => arg instanceof ApiError))).toBe(true)
     app.stop()
+  })
+
+  it('offers the way back to the start only for an unexpected error', async () => {
+    const server = installServer(identityFixture())
+    server.me = 'UNAVAILABLE'
+    const app = renderApp('/agent')
+    expect(await screen.findByRole('heading', { name: TITLES.en })).toBeVisible()
+    expect(screen.queryByRole('link', { name: 'Back to start' })).not.toBeInTheDocument()
+    app.stop()
+  })
+
+  it('shows a /me answered 401 as before: the sign-in page, the cache cleared', async () => {
+    installServer(null)
+    const queryClient = appQueryClient()
+    seedEarlierSession(queryClient, identityFixture())
+    const app = renderApp('/admin/cdr/' + CDR_ID, queryClient)
+    expect(await screen.findByLabelText('Password')).toBeVisible()
+    expect(queryClient.getQueryData(SESSION_KEY)).toBeNull()
+    expect(screen.queryByRole('heading', { name: TITLES.en })).not.toBeInTheDocument()
+    app.stop()
+  })
+
+  describe('"Try again"', () => {
+    it.each([
+      ['/', false],
+      ['/agent', true],
+    ] as const)('while the server is still down asks once more and stops, at %s', async (path, hasEarlierSession) => {
+      const server = installServer(identityFixture())
+      server.me = 'UNAVAILABLE'
+      const queryClient = appQueryClient()
+      if (hasEarlierSession) seedEarlierSession(queryClient, identityFixture())
+      const app = renderApp(path, queryClient)
+      await screen.findByRole('heading', { name: TITLES.en })
+      expect(server.meRequests).toBe(1)
+
+      await app.user.click(screen.getByRole('button', { name: 'Try again' }))
+      await waitFor(() => expect(server.meRequests).toBe(2))
+      expect(await screen.findByRole('heading', { name: TITLES.en })).toBeVisible()
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      expect(server.meRequests).toBe(2)
+      app.stop()
+    })
+
+    it.each([
+      ['/', false, '/agent'],
+      ['/agent/calls', true, '/agent/calls'],
+      ['/agent/calls', false, '/agent/calls'],
+    ] as const)('once the server is back lands on the page asked for, from %s (earlier session: %s)', async (path, hasEarlierSession, lands) => {
+      const server = installServer(identityFixture())
+      server.me = 'UNAVAILABLE'
+      const queryClient = appQueryClient()
+      if (hasEarlierSession) seedEarlierSession(queryClient, identityFixture())
+      const app = renderApp(path, queryClient)
+      await screen.findByRole('heading', { name: TITLES.en })
+
+      server.me = 'SESSION'
+      await app.user.click(screen.getByRole('button', { name: 'Try again' }))
+
+      await waitFor(() => expect(app.router.state.location.pathname).toBe(lands))
+      await app.settled()
+      if (lands === '/agent/calls') expect(await screen.findByRole('heading', { name: 'My Calls' })).toBeVisible()
+      expect(screen.queryByRole('heading', { name: TITLES.en })).not.toBeInTheDocument()
+      expect(app.sawSignInForm()).toBe(false)
+      expect(app.shown).not.toContain('/login')
+      expect(server.meRequests).toBe(2)
+      app.stop()
+    })
+  })
+
+  describe('navigating within the app', () => {
+    it('keeps the shell and the softphone when the check fails, and recovers with "Try again"', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      const server = installServer(identityFixture())
+      const app = renderApp('/')
+      await waitFor(() => expect(app.router.state.location.pathname).toBe('/agent'))
+      await app.settled()
+      const sidebar = document.querySelector('aside')
+      const header = document.querySelector('header')
+      const bar = await waitFor(() => {
+        const found = document.querySelector('[data-softphone-bar]')
+        if (!found) throw new Error('the softphone bar is not on screen yet')
+        return found
+      })
+      expect(sidebar).not.toBeNull()
+      expect(screen.getByRole('button', { name: 'AC' })).toBeVisible()
+
+      vi.setSystemTime(Date.now() + 60_000)
+      server.me = 'UNAVAILABLE'
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      await act(() => app.router.navigate({ to: '/agent/calls' }))
+
+      expect(await screen.findByRole('heading', { name: TITLES.en })).toBeVisible()
+      // Nothing was thrown, so the layout is the one to log it, once.
+      await waitFor(() =>
+        expect(log.mock.calls.filter((call) => call.some((arg) => arg instanceof ApiError))).toHaveLength(1),
+      )
+      expect(document.querySelector('aside')).toBe(sidebar)
+      expect(document.querySelector('header')).toBe(header)
+      expect(document.querySelector('[data-softphone-bar]')).toBe(bar)
+      expect(screen.queryByRole('heading', { name: 'My Calls' })).not.toBeInTheDocument()
+      expect(app.sawSignInForm()).toBe(false)
+      const meBefore = server.meRequests
+
+      server.me = 'SESSION'
+      await app.user.click(screen.getByRole('button', { name: 'Try again' }))
+      expect(await screen.findByRole('heading', { name: 'My Calls' })).toBeVisible()
+      expect(document.querySelector('aside')).toBe(sidebar)
+      expect(server.meRequests).toBe(meBefore + 1)
+      expect(screen.queryByRole('heading', { name: TITLES.en })).not.toBeInTheDocument()
+      app.stop()
+    })
+  })
+
+  describe('a page that fails to render', () => {
+    it('keeps the shell and says the page could not be loaded, with a way back', async () => {
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+      installServer(identityFixture())
+      throwingPage.isThrowing = true
+      const app = renderApp('/agent/contacts')
+
+      expect(await screen.findByRole('heading', { name: TITLES.unexpected })).toBeVisible()
+      expect(document.querySelector('aside')).not.toBeNull()
+      await waitFor(() => expect(document.querySelector('[data-softphone-bar]')).not.toBeNull())
+      expect(screen.queryByRole('heading', { name: TITLES.en })).not.toBeInTheDocument()
+      expect(screen.getByRole('link', { name: 'Back to start' })).toHaveAttribute('href', '/')
+      expect(document.body.textContent).not.toContain('Cannot read properties')
+      expect(log.mock.calls.some((call) => call.some((arg) => arg instanceof TypeError && arg.message.startsWith('Cannot read properties')))).toBe(true)
+      throwingPage.isThrowing = false
+      app.stop()
+    })
   })
 })
 

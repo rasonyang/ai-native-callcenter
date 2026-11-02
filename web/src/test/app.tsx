@@ -1,9 +1,9 @@
 import { QueryClient } from '@tanstack/react-query'
-import { RouterProvider, createMemoryHistory, createRouter } from '@tanstack/react-router'
+import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import { waitFor } from '@testing-library/react'
 import { vi } from 'vitest'
 
-import { routeTree } from '@/routeTree.gen'
+import { createAppRouter } from '@/router'
 
 import {
   identityFixture, installBackend, installFakeExtension, renderWithProviders,
@@ -67,9 +67,8 @@ export function renderApp(
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   })
-  const router = createRouter({
-    routeTree,
-    context: { queryClient },
+  const router = createAppRouter({
+    queryClient,
     history: createMemoryHistory({ initialEntries: [path] }),
   })
   const rendered = renderWithProviders(

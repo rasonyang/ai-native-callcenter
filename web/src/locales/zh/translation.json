@@ -1146,5 +1146,17 @@
         "ROW_SHAPE": "列数不符（实际/应有 {{detail}}），未发送。"
       }
     }
+  },
+  "routeError": {
+    "unreachable": {
+      "title": "无法连接服务器",
+      "description": "服务器暂时没有响应，你的登录状态仍然有效，请稍后重试。"
+    },
+    "unexpected": {
+      "title": "页面加载失败",
+      "description": "加载此页面时出现意外错误。"
+    },
+    "retry": "重试",
+    "backToStart": "返回首页"
   }
 }
