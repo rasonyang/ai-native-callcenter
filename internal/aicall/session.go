@@ -544,13 +544,38 @@ func (s *Session) AnswerTool(toolCallID, output string) error {
 }
 
 // SendCue sends the model a text it answers with a turn of its own: a
-// dead-air check, a goodbye, a keypress.
+// dead-air check, a goodbye, a handover failure, a claim cue.
+//
+// A cue is the application stepping in, so an open turn measurement the engine
+// has not answered closes as unanswered (reason CUE) before the text goes out.
+// It has to be before: the cue's own ResponseStarted arrives on the event
+// goroutine and would otherwise mark the caller's turn as answered. A
+// measurement the engine did answer is left to close as latency.
 func (s *Session) SendCue(text string) error {
+	s.stepIn(turnUnansweredCue)
+	return s.sendCue(text)
+}
+
+// sendCue is SendCue without the unanswered-turn rule, for a cue that is the
+// caller's own input (a keypress).
+func (s *Session) sendCue(text string) error {
 	if err := s.model.SendUserText(text); err != nil {
 		return err
 	}
 	s.askedForATurn()
 	return nil
+}
+
+// stepIn closes an open measurement the engine has not answered as unanswered:
+// the application is about to speak or prompt, and the reply that follows is
+// its own, not an answer to the caller.
+func (s *Session) stepIn(reason string) {
+	s.mu.Lock()
+	waitMs, ok := s.timer.onSteppedIn()
+	s.mu.Unlock()
+	if ok {
+		recordTurnUnanswered(s.log, s.providerName, waitMs, reason)
+	}
 }
 
 // askedForATurn records that the model owes a turn which has not started: a
@@ -587,7 +612,11 @@ func (s *Session) Reinstruct(text string) error {
 // is being started and there is no mid-call moment to catch.
 //
 // isClosing says the line ends the call (provider.VoiceSession.SpeakText).
+//
+// A line is the application stepping in: an open turn measurement the engine
+// has not answered closes as unanswered (reason LINE) before the line is sent.
 func (s *Session) Speak(text string, isClosing bool) error {
+	s.stepIn(turnUnansweredLine)
 	return s.model.SpeakText(text, isClosing)
 }
 
@@ -602,7 +631,12 @@ func (s *Session) Speak(text string, isClosing bool) error {
 // starting first means the line did not come first (a reply to the caller won
 // the floor, or the engine dropped the line), and nothing is marked: a reply
 // mistaken for an aside would be left out of everything that counts replies.
+//
+// Like Speak it closes an open, unanswered turn measurement as unanswered. An
+// aside follows a tool call, which has already answered the turn, so in
+// practice the rule leaves the measurement alone.
 func (s *Session) SpeakAside(text string) error {
+	s.stepIn(turnUnansweredLine)
 	s.mu.Lock()
 	s.isAsideOwed = true
 	s.mu.Unlock()
@@ -1197,6 +1231,9 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	case isSpokenLine && isLineAskedAgain && s.asideTurn != 0 && s.asideTurn == s.turnSeq-1:
 		s.asideTurn = s.turnSeq
 	}
+	// A response that starts after speech_stopped answers the caller's turn,
+	// whether or not it makes a sound (a tool call does not).
+	s.timer.onResponseStarted()
 	s.isResponding = true
 	s.turnOwedUntil = time.Time{}
 	s.openTurns = min(s.openTurns+1, 2)
@@ -1456,6 +1493,9 @@ func (s *Session) awaitCallerOrDeadAir(generation uint64) (playbackMarker, bool,
 			return playbackMarker{}, false, false
 		}
 		s.log.Info("dead air", "afterMs", timeout.Milliseconds())
+		// The application is about to prompt a caller whose last turn the
+		// engine never answered: that wait is not latency.
+		s.stepIn(turnUnansweredNoInput)
 		s.emit(Event{Type: EventTypeNoInput})
 		return playbackMarker{}, false, true
 	}
@@ -1517,10 +1557,16 @@ func (s *Session) pumpDigits() {
 				s.emit(Event{Type: EventTypeDigit, Text: digit})
 				continue
 			}
+			// A keypress is the caller's own input: it abandons an open turn
+			// measurement the way speech does, and is not the application
+			// stepping in.
+			s.mu.Lock()
+			s.timer.onSpeechStarted()
+			s.mu.Unlock()
 			s.bargeIn(provider.InterruptReasonDTMF)
 			s.emit(Event{Type: EventTypeDigit, Text: digit})
 
-			if err := s.SendCue(keypressText(digit)); err != nil {
+			if err := s.sendCue(keypressText(digit)); err != nil {
 				s.log.Warn("could not report a keypress to the model",
 					"digit", digit, "error", err)
 			}

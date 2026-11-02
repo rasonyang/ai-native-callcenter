@@ -102,6 +102,7 @@ OPENAI_API_KEY=not-a-key \
 | `aicc_uplink_frames_{received,sent,filled,dropped_backlog,dropped_rx}_total` | The AI leg's 20 ms uplink clock: `sent` follows elapsed slots, `filled` is slots the caller sent nothing for, the two `dropped` counts are frames the 100 ms bound or the RTP queue discarded |
 | `aicc_turn_latency_ms{provider}` | Caller stopped speaking to first reply frame |
 | `aicc_provider_first_audio_ms{provider}` | The provider's share of that |
+| `aicc_turn_unanswered_total{provider}` | Caller turns the engine never answered before the application stepped in (a dead-air check, a cue or a line of its own). These are excluded from the two histograms above |
 | `aicc_provider_ws_errors_total` | Sessions that ended on an error |
 | `go_goroutines`, `go_memstats_heap_inuse_bytes` | Leaks, and the RSS budget |
 
@@ -189,7 +190,12 @@ that no amount of local capacity substitutes for.
 
 * `aicc_turn_latency_ms`, with the caveat about what it measures: the window
   starts at `speech_stopped`, *after* the VAD's silence hold, so the hold has
-  to be added back before comparing it to what a caller experiences.
+  to be added back before comparing it to what a caller experiences. The
+  histogram excludes unanswered turns: when the engine drops a caller's turn
+  and the application steps in first (the dead-air check, a cue, a phase's
+  line), the turn is counted in `aicc_turn_unanswered_total` and logged as
+  `caller turn went unanswered`, not recorded as a long latency. A rising
+  unanswered count with a flat histogram is an engine dropping turns.
 * `aicc_provider_ws_errors_total`. A vendor dropping sockets under sustained
   load is exactly what an hour finds and ten minutes does not.
 
