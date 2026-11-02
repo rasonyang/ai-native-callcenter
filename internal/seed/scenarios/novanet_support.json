@@ -53,7 +53,7 @@
       "lang": "en",
       "caller": "8005550104",
       "steps": [
-        {"call": "hangup", "args": {"isFarewellSpoken": false}, "expect": {"phase": "farewell"}}
+        {"call": "hangup", "args": {}, "expect": {"phase": "farewell"}}
       ],
       "expect": {"path": ["welcome", "farewell"], "ending": "hangup"}
     },

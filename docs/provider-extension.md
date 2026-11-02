@@ -311,6 +311,16 @@ turn whole; a double goodbye is possible and accepted. A second miss is logged
 at WARN and the call ends on that turn. Doubao says its line itself and is not
 checked.
 
+The line is the only goodbye (issue [#441](https://github.com/rasonyang/ai-native-callcenter/issues/441)).
+When a tool call moves the call into a terminal phase with an `announce`, the
+response that carried the call is muted locally once the call has run, before
+its result is answered, on the engines that put the line in the tool result and
+on doubao alike: its queued, unplayed audio is flushed, its later audio is dropped, and
+the next turn, the line's, plays normally. No `response.cancel` is sent and the
+history is not trimmed; the response finishes and its call is answered as
+ever. What the muted turn had already played is heard as a fragment. A terminal
+phase without an `announce` keeps the model's own words as the goodbye.
+
 ## Attaching something that is not a vendor
 
 The interesting case is the one the design reserves: a **Realtime gateway** — a

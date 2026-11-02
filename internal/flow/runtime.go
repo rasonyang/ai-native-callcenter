@@ -414,9 +414,7 @@ func (r *Runtime) run(ctx context.Context, name string, args map[string]any) (Re
 			CallbackNumber: stringArg(args, "callbackNumber"),
 		})
 	case ToolHangup:
-		return r.actions.Hangup(ctx, HangupRequest{
-			IsFarewellSpoken: boolArg(args, "isFarewellSpoken"),
-		})
+		return r.actions.Hangup(ctx, HangupRequest{})
 	}
 
 	tool, ok := r.engine.Spec().Tools[name]
@@ -676,15 +674,4 @@ func mapArg(args map[string]any, name string) map[string]any {
 		return value
 	}
 	return nil
-}
-
-func boolArg(args map[string]any, name string) bool {
-	switch value := args[name].(type) {
-	case bool:
-		return value
-	case string:
-		return value == "true" || value == "1"
-	default:
-		return false
-	}
 }

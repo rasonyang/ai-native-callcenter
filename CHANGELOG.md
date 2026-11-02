@@ -107,6 +107,14 @@ carries the one-line installer's files.
   session check now gives up on a server that never answers after 10 seconds,
   and a proxy's HTML 502 is treated as a server failure rather than a parse
   error. (#327)
+- AI calls: a caller no longer hears two goodbyes when the model says its own
+  in the response that calls `hangup` and the terminal phase it moves to has an
+  `announce`. The announce is the only goodbye now: the response that carried
+  the call is muted locally (its unplayed audio flushed, its later audio
+  dropped, nothing cancelled), on the Realtime engines and on doubao alike, and
+  its words are left out of the transcript. A terminal phase without an
+  `announce` keeps the model's own goodbye. The `hangup` tool no longer takes
+  `isFarewellSpoken`; a model that still sends it is ignored. (#441)
 - AI calls: a lookup, transfer or message the bot promised without calling the
   tool ("好的，我帮您查询一下 RMA1003 的维修进度。", nothing run) is now acted on
   once. When the caller has heard the promise, the model gets one cue that
