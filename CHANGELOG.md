@@ -108,6 +108,18 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Webhooks: a fuller CDR written for a call while its earlier delivery was in
+  flight, or waiting to retry, could be lost or sent under the wrong identity.
+  The receiver's 2xx for the old body marked the replaced delivery delivered,
+  so the correction was never sent, and a delivery that had already reached the
+  receiver unacknowledged was re-sent with a different body under the same
+  `deliveryId` and `revision`, which a receiver deduplicating on
+  `X-AICC-Webhook-Id` discards. Now only a delivery that has never been
+  attempted is replaced in place; once an attempt has been made, the correction
+  is a new delivery with a new `deliveryId` and the next `revision`, and the
+  earlier delivery keeps its own retries (last revision wins per `callId`, as
+  documented). One `deliveryId` always carries one body. A delivery result is
+  also recorded only for the attempt that produced it. (#445)
 - Web: a page that fails to load (the server restarting, a network blip, a 502
   from a proxy, a page that breaks while rendering) now shows a designed,
   translated error state with "Try again" instead of the router's stock

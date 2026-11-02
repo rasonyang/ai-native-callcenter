@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -270,33 +271,57 @@ func (w *WebhookStore) ClaimDue(ctx context.Context, n int) ([]WebhookDelivery, 
 	return out, nil
 }
 
-func (w *WebhookStore) MarkDelivered(ctx context.Context, id uuid.UUID, statusCode int) error {
+// ErrWebhookAttemptSuperseded is returned when a settle matched no row: the
+// delivery is no longer PENDING at the attempt the caller claimed. Nothing was
+// changed.
+var ErrWebhookAttemptSuperseded = errors.New("webhook delivery attempt superseded")
+
+// MarkDelivered settles the claimed attempt as delivered. attempt is the
+// AttemptCount the claim returned.
+func (w *WebhookStore) MarkDelivered(ctx context.Context, id uuid.UUID, attempt, statusCode int) error {
 	code := int32(statusCode)
-	return w.q.MarkWebhookDelivered(ctx, queries.MarkWebhookDeliveredParams{
-		DeliveryID: id, LastStatusCode: &code,
+	n, err := w.q.MarkWebhookDelivered(ctx, queries.MarkWebhookDeliveredParams{
+		DeliveryID: id, AttemptCount: int32(attempt), LastStatusCode: &code,
 	})
+	return settled(n, err)
 }
 
-func (w *WebhookStore) Reschedule(ctx context.Context, id uuid.UUID, at time.Time, statusCode int, reason string) error {
+// Reschedule moves the claimed attempt's next try to at. attempt is the
+// AttemptCount the claim returned.
+func (w *WebhookStore) Reschedule(ctx context.Context, id uuid.UUID, attempt int, at time.Time, statusCode int, reason string) error {
 	var code *int32
 	if statusCode > 0 {
 		c := int32(statusCode)
 		code = &c
 	}
-	return w.q.RescheduleWebhookDelivery(ctx, queries.RescheduleWebhookDeliveryParams{
-		DeliveryID: id, NextAttemptAt: stamp(at), LastStatusCode: code, LastError: reason,
+	n, err := w.q.RescheduleWebhookDelivery(ctx, queries.RescheduleWebhookDeliveryParams{
+		DeliveryID: id, AttemptCount: int32(attempt), NextAttemptAt: stamp(at), LastStatusCode: code, LastError: reason,
 	})
+	return settled(n, err)
 }
 
-func (w *WebhookStore) MarkFailed(ctx context.Context, id uuid.UUID, statusCode int, reason string) error {
+// MarkFailed gives up on the claimed attempt's delivery. attempt is the
+// AttemptCount the claim returned.
+func (w *WebhookStore) MarkFailed(ctx context.Context, id uuid.UUID, attempt, statusCode int, reason string) error {
 	var code *int32
 	if statusCode > 0 {
 		c := int32(statusCode)
 		code = &c
 	}
-	return w.q.MarkWebhookFailed(ctx, queries.MarkWebhookFailedParams{
-		DeliveryID: id, LastStatusCode: code, LastError: reason,
+	n, err := w.q.MarkWebhookFailed(ctx, queries.MarkWebhookFailedParams{
+		DeliveryID: id, AttemptCount: int32(attempt), LastStatusCode: code, LastError: reason,
 	})
+	return settled(n, err)
+}
+
+func settled(rows int64, err error) error {
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrWebhookAttemptSuperseded
+	}
+	return nil
 }
 
 // Sweep removes settled deliveries past their own window. PENDING is never
@@ -311,10 +336,15 @@ func (w *WebhookStore) Sweep(ctx context.Context, deliveredBefore, failedBefore 
 // enqueueFor queues this call for every enabled subscription that wants it,
 // inside the caller's transaction.
 //
-// Three outcomes per subscription, and only the third is a second delivery to
-// the customer (design 09 §2.1): a delivery still PENDING has its payload
-// replaced, so they only ever hear the corrected story; anything else — no row
-// yet, or one already DELIVERED or FAILED — enqueues the next revision.
+// Two outcomes per subscription (design 09 §2.1). A delivery that has never
+// been attempted is PENDING with attempt_count 0 and has its payload replaced,
+// so the customer only ever hears the corrected story. Anything else enqueues
+// the next revision under a new delivery_id: no row yet, one already DELIVERED
+// or FAILED, or one PENDING but attempted. A claimed row stays PENDING while
+// in flight and while waiting to retry, and may already have reached the
+// receiver, so its payload is never touched (#445). That earlier delivery is
+// not retired: it keeps its own retry schedule, and a receiver that follows
+// last-revision-wins discards the lower revision whatever order they arrive.
 func enqueueFor(ctx context.Context, q *queries.Queries, cdr CDR) error {
 	subs, err := q.EnabledWebhookSubscriptions(ctx)
 	if err != nil {

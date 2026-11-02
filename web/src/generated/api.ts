@@ -1865,7 +1865,7 @@ export interface webhooks {
          *
          *     **Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.
          *
-         *     **Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again: when the earlier delivery is still pending, its payload is replaced in place (same `deliveryId` and `revision`, `attempt` back to 1), so the next attempt carries the corrected record; when it was already delivered or has failed, a new delivery with a new `deliveryId` and the next `revision` is queued. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery. Because a pending delivery is replaced in place, an attempt that reached the receiver but was not acknowledged (a timeout, for instance) can be followed by a different body under the same `deliveryId` and `revision`; a receiver that skips a `deliveryId` it has already stored keeps the earlier record.
+         *     **Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again. Only a delivery that has never been attempted is replaced in place, so its first attempt already carries the corrected record. Once any attempt has been made (in flight, waiting to retry, delivered or failed), a correction is a new delivery with a new `deliveryId` and the next `revision`; the earlier delivery is not recalled and keeps its own retries. One `deliveryId` always carries one body. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery, so a receiver that skips a `deliveryId` it has already stored never discards a correction.
          */
         post: operations["cdrDelivery"];
         delete?: never;
@@ -3297,7 +3297,7 @@ export interface components {
             deliveryId: string;
             /** Format: uuid */
             callId: string;
-            /** @description 1 for the first delivery of a call. A later, fuller CDR replacing one already sent produces revision 2, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order. */
+            /** @description 1 for the first delivery of a call. A later, fuller CDR written after an attempt on the first delivery was made (in flight, waiting to retry, delivered or failed) produces revision 2 under a new deliveryId, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order. */
             revision: number;
             /** @enum {string} */
             status: "PENDING" | "DELIVERED" | "FAILED";

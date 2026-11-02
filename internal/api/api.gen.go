@@ -3289,7 +3289,7 @@ type WebhookDelivery struct {
 	LastStatusCode *int      `json:"lastStatusCode,omitempty"`
 	NextAttemptAt  time.Time `json:"nextAttemptAt"`
 
-	// Revision 1 for the first delivery of a call. A later, fuller CDR replacing one already sent produces revision 2, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order.
+	// Revision 1 for the first delivery of a call. A later, fuller CDR written after an attempt on the first delivery was made (in flight, waiting to retry, delivered or failed) produces revision 2 under a new deliveryId, and the receiver's rule is last-revision-wins per callId — deliveries are concurrent, so the number decides, not the arrival order.
 	Revision int                   `json:"revision"`
 	Status   WebhookDeliveryStatus `json:"status"`
 }

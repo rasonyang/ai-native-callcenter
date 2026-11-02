@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -57,9 +58,12 @@ const PerSubscriptionConcurrency = 4
 type Store interface {
 	ClaimDue(ctx context.Context, n int) ([]store.WebhookDelivery, error)
 	Endpoint(ctx context.Context, subscriptionID uuid.UUID) (url, token string, err error)
-	MarkDelivered(ctx context.Context, deliveryID uuid.UUID, statusCode int) error
-	Reschedule(ctx context.Context, deliveryID uuid.UUID, at time.Time, statusCode int, reason string) error
-	MarkFailed(ctx context.Context, deliveryID uuid.UUID, statusCode int, reason string) error
+	// The three settle methods take the attempt number the claim returned and
+	// return store.ErrWebhookAttemptSuperseded when that attempt is no longer
+	// the delivery's current one.
+	MarkDelivered(ctx context.Context, deliveryID uuid.UUID, attempt, statusCode int) error
+	Reschedule(ctx context.Context, deliveryID uuid.UUID, attempt int, at time.Time, statusCode int, reason string) error
+	MarkFailed(ctx context.Context, deliveryID uuid.UUID, attempt, statusCode int, reason string) error
 }
 
 // Metrics counts what a dashboard watches. Nil disables counting; the log line
@@ -232,9 +236,11 @@ func (w *Worker) deliver(ctx context.Context, d store.WebhookDelivery) {
 	_ = resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
-		if err := w.store.MarkDelivered(ctx, d.DeliveryID, resp.StatusCode); err != nil {
-			w.log.ErrorContext(ctx, "delivered but could not be marked", "error", err,
-				"deliveryId", d.DeliveryID)
+		if err := w.store.MarkDelivered(ctx, d.DeliveryID, d.AttemptCount, resp.StatusCode); err != nil {
+			if !w.warnSuperseded(ctx, d, err) {
+				w.log.ErrorContext(ctx, "delivered but could not be marked", "error", err,
+					"deliveryId", d.DeliveryID)
+			}
 			return
 		}
 		if w.metrics != nil {
@@ -256,7 +262,10 @@ func (w *Worker) deliver(ctx context.Context, d store.WebhookDelivery) {
 // running off the end of the schedule is the cap.
 func (w *Worker) settle(ctx context.Context, d store.WebhookDelivery, statusCode int, reason string) {
 	if d.AttemptCount >= len(Backoff) {
-		if err := w.store.MarkFailed(ctx, d.DeliveryID, statusCode, reason); err != nil {
+		if err := w.store.MarkFailed(ctx, d.DeliveryID, d.AttemptCount, statusCode, reason); err != nil {
+			if w.warnSuperseded(ctx, d, err) {
+				return
+			}
 			w.log.ErrorContext(ctx, "failed delivery could not be marked", "error", err,
 				"deliveryId", d.DeliveryID)
 		}
@@ -273,8 +282,23 @@ func (w *Worker) settle(ctx context.Context, d store.WebhookDelivery, statusCode
 		return
 	}
 	next := w.now().Add(Backoff[d.AttemptCount])
-	if err := w.store.Reschedule(ctx, d.DeliveryID, next, statusCode, reason); err != nil {
-		w.log.ErrorContext(ctx, "could not reschedule a delivery", "error", err,
-			"deliveryId", d.DeliveryID)
+	if err := w.store.Reschedule(ctx, d.DeliveryID, d.AttemptCount, next, statusCode, reason); err != nil {
+		if !w.warnSuperseded(ctx, d, err) {
+			w.log.ErrorContext(ctx, "could not reschedule a delivery", "error", err,
+				"deliveryId", d.DeliveryID)
+		}
 	}
+}
+
+// warnSuperseded logs a settle that matched no row and reports whether err was
+// that case. The delivery is no longer PENDING at the attempt this worker
+// claimed, so nothing was written and no metric is counted for it.
+func (w *Worker) warnSuperseded(ctx context.Context, d store.WebhookDelivery, err error) bool {
+	if !errors.Is(err, store.ErrWebhookAttemptSuperseded) {
+		return false
+	}
+	w.log.WarnContext(ctx, "a webhook delivery attempt was superseded before it could be settled",
+		"deliveryId", d.DeliveryID, "subscriptionId", d.SubscriptionID,
+		"callId", d.CallID, "revision", d.Revision, "attempt", d.AttemptCount)
+	return true
 }

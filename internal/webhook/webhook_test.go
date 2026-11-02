@@ -99,7 +99,7 @@ func (f *fakeStore) Endpoint(_ context.Context, subscriptionID uuid.UUID) (strin
 	return f.url, f.token, nil
 }
 
-func (f *fakeStore) MarkDelivered(_ context.Context, id uuid.UUID, code int) error {
+func (f *fakeStore) MarkDelivered(_ context.Context, id uuid.UUID, _ int, code int) error {
 	f.mu.Lock()
 	f.delivered[id] = code
 	f.mu.Unlock()
@@ -128,7 +128,7 @@ func (f *fakeStore) deliveredCount() int {
 	return len(f.delivered)
 }
 
-func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, at time.Time, code int, reason string) error {
+func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, _ int, at time.Time, code int, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.rescheduled[id] = at
@@ -137,7 +137,7 @@ func (f *fakeStore) Reschedule(_ context.Context, id uuid.UUID, at time.Time, co
 	return nil
 }
 
-func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, code int, reason string) error {
+func (f *fakeStore) MarkFailed(_ context.Context, id uuid.UUID, _ int, code int, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.codes[id] = code

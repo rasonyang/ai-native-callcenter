@@ -5,6 +5,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -120,7 +121,7 @@ func TestAWriteThatChangesNothingQueuesNothing(t *testing.T) {
 	if len(first) != 1 {
 		t.Fatalf("deliveries after the first write = %d, want 1", len(first))
 	}
-	if err := hooks.MarkDelivered(ctx, first[0].DeliveryID, 200); err != nil {
+	if err := hooks.MarkDelivered(ctx, first[0].DeliveryID, 0, 200); err != nil {
 		t.Fatalf("mark delivered: %v", err)
 	}
 
@@ -161,7 +162,7 @@ func TestAFullerCDRAfterDeliverySendsACorrection(t *testing.T) {
 	if len(first) != 1 {
 		t.Fatalf("deliveries = %d, want 1", len(first))
 	}
-	if err := hooks.MarkDelivered(ctx, first[0].DeliveryID, 200); err != nil {
+	if err := hooks.MarkDelivered(ctx, first[0].DeliveryID, 0, 200); err != nil {
 		t.Fatalf("mark delivered: %v", err)
 	}
 
@@ -236,3 +237,150 @@ func containsTalkSec(payload []byte, want int) bool {
 }
 
 func jsonUnmarshal(b []byte, v any) error { return json.Unmarshal(b, v) }
+
+// A fuller CDR written while the earlier delivery is in flight. The claim
+// leaves the row PENDING, so replacing its payload would let the 2xx for the
+// old body mark the row delivered and the correction would never be sent
+// (#445). The in-flight row keeps its body; the correction is a new delivery.
+func TestAFullerCDRWhileTheEarlierDeliveryIsInFlightIsSentAsARevision(t *testing.T) {
+	st, ctx := liveStore(t)
+	hooks := st.Webhooks()
+	sub, err := hooks.Create(ctx, WebhookSubscriptionWrite{
+		Name: "crm", URL: "https://crm.example.com/cdr", IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	callID := uuid.Must(uuid.NewV7())
+	short := time.Now().UTC().Add(-4 * time.Minute)
+	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short, 30)); err != nil {
+		t.Fatalf("short write: %v", err)
+	}
+	claimed, err := hooks.ClaimDue(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d rows, err %v, want the one delivery", len(claimed), err)
+	}
+	inFlight := claimed[0]
+
+	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short.Add(4*time.Minute), 270)); err != nil {
+		t.Fatalf("fuller write: %v", err)
+	}
+	// The receiver answers 2xx for the body it was sent.
+	if err := hooks.MarkDelivered(ctx, inFlight.DeliveryID, inFlight.AttemptCount, 204); err != nil {
+		t.Fatalf("mark the in-flight attempt delivered: %v", err)
+	}
+
+	got, err := hooks.Deliveries(ctx, sub.SubscriptionID, 10)
+	if err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("deliveries = %d, want 2 — the correction must not ride on the in-flight row", len(got))
+	}
+	correction, original := got[0], got[1]
+	if correction.Revision != 2 || correction.Status != DeliveryPending ||
+		correction.DeliveryID == original.DeliveryID || !containsTalkSec(correction.Payload, 270) {
+		t.Errorf("correction = %+v (payload %s), want a new pending delivery, revision 2, the fuller story",
+			correction, correction.Payload)
+	}
+	if original.DeliveryID != inFlight.DeliveryID || original.Revision != 1 ||
+		original.Status != DeliveryDelivered || !containsTalkSec(original.Payload, 30) {
+		t.Errorf("original = %+v (payload %s), want revision 1 delivered with the body that was sent",
+			original, original.Payload)
+	}
+}
+
+// A delivery waiting to retry may already have reached the receiver without
+// being acknowledged. Replacing it would reuse its deliveryId and revision for
+// a different body, which a receiver deduping on X-AICC-Webhook-Id discards.
+func TestAFullerCDRWhileTheEarlierDeliveryWaitsToRetryIsSentAsARevision(t *testing.T) {
+	st, ctx := liveStore(t)
+	hooks := st.Webhooks()
+	sub, err := hooks.Create(ctx, WebhookSubscriptionWrite{
+		Name: "crm", URL: "https://crm.example.com/cdr", IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	callID := uuid.Must(uuid.NewV7())
+	short := time.Now().UTC().Add(-4 * time.Minute)
+	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short, 30)); err != nil {
+		t.Fatalf("short write: %v", err)
+	}
+	claimed, err := hooks.ClaimDue(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d rows, err %v, want the one delivery", len(claimed), err)
+	}
+	if err := hooks.Reschedule(ctx, claimed[0].DeliveryID, claimed[0].AttemptCount,
+		time.Now().Add(time.Minute), 503, "HTTP 503"); err != nil {
+		t.Fatalf("reschedule: %v", err)
+	}
+
+	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, short.Add(4*time.Minute), 270)); err != nil {
+		t.Fatalf("fuller write: %v", err)
+	}
+
+	got, err := hooks.Deliveries(ctx, sub.SubscriptionID, 10)
+	if err != nil {
+		t.Fatalf("read deliveries: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("deliveries = %d, want 2 — a row that was attempted is never replaced in place", len(got))
+	}
+	if got[0].Revision != 2 || got[0].DeliveryID == claimed[0].DeliveryID || !containsTalkSec(got[0].Payload, 270) {
+		t.Errorf("correction = %+v (payload %s), want a new delivery, revision 2, the fuller story",
+			got[0], got[0].Payload)
+	}
+	if got[1].DeliveryID != claimed[0].DeliveryID || got[1].Status != DeliveryPending ||
+		got[1].AttemptCount != 1 || !containsTalkSec(got[1].Payload, 30) {
+		t.Errorf("earlier = %+v (payload %s), want it untouched and still on its own retry schedule",
+			got[1], got[1].Payload)
+	}
+}
+
+// A settle names the attempt it settles. One for an attempt that is no longer
+// the delivery's current one changes nothing and says so.
+func TestASettleForASupersededAttemptChangesNothing(t *testing.T) {
+	st, ctx := liveStore(t)
+	hooks := st.Webhooks()
+	sub, err := hooks.Create(ctx, WebhookSubscriptionWrite{
+		Name: "crm", URL: "https://crm.example.com/cdr", IsEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	callID := uuid.Must(uuid.NewV7())
+	if err := st.Ledger().InsertCDR(ctx, aCDR(callID, time.Now().UTC(), 30)); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	claimed, err := hooks.ClaimDue(ctx, 10)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim = %d rows, err %v", len(claimed), err)
+	}
+	id, attempt := claimed[0].DeliveryID, claimed[0].AttemptCount
+
+	stale := attempt + 1
+	if err := hooks.MarkDelivered(ctx, id, stale, 200); !errors.Is(err, ErrWebhookAttemptSuperseded) {
+		t.Errorf("MarkDelivered with a stale attempt = %v, want ErrWebhookAttemptSuperseded", err)
+	}
+	if err := hooks.Reschedule(ctx, id, stale, time.Now(), 500, "x"); !errors.Is(err, ErrWebhookAttemptSuperseded) {
+		t.Errorf("Reschedule with a stale attempt = %v, want ErrWebhookAttemptSuperseded", err)
+	}
+	if err := hooks.MarkFailed(ctx, id, stale, 500, "x"); !errors.Is(err, ErrWebhookAttemptSuperseded) {
+		t.Errorf("MarkFailed with a stale attempt = %v, want ErrWebhookAttemptSuperseded", err)
+	}
+	got, _ := hooks.Deliveries(ctx, sub.SubscriptionID, 10)
+	if len(got) != 1 || got[0].Status != DeliveryPending || got[0].LastStatusCode != nil || got[0].LastError != "" {
+		t.Fatalf("delivery = %+v, want it untouched", got)
+	}
+
+	// The right attempt settles once; a second settle of it is superseded too.
+	if err := hooks.MarkDelivered(ctx, id, attempt, 200); err != nil {
+		t.Fatalf("settle the claimed attempt: %v", err)
+	}
+	if err := hooks.MarkFailed(ctx, id, attempt, 500, "late"); !errors.Is(err, ErrWebhookAttemptSuperseded) {
+		t.Errorf("settling a delivered row again = %v, want ErrWebhookAttemptSuperseded", err)
+	}
+}
