@@ -1,12 +1,13 @@
 import { useEffect } from 'react'
-import { Outlet, createFileRoute, redirect, useNavigate, useRouterState } from '@tanstack/react-router'
+import { Outlet, createFileRoute, isRedirect, redirect, useNavigate, useRouterState } from '@tanstack/react-router'
 
+import { InShellProvider, RouteError } from '@/components/route-error'
 import { AppShell } from '@/components/app-shell'
 import { BreadcrumbDetailProvider } from '@/lib/breadcrumb'
 import { PhoneOnboarding } from '@/components/phone-onboarding'
 import { SoftphoneBar } from '@/components/softphone-bar'
 import { usePresence } from '@/lib/agent'
-import { loadSession, useSession } from '@/lib/session'
+import { cachedSession, loadSession, useSession } from '@/lib/session'
 import { PhoneBridgeProvider, usePhoneBridgeValue } from '@/lib/phone-bridge'
 import { EventStreamProvider, useEventStream } from '@/lib/use-event-stream'
 
@@ -27,15 +28,28 @@ const SESSION_HANDOFF_MS = 3_000
  */
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ context }) => {
-    const user = await loadSession(context.queryClient, { reuseProvedWithinMs: SESSION_HANDOFF_MS })
-    if (!user) throw redirect({ to: '/login' })
-    return { user }
+    try {
+      const user = await loadSession(context.queryClient, { reuseProvedWithinMs: SESSION_HANDOFF_MS })
+      if (!user) throw redirect({ to: '/login' })
+      return { user, sessionCheckFailure: undefined }
+    } catch (error) {
+      // A 401 comes back as null above, so this is a check that failed for any
+      // other reason. Where this tab already proved a user, the layout is on
+      // screen with an agent's call controls in it: throwing would unmount it
+      // (and with it the phone), so the failure rides along as context and the
+      // layout shows it in place of the page. With nobody proved there is no
+      // shell to keep, and the error is the route's.
+      const user = cachedSession(context.queryClient)
+      if (isRedirect(error) || !user) throw error
+      return { user, sessionCheckFailure: error }
+    }
   },
   component: AppLayout,
 })
 
 function AppLayout() {
-  const { data: user } = useSession()
+  const { sessionCheckFailure } = Route.useRouteContext()
+  const { data: user } = useSession({ isEnabled: sessionCheckFailure === undefined })
   const navigate = useNavigate()
   const { status, listeners } = useEventStream(Boolean(user))
   const pathname = useRouterState({ select: (state) => state.location.pathname })
@@ -79,7 +93,14 @@ function AppLayout() {
             // An agent carries their call controls with them on every page.
             softphone={isAgent ? <SoftphoneBar /> : undefined}
           >
-            <Outlet />
+            <InShellProvider>
+              {/* A page below would only fire requests the server is refusing. */}
+              {sessionCheckFailure !== undefined ? (
+                <RouteError error={sessionCheckFailure} />
+              ) : (
+                <Outlet />
+              )}
+            </InShellProvider>
           </AppShell>
         </BreadcrumbDetailProvider>
         {/* Setup an agent has not finished blocks the cockpit, on whichever

@@ -1,6 +1,6 @@
 import type { TFunction } from 'i18next'
 
-import { ApiError } from './api'
+import { ApiError, NetworkError } from './api'
 
 /**
  * Renders any thrown value as a localized message.
@@ -34,4 +34,16 @@ export function fieldErrorText(error: unknown, field: string, t: TFunction): str
   return t(`errors.rules.${error.params.rule}`, {
     defaultValue: t(`errors.${error.code}`),
   })
+}
+
+/**
+ * Whether a failure means the server could not be reached or answered with a
+ * server error, as opposed to something the client did wrong. A restart, a
+ * proxy answering 502, a network blip and a request that timed out all read
+ * the same to the person: nothing is wrong with their session, try again.
+ */
+export function isServerUnreachable(error: unknown): boolean {
+  if (error instanceof ApiError) return error.status >= 500
+  if (error instanceof NetworkError) return true
+  return error instanceof DOMException && (error.name === 'AbortError' || error.name === 'TimeoutError')
 }

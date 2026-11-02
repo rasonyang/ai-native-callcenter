@@ -24,9 +24,9 @@ export const ALL_BUT_SESSION = {
  * 5xx, a network error) is thrown, because a server that is restarting has not
  * signed anyone out.
  */
-async function fetchSession(): Promise<Identity | null> {
+async function fetchSession(signal?: AbortSignal): Promise<Identity | null> {
   try {
-    const { user } = await api.me()
+    const { user } = await api.me(signal)
     return user
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) return null
@@ -38,13 +38,34 @@ async function fetchSession(): Promise<Identity | null> {
  * The current session. An expired or absent session resolves to null rather
  * than throwing, so the router can redirect instead of showing an error.
  */
-export function useSession() {
+export function useSession({ isEnabled = true }: { isEnabled?: boolean } = {}) {
   return useQuery({
     queryKey: SESSION_KEY,
-    queryFn: fetchSession,
+    queryFn: () => fetchSession(),
     staleTime: 30_000,
     retry: false,
+    // The layout stands the query down while it is showing a failed check: the
+    // route has just asked and been refused, and the answer it is showing
+    // would otherwise be asked for again the moment the layout mounted.
+    enabled: isEnabled,
   })
+}
+
+/**
+ * How long the route's session check waits for `/me`. Without a bound a server
+ * that accepts the connection and never answers leaves the navigation pending
+ * for good, with neither a page nor an error; the abort ends it as a failure
+ * to reach the server, which the error state shows and "Try again" retries.
+ */
+const SESSION_CHECK_TIMEOUT_MS = 10_000
+
+/**
+ * The user this tab has proved signed in, if any, whatever its age. It lets
+ * the layout keep its shell when a later check fails without a 401: the user
+ * is still who the server last said, and nothing has said otherwise.
+ */
+export function cachedSession(queryClient: QueryClient): Identity | null {
+  return queryClient.getQueryData<Identity | null>(SESSION_KEY) ?? null
 }
 
 /**
@@ -69,7 +90,14 @@ export async function loadSession(
   if (cached?.data && Date.now() - cached.dataUpdatedAt < reuseProvedWithinMs) {
     return cached.data
   }
-  const user = await fetchSession()
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), SESSION_CHECK_TIMEOUT_MS)
+  let user: Identity | null
+  try {
+    user = await fetchSession(controller.signal)
+  } finally {
+    clearTimeout(timer)
+  }
   if (user) rememberSession(queryClient, user)
   else clearSession(queryClient)
   return user

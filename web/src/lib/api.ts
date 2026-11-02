@@ -29,6 +29,19 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A request that never got an answer: the connection was refused or dropped
+ * before a response arrived. `fetch` reports that as a bare TypeError, which
+ * is also what most rendering bugs throw, so it is given its own type here,
+ * where the two cannot be confused.
+ */
+export class NetworkError extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'NetworkError'
+  }
+}
+
 const BASE = '/api/v1'
 
 /** Mutations must carry this header; see docs/design/04-api-sse.md §2. */
@@ -40,17 +53,33 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
   if (init.body !== undefined) headers.set('Content-Type', 'application/json')
   if (method !== 'GET' && method !== 'HEAD') headers.set(CSRF_HEADER, '1')
 
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    method,
-    headers,
-    credentials: 'same-origin',
-  })
+  let response: Response
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      ...init,
+      method,
+      headers,
+      credentials: 'same-origin',
+    })
+  } catch (error) {
+    // An abort is the caller's own doing (a cancelled query, a timeout) and
+    // stays what it is; anything else means the server was not reached.
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    throw new NetworkError(error)
+  }
 
   if (response.status === 204) return undefined as T
 
   const text = await response.text()
-  const payload: unknown = text ? JSON.parse(text) : null
+  // A proxy in front of a restarting server answers 502 or 503 with an HTML
+  // page. That is the server failing, not a body to parse: it becomes the same
+  // ApiError any other refusal is, so callers tell "unreachable" by status.
+  let payload: unknown = null
+  try {
+    payload = text ? JSON.parse(text) : null
+  } catch (error) {
+    if (response.ok) throw error
+  }
 
   if (!response.ok) {
     const body = (payload as { error?: ApiErrorBody } | null)?.error
@@ -71,7 +100,7 @@ export const api = {
 
   logout: () => request<void>('/auth/logout', { method: 'POST' }),
 
-  me: () => request<{ user: Identity }>('/auth/me'),
+  me: (signal?: AbortSignal) => request<{ user: Identity }>('/auth/me', { signal }),
 
   /** Stream counters and the trunks the switch holds, read never written. */
   health: () => request<components['schemas']['SystemHealth']>('/system/health'),

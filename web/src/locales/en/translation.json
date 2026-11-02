@@ -1155,5 +1155,17 @@
         "ROW_SHAPE": "Wrong number of columns (found/expected {{detail}}); not sent."
       }
     }
+  },
+  "routeError": {
+    "unreachable": {
+      "title": "Can't reach the server",
+      "description": "The server isn't answering right now. You are still signed in; try again in a moment."
+    },
+    "unexpected": {
+      "title": "This page couldn't be loaded",
+      "description": "Something unexpected went wrong while loading it."
+    },
+    "retry": "Try again",
+    "backToStart": "Back to start"
   }
 }
