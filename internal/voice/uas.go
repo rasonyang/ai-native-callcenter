@@ -69,10 +69,11 @@ func DefaultConfig() Config {
 	return Config{
 		SIPHost: "0.0.0.0",
 		SIPPort: 6060,
-		// Deliberately clear of the switch's own 16384-32768 range, since a
-		// development host runs both. Five hundred pairs covers the concurrent
-		// call target with room to spare.
-		RTPPortRange:      [2]int{40000, 40999},
+		// The bot's 26000-29999 sits next to the switch's 20000-25999 without
+		// sharing a port, and both stay below Linux's ephemeral range
+		// (32768-60999), where any short-lived socket could take a port. 2,000
+		// pairs against the default MaxCalls of 220.
+		RTPPortRange:      [2]int{26000, 29999},
 		CodecPreferences:  []media.Law{media.LawMu, media.LawAlaw},
 		RTPDeadTimeout:    5 * time.Second,
 		FirstMediaTimeout: 30 * time.Second,
@@ -131,9 +132,8 @@ type Dialog struct {
 	// answer is the 200 OK, kept so a retransmitted INVITE can be answered
 	// with the identical response instead of a second, conflicting one.
 	answer []byte
-	// rtcp is nil when reporting is disabled or its port could not be bound.
-	// It is created after the dialog is already visible to other goroutines,
-	// so it lives under the mutex.
+	// rtcp is nil when reporting is disabled. Its socket is bound before the
+	// 200 OK and closed by Stop even when the session never started.
 	rtcp      *RTCPSession
 	isStopped bool
 	isByeSent bool
@@ -153,31 +153,20 @@ func (d *Dialog) setSIPTransport(conn *net.UDPConn, addr *net.UDPAddr) {
 }
 
 func (d *Dialog) startMedia() error {
+	// The sockets were bound before the 200 OK (UAS.bindRTPPair), so Start
+	// binds nothing and cannot fail on a busy port.
 	if err := d.RTP.Start(d.RemoteRTPAddr); err != nil {
 		return err
 	}
-	if d.rtcpInterval <= 0 {
-		return nil
-	}
-	// RTCP is observability, not the call. Losing it — a busy port, say —
-	// must not take the audio down with it.
-	session, err := NewRTCPSession(d.RTP, d.RemoteRTPAddr, d.rtcpInterval, d.log)
-	if err != nil {
-		d.log.Warn("rtcp disabled for call", "error", err)
-		return nil
-	}
 	d.mu.Lock()
-	// The call can be torn down while this is being set up, in which case Stop
-	// has already run and would never see this session.
-	if d.isStopped {
-		d.mu.Unlock()
-		session.Stop()
-		return nil
+	// The call can be torn down while this is being set up; Stop has then
+	// already closed the RTCP socket and the session must not start on it.
+	// Holding the mutex across Start (it only launches goroutines) keeps Stop
+	// from slipping in between the check and the start.
+	if d.rtcp != nil && !d.isStopped {
+		d.rtcp.Start()
 	}
-	d.rtcp = session
 	d.mu.Unlock()
-
-	session.Start()
 	return nil
 }
 
@@ -431,46 +420,107 @@ func (u *UAS) ActiveCalls() int {
 // Port pool.
 //
 
-// allocateRTPPort claims an even port and the odd one above it, so one call's
-// RTCP can never land on another call's RTP.
-func (u *UAS) allocateRTPPort() (int, error) {
-	u.mu.Lock()
-	defer u.mu.Unlock()
+// rtpPair is a claimed, bound RTP port with the RTCP port above it. rtcp is
+// nil when RTCP is off.
+type rtpPair struct {
+	port      int
+	rtp, rtcp *net.UDPConn
+}
 
+func (p *rtpPair) close() {
+	if p.rtp != nil {
+		_ = p.rtp.Close()
+	}
+	if p.rtcp != nil {
+		_ = p.rtcp.Close()
+	}
+}
+
+// allocateRTPPort claims an even port and the odd one above it, so one call's
+// RTCP can never land on another call's RTP, and binds them on local before the
+// caller advertises the port in a 200 OK. The OS is the authority on what is
+// free: another process (the switch, an ephemeral socket) may hold a port this
+// process never handed out, and a pair is taken only when every port it needs
+// binds. The SDP carries no a=rtcp, so the peer sends RTCP to P+1, and a foreign
+// holder there would receive our peer's reports. A pair the OS refuses is
+// logged, stays free in usedPorts and is not tried again for this call.
+//
+// u.mu guards only the claim in usedPorts, never a syscall.
+func (u *UAS) allocateRTPPort(local net.IP, log *slog.Logger) (*rtpPair, error) {
 	low, high := u.cfg.RTPPortRange[0], u.cfg.RTPPortRange[1]
 	if low%2 != 0 {
 		low++
 	}
-	claim := func(port int) bool {
-		if port < low || port+1 > high || u.usedPorts[port] || u.usedPorts[port+1] {
-			return false
+	refused := map[int]bool{}
+	var lastErr error
+
+	try := func(port int) *rtpPair {
+		if port < low || port+1 > high || refused[port] {
+			return nil
+		}
+		u.mu.Lock()
+		if u.usedPorts[port] || u.usedPorts[port+1] {
+			u.mu.Unlock()
+			return nil
 		}
 		u.usedPorts[port], u.usedPorts[port+1] = true, true
-		return true
+		u.mu.Unlock()
+
+		pair, err := bindRTPPair(local, port, u.cfg.RTCPInterval > 0)
+		if err != nil {
+			refused[port] = true
+			lastErr = err
+			u.releaseRTPPort(port)
+			log.Warn("rtp port pair skipped: the OS refused it", "rtpPort", port, "error", err)
+			return nil
+		}
+		return pair
 	}
 
 	// Random first so consecutive calls do not reuse a port pair that the
 	// previous peer may still be sending to; a linear sweep as the fallback so
 	// a nearly full pool still succeeds.
 	for range 100 {
-		if port := low + rand.IntN((high-low)/2+1)*2; claim(port) {
-			return port, nil
+		if pair := try(low + rand.IntN((high-low)/2+1)*2); pair != nil {
+			return pair, nil
 		}
 	}
 	for port := low; port+1 <= high; port += 2 {
-		if claim(port) {
-			return port, nil
+		if pair := try(port); pair != nil {
+			return pair, nil
 		}
 	}
-	return 0, fmt.Errorf("no RTP ports available in %d-%d", low, high)
+	if lastErr != nil {
+		return nil, fmt.Errorf("no RTP port pair available in %d-%d: last bind error: %w", low, high, lastErr)
+	}
+	return nil, fmt.Errorf("no RTP ports available in %d-%d", low, high)
+}
+
+// bindRTPPair binds port (and port+1 when withRTCP) on local, closing what it
+// bound when either fails.
+func bindRTPPair(local net.IP, port int, withRTCP bool) (*rtpPair, error) {
+	rtpConn, err := net.ListenUDP("udp4", &net.UDPAddr{IP: local, Port: port})
+	if err != nil {
+		return nil, err
+	}
+	pair := &rtpPair{port: port, rtp: rtpConn}
+	if withRTCP {
+		pair.rtcp, err = net.ListenUDP("udp4", &net.UDPAddr{IP: local, Port: port + 1})
+		if err != nil {
+			pair.close()
+			return nil, err
+		}
+	}
+	return pair, nil
 }
 
 // newRTPSession prepares a call's media, accepting it only from the peers the
 // signalling is accepted from.
-func (u *UAS) newRTPSession(port int, local net.IP, law media.Law, dtmfPayloadType int, log *slog.Logger) *RTPSession {
-	session := NewRTPSession(port, law, dtmfPayloadType, log)
+func (u *UAS) newRTPSession(pair *rtpPair, local net.IP, law media.Law, dtmfPayloadType int, log *slog.Logger) *RTPSession {
+	session := NewRTPSession(pair.port, law, dtmfPayloadType, log)
 	session.allowed = u.allowed
 	session.bindIP = local
+	session.prebound = pair.rtp
 	return session
 }
 
@@ -664,12 +714,21 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 		return
 	}
 
-	localRTPPort, err := u.allocateRTPPort()
+	// Bind before answering: the 200 OK must only name a port this process
+	// holds. Until the dialog owns the sockets, a refusal closes them.
+	pair, err := u.allocateRTPPort(local, log)
 	if err != nil {
 		log.Error("no rtp port for call", "error", err)
 		u.send(buildReject(msg, "503 Service Unavailable", ""), addr)
 		return
 	}
+	defer func() {
+		if !isAccepted {
+			pair.close()
+			u.releaseRTPPort(pair.port)
+		}
+	}()
+	localRTPPort := pair.port
 
 	dtmfPayloadType := -1
 	if u.cfg.IsDTMFEnabled {
@@ -694,13 +753,16 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 		LocalRTPPort:  localRTPPort,
 		LocalIP:       localIP,
 		LocalSIPPort:  u.localPort,
-		RTP:           u.newRTPSession(localRTPPort, local, law, dtmfPayloadType, log),
+		RTP:           u.newRTPSession(pair, local, law, dtmfPayloadType, log),
 		InviteAt:      receivedAt,
 		Stopped:       make(chan struct{}),
 		rtcpInterval:  u.cfg.RTCPInterval,
 		log:           log,
 		callLog:       dlog,
 		invite:        msg,
+	}
+	if pair.rtcp != nil {
+		dialog.rtcp = newRTCPSessionOn(pair.rtcp, dialog.RTP, dialog.RemoteRTPAddr, u.cfg.RTCPInterval, log)
 	}
 	dialog.setSIPTransport(u.conn, addr)
 

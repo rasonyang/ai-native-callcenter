@@ -120,6 +120,9 @@ type composition struct {
 	// SwitchUUID asserts on every connect that the switch mints v7 UUIDs, and
 	// forgets the result when the link is lost. Nil is allowed.
 	SwitchUUID *switchUUIDCheck
+	// BotRTPRange asserts on every connect that the bot's RTP range and the
+	// switch's share no port. Nil in tests that do not care.
+	BotRTPRange *botRTPRangeCheck
 }
 
 // systemPublisher is the slice of the hub used to announce facts about the
@@ -178,6 +181,10 @@ func (c composition) connect() {
 	if c.SwitchUUID != nil {
 		c.Link.OnConnect(c.SwitchUUID.onConnect)
 		c.Link.OnLost(c.SwitchUUID.onLost)
+	}
+	if c.BotRTPRange != nil {
+		c.Link.OnConnect(c.BotRTPRange.onConnect)
+		c.Link.OnLost(c.BotRTPRange.onLost)
 	}
 
 	// What the switch is holding that this process knows nothing about: calls

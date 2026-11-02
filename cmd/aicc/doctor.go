@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"flag"
 	"fmt"
@@ -14,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -78,6 +79,8 @@ const (
 	DoctorCheckOutboundGateway      DoctorCheck = "outbound_gateway"
 	DoctorCheckDNCCountryCode       DoctorCheck = "dnc_country_code"
 	DoctorCheckSwitchRTPRange       DoctorCheck = "switch_rtp_range"
+	DoctorCheckBotRTPRange          DoctorCheck = "bot_rtp_range"
+	DoctorCheckBotRTPEphemeral      DoctorCheck = "bot_rtp_ephemeral"
 )
 
 // DoctorCode names a failure. The values are stable: an installer matches on
@@ -114,6 +117,12 @@ const (
 	// the table below lists the failing one.
 	DoctorCodeSwitchRTPRangeInvalid DoctorCode = "SWITCH_RTP_RANGE_INVALID"
 	DoctorCodeSwitchRTPRangeNarrow  DoctorCode = "SWITCH_RTP_RANGE_NARROW"
+	// DoctorCodeBotRTPRangeOverlapsSwitch is a FAIL: the bot and the switch
+	// would bind the same UDP port, and calls on either side then fail at
+	// random under load. DoctorCodeBotRTPRangeEphemeral is a WARN: the bot's range lies in
+	// the OS's ephemeral range, where any short-lived socket can take a port.
+	DoctorCodeBotRTPRangeOverlapsSwitch DoctorCode = "BOT_RTP_RANGE_OVERLAPS_SWITCH"
+	DoctorCodeBotRTPRangeEphemeral      DoctorCode = "BOT_RTP_RANGE_EPHEMERAL"
 )
 
 // doctorChecks is every check, in the order they run, with the code it fails
@@ -137,6 +146,8 @@ var doctorChecks = []struct {
 	{DoctorCheckExternalIP, DoctorCodeExternalIPNotOnHost},
 	{DoctorCheckExternalIPAdvertised, DoctorCodeExternalIPStale},
 	{DoctorCheckSwitchRTPRange, DoctorCodeSwitchRTPRangeInvalid},
+	{DoctorCheckBotRTPRange, DoctorCodeBotRTPRangeOverlapsSwitch},
+	{DoctorCheckBotRTPEphemeral, DoctorCodeBotRTPRangeEphemeral},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
 	{DoctorCheckProviderSession, DoctorCodeProviderSessionFailed},
 	{DoctorCheckDNCCountryCode, DoctorCodeDNCCountryCodeUnset},
@@ -219,6 +230,9 @@ type doctorDeps struct {
 	interfaceAddrs func() ([]net.Addr, error)
 	sleep          func(context.Context, time.Duration) bool
 	now            func() time.Time
+	// ephemeralPorts is the OS's ephemeral port range in the namespace doctor
+	// runs in. Nil means it cannot be read.
+	ephemeralPorts func() (low, high int, err error)
 }
 
 // runDoctor implements `aicc doctor`.
@@ -278,6 +292,7 @@ func runDoctor(args []string) error {
 		},
 		sessions:       voiceSession,
 		interfaceAddrs: net.InterfaceAddrs,
+		ephemeralPorts: osEphemeralPorts,
 		sleep:          sleepCtx,
 		now:            time.Now,
 	}, opts)
@@ -329,6 +344,8 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	// The RTP range is read and judged (checkSwitchRTPRange); that the range is
 	// reachable on the LAN is still verified by the release checklist, not by doctor.
 	out = append(out, checkSwitchRTPRange(d, sw.reader)...)
+	out = append(out, checkBotRTPRange(d, sw.reader)...)
+	out = append(out, checkBotRTPEphemeral(d)...)
 	out = append(out, checkProvider(ctx, d, opts)...)
 	return out
 }
@@ -413,6 +430,10 @@ func checkApp(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorRes
 		out = append(out, fail(DoctorCheckApp,
 			fmt.Sprintf("%s answered %d: %s", opts.readyzURL, reply.status, reply.head),
 			"the switch mints UUIDs that are not v7; see the switch_uuid check below"))
+	} else if reply.status != http.StatusOK && reply.lines["database"] == "ok" && strings.HasPrefix(reply.lines["bot-rtp-range"], "OVERLAPS_SWITCH") {
+		out = append(out, fail(DoctorCheckApp,
+			fmt.Sprintf("%s answered %d: %s", opts.readyzURL, reply.status, reply.head),
+			"the bot's RTP port range overlaps the switch's; see the bot_rtp_range check below"))
 	} else if reply.status != http.StatusOK {
 		out = append(out, fail(DoctorCheckApp,
 			fmt.Sprintf("%s answered %d: %s", opts.readyzURL, reply.status, reply.head),
@@ -1018,49 +1039,25 @@ func countFailed(results []doctorResult) int {
 // oneLine keeps an error on the line it is printed on.
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
 
-// FreeSWITCH's built-in RTP port range, used when switch.conf sets none (or 0).
-const (
-	defaultRTPStart = 16384
-	defaultRTPEnd   = 32768
-)
-
 // rtpRange is the switch's RTP range as it will be allocated.
-type rtpRange struct {
-	start, end int
-	// startSet and endSet say whether switch.conf names the value; a missing
-	// one is the switch's built-in default.
-	startSet, endSet bool
-}
+type rtpRange = telephony.RTPRange
 
-// evenStart and evenEnd are the ports the allocator really uses: only even
-// ports carry RTP, an odd start is rounded up and an odd end down.
-func (r rtpRange) evenStart() int { return r.start + r.start%2 }
-func (r rtpRange) evenEnd() int   { return r.end - r.end%2 }
-
-// legs is how many media legs the range holds, one even port each.
-func (r rtpRange) legs() int {
-	if r.evenEnd() < r.evenStart() {
-		return 0
-	}
-	return (r.evenEnd()-r.evenStart())/2 + 1
-}
-
-// describe states the range as configured, the even ports it really uses where
-// rounding applies, and how many legs that is.
-func (r rtpRange) describe() string {
+// describeRTPRange states the range as configured, the even ports it really
+// uses where rounding applies, and how many legs that is.
+func describeRTPRange(r rtpRange) string {
 	var b strings.Builder
 	switch {
-	case !r.startSet && !r.endSet:
-		fmt.Fprintf(&b, "the switch sets no RTP range, so it uses FreeSWITCH's built-in %d–%d", r.start, r.end)
-	case !r.startSet:
-		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-start-port is unset: FreeSWITCH's built-in %d)", r.start, r.end, r.start)
-	case !r.endSet:
-		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-end-port is unset: FreeSWITCH's built-in %d)", r.start, r.end, r.end)
+	case !r.StartSet && !r.EndSet:
+		fmt.Fprintf(&b, "the switch sets no RTP range, so it uses FreeSWITCH's built-in %d–%d", r.Start, r.End)
+	case !r.StartSet:
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-start-port is unset: FreeSWITCH's built-in %d)", r.Start, r.End, r.Start)
+	case !r.EndSet:
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d (rtp-end-port is unset: FreeSWITCH's built-in %d)", r.Start, r.End, r.End)
 	default:
-		fmt.Fprintf(&b, "the switch's RTP range is %d–%d", r.start, r.end)
+		fmt.Fprintf(&b, "the switch's RTP range is %d–%d", r.Start, r.End)
 	}
-	if r.legs() > 0 && (r.start%2 != 0 || r.end%2 != 0) {
-		fmt.Fprintf(&b, ", RTP on the even ports %d–%d", r.evenStart(), r.evenEnd())
+	if r.Legs() > 0 && (r.Start%2 != 0 || r.End%2 != 0) {
+		fmt.Fprintf(&b, ", RTP on the even ports %d–%d", r.EvenStart(), r.EvenEnd())
 	}
 	return b.String()
 }
@@ -1079,55 +1076,6 @@ func legsText(n int) string {
 	return withThousands(n) + " media legs; a call holds two (the caller and the agent or the bot), a supervisor's eavesdrop adds one"
 }
 
-// parseSwitchRTPRange reads the range out of the XML `xml_locate` returns for
-// switch.conf. A param that is missing, empty or 0 is the built-in default, as
-// the switch itself reads it.
-func parseSwitchRTPRange(conf string) (rtpRange, error) {
-	var doc struct {
-		XMLName xml.Name `xml:"configuration"`
-		Name    string   `xml:"name,attr"`
-		Params  []struct {
-			Name  string `xml:"name,attr"`
-			Value string `xml:"value,attr"`
-		} `xml:"settings>param"`
-	}
-	if err := xml.Unmarshal([]byte(strings.TrimSpace(conf)), &doc); err != nil {
-		return rtpRange{}, fmt.Errorf("the reply is not switch.conf XML: %w", err)
-	}
-	if doc.Name != "switch.conf" {
-		return rtpRange{}, fmt.Errorf("the reply is configuration %q, not switch.conf", doc.Name)
-	}
-	r := rtpRange{start: defaultRTPStart, end: defaultRTPEnd}
-	for _, p := range doc.Params {
-		var target *int
-		var set *bool
-		switch p.Name {
-		case "rtp-start-port":
-			target, set = &r.start, &r.startSet
-		case "rtp-end-port":
-			target, set = &r.end, &r.endSet
-		default:
-			continue
-		}
-		v := strings.TrimSpace(p.Value)
-		if v == "" || v == "0" {
-			continue
-		}
-		n, err := strconv.Atoi(v)
-		if err != nil || n < 1 || n > 65535 {
-			return rtpRange{}, rtpValueError{fmt.Sprintf("%s is %q, not a port between 1 and 65535", p.Name, v)}
-		}
-		*target, *set = n, true
-	}
-	return r, nil
-}
-
-// rtpValueError is a configured value that is not a usable port, as opposed to
-// a reply doctor could not read at all.
-type rtpValueError struct{ msg string }
-
-func (e rtpValueError) Error() string { return e.msg }
-
 // checkSwitchRTPRange prints the switch's RTP range and how many legs it
 // carries, and judges it.
 //
@@ -1145,9 +1093,9 @@ func checkSwitchRTPRange(d doctorDeps, sw switchReader) []doctorResult {
 		return []doctorResult{warn(check, "cannot read the switch's RTP range: "+oneLine(err.Error()),
 			"check `docker compose logs freeswitch`")}
 	}
-	r, err := parseSwitchRTPRange(conf)
+	r, err := telephony.ParseSwitchRTPRange(conf)
 	if err != nil {
-		if errors.As(err, new(rtpValueError)) {
+		if telephony.IsRTPValueError(err) {
 			return []doctorResult{fail(check, "the switch's RTP range is invalid: "+err.Error(),
 				"set FS_RTP_START_PORT and FS_RTP_END_PORT on the switch image (RTP_START and RTP_END in deploy/.env) to ports between 1 and 65535, start below end, and publish the same range")}
 		}
@@ -1156,19 +1104,19 @@ func checkSwitchRTPRange(d doctorDeps, sw switchReader) []doctorResult {
 	}
 
 	switch {
-	case r.end < r.start:
+	case r.End < r.Start:
 		return []doctorResult{fail(check,
 			fmt.Sprintf("%s: the end is below the start. The switch does not refuse it but allocates ports anywhere in 1–65535, "+
-				"which a firewall or a published range will not pass, and its memory grows", r.describe()),
+				"which a firewall or a published range will not pass, and its memory grows", describeRTPRange(r)),
 			"set FS_RTP_END_PORT above FS_RTP_START_PORT on the switch image (RTP_START and RTP_END in deploy/.env) and publish the same range")}
-	case r.legs() == 0:
+	case r.Legs() == 0:
 		return []doctorResult{fail(check,
-			fmt.Sprintf("%s: it holds no even port pair, so 0 media legs and every call fails", r.describe()),
+			fmt.Sprintf("%s: it holds no even port pair, so 0 media legs and every call fails", describeRTPRange(r)),
 			"widen the range: FS_RTP_START_PORT/FS_RTP_END_PORT on the switch image (RTP_START/RTP_END in deploy/.env), and publish the same range")}
 	}
 
-	msg := r.describe() + ", " + legsText(r.legs())
-	if need := 2 * d.cfg.BotMaxCalls; d.cfg.IsBotEnabled && r.legs() < need {
+	msg := describeRTPRange(r) + ", " + legsText(r.Legs())
+	if need := 2 * d.cfg.BotMaxCalls; d.cfg.IsBotEnabled && r.Legs() < need {
 		return []doctorResult{{Check: check, State: DoctorStateWarn, Code: DoctorCodeSwitchRTPRangeNarrow,
 			Message: fmt.Sprintf("%s. The AI leg alone can hold %d calls (AICC_BOT_MAX_CALLS) at two legs each, %s legs, more than the range has",
 				msg, d.cfg.BotMaxCalls, withThousands(need)),
@@ -1176,4 +1124,128 @@ func checkSwitchRTPRange(d doctorDeps, sw switchReader) []doctorResult {
 				"and the switch's FS_RTP_START_PORT/FS_RTP_END_PORT, or lower AICC_BOT_MAX_CALLS"}}
 	}
 	return []doctorResult{pass(check, msg)}
+}
+
+// botRange is the bot's configured RTP range as text.
+func botRange(cfg config.Config) string {
+	return fmt.Sprintf("%d-%d", cfg.BotRTPPortLow, cfg.BotRTPPortHigh)
+}
+
+// checkBotRTPRange requires that the bot's RTP range and the switch's share no
+// port. Each binds ports in its range as calls come and go: a port the bot
+// holds fails a switch leg that is given it (the switch does not test a port
+// before it uses it), and every port the switch holds narrows the bot's pool,
+// which refuses a call once no pair is free.
+//
+// It judges only a range it can read and trust: a bot that is off, a switch
+// that was not reached, a conf that could not be read and an invalid range
+// (already SWITCH_RTP_RANGE_INVALID) are all SKIPs, never a second failure.
+func checkBotRTPRange(d doctorDeps, sw switchReader) []doctorResult {
+	const check = DoctorCheckBotRTPRange
+	if !d.cfg.IsBotEnabled {
+		return []doctorResult{skip(check, "the AI leg is off (AICC_BOT_ENABLED), so it binds no RTP port")}
+	}
+	if sw == nil {
+		return []doctorResult{skip(check, "doctor could not connect to the switch")}
+	}
+	conf, err := sw.SwitchConf()
+	if err != nil {
+		return []doctorResult{skip(check, "cannot read the switch's RTP range: "+oneLine(err.Error()))}
+	}
+	r, err := telephony.ParseSwitchRTPRange(conf)
+	if err != nil {
+		return []doctorResult{skip(check, "the switch's RTP range cannot be judged: "+oneLine(err.Error()))}
+	}
+	if r.End < r.Start || r.Legs() == 0 {
+		return []doctorResult{skip(check, "the switch's RTP range is invalid (see switch_rtp_range)")}
+	}
+	swText := fmt.Sprintf("%d-%d", r.Start, r.End)
+	if r.IsBuiltIn() {
+		swText += " (FreeSWITCH's built-in default: the switch sets no RTP range)"
+	} else if !r.StartSet || !r.EndSet {
+		swText += " (part of it FreeSWITCH's built-in default)"
+	}
+	if telephony.RTPRangesOverlap(d.cfg.BotRTPPortLow, d.cfg.BotRTPPortHigh, r) {
+		return []doctorResult{fail(check,
+			fmt.Sprintf("the bot's RTP range and the switch's share ports: bot=%s, switch=%s. Each binds ports in its range as calls come and go, so calls on either side fail at random under load",
+				botRange(d.cfg), swText),
+			"move the bot with AICC_BOT_RTP_PORT_LOW/AICC_BOT_RTP_PORT_HIGH, or the switch with RTP_START/RTP_END in deploy/.env (FS_RTP_START_PORT/FS_RTP_END_PORT on the switch image) so the two ranges share no port; the defaults are 20000-25999 for the switch and 26000-29999 for the bot")}
+	}
+	return []doctorResult{pass(check, fmt.Sprintf("the bot's RTP range and the switch's share no port: bot=%s, switch=%s", botRange(d.cfg), swText))}
+}
+
+// checkBotRTPEphemeral warns when the bot's range lies in the OS's ephemeral
+// port range, where any short-lived UDP socket (a DNS lookup, say) can take a
+// bot port. It is its own check because it does not depend on the switch and a
+// check carries one code. Doctor runs where the application does (inside the
+// app container on the compose stacks, on the host for a native install), so
+// this is the namespace the bot binds in.
+func checkBotRTPEphemeral(d doctorDeps) []doctorResult {
+	const check = DoctorCheckBotRTPEphemeral
+	if !d.cfg.IsBotEnabled {
+		return []doctorResult{skip(check, "the AI leg is off (AICC_BOT_ENABLED), so it binds no RTP port")}
+	}
+	if d.ephemeralPorts == nil {
+		return []doctorResult{skip(check, "the OS's ephemeral port range is not readable here")}
+	}
+	lo, hi, err := d.ephemeralPorts()
+	if err != nil {
+		return []doctorResult{skip(check, "cannot read the OS's ephemeral port range: "+oneLine(err.Error()))}
+	}
+	if d.cfg.BotRTPPortLow <= hi && lo <= d.cfg.BotRTPPortHigh {
+		return []doctorResult{warn(check,
+			fmt.Sprintf("the bot's RTP range %s overlaps the OS's ephemeral port range %d-%d: any short-lived UDP socket can take a bot port and fail that call",
+				botRange(d.cfg), lo, hi),
+			"move AICC_BOT_RTP_PORT_LOW/AICC_BOT_RTP_PORT_HIGH below "+strconv.Itoa(lo)+" (the default is 26000-29999), or narrow the ephemeral range with sysctl")}
+	}
+	return []doctorResult{pass(check, fmt.Sprintf("the bot's RTP range %s is outside the OS's ephemeral port range %d-%d", botRange(d.cfg), lo, hi))}
+}
+
+// osEphemeralPorts reads the ephemeral port range of the namespace this
+// process runs in: /proc/sys/net/ipv4/ip_local_port_range on Linux (a
+// container's own namespace included), sysctl net.inet.ip.portrange on macOS.
+// macOS goes through `sysctl -n`: golang.org/x/sys is only an indirect
+// dependency and syscall.Sysctl returns raw bytes for an integer.
+func osEphemeralPorts() (int, int, error) {
+	switch runtime.GOOS {
+	case "linux":
+		b, err := os.ReadFile("/proc/sys/net/ipv4/ip_local_port_range")
+		if err != nil {
+			return 0, 0, err
+		}
+		return parseEphemeralLinux(string(b))
+	case "darwin":
+		first, err := exec.Command("sysctl", "-n", "net.inet.ip.portrange.first").Output()
+		if err != nil {
+			return 0, 0, err
+		}
+		last, err := exec.Command("sysctl", "-n", "net.inet.ip.portrange.last").Output()
+		if err != nil {
+			return 0, 0, err
+		}
+		return parseEphemeralDarwin(string(first), string(last))
+	}
+	return 0, 0, fmt.Errorf("not known on %s", runtime.GOOS)
+}
+
+// parseEphemeralLinux reads "32768\t60999".
+func parseEphemeralLinux(s string) (int, int, error) {
+	f := strings.Fields(s)
+	if len(f) != 2 {
+		return 0, 0, fmt.Errorf("unexpected ip_local_port_range %q", strings.TrimSpace(s))
+	}
+	return parseEphemeralPair(f[0], f[1])
+}
+
+func parseEphemeralDarwin(first, last string) (int, int, error) {
+	return parseEphemeralPair(strings.TrimSpace(first), strings.TrimSpace(last))
+}
+
+func parseEphemeralPair(a, b string) (int, int, error) {
+	lo, err1 := strconv.Atoi(a)
+	hi, err2 := strconv.Atoi(b)
+	if err1 != nil || err2 != nil || lo < 1 || hi > 65535 || hi < lo {
+		return 0, 0, fmt.Errorf("unexpected ephemeral port range %q-%q", a, b)
+	}
+	return lo, hi, nil
 }

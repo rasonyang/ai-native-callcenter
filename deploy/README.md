@@ -172,6 +172,8 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
 | `switch_rtp_range` | `SWITCH_RTP_RANGE_INVALID`, `SWITCH_RTP_RANGE_NARROW` (a `WARN`, not a failure) |
+| `bot_rtp_range` | `BOT_RTP_RANGE_OVERLAPS_SWITCH` |
+| `bot_rtp_ephemeral` | `BOT_RTP_RANGE_EPHEMERAL` (a `WARN`, not a failure) |
 | `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
 
 `switch_uuid` asks the switch to mint a UUID and requires version 7: the
@@ -197,6 +199,18 @@ holds no pair; the fix is to set `RTP_START` and `RTP_END` (the switch's
 switch. It warns with `SWITCH_RTP_RANGE_NARROW` when the bot is enabled and the
 legs are fewer than 2 x `AICC_BOT_MAX_CALLS`; widen the range (and publish it)
 or lower `AICC_BOT_MAX_CALLS`. It does not test that RTP reaches the switch.
+
+`bot_rtp_range` fails with `BOT_RTP_RANGE_OVERLAPS_SWITCH` when the bot's
+`AICC_BOT_RTP_PORT_LOW`/`AICC_BOT_RTP_PORT_HIGH` range shares a port with the
+switch's `rtp-start-port`/`rtp-end-port`: the switch and the bot would then
+both hand out the same UDP port. The fix is to move one of them (the defaults,
+`20000-25999` for the switch and `26000-29999` for the bot, do not overlap; a
+switch left on FreeSWITCH's built-in `16384-32768` does). `/readyz` answers 503
+with a `bot-rtp-range: OVERLAPS_SWITCH bot=<low>-<high> switch=<start>-<end>`
+line while they overlap. `bot_rtp_ephemeral` warns with
+`BOT_RTP_RANGE_EPHEMERAL` when the bot's range overlaps the operating system's
+ephemeral port range in the application's network namespace, because a
+short-lived socket can then take a port the bot means to use.
 
 Two of those are the outbound path a campaign needs: `outbound_endpoint` warns
 when `AICC_OUTBOUND_ENDPOINT` is empty (the deployment can take calls in but
@@ -228,9 +242,9 @@ whose ping status is `DOWN` warns too.
 
 | Overlay | Switch media (RTP) | Bot media | How ports reach the stack |
 |---|---|---|---|
-| `compose.linux.yml` (installer, Linux) | `16384-29999/udp` (6,808 legs) | `30000-30999/udp`, bot SIP `6060` | Host networking: the switch and the application bind the host's addresses; nothing is published |
-| `compose.macos.yml` (installer, macOS) | `16384-16583/udp` (100 legs) | not published | The `netns` container publishes 8080/tcp, 5060/udp+tcp, 5066/tcp and the RTP range |
-| none (manual quick start) | `16384-16483/udp` (50 legs) | not published | Published by the switch and application containers |
+| `compose.linux.yml` (installer, Linux) | `20000-25999/udp` (3,000 legs) | `26000-29999/udp`, bot SIP `6060` | Host networking: the switch and the application bind the host's addresses; nothing is published |
+| `compose.macos.yml` (installer, macOS) | `20000-20199/udp` (100 legs) | not published | The `netns` container publishes 8080/tcp, 5060/udp+tcp, 5066/tcp and the RTP range |
+| none (manual quick start) | `20000-20099/udp` (50 legs) | not published | Published by the switch and application containers |
 
 `RTP_START` and `RTP_END` in `.env` move the switch's range; on macOS each
 published port costs a forwarder in the VM, so widen it with care.
@@ -255,10 +269,10 @@ carries.
 On Linux with an active ufw or firewalld, the preflight fails with
 `PREFLIGHT_FIREWALL` until these are allowed (and prints the exact commands):
 `8080/tcp`, `5060/tcp`, `5060/udp`, `5066/tcp`, `5080/tcp`, `5080/udp`,
-`7443/tcp` and the RTP range `16384-29999/udp`. For ufw:
+`7443/tcp` and the RTP range `20000-25999/udp`. For ufw:
 
 ```sh
-for r in 8080/tcp 5060/tcp 5060/udp 5066/tcp 5080/tcp 5080/udp 7443/tcp 16384:29999/udp; do sudo ufw allow "$r"; done
+for r in 8080/tcp 5060/tcp 5060/udp 5066/tcp 5080/tcp 5080/udp 7443/tcp 20000:25999/udp; do sudo ufw allow "$r"; done
 ```
 
 For firewalld:
@@ -266,10 +280,10 @@ For firewalld:
 ```sh
 sudo firewall-cmd --permanent --add-port=8080/tcp --add-port=5060/tcp --add-port=5060/udp \
     --add-port=5066/tcp --add-port=5080/tcp --add-port=5080/udp --add-port=7443/tcp \
-    --add-port=16384-29999/udp && sudo firewall-cmd --reload
+    --add-port=20000-25999/udp && sudo firewall-cmd --reload
 ```
 
-The bot's ports (6060, `30000-30999/udp`) need no rule: only the switch on the
+The bot's ports (6060, `26000-29999/udp`) need no rule: only the switch on the
 same host sends to them, and the application accepts SIP, RTP and RTCP only
 from the addresses in `AICC_BOT_ALLOWED_PEERS` (loopback and `FS_LOCAL_IP`).
 The [production checklist](production-checklist.md) covers narrowing SIP and
@@ -394,7 +408,7 @@ caller is moved to the number's fallback queue
 The one-line installer uses `compose.macos.yml` on macOS: a placeholder
 container, `netns`, owns one network namespace on the compose network and
 publishes every port (8080/tcp, 5060/udp+tcp, 5066/tcp and the RTP range
-`16384-16583/udp`, 200 ports); the application and the switch join it. The
+`20000-20199/udp`, 200 ports); the application and the switch join it. The
 installer supports Docker Desktop and Colima; OrbStack, Podman and Rancher
 Desktop are refused (`PREFLIGHT_RUNTIME_UNSUPPORTED`).
 
@@ -605,7 +619,7 @@ Published ports (on `HTTP_BIND` or `SIP_BIND`):
 | 8080/tcp | API, event stream and web interface |
 | 5060/udp, 5060/tcp | SIP signalling |
 | 5066/tcp | Browser phone WebSocket transport |
-| 16384-16483/udp | Media to phones off this host |
+| 20000-20099/udp | Media to phones off this host |
 
 ESL, the metrics listener, and the AI leg's SIP and RTP are not published.
 

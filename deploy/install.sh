@@ -281,6 +281,21 @@ env_add_missing() {
     env_has "$1" "$2" || env_set "$1" "$2" "$3"
 }
 
+# rtp_effective_range: sets RTP_RANGE_START and RTP_RANGE_END to the range the
+# stack will run with. A range in .env wins, except one equal to the previous
+# installer default (RTP_START_OLD/RTP_END_OLD, v0.2.0 to v0.7.1 wrote it),
+# which env_merge moves to the current default; a hand-set range is left alone.
+rtp_effective_range() {
+    RTP_RANGE_START=$(env_get "$ENV_FILE" RTP_START)
+    RTP_RANGE_END=$(env_get "$ENV_FILE" RTP_END)
+    if [ "$RTP_RANGE_START" = "$RTP_START_OLD" ] && [ "$RTP_RANGE_END" = "$RTP_END_OLD" ]; then
+        RTP_RANGE_START=$RTP_START_WANT
+        RTP_RANGE_END=$RTP_END_WANT
+    fi
+    RTP_RANGE_START=${RTP_RANGE_START:-$RTP_START_WANT}
+    RTP_RANGE_END=${RTP_RANGE_END:-$RTP_END_WANT}
+}
+
 # env_merge FILE: writes what this run decided into .env. A missing key is
 # added; an existing one is kept, secrets above all. The addresses are
 # rewritten only when REWRITE_ADDRESS=1 (an explicit --external-ip), the
@@ -314,6 +329,13 @@ env_merge() {
         fi
     done
     env_add_missing "$1" AICC_SEED "$SEED"
+    if [ -n "${RTP_START_OLD:-}" ] && [ "$(env_get "$1" RTP_START)" = "$RTP_START_OLD" ] &&
+        [ "$(env_get "$1" RTP_END)" = "$RTP_END_OLD" ]; then
+        env_set "$1" RTP_START "$RTP_START_WANT"
+        env_set "$1" RTP_END "$RTP_END_WANT"
+        say "note: the media port range moved from $RTP_START_OLD-$RTP_END_OLD (the previous installer default) to $RTP_START_WANT-$RTP_END_WANT, the new installer default, clear of the bot's 26000-29999." \
+            "A firewall rule for $RTP_START_OLD-$RTP_END_OLD/udp has to move to $RTP_START_WANT-$RTP_END_WANT/udp. A range you set yourself is never changed."
+    fi
     env_add_missing "$1" RTP_START "$RTP_START_WANT"
     env_add_missing "$1" RTP_END "$RTP_END_WANT"
     if [ "$OS" = linux ]; then env_add_missing "$1" PG_HOST_PORT 15432; fi
@@ -408,13 +430,17 @@ detect_platform() {
     if [ "$OS" = linux ]; then
         DIR=/opt/aicc
         COMPOSE_FILE_WANT=docker-compose.yml:compose.release.yml:compose.linux.yml
-        RTP_START_WANT=16384
-        RTP_END_WANT=29999
+        RTP_START_WANT=20000
+        RTP_END_WANT=25999
+        RTP_START_OLD=16384
+        RTP_END_OLD=29999
     else
         DIR="$HOME/.aicc"
         COMPOSE_FILE_WANT=docker-compose.yml:compose.release.yml:compose.macos.yml
-        RTP_START_WANT=16384
-        RTP_END_WANT=16583
+        RTP_START_WANT=20000
+        RTP_END_WANT=20199
+        RTP_START_OLD=16384
+        RTP_END_OLD=16583
     fi
     ENV_FILE="$DIR/.env"
 }
@@ -699,14 +725,13 @@ preflight_ports() {
     fi
     _pp_http=$(env_get "$ENV_FILE" HTTP_PORT)
     _pp_http=${_pp_http:-8080}
-    _pp_rs=$(env_get "$ENV_FILE" RTP_START)
-    _pp_re=$(env_get "$ENV_FILE" RTP_END)
-    _pp_rs=${_pp_rs:-$RTP_START_WANT}
-    _pp_re=${_pp_re:-$RTP_END_WANT}
+    rtp_effective_range
+    _pp_rs=$RTP_RANGE_START
+    _pp_re=$RTP_RANGE_END
     if [ "$OS" = linux ]; then
         _pp_pg=$(env_get "$ENV_FILE" PG_HOST_PORT)
         LINUX_TCP_PORTS="$_pp_http 5060 5066 5080 7443 8090 9090 18021 ${_pp_pg:-15432}"
-        LINUX_UDP_PORTS="5060 5080 6060 $_pp_rs-$_pp_re 30000-30999"
+        LINUX_UDP_PORTS="5060 5080 6060 $_pp_rs-$_pp_re 26000-29999"
         command -v ss >/dev/null 2>&1 || die "ss (iproute2) is needed to check ports"
         _pp_busy=$(linux_port_conflicts "$(ss -Hltnu 2>/dev/null)")
         _pp_ports=$(printf '%s\n' "$_pp_busy" | sed 's|.*/||' | paste -s -d'|' -)
@@ -734,10 +759,9 @@ preflight_ports() {
 FIREWALL_RULES='8080/tcp 5060/tcp 5060/udp 5066/tcp 5080/tcp 5080/udp 7443/tcp'
 preflight_firewall() {
     [ "$OS" = linux ] || return 0
-    _pf_rtp="$(env_get "$ENV_FILE" RTP_START)"
-    _pf_rtp_end="$(env_get "$ENV_FILE" RTP_END)"
-    _pf_rtp=${_pf_rtp:-$RTP_START_WANT}
-    _pf_rtp_end=${_pf_rtp_end:-$RTP_END_WANT}
+    rtp_effective_range
+    _pf_rtp=$RTP_RANGE_START
+    _pf_rtp_end=$RTP_RANGE_END
     _pf_missing=''
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | head -n 1 | grep -q 'Status: active'; then
         _pf_status=$(ufw status 2>/dev/null)

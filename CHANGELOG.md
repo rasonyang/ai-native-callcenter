@@ -31,14 +31,30 @@ carries the one-line installer's files.
   (`internal/callidgate`) fails the build when a `callId` attribute holds
   anything but a call id. (#439)
 
-- The switch image's own RTP range is now 16384-29999 (6,808 legs, one RTP/RTCP
+- The switch image's own RTP range is now 20000-25999 (3,000 legs, one RTP/RTCP
   pair each; a call holds two legs), the Linux installer's range, instead of
   16384-16584 (101 legs). The odd end keeps the last pair's RTCP port inside the
   range; the switch logs one `Rounding odd end port` warning at the first call.
-  The manual quick start's default moves from 16384-16484 to 16384-16483 (50
-  legs, every RTCP port inside the published range); the macOS installer's
-  16384-16583 is unchanged. `.env` files that set `RTP_START`/`RTP_END` keep
-  their values. (#417)
+  The manual quick start's default is 20000-20099 (50 legs, every RTCP port
+  inside the published range) and the macOS installer's 20000-20199 (100 legs);
+  both keep their widths and only move. (#417, #450)
+- The bot's RTP range is now 26000-29999 (2,000 pairs for the default
+  `AICC_BOT_MAX_CALLS` of 220), moved from 40000-40999 (and, on Linux host
+  networking, from 30000-30999). It sits next to the switch's range and below
+  Linux's ephemeral ports (32768-60999), so the two ranges never overlap each
+  other or an outgoing connection's port. (#450)
+- Upgrading: the installer moves a `.env` range that equals the previous
+  installer default (16384-29999 on Linux, 16384-16583 on macOS) to the new
+  one and prints a note saying so; a range you set yourself is never changed.
+  A firewall rule for the old ranges has to move to the new ones (`20000-25999/udp`
+  on Linux). A native switch on FreeSWITCH's built-in 16384-32768 overlaps the
+  bot's range; set `rtp-start-port`/`rtp-end-port` as `docs/dev-stack.md` says. (#450)
+- `aicc doctor` fails with `BOT_RTP_RANGE_OVERLAPS_SWITCH` when the bot's RTP
+  range shares a port with the switch's, and warns with `BOT_RTP_RANGE_EPHEMERAL`
+  when it overlaps the operating system's ephemeral range; `/readyz` answers 503
+  with a `bot-rtp-range` line while the ranges overlap. The bot also binds its
+  RTP port before it answers the call, so a port it cannot take refuses the call
+  instead of answering it with no media. (#450)
 - `install.sh --external-ip`, and an address typed at the installer's prompt,
   is now refused unless it is one of this host's own addresses (one `ip addr`
   or `ifconfig` lists, or inside a range of the kernel's local table such as

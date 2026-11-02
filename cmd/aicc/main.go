@@ -406,6 +406,7 @@ func run() error {
 	}
 
 	switchUUID := newSwitchUUIDCheck(adapter.UUIDVersion, slog.Default())
+	botRTPRange := newBotRTPRangeCheck(adapter.SwitchRTPRange, cfg.BotRTPPortLow, cfg.BotRTPPortHigh, cfg.IsBotEnabled, slog.Default())
 
 	// Every connection between the parts, in one place that a test can drive
 	// with fakes. Nothing above this line joins two services together.
@@ -426,9 +427,10 @@ func run() error {
 		Registrations: func() ([]telephony.Registration, error) {
 			return adapter.Registrations(cfg.SIPProfile)
 		},
-		Events:     hub,
-		Log:        slog.Default(),
-		SwitchUUID: switchUUID,
+		Events:      hub,
+		Log:         slog.Default(),
+		SwitchUUID:  switchUUID,
+		BotRTPRange: botRTPRange,
 		Reconcile: reconcileLive(coordinator, outboundSvc, hasBotSession,
 			link.IsUp, slog.Default(), reconcileBackoffMin),
 	}.connect()
@@ -542,10 +544,11 @@ func run() error {
 		IdleTimeout: 120 * time.Second,
 	}
 	readiness := httpapi.Readiness{
-		Ping:       st.Pool.Ping,
-		IsSwitchUp: link.IsUp,
-		Migrations: st.MigrationStatus,
-		SwitchUUID: switchUUID.Status,
+		Ping:        st.Pool.Ping,
+		IsSwitchUp:  link.IsUp,
+		Migrations:  st.MigrationStatus,
+		SwitchUUID:  switchUUID.Status,
+		BotRTPRange: botRTPRange.Status,
 	}
 	metricsSrv := &http.Server{
 		Addr:              cfg.MetricsAddr,

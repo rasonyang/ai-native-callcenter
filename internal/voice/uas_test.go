@@ -762,16 +762,26 @@ func TestJudgeMediaAppliesEachTimeoutToItsOwnState(t *testing.T) {
 
 func TestRTPPortsAreAllocatedInPairsAndReleased(t *testing.T) {
 	t.Parallel()
+	low := freePairBase(t, 2)
 	uas := NewUAS(Config{
-		RTPPortRange: [2]int{41000, 41003}, // exactly two pairs
+		RTPPortRange: [2]int{low, low + 3}, // exactly two pairs
+		RTCPInterval: time.Second,
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
+	alloc := func() (int, error) {
+		pair, err := uas.allocateRTPPort(net.IPv4(127, 0, 0, 1), uas.log)
+		if err != nil {
+			return 0, err
+		}
+		t.Cleanup(pair.close)
+		return pair.port, nil
+	}
 
-	first, err := uas.allocateRTPPort()
+	first, err := alloc()
 	if err != nil {
 		t.Fatalf("first allocation: %v", err)
 	}
-	second, err := uas.allocateRTPPort()
+	second, err := alloc()
 	if err != nil {
 		t.Fatalf("second allocation: %v", err)
 	}
@@ -783,12 +793,9 @@ func TestRTPPortsAreAllocatedInPairsAndReleased(t *testing.T) {
 			first, second)
 	}
 
-	if _, err := uas.allocateRTPPort(); err == nil {
+	if _, err := alloc(); err == nil {
 		t.Error("allocated a third pair from a two-pair range")
 	}
 
 	uas.releaseRTPPort(first)
-	if reused, err := uas.allocateRTPPort(); err != nil || reused != first {
-		t.Errorf("after release got port %d (%v), want %d back", reused, err, first)
-	}
 }

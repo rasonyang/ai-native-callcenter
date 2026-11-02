@@ -479,6 +479,51 @@ type Readiness struct {
 	// SwitchUUID is what the app last learned of the UUIDs the switch mints.
 	// Nil reports unknown.
 	SwitchUUID func() SwitchUUIDStatus
+	// BotRTPRange is what the app last learned of the bot's RTP range against
+	// the switch's. Nil reports unknown. An overlap fails readiness for the
+	// reason a wrong UUID version does: it is a configuration fault that
+	// loses calls at random while the app looks healthy.
+	BotRTPRange func() BotRTPRangeStatus
+}
+
+// BotRTPRangeState is how the bot's RTP range stands against the switch's.
+type BotRTPRangeState string
+
+const (
+	// BotRTPRangeUnknown: not read yet, read failed, link lost or the switch's
+	// range is invalid. Never fails readiness.
+	BotRTPRangeUnknown BotRTPRangeState = ""
+	// BotRTPRangeOff: the AI leg is off, so the bot binds no port.
+	BotRTPRangeOff BotRTPRangeState = "OFF"
+	// BotRTPRangeOK: the two ranges share no port.
+	BotRTPRangeOK BotRTPRangeState = "OK"
+	// BotRTPRangeOverlaps: the two ranges share a port; fails readiness.
+	BotRTPRangeOverlaps BotRTPRangeState = "OVERLAPS_SWITCH"
+)
+
+// BotRTPRangeStatus is the result of comparing the bot's RTP range with the
+// switch's.
+type BotRTPRangeStatus struct {
+	State                  BotRTPRangeState
+	BotLow, BotHigh        int
+	SwitchStart, SwitchEnd int
+}
+
+// IsViolation reports ranges known to overlap.
+func (s BotRTPRangeStatus) IsViolation() bool { return s.State == BotRTPRangeOverlaps }
+
+// line is the status's /readyz value.
+func (s BotRTPRangeStatus) line() string {
+	switch s.State {
+	case BotRTPRangeOff:
+		return "off"
+	case BotRTPRangeOK:
+		return fmt.Sprintf("ok bot=%d-%d switch=%d-%d", s.BotLow, s.BotHigh, s.SwitchStart, s.SwitchEnd)
+	case BotRTPRangeOverlaps:
+		return fmt.Sprintf("OVERLAPS_SWITCH bot=%d-%d switch=%d-%d",
+			s.BotLow, s.BotHigh, s.SwitchStart, s.SwitchEnd)
+	}
+	return "unknown"
 }
 
 // SwitchUUIDStatus is the result of asking the switch to mint a UUID.
@@ -517,6 +562,7 @@ const readyzTimeout = 3 * time.Second
 //	switch: up|down
 //	migrations: <db>/<latest>  (or "unknown")
 //	switch-uuid: v7|unknown|NOT_V7 version=<n> (...)  (NOT_V7 answers 503)
+//	bot-rtp-range: off|unknown|ok bot=<low>-<high> switch=<start>-<end>|OVERLAPS_SWITCH bot=... switch=...  (OVERLAPS_SWITCH answers 503)
 func MetricsHandler(metrics http.Handler, ready Readiness) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /metrics", metrics)
@@ -553,11 +599,20 @@ func MetricsHandler(metrics http.Handler, ready Readiness) http.Handler {
 			head = "the switch mints UUID version " + strconv.Itoa(swUUID.Version) + ", not 7"
 		}
 
+		var botRTP BotRTPRangeStatus
+		if ready.BotRTPRange != nil {
+			botRTP = ready.BotRTPRange()
+		}
+		if botRTP.IsViolation() && status == http.StatusOK {
+			status = http.StatusServiceUnavailable
+			head = "the bot's RTP port range overlaps the switch's"
+		}
+
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.WriteHeader(status)
-		_, _ = fmt.Fprintf(w, "%s\ndatabase: %s\nswitch: %s\nmigrations: %s\nswitch-uuid: %s\n",
-			head, database, sw, migrations, swUUID.line())
+		_, _ = fmt.Fprintf(w, "%s\ndatabase: %s\nswitch: %s\nmigrations: %s\nswitch-uuid: %s\nbot-rtp-range: %s\n",
+			head, database, sw, migrations, swUUID.line(), botRTP.line())
 	})
 	return mux
 }
