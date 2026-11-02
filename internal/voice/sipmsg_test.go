@@ -35,7 +35,7 @@ func TestParseHandlesRealWorldHeaderForms(t *testing.T) {
 		t.Errorf("method = %q, want INVITE", msg.method)
 	}
 	// Compact forms are what a proxy under load actually sends.
-	if got := msg.callID(); got != "call-abc-123" {
+	if got := msg.sipCallID(); got != "call-abc-123" {
 		t.Errorf("compact Call-ID parsed as %q", got)
 	}
 	if got := msg.contact(); got != "<sip:10.0.0.8:5060>" {
@@ -156,7 +156,7 @@ func Test487CarriesTheInviteCSeq(t *testing.T) {
 func TestByeKeepsTheRouteSetInTheOrderReceived(t *testing.T) {
 	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
-	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
+	bye := string(buildBye(msg.sipCallID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
 		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReason{}))
 
 	if !strings.HasPrefix(bye, "BYE sip:10.0.0.8:5060 SIP/2.0") {
@@ -224,7 +224,7 @@ func TestByeEmitsEachRouteAsItsOwnHeaderInOrder(t *testing.T) {
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
-			bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
+			bye := string(buildBye(msg.sipCallID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
 				"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReason{}))
 
 			got := routesOf(t, bye)
@@ -252,7 +252,7 @@ func TestByeEmitsEachRouteAsItsOwnHeaderInOrder(t *testing.T) {
 func TestAByeSentBecauseWeAreRestartingSaysSo(t *testing.T) {
 	t.Parallel()
 	msg, _ := parseSIP([]byte(inviteFromSwitch))
-	bye := string(buildBye(msg.callID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
+	bye := string(buildBye(msg.sipCallID(), msg.fromHeader(), msg.toHeader(), "aicc-4",
 		"10.0.0.5", 6060, msg.recordRoutes(), msg.contact(), byeReasonRestart))
 
 	if !strings.Contains(bye, `Reason: SIP;cause=503;text="Service Restart"`) {

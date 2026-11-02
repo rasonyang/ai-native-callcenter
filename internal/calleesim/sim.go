@@ -335,7 +335,7 @@ func (d *dialog) provisional(p Provisional, offer *voice.SDPOffer, payloadType i
 	var body []byte
 	if p.EarlyMedia {
 		if err := d.startMediaLocked(offer, payloadType); err != nil {
-			d.s.log.Warn("early media unavailable", "callId", d.rec.CallID, "error", err)
+			d.s.log.Warn("early media unavailable", "sipCallId", d.rec.CallID, "error", err)
 		} else {
 			extra += "Content-Type: application/sdp\r\n"
 			body = []byte(d.sdpLocked(payloadType, offer))
@@ -375,7 +375,7 @@ func (d *dialog) answer(offer *voice.SDPOffer, payloadType int) {
 	}
 	if err := d.startMediaLocked(offer, payloadType); err != nil {
 		d.mu.Unlock()
-		d.s.log.Warn("media unavailable", "callId", d.rec.CallID, "error", err)
+		d.s.log.Warn("media unavailable", "sipCallId", d.rec.CallID, "error", err)
 		d.finalResponse(500, "500 Server Internal Error")
 		return
 	}
@@ -454,7 +454,7 @@ func (d *dialog) byeTarget() *net.UDPAddr {
 		addr, err := voice.RouteSetNextHop(routeSet)
 		if err != nil {
 			d.s.log.Warn("bye cannot go to the top of its route set, sending it to the invite's source",
-				"callId", d.invite.CallID(), "route", routeSet[0], "error", err)
+				"sipCallId", d.invite.CallID(), "route", routeSet[0], "error", err)
 			return d.from
 		}
 		return addr

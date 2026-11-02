@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
@@ -1577,10 +1579,11 @@ func (b *lockedBuffer) String() string {
 
 // The orchestrator hands the session a logger that already names the call.
 // Binding callId again wrote the key twice on every session line, and a leg
-// whose ID is not the dialog's Call-ID would put two values under one key.
+// whose ID is the SIP Call-ID would put two values under one key.
 func TestTheSessionLogsTheCallIdOnce(t *testing.T) {
 	var out lockedBuffer
-	log := slog.New(slog.NewJSONHandler(&out, nil)).With("callId", "dialog-call-id")
+	callID := uuid.MustParse("01a19507-5177-7dc9-bef3-91e32915b768")
+	log := slog.New(slog.NewJSONHandler(&out, nil)).With("callId", callID)
 
 	leg := newFakeLeg(media.LawMu)
 	model := newFakeModel()
@@ -1610,7 +1613,7 @@ func TestTheSessionLogsTheCallIdOnce(t *testing.T) {
 	if n := strings.Count(bridged, `"callId":`); n != 1 {
 		t.Errorf("callId appears %d times: %s", n, bridged)
 	}
-	if !strings.Contains(bridged, `"callId":"dialog-call-id"`) {
+	if !strings.Contains(bridged, `"callId":"`+callID.String()+`"`) {
 		t.Errorf("the line does not carry the call's own id: %s", bridged)
 	}
 }

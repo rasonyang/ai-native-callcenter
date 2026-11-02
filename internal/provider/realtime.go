@@ -1763,7 +1763,7 @@ func (r *Realtime) onLineCall(event *wireEvent) bool {
 		return false
 	}
 	r.log.Info("the turn asked for a line called a tool; the call is not handed out and is taken back when the turn ends",
-		"tool", event.Name, "callId", event.CallID, "itemId", event.ItemID)
+		"tool", event.Name, "toolCallId", event.CallID, "itemId", event.ItemID)
 	return true
 }
 

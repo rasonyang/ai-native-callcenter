@@ -20,6 +20,17 @@ carries the one-line installer's files.
 
 ### Changed
 
+- Log keys: `callId` now always means the call's own id and nothing else. The
+  AI leg's lines (the bot's SIP and RTP lines, and the flow, provider and
+  session lines of an AI call) used to log the bot leg's SIP Call-ID as
+  `callId`. They now log it as `sipCallId` and carry the call's real `callId`
+  next to it, so a log search by a call's `callId` finds its AI leg. The
+  `aiccCallId` key on those lines is gone. A provider tool-call id logs as
+  `toolCallId`, the callee simulator's SIP Call-ID as `sipCallId`, and an
+  unparseable `aicc_call_id` channel variable as `aiccCallId`. A CI gate
+  (`internal/callidgate`) fails the build when a `callId` attribute holds
+  anything but a call id. (#439)
+
 - The switch image's own RTP range is now 16384-29999 (6,808 legs, one RTP/RTCP
   pair each; a call holds two legs), the Linux installer's range, instead of
   16384-16584 (101 legs). The odd end keeps the last pair's RTCP port inside the

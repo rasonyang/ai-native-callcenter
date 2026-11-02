@@ -57,6 +57,10 @@ Normative for all code, schema, and contracts in this repo. Source: project owne
 - Meaningless standalone names: `data`, `info`, `item`, `temp`, `obj`, `mgr`, `util`.
 - Synonym drift: one concept, one word — `agent` (never `operator`/`rep`), `call` (never `phone_call`/`conversation`), `queue` (never `skill_group`).
 
+## 6a. Log keys, span attributes and metric labels
+
+`callId` in a log record, span attribute or metric label is the domain call id (a `uuid.UUID`, or its `.String()`) and nothing else, so a search for a call's `callId` returns every line about that call and only those. Other ids keep their own keys: `sipCallId` for the SIP Call-ID, `channelId` for a switch channel, `legId`/`partyId` for a leg, `toolCallId` for a provider tool call, `aiccCallId` for the raw `aicc_call_id` channel variable before it is parsed. `internal/callidgate` type-checks every non-test package and fails CI on a `"callId"` attribute whose value is not domain-typed.
+
 ## 7. Project applications & boundary rulings
 
 Concrete consequences already applied across docs 01–10 (each ruling below is an *application* of the spec; the flagged items are interpretations awaiting owner veto):

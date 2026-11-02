@@ -86,7 +86,9 @@ func DefaultConfig() Config {
 // Dialog is one accepted call: the SIP state needed to end it properly, plus
 // its media session.
 type Dialog struct {
-	CallID    string
+	// SIPCallID is the SIP Call-ID header, a token the sender minted. It is
+	// not the domain call id (see CallID).
+	SIPCallID string
 	LocalTag  string
 	RemoteTag string
 
@@ -118,7 +120,9 @@ type Dialog struct {
 	Stopped chan struct{}
 
 	rtcpInterval time.Duration
-	log          *slog.Logger
+	// callLog is nil only on a Dialog built outside the UAS.
+	callLog *dialogLog
+	log     *slog.Logger
 	// invite is retained so a CANCEL can be answered inside the INVITE's own
 	// transaction, with its Via set and its CSeq.
 	invite *sipMessage
@@ -159,7 +163,7 @@ func (d *Dialog) startMedia() error {
 	// must not take the audio down with it.
 	session, err := NewRTCPSession(d.RTP, d.RemoteRTPAddr, d.rtcpInterval, d.log)
 	if err != nil {
-		d.log.Warn("rtcp disabled for call", "callId", d.CallID, "error", err)
+		d.log.Warn("rtcp disabled for call", "error", err)
 		return nil
 	}
 	d.mu.Lock()
@@ -207,10 +211,10 @@ func (d *Dialog) sendBye() {
 		return
 	}
 	addr = d.byeNextHop(addr)
-	bye := buildBye(d.CallID, d.FromHeader, d.ToHeader, d.LocalTag,
+	bye := buildBye(d.SIPCallID, d.FromHeader, d.ToHeader, d.LocalTag,
 		d.LocalIP, d.LocalSIPPort, d.RecordRoutes, d.RemoteContact, reason)
 	if _, err := conn.WriteToUDP(bye, addr); err == nil {
-		d.log.Info("sip bye sent", "callId", d.CallID, "to", addr.String(),
+		d.log.Info("sip bye sent", "to", addr.String(),
 			"sipCause", reason.SIPCause, "q850Cause", reason.Q850Cause)
 	}
 }
@@ -237,7 +241,7 @@ func (d *Dialog) byeNextHop(source *net.UDPAddr) *net.UDPAddr {
 	addr, err := routeSetNextHop(d.RecordRoutes, "udp4")
 	if err != nil {
 		d.log.Warn("bye cannot go to the top of its route set, sending it to the invite's source",
-			"callId", d.CallID, "route", d.RecordRoutes[0], "to", source.String(), "error", err)
+			"route", d.RecordRoutes[0], "to", source.String(), "error", err)
 		return source
 	}
 	return addr
@@ -463,8 +467,8 @@ func (u *UAS) allocateRTPPort() (int, error) {
 
 // newRTPSession prepares a call's media, accepting it only from the peers the
 // signalling is accepted from.
-func (u *UAS) newRTPSession(port int, local net.IP, law media.Law, dtmfPayloadType int) *RTPSession {
-	session := NewRTPSession(port, law, dtmfPayloadType, u.log)
+func (u *UAS) newRTPSession(port int, local net.IP, law media.Law, dtmfPayloadType int, log *slog.Logger) *RTPSession {
+	session := NewRTPSession(port, law, dtmfPayloadType, log)
 	session.allowed = u.allowed
 	session.bindIP = local
 	return session
@@ -546,8 +550,31 @@ func (u *UAS) handleMessage(data []byte, addr *net.UDPAddr, local net.IP) {
 	case methodInfo:
 		u.handleInfo(msg, addr)
 	default:
-		u.log.Debug("sip method not handled", "method", string(msg.method))
+		log := u.messageLog(msg)
+		if msg.statusCode != 0 {
+			// A response, such as the 200 OK to a BYE this side sent. Nothing
+			// waits for one.
+			log.Debug("sip response ignored", "status", msg.statusCode)
+		} else {
+			log.Debug("sip method not handled", "method", string(msg.method))
+		}
 	}
+}
+
+// messageLog is the logger for a line about one SIP message: its dialog's
+// while the dialog is known, else one that names the message's Call-ID.
+func (u *UAS) messageLog(msg *sipMessage) *slog.Logger {
+	sipCallID := msg.sipCallID()
+	if sipCallID == "" {
+		return u.log
+	}
+	u.mu.Lock()
+	dialog := u.dialogs[sipCallID]
+	u.mu.Unlock()
+	if dialog != nil {
+		return dialog.log
+	}
+	return u.log.With("sipCallId", sipCallID)
 }
 
 func (u *UAS) send(data []byte, addr *net.UDPAddr) {
@@ -558,10 +585,15 @@ func (u *UAS) send(data []byte, addr *net.UDPAddr) {
 
 func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 	receivedAt := time.Now()
-	callID := msg.callID()
+	sipCallID := msg.sipCallID()
+	// The dialog's logger from the first line: the SIP Call-ID always, the
+	// domain call id only when the header holds one (never a guess).
+	callID := parseCallID(msg.get("X-AICC-Call-ID"))
+	dlog := newDialogLog(u.log, sipCallID, callID)
+	log := dlog.logger
 
 	u.mu.Lock()
-	existing := u.dialogs[callID]
+	existing := u.dialogs[sipCallID]
 	u.mu.Unlock()
 
 	// A retransmitted INVITE means our 200 OK did not arrive. Answering with
@@ -589,18 +621,17 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 		// conversation started now would be with nobody, and would take a
 		// slot it no longer holds.
 		u.send(buildReject(msg, "480 Temporarily Unavailable", newTag()), addr)
-		u.log.Warn("invite refused: its reservation was withdrawn, the leg it was for is being ended",
-			"callId", callID, "reservation", key)
+		log.Warn("invite refused: its reservation was withdrawn, the leg it was for is being ended",
+			"reservation", key)
 		return
 	case key != "" && u.cfg.Slots.Consume(key):
-		u.log.Info("bot slot taken from reservation", "callId", callID, "reservation", key)
+		log.Info("bot slot taken from reservation", "reservation", key)
 	case u.cfg.Slots.TryAcquire():
 		// Inbound INVITEs carry X-AICC-Call-ID too, so a key with no
 		// reservation is the ordinary case, not a lost one.
 	default:
 		u.send(buildReject(msg, "486 Busy Here", newTag()), addr)
-		u.log.Warn("invite rejected at capacity", "callId", callID,
-			"maxCalls", u.cfg.Slots.Cap(), "reservation", key)
+		log.Warn("invite rejected at capacity", "maxCalls", u.cfg.Slots.Cap(), "reservation", key)
 		return
 	}
 	// Every refusal below gives the slot back; a dialog in u.dialogs holds one
@@ -616,26 +647,26 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 
 	offer := parseSDP(msg.body)
 	if offer.IP == "" || offer.Port == 0 {
-		u.log.Error("invite carried no usable sdp", "callId", callID)
+		log.Error("invite carried no usable sdp")
 		u.send(buildReject(msg, "488 Not Acceptable Here", ""), addr)
 		return
 	}
 	law, payloadType, ok := negotiate(offer, u.cfg.CodecPreferences)
 	if !ok {
-		u.log.Error("no common codec", "callId", callID, "offered", offer.Codecs)
+		log.Error("no common codec", "offered", offer.Codecs)
 		u.send(buildReject(msg, "488 Not Acceptable Here", ""), addr)
 		return
 	}
 
 	if local == nil {
-		u.log.Error("cannot tell which local address the invite was sent to", "callId", callID)
+		log.Error("cannot tell which local address the invite was sent to")
 		u.send(buildReject(msg, "500 Server Internal Error", ""), addr)
 		return
 	}
 
 	localRTPPort, err := u.allocateRTPPort()
 	if err != nil {
-		u.log.Error("no rtp port for call", "callId", callID, "error", err)
+		log.Error("no rtp port for call", "error", err)
 		u.send(buildReject(msg, "503 Service Unavailable", ""), addr)
 		return
 	}
@@ -650,7 +681,7 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 	localTag := fmt.Sprintf("aicc-%d", sessionID)
 
 	dialog := &Dialog{
-		CallID:        callID,
+		SIPCallID:     sipCallID,
 		LocalTag:      localTag,
 		RemoteTag:     tagFrom(msg.fromHeader()),
 		FromHeader:    msg.fromHeader(),
@@ -663,11 +694,12 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 		LocalRTPPort:  localRTPPort,
 		LocalIP:       localIP,
 		LocalSIPPort:  u.localPort,
-		RTP:           u.newRTPSession(localRTPPort, local, law, dtmfPayloadType),
+		RTP:           u.newRTPSession(localRTPPort, local, law, dtmfPayloadType, log),
 		InviteAt:      receivedAt,
 		Stopped:       make(chan struct{}),
 		rtcpInterval:  u.cfg.RTCPInterval,
-		log:           u.log,
+		log:           log,
+		callLog:       dlog,
 		invite:        msg,
 	}
 	dialog.setSIPTransport(u.conn, addr)
@@ -679,18 +711,18 @@ func (u *UAS) handleInvite(msg *sipMessage, addr *net.UDPAddr, local net.IP) {
 	dialog.mu.Unlock()
 
 	u.mu.Lock()
-	u.dialogs[callID] = dialog
+	u.dialogs[sipCallID] = dialog
 	isAccepted = true
-	u.ackTimers[callID] = time.AfterFunc(u.cfg.AckTimeout, func() {
-		u.log.Warn("no ack for accepted invite", "callId", callID)
-		u.cleanup(callID)
+	u.ackTimers[sipCallID] = time.AfterFunc(u.cfg.AckTimeout, func() {
+		log.Warn("no ack for accepted invite")
+		u.cleanup(sipCallID)
 	})
 	u.mu.Unlock()
 
 	u.send(answer, addr)
 	u.retransmitAnswer(dialog, addr)
 
-	u.log.Info("invite accepted", "callId", callID, "codec", law.String(),
+	log.Info("invite accepted", "codec", law.String(),
 		"remoteRtp", fmt.Sprintf("%s:%d", offer.IP, offer.Port),
 		"localIp", localIP, "rtpPort", localRTPPort,
 		"dtmfPayloadType", dtmfPayloadType, "headers", dialog.CustomHeaders)
@@ -714,7 +746,7 @@ func (u *UAS) retransmitAnswer(dialog *Dialog, addr *net.UDPAddr) {
 			u.mu.Unlock()
 			return
 		}
-		u.answerTimer[dialog.CallID] = time.AfterFunc(interval, func() {
+		u.answerTimer[dialog.SIPCallID] = time.AfterFunc(interval, func() {
 			dialog.mu.Lock()
 			isAcked, isStopped, answer := dialog.isAcked, dialog.isStopped, dialog.answer
 			dialog.mu.Unlock()
@@ -722,7 +754,7 @@ func (u *UAS) retransmitAnswer(dialog *Dialog, addr *net.UDPAddr) {
 				return
 			}
 			u.send(answer, addr)
-			u.log.Debug("retransmitted 200 ok", "callId", dialog.CallID, "after", interval)
+			dialog.log.Debug("retransmitted 200 ok", "after", interval)
 			interval = min(interval*2, maxInterval)
 			schedule()
 		})
@@ -732,18 +764,18 @@ func (u *UAS) retransmitAnswer(dialog *Dialog, addr *net.UDPAddr) {
 }
 
 func (u *UAS) handleAck(msg *sipMessage) {
-	callID := msg.callID()
+	sipCallID := msg.sipCallID()
 
 	u.mu.Lock()
-	if timer, ok := u.ackTimers[callID]; ok {
+	if timer, ok := u.ackTimers[sipCallID]; ok {
 		timer.Stop()
-		delete(u.ackTimers, callID)
+		delete(u.ackTimers, sipCallID)
 	}
-	if timer, ok := u.answerTimer[callID]; ok {
+	if timer, ok := u.answerTimer[sipCallID]; ok {
 		timer.Stop()
-		delete(u.answerTimer, callID)
+		delete(u.answerTimer, sipCallID)
 	}
-	dialog := u.dialogs[callID]
+	dialog := u.dialogs[sipCallID]
 	u.mu.Unlock()
 
 	if dialog == nil {
@@ -765,10 +797,10 @@ func (u *UAS) handleAck(msg *sipMessage) {
 func (u *UAS) handleCancel(msg *sipMessage, addr *net.UDPAddr) {
 	u.send(build200OK(msg), addr)
 
-	callID := msg.callID()
+	sipCallID := msg.sipCallID()
 	u.mu.Lock()
-	dialog := u.dialogs[callID]
-	_, isPendingAck := u.ackTimers[callID]
+	dialog := u.dialogs[sipCallID]
+	_, isPendingAck := u.ackTimers[sipCallID]
 	u.mu.Unlock()
 
 	if dialog == nil || !isPendingAck {
@@ -778,14 +810,14 @@ func (u *UAS) handleCancel(msg *sipMessage, addr *net.UDPAddr) {
 	// INVITE — same Via, and the INVITE's CSeq.
 	u.send(build487(dialog.invite, dialog.LocalTag), addr)
 
-	go u.cleanup(callID)
+	go u.cleanup(sipCallID)
 }
 
 func (u *UAS) handleInfo(msg *sipMessage, addr *net.UDPAddr) {
 	u.send(build200OK(msg), addr)
 
 	u.mu.Lock()
-	dialog := u.dialogs[msg.callID()]
+	dialog := u.dialogs[msg.sipCallID()]
 	u.mu.Unlock()
 
 	if dialog != nil {
@@ -798,17 +830,17 @@ func (u *UAS) handleInfo(msg *sipMessage, addr *net.UDPAddr) {
 func (u *UAS) handleBye(msg *sipMessage, addr *net.UDPAddr) {
 	u.send(build200OK(msg), addr)
 
-	callID := msg.callID()
+	sipCallID := msg.sipCallID()
 	u.mu.Lock()
-	if timer, ok := u.ackTimers[callID]; ok {
+	if timer, ok := u.ackTimers[sipCallID]; ok {
 		timer.Stop()
-		delete(u.ackTimers, callID)
+		delete(u.ackTimers, sipCallID)
 	}
-	if timer, ok := u.answerTimer[callID]; ok {
+	if timer, ok := u.answerTimer[sipCallID]; ok {
 		timer.Stop()
-		delete(u.answerTimer, callID)
+		delete(u.answerTimer, sipCallID)
 	}
-	dialog := u.dialogs[callID]
+	dialog := u.dialogs[sipCallID]
 	u.mu.Unlock()
 
 	if dialog == nil {
@@ -825,11 +857,11 @@ func (u *UAS) handleBye(msg *sipMessage, addr *net.UDPAddr) {
 func (u *UAS) startCall(dialog *Dialog) {
 	dialog.AnsweredAt = time.Now()
 	if err := dialog.startMedia(); err != nil {
-		u.log.Error("media failed to start", "callId", dialog.CallID, "error", err)
+		dialog.log.Error("media failed to start", "error", err)
 		if u.OnCallFailed != nil {
 			u.OnCallFailed(dialog, err)
 		}
-		u.cleanup(dialog.CallID)
+		u.cleanup(dialog.SIPCallID)
 		return
 	}
 
@@ -846,7 +878,7 @@ func (u *UAS) runMedia(dialog *Dialog) {
 	dialog.RTP.Run()
 
 	u.mu.Lock()
-	_, isActive := u.dialogs[dialog.CallID]
+	_, isActive := u.dialogs[dialog.SIPCallID]
 	u.mu.Unlock()
 	if isActive {
 		u.endCall(dialog)
@@ -919,7 +951,7 @@ func (u *UAS) watchForDeadMedia(dialog *Dialog) {
 		}
 
 		u.mu.Lock()
-		_, isActive := u.dialogs[dialog.CallID]
+		_, isActive := u.dialogs[dialog.SIPCallID]
 		u.mu.Unlock()
 		if !isActive {
 			return
@@ -931,9 +963,9 @@ func (u *UAS) watchForDeadMedia(dialog *Dialog) {
 		silent := time.Since(dialog.RTP.LastPacketAt())
 		switch judgeMedia(u.cfg, state, waited, silent) {
 		case mediaNeverStarted:
-			u.log.Warn("media never started", "callId", dialog.CallID, "waited", waited)
+			dialog.log.Warn("media never started", "waited", waited)
 		case mediaWentDead:
-			u.log.Warn("media went dead", "callId", dialog.CallID, "silentFor", silent)
+			dialog.log.Warn("media went dead", "silentFor", silent)
 		default:
 			continue
 		}
@@ -945,8 +977,8 @@ func (u *UAS) watchForDeadMedia(dialog *Dialog) {
 // endCall runs the ended callback exactly once and releases everything.
 func (u *UAS) endCall(dialog *Dialog) {
 	u.mu.Lock()
-	_, isActive := u.dialogs[dialog.CallID]
-	delete(u.dialogs, dialog.CallID)
+	_, isActive := u.dialogs[dialog.SIPCallID]
+	delete(u.dialogs, dialog.SIPCallID)
 	u.mu.Unlock()
 	if !isActive {
 		return
@@ -961,14 +993,14 @@ func (u *UAS) endCall(dialog *Dialog) {
 }
 
 // cleanup drops a call that never started, so no ended callback fires.
-func (u *UAS) cleanup(callID string) {
+func (u *UAS) cleanup(sipCallID string) {
 	u.mu.Lock()
-	dialog := u.dialogs[callID]
-	delete(u.dialogs, callID)
+	dialog := u.dialogs[sipCallID]
+	delete(u.dialogs, sipCallID)
 	for _, timers := range []map[string]*time.Timer{u.ackTimers, u.answerTimer} {
-		if timer, ok := timers[callID]; ok {
+		if timer, ok := timers[sipCallID]; ok {
 			timer.Stop()
-			delete(timers, callID)
+			delete(timers, sipCallID)
 		}
 	}
 	u.mu.Unlock()

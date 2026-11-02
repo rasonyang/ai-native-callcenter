@@ -238,7 +238,7 @@ func TestByeNextHopFallsBackToTheInviteSource(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			d := &Dialog{
-				CallID: "call-1", RemoteContact: "<sip:1001@10.0.0.200:5060>",
+				SIPCallID: "call-1", RemoteContact: "<sip:1001@10.0.0.200:5060>",
 				RecordRoutes: tt.routeSet,
 				log:          slog.New(slog.NewTextHandler(io.Discard, nil)),
 			}
