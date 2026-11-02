@@ -283,7 +283,7 @@ func (s *session) runScript(instructions string) {
 			}
 			if !s.awaitResult(lastCallID, secondsOf(timeout)) {
 				s.server.scriptsFailed.Add(1)
-				s.log.Warn("mockprovider: no tool result in time", "script", script.Name, "callId", lastCallID)
+				s.log.Warn("mockprovider: no tool result in time", "script", script.Name, "toolCallId", lastCallID)
 				s.closeWith(websocket.CloseInternalServerErr, "tool result missing")
 				return
 			}
@@ -393,7 +393,7 @@ func (s *session) awaitResult(callID string, timeout time.Duration) bool {
 		case <-grace:
 			s.server.resultsWithoutCreate.Add(1)
 			s.log.Info("mockprovider: no response.create followed the tool result; continuing",
-				"callId", callID)
+				"toolCallId", callID)
 			return true
 		case <-timer.C:
 			return false

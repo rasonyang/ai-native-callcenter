@@ -374,7 +374,7 @@ func (c *Coordinator) adoptQueuedCaller(ctx context.Context, member QueueMember)
 	parsed, err := uuid.Parse(callID)
 	if err != nil {
 		slog.WarnContext(ctx, "cannot adopt a queued caller: unreadable call id",
-			"channelId", member.ChannelID, "callId", callID, "error", err)
+			"channelId", member.ChannelID, "aiccCallId", callID, "error", err)
 		return
 	}
 

@@ -58,7 +58,7 @@ type dialogLeg struct{ dialog *voice.Dialog }
 // FromDialog wraps an accepted SIP dialog as a leg.
 func FromDialog(dialog *voice.Dialog) Leg { return dialogLeg{dialog} }
 
-func (l dialogLeg) ID() string                    { return l.dialog.CallID }
+func (l dialogLeg) ID() string                    { return l.dialog.SIPCallID }
 func (l dialogLeg) Law() media.Law                { return l.dialog.RTP.Law() }
 func (l dialogLeg) Frames() <-chan []byte         { return l.dialog.RTP.Frames() }
 func (l dialogLeg) Digits() <-chan string         { return l.dialog.RTP.DTMF() }

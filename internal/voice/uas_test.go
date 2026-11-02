@@ -24,6 +24,9 @@ type peer struct {
 	uasAddr *net.UDPAddr
 	callID  string
 	cseq    int
+	// aiccLines replaces the default X-Aicc-Call-Id header line when non-nil;
+	// an empty non-nil slice sends none.
+	aiccLines []string
 }
 
 type callHooks struct {
@@ -104,6 +107,13 @@ func (p *peer) request(method, body string, headers ...string) {
 	if len(headers) > 0 {
 		extra = strings.Join(headers, "\r\n") + "\r\n" + contentType
 	}
+	aicc := "X-Aicc-Call-Id: 0198-test\r\n"
+	if p.aiccLines != nil {
+		aicc = ""
+		for _, line := range p.aiccLines {
+			aicc += line + "\r\n"
+		}
+	}
 	msg := fmt.Sprintf(
 		"%s sip:aicc@127.0.0.1 SIP/2.0\r\n"+
 			"Via: SIP/2.0/UDP 127.0.0.1:%d;branch=z9hG4bK-%s-%d\r\n"+
@@ -112,12 +122,12 @@ func (p *peer) request(method, body string, headers ...string) {
 			"Call-ID: %s\r\n"+
 			"CSeq: %d %s\r\n"+
 			"Contact: <sip:1001@127.0.0.1:%d>\r\n"+
-			"X-Aicc-Call-Id: 0198-test\r\n"+
+			"%s"+
 			"%s"+
 			"Content-Length: %d\r\n\r\n%s",
 		method, p.sip.LocalAddr().(*net.UDPAddr).Port, method, p.cseq,
 		p.callID, p.cseq, method, p.sip.LocalAddr().(*net.UDPAddr).Port,
-		extra, len(body), body)
+		aicc, extra, len(body), body)
 
 	if _, err := p.sip.WriteToUDP([]byte(msg), p.uasAddr); err != nil {
 		p.t.Fatalf("send %s: %v", method, err)
@@ -444,8 +454,8 @@ func TestHangingUpSendsBye(t *testing.T) {
 	dialog.Stop()
 
 	bye := p.awaitBye(2 * time.Second)
-	if bye.callID() != p.callID {
-		t.Errorf("BYE carries Call-ID %q, want %q", bye.callID(), p.callID)
+	if bye.sipCallID() != p.callID {
+		t.Errorf("BYE carries Call-ID %q, want %q", bye.sipCallID(), p.callID)
 	}
 }
 

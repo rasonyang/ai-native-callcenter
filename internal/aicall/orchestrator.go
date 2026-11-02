@@ -238,7 +238,7 @@ func NewOrchestrator(cfg OrchestratorConfig) (*Orchestrator, error) {
 	o.uas.OnCallStarted = o.onCallStarted
 	o.uas.OnCallEnded = o.onCallEnded
 	o.uas.OnCallFailed = func(dialog *voice.Dialog, err error) {
-		o.log.Error("bot leg failed before media", "callId", dialog.CallID, "error", err)
+		o.dialogLog(dialog).Error("bot leg failed before media", "error", err)
 	}
 	return o, nil
 }
@@ -285,12 +285,22 @@ func (o *Orchestrator) HasSession(callID uuid.UUID) bool {
 	return false
 }
 
+// dialogLog is the orchestrator's logger for a line about one dialog: its SIP
+// Call-ID, and the domain call id when the dialog knows it.
+func (o *Orchestrator) dialogLog(dialog *voice.Dialog) *slog.Logger {
+	log := o.log.With("sipCallId", dialog.SIPCallID)
+	if id := dialog.CallID(); id != uuid.Nil {
+		log = log.With("callId", id)
+	}
+	return log
+}
+
 func (o *Orchestrator) onCallStarted(dialog *voice.Dialog) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	o.mu.Lock()
-	ledgerID, _ := uuid.Parse(dialog.CustomHeaders[headerCallID])
-	o.calls[dialog.CallID] = &activeCall{cancel: cancel, callID: ledgerID}
+	ledgerID := dialog.CallID()
+	o.calls[dialog.SIPCallID] = &activeCall{cancel: cancel, callID: ledgerID}
 	o.mu.Unlock()
 	// Stage 1 of an AI outbound call's time to the first word; a no-op for any
 	// call the application did not place.
@@ -300,7 +310,7 @@ func (o *Orchestrator) onCallStarted(dialog *voice.Dialog) {
 	go func() {
 		defer cancel()
 		if err := o.runCall(ctx, dialog); err != nil {
-			o.log.Error("ai call could not run", "callId", dialog.CallID, "error", err)
+			o.dialogLog(dialog).Error("ai call could not run", "error", err)
 			o.rescue(dialog)
 		}
 	}()
@@ -308,8 +318,8 @@ func (o *Orchestrator) onCallStarted(dialog *voice.Dialog) {
 
 func (o *Orchestrator) onCallEnded(dialog *voice.Dialog) {
 	o.mu.Lock()
-	call := o.calls[dialog.CallID]
-	delete(o.calls, dialog.CallID)
+	call := o.calls[dialog.SIPCallID]
+	delete(o.calls, dialog.SIPCallID)
 	o.mu.Unlock()
 	if call != nil {
 		call.cancel()
@@ -333,8 +343,26 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	language := headers[headerLanguage]
 	callerChannel := headers[headerChannelID]
 
-	log := o.log.With("callId", dialog.CallID,
-		"aiccCallId", headers[headerCallID], "did", didNumber)
+	// The call's domain id is the one the switch stamped on the INVITE, which
+	// the dialog parsed. Without a usable one the call still needs an identity,
+	// so mint it and attach it to the dialog, which makes the UAS's and the
+	// media sessions' later lines carry it too.
+	ledgerCallID := dialog.CallID()
+	isMinted := ledgerCallID == uuid.Nil
+	if isMinted {
+		ledgerCallID = uuid.Must(uuid.NewV7())
+		dialog.BindCallID(ledgerCallID)
+		if bound := dialog.CallID(); bound != uuid.Nil {
+			ledgerCallID = bound
+		}
+	}
+	// callId is the domain call id and nothing else; the SIP Call-ID is
+	// sipCallId.
+	log := o.log.With("callId", ledgerCallID, "sipCallId", dialog.SIPCallID, "did", didNumber)
+	if isMinted {
+		log.Warn("bot leg carried no parseable call id; minted one",
+			"header", headers[headerCallID])
+	}
 
 	did, err := o.findDID(ctx, didNumber)
 	if err != nil {
@@ -353,12 +381,6 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 
 	// The ledger identity is the call id minted before any leg existed, so the
 	// bot's rows and the human path's rows meet on the same key.
-	ledgerCallID, err := uuid.Parse(headers[headerCallID])
-	if err != nil {
-		ledgerCallID = uuid.Must(uuid.NewV7())
-		log.Warn("bot leg carried no parseable call id; minted one",
-			"header", headers[headerCallID], "callId", ledgerCallID)
-	}
 	// An outbound conversation is the same machinery with the direction
 	// stamped by whoever originated it; the default is a caller dialing in.
 	direction := callTypeFromHeader(headers[headerCallType])
@@ -379,7 +401,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		flowID:             did.FlowID,
 		flowSlug:           spec.ID,
 		tech: map[string]any{
-			"sipCallId":     dialog.CallID,
+			"sipCallId":     dialog.SIPCallID,
 			"codec":         dialog.RTP.Law().String(),
 			"remoteRtpAddr": dialog.RemoteRTPAddr.String(),
 		},
@@ -444,7 +466,7 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 	session.ledgerCallID = ledgerCallID
 
 	o.mu.Lock()
-	if call := o.calls[dialog.CallID]; call != nil {
+	if call := o.calls[dialog.SIPCallID]; call != nil {
 		call.session = session
 	}
 	o.mu.Unlock()
@@ -1408,13 +1430,13 @@ func (o *Orchestrator) rescue(dialog *voice.Dialog) {
 	}
 	for _, queue := range queues {
 		if queue.ID == *did.FallbackQueueID {
-			o.log.Info("transferring the caller to the fallback queue",
-				"callId", dialog.CallID, "queue", queue.Name)
+			o.dialogLog(dialog).Info("transferring the caller to the fallback queue",
+				"queue", queue.Name)
 			if err := o.cfg.Switch.TransferToExtension(channel, queue.ExtNumber, ""); isUnconfirmed(err) {
-				o.log.Warn("fallback transfer sent and not confirmed; the switch may still run it",
-					"callId", dialog.CallID, "error", err)
+				o.dialogLog(dialog).Warn("fallback transfer sent and not confirmed; the switch may still run it",
+					"error", err)
 			} else if err != nil {
-				o.log.Error("fallback transfer failed", "callId", dialog.CallID, "error", err)
+				o.dialogLog(dialog).Error("fallback transfer failed", "error", err)
 			}
 			return
 		}

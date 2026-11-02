@@ -56,7 +56,7 @@ type sipMessage struct {
 
 func (m *sipMessage) get(name string) string { return m.headers[strings.ToLower(name)] }
 
-func (m *sipMessage) callID() string     { return m.get("Call-ID") }
+func (m *sipMessage) sipCallID() string  { return m.get("Call-ID") }
 func (m *sipMessage) fromHeader() string { return m.get("From") }
 func (m *sipMessage) toHeader() string   { return m.get("To") }
 func (m *sipMessage) cseq() string       { return m.get("CSeq") }
@@ -240,7 +240,7 @@ func buildResponse(msg *sipMessage, status, toTag, cseqOverride, extraHeaders st
 		echoRouting(msg) + "\r\n" +
 		"From: " + msg.fromHeader() + "\r\n" +
 		"To: " + to + "\r\n" +
-		"Call-ID: " + msg.callID() + "\r\n" +
+		"Call-ID: " + msg.sipCallID() + "\r\n" +
 		"CSeq: " + cseq + "\r\n"
 	if extraHeaders != "" {
 		head += extraHeaders

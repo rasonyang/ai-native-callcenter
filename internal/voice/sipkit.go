@@ -47,7 +47,7 @@ func (m *SIPMessage) Headers() map[string]string {
 	return out
 }
 
-func (m *SIPMessage) CallID() string  { return m.msg.callID() }
+func (m *SIPMessage) CallID() string  { return m.msg.sipCallID() }
 func (m *SIPMessage) From() string    { return m.msg.fromHeader() }
 func (m *SIPMessage) To() string      { return m.msg.toHeader() }
 func (m *SIPMessage) CSeq() string    { return m.msg.cseq() }
