@@ -4,7 +4,7 @@
     "title": "AI Native Call Center API",
     "version": "1.0.0",
     "summary": "REST and SSE surface of the AI-native call center.",
-    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around. The embedded web application is one consumer of this contract, with no route and no capability of its own.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\n**Authorization is scopes, not roles.** Every operation declares the scopes it needs; the vocabulary is x-scopes at the root of this document and nothing else defines it. Two credentials carry those scopes and neither is the norm: a person signs in at a browser and gets a session cookie (POST /auth/login), whose scopes are derived from the account's role — the role itself never reaches the wire; a system presents an API key as `Authorization: Bearer <key>` and carries exactly the scopes it was issued with. A key may act for an agent by sending `X-AICC-Agent-ID`; the same header on a session request is refused. A mutating request that authenticates with the cookie must also carry X-AICC-Csrf; one that authenticates with a key must not — that header protects a credential the browser sends automatically.\n\nErrors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the client. That holds for the router's own refusals too: a path this contract does not declare is 404 NOT_FOUND and a method it does not declare on a path it does is 405 METHOD_NOT_ALLOWED, both in the envelope — never the web application's index.html, which a client cannot tell from a successful response.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.",
+    "description": "The single contract for every HTTP endpoint the platform serves. Spec-first: this document is the source of truth; Go and TypeScript types are generated from it, never the other way around. The embedded web application is one consumer of this contract, with no route and no capability of its own.\n\nNaming follows docs/design/07-naming.md: JSON properties are lowerCamelCase with initialisms treated as words (callId), enum values are SCREAMING_SNAKE_CASE and byte-identical across JSON, TypeScript and the database, timestamps are xxxAt (RFC 3339), durations are xxxSec/xxxMs, booleans are is/has prefixed.\n\n**Authorization is scopes, not roles.** Every operation declares the scopes it needs; the vocabulary is x-scopes at the root of this document and nothing else defines it. Two credentials carry those scopes and neither is the norm: a person signs in at a browser and gets a session cookie (POST /auth/login), whose scopes are derived from the account's role — the role itself never reaches the wire; a system presents an API key as `Authorization: Bearer <key>` and carries exactly the scopes it was issued with. A key may act for an agent by sending `X-AICC-Agent-ID`; the same header on a session request is refused. A mutating request that authenticates with the cookie must also carry X-AICC-Csrf; one that authenticates with a key must not — that header protects a credential the browser sends automatically.\n\nErrors always use the single envelope {\"error\": {code, message, params}}; the code is machine-readable and localized by the client. That holds for the router's own refusals too: a path this contract does not declare is 404 NOT_FOUND and a method it does not declare on a path it does is 405 METHOD_NOT_ALLOWED, both in the envelope — never the web application's index.html, which a client cannot tell from a successful response.\n\nA separate unauthenticated operations listener (AICC_METRICS_ADDR, default 127.0.0.1:9090) serves GET /metrics, /healthz and /readyz in plain text; it is deliberately outside this contract.\n\nTwo surfaces push to a client rather than answer it. The event stream (GET /events) is described in the events guide: https://github.com/rasonyang/ai-native-callcenter/blob/main/docs/events.md. The CDR webhook the platform sends to a subscription's endpoint is declared as webhooks.cdrDelivery.",
     "license": {
       "name": "Apache-2.0",
       "identifier": "Apache-2.0"
@@ -97,7 +97,7 @@
     },
     {
       "name": "webhooks",
-      "description": "CDR delivery to a customer's own system. A subscription names an endpoint; every finished call whose CDR matches its filter is delivered there. Read-only over HTTP for now on the screens (design 09 §11); the write operations here are how a subscription is created."
+      "description": "CDR delivery to a customer's own system. A subscription names an endpoint; every finished call whose CDR matches its filter is delivered there. The request the platform sends to that endpoint, and the answer it expects, are declared as webhooks.cdrDelivery (the `webhooks` section of this document). Read-only over HTTP for now on the screens (design 09 §11); the write operations here are how a subscription is created."
     },
     {
       "name": "dnc",
@@ -6061,7 +6061,7 @@
           "events"
         ],
         "summary": "The ordered event stream",
-        "description": "Server-sent events, one SseEvent envelope per data: line, the type mirrored on the event: line and the global seq on the id: line. Scope comes from the authenticated identity; ?types= may only narrow what that identity would already receive. Reconnection resumes from Last-Event-ID (or ?lastEventId=); a resume point older than the replay ring triggers a SYSTEM_RESET event telling the client to refetch snapshots. A comment heartbeat (\": hb\") flows every 15 seconds. The connection has no timeout; it ends with the client.",
+        "description": "Server-sent events, one SseEvent envelope per data: line, the type mirrored on the event: line and the global seq on the id: line. Scope comes from the authenticated identity; ?types= may only narrow what that identity would already receive. Reconnection resumes from Last-Event-ID (or ?lastEventId=); a resume point older than the replay ring triggers a SYSTEM_RESET event telling the client to refetch snapshots. A comment heartbeat (\": hb\") flows every 15 seconds. The connection has no timeout; it ends with the client. The event types, framing, scope and resume rules are written up in the events guide: https://github.com/rasonyang/ai-native-callcenter/blob/main/docs/events.md.",
         "parameters": [
           {
             "name": "types",
@@ -6093,7 +6093,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseAgentPresencePayload, SseCallbackEventPayload, SseSystemResetPayload).",
+            "description": "The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention; the events guide maps every SseEventType to its payload schema.",
             "content": {
               "text/event-stream": {
                 "schema": {
@@ -6407,7 +6407,7 @@
           "webhooks"
         ],
         "summary": "Create a webhook subscription",
-        "description": "Where finished calls are sent. Reachable by any subject holding config:write, a key included.\n\nThis was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from \"can the key reach it\" to \"was this key granted config:write\", which is the question a scope exists to answer.",
+        "description": "Where finished calls are sent. Reachable by any subject holding config:write, a key included.\n\nThis was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from \"can the key reach it\" to \"was this key granted config:write\", which is the question a scope exists to answer.\n\nWhat is sent to the subscription's url, how it authenticates, and what acknowledges it or is retried: see webhooks.cdrDelivery.",
         "security": [
           {
             "cookieSession": [
@@ -7011,8 +7011,64 @@
       }
     }
   },
+  "webhooks": {
+    "cdrDelivery": {
+      "post": {
+        "operationId": "cdrDelivery",
+        "tags": [
+          "webhooks"
+        ],
+        "summary": "A finished call, delivered to a subscription",
+        "description": "Not an operation of this server: this is the request the platform sends to the `url` of every enabled webhook subscription whose filter matches a finished call, and the operation the receiving endpoint implements. Create subscriptions with `createWebhookSubscription`.\n\nThe request is a POST with a JSON body (`WebhookCdrDelivery`). `X-AICC-Webhook-Id` carries the `deliveryId` as a header too. When the subscription has a token, `Authorization: Bearer <token>` carries it: the subscription's own credential, never one of this deployment's API keys. A subscription with no token sends no Authorization header.\n\nThe receiver's answer decides what happens next.\n\n**Acknowledgement.** Any 2xx status acknowledges the delivery; the response body is read (up to 4 KiB) and discarded. Anything else is a failed attempt: every non-2xx status (4xx included, because a malformed-payload rejection cannot be told from a gateway hiccup by status code), a timeout, a refused or reset connection, and a redirect. Redirects are never followed, so the subscription URL must be the endpoint itself.\n\n**Timeout.** One attempt is bounded at 10 seconds.\n\n**Retry.** A delivery is attempted at most 6 times. After the first failed attempt the next is made 1 minute later, then 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the sixth failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.\n\n**Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.\n\n**Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again: when the earlier delivery is still pending, its payload is replaced in place (same `deliveryId` and `revision`, `attempt` back to 1), so the next attempt carries the corrected record; when it was already delivered or has failed, a new delivery with a new `deliveryId` and the next `revision` is queued. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery. Because a pending delivery is replaced in place, an attempt that reached the receiver but was not acknowledged (a timeout, for instance) can be followed by a different body under the same `deliveryId` and `revision`; a receiver that skips a `deliveryId` it has already stored keeps the earlier record.",
+        "security": [
+          {
+            "subscriptionToken": []
+          },
+          {}
+        ],
+        "parameters": [
+          {
+            "name": "X-AICC-Webhook-Id",
+            "in": "header",
+            "required": true,
+            "description": "The delivery's `deliveryId`, sent as a header so a receiver can deduplicate before parsing the body. Identical on every retry of one delivery.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCdrDelivery"
+              }
+            }
+          }
+        },
+        "responses": {
+          "2XX": {
+            "description": "Acknowledged. Any 2xx status settles the delivery as delivered; the body is ignored."
+          },
+          "4XX": {
+            "description": "Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times, as is any other non-2xx status."
+          },
+          "5XX": {
+            "description": "Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times."
+          }
+        }
+      }
+    }
+  },
   "components": {
     "securitySchemes": {
+      "subscriptionToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The token of a webhook subscription, presented by the platform to the subscriber's endpoint as `Authorization: Bearer <token>` on every delivery (webhooks.cdrDelivery). It is the subscriber's own credential, set on the subscription (WebhookSubscriptionWrite.authToken); this deployment does not accept it and never sends an API key outward. A subscription with no token sends no header."
+      },
       "cookieSession": {
         "type": "apiKey",
         "in": "cookie",
@@ -7124,6 +7180,43 @@
       }
     },
     "schemas": {
+      "WebhookCdrDelivery": {
+        "type": "object",
+        "description": "The body of a CDR webhook delivery (webhooks.cdrDelivery): the finished call wrapped in a delivery header. The CDR is the one the ledger holds, as GET /cdrs/{callId} serves it in CDRDetail.cdr; transcript and recordings are not part of a delivery.",
+        "properties": {
+          "deliveryId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Identifies this delivery, and is the receiver's deduplication key. Repeated on every retry; also sent as the X-AICC-Webhook-Id header."
+          },
+          "subscriptionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The webhook subscription this delivery belongs to."
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Which version of the call's record this is, counted per subscription and call from 1. The receiver keeps the highest revision per cdr.callId."
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 6,
+            "description": "Which attempt this is for this delivery, from 1; at most 6."
+          },
+          "cdr": {
+            "$ref": "#/components/schemas/CDR"
+          }
+        },
+        "required": [
+          "deliveryId",
+          "subscriptionId",
+          "revision",
+          "attempt",
+          "cdr"
+        ]
+      },
       "ErrorCode": {
         "type": "string",
         "description": "Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.",

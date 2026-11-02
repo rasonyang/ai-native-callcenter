@@ -72,6 +72,20 @@ carries the one-line installer's files.
 
 ### Added
 
+- The CDR webhook is in the API contract. `docs/openapi.json` declares a
+  top-level `webhooks.cdrDelivery` (`POST`): the `WebhookCdrDelivery` body
+  (`deliveryId`, `subscriptionId`, `revision`, `attempt`, `cdr`), the
+  `Authorization: Bearer <subscription token>` and `X-AICC-Webhook-Id` headers,
+  what acknowledges a delivery (any 2xx), the retry schedule and the
+  last-`revision`-wins rule per `callId`, so a rendered reference shows the
+  request the platform sends and not only the subscription CRUD. A test in
+  `internal/webhook` validates the body and headers the worker really sends
+  against that declaration. A new guide, `docs/events.md`, covers the event
+  stream (framing, scope, `?types=`, resuming with `Last-Event-ID`,
+  `SYSTEM_RESET`, slow consumers) and lists every `SseEventType` value with its
+  payload schema; a test fails when a value in the contract has no row in it.
+  `info.description` and `streamEvents` link to the guide. (#431)
+
 - When the switch runs out of RTP ports the application now says so: an ERROR
   log line `switch out of RTP ports` (`legId`, `callId` when known, `media`,
   `fix`) and a counter `aicc_switch_rtp_ports_exhausted_total{media}`. `aicc

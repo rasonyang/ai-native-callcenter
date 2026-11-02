@@ -8,6 +8,12 @@ generate:
   chi-server: true
 output: internal/api/api.gen.go
 output-options:
+  # The prune step does not follow $refs from the top-level `webhooks`
+  # section, so it drops WebhookCdrDelivery (referenced only by
+  # webhooks.cdrDelivery) while the generated CDRDeliveryJSONRequestBody
+  # alias still names it, and internal/api stops compiling. Keeping every
+  # component costs only the otherwise-unused Sse*Payload types.
+  skip-prune: true
   # 07-naming: Go exported names keep initialisms fully capitalized
   # (JSON callId -> Go CallID). The additional entries cover this domain's
   # vocabulary; MOH and RONA stay ordinary words (MohSound, RonaDelaySec),
