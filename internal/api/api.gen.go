@@ -2889,6 +2889,74 @@ type SIPSession struct {
 // Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
 type Speaker string
 
+// SSEAgentPresencePayload Payload of the AGENT_* events: this agent's presence as it now stands, carrying what a roster row shows so a supervisor's list updates without refetching.
+type SSEAgentPresencePayload struct {
+	// Availability The single word that answers: could this agent take a call, and if not, why.
+	Availability Availability `json:"availability"`
+
+	// DeviceAccount The extension number the switch holds a registration for, or null when it holds none.
+	DeviceAccount *string `json:"deviceAccount"`
+	DisplayName   string  `json:"displayName"`
+
+	// ExtensionNumber The extension the agent is signed in at; absent while signed out. deviceAccount, not this field, names a registered phone.
+	ExtensionNumber *string `json:"extensionNumber,omitempty"`
+
+	// IsDeviceRegistered Whether the switch currently holds a registration for this agent's extension.
+	IsDeviceRegistered bool `json:"isDeviceRegistered"`
+
+	// Reason Why an agent is NOT_READY. LOGIN, AFTER_CALL_WORK, SYSTEM, SUPERVISOR and DEVICE_LOST are set by the platform, never chosen by the agent. DEVICE_LOST means the phone's registration expired or was flushed while the agent was READY.
+	Reason *NotReadyReason `json:"reason,omitempty"`
+
+	// State Presence FSM state.
+	State AgentState `json:"state"`
+
+	// WrapUpCallID The call the agent is doing after-call work for; absent while there is none.
+	WrapUpCallID *openapi_types.UUID `json:"wrapUpCallId,omitempty"`
+}
+
+// SSEBotSessionStartedPayload Payload of BOT_SESSION_STARTED: the conversation is running, which is not the same as the bot's leg being up. The leg answers first and the model session is opened afterwards, and it can fail — the caller is then rescued to a queue. Until this arrives, a caller on an answered bot leg may be talking to nothing.
+type SSEBotSessionStartedPayload struct {
+	// FlowID The published flow revision answering this call. Not otherwise knowable while the call is running; the ledger only says so afterwards.
+	FlowID openapi_types.UUID `json:"flowId"`
+}
+
+// SSECallUserDataPayload Payload of CALL_USER_DATA: the call's business data changed, and these are the keys that moved. The resulting data itself is on the envelope's userData, as it is on every call event — this names what is different about it, so a screen can highlight the change without diffing. Both lists are sorted, and a key set to the value it already held appears in neither: what is announced here is movement, not merely that a write arrived.
+type SSECallUserDataPayload struct {
+	// ChangedKeys Keys that were added or given a new value.
+	ChangedKeys []string `json:"changedKeys"`
+
+	// DeletedKeys Keys that were removed.
+	DeletedKeys []string `json:"deletedKeys"`
+}
+
+// SSECallbackEventPayload Payload of CALLBACK_CREATED and CALLBACK_UPDATED.
+type SSECallbackEventPayload struct {
+	// Callback A promise to call somebody back, taken by the bot and kept by an agent.
+	Callback Callback `json:"callback"`
+}
+
+// SSECampaignUpdatedPayload Payload of CAMPAIGN_UPDATED: the campaign's state as the dialer sees it, published when a campaign is created (status DRAFT, zero contacts) and whenever something in it changes, at most once per second per campaign (the latest state wins, so a campaign created and started inside one second is announced once, as RUNNING; a final status is never dropped). A create that fails publishes nothing. Delivered to subjects that hold calls:read:all, never to an agent's own stream. After a SYSTEM_RESET, read GET /campaigns/{campaignId} for the same fields.
+type SSECampaignUpdatedPayload struct {
+	// Activity What a RUNNING campaign is doing right now, computed by the dialer and never stored. DIALING: calls are in flight. WAITING_WINDOW: every pending contact is outside its calling window (the campaign stays RUNNING; the window reopens by itself). WAITING_RETRY: no pending contact is due yet. AT_CAPACITY: due contacts are held back by a limit (the campaign's maxConcurrent, the deployment's ringing cap, or bot capacity).
+	Activity   *CampaignActivity  `json:"activity,omitempty"`
+	CampaignID openapi_types.UUID `json:"campaignId"`
+
+	// Contacts How many contacts the campaign has in each status.
+	Contacts CampaignContactCounts `json:"contacts"`
+
+	// InFlight Calls ringing or talking right now. Absent unless RUNNING.
+	InFlight *int `json:"inFlight,omitempty"`
+
+	// NextDialAt As on Campaign: absent unless RUNNING and a future dial time is known.
+	NextDialAt *time.Time `json:"nextDialAt,omitempty"`
+
+	// PauseReason Why a campaign is PAUSED. MANUAL: an operator paused it. TRUNK_FAILURE: the trunk breaker tripped, several attempts in a row ended in a transient or originate failure. PROVIDER_FAILURE: the voice-provider breaker tripped, several answered calls in a row could not start a bot session. OUTBOUND_NOT_CONFIGURED: the dialer found AICC_OUTBOUND_ENDPOINT empty while the campaign was running; set it, then resume. Resuming is an operator's decision in every case.
+	PauseReason *CampaignPauseReason `json:"pauseReason,omitempty"`
+
+	// Status DRAFT is being written and dials nothing. RUNNING dials. PAUSED has stopped admitting new calls (pauseReason says who stopped it); calls in flight finish. COMPLETED and CANCELLED are final: nothing changes, contacts and leads stay readable. COMPLETED is reached only by the dialer, when nothing is left to dial and nothing is in flight; there is no operation for it.
+	Status CampaignStatus `json:"status"`
+}
+
 // SSEEvent One envelope on the event stream. Call events repeat enough context (callType, userData) for a screen-pop without further requests. In SSE framing the envelope is the data: line, the event: line carries type, and the id: line carries seq.
 type SSEEvent struct {
 	AgentID *openapi_types.UUID `json:"agentId,omitempty"`
@@ -2914,6 +2982,75 @@ type SSEEvent struct {
 
 // SSEEventType Every event name on the stream. PARTY_* are leg-scoped, CALL_* call-scoped, CAMPAIGN_* describe an outbound campaign (supervision only). SYSTEM_* stream-control. DEVICE_* report a phone on two independent axes and name one transition each: REGISTERED/UNREGISTERED say whether a SIP registration exists, REACHABLE/UNREACHABLE whether the registered phone still answers the switch's OPTIONS ping. A registered phone that stops answering is the agent-side failure that matters most — it looks exactly like a working one — so it has a name of its own rather than borrowing UNREGISTERED.
 type SSEEventType string
+
+// SSEQueueCountPayload Payload of QUEUE_COUNT: how many callers are waiting in the queue named on the envelope's queueId, published whenever that number moves.
+type SSEQueueCountPayload struct {
+	// LongestWaitAt When the longest-waiting caller joined; absent when nobody is waiting.
+	LongestWaitAt *time.Time `json:"longestWaitAt,omitempty"`
+	QueueName     string     `json:"queueName"`
+	Waiting       int        `json:"waiting"`
+}
+
+// SSEQueueJoinedPayload Payload of QUEUE_JOINED: a caller entered the queue named on the envelope's queueId.
+type SSEQueueJoinedPayload struct {
+	FromNumber *string   `json:"fromNumber,omitempty"`
+	JoinedAt   time.Time `json:"joinedAt"`
+	QueueName  string    `json:"queueName"`
+}
+
+// SSEQueueLeftPayload Payload of QUEUE_LEFT: the caller left the queue, whether answered, abandoned or timed out. cause and cancelReason are the queue's own words, stable codes rather than display text.
+type SSEQueueLeftPayload struct {
+	CancelReason *string `json:"cancelReason,omitempty"`
+	Cause        *string `json:"cause,omitempty"`
+	FromNumber   *string `json:"fromNumber,omitempty"`
+	QueueName    string  `json:"queueName"`
+	WaitSec      *int    `json:"waitSec,omitempty"`
+}
+
+// SSESystemResetPayload Payload of SYSTEM_RESET: the resume point aged out of the ring; refetch snapshots before tailing again.
+type SSESystemResetPayload struct {
+	OldestSeq int64 `json:"oldestSeq"`
+}
+
+// SSETranscriptPayload Payload of CALL_TRANSCRIPT: one line of the conversation, from either phase of the call. seq orders the transcript within the call and is unrelated to the envelope's transport seq. A partial carries isFinal false and no seq, because it has no place in the order until it is final.
+type SSETranscriptPayload struct {
+	AgentID  *openapi_types.UUID `json:"agentId,omitempty"`
+	IsFinal  bool                `json:"isFinal"`
+	Kind     TranscriptKind      `json:"kind"`
+	Language *string             `json:"language,omitempty"`
+	OffsetMs *int64              `json:"offsetMs,omitempty"`
+	PartyID  *openapi_types.UUID `json:"partyId,omitempty"`
+	Seq      *int64              `json:"seq,omitempty"`
+
+	// Source Where a line came from. MODEL is the conversational engine's own transcript of the AI leg; ASR is a separate recognition of streamed audio.
+	Source TranscriptSource `json:"source"`
+
+	// Speaker Who said a line. CUSTOMER is the person who called, whichever leg carries them; BOT is the AI; HUMAN_AGENT is a logged-in agent answering after a transfer.
+	Speaker     Speaker `json:"speaker"`
+	Text        string  `json:"text"`
+	UtteranceID string  `json:"utteranceId"`
+}
+
+// SSETranscriptionStatePayload Payload of CALL_TRANSCRIPTION_STATE: whether the agent is seeing everything that is being said, and if not, which side is missing. reason is a stable code, never display text.
+type SSETranscriptionStatePayload struct {
+	DegradedSpeakers *[]Speaker `json:"degradedSpeakers,omitempty"`
+	Reason           *string    `json:"reason,omitempty"`
+
+	// State Health of live transcription for a call, as the agent should see it. ENDED is the snapshot's answer for a call that is over: it is produced by GET /calls/{callId}/transcript rather than by the transcription actor, which is why the actor's own mirror of these values does not name it.
+	State TranscriptionState `json:"state"`
+}
+
+// SSEWrapUpDraftPayload Payload of AGENT_WRAP_UP_DRAFTED: the AI wrote a draft of this agent's after-call record. Sent once per record, only to the agent whose record it is (supervisors and administrators see every event, as for every AGENT_* event), and never for a record the agent has already confirmed. The same draft is on the record (CurrentWrapUp, WrapUp), so a client that missed the event reads it from there.
+type SSEWrapUpDraftPayload struct {
+	CallID openapi_types.UUID `json:"callId"`
+
+	// DispositionCode The suggested disposition, one of the enabled codes. Absent when the draft suggests none.
+	DispositionCode *string   `json:"dispositionCode,omitempty"`
+	GeneratedAt     time.Time `json:"generatedAt"`
+
+	// Note The drafted note.
+	Note string `json:"note"`
+}
 
 // StaffQueueRequest defines model for StaffQueueRequest.
 type StaffQueueRequest struct {
@@ -3117,6 +3254,24 @@ type WaitingCallList struct {
 
 	// Queues The queues the reader works, listed whether or not anybody is waiting in them. A line with nobody in it is an answer, not an absence.
 	Queues []StaffedQueue `json:"queues"`
+}
+
+// WebhookCDRDelivery The body of a CDR webhook delivery (webhooks.cdrDelivery): the finished call wrapped in a delivery header. The CDR is the one the ledger holds, as GET /cdrs/{callId} serves it in CDRDetail.cdr; transcript and recordings are not part of a delivery.
+type WebhookCDRDelivery struct {
+	// Attempt Which attempt this is for this delivery, from 1; at most 6.
+	Attempt int `json:"attempt"`
+
+	// CDR One finished call. totalSec always equals the sum of its parts.
+	CDR CDR `json:"cdr"`
+
+	// DeliveryID Identifies this delivery, and is the receiver's deduplication key. Repeated on every retry; also sent as the X-AICC-Webhook-Id header.
+	DeliveryID openapi_types.UUID `json:"deliveryId"`
+
+	// Revision Which version of the call's record this is, counted per subscription and call from 1. The receiver keeps the highest revision per cdr.callId.
+	Revision int `json:"revision"`
+
+	// SubscriptionID The webhook subscription this delivery belongs to.
+	SubscriptionID openapi_types.UUID `json:"subscriptionId"`
 }
 
 // WebhookDelivery One attempt-set at delivering one revision of one call's CDR to one subscription.
@@ -3423,6 +3578,12 @@ type ListWebhookDeliveriesParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CDRDeliveryParams defines parameters for CDRDelivery.
+type CDRDeliveryParams struct {
+	// XAICCWebhookID The delivery's `deliveryId`, sent as a header so a receiver can deduplicate before parsing the body. Identical on every retry of one delivery.
+	XAICCWebhookID openapi_types.UUID `json:"X-AICC-Webhook-Id"`
+}
+
 // AgentLoginJSONRequestBody defines body for AgentLogin for application/json ContentType.
 type AgentLoginJSONRequestBody = AgentLoginRequest
 
@@ -3530,6 +3691,9 @@ type CreateWebhookSubscriptionJSONRequestBody = WebhookSubscriptionWrite
 
 // UpdateWebhookSubscriptionJSONRequestBody defines body for UpdateWebhookSubscription for application/json ContentType.
 type UpdateWebhookSubscriptionJSONRequestBody = WebhookSubscriptionWrite
+
+// CDRDeliveryJSONRequestBody defines body for CDRDelivery for application/json ContentType.
+type CDRDeliveryJSONRequestBody = WebhookCDRDelivery
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -8184,4 +8348,67 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 
 	return r
+}
+
+// WebhookReceiverInterface represents handlers for receiving inbound
+// webhook requests. Each webhook becomes a Handle*Webhook
+// method that the implementation fills in. The caller mounts the per-
+// webhook http.Handler returned by {Op}WebhookHandler at
+// whatever URL path they advertise to senders.
+type WebhookReceiverInterface interface {
+	// A finished call, delivered to a subscription
+	// HandleCDRDeliveryWebhook handles the POST webhook for cdrDelivery.
+	HandleCDRDeliveryWebhook(w http.ResponseWriter, r *http.Request, params CDRDeliveryParams)
+}
+
+// WebhookReceiverMiddlewareFunc wraps an http.Handler with cross-
+// cutting behavior (signature verification, logging, rate limiting, ...).
+type WebhookReceiverMiddlewareFunc func(http.Handler) http.Handler
+
+// CDRDeliveryWebhookHandler returns the http.Handler for the cdrDelivery webhook.
+// Mount this at the URL path advertised to webhook senders. errHandler
+// may be nil; if so, parameter-binding errors return 400 with the error
+// message. Middlewares are applied in the order provided -- the last
+// argument becomes the outermost wrapper.
+func CDRDeliveryWebhookHandler(si WebhookReceiverInterface, errHandler func(w http.ResponseWriter, r *http.Request, err error), middlewares ...WebhookReceiverMiddlewareFunc) http.Handler {
+	if errHandler == nil {
+		errHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+		}
+	}
+	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var err error
+		_ = err
+
+		// Parameter object where we will unmarshal all parameters from the request.
+		var params CDRDeliveryParams
+
+		// ------------- Required header parameter "X-AICC-Webhook-Id" -------------
+		if valueList, found := r.Header[http.CanonicalHeaderKey("X-AICC-Webhook-Id")]; found {
+			var XAICCWebhookID openapi_types.UUID
+			n := len(valueList)
+			if n != 1 {
+				errHandler(w, r, &TooManyValuesForParamError{ParamName: "X-AICC-Webhook-Id", Count: n})
+				return
+			}
+
+			err = runtime.BindStyledParameterWithOptions("simple", "X-AICC-Webhook-Id", valueList[0], &XAICCWebhookID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: "uuid"})
+			if err != nil {
+				errHandler(w, r, &InvalidParamFormatError{ParamName: "X-AICC-Webhook-Id", Err: err})
+				return
+			}
+			params.XAICCWebhookID = XAICCWebhookID
+
+		} else {
+			err := fmt.Errorf("Header parameter X-AICC-Webhook-Id is required, but not found")
+			errHandler(w, r, &RequiredHeaderError{ParamName: "X-AICC-Webhook-Id", Err: err})
+			return
+		}
+
+		si.HandleCDRDeliveryWebhook(w, r, params)
+	})
+	for _, mw := range middlewares {
+		h = mw(h)
+	}
+	return h
 }

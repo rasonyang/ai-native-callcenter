@@ -1592,7 +1592,7 @@ export interface paths {
         };
         /**
          * The ordered event stream
-         * @description Server-sent events, one SseEvent envelope per data: line, the type mirrored on the event: line and the global seq on the id: line. Scope comes from the authenticated identity; ?types= may only narrow what that identity would already receive. Reconnection resumes from Last-Event-ID (or ?lastEventId=); a resume point older than the replay ring triggers a SYSTEM_RESET event telling the client to refetch snapshots. A comment heartbeat (": hb") flows every 15 seconds. The connection has no timeout; it ends with the client.
+         * @description Server-sent events, one SseEvent envelope per data: line, the type mirrored on the event: line and the global seq on the id: line. Scope comes from the authenticated identity; ?types= may only narrow what that identity would already receive. Reconnection resumes from Last-Event-ID (or ?lastEventId=); a resume point older than the replay ring triggers a SYSTEM_RESET event telling the client to refetch snapshots. A comment heartbeat (": hb") flows every 15 seconds. The connection has no timeout; it ends with the client. The event types, framing, scope and resume rules are written up in the events guide: https://github.com/rasonyang/ai-native-callcenter/blob/main/docs/events.md.
          */
         get: operations["streamEvents"];
         put?: never;
@@ -1685,6 +1685,8 @@ export interface paths {
          * @description Where finished calls are sent. Reachable by any subject holding config:write, a key included.
          *
          *     This was once closed to API keys outright, on the reasoning that a credential able to place calls should not also be able to choose where every finished call goes (design 09 §10). That reasoning assumed one all-powerful key. With a scope per key it no longer holds: a key issued for dialling carries calls:create and cannot reach this at all. The risk did not disappear — it moved from "can the key reach it" to "was this key granted config:write", which is the question a scope exists to answer.
+         *
+         *     What is sent to the subscription's url, how it authenticates, and what acknowledges it or is retried: see webhooks.cdrDelivery.
          */
         post: operations["createWebhookSubscription"];
         delete?: never;
@@ -1837,9 +1839,62 @@ export interface paths {
         trace?: never;
     };
 }
-export type webhooks = Record<string, never>;
+export interface webhooks {
+    cdrDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A finished call, delivered to a subscription
+         * @description Not an operation of this server: this is the request the platform sends to the `url` of every enabled webhook subscription whose filter matches a finished call, and the operation the receiving endpoint implements. Create subscriptions with `createWebhookSubscription`.
+         *
+         *     The request is a POST with a JSON body (`WebhookCdrDelivery`). `X-AICC-Webhook-Id` carries the `deliveryId` as a header too. When the subscription has a token, `Authorization: Bearer <token>` carries it: the subscription's own credential, never one of this deployment's API keys. A subscription with no token sends no Authorization header.
+         *
+         *     The receiver's answer decides what happens next.
+         *
+         *     **Acknowledgement.** Any 2xx status acknowledges the delivery; the response body is read (up to 4 KiB) and discarded. Anything else is a failed attempt: every non-2xx status (4xx included, because a malformed-payload rejection cannot be told from a gateway hiccup by status code), a timeout, a refused or reset connection, and a redirect. Redirects are never followed, so the subscription URL must be the endpoint itself.
+         *
+         *     **Timeout.** One attempt is bounded at 10 seconds.
+         *
+         *     **Retry.** A delivery is attempted at most 6 times. After the first failed attempt the next is made 1 minute later, then 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the sixth failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.
+         *
+         *     **Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.
+         *
+         *     **Revisions: the last `revision` wins per `callId`.** The first delivery of a call to a subscription is revision 1. If the call's record is later written again (a fuller CDR replacing the first), the receiver is told again: when the earlier delivery is still pending, its payload is replaced in place (same `deliveryId` and `revision`, `attempt` back to 1), so the next attempt carries the corrected record; when it was already delivered or has failed, a new delivery with a new `deliveryId` and the next `revision` is queued. A receiver keeps, per `callId`, the delivery with the highest `revision`, and ignores one with a lower `revision` than it already holds whatever order they arrive in. `X-AICC-Webhook-Id` is the deduplication key for a retry of the same delivery. Because a pending delivery is replaced in place, an attempt that reached the receiver but was not acknowledged (a timeout, for instance) can be followed by a different body under the same `deliveryId` and `revision`; a receiver that skips a `deliveryId` it has already stored keeps the earlier record.
+         */
+        post: operations["cdrDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+}
 export interface components {
     schemas: {
+        /** @description The body of a CDR webhook delivery (webhooks.cdrDelivery): the finished call wrapped in a delivery header. The CDR is the one the ledger holds, as GET /cdrs/{callId} serves it in CDRDetail.cdr; transcript and recordings are not part of a delivery. */
+        WebhookCdrDelivery: {
+            /**
+             * Format: uuid
+             * @description Identifies this delivery, and is the receiver's deduplication key. Repeated on every retry; also sent as the X-AICC-Webhook-Id header.
+             */
+            deliveryId: string;
+            /**
+             * Format: uuid
+             * @description The webhook subscription this delivery belongs to.
+             */
+            subscriptionId: string;
+            /** @description Which version of the call's record this is, counted per subscription and call from 1. The receiver keeps the highest revision per cdr.callId. */
+            revision: number;
+            /** @description Which attempt this is for this delivery, from 1; at most 6. */
+            attempt: number;
+            cdr: components["schemas"]["CDR"];
+        };
         /**
          * @description Machine-readable, translatable failure identifier. The frontend renders errors.<CODE>; the backend never localizes.
          * @enum {string}
@@ -6591,7 +6646,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention (SseAgentPresencePayload, SseCallbackEventPayload, SseSystemResetPayload). */
+            /** @description The stream. Each data: line is one SseEvent; per-type payload shapes live in components/schemas under the Sse*Payload naming convention; the events guide maps every SseEventType to its payload schema. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -7016,6 +7071,45 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             503: components["responses"]["ServiceUnavailable"];
+        };
+    };
+    cdrDelivery: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description The delivery's `deliveryId`, sent as a header so a receiver can deduplicate before parsing the body. Identical on every retry of one delivery. */
+                "X-AICC-Webhook-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebhookCdrDelivery"];
+            };
+        };
+        responses: {
+            /** @description Acknowledged. Any 2xx status settles the delivery as delivered; the body is ignored. */
+            "2XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times, as is any other non-2xx status. */
+            "4XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times. */
+            "5XX": {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }
