@@ -21,14 +21,26 @@ the ESL link reconnects on its own — but the human path is dead until it does.
 
 **FreeSWITCH is not this repository's to start — but its configuration is this
 repository's.** The process is a native install on this box, started and stopped
-outside the repository (`pgrep -fl freeswitch`;
-`/usr/local/freeswitch/bin/freeswitch -nc -nonat`). What it reads is ours:
+by hand (`pgrep -fl freeswitch`; on macOS with `/usr/local/freeswitch/startup.sh`,
+which [`deploy/dev/freeswitch/install.sh`](../deploy/dev/freeswitch/README.md#thread-priority-on-macos)
+installs, below). What it reads is ours:
 `freeswitch/conf/` is the complete configuration tree and `freeswitch/scripts/`
 the Lua that serves the directory and the queues from PostgreSQL, and
 [`freeswitch/README.md`](../freeswitch/README.md) §2 says how to install both
 onto a native switch and which placeholders a copy leaves to fill in. The demo
 runs the same tree inside this repository's own image; the dev box does not run
 that container.
+
+A native macOS switch must be started through `startup.sh`. FreeSWITCH lowers its
+own threads' priority at creation, macOS applies that, and the lowered threads
+run only on the efficiency cores, so a plain start stalls ESL and chops or
+silences the bot's audio whenever those cores are busy, as they are during
+`make test-stress`. Its ESL reader also calls `sched_yield` after every byte,
+which on macOS drops the thread's priority for a moment, so each command waits
+behind the same load. `startup.sh` loads a small library (built by `install.sh`)
+that keeps the threads at the default priority and yields without dropping it.
+Before a live call round, run `deploy/dev/freeswitch/check-priority.sh`: it
+fails if any thread of the running switch is below priority 4 (#451).
 
 One thing on this box is *not* in `freeswitch/`: the simulated PSTN trunk. It
 belongs to a deployment rather than to the product, so it lives in
