@@ -24,8 +24,9 @@
 // It changes nothing else and logs nothing per call.
 //
 // Build and install: deploy/dev/freeswitch/install.sh builds it into
-// $FS_ROOT/lib/libaicc_keep_priority.dylib. Load: deploy/dev/freeswitch/start.sh
-// starts the switch with DYLD_INSERT_LIBRARIES pointing at it.
+// $FS_ROOT/lib/libaicc_keep_priority.dylib. Load: $FS_ROOT/startup.sh, which
+// install.sh copies from start.sh, starts the switch with DYLD_INSERT_LIBRARIES
+// pointing at it.
 
 #ifndef __APPLE__
 #error "keep_priority.c is only for macOS: other systems ignore the request already"

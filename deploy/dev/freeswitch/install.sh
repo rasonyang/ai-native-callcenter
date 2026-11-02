@@ -4,12 +4,12 @@
 # Install this machine's FreeSWITCH overlay into a native FreeSWITCH tree, then
 # tell the running switch to read it.
 #
-# It copies two files, on macOS builds libaicc_keep_priority.dylib next to the
-# switch (see keep_priority.c and start.sh, #451), and reloads. It does not
-# touch vars.xml: that file holds database passwords, and the operator edits it
-# by hand from vars.d.example.xml. If a variable this overlay needs is missing
-# there, the
-# reload below will succeed and the calls will not — see the README. The one
+# It copies two files, on macOS builds libaicc_keep_priority.dylib and copies
+# start.sh into the switch's tree as startup.sh (see keep_priority.c, #451), and
+# reloads. It does not touch vars.xml: that file holds database passwords, and
+# the operator edits it by hand from vars.d.example.xml. If a variable this
+# overlay needs is missing there, the reload below will succeed and the calls
+# will not — see the README. The one
 # check made here is pstn_gateway_proxy, which a vars.xml written before it
 # existed lacks: a missing one is warned about on stderr, not fatal.
 #
@@ -92,6 +92,10 @@ install_keep_priority() {
 
 if [ "$(uname -s)" = Darwin ]; then
 	install_keep_priority
+	# The switch's own start command, so it is started with the library
+	# without anyone remembering the variable: $FS_ROOT/startup.sh.
+	install_file "$SRC_DIR/start.sh" "$FS_ROOT/startup.sh"
+	chmod 755 "$FS_ROOT/startup.sh"
 fi
 
 install_file "$SRC_DIR/dialplan/aicc/00_pstn_gateway.xml" \

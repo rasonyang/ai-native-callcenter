@@ -39,7 +39,7 @@ question.
 | `vars.d.example.xml` | nothing — copied by hand | The `X-PRE-PROCESS` lines `vars.xml` needs, with placeholder values. |
 | `install.sh` | — | Copies the two files in and reloads the switch. On macOS it also builds and installs `libaicc_keep_priority.dylib`. |
 | `keep_priority.c` | `lib/libaicc_keep_priority.dylib` (built, never committed) | A library that stops the native macOS switch from lowering its own threads' priority. See "Thread priority on macOS". |
-| `start.sh` | — | Starts the native macOS switch with that library loaded. |
+| `start.sh` | `startup.sh` (macOS only) | Starts the native macOS switch with that library loaded. |
 | `check-priority.sh` | — | Reads the running switch's per-thread priorities and fails if any is below 4. |
 
 The dialplan file is an `<include>` fragment, not a `<context>`. It has to be.
@@ -112,11 +112,13 @@ even with the priorities fixed. The replacement yields with
    Tools) and installs it as `$FS_ROOT/lib/libaicc_keep_priority.dylib`. It
    writes a new file and renames it over the old one, because overwriting in
    place the library a running switch has mapped kills that switch.
-2. Start the switch through the script:
+2. Start the switch through the script. `install.sh` also copies it into the
+   switch's tree as `startup.sh`, which starts the tree it sits in:
 
    ```sh
-   deploy/dev/freeswitch/start.sh            # bin/freeswitch -nonat
-   deploy/dev/freeswitch/start.sh -nc -nonat # arguments replace the default
+   /usr/local/freeswitch/startup.sh            # bin/freeswitch -nonat
+   /usr/local/freeswitch/startup.sh -nc -nonat # arguments replace the default
+   deploy/dev/freeswitch/start.sh              # the same, from the checkout
    ```
 
    It is the same as

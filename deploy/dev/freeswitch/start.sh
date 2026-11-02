@@ -6,13 +6,23 @@
 # install.sh first: it builds the library next to the switch.
 #
 # Arguments go to bin/freeswitch unchanged; with none, it starts with -nonat.
+# install.sh also copies this file into the switch's tree as startup.sh; run
+# from there, it starts the tree it sits in.
 #
-# Usage:  ./start.sh
+# Usage:  /usr/local/freeswitch/startup.sh
+#         ./start.sh
 #         ./start.sh -nc -nonat
 #         FS_ROOT=/opt/freeswitch ./start.sh
 set -eu
 
-FS_ROOT=${FS_ROOT:-/usr/local/freeswitch}
+here=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
+if [ -z "${FS_ROOT:-}" ]; then
+	if [ -x "$here/bin/freeswitch" ]; then
+		FS_ROOT=$here
+	else
+		FS_ROOT=/usr/local/freeswitch
+	fi
+fi
 LIB=$FS_ROOT/lib/libaicc_keep_priority.dylib
 
 die() {

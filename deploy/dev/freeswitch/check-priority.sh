@@ -6,7 +6,7 @@
 # cores (#451). Run it before a live call round. Read-only.
 #
 # Exit 0: every thread is at 4 or above. Exit 1: a thread is below 4 (the
-# switch was not started through start.sh) or there is no single switch.
+# switch was not started through startup.sh) or there is no single switch.
 set -eu
 
 die() {
@@ -40,6 +40,6 @@ printf '%s\n' "$counts" | sort -n | awk '{ printf "  priority %3d: %d threads\n"
 
 if [ "$rc" -ne 0 ]; then
 	low=$(printf '%s\n' "$counts" | awk '$1 < 4 { n += $2 } END { print n + 0 }')
-	echo "check-priority.sh: $low thread(s) below priority 4; start the switch through deploy/dev/freeswitch/start.sh (#451)" >&2
+	echo "check-priority.sh: $low thread(s) below priority 4; restart the switch with /usr/local/freeswitch/startup.sh (#451)" >&2
 	exit 1
 fi
