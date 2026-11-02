@@ -86,13 +86,35 @@ one call.
 **Owner decision (A), 2026-08-26: send the correction.** The customer's ledger being right
 outranks the tidiness of exactly one HTTP post per call.
 
-Three cases, and only the third is a second delivery:
+Four cases, and only the first is not a second delivery:
 
 | the stored row is replaced and the delivery is… | what happens |
 |---|---|
-| still `PENDING` | its payload is replaced in place. One delivery, and it carries the right story. |
-| `FAILED` | a fresh revision is enqueued; the retry schedule starts over on the correct row. |
+| `PENDING`, never attempted (`attempt_count = 0`) | its payload is replaced in place. One delivery, and it carries the right story. |
+| `PENDING` but attempted (in flight, or waiting to retry) | a fresh revision is enqueued under a new `delivery_id`. The earlier delivery keeps its own retry schedule. |
+| `FAILED` | a fresh revision is enqueued under a new `delivery_id`. |
 | already `DELIVERED` | **a new delivery row** is enqueued carrying the corrected CDR. |
+
+*Amended 2026-11-02 (#445).* The first row used to read "still `PENDING`". The claim leaves a
+row `PENDING` while it is in flight and while it waits to retry, so replacing it there lost the
+correction: the receiver's 2xx for the old body marked the row `DELIVERED`, and nothing newer was
+ever sent. A row in backoff may also have reached the receiver unacknowledged, and replacing it
+reused its `deliveryId` and `revision` for a different body, which a receiver deduplicating on
+`X-AICC-Webhook-Id` discards. So only a row nobody has claimed is replaced. The claim raises
+`attempt_count` in the same `UPDATE` that hands the row out, and under `READ COMMITTED` the row
+lock orders the two: a row claimed first no longer matches the replace, and a row replaced first
+is skipped by the claim's `FOR UPDATE SKIP LOCKED` until the CDR transaction commits. One
+`deliveryId` therefore always carries one body.
+
+The superseded, attempted row is **not retired**. An in-flight row cannot be told from one in
+backoff by its columns, retiring it would race its own settle, and retiring needs a new status
+value across the database and the contract. It keeps retrying; a receiver that follows
+last-revision-wins discards the lower revision whatever order the two arrive in.
+
+Settling is conditional on the attempt it settles: `MarkWebhookDelivered`,
+`RescheduleWebhookDelivery` and `MarkWebhookFailed` match `delivery_id`, the `attempt_count` the
+worker claimed, and `status = 'PENDING'`. A settle that matches nothing returns
+`store.ErrWebhookAttemptSuperseded`; the worker logs it at Warn and counts no metric.
 
 **Enqueue only when the row actually changed.** `InsertCDR` replaces only when the new row ends
 later, so the insert must report whether it replaced anything — `ON CONFLICT … WHERE
@@ -189,7 +211,8 @@ listing, which is newest-first within one subscription.
 The unique key includes `revision`, so a correction is a **new row** rather than a mutated one.
 Keeping the superseded row is the point: the `deliveries` endpoint (§10) has to be able to answer
 "what did we send them, and when" for both, and an in-place update would erase the very history
-somebody is asking about.
+somebody is asking about. The only in-place update is of a row that has never been attempted
+(§2.1), which nobody has been told about yet.
 
 `call_id` is deliberately **not** a foreign key to `cdrs`: the delivery records what was sent and
 must survive the CDR being swept. No `event_seq` — there is no event, and ordering is §6.

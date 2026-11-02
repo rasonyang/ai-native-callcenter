@@ -294,43 +294,60 @@ func (q *Queries) ListWebhookSubscriptions(ctx context.Context) ([]WebhookSubscr
 	return items, nil
 }
 
-const markWebhookDelivered = `-- name: MarkWebhookDelivered :exec
+const markWebhookDelivered = `-- name: MarkWebhookDelivered :execrows
 UPDATE webhook_deliveries
-SET status = 'DELIVERED', delivered_at = now(), last_status_code = $2, last_error = ''
-WHERE delivery_id = $1
+SET status = 'DELIVERED', delivered_at = now(), last_status_code = $3, last_error = ''
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING'
 `
 
 type MarkWebhookDeliveredParams struct {
 	DeliveryID     uuid.UUID `json:"deliveryId"`
+	AttemptCount   int32     `json:"attemptCount"`
 	LastStatusCode *int32    `json:"lastStatusCode"`
 }
 
-func (q *Queries) MarkWebhookDelivered(ctx context.Context, arg MarkWebhookDeliveredParams) error {
-	_, err := q.db.Exec(ctx, markWebhookDelivered, arg.DeliveryID, arg.LastStatusCode)
-	return err
+// The three settle queries are conditional on the attempt they settle ($2 is
+// the attempt_count the worker claimed). A row whose attempt_count has moved on
+// or whose status is no longer PENDING was settled by something else, and the
+// caller gets zero rows back instead of a silent overwrite.
+func (q *Queries) MarkWebhookDelivered(ctx context.Context, arg MarkWebhookDeliveredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markWebhookDelivered, arg.DeliveryID, arg.AttemptCount, arg.LastStatusCode)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
-const markWebhookFailed = `-- name: MarkWebhookFailed :exec
+const markWebhookFailed = `-- name: MarkWebhookFailed :execrows
 UPDATE webhook_deliveries
-SET status = 'FAILED', last_status_code = $2, last_error = $3
-WHERE delivery_id = $1
+SET status = 'FAILED', last_status_code = $3, last_error = $4
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING'
 `
 
 type MarkWebhookFailedParams struct {
 	DeliveryID     uuid.UUID `json:"deliveryId"`
+	AttemptCount   int32     `json:"attemptCount"`
 	LastStatusCode *int32    `json:"lastStatusCode"`
 	LastError      string    `json:"lastError"`
 }
 
-func (q *Queries) MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedParams) error {
-	_, err := q.db.Exec(ctx, markWebhookFailed, arg.DeliveryID, arg.LastStatusCode, arg.LastError)
-	return err
+func (q *Queries) MarkWebhookFailed(ctx context.Context, arg MarkWebhookFailedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markWebhookFailed,
+		arg.DeliveryID,
+		arg.AttemptCount,
+		arg.LastStatusCode,
+		arg.LastError,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const replacePendingWebhookDelivery = `-- name: ReplacePendingWebhookDelivery :one
 UPDATE webhook_deliveries
-SET payload = $3, attempt_count = 0, next_attempt_at = now(), last_error = '', last_status_code = NULL
-WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING'
+SET payload = $3, next_attempt_at = now()
+WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING' AND attempt_count = 0
 RETURNING delivery_id, subscription_id, call_id, revision, payload, status, attempt_count, next_attempt_at, last_status_code, last_error, created_at, delivered_at
 `
 
@@ -342,8 +359,19 @@ type ReplacePendingWebhookDeliveryParams struct {
 
 // ReplacePendingWebhookDelivery is the ordinary case for a corrected CDR: the
 // delivery has not gone out yet, so the customer never needs to hear about the
-// shorter story at all. Returns nothing when there is no pending row, which is
-// how the caller learns it must enqueue a correction instead.
+// shorter story at all. Returns nothing when there is no such row, which is how
+// the caller learns it must enqueue the next revision instead.
+//
+// Only a delivery that has never been attempted qualifies (attempt_count = 0).
+// A claimed row stays PENDING while it is in flight and while it waits to
+// retry, and the two cannot be told apart by their columns; either may already
+// have reached the receiver, and the 2xx for the old payload would settle the
+// row and lose the correction (#445). The claim raises attempt_count in the
+// same UPDATE that hands the row out, so under READ COMMITTED the row lock
+// orders the two: a row claimed first no longer matches here, and a row
+// replaced first is skipped by the claim's FOR UPDATE SKIP LOCKED until this
+// transaction commits. An unattempted row already has attempt_count 0, no
+// error and no status code, so only the payload and the due time change.
 func (q *Queries) ReplacePendingWebhookDelivery(ctx context.Context, arg ReplacePendingWebhookDeliveryParams) (WebhookDelivery, error) {
 	row := q.db.QueryRow(ctx, replacePendingWebhookDelivery, arg.SubscriptionID, arg.CallID, arg.Payload)
 	var i WebhookDelivery
@@ -364,27 +392,32 @@ func (q *Queries) ReplacePendingWebhookDelivery(ctx context.Context, arg Replace
 	return i, err
 }
 
-const rescheduleWebhookDelivery = `-- name: RescheduleWebhookDelivery :exec
+const rescheduleWebhookDelivery = `-- name: RescheduleWebhookDelivery :execrows
 UPDATE webhook_deliveries
-SET next_attempt_at = $2, last_status_code = $3, last_error = $4
-WHERE delivery_id = $1
+SET next_attempt_at = $3, last_status_code = $4, last_error = $5
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING'
 `
 
 type RescheduleWebhookDeliveryParams struct {
 	DeliveryID     uuid.UUID          `json:"deliveryId"`
+	AttemptCount   int32              `json:"attemptCount"`
 	NextAttemptAt  pgtype.Timestamptz `json:"nextAttemptAt"`
 	LastStatusCode *int32             `json:"lastStatusCode"`
 	LastError      string             `json:"lastError"`
 }
 
-func (q *Queries) RescheduleWebhookDelivery(ctx context.Context, arg RescheduleWebhookDeliveryParams) error {
-	_, err := q.db.Exec(ctx, rescheduleWebhookDelivery,
+func (q *Queries) RescheduleWebhookDelivery(ctx context.Context, arg RescheduleWebhookDeliveryParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rescheduleWebhookDelivery,
 		arg.DeliveryID,
+		arg.AttemptCount,
 		arg.NextAttemptAt,
 		arg.LastStatusCode,
 		arg.LastError,
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const sweepWebhookDeliveries = `-- name: SweepWebhookDeliveries :execrows

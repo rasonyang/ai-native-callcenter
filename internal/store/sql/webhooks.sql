@@ -52,12 +52,23 @@ RETURNING *;
 
 -- ReplacePendingWebhookDelivery is the ordinary case for a corrected CDR: the
 -- delivery has not gone out yet, so the customer never needs to hear about the
--- shorter story at all. Returns nothing when there is no pending row, which is
--- how the caller learns it must enqueue a correction instead.
+-- shorter story at all. Returns nothing when there is no such row, which is how
+-- the caller learns it must enqueue the next revision instead.
+--
+-- Only a delivery that has never been attempted qualifies (attempt_count = 0).
+-- A claimed row stays PENDING while it is in flight and while it waits to
+-- retry, and the two cannot be told apart by their columns; either may already
+-- have reached the receiver, and the 2xx for the old payload would settle the
+-- row and lose the correction (#445). The claim raises attempt_count in the
+-- same UPDATE that hands the row out, so under READ COMMITTED the row lock
+-- orders the two: a row claimed first no longer matches here, and a row
+-- replaced first is skipped by the claim's FOR UPDATE SKIP LOCKED until this
+-- transaction commits. An unattempted row already has attempt_count 0, no
+-- error and no status code, so only the payload and the due time change.
 -- name: ReplacePendingWebhookDelivery :one
 UPDATE webhook_deliveries
-SET payload = $3, attempt_count = 0, next_attempt_at = now(), last_error = '', last_status_code = NULL
-WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING'
+SET payload = $3, next_attempt_at = now()
+WHERE subscription_id = $1 AND call_id = $2 AND status = 'PENDING' AND attempt_count = 0
 RETURNING *;
 
 -- ClaimDueWebhookDeliveries takes the oldest work that is due. FOR UPDATE SKIP
@@ -76,20 +87,24 @@ WHERE delivery_id IN (
 )
 RETURNING *;
 
--- name: MarkWebhookDelivered :exec
+-- The three settle queries are conditional on the attempt they settle ($2 is
+-- the attempt_count the worker claimed). A row whose attempt_count has moved on
+-- or whose status is no longer PENDING was settled by something else, and the
+-- caller gets zero rows back instead of a silent overwrite.
+-- name: MarkWebhookDelivered :execrows
 UPDATE webhook_deliveries
-SET status = 'DELIVERED', delivered_at = now(), last_status_code = $2, last_error = ''
-WHERE delivery_id = $1;
+SET status = 'DELIVERED', delivered_at = now(), last_status_code = $3, last_error = ''
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING';
 
--- name: RescheduleWebhookDelivery :exec
+-- name: RescheduleWebhookDelivery :execrows
 UPDATE webhook_deliveries
-SET next_attempt_at = $2, last_status_code = $3, last_error = $4
-WHERE delivery_id = $1;
+SET next_attempt_at = $3, last_status_code = $4, last_error = $5
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING';
 
--- name: MarkWebhookFailed :exec
+-- name: MarkWebhookFailed :execrows
 UPDATE webhook_deliveries
-SET status = 'FAILED', last_status_code = $2, last_error = $3
-WHERE delivery_id = $1;
+SET status = 'FAILED', last_status_code = $3, last_error = $4
+WHERE delivery_id = $1 AND attempt_count = $2 AND status = 'PENDING';
 
 -- name: ListWebhookDeliveries :many
 SELECT * FROM webhook_deliveries
