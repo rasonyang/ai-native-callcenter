@@ -37,7 +37,10 @@ question.
 | `dialplan/aicc/00_pstn_gateway.xml` | `conf/dialplan/aicc/00_pstn_gateway.xml` | The outbound route: any 7-to-16-digit number, optionally `+` prefixed, bridged to the trunk with `effective_caller_id_number` passed through as the outbound caller id. Calls carrying `X-FreeSBC-Carrier` (arrived from the carrier) or `X-FSBC-Out` (already sent out by this switch) skip it, and the bridge stamps `X-FSBC-Out: 1`. An AI outbound call is originated straight to `AICC_OUTBOUND_ENDPOINT`, never through this route, so it carries `X-FSBC-Out` only when the deployment sets `AICC_OUTBOUND_SIP_HEADERS=X-FSBC-Out=1`; the application names no SBC vendor's header itself. |
 | `sip_profiles/external/pstn_gateway.xml` | `conf/sip_profiles/external/pstn_gateway.xml` | The gateway itself. NOREG, no ping, `outbound-proxy` pinned. `proxy` (the Request-URI) is `pstn_gateway_proxy`, `outbound-proxy` (the next hop) is `pstn_gateway_host:pstn_gateway_port`. |
 | `vars.d.example.xml` | nothing — copied by hand | The `X-PRE-PROCESS` lines `vars.xml` needs, with placeholder values. |
-| `install.sh` | — | Copies the two files in and reloads the switch. |
+| `install.sh` | — | Copies the two files in and reloads the switch. On macOS it also builds and installs `libaicc_keep_priority.dylib`. |
+| `keep_priority.c` | `lib/libaicc_keep_priority.dylib` (built, never committed) | A library that stops the native macOS switch from lowering its own threads' priority. See "Thread priority on macOS". |
+| `start.sh` | — | Starts the native macOS switch with that library loaded. |
+| `check-priority.sh` | — | Reads the running switch's per-thread priorities and fails if any is below 4. |
 
 The dialplan file is an `<include>` fragment, not a `<context>`. It has to be.
 `freeswitch/conf/dialplan/aicc.xml` ends with
@@ -82,6 +85,60 @@ already. Anything added here goes in as `<include><extension>…`.
    optional: `reloadxml` re-reads the XML without rebuilding the profile's
    gateways, so a changed proxy address would sit in the file and not in the
    switch.
+
+## Thread priority on macOS
+
+FreeSWITCH creates its threads through `switch_threadattr_create`, which asks
+for the lowest priority (1) for most of them, and APR applies the request with
+`pthread_setschedparam` from inside each new thread. Linux ignores it. macOS
+applies it, and a thread below priority 4 is in the throttled tier, which runs
+only on the efficiency cores. A switch started plainly therefore starves
+whenever those cores are busy (`make test-stress` keeps them busy): ESL stalls
+and the bot's audio turns choppy or silent (#451).
+
+`keep_priority.c` is a small `DYLD_INSERT_LIBRARIES` interposer. It drops a
+`pthread_setschedparam` call that would lower a thread's priority, so those
+threads keep the default (31) and can use any core. Calls that raise the
+priority pass through. Nothing in `freeswitch/` or in any image changes.
+
+It also replaces `sched_yield`. On macOS that call depresses the caller's
+priority for a scheduling quantum, where Linux only lets the thread's peers run
+first. FreeSWITCH yields after every byte it reads from an ESL socket, so with
+the efficiency cores busy every command waited behind the load once per byte,
+even with the priorities fixed. The replacement yields with
+`thread_switch(SWITCH_OPTION_NONE)`, which does not depress the priority.
+
+1. Install: `install.sh` builds the library with `cc` (the Xcode Command Line
+   Tools) and installs it as `$FS_ROOT/lib/libaicc_keep_priority.dylib`. It
+   writes a new file and renames it over the old one, because overwriting in
+   place the library a running switch has mapped kills that switch.
+2. Start the switch through the script:
+
+   ```sh
+   deploy/dev/freeswitch/start.sh            # bin/freeswitch -nonat
+   deploy/dev/freeswitch/start.sh -nc -nonat # arguments replace the default
+   ```
+
+   It is the same as
+
+   ```sh
+   cd /usr/local/freeswitch && DYLD_INSERT_LIBRARIES=$PWD/lib/libaicc_keep_priority.dylib bin/freeswitch -nonat
+   ```
+
+   The console prints `keep_priority: FreeSWITCH threads keep the default
+   priority` when the library loaded. A running switch picks it up only after a
+   restart. If the new switch logs `Error Creating SIP UA for profile:
+   internal`, the old one still held port 5060 when it started; `sofia profile
+   internal start` brings the profile up, and the browser phones register
+   again on their own.
+3. Check, before a live call round:
+
+   ```sh
+   deploy/dev/freeswitch/check-priority.sh
+   ```
+
+   It prints the number of threads at each priority and exits non-zero if any
+   is below 4. The raw view is `ps -M -o pri -p $(pgrep -x freeswitch)`.
 
 ## Verify
 

@@ -4,9 +4,11 @@
 # Install this machine's FreeSWITCH overlay into a native FreeSWITCH tree, then
 # tell the running switch to read it.
 #
-# It copies two files and reloads. It does not touch vars.xml: that file holds
-# database passwords, and the operator edits it by hand from
-# vars.d.example.xml. If a variable this overlay needs is missing there, the
+# It copies two files, on macOS builds libaicc_keep_priority.dylib next to the
+# switch (see keep_priority.c and start.sh, #451), and reloads. It does not
+# touch vars.xml: that file holds database passwords, and the operator edits it
+# by hand from vars.d.example.xml. If a variable this overlay needs is missing
+# there, the
 # reload below will succeed and the calls will not — see the README. The one
 # check made here is pstn_gateway_proxy, which a vars.xml written before it
 # existed lacks: a missing one is warned about on stderr, not fatal.
@@ -58,6 +60,39 @@ install_file() {
 	cp "$src" "$dst"
 	echo "installed  $dst"
 }
+
+# Native macOS only: the switch lowers its own thread priorities into the
+# efficiency-core tier, and this library stops it (#451). It is built here, never
+# committed. The running switch has the installed copy mapped, and rewriting a
+# mapped signed Mach-O in place gets the process killed for an invalid code
+# signature. So the new library is written beside it and moved over it: the
+# rename gives the path a new inode and the mapped one stays intact.
+install_keep_priority() {
+	dst=$FS_ROOT/lib/libaicc_keep_priority.dylib
+	[ -d "$FS_ROOT/lib" ] || die "no $FS_ROOT/lib (set FS_ROOT)"
+	command -v cc >/dev/null 2>&1 ||
+		die "no cc; install the Xcode Command Line Tools (xcode-select --install)"
+	tmp=$(mktemp "$FS_ROOT/lib/.libaicc_keep_priority.XXXXXX")
+	trap 'rm -f "$tmp"' EXIT
+	cc -dynamiclib -install_name libaicc_keep_priority.dylib -O2 -Wall -Wextra -Werror -o "$tmp" "$SRC_DIR/keep_priority.c" ||
+		die "building keep_priority.c failed"
+	if [ -f "$dst" ]; then
+		if cmp -s "$tmp" "$dst"; then
+			echo "unchanged  $dst"
+			rm -f "$tmp"
+			return 0
+		fi
+		cp -p "$dst" "$dst.bak-$STAMP"
+		echo "backed up  $dst.bak-$STAMP"
+	fi
+	chmod 755 "$tmp"
+	mv -f "$tmp" "$dst"
+	echo "installed  $dst"
+}
+
+if [ "$(uname -s)" = Darwin ]; then
+	install_keep_priority
+fi
 
 install_file "$SRC_DIR/dialplan/aicc/00_pstn_gateway.xml" \
 	"$FS_CONF/dialplan/aicc/00_pstn_gateway.xml"
