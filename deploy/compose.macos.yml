@@ -36,7 +36,7 @@ services:
       - "${SIP_BIND:-0.0.0.0}:5066:5066/tcp"
       # 200 ports, 100 RTP/RTCP pairs. Each published port costs a forwarder
       # in the VM; widen RTP_START and RTP_END together.
-      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-16384}-${RTP_END:-16583}:${RTP_START:-16384}-${RTP_END:-16583}/udp"
+      - "${SIP_BIND:-0.0.0.0}:${RTP_START:-20000}-${RTP_END:-20199}:${RTP_START:-20000}-${RTP_END:-20199}/udp"
 
   aicc:
     network_mode: service:netns
@@ -55,5 +55,5 @@ services:
     environment:
       # AICC_BOT_HOST stays AICC_APP_IP: the namespace's own eth0 address.
       FS_ESL_LISTEN_IP: 127.0.0.1
-      FS_RTP_START_PORT: ${RTP_START:-16384}
-      FS_RTP_END_PORT: ${RTP_END:-16583}
+      FS_RTP_START_PORT: ${RTP_START:-20000}
+      FS_RTP_END_PORT: ${RTP_END:-20199}

@@ -316,7 +316,7 @@ eq 'colima status address' "$(json_field address '{"cpu":4,"address":"192.168.10
 # --------------------------------------------------------------- ports ----
 
 LINUX_TCP_PORTS='8080 5060 5066 5080 7443 8090 9090 18021 15432'
-LINUX_UDP_PORTS='5060 5080 6060 16384-29999 30000-30999'
+LINUX_UDP_PORTS='5060 5080 6060 20000-25999 26000-29999'
 ss_out='tcp   LISTEN 0      4096         0.0.0.0:22        0.0.0.0:*
 tcp   LISTEN 0      5            0.0.0.0:8080      0.0.0.0:*
 tcp   LISTEN 0      4096            [::]:5066         [::]:*
@@ -337,8 +337,10 @@ PROVIDER=qwen
 PROVIDER_KEY_VAR=ALIYUN_API_KEY
 PROVIDER_KEY=sk-test
 PROVIDER_ENDPOINT=''
-RTP_START_WANT=16384
-RTP_END_WANT=29999
+RTP_START_WANT=20000
+RTP_END_WANT=25999
+RTP_START_OLD=16384
+RTP_END_OLD=29999
 REWRITE_ADDRESS=0
 REWRITE_COMPOSE=0
 
@@ -383,6 +385,71 @@ eq 'operator comment kept' "$(head -n 1 "$env")" '# mine'
 eq 'missing secret added' "$(env_get "$env" LUA_PASSWORD | awk '{ print length }')" 32
 eq 'empty provider key filled' "$(env_get "$env" ALIYUN_API_KEY)" sk-test
 eq 'empty AICC_SEED (no demo) kept' "$(grep -c '^AICC_SEED=$' "$env")" 1
+
+has_text() { printf '%s' "$1" | grep -q -- "$2"; }
+env_merge_says_moved() { env_merge "$1" | grep -q moved; }
+
+# The media range. A fresh install gets the current defaults.
+eq 'fresh linux .env: RTP_START' "$(env_get "$TMP/fresh.env" RTP_START)" 20000
+eq 'fresh linux .env: RTP_END' "$(env_get "$TMP/fresh.env" RTP_END)" 25999
+notok 'fresh install prints no range note' env_merge_says_moved "$TMP/fresh.env"
+
+# v0.2.0 to v0.7.1 wrote 16384/29999 (Linux) and 16384/16583 (macOS) into .env.
+env="$TMP/v071-linux.env"
+printf 'RTP_START=16384\nRTP_END=29999\nPOSTGRES_PASSWORD=keepme123\n' >"$env"
+ENV_FILE=$env rtp_effective_range
+eq 'v0.7.1 linux: preflight sees the new range' "$RTP_RANGE_START-$RTP_RANGE_END" 20000-25999
+note=$(env_merge "$env")
+eq 'v0.7.1 linux: RTP_START moved' "$(env_get "$env" RTP_START)" 20000
+eq 'v0.7.1 linux: RTP_END moved' "$(env_get "$env" RTP_END)" 25999
+eq 'v0.7.1 linux: one key each' "$(grep -c '^RTP_START=' "$env")$(grep -c '^RTP_END=' "$env")" 11
+eq 'v0.7.1 linux: secret kept' "$(env_get "$env" POSTGRES_PASSWORD)" keepme123
+ok 'v0.7.1 linux: note names the old range' has_text "$note" 16384-29999
+ok 'v0.7.1 linux: note names the new range' has_text "$note" 20000-25999
+ok 'v0.7.1 linux: note mentions the firewall' has_text "$note" firewall
+note=$(env_merge "$env")
+eq 'v0.7.1 linux: second run is silent' "$note" ''
+
+# Hand-set ranges stay, silently: one that is not the old default, and one that
+# is clear of both the switch's and the bot's defaults.
+for pair in 18000:27000 30000:30999 16384:16583; do
+    env="$TMP/hand-${pair%:*}.env"
+    printf 'RTP_START=%s\nRTP_END=%s\n' "${pair%:*}" "${pair#*:}" >"$env"
+    note=$(env_merge "$env")
+    eq "hand-set linux $pair kept" "$(env_get "$env" RTP_START):$(env_get "$env" RTP_END)" "$pair"
+    eq "hand-set linux $pair: no note" "$note" ''
+done
+env="$TMP/half.env"
+printf 'RTP_START=16384\n' >"$env"
+note=$(env_merge "$env")
+eq 'only RTP_START set: kept as is' "$(env_get "$env" RTP_START)" 16384
+eq 'only RTP_START set: no note' "$note" ''
+
+# macOS: the old default is 16384/16583 and the new one 20000/20199.
+OS=macos
+RTP_START_WANT=20000
+RTP_END_WANT=20199
+RTP_START_OLD=16384
+RTP_END_OLD=16583
+env="$TMP/v071-macos.env"
+printf 'RTP_START=16384\nRTP_END=16583\n' >"$env"
+note=$(env_merge "$env")
+eq 'v0.7.1 macos: moved' "$(env_get "$env" RTP_START)-$(env_get "$env" RTP_END)" 20000-20199
+ok 'v0.7.1 macos: note' has_text "$note" 16384-16583
+env="$TMP/linux-range-on-macos.env"
+printf 'RTP_START=16384\nRTP_END=29999\n' >"$env"
+note=$(env_merge "$env")
+eq 'macos: the Linux old default is a hand-set range here' "$(env_get "$env" RTP_START)-$(env_get "$env" RTP_END)" 16384-29999
+eq 'macos: no note for it' "$note" ''
+env="$TMP/fresh-macos.env"
+env_merge "$env" >/dev/null
+eq 'fresh macos .env: range' "$(env_get "$env" RTP_START)-$(env_get "$env" RTP_END)" 20000-20199
+OS=linux
+RTP_START_WANT=20000
+RTP_END_WANT=25999
+RTP_START_OLD=16384
+RTP_END_OLD=29999
+env="$TMP/operator.env"
 
 # An explicit --external-ip rewrites the address keys and nothing else.
 cp "$env" "$TMP/before.env"

@@ -69,7 +69,7 @@ ENV AICC_LOG_DIR=/var/log/aicc \
 # bridges AI calls to, with its RTP range beside it. 9090 carries metrics and
 # health and stays shut until AICC_METRICS_ADDR is opened deliberately — that
 # listener has no authentication of its own.
-EXPOSE 8080 9090 6060/udp 40000-40999/udp
+EXPOSE 8080 9090 6060/udp 26000-29999/udp
 
 USER nonroot
 ENTRYPOINT ["/usr/local/bin/aicc"]

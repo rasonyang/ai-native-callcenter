@@ -22,13 +22,15 @@
 # Host ports this stack takes. Check them before starting on a shared host:
 #   aicc        ${HTTP_BIND}:${HTTP_PORT} (8080/tcp); 127.0.0.1:9090 metrics;
 #               127.0.0.1:8090 audio-stream ingest; 6060 bot SIP;
-#               30000-30999/udp bot RTP
+#               26000-29999/udp bot RTP (the default)
 #   freeswitch  5060 udp+tcp (internal), 5080 udp+tcp (external), 5066/tcp ws,
 #               7443/tcp wss, 127.0.0.1:18021 event socket,
-#               ${RTP_START}-${RTP_END}/udp media (16384-29999)
+#               ${RTP_START}-${RTP_END}/udp media (20000-25999)
 #   postgres    127.0.0.1:${PG_HOST_PORT} (15432)
-# The two RTP ranges sit below Linux's ephemeral port range (32768-60999), so
-# an outgoing connection's local port never takes one of them.
+# The two RTP ranges sit side by side below Linux's ephemeral port range
+# (32768-60999), so an outgoing connection's local port never takes one of them
+# and the two never overlap. The bot's range is the application's own default
+# (AICC_BOT_RTP_PORT_LOW/HIGH), not set here, so there is one place to change it.
 
 services:
   postgres:
@@ -50,8 +52,6 @@ services:
       # The bot's SIP and RTP ports are on the host's interfaces now, so only
       # the switch may send to them: it dials from FS_LOCAL_IP.
       AICC_BOT_ALLOWED_PEERS: 127.0.0.1,${FS_LOCAL_IP:?set FS_LOCAL_IP in .env to this host's LAN address}
-      AICC_BOT_RTP_PORT_LOW: "30000"
-      AICC_BOT_RTP_PORT_HIGH: "30999"
 
   freeswitch:
     network_mode: host
@@ -65,5 +65,5 @@ services:
       # loopback: sofia binds FS_LOCAL_IP and cannot send to 127.0.0.1 from it.
       AICC_BOT_HOST: ${FS_LOCAL_IP:?set FS_LOCAL_IP in .env to this host's LAN address}
       FS_ESL_LISTEN_IP: 127.0.0.1
-      FS_RTP_START_PORT: ${RTP_START:-16384}
-      FS_RTP_END_PORT: ${RTP_END:-29999}
+      FS_RTP_START_PORT: ${RTP_START:-20000}
+      FS_RTP_END_PORT: ${RTP_END:-25999}

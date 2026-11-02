@@ -53,7 +53,8 @@ names the peer, and the `vars.xml` lines both need.
 ```
 :8080              application HTTP + embedded SPA
 :6060              SIP UAS for the AI leg (UDP)
-40000–40999        RTP for the AI leg (even/odd pairs)
+26000–29999        RTP for the AI leg (even/odd pairs)
+20000–25999        RTP of the switch (set it as below; the built-in 16384–32768 overlaps the AI leg's)
 127.0.0.1:8090     transcription ingest WebSocket (mod_audio_stream connects here)
 127.0.0.1:9090     Prometheus metrics
 127.0.0.1:5432     PostgreSQL
@@ -61,6 +62,15 @@ names the peer, and the `vars.xml` lines both need.
 127.0.0.1:8333     SeaweedFS S3         (the application reads from it)
 127.0.0.1:18021    FreeSWITCH ESL       (not the stock 8021)
 ```
+
+The switch's RTP range is not part of the dev overlay: `rtp-start-port` and
+`rtp-end-port` live in `autoload_configs/switch.conf.xml`, which the overlay
+installer does not write, and the switch reads them only at startup. A native
+switch left on FreeSWITCH's built-in 16384–32768 shares ports 26000–29999 with
+the bot, and `aicc doctor` fails it (`BOT_RTP_RANGE_OVERLAPS_SWITCH`). Once, by
+hand: set `rtp-start-port` to `20000` and `rtp-end-port` to `25999` in the
+switch's `switch.conf.xml` (the repository's `freeswitch/conf` already does),
+then restart the switch.
 
 `127.0.0.1:9090` is worth remembering: it is the metrics listener's default and
 also the port most other services reach for first. Two processes can bind it on

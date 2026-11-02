@@ -169,19 +169,22 @@
          odd one above it is RTCP. A call holds two legs (the caller and the
          agent or the aicc_bot gateway), a supervisor's eavesdrop adds one.
          The end port is inclusive, an odd start is rounded up and an odd end
-         down, so 16384-29999 carries (29998 - 16384) / 2 + 1 = 6,808 legs.
-         The end is odd on purpose: the last pair's RTCP port, 29999, stays
+         down, so 20000-25999 carries (25998 - 20000) / 2 + 1 = 3,000 legs.
+         The end is odd on purpose: the last pair's RTCP port, 25999, stays
          inside the range a deployment publishes. The switch logs one
          "Rounding odd end port" warning at the first call; it is expected.
          When the range is full the switch logs "No audio RTP ports
          available!": a leg it places fails with DESTINATION_OUT_OF_ORDER
          before any INVITE is sent, an INVITE it receives is answered 488.
+         The range sits below the bot's (AICC_BOT_RTP_PORT_LOW/HIGH, default
+         26000-29999) and both below Linux's ephemeral ports (32768-60999),
+         so neither overlaps the other nor an outgoing connection's port.
          A container on a bridge network must narrow this range and publish
          exactly the same one (each published port costs a proxy process).
          FS_RTP_START_PORT and FS_RTP_END_PORT, which the entrypoint rewrites
          here, move it. Never set the end below the start. -->
-    <param name="rtp-start-port" value="16384"/>
-    <param name="rtp-end-port" value="29999"/>
+    <param name="rtp-start-port" value="20000"/>
+    <param name="rtp-end-port" value="25999"/>
 
     <!-- Test each port to make sure it is not in use by some other process before allocating it to RTP -->
     <!-- <param name="rtp-port-usage-robustness" value="true"/> -->
