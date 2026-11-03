@@ -1655,3 +1655,22 @@ profile (flash) or from `AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`:
 With the earlier run's 17 of 18, the tools arm of `MidCallInstructions` called
 the tool in 19 of 21 flash sessions, in 2 of 7 runs short by one session (plus:
 15 of 15 in 5 runs).
+
+### Owner-placed A/B calls (2026-11-03)
+
+There were 9 calls per model on the same build (`591b18a`), with the same script on both.
+
+- **Calls 1–6**: an outbound slot-tool flow whose terminal phases carry fixed lines. The scenarios were agree; ask then agree; decline twice; do-not-call over the opening; silence; and backchannels.
+- **Calls 7–9**: `mobile_support` on 95012 with the HTTP tool `repair_status`. Call 9 makes three lookups: not found, then two valid numbers.
+
+| # | Flash | Plus |
+|---|---|---|
+| 1, 2, 4, 5, 7, 8 | pass | pass |
+| 3 decline twice | closing line said again in full (#465) | the same |
+| 6 backchannels | "嗯" taken as agreement; closing line said 5 times (#403, #465) | the same, 4 times |
+| 9 three lookups | the 2nd and 3rd result turns repeated "好的，我查一下。" and did not read the result (#466) | all three results read, no filler |
+| Answer to first bot audio | 0.73–1.01 s | 0.95–2.16 s |
+
+The failures shared by both models are platform defects (#465, #403). The flash-only one is #466.
+
+Owner decision, 2026-11-03: flash stays the default, for cost. #466 tracks the lookup weakness, and a lookup-heavy deployment can stay on plus with `AICC_PROVIDER_MODEL`.

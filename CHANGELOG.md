@@ -24,7 +24,10 @@ carries the one-line installer's files.
   `qwen-audio-3.1-realtime-plus`), after the profile's traits were re-measured
   on it. A deployment that sets `AICC_PROVIDER_MODEL` keeps its model; setting
   it to `qwen-audio-3.1-realtime-plus` returns to the earlier model with no
-  rebuild. (#463)
+  rebuild. Flash is weaker on lookup-heavy flows: on a second lookup in the
+  same call it can repeat its "let me check" filler instead of reading the
+  result (#466); a deployment whose flows lean on HTTP lookups can stay on plus.
+  (#463)
 - Realtime providers: every tool's `parameters` now carries a top-level
   `required` (an empty list when the flow names none). Flash fails the first
   response of a session whose tool has none; the other engines accept either
