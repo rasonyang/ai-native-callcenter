@@ -1,5 +1,5 @@
 import {
-  Activity, BarChart3, Bot, BookUser, FileClock, Headphones, KeyRound, LayoutDashboard,
+  BarChart3, Bot, BookUser, FileClock, Headphones, KeyRound, LayoutDashboard,
   ListChecks, Megaphone, Phone, PhoneOff, PhoneCall, PhoneForwarded, ScrollText, ShieldCheck, Users, Webhook,
 } from 'lucide-react'
 
@@ -69,7 +69,7 @@ export const NAV: NavGroup[] = [
     labelKey: 'nav.manage',
     roleHome: '/admin',
     items: [
-      { to: '/admin', labelKey: 'nav.overview', icon: Activity, roles: ['ADMIN'], isReady: true },
+      { to: '/admin', labelKey: 'nav.salesWorkbench', icon: LayoutDashboard, roles: ['ADMIN'], isReady: true },
       { to: '/admin/users', labelKey: 'nav.users', icon: Users, roles: ['ADMIN'], isReady: true },
       { to: '/admin/extensions', labelKey: 'nav.extensions', icon: PhoneCall, roles: ['ADMIN'], isReady: true },
       { to: '/admin/routing', labelKey: 'nav.routing', icon: ListChecks, roles: ['ADMIN'], isReady: true },
