@@ -540,7 +540,8 @@
       "FAILED": "failed",
       "ABANDONED": "hung up before answer",
       "CANCELLED": "cancelled"
-    }
+    },
+    "teamNote": "Managers can review these tasks here. An agent must claim and work each task in their own callback queue."
   },
   "reports": {
     "hint": "Aggregates over finished calls.",
