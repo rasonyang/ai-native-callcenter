@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { CampaignState, ContactCounts } from '@/components/campaign-state'
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
+import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { api } from '@/lib/api'
 import { useCampaigns } from '@/lib/campaigns'
 import { describeError } from '@/lib/errors'
@@ -71,32 +72,44 @@ function SalesWorkspace() {
           </div>
           <Link to="/admin/campaigns" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">{t('sales.viewAllCampaigns')} <ArrowRight className="size-3" /></Link>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-[13px]">
-            <thead className="border-b text-xs uppercase tracking-wide text-muted-foreground">
-              <tr><th className="px-4 py-2 font-medium">{t('sales.campaignName')}</th><th className="px-4 py-2 font-medium">{t('sales.campaignState')}</th><th className="px-4 py-2 font-medium">{t('sales.campaignContacts')}</th></tr>
-            </thead>
-            <tbody className="divide-y">
-              {campaigns.isPending && <tr><td colSpan={3} className="px-4 py-5 text-center text-xs text-muted-foreground">{t('common.loading')}</td></tr>}
-              {campaigns.isError && <tr><td colSpan={3} className="px-4 py-5 text-center text-xs text-muted-foreground">{describeError(campaigns.error, t)}</td></tr>}
-              {!campaigns.isPending && !campaigns.isError && campaigns.data?.items.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-xs text-muted-foreground">{t('sales.noCampaigns')}</td></tr>}
-              {campaigns.data?.items.map((campaign) => (
-                <tr key={campaign.id} className="hover:bg-muted/30">
-                  <td className="max-w-64 px-4 py-2.5 font-medium"><Link to="/admin/campaigns/$campaignId" params={{ campaignId: campaign.id }} className="block truncate text-foreground hover:text-primary" title={campaign.name}>{campaign.name}</Link></td>
-                  <td className="whitespace-nowrap px-4 py-2.5"><CampaignState campaign={campaign} /></td>
-                  <td className="px-4 py-2.5"><ContactCounts counts={campaign.contacts} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable>
+          <THead>
+            <Th>{t('sales.campaignName')}</Th>
+            <Th>{t('sales.campaignState')}</Th>
+            <Th>{t('sales.campaignContacts')}</Th>
+          </THead>
+          <TBody>
+            {campaigns.isPending && <TableMessage colSpan={3}>{t('common.loading')}</TableMessage>}
+            {campaigns.isError && <TableMessage colSpan={3}>{describeError(campaigns.error, t)}</TableMessage>}
+            {!campaigns.isPending && !campaigns.isError && campaigns.data?.items.length === 0 && (
+              <TableMessage colSpan={3}>{t('sales.noCampaigns')}</TableMessage>
+            )}
+            {campaigns.data?.items.map((campaign) => (
+              <Tr key={campaign.id}>
+                <Td className="font-medium">
+                  <Link
+                    to="/admin/campaigns/$campaignId"
+                    params={{ campaignId: campaign.id }}
+                    className="text-foreground hover:text-primary"
+                  >
+                    <CellText maxWidth="max-w-xs" minWidth="min-w-upto-24 xl:min-w-upto-48">
+                      {campaign.name}
+                    </CellText>
+                  </Link>
+                </Td>
+                <Td><CampaignState campaign={campaign} /></Td>
+                <Td><ContactCounts counts={campaign.contacts} /></Td>
+              </Tr>
+            ))}
+          </TBody>
+        </DataTable>
       </section>
 
       <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
         <section className="rounded-md border bg-card">
           <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
             <div><h2 className="text-sm font-semibold">{t('sales.callbacksTitle')}</h2><p className="mt-0.5 text-xs text-muted-foreground">{t('sales.callbacksDescription')}</p></div>
-            <Link to="/admin/campaigns" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">{t('sales.viewAllCampaigns')} <ArrowRight className="size-3" /></Link>
+            <Link to="/admin/callbacks" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">{t('sales.viewAllCampaigns')} <ArrowRight className="size-3" /></Link>
           </div>
           <div className="divide-y">
             {callbacks.isPending && <p className="px-4 py-5 text-xs text-muted-foreground">{t('common.loading')}</p>}
@@ -125,7 +138,7 @@ function SalesWorkspace() {
       <section className="rounded-md border bg-card p-4">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('sales.systemHealth')}</h2>
         <dl className="mt-2 divide-y">
-          <HealthRow label={t('sales.eventStream')} value={health.isError ? t('stream.offline') : t('sales.consolesLive', { count: health.data?.sseClients ?? 0 })} isDegraded={health.isError} />
+          <HealthRow label={t('sales.eventStream')} value={health.isError ? t('stream.offline') : (health.data ? t('sales.consolesLive', { count: health.data.sseClients }) : '—')} isDegraded={health.isError} />
           <HealthRow label={t('sales.replayWindow')} value={health.data ? `#${health.data.oldestSeq}` : '—'} />
           {(health.data?.trunks ?? []).map((trunk) => <HealthRow key={`${trunk.profile}::${trunk.name}`} label={t('sales.trunk', { name: trunk.name })} value={`${trunk.state} · ${trunk.address}`} isDegraded={!trunk.isUp} />)}
           {health.data && (health.data.trunks ?? []).length === 0 && <HealthRow label={t('sales.trunks')} value={t('sales.noTrunks')} isDegraded />}
