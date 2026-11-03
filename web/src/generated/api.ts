@@ -1861,7 +1861,7 @@ export interface webhooks {
          *
          *     **Timeout.** One attempt is bounded at 10 seconds.
          *
-         *     **Retry.** A delivery is attempted at most 6 times. After the first failed attempt the next is made 1 minute later, then 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the sixth failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.
+         *     **Retry.** A delivery is attempted at most 7 times. After the first failed attempt the next is made 10 seconds later, then 1 minute, 5 minutes, 30 minutes, 2 hours and 6 hours after the following failures, roughly 8.6 hours in all from the first attempt. After the seventh failure the delivery is FAILED and is not retried again. Every retry sends the same `deliveryId` and `revision` with `attempt` incremented. A delivery in flight when the server restarts is retried after about an hour.
          *
          *     **Concurrency.** At most 4 deliveries are in flight to one subscription at a time, and deliveries are not ordered, so a later revision can arrive before an earlier one.
          *
@@ -1891,7 +1891,7 @@ export interface components {
             subscriptionId: string;
             /** @description Which version of the call's record this is, counted per subscription and call from 1. The receiver keeps the highest revision per cdr.callId. */
             revision: number;
-            /** @description Which attempt this is for this delivery, from 1; at most 6. */
+            /** @description Which attempt this is for this delivery, from 1; at most 7. */
             attempt: number;
             cdr: components["schemas"]["CDR"];
         };
@@ -7096,14 +7096,14 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times, as is any other non-2xx status. */
+            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 7 times, as is any other non-2xx status. */
             "4XX": {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 6 times. */
+            /** @description Not acknowledged. The attempt failed and the delivery is retried on the schedule above until it has been tried 7 times. */
             "5XX": {
                 headers: {
                     [name: string]: unknown;

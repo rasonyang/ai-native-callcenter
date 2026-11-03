@@ -81,7 +81,7 @@ func TestTheDeliveryOnTheWireMatchesTheContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := pending(2)
+	d := pending(MaxAttempts) // the last attempt, to pin the contract's maximum
 	d.CallID = cdr.CallID
 	d.Revision = 3
 	d.Payload = payload
