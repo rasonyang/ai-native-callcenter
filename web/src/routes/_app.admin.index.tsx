@@ -1,148 +1,150 @@
 import { Link, createFileRoute } from '@tanstack/react-router'
+import { ArrowRight, BarChart3, Bot, FileClock, Megaphone, Upload } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 
+import { CampaignState, ContactCounts } from '@/components/campaign-state'
 import { KpiCard } from '@/components/kpi-card'
 import { PageHeader } from '@/components/page-header'
 import { api } from '@/lib/api'
-import { useDIDs, useExtensions, useQueues } from '@/lib/catalog'
+import { useCampaigns } from '@/lib/campaigns'
+import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
-import { useRoster } from '@/lib/agent'
+import { useCallbacks, useOverview } from '@/lib/ledger'
 
-/**
- * Administration overview: how much of the platform is configured, and whether
- * the parts an operator cannot see are alive.
- */
+/** The administrator's sales landing page; all figures come from the API. */
 export const Route = createFileRoute('/_app/admin/')({
   beforeLoad: ({ context }) => requireRole(context.user, 'ADMIN'),
-  component: AdminOverview,
+  component: SalesWorkspace,
 })
 
-function AdminOverview() {
-  const { t } = useTranslation()
-  const extensions = useExtensions()
-  const queues = useQueues()
-  const dids = useDIDs()
-  const roster = useRoster(true)
-  const health = useQuery({ queryKey: ['system', 'health'], queryFn: api.health })
+function todayRange(): { from: string; to: string } {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const end = new Date(start)
+  end.setDate(end.getDate() + 1)
+  return { from: start.toISOString(), to: end.toISOString() }
+}
 
-  const enabledDIDs = dids.data?.items.filter((did) => did.isEnabled).length ?? 0
-  const withFlow = dids.data?.items.filter((did) => did.flowId).length ?? 0
-  const boundExtensions = extensions.data?.items.filter((e) => e.agentId).length ?? 0
+function SalesWorkspace() {
+  const { t, i18n } = useTranslation()
+  const { from, to } = useMemo(todayRange, [])
+  const overview = useOverview(from, to)
+  const campaigns = useCampaigns({ status: 'RUNNING', limit: 5, offset: 0 })
+  const callbacks = useCallbacks('OPEN')
+  const health = useQuery({ queryKey: ['system', 'health'], queryFn: api.health })
+  const totalCalls = overview.data?.totalCalls
+  const answeredCalls = overview.data?.answeredCalls
+  const answerRate = totalCalls !== undefined && answeredCalls !== undefined && totalCalls > 0
+    ? Math.round((answeredCalls / totalCalls) * 100) : undefined
+  const runningCount = campaigns.data?.total
+  const openCallbacks = callbacks.data?.items ?? []
+  const timeFormat = new Intl.DateTimeFormat(i18n.language, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
 
   return (
     <div className="flex flex-col gap-4">
-      <PageHeader title={t('nav.overview')} description={t('admin.overviewHint')} />
+      <PageHeader
+        title={t('sales.title')}
+        description={t('sales.description')}
+        actions={
+          <Link to="/admin/campaigns/new" className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground hover:bg-primary/90">
+            <Megaphone className="size-4" />{t('sales.newCampaign')}
+          </Link>
+        }
+      />
 
-      <div className="grid grid-cols-4 gap-4">
-        <KpiCard
-          label={t('nav.extensions')}
-          value={extensions.data?.items.length ?? '—'}
-          note={t('admin.boundExtensions', { count: boundExtensions })}
-        />
-        <KpiCard
-          label={t('nav.queues')}
-          value={queues.data?.items.length ?? '—'}
-          note={t('admin.queuesNote', {
-            count: queues.data?.items.filter((q) => q.isEnabled).length ?? 0,
-          })}
-        />
-        <KpiCard
-          label={t('nav.numbers')}
-          value={dids.data?.items.length ?? '—'}
-          note={t('admin.numbersNote', { enabled: enabledDIDs, withFlow })}
-        />
-        <KpiCard
-          label={t('nav.agents')}
-          value={roster.data?.items.length ?? '—'}
-          note={t('admin.agentsNote', {
-            count: roster.data?.items.filter((a) => a.state !== 'LOGGED_OUT').length ?? 0,
-          })}
-        />
+      <section aria-label={t('sales.title')} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard label={t('sales.todayCalls')} value={overview.isPending ? '—' : (totalCalls ?? '—')} note={overview.isError ? describeError(overview.error, t) : t('sales.allCallTypes')} />
+        <KpiCard label={t('sales.answeredCalls')} value={overview.isPending ? '—' : (answeredCalls ?? '—')} note={answerRate === undefined ? t('sales.noCallData') : t('sales.answerRate', { rate: answerRate })} />
+        <KpiCard label={t('sales.runningCampaigns')} value={campaigns.isPending ? '—' : (runningCount ?? '—')} note={campaigns.isError ? describeError(campaigns.error, t) : t('sales.runningCampaignsNote', { total: runningCount ?? 0 })} />
+        <KpiCard label={t('sales.pendingCallbacks')} value={callbacks.isPending || callbacks.isError ? '—' : openCallbacks.length} note={callbacks.isError ? describeError(callbacks.error, t) : t('sales.pendingCallbacksNote')} />
+      </section>
+
+      <section className="rounded-md border bg-card">
+        <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
+          <div>
+            <h2 className="text-sm font-semibold">{t('sales.campaignsTitle')}</h2>
+            {campaigns.data && campaigns.data.total > campaigns.data.items.length && <p className="mt-0.5 text-xs text-muted-foreground">{t('sales.runningCampaignsPartialNote', { shown: campaigns.data.items.length, total: campaigns.data.total })}</p>}
+          </div>
+          <Link to="/admin/campaigns" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">{t('sales.viewAllCampaigns')} <ArrowRight className="size-3" /></Link>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-[13px]">
+            <thead className="border-b text-xs uppercase tracking-wide text-muted-foreground">
+              <tr><th className="px-4 py-2 font-medium">{t('sales.campaignName')}</th><th className="px-4 py-2 font-medium">{t('sales.campaignState')}</th><th className="px-4 py-2 font-medium">{t('sales.campaignContacts')}</th></tr>
+            </thead>
+            <tbody className="divide-y">
+              {campaigns.isPending && <tr><td colSpan={3} className="px-4 py-5 text-center text-xs text-muted-foreground">{t('common.loading')}</td></tr>}
+              {campaigns.isError && <tr><td colSpan={3} className="px-4 py-5 text-center text-xs text-muted-foreground">{describeError(campaigns.error, t)}</td></tr>}
+              {!campaigns.isPending && !campaigns.isError && campaigns.data?.items.length === 0 && <tr><td colSpan={3} className="px-4 py-6 text-center text-xs text-muted-foreground">{t('sales.noCampaigns')}</td></tr>}
+              {campaigns.data?.items.map((campaign) => (
+                <tr key={campaign.id} className="hover:bg-muted/30">
+                  <td className="max-w-64 px-4 py-2.5 font-medium"><Link to="/admin/campaigns/$campaignId" params={{ campaignId: campaign.id }} className="block truncate text-foreground hover:text-primary" title={campaign.name}>{campaign.name}</Link></td>
+                  <td className="whitespace-nowrap px-4 py-2.5"><CampaignState campaign={campaign} /></td>
+                  <td className="px-4 py-2.5"><ContactCounts counts={campaign.contacts} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div className="grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+        <section className="rounded-md border bg-card">
+          <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
+            <div><h2 className="text-sm font-semibold">{t('sales.callbacksTitle')}</h2><p className="mt-0.5 text-xs text-muted-foreground">{t('sales.callbacksDescription')}</p></div>
+            <Link to="/admin/campaigns" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary">{t('sales.viewAllCampaigns')} <ArrowRight className="size-3" /></Link>
+          </div>
+          <div className="divide-y">
+            {callbacks.isPending && <p className="px-4 py-5 text-xs text-muted-foreground">{t('common.loading')}</p>}
+            {callbacks.isError && <p className="px-4 py-5 text-xs text-muted-foreground">{describeError(callbacks.error, t)}</p>}
+            {!callbacks.isPending && !callbacks.isError && openCallbacks.length === 0 && <p className="px-4 py-6 text-center text-xs text-muted-foreground">{t('sales.noCallbacks')}</p>}
+            {openCallbacks.slice(0, 5).map((item) => (
+              <div key={item.id} className="flex items-start justify-between gap-3 px-4 py-3">
+                <div className="min-w-0"><p className="truncate text-sm font-medium tabular">{item.phoneNumber}</p><p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.message || '—'}</p></div>
+                <time className="shrink-0 text-xs tabular text-muted-foreground">{timeFormat.format(new Date(item.createdAt))}</time>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-md border bg-card">
+          <div className="border-b px-4 py-3"><h2 className="text-sm font-semibold">{t('sales.quickActionsTitle')}</h2></div>
+          <div className="grid grid-cols-1 divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0">
+            <QuickAction to="/admin/campaigns" icon={Upload} title={t('sales.importContacts')} description={t('sales.importContactsHint')} />
+            <QuickAction to="/admin/bots" icon={Bot} title={t('sales.editSalesFlow')} description={t('sales.editSalesFlowHint')} />
+            <QuickAction to="/admin/cdr" icon={FileClock} title={t('sales.callHistory')} description={t('sales.callHistoryHint')} />
+            <QuickAction to="/admin/reports" icon={BarChart3} title={t('sales.salesReports')} description={t('sales.salesReportsHint')} />
+          </div>
+        </section>
       </div>
 
       <section className="rounded-md border bg-card p-4">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {t('admin.systemHealth')}
-        </h2>
+        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{t('sales.systemHealth')}</h2>
         <dl className="mt-2 divide-y">
-          <HealthRow
-            label={t('admin.eventStream')}
-            value={
-              health.isError
-                ? t('stream.offline')
-                : t('admin.consolesLive', { count: health.data?.sseClients ?? 0 })
-            }
-            isDegraded={health.isError}
-          />
-          <HealthRow
-            label={t('admin.replayWindow')}
-            value={health.data ? `#${health.data.oldestSeq}` : '—'}
-          />
-          {/* Read from the switch, never managed here: a gateway is defined in
-              the switch's own configuration and this application does not
-              write that file. What the product can answer is whether the
-              trunk is there, which is the first thing to check when outbound
-              calls stop going out. */}
-          {(health.data?.trunks ?? []).map((trunk) => (
-            <HealthRow
-              key={`${trunk.profile}::${trunk.name}`}
-              label={t('admin.trunk', { name: trunk.name })}
-              // The switch's own word, not a yes/no: a trunk down for a reason
-              // it has a name for should say that name.
-              value={`${trunk.state} · ${trunk.address}`}
-              isDegraded={!trunk.isUp}
-            />
-          ))}
-          {health.data && (health.data.trunks ?? []).length === 0 && (
-            <HealthRow label={t('admin.trunks')} value={t('admin.noTrunks')} isDegraded />
-          )}
+          <HealthRow label={t('sales.eventStream')} value={health.isError ? t('stream.offline') : t('sales.consolesLive', { count: health.data?.sseClients ?? 0 })} isDegraded={health.isError} />
+          <HealthRow label={t('sales.replayWindow')} value={health.data ? `#${health.data.oldestSeq}` : '—'} />
+          {(health.data?.trunks ?? []).map((trunk) => <HealthRow key={`${trunk.profile}::${trunk.name}`} label={t('sales.trunk', { name: trunk.name })} value={`${trunk.state} · ${trunk.address}`} isDegraded={!trunk.isUp} />)}
+          {health.data && (health.data.trunks ?? []).length === 0 && <HealthRow label={t('sales.trunks')} value={t('sales.noTrunks')} isDegraded />}
         </dl>
-        <p className="mt-3 text-xs text-muted-foreground">{t('admin.healthHint')}</p>
-      </section>
-
-      <section className="rounded-md border bg-card p-4">
-        <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {t('admin.shortcuts')}
-        </h2>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-          <Shortcut to="/admin/extensions" label={t('nav.extensions')} />
-          <Shortcut to="/admin/routing" label={t('nav.routing')} />
-          <Shortcut to="/admin/numbers" label={t('nav.numbers')} />
-          <Shortcut to="/admin/cdr" label={t('nav.cdr')} />
-          <Shortcut to="/admin/reports" label={t('nav.reports')} />
-        </div>
+        <p className="mt-3 text-xs text-muted-foreground">{t('sales.healthHint')}</p>
       </section>
     </div>
   )
 }
 
-function HealthRow({
-  label,
-  value,
-  isDegraded,
-}: {
-  label: string
-  value: string
-  isDegraded?: boolean
+function QuickAction({ to, icon: Icon, title, description }: {
+  to: '/admin/campaigns' | '/admin/bots' | '/admin/cdr' | '/admin/reports'
+  icon: typeof Upload
+  title: string
+  description: string
 }) {
-  return (
-    <div className="flex h-8 items-center justify-between gap-2">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd
-        className="tabular text-sm"
-        style={isDegraded ? { color: 'var(--state-breach)' } : undefined}
-      >
-        {value}
-      </dd>
-    </div>
-  )
+  return <Link to={to} className="flex min-w-0 items-start gap-3 p-4 hover:bg-muted/30"><Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="min-w-0"><span className="block text-sm font-medium">{title}</span><span className="mt-1 block text-xs text-muted-foreground">{description}</span></span></Link>
 }
 
-function Shortcut({ to, label }: { to: string; label: string }) {
-  return (
-    <Link to={to} className="text-sm text-muted-foreground hover:text-primary">
-      {label}
-    </Link>
-  )
+function HealthRow({ label, value, isDegraded }: { label: string; value: string; isDegraded?: boolean }) {
+  return <div className="flex h-8 items-center justify-between gap-2"><dt className="text-sm text-muted-foreground">{label}</dt><dd className="tabular text-sm" style={isDegraded ? { color: 'var(--state-breach)' } : undefined}>{value}</dd></div>
 }
