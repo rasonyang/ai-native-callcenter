@@ -79,6 +79,7 @@ export const NAV: NavGroup[] = [
       // map grants campaigns:read and :write from the supervisor floor up), so
       // the pair belongs to both senior roles, like the ledger.
       { to: '/admin/campaigns', labelKey: 'nav.campaigns', icon: Megaphone, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
+      { to: '/admin/callbacks', labelKey: 'nav.callbacks', icon: PhoneForwarded, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
       { to: '/admin/dnc', labelKey: 'nav.dnc', icon: PhoneOff, roles: ['ADMIN', 'SUPERVISOR'], isReady: true },
     ],
   },
