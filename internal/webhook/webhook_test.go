@@ -697,12 +697,36 @@ func TestADeliveryThatNeverSucceedsIsAttemptedSevenTimesOnTheSchedule(t *testing
 	}
 }
 
-// A receiver that fails three different ways and then recovers: the wait after
-// a timeout is the third step, 5 minutes, and the delivery ends DELIVERED on
-// attempt 4 with that number in the body the receiver read (#446).
+// timingOutOnce is a transport whose nth request fails the way http.Client
+// reports an expired Client.Timeout (a net.Error with Timeout() true) without
+// reaching the server. Waiting for a real timeout would cost the 10 s
+// RequestTimeout, or a short one that flakes when the machine is loaded, and
+// the worker treats the error alike either way.
+type timingOutOnce struct {
+	next http.RoundTripper
+	n    atomic.Int32
+	at   int32
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "context deadline exceeded (Client.Timeout exceeded)" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func (t *timingOutOnce) RoundTrip(r *http.Request) (*http.Response, error) {
+	if t.n.Add(1) == t.at {
+		return nil, timeoutErr{}
+	}
+	return t.next.RoundTrip(r)
+}
+
+// A receiver that fails three different ways and then recovers: 500, 503, a
+// timeout, then 204. The wait after the timeout is the third step, 5 minutes,
+// and the delivery ends DELIVERED on attempt 4 with that number in the body
+// the receiver read (#446).
 func TestADeliveryThatRecoversOnTheFourthAttemptIsDelivered(t *testing.T) {
 	t.Parallel()
-	release := make(chan struct{})
 	var (
 		mu       sync.Mutex
 		hits     int
@@ -718,12 +742,6 @@ func TestADeliveryThatRecoversOnTheFourthAttemptIsDelivered(t *testing.T) {
 			rw.WriteHeader(http.StatusInternalServerError)
 		case 2:
 			rw.WriteHeader(http.StatusServiceUnavailable)
-		case 3:
-			// A timeout: block until the client gives up or the test ends.
-			select {
-			case <-release:
-			case <-r.Context().Done():
-			}
 		default:
 			b, _ := io.ReadAll(r.Body)
 			mu.Lock()
@@ -732,15 +750,13 @@ func TestADeliveryThatRecoversOnTheFourthAttemptIsDelivered(t *testing.T) {
 			rw.WriteHeader(http.StatusNoContent)
 		}
 	}))
-	// Cleanups run last in first out: unblock the handler, then close the server.
-	t.Cleanup(srv.Close)
-	t.Cleanup(func() { close(release) })
+	defer srv.Close()
 
 	d := pending(0)
 	st := newFakeStore(srv.URL, "t")
 	w := newWorker(t, st, nil)
-	// The production RequestTimeout is 10 s; a test must not wait for it.
-	w.client.Timeout = 200 * time.Millisecond
+	// The third attempt times out before it reaches the server.
+	w.client.Transport = &timingOutOnce{next: w.client.Transport, at: 3}
 	clock := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
 	w.now = func() time.Time { return clock }
 
