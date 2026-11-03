@@ -2042,3 +2042,37 @@ func TestAConfirmedCancelNamesTheReasonItWasSentFor(t *testing.T) {
 		t.Errorf("interruptedBy = %q, want the caller", event.InterruptedBy)
 	}
 }
+
+// Every tool reaches the engine with a top-level "required": flash fails the
+// first response of a session whose tool lacks one (qwen-findings, flash).
+func TestBuildToolsAlwaysCarriesRequired(t *testing.T) {
+	r := &Realtime{}
+	cases := []struct {
+		name       string
+		parameters json.RawMessage
+		want       string
+	}{
+		{"none", nil, `{"properties":{},"required":[],"type":"object"}`},
+		{"empty", json.RawMessage(``), `{"properties":{},"required":[],"type":"object"}`},
+		{"without required", json.RawMessage(`{"type":"object","properties":{"orderId":{"type":"string"}}}`),
+			`{"properties":{"orderId":{"type":"string"}},"required":[],"type":"object"}`},
+		{"with required", json.RawMessage(`{"type":"object","properties":{"orderId":{"type":"string"}},"required":["orderId"]}`),
+			`{"type":"object","properties":{"orderId":{"type":"string"}},"required":["orderId"]}`},
+		{"with empty required", json.RawMessage(`{"type":"object","required":[]}`), `{"type":"object","required":[]}`},
+		{"unparsable", json.RawMessage(`{"type":`), `{"type":`},
+		{"not an object", json.RawMessage(`[1,2]`), `[1,2]`},
+		{"null", json.RawMessage(`null`), `null`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tools := r.buildTools([]ToolSpec{{Name: "t", Description: "d", Parameters: c.parameters}})
+			got, ok := tools[0]["parameters"].(json.RawMessage)
+			if !ok {
+				t.Fatalf("parameters is %T, want json.RawMessage", tools[0]["parameters"])
+			}
+			if string(got) != c.want {
+				t.Errorf("parameters = %s, want %s", got, c.want)
+			}
+		})
+	}
+}

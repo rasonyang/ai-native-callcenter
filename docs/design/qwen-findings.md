@@ -1510,8 +1510,9 @@ answered it; other flows than
 Issue #463. Everything above was measured on `qwen-audio-3.1-realtime-plus`.
 The 2026-09-24 section recorded `close 1007 "Model not found
 (qwen-audio-3.1-realtime-flash)!"`. This section re-measures on flash. It
-changes no profile, default or trait: those stay as they were until the owner
-decides.
+was written before the profile changed. The profile's model became flash the
+same day (owner decision, #463), together with the `required` fix below; the
+traits themselves are unchanged.
 
 **Method.** `AICC_PROVIDER_MODEL` now reaches the live tests (`liveProfile` in
 `internal/provider/live_test.go`): it replaces the model of the profile whose
@@ -1576,8 +1577,10 @@ this way (`MidCallInstructions` tools arms, `LineAfterMove`, `LineCallsNoTool`,
 arms of `MidCallInstructions` passed.
 
 The rows below were measured with a working-tree-only patch to `buildTools`
-that adds `"required": []` to a `parameters` object that lacks one. It is not
-committed. Plus was measured without it.
+that adds `"required": []` to a `parameters` object that lacks one. That patch
+is now `withRequired` in `buildTools`, applied to every Realtime profile. Plus
+was measured without it; a later run of ClosingLine and WaitLine on plus with
+`withRequired` is recorded at the end of this section.
 
 ### Results
 
@@ -1635,3 +1638,20 @@ No live test covers these, on either model; none was written here.
   re-measured on flash. A first attempt at the full matrix was stopped at the
   15-minute test timeout.
 - The open qwen defects (#197, #310, #387, #403, #448, #453) were not retested.
+
+### After the fix (2026-11-03)
+
+`withRequired` in `buildTools` now gives every tool of every Realtime profile a
+top-level `required`. One run each, `-count=1`, the model taken from the
+profile (flash) or from `AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`:
+
+| Test | Flash (default) | Plus |
+|---|---|---|
+| `ClosingLine` | 3 of 3, passed | 3 of 3, passed |
+| `WaitLine` | plain: call made 3 of 3; shipped: call made 0 of 3; line said 3 of 3 each; one answer 3 of 3 | the same counts |
+| `MidCallInstructions` | failed: tools arm called the tool in 2 of 3 sessions (the third reply was "好的，王先生。" with no call), marker 3 of 3; control, idle, speaking and tools-control as before | not run |
+| `LineAfterMove` | zh and en: line said 3 of 3 each; the result's turn acted before the line 0 of 6 | not run |
+
+With the earlier run's 17 of 18, the tools arm of `MidCallInstructions` called
+the tool in 19 of 21 flash sessions, in 2 of 7 runs short by one session (plus:
+15 of 15 in 5 runs).

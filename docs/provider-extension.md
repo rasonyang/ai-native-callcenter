@@ -66,6 +66,21 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `IgnoresOverrideOnceTalking` | Whether a `response.create` carrying only a per-response `instructions` override is silently dropped once the conversation holds a turn: no `response.created`, no error. True on grok (0 of 5; grok-findings 5.2). Every mid-call line asked for with `SpeakText`, closing or not, then goes into the conversation as a caller message first and the override follows (3 of 3 verbatim) — the mechanism `NeedsDirectedLineInConversation` applies to closing lines only. The opening line is exempt: the override alone works on an empty conversation. |
 | `RequiresTerminalAnnounce` | Whether the engine speaks only words it is handed: *no* text will make it take a turn. Stronger than the row above: a cue is something a client can invent, and this says there is no cue at all, so a phase the call stops at must carry its own words or the caller hears silence, and a publish is refused otherwise (`flow.RequireTerminalAnnounce`, `TERMINAL_ANNOUNCE_REQUIRED`). The same capability decides how the closing line travels. Where it is true (doubao) a tool result that moves the call into a terminal phase carries the phase's instruction and the line is said with `SpeakText`, which is exact by construction; the session limit also has no cue to ask for a goodbye or handover with. Where it is false (openai, grok, qwen, gateway; grok measured in grok-findings 5.2, where a tool-result hint was verbatim 3 of 3) the tool result carries the line as its hint (`SayExactly`), so the turn the result produces is the line, because a line asked for on top of the result lost to it on qwen (qwen-findings W-Q1). |
 
+**Which qwen model the qwen rows describe.** Every qwen trait above was first
+measured on `qwen-audio-3.1-realtime-plus`. The profile's model has been
+`qwen-audio-3.1-realtime-flash` since 2026-11-03 (#463), after the traits were
+re-measured on it (qwen-findings, "Model: qwen-audio-3.1-realtime-flash"): the
+live tests that cover them held, with these counts: a mid-call update with a
+tool declared called the tool in 17 of 18 sessions (plus 15 of 15), and the
+tool-free wait-line direction still saw the model call a tool in the line's turn
+in 2 of 18 sessions (plus 0 of 18; the client keeps such a call back and the
+line is said). Traits no live test covers (turn detection fixed once audio
+flows, a second voice, out-of-band responses) are not re-measured. Flash fails
+the first response of a session that declares a tool whose `parameters` has no
+`required` key, so `buildTools` gives every tool of every Realtime profile a
+top-level `required` (an empty list when the flow names none). Plus stays
+selectable with `AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`.
+
 The last five are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call
 behaved differently from the documentation, and each is a bug somewhere else in

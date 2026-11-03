@@ -20,6 +20,15 @@ carries the one-line installer's files.
 
 ### Changed
 
+- qwen: the default model is now `qwen-audio-3.1-realtime-flash` (it was
+  `qwen-audio-3.1-realtime-plus`), after the profile's traits were re-measured
+  on it. A deployment that sets `AICC_PROVIDER_MODEL` keeps its model; setting
+  it to `qwen-audio-3.1-realtime-plus` returns to the earlier model with no
+  rebuild. (#463)
+- Realtime providers: every tool's `parameters` now carries a top-level
+  `required` (an empty list when the flow names none). Flash fails the first
+  response of a session whose tool has none; the other engines accept either
+  form. (#463)
 - Log keys: `callId` now always means the call's own id and nothing else. The
   AI leg's lines (the bot's SIP and RTP lines, and the flow, provider and
   session lines of an AI call) used to log the bot leg's SIP Call-ID as

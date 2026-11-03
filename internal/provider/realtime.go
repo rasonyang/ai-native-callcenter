@@ -1443,10 +1443,34 @@ func (r *Realtime) buildTools(tools []ToolSpec) []map[string]any {
 			"type":        "function",
 			"name":        tool.Name,
 			"description": tool.Description,
-			"parameters":  parameters,
+			"parameters":  withRequired(parameters),
 		})
 	}
 	return out
+}
+
+// withRequired makes sure a tool's JSON Schema has a top-level "required" key,
+// adding an empty list when it is absent. qwen-audio-3.1-realtime-flash fails
+// the first response of any session that declares a tool whose parameters have
+// no "required" (response.done status=failed, InternalError, close 1011);
+// other engines accept either form, so every profile gets the same schema
+// (qwen-findings, "Model: qwen-audio-3.1-realtime-flash"). An existing
+// "required" is kept as it is, and parameters that are not a JSON object are
+// returned unchanged.
+func withRequired(parameters json.RawMessage) json.RawMessage {
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(parameters, &schema); err != nil || schema == nil {
+		return parameters
+	}
+	if _, ok := schema["required"]; ok {
+		return parameters
+	}
+	schema["required"] = json.RawMessage(`[]`)
+	fixed, err := json.Marshal(schema)
+	if err != nil {
+		return parameters
+	}
+	return fixed
 }
 
 //
