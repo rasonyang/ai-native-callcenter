@@ -1211,6 +1211,7 @@
     "trunk": "Trunk · {{name}}",
     "trunks": "Carrier trunks",
     "noTrunks": "No carrier trunks are configured",
-    "healthHint": "Telephony and event-stream status. Outbound calls remain disabled until a carrier route is configured."
+    "healthHint": "Telephony and event-stream status. Outbound calls remain disabled until a carrier route is configured.",
+    "callbacksReadOnlyNote": "Managers can review these tasks here. An agent must claim and work each task in their own callback queue."
   }
 }
