@@ -73,7 +73,7 @@ import (
 // AICC_LIVE_RUNS (default 5) is how many sessions a cell opens. AICC_LIVE_WIRE=1
 // prints the provider's events of every run, not only the first of a cell.
 func TestLiveQwenCutOpener(t *testing.T) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 	data, err := os.ReadFile("testdata/cut_opener.json")
 	if err != nil {

@@ -51,7 +51,7 @@ func TestLiveQwenSpeechOverTheLineTail(t *testing.T) {
 }
 
 func runSpeechOverTheAnswer(t *testing.T, speakAt time.Duration, isBargeIn bool) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 	runs := 3
 	if v, err := strconv.Atoi(os.Getenv("AICC_LIVE_RUNS")); err == nil && v > 0 {
@@ -279,7 +279,7 @@ func TestLiveQwenUnheardResultNote(t *testing.T) {
 }
 
 func runUnheardResultNote(t *testing.T, isKept, isNote bool) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 	runs := 3
 	if v, err := strconv.Atoi(os.Getenv("AICC_LIVE_RUNS")); err == nil && v > 0 {

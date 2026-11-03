@@ -48,7 +48,7 @@ import (
 //
 // AICC_LIVE_RUNS (default 5) is the number of sessions.
 func TestLiveGrokRecoversADroppedLine(t *testing.T) {
-	profile := GrokProfile()
+	profile := liveProfile(GrokProfile())
 	profile.IgnoresOverrideOnceTalking = false
 	requireLive(t, profile)
 	runs := 5

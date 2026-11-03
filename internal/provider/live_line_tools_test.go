@@ -44,11 +44,11 @@ import (
 //	AICC_LIVE_PROVIDER_TEST=1 go test -count=1 -run LiveOpenAILineCallsNoTool -v ./internal/provider/
 const liveWaitLine = "请稍等，我查一下。"
 
-func TestLiveQwenLineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, QwenProfile()) }
+func TestLiveQwenLineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, liveProfile(QwenProfile())) }
 
-func TestLiveGrokLineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, GrokProfile()) }
+func TestLiveGrokLineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, liveProfile(GrokProfile())) }
 
-func TestLiveOpenAILineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, OpenAIProfile()) }
+func TestLiveOpenAILineCallsNoTool(t *testing.T) { runLineCallsNoTool(t, liveProfile(OpenAIProfile())) }
 
 func runLineCallsNoTool(t *testing.T, profile Profile) {
 	requireLive(t, profile)
@@ -282,11 +282,11 @@ type waitLineArm struct {
 // Arms: "plain" is the line as it was asked for before W-Q8 (SayExactly),
 // "shipped" is QwenProfile as it ships (sayExactlyWithoutTools).
 func TestLiveQwenWaitLine(t *testing.T) {
-	plain := QwenProfile()
+	plain := liveProfile(QwenProfile())
 	plain.NeedsToolFreeLineDirection = false
 	arms := []waitLineArm{
 		{name: "plain", profile: plain},
-		{name: "shipped", profile: QwenProfile(), isShipped: true},
+		{name: "shipped", profile: liveProfile(QwenProfile()), isShipped: true},
 	}
 	for _, arm := range arms {
 		t.Run(arm.name, func(t *testing.T) { runWaitLineArm(t, arm) })
@@ -478,7 +478,7 @@ func (c *midCall) waitLineRound(t *testing.T, question []byte) waitLineRun {
 //
 //	AICC_LIVE_PROVIDER_TEST=1 go test -count=1 -run LiveQwenClosingLine -v ./internal/provider/
 func TestLiveQwenClosingLine(t *testing.T) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 	runs := 3
 	if v, err := strconv.Atoi(os.Getenv("AICC_LIVE_RUNS")); err == nil && v > 0 {

@@ -236,9 +236,11 @@ func QwenProfile() Profile {
 	return Profile{
 		Name:     "qwen",
 		Endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime",
-		// Probed against this profile's session in qwen-findings §2026-09-24.
-		// There is no flash variant.
-		Model:     "qwen-audio-3.1-realtime-plus",
+		// Flash since 2026-11-03 (#463, qwen-findings "Model:
+		// qwen-audio-3.1-realtime-flash"); it was plus before (qwen-findings
+		// §2026-09-24, which found no flash then). Plus stays selectable with
+		// AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus.
+		Model:     "qwen-audio-3.1-realtime-flash",
 		APIKeyEnv: "ALIYUN_API_KEY",
 		Style:     styleBeta,
 		// The vendor's default voice for this model, by owner decision
