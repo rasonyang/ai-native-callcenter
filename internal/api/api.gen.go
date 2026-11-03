@@ -3258,7 +3258,7 @@ type WaitingCallList struct {
 
 // WebhookCDRDelivery The body of a CDR webhook delivery (webhooks.cdrDelivery): the finished call wrapped in a delivery header. The CDR is the one the ledger holds, as GET /cdrs/{callId} serves it in CDRDetail.cdr; transcript and recordings are not part of a delivery.
 type WebhookCDRDelivery struct {
-	// Attempt Which attempt this is for this delivery, from 1; at most 6.
+	// Attempt Which attempt this is for this delivery, from 1; at most 7.
 	Attempt int `json:"attempt"`
 
 	// CDR One finished call. totalSec always equals the sum of its parts.

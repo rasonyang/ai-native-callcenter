@@ -282,7 +282,11 @@ Because delivery is concurrent, **the customer must order by `revision`, not by 
 Revision 2 of a call can land before revision 1 of the same call; the rule they implement is
 last-revision-wins per `callId`, and the contract must say so in as many words.
 
-**Retry (Q2, accepted as proposed):** 6 attempts at 10s, 1m, 5m, 30m, 2h, 6h, then `FAILED`.
+**Retry (Q2, accepted as proposed; schedule clarified by #446):** seven attempts, which is the
+first try and six retries. The waits after failed attempts 1 to 6 are 10s, 1m, 5m, 30m, 2h and
+6h (about 8.6 hours in all); the seventh failure marks the delivery `FAILED` and nothing is sent
+after it. The wait is indexed by the attempt that just failed (`Backoff[attempt_count-1]`);
+indexing it by the already-incremented count had skipped the 10s step.
 Per-request timeout 10s. A 2xx is success; everything else, timeouts included, retries. 4xx
 other than 408/429 is arguably permanent, but telling "your payload is malformed" from "our WAF
 hiccuped" by status code is guesswork, so all failures are treated alike and the attempt cap
@@ -524,7 +528,7 @@ Every question this design raised has been answered by the owner on 2026-08-26:
 | Scope | CDR only; no generic event subscription, no `events.Hub` subscriber |
 | Enqueue durability | in the same transaction as the CDR write |
 | A fuller CDR replacing a delivered one | **send the correction**, ordered by `revision` |
-| Retry | 6 attempts, 10s → 6h, 10s per-request timeout |
+| Retry | 7 attempts (6 retries), waits 10s → 6h, 10s per-request timeout |
 | Failure signal | a metric **and** a WARN |
 | Retention | `FAILED` 30 days, `DELIVERED` 7, `PENDING` never |
 | Authentication outward | the customer's own bearer token, no HMAC |

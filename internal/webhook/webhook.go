@@ -23,9 +23,15 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
 
-// Backoff is the schedule a delivery is retried on, and its length is the
-// attempt cap: six tries over roughly nine hours, then the delivery is failed
-// (design 09 §6).
+// MaxAttempts is how many times a delivery is attempted: the first try and six
+// retries. The seventh failure marks it FAILED and nothing is sent after it
+// (design 09 §6, clarified by #446).
+const MaxAttempts = 7
+
+// Backoff is the wait after each failed attempt that is not the last:
+// Backoff[i] is the wait after attempt i+1, so the first retry comes 10
+// seconds after the first failure and the whole schedule spans about 8.6
+// hours. It has MaxAttempts-1 entries (design 09 §6).
 //
 // A 2xx is success; everything else, timeouts included, is retried the same
 // way. Telling "your payload is malformed" from "our gateway hiccuped" by
@@ -258,10 +264,11 @@ func (w *Worker) deliver(ctx context.Context, d store.WebhookDelivery) {
 // settle reschedules a failed attempt or gives up on it.
 //
 // AttemptCount is the number of attempts *including* this one, because the
-// claim incremented it — so it indexes the wait before the next try, and
-// running off the end of the schedule is the cap.
+// claim incremented it (so it is at least 1). The attempt that just failed is
+// number AttemptCount, and the wait after it is Backoff[AttemptCount-1]. The
+// MaxAttempts-th failure is the cap.
 func (w *Worker) settle(ctx context.Context, d store.WebhookDelivery, statusCode int, reason string) {
-	if d.AttemptCount >= len(Backoff) {
+	if d.AttemptCount >= MaxAttempts {
 		if err := w.store.MarkFailed(ctx, d.DeliveryID, d.AttemptCount, statusCode, reason); err != nil {
 			if w.warnSuperseded(ctx, d, err) {
 				return
@@ -281,7 +288,7 @@ func (w *Worker) settle(ctx context.Context, d store.WebhookDelivery, statusCode
 			"attempts", d.AttemptCount, "lastStatus", statusCode, "reason", reason)
 		return
 	}
-	next := w.now().Add(Backoff[d.AttemptCount])
+	next := w.now().Add(Backoff[d.AttemptCount-1])
 	if err := w.store.Reschedule(ctx, d.DeliveryID, d.AttemptCount, next, statusCode, reason); err != nil {
 		if !w.warnSuperseded(ctx, d, err) {
 			w.log.ErrorContext(ctx, "could not reschedule a delivery", "error", err,

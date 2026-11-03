@@ -244,8 +244,8 @@ func TestNoTokenMeansNoAuthorizationHeader(t *testing.T) {
 }
 
 // Anything but 2xx is retried on the schedule, and the wait is indexed by the
-// attempt already made — so a first failure waits the first interval, not the
-// second.
+// attempt that just failed — so a first failure waits the first interval
+// (10 s), not the second (#446).
 func TestAFailedAttemptIsRescheduledOnTheSchedule(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -264,7 +264,7 @@ func TestAFailedAttemptIsRescheduledOnTheSchedule(t *testing.T) {
 	if !ok {
 		t.Fatal("a 500 was not retried at all")
 	}
-	if want := base.Add(Backoff[1]); !at.Equal(want) {
+	if want := base.Add(Backoff[0]); !at.Equal(want) {
 		t.Errorf("next attempt at %v, want %v — attempt %d indexes the wait before the next try",
 			at, want, d.AttemptCount)
 	}
@@ -283,7 +283,7 @@ func TestRunningOutOfAttemptsFailsTheDeliveryAndSaysSo(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	d := pending(len(Backoff)) // the last attempt the schedule allows
+	d := pending(MaxAttempts) // the last attempt allowed
 	st := newFakeStore(srv.URL, "t", d)
 	counted := &countingMetrics{}
 	newWorker(t, st, counted).drain(t.Context())
@@ -544,7 +544,7 @@ func TestARedirectIsAFailedAttemptAndIsNotFollowed(t *testing.T) {
 			if !ok {
 				t.Fatalf("a %d was not rescheduled: %s", code, st.whyNot(d.DeliveryID))
 			}
-			if want := base.Add(Backoff[1]); !at.Equal(want) {
+			if want := base.Add(Backoff[0]); !at.Equal(want) {
 				t.Errorf("next attempt at %v, want %v", at, want)
 			}
 			if got := st.codes[d.DeliveryID]; got != code {
@@ -569,7 +569,7 @@ func TestARedirectOnTheLastAttemptFailsTheDeliveryAndSaysSo(t *testing.T) {
 	t.Parallel()
 	srv, _ := redirectingServer(t, http.StatusMovedPermanently)
 
-	d := pending(len(Backoff))
+	d := pending(MaxAttempts)
 	st := newFakeStore(srv.URL+"/old", "t", d)
 	counted := &countingMetrics{}
 	logs := &lockedBuffer{}
@@ -614,4 +614,185 @@ func (c *countingMetrics) DeliveryFailed(uuid.UUID) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.failed++
+}
+
+// attemptLoop plays the store's part for one delivery: each round it hands the
+// worker the delivery with attempt_count incremented, as the claim does, with
+// the fake clock at the previous round's next_attempt_at. It returns the waits
+// the worker chose, one per rescheduled attempt, and stops when the delivery
+// settles as delivered or failed.
+func attemptLoop(t *testing.T, st *fakeStore, w *Worker, d store.WebhookDelivery, clock *time.Time) []time.Duration {
+	t.Helper()
+	var waits []time.Duration
+	for attempt := 1; attempt <= MaxAttempts+3; attempt++ {
+		d.AttemptCount = attempt
+		st.mu.Lock()
+		st.due = []store.WebhookDelivery{d}
+		delete(st.rescheduled, d.DeliveryID)
+		st.mu.Unlock()
+		w.drain(t.Context())
+
+		st.mu.Lock()
+		at, rescheduled := st.rescheduled[d.DeliveryID]
+		_, delivered := st.delivered[d.DeliveryID]
+		_, failed := st.failed[d.DeliveryID]
+		st.mu.Unlock()
+		switch {
+		case delivered || failed:
+			return waits
+		case !rescheduled:
+			t.Fatalf("attempt %d was neither rescheduled nor settled", attempt)
+		}
+		waits = append(waits, at.Sub(*clock))
+		*clock = at
+	}
+	t.Fatal("the delivery never settled")
+	return nil
+}
+
+// The whole life of a delivery whose receiver never answers well: seven
+// attempts, the waits written out here rather than read from Backoff so the
+// test pins the design, FAILED on the seventh, and nothing sent after it (#446).
+func TestADeliveryThatNeverSucceedsIsAttemptedSevenTimesOnTheSchedule(t *testing.T) {
+	t.Parallel()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	d := pending(0)
+	st := newFakeStore(srv.URL, "t")
+	w := newWorker(t, st, nil)
+	clock := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return clock }
+
+	got := attemptLoop(t, st, w, d, &clock)
+
+	want := []time.Duration{
+		10 * time.Second, time.Minute, 5 * time.Minute,
+		30 * time.Minute, 2 * time.Hour, 6 * time.Hour,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("waits = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("wait after attempt %d = %v, want %v", i+1, got[i], want[i])
+		}
+	}
+	if _, ok := st.failed[d.DeliveryID]; !ok {
+		t.Fatalf("not FAILED after the seventh attempt: %s", st.whyNot(d.DeliveryID))
+	}
+	if n := hits.Load(); n != 7 {
+		t.Errorf("the receiver was hit %d times, want 7", n)
+	}
+
+	// Well past the last wait, nothing is due and nothing is sent.
+	clock = clock.Add(24 * time.Hour)
+	w.drain(t.Context())
+	if n := hits.Load(); n != 7 {
+		t.Errorf("the receiver was hit %d times after the delivery failed, want 7", n)
+	}
+}
+
+// timingOutOnce is a transport whose nth request fails the way http.Client
+// reports an expired Client.Timeout (a net.Error with Timeout() true) without
+// reaching the server. Waiting for a real timeout would cost the 10 s
+// RequestTimeout, or a short one that flakes when the machine is loaded, and
+// the worker treats the error alike either way.
+type timingOutOnce struct {
+	next http.RoundTripper
+	n    atomic.Int32
+	at   int32
+}
+
+type timeoutErr struct{}
+
+func (timeoutErr) Error() string   { return "context deadline exceeded (Client.Timeout exceeded)" }
+func (timeoutErr) Timeout() bool   { return true }
+func (timeoutErr) Temporary() bool { return true }
+
+func (t *timingOutOnce) RoundTrip(r *http.Request) (*http.Response, error) {
+	if t.n.Add(1) == t.at {
+		return nil, timeoutErr{}
+	}
+	return t.next.RoundTrip(r)
+}
+
+// A receiver that fails three different ways and then recovers: 500, 503, a
+// timeout, then 204. The wait after the timeout is the third step, 5 minutes,
+// and the delivery ends DELIVERED on attempt 4 with that number in the body
+// the receiver read (#446).
+func TestADeliveryThatRecoversOnTheFourthAttemptIsDelivered(t *testing.T) {
+	t.Parallel()
+	var (
+		mu       sync.Mutex
+		hits     int
+		lastBody []byte
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits++
+		n := hits
+		mu.Unlock()
+		switch n {
+		case 1:
+			rw.WriteHeader(http.StatusInternalServerError)
+		case 2:
+			rw.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			b, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			lastBody = b
+			mu.Unlock()
+			rw.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer srv.Close()
+
+	d := pending(0)
+	st := newFakeStore(srv.URL, "t")
+	w := newWorker(t, st, nil)
+	// The third attempt times out before it reaches the server.
+	w.client.Transport = &timingOutOnce{next: w.client.Transport, at: 3}
+	clock := time.Date(2026, 11, 3, 10, 0, 0, 0, time.UTC)
+	w.now = func() time.Time { return clock }
+
+	got := attemptLoop(t, st, w, d, &clock)
+
+	want := []time.Duration{10 * time.Second, time.Minute, 5 * time.Minute}
+	if len(got) != len(want) {
+		t.Fatalf("waits = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("wait after attempt %d = %v, want %v", i+1, got[i], want[i])
+		}
+	}
+	if _, ok := st.delivered[d.DeliveryID]; !ok {
+		t.Fatalf("not delivered: %s", st.whyNot(d.DeliveryID))
+	}
+	mu.Lock()
+	body := lastBody
+	mu.Unlock()
+	var sent struct {
+		Attempt int `json:"attempt"`
+	}
+	if err := json.Unmarshal(body, &sent); err != nil {
+		t.Fatalf("body: %v (%s)", err, body)
+	}
+	if sent.Attempt != 4 {
+		t.Errorf("attempt in the delivered body = %d, want 4", sent.Attempt)
+	}
+}
+
+// The cap and the schedule are one decision: a wait after every failure but the
+// last.
+func TestTheScheduleHasOneWaitFewerThanTheAttempts(t *testing.T) {
+	t.Parallel()
+	if len(Backoff) != MaxAttempts-1 {
+		t.Errorf("len(Backoff) = %d, want MaxAttempts-1 = %d", len(Backoff), MaxAttempts-1)
+	}
 }

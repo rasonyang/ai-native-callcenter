@@ -124,6 +124,14 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- Webhooks: the retry schedule skipped its first step. The first retry came 1
+  minute after the first failure instead of 10 seconds, and a delivery was
+  attempted 6 times. It is now attempted at most 7 times: the waits after
+  failed attempts 1 to 6 are 10 seconds, 1 minute, 5 minutes, 30 minutes,
+  2 hours and 6 hours (about 8.6 hours in all), and the seventh failure marks
+  the delivery FAILED. The `attempt` field of a delivery can now reach 7; the
+  contract's maximum and the retry text of `webhooks.cdrDelivery` say so. (#446)
+
 - Webhooks: a fuller CDR written for a call while its earlier delivery was in
   flight, or waiting to retry, could be lost or sent under the wrong identity.
   The receiver's 2xx for the old body marked the replaced delivery delivered,
