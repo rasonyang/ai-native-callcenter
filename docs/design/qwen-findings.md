@@ -1504,3 +1504,134 @@ which `opening_direction_test.go` covers and no call reached; the no-input path 
 the cues left the opening direction as the last caller item and the model
 answered it; other flows than
 `campaign_lead_followup`; other qwen models.
+
+## Model: qwen-audio-3.1-realtime-flash (2026-11-03)
+
+Issue #463. Everything above was measured on `qwen-audio-3.1-realtime-plus`.
+The 2026-09-24 section recorded `close 1007 "Model not found
+(qwen-audio-3.1-realtime-flash)!"`. This section re-measures on flash. It
+changes no profile, default or trait: those stay as they were until the owner
+decides.
+
+**Method.** `AICC_PROVIDER_MODEL` now reaches the live tests (`liveProfile` in
+`internal/provider/live_test.go`): it replaces the model of the profile whose
+name equals `AICC_PROVIDER`, and nothing else. Command:
+
+```sh
+AICC_PROVIDER=qwen AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-flash \
+  AICC_LIVE_PROVIDER_TEST=1 go test -count=1 -run '<TestLiveQwen...>' -v ./internal/provider/
+```
+
+Each test ran 3 times (6 for `TestLiveQwenMidCallInstructions` and
+`TestLiveQwenWaitLine`, traits recorded 6 of 6 on plus). The "plus, today"
+column is the same tests run the same day on plus, with the same number of
+runs. The test log prints `qwen (<model>)`, which shows the model that ran.
+
+### Handshake
+
+The endpoint accepts `model=qwen-audio-3.1-realtime-flash`. It answers
+`session.created` and then `session.updated` for the profile's `session.update`
+(`longanqian_v3.1`, `server_vad` at 500 ms, `temperature` 0.3, tools):
+
+| Echo | `session.created` | `session.updated` |
+|---|---|---|
+| `model` | `qwen-audio-3.1-realtime-flash` | `qwen-audio-3.1-realtime-flash` |
+| `voice` | `Chelsie` (the connection's default) | `longanqian_v3.1` |
+| `turn_detection` | `server_vad`, threshold 0.5, prefix 300 ms, silence 800 ms | `server_vad`, threshold 0.5, prefix 300 ms, silence 500 ms |
+| `temperature` | not present | 0.3 |
+| `input_audio_format` / `output_audio_format` | `pcm16` / `pcm24` | `pcm16` / `pcm` (the formats are not echoed as sent, as on plus) |
+| `tools` | not present | echoed, `type` `function` |
+
+`response.create` on an empty conversation is refused on flash too
+(`Cannot create response: conversation has no messages or no user message.`),
+with or without tools. `response.done` carries a `usage` object on flash.
+
+### A tool whose `parameters` has no `required` fails on flash
+
+With tools declared and a first response requested, flash answers
+`response.done status=failed` and `error InternalError: Internal service error:
+An internal error occurred while generating the response`, then closes the
+socket (`1011`, once `1007`). `session.updated` had been acknowledged; the
+response is what fails. Plus accepts the same tools. Whether `parameters`
+carries a `required` key decides it (probe on flash: the product's
+`session.update`, a cue item and a bare `response.create`; each shape twice,
+the same result both times):
+
+| `parameters` | Result |
+|---|---|
+| `{"type":"object","properties":{"orderId":{...}}}` (no `required`) | InternalError |
+| `{"type":"object","properties":{}}` | InternalError |
+| `{"type":"object"}` | InternalError |
+| the same with `additionalProperties: false`, no `required` | InternalError |
+| `required: ["orderId"]`, with or without a property description | completed |
+| `required: []`, with or without properties | completed |
+
+`provider.Realtime.buildTools` sends `parameters` as the flow supplied it, and
+substitutes `{"type":"object","properties":{}}` when there is none, so a tool
+without `required` fails the first response of any session that declares it.
+Run as the repository stands, 30 of 30 runs of the tool-declaring tests failed
+this way (`MidCallInstructions` tools arms, `LineAfterMove`, `LineCallsNoTool`,
+`WaitLine`, `ClosingLine`, `SpeechOverTheAnswer`, `SpeechOverTheLineTail`,
+`UnheardResultNote`); `Linear`, `AcceptsATemperature`, `Truncate` and the no-tool
+arms of `MidCallInstructions` passed.
+
+The rows below were measured with a working-tree-only patch to `buildTools`
+that adds `"required": []` to a `parameters` object that lacks one. It is not
+committed. Plus was measured without it.
+
+### Results
+
+| Test | Trait it measures | Flash | Plus, today | Plus, recorded |
+|---|---|---|---|---|
+| `Linear` | 16 kHz in / 24 kHz out is what the model speaks | 3 of 3 runs | 3 of 3 | 2026-08 spike |
+| `AcceptsATemperature` | `AcceptsTemperature`: `session.temperature` taken on the opening `session.update`, no reduced retry | 3 of 3 runs | 3 of 3 | accepted |
+| `MidCallInstructions` idle, speaking | instructions-only update obeyed from the next reply (W-Q7) | 6 of 6 and 6 of 6 in each of 6 runs | same | 6 of 6, 6 of 6 |
+| `MidCallInstructions` control | no marker without the update | no marker in any of 6 runs | same | 0 of 9 |
+| `MidCallInstructions` tools | tools survive the update; the tool is called; the reply after the result carries the marker | tool called in 17 of 18 sessions (5 runs 3 of 3, 1 run 2 of 3: the model asked for the order number instead); marker 18 of 18 | tool called 15 of 15, marker 15 of 15 (5 runs; the 6th run was a network failure, below) | tool called 3 of 3 |
+| `LineCallsNoTool` | `AcceptsResponseToolChoice` false / `NeedsToolFreeLineDirection` (W-Q8): a line over an unanswered call | 3 of 3 runs: line said, answer given, no call in the line's turn | 3 of 3 | the response-level field is ignored; the call is repeated unless the direction is used |
+| `WaitLine` plain | the line asked for with SayExactly | line said 18 of 18; a call made in the line's turn in 17 of 18 sessions | line said 18 of 18; call made 18 of 18 | line said 0 of 3; call made 3 of 3 |
+| `WaitLine` shipped | `NeedsToolFreeLineDirection`: the tool-free direction | line said 18 of 18; a call made in the line's turn in 2 of 18 (1 of 3 in two runs; the client kept it back); exactly one answer 18 of 18 | line said 18 of 18; call made 0 of 18; one answer 18 of 18 | line said 6 of 6; call made 0 of 6 |
+| `ClosingLine` | a closing line after the answer is said as written, with no call | 9 of 9 | 9 of 9 | 3 of 3 |
+| `LineAfterMove` | `NeedsDirectedLineInConversation` (W-Q1): a phase line after a move is said | zh said 9 of 9, en 9 of 9; the result's turn acted before the line in 0 of 18 | zh said 8 of 8, en 7 of 7; the result's turn acted before the line in 3 of 18 | shipped: zh 9 of 9, en 9 of 9 and 8 of 8 |
+| `UnheardResultNote` kept, no note | the cut answer's words stay in the history: the reply gives the result | 7 of 9 | 2 of 9 | 0 of 4 (real), 1 of 4 (tts) |
+| `UnheardResultNote` kept, note | the note makes the reply give the result | 9 of 9 | 9 of 9 | 5 of 5, 4 of 4 |
+| `UnheardResultNote` clean, with and without note | clean history | 9 of 9 and 9 of 9 | 9 of 9 and 9 of 9 | 6 of 6, 4 of 4 |
+| `SpeechOverTheAnswer` | `removeUnheardTurn`: the answer is cut before its audio; the reply gives the result | cut 9 of 9; given 8 of 9 | cut 7 of 9; given 7 of 7 | cut 3 of 3; given 3 of 3 |
+| `SpeechOverTheLineTail` | the same on the line-tail shape | cut 9 of 9; given 9 of 9 | cut 8 of 9; given 8 of 8 | cut 3 of 4; given 3 of 3 |
+| `Truncate` | `conversation.item.truncate` at 0 and 300 ms is accepted with no error; what the model then recites | 3 of 3 runs, no error | 3 of 3 runs, no error | no acknowledgement, no error |
+| `CutOpener` shipped (en and zh: `stop@2700`, `stop@5000`, `drive@2700`, `who@2700`; 3 sessions per cell) | W-Q11: the opening direction is deleted; the opener is not said again after a cut | opener repeated 0 of 24; deletion echoed 24 of 24; the opener said in turn 1 24 of 24; "who" replies that identified the bot 6 of 6 | not re-run | repeat 0 of 30 / 0 of 10 per cell; deletion echoed in every shipped run |
+
+Notes on rows:
+
+- `MidCallInstructions` on plus, run 1 of 6: `read tcp ...: connection reset
+  by peer` at about 10:36, when the host's LAN address changed (DHCP). That is
+  a network failure, not a model result; the run is left out of the plus counts.
+- `Truncate`: after a truncate at 0 ms the model recited a different code from
+  the one it had said in 3 of 3 runs on both models today (another code, or a
+  greeting); after 300 ms and with no truncate it recited the code it had said,
+  3 of 3 each. The 2026-10-01 record ("the model recites it in full every
+  time") does not hold for the 0 ms variant on either model today.
+- `WaitLine` shipped on flash: in the two sessions where the model made a call
+  in the line's turn, the client kept the call back (`onLineCall`); the line was
+  said and exactly one answer followed.
+- `UnheardResultNote` kept, no note: the count is of sessions whose reply gave
+  the result.
+
+### Not measured
+
+No live test covers these, on either model; none was written here.
+
+- `AcceptsResponseToolChoice` as a field (accepted and ignored): only its
+  consequence is exercised (`LineCallsNoTool`).
+- `NeedsCueForFirstTurn` and the removal of the opening direction after the
+  opening turn (W-Q11) are exercised through `CutOpener` only. The
+  empty-conversation refusal was seen in the probe above.
+- Turn detection fixed once audio flows, out-of-band responses ignored, and the
+  `_v3.1` voice honoured only in the first `session.update`: the voice and the
+  `server_vad` value were echoed in the probe above; no test sends a second
+  voice or a late turn-detection change.
+- `CutOpener`: the other 60 cells of the 68-cell matrix (main, T2 and T3
+  treatments, `stop2`, `bye`, the other offsets, the controls) were not
+  re-measured on flash. A first attempt at the full matrix was stopped at the
+  15-minute test timeout.
+- The open qwen defects (#197, #310, #387, #403, #448, #453) were not retested.
