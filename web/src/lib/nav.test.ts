@@ -161,3 +161,11 @@ describe('the breadcrumb', () => {
     ])
   })
 })
+
+
+describe('the administrator landing label', () => {
+  it('names the admin home as the sales workspace', () => {
+    const home = NAV.flatMap((group) => group.items).find((item) => item.to === '/admin')
+    expect(home?.labelKey).toBe('nav.salesWorkbench')
+  })
+})
