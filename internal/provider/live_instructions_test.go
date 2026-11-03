@@ -68,9 +68,9 @@ const (
 	midToolPhase = "\n\n当来电者询问订单状态时，必须先调用 lookup_order 工具查询，不要直接回答。"
 )
 
-func TestLiveQwenMidCallInstructions(t *testing.T) { runMidCall(t, QwenProfile()) }
+func TestLiveQwenMidCallInstructions(t *testing.T) { runMidCall(t, liveProfile(QwenProfile())) }
 
-func TestLiveOpenAIMidCallInstructions(t *testing.T) { runMidCall(t, OpenAIProfile()) }
+func TestLiveOpenAIMidCallInstructions(t *testing.T) { runMidCall(t, liveProfile(OpenAIProfile())) }
 
 func runMidCall(t *testing.T, profile Profile) {
 	requireLive(t, profile)

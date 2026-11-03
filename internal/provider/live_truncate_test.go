@@ -80,7 +80,7 @@ func collect(s *Realtime, window time.Duration, untilDone bool) (said string, er
 // a question about what was said. playedMs < 0 means no truncate.
 func truncateVariant(t *testing.T, playedMs int) (first, replay string, raw, errs []string) {
 	t.Helper()
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	tap := &debugTap{}
 	s, err := New(profile, slog.New(tap))
 	if err != nil {
@@ -137,7 +137,7 @@ func truncateVariant(t *testing.T, playedMs int) (first, replay string, raw, err
 //
 //	AICC_LIVE_PROVIDER_TEST=1 go test -count=1 -run LiveQwenTruncate -v ./internal/provider/
 func TestLiveQwenTruncate(t *testing.T) {
-	requireLive(t, QwenProfile())
+	requireLive(t, liveProfile(QwenProfile()))
 	for _, v := range []struct {
 		name     string
 		playedMs int

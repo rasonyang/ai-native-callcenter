@@ -193,7 +193,7 @@ func checkAudioArrived(t *testing.T, result liveResult, output media.AudioFormat
 // TestLiveOpenAIPassthrough proves the English leg needs no conversion at all:
 // G.711 goes up and comes back down untouched.
 func TestLiveOpenAIPassthrough(t *testing.T) {
-	profile := OpenAIProfile()
+	profile := liveProfile(OpenAIProfile())
 	requireLive(t, profile)
 
 	_, output := profile.FormatsFor(media.LawMu)
@@ -215,7 +215,7 @@ func TestLiveOpenAIPassthrough(t *testing.T) {
 // vendor never echoes audio formats, so only real audio proves the documented
 // 16 kHz in / 24 kHz out is what it actually speaks.
 func TestLiveQwenLinear(t *testing.T) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 
 	input, output := profile.FormatsFor(media.LawMu)
@@ -257,7 +257,7 @@ func (b *lockedBuffer) String() string {
 // a rejection would make the client fall back to the reduced retry, which drops
 // the field silently: so the test fails if that retry happens.
 func TestLiveQwenAcceptsATemperature(t *testing.T) {
-	profile := QwenProfile()
+	profile := liveProfile(QwenProfile())
 	requireLive(t, profile)
 	if !profile.AcceptsTemperature {
 		t.Fatal("the qwen profile does not accept a temperature")
@@ -325,4 +325,16 @@ listen:
 	if audioBytes == 0 || said == "" {
 		t.Errorf("no greeting came back (audio %d bytes, transcript %q)", audioBytes, said)
 	}
+}
+
+// liveProfile applies AICC_PROVIDER_MODEL to the live tests: when it is set
+// and AICC_PROVIDER names this profile, the profile's model is replaced, so
+// the suite can run on a model the profile does not default to. Profiles of
+// other providers, and an unset variable, leave the profile unchanged.
+func liveProfile(profile Profile) Profile {
+	model := os.Getenv("AICC_PROVIDER_MODEL")
+	if model != "" && os.Getenv("AICC_PROVIDER") == profile.Name {
+		profile.Model = model
+	}
+	return profile
 }

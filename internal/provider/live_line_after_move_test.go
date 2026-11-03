@@ -59,7 +59,7 @@ import (
 // measures it. A language it lacks is skipped.
 func TestLiveQwenLineAfterMove(t *testing.T) {
 	for _, language := range []string{"zh", "en"} {
-		t.Run(language, func(t *testing.T) { runLineAfterMove(t, QwenProfile(), language) })
+		t.Run(language, func(t *testing.T) { runLineAfterMove(t, liveProfile(QwenProfile()), language) })
 	}
 }
 

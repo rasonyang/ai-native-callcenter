@@ -41,9 +41,9 @@ func TestLiveResponseCreatedLatency(t *testing.T) {
 		instructions string
 		language     string
 	}{
-		{OpenAIProfile(), "You answer the phone for NovaNet. Reply in one short sentence.", "en"},
-		{GrokProfile(), "You answer the phone for NovaNet. Reply in one short sentence.", "en"},
-		{QwenProfile(), "你是 NovaNet 的电话客服。每次只用一句很短的话回答。", "zh"},
+		{liveProfile(OpenAIProfile()), "You answer the phone for NovaNet. Reply in one short sentence.", "en"},
+		{liveProfile(GrokProfile()), "You answer the phone for NovaNet. Reply in one short sentence.", "en"},
+		{liveProfile(QwenProfile()), "你是 NovaNet 的电话客服。每次只用一句很短的话回答。", "zh"},
 	} {
 		t.Run(arm.profile.Name, func(t *testing.T) {
 			requireLive(t, arm.profile)
