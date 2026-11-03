@@ -78,8 +78,12 @@ line is said). Traits no live test covers (turn detection fixed once audio
 flows, a second voice, out-of-band responses) are not re-measured. Flash fails
 the first response of a session that declares a tool whose `parameters` has no
 `required` key, so `buildTools` gives every tool of every Realtime profile a
-top-level `required` (an empty list when the flow names none). Plus stays
-selectable with `AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`.
+top-level `required` (an empty list when the flow names none). In owner-placed
+calls, flash also failed to read a tool result on the second and later lookups
+of one call, repeating its earlier "let me check" filler instead (#466; plus read
+every result). Plus stays selectable with
+`AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`, the better fit for
+lookup-heavy flows until #466 is fixed.
 
 The last five are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call
