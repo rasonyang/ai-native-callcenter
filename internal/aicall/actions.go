@@ -480,11 +480,18 @@ func (a *callActions) startCapLocked(after time.Duration) {
 // time. The two ways to get here are told apart: a line that was never
 // generated is a provider that went quiet, while a line generated but not
 // heard is playback that ran past the cap's estimate.
+//
+// A third way is no fault: a cap frozen at the second interruption (#465) is
+// the bound that rule sets on a caller who keeps talking over the line, and
+// reaching it is the rule working. Neither warning fits there (the line may
+// have been generated several times, and isLineSpoken only says whether the
+// latest answer had finished generating), so it is logged as the rule.
 func (a *callActions) runAtCap(generation int) {
 	a.mu.Lock()
 	armed := a.armed
 	isStillArmed := armed != nil && a.armedGeneration == generation
 	isLineSpoken := a.isLineSpoken
+	interruptions := a.interruptions
 	if isStillArmed {
 		a.armed = nil
 	}
@@ -492,10 +499,14 @@ func (a *callActions) runAtCap(generation int) {
 	if !isStillArmed {
 		return
 	}
-	if isLineSpoken {
+	switch {
+	case interruptions >= 2:
+		a.log.Info("the cap frozen at the second interruption ran out; running the armed action",
+			"interruptions", interruptions)
+	case isLineSpoken:
 		a.log.Warn("running an armed action at the cap; the closing line was generated " +
 			"but its playback had not finished")
-	} else {
+	default:
 		a.log.Warn("running an armed action at the cap; no closing line was generated " +
 			"after the action was armed")
 	}
