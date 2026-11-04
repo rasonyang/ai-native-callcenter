@@ -13,6 +13,9 @@ Dockerfile
 .dockerignore
 build.sh
 
+# The tooling at the top of sounds/aicc/; only the zh/ and en/ wav files ship.
+sounds/aicc/*.*
+
 # Documentation.
 README.md
 DOCKERHUB.md

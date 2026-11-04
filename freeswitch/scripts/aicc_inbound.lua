@@ -56,6 +56,21 @@ if route == nil then
   return
 end
 
+-- The product's own "we cannot take your call" prompt, in the call's language.
+-- The language is looked up in a fixed map and never spliced into the path: a
+-- DID's language is any BCP 47 tag, so a raw value could name any directory.
+-- Anything not listed gets English. The path is absolute because the switch's
+-- sound_prefix points into the stock callie pack, where a relative name would
+-- resolve; nil when the switch has no sounds_dir to build it from.
+local PROMPT_LANGUAGES = { zh = "zh" }
+
+local function bot_unavailable_prompt(language)
+  local dir = freeswitch.getGlobalVariable("sounds_dir")
+  if dir == nil or dir == "" then return nil end
+  local lang = PROMPT_LANGUAGES[language] or "en"
+  return dir .. "/aicc/" .. lang .. "/bot-unavailable.wav"
+end
+
 -- One call identity, minted before any leg exists, so every event the
 -- application sees carries it from the first moment.
 --
@@ -161,7 +176,12 @@ if session:ready() then
     session:setVariable("hangup_after_bridge", "true")
     session:execute("transfer", fallback .. " XML aicc")
   else
-    session:execute("playback", "ivr/ivr-call_cannot_be_completed_as_dialed.wav")
+    local prompt = bot_unavailable_prompt(route.language)
+    if prompt ~= nil then
+      session:execute("playback", prompt)
+    else
+      log("err", "sounds_dir is not set; hanging up without a prompt")
+    end
     session:hangup("NORMAL_TEMPORARY_FAILURE")
   end
 end

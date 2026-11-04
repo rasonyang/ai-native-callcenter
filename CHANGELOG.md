@@ -27,6 +27,16 @@ carries the one-line installer's files.
   long call opened at its first line and stopped following as soon as a line
   arrived, and a reader who had scrolled up carried that position into the next
   call. (#456)
+- An inbound caller whose bot cannot take the call, on a number with no fallback
+  queue, now hears a short prompt in the number's language ("Sorry, we are
+  unable to continue this call right now. Please try again later. Goodbye.", or
+  its zh version), then the call ends. Before, every caller heard the switch's
+  stock English recording about a number that "cannot be completed as dialed",
+  even on a zh number, and an image built with `SOUNDS=none` played nothing.
+  The two recordings ship in the switch image, `SOUNDS=none` included, at
+  `sounds/aicc/<zh|en>/bot-unavailable.wav`; `zh` plays zh and any other language
+  plays en. A switch installed natively needs them copied in once
+  (`docs/dev-stack.md`). (#485)
 
 ### Changed
 

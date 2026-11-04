@@ -53,10 +53,12 @@ ARG LIBWSC_COMMIT=09d18e5db9243a996692261a7a0839c9c346bc47
 # Sound files. 8 kHz only by default — the 32k and 48k sets are another ~450MB
 # and nothing in this product plays a prompt above narrowband.
 #   SOUNDS=8000  fetch the two tarballs below (default)
-#   SOUNDS=none  ship no sounds at all
+#   SOUNDS=none  leave the two stock packs out
 # Without them the switch still runs and calls still connect; what stops
 # working is queue hold music (music/8000, which mod_local_stream serves as
-# moh_stream) and the stock English prompts. An AI call plays neither.
+# moh_stream) and the stock English prompts. An AI call plays neither. The
+# product's own prompts (sounds/aicc/, copied below) are not part of the packs
+# and ship in every build, SOUNDS=none included.
 ARG SOUNDS=8000
 ARG SOUNDS_CALLIE_VERSION=1.0.53
 ARG SOUNDS_CALLIE_SHA256=24a2baad88696169950c84cafc236124b2bfa63114c7c8ac7d330fd980c8db05
@@ -97,7 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certifi
 # sha1 only and cannot be checked this way.
 RUN mkdir -p /sounds && cd /sounds \
     && if [ "$SOUNDS" = "none" ]; then \
-         echo "sounds: skipped (SOUNDS=none); queue hold music will not play"; \
+         echo "sounds: stock packs skipped (SOUNDS=none); queue hold music will not play"; \
        else \
          base=https://files.freeswitch.org/releases/sounds; \
          callie="freeswitch-sounds-en-us-callie-8000-${SOUNDS_CALLIE_VERSION}.tar.gz"; \
@@ -267,6 +269,14 @@ RUN echo /usr/local/freeswitch/lib > /etc/ld.so.conf.d/freeswitch.conf && ldconf
 COPY conf/ /usr/local/freeswitch/conf/
 COPY scripts/ /usr/local/freeswitch/scripts/
 COPY --from=sounds /sounds/ /usr/local/freeswitch/sounds/
+# The product's own prompts, played by aicc_inbound.lua when the bot cannot take
+# a call. They are not in the stock packs, so SOUNDS=none does not remove them,
+# and a build without them fails here rather than playing silence on a live call.
+COPY sounds/aicc/ /usr/local/freeswitch/sounds/aicc/
+RUN for lang in zh en; do \
+      test -s "/usr/local/freeswitch/sounds/aicc/$lang/bot-unavailable.wav" \
+        || { echo "missing or empty sounds/aicc/$lang/bot-unavailable.wav" >&2; exit 1; }; \
+    done
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 # Every module the shipped configuration loads must be a module this image
