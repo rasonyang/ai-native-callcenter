@@ -302,3 +302,107 @@ func TestSettlementInvariantsOverRandomHistories(t *testing.T) {
 		}
 	}
 }
+
+// A recorded lead proves the customer talked to the bot, so the contact is
+// never dialled again whatever the attempt's own outcome says (#264).
+func TestARecordedLeadEndsTheContactWhateverTheOutcome(t *testing.T) {
+	s := settleWindow(t)
+	now := at(t, "America/New_York", "2026-06-01 10:00")
+	policies := map[string]RetryPolicy{"default": DefaultRetryPolicy()}
+	noRetry := DefaultRetryPolicy()
+	noRetry.RetryOutcomes = nil
+	policies["retries nothing"] = noRetry
+	one := DefaultRetryPolicy()
+	one.MaxAttempts = 1
+	one.MaxSystemRetries = 1
+	policies["budget of one"] = one
+
+	for name, p := range policies {
+		for _, o := range AllOutcomes() {
+			for _, lead := range []LeadIntent{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCall} {
+				want, reason := ContactDone, SettleLeadRecorded
+				if lead == LeadDoNotCall {
+					want, reason = ContactDoNotCall, SettleLeadDoNotCall
+				}
+				// Counters already past every budget, and untouched ones.
+				for _, c := range []Counters{Counters{}.Add(o), {Attempts: 99, SystemFailures: 99}} {
+					got := Settle(p, c, o, lead, now, s)
+					if got.Status != want || got.NextAttemptAt != nil || got.Reason != reason {
+						t.Errorf("%s: %s with lead %s: %+v, want %s (%s) and no next attempt", name, o, lead, got, want, reason)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Without a lead the old rules stand: every outcome, as before.
+func TestWithoutALeadTheOutcomeRulesStand(t *testing.T) {
+	policy := DefaultRetryPolicy()
+	s := settleWindow(t)
+	now := at(t, "America/New_York", "2026-06-01 10:00")
+
+	for _, o := range AllOutcomes() {
+		got := Settle(policy, Counters{}.Add(o), o, "", now, s)
+		switch {
+		case o == OutcomeInvalidNumber:
+			if got.Status != ContactInvalidNumber || got.Reason != SettleInvalidNumber {
+				t.Errorf("%s = %+v", o, got)
+			}
+		case o == OutcomeDNCSkipped:
+			if got.Status != ContactDoNotCall || got.Reason != SettleDNCSkipped {
+				t.Errorf("%s = %+v", o, got)
+			}
+		case IsAnsweredOutcome(o):
+			if got.Status != ContactDone || got.Reason != SettleAnswered || got.NextAttemptAt != nil {
+				t.Errorf("%s = %+v", o, got)
+			}
+		default: // retried by the default policy
+			if got.Status != ContactActive || got.Reason != SettleRetry || got.NextAttemptAt == nil {
+				t.Errorf("%s = %+v, want ACTIVE and a retry", o, got)
+			}
+		}
+	}
+
+	// UNKNOWN with no lead is retried a day later (10:00 Monday to 10:00 Tuesday).
+	got := Settle(policy, Counters{}.Add(OutcomeUnknown), OutcomeUnknown, "", now, s)
+	if want := at(t, "America/New_York", "2026-06-02 10:00"); got.NextAttemptAt == nil || !got.NextAttemptAt.Equal(want) {
+		t.Errorf("UNKNOWN next = %v, want %v", got.NextAttemptAt, want)
+	}
+
+	// Reasons of the exhausted paths.
+	noRetry := DefaultRetryPolicy()
+	noRetry.RetryOutcomes = []Outcome{OutcomeNoAnswer}
+	if got := Settle(noRetry, Counters{1, 0}, OutcomeBusy, "", now, s); got.Status != ContactExhausted || got.Reason != SettleNotRetried {
+		t.Errorf("an unretried BUSY = %+v", got)
+	}
+	if got := Settle(policy, Counters{Attempts: policy.MaxAttempts}, OutcomeUnknown, "", now, s); got.Status != ContactExhausted || got.Reason != SettleBudgetSpent {
+		t.Errorf("a spent budget = %+v", got)
+	}
+}
+
+// The budget's edge: counters already include the attempt, so with
+// maxAttempts-1 spent before it an UNKNOWN spends the last chance. With no
+// lead it is EXHAUSTED; with a lead it is DONE, not EXHAUSTED and not a retry.
+func TestTheLastChanceWithALead(t *testing.T) {
+	policy := DefaultRetryPolicy()
+	s := settleWindow(t)
+	now := at(t, "America/New_York", "2026-06-01 10:00")
+
+	before := Counters{Attempts: policy.MaxAttempts - 1}
+	after := before.Add(OutcomeUnknown)
+	if got := Settle(policy, after, OutcomeUnknown, "", now, s); got.Status != ContactExhausted || got.Reason != SettleBudgetSpent {
+		t.Errorf("last chance, no lead = %+v, want EXHAUSTED", got)
+	}
+	if got := Settle(policy, after, OutcomeUnknown, LeadHigh, now, s); got.Status != ContactDone || got.NextAttemptAt != nil {
+		t.Errorf("last chance, HIGH = %+v, want DONE", got)
+	}
+	// One chance earlier it is still retried without a lead.
+	earlier := Counters{Attempts: policy.MaxAttempts - 2}.Add(OutcomeUnknown)
+	if got := Settle(policy, earlier, OutcomeUnknown, "", now, s); got.Status != ContactActive {
+		t.Errorf("one before the last, no lead = %+v, want ACTIVE", got)
+	}
+	if got := Settle(policy, earlier, OutcomeUnknown, LeadLow, now, s); got.Status != ContactDone || got.NextAttemptAt != nil {
+		t.Errorf("one before the last, LOW = %+v, want DONE", got)
+	}
+}

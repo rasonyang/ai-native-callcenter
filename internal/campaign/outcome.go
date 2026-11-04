@@ -4,6 +4,7 @@ package campaign
 
 import (
 	"log/slog"
+	"slices"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 )
@@ -188,13 +189,15 @@ func IsAnsweredOutcome(o Outcome) bool {
 	return o == OutcomeAnswered || o == OutcomeBotFailed || o == OutcomeOverflow
 }
 
-// IsValid reports whether o is one of the eleven outcomes.
-func (o Outcome) IsValid() bool {
-	switch o {
-	case OutcomeAnswered, OutcomeBotFailed, OutcomeOverflow, OutcomeNoAnswer, OutcomeBusy,
+// AllOutcomes is every outcome, in the order of the type's declaration. It is
+// the one list IsValid reads, so a test that walks it covers a new outcome.
+func AllOutcomes() []Outcome {
+	return []Outcome{
+		OutcomeAnswered, OutcomeBotFailed, OutcomeOverflow, OutcomeNoAnswer, OutcomeBusy,
 		OutcomeRejected, OutcomeUnknown, OutcomeTransient, OutcomeOriginateFailed,
-		OutcomeInvalidNumber, OutcomeDNCSkipped:
-		return true
+		OutcomeInvalidNumber, OutcomeDNCSkipped,
 	}
-	return false
 }
+
+// IsValid reports whether o is one of the eleven outcomes.
+func (o Outcome) IsValid() bool { return slices.Contains(AllOutcomes(), o) }

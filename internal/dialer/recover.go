@@ -91,7 +91,14 @@ func (d *Dialer) reconcile(ctx context.Context, callID uuid.UUID, now time.Time)
 	}
 	d.drop(callID)
 	if done != nil {
-		d.log.Warn("dialer: an attempt left no trace; counted as UNKNOWN", "callId", callID)
+		attrs := []any{
+			"callId", callID, "attemptId", done.AttemptID, "contactId", done.ContactID, "campaignId", done.CampaignID,
+			"contactStatus", done.ContactStatus, "settleReason", done.SettleReason,
+		}
+		if done.NextAttemptAt != nil {
+			attrs = append(attrs, "nextAttemptAt", *done.NextAttemptAt)
+		}
+		d.log.Warn("dialer: an attempt left no trace; counted as UNKNOWN", attrs...)
 	}
 	return reconciledUnknown
 }

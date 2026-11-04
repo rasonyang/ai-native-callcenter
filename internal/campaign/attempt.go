@@ -75,4 +75,7 @@ type Finished struct {
 	// ContactStatus and NextAttemptAt are the contact as the routine left it.
 	ContactStatus ContactStatus
 	NextAttemptAt *time.Time
+	// SettleReason is the rule that decided ContactStatus, for the log; empty
+	// when the routine left the contact alone (a revision of an older attempt).
+	SettleReason SettleReason
 }

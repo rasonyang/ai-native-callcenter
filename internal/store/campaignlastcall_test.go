@@ -83,18 +83,30 @@ func TestAContactNamesItsLatestAttemptsCall(t *testing.T) {
 	}
 }
 
-// A retry can follow a recorded lead only when the first attempt was not seen
-// to be answered: reconciliation finished it UNKNOWN with no CDR (design 10
-// section 8.2; #264 tracks ending such a contact instead). The link then
-// follows the latest call, and the callback the first call filed is left as
-// it is: not removed, not filed again.
-func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) {
+// A call that recorded a lead and then left no trace (the app died, the
+// customer hung up, reconciliation finished it UNKNOWN with no CDR) proves the
+// customer talked to the bot: the contact ends, it is not retried (design 10
+// section 7.2, #264). The lead's callback and the contact's link name that
+// call, and nothing is filed twice.
+func TestAnUnknownAttemptThatRecordedALeadEndsItsContact(t *testing.T) {
 	ctx := context.Background()
 	e := openAttempts(t)
-	c, contacts := e.campaign(t, "High then low", "7", 2, nil)
 	t1 := ny(t, "2026-06-01 10:00")
-	t2 := ny(t, "2026-06-02 10:00")
 
+	unknownWith := func(t *testing.T, ct campaign.Contact, intent campaign.LeadIntent) (campaign.Attempt, *campaign.Finished) {
+		t.Helper()
+		a := e.begin(t, ct, t1)
+		if ok, err := e.attempts.SetLead(ctx, a.CallID, intent, "notes for "+string(intent)); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		done, err := e.attempts.Finish(ctx, a.CallID, campaign.Ending{
+			Outcome: campaign.OutcomeUnknown, HangupCause: "UNKNOWN", EndedAt: t1,
+		})
+		if err != nil || done == nil {
+			t.Fatalf("finish: %+v, %v", done, err)
+		}
+		return a, done
+	}
 	callbacksOf := func(t *testing.T, callID uuid.UUID) []Callback {
 		t.Helper()
 		rows, err := e.ledger.ListCallbacks(ctx, "", &callID, 50, 0)
@@ -103,71 +115,107 @@ func TestARetryAfterAHighLeadMovesTheLinkAndKeepsTheFirstCallback(t *testing.T) 
 		}
 		return rows
 	}
-	highUnknown := func(t *testing.T, ct campaign.Contact) campaign.Attempt {
+	nextAt := func(t *testing.T, id uuid.UUID) *time.Time {
 		t.Helper()
-		a := e.begin(t, ct, t1)
-		if ok, err := e.attempts.SetLead(ctx, a.CallID, campaign.LeadHigh, "send the offer"); err != nil || !ok {
-			t.Fatal(ok, err)
-		}
-		if _, err := e.attempts.Finish(ctx, a.CallID, campaign.Ending{
-			Outcome: campaign.OutcomeUnknown, HangupCause: "UNKNOWN", EndedAt: t1,
-		}); err != nil {
+		var at *time.Time
+		if err := e.st.Pool.QueryRow(ctx, `SELECT next_attempt_at FROM campaign_contacts WHERE id=$1`, id).Scan(&at); err != nil {
 			t.Fatal(err)
 		}
-		got := e.contact(t, c, ct.ID)
-		if got.Status != campaign.ContactActive || got.LeadIntent != campaign.LeadHigh ||
-			got.LastCallID == nil || *got.LastCallID != a.CallID {
-			t.Fatalf("after the UNKNOWN HIGH call: %+v", got)
-		}
-		if cbs := callbacksOf(t, a.CallID); len(cbs) != 1 {
-			t.Fatalf("the HIGH call filed %d callbacks, want 1", len(cbs))
-		}
-		return a
+		return at
 	}
 
-	t.Run("HIGH then LOW", func(t *testing.T) {
-		ct := contacts[0]
-		first := highUnknown(t, ct)
-		second := e.begin(t, ct, t2)
-		if ok, err := e.attempts.SetLead(ctx, second.CallID, campaign.LeadLow, "not now"); err != nil || !ok {
-			t.Fatal(ok, err)
+	t.Run("HIGH is DONE with its one callback", func(t *testing.T) {
+		c, contacts := e.campaign(t, "Unknown HIGH", "7", 1, nil)
+		a, done := unknownWith(t, contacts[0], campaign.LeadHigh)
+		if done.ContactStatus != campaign.ContactDone || done.NextAttemptAt != nil || done.SettleReason != campaign.SettleLeadRecorded {
+			t.Errorf("finished = %+v", done)
 		}
-		if err := e.ledger.InsertCDR(ctx, cdrOf(second.CallID, "NORMAL_CLEARING", CDRStatusAnswered, true, t2, t2.Add(time.Minute))); err != nil {
+		got := e.contact(t, c, contacts[0].ID)
+		if got.Status != campaign.ContactDone || got.LeadIntent != campaign.LeadHigh ||
+			got.LastCallID == nil || *got.LastCallID != a.CallID || got.Attempts != 1 {
+			t.Errorf("contact = %+v", got)
+		}
+		if at := nextAt(t, contacts[0].ID); at != nil {
+			t.Errorf("next_attempt_at = %v, want NULL", at)
+		}
+		if cbs := callbacksOf(t, a.CallID); len(cbs) != 1 || cbs[0].Message != "notes for HIGH" {
+			t.Errorf("callbacks = %+v, want the one", cbs)
+		}
+		// A fuller CDR that arrives later runs the routine again: still one
+		// callback, still DONE.
+		if err := e.ledger.InsertCDR(ctx, cdrOf(a.CallID, "NORMAL_CLEARING", CDRStatusAnswered, true, t1, t1.Add(time.Minute))); err != nil {
 			t.Fatal(err)
 		}
-		got := e.contact(t, c, ct.ID)
-		if got.LeadIntent != campaign.LeadLow || got.LeadNotes != "not now" ||
-			got.LastCallID == nil || *got.LastCallID != second.CallID ||
-			got.LastAttemptID == nil || *got.LastAttemptID != second.ID {
-			t.Errorf("contact = %+v, want LOW linked to the second call %s", got, second.CallID)
+		if cbs := callbacksOf(t, a.CallID); len(cbs) != 1 {
+			t.Errorf("after the CDR: %d callbacks", len(cbs))
 		}
-		cbs := callbacksOf(t, first.CallID)
-		if len(cbs) != 1 || cbs[0].Status != "OPEN" || cbs[0].Message != "send the offer" {
-			t.Errorf("the first call's callback = %+v, want it left OPEN as filed", cbs)
-		}
-		if cbs := callbacksOf(t, second.CallID); len(cbs) != 0 {
-			t.Errorf("the LOW call filed %+v", cbs)
+		if got := e.contact(t, c, contacts[0].ID); got.Status != campaign.ContactDone {
+			t.Errorf("after the CDR: %+v", got)
 		}
 	})
 
-	// The known gap (#264): a retry that records no lead keeps HIGH on the
-	// contact while the link names the retry's call, which filed nothing.
-	t.Run("HIGH then no lead", func(t *testing.T) {
-		ct := contacts[1]
-		first := highUnknown(t, ct)
-		second := e.begin(t, ct, t2)
-		if err := e.ledger.InsertCDR(ctx, cdrOf(second.CallID, "NO_ANSWER", CDRStatusNoAnswer, false, t2, t2.Add(30*time.Second))); err != nil {
+	t.Run("the other intents are DONE and file nothing", func(t *testing.T) {
+		c, contacts := e.campaign(t, "Unknown others", "8", 3, nil)
+		for i, intent := range []campaign.LeadIntent{campaign.LeadMedium, campaign.LeadLow, campaign.LeadNone} {
+			a, _ := unknownWith(t, contacts[i], intent)
+			got := e.contact(t, c, contacts[i].ID)
+			if got.Status != campaign.ContactDone || got.LeadIntent != intent || nextAt(t, contacts[i].ID) != nil {
+				t.Errorf("%s: contact = %+v", intent, got)
+			}
+			if cbs := callbacksOf(t, a.CallID); len(cbs) != 0 {
+				t.Errorf("%s filed %+v", intent, cbs)
+			}
+		}
+	})
+
+	t.Run("DO_NOT_CALL is DNC with one list row", func(t *testing.T) {
+		c, contacts := e.campaign(t, "Unknown DNC", "9", 1, nil)
+		a, done := unknownWith(t, contacts[0], campaign.LeadDoNotCall)
+		if done.ContactStatus != campaign.ContactDoNotCall || done.NextAttemptAt != nil || done.SettleReason != campaign.SettleLeadDoNotCall {
+			t.Errorf("finished = %+v", done)
+		}
+		got := e.contact(t, c, contacts[0].ID)
+		if got.Status != campaign.ContactDoNotCall || nextAt(t, contacts[0].ID) != nil {
+			t.Errorf("contact = %+v", got)
+		}
+		listed, _, err := e.st.DNC().List(ctx, DNCFilter{Prefix: contacts[0].Number})
+		if err != nil || len(listed) != 1 || listed[0].CallID == nil || *listed[0].CallID != a.CallID {
+			t.Errorf("dnc = %+v, %v", listed, err)
+		}
+	})
+
+	t.Run("an UNKNOWN with no lead is still retried", func(t *testing.T) {
+		c, contacts := e.campaign(t, "Unknown none recorded", "10", 1, nil)
+		a := e.begin(t, contacts[0], t1)
+		done, err := e.attempts.Finish(ctx, a.CallID, campaign.Ending{Outcome: campaign.OutcomeUnknown, HangupCause: "UNKNOWN", EndedAt: t1})
+		if err != nil || done == nil {
+			t.Fatal(done, err)
+		}
+		got := e.contact(t, c, contacts[0].ID)
+		at := nextAt(t, contacts[0].ID)
+		if got.Status != campaign.ContactActive || at == nil || at.Before(t1.Add(23*time.Hour)) || done.SettleReason != campaign.SettleRetry {
+			t.Errorf("contact = %+v, next %v, reason %s; want ACTIVE a day out", got, at, done.SettleReason)
+		}
+	})
+
+	t.Run("the last chance with a lead is DONE, without one EXHAUSTED", func(t *testing.T) {
+		c, contacts := e.campaign(t, "Unknown last chance", "11", 2, nil)
+		// Two attempts already spent: the third is the policy's last.
+		for _, ct := range contacts {
+			if _, err := e.st.Pool.Exec(ctx, `UPDATE campaign_contacts SET attempts = 2 WHERE id = $1`, ct.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		unknownWith(t, contacts[0], campaign.LeadHigh)
+		if got := e.contact(t, c, contacts[0].ID); got.Status != campaign.ContactDone || got.Attempts != 3 {
+			t.Errorf("with a lead: %+v, want DONE after 3 attempts", got)
+		}
+		a := e.begin(t, contacts[1], t1)
+		if _, err := e.attempts.Finish(ctx, a.CallID, campaign.Ending{Outcome: campaign.OutcomeUnknown, HangupCause: "UNKNOWN", EndedAt: t1}); err != nil {
 			t.Fatal(err)
 		}
-		got := e.contact(t, c, ct.ID)
-		if got.LeadIntent != campaign.LeadHigh || got.LastCallID == nil || *got.LastCallID != second.CallID {
-			t.Errorf("contact = %+v, want HIGH kept and the link on the second call", got)
-		}
-		if cbs := callbacksOf(t, first.CallID); len(cbs) != 1 {
-			t.Errorf("the first call's callback = %+v, want it kept", cbs)
-		}
-		if cbs := callbacksOf(t, *got.LastCallID); len(cbs) != 0 {
-			t.Errorf("the second call filed %+v", cbs)
+		if got := e.contact(t, c, contacts[1].ID); got.Status != campaign.ContactExhausted || got.Attempts != 3 {
+			t.Errorf("without a lead: %+v, want EXHAUSTED after 3 attempts", got)
 		}
 	})
 }

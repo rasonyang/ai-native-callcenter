@@ -39,9 +39,37 @@ func (c Counters) Remove(o Outcome) Counters {
 	return c
 }
 
+// SettleReason says which rule of Settle decided a contact's fate. It is for
+// the log only: it never reaches the API, the database or the event stream.
+type SettleReason string
+
+const (
+	// SettleLeadDoNotCall: the call recorded a DO_NOT_CALL lead.
+	SettleLeadDoNotCall SettleReason = "LEAD_DO_NOT_CALL"
+	// SettleLeadRecorded: the call recorded any other lead, so the customer
+	// talked to the bot, whatever the outcome says.
+	SettleLeadRecorded SettleReason = "LEAD_RECORDED"
+	// SettleInvalidNumber: the number cannot be dialled.
+	SettleInvalidNumber SettleReason = "INVALID_NUMBER"
+	// SettleDNCSkipped: the number is on the do-not-call list.
+	SettleDNCSkipped SettleReason = "DNC_SKIPPED"
+	// SettleContactOnDNC: the contact was already on the list.
+	SettleContactOnDNC SettleReason = "CONTACT_ON_DNC"
+	// SettleAnswered: the outcome says the customer was reached.
+	SettleAnswered SettleReason = "ANSWERED"
+	// SettleNotRetried: the policy does not retry this outcome.
+	SettleNotRetried SettleReason = "NOT_RETRIED"
+	// SettleBudgetSpent: the attempts or system failures budget is used up.
+	SettleBudgetSpent SettleReason = "BUDGET_SPENT"
+	// SettleRetry: the contact is dialled again at NextAttemptAt.
+	SettleRetry SettleReason = "RETRY"
+)
+
 // Settlement is what an ended attempt does to its contact.
 type Settlement struct {
 	Status ContactStatus
+	// Reason is the rule that decided Status; it is for the log.
+	Reason SettleReason
 	// NextAttemptAt is when the contact may be dialled again; nil unless the
 	// contact is ACTIVE.
 	NextAttemptAt *time.Time
@@ -56,6 +84,10 @@ type Settlement struct {
 // The rules, in order:
 //
 //   - a lead of DO_NOT_CALL ends the contact as DNC, whatever the outcome;
+//   - any other recorded lead (HIGH, MEDIUM, LOW, NONE) ends it as DONE and
+//     never has a next attempt, whatever the outcome: a recorded lead proves
+//     the customer talked to the bot, even when the call's own outcome is
+//     lost (an UNKNOWN left by a restart) (#264);
 //   - INVALID_NUMBER and DNC_SKIPPED end it as INVALID_NUMBER and DNC;
 //   - an answered outcome (ANSWERED, BOT_FAILED, OVERFLOW) ends it as DONE and
 //     never has a next attempt, however the call went;
@@ -70,22 +102,24 @@ type Settlement struct {
 func Settle(p RetryPolicy, c Counters, o Outcome, lead LeadIntent, finishedAt time.Time, s Schedule) Settlement {
 	switch {
 	case lead == LeadDoNotCall:
-		return Settlement{Status: ContactDoNotCall}
+		return Settlement{Status: ContactDoNotCall, Reason: SettleLeadDoNotCall}
+	case lead != "":
+		return Settlement{Status: ContactDone, Reason: SettleLeadRecorded}
 	case o == OutcomeInvalidNumber:
-		return Settlement{Status: ContactInvalidNumber}
+		return Settlement{Status: ContactInvalidNumber, Reason: SettleInvalidNumber}
 	case o == OutcomeDNCSkipped:
-		return Settlement{Status: ContactDoNotCall}
+		return Settlement{Status: ContactDoNotCall, Reason: SettleDNCSkipped}
 	case IsAnsweredOutcome(o):
-		return Settlement{Status: ContactDone}
+		return Settlement{Status: ContactDone, Reason: SettleAnswered}
 	case !slices.Contains(p.RetryOutcomes, o):
-		return Settlement{Status: ContactExhausted}
+		return Settlement{Status: ContactExhausted, Reason: SettleNotRetried}
 	}
 
 	var wait time.Duration
 	switch ClassOf(o) {
 	case ClassReached:
 		if c.Attempts >= p.MaxAttempts {
-			return Settlement{Status: ContactExhausted}
+			return Settlement{Status: ContactExhausted, Reason: SettleBudgetSpent}
 		}
 		sec, ok := p.IntervalSec[o]
 		if !ok {
@@ -94,18 +128,18 @@ func Settle(p RetryPolicy, c Counters, o Outcome, lead LeadIntent, finishedAt ti
 		wait = time.Duration(sec) * time.Second
 	case ClassSystem:
 		if c.SystemFailures >= p.MaxSystemRetries {
-			return Settlement{Status: ContactExhausted}
+			return Settlement{Status: ContactExhausted, Reason: SettleBudgetSpent}
 		}
 		wait = p.TransientBackoff.Wait(c.SystemFailures)
 	default:
-		return Settlement{Status: ContactExhausted}
+		return Settlement{Status: ContactExhausted, Reason: SettleNotRetried}
 	}
 
 	due := finishedAt.Add(wait)
 	if open, ok := s.NextOpen(due); ok {
 		due = open
 	}
-	return Settlement{Status: ContactActive, NextAttemptAt: &due}
+	return Settlement{Status: ContactActive, Reason: SettleRetry, NextAttemptAt: &due}
 }
 
 // Wait is the delay before retry number n (1 for the first): BaseSec times
