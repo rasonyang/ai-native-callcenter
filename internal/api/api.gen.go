@@ -1788,7 +1788,7 @@ type CampaignContact struct {
 	// LastAttemptID The id of the attempt lastCallId belongs to, or null before the first attempt has finished.
 	LastAttemptID *openapi_types.UUID `json:"lastAttemptId"`
 
-	// LastCallID The call of this contact's latest finished attempt, or null before its first attempt has finished. It changes with every attempt, so after a retry it names the retry's call, and leadIntent may still be the one an earlier call recorded when the retry recorded none. Not every attempt is a call that took place: after a DNC_SKIPPED, INVALID_NUMBER, ORIGINATE_FAILED or UNKNOWN attempt the ledger may hold no CDR for it. A HIGH lead's callback is found with listCallbacks?callId=.
+	// LastCallID The call of this contact's latest finished attempt, or null before its first attempt has finished. It changes with every attempt, so after a retry it names the retry's call. A call that recorded a lead ends its contact, whatever the call's outcome, so when leadIntent is set it is this call's. Not every attempt is a call that took place: after a DNC_SKIPPED, INVALID_NUMBER, ORIGINATE_FAILED or UNKNOWN attempt the ledger may hold no CDR for it. A HIGH lead's callback is found with listCallbacks?callId=.
 	LastCallID *openapi_types.UUID `json:"lastCallId"`
 
 	// LastOutcome How an attempt ended (design 10 section 7.2). A contact's lastOutcome is the latest attempt's.

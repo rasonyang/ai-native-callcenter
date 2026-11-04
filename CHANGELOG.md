@@ -20,6 +20,14 @@ carries the one-line installer's files.
 
 ### Changed
 
+- A contact whose call recorded a lead is never dialled again, whatever the
+  call's outcome. Before, a call that recorded a lead and then left no trace (the
+  application died and the customer hung up) was reconciled as `UNKNOWN`, a
+  retryable outcome, so the contact stayed `ACTIVE` and was called again the next
+  day while a person also chased its callback. Now any recorded lead settles the
+  contact `DONE` (`DNC` for `DO_NOT_CALL`) with no next attempt, whatever the
+  outcome; `UNKNOWN` still spends one of `maxAttempts`. The reconcile warning
+  names the attempt, the contact and why it ended. (#264)
 - qwen: the default model is now `qwen-audio-3.1-realtime-flash` (it was
   `qwen-audio-3.1-realtime-plus`), after the profile's traits were re-measured
   on it. A deployment that sets `AICC_PROVIDER_MODEL` keeps its model; setting

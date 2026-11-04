@@ -11864,7 +11864,7 @@
               "null"
             ],
             "format": "uuid",
-            "description": "The call of this contact's latest finished attempt, or null before its first attempt has finished. It changes with every attempt, so after a retry it names the retry's call, and leadIntent may still be the one an earlier call recorded when the retry recorded none. Not every attempt is a call that took place: after a DNC_SKIPPED, INVALID_NUMBER, ORIGINATE_FAILED or UNKNOWN attempt the ledger may hold no CDR for it. A HIGH lead's callback is found with listCallbacks?callId=."
+            "description": "The call of this contact's latest finished attempt, or null before its first attempt has finished. It changes with every attempt, so after a retry it names the retry's call. A call that recorded a lead ends its contact, whatever the call's outcome, so when leadIntent is set it is this call's. Not every attempt is a call that took place: after a DNC_SKIPPED, INVALID_NUMBER, ORIGINATE_FAILED or UNKNOWN attempt the ledger may hold no CDR for it. A HIGH lead's callback is found with listCallbacks?callId=."
           },
           "lastAttemptId": {
             "type": [
