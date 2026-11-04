@@ -130,6 +130,7 @@ var K1 = CapacityScenario{
 	},
 	AppEnv: map[string]string{
 		EnvBotMaxCalls: strconv.Itoa(k1BotSlots), EnvBotInboundReserve: "0", EnvOverflowHold: k1OverflowHoldStr,
+		EnvBotRTPPortLow: "", EnvBotRTPPortHigh: "",
 	},
 }
 
@@ -144,8 +145,12 @@ var K2 = CapacityScenario{
 	},
 	Plan:      campaignPlan{RingTimeoutSec: k2RingTimeoutSec, MaxAttempts: 1, MaxOutboundChannels: &k2Limit},
 	LineLimit: k2LineLimit,
-	AppEnv:    map[string]string{EnvBotMaxCalls: "", EnvBotInboundReserve: "", EnvOverflowHold: ""},
+	AppEnv:    map[string]string{EnvBotMaxCalls: "", EnvBotInboundReserve: "", EnvOverflowHold: "", EnvBotRTPPortLow: "", EnvBotRTPPortHigh: ""},
 }
 
-// CapacityScenarios are the runs `make e2e-capacity` makes, by ID.
+// K3, the bot leg that is refused (issue #459), has a runner of its own
+// (refusal.go): its calls are not all a campaign's.
+
+// CapacityScenarios are the runs `make e2e-capacity` makes for the campaign
+// runner, by ID; K3 is RunRefusal's.
 var CapacityScenarios = map[string]CapacityScenario{"K1": K1, "K2": K2}

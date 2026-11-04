@@ -19,12 +19,15 @@ import (
 	"testing"
 )
 
-var flagCapacity = flag.String("e2e.capacity", "", "the capacity scenario to run: K1 or K2")
+var (
+	flagCapacity  = flag.String("e2e.capacity", "", "the capacity scenario to run: K1, K2 or K3")
+	flagSwitchLog = flag.String("e2e.switchlog", "", "the switch's log file, for TestRefusalSwitchLog")
+)
 
 func TestCapacity(t *testing.T) {
 	sc, ok := CapacityScenarios[*flagCapacity]
-	if !ok {
-		t.Fatalf("-e2e.capacity is %q, want one of K1, K2; run make e2e-capacity", *flagCapacity)
+	if !ok && *flagCapacity != K3.ID {
+		t.Fatalf("-e2e.capacity is %q, want one of K1, K2, K3; run make e2e-capacity", *flagCapacity)
 	}
 	cfg := CampaignConfig{
 		API: *flagAPI, ReadyURL: *flagReady, CalleeSim: *flagCalleeSim, MockProvider: *flagMockProvider,
@@ -47,6 +50,10 @@ func TestCapacity(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if *flagCapacity == K3.ID {
+		runRefusalTest(ctx, t, cfg)
+		return
+	}
 	rep, err := RunCapacity(ctx, cfg, sc)
 	if rep == nil {
 		t.Fatalf("the run did not start: %v", err)
@@ -72,5 +79,55 @@ func TestCapacity(t *testing.T) {
 			}
 		}
 		t.Fatalf("%d failure(s); the report is %s", len(rep.Failures), filepath.Join(cfg.OutDir, "report.json"))
+	}
+}
+
+// runRefusalTest is TestCapacity for K3 (issue #459). The switch's log is
+// judged by TestRefusalSwitchLog, once e2e.sh has copied it out.
+func runRefusalTest(ctx context.Context, t *testing.T, cfg CampaignConfig) {
+	rep, err := RunRefusal(ctx, cfg, K3)
+	if rep == nil {
+		t.Fatalf("the run did not start: %v", err)
+	}
+	t.Run(K3.ID, func(t *testing.T) {
+		for _, f := range rep.Checks.Failures {
+			t.Error(f)
+		}
+	})
+	for _, a := range rep.AfterRun {
+		t.Run("after-run/"+a.Name, func(t *testing.T) {
+			for _, f := range a.Failures {
+				t.Error(f)
+			}
+		})
+	}
+	t.Logf("%s", RefusalTable(rep))
+	t.Logf("run time %.0f s (latency, reported only: %v)", rep.DurationSec, rep.Latency)
+	if err != nil {
+		for _, f := range rep.Failures {
+			if strings.HasPrefix(f, runIncomplete) {
+				t.Error(f)
+			}
+		}
+		t.Fatalf("%d failure(s); the report is %s", len(rep.Failures), filepath.Join(cfg.OutDir, "report.json"))
+	}
+}
+
+// TestRefusalSwitchLog judges the switch's log against K3's report. It is run
+// by e2e.sh after K3, with -e2e.out the scenario's output directory and
+// -e2e.switchlog the log copied out of the switch's container.
+func TestRefusalSwitchLog(t *testing.T) {
+	if *flagOut == "" || *flagSwitchLog == "" {
+		t.Fatal("-e2e.out and -e2e.switchlog are required; run make e2e-capacity")
+	}
+	rep, err := ApplySwitchLog(*flagOut, *flagSwitchLog)
+	if rep != nil && rep.SwitchLog != nil {
+		for _, f := range rep.SwitchLog.Checks.Failures {
+			t.Error(f)
+		}
+		t.Logf("%s", RefusalTable(rep))
+	}
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
 }

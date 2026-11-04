@@ -58,6 +58,11 @@ services:
       AICC_BOT_MAX_CALLS: ${E2E_BOT_MAX_CALLS:-}
       AICC_BOT_INBOUND_RESERVE: ${E2E_BOT_INBOUND_RESERVE:-}
       AICC_OVERFLOW_HOLD: ${E2E_OVERFLOW_HOLD:-}
+      # K3 (issue #459) narrows the bot's RTP range to exactly one pair
+      # (26000-26001, just above the switch's 20000-25999) to make the UAS
+      # refuse an INVITE. Only e2e.sh capacity sets them; empty is the default.
+      AICC_BOT_RTP_PORT_LOW: ${E2E_BOT_RTP_PORT_LOW:-}
+      AICC_BOT_RTP_PORT_HIGH: ${E2E_BOT_RTP_PORT_HIGH:-}
       AICC_LOG_LEVEL: ${AICC_LOG_LEVEL:-info}
 
   freeswitch:

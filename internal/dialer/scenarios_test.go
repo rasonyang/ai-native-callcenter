@@ -587,3 +587,92 @@ func TestAnAlreadyPlacedCallIsLeftInFlight(t *testing.T) {
 		t.Errorf("in flight = %d", p.InFlight)
 	}
 }
+
+// A campaign of 51 calls in which every third bot leg is refused (#459). The
+// customer answered each of them, so none is dialled again; the refused ones
+// finish BOT_FAILED whatever the switch's cause was, the others ANSWERED, and
+// because a good call falls between any two refusals the provider breaker
+// (M = 2) never sees a run and the campaign goes on to the end with nothing
+// left in flight.
+func TestACampaignWhoseEveryThirdBotLegIsRefusedGoesOnAndSettlesEveryCall(t *testing.T) {
+	r := newRig(t, opts{providerM: 2})
+	c := r.newCampaign("Refusals", func(s *camSpec) { s.max = 10 })
+	const n = 51
+	specs := numbers("52", n)
+	r.importContacts(c, specs)
+	isRefused := map[string]bool{}
+	for i, s := range specs {
+		isRefused[s.number] = i%3 == 0
+	}
+	r.start(c)
+
+	for step := 0; step < 100; step++ {
+		r.endAll(func(number string) string {
+			if isRefused[number] {
+				return endBotRefused
+			}
+			return endAnswered
+		})
+		if got := r.campaignNow(c); got.Status == campaign.StatusPaused {
+			t.Fatalf("paused (%s) with refusals that were never consecutive", got.PauseReason)
+		}
+		if len(r.placer.liveCalls()) == 0 && r.nextDue(c).IsZero() {
+			break
+		}
+	}
+	if live := r.placer.liveCalls(); len(live) != 0 {
+		t.Fatalf("%d calls still live at the end", len(live))
+	}
+	r.noViolations()
+
+	// Not r.contacts: it asks for 100000 rows and ListContacts, which caps a
+	// page at 1000, answers a default page of 50.
+	all, _, err := r.st.Campaigns().ListContacts(context.Background(), c.ID, campaign.ContactFilter{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != n {
+		t.Fatalf("%d contacts listed, want %d", len(all), n)
+	}
+	refused, answered := 0, 0
+	for _, ct := range all {
+		wantOutcome := campaign.OutcomeAnswered
+		if isRefused[ct.Number] {
+			wantOutcome = campaign.OutcomeBotFailed
+			refused++
+		} else {
+			answered++
+		}
+		if ct.Status != campaign.ContactDone || ct.Attempts != 1 || ct.LastOutcome != wantOutcome {
+			t.Errorf("%s: status %s attempts %d last %s; want DONE 1 %s", ct.Number, ct.Status, ct.Attempts, ct.LastOutcome, wantOutcome)
+		}
+	}
+	if refused != 17 || answered != 34 {
+		t.Errorf("refused %d, answered %d; want 17 and 34", refused, answered)
+	}
+	if rows := r.attempts(c); len(rows) != n {
+		t.Errorf("%d attempt rows, want one per contact (%d): an answered number is never redialled", len(rows), n)
+	}
+	if got := r.campaignNow(c); got.Status != campaign.StatusCompleted {
+		t.Errorf("campaign is %s, want COMPLETED", got.Status)
+	}
+}
+
+// Refusals in a row are what the provider breaker is for: M of them pause the
+// campaign, with BOT_FAILED counted off the CDR's bot reason.
+func TestConsecutiveRefusedBotLegsTripTheProviderBreaker(t *testing.T) {
+	r := newRig(t, opts{providerM: 2})
+	c := r.newCampaign("Gateway down", func(s *camSpec) { s.max = 1 })
+	r.importContacts(c, numbers("53", 30))
+	r.start(c)
+	r.end(r.placer.liveCalls()[0], endBotRefused)
+	r.settle()
+	if got := r.campaignNow(c); got.Status != campaign.StatusRunning {
+		t.Fatalf("paused after one refusal: %s", got.PauseReason)
+	}
+	r.end(r.placer.liveCalls()[0], endBotRefused)
+	r.settle()
+	if got := r.campaignNow(c); got.Status != campaign.StatusPaused || got.PauseReason != campaign.PauseProviderFailure {
+		t.Errorf("status %s/%s, want PAUSED/PROVIDER_FAILURE", got.Status, got.PauseReason)
+	}
+}

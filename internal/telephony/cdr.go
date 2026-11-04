@@ -482,11 +482,15 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.Legs = unreachedJourney(snap, originator, cdr.Status == store.CDRStatusAnswered, cdr.EndedAt, cdr.ToNumber)
 	}
 	cdr.UnbackedClaims = snap.Bot.UnbackedClaims
-	if snap.Bot.Summary != "" {
+	if snap.Bot.Summary != "" || snap.Bot.Reason != "" {
 		if cdr.UserData == nil {
 			cdr.UserData = map[string]any{}
 		}
-		cdr.UserData["botSummary"] = snap.Bot.Summary
+		// The reason stands without a summary: a call whose bot leg never
+		// carried a conversation (BOT_LEG_FAILED) has none to give.
+		if snap.Bot.Summary != "" {
+			cdr.UserData["botSummary"] = snap.Bot.Summary
+		}
 		if snap.Bot.Reason != "" {
 			cdr.UserData["botReason"] = snap.Bot.Reason
 		}

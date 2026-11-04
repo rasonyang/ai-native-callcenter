@@ -26,6 +26,20 @@ One thing the port carried wrong and #250 fixed, invisible here because this top
 
 **Kept from golang-bot verbatim**: 20ms ticker pacing with late-tick resync (no catch-up bursts), TX prebuffer 3 frames (60ms) + 2-tick underrun grace, reorder-only jitter buffer (4-frame window, ≥25-frame gap resync, codec-correct silence fill), RTP dead timeout (5s default), minimal RTCP SR/RR (one-way-dead detection), OPTIONS→200, INFO+RFC2833 DTMF merge, advertise-IP route-probe toward the peer's media address (replaced in #349: the answer names the address the INVITE was sent to).
 
+**A bot leg that never carries the conversation (#459).** The switch is told what to do with the customer before it knows the bridge to the bot will fail; the application cannot be asked after the INVITE is refused. An inbound call's Lua script (`aicc_inbound.lua`) owns this: `continue_on_fail`, then the number's fallback queue or the stock prompt. A call the platform placed to a customer has no script, so `telephony.BridgeToBot` builds the same thing into the inline transfer, in this order: `set:continue_on_fail=true`, `set:hangup_after_bridge=true`, the bridge, `set:aicc_bot_reason=BOT_LEG_FAILED`, then one continuation chosen by `outbound` before the bridge is sent. `hangup_after_bridge` stays on, so a bot that answered and later hung up ends the call and never reaches the continuation. The continuation is:
+
+- a single call whose number has a fallback queue that exists and is enabled: `transfer:<queue extension> XML aicc`;
+- a single call with no such queue: `playback:${sounds_dir}/aicc/<lang>/bot-unavailable.wav`, then `hangup:${originate_disposition}` (the switch's own cause survives);
+- a campaign call: `hangup:${originate_disposition}`, no prompt and never a queue (design 10 section 10).
+
+`<lang>` comes from a fixed map (`telephony.PromptLanguage`): `zh` is `zh`, everything else, an empty or malformed value included, is `en`. The call's raw language and the queue's raw extension never reach the string unchecked: an extension the inline grammar reads as syntax degrades to the prompt. The recordings ship in the switch image; until they exist the playback finds nothing and the call hangs up.
+
+A leg that answered and then failed before media (`voice.UAS`'s `OnCallFailed`, or the run-error path) cannot use the continuation, because the bridge came up. The orchestrator runs `rescue` from `OnCallFailed`, on the goroutine that sends the BYE next: the customer's channel (`X-AICC-Channel-ID`) is moved first, then the bot leg ends, so the BYE never finds the customer still bridged. For a call placed to a customer (`X-AICC-Placed-To-Customer`) `rescue` follows the same rules: it stamps `aicc_bot_reason=BOT_LEG_FAILED` first; a campaign call (`X-AICC-Campaign-ID`) is then left alone, and ending the bot leg hangs it up through `hangup_after_bridge`; a single call goes to the number's fallback queue if it is enabled, otherwise into an inline `playback` and a plain `hangup`. An inbound call keeps its old rescue (the number's queue, if any) and no stamp. Every transfer to a fallback queue first puts `hangup_after_bridge` back on, as the inbound script does after a failed bridge: `aicc_queue.lua` takes a caller still on the line after `callcenter` returns for one who never reached an agent. A bot that vanishes mid-call after media is not part of this.
+
+Because the bridge sets `hangup_after_bridge=true` on a placed call, a failed handover (`handoverFailed`) restores `true` there and `false` only on an inbound call; `false` would run the continuation after a bot's ordinary hangup.
+
+The CDR of such a call carries `userData.botReason=BOT_LEG_FAILED`, with or without a bot summary, and its `hangupCause` is the switch's, so a refused INVITE and a pre-media failure can still be told apart. A campaign attempt whose answered call carries that reason finishes `BOT_FAILED`, whatever the cause.
+
 ## 2. Codec & sample-rate paths (per direction, per provider)
 
 | Leg codec | Direction | OpenAI (preferred: G.711 passthrough) | Qwen |

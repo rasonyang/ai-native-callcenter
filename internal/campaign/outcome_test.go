@@ -73,6 +73,16 @@ func TestAnAnsweredCall(t *testing.T) {
 		// somebody has answered.
 		{"busy cause after an answer", CallEnd{HangupCause: "USER_BUSY", IsAnswered: true}, OutcomeAnswered},
 		{"temporary failure after an answer", CallEnd{HangupCause: "NORMAL_TEMPORARY_FAILURE", IsAnswered: true}, OutcomeAnswered},
+		// A refused or pre-media-failed bot leg keeps the switch's cause (a 503
+		// is NORMAL_TEMPORARY_FAILURE, which alone is ANSWERED, above) and
+		// carries botReason BOT_LEG_FAILED, which is what makes it the bot's
+		// failure (#459).
+		{"bot leg refused: temporary failure", CallEnd{HangupCause: "NORMAL_TEMPORARY_FAILURE", IsAnswered: true, BotReason: "BOT_LEG_FAILED"}, OutcomeBotFailed},
+		{"bot leg refused: busy", CallEnd{HangupCause: "USER_BUSY", IsAnswered: true, BotReason: "BOT_LEG_FAILED"}, OutcomeBotFailed},
+		{"bot leg refused: rejected", CallEnd{HangupCause: "CALL_REJECTED", IsAnswered: true, BotReason: "BOT_LEG_FAILED"}, OutcomeBotFailed},
+		{"bot leg refused: gateway down", CallEnd{HangupCause: "GATEWAY_DOWN", IsAnswered: true, BotReason: "BOT_LEG_FAILED"}, OutcomeBotFailed},
+		{"bot leg failed before media: normal clearing", CallEnd{HangupCause: "NORMAL_CLEARING", IsAnswered: true, BotReason: "BOT_LEG_FAILED"}, OutcomeBotFailed},
+		{"another bot reason changes nothing", CallEnd{HangupCause: "NORMAL_TEMPORARY_FAILURE", IsAnswered: true, BotReason: "SESSION_LIMIT"}, OutcomeAnswered},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

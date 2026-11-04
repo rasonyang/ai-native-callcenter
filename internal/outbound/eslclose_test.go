@@ -206,8 +206,10 @@ func TestAnOriginateWhoseLinkClosesAfterTheWriteIsUnconfirmed(t *testing.T) {
 					UserData: map[string]string{"ticket": "T-302"}})
 				return err
 			},
-			done: func(leg string) string { return "api uuid_transfer " + leg + " 'm:^:bridge:" },
-			did:  "95099",
+			done: func(leg string) string {
+				return "api uuid_transfer " + leg + " 'm:^:set:continue_on_fail=true^set:hangup_after_bridge=true^bridge:"
+			},
+			did: "95099",
 		},
 		{
 			name: "click-to-dial",

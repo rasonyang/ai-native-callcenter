@@ -207,11 +207,12 @@ func TestASessionLimitTransferKeepsTheFinalLegsCause(t *testing.T) {
 					if got.UserData["crmTicket"] != "T-0042 / 工单" {
 						t.Errorf("userData lost the call's own data: %v", got.UserData)
 					}
-					// The reason rides only beside a summary, which is why the
-					// limit's own summary is never empty (sessionLimitSummary).
-					wantReason, wantSummary := any(nil), any(nil)
+					// The reason stands without a summary (#459: a call with no
+					// bot conversation has a reason and nothing to summarise);
+					// the summary is written only when there is one.
+					wantReason, wantSummary := any("SESSION_LIMIT"), any(nil)
 					if summary.text != "" {
-						wantReason, wantSummary = "SESSION_LIMIT", summary.text
+						wantSummary = summary.text
 					}
 					if got.UserData["botReason"] != wantReason || got.UserData["botSummary"] != wantSummary {
 						t.Errorf("botReason=%v botSummary=%v, want %v and %v",

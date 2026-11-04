@@ -933,3 +933,39 @@ func TestRandomAttemptHistoriesKeepTheInvariants(t *testing.T) {
 		t.Errorf("%d callbacks for %d finished HIGH leads: exactly one each", callbacks, leads)
 	}
 }
+
+// How a campaign call whose bot refused the leg is read off its CDR (#459).
+// The customer answered and the switch's cause is its own; before the bot
+// reason was read, the attempt finished ANSWERED.
+func TestAnAnsweredCallWhoseBotLegFailedFinishesBotFailed(t *testing.T) {
+	t.Parallel()
+	answeredAt := time.Date(2026, 6, 1, 14, 0, 0, 0, time.UTC)
+	refused := func(cause string, userData map[string]any) CDR {
+		return CDR{
+			HangupCause: cause, Status: CDRStatusAnswered, AnsweredAt: answeredAt,
+			EndedAt: answeredAt.Add(time.Second), UserData: userData,
+		}
+	}
+	for _, tt := range []struct {
+		name string
+		cdr  CDR
+		want campaign.Outcome
+	}{
+		{"before: no reason", refused("NORMAL_TEMPORARY_FAILURE", nil), campaign.OutcomeAnswered},
+		{"a refusal", refused("NORMAL_TEMPORARY_FAILURE", map[string]any{"botReason": "BOT_LEG_FAILED"}), campaign.OutcomeBotFailed},
+		{"a busy gateway", refused("USER_BUSY", map[string]any{"botReason": "BOT_LEG_FAILED"}), campaign.OutcomeBotFailed},
+		{"a failure before media, cleared normally", refused("NORMAL_CLEARING", map[string]any{"botReason": "BOT_LEG_FAILED"}), campaign.OutcomeBotFailed},
+		{"a reason that is not a string", refused("NORMAL_CLEARING", map[string]any{"botReason": 7}), campaign.OutcomeAnswered},
+		{"another reason", refused("NORMAL_CLEARING", map[string]any{"botReason": "SESSION_LIMIT"}), campaign.OutcomeAnswered},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := endingFromCDR(tt.cdr)
+			if got.Outcome != tt.want {
+				t.Errorf("outcome = %s, want %s", got.Outcome, tt.want)
+			}
+			if got.HangupCause != tt.cdr.HangupCause {
+				t.Errorf("hangupCause = %q, want the switch's %q", got.HangupCause, tt.cdr.HangupCause)
+			}
+		})
+	}
+}

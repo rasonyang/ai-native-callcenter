@@ -213,6 +213,7 @@ func endingFromCDR(cdr CDR) campaign.Ending {
 			end.HasBot = true
 		}
 	}
+	end.BotReason, _ = cdr.UserData["botReason"].(string)
 	if v, ok := cdr.Tech["isPlacementFailure"].(bool); ok {
 		end.IsPlacementFailure = v
 	}

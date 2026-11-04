@@ -20,6 +20,16 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- An AI outbound call no longer drops the customer when the bot leg fails. If
+  the bot refuses the leg (503, 486, 480, gateway down) or answers and fails
+  before media, a single call goes to its number's fallback queue when that
+  queue is enabled and otherwise plays a short "unavailable" prompt in the
+  call's language (`zh` or `en`) and hangs up; the prompt files ship with the
+  switch image separately and nothing is played until they do. A campaign call
+  is hung up without a prompt and never goes to a queue. The call's CDR
+  carries `userData.botReason=BOT_LEG_FAILED` beside the switch's own
+  `hangupCause`, and a campaign attempt so ended finishes `BOT_FAILED`.
+  (#459)
 - The agent's live transcript follows the conversation again: it opens at the
   latest line, whether the call is live or has ended, and keeps each new or
   growing line in view until the reader scrolls up on purpose. "Jump to latest"

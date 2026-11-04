@@ -257,6 +257,13 @@ func (c *httpc) signInWithKey(ctx context.Context, username, password, keyName s
 // creates an enabled DID that allows outbound calls and runs it, with
 // maxOutbound as its outbound line limit (nil: none).
 func (c *httpc) publishFlowAndDID(ctx context.Context, flowFile, slug, name, number string, maxOutbound *int) (api.DID, error) {
+	return c.publishFlowAndDIDWith(ctx, flowFile, slug, name, api.DIDWrite{Number: number, MaxOutboundChannels: maxOutbound})
+}
+
+// publishFlowAndDIDWith is publishFlowAndDID for a DID that needs more than a
+// number and a line limit (a language, a fallback queue): w carries those,
+// and the flow, outbound-only and enabled are set here.
+func (c *httpc) publishFlowAndDIDWith(ctx context.Context, flowFile, slug, name string, w api.DIDWrite) (api.DID, error) {
 	specBytes, err := os.ReadFile(flowFile)
 	if err != nil {
 		return api.DID{}, err
@@ -275,11 +282,9 @@ func (c *httpc) publishFlowAndDID(ctx context.Context, flowFile, slug, name, num
 	yes := true
 	no := false
 	flowID := flow.FlowID
+	w.FlowID, w.AllowOutbound, w.AllowInbound, w.IsEnabled = &flowID, &yes, &no, &yes
 	var did api.DID
-	if err := c.do(ctx, http.MethodPost, "/dids", api.DIDWrite{
-		Number: number, FlowID: &flowID, AllowOutbound: &yes, AllowInbound: &no, IsEnabled: &yes,
-		MaxOutboundChannels: maxOutbound,
-	}, &did, http.StatusCreated); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/dids", w, &did, http.StatusCreated); err != nil {
 		return api.DID{}, fmt.Errorf("create did: %w", err)
 	}
 	return did, nil

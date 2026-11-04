@@ -108,6 +108,7 @@ type bridged struct {
 	channelID string
 	endpoint  string
 	vars      map[string]string
+	fallback  telephony.BotFallback
 }
 
 type transferred struct {
@@ -209,10 +210,10 @@ func (f *fakeSwitch) Originate(partyID uuid.UUID, endpoint string, vars map[stri
 	return "job-1", nil
 }
 
-func (f *fakeSwitch) BridgeToEndpoint(channelID string, _ uuid.UUID, endpoint string, vars map[string]string) error {
+func (f *fakeSwitch) BridgeToBot(channelID string, _ uuid.UUID, endpoint string, vars map[string]string, fallback telephony.BotFallback) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.bridges = append(f.bridges, bridged{channelID, endpoint, vars})
+	f.bridges = append(f.bridges, bridged{channelID, endpoint, vars, fallback})
 	f.order = append(f.order, "bridge")
 	return f.bridgeErr
 }

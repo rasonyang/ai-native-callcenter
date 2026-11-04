@@ -44,6 +44,16 @@ func (s *orderedSwitch) TransferToExtension(channelID, extension, _ string) erro
 	return nil
 }
 
+func (s *orderedSwitch) StampBotLegFailed(channelID string) error {
+	s.record("stamp " + channelID)
+	return nil
+}
+
+func (s *orderedSwitch) PlayBotUnavailable(channelID, language string) error {
+	s.record("prompt " + channelID + " " + language)
+	return nil
+}
+
 func (s *orderedSwitch) SetVariable(channelID, name, value string) error {
 	s.record("set " + channelID + " " + name + "=" + value)
 	return nil
