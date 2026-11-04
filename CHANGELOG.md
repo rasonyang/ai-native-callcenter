@@ -30,6 +30,12 @@ carries the one-line installer's files.
   carries `userData.botReason=BOT_LEG_FAILED` beside the switch's own
   `hangupCause`, and a campaign attempt so ended finishes `BOT_FAILED`.
   (#459)
+- On the qwen flash model, a second or third lookup in one call could be
+  answered with "let me check" again instead of the result. The bot now says
+  nothing in a turn that calls an HTTP tool and reads the result when it comes
+  back; the wait line still covers a slow lookup. A flow's own instruction
+  should not ask for a filler in a lookup turn, and the platform rule wins if it
+  does. The `mobile_support` seed flow no longer asks for one. (#466)
 - The agent's live transcript follows the conversation again: it opens at the
   latest line, whether the call is live or has ended, and keeps each new or
   growing line in view until the reader scrolls up on purpose. "Jump to latest"

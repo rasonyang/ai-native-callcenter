@@ -222,6 +222,10 @@ func (r *Runtime) Instructions() string {
 	b.WriteString("\n\n")
 	b.WriteString(r.actionClaimRule())
 	b.WriteString("\n\n")
+	if rule := r.lookupSilenceRule(); rule != "" {
+		b.WriteString(rule)
+		b.WriteString("\n\n")
+	}
 	b.WriteString(spec.Global.Persona.For(lang))
 	if rules := spec.Global.Rules.For(lang); len(rules) > 0 {
 		b.WriteString("\n\n")
@@ -568,13 +572,18 @@ func (r *Runtime) confidentialityRule() string {
 // commitment ("let me check") as well as the claim ("I've transferred you"),
 // because both leave the caller waiting, and it carries an example because on
 // qwen the concrete wording is what held (confidentialityRule).
+//
+// The example is phrased as a prohibition. The earlier one endorsed saying
+// "let me check" together with the tool call, and on qwen flash that filler,
+// said in the tool-call turn, was repeated as a later lookup's result turn
+// instead of the result (#466); see lookupSilenceRule.
 func (r *Runtime) actionClaimRule() string {
 	if r.engine.Lang() == LangZH {
 		return "不要对来电者说你正在或已经做某件需要工具完成的事——" +
 			"转接人工、查询、记录留言、结束通话——除非你在同一次回复里调用了对应的工具。" +
 			"只说不调用，什么都不会发生，来电者只会一直等。" +
 			"这次回复不调用工具，就不要说你在做。" +
-			"例如：“我帮您查询一下。”只能和查询工具的调用一起出现，不能单独说。"
+			"例如：没有调用查询工具，就不要说“我帮您查询一下”。"
 	}
 	return "Never tell the caller you are doing something a tool does — " +
 		"transferring or connecting them, looking something up, saving a " +
@@ -582,8 +591,44 @@ func (r *Runtime) actionClaimRule() string {
 		"reply. Saying it does not do it: without the tool call nothing " +
 		"happens and the caller waits for something that never comes. If you " +
 		"are not calling the tool now, do not say you are doing it. For " +
-		"example, \"Let me check that order for you.\" goes out only together " +
-		"with the lookup tool call, never on its own."
+		"example, if you are not calling the lookup tool, do not say " +
+		"\"Let me check that order for you.\""
+}
+
+// lookupSilenceRule tells the model to say nothing in a reply that calls an
+// HTTP tool the current phase allows, and to read the result when it comes
+// back. It is empty when the phase allows no such tool.
+//
+// Why (#466): on qwen flash, the filler said in the tool-call turn ("let me
+// check") was repeated as the result turn of the call's later lookups, so the
+// caller heard the filler again instead of the result. A slow tool does not
+// need the filler: the platform says global.toolWaitLine itself once the tool
+// has run longer than ToolWaitLineAfter. The rule wins over a flow whose own
+// instruction asks for a filler (owner decision, 2026-11-04); a flow should not
+// ask for one. The counts of the probe are in docs/design/qwen-findings.md.
+//
+// The tools are the flow's HTTP tools (IsHTTPTool) in name order, so the text
+// is deterministic.
+func (r *Runtime) lookupSilenceRule() string {
+	var names []string
+	for name := range r.engine.Spec().Tools {
+		if r.IsHTTPTool(name) {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	slices.Sort(names)
+	if r.engine.Lang() == LangZH {
+		return "调用 " + strings.Join(names, "或") + " 的那次回复只调用工具，不要说任何话，" +
+			"也不要说“好的，我查一下”这类话：查询慢时系统会自己请来电者稍等。" +
+			"工具结果回来后，直接把结果告诉来电者。"
+	}
+	return "In a reply that calls " + strings.Join(names, " or ") +
+		", only call the tool and say nothing, not even \"One moment, let me check.\" " +
+		"If the lookup is slow, the system asks the caller to hold on. " +
+		"When the result comes back, tell the caller the result directly."
 }
 
 // wrapUpRule is the platform's steer once a call has used most of its time

@@ -68,8 +68,8 @@
         "en": "Welcome to the StarCom Mobile after-sales hotline. Are you calling about a usage question, a repair status, or something else?"
       },
       "instruction": {
-        "zh": "使用类问题:用你自己的知识简短解答常见操作问题(开关机、系统设置、充电、存储、系统升级等),超出能力或用户不满意时转人工。查维修进度:请用户报维修单号(RMA开头)。单号听不清或不完整时,先逐位读出请用户确认,等用户答复后再查询;单号清楚就直接调用 repair_status,调用时不要复述单号、不要提问,最多说一句“好的,我查一下”。查无此单(found=0)请用户核对单号。",
-        "en": "Usage questions: answer common operations briefly from your own knowledge (power, settings, charging, storage, system updates); transfer when it is beyond you or the caller is unsatisfied. Repair status: ask for the RMA number. If it is unclear or incomplete, read it back character by character and wait for the caller to confirm before looking it up; if it is clear, call repair_status right away, and while calling do not read the number back or ask anything: at most say \"One moment, let me check.\" If not found (found=0), ask the caller to double-check the number."
+        "zh": "使用类问题:用你自己的知识简短解答常见操作问题(开关机、系统设置、充电、存储、系统升级等),超出能力或用户不满意时转人工。查维修进度:请用户报维修单号(RMA开头)。单号听不清或不完整时,先逐位读出请用户确认,等用户答复后再查询;单号清楚就直接调用 repair_status,调用时不要复述单号、不要提问、不要说话。查无此单(found=0)请用户核对单号。",
+        "en": "Usage questions: answer common operations briefly from your own knowledge (power, settings, charging, storage, system updates); transfer when it is beyond you or the caller is unsatisfied. Repair status: ask for the RMA number. If it is unclear or incomplete, read it back character by character and wait for the caller to confirm before looking it up; if it is clear, call repair_status right away, and while calling do not read the number back, ask anything or say anything. If not found (found=0), ask the caller to double-check the number."
       },
       "tools": [
         "repair_status"
