@@ -44,7 +44,7 @@ function oneOfEach(overrides: Partial<Callback> = {}): Callback[] {
 
 function render(rows: Callback[]) {
   return renderApp('/agent/callbacks', {
-    handle: ({ path, method }) => (method === 'GET' && path.startsWith('/callbacks') ? { items: rows } : undefined),
+    handle: ({ path, method }) => (method === 'GET' && path.startsWith('/callbacks') ? { items: rows, total: 120 } : undefined),
   }, { role: 'AGENT' })
 }
 
