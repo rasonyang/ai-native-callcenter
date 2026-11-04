@@ -237,6 +237,8 @@ describe('LiveTranscript', () => {
     Object.defineProperty(log, 'scrollHeight', { value: 1000, configurable: true })
     Object.defineProperty(log, 'clientHeight', { value: 100, configurable: true })
     log.scrollTop = 0
+    // A scroll away from the end only counts when the reader made it.
+    log.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
     log.dispatchEvent(new Event('scroll'))
 
     const jump = await screen.findByRole('button', { name: 'Jump to latest' })

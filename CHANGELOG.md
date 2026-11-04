@@ -18,6 +18,16 @@ carries the one-line installer's files.
   `uuid.NewV7` in Go or `uuidv7()` in PostgreSQL 18. Recorded in
   `.oasdiff-breaking-ignore.txt`. (#400)
 
+### Fixed
+
+- The agent's live transcript follows the conversation again: it opens at the
+  latest line, whether the call is live or has ended, and keeps each new or
+  growing line in view until the reader scrolls up on purpose. "Jump to latest"
+  appears only then, and a new call always starts at its latest line. Before, a
+  long call opened at its first line and stopped following as soon as a line
+  arrived, and a reader who had scrolled up carried that position into the next
+  call. (#456)
+
 ### Changed
 
 - A contact whose call recorded a lead is never dialled again, whatever the
