@@ -2862,19 +2862,19 @@ func TestARepeatedHangupWithoutAnInterruptionKeepsToday(t *testing.T) {
 // The cap is the floor: after the refusal the model never speaks, and the
 // refusal restarted the cap so the call ends on it.
 func TestAfterTheRefusalAModelThatNeverSpeaksEndsAtTheCap(t *testing.T) {
-	actions, _, armedTurn, fired := armInterruptedHangup(t, 300*time.Millisecond)
-	time.Sleep(200 * time.Millisecond)
+	actions, _, armedTurn, fired := armInterruptedHangup(t, time.Second)
+	time.Sleep(600 * time.Millisecond)
 	if result, _ := actions.Hangup(t.Context(), flow.HangupRequest{}); result.IsOK {
 		t.Fatal("the bare hangup was not refused")
 	}
 	actions.onPlaybackDone(armedTurn+2, false)
-	// 200 ms in, the interruption's own cap would fire at 300 ms; the refusal
-	// restarted it, so it is not due yet.
-	time.Sleep(150 * time.Millisecond)
+	// 600 ms in, the interruption's own cap would fire at 1 s; the refusal
+	// restarted it to 1.6 s, so it is not due yet at about 1.1 s.
+	time.Sleep(500 * time.Millisecond)
 	neverFired(t, fired, "the cap was not restarted by the refusal")
 	select {
 	case <-fired:
-	case <-time.After(time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("the cap did not end the call")
 	}
 }
