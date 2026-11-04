@@ -290,6 +290,11 @@ func TestFourInterruptionsEndTheCallAtTheCapRunningAtTheSecond(t *testing.T) {
 	if strings.Contains(logs, "the line is asked for once more") {
 		t.Errorf("the line was asked for after the second interruption:\n%s", logs)
 	}
+	// Reaching the frozen cap is the rule working, not a stalled line.
+	if !strings.Contains(logs, "the cap frozen at the second interruption ran out; running the armed action") ||
+		strings.Contains(logs, "running an armed action at the cap") {
+		t.Errorf("the frozen cap was not logged as the rule:\n%s", logs)
+	}
 }
 
 // An early question is the first interruption and is answered; the answer is
