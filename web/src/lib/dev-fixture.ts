@@ -104,7 +104,7 @@ export function installDevFixture(queryClient: QueryClient) {
     queryClient.setQueryData(PRESENCE_KEY, presenceFor(state, now))
     const call = callFor(state, now)
     queryClient.setQueryData(CALLS_KEY, { items: call ? [call] : [] })
-    queryClient.setQueryData([...CALLBACKS_KEY, 'OPEN'], { items: CALLBACKS })
+    queryClient.setQueryData([...CALLBACKS_KEY, 'OPEN', {}], { items: CALLBACKS, total: CALLBACKS.length })
     return state
   }
 
