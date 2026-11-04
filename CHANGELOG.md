@@ -44,7 +44,10 @@ carries the one-line installer's files.
   the line is never asked for again and the call's cap stops moving, so a caller
   saying "mm-hm" over the start of the line cannot stretch the call: it ends on
   the next answer or at the cap already running. A caller who interrupts twice
-  may not hear all of the line. (#465)
+  may not hear all of the line. When the model answers such an interruption
+  aloud and calls `hangup` in the same turn, that answer is the goodbye: the
+  turn the call's result brings is not played, and the call ends once the
+  goodbye has been heard. (#465)
 - The agent's live transcript follows the conversation again: it opens at the
   latest line, whether the call is live or has ended, and keeps each new or
   growing line in view until the reader scrolls up on purpose. "Jump to latest"

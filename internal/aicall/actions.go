@@ -85,6 +85,22 @@ type callActions struct {
 	// model that keeps saying the line again cannot stretch the call (#465).
 	// Reset by armAs.
 	interruptions int
+	// isLineSaidByRule says the closing line counts as said by a rule and not by
+	// having played: the cut fell in its final sentence (rule A) or this is the
+	// second interruption or later (rule D), both set in onBargeIn. Only then
+	// does a hangup from the model over a speaking answer end the call on that
+	// answer (sayGoodbyeOnHangup). A first interruption mid-line leaves it
+	// clear: the line is still owed and the answer may take two turns (#147,
+	// #262). Reset by armAs.
+	isLineSaidByRule bool
+	// goodbyeTurn is the model turn that spoke the goodbye and called hangup
+	// while the line counted as said (sayGoodbyeOnHangup); 0 is none. The
+	// ending runs on that turn's playback, also through the playback of a later
+	// turn with no audio of its own (onPlaybackDone): the turn the hangup's
+	// result brings is muted, and its playback ends when the goodbye's queued
+	// audio has drained. A further interruption clears it (onBargeIn). Reset by
+	// armAs.
+	goodbyeTurn int
 	// audioTurnsAtInterrupt is Session.audioProgress's finished-turn count when
 	// the interruption was seen; a larger count later means the model has
 	// answered aloud since.
@@ -401,6 +417,7 @@ func (a *callActions) Hangup(ctx context.Context, _ flow.HangupRequest) (flow.Re
 		// it insisted after being asked for the closing line, on the playback
 		// of the turn that carries this call (insistedOnHangup).
 		a.insistedOnHangup()
+		a.sayGoodbyeOnHangup()
 		return flow.Succeeded(nil, ""), nil
 	}
 	if a.recorder != nil {
@@ -452,6 +469,8 @@ func (a *callActions) armAs(_ context.Context, isTransfer bool, action func()) {
 	a.isLineRefused = false
 	// Before the cap starts: a fresh arming is never frozen.
 	a.interruptions = 0
+	a.isLineSaidByRule = false
+	a.goodbyeTurn = 0
 	graceCap := a.graceCap
 	if graceCap <= 0 {
 		graceCap = actionGraceCap
@@ -664,6 +683,38 @@ func (a *callActions) insistedOnHangup() {
 		"ending the call without it")
 }
 
+// sayGoodbyeOnHangup handles a hangup the model makes in an answer that is
+// already speaking, after the caller talked over the closing line and a rule
+// counted the line as said (isLineSaidByRule: a cut in its final sentence, or
+// the second interruption). The answer is then the goodbye, and a hangup from
+// it is the model saying so. A tool result is answered with one more turn, and
+// on qwen that turn said the line yet again (#465: the line three times and a
+// BYE 16.6 s after the interruption). So the turn that made
+// the call is recorded as the goodbye (goodbyeTurn), the ending runs on its
+// playback (onPlaybackDone), and the turn the result brings is not played and
+// leaves no words in the transcript (Session.muteNextTurn).
+//
+// Nothing here applies to a first interruption that left the line owed (the
+// answer may legitimately take two turns), to an answer that has not started
+// speaking (the bare hangup refusals decide that), or to a transfer. A further
+// interruption withdraws it (onBargeIn).
+func (a *callActions) sayGoodbyeOnHangup() {
+	_, isSpeaking := a.session.audioProgress()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.armed == nil || a.isArmedTransfer || !a.isLineSaidByRule || a.goodbyeTurn != 0 || !isSpeaking {
+		return
+	}
+	turn := a.session.currentTurn()
+	if turn <= a.armedInTurn {
+		return
+	}
+	a.goodbyeTurn = turn
+	a.session.muteNextTurn(true)
+	a.log.Info("the model said goodbye and called hangup over a closing line counted as said; "+
+		"the call ends after this turn, and the turn its answer brings is not played", "turn", turn)
+}
+
 // lineOwedHint asks the model to say the closing line it has not said yet.
 func (a *callActions) lineOwedHint() string {
 	if a.session != nil && a.session.cfg.Session.Language == "zh" {
@@ -760,9 +811,16 @@ func (a *callActions) disarm() {
 // A turn that onTurnDone judged not to be the line (notLineThrough) does not
 // run the ending either, whatever it played: the line is on its way in a turn
 // after it, and that turn's playback is the one the ending waits for.
+//
+// After a goodbye (goodbyeTurn, sayGoodbyeOnHangup) a later turn needs no audio
+// of its own: it is the muted turn the hangup's result brought, and its
+// playback ends when the goodbye's queued audio has drained, which is the
+// goodbye's own playback end (the goodbye's PLAYBACK_DONE is superseded when
+// that turn begins).
 func (a *callActions) onPlaybackDone(turn int, hasAudio bool) {
 	a.mu.Lock()
-	if a.armed == nil || turn <= a.armedInTurn || (a.isInterrupted && !hasAudio) ||
+	isAfterGoodbye := a.goodbyeTurn != 0 && turn > a.goodbyeTurn
+	if a.armed == nil || turn <= a.armedInTurn || (a.isInterrupted && !hasAudio && !isAfterGoodbye) ||
 		(a.isLineOwed && !a.isLineSpoken && !hasAudio) || turn <= a.notLineThrough {
 		a.mu.Unlock()
 		return
@@ -927,8 +985,22 @@ const closingTailAck = 1500 * time.Millisecond
 //     restarted the cap each time and the model said the full line five times
 //     in 20 s. The trade-off is accepted: a caller who interrupts twice may not
 //     hear all of the line.
+//
+// Either rule sets isLineSaidByRule, which is what lets a hangup from the
+// answer end the call on that answer (sayGoodbyeOnHangup). A caller cutting in
+// on that goodbye with more than closingTailAck left withdraws it: the answer
+// to them is played, and the ending runs on its playback or at the cap.
 func (a *callActions) onBargeIn(unplayed, played time.Duration) {
 	a.mu.Lock()
+	if a.armed != nil && a.goodbyeTurn != 0 && unplayed > closingTailAck {
+		// The caller cut in on the goodbye with more than a tail left: what
+		// they say is answered and that answer is played, not muted
+		// (sayGoodbyeOnHangup). The ending waits for it, or for the cap.
+		a.goodbyeTurn = 0
+		a.session.muteNextTurn(false)
+		a.log.Info("the caller spoke over the goodbye; the answer to them is played",
+			"unplayedMs", unplayed.Milliseconds())
+	}
 	if a.armed == nil || !a.isLineSpoken {
 		a.mu.Unlock()
 		return
@@ -945,10 +1017,12 @@ func (a *callActions) onBargeIn(unplayed, played time.Duration) {
 			finalSentence, isFinalSentence = cutInFinalSentence(a.closingLine, played, unplayed)
 			if isFinalSentence {
 				a.isLineOwed = false
+				a.isLineSaidByRule = true
 			}
 		}
 		if count >= 2 {
 			a.isLineOwed = false
+			a.isLineSaidByRule = true
 		} else {
 			graceCap := a.graceCap
 			if graceCap <= 0 {

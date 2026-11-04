@@ -351,3 +351,219 @@ func btoi(b bool) int {
 	}
 	return 0
 }
+
+// goodbyeText is what the answer turn says in the goodbye tests: the full line
+// again, as the model did on the live call.
+const goodbyeText = cutLine
+
+// sayAndHangUp has the model produce an answer turn that speaks (frames of
+// audio, pending of them still queued) and calls hangup in the same turn, and
+// waits until the call has answered that hangup. The turn is left open.
+func (r *cutRig) sayAndHangUp(t *testing.T, frames, pending int, words ...string) {
+	t.Helper()
+	answered := len(r.model.recordedToolResults())
+	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	r.model.events <- provider.Event{
+		Type: provider.EventTypeAudioDelta, Audio: make([]byte, qwenFrameBytes*frames),
+	}
+	for _, w := range words {
+		r.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: w, IsFinal: true}
+	}
+	r.leg.holdFrames(pending)
+	r.model.events <- provider.Event{
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_goodbye", ToolName: flow.ToolHangup, ToolArgs: `{}`,
+	}
+	r.await(t, "the hangup to be answered", func() bool {
+		return len(r.model.recordedToolResults()) > answered
+	})
+}
+
+// endTurn ends the open turn and waits until the call has judged it.
+func (r *cutRig) endTurn(t *testing.T) {
+	t.Helper()
+	r.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+	r.await(t, "the turn to finish generating", r.actions.isLineSpokenForTest)
+}
+
+// followUp is the turn the provider makes after a tool result: it says words
+// with frames of audio. It waits until the turn has been ended by the session.
+func (r *cutRig) followUp(t *testing.T, frames int, words ...string) (turn int) {
+	t.Helper()
+	turn = r.session.currentTurn() + 1
+	r.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
+	r.model.events <- provider.Event{
+		Type: provider.EventTypeAudioDelta, Audio: make([]byte, qwenFrameBytes*frames),
+	}
+	for _, w := range words {
+		r.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript, Text: w, IsFinal: true}
+	}
+	r.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
+	r.await(t, "the follow-up turn to end", func() bool {
+		return r.session.currentTurn() == turn && !r.session.isTurnGenerating()
+	})
+	return turn
+}
+
+func (r *cutRig) goodbyeTurn() (turn int) {
+	r.state(func(a *callActions) { turn = a.goodbyeTurn })
+	return turn
+}
+
+const (
+	goodbyeLog = "the model said goodbye and called hangup over a closing line counted as said"
+	capLogA    = "running an armed action at the cap"
+	capLogB    = "ran out; running the armed action"
+)
+
+func (r *cutRig) assertNotEndedOnTheCap(t *testing.T) {
+	t.Helper()
+	logs := r.logs.String()
+	if strings.Contains(logs, capLogA) || strings.Contains(logs, capLogB) {
+		t.Errorf("the call ended on the cap:\n%s", logs)
+	}
+}
+
+// A cut in the final sentence counts the line as said; the answer says the line
+// again and calls hangup. The turn the hangup's result brings says it a third
+// time: it is not played and leaves no words, and the call ends when the
+// answer has been heard (#465).
+func TestTheTurnAfterAGoodbyeHangupIsMutedAndTheCallEndsOnTheGoodbye(t *testing.T) {
+	r := startCutRig(t, time.Minute)
+	r.lineTurn(t, lineFrames, lineFrames, cutLine)
+	r.interrupt(t, lineFrames-lineFrames*73/100, 1) // A applies
+
+	r.sayAndHangUp(t, shortLineFrames, 100, goodbyeText)
+	answerTurn := r.session.currentTurn()
+	if got := r.goodbyeTurn(); got != answerTurn {
+		t.Fatalf("goodbye turn = %d, want the answer turn %d", got, answerTurn)
+	}
+	r.endTurn(t)
+	played := len(r.leg.sentFrames())
+
+	turn := r.followUp(t, shortLineFrames, goodbyeText)
+	if !r.session.isMutedTurn(turn) {
+		t.Errorf("turn %d, the one the hangup's result brought, is not muted", turn)
+	}
+	if got := len(r.leg.sentFrames()); got != played {
+		t.Errorf("%d frames of the muted turn reached the caller", got-played)
+	}
+	r.await(t, "the muted words to be left out", func() bool {
+		return strings.Contains(r.logs.String(), "left a muted turn's words out of the transcript")
+	})
+	if r.isCallEnded() {
+		t.Fatal("the call ended before the goodbye had played")
+	}
+	r.leg.holdFrames(0) // the goodbye has drained
+	r.awaitCallEnded(t, 15*time.Second)
+
+	logs := r.logs.String()
+	if strings.Count(logs, goodbyeLog) != 1 {
+		t.Errorf("the rule was not logged once:\n%s", logs)
+	}
+	if n := len(r.asked()); n != 0 {
+		t.Errorf("the line was asked for %d times, want none", n)
+	}
+	r.assertNotEndedOnTheCap(t)
+}
+
+// The caller talks over the goodbye after the hangup: the mute is withdrawn,
+// the answer to them is played, and the call ends on it.
+func TestACallerWhoTalksOverTheGoodbyeGetsTheirAnswerPlayed(t *testing.T) {
+	r := startCutRig(t, time.Minute)
+	r.lineTurn(t, lineFrames, lineFrames, cutLine)
+	r.interrupt(t, lineFrames-lineFrames*73/100, 1)
+
+	r.sayAndHangUp(t, shortLineFrames, 100, goodbyeText)
+	r.endTurn(t)
+	if r.goodbyeTurn() == 0 {
+		t.Fatal("the goodbye was not recorded")
+	}
+	r.interrupt(t, 100, 2)
+	if got := r.goodbyeTurn(); got != 0 {
+		t.Fatalf("goodbye turn = %d after the caller talked over it, want none", got)
+	}
+	played := len(r.leg.sentFrames())
+
+	turn := r.session.currentTurn() + 1
+	r.say(3, 0, "Of course, thank you.")
+	r.awaitCallEnded(t, 15*time.Second)
+	if r.session.isMutedTurn(turn) {
+		t.Errorf("turn %d, the answer to the caller, was muted", turn)
+	}
+	if got := len(r.leg.sentFrames()); got <= played {
+		t.Error("the answer to the caller did not play")
+	}
+	logs := r.logs.String()
+	if strings.Contains(logs, "left a muted turn's words out") {
+		t.Errorf("a turn was muted after the mute was withdrawn:\n%s", logs)
+	}
+	if !strings.Contains(logs, "the caller spoke over the goodbye") {
+		t.Errorf("the withdrawal was not logged:\n%s", logs)
+	}
+}
+
+// A first interruption that is not in the final sentence leaves the line owed:
+// a hangup from the speaking answer changes nothing, and the turn after it is
+// played as before.
+func TestAHangupAfterAnEarlyFirstInterruptionMutesNothing(t *testing.T) {
+	r := startCutRig(t, time.Minute)
+	r.lineTurn(t, lineFrames, lineFrames, cutLine)
+	r.interrupt(t, lineFrames*95/100, 1) // 5 percent in, not A
+
+	r.sayAndHangUp(t, shortLineFrames, 100, goodbyeText)
+	if got := r.goodbyeTurn(); got != 0 {
+		t.Fatalf("goodbye turn = %d, want none", got)
+	}
+	r.endTurn(t)
+	played := len(r.leg.sentFrames())
+
+	turn := r.followUp(t, shortLineFrames, goodbyeText)
+	if r.session.isMutedTurn(turn) {
+		t.Errorf("turn %d was muted", turn)
+	}
+	if got := len(r.leg.sentFrames()); got <= played {
+		t.Error("the turn after the hangup did not play")
+	}
+	r.leg.holdFrames(0)
+	r.awaitCallEnded(t, 15*time.Second)
+	logs := r.logs.String()
+	if strings.Contains(logs, goodbyeLog) ||
+		strings.Contains(logs, "left a muted turn's words out") {
+		t.Errorf("the goodbye rule engaged on a first early interruption:\n%s", logs)
+	}
+}
+
+// Two early interruptions (D), then an answer that speaks and calls hangup: the
+// follow-up is muted and the call ends on the answer's playback, before the cap
+// that was running at the second interruption.
+func TestTheGoodbyeRuleAlsoHoldsAfterASecondInterruption(t *testing.T) {
+	r := startCutRig(t, time.Minute)
+	r.lineTurn(t, shortLineFrames, 100, cutLine)
+	r.interrupt(t, 100, 1)
+	r.lineTurn(t, shortLineFrames, 100, cutLine)
+	r.interrupt(t, 100, 2)
+	due := r.capDue()
+
+	r.sayAndHangUp(t, shortLineFrames, 100, goodbyeText)
+	if r.goodbyeTurn() == 0 {
+		t.Fatal("the goodbye was not recorded after the second interruption")
+	}
+	r.endTurn(t)
+	played := len(r.leg.sentFrames())
+	turn := r.followUp(t, shortLineFrames, goodbyeText)
+	if !r.session.isMutedTurn(turn) {
+		t.Errorf("turn %d is not muted", turn)
+	}
+	if got := len(r.leg.sentFrames()); got != played {
+		t.Errorf("%d frames of the muted turn reached the caller", got-played)
+	}
+	r.leg.holdFrames(0)
+	r.awaitCallEnded(t, 15*time.Second)
+	if got := r.capDue(); !got.Equal(due) {
+		t.Errorf("the cap moved by %v", got.Sub(due))
+	}
+	if !strings.Contains(r.logs.String(), goodbyeLog) {
+		t.Errorf("the rule was not logged:\n%s", r.logs.String())
+	}
+	r.assertNotEndedOnTheCap(t)
+}

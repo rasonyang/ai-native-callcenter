@@ -240,6 +240,9 @@ type Session struct {
 	// muteLog is what the turn-end line reports; nil once logged.
 	mutedTurn int
 	muteLog   *muteRecord
+	// isNextTurnMuted asks beginTurn to mute the next turn it starts
+	// (muteNextTurn): the turn a goodbye's hangup result brings.
+	isNextTurnMuted bool
 	// turnOwedUntil is when an asked-for turn that has not started yet stops
 	// counting as the bot's floor; zero is none. See askedForATurn.
 	turnOwedUntil time.Time
@@ -1150,6 +1153,19 @@ func (s *Session) logMuted() {
 	s.muteLog = nil
 }
 
+// muteNextTurn asks for the next turn the model begins to be muted, or
+// withdraws the request. It is for the turn that answers a goodbye's hangup
+// (callActions.sayGoodbyeOnHangup): the goodbye has been said, and the turn the
+// tool result brings would only say it again. Unlike MuteTurn it touches no
+// queue: the goodbye's audio is still playing and stays. The turn is fenced
+// off at beginTurn, after that reset, and its words are left out of the
+// transcript as a muted turn's are.
+func (s *Session) muteNextTurn(isMuted bool) {
+	s.mu.Lock()
+	s.isNextTurnMuted = isMuted
+	s.mu.Unlock()
+}
+
 // isMutedTurn reports whether a turn's audio was muted (MuteTurn), and so
 // whether its words are ones the caller did not hear.
 func (s *Session) isMutedTurn(turn int) bool {
@@ -1254,6 +1270,14 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 				"chunks", s.cutOffChunks)
 		}
 		s.isCutOff, s.cutOffChunks = false, 0
+	}
+	if s.isNextTurnMuted {
+		// After the reset above: this turn's audio is dropped through the same
+		// fence, and its words stay out of the transcript (isMutedTurn).
+		s.isNextTurnMuted = false
+		s.mutedTurn = s.turnSeq
+		s.isCutOff = true
+		s.log.Info("muted the turn the goodbye's hangup brought; it is not played", "turn", s.turnSeq)
 	}
 	// Any pending drain or dead-air watch belongs to the previous turn.
 	s.drainGeneration++
