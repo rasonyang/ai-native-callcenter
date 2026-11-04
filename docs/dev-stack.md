@@ -42,6 +42,21 @@ that keeps the threads at the default priority and yields without dropping it.
 Before a live call round, run `deploy/dev/freeswitch/check-priority.sh`: it
 fails if any thread of the running switch is below priority 4 (#451).
 
+The container image carries the product's own prompts; a native switch does
+not, so copy them in once, and install the updated `scripts/aicc_inbound.lua`
+with the rest of `freeswitch/scripts/`. The bot-unavailable prompt is read when
+a call needs it, so neither step needs a reload:
+
+```sh
+sudo mkdir -p /usr/local/freeswitch/sounds/aicc/zh /usr/local/freeswitch/sounds/aicc/en
+sudo cp freeswitch/sounds/aicc/zh/bot-unavailable.wav /usr/local/freeswitch/sounds/aicc/zh/
+sudo cp freeswitch/sounds/aicc/en/bot-unavailable.wav /usr/local/freeswitch/sounds/aicc/en/
+```
+
+Without the files, a call whose bot fails on a number with no fallback queue
+hangs up in silence: the script plays
+`<sounds_dir>/aicc/<zh|en>/bot-unavailable.wav` and nothing else.
+
 One thing on this box is *not* in `freeswitch/`: the simulated PSTN trunk. It
 belongs to a deployment rather than to the product, so it lives in
 [`deploy/dev/freeswitch/`](../deploy/dev/freeswitch/README.md) with its own

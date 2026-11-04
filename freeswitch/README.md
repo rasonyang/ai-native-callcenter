@@ -95,7 +95,10 @@ recogniser returns confident, wrong words.
 
 Sound files come from the official tarballs at pinned versions, 8 kHz only.
 `SOUNDS=none` leaves them out; queue hold music then stops working, because
-`mod_local_stream` serves `music/8000` as `moh_stream`.
+`mod_local_stream` serves `music/8000` as `moh_stream`. The product's own
+prompts in `sounds/aicc/` are not part of those packs and ship in every build,
+`SOUNDS=none` included: `aicc_inbound.lua` plays `aicc/<zh|en>/bot-unavailable.wav`
+to a caller whose bot cannot take the call and whose number has no fallback queue.
 
 ### Running it
 

@@ -173,7 +173,8 @@ The build fails if the shipped configuration loads a module the image does not c
 
 - `/usr/local/freeswitch/conf` — the aicc configuration tree, from the repository's `freeswitch/conf/`
 - `/usr/local/freeswitch/scripts` — `aicc_inbound.lua`, `aicc_did_route.lua`, `aicc_queue.lua`, `aicc_track.lua`, `aicc_xml.lua` (the `mod_lua` XML handler that serves the directory and the queues from PostgreSQL)
-- `/usr/local/freeswitch/sounds` — 8 kHz only: `freeswitch-sounds-en-us-callie-8000-1.0.53` and `freeswitch-sounds-music-8000-1.0.52`, downloaded from files.freeswitch.org during the build and verified by sha256. The wideband sets are another ~450MB and nothing here plays a prompt above narrowband.
+- `/usr/local/freeswitch/sounds` — 8 kHz only: `freeswitch-sounds-en-us-callie-8000-1.0.53` and `freeswitch-sounds-music-8000-1.0.52`, downloaded from files.freeswitch.org during the build and verified by sha256. The wideband sets are another ~450MB and nothing here plays a prompt above narrowband. `SOUNDS=none` leaves these two packs out.
+- `/usr/local/freeswitch/sounds/aicc` — the product's own prompts (`zh/` and `en/bot-unavailable.wav`, 8 kHz mono), in every build including `SOUNDS=none`. `aicc_inbound.lua` plays one to a caller whose bot cannot take the call when the number has no fallback queue.
 
 FreeSWITCH runs in the foreground as the `freeswitch` user (`-nonat -nf -nc`); `HEALTHCHECK` is `fs_cli -x status`.
 
@@ -183,7 +184,7 @@ FreeSWITCH runs in the foreground as the `freeswitch` user (`-nonat -nf -nc`); `
 VERSION=v0.1.0 freeswitch/build.sh                                  # both platforms, --push
 VERSION=dev LOAD=1 PLATFORM=linux/arm64 freeswitch/build.sh          # one platform, into the local daemon
 VERSION=v0.1.0 MAKE_JOBS=3 freeswitch/build.sh                      # emulated builds want 2-3
-VERSION=v0.1.0 SOUNDS=none freeswitch/build.sh                      # no sound files (queue hold music stops working)
+VERSION=v0.1.0 SOUNDS=none freeswitch/build.sh                      # no stock sound packs (queue hold music stops working; the aicc prompts stay)
 ```
 
 These are manual builds; a release is built and pushed by `.github/workflows/release.yml`. `VERSION` is required and is the image tag: the application's release tag for the same commit. `FS_REF` (default `v1.11.3`) selects the FreeSWITCH source and is never a tag. The build context is the repository's `freeswitch/` directory as it stands in the working tree. Nothing is read from the machine running the build: the FreeSWITCH and `mod_audio_stream` sources are cloned at pinned refs and the sound files are downloaded at pinned versions and checksummed. A push from a dirty working tree is refused, because `org.opencontainers.image.revision` would then name a commit nobody can check out.

@@ -44,6 +44,7 @@ files.
 | `dialplan/public/05_aicc.xml` | The inbound doorway: every external number goes to `aicc_inbound.lua`. Numbering plans live in the database. Unchanged. |
 | `sip_profiles/external/aicc_bot.xml` | The gateway that reaches the application's own SIP server for AI calls. No registration; `ping` for real OPTIONS keepalive. Unchanged. |
 | `dialplan/aicc/.gitkeep`, `dialplan/aicc/README.md` | The seam `dialplan/aicc.xml` includes. A deployment's own rules — its trunk, its feature codes — go here. The directory has to exist in the image or the include has nowhere to point; the README says what belongs there and warns that a second file opening `<context name="aicc">` is silently ignored. |
+| `../sounds/aicc/{zh,en}/bot-unavailable.wav` | The product's own prompts, outside `conf/` (the image copies them to `/usr/local/freeswitch/sounds/aicc/`, in every build, `SOUNDS=none` included). `scripts/aicc_inbound.lua` plays `<sounds_dir>/aicc/<lang>/bot-unavailable.wav` to a caller whose bot leg failed on a number with no fallback queue, in place of the stock English `ivr/ivr-call_cannot_be_completed_as_dialed.wav` from the callie pack. `<lang>` is `zh` or `en` from a fixed map. The path is absolute because `sound_prefix` points into the callie pack. |
 | `directory/default/.gitkeep` | Keeps the (now empty) static-directory fallback directory present, since its glob is still included. |
 
 ## Files deleted from vanilla
