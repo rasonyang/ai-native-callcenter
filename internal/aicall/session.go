@@ -82,6 +82,11 @@ type Event struct {
 	// the queue; the armed ending needs it to tell an acknowledgement of the
 	// closing line ("bye now") from a caller cutting in on it.
 	Unplayed time.Duration
+	// Played is, on a BARGE_IN, how much of the current turn's audio the caller
+	// had heard when they took the floor (the flush's played time). Negative
+	// when not known: nothing of the turn ever reached the leg. With Unplayed
+	// it dates the cut inside the closing line (cutInFinalSentence).
+	Played time.Duration
 	// HasAudio is, on a TURN_DONE or a PLAYBACK_DONE, whether the turn queued
 	// any audio for the caller. A turn that only made a tool call plays nothing, and its
 	// playback "finishes" at once.
@@ -1071,7 +1076,11 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	s.log.Info("the caller took the floor back",
 		"reason", string(reason), "playedMs", playedMs, "wasGenerating", isGenerating)
 	obs.RecordBotInterruption(string(reason))
-	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Unplayed: unplayed})
+	played := time.Duration(playedMs) * time.Millisecond
+	if playedMs < 0 {
+		played = -1
+	}
+	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Unplayed: unplayed, Played: played})
 }
 
 // muteRecord is what a muted turn reports when it ends (logMuted).

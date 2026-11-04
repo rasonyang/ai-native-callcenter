@@ -77,6 +77,14 @@ type callActions struct {
 	// waits for a turn that plays audio (onPlaybackDone), and the model's first
 	// bare hangup is refused (Hangup).
 	isInterrupted bool
+	// interruptions counts the barge-ins over the armed ending with more than
+	// closingTailAck of the audio still unplayed (onBargeIn): over the line, over
+	// a re-said line, over an answer turn. The first is handled as an
+	// interruption always was; from the second on the line counts as said and
+	// the cap is frozen (startCapLocked), so a caller who keeps talking over a
+	// model that keeps saying the line again cannot stretch the call (#465).
+	// Reset by armAs.
+	interruptions int
 	// audioTurnsAtInterrupt is Session.audioProgress's finished-turn count when
 	// the interruption was seen; a larger count later means the model has
 	// answered aloud since.
@@ -442,6 +450,8 @@ func (a *callActions) armAs(_ context.Context, isTransfer bool, action func()) {
 	a.isLineAskedAgain = false
 	a.notLineThrough = 0
 	a.isLineRefused = false
+	// Before the cap starts: a fresh arming is never frozen.
+	a.interruptions = 0
 	graceCap := a.graceCap
 	if graceCap <= 0 {
 		graceCap = actionGraceCap
@@ -450,7 +460,16 @@ func (a *callActions) armAs(_ context.Context, isTransfer bool, action func()) {
 }
 
 // startCapLocked (re)starts the cap, retiring any timer already running.
+//
+// From the second interruption over the closing line on it does nothing: the
+// running timer and capDue stay as they are, so the call ends within the cap
+// that was running then, whatever the caller does. Every path that restarts or
+// moves out the cap (onBargeIn, onTurnDone, refuseBareHangup, the line ask)
+// goes through here, so none of them can undo the bound (#465).
 func (a *callActions) startCapLocked(after time.Duration) {
+	if a.interruptions >= 2 {
+		return
+	}
 	a.armedGeneration++
 	generation := a.armedGeneration
 	a.capDue = time.Now().Add(after)
@@ -523,7 +542,8 @@ func (a *callActions) endingHint(isHangupAsked bool) string {
 // call ended on the audio-less turn, the question unanswered (#147). It refuses
 // once, so a model that insists gets its hangup and there is no loop. The cap,
 // restarted here, bounds the wait for the answer: a model that never speaks
-// still ends the call.
+// still ends the call. After the second interruption the cap is frozen
+// (startCapLocked) and the refusal does not move it.
 func (a *callActions) refuseBareHangup() bool {
 	finished, isSpeaking := a.session.audioProgress()
 	a.mu.Lock()
@@ -860,7 +880,8 @@ const closingTailAck = 1500 * time.Millisecond
 
 // onBargeIn decides what the caller taking the floor means for an armed ending.
 // unplayed is the audio still queued for the caller when they spoke, read
-// before the barge-in flushed it.
+// before the barge-in flushed it; played is how much of the current turn they
+// had heard (negative when not known).
 //
 // Over or before a line that has not finished generating, nothing changes: the
 // ending waits for a line.
@@ -878,7 +899,24 @@ const closingTailAck = 1500 * time.Millisecond
 //     counts as said, the ending stays armed, and the model answers in a later
 //     turn whose playback (or, if the caller cuts that one short too, the same
 //     rule) runs it. The cap starts over so that answer has the time to be made.
-func (a *callActions) onBargeIn(unplayed time.Duration) {
+//
+// The second case is counted (interruptions, #465), because it can repeat:
+//
+//   - The first interruption is as above, unless it fell in the line's final
+//     sentence (cutInFinalSentence): the caller has then heard the line but for
+//     its goodbye, and a decline over it is answered by a short goodbye that is
+//     not the line, so asking for the line again said it twice. The line counts
+//     as said (isLineOwed cleared); everything else is as for any first
+//     interruption. Needs the line's text, so a profile that never owes the
+//     line (doubao, closingLine empty) gets the count but never this rule.
+//   - From the second on the line counts as said and is never asked for again,
+//     and the cap is not restarted (and, in startCapLocked, never moved): the
+//     ending runs on the playback of the next turn with audio, or at the cap
+//     already running. Without this a caller saying "mm-hm" over every telling
+//     restarted the cap each time and the model said the full line five times
+//     in 20 s. The trade-off is accepted: a caller who interrupts twice may not
+//     hear all of the line.
+func (a *callActions) onBargeIn(unplayed, played time.Duration) {
 	a.mu.Lock()
 	if a.armed == nil || !a.isLineSpoken {
 		a.mu.Unlock()
@@ -888,14 +926,43 @@ func (a *callActions) onBargeIn(unplayed time.Duration) {
 		a.isLineSpoken = false
 		a.isInterrupted = true
 		a.audioTurnsAtInterrupt, _ = a.session.audioProgress()
-		graceCap := a.graceCap
-		if graceCap <= 0 {
-			graceCap = actionGraceCap
+		a.interruptions++
+		count := a.interruptions
+		var finalSentence time.Duration
+		isFinalSentence := false
+		if count == 1 && a.closingLine != "" {
+			finalSentence, isFinalSentence = cutInFinalSentence(a.closingLine, played, unplayed)
+			if isFinalSentence {
+				a.isLineOwed = false
+			}
 		}
-		a.startCapLocked(graceCap)
+		if count >= 2 {
+			a.isLineOwed = false
+		} else {
+			graceCap := a.graceCap
+			if graceCap <= 0 {
+				graceCap = actionGraceCap
+			}
+			a.startCapLocked(graceCap)
+		}
+		capIn := time.Until(a.capDue)
 		a.mu.Unlock()
-		a.log.Info("caller spoke over the closing line; answering them before the armed action runs",
-			"unplayedMs", unplayed.Milliseconds())
+		switch {
+		case count == 1:
+			a.log.Info("caller spoke over the closing line; answering them before the armed action runs",
+				"unplayedMs", unplayed.Milliseconds(), "interruptions", count)
+			if isFinalSentence {
+				a.log.Info("the cut fell in the closing line's final sentence; counting it as said",
+					"unplayedMs", unplayed.Milliseconds(), "playedMs", played.Milliseconds(),
+					"finalSentenceMs", finalSentence.Milliseconds())
+			}
+		case count == 2:
+			a.log.Info("a second interruption over the closing line; not asking for it again, cap not restarted",
+				"interruptions", count, "unplayedMs", unplayed.Milliseconds(), "capInMs", capIn.Milliseconds())
+		default:
+			a.log.Info("a further interruption over the closing line; cap still not restarted",
+				"interruptions", count, "unplayedMs", unplayed.Milliseconds(), "capInMs", capIn.Milliseconds())
+		}
 		return
 	}
 	armed := a.armed
