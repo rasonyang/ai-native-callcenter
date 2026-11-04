@@ -39,8 +39,8 @@ export function LastAttempt({ callback, format }: { callback: Callback; format: 
 export function StatusPill({ status, isMine = false }: { status: CallbackStatus; isMine?: boolean }) {
   const { t } = useTranslation()
   return (
-    <span className="flex items-center gap-1.5 text-xs">
-      <span className="size-2 rounded-full" style={{ backgroundColor: STATUS_COLOR[status] }} />
+    <span className="flex items-center gap-1.5 whitespace-nowrap text-xs">
+      <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: STATUS_COLOR[status] }} />
       {t(`callbacks.statuses.${status}`)}
       {status === 'CLAIMED' && isMine && (
         <span className="text-muted-foreground">{t('callbacks.byYou')}</span>

@@ -4,7 +4,7 @@ import { describe } from 'vitest'
 import type { Callback } from '@/lib/ledger'
 import { renderApp, waitForRows } from '@/test/app'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote } from '@/test/hostile'
-import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
+import { expectLayout, expectNumbersRead, expectOneLine, layoutTest, restoreLanguage } from '@/test/layout'
 
 /**
  * The team's callback queue. The message and the number are the caller's
@@ -16,6 +16,7 @@ const id = (n: number) => `0199f3a2-7c41-7d22-9b1e-${String(n).padStart(12, '0')
 const at = '2026-10-20T09:12:00Z'
 const AGENT = id(900)
 const GONE = id(901)
+const NAME = 'Mina Chen-Whitfield'
 
 function callback(n: number, overrides: Partial<Callback> = {}): Callback {
   return {
@@ -32,10 +33,10 @@ function callback(n: number, overrides: Partial<Callback> = {}): Callback {
 function oneOfEach(overrides: Partial<Callback> = {}): Callback[] {
   return [
     callback(1, { ...overrides }),
-    callback(2, { status: 'CLAIMED', handledBy: AGENT, lastAttemptAt: at, lastAttemptStatus: 'NO_ANSWER', ...overrides }),
+    callback(2, { status: 'CLAIMED', handledBy: AGENT, handledByName: NAME, lastAttemptAt: at, lastAttemptStatus: 'NO_ANSWER', ...overrides }),
     callback(3, { status: 'CLAIMED', handledBy: GONE, ...overrides }),
-    callback(4, { status: 'DONE', handledBy: AGENT, lastAttemptAt: at, lastAttemptStatus: 'ANSWERED', ...overrides }),
-    callback(5, { status: 'DISMISSED', handledBy: AGENT, ...overrides }),
+    callback(4, { status: 'DONE', handledBy: AGENT, handledByName: NAME, lastAttemptAt: at, lastAttemptStatus: 'ANSWERED', ...overrides }),
+    callback(5, { status: 'DISMISSED', handledBy: AGENT, handledByName: NAME, ...overrides }),
   ]
 }
 
@@ -43,9 +44,6 @@ function render(rows: Callback[], role: 'ADMIN' | 'SUPERVISOR' = 'ADMIN') {
   return renderApp('/admin/callbacks', {
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
-      if (path === '/agents') {
-        return { items: [{ agentId: id(800), userId: AGENT, username: 'mina', displayName: 'Mina Chen-Whitfield' }] }
-      }
       return path.startsWith('/callbacks') ? { items: rows, total: 120 } : undefined
     },
   }, { role })
@@ -56,13 +54,20 @@ async function loaded(count: number) {
   await screen.findAllByText('Mina Chen-Whitfield')
 }
 
+/** The time and the status read as one line each; the message column takes the squeeze. */
+async function expectCompactRows(ctx: Parameters<typeof expectOneLine>[0]) {
+  await expectLayout(ctx)
+  expectOneLine(ctx, [0, 3])
+}
+
 restoreLanguage()
 
 describe('team callbacks with ordinary requests', () => {
   layoutTest('admin/callbacks (ordinary data)', async (ctx) => {
     render(oneOfEach())
     await loaded(5)
-    await expectLayout(ctx)
+    await expectCompactRows(ctx)
+    expectNumbersRead(ctx, 1)
   })
 
   layoutTest('admin/callbacks (supervisor)', async (ctx) => {
@@ -76,15 +81,15 @@ describe('team callbacks with hostile messages', () => {
   layoutTest('admin/callbacks (2,000-character zh message)', async (ctx) => {
     render(oneOfEach({ message: chineseRun(2000, 7) }))
     await loaded(5)
-    await expectLayout(ctx)
+    await expectCompactRows(ctx)
   })
 
   layoutTest('admin/callbacks (long messages)', async (ctx) => {
     render([
       callback(1, { message: asciiRun(6000, 1) }),
-      callback(2, { message: chineseRun(3000, 2), status: 'CLAIMED', handledBy: AGENT }),
+      callback(2, { message: chineseRun(3000, 2), status: 'CLAIMED', handledBy: AGENT, handledByName: NAME }),
       callback(3, { message: longUrl() }),
-      callback(4, { message: mixedNote().repeat(20), status: 'CLAIMED', handledBy: AGENT }),
+      callback(4, { message: mixedNote().repeat(20), status: 'CLAIMED', handledBy: AGENT, handledByName: NAME }),
     ])
     await loaded(4)
     await expectLayout(ctx)
@@ -95,14 +100,24 @@ describe('team callbacks with hostile numbers', () => {
   layoutTest('admin/callbacks (40-digit numbers)', async (ctx) => {
     render(oneOfEach({ phoneNumber: digits(40, 1) }))
     await loaded(5)
-    await expectLayout(ctx)
+    await expectCompactRows(ctx)
+  })
+
+  layoutTest('admin/callbacks (2,000-character zh message and a 40-digit number)', async (ctx) => {
+    // Ordinary numbers beside one hostile one: the ordinary ones read in full.
+    const rows = oneOfEach({ message: chineseRun(2000, 7), phoneNumber: '+8618688886660' })
+    rows[2] = { ...rows[2], phoneNumber: digits(40, 1) }
+    render(rows)
+    await loaded(5)
+    await expectCompactRows(ctx)
+    expectNumbersRead(ctx, 1)
   })
 
   layoutTest('admin/callbacks (unbreakable numbers)', async (ctx) => {
     render([
-      callback(1, { phoneNumber: asciiRun(6000, 4), status: 'CLAIMED', handledBy: AGENT }),
-      callback(2, { phoneNumber: chineseRun(3000, 5), status: 'CLAIMED', handledBy: AGENT }),
-      callback(3, { phoneNumber: longUrl(), status: 'CLAIMED', handledBy: AGENT }),
+      callback(1, { phoneNumber: asciiRun(6000, 4), status: 'CLAIMED', handledBy: AGENT, handledByName: NAME }),
+      callback(2, { phoneNumber: chineseRun(3000, 5), status: 'CLAIMED', handledBy: AGENT, handledByName: NAME }),
+      callback(3, { phoneNumber: longUrl(), status: 'CLAIMED', handledBy: AGENT, handledByName: NAME }),
     ])
     await loaded(3)
     await expectLayout(ctx)

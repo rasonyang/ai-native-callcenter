@@ -543,7 +543,6 @@
     },
     "teamHint": "Every promise the bot made, who has claimed it and how the last attempt went.",
     "handledBy": "Handled by",
-    "lastAttemptHeading": "Last attempt",
     "unknownUser": "Unknown user",
     "teamNote": "Managers can review these tasks here. An agent must claim and work each task in their own callback queue."
   },

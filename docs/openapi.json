@@ -9551,6 +9551,10 @@
             "format": "uuid",
             "description": "The user working or having closed the callback."
           },
+          "handledByName": {
+            "type": "string",
+            "description": "The display name of the user in handledBy. Absent when nobody handled the callback or that user no longer exists."
+          },
           "handledAt": {
             "type": "string",
             "format": "date-time"

@@ -154,8 +154,13 @@ carries the one-line installer's files.
   status filter (open by default), who handled each callback by name, and how
   the last attempt went. `GET /callbacks` now answers a `total`, the rows
   matching the `status` and `callId` filters whatever `limit` and `offset` say
-  (additive). Both callbacks screens page with 50 rows a page, so a queue past
-  50 is no longer cut off in the agent's view. (#469; thanks
+  (additive). A callback now carries `handledByName`, the display name of the
+  user in `handledBy` (additive; absent when nobody handled it or that user no
+  longer exists), in every response and in the `CALLBACK_*` event, so the
+  screen names an administrator or a supervisor as well as an agent. Both
+  callbacks screens page with 50 rows a page, so a queue past 50 is no longer
+  cut off in the agent's view, and a row stays on one line at 1024px: the
+  status and the time no longer wrap. (#469; thanks
   @siyingchao007-maker)
 
 - The CDR webhook is in the API contract. `docs/openapi.json` declares a

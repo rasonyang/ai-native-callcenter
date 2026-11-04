@@ -2809,6 +2809,8 @@ export interface components {
              * @description The user working or having closed the callback.
              */
             handledBy?: string;
+            /** @description The display name of the user in handledBy. Absent when nobody handled the callback or that user no longer exists. */
+            handledByName?: string;
             /** Format: date-time */
             handledAt?: string;
             /**
