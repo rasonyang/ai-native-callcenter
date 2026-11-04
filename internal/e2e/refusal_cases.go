@@ -54,6 +54,10 @@ const (
 	k3RingTimeoutSec   = 8
 	k3PlatformByeMaxMs = 6000
 	k3QueuedByeSlackMs = 1000
+	// k3PromptByeMaxMs bounds R2, whose hangup follows the bot-unavailable
+	// prompt. A switch image without the recording plays nothing; one with
+	// it (#485) plays up to 8 s first.
+	k3PromptByeMaxMs = k3PlatformByeMaxMs + 8000
 )
 
 // RefusalRole is what a direct call is in K3.

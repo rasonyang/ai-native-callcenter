@@ -393,7 +393,9 @@ func (rr *refusalRun) run(ctx context.Context, d *driver) (*RunView, error) {
 // campaign with its DID (which has the queue too).
 func (rr *refusalRun) provision(ctx context.Context, d *driver) error {
 	yes := true
-	name := "e2e-k3-" + strings.ReplaceAll(uuid.NewString(), "-", "")[:12]
+	// The tail of a UUIDv7 is its random part; the head is the millisecond.
+	id := strings.ReplaceAll(uuid.Must(uuid.NewV7()).String(), "-", "")
+	name := "e2e-k3-" + id[len(id)-12:]
 	if err := d.c.do(ctx, http.MethodPost, "/queues", api.QueueWrite{Name: name, IsEnabled: &yes}, &rr.queue, http.StatusCreated); err != nil {
 		return fmt.Errorf("create the fallback queue: %w", err)
 	}

@@ -88,8 +88,8 @@ func TestK3HoldsThePairPastTheRefusedCalls(t *testing.T) {
 	if k3HolderByeMs < placedByMs+k3QueuedByeMs+10_000 {
 		t.Errorf("the holder hangs up %d ms after answering; R1 may still be up at %d ms", k3HolderByeMs, placedByMs+k3QueuedByeMs)
 	}
-	if k3PlatformByeMaxMs+2000 > k3StaysUpByeMs {
-		t.Errorf("the callee's scripted %d ms is too close to the platform's bound %d ms to tell who hung up", k3StaysUpByeMs, k3PlatformByeMaxMs)
+	if k3PromptByeMaxMs+2000 > k3StaysUpByeMs {
+		t.Errorf("the callee's scripted %d ms is too close to the platform's bound %d ms to tell who hung up", k3StaysUpByeMs, k3PromptByeMaxMs)
 	}
 	if k3AnswerMs >= (k3RingTimeoutSec-1)*1000 {
 		t.Errorf("the callees answer at %d ms, too close to the %d s ring timeout", k3AnswerMs, k3RingTimeoutSec)
@@ -310,7 +310,7 @@ func TestAssessRefusalFails(t *testing.T) {
 			v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add(20 * time.Second)
 		},
 		"R2's hang-up was slow": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add(7 * time.Second)
+			v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add((k3PromptByeMaxMs + 1000) * time.Millisecond)
 		},
 		"R2's cause is something else": func(v *RunView, _ *RefusalFacts) {
 			c := "NORMAL_CLEARING"

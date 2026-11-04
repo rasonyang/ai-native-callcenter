@@ -193,8 +193,8 @@ func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([
 		cdr := assessRefused(c, pre, r2.Dialog, r2.CDRs)
 		c.That(endedByBye(r2.Dialog, calleesim.EndedByCaller),
 			pre+"the platform hung the customer up with a BYE, ahead of the callee's scripted %d ms (%s)", k3StaysUpByeMs, r.EndedBy)
-		c.That(r.HoldMs != nil && holdMs(r) <= k3PlatformByeMaxMs,
-			pre+"the platform's BYE came within %d ms of the answer (%.0f ms)", k3PlatformByeMaxMs, holdMs(r))
+		c.That(r.HoldMs != nil && holdMs(r) <= k3PromptByeMaxMs,
+			pre+"the platform's BYE came within %d ms of the answer, the prompt included (%.0f ms)", k3PromptByeMaxMs, holdMs(r))
 		if cdr != nil {
 			c.That(deref(cdr.HangupCause) == causeTemporaryFailure, pre+"the CDR's hangup cause is the switch's %s (%s)", causeTemporaryFailure, deref(cdr.HangupCause))
 			c.That(cdr.QueueID == nil, pre+"the call never reached a queue (queueId %s)", uuidText(cdr.QueueID))
