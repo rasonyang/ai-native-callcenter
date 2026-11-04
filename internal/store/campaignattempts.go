@@ -314,7 +314,7 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 	}
 	settled := campaign.Settle(cam.RetryPolicy, counters, e.Outcome, lead, endedAt, sched)
 	if contact.Status == string(campaign.ContactDoNotCall) {
-		settled = campaign.Settlement{Status: campaign.ContactDoNotCall}
+		settled = campaign.Settlement{Status: campaign.ContactDoNotCall, Reason: campaign.SettleContactOnDNC}
 	}
 
 	var leadIntent, leadNotes *string
@@ -337,6 +337,7 @@ func (f attemptFinisher) apply(ctx context.Context, q *queries.Queries, att quer
 	}
 	done.ContactStatus = settled.Status
 	done.NextAttemptAt = settled.NextAttemptAt
+	done.SettleReason = settled.Reason
 	return done, nil
 }
 

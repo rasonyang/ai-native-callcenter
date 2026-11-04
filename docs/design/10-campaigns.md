@@ -200,8 +200,8 @@ final.
 | `system_failures` | attempts that never reached the customer; counted against `maxSystemRetries` (§7) |
 | `next_attempt_at` | when it may be dialled next; NULL unless `ACTIVE` |
 | `last_outcome` | from the latest attempt |
-| `lead_intent`, `lead_notes` | latest recorded lead (§11); NULL means never recorded |
-| `last_attempt_id`, `last_call_id` | the latest finished attempt and its call; NULL before the first attempt finishes. Written with `last_outcome` when the latest attempt settles, so they follow every attempt while the lead is kept from the latest call that recorded one (§14). Not foreign keys, like `call_id` everywhere; migration 00042 backfilled them from the latest `FINISHED` attempt by `started_at` |
+| `lead_intent`, `lead_notes` | the recorded lead (§11); NULL means never recorded. A contact with one is never dialled again (§7.2) |
+| `last_attempt_id`, `last_call_id` | the latest finished attempt and its call; NULL before the first attempt finishes. Written with `last_outcome` when the latest attempt settles, so they follow every attempt; once a call records a lead there is no later attempt (§7.2), so the pair names that call (§14). Not foreign keys, like `call_id` everywhere; migration 00042 backfilled them from the latest `FINISHED` attempt by `started_at` |
 
 ### 3.3 `campaign_attempts`
 
@@ -736,8 +736,15 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
   bot failure or an overflow loses the lead outright, which is why the overflow control (§6.5) and
   the provider breaker (§7.4) are required. `talk_sec` and `lead_intent` (possibly NULL) are kept
   for reporting.
+- **An attempt that recorded a lead settles its contact as answered, whatever its outcome**
+  (#264). A recorded `lead_intent` of any value, `NONE` included, proves the customer talked to the
+  bot even when the call's own outcome is lost (an `UNKNOWN` left by a restart, §8.2): the contact
+  is `DONE`, or `DNC` for `DO_NOT_CALL`, and has no next attempt, with every outcome and however
+  much of the budget is left. The rule is in `Settle`, so every finish path applies it. Counters
+  are unchanged: an `UNKNOWN` still spends one of `maxAttempts`.
 - `UNKNOWN` counts against `maxAttempts` with a 24 h interval: the call may have rung or even been
-  answered, so one call too few beats one too many.
+  answered, so one call too few beats one too many. An `UNKNOWN` attempt that recorded a lead is
+  not retried (above).
 - The cause → outcome mapping is a table in code with a test per cause. An unmapped cause becomes
   `TRANSIENT`, logs a WARN and increments a metric, so new causes surface; it stays bounded by
   `maxSystemRetries`.
@@ -832,7 +839,9 @@ Adoption, run before the dialer admits anything:
 3. For each `DIALING` attempt with no channel:
    - a CDR exists: finish from it (normally §5.4 already has);
    - none: finish as `UNKNOWN`, counted against `maxAttempts` (§7), retried after the normal
-     interval, never at once.
+     interval, never at once. The exception is an `UNKNOWN` attempt that recorded a lead (the call
+     reached the bot before the application died): it is not retried, the contact is `DONE` (or
+     `DNC` for `DO_NOT_CALL`), §7.2.
 
 What is guaranteed, and what is not:
 
@@ -1119,15 +1128,10 @@ configuration today, so only the env names `AICC_OVERFLOW_HOLD` and the like app
   release), not because of the API: `listCallbacks` is `calls:read:own` from role `NONE` and filters
   nothing by caller, so a supervisor's session and a key with `campaigns:read` + `calls:read:own`
   read the same rows.
-  - **A retry after a lead.** The link follows the latest attempt; the lead is kept from the latest
-    call that recorded one (§11). After a first call that recorded `HIGH` and a retry that recorded
-    `LOW`, the contact is `LOW` and links to the second call; the callback the first call filed is
-    left as it is, neither removed nor filed again, because callbacks are filed once per call and
-    never withdrawn. A retry can follow a lead only when the first attempt was not seen to be
-    answered: reconciliation finished it `UNKNOWN` with no CDR (§8.2).
-  - **Known gap.** Such an `UNKNOWN`-reconciled attempt that recorded a lead can be redialled, and
-    when the retry records no lead the contact keeps `HIGH` while `lastCallId` names the retry, so a
-    `HIGH` row can lose its callback link until that is fixed (#264).
+  - **No retry follows a lead.** A contact whose call recorded a lead is never dialled again
+    (§7.2), whatever the call's outcome, so the lead row's `lastCallId` always names the call that
+    recorded the lead and filed its callback. The link is still hidden when `lastOutcome` is
+    `UNKNOWN`, because the ledger may hold no CDR for that call.
 - DNC list: view, add, remove;
 - the DID form gains `maxOutboundChannels`.
 
