@@ -113,6 +113,24 @@ func (q *Queries) CountCDRs(ctx context.Context, arg CountCDRsParams) (int64, er
 	return count, err
 }
 
+const countCallbacks = `-- name: CountCallbacks :one
+SELECT count(*) FROM callbacks
+WHERE ($1::text = '' OR status = $1)
+  AND ($2::uuid IS NULL OR call_id = $2)
+`
+
+type CountCallbacksParams struct {
+	Status string     `json:"status"`
+	CallID *uuid.UUID `json:"callId"`
+}
+
+func (q *Queries) CountCallbacks(ctx context.Context, arg CountCallbacksParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCallbacks, arg.Status, arg.CallID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const expiredRecordings = `-- name: ExpiredRecordings :many
 
 SELECT id, call_id, backend, bucket, object_key, size_bytes, duration_sec, format, created_at, deleted_at FROM recordings

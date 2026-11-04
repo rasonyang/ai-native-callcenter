@@ -1642,6 +1642,9 @@ type Callback struct {
 // CallbackList defines model for CallbackList.
 type CallbackList struct {
 	Items []Callback `json:"items"`
+
+	// Total Total rows matching the status and callId filters, regardless of limit and offset, for paging.
+	Total int `json:"total"`
 }
 
 // CallbackStatus defines model for CallbackStatus.

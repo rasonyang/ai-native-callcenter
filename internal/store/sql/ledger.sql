@@ -156,6 +156,11 @@ WHERE (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
 ORDER BY created_at DESC
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
+-- name: CountCallbacks :one
+SELECT count(*) FROM callbacks
+WHERE (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
+  AND (sqlc.narg('call_id')::uuid IS NULL OR call_id = sqlc.narg('call_id'));
+
 -- name: HandleCallback :one
 UPDATE callbacks
 SET status = $2, handled_by = $3, handled_at = now()

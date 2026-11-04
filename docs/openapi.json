@@ -9590,10 +9590,15 @@
             "items": {
               "$ref": "#/components/schemas/Callback"
             }
+          },
+          "total": {
+            "type": "integer",
+            "description": "Total rows matching the status and callId filters, regardless of limit and offset, for paging."
           }
         },
         "required": [
-          "items"
+          "items",
+          "total"
         ]
       },
       "CompleteCallbackRequest": {

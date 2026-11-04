@@ -159,13 +159,33 @@ func (s *Server) ListCallbacks(w http.ResponseWriter, r *http.Request, params ap
 	if params.Status != nil {
 		status = string(*params.Status)
 	}
-	items, err := s.ledger.ListCallbacks(r.Context(), status, params.CallID,
+	rows, total, err := s.ledger.ListCallbacks(r.Context(), status, params.CallID,
 		intOr(params.Limit, 50), intOr(params.Offset, 0))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot list callbacks", nil)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	items := make([]api.Callback, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, callbackOf(row))
+	}
+	writeJSON(w, http.StatusOK, api.CallbackList{Items: items, Total: int(total)})
+}
+
+// callbackOf maps a stored callback to its contract shape.
+func callbackOf(c store.Callback) api.Callback {
+	out := api.Callback{
+		ID: c.ID, CallID: c.CallID, QueueID: c.QueueID,
+		PhoneNumber: c.PhoneNumber, Message: c.Message,
+		Status: api.CallbackStatus(c.Status), CreatedAt: c.CreatedAt,
+		HandledBy: c.HandledBy, HandledAt: c.HandledAt,
+		LastAttemptCallID: c.LastAttemptCallID, LastAttemptAt: c.LastAttemptAt,
+	}
+	if c.LastAttemptStatus != "" {
+		status := api.CDRStatus(c.LastAttemptStatus)
+		out.LastAttemptStatus = &status
+	}
+	return out
 }
 
 // ClaimCallback marks a callback as being worked by the caller.

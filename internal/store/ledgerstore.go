@@ -810,22 +810,27 @@ func (l *LedgerStore) InsertCallback(ctx context.Context, callID, queueID *uuid.
 }
 
 // ListCallbacks pages the work queue; an empty status lists everything, and
-// a nil callID every call's callbacks.
-func (l *LedgerStore) ListCallbacks(ctx context.Context, status string, callID *uuid.UUID, limit, offset int) ([]Callback, error) {
+// a nil callID every call's callbacks. The total counts the rows matching the
+// same filters, whatever the page.
+func (l *LedgerStore) ListCallbacks(ctx context.Context, status string, callID *uuid.UUID, limit, offset int) ([]Callback, int64, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
+	}
+	total, err := l.q.CountCallbacks(ctx, queries.CountCallbacksParams{Status: status, CallID: callID})
+	if err != nil {
+		return nil, 0, err
 	}
 	rows, err := l.q.ListCallbacks(ctx, queries.ListCallbacksParams{
 		Status: status, CallID: callID, PageLimit: int32(limit), PageOffset: int32(offset),
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	out := make([]Callback, 0, len(rows))
 	for _, row := range rows {
 		out = append(out, callbackFromRow(row))
 	}
-	return out, nil
+	return out, total, nil
 }
 
 // ClaimCallback marks an OPEN callback as being worked by one agent. A second
