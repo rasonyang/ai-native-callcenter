@@ -15,6 +15,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
 	"github.com/rasonyang/ai-native-callcenter/internal/mockprovider"
@@ -422,6 +424,9 @@ type driver struct {
 	// onPoll, when set, runs after every successful observation while the
 	// driver waits (the capacity runs sample the lines in use with it).
 	onPoll func(ctx context.Context)
+	// fallbackQueue, when set, is the fallback queue of each region's DID
+	// (K3 proves a campaign call never goes to it).
+	fallbackQueue *uuid.UUID
 }
 
 // regionRun is one campaign of the run as the driver tracks it.
@@ -531,7 +536,8 @@ func (d *driver) provision(ctx context.Context, r Region, usedDIDs map[string]bo
 		}
 		var err error
 		slug := "e2e-campaign-" + strings.ToLower(r.Code) + "-" + number
-		did, err = d.c.publishFlowAndDID(ctx, d.cfg.FlowFile, slug, "e2e campaign "+r.Code+" "+number, number, d.plan.MaxOutboundChannels)
+		did, err = d.c.publishFlowAndDIDWith(ctx, d.cfg.FlowFile, slug, "e2e campaign "+r.Code+" "+number,
+			api.DIDWrite{Number: number, MaxOutboundChannels: d.plan.MaxOutboundChannels, FallbackQueueID: d.fallbackQueue})
 		if err == nil {
 			usedDIDs[number] = true
 			break

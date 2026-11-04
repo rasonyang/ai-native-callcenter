@@ -128,6 +128,10 @@ type DirectCall struct {
 	DID     string    `json:"did"`
 	CallID  string    `json:"callId"`
 	Placed  time.Time `json:"placedAt"`
+	// IsExpectedNoBot says the call is answered and is meant to meet no bot
+	// (K3's refused calls): it opens no provider session and its CDR has no
+	// BOT leg.
+	IsExpectedNoBot bool `json:"isExpectedNoBot,omitempty"`
 	// Dialog is the simulator's record of its INVITE; CDRs the ledger's rows
 	// for its call id.
 	Dialog *calleesim.DialogRecord `json:"dialog,omitempty"`

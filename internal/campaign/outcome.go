@@ -33,6 +33,11 @@ const (
 	CauseBotBridgeUnconfirmed = "BOT_BRIDGE_UNCONFIRMED"
 )
 
+// BotReasonLegFailed is the CDR's userData.botReason of a call whose bot leg
+// never carried a conversation: refused, unreachable, or failed before media
+// (telephony.BotLegFailed). The switch's cause stays whatever it was.
+const BotReasonLegFailed = "BOT_LEG_FAILED"
+
 // CallEnd is what a finished call tells about how it went: the facts of the
 // CDR (or of a job result for a call that never had one), reduced to what the
 // outcome depends on.
@@ -48,6 +53,9 @@ type CallEnd struct {
 	IsFailed bool
 	// HasBot: a bot leg or session existed (botSec above zero, or a BOT leg).
 	HasBot bool
+	// BotReason is the CDR's userData.botReason. BOT_LEG_FAILED on an answered
+	// call means the bot side failed, whatever the hangup cause says.
+	BotReason string
 	// IsPlacementFailure: the originate never made a channel
 	// (tech.isPlacementFailure); the cause is the job result's.
 	IsPlacementFailure bool
@@ -108,7 +116,9 @@ func CauseTable() map[string]Outcome {
 //     an answered number is never dialled again (owner's decision, design 10
 //     section 7.2). The cause only chooses which: BOT_FAILED when the bot side
 //     failed (the ledger calls the call FAILED, or recovery, a late answer or
-//     a bridge to the bot that never ran ended the leg), ANSWERED otherwise.
+//     a bridge to the bot that never ran ended the leg, or the call carries
+//     botReason BOT_LEG_FAILED: the bot refused the leg or failed before
+//     media, with the switch's cause left as it was), ANSWERED otherwise.
 //     A call lost to CHANNEL_VANISHED is ANSWERED when a bot had been talking
 //     and BOT_FAILED when none had.
 //   - A hang-up in the first second, a voicemail and a call that recorded no
@@ -124,6 +134,9 @@ func Classify(e CallEnd) Outcome {
 		return OutcomeOverflow
 	}
 	if e.IsAnswered {
+		if e.BotReason == BotReasonLegFailed {
+			return OutcomeBotFailed
+		}
 		switch e.HangupCause {
 		case CauseRecovery, CauseLateAnswer, CauseBotBridgeUnconfirmed:
 			return OutcomeBotFailed

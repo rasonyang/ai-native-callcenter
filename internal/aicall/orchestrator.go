@@ -75,6 +75,12 @@ type FlowSource interface {
 type Switch interface {
 	// TransferToExtension moves the caller's channel to a dialplan extension.
 	TransferToExtension(channelID, extension, context string) error
+	// StampBotLegFailed records aicc_bot_reason=BOT_LEG_FAILED on the caller's
+	// channel, so the CDR says the bot never carried the call.
+	StampBotLegFailed(channelID string) error
+	// PlayBotUnavailable moves the caller into the bot-unavailable prompt in
+	// the call's language, then a hangup.
+	PlayBotUnavailable(channelID, language string) error
 	// SetVariable stamps business context onto the caller's channel, so it
 	// survives into the queue and the answering agent's screen pop.
 	SetVariable(channelID, name, value string) error
@@ -237,8 +243,14 @@ func NewOrchestrator(cfg OrchestratorConfig) (*Orchestrator, error) {
 	o.uas = voice.NewUAS(uasCfg)
 	o.uas.OnCallStarted = o.onCallStarted
 	o.uas.OnCallEnded = o.onCallEnded
+	// A leg that answered and could not start its media is a bot that never
+	// carried a conversation. The rescue runs here, on the goroutine that is
+	// about to send the BYE, so the caller has been moved off the bridge
+	// before the bot leg goes: with the teardown rule on (an outbound call)
+	// the BYE would otherwise take the caller down with it.
 	o.uas.OnCallFailed = func(dialog *voice.Dialog, err error) {
 		o.dialogLog(dialog).Error("bot leg failed before media", "error", err)
+		o.rescue(dialog)
 	}
 	return o, nil
 }
@@ -1411,35 +1423,95 @@ func (o *Orchestrator) findQueue(ctx context.Context, name string) (catalog.Queu
 
 // rescue sends a caller whose conversation never started to the number's
 // fallback queue, so a broken provider degrades to a longer wait rather than
-// to a dead line.
+// to a dead line. It then ends the bot leg.
+//
+// A call the platform placed to a customer follows the rules of the inline
+// continuation of its bridge (telephony.BridgeToBot): the caller's channel is
+// stamped aicc_bot_reason=BOT_LEG_FAILED first; a campaign call is then left
+// alone (ending the bot leg hangs it up, and it never goes to a person, design
+// 10 section 10); a single call goes to its number's fallback queue when that
+// queue exists and is enabled and otherwise hears the bot-unavailable prompt.
+// An inbound call keeps the queue-or-nothing rule: its dialplan owns the
+// rest.
 func (o *Orchestrator) rescue(dialog *voice.Dialog) {
 	headers := dialog.CustomHeaders
 	defer dialog.Stop()
+	log := o.dialogLog(dialog)
 
 	channel := headers[headerChannelID]
 	if channel == "" {
+		log.Warn("bot leg failed and the caller's channel is unknown; nothing to rescue")
 		return
 	}
-	did, err := o.findDID(context.Background(), headers[headerDID])
-	if err != nil || did.FallbackQueueID == nil {
+	if headers[headerPlacedToCustomer] == "true" {
+		o.rescuePlaced(dialog, channel)
 		return
+	}
+	queue, ok := o.fallbackQueue(headers[headerDID], false)
+	if !ok {
+		return
+	}
+	o.transferToFallback(dialog, channel, queue)
+}
+
+// rescuePlaced is rescue for a call the platform placed to a customer.
+func (o *Orchestrator) rescuePlaced(dialog *voice.Dialog, channel string) {
+	headers := dialog.CustomHeaders
+	log := o.dialogLog(dialog)
+
+	if err := o.cfg.Switch.StampBotLegFailed(channel); err != nil {
+		log.Warn("could not stamp the caller's channel with the failed bot leg", "error", err)
+	}
+	if headers[headerCampaignID] != "" {
+		log.Info("campaign call: the bot leg failed; ending it, which hangs the customer up")
+		return
+	}
+	if queue, ok := o.fallbackQueue(headers[headerDID], true); ok {
+		o.transferToFallback(dialog, channel, queue)
+		return
+	}
+	log.Info("no fallback queue; playing the bot-unavailable prompt")
+	if err := o.cfg.Switch.PlayBotUnavailable(channel, headers[headerLanguage]); isUnconfirmed(err) {
+		log.Warn("bot-unavailable prompt sent and not confirmed; the switch may still run it", "error", err)
+	} else if err != nil {
+		log.Error("bot-unavailable prompt failed", "error", err)
+	}
+}
+
+// fallbackQueue is the number's fallback queue. mustBeEnabled refuses a closed
+// one: an inbound call keeps sending to it (its dialplan reads the same
+// column), a call placed to a customer takes the prompt instead.
+func (o *Orchestrator) fallbackQueue(didNumber string, mustBeEnabled bool) (catalog.Queue, bool) {
+	did, err := o.findDID(context.Background(), didNumber)
+	if err != nil || did.FallbackQueueID == nil {
+		return catalog.Queue{}, false
 	}
 	queues, err := o.cfg.Catalog.Queues(context.Background())
 	if err != nil {
-		return
+		return catalog.Queue{}, false
 	}
 	for _, queue := range queues {
 		if queue.ID == *did.FallbackQueueID {
-			o.dialogLog(dialog).Info("transferring the caller to the fallback queue",
-				"queue", queue.Name)
-			if err := o.cfg.Switch.TransferToExtension(channel, queue.ExtNumber, ""); isUnconfirmed(err) {
-				o.dialogLog(dialog).Warn("fallback transfer sent and not confirmed; the switch may still run it",
-					"error", err)
-			} else if err != nil {
-				o.dialogLog(dialog).Error("fallback transfer failed", "error", err)
-			}
-			return
+			return queue, !mustBeEnabled || queue.IsEnabled
 		}
+	}
+	return catalog.Queue{}, false
+}
+
+func (o *Orchestrator) transferToFallback(dialog *voice.Dialog, channel string, queue catalog.Queue) {
+	o.dialogLog(dialog).Info("transferring the caller to the fallback queue", "queue", queue.Name)
+	// The rule goes back on before the caller is handed to a queue, as the
+	// dialplan does after a failed bridge: from the queue an agent's hangup
+	// must end the call (aicc_queue.lua assumes a bridged caller who hung up
+	// is gone). An inbound caller still has the off rule the script set.
+	if err := o.cfg.Switch.EndCallerWithTheirBridge(channel); err != nil {
+		o.dialogLog(dialog).Warn("could not restore the caller's teardown rule before the fallback", "error", err)
+	}
+	if err := o.cfg.Switch.TransferToExtension(channel, queue.ExtNumber, ""); isUnconfirmed(err) {
+		o.dialogLog(dialog).Warn("fallback transfer sent and not confirmed; the switch may still run it",
+			"error", err)
+	} else if err != nil {
+		o.dialogLog(dialog).Error("fallback transfer failed", "error", err)
 	}
 }
 

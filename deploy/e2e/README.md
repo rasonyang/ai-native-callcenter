@@ -11,7 +11,7 @@ API, with a scoped API key.
 make e2e-up        # fresh database, application built from the working tree
 make e2e-smoke     # one AI outbound call; checks the callee's record and the CDR
 make e2e-campaign  # two campaigns (US, CN): answered and unanswered outcomes, SIP probes, run-wide invariants
-make e2e-capacity  # bot-slot overflow (K1) and the DID outbound line limit (K2), each in its own application start
+make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) and a refused bot leg (K3), each in its own application start
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 
@@ -219,16 +219,18 @@ recreates the application container (`docker compose up --force-recreate
 --no-deps aicc`, the database and the switch untouched) with the scenario's
 settings, renders and guards the configuration it used, and the driver
 refuses to run when that configuration does not hold the scenario's values.
-K1 runs first; K2 runs on the defaults, so the environment is left as `e2e.sh
-up` started it. The settings come from `E2E_BOT_MAX_CALLS`,
-`E2E_BOT_INBOUND_RESERVE` and `E2E_OVERFLOW_HOLD` in the compose overlay, which
-only `e2e.sh capacity` sets (empty is the application's default). The
-simulator is restarted first, as for the campaign tests.
+K1 runs first, K2 runs on the defaults and K3 last; the application is then
+recreated on the defaults, so the environment is left as `e2e.sh up` started
+it. The settings come from `E2E_BOT_MAX_CALLS`, `E2E_BOT_INBOUND_RESERVE`,
+`E2E_OVERFLOW_HOLD`, `E2E_BOT_RTP_PORT_LOW` and `E2E_BOT_RTP_PORT_HIGH` in the
+compose overlay, which only `e2e.sh capacity` sets (empty is the application's
+default). The simulator is restarted first, as for the campaign tests.
 
 | scenario | setup | callee (`scenario.json`) | asserted |
 | --- | --- | --- | --- |
 | K1 | `AICC_BOT_MAX_CALLS=3`, `AICC_BOT_INBOUND_RESERVE=0`, `AICC_OVERFLOW_HOLD=1500ms`; one US campaign of three contacts, ring timeout 8 s; once all three are ringing, two single AI calls (`POST /calls`, `AI_OUTBOUND`) from a DID of their own | contacts `+1 202 555 0121`–`23`: 180, 200 at 5 s, BYE 6 s after the answer; slot holders `…0131`, `…0132`: 200 at 300 ms, BYE 12 s later | 1 `ANSWERED` and 2 `OVERFLOW`; each `OVERFLOW` leg: CDR cause `OVERFLOW`, answered, no `BOT` leg, hung up by the platform with a BYE, no downlink window above silence; the `ANSWERED` leg was heard (so the measurement works on this path); every contact `DONE`, one attempt, one INVITE (no redial); `aicc_bot_overflow_total` and `aicc_campaign_overflow_total` moved by 2 |
 | K2 | the defaults; two campaigns (US, CN) at once, each on its own DID created with `maxOutboundChannels: 2`, ring timeout 8 s, `maxAttempts` 1 | six contacts per country (`…0141`–`46`, `+86 139 8888 6641`–`46`): 180, never answered | per DID, the simulator's peak of dialogs up at once is 2: never above the limit, and reaching it; all six contacts attempted once, `NO_ANSWER`, cancelled, `EXHAUSTED`; the line gauge never read above 2 in its samples; the dialer counted `DID_LINES` as a reason to hold back |
+| K3 | `AICC_BOT_RTP_PORT_LOW=26000`, `AICC_BOT_RTP_PORT_HIGH=26001` (exactly one RTP pair, just above the switch's range); a single AI call from its own DID holds the pair; with it up, R1, R2 and the R3 campaign are placed, then, after the holder ended, N1 | all 200 after 300 ms: holder `+1 202 555 0151`, BYE 28 s later; R1 `…0161`, BYE 8 s later; R2 `…0162` and R3 `…0163`, BYE 20 s later unless the platform hangs up first; N1 `…0171`, BYE 6 s later | the bot refuses the INVITE (503, `NORMAL_TEMPORARY_FAILURE`) of every case placed while the pair is held. R1, a single AI call on a DID with an enabled fallback queue (no agents): the customer is not dropped, the callee's BYE comes at 8 s ±1 s, the switch log shows the transfer to the queue's extension. R2, a single AI call, no fallback queue, language `zh`: the platform's BYE within 6 s, cause `NORMAL_TEMPORARY_FAILURE`, and the switch log names `…/aicc/zh/bot-unavailable.wav` with `${sounds_dir}` expanded. R3, a campaign of one contact on a DID that has a fallback queue: the platform's BYE within 6 s, no transfer to the queue in the switch log, no prompt, attempt `BOT_FAILED`, contact `DONE` after one attempt and one INVITE. All three CDRs: answered, no `BOT` leg, `userData.botReason` `BOT_LEG_FAILED`. N1: answered, a `BOT` leg, downlink above silence, no `botReason` |
 
 Why K1 is not "bot slot limit 1": the dialer admits a call only while slots
 held, plus the expected answers of the legs ringing, plus one fit in the
@@ -248,13 +250,37 @@ the split, not the winner. The one free slot is global, so K1 uses one
 country: a second one would share it and neither could be held to one
 `ANSWERED` and two `OVERFLOW`.
 
+Why K3 holds the pair with a call. The UAS refuses an INVITE with 503 when it
+cannot bind an RTP pair (#450), and that is the only way a bot leg is refused
+that the harness can set up without breaking something else: narrow the range
+to one pair, and the second call has nowhere to go. An external process
+holding the port would work too, but would be another thing to start and to
+tell apart from the application's own pair; a call is the way production loses
+a pair, and the run can see it (the callee answered, a bot slot is in use, the
+mock has a session open). The run holds itself to the order, as K1 does: the
+holder answered and on the bot before the first refused call is placed, and
+still up when the last refused call ended (28 s against about 8), and fails
+rather than report a split it did not set up. The three refused cases are
+placed together; N1 waits for the holder's end and for the slots to be free.
+The bot's range is checked against the switch's (`FS_RTP_START_PORT` and
+`FS_RTP_END_PORT` in the resolved configuration, else the image's
+20000-25999) and the run is refused when they share a port, so the refusal
+cannot come from the switch.
+
+The switch's log is in the switch's container, so K3 is judged in two parts.
+The test run writes into its report what each refused call's leg must show
+(the leg's channel id, read from the live call while it is up, or the
+campaign attempt's `legId`); `e2e.sh` copies the log out and a second test
+(`TestRefusalSwitchLog`) reads the leg's lines in it and writes the result into
+`report.json` and `capacity.md`. A leg with no lines in the log fails.
+
 Reported, never asserted: each call's answer and end times from the run's
 first INVITE, each `OVERFLOW` leg's hold (200 OK to the platform's BYE) next to
 the configured hold, the spread of the three answers, the application's own
 mean hold (`aicc_bot_overflow_hold_ms`), the line gauge's sampled peak, and
 whether a campaign read `AT_CAPACITY`.
 
-The run-wide invariants (`AfterRunChecks`) run on both, with these
+The run-wide invariants (`AfterRunChecks`) run on all three, with these
 adaptations, each written into the check it changes:
 
 - provider sessions: an `OVERFLOW` attempt was answered and met no bot, so it
@@ -273,9 +299,14 @@ adaptations, each written into the check it changes:
   "every attempt that created a channel has one CDR" and "every dialog belongs
   to a contact" count only the campaigns' dialogs.
 
-A run writes `capacity-<time>/K1/` and `capacity-<time>/K2/`: `report.json`
-(every assertion and every call) and `capacity.md` (the tables, also printed
-by `e2e.sh`).
+K3 uses the same checks with these adaptations: an attempt that finished
+`BOT_FAILED` and a direct call marked as refused are answered and open no
+provider session (their CDRs must have no `BOT` leg); the sessions are the
+holder's and N1's.
+
+A run writes `capacity-<time>/K1/`, `K2/` and `K3/`: `report.json` (every
+assertion and every call) and `capacity.md` (the tables, also printed by
+`e2e.sh`).
 
 ## Reading a run
 
@@ -289,7 +320,7 @@ by `e2e.sh`).
 | `campaign-<time>/report.json` | the campaign run: every assertion, per region, case and attempt |
 | `campaign-<time>/probes.md` | the measured table, one block per country, and the first-audio times |
 | `campaign-<time>/bundles/` | per failed attempt: attempt, dialog, CDRs and the sliced logs |
-| `capacity-<time>/K1/`, `capacity-<time>/K2/` | each capacity scenario's `report.json` and `capacity.md` |
+| `capacity-<time>/K1/`, `K2/`, `K3/` | each capacity scenario's `report.json` and `capacity.md` (K3's with the switch log's lines) |
 | `logs/<service>.log` | each container's output, written on a failed up, smoke, campaign or capacity run and by `e2e-down` |
 | `logs/freeswitch-file.log` | the switch's log file, each call's lines prefixed with its leg id |
 | `logs/sofia-status.txt` | the switch's gateways |

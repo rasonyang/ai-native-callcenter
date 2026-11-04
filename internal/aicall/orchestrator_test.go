@@ -48,13 +48,53 @@ type fakeSwitch struct {
 	exists      *bool
 	existsErr   error
 	existsAsked int
+	// prompts are the bot-unavailable prompts ("channel language"), and ops
+	// every rescue-related command in the order it was sent.
+	prompts []string
+	ops     []string
+	// onTransfer runs, outside the lock, when a transfer or a prompt is sent.
+	onTransfer func()
 }
 
 func (s *fakeSwitch) TransferToExtension(channelID, extension, _ string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.transfers = append(s.transfers, channelID+"→"+extension)
-	return s.transferErr
+	s.ops = append(s.ops, "transfer "+channelID+"→"+extension)
+	hook, err := s.onTransfer, s.transferErr
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return err
+}
+
+func (s *fakeSwitch) StampBotLegFailed(channelID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.variables == nil {
+		s.variables = map[string]string{}
+	}
+	s.variables["aicc_bot_reason"] = "BOT_LEG_FAILED"
+	s.ops = append(s.ops, "stamp "+channelID)
+	return nil
+}
+
+func (s *fakeSwitch) PlayBotUnavailable(channelID, language string) error {
+	s.mu.Lock()
+	s.prompts = append(s.prompts, channelID+" "+language)
+	s.ops = append(s.ops, "prompt "+channelID+" "+language)
+	hook := s.onTransfer
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return nil
+}
+
+func (s *fakeSwitch) recordedOps() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.ops...)
 }
 
 func (s *fakeSwitch) ChannelExists(string) (bool, error) {
@@ -81,6 +121,7 @@ func (s *fakeSwitch) EndCallerWithTheirBridge(channelID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.handedOn = append(s.handedOn, channelID)
+	s.ops = append(s.ops, "handOn "+channelID)
 	return nil
 }
 

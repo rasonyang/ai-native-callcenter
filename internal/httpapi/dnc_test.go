@@ -29,6 +29,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
+	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 	"github.com/rasonyang/ai-native-callcenter/internal/testdb"
 )
 
@@ -56,7 +57,7 @@ func (s *countingSwitch) Originate(uuid.UUID, string, map[string]string) (string
 	s.originates++
 	return "job", nil
 }
-func (*countingSwitch) BridgeToEndpoint(string, uuid.UUID, string, map[string]string) error {
+func (*countingSwitch) BridgeToBot(string, uuid.UUID, string, map[string]string, telephony.BotFallback) error {
 	return nil
 }
 func (*countingSwitch) TransferToExtension(string, string, string) error { return nil }

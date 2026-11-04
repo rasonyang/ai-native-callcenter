@@ -511,6 +511,13 @@ and nothing is retried blindly.
   still held means it did not, the key is refused to any later INVITE (`480`) for 10 minutes, and
   the customer leg is hung up with `hangupCause` `BOT_BRIDGE_UNCONFIRMED`, a platform word stamped
   like `OVERFLOW`. A campaign attempt so ended is `BOT_FAILED`.
+- **A bot leg that is refused or fails before media** (the bot's UAS answers 503/486/480, the
+  gateway is down, or the leg answers and `startMedia` fails). The bridge carries an inline
+  continuation (design 02 section 1): a campaign call is hung up with the switch's cause and
+  **no prompt**, never sent to a queue. For the pre-media failure `OnCallFailed` runs `rescue`,
+  which only stamps the customer's channel and ends the bot leg, so `hangup_after_bridge` hangs the
+  customer up. Either way the CDR carries `userData.botReason=BOT_LEG_FAILED` beside the switch's
+  `hangupCause`, and the attempt is `BOT_FAILED`.
 
 ---
 
@@ -716,7 +723,7 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
 | outcome | typical causes | dialled again? | default interval | budget |
 |---|---|---|---|---|
 | `ANSWERED` | answered, any talk time | no — contact `DONE` | — | `maxAttempts` |
-| `BOT_FAILED` | answered; the bot side failed before the flow ended, or the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7) | no — contact `DONE` | — | `maxAttempts` |
+| `BOT_FAILED` | answered; the bot side failed before the flow ended, the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7), or the bot leg was refused or failed before media (`userData.botReason=BOT_LEG_FAILED`, whatever the cause, §5.7) | no — contact `DONE` | — | `maxAttempts` |
 | `OVERFLOW` | answered; no bot slot after `overflowHold` (§6.4) | no — contact `DONE` | — | `maxAttempts` |
 | `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout | yes | 2 h | `maxAttempts` |
 | `BUSY` | `USER_BUSY` | yes | 30 min | `maxAttempts` |
@@ -924,6 +931,9 @@ mapping, preview, chunking and per-row report are the same for either.
     callbacks come only from `HIGH` leads (§11), and `take_message` would file one for any call;
   - a provider failure takes the no-fallback branch of `rescueCaller` (F7) whatever the DID's
     fallback queue says, and the attempt finishes `BOT_FAILED`.
+  - a bot leg that is refused, unreachable or fails before media is hung up with no prompt, never
+    sent to the DID's queue, in the inline continuation of the bridge and in `rescue` alike; the CDR
+    has `userData.botReason=BOT_LEG_FAILED` and the attempt finishes `BOT_FAILED` (§5.7).
   - the session limit (`global.maxDurationSec`, design 02) never hands a campaign call to the
     DID's queue: at 100 % the call ends through `global.closingTarget`. This third way to a
     person was missing from the first draft (found while building #163).
@@ -1207,6 +1217,9 @@ Added by this design:
   next window's start, including across midnight and on a daylight-saving changeover day.
 - **Breakers:** the trunk breaker trips on the `N`th failure and not the `N − 1`th; the provider
   breaker trips on the `M`th consecutive `BOT_FAILED`.
+- **Refused bot legs:** a campaign in which every third bot leg is refused finishes those
+  attempts `BOT_FAILED` and the rest `ANSWERED`, keeps running (the refusals are not consecutive),
+  and leaves nothing in flight; `M` refusals in a row pause it.
 - **Synchronous `DialAI` errors** map as in §5.3; a voided attempt leaves no row and no count.
 - **`BACKGROUND_JOB`:** a pre-channel `-ERR <CAUSE>` finishes the attempt at once with that cause;
   when a channel existed only the CDR finishes it, and the job result causes no second finish.

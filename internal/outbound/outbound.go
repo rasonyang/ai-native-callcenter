@@ -32,7 +32,9 @@ import (
 // Switch is the slice of the adapter vocabulary this package uses.
 type Switch interface {
 	Originate(partyID uuid.UUID, endpoint string, vars map[string]string) (string, error)
-	BridgeToEndpoint(channelID string, newPartyID uuid.UUID, endpoint string, vars map[string]string) error
+	// BridgeToBot bridges an answered customer to the bot gateway with the
+	// continuation the switch runs when the bridge never comes up.
+	BridgeToBot(channelID string, newLeg uuid.UUID, endpoint string, vars map[string]string, fallback telephony.BotFallback) error
 	TransferToExtension(channelID, extension, context string) error
 	Hangup(channelID, cause string) error
 	SetVariable(channelID, name, value string) error
@@ -67,6 +69,13 @@ type BotSlots interface {
 // DIDSource answers which numbers exist and which flow serves them.
 type DIDSource interface {
 	DIDs(ctx context.Context) ([]catalog.DID, error)
+}
+
+// QueueSource answers which queues exist. A DIDSource that also implements it
+// (the catalog service does) lets an AI call whose bot leg fails be sent to the
+// number's fallback queue; without it every such call gets the prompt.
+type QueueSource interface {
+	Queues(ctx context.Context) ([]catalog.Queue, error)
 }
 
 // NumberPlan answers whether a number belongs to the switch itself: a
@@ -153,6 +162,7 @@ type Service struct {
 	cfg     Config
 	sw      Switch
 	dids    DIDSource
+	queues  QueueSource
 	numbers NumberPlan
 	dnc     DNCList
 	hasCDR  func(ctx context.Context, callID uuid.UUID) (bool, error)
@@ -290,10 +300,12 @@ func New(cfg Config, sw Switch, dids DIDSource, numbers NumberPlan,
 	if log == nil {
 		log = slog.Default()
 	}
+	queues, _ := dids.(QueueSource)
 	return &Service{
 		cfg:      cfg,
 		sw:       sw,
 		dids:     dids,
+		queues:   queues,
 		numbers:  numbers,
 		hasCDR:   hasCDR,
 		isLive:   isLive,
@@ -1035,6 +1047,47 @@ func (s *Service) startRecording(callID uuid.UUID, customerLeg string) {
 	}
 }
 
+// botFallback chooses what the switch does with a customer whose bridge to the
+// bot never comes up (telephony.BridgeToBot).
+//
+// A campaign call never goes to a person (design 10 section 10): it is hung up
+// without a prompt. A single call goes to its number's fallback queue when that
+// queue exists and is enabled, and otherwise hears the prompt. A lookup that
+// fails is logged and takes the prompt: the customer is told the line is
+// unavailable rather than left to a guess.
+func (s *Service) botFallback(didNumber, language string, ref campaignRef) telephony.BotFallback {
+	if ref.campaignID != uuid.Nil {
+		return telephony.FallbackHangup()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), botFallbackLookup)
+	defer cancel()
+	did, err := s.findDID(ctx, didNumber)
+	if err != nil {
+		s.log.Warn("ai outbound: could not read the number's fallback queue; a failed bot leg plays the prompt",
+			"did", didNumber, "error", err)
+		return telephony.FallbackPrompt(language)
+	}
+	if did.FallbackQueueID == nil || s.queues == nil {
+		return telephony.FallbackPrompt(language)
+	}
+	queues, err := s.queues.Queues(ctx)
+	if err != nil {
+		s.log.Warn("ai outbound: could not read the queues; a failed bot leg plays the prompt",
+			"did", didNumber, "error", err)
+		return telephony.FallbackPrompt(language)
+	}
+	for _, queue := range queues {
+		if queue.ID == *did.FallbackQueueID && queue.IsEnabled {
+			return telephony.FallbackQueue(queue.ExtNumber, language)
+		}
+	}
+	return telephony.FallbackPrompt(language)
+}
+
+// botFallbackLookup bounds the catalog reads that choose a fallback: the
+// customer is on the line, and the bridge waits for the answer.
+const botFallbackLookup = 3 * time.Second
+
 // bridgeToBot is what an answered AI outbound leg does: transfer into a bridge
 // to the bot gateway with the correlation headers an inbound call carries.
 // Placing a call and adopting one that outlived a restart arm the same thing.
@@ -1047,6 +1100,10 @@ func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language
 		}
 	}, proceed: func() {
 		key := callID.String()
+		// Chosen first: the catalog reads can take seconds, and the slot's
+		// reservation runs on its short default expiry until keepForBridge
+		// extends it.
+		fallback := s.botFallback(didNumber, language, ref)
 		if s.cfg.Slots != nil && !s.takeSlot(callID, customerLeg, to) {
 			return
 		}
@@ -1077,7 +1134,7 @@ func (s *Service) bridgeToBot(callID uuid.UUID, customerLeg, didNumber, language
 		// expiry, and a reservation that lapsed under it would send that
 		// INVITE in unreserved (bridge.go).
 		isReserved := s.keepForBridge(key)
-		err := s.sw.BridgeToEndpoint(customerLeg, botLeg, target, bridgeVars)
+		err := s.sw.BridgeToBot(customerLeg, botLeg, target, bridgeVars, fallback)
 		switch {
 		case err == nil:
 			// Confirmed: the INVITE follows at once, and the reservation

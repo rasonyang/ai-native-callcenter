@@ -92,6 +92,11 @@ func expectedAnswered(v *RunView) int {
 //     of its own) may have no series of the application's counter yet: a
 //     missing series reads as zero, and only then.
 //
+// Issue #459 (K3) adapts it once more: an attempt that finished BOT_FAILED
+// (the bot refused the INVITE) was answered and met no bot either, so it is
+// counted with OVERFLOW; and a direct call marked IsExpectedNoBot is answered
+// and opens no session, and its CDR must show no BOT leg.
+//
 // The campaign scenarios have no OVERFLOW, no direct call and both kinds of
 // call, so for them it is the check it was.
 func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
@@ -102,13 +107,19 @@ func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
 
 	overflow := 0
 	for _, p := range pairAttempts(v) {
-		if deref(p.attempt.Outcome) == outcomeOverflow {
+		if metNoBot(deref(p.attempt.Outcome)) {
 			overflow++
 		}
 	}
-	direct := 0
+	direct, directNoBot, directNoBotWithBot := 0, 0, 0
 	for _, d := range v.Direct {
-		if d.IsAnswered() {
+		switch {
+		case d.IsAnswered() && d.IsExpectedNoBot:
+			directNoBot++
+			if len(d.CDRs) == 1 && (hasBotLeg(d.CDRs[0]) || d.CDRs[0].BotSec > 0) {
+				directNoBotWithBot++
+			}
+		case d.IsAnswered():
 			direct++
 		}
 	}
@@ -118,6 +129,9 @@ func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
 	c.That(mock == int64(sessions),
 		"the mock provider accepted one session per answered dialog that reached a bot: %d session(s), %d answered campaign dialog(s) - %d OVERFLOW + %d answered direct call(s) = %d",
 		mock, answered, overflow, direct, sessions)
+	if directNoBot > 0 {
+		c.That(directNoBotWithBot == 0, "no answered direct call that was refused by the bot has a BOT leg or bot seconds in its CDR (%d of %d do)", directNoBotWithBot, directNoBot)
+	}
 	c.That(v.Provider.After.Live == 0, "no provider session is still open on the mock (%d)", v.Provider.After.Live)
 
 	before, _ := v.MetricsBefore.Sum(MetricProviderSessions, nil)
@@ -136,7 +150,7 @@ func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
 		isAnswered := p.dialog.Final != nil && p.dialog.Final.Status == 200
 		bot := hasBotLeg(p.cdrs[0]) || p.cdrs[0].BotSec > 0
 		switch {
-		case isAnswered && deref(p.attempt.Outcome) == outcomeOverflow:
+		case isAnswered && metNoBot(deref(p.attempt.Outcome)):
 			overflowSeen++
 			if bot {
 				overflowWithBot++
@@ -155,7 +169,9 @@ func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
 			}
 		}
 	}
-	c.That(reachedWithBot == reached && reached == answered-overflow && (reached > 0 || want == 0),
+	// want == overflow: a run whose every answered call met no bot (K3's
+	// campaign has R3 only) reaches none, and says so.
+	c.That(reachedWithBot == reached && reached == answered-overflow && (reached > 0 || want == overflow),
 		"every answered call that was not OVERFLOW shows in its CDR that it reached the bot (%d of %d; %d answered, %d OVERFLOW)",
 		reachedWithBot, reached, answered, overflow)
 	if overflow > 0 {
@@ -170,8 +186,16 @@ func CheckProviderSessions(_ context.Context, v *RunView, c *Checks) {
 		"no call that only rang (180 or 183, %d of them) reached the bot (%d did: %v)", ringing, ringingWithBot, stray)
 }
 
-// outcomeOverflow is the outcome of an answered call that met no bot.
-const outcomeOverflow = "OVERFLOW"
+// outcomeOverflow is the outcome of an answered call that met no bot because
+// no slot freed; outcomeBotFailed, of one whose bot refused it (issue #459).
+const (
+	outcomeOverflow  = "OVERFLOW"
+	outcomeBotFailed = "BOT_FAILED"
+)
+
+// metNoBot reports whether an attempt outcome is an answered call that never
+// reached the bot.
+func metNoBot(outcome string) bool { return outcome == outcomeOverflow || outcome == outcomeBotFailed }
 
 // wantRinging is how many of the run's calls only ring, per the cases: every
 // unanswered, dialled case, once per region.

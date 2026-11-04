@@ -6,7 +6,7 @@
 #   deploy/e2e/e2e.sh up      fresh database, application built from this tree
 #   deploy/e2e/e2e.sh smoke   place one AI outbound call and check the result
 #   deploy/e2e/e2e.sh campaign  run the campaign scenarios, probes and invariants (#245, #246)
-#   deploy/e2e/e2e.sh capacity  run the capacity scenarios K1 and K2, each in an application start of its own (#247)
+#   deploy/e2e/e2e.sh capacity  run the capacity scenarios K1, K2 and K3, each in an application start of its own (#247, #459)
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
@@ -29,10 +29,11 @@ TOOLS="$WORK/tools"
 APP_IP="$NET.10"; FS_IP="$NET.11"; MOCK_IP="$NET.12"; CALLEE_IP="$NET.13"
 TO_NUMBER=13800000001
 
-# The application's bot capacity and overflow hold for its next start; empty
-# is the application's default. Only cmd_capacity changes them, and nothing
-# from the caller's shell reaches them.
+# The application's bot capacity, overflow hold and bot RTP range for its next
+# start; empty is the application's default. Only cmd_capacity changes them,
+# and nothing from the caller's shell reaches them.
 APP_BOT_MAX_CALLS=""; APP_BOT_INBOUND_RESERVE=""; APP_OVERFLOW_HOLD=""
+APP_BOT_RTP_PORT_LOW=""; APP_BOT_RTP_PORT_HIGH=""
 
 # Compose runs with a scrubbed environment: nothing from the caller's shell
 # (provider keys, AICC_* settings, a stray .env) can reach an interpolation.
@@ -47,6 +48,7 @@ compose() {
     ${E2E_OUTBOUND_ENDPOINT:+E2E_OUTBOUND_ENDPOINT="$E2E_OUTBOUND_ENDPOINT"} \
     E2E_BOT_MAX_CALLS="$APP_BOT_MAX_CALLS" E2E_BOT_INBOUND_RESERVE="$APP_BOT_INBOUND_RESERVE" \
     E2E_OVERFLOW_HOLD="$APP_OVERFLOW_HOLD" \
+    E2E_BOT_RTP_PORT_LOW="$APP_BOT_RTP_PORT_LOW" E2E_BOT_RTP_PORT_HIGH="$APP_BOT_RTP_PORT_HIGH" \
     docker compose -p "$PROJECT" --project-directory "$ROOT/deploy" \
     --env-file "$E2E/e2e.env" -f "$ROOT/deploy/docker-compose.yml" -f "$E2E/docker-compose.yml" "$@"
 }
@@ -193,7 +195,7 @@ restart_app() {
   render
   local t=$SECONDS
   compose up -d --no-deps --force-recreate --wait --wait-timeout 180 aicc >&2
-  say "application restarted for $1 in $((SECONDS - t)) s (AICC_BOT_MAX_CALLS='$APP_BOT_MAX_CALLS' AICC_BOT_INBOUND_RESERVE='$APP_BOT_INBOUND_RESERVE' AICC_OVERFLOW_HOLD='$APP_OVERFLOW_HOLD')"
+  say "application restarted for $1 in $((SECONDS - t)) s (AICC_BOT_MAX_CALLS='$APP_BOT_MAX_CALLS' AICC_BOT_INBOUND_RESERVE='$APP_BOT_INBOUND_RESERVE' AICC_OVERFLOW_HOLD='$APP_OVERFLOW_HOLD' AICC_BOT_RTP_PORT_LOW='$APP_BOT_RTP_PORT_LOW' AICC_BOT_RTP_PORT_HIGH='$APP_BOT_RTP_PORT_HIGH')"
 }
 
 run_capacity() {
@@ -213,28 +215,49 @@ run_capacity() {
   fi
 }
 
+# judge_switch_log is K3's second half. The switch's log is in its container,
+# so it is copied out and the test binary judges it against the probes the run
+# wrote into its report (the lines of each refused call's leg).
+judge_switch_log() {
+  local dir="$1" t=$SECONDS
+  collect_logs
+  if compose run --rm -T --no-deps --entrypoint /usr/local/bin/aicc-e2e-campaign.test driver \
+      -test.v -test.run '^TestRefusalSwitchLog$' -test.timeout 2m \
+      -e2e.out "/run/e2e/$dir/K3" -e2e.switchlog /run/e2e/logs/freeswitch-file.log >&2; then
+    say "K3 switch log checks passed in $((SECONDS - t)) s"
+  else
+    say "K3 switch log checks FAILED after $((SECONDS - t)) s"
+    return 1
+  fi
+}
+
 cmd_capacity() {
   [ -n "$(compose ps -q aicc 2>/dev/null)" ] || { say "the environment is not up; run: make e2e-up"; exit 1; }
   local id rc=0 sc t0=$SECONDS
   id="capacity-$(date -u +%Y%m%dT%H%M%SZ)"
   # A fresh record: the simulator counts a number's INVITEs from its start.
   compose restart calleesim >&2
-  # K1 lowers the bot capacity and K2 keeps the defaults; each gets an
-  # application start of its own, and K2 last leaves the application as
-  # e2e.sh up started it.
-  for sc in K1 K2; do
+  # K1 lowers the bot capacity, K2 keeps the defaults and K3 narrows the bot's
+  # RTP range to one pair; each gets an application start of its own, and the
+  # application is recreated on the defaults last, as e2e.sh up started it.
+  for sc in K1 K2 K3; do
+    APP_BOT_MAX_CALLS=""; APP_BOT_INBOUND_RESERVE=""; APP_OVERFLOW_HOLD=""
+    APP_BOT_RTP_PORT_LOW=""; APP_BOT_RTP_PORT_HIGH=""
     case "$sc" in
       K1) APP_BOT_MAX_CALLS=3; APP_BOT_INBOUND_RESERVE=0; APP_OVERFLOW_HOLD=1500ms ;;
-      K2) APP_BOT_MAX_CALLS=""; APP_BOT_INBOUND_RESERVE=""; APP_OVERFLOW_HOLD="" ;;
+      K2) ;;
+      K3) APP_BOT_RTP_PORT_LOW=26000; APP_BOT_RTP_PORT_HIGH=26001 ;;
     esac
     if ! restart_app "$sc"; then rc=1; break; fi
     run_capacity "$sc" "$id" || rc=1
+    if [ "$sc" = K3 ] && [ -f "$RUN/$id/K3/report.json" ]; then judge_switch_log "$id" || rc=1; fi
   done
-  if [ -n "$APP_BOT_MAX_CALLS$APP_BOT_INBOUND_RESERVE$APP_OVERFLOW_HOLD" ]; then
+  if [ -n "$APP_BOT_MAX_CALLS$APP_BOT_INBOUND_RESERVE$APP_OVERFLOW_HOLD$APP_BOT_RTP_PORT_LOW$APP_BOT_RTP_PORT_HIGH" ]; then
     APP_BOT_MAX_CALLS=""; APP_BOT_INBOUND_RESERVE=""; APP_OVERFLOW_HOLD=""
+    APP_BOT_RTP_PORT_LOW=""; APP_BOT_RTP_PORT_HIGH=""
     restart_app defaults || rc=1
   fi
-  for sc in K1 K2; do
+  for sc in K1 K2 K3; do
     if [ -f "$RUN/$id/$sc/capacity.md" ]; then cat "$RUN/$id/$sc/capacity.md"; fi
   done
   if [ "$rc" -ne 0 ]; then

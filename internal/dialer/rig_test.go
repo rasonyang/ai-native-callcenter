@@ -570,6 +570,10 @@ const (
 	endInvalid   = "invalid"
 	endPlacement = "placement"
 	endBotFailed = "botfailed"
+	// endBotRefused: the customer answered and the bot leg was refused (a
+	// 503 from the bot's own UAS, #459). The switch's cause is its own; the
+	// call carries botReason BOT_LEG_FAILED and never had a bot.
+	endBotRefused = "botrefused"
 )
 
 func cdrFor(callID uuid.UUID, to, kind string, start, end time.Time) store.CDR {
@@ -595,6 +599,9 @@ func cdrFor(callID uuid.UUID, to, kind string, start, end time.Time) store.CDR {
 		answer("NORMAL_CLEARING", store.CDRStatusAnswered, 700*time.Millisecond, false)
 	case endBotFailed:
 		answer("MEDIA_OR_PROVIDER_FAILURE", store.CDRStatusFailed, 20*time.Second, true)
+	case endBotRefused:
+		answer("NORMAL_TEMPORARY_FAILURE", store.CDRStatusAnswered, time.Second, false)
+		cdr.UserData = map[string]any{"botReason": "BOT_LEG_FAILED"}
 	case endNoAnswer:
 		cdr.HangupCause, cdr.Status = "NO_ANSWER", store.CDRStatusNoAnswer
 	case endBusy:

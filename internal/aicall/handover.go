@@ -151,10 +151,18 @@ func (a *callActions) handoverFailed(handover failedHandover, wasLocked bool) {
 	a.log.Warn("transfer never ran: the caller is still on the bot leg; telling them",
 		"queue", queue.Name, "isAtTimeLimit", wasLocked, "resumeIn", handover.fromPhase)
 	// The caller is still the bot's: the teardown rule goes back to what the
-	// dialplan set for the bot bridge, so a bot leg that dies from here on
-	// sends them to the fallback rather than hanging them up.
-	if err := a.orchestrator.cfg.Switch.SetVariable(a.callerChannel, "hangup_after_bridge", "false"); err != nil {
-		a.log.Warn("could not suspend the caller's teardown rule again", "error", err)
+	// bridge to the bot set. An inbound call's dialplan turns it off, so a
+	// bot leg that dies from here on sends them to the fallback rather than
+	// hanging them up. A call the platform placed to a customer bridges with
+	// it on, so a bot that ends normally ends the call and only a bridge that
+	// never came up reaches the inline continuation (telephony.BridgeToBot):
+	// "false" would run that continuation after a bot's ordinary hangup.
+	rule := "false"
+	if a.facts != nil && a.facts.isPlacedToCustomer {
+		rule = "true"
+	}
+	if err := a.orchestrator.cfg.Switch.SetVariable(a.callerChannel, "hangup_after_bridge", rule); err != nil {
+		a.log.Warn("could not restore the caller's teardown rule", "error", err)
 	}
 	if a.recorder != nil {
 		a.recorder.markHandoverFailed()
