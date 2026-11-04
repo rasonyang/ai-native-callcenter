@@ -147,6 +147,74 @@ export function layoutTest(
   }
 }
 
+/**
+ * Fails when the text of any cell in the given table columns (0-based) is laid
+ * out on more than one line. For a column that must read as one line whatever
+ * the other columns hold (a time, a status): the squeeze belongs to the free
+ * text column, not to it. A cell with element children is measured on its
+ * first one. Counts the distinct line tops of its text, so it holds at any
+ * font size.
+ */
+export function expectOneLine(ctx: LayoutContext, columns: number[], options: LayoutOptions = {}) {
+  const root = options.within ?? document
+  const problems: string[] = []
+  const rows = [...root.querySelectorAll('tbody tr')].filter((tr) => tr.querySelectorAll('td').length > 1)
+  if (rows.length === 0) problems.push('  no table rows to measure')
+  for (const [r, tr] of rows.entries()) {
+    const cells = tr.querySelectorAll('td')
+    for (const column of columns) {
+      const cell = cells[column]
+      if (!cell) continue
+      // The line tops of the text itself: a dot or an icon beside it sits at
+      // its own height and says nothing about wrapping.
+      const target = cell.firstElementChild ?? cell
+      const tops = new Set<number>()
+      const walker = document.createTreeWalker(target, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        for (const rect of range.getClientRects()) if (rect.width > 0) tops.add(Math.round(rect.top))
+      }
+      if (tops.size > 1) {
+        problems.push(`  row ${r + 1}, column ${column + 1}: ${describeEl(cell)} wraps onto ${tops.size} lines`)
+      }
+    }
+  }
+  if (problems.length > 0) {
+    throw new LayoutViolation(`${label(ctx)}: text that must stay on one line wraps:\n${problems.join('\n')}`)
+  }
+}
+
+/**
+ * A phone number reads in full when it is an ordinary one: every cell of the
+ * given column whose value is at most 16 characters (E.164 is 16 with its `+`)
+ * must show all of it, and a longer one (a hostile 40-digit value) must be the
+ * one that is cut.
+ */
+export function expectNumbersRead(ctx: LayoutContext, column: number, options: LayoutOptions = {}) {
+  const root = options.within ?? document
+  const problems: string[] = []
+  let sawShort = false
+  for (const tr of root.querySelectorAll('tbody tr')) {
+    const cell = tr.querySelectorAll('td')[column]
+    const span = cell?.querySelector('span[title]') ?? cell?.querySelector('span')
+    if (!cell || !span) continue
+    const value = (span.textContent ?? '').trim()
+    const cut = span.scrollWidth > span.clientWidth + SLOP
+    if (value.length <= 16) {
+      sawShort = true
+      if (cut) problems.push(`  "${value}" is cut: needs ${span.scrollWidth}px, has ${span.clientWidth}px`)
+    } else {
+      if (!cut) problems.push(`  the ${value.length}-character "${value.slice(0, 20)}..." is not cut`)
+    }
+  }
+  if (!sawShort) problems.push('  no ordinary number to measure')
+  if (problems.length > 0) {
+    throw new LayoutViolation(`${label(ctx)}: phone numbers:\n${problems.join('\n')}`)
+  }
+}
+
 /** Call once per file that uses `layoutTest`: puts the language back after each. */
 export function restoreLanguage() {
   afterEach(async () => {

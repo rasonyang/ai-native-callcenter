@@ -6,7 +6,7 @@ import i18n from '@/lib/i18n'
 import { renderApp, waitForRows } from '@/test/app'
 import { AGENT_ID } from '@/test/harness'
 import { asciiRun, chineseRun, digits, longUrl, mixedNote, words } from '@/test/hostile'
-import { expectLayout, layoutTest, restoreLanguage } from '@/test/layout'
+import { expectLayout, expectNumbersRead, expectOneLine, layoutTest, restoreLanguage } from '@/test/layout'
 
 /**
  * The callbacks queue. A callback is made by the bot from what the caller
@@ -54,13 +54,30 @@ async function loaded(count: number) {
   await screen.findAllByRole('button', { name: i18n.t('callbacks.markDone') })
 }
 
+/** The time and the status read as one line each; the message column takes the squeeze. */
+async function expectCompactRows(ctx: Parameters<typeof expectOneLine>[0]) {
+  await expectLayout(ctx)
+  expectOneLine(ctx, [0, 3])
+}
+
 restoreLanguage()
 
 describe('callbacks with ordinary requests', () => {
   layoutTest('agent/callbacks (ordinary data)', async (ctx) => {
     render(oneOfEach())
     await loaded(5)
-    await expectLayout(ctx)
+    await expectCompactRows(ctx)
+    expectNumbersRead(ctx, 1)
+  })
+
+  layoutTest('agent/callbacks (2,000-character zh message and a 40-digit number)', async (ctx) => {
+    // Ordinary numbers beside one hostile one: the ordinary ones read in full.
+    const rows = oneOfEach({ message: chineseRun(2000, 7), phoneNumber: '+8618688886660' })
+    rows[2] = { ...rows[2], phoneNumber: digits(40, 1) }
+    render(rows)
+    await loaded(5)
+    await expectCompactRows(ctx)
+    expectNumbersRead(ctx, 1)
   })
 })
 

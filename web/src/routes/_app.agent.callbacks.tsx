@@ -92,7 +92,7 @@ function CallbacksPage() {
           )}
           {rows.map((row) => (
             <Tr key={row.id}>
-              <Td className="tabular">{timeFormat.format(new Date(row.createdAt))}</Td>
+              <Td className="tabular whitespace-nowrap">{timeFormat.format(new Date(row.createdAt))}</Td>
               <Td className="tabular font-medium">
                 <CellText maxWidth="max-w-40" minWidth="min-w-upto-32">{row.phoneNumber}</CellText>
               </Td>

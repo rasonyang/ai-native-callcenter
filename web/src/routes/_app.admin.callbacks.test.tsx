@@ -32,9 +32,6 @@ function render(handle: (path: string) => unknown) {
   const api = installBackend({
     handle: ({ path, method }) => {
       if (method !== 'GET') return undefined
-      if (path === '/agents') {
-        return { items: [{ agentId: id(800), userId: KNOWN, username: 'mina', displayName: 'Mina Chen' }] }
-      }
       return path.startsWith('/callbacks') ? handle(path) : undefined
     },
   })
@@ -70,17 +67,25 @@ describe('the team callback queue', () => {
     await waitFor(() => expect(callbackRequests(api).at(-1)).toBe('/callbacks?limit=50&offset=0'))
   })
 
-  it('names a claimant from the roster and shows a neutral word for one it does not know', async () => {
+  it('names the handler the API names, says unknown for one it cannot, and a dash for none', async () => {
     render(() => ({
       items: [
-        callback(1, { status: 'CLAIMED', handledBy: KNOWN }),
-        callback(2, { status: 'CLAIMED', handledBy: GONE }),
+        callback(1, { status: 'CLAIMED', handledBy: KNOWN, handledByName: 'Mina Chen' }),
+        callback(2, { status: 'DISMISSED', handledBy: GONE }),
+        callback(3),
       ],
-      total: 2,
+      total: 3,
     }))
     expect(await screen.findByText('Mina Chen')).toBeInTheDocument()
     expect(screen.getByText('Unknown user')).toBeInTheDocument()
+    expect(screen.getAllByText('—')).toHaveLength(1) // the open row has no handler
     expect(document.body.textContent).not.toContain(GONE)
+  })
+
+  it('does not read the agent roster to name anybody', async () => {
+    const { api } = render(() => ({ items: [callback(1)], total: 1 }))
+    await screen.findByText('message 1')
+    expect(api.requests.some((r) => r.path.startsWith('/agents'))).toBe(false)
   })
 
   it('offers no way to claim, release or close a callback', async () => {
