@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -19,6 +20,10 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 )
+
+// maxWebhookURLLength is the contract's maxLength for
+// WebhookSubscriptionWrite.url, counted in characters, not bytes.
+const maxWebhookURLLength = 2048
 
 // WebhookService is where finished calls are told to somebody else.
 type WebhookService interface {
@@ -166,6 +171,13 @@ func decodeSubscription(w http.ResponseWriter, r *http.Request) (store.WebhookSu
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			"url must be an absolute http or https address",
+			map[string]any{"field": "url"})
+		return store.WebhookSubscriptionWrite{}, false
+	}
+
+	if utf8.RuneCountInString(body.URL) > maxWebhookURLLength {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			fmt.Sprintf("url is at most %d characters", maxWebhookURLLength),
 			map[string]any{"field": "url"})
 		return store.WebhookSubscriptionWrite{}, false
 	}

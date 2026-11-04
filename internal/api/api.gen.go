@@ -3336,7 +3336,7 @@ type WebhookSubscription struct {
 	SubscriptionID openapi_types.UUID `json:"subscriptionId"`
 	UpdatedAt      time.Time          `json:"updatedAt"`
 
-	// URL Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
+	// URL Where deliveries are POSTed: an absolute `http` or `https` URL with a host; HTTPS is recommended. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
 	URL string `json:"url"`
 }
 
@@ -3355,7 +3355,7 @@ type WebhookSubscriptionWrite struct {
 	IsEnabled *bool          `json:"isEnabled,omitempty"`
 	Name      string         `json:"name"`
 
-	// URL Where deliveries are POSTed. HTTPS. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
+	// URL Where deliveries are POSTed: an absolute `http` or `https` URL with a host. Any other scheme, or an address with no host, is refused with 422. HTTPS is recommended; `http` is accepted so that a receiver can be integrated against before it has a certificate, such as a staging endpoint or one on the deployment's own host. A redirect is not followed: a 3xx answer is a failed attempt, retried like any other non-2xx, so the URL must be the endpoint itself rather than one that redirects to it.
 	URL string `json:"url"`
 }
 

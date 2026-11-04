@@ -327,6 +327,13 @@ carries the one-line installer's files.
   warns, and the image's architecture is checked once the pull has put it in
   the local daemon (`PREFLIGHT_IMAGE_ARCH` if it is wrong). `--check` only
   warns. (#348)
+- Webhook subscriptions: the contract described `url` as HTTPS, but the server
+  has always accepted `http` as well, by design (a receiver is often integrated
+  against before it has a certificate). Both `url` descriptions now state the
+  rule the server applies: an absolute `http` or `https` URL with a host, HTTPS
+  recommended; any other scheme, or an address with no host, is refused with
+  422. A `url` longer than the contract's 2048 characters is now refused with
+  422 `VALIDATION_FAILED` `{"field": "url"}`; it used to be stored. (#461)
 
 ### Removed
 
