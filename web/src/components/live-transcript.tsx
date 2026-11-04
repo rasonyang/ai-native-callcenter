@@ -55,38 +55,151 @@ export function LiveTranscript({
     streamStatus,
   )
   const scroller = useRef<HTMLDivElement>(null)
-  const [isFollowing, setFollowing] = useState(true)
-  const wasSticky = useRef(true)
+  const content = useRef<HTMLDivElement>(null)
+  const [isFollowing, setFollowingState] = useState(true)
+  // The synchronous truth behind isFollowing: the pin runs inside layout
+  // effects and observer callbacks, which must not wait for a render.
+  const following = useRef(true)
+  const setFollowing = useCallback((value: boolean) => {
+    following.current = value
+    setFollowingState(value)
+  }, [])
 
-  // Measured before the mutation paints, so a line growing from partial to
-  // final does not shift a reader who was at the bottom.
-  useLayoutEffect(() => {
-    const el = scroller.current
-    if (!el) return
-    wasSticky.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD
-  })
+  // Following is a mode the reader leaves and re-enters; it is never inferred
+  // from how tall the content is. Several things scroll this element that are
+  // not the reader: our own pin, the browser's scroll anchoring when the hook's
+  // window drops a line at the top, and the clamp when the panel grows or the
+  // lines are replaced. They all fire `scroll`, and some land away from the
+  // bottom, so a position alone cannot tell them apart. Leaving the bottom
+  // therefore needs a signal that only the reader produces (wheel, touch, a key,
+  // a pointer held on the scrollbar), seen shortly before the scroll event. A
+  // scroll that ends at the bottom always resumes following.
+  const intentUntil = useRef(0)
+  const isPointerDown = useRef(false)
+  const noteIntent = useCallback(() => {
+    intentUntil.current = performance.now() + 600
+  }, [])
+  const hasIntent = () => isPointerDown.current || performance.now() < intentUntil.current
 
-  useEffect(() => {
+  const pin = useCallback(() => {
     const el = scroller.current
-    if (!el || !isFollowing) return
+    if (!el || !following.current) return
     // Never yank the page out from under a selection someone is copying.
     const selection = document.getSelection()
     if (selection && !selection.isCollapsed && el.contains(selection.anchorNode)) return
-    if (wasSticky.current) el.scrollTop = el.scrollHeight
-  }, [lines, isFollowing])
+    el.scrollTop = el.scrollHeight
+  }, [])
+
+  // The row at the top of the view before "Load earlier" prepends, and where it
+  // sat. Chromium's scroll anchoring does not apply at scrollTop 0, which is
+  // where that button is clicked, so the reader's line is restored explicitly.
+  // It is spent only by a prepend (an earlier first seq): the 400-line window
+  // trimming the top also changes the first line, and must not restore a stale
+  // place. A load that prepends nothing leaves it unspent and harmless.
+  const anchor = useRef<{ row: Element; offset: number; firstSeq: number } | null>(null)
+
+  // A new call starts in following mode, whatever the previous reader did. Only
+  // a defined callId counts: the cockpit passes undefined when a call ends and
+  // the panel keeps showing that transcript until the next call replaces it.
+  const lastCallId = useRef(callId)
+  useLayoutEffect(() => {
+    if (callId && lastCallId.current && callId !== lastCallId.current) setFollowing(true)
+    if (callId) lastCallId.current = callId
+  }, [callId, setFollowing])
+
+  // After every change to the lines, before paint, so the first paint of a
+  // fresh snapshot already shows the last line.
+  useLayoutEffect(() => {
+    const el = scroller.current
+    const held = anchor.current
+    const firstSeq = firstSeqOf(lines)
+    if (el && held && firstSeq !== undefined && firstSeq < held.firstSeq) {
+      anchor.current = null
+      if (held.row.isConnected) {
+        const delta =
+          held.row.getBoundingClientRect().top - el.getBoundingClientRect().top - held.offset
+        el.scrollTop += delta
+        if (el.scrollHeight - el.scrollTop - el.clientHeight >= STICK_THRESHOLD) setFollowing(false)
+        return
+      }
+    }
+    pin()
+  }, [lines, pin, setFollowing])
+
+  // A size change that is not a new line: a partial growing to several rows, a
+  // window resize that rewraps the text, the cockpit's flex height changing.
+  useEffect(() => {
+    const el = scroller.current
+    const inner = content.current
+    if (!el || !inner || typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(pin)
+    observer.observe(el)
+    observer.observe(inner)
+    return () => observer.disconnect()
+  }, [pin])
+
+  // Keys are heard on the window: the log is not focusable, so after a click in
+  // it the browser keyboard-scrolls it while the key event goes to the body.
+  useEffect(() => {
+    const release = () => {
+      isPointerDown.current = false
+    }
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    window.addEventListener('keydown', noteIntent, true)
+    return () => {
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      window.removeEventListener('keydown', noteIntent, true)
+    }
+  }, [noteIntent])
 
   const onScroll = useCallback(() => {
     const el = scroller.current
     if (!el) return
-    setFollowing(el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD)
-  }, [])
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < STICK_THRESHOLD) {
+      setFollowing(true)
+    } else if (hasIntent()) {
+      setFollowing(false)
+    }
+  }, [setFollowing])
+
+  const onWheel = useCallback(
+    (event: React.WheelEvent) => {
+      noteIntent()
+      const el = scroller.current
+      // An upward wheel leaves the bottom at once: waiting for the scroll event
+      // would let a line that arrives in between pull the reader back.
+      if (el && event.deltaY < 0 && el.scrollTop > 0 && el.scrollHeight > el.clientHeight) {
+        setFollowing(false)
+      }
+    },
+    [noteIntent, setFollowing],
+  )
 
   const jumpToLatest = useCallback(() => {
     const el = scroller.current
     if (!el) return
-    el.scrollTop = el.scrollHeight
     setFollowing(true)
-  }, [])
+    el.scrollTop = el.scrollHeight
+  }, [setFollowing])
+
+  const loadEarlierKeepingPlace = useCallback(async () => {
+    const el = scroller.current
+    const firstSeq = firstSeqOf(lines)
+    if (el && firstSeq !== undefined) {
+      const top = el.getBoundingClientRect().top
+      const row = [...el.querySelectorAll('li')].find((li) => li.getBoundingClientRect().bottom > top)
+      if (row) {
+        anchor.current = { row, offset: row.getBoundingClientRect().top - top, firstSeq }
+      }
+    }
+    try {
+      await loadEarlier()
+    } catch {
+      anchor.current = null
+    }
+  }, [loadEarlier, lines])
 
   let body: ReactNode
   if (isUnavailable) {
@@ -133,22 +246,34 @@ export function LiveTranscript({
       <div
         ref={scroller}
         onScroll={onScroll}
+        onWheel={onWheel}
+        onTouchMove={noteIntent}
+        onPointerDown={() => {
+          isPointerDown.current = true
+        }}
         role="log"
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        {hasEarlier && lines.length > 0 && (
-          <button
-            type="button"
-            onClick={() => void loadEarlier()}
-            className="mb-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            {t('transcript.loadEarlier')}
-          </button>
-        )}
-        {body}
+        <div ref={content}>
+          {hasEarlier && lines.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void loadEarlierKeepingPlace()}
+              className="mb-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {t('transcript.loadEarlier')}
+            </button>
+          )}
+          {body}
+        </div>
       </div>
     </section>
   )
+}
+
+/** The seq of the oldest final line; a partial has none. */
+function firstSeqOf(lines: Line[]): number | undefined {
+  return lines.find((l) => l.seq !== undefined)?.seq
 }
 
 /**
