@@ -150,10 +150,12 @@ VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: ListCallbacks :many
-SELECT * FROM callbacks
-WHERE (sqlc.arg('status')::text = '' OR status = sqlc.arg('status'))
-  AND (sqlc.narg('call_id')::uuid IS NULL OR call_id = sqlc.narg('call_id'))
-ORDER BY created_at DESC
+SELECT sqlc.embed(c), u.display_name AS handled_by_name
+FROM callbacks c
+LEFT JOIN users u ON u.id = c.handled_by
+WHERE (sqlc.arg('status')::text = '' OR c.status = sqlc.arg('status'))
+  AND (sqlc.narg('call_id')::uuid IS NULL OR c.call_id = sqlc.narg('call_id'))
+ORDER BY c.created_at DESC
 LIMIT sqlc.arg('page_limit') OFFSET sqlc.arg('page_offset');
 
 -- name: CountCallbacks :one

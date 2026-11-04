@@ -181,6 +181,10 @@ func callbackOf(c store.Callback) api.Callback {
 		HandledBy: c.HandledBy, HandledAt: c.HandledAt,
 		LastAttemptCallID: c.LastAttemptCallID, LastAttemptAt: c.LastAttemptAt,
 	}
+	if c.HandledByName != "" {
+		name := c.HandledByName
+		out.HandledByName = &name
+	}
 	if c.LastAttemptStatus != "" {
 		status := api.CDRStatus(c.LastAttemptStatus)
 		out.LastAttemptStatus = &status
@@ -215,7 +219,7 @@ func (s *Server) ClaimCallback(w http.ResponseWriter, r *http.Request, id uuid.U
 		return
 	}
 	s.publishCallback(r, events.TypeCallbackUpdated, callback)
-	writeJSON(w, http.StatusOK, callback)
+	writeJSON(w, http.StatusOK, callbackOf(callback))
 }
 
 // ReleaseCallback hands a claimed callback back to the pool.
@@ -241,7 +245,7 @@ func (s *Server) ReleaseCallback(w http.ResponseWriter, r *http.Request, id uuid
 		return
 	}
 	s.publishCallback(r, events.TypeCallbackUpdated, callback)
-	writeJSON(w, http.StatusOK, callback)
+	writeJSON(w, http.StatusOK, callbackOf(callback))
 }
 
 // completeCallbackRequest closes a callback.
@@ -281,7 +285,7 @@ func (s *Server) CompleteCallback(w http.ResponseWriter, r *http.Request, id uui
 		return
 	}
 	s.publishCallback(r, events.TypeCallbackUpdated, callback)
-	writeJSON(w, http.StatusOK, callback)
+	writeJSON(w, http.StatusOK, callbackOf(callback))
 }
 
 // publishCallback announces a callback movement to every signed-in screen.
@@ -292,7 +296,7 @@ func (s *Server) publishCallback(r *http.Request, eventType events.Type, callbac
 	s.hub.Publish(r.Context(), events.Event{
 		Type:    eventType,
 		CallID:  callback.CallID,
-		Payload: map[string]any{"callback": callback},
+		Payload: map[string]any{"callback": callbackOf(callback)},
 		// A callback belongs on every screen that can act on one.
 	}, events.Scope{IsBroadcast: true})
 }

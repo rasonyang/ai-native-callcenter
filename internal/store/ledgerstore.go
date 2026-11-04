@@ -260,7 +260,11 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 			return err
 		}
 		for _, row := range rows {
-			settled = append(settled, callbackFromRow(row))
+			cb, err := l.named(ctx, q, callbackFromRow(row))
+			if err != nil {
+				return err
+			}
+			settled = append(settled, cb)
 		}
 		// The attempt a campaign made of this call learns its outcome in the
 		// same transaction, so it never disagrees with the ledger (design 10
@@ -778,7 +782,10 @@ type Callback struct {
 	Status      string     `json:"status"`
 	CreatedAt   time.Time  `json:"createdAt"`
 	HandledBy   *uuid.UUID `json:"handledBy,omitempty"`
-	HandledAt   *time.Time `json:"handledAt,omitempty"`
+	// HandledByName is that user's display name; empty when nobody handled
+	// the callback or the user has since been deleted.
+	HandledByName string     `json:"handledByName,omitempty"`
+	HandledAt     *time.Time `json:"handledAt,omitempty"`
 	// The last call placed to keep this callback, and how it went. Status
 	// stays empty while that call is still up.
 	LastAttemptCallID *uuid.UUID `json:"lastAttemptCallId,omitempty"`
@@ -828,7 +835,11 @@ func (l *LedgerStore) ListCallbacks(ctx context.Context, status string, callID *
 	}
 	out := make([]Callback, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, callbackFromRow(row))
+		cb := callbackFromRow(row.Callback)
+		if row.HandledByName != nil {
+			cb.HandledByName = *row.HandledByName
+		}
+		out = append(out, cb)
 	}
 	return out, total, nil
 }
@@ -840,7 +851,7 @@ func (l *LedgerStore) ClaimCallback(ctx context.Context, id, userID uuid.UUID) (
 	if err != nil {
 		return Callback{}, err
 	}
-	return callbackFromRow(row), nil
+	return l.named(ctx, l.q, callbackFromRow(row))
 }
 
 // ReleaseCallback puts a CLAIMED callback back in the pool. Only the holder
@@ -852,7 +863,7 @@ func (l *LedgerStore) ReleaseCallback(ctx context.Context, id, userID uuid.UUID)
 	if err != nil {
 		return Callback{}, err
 	}
-	return callbackFromRow(row), nil
+	return l.named(ctx, l.q, callbackFromRow(row))
 }
 
 // MarkCallbackAttempt notes on a callback that a call is being placed to
@@ -866,7 +877,7 @@ func (l *LedgerStore) MarkCallbackAttempt(ctx context.Context, id, callID, userI
 	if err != nil {
 		return Callback{}, err
 	}
-	return callbackFromRow(row), nil
+	return l.named(ctx, l.q, callbackFromRow(row))
 }
 
 // HandleCallback closes a callback as done or dismissed.
@@ -877,7 +888,25 @@ func (l *LedgerStore) HandleCallback(ctx context.Context, id uuid.UUID, status s
 	if err != nil {
 		return Callback{}, err
 	}
-	return callbackFromRow(row), nil
+	return l.named(ctx, l.q, callbackFromRow(row))
+}
+
+// named fills in the display name of the user who handled the callback. A
+// handler that no longer exists leaves it empty; any other failure is the
+// caller's to see.
+func (l *LedgerStore) named(ctx context.Context, q *queries.Queries, cb Callback) (Callback, error) {
+	if cb.HandledBy == nil {
+		return cb, nil
+	}
+	u, err := q.GetUserByID(ctx, *cb.HandledBy)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		return cb, nil
+	case err != nil:
+		return cb, err
+	}
+	cb.HandledByName = u.DisplayName
+	return cb, nil
 }
 
 func callbackFromRow(row queries.Callback) Callback {

@@ -893,10 +893,12 @@ func (q *Queries) ListCDRs(ctx context.Context, arg ListCDRsParams) ([]Cdr, erro
 }
 
 const listCallbacks = `-- name: ListCallbacks :many
-SELECT id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status FROM callbacks
-WHERE ($1::text = '' OR status = $1)
-  AND ($2::uuid IS NULL OR call_id = $2)
-ORDER BY created_at DESC
+SELECT c.id, c.call_id, c.queue_id, c.phone_number, c.message, c.status, c.created_at, c.handled_by, c.handled_at, c.last_attempt_call_id, c.last_attempt_at, c.last_attempt_status, u.display_name AS handled_by_name
+FROM callbacks c
+LEFT JOIN users u ON u.id = c.handled_by
+WHERE ($1::text = '' OR c.status = $1)
+  AND ($2::uuid IS NULL OR c.call_id = $2)
+ORDER BY c.created_at DESC
 LIMIT $4 OFFSET $3
 `
 
@@ -907,7 +909,12 @@ type ListCallbacksParams struct {
 	PageLimit  int32      `json:"pageLimit"`
 }
 
-func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([]Callback, error) {
+type ListCallbacksRow struct {
+	Callback      Callback `json:"callback"`
+	HandledByName *string  `json:"handledByName"`
+}
+
+func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([]ListCallbacksRow, error) {
 	rows, err := q.db.Query(ctx, listCallbacks,
 		arg.Status,
 		arg.CallID,
@@ -918,22 +925,23 @@ func (q *Queries) ListCallbacks(ctx context.Context, arg ListCallbacksParams) ([
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Callback{}
+	items := []ListCallbacksRow{}
 	for rows.Next() {
-		var i Callback
+		var i ListCallbacksRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.CallID,
-			&i.QueueID,
-			&i.PhoneNumber,
-			&i.Message,
-			&i.Status,
-			&i.CreatedAt,
-			&i.HandledBy,
-			&i.HandledAt,
-			&i.LastAttemptCallID,
-			&i.LastAttemptAt,
-			&i.LastAttemptStatus,
+			&i.Callback.ID,
+			&i.Callback.CallID,
+			&i.Callback.QueueID,
+			&i.Callback.PhoneNumber,
+			&i.Callback.Message,
+			&i.Callback.Status,
+			&i.Callback.CreatedAt,
+			&i.Callback.HandledBy,
+			&i.Callback.HandledAt,
+			&i.Callback.LastAttemptCallID,
+			&i.Callback.LastAttemptAt,
+			&i.Callback.LastAttemptStatus,
+			&i.HandledByName,
 		); err != nil {
 			return nil, err
 		}

@@ -1623,7 +1623,10 @@ type Callback struct {
 
 	// HandledBy The user working or having closed the callback.
 	HandledBy *openapi_types.UUID `json:"handledBy,omitempty"`
-	ID        openapi_types.UUID  `json:"id"`
+
+	// HandledByName The display name of the user in handledBy. Absent when nobody handled the callback or that user no longer exists.
+	HandledByName *string            `json:"handledByName,omitempty"`
+	ID            openapi_types.UUID `json:"id"`
 
 	// LastAttemptAt When that call was placed; once it ends, when it ended.
 	LastAttemptAt *time.Time `json:"lastAttemptAt,omitempty"`
