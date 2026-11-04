@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -125,6 +126,88 @@ func TestAnUnknownFilterKeyIsRefusedWhenTheSubscriptionIsWritten(t *testing.T) {
 
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400: %s", w.Code, w.Body)
+		}
+	})
+}
+
+// The contract says a subscription url is an absolute http or https URL with a
+// host, at most 2048 characters (WebhookSubscriptionWrite.url); design 09 §4.1
+// accepts http on purpose. The length is counted in characters, as maxLength is,
+// so a multi-byte path of 2048 characters is within the limit.
+func TestASubscriptionURLIsAnAbsoluteHTTPOrHTTPSAddress(t *testing.T) {
+	t.Parallel()
+	pad := func(prefix, unit string, total int) string {
+		return prefix + strings.Repeat(unit, total-len([]rune(prefix)))
+	}
+	accepted := map[string]string{
+		"https":                  "https://example.com/h",
+		"http":                   "http://example.com/h",
+		"http on the local host": "http://127.0.0.1:8771/hook",
+		"2048 characters":        pad("https://example.com/", "a", 2048),
+		"2048 multi-byte chars":  pad("https://example.com/", "例", 2048),
+	}
+	for name, u := range accepted {
+		t.Run("accepts "+name, func(t *testing.T) {
+			svc := &stubWebhooks{}
+			s := &Server{webhooks: svc}
+			w := httptest.NewRecorder()
+
+			s.CreateWebhookSubscription(w, post(`{"name":"x","url":"`+u+`"}`))
+
+			if w.Code != http.StatusCreated {
+				t.Fatalf("status = %d, want 201: %s", w.Code, w.Body)
+			}
+			if svc.written.URL != u {
+				t.Errorf("written url = %q, want %q", svc.written.URL, u)
+			}
+		})
+	}
+	refused := map[string]string{
+		"ftp scheme":      "ftp://example.com/h",
+		"mailto scheme":   "mailto:x@example.com",
+		"no scheme":       "//example.com/h",
+		"no host":         "http:///h",
+		"2049 characters": pad("https://example.com/", "a", 2049),
+		"2049 multi-byte": pad("https://example.com/", "例", 2049),
+	}
+	for name, u := range refused {
+		t.Run("create refuses "+name, func(t *testing.T) {
+			svc := &stubWebhooks{}
+			s := &Server{webhooks: svc}
+			w := httptest.NewRecorder()
+
+			s.CreateWebhookSubscription(w, post(`{"name":"x","url":"`+u+`"}`))
+
+			if w.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("status = %d, want 422: %s", w.Code, w.Body)
+			}
+			if code := errorCodeOf(t, w); code != string(CodeValidationFailed) {
+				t.Errorf("code = %s, want %s", code, CodeValidationFailed)
+			}
+			if field := errorParamOf(t, w, "field"); field != "url" {
+				t.Errorf("field = %q, want \"url\"", field)
+			}
+			if svc.calls != 0 {
+				t.Error("the subscription was written despite the bad url")
+			}
+		})
+	}
+	t.Run("update refuses 2049 characters", func(t *testing.T) {
+		svc := &stubWebhooks{}
+		s := &Server{webhooks: svc}
+		w := httptest.NewRecorder()
+
+		s.UpdateWebhookSubscription(w,
+			post(`{"name":"x","url":"`+pad("https://example.com/", "a", 2049)+`"}`), uuid.Must(uuid.NewV7()))
+
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("status = %d, want 422: %s", w.Code, w.Body)
+		}
+		if field := errorParamOf(t, w, "field"); field != "url" {
+			t.Errorf("field = %q, want \"url\"", field)
+		}
+		if svc.calls != 0 {
+			t.Error("the subscription was updated despite the bad url")
 		}
 	})
 }

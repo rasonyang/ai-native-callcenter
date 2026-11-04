@@ -165,7 +165,7 @@ the others.
 |---|---|---|
 | `subscription_id` | `uuid` PK | |
 | `name` | `text NOT NULL` | operator-facing label; a list of URLs is unreadable |
-| `url` | `text NOT NULL` | http or https; the handler refuses anything else |
+| `url` | `text NOT NULL` | http or https with a host, at most 2048 characters; the handler refuses anything else |
 | `filter` | `jsonb NOT NULL DEFAULT '{}'` | see §5 |
 | `auth_token` | `text NOT NULL DEFAULT ''` | the customer's own credential — see §8 |
 | `is_enabled` | `boolean NOT NULL DEFAULT true` | |
@@ -173,9 +173,10 @@ the others.
 
 `http` is accepted alongside `https` because a receiver is usually integrated against before it
 has a certificate — a staging endpoint, or one on the same host as the deployment. Every other
-scheme, and any address with no host, is refused with 422 when the subscription is written
-(`decodeSubscription`, `internal/httpapi/webhook_handlers.go`), on the same rule the filter
-follows: an endpoint that can never be reached is a write to refuse, not a silence to diagnose.
+scheme, any address with no host, and one longer than the contract's 2048 characters are refused
+with 422 when the subscription is written (`decodeSubscription`,
+`internal/httpapi/webhook_handlers.go`), on the same rule the filter follows: an endpoint that can
+never be reached is a write to refuse, not a silence to diagnose.
 
 No `event_types` column. There is one event and it is the CDR; a column offering a choice that
 does not exist would be a promise the platform cannot keep.
