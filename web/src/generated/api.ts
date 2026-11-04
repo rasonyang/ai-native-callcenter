@@ -2826,6 +2826,8 @@ export interface components {
         };
         CallbackList: {
             items: components["schemas"]["Callback"][];
+            /** @description Total rows matching the status and callId filters, regardless of limit and offset, for paging. */
+            total: number;
         };
         CompleteCallbackRequest: {
             /**

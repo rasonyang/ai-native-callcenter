@@ -26,6 +26,8 @@ export type CallbackStatus = components['schemas']['CallbackStatus']
 
 export type Callback = components['schemas']['Callback']
 
+export type CallbackList = components['schemas']['CallbackList']
+
 /** The after-call work filed against a call. */
 export type WrapUp = components['schemas']['WrapUp']
 
@@ -67,6 +69,12 @@ export interface CDRFilter {
   offset?: number
 }
 
+/** One page of a list: how many rows, and how many to skip. */
+export interface PageParams {
+  limit?: number
+  offset?: number
+}
+
 function query(params: Record<string, string | number | undefined>): string {
   const search = new URLSearchParams()
   for (const [key, value] of Object.entries(params)) {
@@ -101,8 +109,8 @@ export const ledgerApi = {
   recordingsByCall: (callId: string) =>
     request<{ items: RecordingRow[] }>(`/calls/${callId}/recordings`),
 
-  callbacks: (status?: string) =>
-    request<{ items: Callback[] }>(`/callbacks${query({ status })}`),
+  callbacks: (status?: string, page: PageParams = {}) =>
+    request<CallbackList>(`/callbacks${query({ status, ...page })}`),
 
   callbacksOfCall: (callId: string) =>
     request<{ items: Callback[] }>(`/callbacks${query({ callId })}`),
@@ -202,10 +210,15 @@ export function useCDR(callId: string) {
   })
 }
 
-export function useCallbacks(status?: string) {
+/**
+ * One page of the callback queue. Every key sits under CALLBACKS_KEY, so the
+ * event stream's invalidation reaches each page and filter on screen. Without
+ * a page the server's default applies.
+ */
+export function useCallbacks(status?: string, page: PageParams = {}) {
   return useQuery({
-    queryKey: [...CALLBACKS_KEY, status ?? 'all'],
-    queryFn: () => ledgerApi.callbacks(status),
+    queryKey: [...CALLBACKS_KEY, status ?? 'all', { limit: page.limit, offset: page.offset }],
+    queryFn: () => ledgerApi.callbacks(status, page),
   })
 }
 

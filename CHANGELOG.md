@@ -129,6 +129,15 @@ carries the one-line installer's files.
 
 ### Added
 
+- Supervisors and administrators have a callbacks screen, `/admin/callbacks`
+  under Manage next to Campaigns: the shared callback queue, read-only, with a
+  status filter (open by default), who handled each callback by name, and how
+  the last attempt went. `GET /callbacks` now answers a `total`, the rows
+  matching the `status` and `callId` filters whatever `limit` and `offset` say
+  (additive). Both callbacks screens page with 50 rows a page, so a queue past
+  50 is no longer cut off in the agent's view. (#469; thanks
+  @siyingchao007-maker)
+
 - The CDR webhook is in the API contract. `docs/openapi.json` declares a
   top-level `webhooks.cdrDelivery` (`POST`): the `WebhookCdrDelivery` body
   (`deliveryId`, `subscriptionId`, `revision`, `attempt`, `cdr`), the

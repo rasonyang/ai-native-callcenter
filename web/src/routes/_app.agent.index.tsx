@@ -581,7 +581,7 @@ function CallbacksCard() {
       title={t('nav.callbacks')}
       aside={
         <>
-          <span className="tabular">{t('agent.openCount', { count: items.length })}</span>
+          <span className="tabular">{t('agent.openCount', { count: data?.total ?? items.length })}</span>
           <Link to="/agent/callbacks" className="hover:text-primary">
             {t('common.viewAll')}
           </Link>

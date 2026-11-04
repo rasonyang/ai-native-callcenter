@@ -538,7 +538,12 @@
       "FAILED": "失败",
       "ABANDONED": "接通前挂断",
       "CANCELLED": "已取消"
-    }
+    },
+    "teamHint": "机器人承诺的全部回访：谁认领了、最近一次回拨结果如何。",
+    "handledBy": "处理人",
+    "lastAttemptHeading": "最近回拨",
+    "unknownUser": "未知用户",
+    "teamNote": "管理页面仅显示任务详情。需要回拨时，请由坐席在自己的回访任务页面认领并处理。"
   },
   "reports": {
     "hint": "基于已结束通话的统计。",

@@ -4,7 +4,9 @@ import { useState, type ReactNode } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Ban, Check, Hand, PhoneOutgoing, Undo2 } from 'lucide-react'
 
+import { CALLBACK_FILTERS, CALLBACK_PAGE_SIZE, LastAttempt, StatusPill } from '@/components/callback-parts'
 import { PageHeader } from '@/components/page-header'
+import { Pager } from '@/components/pager'
 import { Select } from '@/components/record-dialog'
 import { CellText, DataTable, TBody, THead, TableMessage, Td, Th, Tr } from '@/components/table'
 import { Button } from '@/components/ui/button'
@@ -13,7 +15,7 @@ import { describeError } from '@/lib/errors'
 import { requireRole } from '@/lib/guards'
 import { useSession } from '@/lib/session'
 import {
-  useCallbackMutations, useCallbacks, type Callback, type CallbackStatus,
+  useCallbackMutations, useCallbacks, type Callback,
 } from '@/lib/ledger'
 
 /**
@@ -26,13 +28,15 @@ export const Route = createFileRoute('/_app/agent/callbacks')({
   component: CallbacksPage,
 })
 
-const FILTERS: Array<CallbackStatus | ''> = ['', 'OPEN', 'CLAIMED', 'DONE', 'DISMISSED']
-
 function CallbacksPage() {
   const { t, i18n } = useTranslation()
   const { data: user } = useSession()
   const [filter, setFilter] = useState('')
-  const { data, isPending, isError, error } = useCallbacks(filter || undefined)
+  const [page, setPage] = useState(0)
+  const { data, isPending, isError, error } = useCallbacks(filter || undefined, {
+    limit: CALLBACK_PAGE_SIZE,
+    offset: page * CALLBACK_PAGE_SIZE,
+  })
   const { claim, release, complete } = useCallbackMutations()
   // Click-to-dial from the row: the agent's own phone rings first, then the
   // customer. The callback stays CLAIMED — whether the call kept the promise
@@ -54,8 +58,11 @@ function CallbacksPage() {
         actions={
           <Select
             value={filter}
-            onChange={setFilter}
-            options={FILTERS.map((s) => ({
+            onChange={(next) => {
+              setFilter(next)
+              setPage(0)
+            }}
+            options={CALLBACK_FILTERS.map((s) => ({
               value: s,
               label: s === '' ? t('callbacks.all') : t(`callbacks.statuses.${s}`),
             }))}
@@ -95,7 +102,7 @@ function CallbacksPage() {
                 </CellText>
               </Td>
               <Td>
-                <StatusPill callback={row} isMine={row.handledBy === user?.userId} />
+                <StatusPill status={row.status} isMine={row.handledBy === user?.userId} />
                 <LastAttempt callback={row} format={timeFormat} />
               </Td>
               <Td align="right">
@@ -113,50 +120,8 @@ function CallbacksPage() {
           ))}
         </TBody>
       </DataTable>
+      <Pager page={page} pageSize={CALLBACK_PAGE_SIZE} total={data?.total ?? 0} onPage={setPage} />
     </>
-  )
-}
-
-const STATUS_COLOR: Record<CallbackStatus, string> = {
-  OPEN: 'var(--state-ringing)',
-  CLAIMED: 'var(--state-oncall)',
-  DONE: 'var(--state-available)',
-  DISMISSED: 'var(--state-offline)',
-}
-
-/**
- * What happened the last time somebody rang from this row. A dial is not a
- * kept promise — no answer, busy, "call me later" all leave the callback
- * open — so the outcome sits under the status for the agent to read before
- * deciding, rather than closing the row for them.
- */
-function LastAttempt({ callback, format }: { callback: Callback; format: Intl.DateTimeFormat }) {
-  const { t } = useTranslation()
-  if (!callback.lastAttemptAt) return null
-  const when = format.format(new Date(callback.lastAttemptAt))
-  const outcome = callback.lastAttemptStatus
-    ? t(`callbacks.attempt.${callback.lastAttemptStatus}`, { defaultValue: callback.lastAttemptStatus })
-    : t('callbacks.attempt.IN_PROGRESS')
-  return (
-    <span className="mt-0.5 block text-xs text-muted-foreground">
-      {t('callbacks.lastAttempt', { when, outcome })}
-    </span>
-  )
-}
-
-function StatusPill({ callback, isMine }: { callback: Callback; isMine: boolean }) {
-  const { t } = useTranslation()
-  return (
-    <span className="flex items-center gap-1.5 text-xs">
-      <span
-        className="size-2 rounded-full"
-        style={{ backgroundColor: STATUS_COLOR[callback.status] }}
-      />
-      {t(`callbacks.statuses.${callback.status}`)}
-      {callback.status === 'CLAIMED' && isMine && (
-        <span className="text-muted-foreground">{t('callbacks.byYou')}</span>
-      )}
-    </span>
   )
 }
 

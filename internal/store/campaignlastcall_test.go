@@ -109,7 +109,7 @@ func TestAnUnknownAttemptThatRecordedALeadEndsItsContact(t *testing.T) {
 	}
 	callbacksOf := func(t *testing.T, callID uuid.UUID) []Callback {
 		t.Helper()
-		rows, err := e.ledger.ListCallbacks(ctx, "", &callID, 50, 0)
+		rows, _, err := e.ledger.ListCallbacks(ctx, "", &callID, 50, 0)
 		if err != nil {
 			t.Fatal(err)
 		}

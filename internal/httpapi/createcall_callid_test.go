@@ -169,7 +169,7 @@ func claimedCallback(t *testing.T, st *store.Store) (store.Callback, AuthContext
 
 func lastAttempt(t *testing.T, st *store.Store, id uuid.UUID) *uuid.UUID {
 	t.Helper()
-	cbs, err := st.Ledger().ListCallbacks(context.Background(), "", nil, 100, 0)
+	cbs, _, err := st.Ledger().ListCallbacks(context.Background(), "", nil, 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
