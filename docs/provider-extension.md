@@ -81,9 +81,9 @@ the first response of a session that declares a tool whose `parameters` has no
 top-level `required` (an empty list when the flow names none). In owner-placed
 calls, flash also failed to read a tool result on the second and later lookups
 of one call, repeating its earlier "let me check" filler instead (#466; plus read
-every result). Plus stays selectable with
-`AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`, the better fit for
-lookup-heavy flows until #466 is fixed.
+every result); the platform now tells the model to say nothing in a turn that
+calls an HTTP tool (qwen-findings W-Q12). Plus stays selectable with
+`AICC_PROVIDER_MODEL=qwen-audio-3.1-realtime-plus`.
 
 The last five are the interesting ones. They are not configuration in any
 meaningful sense — they are findings. Each was written down after a live call

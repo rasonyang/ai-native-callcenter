@@ -1674,3 +1674,49 @@ There were 9 calls per model on the same build (`591b18a`), with the same script
 The failures shared by both models are platform defects (#465, #403). The flash-only one is #466.
 
 Owner decision, 2026-11-03: flash stays the default, for cost. #466 tracks the lookup weakness, and a lookup-heavy deployment can stay on plus with `AICC_PROVIDER_MODEL`.
+
+## W-Q12: a later lookup's result turn repeats the tool-call turn's filler (2026-11-04)
+
+**W-Q12 — on `qwen-audio-3.1-realtime-flash`, the filler said in the turn that calls an HTTP tool ("好的，我查一下。") was said again as the result turn of the call's 2nd and later lookups, and the result was not read.** Found on the owner-placed A/B call 9 of 2026-11-03 (`mobile_support` on 95012, three lookups: not found, then two valid numbers; plus read all three results). Issue #466.
+
+Two facts the issue did not state: the seed flow `mobile_support` itself asked for the filler in its repair-status instruction ("最多说一句'好的,我查一下'"), and the platform already has a wait line (`global.toolWaitLine`, said by `SpeakText` when an HTTP tool runs past `ToolWaitLineAfter`, 1 s), which also stays in the conversation as an assistant turn. The result turn itself is a bare `response.create` (`Realtime.SendToolResult`).
+
+**Owner's call (2026-11-04):** probe first, then pick by the numbers. Decision rule: B1 (a built-in rule: say nothing in a turn that calls an HTTP tool) if it reaches 0 of 10 repeats; otherwise A (a per-response direction on the result turn); C (detect a repeat and ask once more) only if neither does. Spent: 68 qwen sessions.
+
+**Method.** `TestLiveQwenRepeatLookup` (`internal/provider/live_repeat_lookup_test.go`): one session on `mobile_support` (zh) as the orchestrator drives a call, rendered by `flow.Runtime` against the mock backend (`testdata/repeat_lookup.json`). Three lookups: RMA9999 (found=0), RMA1002 (moves to `repair_report`), RMA1001 (moves to `repair_report_multi`). A result turn passes when it carries the result's key field and does not repeat the previous bot text. `-count=1`, one session after another.
+
+### Reproducing the defect took three ingredients
+
+| Harness | Flash sessions | Sessions with a repeat |
+|---|---|---|
+| TTS caller clips, result sent 300 ms after the call, caller waits for playback | 10 | 0 (29/29 result turns read) |
+| Same, but the caller speaks over the previous answer's tail (client sends `conversation.item.truncate`) | 10 | 0 (30/30) |
+| The owner's own utterances cut from the flash call's recording (kept locally, not committed), barge-in, 300 ms | 5 | 0 by text; 1 suspect (a 1.2 s result turn with no transcript, then the found=0 answer one turn late) |
+| Owner clips, barge-in, **result sent 3 ms after the call** (what the dev mock backend took on the calls; the filler was still being made) | 5 | **1** (lookup 2's result turn was `好的，我查一下。`) |
+
+The arms below all use that last harness; 3 ms is the test's default.
+
+### Arms (owner clips, barge-in, 3 ms; 10 sessions each)
+
+| Arm | Sessions with a repeat | Result turns read | found=0 asks to check | Filler said, no tool call | Tool-call turns that said the filler |
+|---|---|---|---|---|---|
+| Baseline, flash | **1 / 10** | 27 / 28 | 10 / 10 | 2 | 25 / 28 |
+| Baseline, plus | **0 / 10** | 30 / 30 | 10 / 10 | 0 | 20 / 30 |
+| B1, flash (built-in "say nothing in a repair_status turn" rule, seed filler invitation removed; lookup 2 always and lookup 1 in even sessions take 2 s) | **0 / 10** | 30 / 30 | 10 / 10 | 0 | **12 / 30** |
+| A, flash (the result turn's `response.create` carries the standing instructions plus "answer from the result now, do not repeat what you said") | **0 / 10** | 29 / 29 | 10 / 10 | 1 | 27 / 29 |
+
+Notes:
+
+- Two result turns in baseline flash and one in B1 were first judged failures. They said "没找到" and "查询不到", which the not-found pattern lacked. The pattern was widened, and the counts above include those turns as passes.
+- **B1:** the platform wait line was said 13 times (slow lookups whose tool-call turn was silent) and was never copied into the result turn. But the rule did not stop the filler: flash still said "好的，我查一下。" in 12 of 30 tool-call turns, against 25 of 28 in baseline.
+- **A:** the override was accepted, both directly and as the owed turn released after the tool-call response. The phase's rules held: on found=0 the bot asked the caller to check the number in 10 of 10.
+- "Filler said, no tool call" is the #463 shape (the turn after the caller's number says `好的，我查一下。` and calls nothing). It is counted apart from repeats and is not part of this issue.
+- **Caveat:** the baseline rate in this harness is 1 in 10 sessions, far below the owner's call (2 of 2 later lookups). A 0/10 arm is weak evidence: with no effect at all, 0 of 10 would still come up about a third of the time. Neither B1 nor A is separated from the other by these counts.
+
+### Decision
+
+B1 shipped, by the decision rule and because it is the smallest change and helps every flow. `flow.Runtime` adds a platform rule (`lookupSilenceRule`) naming the HTTP tools the phase allows: the reply that calls one only calls it and says nothing, and the result is told directly. The action-claim rule's example no longer endorses the filler with the call ("if you are not calling the lookup tool, do not say ..."). The rule wins over a flow's own instruction that asks for a filler (owner, 2026-11-04); the `mobile_support` seed flow no longer asks. The shipped text is byte for byte what the B1 arm sent. B1 does not remove the filler (still said in 12 of 30 tool-call turns). No result turn under it repeated anything, 0 of 10 sessions against 1 of 10 for baseline, which is weak evidence at that rate.
+
+The A arm (a per-response direction on the result turn) also measured 0 of 10 and was not shipped: it needs a profile trait and a per-response frame, and it did not stop the filler either (27 of 29 tool-call turns said it).
+
+**Fix verified on plus** (shipped rendering; owner clips, barge-in, 3 ms; 10 sessions): no repeat in 10 of 10 sessions, 30 of 30 result turns read, found=0 asks to check 10 of 10, no filler in any of the 30 tool-call turns (20 of 30 before the fix), and the wait line said on all 15 slow lookups and never repeated as the result turn. Flash on the shipped rendering is the B1 arm above: the zh text is byte for byte what that arm sent.
