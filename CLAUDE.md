@@ -2,6 +2,30 @@
 
 `CLAUDE.md` (Claude Code) and `AGENTS.md` (Codex) carry the same text; change them together.
 
+## This host: the maintainer server
+
+Host facts, not product policy. Everything below the next heading is the shared upstream text; this section is the one part that describes this machine, and it is the part to update when the machine changes.
+
+This server exists to **maintain, build and release** this repository: check it out, build and test it, run the container stack, cut releases. It is not a production switch and holds no customer data.
+
+- **The checkout is `/data/ai-native-callcenter`**, and it is the only working copy here. `origin` is `git@github.com:rasonyang/ai-native-callcenter.git`; every change is committed and pushed from this host, never left uncommitted overnight. GitHub is reached over SSH on `ssh.github.com:443` (`/root/.ssh/config`, because port 22 is firewalled) with the write-enabled deploy key `$(hostname)-maintainer`; `gh` is logged in as `rasonyang` for the API (PRs, issues, releases) and `gh auth setup-git` is in place as the HTTPS fallback.
+- **Every byte of state goes on `/data`** (196 GB). `/` is the 40 GB system disk and holds nothing but the OS and the toolchains; a stray `~/.cache`, a `/tmp` build or `/var/lib/docker` fills it and breaks the host. `/data/tmp` is `TMPDIR`, so ordinary scratch files already land in the right place — keep it that way instead of writing `/tmp/...` explicitly.
+
+| path | what lives there |
+| --- | --- |
+| `/data/ai-native-callcenter` | this checkout; `logs/` (the app's `AICC_LOG_DIR` default), `web/node_modules/`, `web/dist/` are inside it, hence on `/data` |
+| `/data/bin` | binaries built here (`/data/bin/aicc`); `/tmp/aicc` is a symlink to it, so `deploy/dev/restart.sh`'s `go build -o /tmp/aicc` writes to the data disk and its `pkill -f /tmp/aicc` still matches |
+| `/data/cache` | `go/` (GOPATH + module cache), `go-build/`, `npm/`, `ms-playwright/`, `docker/` (`DOCKER_CONFIG`) |
+| `/data/docker` | Docker data-root: images and every compose volume (`postgres-data`, `recordings`, `fs-db`, `fs-log`, `app-logs`) |
+| `/data/logs` | test runs and anything long-running started by hand (`nohup … > /data/logs/x.log`) |
+| `/data/recordings` | `AICC_RECORDING_DIR` spool for a native (non-compose) run |
+| `/data/tmp` | `TMPDIR` / `GOTMPDIR` |
+
+- **Environment**: `/etc/profile.d/00-aicc-data.sh`, sourced by login shells and from `/root/.bashrc`, exports the paths above and the mirrors this network needs — `GOPROXY=https://goproxy.cn`, `GOSUMDB=sum.golang.google.cn`, npm `registry.npmmirror.com`, Docker `registry-mirrors: docker.m.daocloud.io, docker.1panel.live` (`/etc/docker/daemon.json`). `proxy.golang.org`, `registry-1.docker.io` and GitHub release downloads are unreachable from here: when a fetch fails, add a reachable mirror, never remove the one that works.
+- **Toolchain on `PATH`**: Go 1.27.3 (`/usr/local/go`), Node 24.9.0 + npm 11.6.0 (`/usr/local/node24`, which `web/package.json`'s `devEngines` requires — the distro's Node 22 fails `npm ci`), Docker 29.9.3 + compose v5.7.0 (static binaries in `/usr/local/bin`, unit `docker.service`).
+- **Running here**: `make dev-up` brings up PostgreSQL 18 and SeaweedFS; their volumes are already on `/data` because the Docker data-root is. Database tests need `AICC_TEST_DATABASE_URL='postgres://aicc:aicc@127.0.0.1:5432/aicc?sslmode=disable'` (that value is the dev stack's). Do not set `AICC_LOG_DIR` globally: `deploy/dev/restart.sh` looks for the newest `logs/aicc-*.log` relative to the checkout, which is on `/data` anyway.
+- **A push is the end of a piece of work**: `git push` from here, or a PR opened with `gh pr create` when the change wants review. A dirty tree that works only on this host is not a deliverable.
+
 ## What this is
 
 An open-source AI-native call center: one Go binary (chi/pgx/sqlc/slog/OTel) serving a REST API, an SSE stream and an embedded React SPA. It drives FreeSWITCH over ESL for human agents (WebRTC agents on the web-sip-phone Chrome extension, queues on mod_callcenter) and terminates its own SIP/RTP for AI calls. Single tenant: no `tenant_id` anywhere. Apache-2.0: new Go, SQL, Lua and script files start with an `SPDX-License-Identifier: Apache-2.0` line.
