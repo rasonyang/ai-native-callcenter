@@ -6,7 +6,7 @@
 
 Host facts, not product policy. Everything below the next heading is the shared upstream text; this section is the one part that describes this machine, and it is the part to update when the machine changes.
 
-This server exists to **maintain, build and release** this repository: check it out, build and test it, run the container stack, cut releases. It is not a production switch and holds no customer data.
+This server exists to **maintain, build and release** this repository: check it out, build and test it, run the container stack, cut releases. It is not a production switch and holds no customer data. The machine-wide rules it shares with every other checkout here (the data disk, the mirrors, the toolchain, the Docker data-root) are in `/root/AGENTS.md`; that file wins on machine facts, this one on repository facts.
 
 - **The checkout is `/data/ai-native-callcenter`**, and it is the only working copy here. `origin` is `git@github.com:rasonyang/ai-native-callcenter.git`; every change is committed and pushed from this host, never left uncommitted overnight. GitHub is reached over SSH on `ssh.github.com:443` (`/root/.ssh/config`, because port 22 is firewalled) with the write-enabled deploy key `$(hostname)-maintainer`; `gh` is logged in as `rasonyang` for the API (PRs, issues, releases) and `gh auth setup-git` is in place as the HTTPS fallback.
 - **Every byte of state goes on `/data`** (196 GB). `/` is the 40 GB system disk and holds nothing but the OS and the toolchains; a stray `~/.cache`, a `/tmp` build or `/var/lib/docker` fills it and breaks the host. `/data/tmp` is `TMPDIR`, so ordinary scratch files already land in the right place — keep it that way instead of writing `/tmp/...` explicitly.
