@@ -693,7 +693,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				o.closeToolBatch(&batch, session, runtime, log)
 
 			case EventTypeBargeIn:
-				actions.onBargeIn(event.Unplayed)
+				actions.onBargeIn(event.Unplayed, event.Played)
 
 			case EventTypePlaybackDone:
 				// A limit waiting for the floor goes first, ahead of the

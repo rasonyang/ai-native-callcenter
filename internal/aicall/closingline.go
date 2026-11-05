@@ -4,6 +4,7 @@ package aicall
 
 import (
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -86,4 +87,87 @@ func commonSubsequence(a, b []string) int {
 		}
 	}
 	return row[len(b)]
+}
+
+// finalSentenceSlack widens the final sentence on the early side when a cut is
+// dated (cutInFinalSentence). The share of the audio a sentence takes is
+// estimated from its share of the text, which is off by a few hundred
+// milliseconds on a line spoken at a different pace in different places, and
+// the pause at a sentence boundary belongs to neither sentence. A caller whose
+// speech was detected 400 ms before the final sentence began has heard the line
+// for every purpose that matters here. Kept under 500 ms on the owner's
+// instruction: any more and a cut in the middle of the last-but-one sentence
+// would count as said.
+const finalSentenceSlack = 400 * time.Millisecond
+
+// cutInFinalSentence reports whether a caller who spoke over the closing line,
+// having heard played of it with unplayed still to come, cut in on its final
+// sentence, and so heard all of it but a goodbye. finalSentence is the
+// estimated audio length of that sentence: (played + unplayed) times the
+// sentence's share of the line's letters and digits (Han characters count as
+// letters). ok is true when unplayed is no more than finalSentence plus
+// finalSentenceSlack.
+//
+// The sentence ends at the last terminator (. ! ? and their full-width forms)
+// before the line's trailing terminators and closing quotes; a '.' between two
+// ASCII digits ("3.5") is not one. A line with no such terminator is one
+// sentence, and a cut anywhere in it is a cut before its final sentence (ok is
+// false): an early cut on a one-sentence line still gets the line said. A
+// negative played (not known) or a line with nothing to weigh never applies.
+func cutInFinalSentence(line string, played, unplayed time.Duration) (finalSentence time.Duration, ok bool) {
+	if played < 0 || unplayed < 0 {
+		return 0, false
+	}
+	runes := []rune(strings.TrimSpace(line))
+	end := len(runes)
+	for end > 0 && (isSentenceEnd(runes, end-1) || isClosingMark(runes[end-1]) || unicode.IsSpace(runes[end-1])) {
+		end--
+	}
+	runes = runes[:end]
+	split := -1
+	for i := range runes {
+		if isSentenceEnd(runes, i) {
+			split = i
+		}
+	}
+	if split < 0 {
+		return 0, false
+	}
+	total, last := weigh(runes), weigh(runes[split+1:])
+	if total == 0 || last == 0 {
+		return 0, false
+	}
+	finalSentence = time.Duration(float64(played+unplayed) * float64(last) / float64(total))
+	return finalSentence, unplayed <= finalSentence+finalSentenceSlack
+}
+
+// isSentenceEnd reports whether runes[i] ends a sentence. A '.' with an ASCII
+// digit on both sides is a decimal point.
+func isSentenceEnd(runes []rune, i int) bool {
+	switch runes[i] {
+	case '。', '！', '？', '!', '?':
+		return true
+	case '.':
+		isDigit := func(r rune) bool { return r >= '0' && r <= '9' }
+		return !(i > 0 && i+1 < len(runes) && isDigit(runes[i-1]) && isDigit(runes[i+1]))
+	}
+	return false
+}
+
+// isClosingMark reports whether r is a quote or bracket that closes a sentence
+// after its terminator.
+func isClosingMark(r rune) bool {
+	return strings.ContainsRune("\"'”’」』）)»", r)
+}
+
+// weigh counts the letters and digits in runes, the stand-in for how long they
+// take to say.
+func weigh(runes []rune) int {
+	n := 0
+	for _, r := range runes {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			n++
+		}
+	}
+	return n
 }

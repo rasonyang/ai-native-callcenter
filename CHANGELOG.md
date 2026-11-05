@@ -36,6 +36,18 @@ carries the one-line installer's files.
   back; the wait line still covers a slow lookup. A flow's own instruction
   should not ask for a filler in a lookup turn, and the platform rule wins if it
   does. The `mobile_support` seed flow no longer asks for one. (#466)
+- A closing line the caller talks over is no longer said again and again. A
+  cut inside the line's final sentence now counts as the line said (the
+  sentence's share of the audio is estimated from its share of the text, with
+  400 ms of slack), so a caller who declines over the goodbye hears a short
+  goodbye and not the whole line a second time. From the second interruption on
+  the line is never asked for again and the call's cap stops moving, so a caller
+  saying "mm-hm" over the start of the line cannot stretch the call: it ends on
+  the next answer or at the cap already running. A caller who interrupts twice
+  may not hear all of the line. When the model answers such an interruption
+  aloud and calls `hangup` in the same turn, that answer is the goodbye: the
+  turn the call's result brings is not played, and the call ends once the
+  goodbye has been heard. (#465)
 - The agent's live transcript follows the conversation again: it opens at the
   latest line, whether the call is live or has ended, and keeps each new or
   growing line in view until the reader scrolls up on purpose. "Jump to latest"
