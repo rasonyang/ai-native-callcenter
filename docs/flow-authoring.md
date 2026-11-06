@@ -182,7 +182,7 @@ The mock backend's `POST /api/kb/secure-search` is a slow, authenticated backend
 
 A transition has `on`, `tool`, `condition`, `target` and `priority`.
 
-- `on` is `TOOL_RESULT` (a tool ran, whatever its outcome) or `NO_INPUT` (the caller said nothing). Empty matches any event. Nothing else is an event: there is no event for what the caller said, and none for a keypress (see 6).
+- `on` is `TOOL_RESULT` (a tool ran, whatever its outcome) or `NO_INPUT` (the caller said nothing; a caller turn the engine dropped is not a silence when it was transcribed with words: the model is asked to answer it and no rule fires). Empty matches any event. Nothing else is an event: there is no event for what the caller said, and none for a keypress (see 6).
 - `tool` narrows a `TOOL_RESULT` rule to one tool. A `NO_INPUT` rule that names a tool is refused at load, because a silence carries no tool.
 - `target` must be an existing phase.
 - Rules are tried in ascending `priority`, equal priorities in declared order, the phase's own rules before the flow-wide ones. The first whose event and condition both hold wins. If none holds, the call stays in the phase and the model tries again, which reads to the caller as being asked again, not as an error.
@@ -573,9 +573,9 @@ A model-spoken goodbye followed by `hangup` is unreliable ("say the closing line
 
 The engine cannot see a caller's decline, only tool results and silence, so three guards back the rule up. All go to `global.closingTarget`, a terminal phase with its own `announce`:
 
-- **Silence.** In a phase where no authored rule can fire on `NO_INPUT`, three consecutive silences move the call to `closingTarget`. A rule you wrote that can fire on `NO_INPUT` in that phase, however it is conditioned, switches this default off for the phase.
+- **Silence.** In a phase where no authored rule can fire on `NO_INPUT`, three consecutive silences move the call to `closingTarget`. A rule you wrote that can fire on `NO_INPUT` in that phase, however it is conditioned, switches this default off for the phase. A caller turn the engine dropped that was transcribed with words is not a silence and is not counted (issue [#448](https://github.com/rasonyang/ai-native-callcenter/issues/448)).
 - **Tool-less replies.** `maxTurnsWithoutTool` bounds replies in one phase that follow the caller speaking and make no tool call. When the count exceeds it, the call moves to `closingTarget` after the caller has heard the reply. It resets on a tool call and on any phase change. Set it above the longest tool-less stretch any phase is meant to hold; the seeded flows use 10.
-- **A goodbye with no hangup.** If the model said goodbye in words, made no tool call, and the caller then goes quiet, the dead-air path moves the call to `closingTarget` instead of asking the model anything (issue [#147](https://github.com/rasonyang/ai-native-callcenter/issues/147)). It does not apply to a campaign call, a terminal phase, an armed ending or a flow with no `closingTarget`.
+- **A goodbye with no hangup.** If the model said goodbye in words, made no tool call, and the caller then goes quiet, the dead-air path moves the call to `closingTarget` instead of asking the model anything (issue [#147](https://github.com/rasonyang/ai-native-callcenter/issues/147)). It does not apply to a campaign call, a terminal phase, an armed ending or a flow with no `closingTarget`, nor when the caller spoke after the goodbye and the engine dropped their turn with words in it (the model answers them instead, issue [#448](https://github.com/rasonyang/ai-native-callcenter/issues/448)).
 
 These are backstops for a model that ignores the closing instruction, not the mechanism that normally ends a call. `maxTurns` with `fallbackTarget` is the equivalent backstop for a model that calls tools in a loop.
 
