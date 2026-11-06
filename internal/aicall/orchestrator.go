@@ -667,7 +667,14 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					enforceLimit(limitCallerSilent)
 					continue
 				}
-				o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, log)
+				// A caller turn the engine dropped, with words in it, is
+				// not silence (#448); without words it stays one.
+				callerWords := ""
+				if event.IsCallerUnanswered {
+					callerWords = event.Text
+				}
+				o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims,
+					callerWords, log)
 				claims.consumeFarewell()
 
 			case EventTypeTurnDone:
@@ -801,7 +808,7 @@ func (o *Orchestrator) reAskClaim(c claim, turn int, claims *claimWatch, session
 		session.isHoldingTheFloor() {
 		return
 	}
-	o.sendClaimCue(c, turn, claimCueOnPlayback, false, claims, session, runtime, actions, log)
+	o.sendClaimCue(c, turn, claimCueOnPlayback, false, "", claims, session, runtime, actions, log)
 }
 
 // sendClaimCue sends the cue for a claim and records that the next finished
@@ -810,11 +817,11 @@ func (o *Orchestrator) reAskClaim(c claim, turn int, claims *claimWatch, session
 // nothing of the kind: the session arms the dead-air watch after every
 // PLAYBACK_DONE itself, and a stray re-arm request would outlive that cycle.
 func (o *Orchestrator) sendClaimCue(c claim, turn int, trigger string, isCallerSilent bool,
-	claims *claimWatch, session *Session, runtime *flow.Runtime, actions *callActions,
+	callerWords string, claims *claimWatch, session *Session, runtime *flow.Runtime, actions *callActions,
 	log *slog.Logger) {
 
 	tools := claimTools(runtime, c.kind)
-	cue := claimCue(runtime.Engine().Lang(), c, tools, isCallerSilent)
+	cue := claimCue(runtime.Engine().Lang(), c, tools, isCallerSilent, callerWords)
 	if err := session.SendCue(cue); err != nil {
 		log.Warn("could not re-ask an unbacked claim", "claim", c.kind, "turn", turn,
 			"trigger", trigger, "error", err)
@@ -1194,6 +1201,22 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 // handleDeadAir asks the model to re-engage a silent caller, or moves the flow
 // on when its rules treat silence as an answer.
 //
+// The order, after the event loop has let a settling handover and a time limit
+// waiting for the floor go first:
+//
+//  1. A caller turn the engine dropped, with words in it (callerWords, #448),
+//     beats the flow's NO_INPUT rules, the unhung-farewell backstop and the
+//     silent-caller cue: that caller was not silent. The flow is told nothing
+//     (no rule, no default count), and the model is asked to answer them. A
+//     standing unbacked claim (#438) and such a turn get one merged cue (owner
+//     decision, 2026-11-04), the claim's own bookkeeping unchanged. Speech
+//     without a transcript cannot be told from echo or line noise, so it is
+//     not words and falls through as a silence.
+//  2. The flow's NO_INPUT rules.
+//  3. The unhung-farewell backstop.
+//  4. A standing unbacked claim's cue.
+//  5. The silent-caller cue.
+//
 // isFarewellUnhung says the bot's last finished turn said goodbye in words and
 // made no tool call (claimWatch). That conversation is over and nobody ended
 // it, and asking the model anything makes it re-open a call it closed (#147:
@@ -1206,7 +1229,13 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 // lookup, transfer or message the bot promised and never made (#438) gets the
 // claim cue in place of the generic one, which would ask for the promise again.
 func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
-	actions *callActions, isFarewellUnhung bool, claims *claimWatch, log *slog.Logger) {
+	actions *callActions, isFarewellUnhung bool, claims *claimWatch, callerWords string,
+	log *slog.Logger) {
+
+	if callerWords != "" {
+		o.answerDroppedTurn(callerWords, session, runtime, actions, claims, log)
+		return
+	}
 
 	moved := runtime.OnNoInput()
 	// A move that carried words of its own has already asked for the next
@@ -1237,7 +1266,7 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 	// model has defined as that promise: the cue names the tool instead. Not
 	// when the flow has just moved to a closing phase, whose goodbye is next.
 	if c := claims.standingClaim(); c != nil && !actions.isArmed() && !(moved != "" && runtime.Engine().IsTerminal()) {
-		o.sendClaimCue(*c, claims.standingTurn, claimCueOnNoInput, true, claims, session,
+		o.sendClaimCue(*c, claims.standingTurn, claimCueOnNoInput, true, "", claims, session,
 			runtime, actions, log)
 		return
 	}
@@ -1264,6 +1293,42 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 		// the silence again: the count would stay here and neither the
 		// flow's NO_INPUT rule nor the closing target could ever fire (#228).
 		// An armed ending has its own cap and needs no watch.
+		if !actions.isArmed() {
+			session.RewatchDeadAir()
+		}
+	}
+}
+
+// answerDroppedTurn handles dead air that follows a caller turn the engine
+// dropped and that was transcribed with words (#448). The flow is not told of a
+// silence: runtime.OnNoInput is not called, so no NO_INPUT rule and no
+// closingTarget default fire and noInput.count does not move. The unhung
+// farewell backstop does not run either: a caller who spoke after the goodbye
+// was not silent (owner decision 3).
+//
+// With a standing unbacked claim the claim cue goes out merged with the
+// caller's words, through sendClaimCue so its bookkeeping is unchanged. Without
+// one the model gets the answer cue. The words are never logged: transcripts
+// belong in the transcript.
+func (o *Orchestrator) answerDroppedTurn(callerWords string, session *Session,
+	runtime *flow.Runtime, actions *callActions, claims *claimWatch, log *slog.Logger) {
+
+	c := claims.standingClaim()
+	isClaimStanding := c != nil && !actions.isArmed()
+	log.Info("dead air after a caller turn the engine never answered; asking the bot to answer it",
+		"isClaimStanding", isClaimStanding)
+	if isClaimStanding {
+		o.sendClaimCue(*c, claims.standingTurn, claimCueOnNoInput, true, callerWords, claims,
+			session, runtime, actions, log)
+		return
+	}
+	cue := "(The caller spoke and got no reply. Answer what they last said; " +
+		"if you did not catch it, briefly ask them to repeat it.)"
+	if runtime.Engine().Lang() == flow.LangZH {
+		cue = "（来电者说了话，但没有得到回复。请回答对方刚才说的话；如果你没有听清，请简短地请对方再说一遍。）"
+	}
+	if err := session.SendCue(cue); err != nil {
+		log.Warn("could not ask the bot to answer a caller", "error", err)
 		if !actions.isArmed() {
 			session.RewatchDeadAir()
 		}

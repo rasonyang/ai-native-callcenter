@@ -72,9 +72,18 @@ type Event struct {
 	// in is not the turn its closing line plays in.
 	Turn int
 
-	// Text is transcript text, a digit, or a failure message.
+	// Text is transcript text, a digit, or a failure message. On a NO_INPUT
+	// with IsCallerUnanswered it is the caller's last final transcript with
+	// words since a response last started, empty when the engine transcribed
+	// nothing.
 	Text    string
 	IsFinal bool
+
+	// IsCallerUnanswered is set on a NO_INPUT from the same decision that logs
+	// "caller turn went unanswered reason=NO_INPUT": a turn measurement was
+	// open and no response started since speech_stopped. The caller spoke and
+	// the engine dropped the turn; Text then carries what was transcribed.
+	IsCallerUnanswered bool
 
 	ToolCallID string
 	ToolName   string
@@ -592,13 +601,17 @@ func (s *Session) sendCue(text string) error {
 // stepIn closes an open measurement the engine has not answered as unanswered:
 // the application is about to speak or prompt, and the reply that follows is
 // its own, not an answer to the caller.
-func (s *Session) stepIn(reason string) {
+//
+// isUnanswered says a measurement was closed, and words are then the caller's
+// last final transcript of that turn (empty when none).
+func (s *Session) stepIn(reason string) (words string, isUnanswered bool) {
 	s.mu.Lock()
-	waitMs, ok := s.timer.onSteppedIn()
+	waitMs, words, ok := s.timer.onSteppedIn()
 	s.mu.Unlock()
 	if ok {
 		recordTurnUnanswered(s.log, s.providerName, waitMs, reason)
 	}
+	return words, ok
 }
 
 // askedForATurn records that the model owes a turn which has not started: a
@@ -995,6 +1008,11 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside})
 
 	case provider.EventTypeInputTranscript:
+		if event.IsFinal {
+			s.mu.Lock()
+			s.timer.onCallerWords(event.Text)
+			s.mu.Unlock()
+		}
 		s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: event.IsFinal})
 
 	case provider.EventTypeOutputTranscript:
@@ -1567,8 +1585,8 @@ func (s *Session) awaitCallerOrDeadAir(generation uint64) (playbackMarker, bool,
 		s.log.Info("dead air", "afterMs", timeout.Milliseconds())
 		// The application is about to prompt a caller whose last turn the
 		// engine never answered: that wait is not latency.
-		s.stepIn(turnUnansweredNoInput)
-		s.emit(Event{Type: EventTypeNoInput})
+		words, isUnanswered := s.stepIn(turnUnansweredNoInput)
+		s.emit(Event{Type: EventTypeNoInput, IsCallerUnanswered: isUnanswered, Text: words})
 		return playbackMarker{}, false, true
 	}
 	return playbackMarker{}, false, false

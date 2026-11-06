@@ -20,6 +20,16 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A caller turn the engine dropped is no longer reported as silence when the
+  caller said something. When the dead-air watch fires after a turn the engine
+  never answered and the caller's speech was transcribed with words, the model
+  is now asked to answer what the caller last said, instead of being told the
+  caller has been silent and to repeat the current question. Such a turn no
+  longer counts toward the flow's `NO_INPUT` rules or the three-silence default
+  to `global.closingTarget`, and a caller who spoke after a goodbye that nothing
+  hung up on is answered rather than hung up on. With a standing unbacked claim
+  the one cue carries both. Speech with no words in its transcript is still
+  treated as silence. (#448)
 - The seeded `early_collections` flow asks for the account holder in its
   opening line ("...尾号6666的机主本人吗?"), so the caller's first words answer
   it and the reminder follows in the next turn, instead of a greeting followed
