@@ -95,6 +95,31 @@ func TestCallerBargeInEndsTheTurnAsSpeech(t *testing.T) {
 	refuteMoreEvents(t, session)
 }
 
+// The two frames of a barge-in share a millisecond and can arrive either way
+// round. With the transcription first the turn is still open when the bare
+// response.done follows, and it is the caller's cut all the same: the call
+// counts a cut over a closing line from whichever of the two it sees first
+// (aicall, #493), so both orders have to name the caller.
+func TestCallerBargeInEndsTheTurnAsSpeechWhicheverFrameComesFirst(t *testing.T) {
+	f := newFakeDoubao(t, acceptSession)
+	session := startedSession(t, f)
+
+	f.send(audioStarted("default"))
+	f.send(audioDelta(base64.StdEncoding.EncodeToString([]byte{0x10, 0x11})))
+	expectEvents(t, session,
+		provider.EventTypeResponseStarted, provider.EventTypeAudioDelta)
+
+	f.send(transcriptionStarted("item-2"))
+	f.send(wireResponseDone())
+
+	events := expectEvents(t, session,
+		provider.EventTypeSpeechStarted, provider.EventTypeInterrupted)
+	if got := events[1].InterruptedBy; got != provider.InterruptReasonSpeech {
+		t.Errorf("the turn was interrupted by %q, want the caller", got)
+	}
+	refuteMoreEvents(t, session)
+}
+
 // A turn this client stopped is not a barge-in. Reporting it as one would put
 // an interruption the caller never made into the record of the call.
 func TestATurnWeCancelledIsNotBlamedOnTheCaller(t *testing.T) {

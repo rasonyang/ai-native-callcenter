@@ -70,28 +70,36 @@ type callActions struct {
 	// (a tool-result turn stopped to make room for a line, or one the caller
 	// talked over) is not the line, and counting it let a barge-in fire the
 	// action while the real line was still being generated. A caller cutting
-	// in early on the line resets it (onBargeIn).
+	// in early on the line resets it (onBargeIn). While it is clear no barge-in
+	// runs the action; a cut of a later turn still being generated is counted
+	// as an interruption, but never dated inside the line (#493).
 	isLineSpoken bool
 	// isInterrupted says the caller cut in on the armed closing line with more
-	// than closingTailAck of it unplayed (onBargeIn). From then on the ending
+	// than closingTailAck of it unplayed, or while it was still being generated
+	// (onBargeIn). From then on the ending
 	// waits for a turn that plays audio (onPlaybackDone), and the model's first
 	// bare hangup is refused (Hangup).
 	isInterrupted bool
-	// interruptions counts the barge-ins over the armed ending with more than
-	// closingTailAck of the audio still unplayed (onBargeIn): over the line, over
-	// a re-said line, over an answer turn. The first is handled as an
-	// interruption always was; from the second on the line counts as said and
-	// the cap is frozen (startCapLocked), so a caller who keeps talking over a
-	// model that keeps saying the line again cannot stretch the call (#465).
-	// Reset by armAs.
+	// interruptions counts the cuts over the armed ending (onBargeIn): over the
+	// line, over a re-said line, over an answer turn. A turn that finished
+	// generating counts when more than closingTailAck of the audio was still
+	// unplayed; a later turn cut while still being generated counts whenever
+	// something audible was cut (#493). The session's barge-in and the
+	// provider's own cancellation are counted alike, one cut once. The first is
+	// handled as an interruption always was; from the second on the line counts
+	// as said and the cap is frozen (startCapLocked), so a caller who keeps
+	// talking over a model that keeps saying the line again cannot stretch the
+	// call (#465). Reset by armAs.
 	interruptions int
 	// isLineSaidByRule says the closing line counts as said by a rule and not by
-	// having played: the cut fell in its final sentence (rule A) or this is the
-	// second interruption or later (rule D), both set in onBargeIn. Only then
-	// does a hangup from the model over a speaking answer end the call on that
-	// answer (sayGoodbyeOnHangup). A first interruption mid-line leaves it
-	// clear: the line is still owed and the answer may take two turns (#147,
-	// #262). Reset by armAs.
+	// having played: the cut fell in the final sentence of a line that had
+	// finished generating (rule A) or this is the second interruption or later,
+	// whichever side reported it and whether or not the line had finished
+	// generating (rule D), both set in onBargeIn. Only then does a hangup from
+	// the model over a speaking answer end the call on that answer
+	// (sayGoodbyeOnHangup). A first interruption mid-line, or any first cut of a
+	// line still being generated (#493), leaves it clear: the line is still owed
+	// and the answer may take two turns (#147, #262). Reset by armAs.
 	isLineSaidByRule bool
 	// goodbyeTurn is the model turn that spoke the goodbye and called hangup
 	// while the line counted as said (sayGoodbyeOnHangup); 0 is none. The
@@ -948,12 +956,31 @@ func (a *callActions) capAfterLineAskLocked() time.Duration {
 const closingTailAck = 1500 * time.Millisecond
 
 // onBargeIn decides what the caller taking the floor means for an armed ending.
-// unplayed is the audio still queued for the caller when they spoke, read
-// before the barge-in flushed it; played is how much of the current turn they
-// had heard (negative when not known).
+// cut is the BARGE_IN: Unplayed is the audio still queued for the caller when
+// they spoke, read before the barge-in flushed it; Played is how much of the
+// cut turn (Turn) they had heard (negative when not known); IsGenerating says
+// that turn was still being generated; IsByProvider says the provider reported
+// the cut (it cancelled the turn on hearing the caller) and not the session's
+// own barge-in. Both reports are handled alike: what counts is that the caller
+// cut in, not which side noticed first, and the session reports one cut once
+// (#493).
 //
-// Over or before a line that has not finished generating, nothing changes: the
-// ending waits for a line.
+// Over a line that has not finished generating (isLineSpoken clear), a cut of
+// a turn after the arming one while that turn is still being generated, with
+// something audible cut (Unplayed or Played above zero), is an interruption of
+// the closing line (#493). On qwen the provider's own turn detection cancels
+// such a turn before the session hears the caller, and the cut went uncounted:
+// a caller saying "mm-hm" over every telling needed a third interruption
+// before the cap froze. It is counted and handled like the second case below,
+// with two differences, both because a line still being generated has no known
+// length: it never runs the armed action (whatever is unplayed, it cannot be
+// the caller answering the goodbye), and the final-sentence rule never applies
+// to it (the owner's decision, 2026-11-06). So a first such cut leaves the line
+// owed, and from the second on, D holds as for any interruption. Anything else
+// over a line not yet generated changes nothing, and the ending waits for a
+// line: a cut of the arming turn itself (the line has not started), of a turn
+// that had finished (a tail that is not the line), or one with nothing audible
+// to cut (nothing heard of the turn and nothing queued).
 //
 // Over a line that finished generating, there are two cases, told apart by how
 // much of it the caller had left to hear:
@@ -990,7 +1017,8 @@ const closingTailAck = 1500 * time.Millisecond
 // answer end the call on that answer (sayGoodbyeOnHangup). A caller cutting in
 // on that goodbye with more than closingTailAck left withdraws it: the answer
 // to them is played, and the ending runs on its playback or at the cap.
-func (a *callActions) onBargeIn(unplayed, played time.Duration) {
+func (a *callActions) onBargeIn(cut Event) {
+	unplayed, played := cut.Unplayed, cut.Played
 	a.mu.Lock()
 	if a.armed != nil && a.goodbyeTurn != 0 && unplayed > closingTailAck {
 		// The caller cut in on the goodbye with more than a tail left: what
@@ -1001,16 +1029,28 @@ func (a *callActions) onBargeIn(unplayed, played time.Duration) {
 		a.log.Info("the caller spoke over the goodbye; the answer to them is played",
 			"unplayedMs", unplayed.Milliseconds())
 	}
-	if a.armed == nil || !a.isLineSpoken {
+	if a.armed == nil {
 		a.mu.Unlock()
 		return
 	}
+	if !a.isLineSpoken {
+		if !cut.IsGenerating || cut.Turn <= a.armedInTurn || (unplayed <= 0 && played <= 0) {
+			a.mu.Unlock()
+			return
+		}
+		// A cut over a line still being generated (#493): an interruption,
+		// never the "bye now", never dated inside the line.
+		count, capIn := a.interruptLocked()
+		a.mu.Unlock()
+		a.log.Info("the caller cut in on the closing line while it was still being generated; "+
+			"counting it as an interruption, not as the line said",
+			"interruptions", count, "turn", cut.Turn, "isByProvider", cut.IsByProvider,
+			"unplayedMs", unplayed.Milliseconds(), "playedMs", played.Milliseconds())
+		a.logLaterInterruption(count, cut, capIn)
+		return
+	}
 	if unplayed > closingTailAck {
-		a.isLineSpoken = false
-		a.isInterrupted = true
-		a.audioTurnsAtInterrupt, _ = a.session.audioProgress()
-		a.interruptions++
-		count := a.interruptions
+		count, capIn := a.interruptLocked()
 		var finalSentence time.Duration
 		isFinalSentence := false
 		if count == 1 && a.closingLine != "" {
@@ -1020,42 +1060,70 @@ func (a *callActions) onBargeIn(unplayed, played time.Duration) {
 				a.isLineSaidByRule = true
 			}
 		}
-		if count >= 2 {
-			a.isLineOwed = false
-			a.isLineSaidByRule = true
-		} else {
-			graceCap := a.graceCap
-			if graceCap <= 0 {
-				graceCap = actionGraceCap
-			}
-			a.startCapLocked(graceCap)
-		}
-		capIn := time.Until(a.capDue)
 		a.mu.Unlock()
-		switch {
-		case count == 1:
+		if count == 1 {
 			a.log.Info("caller spoke over the closing line; answering them before the armed action runs",
-				"unplayedMs", unplayed.Milliseconds(), "interruptions", count)
+				"unplayedMs", unplayed.Milliseconds(), "interruptions", count, "isByProvider", cut.IsByProvider)
 			if isFinalSentence {
 				a.log.Info("the cut fell in the closing line's final sentence; counting it as said",
 					"unplayedMs", unplayed.Milliseconds(), "playedMs", played.Milliseconds(),
 					"finalSentenceMs", finalSentence.Milliseconds())
 			}
-		case count == 2:
-			a.log.Info("a second interruption over the closing line; not asking for it again, cap not restarted",
-				"interruptions", count, "unplayedMs", unplayed.Milliseconds(), "capInMs", capIn.Milliseconds())
-		default:
-			a.log.Info("a further interruption over the closing line; cap still not restarted",
-				"interruptions", count, "unplayedMs", unplayed.Milliseconds(), "capInMs", capIn.Milliseconds())
 		}
+		a.logLaterInterruption(count, cut, capIn)
 		return
 	}
 	armed := a.armed
 	a.armed = nil
 	a.mu.Unlock()
 	a.log.Info("caller spoke after the closing line; running the armed action now",
-		"unplayedMs", unplayed.Milliseconds())
+		"unplayedMs", unplayed.Milliseconds(), "isByProvider", cut.IsByProvider)
 	armed()
+}
+
+// interruptLocked counts a cut over the armed ending as an interruption and
+// handles it as one (onBargeIn): the line no longer counts as spoken, the
+// ending waits for a turn that plays audio (isInterrupted), and the model's
+// first bare hangup is refused. The first interruption restarts the cap so the
+// answer has the time to be made; from the second on the line counts as said
+// and is never asked for again (rule D), and the cap is not restarted, nor, in
+// startCapLocked, ever moved again. It reports the count and how long the cap
+// has left. The final-sentence rule (A) is not applied here: it needs a line
+// that finished generating, and onBargeIn applies it only to a cut of one.
+// The caller holds mu.
+func (a *callActions) interruptLocked() (count int, capIn time.Duration) {
+	a.isLineSpoken = false
+	a.isInterrupted = true
+	a.audioTurnsAtInterrupt, _ = a.session.audioProgress()
+	a.interruptions++
+	count = a.interruptions
+	if count >= 2 {
+		a.isLineOwed = false
+		a.isLineSaidByRule = true
+	} else {
+		graceCap := a.graceCap
+		if graceCap <= 0 {
+			graceCap = actionGraceCap
+		}
+		a.startCapLocked(graceCap)
+	}
+	return count, time.Until(a.capDue)
+}
+
+// logLaterInterruption logs rule D for the second interruption and each one
+// after it, whichever side reported it and whether or not the line had
+// finished generating. The first is logged by the case it fell in.
+func (a *callActions) logLaterInterruption(count int, cut Event, capIn time.Duration) {
+	switch {
+	case count == 2:
+		a.log.Info("a second interruption over the closing line; not asking for it again, cap not restarted",
+			"interruptions", count, "unplayedMs", cut.Unplayed.Milliseconds(), "capInMs", capIn.Milliseconds(),
+			"isGenerating", cut.IsGenerating, "isByProvider", cut.IsByProvider)
+	case count > 2:
+		a.log.Info("a further interruption over the closing line; cap still not restarted",
+			"interruptions", count, "unplayedMs", cut.Unplayed.Milliseconds(), "capInMs", capIn.Milliseconds(),
+			"isGenerating", cut.IsGenerating, "isByProvider", cut.IsByProvider)
+	}
 }
 
 // campaignDeniedTools are the built-ins a campaign call never offers: a

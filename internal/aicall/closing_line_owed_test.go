@@ -287,7 +287,7 @@ func TestOnlyAHangupIntoALineOwesIt(t *testing.T) {
 		actions.expectClosingLine("")
 		armedTurn := session.currentTurn()
 		actions.onTurnDone(armedTurn+1, false, false)
-		actions.onBargeIn(0, -1)
+		actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 		neverFired(t, fired, "an audio-less turn counted as the line")
 		actions.onTurnDone(armedTurn+2, false, true)
 		actions.onPlaybackDone(armedTurn+2, true)

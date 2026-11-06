@@ -2043,6 +2043,48 @@ func TestAConfirmedCancelNamesTheReasonItWasSentFor(t *testing.T) {
 	}
 }
 
+// qwen's own turn detection ends a response it hears the caller over before it
+// reports the speech. The call therefore learns of that cut from the
+// cancellation, as INTERRUPTED{SPEECH} ahead of SPEECH_STARTED, and counts it
+// over a closing line from there (aicall, #493). The trim the call sends back
+// draws no cancel: the response it would stop is already over.
+func TestQwensOwnCancelArrivesAheadOfTheSpeechItHeard(t *testing.T) {
+	f, session := startQwenCall(t)
+
+	f.send(map[string]any{"type": "response.created"})
+	awaitEvent(t, session, EventTypeResponseStarted)
+	f.send(map[string]any{"type": "response.done",
+		"response": map[string]any{"status": "cancelled"}})
+	f.send(map[string]any{"type": "input_audio_buffer.speech_started"})
+
+	var order []EventType
+	deadline := time.After(2 * time.Second)
+	for len(order) < 2 {
+		select {
+		case event := <-session.Events():
+			switch event.Type {
+			case EventTypeInterrupted:
+				if event.InterruptedBy != InterruptReasonSpeech {
+					t.Errorf("interruptedBy = %q, want the caller", event.InterruptedBy)
+				}
+				order = append(order, event.Type)
+			case EventTypeSpeechStarted:
+				order = append(order, event.Type)
+			}
+		case <-deadline:
+			t.Fatalf("saw %v, want the cancellation and the speech", order)
+		}
+	}
+	if order[0] != EventTypeInterrupted {
+		t.Errorf("events in the order %v, want the cancellation first", order)
+	}
+
+	if err := session.Interrupt(InterruptReasonSpeech, 640); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	f.awaitMessages("response.cancel", 0)
+}
+
 // Every tool reaches the engine with a top-level "required": flash fails the
 // first response of a session whose tool lacks one (qwen-findings, flash).
 func TestBuildToolsAlwaysCarriesRequired(t *testing.T) {

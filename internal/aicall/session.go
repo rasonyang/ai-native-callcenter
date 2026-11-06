@@ -48,7 +48,9 @@ const (
 	// EventTypeNoInput is dead air: the caller has said nothing since the bot
 	// stopped speaking.
 	EventTypeNoInput EventType = "NO_INPUT"
-	// EventTypeBargeIn is the caller taking the floor back.
+	// EventTypeBargeIn is the caller taking the floor back, seen by the
+	// session (bargeIn) or by the provider's turn detection, which cancelled
+	// the turn first (Event.IsByProvider).
 	EventTypeBargeIn EventType = "BARGE_IN"
 	// EventTypeDigit is a keypress.
 	EventTypeDigit EventType = "DIGIT"
@@ -64,7 +66,8 @@ type Event struct {
 	Type EventType
 
 	// Turn numbers the model turn an event belongs to (TURN_DONE,
-	// PLAYBACK_DONE, TOOL_CALL and BOT_SAID). A consumer sequencing an action "after the line that is
+	// PLAYBACK_DONE, TOOL_CALL and BOT_SAID; on a BARGE_IN, the turn that was
+	// cut). A consumer sequencing an action "after the line that is
 	// about to be spoken" compares turn numbers: the turn a tool call arrived
 	// in is not the turn its closing line plays in.
 	Turn int
@@ -87,6 +90,18 @@ type Event struct {
 	// when not known: nothing of the turn ever reached the leg. With Unplayed
 	// it dates the cut inside the closing line (cutInFinalSentence).
 	Played time.Duration
+	// IsGenerating is, on a BARGE_IN, whether the cut turn was still being
+	// generated: the provider had not finished making it, so how long it would
+	// have played is not known. An armed ending counts such a cut over its
+	// closing line as an interruption, but never dates it inside the line
+	// (callActions.onBargeIn, #493).
+	IsGenerating bool
+	// IsByProvider marks a BARGE_IN the provider reported: its own turn
+	// detection heard the caller and cancelled the turn before the session saw
+	// them speak, and the session learned of it from the cancellation. Clear
+	// when the session took the floor back itself (speech it was told of, a
+	// keypress). One cut is reported once, by whichever side saw it first.
+	IsByProvider bool
 	// HasAudio is, on a TURN_DONE or a PLAYBACK_DONE, whether the turn queued
 	// any audio for the caller. A turn that only made a tool call plays nothing, and its
 	// playback "finishes" at once.
@@ -937,7 +952,12 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		// played 0 ms and must be trimmed to 0, or the model's history keeps
 		// an answer nobody received. Only a turn with no queued audio at all
 		// (already flushed by a barge-in) stays silent.
-		if playedMs, hadQueued := s.stopPlayback(isCurrent); hadQueued {
+		//
+		// Before the flush: it empties the queue this measures.
+		unplayed := s.queuedPlayout()
+		playedMs, hadQueued := s.stopPlayback(isCurrent)
+		turn, isAside := s.turnState()
+		if hadQueued {
 			// Said out loud for the same reason the caller-initiated case is:
 			// an interruption that leaves no trace cannot be told apart
 			// afterwards from one that never happened. This path reports the
@@ -945,8 +965,25 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			s.log.Info("the provider took the floor back",
 				"reason", string(event.InterruptedBy), "playedMs", playedMs)
 			s.tellTheModelWhatWasHeard(event.InterruptedBy, playedMs)
+			// A provider with turn detection of its own (qwen, grok, doubao)
+			// cancels the turn the moment it hears the caller, before it says
+			// so: the speech_started that follows finds the queue already
+			// flushed here, and bargeIn has nothing left to take. This was the
+			// caller taking the floor all the same, and an armed ending has to
+			// hear of it as it does of any barge-in, or a cut over a closing
+			// line still being generated goes uncounted (#493). Only for the
+			// turn in progress (a stale cancellation is about a turn already
+			// replaced), and never for a turn this client stopped to make room
+			// for a line (SYSTEM), which nobody interrupted. Nothing is
+			// reported twice: seen here first, the flush leaves the later
+			// speech_started nothing to take in bargeIn; seen by bargeIn
+			// first, its flush leaves nothing queued here (hadQueued).
+			if isCurrent && event.InterruptedBy != provider.InterruptReasonSystem {
+				s.emit(Event{Type: EventTypeBargeIn, Text: string(event.InterruptedBy), Turn: turn,
+					Unplayed: unplayed, Played: time.Duration(playedMs) * time.Millisecond,
+					IsGenerating: true, IsByProvider: true})
+			}
 		}
-		turn, isAside := s.turnState()
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside})
 
 	case provider.EventTypeResponseStarted:
@@ -1001,6 +1038,7 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	s.mu.Lock()
 	isSpeaking := s.isBotSpeaking
 	isGenerating := s.isResponding
+	turn := s.turnSeq
 	audibleFor := time.Since(s.audibleSince)
 	// Generation ending is not the caller's experience ending: the tail of
 	// the utterance is still queued and playing after the model has finished
@@ -1083,7 +1121,8 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	if playedMs < 0 {
 		played = -1
 	}
-	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Unplayed: unplayed, Played: played})
+	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Turn: turn,
+		Unplayed: unplayed, Played: played, IsGenerating: isGenerating})
 }
 
 // muteRecord is what a muted turn reports when it ends (logMuted).
