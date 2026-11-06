@@ -18,7 +18,6 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
-	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 )
 
 // capacityScopes are the campaign driver's scopes plus placing an AI call,
@@ -131,7 +130,7 @@ func RunCapacity(ctx context.Context, cfg CampaignConfig, sc CapacityScenario) (
 	if err != nil {
 		return nil, err
 	}
-	if err := checkDirectInScenario(pre.scenario, sc, pre.form); err != nil {
+	if err := checkDirectInScenario(pre.scenario, sc); err != nil {
 		return nil, err
 	}
 
@@ -235,10 +234,10 @@ const defaultOverflowHold = "1500ms"
 // checkDirectInScenario refuses a run whose direct calls the simulator would
 // not answer at once and keep up: each needs one behaviour, a 200 well before
 // any contact answers, and a hang-up after the last overflow hold.
-func checkDirectInScenario(s *calleesim.Scenario, sc CapacityScenario, form phonenum.DialForm) error {
+func checkDirectInScenario(s *calleesim.Scenario, sc CapacityScenario) error {
 	var problems []string
 	for _, ds := range sc.Direct {
-		list := s.Numbers[ds.DialKey(form)]
+		list := s.Numbers[ds.DialKey()]
 		if len(list) != 1 {
 			problems = append(problems, fmt.Sprintf("direct call %s: the scenario has %d behaviours, want 1", ds.Number(), len(list)))
 			continue
@@ -444,7 +443,7 @@ func (cr *capacityRun) placeDirect(ctx context.Context, d *driver) error {
 		if created.CallID != callID {
 			return fmt.Errorf("the direct call to %s was placed as %s, not under the id sent (%s)", ds.Number(), created.CallID, callID)
 		}
-		cr.direct = append(cr.direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(d.form), DID: did, CallID: callID.String(), Placed: placed, CDRs: []api.CDR{}})
+		cr.direct = append(cr.direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(), DID: did, CallID: callID.String(), Placed: placed, CDRs: []api.CDR{}})
 	}
 	return nil
 }

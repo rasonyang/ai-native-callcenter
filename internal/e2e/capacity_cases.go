@@ -2,11 +2,7 @@
 
 package e2e
 
-import (
-	"strconv"
-
-	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
-)
+import "strconv"
 
 // The capacity scenarios of issue #247, as data. Each runs in an application
 // start of its own (deploy/e2e/e2e.sh capacity recreates the application with
@@ -61,11 +57,11 @@ type DirectSpec struct {
 // Number is the call's canonical number.
 func (d DirectSpec) Number() string { return d.Region.Prefix + d.Suffix }
 
-// DialKey is what the switch is handed for the call, the simulator's key.
-func (d DirectSpec) DialKey(form phonenum.DialForm) string {
-	out, _ := phonenum.DialString(d.Number(), form, d.Region.CountryCode)
-	return out
-}
+// DialKey is what the switch is handed for the call, the simulator's key. The
+// call is placed through POST /calls, which dials its "to" exactly as sent
+// (only the campaign dialer applies AICC_OUTBOUND_DIAL_FORM), so the key is the
+// canonical number in every dial form.
+func (d DirectSpec) DialKey() string { return d.Number() }
 
 // The application settings the capacity scenarios change.
 const (

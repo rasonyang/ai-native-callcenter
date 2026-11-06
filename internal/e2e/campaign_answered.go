@@ -32,6 +32,9 @@ func stepOutcomes(cs Case) string {
 	for _, s := range cs.Steps {
 		out = append(out, s.Outcome)
 	}
+	if cs.IsListedMidRun {
+		out = append(out, listedSkipOutcome)
+	}
 	return strings.Join(out, ", then ")
 }
 
@@ -311,4 +314,137 @@ func FirstAudioTable(rows []FirstAudioRow) string {
 		fmt.Fprintf(&b, "| %s | %s | %d | %s | %s |\n", r.Region, r.ID, r.Attempt, r.CallID, ms)
 	}
 	return b.String()
+}
+
+// assessListedMidRun checks a contact whose number the driver listed on the
+// do-not-call list while the contact waited for its retry (C10): attempt 1 is
+// dialled and refused as the case's one step says; the listing happens after
+// that attempt and before the retry is due; attempt 2 is then skipped
+// (DNC_SKIPPED, NUMBER_ON_DNC) with no INVITE and no CDR, and the contact
+// ends DNC. The number is dialled exactly once.
+//
+// The control is the case named by ControlID, which the callee treats the
+// same way and nobody lists: the run must have dialled it a second time, after
+// C10's retry came due, and read the simulator's record after that moment.
+// Without that, a platform that dialled nothing from the retry's due time on
+// would pass for one that skipped the number.
+func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, control []calleesim.DialogRecord,
+	cdrs map[string][]api.CDR, calleeReadAt time.Time) ScenarioResult {
+	cs := cv.Case
+	res := ScenarioResult{
+		Region: rv.Region.Code, ID: cs.ID, Kind: cs.Kind, Number: cv.Number, DialKey: key, Callee: cs.Callee,
+		Expected: stepOutcomes(cs), AfterFirst: contactResult(cv.AfterFirst), Contact: contactResult(cv.Contact),
+		Attempts: []AttemptResult{}, Invites: len(dialogs), Listing: cv.Listing,
+	}
+	var col Checks
+	col.That(cv.Contact != nil, "the contact exists in the campaign")
+	col.That(cv.AfterFirst != nil, "the contact was read right after its first attempt finished")
+	col.That(len(cs.Steps) == 1, "the case describes the one dialled attempt (%d steps)", len(cs.Steps))
+	col.That(len(cv.Attempts) == 2, "the contact has 2 attempts, the dialled one and the skipped one (%d)", len(cv.Attempts))
+	col.That(len(dialogs) == 1, "the simulator saw exactly 1 INVITE for %s, the first (%d)", key, len(dialogs))
+
+	// The attempts.
+	for i, a := range cv.Attempts {
+		switch {
+		case i == 0 && len(cs.Steps) == 1:
+			var dlg *calleesim.DialogRecord
+			if len(dialogs) > 0 {
+				dlg = &dialogs[0]
+			}
+			res.Attempts = append(res.Attempts, assessStep(rv, cs, 0, a, key, dlg, cdrs[a.CallID.String()]))
+		case i == 1:
+			res.Attempts = append(res.Attempts, assessSkippedAttempt(a, cdrs[a.CallID.String()], cv.Listing, len(dialogs) > 1))
+		}
+	}
+
+	// The listing: after attempt 1, confirmed on the list, and before the
+	// retry came due; otherwise the case would not test what it claims to.
+	col.That(cv.Listing != nil, "the driver listed the number mid-run")
+	if l := cv.Listing; l != nil {
+		col.That(l.IsOnList, "the do-not-call list read back holds %s", cv.Number)
+		due := l.NextAttemptAt
+		margin := due.Sub(l.ListedAt)
+		col.That(margin > 0, "the number was listed %s before the retry came due (nextAttemptAt %s, listed %s)",
+			margin.Round(time.Millisecond), due.Format(time.RFC3339Nano), l.ListedAt.Format(time.RFC3339Nano))
+		if len(cv.Attempts) > 0 && cv.Attempts[0].FinishedAt != nil {
+			col.That(!l.PostedAt.Before(*cv.Attempts[0].FinishedAt), "the number was listed after attempt 1 finished (%s after)",
+				l.PostedAt.Sub(*cv.Attempts[0].FinishedAt).Round(time.Millisecond))
+		}
+		if len(dialogs) > 0 {
+			col.That(dialogs[0].InviteAt.Before(l.PostedAt), "the only INVITE (%s) came before the listing (%s)",
+				dialogs[0].InviteAt.Format(time.RFC3339Nano), l.PostedAt.Format(time.RFC3339Nano))
+		}
+	}
+
+	// The contact right after attempt 1 and at the end.
+	if af := cv.AfterFirst; af != nil {
+		col.That(af.Attempts == 1 && af.SystemFailures == 0,
+			"after the first attempt: attempts = 1 and system_failures = 0 (%d, %d)", af.Attempts, af.SystemFailures)
+		col.That(af.Status == api.CampaignContactStatus("ACTIVE"), "after the first attempt: the contact is ACTIVE, due for a retry (%s)", af.Status)
+		measured, ok := "none", false
+		if len(cv.Attempts) > 0 && af.NextAttemptAt != nil && cv.Attempts[0].FinishedAt != nil {
+			gap := af.NextAttemptAt.Sub(*cv.Attempts[0].FinishedAt)
+			measured = gap.String()
+			ok = absDuration(gap-RetryIntervalSec*time.Second) <= retryTolerance
+		}
+		col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)", RetryIntervalSec, measured)
+	}
+	if ct := cv.Contact; ct != nil {
+		col.That(ct.Status == api.CampaignContactStatus("DNC"), "at the end: the contact is DNC (%s)", ct.Status)
+		col.That(ct.Attempts == 1 && ct.SystemFailures == 0,
+			"at the end: attempts = 1 and system_failures = 0, the skipped attempt spending neither (%d, %d)", ct.Attempts, ct.SystemFailures)
+		col.That(ct.NextAttemptAt == nil, "at the end: no next attempt is scheduled")
+		col.That(deref(ct.LastOutcome) == listedSkipOutcome, "at the end: the last outcome is %s (%s)", listedSkipOutcome, deref(ct.LastOutcome))
+	}
+
+	// The control: dialled twice, the second time after C10's retry came due,
+	// and the simulator's record was read after that.
+	ctl := cs.ControlID
+	col.That(ctl != "", "the case names a control that is never listed")
+	col.That(len(control) == 2, "the control %s was dialled twice in this campaign, so the retries ran (%d INVITEs)", ctl, len(control))
+	if l := cv.Listing; l != nil {
+		if len(control) == 2 {
+			late := control[1].InviteAt.Sub(l.NextAttemptAt)
+			col.That(late >= -inviteSlack, "the control's second INVITE (%s) came at or after the moment %s's retry was due (%s after)",
+				control[1].InviteAt.Format(time.RFC3339Nano), cs.ID, late.Round(time.Millisecond))
+		}
+		col.That(calleeReadAt.After(l.NextAttemptAt),
+			"the simulator's record was read (%s) after the retry came due (%s)", calleeReadAt.Format(time.RFC3339Nano), l.NextAttemptAt.Format(time.RFC3339Nano))
+	}
+
+	res.Checks, res.Failures = nonNil(col.checks), nonNil(col.failures)
+	for _, a := range res.Attempts {
+		res.Failures = append(res.Failures, a.Failures...)
+	}
+	res.Passed = len(res.Failures) == 0
+	return res
+}
+
+// assessSkippedAttempt checks the attempt the do-not-call sweep skipped: it
+// is finished by the dialer with the listing's outcome and cause, started
+// after the listing, and neither reached the simulator nor made a CDR.
+func assessSkippedAttempt(a api.CampaignAttempt, cdrs []api.CDR, l *Listing, hasDialog bool) AttemptResult {
+	pre := "attempt 2: "
+	outcome, cause := deref(a.Outcome), deref(a.HangupCause)
+	ar := AttemptResult{
+		Index: 2, Number: a.Number, CallID: a.CallID.String(), LegID: a.LegID.String(), State: string(a.State),
+		Outcome: outcome, HangupCause: cause, StartedAt: a.StartedAt, FinishedAt: a.FinishedAt,
+		CDRs: cdrs, Source: SourceDialer,
+	}
+	if ar.CDRs == nil {
+		ar.CDRs = []api.CDR{}
+	}
+	var col Checks
+	col.That(a.State == attemptFinished, pre+"the attempt is FINISHED (%s)", a.State)
+	col.That(outcome == listedSkipOutcome, pre+"the outcome is %s (%s)", listedSkipOutcome, outcome)
+	col.That(cause == listedSkipCause, pre+"the hangup cause is %s (%s)", listedSkipCause, cause)
+	col.That(len(cdrs) == 0, pre+"no CDR carries the call id (%d)", len(cdrs))
+	col.That(!hasDialog, "%sno INVITE was sent", pre)
+	if l != nil {
+		col.That(!a.StartedAt.Before(l.PostedAt.Add(-inviteSlack)), pre+"the attempt started (%s) after the number was listed (%s)",
+			a.StartedAt.Format(time.RFC3339Nano), l.PostedAt.Format(time.RFC3339Nano))
+	}
+	ar.Checks, ar.Failures = nonNil(col.checks), nonNil(col.failures)
+	ar.Passed = len(ar.Failures) == 0
+	return ar
 }

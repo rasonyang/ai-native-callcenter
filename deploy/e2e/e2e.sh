@@ -10,6 +10,11 @@
 #   deploy/e2e/e2e.sh down    collect logs, remove containers, volumes, network
 #   deploy/e2e/e2e.sh config  print the resolved compose configuration
 #
+# E2E_OUTBOUND_DIAL_FORM (E164, E164_NO_PLUS or NATIONAL; default E164) is the
+# application's AICC_OUTBOUND_DIAL_FORM and picks the simulator's scenario file.
+# `up` fixes it for the environment: every later command uses the form `up`
+# recorded, and refuses a different explicit value (README.md, "Dial forms").
+#
 # COMPOSE_PROJECT_NAME picks the project (default: derived from this checkout's
 # path, so two worktrees get two environments). E2E_NET_PREFIX picks the /24
 # (default: derived from the project name, 10.64-127.x.y).
@@ -28,6 +33,11 @@ RUN="$WORK/run"
 TOOLS="$WORK/tools"
 APP_IP="$NET.10"; FS_IP="$NET.11"; MOCK_IP="$NET.12"; CALLEE_IP="$NET.13"
 TO_NUMBER=13800000001
+# The dial form the environment was started with, written by `up` and removed
+# by `down`.
+FORM_FILE="$WORK/dial-form"
+DIAL_FORM=E164
+SCENARIO_FILE=scenario.json
 
 # The application's bot capacity, overflow hold and bot RTP range for its next
 # start; empty is the application's default. Only cmd_capacity changes them,
@@ -46,11 +56,41 @@ compose() {
     E2E_APP_IP="$APP_IP" E2E_FS_IP="$FS_IP" E2E_MOCK_IP="$MOCK_IP" E2E_CALLEESIM_IP="$CALLEE_IP" \
     E2E_UID="$(id -u)" E2E_GID="$(id -g)" FS_EXTERNAL_IP="$FS_IP" \
     ${E2E_OUTBOUND_ENDPOINT:+E2E_OUTBOUND_ENDPOINT="$E2E_OUTBOUND_ENDPOINT"} \
+    E2E_OUTBOUND_DIAL_FORM="$DIAL_FORM" E2E_SCENARIO_FILE="$SCENARIO_FILE" \
     E2E_BOT_MAX_CALLS="$APP_BOT_MAX_CALLS" E2E_BOT_INBOUND_RESERVE="$APP_BOT_INBOUND_RESERVE" \
     E2E_OVERFLOW_HOLD="$APP_OVERFLOW_HOLD" \
     E2E_BOT_RTP_PORT_LOW="$APP_BOT_RTP_PORT_LOW" E2E_BOT_RTP_PORT_HIGH="$APP_BOT_RTP_PORT_HIGH" \
     docker compose -p "$PROJECT" --project-directory "$ROOT/deploy" \
     --env-file "$E2E/e2e.env" -f "$ROOT/deploy/docker-compose.yml" -f "$E2E/docker-compose.yml" "$@"
+}
+
+# resolve_dial_form sets DIAL_FORM and SCENARIO_FILE. The caller's
+# E2E_OUTBOUND_DIAL_FORM must be a form (empty is unset); `up` takes it (E164
+# when unset), every other command takes the form `up` recorded and refuses a
+# different explicit one, since the application was started in the recorded
+# form and the scenario file the simulator mounted follows it. `down` never
+# refuses: it has to be able to clean up whatever is there.
+resolve_dial_form() {
+  local cmd="$1" want="${E2E_OUTBOUND_DIAL_FORM:-}" rec=""
+  case "$want" in
+    ""|E164|E164_NO_PLUS|NATIONAL) ;;
+    *) echo "E2E_OUTBOUND_DIAL_FORM must be one of E164, E164_NO_PLUS, NATIONAL, got \"$want\"" >&2; exit 2 ;;
+  esac
+  [ ! -f "$FORM_FILE" ] || rec="$(cat "$FORM_FILE")"
+  case "$rec" in
+    ""|E164|E164_NO_PLUS|NATIONAL) ;;
+    *) echo "$FORM_FILE holds \"$rec\", not a dial form; run: make e2e-down" >&2; exit 1 ;;
+  esac
+  if [ "$cmd" = up ] || [ -z "$rec" ]; then
+    DIAL_FORM="${want:-E164}"
+  else
+    if [ -n "$want" ] && [ "$want" != "$rec" ] && [ "$cmd" != down ]; then
+      echo "E2E_OUTBOUND_DIAL_FORM=$want, but the environment is up with $rec; run: make e2e-down, then start it again with the form you want" >&2
+      exit 2
+    fi
+    DIAL_FORM="$rec"
+  fi
+  if [ "$DIAL_FORM" = E164 ]; then SCENARIO_FILE=scenario.json; else SCENARIO_FILE="scenario.$DIAL_FORM.json"; fi
 }
 
 env_value() { sed -n "s/^$1=//p" "$E2E/e2e.env"; }
@@ -116,12 +156,15 @@ slice_bundles() {
 
 cmd_up() {
   build_tools
-  say "project $PROJECT, network $NET.0/24"
+  say "project $PROJECT, network $NET.0/24, dial form $DIAL_FORM (scenario $SCENARIO_FILE)"
   # Refuse first, before anything of a running environment is touched.
   render
   compose down -v --remove-orphans >&2
   rm -rf "$RUN"
   render
+  # From here the environment is in this form, whatever happens next.
+  mkdir -p "$WORK"
+  printf '%s\n' "$DIAL_FORM" > "$FORM_FILE"
   # A start that fails leaves its logs in the run directory.
   trap 'collect_logs' ERR
   say "building the application from this tree"
@@ -276,8 +319,11 @@ cmd_down() {
           docker volume ls -q --filter "label=com.docker.compose.project=$PROJECT"; \
           docker network ls -q --filter "label=com.docker.compose.project=$PROJECT")"
   [ -z "$left" ] || { say "left behind: $left"; exit 1; }
+  rm -f "$FORM_FILE"
   say "down: no container, volume or network of $PROJECT remains. Logs: $RUN/logs"
 }
+
+resolve_dial_form "${1:-}"
 
 case "${1:-}" in
   up) cmd_up ;;

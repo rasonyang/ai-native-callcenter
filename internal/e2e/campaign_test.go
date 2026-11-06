@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 )
 
@@ -14,16 +13,15 @@ import (
 // agree; the driver refuses a run when they do not, and this catches it
 // before an environment is started.
 func TestScenarioFileCoversEveryCampaignCase(t *testing.T) {
-	s, err := calleesim.LoadScenario("../../deploy/e2e/scenario.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckScenarioCoversCases(s, Regions, AllCases, phonenum.FormE164); err != nil {
-		t.Fatal(err)
-	}
-	if len(Regions) != 2 || len(DefaultCases) != 11 || len(AllCases) != 14 {
-		t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 11 and 14", len(Regions), len(DefaultCases), len(AllCases))
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		s := loadScenarioFor(t, form)
+		if err := CheckScenarioCoversCases(s, Regions, AllCases, form); err != nil {
+			t.Fatal(err)
+		}
+		if len(Regions) != 2 || len(DefaultCases) != 12 || len(AllCases) != 15 {
+			t.Fatalf("%d regions, %d unanswered and %d cases in all, want 2, 12 and 15", len(Regions), len(DefaultCases), len(AllCases))
+		}
+	})
 }
 
 // Every contact of a region is from that region's range, and the two ranges

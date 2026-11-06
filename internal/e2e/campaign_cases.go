@@ -59,8 +59,15 @@ func (r Region) Number(c Case) string { return r.Prefix + c.Suffix }
 // the way the dialer computes it (phonenum.DialString with the campaign's
 // country code).
 func (r Region) DialKey(c Case, form phonenum.DialForm) string {
-	out, _ := phonenum.DialString(r.Number(c), form, r.CountryCode)
+	out, _ := r.DialNumber(r.Number(c), form)
 	return out
+}
+
+// DialNumber writes one canonical number of the region in the form, the way
+// the dialer does; the second result is false when the form could not be
+// applied, in which case the number is returned as it was.
+func (r Region) DialNumber(number string, form phonenum.DialForm) (string, bool) {
+	return phonenum.DialString(number, form, r.CountryCode)
 }
 
 // Kind says whether a Case asserts a fixed expectation or records what it
@@ -88,6 +95,17 @@ type Case struct {
 	// IsOnDNC puts the number on the do-not-call list before the campaign
 	// starts.
 	IsOnDNC bool
+	// IsListedMidRun makes the driver put the number on the do-not-call list
+	// while the contact waits for its retry (C10): after Steps[0], the one
+	// attempt that is dialled, a second attempt is skipped as DNC_SKIPPED
+	// (cause NUMBER_ON_DNC) and the contact ends DNC. The case dials once, so
+	// it needs the one callee behaviour Steps[0] describes, in every dial form.
+	IsListedMidRun bool
+	// ControlID, for a case listed mid-run, names the case that behaves the
+	// same on the callee's side and is never listed (C03). The run must have
+	// dialled it a second time, so a retry that is never made cannot pass for
+	// a skipped one.
+	ControlID string
 	// Outcome and Cause are a scenario's expectation; a probe has neither and
 	// is held to design 10 section 7.2 instead (designCauseOutcomes).
 	Outcome string
@@ -189,7 +207,14 @@ const (
 	neverAnsweredStatus  = 480
 )
 
-// DefaultCases are C03, C05, C06, C07, C08, C09 and P1 to P5 (issue #245).
+// Where a number listed mid-run ends (C10): the second attempt is skipped.
+const (
+	listedSkipOutcome = "DNC_SKIPPED"
+	listedSkipCause   = "NUMBER_ON_DNC"
+)
+
+// DefaultCases are C03, C05, C06, C07, C08, C09, C10 and P1 to P5 (issues
+// #245 and #496).
 var DefaultCases = []Case{
 	{ID: "C03", Kind: KindScenario, Suffix: "03", Callee: "180, then 486 Busy Here", Provisional: 180, SIPStatus: 486,
 		Outcome: "BUSY", Cause: "USER_BUSY"},
@@ -203,6 +228,10 @@ var DefaultCases = []Case{
 		Outcome: "NO_ANSWER", Cause: "NO_ANSWER"},
 	{ID: "C09", Kind: KindScenario, Suffix: "09", Callee: "on the do-not-call list (never dialled)", IsOnDNC: true,
 		Outcome: "DNC_SKIPPED", Cause: "NUMBER_ON_DNC"},
+	{ID: "C10", Kind: KindScenario, Suffix: "10",
+		Callee:         "180, then 486 Busy Here; the driver lists the number while the retry waits (never dialled again)",
+		Steps:          []Step{{Provisional: 180, SIPStatus: 486, Outcome: "BUSY", Cause: "USER_BUSY"}},
+		IsListedMidRun: true, ControlID: "C03"},
 	{ID: "P1", Kind: KindProbe, Suffix: "11", Callee: "180, then 480 Temporarily Unavailable", Provisional: 180, SIPStatus: 480},
 	{ID: "P2", Kind: KindProbe, Suffix: "12", Callee: "180, then 408 Request Timeout", Provisional: 180, SIPStatus: 408},
 	{ID: "P3", Kind: KindProbe, Suffix: "13", Callee: "180, then 503 Service Unavailable", Provisional: 180, SIPStatus: 503},

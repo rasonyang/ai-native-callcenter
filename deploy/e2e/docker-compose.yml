@@ -41,11 +41,13 @@ services:
       # The only way out for an outbound call is the simulator's gateway.
       AICC_OUTBOUND_ENDPOINT: ${E2E_OUTBOUND_ENDPOINT:-sofia/gateway/e2e_calleesim/%s}
       # Campaign tests (make e2e-campaign, internal/e2e/campaign*.go). The
-      # dial form is deployment-wide and the default one, spelt out because
-      # the simulator's scenario is keyed on what it produces: the canonical
-      # number with its plus, so a US and a Chinese contact can never be read
-      # as each other (deploy/e2e/README.md, "Campaign tests").
-      AICC_OUTBOUND_DIAL_FORM: E164
+      # dial form is deployment-wide and a run parameter: e2e.sh passes
+      # E2E_OUTBOUND_DIAL_FORM (E164, E164_NO_PLUS or NATIONAL, validated
+      # there) and fixes it at `up`. The simulator's scenario is keyed on what
+      # the dialer produces in that form, so the simulator and the driver mount
+      # the scenario file of the form (E2E_SCENARIO_FILE; deploy/e2e/README.md,
+      # "Dial forms").
+      AICC_OUTBOUND_DIAL_FORM: ${E2E_OUTBOUND_DIAL_FORM:-E164}
       # Off, so a repeat run against the same environment is not held back by
       # the previous run's touch of the same numbers.
       AICC_CAMPAIGN_FREQUENCY_WINDOW: "0"
@@ -101,7 +103,7 @@ services:
       - -rtp-min=30000
       - -rtp-max=30200
     volumes:
-      - ./e2e/scenario.json:/etc/e2e/scenario.json:ro
+      - ./e2e/${E2E_SCENARIO_FILE:-scenario.json}:/etc/e2e/scenario.json:ro
       - ${E2E_RUN_DIR:?}:/run/e2e
     networks:
       default:
@@ -137,7 +139,7 @@ services:
       - ./e2e/flow.json:/etc/e2e/flow.json:ro
       # The campaign driver checks its cases against the simulator's scenario
       # and the mock provider's.
-      - ./e2e/scenario.json:/etc/e2e/scenario.json:ro
+      - ./e2e/${E2E_SCENARIO_FILE:-scenario.json}:/etc/e2e/scenario.json:ro
       - ./e2e/provider-scenario.json:/etc/e2e/provider-scenario.json:ro
       - ${E2E_RUN_DIR:?}:/run/e2e
 

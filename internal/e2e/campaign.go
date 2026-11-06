@@ -5,6 +5,7 @@ package e2e
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -254,7 +255,7 @@ func CheckScenarioCoversCases(s *calleesim.Scenario, regions []Region, cases []C
 		}
 	}
 	if len(problems) > 0 {
-		return fmt.Errorf("the simulator's scenario does not match the campaign cases: %s", strings.Join(problems, "; "))
+		return fmt.Errorf("the simulator's scenario does not match the campaign cases (AICC_OUTBOUND_DIAL_FORM=%s; its keys must be the numbers in that form, deploy/e2e/README.md \"Dial forms\"): %s", form, strings.Join(problems, "; "))
 	}
 	return nil
 }
@@ -421,6 +422,8 @@ type driver struct {
 	callbacks       []api.Callback
 	startedAt       time.Time
 	lastObservation time.Time
+	// calleeReadAt is when the simulator's final record was read.
+	calleeReadAt time.Time
 	// onPoll, when set, runs after every successful observation while the
 	// driver waits (the capacity runs sample the lines in use with it).
 	onPoll func(ctx context.Context)
@@ -442,6 +445,8 @@ type regionRun struct {
 	contacts   map[string]api.CampaignContact
 	attempts   map[string][]api.CampaignAttempt
 	cdrs       []api.CDR
+	// listings is each mid-run listing the driver made, by canonical number.
+	listings map[string]*Listing
 }
 
 func (d *driver) run(ctx context.Context) error {
@@ -499,6 +504,7 @@ func (d *driver) run(ctx context.Context) error {
 	if err := d.c.getJSON(ctx, d.cfg.CalleeSim+"/report", &post); err != nil {
 		return fmt.Errorf("simulator report: %w", err)
 	}
+	d.calleeReadAt = time.Now().UTC()
 	for _, rr := range d.regions {
 		if rr.cdrs, err = d.campaignCDRs(ctx, rr.campaign.ID.String()); err != nil {
 			return err
@@ -549,7 +555,7 @@ func (d *driver) provision(ctx context.Context, r Region, usedDIDs map[string]bo
 
 	rr := &regionRun{
 		region: r, did: did, byNumber: map[string]Case{},
-		afterFirst: map[string]api.CampaignContact{},
+		afterFirst: map[string]api.CampaignContact{}, listings: map[string]*Listing{},
 	}
 	for _, cs := range d.cfg.Cases {
 		rr.byNumber[r.Number(cs)] = cs
@@ -613,6 +619,51 @@ func (d *driver) provision(ctx context.Context, r Region, usedDIDs map[string]bo
 }
 
 var allDays = []api.Weekday{api.WeekdayMON, api.WeekdayTUE, api.WeekdayWED, api.WeekdayTHU, api.WeekdayFRI, api.WeekdaySAT, api.WeekdaySUN}
+
+// errListing marks a failure to list a number mid-run: unlike a failed
+// observation it is not retried, since a listing that half happened would
+// leave the case void.
+var errListing = errors.New("list a number mid-run")
+
+// listMidRun puts the number of every case with IsListedMidRun on the
+// do-not-call list, region by region, as soon as the contact has been seen
+// right after its first attempt with a retry due: the number is then listed
+// while its contact waits. The list is read back to confirm it. A region
+// whose contact is not there yet is left for the next observation, and none
+// of this holds the other cases back.
+func (d *driver) listMidRun(ctx context.Context) error {
+	for _, rr := range d.regions {
+		for _, cs := range d.cfg.Cases {
+			if !cs.IsListedMidRun {
+				continue
+			}
+			n := rr.region.Number(cs)
+			af, seen := rr.afterFirst[n]
+			if rr.listings[n] != nil || !seen || af.NextAttemptAt == nil {
+				continue
+			}
+			l := &Listing{NextAttemptAt: *af.NextAttemptAt}
+			d.dnc = append(d.dnc, n)
+			l.PostedAt = time.Now().UTC()
+			if err := d.c.do(ctx, http.MethodPost, "/dnc-numbers", api.DNCNumberWrite{Number: n}, nil, http.StatusOK, http.StatusCreated); err != nil {
+				return fmt.Errorf("%w: %s %s: add %s to the do-not-call list: %v", errListing, rr.region.Code, cs.ID, n, err)
+			}
+			l.ListedAt = time.Now().UTC()
+			var list api.DNCNumberList
+			if err := d.c.do(ctx, http.MethodGet, "/dnc-numbers?limit=10&prefix="+url.QueryEscape(n), nil, &list, http.StatusOK); err != nil {
+				return fmt.Errorf("%w: %s %s: read the do-not-call list back: %v", errListing, rr.region.Code, cs.ID, err)
+			}
+			for _, item := range list.Items {
+				if item.Number == n {
+					l.IsOnList = true
+				}
+			}
+			l.ConfirmedAt = time.Now().UTC()
+			rr.listings[n] = l
+		}
+	}
+	return nil
+}
 
 func (d *driver) removeDNC(ctx context.Context) {
 	for _, n := range d.dnc {
@@ -734,7 +785,7 @@ func checkSimulatorUnused(pre calleesim.Report, regions []Region, cases []Case, 
 	var used []string
 	for _, r := range regions {
 		for _, cs := range cases {
-			if len(cs.Steps) < 2 {
+			if len(cs.Steps) < 2 && !cs.IsListedMidRun {
 				continue
 			}
 			if key := r.DialKey(cs, form); seen[key] > 0 {
@@ -839,11 +890,17 @@ func (d *driver) waitUntil(ctx context.Context, what string, done func() bool) e
 	deadline := time.Now().Add(d.cfg.Wait)
 	for {
 		err := d.observe(ctx)
+		if err == nil {
+			err = d.listMidRun(ctx)
+		}
 		if err == nil && d.onPoll != nil {
 			d.onPoll(ctx)
 		}
 		if err == nil && done() {
 			return nil
+		}
+		if err != nil && errors.Is(err, errListing) {
+			return err
 		}
 		if time.Now().After(deadline) {
 			if err != nil {
@@ -879,6 +936,7 @@ func (d *driver) view(post calleesim.Report) *RunView {
 		v.Dialogs = post.Dialogs[d.calleeBase:]
 	}
 	v.Callee = post
+	v.CalleeReadAt = d.calleeReadAt
 	for _, rr := range d.regions {
 		rv := RegionView{Region: rr.region, DID: rr.did, Campaign: rr.campaign, CDRs: rr.cdrs}
 		for _, cs := range d.cfg.Cases {
@@ -890,6 +948,7 @@ func (d *driver) view(post calleesim.Report) *RunView {
 			if ct, ok := rr.afterFirst[n]; ok {
 				cv.AfterFirst = &ct
 			}
+			cv.Listing = rr.listings[n]
 			rv.Contacts = append(rv.Contacts, cv)
 		}
 		v.Regions = append(v.Regions, rv)
