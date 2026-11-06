@@ -59,12 +59,12 @@
   "nodes": {
     "greet": {
       "announce": {
-        "zh": "您好,这里是星联宽带客服。",
-        "en": "Hello, this is NovaNet Broadband customer service."
+        "zh": "您好,这里是星联宽带客服,请问您是尾号6666的机主本人吗?",
+        "en": "Hello, this is NovaNet Broadband customer service. Am I speaking with the account holder of the number ending in 6666?"
       },
       "instruction": {
-        "zh": "确认对方是机主本人后(只报号码后4位),立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,不要自己道歉或道别,立即调用 hangup,致歉和结束语由系统说。机主本人明确表示不想聊、不愿继续通话:不要自己道别,也不要追问,立即调用 hangup,结束语由系统说。",
-        "en": "Confirm you are speaking with the account owner (mention only the last 4 digits of the number), then immediately call bill_lookup. If the answerer is not the owner: disclose nothing and call hangup immediately without apologizing or saying goodbye yourself; the apology and goodbye are spoken for you. If the owner says they do not want to talk or continue the call: do not say goodbye yourself and do not ask anything more; call hangup immediately, the closing line is spoken for you."
+        "zh": "开场白已经报过号码尾数,并问过对方是不是机主本人:不要重复、改动或补充任何号码数字。根据对方的回答处理:对方确认是机主本人,立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,不要自己道歉或道别,立即调用 hangup,致歉和结束语由系统说。对方明确表示不想聊、不愿继续通话:不要自己道别,也不要追问,立即调用 hangup,结束语由系统说。对方问你们是谁、有什么事:用一句话简短回答,不提账单和金额,然后再问一次对方是不是机主本人。对方的话听不清、只有一两个字,或者没有回答这个问题:直接再问一次对方是不是机主本人。确认身份之前不要问“有什么可以帮您”,也不要报任何号码。",
+        "en": "The opening line has already named the number's last digits and asked whether you are speaking with the account holder: never repeat, change or add to any digits of a number. Go by the caller's answer. If they confirm they are the account holder: call bill_lookup immediately. If the answerer is not the account holder: disclose nothing and call hangup immediately without apologizing or saying goodbye yourself; the apology and goodbye are spoken for you. If they say they do not want to talk or continue the call: do not say goodbye yourself and do not ask anything more; call hangup immediately, the closing line is spoken for you. If they ask who is calling or why: answer in one short sentence without mentioning the bill or any amount, then ask again whether you are speaking with the account holder. If their answer is unclear, only a word or two, or does not answer the question: just ask again whether you are speaking with the account holder. Until they have confirmed, never ask how you can help, and never say any number."
       },
       "tools": [
         "bill_lookup"
@@ -208,8 +208,8 @@
   "tools": {
     "bill_lookup": {
       "description": {
-        "zh": "按本机号码查询逾期账单。进线后先调用一次。",
-        "en": "Look up the overdue bill for the caller's number. Call once right after the call starts."
+        "zh": "按本机号码查询逾期账单。对方确认是机主本人后调用一次。",
+        "en": "Look up the overdue bill for the caller's number. Call once the answerer has confirmed they are the account holder."
       },
       "parameters": {
         "type": "object",
