@@ -335,7 +335,8 @@ the attempt finishes (§5.4), because only then is it known whether the customer
 Commit, then call `DialAI` with:
 
 - `CallID` and the customer leg id: the `callId` and `legId` just minted;
-- the number in canonical E.164 with `+` (§9.1);
+- the number to dial, in the trunk's form (`AICC_OUTBOUND_DIAL_FORM`), and the stored canonical
+  E.164 number with `+` (§9.1) as `CanonicalTo`, which the do-not-call check uses (§12);
 - the campaign's DID;
 - the contact's slots as `UserData`;
 - the campaign and attempt ids.
@@ -988,6 +989,14 @@ The model judges; code records.
   path, so no path AICC places a call through dials a DNC number, single calls included. The dialer
   also filters at admission (§5.2) so as not to spend capacity on them. Calls agents dial by hand
   from the softphone go through the dialplan and are not checked (§1).
+- **A campaign attempt is checked against the contact's stored canonical number** (#477). The
+  dialer hands `PlaceAI` that number (`AIDialRequest.CanonicalTo`) beside the dial string, and the
+  last check looks the list up with it as it is. The dial string is in the trunk's form
+  (`AICC_OUTBOUND_DIAL_FORM`, with the campaign's country code), so it is never canonicalised again:
+  with `E164_NO_PLUS`, or `NATIONAL` under a country code other than the deployment's, that would
+  look up a different number than the contact's. A `CanonicalTo` that is not canonical E.164 is
+  refused (the placement fails closed and the attempt ends `ORIGINATE_FAILED`), never waved through.
+  The single-call rule below is unchanged.
 - **A single `createCall` to a DNC number** returns **422 `NUMBER_ON_DNC`** and writes no CDR: the
   CDR is the ledger of calls placed, and this one was not. (Settled; this was one of #89's open
   questions.)

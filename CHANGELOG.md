@@ -20,6 +20,13 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A campaign call's last do-not-call check now looks up the number the contact
+  is stored under. With `AICC_OUTBOUND_DIAL_FORM=E164_NO_PLUS`, or `NATIONAL`
+  under a campaign country code other than `AICC_DEFAULT_COUNTRY_CODE`, the
+  check used the trunk's dial string and so looked up a different number: a
+  number added to the list after the dialer picked it, and before the call
+  went out, was still dialled. It is now refused and the attempt ends
+  `DNC_SKIPPED`, as with the `E164` form. Single calls are unchanged. (#477)
 - An AI outbound call no longer drops the customer when the bot leg fails. If
   the bot refuses the leg (503, 486, 480, gateway down) or answers and fails
   before media, a single call goes to its number's fallback queue when that
