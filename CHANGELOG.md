@@ -55,6 +55,16 @@ carries the one-line installer's files.
   aloud and calls `hangup` in the same turn, that answer is the goodbye: the
   turn the call's result brings is not played, and the call ends once the
   goodbye has been heard. (#465)
+- A caller who talks over a closing line the bot is still producing now counts
+  as interrupting it. Providers that stop a reply themselves when they hear the
+  caller (qwen, doubao) cut such a line before the call saw the caller speak,
+  and the cut went uncounted: a caller saying "mm-hm" over the start of the line
+  needed one interruption more before the line stopped being asked for and the
+  call's cap stopped moving. The second interruption now does that, whichever
+  side noticed it. Such a cut never ends the call at once and never counts as
+  the line said, because how long the line would have run is not known yet: a
+  caller who declines over the start of a line still being produced is answered
+  and then hears the line once more. (#493)
 - The agent's live transcript follows the conversation again: it opens at the
   latest line, whether the call is live or has ended, and keeps each new or
   growing line in view until the reader scrolls up on purpose. "Jump to latest"
