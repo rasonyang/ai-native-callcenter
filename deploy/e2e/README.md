@@ -15,6 +15,10 @@ make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) an
 make e2e-down      # collect logs, remove containers, volumes and the network
 ```
 
+`E2E_OUTBOUND_DIAL_FORM=NATIONAL make e2e-up` starts the environment with the
+application dialling campaign contacts in that form (`E164`, the default,
+`E164_NO_PLUS` or `NATIONAL`); see "Dial forms".
+
 Needs Docker with Compose v2.24 or later and Go. Nothing else on the host:
 the harness binaries are cross-compiled statically for the Docker daemon's
 architecture and run in an image with no shell and no libraries.
@@ -117,6 +121,7 @@ be replaced by one a real trunk rings.
 | C07 | 180, never answered | `NO_ANSWER`; CANCEL at the 5 s ring timeout ±1 s; no provider session |
 | C08 | 183 with early media, never answered | `NO_ANSWER`; CANCEL; no provider session |
 | C09 | number on the do-not-call list | `DNC_SKIPPED`, cause `NUMBER_ON_DNC`; contact `DNC`; zero INVITEs |
+| C10 | 180, then 486; the driver lists the number while the retry waits | attempt 1 `BUSY` (`USER_BUSY`), attempt 2 `DNC_SKIPPED` (`NUMBER_ON_DNC`); contact `DNC`; exactly one INVITE, one CDR (attempt 1's), none for the skipped attempt |
 | P1–P5 | 180, then 480, 408, 503, 484, 410 | recorded, and held to design 10 §7.2's cause table |
 | C01 | 180, then 200 after 2 s, a tone on the uplink; the bot records `record_lead` `HIGH` and ends the call | `ANSWERED`; lead `HIGH` on the attempt and the contact; exactly one callback, for that call and number, the notes as its message; contact `DONE`; the caller's BYE |
 | C02 | 200, then the customer's BYE at 1 s | `ANSWERED`; contact `DONE`, no lead, no callback; no further INVITE to the number for the rest of the run |
@@ -155,12 +160,96 @@ the BYE; and downlink audio above silence. The time from the 200 OK to the
 first downlink frame above silence is reported per answered call (`probes.md`,
 "First audio"), with no threshold.
 
-The deployment's `AICC_OUTBOUND_DIAL_FORM` is `E164` (the default, spelt out in
-the compose overlay): the switch is handed `+12025550103` and `+8613988886603`,
-which is the Request-URI user part the simulator matches. The driver reads the
-dial form from the resolved configuration and refuses to start when
-`scenario.json` does not hold every case's number in that form with the case's
-responses.
+C10 lists a number while its campaign runs, which C09 (listed before the
+campaign starts, so never selected) does not. The callee refuses attempt 1 with
+486, which schedules the retry 60 s later. As soon as the driver has seen the
+contact right after that attempt, with its `nextAttemptAt` set, it posts the
+canonical number to `POST /dnc-numbers`, reads `GET /dnc-numbers` back and
+checks the number is on it. It does this for each country on its own, while
+the other cases carry on. The case fails when the listing was not before the
+contact's `nextAttemptAt` (it would test nothing), and otherwise asserts that
+the attempts are exactly `BUSY`/`USER_BUSY` then `DNC_SKIPPED`/`NUMBER_ON_DNC`
+(the second started after the listing), that the contact is `DNC` having spent
+one attempt, that the simulator saw one INVITE for the number, that attempt 1
+has one CDR with the dialled string and the skipped attempt none. The platform
+skips a listed contact on the dialer's next loop, not when its retry falls due
+(design 10 section 12), and removing the number later does not revive it, so
+the number is removed from the list when the run ends, like C09's.
+`aicc_campaign_attempts_total{outcome="DNC_SKIPPED"}` moves by the skipped
+attempts of C09 and C10 in both countries (the run-wide "every attempt
+finished once" invariant).
+
+A control number listed mid-run and removed again before its retry would not
+be dialled again: the skip is immediate, so its contact is skipped as soon as
+it is listed, and the removal does not revive it. C10's control is C03 instead: the same callee behaviour (180, then 486), the same
+retry interval, never listed. C10's assessment requires C03 of the same country
+to have been dialled twice, the second INVITE at or after the moment C10's
+retry fell due (give or take the INVITE slack), and the simulator's record that
+counts C10's INVITEs to have been read after that moment. So C10 cannot pass
+because the platform dialled nothing from then on.
+
+### Dial forms
+
+The campaign dialer writes each contact's number in the deployment's
+`AICC_OUTBOUND_DIAL_FORM` with the campaign's own country code
+(`internal/dialer/admit.go`), and that string is the Request-URI user part the
+simulator matches and the CDR's dialled number. The form is a run parameter:
+
+```sh
+make e2e-up                                        # E164 (the default)
+E2E_OUTBOUND_DIAL_FORM=E164_NO_PLUS make e2e-up
+E2E_OUTBOUND_DIAL_FORM=NATIONAL make e2e-up
+make e2e-campaign                                  # runs in the form `up` started
+```
+
+| form | US campaign (country code 1), C03 | CN campaign (country code 86), C03 |
+| --- | --- | --- |
+| `E164` | `+12025550103` | `+8613988886603` |
+| `E164_NO_PLUS` | `12025550103` | `8613988886603` |
+| `NATIONAL` | `2025550103` | `13988886603` |
+
+The e2e deployment's own country code is 86, so `NATIONAL` dials the US
+numbers with a code that differs from the deployment's and the Chinese ones
+with the same code, both sides of #477. In every form the attempt and the
+contact keep the canonical `+` number; only the dial string follows the form.
+
+- `E2E_OUTBOUND_DIAL_FORM` is checked first thing by `e2e.sh`: a value other
+  than `E164`, `E164_NO_PLUS` and `NATIONAL` stops it with a message naming the
+  three, before anything is built or started.
+- `up` fixes the form for the environment and records it in
+  `bin/e2e/<project>/dial-form` (removed by `down`). Every other command
+  (`smoke`, `campaign`, `capacity`, `config`) runs in the recorded form, so
+  `e2e-capacity`'s application restarts keep it. An explicit
+  `E2E_OUTBOUND_DIAL_FORM` that differs from the recorded one is refused ("the
+  environment is up with X; run: make e2e-down"); `down` ignores it, since it
+  must always be able to clean up. To change the form, `make e2e-down`, then
+  `up` again.
+- The simulator's scenario follows the form. `scenario.json` is the one file
+  edited by hand and is the `E164` file. `scenario.E164_NO_PLUS.json` and
+  `scenario.NATIONAL.json` are generated from it by `ScenarioForForm`
+  (`internal/e2e/scenario_forms.go`): the key of every campaign contact (the
+  campaign table, K1 and K2's campaigns, K3's campaign) becomes the string
+  the dialer produces in that form. Every other key stays as it is: the
+  smoke's `13800000001` and the direct calls (K1's slot holders, K3's calls)
+  are placed through `POST /calls`, which dials its number exactly as sent, in
+  every form. The generator refuses a key it cannot classify and two keys that
+  would become one. After editing `scenario.json` or a case table, regenerate:
+
+  ```sh
+  go test ./internal/e2e -run TestScenarioForms -update
+  ```
+
+  `go test ./internal/e2e` fails, naming that command, when a generated file
+  differs from what the generator makes of `scenario.json`. The compose
+  overlay mounts the file of the form for both the simulator and the driver.
+- The driver reads the form from the resolved configuration and refuses to
+  start when the scenario it was given does not hold every case's number in
+  that form with the case's responses; the refusal names the form
+  (`AICC_OUTBOUND_DIAL_FORM=NATIONAL; ...`).
+- The unit tests (`go test -race ./internal/e2e/`) run every test that depends
+  on a number's form once per form, each against that form's file, and assert
+  the three forms' Request-URI user parts literally. A run in any form also
+  holds that no INVITE of one campaign carries the other country's number.
 
 ### The mock provider's scripts
 
@@ -325,6 +414,7 @@ assertion and every call) and `capacity.md` (the tables, also printed by
 | `logs/freeswitch-file.log` | the switch's log file, each call's lines prefixed with its leg id |
 | `logs/sofia-status.txt` | the switch's gateways |
 | `compose.json` | the resolved configuration the guard checked |
+| `../dial-form` (in `bin/e2e/<project>/`) | the dial form `up` started the environment with |
 | `e2e_calleesim.xml` | the rendered gateway file |
 | `calleesim-final.json` | the simulator's record at shutdown |
 
