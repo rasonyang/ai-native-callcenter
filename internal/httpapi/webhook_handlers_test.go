@@ -212,6 +212,136 @@ func TestASubscriptionURLIsAnAbsoluteHTTPOrHTTPSAddress(t *testing.T) {
 	})
 }
 
+// The contract caps WebhookSubscriptionWrite.name at 120 and .authToken at 1024
+// characters. Both columns are unbounded text, so the handler is the only
+// place the limit holds, and it counts characters, not bytes.
+func TestASubscriptionNameAndTokenAreCappedInCharactersNotBytes(t *testing.T) {
+	t.Parallel()
+	rep := func(unit string, n int) string { return strings.Repeat(unit, n) }
+	type call struct {
+		verb string
+		do   func(s *Server, w *httptest.ResponseRecorder, body string)
+		ok   int
+	}
+	calls := []call{
+		{"create", func(s *Server, w *httptest.ResponseRecorder, body string) {
+			s.CreateWebhookSubscription(w, post(body))
+		}, http.StatusCreated},
+		{"update", func(s *Server, w *httptest.ResponseRecorder, body string) {
+			s.UpdateWebhookSubscription(w, post(body), uuid.Must(uuid.NewV7()))
+		}, http.StatusOK},
+	}
+	nameBody := func(name string) string {
+		return `{"name":"` + name + `","url":"https://example.com/h"}`
+	}
+	tokenBody := func(token string) string {
+		return `{"name":"x","url":"https://example.com/h","authToken":"` + token + `"}`
+	}
+	names := []struct {
+		label string
+		value string
+		ok    bool
+	}{
+		{"120 ASCII characters", rep("a", 120), true},
+		{"121 ASCII characters", rep("a", 121), false},
+		{"120 multi-byte characters", rep("例", 120), true},
+		{"121 multi-byte characters", rep("例", 121), false},
+		{"120 emoji", rep("😀", 120), true},
+	}
+	for _, c := range calls {
+		for _, n := range names {
+			t.Run(c.verb+" name with "+n.label, func(t *testing.T) {
+				svc := &stubWebhooks{}
+				w := httptest.NewRecorder()
+				c.do(&Server{webhooks: svc}, w, nameBody(n.value))
+				if n.ok {
+					if w.Code != c.ok {
+						t.Fatalf("status = %d, want %d: %s", w.Code, c.ok, w.Body)
+					}
+					if svc.written.Name != n.value {
+						t.Error("the name was not stored as sent")
+					}
+					return
+				}
+				if w.Code != http.StatusUnprocessableEntity {
+					t.Fatalf("status = %d, want 422: %s", w.Code, w.Body)
+				}
+				if code := errorCodeOf(t, w); code != string(CodeValidationFailed) {
+					t.Errorf("code = %s, want %s", code, CodeValidationFailed)
+				}
+				if field := errorParamOf(t, w, "field"); field != "name" {
+					t.Errorf("field = %q, want \"name\"", field)
+				}
+				if svc.calls != 0 {
+					t.Error("the subscription was written despite the long name")
+				}
+			})
+		}
+		for _, tc := range []struct {
+			label string
+			value string
+			ok    bool
+		}{
+			{"1024 characters", rep("t", 1024), true},
+			{"1024 multi-byte characters", rep("例", 1024), true},
+			{"1025 characters", rep("t", 1025), false},
+			{"1025 multi-byte characters", rep("例", 1025), false},
+		} {
+			t.Run(c.verb+" authToken with "+tc.label, func(t *testing.T) {
+				svc := &stubWebhooks{}
+				w := httptest.NewRecorder()
+				c.do(&Server{webhooks: svc}, w, tokenBody(tc.value))
+				if tc.ok {
+					if w.Code != c.ok {
+						t.Fatalf("status = %d, want %d: %s", w.Code, c.ok, w.Body)
+					}
+					if svc.written.AuthToken == nil || *svc.written.AuthToken != tc.value {
+						t.Error("the token was not handed to the store as sent")
+					}
+					return
+				}
+				if w.Code != http.StatusUnprocessableEntity {
+					t.Fatalf("status = %d, want 422: %s", w.Code, w.Body)
+				}
+				if code := errorCodeOf(t, w); code != string(CodeValidationFailed) {
+					t.Errorf("code = %s, want %s", code, CodeValidationFailed)
+				}
+				if field := errorParamOf(t, w, "field"); field != "authToken" {
+					t.Errorf("field = %q, want \"authToken\"", field)
+				}
+				if svc.calls != 0 {
+					t.Error("the subscription was written despite the long token")
+				}
+				if strings.Contains(w.Body.String(), tc.value) {
+					t.Error("the refusal repeats the token")
+				}
+			})
+		}
+		t.Run(c.verb+" an empty authToken clears the token", func(t *testing.T) {
+			svc := &stubWebhooks{}
+			w := httptest.NewRecorder()
+			c.do(&Server{webhooks: svc}, w, tokenBody(""))
+			if w.Code != c.ok {
+				t.Fatalf("status = %d, want %d: %s", w.Code, c.ok, w.Body)
+			}
+			if svc.written.AuthToken == nil || *svc.written.AuthToken != "" {
+				t.Errorf("token = %v, want a pointer to the empty string", svc.written.AuthToken)
+			}
+		})
+		t.Run(c.verb+" an absent authToken leaves the token unchanged", func(t *testing.T) {
+			svc := &stubWebhooks{}
+			w := httptest.NewRecorder()
+			c.do(&Server{webhooks: svc}, w, nameBody("x"))
+			if w.Code != c.ok {
+				t.Fatalf("status = %d, want %d: %s", w.Code, c.ok, w.Body)
+			}
+			if svc.written.AuthToken != nil {
+				t.Errorf("token = %q, want nil (absent)", *svc.written.AuthToken)
+			}
+		})
+	}
+}
+
 // The closed list is written down twice — once as the contract's properties,
 // once as the Go slice the handler checks against — and nothing but this joins
 // them. A key added to the schema and not to the store would be declared and
