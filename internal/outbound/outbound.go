@@ -346,6 +346,20 @@ func (s *Service) checkDNC(ctx context.Context, destination string) error {
 			"hasDefaultCountryCode", s.cfg.DefaultCountryCode != "")
 		return nil
 	}
+	return s.checkListed(ctx, number)
+}
+
+// ErrBadCanonicalNumber means a caller that vouches for the customer's
+// canonical number (AIDialRequest.CanonicalTo) gave one that is not canonical
+// E.164. The list cannot be checked against it, and a placement is never
+// allowed to skip the check, so it is refused. It is a defect of the caller,
+// not a fact about the customer: it is deliberately neither ErrBadNumber nor
+// ErrNumberOnDNC.
+var ErrBadCanonicalNumber = fmt.Errorf("outbound: the canonical number to check is not canonical E.164")
+
+// checkListed looks a canonical E.164 number up in the do-not-call list.
+// checkDNC and checkCanonicalDNC both end here.
+func (s *Service) checkListed(ctx context.Context, number string) error {
 	isListed, err := s.dnc.Contains(ctx, number)
 	if err != nil {
 		return fmt.Errorf("outbound: do-not-call lookup: %w", err)
@@ -354,6 +368,22 @@ func (s *Service) checkDNC(ctx context.Context, destination string) error {
 		return ErrNumberOnDNC
 	}
 	return nil
+}
+
+// checkCanonicalDNC checks a number the caller already holds in canonical
+// E.164 (a campaign contact's stored number) without canonicalising it again.
+// A value that is not canonical fails closed: skipping the check would dial a
+// number nobody proved is allowed.
+func (s *Service) checkCanonicalDNC(ctx context.Context, number string) error {
+	if s.dnc == nil {
+		return nil
+	}
+	if !phonenum.IsCanonical(number) {
+		s.log.ErrorContext(ctx, "do-not-call check refused: the canonical number is not canonical E.164",
+			"length", len(number))
+		return ErrBadCanonicalNumber
+	}
+	return s.checkListed(ctx, number)
 }
 
 // Errors the API layer translates.
@@ -786,8 +816,16 @@ func (s *Service) Data() *CallData { return s.callData }
 type AIDialRequest struct {
 	// CallID makes retries idempotent; zero mints a fresh identity.
 	CallID uuid.UUID
-	// To is the customer's number.
+	// To is the customer's number as the trunk is sent it.
 	To string
+	// CanonicalTo is the customer's number in canonical E.164, the one the
+	// do-not-call list is checked against. The dialer sets it, because its To
+	// is the dial string in the trunk's form (AICC_OUTBOUND_DIAL_FORM, the
+	// campaign's country code), which canonicalising with the deployment's
+	// code would not turn back into the stored number. Empty for a single
+	// call, whose To is canonicalised with the deployment's code. When set it
+	// must be canonical, or the placement is refused.
+	CanonicalTo string
 	// DIDNumber names the flow (and the caller id) for the conversation.
 	DIDNumber string
 	// Language overrides the DID's default when set.
@@ -885,7 +923,12 @@ func (s *Service) PlaceAI(ctx context.Context, req AIDialRequest) (Placement, er
 	}
 	// After the idempotency check: a call already placed is reported as
 	// placed, even if its number joined the list since.
-	if err := s.checkDNC(ctx, req.To); err != nil {
+	if req.CanonicalTo != "" {
+		err = s.checkCanonicalDNC(ctx, req.CanonicalTo)
+	} else {
+		err = s.checkDNC(ctx, req.To)
+	}
+	if err != nil {
 		return Placement{}, err
 	}
 	if err := s.claimCall(ctx, callID, req.CallID == uuid.Nil); err != nil {

@@ -64,6 +64,21 @@ func TestTheDialFormChangesOnlyWhatTheTrunkIsSent(t *testing.T) {
 			if n := r.placer.placedTo(tc.wantForeign); n != 1 {
 				t.Errorf("placed to %s %d times, want 1", tc.wantForeign, n)
 			}
+			// The placer is told both: To is what the trunk is sent, CanonicalTo
+			// is the stored number the do-not-call list is checked against.
+			wantCanonical := map[string]bool{"+8618688886666": true, "+14155550123": true, "+14155550124": true}
+			for _, p := range r.placer.placedCalls() {
+				if !wantCanonical[p.Req.CanonicalTo] {
+					t.Errorf("placed to %s with CanonicalTo %q, want a stored canonical number", p.Req.To, p.Req.CanonicalTo)
+				}
+				if want, _ := phonenum.DialString(p.Req.CanonicalTo, tc.form, "86"); p.Req.To != want {
+					t.Errorf("To = %q for %s, want the dial string %q", p.Req.To, p.Req.CanonicalTo, want)
+				}
+				delete(wantCanonical, p.Req.CanonicalTo)
+			}
+			if len(wantCanonical) != 0 {
+				t.Errorf("no placement carried CanonicalTo for %v", wantCanonical)
+			}
 			ct := r.contactOf(c, "+8618688886666")
 			if ct.Number != "+8618688886666" {
 				t.Errorf("contact number = %s, want canonical", ct.Number)

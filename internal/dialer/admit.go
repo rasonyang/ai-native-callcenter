@@ -384,7 +384,7 @@ func (d *Dialer) admit(ctx context.Context, c campaign.Campaign, ct campaign.Con
 	pctx, cancel := context.WithTimeout(ctx, d.cfg.DialTimeout)
 	defer cancel()
 	placed, err := d.pl.PlaceAI(pctx, outbound.AIDialRequest{
-		CallID: att.CallID, LegID: att.LegID, To: d.dialString(c, ct.Number), DIDNumber: c.DIDNumber,
+		CallID: att.CallID, LegID: att.LegID, To: d.dialString(c, ct.Number), CanonicalTo: ct.Number, DIDNumber: c.DIDNumber,
 		UserData: ct.Slots, RingTimeout: ring, CampaignID: c.ID, AttemptID: att.ID,
 	})
 	if err == nil {
