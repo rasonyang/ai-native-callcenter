@@ -414,7 +414,7 @@ func TestACallerAnsweringTheGoodbyeFiresTheArmedAction(t *testing.T) {
 
 	// Speech before the closing line exists must NOT fire: the tool call has
 	// only just happened and the line is still coming.
-	actions.onBargeIn(0, -1)
+	actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 	select {
 	case <-fired:
 		t.Fatal("the action ran before the closing line was even generated")
@@ -424,7 +424,7 @@ func TestACallerAnsweringTheGoodbyeFiresTheArmedAction(t *testing.T) {
 	// The closing line finishes generating in the next turn...
 	actions.onTurnDone(session.currentTurn()+1, false, true)
 	// ...and the caller talks over the tail of it.
-	actions.onBargeIn(0, -1)
+	actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 
 	select {
 	case <-fired:
@@ -1891,7 +1891,7 @@ func TestAClosingLineCutShortEndsTheCallOnlyAtTheCap(t *testing.T) {
 	h.model.events <- provider.Event{Type: provider.EventTypeInterrupted, InterruptedBy: provider.InterruptReasonSpeech}
 	time.Sleep(100 * time.Millisecond)
 
-	h.actions.onBargeIn(0, -1)
+	h.actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 	if h.isCallEnded() || !h.actions.isArmed() {
 		t.Fatal("the call ended on speech over a closing line that was never said")
 	}
@@ -2050,7 +2050,7 @@ func TestACutShortTurnIsNotTheClosingLine(t *testing.T) {
 	actions.arm(t.Context(), func() { close(fired) })
 
 	actions.onTurnDone(session.currentTurn()+1, true, true)
-	actions.onBargeIn(0, -1)
+	actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 	select {
 	case <-fired:
 		t.Fatal("a turn stopped before its words existed counted as the closing line")
@@ -2058,7 +2058,7 @@ func TestACutShortTurnIsNotTheClosingLine(t *testing.T) {
 	}
 
 	actions.onTurnDone(session.currentTurn()+2, false, true)
-	actions.onBargeIn(0, -1)
+	actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 	select {
 	case <-fired:
 	case <-time.After(time.Second):
@@ -2391,7 +2391,7 @@ func TestOnlyTheUnplayedTailDecidesWhetherSpeechIsAnAcknowledgement(t *testing.T
 	actions.arm(t.Context(), func() { close(fired) })
 	actions.onTurnDone(session.currentTurn()+1, false, true)
 
-	actions.onBargeIn(closingTailAck+time.Millisecond, -1)
+	actions.onBargeIn(Event{Unplayed: closingTailAck + time.Millisecond, Played: -1})
 	select {
 	case <-fired:
 		t.Fatal("speech over a long tail ran the armed action")
@@ -2401,7 +2401,7 @@ func TestOnlyTheUnplayedTailDecidesWhetherSpeechIsAnAcknowledgement(t *testing.T
 		t.Fatal("the interrupted line still counts as said")
 	}
 	// Speech again before an answer exists changes nothing.
-	actions.onBargeIn(0, -1)
+	actions.onBargeIn(Event{Unplayed: 0, Played: -1})
 	select {
 	case <-fired:
 		t.Fatal("speech before any answer ran the armed action")
@@ -2409,7 +2409,7 @@ func TestOnlyTheUnplayedTailDecidesWhetherSpeechIsAnAcknowledgement(t *testing.T
 	}
 
 	actions.onTurnDone(session.currentTurn()+2, false, true)
-	actions.onBargeIn(closingTailAck, -1)
+	actions.onBargeIn(Event{Unplayed: closingTailAck, Played: -1})
 	select {
 	case <-fired:
 	case <-time.After(time.Second):
@@ -2705,7 +2705,7 @@ func TestTheCapCoversEveryAnswerToAnInterruptedClosingLine(t *testing.T) {
 	// The closing line finishes generating; the caller cuts in early on it.
 	leg.holdFrames(400)
 	actions.onTurnDone(armedTurn+1, false, true)
-	actions.onBargeIn(closingTailAck+time.Second, -1)
+	actions.onBargeIn(Event{Unplayed: closingTailAck + time.Second, Played: -1})
 	leg.holdFrames(0)
 
 	// Answer one is short, answer two is long.
@@ -2768,7 +2768,7 @@ func armInterruptedHangup(t *testing.T, graceCap time.Duration) (
 	actions.armAs(t.Context(), false, func() { close(fired) })
 	armedTurn := session.currentTurn()
 	actions.onTurnDone(armedTurn+1, false, true)
-	actions.onBargeIn(closingTailAck+time.Second, -1)
+	actions.onBargeIn(Event{Unplayed: closingTailAck + time.Second, Played: -1})
 	return actions, session, armedTurn, fired
 }
 
