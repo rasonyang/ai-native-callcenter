@@ -108,7 +108,7 @@ func TestTier2PromiseCall(t *testing.T) {
 		t.Errorf("bot model = %q", first.Model)
 	}
 	system := first.Messages[0].Content
-	for _, want := range []string{"NovaNet Broadband billing-reminder", "Confirm you are speaking with the account owner"} {
+	for _, want := range []string{"NovaNet Broadband billing-reminder", "asked whether you are speaking with the account holder"} {
 		if !strings.Contains(system, want) {
 			t.Errorf("the bot's system prompt lacks %q", want)
 		}

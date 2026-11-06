@@ -383,3 +383,32 @@ func TestCampaignTalkDoesNotHangUpRightAfterRecordingAStance(t *testing.T) {
 		}
 	}
 }
+
+// The greet instruction once told the model to "mention only the last 4 digits"
+// of a number it was never given, and it made digits up (#491). The tail is in
+// the opening line, which is said as written; nothing the model writes from
+// carries a digit.
+func TestEarlyCollectionsGreetNeverHandsTheModelDigits(t *testing.T) {
+	t.Parallel()
+	spec := shippedFlows(t)["early_collections.json"]
+	if spec == nil {
+		t.Fatal("early_collections.json is not shipped")
+	}
+	greet := spec.Nodes[spec.InitialNode]
+	digit := regexp.MustCompile(`[0-9]`)
+	for lang, text := range map[string]string{"zh": greet.Instruction.ZH, "en": greet.Instruction.EN} {
+		if digit.MatchString(text) {
+			t.Errorf("greet instruction (%s) holds a digit: %q", lang, text)
+		}
+		for _, banned := range []string{"后4位", "last 4 digits"} {
+			if strings.Contains(text, banned) {
+				t.Errorf("greet instruction (%s) still says %q", lang, banned)
+			}
+		}
+	}
+	for lang, text := range map[string]string{"zh": greet.Announce.ZH, "en": greet.Announce.EN} {
+		if !strings.Contains(text, "6666") {
+			t.Errorf("greet announce (%s) lacks the number's tail: %q", lang, text)
+		}
+	}
+}

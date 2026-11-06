@@ -20,6 +20,13 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- The seeded `early_collections` flow asks for the account holder in its
+  opening line ("...尾号6666的机主本人吗?"), so the caller's first words answer
+  it and the reminder follows in the next turn, instead of a greeting followed
+  by silence until the caller spoke. The bot also no longer makes up the
+  number's last digits: its instruction asked it to say digits it was never
+  given. The tail 6666 is fixed in the flow's text for now (#84 would render it
+  from the caller's number). (#491)
 - A campaign call's last do-not-call check now looks up the number the contact
   is stored under. With `AICC_OUTBOUND_DIAL_FORM=E164_NO_PLUS`, or `NATIONAL`
   under a campaign country code other than `AICC_DEFAULT_COUNTRY_CODE`, the
@@ -156,11 +163,11 @@ carries the one-line installer's files.
   declared lead, for instance a `NONE` over a `HIGH` so that no callback was
   filed. The tool is still offered, and a phase without a declared lead is
   unchanged. In the flow simulator such a call comes back `isRefused`. (#358)
-- The seeded `novanet_support`, `mobile_support` and `field_service_appointment`
-  flows changed (see Fixed). The seed never replaces a flow that already
-  exists, so a deployment seeded earlier keeps its published revision; load
-  the new ones from `internal/seed/flows/` with `aicc flowadd` if you use
-  them.
+- The seeded `novanet_support`, `mobile_support`, `field_service_appointment`
+  and `early_collections` flows changed (see Fixed). The seed never replaces a
+  flow that already exists, so a deployment seeded earlier keeps its published
+  revision; load the new ones from `internal/seed/flows/` with `aicc flowadd`
+  if you use them.
 - Every id the server mints is now a UUIDv7, so call ids are time-ordered.
   This covers the call ids of campaign calls, callback dials and the bot's
   fallback; the leg ids the app gives the switch; agent, API key and seeded

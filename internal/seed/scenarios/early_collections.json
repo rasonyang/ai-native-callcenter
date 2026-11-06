@@ -6,7 +6,7 @@
       "lang": "en",
       "caller": "92223333",
       "steps": [
-        {"say": "Yes, this is me."},
+        {"say": "Yes, speaking.", "expect": {"phase": "greet", "announce": "Hello, this is NovaNet Broadband customer service. Am I speaking with the account holder of the number ending in 6666?"}},
         {"call": "bill_lookup", "expect": {
           "phase": "remind",
           "result": {"found": "1", "amount": "45.60", "days_overdue": "8"},
@@ -56,9 +56,44 @@
       "lang": "en",
       "caller": "92223333",
       "steps": [
+        {"say": "No, this is his wife."},
         {"call": "hangup", "expect": {"phase": "finish", "announce": "Sorry to have bothered you. Thank you, goodbye."}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "toolsRun": ["hangup"]}
+    },
+    {
+      "name": "the opening line asks for the account holder and the owner answers at once",
+      "description": "The entry announce carries the question with the number's tail (#491), so the caller's first words answer it; the model looks the bill up in its first turn.",
+      "lang": "zh",
+      "caller": "18688886666",
+      "steps": [
+        {"say": "是我本人", "expect": {"phase": "greet", "announce": "您好,这里是星联宽带客服,请问您是尾号6666的机主本人吗?"}},
+        {"call": "bill_lookup", "expect": {"phase": "remind", "result": {"days_overdue": "16"}}}
+      ],
+      "expect": {"path": ["greet", "remind"], "ending": "none", "toolsRun": ["bill_lookup"]}
+    },
+    {
+      "name": "the answerer is not the owner (zh)",
+      "description": "A family member answers: no bill_lookup, and the finish line speaks no amount.",
+      "lang": "zh",
+      "caller": "18688886666",
+      "steps": [
+        {"say": "不是,我是他家人"},
+        {"call": "hangup", "expect": {"phase": "finish", "announce": "不好意思打扰了,感谢配合,再见。"}}
+      ],
+      "expect": {"path": ["greet", "finish"], "ending": "hangup", "toolsRun": ["hangup"]}
+    },
+    {
+      "name": "the caller asks who is calling before confirming",
+      "description": "The model answers in words without a tool; the phase stays greet until the caller confirms.",
+      "lang": "zh",
+      "caller": "18688886666",
+      "steps": [
+        {"exchange": "你们是谁?", "expect": {"phase": "greet", "instructionContains": ["不提账单和金额", "再问一次对方是不是机主本人"]}},
+        {"say": "我是机主"},
+        {"call": "bill_lookup", "expect": {"phase": "remind"}}
+      ],
+      "expect": {"path": ["greet", "remind"], "ending": "none", "toolsRun": ["bill_lookup"]}
     },
     {
       "name": "the owner refuses to talk before any lookup",
