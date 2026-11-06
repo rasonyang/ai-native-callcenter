@@ -22,46 +22,45 @@ import (
 // The simulator's scenario must play what K3 expects, and K3's numbers must be
 // the harness's own: inside the US range, apart from every other case's.
 func TestScenarioFileCoversK3(t *testing.T) {
-	s, err := calleesim.LoadScenario("../../deploy/e2e/scenario.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := CheckScenarioCoversCases(s, []Region{K3.Region}, K3.CampaignCases(), phonenum.FormE164); err != nil {
-		t.Errorf("R3: %v", err)
-	}
-	if err := checkRefusalInScenario(s, K3, phonenum.FormE164); err != nil {
-		t.Error(err)
-	}
-	seen := map[string]string{}
-	for _, r := range Regions {
-		for _, cs := range AllCases {
-			seen[r.Number(cs)] = r.Code + " " + cs.ID
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		s := loadScenarioFor(t, form)
+		if err := CheckScenarioCoversCases(s, []Region{K3.Region}, K3.CampaignCases(), form); err != nil {
+			t.Errorf("R3: %v", err)
 		}
-	}
-	for _, id := range []string{"K1", "K2"} {
-		sc := CapacityScenarios[id]
-		for _, r := range sc.Regions {
-			for _, cs := range sc.Cases {
-				seen[r.Number(cs)] = id + " " + cs.ID
+		if err := checkRefusalInScenario(s, K3); err != nil {
+			t.Error(err)
+		}
+		seen := map[string]string{}
+		for _, r := range Regions {
+			for _, cs := range AllCases {
+				seen[r.Number(cs)] = r.Code + " " + cs.ID
 			}
 		}
-		for _, ds := range sc.Direct {
-			seen[ds.Number()] = id + " direct " + ds.Suffix
+		for _, id := range []string{"K1", "K2"} {
+			sc := CapacityScenarios[id]
+			for _, r := range sc.Regions {
+				for _, cs := range sc.Cases {
+					seen[r.Number(cs)] = id + " " + cs.ID
+				}
+			}
+			for _, ds := range sc.Direct {
+				seen[ds.Number()] = id + " direct " + ds.Suffix
+			}
 		}
-	}
-	check := func(label, number string) {
-		if !phonenum.IsCanonical(number) || !strings.HasPrefix(number, K3.Region.Prefix) || len(number) != len(K3.Region.Prefix)+2 {
-			t.Errorf("%s: %q is not a number of %sxx", label, number, K3.Region.Prefix)
+		check := func(label, number string) {
+			if !phonenum.IsCanonical(number) || !strings.HasPrefix(number, K3.Region.Prefix) || len(number) != len(K3.Region.Prefix)+2 {
+				t.Errorf("%s: %q is not a number of %sxx", label, number, K3.Region.Prefix)
+			}
+			if prev, dup := seen[number]; dup {
+				t.Errorf("%s and %s share %s", label, prev, number)
+			}
+			seen[number] = label
 		}
-		if prev, dup := seen[number]; dup {
-			t.Errorf("%s and %s share %s", label, prev, number)
+		for _, rc := range K3.Direct {
+			check("K3 "+rc.ID, rc.Number(K3.Region))
 		}
-		seen[number] = label
-	}
-	for _, rc := range K3.Direct {
-		check("K3 "+rc.ID, rc.Number(K3.Region))
-	}
-	check("K3 "+K3.Campaign.ID, K3.Region.Number(K3.Campaign))
+		check("K3 "+K3.Campaign.ID, K3.Region.Number(K3.Campaign))
+	})
 }
 
 // K3's timing: the holder answers before anything else and outlasts every
@@ -157,7 +156,7 @@ func TestCheckAppEnvForK3(t *testing.T) {
 // at 300 ms and stayed 28 s; R1 was queued and its callee hung up 8 s after
 // answering; R2 and R3 were hung up by the platform a second or so after
 // answering; N1 came after the holder and reached the bot.
-func fakeK3(t *testing.T) (*RunView, RefusalFacts) {
+func fakeK3(t *testing.T, form phonenum.DialForm) (*RunView, RefusalFacts) {
 	t.Helper()
 	r := K3.Region
 	base := time.Date(2026, 11, 4, 8, 0, 0, 0, time.UTC)
@@ -186,7 +185,7 @@ func fakeK3(t *testing.T) (*RunView, RefusalFacts) {
 	times := map[string]timing{
 		"HOLDER": {0, 300, 28300}, "R1": {1600, 1900, 9900}, "R2": {1650, 1950, 3200}, "N1": {30000, 30300, 36300},
 	}
-	v := &RunView{Form: phonenum.FormE164, Cases: K3.CampaignCases()}
+	v := &RunView{Form: form, Cases: K3.CampaignCases()}
 	f := RefusalFacts{QueueID: queueID.String(), QueueExt: "7001", Channels: map[string]string{}}
 	placed := map[string]time.Time{"HOLDER": at(-500), "R1": at(1500), "R2": at(1500), "N1": at(29000)}
 	for _, rc := range K3.Direct {
@@ -198,7 +197,7 @@ func fakeK3(t *testing.T) (*RunView, RefusalFacts) {
 		if rc.ID == "HOLDER" || rc.ID == "N1" {
 			peak = 5000
 		}
-		dlg := dialog(rc.DialKey(r, phonenum.FormE164), dids[rc.ID], tm.invite, tm.answer, tm.end, by, peak)
+		dlg := dialog(rc.DialKey(r), dids[rc.ID], tm.invite, tm.answer, tm.end, by, peak)
 		id := uuid.Must(uuid.NewV7())
 		cdr := api.CDR{CallID: id, HangupCause: str("NORMAL_CLEARING"), AnsweredAt: ptr(at(tm.answer))}
 		switch rc.ID {
@@ -211,13 +210,13 @@ func fakeK3(t *testing.T) (*RunView, RefusalFacts) {
 			cdr.UserData = reason
 			cdr.HangupCause = str(causeTemporaryFailure)
 		}
-		v.Direct = append(v.Direct, DirectCall{Number: rc.Number(r), DialKey: rc.DialKey(r, phonenum.FormE164), DID: dids[rc.ID], CallID: id.String(),
+		v.Direct = append(v.Direct, DirectCall{Number: rc.Number(r), DialKey: rc.DialKey(r), DID: dids[rc.ID], CallID: id.String(),
 			Placed: placed[rc.ID], Dialog: &dlg, CDRs: []api.CDR{cdr}, IsExpectedNoBot: rc.Role == RoleRefused})
 		f.Channels[id.String()] = "leg-" + rc.ID
 	}
 	// R3
 	cs := K3.Campaign
-	key := r.DialKey(cs, phonenum.FormE164)
+	key := r.DialKey(cs, form)
 	v.Dialogs = []calleesim.DialogRecord{dialog(key, campaignDID, 2200, 2500, 3600, calleesim.EndedByCaller, 0)}
 	botFailed := api.CampaignOutcome(outcomeBotFailed)
 	finished := at(3700)
@@ -253,133 +252,139 @@ func refusalAssess(v *RunView, f RefusalFacts) (*Checks, []RefusalRow, []SwitchP
 }
 
 func TestAssessRefusalPassesTheDesignedRun(t *testing.T) {
-	v, f := fakeK3(t)
-	c, rows, probes := refusalAssess(v, f)
-	if c.Failed() || len(c.checks) < 40 {
-		t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
-	}
-	if len(rows) != 5 || len(probes) != 3 {
-		t.Fatalf("rows %d, probes %d", len(rows), len(probes))
-	}
-	byID := map[string]RefusalRow{}
-	for _, r := range rows {
-		byID[r.ID] = r
-	}
-	if r := byID["R1"]; r.HoldMs == nil || *r.HoldMs != 8000 || r.BotReason != botLegFailed || r.QueueID == "" {
-		t.Errorf("R1 %+v", r)
-	}
-	if r := byID["R3"]; r.Outcome != outcomeBotFailed || r.ContactEnd != "DONE" || r.Invites != 1 {
-		t.Errorf("R3 %+v", r)
-	}
-	for _, p := range probes {
-		if p.LegID == "" || p.Kind == "" {
-			t.Errorf("probe %+v", p)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v, f := fakeK3(t, form)
+		c, rows, probes := refusalAssess(v, f)
+		if c.Failed() || len(c.checks) < 40 {
+			t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
 		}
-	}
-	if probes[1].Kind != ProbePromptHangup || probes[1].Lang != "zh" || probes[0].QueueExt != "7001" || probes[2].QueueExt != "7001" {
-		t.Errorf("probes %+v", probes)
-	}
+		if len(rows) != 5 || len(probes) != 3 {
+			t.Fatalf("rows %d, probes %d", len(rows), len(probes))
+		}
+		byID := map[string]RefusalRow{}
+		for _, r := range rows {
+			byID[r.ID] = r
+		}
+		if r := byID["R1"]; r.HoldMs == nil || *r.HoldMs != 8000 || r.BotReason != botLegFailed || r.QueueID == "" {
+			t.Errorf("R1 %+v", r)
+		}
+		if r := byID["R3"]; r.Outcome != outcomeBotFailed || r.ContactEnd != "DONE" || r.Invites != 1 {
+			t.Errorf("R3 %+v", r)
+		}
+		for _, p := range probes {
+			if p.LegID == "" || p.Kind == "" {
+				t.Errorf("probe %+v", p)
+			}
+		}
+		if probes[1].Kind != ProbePromptHangup || probes[1].Lang != "zh" || probes[0].QueueExt != "7001" || probes[2].QueueExt != "7001" {
+			t.Errorf("probes %+v", probes)
+		}
+	})
 }
 
 func TestAssessRefusalFails(t *testing.T) {
-	for name, spoil := range map[string]func(v *RunView, f *RefusalFacts){
-		"a run without its direct calls":   func(v *RunView, _ *RefusalFacts) { v.Direct = nil },
-		"the holder never seen on the bot": func(_ *RunView, f *RefusalFacts) { f.HolderOnBotAt = nil },
-		"the holder answered after the first refused INVITE": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[0].Dialog.Final.SentAt = v.Direct[1].Dialog.InviteAt.Add(time.Second)
-		},
-		"the holder was on the bot after R1 was placed": func(_ *RunView, f *RefusalFacts) { f.HolderOnBotAt = ptr(f.HolderOnBotAt.Add(time.Minute)) },
-		"the holder ended before R1 did": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[0].Dialog.End.At = v.Direct[1].Dialog.End.At.Add(-time.Second)
-		},
-		"the normal call came before the holder ended": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[3].Dialog.InviteAt = v.Direct[0].Dialog.End.At.Add(-time.Second)
-		},
-		"R1 was hung up by the platform": func(v *RunView, _ *RefusalFacts) { v.Direct[1].Dialog.End.By = calleesim.EndedByCaller },
-		"R1's callee hung up late": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[1].Dialog.End.At = v.Direct[1].Dialog.End.At.Add(3 * time.Second)
-		},
-		"R1 has a bot leg":    func(v *RunView, _ *RefusalFacts) { v.Direct[1].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
-		"R1 has no botReason": func(v *RunView, _ *RefusalFacts) { v.Direct[1].CDRs[0].UserData = nil },
-		"R1's botReason is something else": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[1].CDRs[0].UserData = &map[string]interface{}{userDataBotReason: "OTHER"}
-		},
-		"R1's leg id was not read": func(v *RunView, f *RefusalFacts) { delete(f.Channels, v.Direct[1].CallID) },
-		"R2 was left up until its callee hung up": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[2].Dialog.End.By = calleesim.EndedByCallee
-			v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add(20 * time.Second)
-		},
-		"R2's hang-up was slow": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add((k3PromptByeMaxMs + 1000) * time.Millisecond)
-		},
-		"R2's cause is something else": func(v *RunView, _ *RefusalFacts) {
-			c := "NORMAL_CLEARING"
-			v.Direct[2].CDRs[0].HangupCause = &c
-		},
-		"R2 reached a queue": func(v *RunView, _ *RefusalFacts) {
-			id := uuid.Must(uuid.NewV7())
-			v.Direct[2].CDRs[0].QueueID = &id
-		},
-		"R3 finished ANSWERED": func(v *RunView, _ *RefusalFacts) {
-			o := api.CampaignOutcome("ANSWERED")
-			v.Regions[0].Contacts[0].Attempts[0].Outcome = &o
-		},
-		"R3 was dialled again": func(v *RunView, _ *RefusalFacts) {
-			v.Dialogs = append(v.Dialogs, v.Dialogs[0])
-		},
-		"R3's contact is not DONE": func(v *RunView, _ *RefusalFacts) {
-			v.Regions[0].Contacts[0].Contact.Status = api.CampaignContactStatus("ACTIVE")
-		},
-		"R3 reached the queue": func(v *RunView, _ *RefusalFacts) {
-			id := uuid.Must(uuid.NewV7())
-			v.Regions[0].CDRs[0].QueueID = &id
-		},
-		"R3 has a bot leg":             func(v *RunView, _ *RefusalFacts) { v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
-		"R3 was hung up by the callee": func(v *RunView, _ *RefusalFacts) { v.Dialogs[0].End.By = calleesim.EndedByCallee },
-		"N1 had no bot leg":            func(v *RunView, _ *RefusalFacts) { v.Direct[3].CDRs[0].Legs = nil },
-		"N1 carries a botReason": func(v *RunView, _ *RefusalFacts) {
-			v.Direct[3].CDRs[0].UserData = &map[string]interface{}{userDataBotReason: botLegFailed}
-		},
-		"N1 was silent":             func(v *RunView, _ *RefusalFacts) { v.Direct[3].Dialog.Downlink = calleesim.Downlink{} },
-		"the holder has no bot leg": func(v *RunView, _ *RefusalFacts) { v.Direct[0].CDRs[0].Legs = nil },
-	} {
-		t.Run(name, func(t *testing.T) {
-			v, f := fakeK3(t)
-			spoil(v, &f)
-			if c, _, _ := refusalAssess(v, f); !c.Failed() {
-				t.Fatalf("passed (%d checks)", len(c.checks))
-			}
-		})
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, spoil := range map[string]func(v *RunView, f *RefusalFacts){
+			"a run without its direct calls":   func(v *RunView, _ *RefusalFacts) { v.Direct = nil },
+			"the holder never seen on the bot": func(_ *RunView, f *RefusalFacts) { f.HolderOnBotAt = nil },
+			"the holder answered after the first refused INVITE": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[0].Dialog.Final.SentAt = v.Direct[1].Dialog.InviteAt.Add(time.Second)
+			},
+			"the holder was on the bot after R1 was placed": func(_ *RunView, f *RefusalFacts) { f.HolderOnBotAt = ptr(f.HolderOnBotAt.Add(time.Minute)) },
+			"the holder ended before R1 did": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[0].Dialog.End.At = v.Direct[1].Dialog.End.At.Add(-time.Second)
+			},
+			"the normal call came before the holder ended": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[3].Dialog.InviteAt = v.Direct[0].Dialog.End.At.Add(-time.Second)
+			},
+			"R1 was hung up by the platform": func(v *RunView, _ *RefusalFacts) { v.Direct[1].Dialog.End.By = calleesim.EndedByCaller },
+			"R1's callee hung up late": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[1].Dialog.End.At = v.Direct[1].Dialog.End.At.Add(3 * time.Second)
+			},
+			"R1 has a bot leg":    func(v *RunView, _ *RefusalFacts) { v.Direct[1].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
+			"R1 has no botReason": func(v *RunView, _ *RefusalFacts) { v.Direct[1].CDRs[0].UserData = nil },
+			"R1's botReason is something else": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[1].CDRs[0].UserData = &map[string]interface{}{userDataBotReason: "OTHER"}
+			},
+			"R1's leg id was not read": func(v *RunView, f *RefusalFacts) { delete(f.Channels, v.Direct[1].CallID) },
+			"R2 was left up until its callee hung up": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[2].Dialog.End.By = calleesim.EndedByCallee
+				v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add(20 * time.Second)
+			},
+			"R2's hang-up was slow": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[2].Dialog.End.At = v.Direct[2].Dialog.Final.SentAt.Add((k3PromptByeMaxMs + 1000) * time.Millisecond)
+			},
+			"R2's cause is something else": func(v *RunView, _ *RefusalFacts) {
+				c := "NORMAL_CLEARING"
+				v.Direct[2].CDRs[0].HangupCause = &c
+			},
+			"R2 reached a queue": func(v *RunView, _ *RefusalFacts) {
+				id := uuid.Must(uuid.NewV7())
+				v.Direct[2].CDRs[0].QueueID = &id
+			},
+			"R3 finished ANSWERED": func(v *RunView, _ *RefusalFacts) {
+				o := api.CampaignOutcome("ANSWERED")
+				v.Regions[0].Contacts[0].Attempts[0].Outcome = &o
+			},
+			"R3 was dialled again": func(v *RunView, _ *RefusalFacts) {
+				v.Dialogs = append(v.Dialogs, v.Dialogs[0])
+			},
+			"R3's contact is not DONE": func(v *RunView, _ *RefusalFacts) {
+				v.Regions[0].Contacts[0].Contact.Status = api.CampaignContactStatus("ACTIVE")
+			},
+			"R3 reached the queue": func(v *RunView, _ *RefusalFacts) {
+				id := uuid.Must(uuid.NewV7())
+				v.Regions[0].CDRs[0].QueueID = &id
+			},
+			"R3 has a bot leg":             func(v *RunView, _ *RefusalFacts) { v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
+			"R3 was hung up by the callee": func(v *RunView, _ *RefusalFacts) { v.Dialogs[0].End.By = calleesim.EndedByCallee },
+			"N1 had no bot leg":            func(v *RunView, _ *RefusalFacts) { v.Direct[3].CDRs[0].Legs = nil },
+			"N1 carries a botReason": func(v *RunView, _ *RefusalFacts) {
+				v.Direct[3].CDRs[0].UserData = &map[string]interface{}{userDataBotReason: botLegFailed}
+			},
+			"N1 was silent":             func(v *RunView, _ *RefusalFacts) { v.Direct[3].Dialog.Downlink = calleesim.Downlink{} },
+			"the holder has no bot leg": func(v *RunView, _ *RefusalFacts) { v.Direct[0].CDRs[0].Legs = nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				v, f := fakeK3(t, form)
+				spoil(v, &f)
+				if c, _, _ := refusalAssess(v, f); !c.Failed() {
+					t.Fatalf("passed (%d checks)", len(c.checks))
+				}
+			})
+		}
+	})
 }
 
 // The invariants of #246, adapted for K3: a BOT_FAILED attempt and a refused
 // direct call are answered and open no session; the holder and N1 open one.
 func TestInvariantsAdaptToRefusedBotLegs(t *testing.T) {
-	for name, check := range map[string]func(context.Context, *RunView, *Checks){
-		"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
-		"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
-	} {
-		v, _ := fakeK3(t)
-		if c := run(check, v); c.Failed() || len(c.checks) == 0 {
-			t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, check := range map[string]func(context.Context, *RunView, *Checks){
+			"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
+			"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
+		} {
+			v, _ := fakeK3(t, form)
+			if c := run(check, v); c.Failed() || len(c.checks) == 0 {
+				t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+			}
 		}
-	}
-	for name, spoil := range map[string]func(v *RunView){
-		"a session for the BOT_FAILED attempt": func(v *RunView) { v.Provider.After.Total = 13 },
-		"a session missing for the holder":     func(v *RunView) { v.Provider.After.Total = 11 },
-		"the BOT_FAILED attempt has a bot leg": func(v *RunView) { v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
-		"a refused direct call has a bot leg":  func(v *RunView) { v.Direct[1].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
-		"the application counted three sessions": func(v *RunView) {
-			v.MetricsAfter, _ = ParseMetrics("aicc_provider_sessions_started_total{provider=\"openai\"} 3\n")
-		},
-	} {
-		v, _ := fakeK3(t)
-		spoil(v)
-		if c := run(CheckProviderSessions, v); !c.Failed() {
-			t.Errorf("%s passed", name)
+		for name, spoil := range map[string]func(v *RunView){
+			"a session for the BOT_FAILED attempt": func(v *RunView) { v.Provider.After.Total = 13 },
+			"a session missing for the holder":     func(v *RunView) { v.Provider.After.Total = 11 },
+			"the BOT_FAILED attempt has a bot leg": func(v *RunView) { v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
+			"a refused direct call has a bot leg":  func(v *RunView) { v.Direct[1].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} },
+			"the application counted three sessions": func(v *RunView) {
+				v.MetricsAfter, _ = ParseMetrics("aicc_provider_sessions_started_total{provider=\"openai\"} 3\n")
+			},
+		} {
+			v, _ := fakeK3(t, form)
+			spoil(v)
+			if c := run(CheckProviderSessions, v); !c.Failed() {
+				t.Errorf("%s passed", name)
+			}
 		}
-	}
+	})
 }
 
 const k3Log = `

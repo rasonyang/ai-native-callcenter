@@ -107,6 +107,8 @@ type ScenarioResult struct {
 	Invites int `json:"invites"`
 	// Callbacks are the callbacks the contact's calls filed (answered cases).
 	Callbacks []api.Callback `json:"callbacks,omitempty"`
+	// Listing is the driver's mid-run listing of the number (C10).
+	Listing *Listing `json:"listedMidRun,omitempty"`
 }
 
 // ContactResult is a contact as read from the API.
@@ -199,6 +201,12 @@ func assess(rep *CampaignReport, v *RunView, cases []Case, form phonenum.DialFor
 		}
 		for _, cv := range rv.Contacts {
 			key := rv.Region.DialKey(cv.Case, form)
+			if cv.Case.IsListedMidRun {
+				control := rv.Region.DialKey(caseByID(cases, cv.Case.ControlID), form)
+				rep.Scenarios = append(rep.Scenarios, assessListedMidRun(rv, cv, key, dialogsFor(v.Dialogs, key),
+					dialogsFor(v.Dialogs, control), cdrs, v.CalleeReadAt))
+				continue
+			}
 			if len(cv.Case.Steps) > 0 {
 				rep.Scenarios = append(rep.Scenarios, assessSteppedContact(rv, cv, key, dialogsFor(v.Dialogs, key), cdrs, v.Callbacks, v.ObservedAt))
 				continue

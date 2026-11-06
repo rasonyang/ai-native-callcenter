@@ -79,6 +79,8 @@ type RunView struct {
 	MetricsAfter  Metrics
 	// Callbacks is the whole callback queue, read after the run settled.
 	Callbacks []api.Callback
+	// CalleeReadAt is when the simulator's record (Callee) was read.
+	CalleeReadAt time.Time
 	// Cases are the run's cases, the same in every region.
 	Cases []Case
 	// Form is the deployment's dial form: a contact's dialogs are those whose
@@ -109,8 +111,26 @@ type ContactView struct {
 	// its first attempt finished. Either is nil when it was never seen.
 	Contact    *api.CampaignContact
 	AfterFirst *api.CampaignContact
+	// Listing is how the driver listed the number mid-run (a case with
+	// IsListedMidRun); nil for any other case.
+	Listing *Listing
 	// Attempts are oldest first.
 	Attempts []api.CampaignAttempt
+}
+
+// Listing is the driver's listing of a contact's number on the do-not-call
+// list while the contact waited for its retry.
+type Listing struct {
+	// PostedAt is just before the request, ListedAt when the API answered it
+	// and ConfirmedAt when the list read back held the number.
+	PostedAt    time.Time `json:"postedAt"`
+	ListedAt    time.Time `json:"listedAt"`
+	ConfirmedAt time.Time `json:"confirmedAt"`
+	// IsOnList is whether the read-back list held the number.
+	IsOnList bool `json:"isOnList"`
+	// NextAttemptAt is the contact's own, as read before the listing: the
+	// moment the retry came due.
+	NextAttemptAt time.Time `json:"nextAttemptAt"`
 }
 
 // ProviderCount is the mock provider's counters, read before the campaigns

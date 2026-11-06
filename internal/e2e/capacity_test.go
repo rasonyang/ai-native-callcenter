@@ -22,47 +22,46 @@ import (
 // fictional US range or the Chinese range reserved for this harness) and
 // apart from every campaign case's.
 func TestScenarioFileCoversTheCapacityScenarios(t *testing.T) {
-	s, err := calleesim.LoadScenario("../../deploy/e2e/scenario.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]string{}
-	for _, r := range Regions {
-		for _, cs := range AllCases {
-			seen[r.DialKey(cs, phonenum.FormE164)] = r.Code + " " + cs.ID
-		}
-	}
-	numbers := 0
-	for _, id := range []string{"K1", "K2"} {
-		sc := CapacityScenarios[id]
-		if err := CheckScenarioCoversCases(s, sc.Regions, sc.Cases, phonenum.FormE164); err != nil {
-			t.Errorf("%s: %v", id, err)
-		}
-		if err := checkDirectInScenario(s, sc, phonenum.FormE164); err != nil {
-			t.Errorf("%s: %v", id, err)
-		}
-		check := func(label, number, prefix string) {
-			numbers++
-			if !phonenum.IsCanonical(number) || !strings.HasPrefix(number, prefix) || len(number) != len(prefix)+2 {
-				t.Errorf("%s: %q is not a number of %sxx", label, number, prefix)
-			}
-			if prev, dup := seen[number]; dup {
-				t.Errorf("%s and %s share %s", label, prev, number)
-			}
-			seen[number] = label
-		}
-		for _, r := range sc.Regions {
-			for _, cs := range sc.Cases {
-				check(id+" "+r.Code+" "+cs.ID, r.Number(cs), r.Prefix)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		s := loadScenarioFor(t, form)
+		seen := map[string]string{}
+		for _, r := range Regions {
+			for _, cs := range AllCases {
+				seen[r.DialKey(cs, form)] = r.Code + " " + cs.ID
 			}
 		}
-		for _, ds := range sc.Direct {
-			check(id+" direct "+ds.Suffix, ds.Number(), ds.Region.Prefix)
+		numbers := 0
+		for _, id := range []string{"K1", "K2"} {
+			sc := CapacityScenarios[id]
+			if err := CheckScenarioCoversCases(s, sc.Regions, sc.Cases, form); err != nil {
+				t.Errorf("%s: %v", id, err)
+			}
+			if err := checkDirectInScenario(s, sc); err != nil {
+				t.Errorf("%s: %v", id, err)
+			}
+			check := func(label, number, prefix string) {
+				numbers++
+				if !phonenum.IsCanonical(number) || !strings.HasPrefix(number, prefix) || len(number) != len(prefix)+2 {
+					t.Errorf("%s: %q is not a number of %sxx", label, number, prefix)
+				}
+				if prev, dup := seen[number]; dup {
+					t.Errorf("%s and %s share %s", label, prev, number)
+				}
+				seen[number] = label
+			}
+			for _, r := range sc.Regions {
+				for _, cs := range sc.Cases {
+					check(id+" "+r.Code+" "+cs.ID, r.Number(cs), r.Prefix)
+				}
+			}
+			for _, ds := range sc.Direct {
+				check(id+" direct "+ds.Suffix, ds.Number(), ds.Region.Prefix)
+			}
 		}
-	}
-	if numbers != 3+2+12 {
-		t.Fatalf("%d capacity numbers, want 17 (K1: 3 contacts and 2 slot holders; K2: 6 contacts in each of 2 regions)", numbers)
-	}
+		if numbers != 3+2+12 {
+			t.Fatalf("%d capacity numbers, want 17 (K1: 3 contacts and 2 slot holders; K2: 6 contacts in each of 2 regions)", numbers)
+		}
+	})
 }
 
 // K1's arithmetic: three contacts can only ring together with three free
@@ -133,7 +132,7 @@ func TestPeakConcurrent(t *testing.T) {
 // fakeK1 is a K1 run that went as designed: two slot holders answered at
 // 300 ms and stayed 12 s, the three contacts answered at 5 s, one reached the
 // bot and two were hung up 1.5 s later without a sound.
-func fakeK1(t *testing.T) *RunView {
+func fakeK1(t *testing.T, form phonenum.DialForm) *RunView {
 	t.Helper()
 	r := K1.Regions[0]
 	base := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
@@ -156,11 +155,11 @@ func fakeK1(t *testing.T) *RunView {
 	answered, overflow := api.CampaignOutcome("ANSWERED"), api.CampaignOutcome(outcomeOverflow)
 	done := api.CampaignContactStatus("DONE")
 	campaignID := uuid.Must(uuid.NewV7())
-	v := &RunView{Form: phonenum.FormE164, Cases: K1.Cases}
+	v := &RunView{Form: form, Cases: K1.Cases}
 	rv := RegionView{Region: r, DID: api.DID{Number: campaignDID}, Campaign: api.Campaign{ID: campaignID}}
 	cause := func(s string) *string { return &s }
 	for i, cs := range K1.Cases {
-		key := r.DialKey(cs, phonenum.FormE164)
+		key := r.DialKey(cs, form)
 		outcome, peak, end, by, hc, legs := &overflow, 0.0, 6530, calleesim.EndedByCaller, "OVERFLOW", []api.Leg(nil)
 		if i == 0 {
 			outcome, peak, end, by, hc, legs = &answered, 5000, 11000, calleesim.EndedByCallee, "NORMAL_CLEARING", []api.Leg{{Kind: "BOT"}}
@@ -175,9 +174,9 @@ func fakeK1(t *testing.T) *RunView {
 	}
 	v.Regions = []RegionView{rv}
 	for i, ds := range K1.Direct {
-		dlg := answeredDialog(ds.DialKey(phonenum.FormE164), directDID, 100+i, 300+i, 12300+i, calleesim.EndedByCallee, 5000)
+		dlg := answeredDialog(ds.DialKey(), directDID, 100+i, 300+i, 12300+i, calleesim.EndedByCallee, 5000)
 		id := uuid.Must(uuid.NewV7())
-		v.Direct = append(v.Direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(phonenum.FormE164), DID: directDID, CallID: id.String(), Dialog: &dlg,
+		v.Direct = append(v.Direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(), DID: directDID, CallID: id.String(), Dialog: &dlg,
 			CDRs: []api.CDR{{CallID: id, HangupCause: cause("NORMAL_CLEARING"), Legs: []api.Leg{{Kind: "BOT"}}}}})
 	}
 	v.Provider = ProviderCount{Before: mockprovider.Stats{Total: 10}, After: mockprovider.Stats{Total: 13}}
@@ -204,112 +203,118 @@ func overflowChecks(v *RunView) *Checks {
 }
 
 func TestAssessOverflowPassesTheDesignedRun(t *testing.T) {
-	v := fakeK1(t)
-	var c Checks
-	contacts, direct := AssessOverflow(v, 1500*time.Millisecond, &c)
-	if c.Failed() || len(c.checks) < 20 {
-		t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
-	}
-	if len(contacts) != 3 || len(direct) != 2 || contacts[1].HoldMs == nil || *contacts[1].HoldMs != 1529 {
-		t.Fatalf("rows %+v / %+v", contacts, direct)
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeK1(t, form)
+		var c Checks
+		contacts, direct := AssessOverflow(v, 1500*time.Millisecond, &c)
+		if c.Failed() || len(c.checks) < 20 {
+			t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
+		}
+		if len(contacts) != 3 || len(direct) != 2 || contacts[1].HoldMs == nil || *contacts[1].HoldMs != 1529 {
+			t.Fatalf("rows %+v / %+v", contacts, direct)
+		}
+	})
 }
 
 func TestAssessOverflowFails(t *testing.T) {
-	for name, spoil := range map[string]func(v *RunView){
-		"no contact at all": func(v *RunView) { v.Regions[0].Contacts = nil },
-		"every contact reached the bot": func(v *RunView) {
-			ok := api.CampaignOutcome("ANSWERED")
-			for i := range v.Regions[0].Contacts {
-				v.Regions[0].Contacts[i].Attempts[0].Outcome = &ok
-			}
-		},
-		"an OVERFLOW leg heard the bot": func(v *RunView) {
-			v.Dialogs[1].Downlink = calleesim.Downlink{Frames: 10, Energy: []calleesim.EnergyBucket{{StartMs: 5100, Frames: 5, PeakRMS: 900}}}
-		},
-		"an OVERFLOW number was dialled again": func(v *RunView) {
-			again := v.Dialogs[2]
-			again.InviteAt = again.InviteAt.Add(time.Minute)
-			v.Dialogs = append(v.Dialogs, again)
-		},
-		"an OVERFLOW leg was hung up by the callee": func(v *RunView) {
-			v.Dialogs[1].End.By = calleesim.EndedByCallee
-		},
-		"an OVERFLOW CDR has a bot leg": func(v *RunView) {
-			v.Regions[0].CDRs[1].Legs = []api.Leg{{Kind: "BOT"}}
-		},
-		"a slot holder answered after the contacts": func(v *RunView) {
-			v.Direct[1].Dialog.Final.SentAt = v.Dialogs[0].Final.SentAt.Add(time.Second)
-		},
-		"a slot holder hung up before the overflow ended": func(v *RunView) {
-			v.Direct[0].Dialog.End.At = v.Dialogs[1].Final.SentAt.Add(500 * time.Millisecond)
-		},
-		"only one slot holder": func(v *RunView) { v.Direct = v.Direct[:1] },
-		"a contact was answered before another rang": func(v *RunView) {
-			v.Dialogs[2].InviteAt = v.Dialogs[0].Final.SentAt.Add(time.Millisecond)
-		},
-		"the application counted no overflow": func(v *RunView) { delete(v.MetricsAfter, MetricBotOverflow) },
-		"the ANSWERED leg was silent, so silence proves nothing": func(v *RunView) {
-			v.Dialogs[0].Downlink = calleesim.Downlink{}
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			v := fakeK1(t)
-			spoil(v)
-			if c := overflowChecks(v); !c.Failed() {
-				t.Fatalf("passed (%d checks)", len(c.checks))
-			}
-		})
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, spoil := range map[string]func(v *RunView){
+			"no contact at all": func(v *RunView) { v.Regions[0].Contacts = nil },
+			"every contact reached the bot": func(v *RunView) {
+				ok := api.CampaignOutcome("ANSWERED")
+				for i := range v.Regions[0].Contacts {
+					v.Regions[0].Contacts[i].Attempts[0].Outcome = &ok
+				}
+			},
+			"an OVERFLOW leg heard the bot": func(v *RunView) {
+				v.Dialogs[1].Downlink = calleesim.Downlink{Frames: 10, Energy: []calleesim.EnergyBucket{{StartMs: 5100, Frames: 5, PeakRMS: 900}}}
+			},
+			"an OVERFLOW number was dialled again": func(v *RunView) {
+				again := v.Dialogs[2]
+				again.InviteAt = again.InviteAt.Add(time.Minute)
+				v.Dialogs = append(v.Dialogs, again)
+			},
+			"an OVERFLOW leg was hung up by the callee": func(v *RunView) {
+				v.Dialogs[1].End.By = calleesim.EndedByCallee
+			},
+			"an OVERFLOW CDR has a bot leg": func(v *RunView) {
+				v.Regions[0].CDRs[1].Legs = []api.Leg{{Kind: "BOT"}}
+			},
+			"a slot holder answered after the contacts": func(v *RunView) {
+				v.Direct[1].Dialog.Final.SentAt = v.Dialogs[0].Final.SentAt.Add(time.Second)
+			},
+			"a slot holder hung up before the overflow ended": func(v *RunView) {
+				v.Direct[0].Dialog.End.At = v.Dialogs[1].Final.SentAt.Add(500 * time.Millisecond)
+			},
+			"only one slot holder": func(v *RunView) { v.Direct = v.Direct[:1] },
+			"a contact was answered before another rang": func(v *RunView) {
+				v.Dialogs[2].InviteAt = v.Dialogs[0].Final.SentAt.Add(time.Millisecond)
+			},
+			"the application counted no overflow": func(v *RunView) { delete(v.MetricsAfter, MetricBotOverflow) },
+			"the ANSWERED leg was silent, so silence proves nothing": func(v *RunView) {
+				v.Dialogs[0].Downlink = calleesim.Downlink{}
+			},
+		} {
+			t.Run(name, func(t *testing.T) {
+				v := fakeK1(t, form)
+				spoil(v)
+				if c := overflowChecks(v); !c.Failed() {
+					t.Fatalf("passed (%d checks)", len(c.checks))
+				}
+			})
+		}
+	})
 }
 
 // The invariants of #246, adapted for K1: an OVERFLOW leg is answered and
 // opens no session, a direct call opens one, and the run has no call that
 // only rings.
 func TestInvariantsAdaptToOverflowAndDirectCalls(t *testing.T) {
-	for name, check := range map[string]func(context.Context, *RunView, *Checks){
-		"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
-		"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
-	} {
-		if c := run(check, fakeK1(t)); c.Failed() || len(c.checks) == 0 {
-			t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, check := range map[string]func(context.Context, *RunView, *Checks){
+			"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
+			"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
+		} {
+			if c := run(check, fakeK1(t, form)); c.Failed() || len(c.checks) == 0 {
+				t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+			}
 		}
-	}
-	v := fakeK1(t)
-	v.Provider.After.Total = 15 // a session for each OVERFLOW leg
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("a session per OVERFLOW leg passed")
-	}
-	v = fakeK1(t)
-	v.Regions[0].CDRs[2].Legs = []api.Leg{{Kind: "BOT"}}
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("an OVERFLOW call with a bot leg passed")
-	}
-	v = fakeK1(t)
-	v.Direct = nil // the holders' sessions are then unexplained
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("sessions without the direct calls that opened them passed")
-	}
-	v = fakeK1(t)
-	v.Dialogs[2].Final = &calleesim.FinalRecord{Status: 487, SentAt: v.Dialogs[2].Final.SentAt}
-	c := run(CheckProviderSessions, v)
-	notApplicable := false
-	for _, f := range c.failures {
-		notApplicable = notApplicable || strings.HasPrefix(f, "not applicable")
-	}
-	if !notApplicable {
-		t.Errorf("a contact that only rang, in a run whose cases have none, passed the not-applicable check: %v", c.failures)
-	}
-	v = fakeK1(t)
-	v.MetricsAfter[MetricDIDOutboundInUse] = v.MetricsAfter[MetricDIDOutboundInUse][:1] // the direct DID's series is gone
-	if c := run(CheckCapacityReleased, v); !c.Failed() {
-		t.Error("a direct DID without a line series passed")
-	}
+		v := fakeK1(t, form)
+		v.Provider.After.Total = 15 // a session for each OVERFLOW leg
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("a session per OVERFLOW leg passed")
+		}
+		v = fakeK1(t, form)
+		v.Regions[0].CDRs[2].Legs = []api.Leg{{Kind: "BOT"}}
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("an OVERFLOW call with a bot leg passed")
+		}
+		v = fakeK1(t, form)
+		v.Direct = nil // the holders' sessions are then unexplained
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("sessions without the direct calls that opened them passed")
+		}
+		v = fakeK1(t, form)
+		v.Dialogs[2].Final = &calleesim.FinalRecord{Status: 487, SentAt: v.Dialogs[2].Final.SentAt}
+		c := run(CheckProviderSessions, v)
+		notApplicable := false
+		for _, f := range c.failures {
+			notApplicable = notApplicable || strings.HasPrefix(f, "not applicable")
+		}
+		if !notApplicable {
+			t.Errorf("a contact that only rang, in a run whose cases have none, passed the not-applicable check: %v", c.failures)
+		}
+		v = fakeK1(t, form)
+		v.MetricsAfter[MetricDIDOutboundInUse] = v.MetricsAfter[MetricDIDOutboundInUse][:1] // the direct DID's series is gone
+		if c := run(CheckCapacityReleased, v); !c.Failed() {
+			t.Error("a direct DID without a line series passed")
+		}
+	})
 }
 
 // fakeK2 is one region of K2: six contacts in three waves of two, each
 // cancelled at the ring timeout.
-func fakeK2(t *testing.T) *RunView {
+func fakeK2(t *testing.T, form phonenum.DialForm) *RunView {
 	t.Helper()
 	r := K2.Regions[0]
 	base := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
@@ -317,13 +322,13 @@ func fakeK2(t *testing.T) *RunView {
 	const did = "95000003"
 	noAnswer, exhausted := api.CampaignOutcome("NO_ANSWER"), api.CampaignContactStatus("EXHAUSTED")
 	campaignID := uuid.Must(uuid.NewV7())
-	v := &RunView{Form: phonenum.FormE164, Cases: K2.Cases}
+	v := &RunView{Form: form, Cases: K2.Cases}
 	rv := RegionView{Region: r, DID: api.DID{Number: did}, Campaign: api.Campaign{ID: campaignID}}
 	cause := "NO_ANSWER"
 	for i, cs := range K2.Cases {
 		start := (i / 2) * 7500
 		v.Dialogs = append(v.Dialogs, calleesim.DialogRecord{
-			Number: r.DialKey(cs, phonenum.FormE164), InviteAt: at(start + i%2), InviteHeaders: map[string]string{"from": "<sip:" + did + "@x>"},
+			Number: r.DialKey(cs, form), InviteAt: at(start + i%2), InviteHeaders: map[string]string{"from": "<sip:" + did + "@x>"},
 			Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 487, SentAt: at(start + 7470)},
 			End: &calleesim.EndRecord{Method: calleesim.EndedWithCancel, By: calleesim.EndedByCaller, At: at(start + 7468)},
 		})
@@ -349,70 +354,74 @@ func lineChecks(v *RunView, gauge float64) *Checks {
 }
 
 func TestAssessLineLimit(t *testing.T) {
-	if c := lineChecks(fakeK2(t), 2); c.Failed() || len(c.checks) < 30 {
-		t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
-	}
-	for name, spoil := range map[string]func(v *RunView){
-		"three lines at once": func(v *RunView) { v.Dialogs[2].InviteAt = v.Dialogs[0].InviteAt.Add(time.Millisecond) },
-		"never reached the limit": func(v *RunView) {
-			for i := range v.Dialogs {
-				v.Dialogs[i].InviteAt = v.Dialogs[0].InviteAt.Add(time.Duration(i) * 8 * time.Second)
-				v.Dialogs[i].End.At = v.Dialogs[i].InviteAt.Add(7 * time.Second)
-			}
-		},
-		"a contact was never attempted": func(v *RunView) {
-			v.Regions[0].Contacts[5].Attempts = nil
-			v.Dialogs = v.Dialogs[:5]
-		},
-		"nothing was dialled":                      func(v *RunView) { v.Dialogs = nil },
-		"the dialer never named the line limit":    func(v *RunView) { delete(v.MetricsAfter, MetricDialerBlocked) },
-		"a dialog that never ended holds its line": func(v *RunView) { v.Dialogs[5].End, v.Dialogs[5].Final = nil, nil },
-	} {
-		t.Run(name, func(t *testing.T) {
-			v := fakeK2(t)
-			spoil(v)
-			if c := lineChecks(v, 2); !c.Failed() {
-				t.Fatalf("passed (%d checks)", len(c.checks))
-			}
-		})
-	}
-	if c := lineChecks(fakeK2(t), 3); !c.Failed() {
-		t.Error("a line gauge read above the limit passed")
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		if c := lineChecks(fakeK2(t, form), 2); c.Failed() || len(c.checks) < 30 {
+			t.Fatalf("%d checks, failures %v", len(c.checks), c.failures)
+		}
+		for name, spoil := range map[string]func(v *RunView){
+			"three lines at once": func(v *RunView) { v.Dialogs[2].InviteAt = v.Dialogs[0].InviteAt.Add(time.Millisecond) },
+			"never reached the limit": func(v *RunView) {
+				for i := range v.Dialogs {
+					v.Dialogs[i].InviteAt = v.Dialogs[0].InviteAt.Add(time.Duration(i) * 8 * time.Second)
+					v.Dialogs[i].End.At = v.Dialogs[i].InviteAt.Add(7 * time.Second)
+				}
+			},
+			"a contact was never attempted": func(v *RunView) {
+				v.Regions[0].Contacts[5].Attempts = nil
+				v.Dialogs = v.Dialogs[:5]
+			},
+			"nothing was dialled":                      func(v *RunView) { v.Dialogs = nil },
+			"the dialer never named the line limit":    func(v *RunView) { delete(v.MetricsAfter, MetricDialerBlocked) },
+			"a dialog that never ended holds its line": func(v *RunView) { v.Dialogs[5].End, v.Dialogs[5].Final = nil, nil },
+		} {
+			t.Run(name, func(t *testing.T) {
+				v := fakeK2(t, form)
+				spoil(v)
+				if c := lineChecks(v, 2); !c.Failed() {
+					t.Fatalf("passed (%d checks)", len(c.checks))
+				}
+			})
+		}
+		if c := lineChecks(fakeK2(t, form), 3); !c.Failed() {
+			t.Error("a line gauge read above the limit passed")
+		}
+	})
 }
 
 // The invariants of #246, adapted for K2: nothing is answered, no session
 // is opened, and the application, started for the run, may not have the
 // session or slot series at all.
 func TestInvariantsOnARunThatOnlyRings(t *testing.T) {
-	for name, check := range map[string]func(context.Context, *RunView, *Checks){
-		"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
-		"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
-	} {
-		if c := run(check, fakeK2(t)); c.Failed() || len(c.checks) == 0 {
-			t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, check := range map[string]func(context.Context, *RunView, *Checks){
+			"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
+			"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
+		} {
+			if c := run(check, fakeK2(t, form)); c.Failed() || len(c.checks) == 0 {
+				t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+			}
 		}
-	}
-	v := fakeK2(t)
-	v.Provider.After.Total = 1
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("a session on a run that only rang passed")
-	}
-	v = fakeK2(t)
-	v.Dialogs[0].Final = &calleesim.FinalRecord{Status: 200}
-	if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
-		t.Error("an answered number on a run whose cases answer none passed")
-	}
-	v = fakeK2(t)
-	v.Dialogs = nil
-	if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
-		t.Error("a run that dialled nothing passed")
-	}
-	v = fakeK2(t)
-	v.MetricsAfter, _ = ParseMetrics("aicc_bot_slots{state=\"IN_USE\"} 1\naicc_did_outbound_in_use{did=\"95000003\"} 0\n")
-	if c := run(CheckCapacityReleased, v); !c.Failed() {
-		t.Error("a slot left in use passed")
-	}
+		v := fakeK2(t, form)
+		v.Provider.After.Total = 1
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("a session on a run that only rang passed")
+		}
+		v = fakeK2(t, form)
+		v.Dialogs[0].Final = &calleesim.FinalRecord{Status: 200}
+		if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
+			t.Error("an answered number on a run whose cases answer none passed")
+		}
+		v = fakeK2(t, form)
+		v.Dialogs = nil
+		if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
+			t.Error("a run that dialled nothing passed")
+		}
+		v = fakeK2(t, form)
+		v.MetricsAfter, _ = ParseMetrics("aicc_bot_slots{state=\"IN_USE\"} 1\naicc_did_outbound_in_use{did=\"95000003\"} 0\n")
+		if c := run(CheckCapacityReleased, v); !c.Failed() {
+			t.Error("a slot left in use passed")
+		}
+	})
 }
 
 func TestCheckAppEnv(t *testing.T) {

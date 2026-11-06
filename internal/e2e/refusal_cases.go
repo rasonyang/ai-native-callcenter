@@ -2,11 +2,7 @@
 
 package e2e
 
-import (
-	"strconv"
-
-	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
-)
+import "strconv"
 
 // K3 is the scenario of issue #459: an answered AI outbound call whose bot
 // leg is refused. The bot's INVITE is refused when the UAS cannot bind an RTP
@@ -90,11 +86,11 @@ type RefusalCall struct {
 // Number is the call's canonical number.
 func (c RefusalCall) Number(r Region) string { return r.Prefix + c.Suffix }
 
-// DialKey is what the switch is handed for the call, the simulator's key.
-func (c RefusalCall) DialKey(r Region, form phonenum.DialForm) string {
-	out, _ := phonenum.DialString(c.Number(r), form, r.CountryCode)
-	return out
-}
+// DialKey is what the switch is handed for the call, the simulator's key. The
+// call is placed through POST /calls, which dials its "to" exactly as sent
+// (only the campaign dialer applies AICC_OUTBOUND_DIAL_FORM), so the key is the
+// canonical number in every dial form.
+func (c RefusalCall) DialKey(r Region) string { return c.Number(r) }
 
 // RefusalScenario is a run of K3.
 type RefusalScenario struct {

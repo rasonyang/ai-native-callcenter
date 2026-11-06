@@ -85,28 +85,29 @@ func TestProviderScenarioRefusals(t *testing.T) {
 // A case whose attempts behave differently needs a simulator that has never
 // answered its number; one that only saw other numbers is fine.
 func TestCheckSimulatorUnused(t *testing.T) {
-	c04 := Regions[0].DialKey(AnsweredCases[2], phonenum.FormE164)
-	c03 := Regions[0].DialKey(DefaultCases[0], phonenum.FormE164)
-	if err := checkSimulatorUnused(calleesim.Report{Dialogs: []calleesim.DialogRecord{{Number: c03}}}, Regions, AllCases, phonenum.FormE164); err != nil {
-		t.Fatalf("refused a simulator that never saw a stepped number: %v", err)
-	}
-	err := checkSimulatorUnused(calleesim.Report{Dialogs: []calleesim.DialogRecord{{Number: c04}}}, Regions, AllCases, phonenum.FormE164)
-	if err == nil || !strings.Contains(err.Error(), "US C04") {
-		t.Fatalf("got %v, want a refusal naming US C04", err)
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		c04 := Regions[0].DialKey(AnsweredCases[2], form)
+		c03 := Regions[0].DialKey(DefaultCases[0], form)
+		if err := checkSimulatorUnused(calleesim.Report{Dialogs: []calleesim.DialogRecord{{Number: c03}}}, Regions, AllCases, form); err != nil {
+			t.Fatalf("refused a simulator that never saw a stepped number: %v", err)
+		}
+		err := checkSimulatorUnused(calleesim.Report{Dialogs: []calleesim.DialogRecord{{Number: c04}}}, Regions, AllCases, form)
+		if err == nil || !strings.Contains(err.Error(), "US C04") {
+			t.Fatalf("got %v, want a refusal naming US C04", err)
+		}
+	})
 }
 
 func TestCheckScenarioRefusesAMismatchedStep(t *testing.T) {
-	s, err := calleesim.LoadScenario("../../deploy/e2e/scenario.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	key := Regions[1].DialKey(AnsweredCases[2], phonenum.FormE164)
-	s.Numbers[key] = s.Numbers[key][:1] // C04 loses its answered attempt
-	err = CheckScenarioCoversCases(s, Regions, AllCases, phonenum.FormE164)
-	if err == nil || !strings.Contains(err.Error(), "CN C04") {
-		t.Fatalf("got %v, want a refusal naming CN C04", err)
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		s := loadScenarioFor(t, form)
+		key := Regions[1].DialKey(AnsweredCases[2], form)
+		s.Numbers[key] = s.Numbers[key][:1] // C04 loses its answered attempt
+		err := CheckScenarioCoversCases(s, Regions, AllCases, form)
+		if err == nil || !strings.Contains(err.Error(), "CN C04") {
+			t.Fatalf("got %v, want a refusal naming CN C04", err)
+		}
+	})
 }
 
 func TestParseMetrics(t *testing.T) {
@@ -156,7 +157,7 @@ aicc_bare 4.5 1700000000000
 
 // fakeRun builds a run's view by hand: one region with C03 (busy twice) and
 // C04 (busy, then answered), and the counters given.
-func fakeRun(t *testing.T) *RunView {
+func fakeRun(t *testing.T, form phonenum.DialForm) *RunView {
 	t.Helper()
 	r := Regions[0]
 	base := time.Date(2026, 10, 17, 8, 0, 0, 0, time.UTC)
@@ -168,7 +169,7 @@ func fakeRun(t *testing.T) *RunView {
 		return d
 	}
 	c03, c04 := DefaultCases[0], AnsweredCases[2]
-	k03, k04 := r.DialKey(c03, phonenum.FormE164), r.DialKey(c04, phonenum.FormE164)
+	k03, k04 := r.DialKey(c03, form), r.DialKey(c04, form)
 	busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
 	attempt := func(o *api.CampaignOutcome) api.CampaignAttempt {
 		end := base.Add(time.Minute)
@@ -184,7 +185,7 @@ func fakeRun(t *testing.T) *RunView {
 		return c
 	}
 	v := &RunView{
-		Form:  phonenum.FormE164,
+		Form:  form,
 		Cases: []Case{c03, c04},
 		Dialogs: []calleesim.DialogRecord{
 			dlg(k03, 0, 180, 486), dlg(k04, 0, 180, 486), dlg(k03, 61*time.Second, 180, 486), dlg(k04, 61*time.Second, 180, 200),
@@ -214,77 +215,87 @@ func run(check func(context.Context, *RunView, *Checks), v *RunView) *Checks {
 }
 
 func TestInvariantsHoldOnAConsistentRun(t *testing.T) {
-	for name, check := range map[string]func(context.Context, *RunView, *Checks){
-		"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
-		"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
-	} {
-		if c := run(check, fakeRun(t)); c.Failed() || len(c.checks) == 0 {
-			t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		for name, check := range map[string]func(context.Context, *RunView, *Checks){
+			"sessions": CheckProviderSessions, "no-invite-after-answer": CheckNoInviteAfterAnswer,
+			"capacity": CheckCapacityReleased, "finished-once": CheckAttemptsFinishedOnce,
+		} {
+			if c := run(check, fakeRun(t, form)); c.Failed() || len(c.checks) == 0 {
+				t.Errorf("%s: %d checks, failures %v", name, len(c.checks), c.failures)
+			}
 		}
-	}
+	})
 }
 
 func TestProviderSessionsInvariantFails(t *testing.T) {
-	v := fakeRun(t)
-	v.Provider.After.Total = 7 // one session more than answered calls: one opened on a ring
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("an extra mock session passed")
-	}
-	v = fakeRun(t)
-	v.MetricsAfter[MetricProviderSessions][0].Value = 5 // the application opened none
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("a missing application session passed")
-	}
-	v = fakeRun(t)
-	v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} // a busy call that reached the bot
-	if c := run(CheckProviderSessions, v); !c.Failed() {
-		t.Error("a bot leg on a call that only rang passed")
-	}
-	empty := &RunView{Cases: AllCases, Regions: fakeRun(t).Regions}
-	if c := run(CheckProviderSessions, empty); !c.Failed() {
-		t.Error("a run with no dialogs passed")
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeRun(t, form)
+		v.Provider.After.Total = 7 // one session more than answered calls: one opened on a ring
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("an extra mock session passed")
+		}
+		v = fakeRun(t, form)
+		v.MetricsAfter[MetricProviderSessions][0].Value = 5 // the application opened none
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("a missing application session passed")
+		}
+		v = fakeRun(t, form)
+		v.Regions[0].CDRs[0].Legs = []api.Leg{{Kind: "BOT"}} // a busy call that reached the bot
+		if c := run(CheckProviderSessions, v); !c.Failed() {
+			t.Error("a bot leg on a call that only rang passed")
+		}
+		empty := &RunView{Cases: AllCases, Regions: fakeRun(t, form).Regions}
+		if c := run(CheckProviderSessions, empty); !c.Failed() {
+			t.Error("a run with no dialogs passed")
+		}
+	})
 }
 
 func TestNoInviteAfterAnswerFails(t *testing.T) {
-	v := fakeRun(t)
-	k04 := v.Dialogs[3].Number
-	redial := v.Dialogs[3]
-	redial.InviteAt = redial.InviteAt.Add(time.Minute)
-	redial.Final = &calleesim.FinalRecord{Status: 486}
-	v.Dialogs = append(v.Dialogs, redial)
-	if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
-		t.Errorf("an INVITE to %s after its answer passed", k04)
-	}
-	v = fakeRun(t)
-	v.Dialogs = v.Dialogs[:3] // C04 never answered
-	if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
-		t.Error("a run that answered fewer numbers than its cases passed")
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeRun(t, form)
+		k04 := v.Dialogs[3].Number
+		redial := v.Dialogs[3]
+		redial.InviteAt = redial.InviteAt.Add(time.Minute)
+		redial.Final = &calleesim.FinalRecord{Status: 486}
+		v.Dialogs = append(v.Dialogs, redial)
+		if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
+			t.Errorf("an INVITE to %s after its answer passed", k04)
+		}
+		v = fakeRun(t, form)
+		v.Dialogs = v.Dialogs[:3] // C04 never answered
+		if c := run(CheckNoInviteAfterAnswer, v); !c.Failed() {
+			t.Error("a run that answered fewer numbers than its cases passed")
+		}
+	})
 }
 
 func TestCapacityInvariantFails(t *testing.T) {
-	v := fakeRun(t)
-	v.MetricsAfter[MetricBotSlots][0].Value = 1
-	if c := run(CheckCapacityReleased, v); !c.Failed() {
-		t.Error("a bot slot left in use passed")
-	}
-	v = fakeRun(t)
-	delete(v.MetricsAfter, MetricDIDOutboundInUse)
-	if c := run(CheckCapacityReleased, v); !c.Failed() {
-		t.Error("a DID with no line series passed")
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeRun(t, form)
+		v.MetricsAfter[MetricBotSlots][0].Value = 1
+		if c := run(CheckCapacityReleased, v); !c.Failed() {
+			t.Error("a bot slot left in use passed")
+		}
+		v = fakeRun(t, form)
+		delete(v.MetricsAfter, MetricDIDOutboundInUse)
+		if c := run(CheckCapacityReleased, v); !c.Failed() {
+			t.Error("a DID with no line series passed")
+		}
+	})
 }
 
 func TestFinishedOnceInvariantFails(t *testing.T) {
-	v := fakeRun(t)
-	v.MetricsAfter[MetricCampaignAttempts][1].Value = 14 // BUSY counted once more than the attempts
-	if c := run(CheckAttemptsFinishedOnce, v); !c.Failed() {
-		t.Error("a second finish passed")
-	}
-	v = fakeRun(t)
-	v.Regions[0].Contacts[1].Attempts[1].State = "DIALING"
-	if c := run(CheckAttemptsFinishedOnce, v); !c.Failed() {
-		t.Error("an unfinished attempt passed")
-	}
+	forEachForm(t, func(t *testing.T, form phonenum.DialForm) {
+		v := fakeRun(t, form)
+		v.MetricsAfter[MetricCampaignAttempts][1].Value = 14 // BUSY counted once more than the attempts
+		if c := run(CheckAttemptsFinishedOnce, v); !c.Failed() {
+			t.Error("a second finish passed")
+		}
+		v = fakeRun(t, form)
+		v.Regions[0].Contacts[1].Attempts[1].State = "DIALING"
+		if c := run(CheckAttemptsFinishedOnce, v); !c.Failed() {
+			t.Error("an unfinished attempt passed")
+		}
+	})
 }

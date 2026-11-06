@@ -19,7 +19,6 @@ import (
 
 	"github.com/rasonyang/ai-native-callcenter/internal/api"
 	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
-	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 )
 
 // refusalScopes are the capacity driver's scopes plus reading the live calls,
@@ -124,7 +123,7 @@ func RunRefusal(ctx context.Context, cfg CampaignConfig, sc RefusalScenario) (*R
 	if err != nil {
 		return nil, err
 	}
-	if err := checkRefusalInScenario(pre.scenario, sc, pre.form); err != nil {
+	if err := checkRefusalInScenario(pre.scenario, sc); err != nil {
 		return nil, err
 	}
 
@@ -245,10 +244,10 @@ func checkRTPRanges(composeJSON []byte, low, high int) (string, error) {
 // the direct calls expect: one behaviour per number, with the step's
 // provisional, answer time and hang-up. The campaign contact is checked by
 // the shared preflight.
-func checkRefusalInScenario(s *calleesim.Scenario, sc RefusalScenario, form phonenum.DialForm) error {
+func checkRefusalInScenario(s *calleesim.Scenario, sc RefusalScenario) error {
 	var problems []string
 	for _, rc := range sc.Direct {
-		key := rc.DialKey(sc.Region, form)
+		key := rc.DialKey(sc.Region)
 		problems = append(problems, stepProblems(rc.ID, key, []Step{rc.Step}, s.Numbers[key])...)
 	}
 	if len(problems) > 0 {
@@ -424,7 +423,7 @@ func (rr *refusalRun) provision(ctx context.Context, d *driver) error {
 			return fmt.Errorf("%s: %w", spec.ID, err)
 		}
 		rr.calls = append(rr.calls, &refusalCall{spec: spec, did: did, direct: DirectCall{
-			Number: spec.Number(rr.sc.Region), DialKey: spec.DialKey(rr.sc.Region, d.form), DID: did.Number, CDRs: []api.CDR{},
+			Number: spec.Number(rr.sc.Region), DialKey: spec.DialKey(rr.sc.Region), DID: did.Number, CDRs: []api.CDR{},
 			IsExpectedNoBot: spec.Role == RoleRefused,
 		}})
 	}
