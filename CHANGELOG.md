@@ -89,6 +89,10 @@ carries the one-line installer's files.
   `sounds/aicc/<zh|en>/bot-unavailable.wav`; `zh` plays zh and any other language
   plays en. A switch installed natively needs them copied in once
   (`docs/dev-stack.md`). (#485)
+- A webhook subscription's `name` longer than 120 characters or `authToken`
+  longer than 1024 is refused with 422 `VALIDATION_FAILED`
+  (`{"field": "name"}` / `{"field": "authToken"}`), as the contract says;
+  before, both were stored. Characters are counted, not bytes. (#470)
 
 ### Changed
 

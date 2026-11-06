@@ -25,6 +25,14 @@ import (
 // WebhookSubscriptionWrite.url, counted in characters, not bytes.
 const maxWebhookURLLength = 2048
 
+// maxWebhookNameLength is the contract's maxLength for
+// WebhookSubscriptionWrite.name, counted in characters, not bytes.
+const maxWebhookNameLength = 120
+
+// maxWebhookAuthTokenLength is the contract's maxLength for
+// WebhookSubscriptionWrite.authToken, counted in characters, not bytes.
+const maxWebhookAuthTokenLength = 1024
+
 // WebhookService is where finished calls are told to somebody else.
 type WebhookService interface {
 	List(ctx context.Context) ([]store.WebhookSubscription, error)
@@ -167,6 +175,12 @@ func decodeSubscription(w http.ResponseWriter, r *http.Request) (store.WebhookSu
 			"a name is required", map[string]any{"field": "name"})
 		return store.WebhookSubscriptionWrite{}, false
 	}
+	if utf8.RuneCountInString(body.Name) > maxWebhookNameLength {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			fmt.Sprintf("name is at most %d characters", maxWebhookNameLength),
+			map[string]any{"field": "name"})
+		return store.WebhookSubscriptionWrite{}, false
+	}
 	parsed, err := url.Parse(body.URL)
 	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" {
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
@@ -179,6 +193,14 @@ func decodeSubscription(w http.ResponseWriter, r *http.Request) (store.WebhookSu
 		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
 			fmt.Sprintf("url is at most %d characters", maxWebhookURLLength),
 			map[string]any{"field": "url"})
+		return store.WebhookSubscriptionWrite{}, false
+	}
+
+	// The token is the customer's credential: the refusal never repeats it.
+	if body.AuthToken != nil && utf8.RuneCountInString(*body.AuthToken) > maxWebhookAuthTokenLength {
+		writeError(w, http.StatusUnprocessableEntity, CodeValidationFailed,
+			fmt.Sprintf("authToken is at most %d characters", maxWebhookAuthTokenLength),
+			map[string]any{"field": "authToken"})
 		return store.WebhookSubscriptionWrite{}, false
 	}
 
