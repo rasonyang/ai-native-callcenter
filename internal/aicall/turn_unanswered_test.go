@@ -449,36 +449,206 @@ func TestAKeypressAfterSpeechStoppedRecordsNothing(t *testing.T) {
 }
 
 //
-// Issue #404 item 3: what a dropped turn does to global.closingTarget.
+// Issue #448: a caller turn the engine dropped carries the caller's words on
+// the NO_INPUT event.
 //
-// These two tests PIN CURRENT BEHAVIOUR; they are a record, not a requirement.
-// The NO_INPUT count (flow.Engine.OnNoInput) resets only on a non-empty final
-// transcript (OnCallerSpoke), a keypress or a tool result. The dead-air watch
-// itself does not know whether the caller spoke: it reports NO_INPUT whenever
-// no turn followed. So whether three dropped turns in a row end the call as
-// "no input" depends on what the engine transcribed for the dropped speech.
+// The dead-air watch survives a caller's speech only when a response's
+// playback ends after it, so these scenarios are the #197 shape: a response
+// (a tool call, with no audio) is already in progress when the caller speaks,
+// and its end arms the watch. The engine never answers the caller's turn.
+//
+
+const rma1003Words = "What is the status of my repair, the order number is RMA1003?"
+
+// responseInProgress starts a response and waits until the session holds the
+// floor for it.
+func (r *turnRig) responseInProgress(t *testing.T) {
+	t.Helper()
+	r.send(provider.EventTypeResponseStarted)
+	waitFor(t, "the response to start", r.session.isHoldingTheFloor)
+}
+
+// callerSpeaks is speech_started then speech_stopped, waited for until the
+// measurement is open.
+func (r *turnRig) callerSpeaks(t *testing.T) {
+	t.Helper()
+	r.send(provider.EventTypeSpeechStarted)
+	r.callerStops(t)
+}
+
+// transcript is the caller's final transcript, waited for until the session
+// has passed it on.
+func (r *turnRig) transcript(t *testing.T, text string) {
+	t.Helper()
+	r.model.events <- provider.Event{Type: provider.EventTypeInputTranscript, Text: text, IsFinal: true}
+	awaitBridgeEvent(t, r.session, EventTypeCustomerSaid)
+}
+
+// deadAir ends the response in progress and waits for the NO_INPUT it arms.
+func (r *turnRig) deadAir(t *testing.T) Event {
+	t.Helper()
+	r.send(provider.EventTypeResponseDone)
+	return awaitBridgeEvent(t, r.session, EventTypeNoInput)
+}
+
+func TestADroppedTurnReportsTheCallersWordsOnNoInput(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.responseInProgress(t)
+		rig.callerSpeaks(t)
+		rig.transcript(t, rma1003Words)
+
+		event := rig.deadAir(t)
+		if !event.IsCallerUnanswered || event.Text != rma1003Words {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want the caller's words", event.IsCallerUnanswered, event.Text)
+		}
+		rig.want(t, 0, 1, "NO_INPUT")
+	})
+}
+
+func TestADroppedTurnWithAnEmptyTranscriptIsUnansweredWithNoWords(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.responseInProgress(t)
+		rig.callerSpeaks(t)
+		rig.transcript(t, "  ")
+
+		event := rig.deadAir(t)
+		if !event.IsCallerUnanswered || event.Text != "" {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want unanswered with no words", event.IsCallerUnanswered, event.Text)
+		}
+	})
+}
+
+func TestDeadAirAfterACallerWhoNeverSpokeIsNotAnUnansweredTurn(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.reply(t)
+		event := awaitBridgeEvent(t, rig.session, EventTypeNoInput)
+		if event.IsCallerUnanswered || event.Text != "" {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want a plain silence", event.IsCallerUnanswered, event.Text)
+		}
+		rig.want(t, 0, 0)
+	})
+}
+
+// OpenAI delivers a turn's input transcript often after the response that
+// answers it has started. That transcript is of an answered turn and must not
+// be mistaken for the words of a later one the engine drops.
+func TestALateTranscriptOfAnAnsweredTurnIsNotTheWordsOfALaterDroppedOne(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.callerSpeaks(t)
+		rig.responseInProgress(t) // answers it
+		rig.transcript(t, "Please check my order.")
+
+		// A noise turn the engine drops, while that response is still going.
+		rig.callerSpeaks(t)
+		event := rig.deadAir(t)
+		if !event.IsCallerUnanswered || event.Text != "" {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want unanswered with no stale words", event.IsCallerUnanswered, event.Text)
+		}
+	})
+}
+
+// Doubao delivers the final transcript before speech_stopped.
+func TestATranscriptBeforeSpeechStoppedIsKept(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.responseInProgress(t)
+		rig.send(provider.EventTypeSpeechStarted)
+		rig.transcript(t, rma1003Words)
+		rig.callerStops(t)
+
+		event := rig.deadAir(t)
+		if !event.IsCallerUnanswered || event.Text != rma1003Words {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want the caller's words", event.IsCallerUnanswered, event.Text)
+		}
+	})
+}
+
+// A response that started before the caller spoke (#197: a tool-result
+// response still in progress) and ends without the engine answering them keeps
+// the words, however late its end arrives after the transcript.
+func TestWordsSaidOverAResponseThatEndsLaterAreKept(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.responseInProgress(t)
+		rig.callerSpeaks(t)
+		rig.transcript(t, rma1003Words)
+		// The response the caller spoke over ends; nothing new starts.
+		event := rig.deadAir(t)
+		if event.Text != rma1003Words || !event.IsCallerUnanswered {
+			t.Errorf("NO_INPUT = unanswered %v, text %q; want the caller's words", event.IsCallerUnanswered, event.Text)
+		}
+	})
+}
+
+// A caller who speaks in two VAD segments may get the first one's transcript
+// during the second.
+func TestTheFirstSegmentsTranscriptSurvivesTheSecondSegmentStarting(t *testing.T) {
+	eachProfile(t, func(t *testing.T, profile provider.Profile) {
+		rig := startTurnRig(t, profile, 100*time.Millisecond)
+		rig.responseInProgress(t)
+		rig.callerSpeaks(t)
+		rig.send(provider.EventTypeSpeechStarted) // the second segment
+		rig.transcript(t, "What is the status of my repair,")
+		rig.callerStops(t)
+
+		event := rig.deadAir(t)
+		if event.Text != "What is the status of my repair," {
+			t.Errorf("text = %q, want the first segment's words", event.Text)
+		}
+	})
+}
+
+// A response that starts after the words answers them: they are not carried to
+// a later silence.
+func TestWordsAreForgottenOnceAResponseStarts(t *testing.T) {
+	var timer turnTimer
+	timer.onSpeechStarted()
+	timer.onSpeechStopped()
+	timer.onCallerWords(rma1003Words)
+	timer.onResponseStarted()
+	if timer.words != "" {
+		t.Errorf("words = %q after a response started, want none", timer.words)
+	}
+	timer.onCallerWords("late transcript of the answered turn")
+	if timer.words != "" {
+		t.Errorf("a transcript after the response started was kept: %q", timer.words)
+	}
+}
+
+//
+// Issue #404 item 3, settled by #448: what a dropped turn does to
+// global.closingTarget. The NO_INPUT count (flow.Engine.OnNoInput) resets on a
+// non-empty final transcript (OnCallerSpoke), a keypress or a tool result.
+// The dead-air watch reports NO_INPUT whenever no turn followed; the session
+// says whether the caller's turn went unanswered and with which words
+// (Event.IsCallerUnanswered), and handleDeadAir does not tell the flow a
+// caller with words was silent.
 //
 
 // dropThreeTurns drives three dropped caller turns through the orchestrator's
-// dead-air handler, with callerSays called before each one to model what the
-// engine transcribed. It returns the cue texts the model received and whether
-// the flow reached its closing target.
-func dropThreeTurns(t *testing.T, callerSays func(runtime interface{ OnCallerSpoke(string) })) (cues, lines []string, closed bool) {
+// dead-air handler, saying callerWords before each one the way the engine
+// transcribed it ("" is a transcript with no words). It returns the cue texts
+// the model received and whether the flow reached its closing target.
+func dropThreeTurns(t *testing.T, callerWords string) (cues, lines []string, closed bool) {
 	t.Helper()
 	o, session, model, engine, runtime, actions, log := deadAirHarness(t, farewellBackstopFlow)
 	model.answerLinesWithATurn(session)
 	for range 3 {
-		callerSays(runtime)
-		o.handleDeadAir(session, runtime, actions, false, nil, log)
+		runtime.OnCallerSpoke(callerWords)
+		o.handleDeadAir(session, runtime, actions, false, nil, callerWords, log)
 	}
 	return model.recordedUserText(), model.spokenLines(), engine.IsTerminal()
 }
 
-func TestPinnedThreeDroppedTurnsWithNoTranscriptEndTheCallAsNoInput(t *testing.T) {
-	cues, lines, closed := dropThreeTurns(t, func(interface{ OnCallerSpoke(string) }) {})
+func TestThreeDroppedTurnsWithNoTranscriptEndTheCallAsNoInput(t *testing.T) {
+	cues, lines, closed := dropThreeTurns(t, "")
 
 	if !closed {
-		t.Fatal("pinned: three dropped turns with no transcript reach the closing target")
+		t.Fatal("three dropped turns with no transcript must reach the closing target")
 	}
 	// The first two dead airs send the re-engagement cue; the third moves the
 	// flow to the closing target and its announce is the line, with no cue.
@@ -490,22 +660,18 @@ func TestPinnedThreeDroppedTurnsWithNoTranscriptEndTheCallAsNoInput(t *testing.T
 	}
 }
 
-func TestPinnedThreeDroppedTurnsWithAFinalTranscriptNeverEndTheCall(t *testing.T) {
-	cues, lines, closed := dropThreeTurns(t, func(runtime interface{ OnCallerSpoke(string) }) {
-		runtime.OnCallerSpoke("what is the status of my repair?")
-	})
+func TestThreeDroppedTurnsWithAFinalTranscriptNeverEndTheCallAndAreEachAnswered(t *testing.T) {
+	cues, lines, closed := dropThreeTurns(t, "what is the status of my repair?")
 
 	if closed {
-		t.Fatal("pinned: a final transcript resets the count, so the call is never closed as no-input")
+		t.Fatal("a caller with words was told to be silent three times and the call was closed")
 	}
-	// Every dead air is the same "still there" cue: the model is told the
-	// caller was silent although the caller asked a question.
 	if len(cues) != 3 || len(lines) != 0 {
 		t.Fatalf("cues = %q, lines = %q, want three cues and no line", cues, lines)
 	}
 	for _, cue := range cues {
-		if !strings.Contains(cue, "The caller has been silent") {
-			t.Errorf("cue = %q, want the silent-caller cue", cue)
+		if cue != answerCueEN {
+			t.Errorf("cue = %q, want the answer cue", cue)
 		}
 	}
 }

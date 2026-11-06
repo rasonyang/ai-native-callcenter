@@ -148,7 +148,14 @@ func newClaimsHarness(t *testing.T) *claimsHarness {
 // session configuration.
 func newClaimsHarnessWith(t *testing.T, flowJSON, lang, backendURL string, cfg Config) *claimsHarness {
 	t.Helper()
-	session, leg, model := startBridgeWith(t, provider.OpenAIProfile(), cfg)
+	return newClaimsHarnessOn(t, provider.OpenAIProfile(), flowJSON, lang, backendURL, cfg)
+}
+
+// newClaimsHarnessOn is newClaimsHarnessWith on an engine of the test's choice.
+func newClaimsHarnessOn(t *testing.T, profile provider.Profile, flowJSON, lang, backendURL string,
+	cfg Config) *claimsHarness {
+	t.Helper()
+	session, leg, model := startBridgeWith(t, profile, cfg)
 	awaitBridgeEvent(t, session, EventTypeReady)
 
 	h := &claimsHarness{session: session, leg: leg, model: model,
@@ -162,7 +169,7 @@ func newClaimsHarnessWith(t *testing.T, flowJSON, lang, backendURL string, cfg C
 		}},
 		Flows:   fakeFlows{},
 		Switch:  h.sw,
-		Profile: provider.OpenAIProfile(),
+		Profile: profile,
 		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})
 	if err != nil {

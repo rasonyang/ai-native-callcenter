@@ -4,6 +4,7 @@ package aicall
 
 import (
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
@@ -38,6 +39,22 @@ type turnTimer struct {
 	// isAnswered is true once a model response has started since
 	// speech_stopped. It is meaningful only while a measurement is open.
 	isAnswered bool
+
+	// words is the caller's last final transcript with words in it received
+	// since a response last started; empty when there is none.
+	//
+	// It is tracked here, in the provider's own event order, and not in the
+	// orchestrator from CUSTOMER_SAID: "since the last bot turn" must mean
+	// "since a response last started", which only the session sees. The
+	// orchestrator's TURN_DONE or BOT_SAID can arrive after the dropped turn's
+	// transcript in exactly #197's path (a tool-result response still in
+	// progress when the caller answers), and on OpenAI a turn's input
+	// transcript often arrives after the response that answers it has started.
+	words string
+	// hasResponseSinceSpeech is true once a response has started since the
+	// caller last began speaking. A final transcript that arrives while it is
+	// true belongs to a turn the engine already answered and is not kept.
+	hasResponseSinceSpeech bool
 }
 
 // Why the application closed a measurement as unanswered.
@@ -58,28 +75,50 @@ func (t *turnTimer) onSpeechStopped() {
 }
 
 // onSpeechStarted abandons it: the caller resumed before any reply.
+//
+// The words are kept: a caller who speaks in two VAD segments may get the
+// first segment's transcript during the second.
 func (t *turnTimer) onSpeechStarted() {
 	t.speechStoppedAt = time.Time{}
 	t.isAnswered = false
+	t.hasResponseSinceSpeech = false
 }
 
 // onResponseStarted notes that the engine has begun a response, audio or not.
+//
+// Words said before this response are no longer the unanswered ones, whether or
+// not a measurement is open.
 func (t *turnTimer) onResponseStarted() {
+	t.words = ""
+	t.hasResponseSinceSpeech = true
 	if !t.speechStoppedAt.IsZero() {
 		t.isAnswered = true
 	}
 }
 
+// onCallerWords keeps a final transcript of the caller's speech when it has
+// words in it and no response has started since the caller began speaking.
+func (t *turnTimer) onCallerWords(text string) {
+	if strings.TrimSpace(text) == "" || t.hasResponseSinceSpeech {
+		return
+	}
+	t.words = text
+}
+
 // onSteppedIn closes an open, unanswered measurement because the application
 // spoke or prompted first; waitMs is speech_stopped to now. ok is false when
-// nothing is open or the engine has answered, and then nothing changes.
-func (t *turnTimer) onSteppedIn() (waitMs int64, ok bool) {
+// nothing is open or the engine has answered, and then nothing changes. When
+// it closes one, words are the caller's words of that unanswered turn (empty
+// when nothing was transcribed) and are cleared.
+func (t *turnTimer) onSteppedIn() (waitMs int64, words string, ok bool) {
 	if t.speechStoppedAt.IsZero() || t.isAnswered {
-		return 0, false
+		return 0, "", false
 	}
 	waitMs = time.Since(t.speechStoppedAt).Milliseconds()
 	t.speechStoppedAt = time.Time{}
-	return waitMs, true
+	words = t.words
+	t.words = ""
+	return waitMs, words, true
 }
 
 // onFirstAudio records the provider's share of the wait.

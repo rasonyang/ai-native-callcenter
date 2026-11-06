@@ -411,75 +411,88 @@ func claimTools(runtime *flow.Runtime, kind string) []string {
 // before speaking, because a general reminder is what the model already failed
 // to follow (actionClaimRule). isCallerSilent is the dead-air trigger: the
 // caller has gone quiet waiting for it.
-func claimCue(lang string, c claim, tools []string, isCallerSilent bool) string {
+//
+// callerWords is the merged cue of #448: the dead air is a caller turn the
+// engine dropped, and its words ride in the same cue. That caller was not
+// silent, so the silent prefix is left out, and the cue ends by asking for the
+// words to be answered too.
+func claimCue(lang string, c claim, tools []string, isCallerSilent bool, callerWords string) string {
 	if lang == flow.LangZH {
-		return claimCueZH(c, tools, isCallerSilent)
+		return claimCueZH(c, tools, isCallerSilent, callerWords)
 	}
-	return claimCueEN(c, tools, isCallerSilent)
+	return claimCueEN(c, tools, isCallerSilent, callerWords)
 }
 
-func claimCueEN(c claim, tools []string, isCallerSilent bool) string {
+func claimCueEN(c claim, tools []string, isCallerSilent bool, callerWords string) string {
 	var b strings.Builder
 	b.WriteString("(")
-	if isCallerSilent {
+	if isCallerSilent && callerWords == "" {
 		b.WriteString("The caller has been silent, waiting for you. ")
 	}
 	b.WriteString("Your last reply told the caller \"" + c.phrase + "\", but ")
 	if len(tools) == 0 {
 		b.WriteString("nothing happened: you have no tool here that can do that. " +
 			"Tell the caller plainly that it was not done, and say what you can do instead. " +
-			"Do not claim it again.)")
-		return b.String()
+			"Do not claim it again.")
+	} else {
+		var happening, missing, again string
+		switch c.kind {
+		case store.UnbackedClaimTransfer:
+			happening = "no transfer was made, so the caller is not being put through"
+			missing = "what it needs (for example which queue or why)"
+			again = "that you are transferring them"
+		case store.UnbackedClaimMessage:
+			happening = "no message was saved, so nothing has been recorded"
+			missing = "what it needs (for example the message or a callback number)"
+			again = "that it is saved"
+		default:
+			happening = "no lookup ran, so nothing is being looked up"
+			missing = "what it needs (for example which order)"
+			again = "that you are checking"
+		}
+		b.WriteString(happening + " and the caller is waiting. Call " + strings.Join(tools, " or ") +
+			" now, without saying anything first. If you do not have " + missing +
+			", ask the caller for it instead. Do not say again " + again + ".")
 	}
-	var happening, missing, again string
-	switch c.kind {
-	case store.UnbackedClaimTransfer:
-		happening = "no transfer was made, so the caller is not being put through"
-		missing = "what it needs (for example which queue or why)"
-		again = "that you are transferring them"
-	case store.UnbackedClaimMessage:
-		happening = "no message was saved, so nothing has been recorded"
-		missing = "what it needs (for example the message or a callback number)"
-		again = "that it is saved"
-	default:
-		happening = "no lookup ran, so nothing is being looked up"
-		missing = "what it needs (for example which order)"
-		again = "that you are checking"
+	if callerWords != "" {
+		b.WriteString(" The caller also said \"" + callerWords + "\" and got no reply; answer that too.")
 	}
-	b.WriteString(happening + " and the caller is waiting. Call " + strings.Join(tools, " or ") +
-		" now, without saying anything first. If you do not have " + missing +
-		", ask the caller for it instead. Do not say again " + again + ".)")
+	b.WriteString(")")
 	return b.String()
 }
 
-func claimCueZH(c claim, tools []string, isCallerSilent bool) string {
+func claimCueZH(c claim, tools []string, isCallerSilent bool, callerWords string) string {
 	var b strings.Builder
 	b.WriteString("（")
-	if isCallerSilent {
+	if isCallerSilent && callerWords == "" {
 		b.WriteString("来电者一直没有说话，在等你。")
 	}
 	b.WriteString("你上一轮对来电者说了“" + c.phrase + "”，但")
 	if len(tools) == 0 {
 		b.WriteString("实际什么都没有发生：你在这里没有任何工具能做这件事。" +
-			"请直接告诉来电者这件事没有办成，并说明你能做什么。不要再说你在做这件事。）")
-		return b.String()
+			"请直接告诉来电者这件事没有办成，并说明你能做什么。不要再说你在做这件事。")
+	} else {
+		var happening, missing, again string
+		switch c.kind {
+		case store.UnbackedClaimTransfer:
+			happening = "没有调用任何转接工具，转接并没有发生，来电者没有被接通"
+			missing = "转接需要的信息（例如转到哪个队列、为什么）"
+			again = "你在转接"
+		case store.UnbackedClaimMessage:
+			happening = "没有调用任何留言工具，留言并没有被记录"
+			missing = "留言需要的信息（例如留言内容或回电号码）"
+			again = "已经记录"
+		default:
+			happening = "没有调用任何查询工具，查询并没有发生"
+			missing = "要查什么"
+			again = "你在查"
+		}
+		b.WriteString(happening + "，来电者在等。现在就调用 " + strings.Join(tools, " 或 ") +
+			"，调用之前不要说话。如果不知道" + missing + "，就直接问来电者。不要再说" + again + "。")
 	}
-	var happening, missing, again string
-	switch c.kind {
-	case store.UnbackedClaimTransfer:
-		happening = "没有调用任何转接工具，转接并没有发生，来电者没有被接通"
-		missing = "转接需要的信息（例如转到哪个队列、为什么）"
-		again = "你在转接"
-	case store.UnbackedClaimMessage:
-		happening = "没有调用任何留言工具，留言并没有被记录"
-		missing = "留言需要的信息（例如留言内容或回电号码）"
-		again = "已经记录"
-	default:
-		happening = "没有调用任何查询工具，查询并没有发生"
-		missing = "要查什么"
-		again = "你在查"
+	if callerWords != "" {
+		b.WriteString("来电者还说了“" + callerWords + "”，但没有得到回复，请一并回答。")
 	}
-	b.WriteString(happening + "，来电者在等。现在就调用 " + strings.Join(tools, " 或 ") +
-		"，调用之前不要说话。如果不知道" + missing + "，就直接问来电者。不要再说" + again + "。）")
+	b.WriteString("）")
 	return b.String()
 }
