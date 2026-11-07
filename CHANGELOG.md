@@ -20,6 +20,12 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A caller hanging up on an AI call is no longer recorded as a media or
+  provider failure. The hang-up closes the model's session, and a send of the
+  caller's audio that was in flight at that moment then failed; that error
+  used to end the call as `MEDIA_OR_PROVIDER_FAILURE` about half the time and
+  try to rescue a caller who had already gone. A send error on a call that is
+  still open fails it as before. (#500)
 - A caller turn the engine dropped is no longer reported as silence when the
   caller said something. When the dead-air watch fires after a turn the engine
   never answered and the caller's speech was transcribed with words, the model
