@@ -52,6 +52,13 @@ const (
 	// session (bargeIn) or by the provider's turn detection, which cancelled
 	// the turn first (Event.IsByProvider).
 	EventTypeBargeIn EventType = "BARGE_IN"
+	// EventTypeCallerSpeech is the provider reporting that the caller started
+	// to speak, whether or not the bot held the floor. A barge-in is reported
+	// only when there was something to cut, so this is the one signal that the
+	// caller took a turn in the quiet after the bot: the unhung-farewell grace
+	// is cancelled by it, on the speech start and not on its transcript, so a
+	// caller mid-sentence is never hung up on (farewell.go).
+	EventTypeCallerSpeech EventType = "CALLER_SPEECH"
 	// EventTypeDigit is a keypress.
 	EventTypeDigit EventType = "DIGIT"
 	// EventTypeFailed means the conversation cannot continue and the call must
@@ -939,6 +946,8 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.timer.onSpeechStarted()
 		s.mu.Unlock()
 		s.bargeIn(provider.InterruptReasonSpeech)
+		// After the barge-in, so a consumer sees the cut before the speech.
+		s.emit(Event{Type: EventTypeCallerSpeech})
 
 	case provider.EventTypeSpeechStopped:
 		s.mu.Lock()

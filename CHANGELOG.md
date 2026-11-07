@@ -20,6 +20,24 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A call whose bot says goodbye in words and never hangs up now ends on that
+  goodbye. Before, the flow's closing line was said on top of it after about ten
+  seconds of silence (a double goodbye), and a caller who answered the goodbye
+  ("why don't you hang up?") got another goodbye from the model, again and again.
+  Now a goodbye the caller heard to its end, followed by two seconds of caller
+  silence, hangs the call up; a second goodbye in a row hangs it up as soon as it
+  has played. The call still moves to `global.closingTarget`, so the final node
+  and the record are unchanged, but the target's `announce` is not said and no
+  further goodbye is asked for. A caller who starts speaking inside the two
+  seconds, or talks over the goodbye, keeps the call open. This now applies to
+  campaign calls, to flows with no `closingTarget`, to closing phases without an
+  `announce` and to doubao. The eight-second dead-air timer remains as the
+  fallback and closes the same way. The goodbye detector also recognises
+  "我就先不打扰您了", "先不打扰了", "那就先这样", "您先忙，有需要随时来电", "I'll let
+  you go", "that's all from me" and "feel free to call back anytime", including when the condition is a clause of its own ("好的，那如果您没有其他
+  问题，我就先不打扰您了"), and still ignores phrases that carry on ("不打扰您的话，我再确认
+  一下", "before I let you go, ...", a goodbye followed by "but first ...") and turns
+  that end in a question ("请问还有其他问题吗？"), which are not goodbyes. (#453)
 - A caller hanging up on an AI call is no longer recorded as a media or
   provider failure. The hang-up closes the model's session, and a send of the
   caller's audio that was in flight at that moment then failed; that error

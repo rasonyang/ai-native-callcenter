@@ -258,11 +258,13 @@ func TestAnUnhungFarewellFollowedByAnUnansweredTurnWithNoWordsRunsTheBackstop(t 
 		settle()
 
 		h.session.emit(droppedTurn(""))
-		waitFor(t, "the closing line", func() bool {
-			return slices.Contains(h.model.spokenLines(), "Sorry to have bothered you, goodbye.")
-		})
+		// The backstop hangs the call up and says nothing (#453).
+		waitFor(t, "the call to be hung up", h.session.isClosed)
 		if !h.runtime.Engine().IsTerminal() {
 			t.Error("the flow did not reach its closing target")
+		}
+		if got := h.model.spokenLines(); len(got) != 0 {
+			t.Errorf("lines spoken = %q, want none", got)
 		}
 	})
 }

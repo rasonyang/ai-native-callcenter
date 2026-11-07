@@ -155,6 +155,15 @@ func newClaimsHarnessWith(t *testing.T, flowJSON, lang, backendURL string, cfg C
 func newClaimsHarnessOn(t *testing.T, profile provider.Profile, flowJSON, lang, backendURL string,
 	cfg Config) *claimsHarness {
 	t.Helper()
+	return newClaimsHarnessSetup(t, profile, flowJSON, lang, backendURL, cfg, nil)
+}
+
+// newClaimsHarnessSetup is newClaimsHarnessOn with a hook that runs on the
+// built call before drive starts: the place to inject a clock or mark the call
+// a campaign's.
+func newClaimsHarnessSetup(t *testing.T, profile provider.Profile, flowJSON, lang, backendURL string,
+	cfg Config, setup func(h *claimsHarness)) *claimsHarness {
+	t.Helper()
 	session, leg, model := startBridgeWith(t, profile, cfg)
 	awaitBridgeEvent(t, session, EventTypeReady)
 
@@ -186,6 +195,9 @@ func newClaimsHarnessOn(t *testing.T, profile provider.Profile, flowJSON, lang, 
 	h.actions = &callActions{orchestrator: o, session: session, log: log,
 		callerChannel: "chan-9", recorder: h.recorder, facts: testFacts()}
 	h.runtime = flow.NewRuntime(engine, h.actions, flow.NewBackend(backendURL), nil, log)
+	if setup != nil {
+		setup(h)
+	}
 
 	go func() {
 		defer close(h.done)
