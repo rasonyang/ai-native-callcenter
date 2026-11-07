@@ -531,6 +531,7 @@ func (s *Session) recordFirstAudio() {
 // Close ends the call from this side and releases both halves.
 func (s *Session) Close(ctx context.Context) {
 	s.closeOnce.Do(func() {
+		// done closes before the model does: fail relies on that order.
 		close(s.done)
 		s.mu.Lock()
 		s.turnOwedUntil = time.Time{}
@@ -1689,8 +1690,18 @@ func (s *Session) watchLeg() {
 	}
 }
 
-// fail ends the call because the conversation cannot go on.
+// fail ends the call because the conversation cannot go on. After Close it
+// does nothing: the call is over, and an error that follows is the close's own
+// (a send to a model that Close just shut, #500), not a failure. This is
+// deterministic because Close closes done before it closes the model, so a
+// send that fails because of the close always finds done closed here. An error
+// on a session that is still open reaches the log, FAILED and Close as before.
 func (s *Session) fail(reason string, err error) {
+	if s.isClosed() {
+		s.log.Debug("ai call failure ignored, the call was already closed",
+			"reason", reason, "error", err)
+		return
+	}
 	s.log.Error("ai call failed", "reason", reason, "error", err)
 	s.emit(Event{Type: EventTypeFailed, Text: reason, Err: err})
 
@@ -1699,8 +1710,14 @@ func (s *Session) fail(reason string, err error) {
 	s.Close(ctx)
 }
 
-// emit publishes an event, dropping it once the call is over.
+// emit publishes an event, dropping it once the call is over. The check of
+// done comes first because the select below picks at random when both its
+// cases are ready, and an event published after Close must not be delivered
+// half the time.
 func (s *Session) emit(event Event) {
+	if s.isClosed() {
+		return
+	}
 	select {
 	case s.events <- event:
 	case <-s.done:
