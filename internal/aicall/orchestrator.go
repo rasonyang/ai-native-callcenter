@@ -542,6 +542,8 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 	wall := turnsWithoutToolWatch{toolCallTurn: -1}
 	var claims claimWatch
+	// fw is the bot's own goodbyes (farewell.go).
+	var fw farewellWatch
 	reportClaims := func(turn int, found []claim) {
 		for _, c := range found {
 			o.reportUnbackedClaim(turn, c, recorder, log)
@@ -613,6 +615,10 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 			o.resumeAfterFailedHandover(failed, session, runtime, actions, log)
 			continue
 
+		case <-fw.due:
+			o.onOwnFarewellGraceDue(&fw, &claims, isLimitWaiting, session, runtime, actions, log)
+			continue
+
 		case event, ok := <-events:
 			if !ok {
 				return
@@ -622,7 +628,11 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				if event.IsFinal {
 					recorder.say(store.SpeakerCustomer, event.Text)
 					runtime.OnCallerSpoke(event.Text)
+					fw.onCallerSpoke()
 				}
+
+			case EventTypeCallerSpeech:
+				fw.onCallerSpoke()
 
 			case EventTypeBotSaid:
 				// Words of a muted turn (answerToolCall) were not heard: not
@@ -638,18 +648,26 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					// A wait line is the application's words, not a claim
 					// of the model's ("let me check" is what it says).
 					if !event.IsAside {
-						reportClaims(event.Turn, claims.onBotSaid(event.Turn, event.Text))
+						found := claims.onBotSaid(event.Turn, event.Text)
+						reportClaims(event.Turn, found)
 						// The words an owed closing line is held against.
 						actions.onBotSaid(event.Turn, event.Text)
+						// A goodbye whose transcript landed after its turn
+						// finished (and maybe after it played).
+						fw.onBotSaid(event.Turn, hasFarewell(found))
+						o.checkOwnFarewell(&fw, &claims, claims.standingClaim() != nil,
+							isLimitWaiting, session, runtime, actions, log)
 					}
 				}
 
 			case EventTypeDigit:
 				recorder.say(store.SpeakerCustomer, "[keypad] "+event.Text)
 				runtime.OnCallerKeyed()
+				fw.onCallerSpoke()
 
 			case EventTypeToolCall:
 				claims.onToolCall()
+				fw.onToolCall()
 				wall.toolCallTurn = event.Turn
 				if !batch.isOpen {
 					batch.isOpen = true
@@ -692,6 +710,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				if event.IsInterrupted {
 					claims.onTurnInterrupted()
 				}
+				fw.onTurnDone(event.Turn, event.IsInterrupted, claims.hasFarewellWithoutHangup())
 				if out, ok := claims.takeCueOutcome(); ok {
 					o.reportClaimCueOutcome(out, event.Turn, event.IsInterrupted, log)
 				}
@@ -701,6 +720,8 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 
 			case EventTypeBargeIn:
 				actions.onBargeIn(event)
+				claims.onBargeIn(event.Turn)
+				fw.due = nil
 
 			case EventTypePlaybackDone:
 				// A limit waiting for the floor goes first, ahead of the
@@ -733,9 +754,18 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				// re-ask: the call is ending, not being asked to act.
 				isWallClosing := wall.crossedInTurn != 0 && wall.crossedInTurn == event.Turn
 				o.handlePlaybackDone(event.Turn, event.HasAudio, &wall, session, runtime, actions, log)
-				if c := claims.onPlaybackDone(event.Turn); c != nil && !isWallClosing {
+				if event.HasAudio {
+					claims.onAudioPlayed(event.Turn)
+					fw.onAudioPlayed()
+				}
+				c := claims.onPlaybackDone(event.Turn)
+				if c != nil && !isWallClosing {
 					o.reAskClaim(*c, event.Turn, &claims, session, runtime, actions, log)
 				}
+				// Last: the wall's close and a re-ask have had their say, and
+				// a call they are acting on is not left on the bot's goodbye.
+				o.checkOwnFarewell(&fw, &claims, c != nil || claims.standingClaim() != nil,
+					isLimitWaiting, session, runtime, actions, log)
 
 			case EventTypeFailed:
 				if actions.isSettlingHandover() {
@@ -1213,17 +1243,22 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 //     without a transcript cannot be told from echo or line noise, so it is
 //     not words and falls through as a silence.
 //  2. The flow's NO_INPUT rules.
-//  3. The unhung-farewell backstop.
+//  3. The unhung-farewell backstop, the fallback for what the grace of the
+//     bot's own goodbye did not catch (farewell.go): the call is hung up, and
+//     the closing target's announce is not said.
 //  4. A standing unbacked claim's cue.
 //  5. The silent-caller cue.
 //
-// isFarewellUnhung says the bot's last finished turn said goodbye in words and
-// made no tool call (claimWatch). That conversation is over and nobody ended
-// it, and asking the model anything makes it re-open a call it closed (#147:
-// "are you still there?", a second goodbye, a hangup 22 s late). So the flow's
-// closing target ends it, through the path every engine-decided ending takes.
-// Not when an ending is already armed, in a terminal phase, on a campaign
-// call, or in a flow with no closing target: those keep the cue.
+// isFarewellUnhung says the bot's last finished turn said goodbye in words
+// and made no tool call (claimWatch). That conversation is over and nobody
+// ended it, and asking the model anything makes it re-open a call it closed
+// (#147: "are you still there?", a second goodbye, a hangup 22 s late). Nor is
+// the flow's closing line said: the caller has heard a goodbye, and a second
+// one is the defect (#453). So the engine moves to the flow's closing target,
+// for the final node and the record, and the call is hung up with no line and
+// no cue (endAtOwnFarewell). That holds on a campaign call, in a flow with no
+// closing target and in a terminal phase. Not when an ending is already armed:
+// it keeps its own.
 //
 // claims is the call's claim watch (nil when there is none to consult). A
 // lookup, transfer or message the bot promised and never made (#438) gets the
@@ -1247,18 +1282,15 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 		return
 	}
 
-	if isFarewellUnhung && !actions.isArmed() && !actions.isCampaign() {
-		if closing := runtime.CloseAtUnhungFarewell(); closing != "" {
-			log.Info("the bot said goodbye without hanging up and the caller went quiet; "+
-				"closing the call at the flow's closing target", "node", closing)
-			if o.afterMove(closing, session, runtime, actions, log) {
-				return
-			}
-			if err := session.SendCue(goodbyeCue(runtime.Engine().Lang(), true)); err != nil {
-				log.Warn("could not ask for the goodbye", "error", err)
-			}
-			return
+	if isFarewellUnhung && !actions.isArmed() {
+		turn := 0
+		if claims != nil {
+			turn = claims.lastDoneTurn
 		}
+		o.endAtOwnFarewell("the bot said goodbye without hanging up and the caller went quiet; "+
+			"hanging up without the closing line", "DEAD_AIR", turn,
+			session, runtime, actions, log)
+		return
 	}
 
 	// A caller waiting on a lookup, transfer or message the bot promised and

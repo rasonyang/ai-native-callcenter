@@ -830,14 +830,19 @@ func TestAGoodbyeWithoutHangupThenSilenceClosesTheCallWithoutAskingTheModel(t *t
 	if !engine.IsTerminal() {
 		t.Fatal("the call did not move to the closing target")
 	}
-	if got := model.spokenLines(); len(got) != 1 || got[0] != "Sorry to have bothered you, goodbye." {
-		t.Errorf("spoken lines = %v, want the closing line once", got)
+	// The model's goodbye was the goodbye: the closing target's line is not
+	// said and the model is not asked for another (#453).
+	if got := model.spokenLines(); len(got) != 0 {
+		t.Errorf("spoken lines = %v, want none", got)
 	}
 	if got := model.recordedUserText(); len(got) != 0 {
 		t.Errorf("cues sent = %v, want none: the model is not asked anything", got)
 	}
-	if !actions.isArmed() {
-		t.Error("the closing target did not arm the ending")
+	if !session.isClosed() {
+		t.Error("the call was not hung up")
+	}
+	if actions.recorder.endReason != "HANGUP" {
+		t.Errorf("end reason = %q, want the containment mark", actions.recorder.endReason)
 	}
 }
 
@@ -889,7 +894,7 @@ func TestAFarewellFollowedByAnotherTurnOrAToolCallIsNotActedOn(t *testing.T) {
 	}
 }
 
-func TestTheFarewellBackstopLeavesAnArmedEndingACampaignAndAFlowWithoutATargetAlone(t *testing.T) {
+func TestTheFarewellBackstopLeavesOnlyAnArmedEndingAlone(t *testing.T) {
 	t.Run("armed", func(t *testing.T) {
 		o, session, model, engine, runtime, actions, log := deadAirHarness(t, farewellBackstopFlow)
 		actions.arm(t.Context(), func() {})
@@ -902,17 +907,22 @@ func TestTheFarewellBackstopLeavesAnArmedEndingACampaignAndAFlowWithoutATargetAl
 		}
 	})
 	t.Run("campaign", func(t *testing.T) {
+		// Included since #453: the same rule as on any call.
 		o, session, model, engine, runtime, actions, log := deadAirHarness(t, farewellBackstopFlow)
 		actions.campaignID = "c-1"
 		o.handleDeadAir(session, runtime, actions, true, nil, "", log)
-		if engine.IsTerminal() {
-			t.Error("the backstop moved a campaign call")
+		if !engine.IsTerminal() || !session.isClosed() {
+			t.Error("the backstop left a campaign call open")
 		}
-		if len(model.recordedUserText()) != 1 {
-			t.Error("the cue was not sent")
+		if got := model.recordedUserText(); len(got) != 0 {
+			t.Errorf("cues = %v, want none", got)
+		}
+		if got := model.spokenLines(); len(got) != 0 {
+			t.Errorf("lines = %v, want none", got)
 		}
 	})
 	t.Run("no closing target", func(t *testing.T) {
+		// Nowhere to move to: hung up all the same, with no second line.
 		o, session, model, engine, runtime, actions, log := deadAirHarness(t, `{
 			"id": "no-target", "specVersion": "v2", "initialNode": "welcome",
 			"global": {"persona": "You answer the phone."},
@@ -922,8 +932,11 @@ func TestTheFarewellBackstopLeavesAnArmedEndingACampaignAndAFlowWithoutATargetAl
 		if engine.IsTerminal() {
 			t.Error("the backstop moved a flow with nowhere to go")
 		}
-		if len(model.recordedUserText()) != 1 {
-			t.Error("the cue was not sent")
+		if !session.isClosed() {
+			t.Error("the call was not hung up")
+		}
+		if got := model.recordedUserText(); len(got) != 0 {
+			t.Errorf("cues = %v, want none", got)
 		}
 	})
 }

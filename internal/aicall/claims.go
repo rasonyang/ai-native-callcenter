@@ -79,18 +79,103 @@ var claimPatterns = []claimPattern{
 			`|(?:留言|信息|请求|回电请求)已(?:经)?(?:记录|登记|提交|转达)`)},
 	// Farewell: a goodbye is a claim that the call is ending.
 	// Besides the word itself, the closing phrases the seeded flows use ("Thanks
-	// for your time", "祝您生活愉快"). A plain "thank you" is not one: it is said
-	// mid-call all the time.
+	// for your time", "祝您生活愉快") and the ones a model reaches for when it
+	// closes in words instead of calling hangup ("我就先不打扰您了", "那就先这样",
+	// "I'll let you go", "that's all from me", #453). A plain "thank you" is not
+	// one: it is said mid-call all the time. A phrase that carries on ("不打扰您的
+	// 话，我再确认一下", "before I let you go, ...") matches none of these, and
+	// farewellContinues keeps the ones that could.
 	{store.UnbackedClaimFarewell, regexp.MustCompile(
 		`(?i)\b(?:good-?bye|bye-bye|bye now)\b|` +
 			`\bthank(?:s| you) for your (?:time|cooperation)\b|` +
 			`\bhave a (?:great|good|nice|wonderful|lovely) (?:day|evening|night)\b|` +
 			`\btake care(?:[.!,]|\s*$)|` +
-			`再见|拜拜|祝您[^，。！？,.!?]{0,8}愉快|感谢您的(?:配合|时间)|感谢配合`)},
+			`\bi(?:'ll| will) let you go\b|` +
+			`\bthat(?:'s| is) all from (?:me|my side)\b|` +
+			`\bi (?:won't|will not) take (?:up )?any more of your time\b|` +
+			`\bfeel free to (?:call|reach out|contact us)(?: back| again)? any ?time\b|` +
+			`再见|拜拜|祝您[^，。！？,.!?]{0,8}愉快|感谢您的(?:配合|时间)|感谢配合|` +
+			`不(?:再)?打扰(?:您|你)了|先不打扰(?:您|你)?了|` +
+			`(?:您|你)先忙|(?:有需要|欢迎)(?:您)?(?:再)?随时(?:再)?(?:来电|联系)|` +
+			`就先这样(?:吧|啦|了)?\s*[。！.!]?\s*$|` +
+			`我(?:这就|先|就)挂(?:断|了|电话)`)},
 }
 
 // notAClaim marks a sentence that offers or supposes rather than claims.
 var notAClaim = regexp.MustCompile(`\bif\b|\bwhether\b|如果|的话|是否|要不要|吗`)
+
+// farewellContinues marks a clause that says the conversation goes on after the
+// words that might close it: "I'll let you go after I confirm your number".
+// Used for the FAREWELL kind only.
+var farewellContinues = regexp.MustCompile(`\b(?:before|after|once|until|but)\b|之前|之后|不过|但是`)
+
+// clauseSplit divides a sentence at the commas a closing line is written with.
+var clauseSplit = regexp.MustCompile(`[,，;；、]`)
+
+// farewellPhrase is the goodbye a sentence says, "" when it says none.
+//
+// The sentence-level notAClaim is right for a promise ("如果需要，我帮您查询")
+// and wrong for a goodbye: the model closes with the condition in its own
+// clause ("好的，那如果您没有其他问题，我就先不打扰您了。", #453), and the whole
+// sentence was skipped. So the guard is applied to the comma-delimited clause
+// that holds the phrase: the condition's clause is not a goodbye, the clause
+// with the farewell in it is, unless it is itself conditional, a question or
+// carries on (farewellContinues).
+func farewellPhrase(re *regexp.Regexp, normalized string) string {
+	clauses := clauseSplit.Split(normalized, -1)
+	for i, clause := range clauses {
+		if notAClaim.MatchString(clause) || farewellContinues.MatchString(clause) {
+			continue
+		}
+		phrase := re.FindString(clause)
+		if phrase == "" || farewellCarriesOn(clauses[i+1:]) {
+			continue
+		}
+		return phrase
+	}
+	return ""
+}
+
+// laterContinues marks a later clause of the sentence that starts a
+// continuation: "…, but first let me confirm your address", "…，不过最后确认一下".
+// "after" and "之后" are not here: "之后有问题随时联系我们" is a normal closing.
+var laterContinues = regexp.MustCompile(`^\s*(?:but|however|before)\b|^\s*(?:不过|但是|但)|之前`)
+
+// farewellCarriesOn says a clause after the farewell's own starts a
+// continuation, so the farewell was not the end of the sentence's business.
+func farewellCarriesOn(later []string) bool {
+	for _, clause := range later {
+		if laterContinues.MatchString(clause) {
+			return true
+		}
+	}
+	return false
+}
+
+// endsInQuestion says the last sentence of a turn's text is a question: a turn
+// that closes by asking ("感谢您的配合。请问还有其他问题吗？") expects an answer
+// and is no goodbye, whatever its first sentence said. Asked of the whole turn,
+// since its words arrive in pieces.
+func endsInQuestion(text string) bool {
+	all := sentences(text)
+	if len(all) == 0 {
+		return false
+	}
+	last := all[len(all)-1]
+	return strings.HasSuffix(last, "?") || strings.HasSuffix(last, "？")
+}
+
+// withoutFarewell drops the FAREWELL claims of a turn that ends in a question:
+// the line is not a goodbye, so it is neither acted on nor reported.
+func withoutFarewell(found []claim) []claim {
+	var out []claim
+	for _, c := range found {
+		if c.kind != store.UnbackedClaimFarewell {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // detectClaims returns the actions a bot line claims, each kind once.
 func detectClaims(text string) []claim {
@@ -101,14 +186,19 @@ func detectClaims(text string) []claim {
 			continue
 		}
 		normalized := strings.ToLower(strings.ReplaceAll(sentence, "’", "'"))
-		if notAClaim.MatchString(normalized) {
-			continue
-		}
+		isConditional := notAClaim.MatchString(normalized)
 		for _, pattern := range claimPatterns {
 			if seen[pattern.kind] {
 				continue
 			}
-			if phrase := pattern.re.FindString(normalized); phrase != "" {
+			var phrase string
+			switch {
+			case pattern.kind == store.UnbackedClaimFarewell:
+				phrase = farewellPhrase(pattern.re, normalized)
+			case !isConditional:
+				phrase = pattern.re.FindString(normalized)
+			}
+			if phrase != "" {
 				seen[pattern.kind] = true
 				claims = append(claims, claim{kind: pattern.kind, phrase: phrase})
 			}
@@ -186,6 +276,16 @@ type claimWatch struct {
 	// isLastDoneInterrupted says the caller talked over the latest finished
 	// turn: nothing in it was heard to the end.
 	isLastDoneInterrupted bool
+	// playedInFullTurn is the latest turn whose playback finished with audio
+	// the caller heard to its end (farewellPlayedInFull). 0 is none.
+	playedInFullTurn int
+	// isLastDoneCut says the caller talked over the latest finished turn, in
+	// generation or over its playing tail: a goodbye in it was not heard to the
+	// end, whenever its transcript lands.
+	isLastDoneCut bool
+	// lastDoneText is all the words of the latest finished turn so far (its
+	// pieces, pending or late), for judging how the turn ended.
+	lastDoneText string
 	// outcome is the answer to a claim cue that has just finished, until
 	// takeCueOutcome reads it.
 	outcome *claimCueOutcome
@@ -297,7 +397,36 @@ func (w *claimWatch) onToolCall() {
 func (w *claimWatch) onTurnInterrupted() {
 	w.isFarewellUnhung = false
 	w.isLastDoneInterrupted = true
+	w.isLastDoneCut = true
 	w.consumeStanding()
+}
+
+// onBargeIn takes the farewell back when the caller cut the latest finished
+// turn over its still-playing tail: TURN_DONE said it completed, and the
+// playback that follows never will. A cut of any kind counts, wherever it fell
+// (the #465 rule that a cut in the final sentence counts as said is for an
+// armed ending, and nothing is armed here).
+func (w *claimWatch) onBargeIn(turn int) {
+	if turn == 0 || turn != w.lastDoneTurn {
+		return
+	}
+	w.isFarewellUnhung = false
+	w.isLastDoneCut = true
+}
+
+// onAudioPlayed records that the caller heard a turn's audio to its end.
+func (w *claimWatch) onAudioPlayed(turn int) { w.playedInFullTurn = max(w.playedInFullTurn, turn) }
+
+// farewellPlayedInFull reports the turn of an unhung goodbye the caller heard
+// to its end and did not talk over, 0 when there is none. The two halves can
+// arrive in either order (a transcript may land after the turn's playback), so
+// it is asked after each.
+func (w *claimWatch) farewellPlayedInFull() int {
+	if !w.isFarewellUnhung || w.isLastDoneCut || w.lastDoneTurn == 0 ||
+		w.playedInFullTurn != w.lastDoneTurn {
+		return 0
+	}
+	return w.lastDoneTurn
 }
 
 // consumeFarewell takes the farewell back once it has been acted on.
@@ -326,7 +455,13 @@ func (w *claimWatch) onBotSaid(turn int, text string) []claim {
 			return nil
 		}
 		found := detectClaims(text)
-		w.isFarewellUnhung = w.isFarewellUnhung || hasFarewell(found)
+		w.lastDoneText = strings.TrimSpace(w.lastDoneText + " " + text)
+		if endsInQuestion(w.lastDoneText) {
+			// Ends by asking: not a goodbye, even if an earlier piece was one.
+			found = withoutFarewell(found)
+			w.isFarewellUnhung = false
+		}
+		w.isFarewellUnhung = w.isFarewellUnhung || (hasFarewell(found) && !w.isLastDoneCut)
 		if w.standing == nil {
 			w.stand(turn, found)
 		}
@@ -354,6 +489,8 @@ func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
 	w.standing, w.standingTurn, w.reAskTurn = nil, 0, 0
 	w.lastDoneAnswered = w.cue != nil
 	w.isLastDoneInterrupted = false
+	w.isLastDoneCut = false
+	w.lastDoneText = ""
 	if w.cue != nil {
 		w.outcome = &claimCueOutcome{kind: w.cue.kind, trigger: w.cue.trigger, isBacked: isToolCall}
 		w.cue = nil
@@ -368,7 +505,11 @@ func (w *claimWatch) onTurnDone(turn int, isToolCall, isArmed bool) []claim {
 	if isBacked || text == "" {
 		return nil
 	}
+	w.lastDoneText = text
 	found := detectClaims(text)
+	if endsInQuestion(text) {
+		found = withoutFarewell(found)
+	}
 	w.isFarewellUnhung = hasFarewell(found)
 	w.stand(turn, found)
 	return found
