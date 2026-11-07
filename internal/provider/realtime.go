@@ -155,10 +155,12 @@ type Realtime struct {
 	// SendToolResult, SendUserText and releaseOwedTurn.
 	//
 	// isTurnOwed means something is in the conversation that wants a turn
-	// (a tool result, or a cue) and the turn it asks for has not been
-	// requested yet, because a response still held the floor when it arrived
-	// (W-Q4). It is a flag, not a count: however many results and cues one
-	// response produced, they are answered in one turn.
+	// (a tool result, a cue, or the caller's own speech that the provider
+	// committed and then refused to answer, #197) and the turn it asks for
+	// has not been requested yet, because a response still held the floor
+	// when it arrived (W-Q4). It is a flag, not a count: however many
+	// results, cues and refused turns one response produced, they are
+	// answered in one turn.
 	// isOwedPastCreate marks a turn owed while a request was in flight and
 	// nothing was open yet. The response that request makes was asked for
 	// before the item, so it is not the turn that was owed and its creation
@@ -1083,8 +1085,11 @@ func (r *Realtime) SendToolResult(toolCallID, output string) error {
 		map[string]any{"type": "response.create"})
 }
 
-// releaseOwedTurn asks for the turn a tool result is owed, now that the
-// response that held the floor has ended. The read loop calls it after
+// releaseOwedTurn asks for the turn that is owed, now that the response that
+// held the floor has ended. What is owed a turn is a tool result, a cue, or
+// the caller's speech that server VAD committed while a response this client
+// asked for was running (onVADTurnRefused). It is the one place that asks for
+// an owed turn. The read loop calls it after
 // dispatchPendingSpeak, so a line that was waiting has already taken the
 // floor and — through requestResponse — discharged the tool turn: the line
 // is said with the result in view, and one turn is all the floor holds.
@@ -2238,6 +2243,57 @@ func (r *Realtime) isAnsweredDelete(err *wireError) bool {
 	return false
 }
 
+// isVADTurnRefused reports whether an error is qwen saying that server VAD
+// committed the caller's speech but made no response for it, because a
+// response this client asked for ("manual") was already in progress:
+//
+//	Server VAD turn committed but no response was created because a manual
+//	response is already in progress.
+//
+// Matched on the words alone, with any code, because the error names neither
+// the item nor the frame; the phrase is specific enough that nothing else
+// says it, and a dialect that does not send it is unaffected.
+func isVADTurnRefused(err *wireError) bool {
+	message := strings.ToLower(err.Message)
+	return strings.Contains(message, "server vad turn committed") &&
+		strings.Contains(message, "no response was created")
+}
+
+// onVADTurnRefused owes the caller's turn. The provider heard the caller and
+// committed the speech to the conversation, but its own answer was suppressed
+// by the response this client had asked for, so nothing will answer the caller
+// unless this client does: the dead-air prompt would be the only thing left,
+// 8 s later.
+//
+// It rides the mechanism a tool result waiting for the floor uses (W-Q4), so
+// the turn is asked for once whatever else is owed:
+//   - a response is open: the turn is owed and releaseOwedTurn asks for it when
+//     that response's response.done is handled;
+//   - a request is in flight and nothing is open: the response it makes was
+//     created by the provider before it committed the caller's speech, so it
+//     does not answer it, and its creation must not discharge the debt
+//     (isOwedPastCreate);
+//   - nothing is open or requested: the turn is asked for now, unless the
+//     caller is speaking again, in which case the provider's own reply to that
+//     speech is the answer (releaseOwedTurn).
+func (r *Realtime) onVADTurnRefused() {
+	r.mu.Lock()
+	isOpen := r.isResponseOpen.Load()
+	isRequested := r.isResponseRequested
+	wasOwed := r.isTurnOwed
+	r.isTurnOwed = true
+	if !isOpen && isRequested {
+		r.isOwedPastCreate = true
+	}
+	r.mu.Unlock()
+
+	r.log.Info("the provider committed the caller's turn without answering it; the turn is owed",
+		"isResponseOpen", isOpen, "isResponseRequested", isRequested, "wasOwed", wasOwed)
+	if !isOpen && !isRequested {
+		r.releaseOwedTurn()
+	}
+}
+
 func (r *Realtime) handleError(event *wireEvent) {
 	if event.Error == nil {
 		r.emit(Event{Type: EventTypeError, Err: errors.New("provider reported an unspecified error")})
@@ -2272,6 +2328,15 @@ func (r *Realtime) handleError(event *wireEvent) {
 	if r.isAnsweredDelete(err) {
 		r.log.Debug("the provider refused to delete an item",
 			"code", err.Code, "message", err.Message)
+		return
+	}
+
+	// The provider committed the caller's speech and then declined to answer
+	// it, because a response this client asked for was still running (#197).
+	// Nothing here is a failure and nothing is settled: the response in
+	// flight is a good one, and the caller's turn is simply owed.
+	if isVADTurnRefused(err) {
+		r.onVADTurnRefused()
 		return
 	}
 
