@@ -55,6 +55,19 @@ type turnTimer struct {
 	// caller last began speaking. A final transcript that arrives while it is
 	// true belongs to a turn the engine already answered and is not kept.
 	hasResponseSinceSpeech bool
+
+	// What the latest onResponseStarted changed, so a response the provider
+	// gave up before the caller heard any of it can be taken back (#310):
+	// startedResponse says there is such a response to take back,
+	// clearedWords the words it cleared, wasAnswered and hadResponse the
+	// measurement's and hasResponseSinceSpeech's values before it started, and
+	// lateWords the last final transcript that arrived while it was the latest
+	// response and so was not kept.
+	startedResponse bool
+	clearedWords    string
+	wasAnswered     bool
+	hadResponse     bool
+	lateWords       string
 }
 
 // Why the application closed a measurement as unanswered.
@@ -69,6 +82,7 @@ const (
 
 // onSpeechStopped starts a measurement.
 func (t *turnTimer) onSpeechStopped() {
+	t.startedResponse = false
 	t.speechStoppedAt = time.Now()
 	t.firstAudioMs = 0
 	t.isAnswered = false
@@ -79,6 +93,7 @@ func (t *turnTimer) onSpeechStopped() {
 // The words are kept: a caller who speaks in two VAD segments may get the
 // first segment's transcript during the second.
 func (t *turnTimer) onSpeechStarted() {
+	t.startedResponse = false
 	t.speechStoppedAt = time.Time{}
 	t.isAnswered = false
 	t.hasResponseSinceSpeech = false
@@ -89,6 +104,9 @@ func (t *turnTimer) onSpeechStarted() {
 // Words said before this response are no longer the unanswered ones, whether or
 // not a measurement is open.
 func (t *turnTimer) onResponseStarted() {
+	t.startedResponse = true
+	t.clearedWords, t.wasAnswered, t.hadResponse = t.words, t.isAnswered, t.hasResponseSinceSpeech
+	t.lateWords = ""
 	t.words = ""
 	t.hasResponseSinceSpeech = true
 	if !t.speechStoppedAt.IsZero() {
@@ -99,10 +117,46 @@ func (t *turnTimer) onResponseStarted() {
 // onCallerWords keeps a final transcript of the caller's speech when it has
 // words in it and no response has started since the caller began speaking.
 func (t *turnTimer) onCallerWords(text string) {
-	if strings.TrimSpace(text) == "" || t.hasResponseSinceSpeech {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if t.hasResponseSinceSpeech {
+		t.lateWords = text
 		return
 	}
 	t.words = text
+}
+
+// onResponseAbandoned puts the timer back as if the latest response had never
+// started, for a response the provider's watchdog gave up before any of it was
+// queued for the caller (#310). On 2026-11-07 a response server VAD made for
+// the caller's question started, produced nothing for 3 s and was abandoned;
+// the timer had counted the turn as answered, so the dead air that followed
+// was a plain NO_INPUT reprompt instead of #448's "answer the caller" cue.
+//
+// An open measurement the response had answered becomes unanswered again, and
+// the caller's words come back: the ones the start cleared, or a later final
+// transcript the start made it drop, which is newer. Nothing changes when no
+// measurement is open (the caller has spoken again, or a cue closed it) or
+// when the measurement was already answered before that response. The next
+// response that starts, the re-ask, marks the turn answered as usual, and the
+// dead-air path clears the words once it uses them (onSteppedIn), so a turn is
+// asked about once however many responses are abandoned.
+func (t *turnTimer) onResponseAbandoned() {
+	if !t.startedResponse {
+		return
+	}
+	t.startedResponse = false
+	if t.speechStoppedAt.IsZero() || t.wasAnswered {
+		return
+	}
+	t.isAnswered = false
+	t.hasResponseSinceSpeech = t.hadResponse
+	t.words = t.clearedWords
+	if t.lateWords != "" {
+		t.words = t.lateWords
+	}
+	t.lateWords = ""
 }
 
 // onSteppedIn closes an open, unanswered measurement because the application

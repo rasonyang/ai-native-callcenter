@@ -1013,7 +1013,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.beginTurn(event.IsSpokenLine, event.IsLineAskedAgain)
 
 	case provider.EventTypeResponseDone:
-		hasAudio := s.endTurn()
+		hasAudio := s.finishTurn(event.IsAbandoned)
 		turn, isAside := s.turnState()
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside})
 
@@ -1407,6 +1407,16 @@ func (s *Session) currentTurn() int {
 
 // endTurn closes out generation and hands the turn to the playback watcher.
 func (s *Session) endTurn() (hasAudio bool) {
+	return s.finishTurn(false)
+}
+
+// finishTurn is endTurn. isAbandoned is the provider's word that its watchdog
+// gave this response up (provider.Event.IsAbandoned). Such a response that
+// queued no audio did not answer the caller, whatever it did to the turn timer
+// when it started, so the timer is put back before the playback watcher can
+// arm the dead-air watch (turnTimer.onResponseAbandoned). One that queued audio
+// was heard in part and is left as it is.
+func (s *Session) finishTurn(isAbandoned bool) (hasAudio bool) {
 	s.mu.Lock()
 	// The tail of the last sentence is worth padding out rather than losing.
 	s.framer.flush(s.queueFrame)
@@ -1419,6 +1429,9 @@ func (s *Session) endTurn() (hasAudio bool) {
 	if hasAudio {
 		s.audioTurns++
 		s.lastAudioTurn = s.turnSeq
+	}
+	if isAbandoned && !hasAudio {
+		s.timer.onResponseAbandoned()
 	}
 	marker := playbackMarker{generation: s.drainGeneration, turn: s.turnSeq, hasAudio: hasAudio,
 		isAside: s.asideTurn != 0 && s.turnSeq == s.asideTurn}
