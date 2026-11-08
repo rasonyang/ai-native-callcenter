@@ -31,6 +31,12 @@ const (
 	// confirmed or ran the bridge to the bot, so the leg was hung up
 	// (outbound.BridgeUnconfirmedCause).
 	CauseBotBridgeUnconfirmed = "BOT_BRIDGE_UNCONFIRMED"
+	// CauseBotStartFailed: the bot leg answered and its session never started,
+	// and the caller was not rescued, so the platform names the failure as the
+	// call's hangupCause (telephony.BotStartFailed). A campaign call whose ACK
+	// never reached the bot ends here with no BOT_LEG_FAILED stamp, because no
+	// rescue ran.
+	CauseBotStartFailed = "BOT_START_FAILED"
 )
 
 // BotReasonLegFailed is the CDR's userData.botReason of a call whose bot leg
@@ -116,7 +122,8 @@ func CauseTable() map[string]Outcome {
 //     an answered number is never dialled again (owner's decision, design 10
 //     section 7.2). The cause only chooses which: BOT_FAILED when the bot side
 //     failed (the ledger calls the call FAILED, or recovery, a late answer or
-//     a bridge to the bot that never ran ended the leg, or the call carries
+//     a bridge to the bot that never ran ended the leg, the bot answered and
+//     its session never started (BOT_START_FAILED), or the call carries
 //     botReason BOT_LEG_FAILED: the bot refused the leg or failed before
 //     media, with the switch's cause left as it was), ANSWERED otherwise.
 //     A call lost to CHANNEL_VANISHED is ANSWERED when a bot had been talking
@@ -138,7 +145,7 @@ func Classify(e CallEnd) Outcome {
 			return OutcomeBotFailed
 		}
 		switch e.HangupCause {
-		case CauseRecovery, CauseLateAnswer, CauseBotBridgeUnconfirmed:
+		case CauseRecovery, CauseLateAnswer, CauseBotBridgeUnconfirmed, CauseBotStartFailed:
 			return OutcomeBotFailed
 		case CauseVanished:
 			if e.HasBot {

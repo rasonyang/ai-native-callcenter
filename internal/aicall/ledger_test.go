@@ -28,6 +28,14 @@ type fakeLedger struct {
 
 func newFakeLedger() *fakeLedger { return &fakeLedger{} }
 
+// rows is a copy of the rows written so far, safe to read while a call's
+// goroutine is still writing.
+func (f *fakeLedger) rows() []store.CDR {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Clone(f.cdrs)
+}
+
 func (f *fakeLedger) InsertCDR(_ context.Context, cdr store.CDR) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -86,7 +94,7 @@ func recorderWithTranscript(t *testing.T, callID uuid.UUID, startedAt time.Time)
 	var once sync.Once
 	flush := func() { once.Do(func() { reg.Close(callID) }) }
 	t.Cleanup(flush)
-	return newCallRecorder(callID, startedAt, actor), lines, flush
+	return newStartedRecorder(callID, startedAt, actor), lines, flush
 }
 
 func discard() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -190,7 +198,7 @@ func TestATransferredCallStillWritesTheRowItKnows(t *testing.T) {
 // on the dev stack).
 func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markTransferred("", "")
 	recorder.finish(ledger, testFacts(), discard())
@@ -214,7 +222,7 @@ func TestATransferNeverHandedOverNamesNoQueue(t *testing.T) {
 // 01a0f664 on the dev stack).
 func TestATransferNeverHandedOverKeepsTheBotsSummary(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	facts := testFacts()
 	facts.userData = map[string]any{"orderId": "A-1001"}
 
@@ -242,7 +250,7 @@ func TestATransferNeverHandedOverKeepsTheBotsSummary(t *testing.T) {
 // with and nothing of the bot's.
 func TestARowWithoutATransferAddsNoSummary(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markHangup()
 	recorder.finish(ledger, testFacts(), discard())
@@ -256,7 +264,7 @@ func TestARowWithoutATransferAddsNoSummary(t *testing.T) {
 // once and in a stable order.
 func TestUnbackedClaimsReachTheRow(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 
 	recorder.markUnbackedClaim(store.UnbackedClaimTransfer)
 	recorder.markUnbackedClaim(store.UnbackedClaimLookup)
@@ -271,7 +279,7 @@ func TestUnbackedClaimsReachTheRow(t *testing.T) {
 	}
 
 	clean := newFakeLedger()
-	newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil).finish(clean, testFacts(), discard())
+	newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil).finish(clean, testFacts(), discard())
 	if claims := clean.cdrs[0].UnbackedClaims; claims != nil {
 		t.Errorf("a call with no claims wrote %v", claims)
 	}
@@ -280,7 +288,7 @@ func TestUnbackedClaimsReachTheRow(t *testing.T) {
 // A caller who hangs up mid-conversation is answered but not contained.
 func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.say(store.SpeakerBot, "你好")
 
 	recorder.finish(ledger, testFacts(), discard()) // no end reason: caller left
@@ -299,7 +307,7 @@ func TestACallerHangupIsAnsweredButNotContained(t *testing.T) {
 // A failed conversation is a FAILED row with its cause.
 func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.markFailed("MEDIA_OR_PROVIDER_FAILURE")
 
 	recorder.finish(ledger, testFacts(), discard())
@@ -315,7 +323,7 @@ func TestAFailedCallWritesAFailedCDR(t *testing.T) {
 
 // A nil ledger writes nothing and panics nowhere.
 func TestANilLedgerIsANoOp(t *testing.T) {
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.say(store.SpeakerBot, "hello")
 	recorder.finish(nil, testFacts(), discard())
 }
@@ -327,7 +335,7 @@ func TestTakeMessagePersistsAndAnnouncesACallback(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.orchestrator.cfg.Ledger = ledger
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.facts = testFacts()
 	var announced []store.Callback
 	actions.orchestrator.cfg.AnnounceCallback = func(cb store.Callback) {
@@ -360,7 +368,7 @@ func TestTakeMessagePersistsAndAnnouncesACallback(t *testing.T) {
 // 2026-08-21: a 34-second contained call billed as free).
 func TestAContainedCallIsStillBilled(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-40*time.Second), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-40*time.Second), nil)
 	recorder.answeredAt = time.Now().Add(-34 * time.Second)
 	recorder.markHangup()
 	recorder.finish(ledger, testFacts(), discard())
@@ -397,7 +405,7 @@ func TestTheLedgerKnowsWhichEndOfAnOutboundCallIsWhich(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
+			recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 
 			facts := testFacts()
@@ -471,7 +479,7 @@ func TestAToolResultIsRecordedWithoutItsHint(t *testing.T) {
 // path; a transferred call's row is the human path's (#230).
 func TestACallEndedByTheTimeLimitIsNotContained(t *testing.T) {
 	ledger := newFakeLedger()
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	recorder.markSessionLimit()
 	recorder.markHangup()
 
@@ -508,7 +516,7 @@ func TestACallAnAgentPlacedIsNotWrittenByTheBot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
+			recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 			recorder.finish(ledger, facts, discard())
 			if len(ledger.cdrs) != 0 {
@@ -528,7 +536,7 @@ func TestACallNoAgentPlacedIsStillWrittenByTheBot(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ledger := newFakeLedger()
-			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
+			recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-10*time.Second), nil)
 			recorder.markHangup()
 			recorder.finish(ledger, facts, discard())
 			if len(ledger.cdrs) != 1 {
@@ -571,7 +579,7 @@ func TestABotRowTakesItsTimelineFromTheCall(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			session := time.Now().Add(-talk)
-			r := newCallRecorder(uuid.Must(uuid.NewV7()), session, nil)
+			r := newStartedRecorder(uuid.Must(uuid.NewV7()), session, nil)
 			var created, answered time.Time
 			if tt.hasCreated {
 				created = session.Add(-tt.createdBefore)
@@ -607,4 +615,14 @@ func TestABotRowTakesItsTimelineFromTheCall(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newStartedRecorder is a recorder of a call whose session started, which is
+// the only kind that writes a row (finish). Tests that exercise the row's
+// content model such a call; the test that does not builds the recorder with
+// newCallRecorder.
+func newStartedRecorder(callID uuid.UUID, startedAt time.Time, actor *transcript.Actor) *callRecorder {
+	r := newCallRecorder(callID, startedAt, actor)
+	r.markStarted()
+	return r
 }

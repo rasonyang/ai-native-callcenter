@@ -518,7 +518,10 @@ and nothing is retried blindly.
   **no prompt**, never sent to a queue. For the pre-media failure `OnCallFailed` runs `rescue`,
   which only stamps the customer's channel and ends the bot leg, so `hangup_after_bridge` hangs the
   customer up. Either way the CDR carries `userData.botReason=BOT_LEG_FAILED` beside the switch's
-  `hangupCause`, and the attempt is `BOT_FAILED`.
+  `hangupCause`, and the attempt is `BOT_FAILED`. A leg that answered and never started leaves the
+  row to the human path (#334), whose `hangupCause` is then `BOT_START_FAILED` when the customer was
+  not moved to a queue; a lost ACK, where no rescue runs and nothing is stamped, ends the same way,
+  and the attempt is `BOT_FAILED` on that cause too.
 
 ---
 
@@ -724,7 +727,7 @@ any channel (§5.5) — not from `releaseReason` alone, because `FAILED` folds a
 | outcome | typical causes | dialled again? | default interval | budget |
 |---|---|---|---|---|
 | `ANSWERED` | answered, any talk time | no — contact `DONE` | — | `maxAttempts` |
-| `BOT_FAILED` | answered; the bot side failed before the flow ended, the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7), or the bot leg was refused or failed before media (`userData.botReason=BOT_LEG_FAILED`, whatever the cause, §5.7) | no — contact `DONE` | — | `maxAttempts` |
+| `BOT_FAILED` | answered; the bot side failed before the flow ended, the bridge to it never ran (`BOT_BRIDGE_UNCONFIRMED`, §5.7), the bot leg was refused or failed before media (`userData.botReason=BOT_LEG_FAILED`, whatever the cause, §5.7), or it answered and its session never started (`hangupCause=BOT_START_FAILED`, §5.7) | no — contact `DONE` | — | `maxAttempts` |
 | `OVERFLOW` | answered; no bot slot after `overflowHold` (§6.4) | no — contact `DONE` | — | `maxAttempts` |
 | `NO_ANSWER` | `NO_ANSWER`, `NO_USER_RESPONSE`, our ring timeout | yes | 2 h | `maxAttempts` |
 | `BUSY` | `USER_BUSY` | yes | 30 min | `maxAttempts` |

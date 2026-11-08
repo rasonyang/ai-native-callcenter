@@ -39,7 +39,7 @@ func takeMessageActions(countryCode string, form phonenum.DialForm) (*callAction
 			DialForm:           form,
 		}},
 		log:      slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
-		recorder: newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil),
+		recorder: newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil),
 		facts:    facts,
 	}, ledger, logs
 }

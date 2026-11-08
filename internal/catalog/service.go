@@ -632,6 +632,22 @@ func (s *Service) UnstaffQueue(ctx context.Context, queueID, agentID uuid.UUID) 
 // DIDs lists every external number.
 func (s *Service) DIDs(ctx context.Context) ([]DID, error) { return s.store.ListDIDs(ctx) }
 
+// FlowIDByDID is the flow of an external number, whether or not the number is
+// enabled: nil when the number has no flow or does not exist. The ledger uses
+// it for a call whose bot never stamped one.
+func (s *Service) FlowIDByDID(ctx context.Context, number string) (*uuid.UUID, error) {
+	dids, err := s.store.ListDIDs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, d := range dids {
+		if d.Number == number {
+			return d.FlowID, nil
+		}
+	}
+	return nil, nil
+}
+
 // CreateDID adds an external number.
 func (s *Service) CreateDID(ctx context.Context, d DID) (DID, error) {
 	if err := d.validate(); err != nil {

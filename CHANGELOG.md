@@ -20,6 +20,18 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A call whose bot leg answered but whose session never started now gets one
+  CDR row, written by the call's switch side. The bot stamps
+  `aicc_bot_started` on the caller's channel once its session is up and writes
+  no row for a session that never started; the switch side writes whenever the
+  marker is absent. The row has the DID's `flowId` and a BOT hop. A caller who
+  was not rescued gets `ANSWERED` (the carrier billed the answer) and
+  `hangupCause=BOT_START_FAILED`. A caller rescued to a queue gets the queue
+  stay, the agent and the status of any queued call, keeps the final leg's
+  cause and carries the failure in `userData.botReason`
+  (`BOT_START_FAILED`, or the stamped `BOT_LEG_FAILED` on an AI outbound
+  call). A campaign attempt that ends in `BOT_START_FAILED` finishes
+  `BOT_FAILED`. Rows already written are left as they are. (#334)
 - A call whose bot says goodbye in words and never hangs up now ends on that
   goodbye. Before, the flow's closing line was said on top of it after about ten
   seconds of silence (a double goodbye), and a caller who answered the goodbye

@@ -43,6 +43,16 @@ type QueueDirectory interface {
 	QueueIDByName(ctx context.Context, name string) (uuid.UUID, bool)
 }
 
+// FlowDirectory resolves a number's flow, for a bot leg that answered and
+// never started its session: that call carries no flow stamp, and the row
+// takes the DID's. A QueueDirectory that also implements it is used; one that
+// does not leaves such a row's flowId empty.
+type FlowDirectory interface {
+	// FlowIDByDID is the flow of the number, enabled or not; nil when the
+	// number has none or is unknown.
+	FlowIDByDID(ctx context.Context, number string) (*uuid.UUID, error)
+}
+
 // shortAbandonThreshold separates a caller who gave the queue a real chance
 // from one who dialled and thought better of it.
 const shortAbandonThreshold = 5 * time.Second
@@ -108,39 +118,38 @@ func (a *CDRAssembler) SetRecordingOffer(o RecordingOffer) { a.offer = o }
 // CallFinished receives the final snapshot; safe to set as Registry.OnCallFinished.
 func (a *CDRAssembler) CallFinished(snap Snapshot) {
 	go func() {
-		// The ledger follows the call. A call the bot answered and never
-		// handed to a person is the bot's story to write — its session holds
-		// the transcript, timings and containment this path cannot see. The
-		// bot-share stamp is what marks a handover, and only then does this
-		// path own the row. The one other case is a call an agent's phone
-		// placed, which is the agent's whoever ended it: that is the leg
-		// saying so (isAgentPlaced), never a caller id that resembles an
-		// extension, so a carrier call from "1008" stays the bot's.
+		// The ledger follows the call. A call the bot answered and kept is the
+		// bot's story to write — its session holds the transcript, timings and
+		// containment this path cannot see. The bot says that its session
+		// started by stamping aicc_bot_started on the caller's channel, so this
+		// path writes the row whenever that marker is absent, and in the cases
+		// that never depended on it:
 		//
-		// "Non-empty" was not that test. The dialplan exports the DID to the
-		// leg it dials towards the bot, so a share was never empty and both
-		// paths raced for every contained call, settled silently by whichever
-		// insert lost the primary key.
+		//   - the bot did not start a session: it never answered (a refusal at
+		//     capacity, a customer gone before the answer, a bridge the switch
+		//     made after its reservation was withdrawn: #313), or it answered
+		//     and failed before its conversation began (#334). A bot that never
+		//     answered never started, so one test covers both;
+		//   - the bot handed the call to a person (aicc_bot_sec), the call a
+		//     person finished;
+		//   - an agent's phone placed the call, which is the agent's whoever
+		//     ended it: that is the leg saying so (isAgentPlaced), never a
+		//     caller id that resembles an extension, so a carrier call from
+		//     "1008" stays the bot's;
+		//   - the bot's session died with the process (a call recovery adopted
+		//     and ended), so no one is left to write the row.
 		//
-		// One more owner: a bot whose session died with the process (a call
-		// recovery adopted and ended) has no one left to write the row.
+		// "A non-empty share" was never that test: the dialplan exports the DID
+		// to the leg it dials towards the bot, so a share was never empty and
+		// both paths raced for every contained call, settled silently by
+		// whichever insert lost the primary key.
 		//
-		// And a bot that never answered was never a writer at all. The switch
-		// dials a bot leg before the bot has said anything, and a leg dialled
-		// is not a session: the bot answers (200 OK) only once it has admitted
-		// the call, and the conversation that writes the row starts on the
-		// ACK. A customer who hangs up between an AI outbound call's
-		// uuid_transfer and that answer, a bridge the switch makes after its
-		// reservation was withdrawn (refused 480), an inbound call refused at
-		// capacity (486) or dropped by the peer list, then sent to the
-		// fallback queue or told the call cannot be completed: asked "was a bot
-		// leg dialled", each of these left the row to a bot that never existed,
-		// and the call reached the ledger from neither side (#313). The test is
-		// the one the journey and the status ask (botJoined), so a row written
-		// here because the bot was not there says so, and a row it leaves to
-		// the bot is one the bot's session writes.
+		// The bot's own path writes nothing for a session that never started
+		// (callRecorder.finish), so exactly one side writes. If the marker's
+		// stamp is lost (an ESL error) on a call the bot kept, both write and
+		// InsertCDR's rule, the row that saw the call end later wins, picks one.
 		originator, _ := split(snap)
-		if !botJoined(snap, snap.Bot.Sec) || snap.Bot.HandedOver() || isAgentPlaced(originator) || snap.IsBotAbandoned {
+		if !snap.Bot.IsSessionStarted || snap.Bot.HandedOver() || isAgentPlaced(originator) || snap.IsBotAbandoned {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			if err := a.ledger.InsertCDR(ctx, a.assemble(ctx, snap)); err != nil {
 				a.log.Error("could not write the cdr", "callId", snap.CallID, "error", err)
@@ -319,6 +328,20 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 
+	// A bot leg that answered and never started its session (isBotStartFailed)
+	// stamped no flow, so the row takes the DID's, enabled or not.
+	botStartFailed := isBotStartFailed(snap, originator)
+	if botStartFailed && cdr.FlowID == nil && snap.Bot.DID != "" {
+		if dir, ok := a.queues.(FlowDirectory); ok {
+			if id, err := dir.FlowIDByDID(ctx, snap.Bot.DID); err != nil {
+				a.log.Warn("could not look up the flow of a bot that never started",
+					"callId", snap.CallID, "did", snap.Bot.DID, "error", err)
+			} else {
+				cdr.FlowID = id
+			}
+		}
+	}
+
 	// The queue's identity and timings: the first queue the caller joined,
 	// and that stay's wait (owner decision on #283). The row has one queue
 	// and the reports group by it, so a call that passed through two queues
@@ -469,6 +492,19 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		cdr.RingSec = ringSpan(agentLegs)
 	}
 
+	if botStartFailed {
+		// The same rule as SESSION_LIMIT: where the bot ended the call, the
+		// failure is the hangupCause; where the caller went on to a person it
+		// is userData.botReason and the hangupCause stays the final leg's.
+		// The carrier billed the bot leg's answer, so a call nobody was sought
+		// for is ANSWERED even when no bot time was stamped.
+		if !soughtAPerson {
+			cdr.Status = store.CDRStatusAnswered
+			cdr.MissedReason = ""
+			cdr.HangupCause = BotStartFailed
+		}
+	}
+
 	if placed {
 		cdr.Legs = buildLegs(snap, stays, originator, append(slices.Clone(agentLegs), dialled...), cdr.BotSec,
 			placerIsAHop(dialled, metBot, handedOver), cdr.EndedAt)
@@ -494,6 +530,12 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		if snap.Bot.Reason != "" {
 			cdr.UserData["botReason"] = snap.Bot.Reason
 		}
+	}
+	if botStartFailed && soughtAPerson && snap.Bot.Reason == "" {
+		if cdr.UserData == nil {
+			cdr.UserData = map[string]any{}
+		}
+		cdr.UserData["botReason"] = BotStartFailed
 	}
 	a.checkDurations(snap, &cdr)
 
@@ -539,6 +581,18 @@ func (a *CDRAssembler) assemble(ctx context.Context, snap Snapshot) store.CDR {
 		}
 	}
 	return cdr
+}
+
+// isBotStartFailed reports whether the bot leg answered and its session never
+// started, on a call this path writes for that reason and no other: a call an
+// agent placed or one the bot's session was lost on keep the row they always
+// had. Whoever handed the call over proves a session, so the stamp
+// (HandedOver) excludes it too.
+func isBotStartFailed(snap Snapshot, originator *PartySnapshot) bool {
+	bot := botLeg(snap)
+	return bot != nil && bot.AnsweredAt != nil &&
+		!snap.Bot.IsSessionStarted && !snap.Bot.HandedOver() &&
+		!isAgentPlaced(originator) && !snap.IsBotAbandoned
 }
 
 // botLeg is the leg the switch dialled towards the AI gateway, or nil on a

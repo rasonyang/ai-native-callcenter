@@ -105,9 +105,12 @@ func sessionLimitSnapshot(callID uuid.UUID, base, end time.Time, cause, summary 
 				Bridges: []telephony.BridgeSpan{{OtherChannelID: "chan-caller", StartedAt: base, EndedAt: *at(65)}},
 			},
 		},
+		// The bot ran its session for 65 s, so it stamped aicc_bot_started
+		// when the session began (#334), whether or not it handed over.
 		Bot: telephony.BotShare{
 			FlowID: &flowID, FlowSlug: "novanet_support", DID: "95012",
 			Summary: summary, Reason: "SESSION_LIMIT", IsStamped: stamped,
+			IsSessionStarted: true,
 		},
 	}
 	if !stamped {
@@ -165,7 +168,7 @@ func TestASessionLimitTransferKeepsTheFinalLegsCause(t *testing.T) {
 					hasAgent := cause == "NORMAL_CLEARING"
 					snap := sessionLimitSnapshot(callID, base, end, cause, summary.text, hasAgent, true)
 
-					recorder := newCallRecorder(callID, base, nil)
+					recorder := newStartedRecorder(callID, base, nil)
 					recorder.markSessionLimit()
 					recorder.markTransferred(summary.text, hangupCauseSessionLimit)
 					recorder.markHandedOver(queueID)
@@ -248,7 +251,7 @@ func TestASessionLimitTheBotEndedKeepsSessionLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			callID := uuid.Must(uuid.NewV7())
 			base := time.Now().Add(-70 * time.Second).Truncate(time.Millisecond)
-			recorder := newCallRecorder(callID, base, nil)
+			recorder := newStartedRecorder(callID, base, nil)
 			recorder.markSessionLimit()
 			snapSummary := ""
 			if tc.isTransferDecided {

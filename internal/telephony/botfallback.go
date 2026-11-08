@@ -15,6 +15,17 @@ import (
 // INVITE, the gateway was down, or the leg answered and failed before media.
 const BotLegFailed = "BOT_LEG_FAILED"
 
+// BotStartFailed is the hangupCause of a call whose bot leg answered (200 OK)
+// but whose session never started, when the caller was not then rescued: no
+// switch cause says why the call ended, so the platform names the failure. A
+// caller who was rescued to a queue keeps the final leg's cause and carries
+// this in userData.botReason instead, the rule SESSION_LIMIT follows.
+const BotStartFailed = "BOT_START_FAILED"
+
+// botStartedVar is the channel variable the bot stamps on the caller's channel
+// (value "true") once its session has started.
+const botStartedVar = "aicc_bot_started"
+
 // botReasonVar is the channel variable the CDR reads the bot's reason from.
 const botReasonVar = "aicc_bot_reason"
 

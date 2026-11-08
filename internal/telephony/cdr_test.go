@@ -80,12 +80,12 @@ func TestTheBotOwnsItsFinishedCalls(t *testing.T) {
 	// ever having happened. Reading "non-empty" as "handed over" made both
 	// paths race for this row, settled silently by whichever insert lost the
 	// primary key (C21).
-	contained.Bot = BotShare{DID: "95012"}
+	contained.Bot = BotShare{DID: "95012", IsSessionStarted: true}
 
 	// A real handover: the bot stamped the caller's channel on its way out.
 	transferred := contained
 	transferred.CallID = uuid.Must(uuid.NewV7())
-	transferred.Bot = BotShare{Sec: 20, DID: "95012", IsStamped: true}
+	transferred.Bot = BotShare{Sec: 20, DID: "95012", IsStamped: true, IsSessionStarted: true}
 
 	ledger := &memoryLedger{}
 	assembler := newAssembler(ledger, staticQueues{})
@@ -1873,7 +1873,7 @@ func TestACallerTheBotKeptIsStillLeftToTheBot(t *testing.T) {
 	snap := Snapshot{
 		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
-		Bot: BotShare{DID: "95001"},
+		Bot: BotShare{DID: "95001", IsSessionStarted: true},
 		Parties: []PartySnapshot{
 			{Role: RoleOriginator, Number: "13800138000", AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
 			{Role: RoleTarget, Number: "95001", IsBotLeg: true, AnsweredAt: atPtr(0), ReleasedAt: atPtr(40)},
@@ -2083,7 +2083,7 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 	keptOutbound := Snapshot{
 		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
-		Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification"},
+		Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification", IsSessionStarted: true},
 		Parties: []PartySnapshot{{
 			Role: RoleOriginator, Number: "18688886666", ChannelID: "customer",
 			CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(40),
@@ -2093,7 +2093,7 @@ func TestABotThatAnsweredStillDecidesWhoWritesTheRow(t *testing.T) {
 	keptInbound := Snapshot{
 		CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeInbound,
 		CreatedAt: at(0), EndedAt: atPtr(40),
-		Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
+		Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support", IsSessionStarted: true},
 		Parties: []PartySnapshot{{
 			Role: RoleOriginator, Number: "13800138000", ChannelID: "customer",
 			CreatedAt: at(0), AnsweredAt: atPtr(0), ReleasedAt: atPtr(40),
@@ -2438,7 +2438,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 		return Snapshot{
 			CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 			CreatedAt: at(0), EndedAt: atPtr(9),
-			Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification"},
+			Bot: BotShare{DID: "95099", FlowID: &flow, FlowSlug: "lead_qualification", IsSessionStarted: true},
 			Parties: []PartySnapshot{{
 				Role: RoleOriginator, Number: "18688886666", ChannelID: "customer",
 				CreatedAt: at(0), ReleasedAt: atPtr(9), ReleaseCause: cause,
@@ -2523,7 +2523,7 @@ func TestAnUnansweredCallIsStillDialingAndAReachedBotIsStillTheJourney(t *testin
 			snap: Snapshot{
 				CallID: uuid.Must(uuid.NewV7()), CallType: events.CallTypeOutbound,
 				CreatedAt: at(0), EndedAt: atPtr(6),
-				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support"},
+				Bot: BotShare{DID: "95001", FlowID: &flow, FlowSlug: "novanet_support", IsSessionStarted: true},
 				Parties: []PartySnapshot{phone, {
 					Role: RoleTarget, Number: "95001", ChannelID: "bot", IsBotLeg: true,
 					CreatedAt: at(1), ReleasedAt: atPtr(6), ReleaseCause: "ORIGINATOR_CANCEL",

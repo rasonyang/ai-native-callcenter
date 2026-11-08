@@ -36,7 +36,11 @@ type Ledger interface {
 // one CDR at the real end, and the bot's share travels there as channel
 // variables on the caller's leg. A call an agent placed to a bot number is the
 // agent's call whoever it reached, so the human path writes its row whether or
-// not the bot hands it on (callFacts.isPlacedByAgent).
+// not the bot hands it on (callFacts.isPlacedByAgent). A bot leg whose session
+// never started (no provider, a failed handshake, a failed start) is nobody's
+// finished conversation: this recorder writes nothing and the human path
+// writes the row, told so by the aicc_bot_started marker that is stamped only
+// after Start succeeded (markStarted, stampSessionStarted).
 type callRecorder struct {
 	callID uuid.UUID
 	// startedAt and answeredAt are the CDR's: when the call began and when the
@@ -56,6 +60,10 @@ type callRecorder struct {
 	transcript *transcript.Actor
 
 	mu sync.Mutex
+
+	// isStarted says session.Start succeeded: there was a conversation, so
+	// there is a bot share of the call and a row this recorder may write.
+	isStarted bool
 
 	isTransferred bool
 	// transferQueue is the queue the caller was handed to, set when the
@@ -256,6 +264,14 @@ func (r *callRecorder) markSessionLimit() {
 	r.mu.Unlock()
 }
 
+// markStarted records that the session started. Until then finish writes
+// nothing.
+func (r *callRecorder) markStarted() {
+	r.mu.Lock()
+	r.isStarted = true
+	r.mu.Unlock()
+}
+
 func (r *callRecorder) markFailed(cause string) {
 	r.mu.Lock()
 	r.endReason = "FAILED"
@@ -269,7 +285,20 @@ func (r *callRecorder) markFailed(cause string) {
 // conversation. The CDR is written only when the call ended here; a transfer
 // means the human path owns the single CDR, with the bot's share stamped onto
 // the caller's channel before the leg moved.
+//
+// A call whose session never started writes no row at all: the bot answered
+// but never ran a conversation, so a row from here would be a 0-3 s BOT-only
+// stub that hides the caller's queue stay and agent. The human path writes the
+// row of that call, because the marker stampSessionStarted sets is absent from
+// the caller's channel.
 func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) {
+	r.mu.Lock()
+	isStarted := r.isStarted
+	r.mu.Unlock()
+	if !isStarted {
+		log.Info("the conversation never started; the human path writes this call's row")
+		return
+	}
 	if ledger == nil {
 		return
 	}
@@ -335,12 +364,14 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	// whichever path wrote the row. Without it a transfer the caller hung up
 	// on lost the summary from the ledger, though the bot had produced it.
 	userData := call.userData
-	if transferSummary != "" {
+	if transferSummary != "" || transferReason != "" {
 		userData = maps.Clone(call.userData)
 		if userData == nil {
 			userData = map[string]any{}
 		}
-		userData["botSummary"] = transferSummary
+		if transferSummary != "" {
+			userData["botSummary"] = transferSummary
+		}
 		if transferReason != "" {
 			userData["botReason"] = transferReason
 		}
@@ -474,6 +505,18 @@ func (a *callActions) stampAtStart() {
 		return
 	}
 	a.stampFlow(a.facts)
+}
+
+// stampSessionStarted tells the human path the bot's session started and that
+// the bot will write the row of a call it keeps.
+//
+// This marker, not aicc_bot_sec, is what says so: aicc_bot_sec alone means the
+// call was handed over. A bot leg that answered without the marker never ran a
+// conversation (finish writes nothing for it), so the human path writes its
+// row. Stamped on every call, an agent-placed one included, where it is
+// harmless.
+func (a *callActions) stampSessionStarted() {
+	a.stampChannel("aicc_bot_started", "true")
 }
 
 // stampBotSec writes how long the caller was with the bot, and belongs at the
