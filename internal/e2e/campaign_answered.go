@@ -66,7 +66,11 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 		if i < len(dialogs) {
 			dlg = &dialogs[i]
 		}
-		ar := assessStep(rv, cs, i, a, key, dlg, cdrs[a.CallID.String()])
+		var next *time.Time
+		if i+1 < len(cv.Attempts) {
+			next = &cv.Attempts[i+1].StartedAt
+		}
+		ar := assessStep(rv, cs, i, a, key, dlg, cdrs[a.CallID.String()], next)
 		res.Attempts = append(res.Attempts, ar)
 		if cs.Steps[i].IsAnswered() && answeredAt < 0 {
 			answeredAt = i
@@ -88,7 +92,7 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 				measured = gap.String()
 				ok = absDuration(gap-RetryIntervalSec*time.Second) <= retryTolerance
 			}
-			col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)", RetryIntervalSec, measured)
+			col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)"+switchTime, RetryIntervalSec, measured)
 		}
 	}
 
@@ -110,7 +114,7 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 		late := cv.Attempts[1].StartedAt.Sub(*cv.AfterFirst.NextAttemptAt)
 		ms := float64(late.Milliseconds())
 		res.Attempts[1].RetryLatenessMs = &ms
-		col.That(late >= -inviteSlack, "the retry did not start before nextAttemptAt (it started %s after it)", late)
+		col.That(late >= -inviteSlack, "the retry did not start before nextAttemptAt (it started %s after it)"+switchTime, late)
 		if len(dialogs) >= 2 {
 			gap := dialogs[1].InviteAt.Sub(dialogs[0].InviteAt)
 			gapMs := float64(gap.Milliseconds())
@@ -127,11 +131,12 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 		after := len(dialogs) - answeredAt - 1
 		col.That(after == 0, "no INVITE reached %s after the answered one (%d did)", key, after)
 	}
-	if answeredAt == 0 && len(cv.Attempts) > 0 && cv.Attempts[0].FinishedAt != nil {
-		watched := observedAt.Sub(*cv.Attempts[0].FinishedAt)
+	if answeredAt == 0 && len(cv.Attempts) > 0 {
+		from, anchor := watchAnchor(cv.Attempts[0], dialogs)
+		watched := observedAt.Sub(from)
 		col.That(watched >= RetryIntervalSec*time.Second,
-			"the contact was watched for at least the %d s retry interval after its answered call, with no further attempt (%s)",
-			RetryIntervalSec, watched.Round(time.Second))
+			"the contact was watched for at least the %d s retry interval after its answered call (%s), with no further attempt (%s)",
+			RetryIntervalSec, anchor, watched.Round(time.Second))
 	}
 
 	// The lead and its callbacks (design 10 section 11).
@@ -174,7 +179,7 @@ func assessSteppedContact(rv RegionView, cv ContactView, key string, dialogs []c
 }
 
 // assessStep checks one attempt of a stepped case.
-func assessStep(rv RegionView, cs Case, i int, a api.CampaignAttempt, key string, dlg *calleesim.DialogRecord, cdrs []api.CDR) AttemptResult {
+func assessStep(rv RegionView, cs Case, i int, a api.CampaignAttempt, key string, dlg *calleesim.DialogRecord, cdrs []api.CDR, next *time.Time) AttemptResult {
 	st := cs.Steps[i]
 	pre := fmt.Sprintf("attempt %d: ", i+1)
 	outcome, cause := deref(a.Outcome), deref(a.HangupCause)
@@ -220,18 +225,19 @@ func assessStep(rv RegionView, cs Case, i int, a api.CampaignAttempt, key string
 
 	col.That(dlg != nil, "%sthe simulator recorded the attempt's INVITE", pre)
 	if dlg != nil {
-		assessStepDialog(&col, pre, rv, st, a, dlg, &ar)
+		setSwitchOffset(&ar, a, dlg)
+		assessStepDialog(&col, pre, rv, st, a, dlg, next, &ar)
 	}
 	ar.Checks, ar.Failures = nonNil(col.checks), nonNil(col.failures)
 	ar.Passed = len(ar.Failures) == 0
 	return ar
 }
 
-func assessStepDialog(col *Checks, pre string, rv RegionView, st Step, a api.CampaignAttempt, d *calleesim.DialogRecord, ar *AttemptResult) {
+func assessStepDialog(col *Checks, pre string, rv RegionView, st Step, a api.CampaignAttempt, d *calleesim.DialogRecord, next *time.Time, ar *AttemptResult) {
 	from := sipUser(d.InviteHeaders["from"])
 	col.That(from == rv.DID.Number, pre+"the INVITE came from the campaign's caller id %s (%s)", rv.DID.Number, from)
-	inWindow := !d.InviteAt.Before(a.StartedAt.Add(-inviteSlack)) && (a.FinishedAt == nil || !d.InviteAt.After(a.FinishedAt.Add(inviteSlack)))
-	col.That(inWindow, pre+"the INVITE (%s) falls inside the attempt (%s to %v)", d.InviteAt.Format(time.RFC3339Nano), a.StartedAt.Format(time.RFC3339Nano), a.FinishedAt)
+	inWindow, desc := inviteWindow(d, a, next)
+	col.That(inWindow, "%s%s", pre, desc)
 	if st.Provisional != 0 {
 		sent := false
 		for _, p := range d.Provisionals {
@@ -328,6 +334,14 @@ func FirstAudioTable(rows []FirstAudioRow) string {
 // C10's retry came due, and read the simulator's record after that moment.
 // Without that, a platform that dialled nothing from the retry's due time on
 // would pass for one that skipped the number.
+//
+// Every ordering here is read on one clock, the host's, which the driver, the
+// simulator and the dialer share. The retry falls due RetryIntervalSec after
+// the callee's final response to attempt 1; the listing is held to that
+// response, not to the attempt's finishedAt or the contact's nextAttemptAt,
+// which are stamped from the switch's clock and drift from the host's (issue
+// #504). Those two are only printed, marked as switch time. A dialog with no
+// final response fails each check that needs it; nothing is skipped.
 func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, control []calleesim.DialogRecord,
 	cdrs map[string][]api.CDR, calleeReadAt time.Time) ScenarioResult {
 	cs := cv.Case
@@ -351,7 +365,11 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 			if len(dialogs) > 0 {
 				dlg = &dialogs[0]
 			}
-			res.Attempts = append(res.Attempts, assessStep(rv, cs, 0, a, key, dlg, cdrs[a.CallID.String()]))
+			var next *time.Time
+			if len(cv.Attempts) > 1 {
+				next = &cv.Attempts[1].StartedAt
+			}
+			res.Attempts = append(res.Attempts, assessStep(rv, cs, 0, a, key, dlg, cdrs[a.CallID.String()], next))
 		case i == 1:
 			res.Attempts = append(res.Attempts, assessSkippedAttempt(a, cdrs[a.CallID.String()], cv.Listing, len(dialogs) > 1))
 		}
@@ -359,16 +377,27 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 
 	// The listing: after attempt 1, confirmed on the list, and before the
 	// retry came due; otherwise the case would not test what it claims to.
+	// Both moments are the callee's final response (simulator clock) and the
+	// retry interval after it.
+	var final, due time.Time
+	hasFinal := len(dialogs) > 0 && dialogs[0].Final != nil
+	if hasFinal {
+		final = dialogs[0].Final.SentAt
+		due = final.Add(RetryIntervalSec * time.Second)
+	}
 	col.That(cv.Listing != nil, "the driver listed the number mid-run")
 	if l := cv.Listing; l != nil {
 		col.That(l.IsOnList, "the do-not-call list read back holds %s", cv.Number)
-		due := l.NextAttemptAt
-		margin := due.Sub(l.ListedAt)
-		col.That(margin > 0, "the number was listed %s before the retry came due (nextAttemptAt %s, listed %s)",
-			margin.Round(time.Millisecond), due.Format(time.RFC3339Nano), l.ListedAt.Format(time.RFC3339Nano))
-		if len(cv.Attempts) > 0 && cv.Attempts[0].FinishedAt != nil {
-			col.That(!l.PostedAt.Before(*cv.Attempts[0].FinishedAt), "the number was listed after attempt 1 finished (%s after)",
-				l.PostedAt.Sub(*cv.Attempts[0].FinishedAt).Round(time.Millisecond))
+		if hasFinal {
+			margin := due.Sub(l.ListedAt)
+			col.That(margin > 0, "the number was listed %s before the retry came due (the callee's final response %s + %d s = %s, listed %s; the contact's nextAttemptAt reads %s [switch time])",
+				margin.Round(time.Millisecond), final.Format(time.RFC3339Nano), RetryIntervalSec, due.Format(time.RFC3339Nano),
+				l.ListedAt.Format(time.RFC3339Nano), l.NextAttemptAt.Format(time.RFC3339Nano))
+			col.That(!l.PostedAt.Before(final), "the number was listed at or after the callee's final response to attempt 1 (%s after the %d, simulator clock)",
+				l.PostedAt.Sub(final).Round(time.Millisecond), dialogs[0].Final.Status)
+		} else {
+			col.That(false, "the number was listed before the retry came due (the simulator recorded no final response to attempt 1, so the due moment is unknown)")
+			col.That(false, "the number was listed at or after the callee's final response to attempt 1 (the simulator recorded no final response)")
 		}
 		if len(dialogs) > 0 {
 			col.That(dialogs[0].InviteAt.Before(l.PostedAt), "the only INVITE (%s) came before the listing (%s)",
@@ -387,7 +416,7 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 			measured = gap.String()
 			ok = absDuration(gap-RetryIntervalSec*time.Second) <= retryTolerance
 		}
-		col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)", RetryIntervalSec, measured)
+		col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)"+switchTime, RetryIntervalSec, measured)
 	}
 	if ct := cv.Contact; ct != nil {
 		col.That(ct.Status == api.CampaignContactStatus("DNC"), "at the end: the contact is DNC (%s)", ct.Status)
@@ -402,14 +431,20 @@ func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, cont
 	ctl := cs.ControlID
 	col.That(ctl != "", "the case names a control that is never listed")
 	col.That(len(control) == 2, "the control %s was dialled twice in this campaign, so the retries ran (%d INVITEs)", ctl, len(control))
-	if l := cv.Listing; l != nil {
-		if len(control) == 2 {
-			late := control[1].InviteAt.Sub(l.NextAttemptAt)
-			col.That(late >= -inviteSlack, "the control's second INVITE (%s) came at or after the moment %s's retry was due (%s after)",
-				control[1].InviteAt.Format(time.RFC3339Nano), cs.ID, late.Round(time.Millisecond))
+	if cv.Listing != nil {
+		switch {
+		case !hasFinal:
+			col.That(false, "the control's second INVITE came at or after the moment %s's retry was due (the simulator recorded no final response to attempt 1)", cs.ID)
+			col.That(false, "the simulator's record was read after the retry came due (the simulator recorded no final response to attempt 1)")
+		default:
+			if len(control) == 2 {
+				late := control[1].InviteAt.Sub(due)
+				col.That(late >= -inviteSlack, "the control's second INVITE (%s) came at or after the moment %s's retry was due (%s after)",
+					control[1].InviteAt.Format(time.RFC3339Nano), cs.ID, late.Round(time.Millisecond))
+			}
+			col.That(calleeReadAt.After(due),
+				"the simulator's record was read (%s) after the retry came due (%s)", calleeReadAt.Format(time.RFC3339Nano), due.Format(time.RFC3339Nano))
 		}
-		col.That(calleeReadAt.After(l.NextAttemptAt),
-			"the simulator's record was read (%s) after the retry came due (%s)", calleeReadAt.Format(time.RFC3339Nano), l.NextAttemptAt.Format(time.RFC3339Nano))
 	}
 
 	res.Checks, res.Failures = nonNil(col.checks), nonNil(col.failures)

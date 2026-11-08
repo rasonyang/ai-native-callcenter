@@ -19,10 +19,62 @@ import (
 // slack covers the two timestamps being written apart, not the dialer's speed.
 const retryTolerance = 2 * time.Second
 
-// inviteSlack is how far outside its attempt's start and finish the
-// simulator's INVITE may sit and still be that attempt's. The simulator and
-// the application read the same host clock.
+// inviteSlack is how far before its attempt's start the simulator's INVITE
+// may sit and still be that attempt's. The simulator and the dialer read the
+// same host clock. The window's upper end, the next attempt's start, takes no
+// slack, since a retry is at least a minute away: see inviteWindow.
 const inviteSlack = time.Second
+
+// switchTime marks a check that reads the switch's clock: an attempt's
+// finishedAt and the contact's nextAttemptAt are stamped from the switch's
+// event timestamps, and that clock drifts from the host's (issue #504). Every
+// other check anchors on the simulator, whose clock the driver and the dialer
+// share. No tolerance is added for the drift: it grows with the switch's
+// uptime, so a fixed one would only make the failure come later.
+const switchTime = " [switch time]"
+
+// simDialogEnd is the simulator's end of a dialog on the host clock: the end of
+// the call when it ended, else the final response. It reports false when the
+// simulator recorded neither.
+func simDialogEnd(d *calleesim.DialogRecord) (time.Time, bool) {
+	switch {
+	case d == nil:
+		return time.Time{}, false
+	case d.End != nil:
+		return d.End.At, true
+	case d.Final != nil:
+		return d.Final.SentAt, true
+	}
+	return time.Time{}, false
+}
+
+// setSwitchOffset records the attempt's measured switch-clock offset: its
+// finishedAt (switch time) minus the end of its dialog (simulator time).
+func setSwitchOffset(ar *AttemptResult, a api.CampaignAttempt, d *calleesim.DialogRecord) {
+	if end, ok := simDialogEnd(d); ok && a.FinishedAt != nil {
+		ms := float64(a.FinishedAt.Sub(end).Milliseconds())
+		ar.SwitchOffsetMs = &ms
+	}
+}
+
+// inviteWindow reports whether a dialog's INVITE is the attempt's. The lower
+// bound is the attempt's start (dialer and simulator share a clock). The
+// upper bound is the next attempt's start, which the dialer stamps too: the
+// dialog must have ended by then. The attempt's own finishedAt is switch time
+// and is not used. The last attempt has only the lower bound.
+func inviteWindow(d *calleesim.DialogRecord, a api.CampaignAttempt, next *time.Time) (bool, string) {
+	ok := !d.InviteAt.Before(a.StartedAt.Add(-inviteSlack))
+	desc := fmt.Sprintf("the INVITE (%s) falls inside the attempt (started %s", d.InviteAt.Format(time.RFC3339Nano), a.StartedAt.Format(time.RFC3339Nano))
+	if next == nil {
+		return ok, desc + ", the last attempt)"
+	}
+	end, has := simDialogEnd(d)
+	if !has {
+		end = d.InviteAt
+	}
+	ok = ok && !end.After(*next)
+	return ok, desc + fmt.Sprintf("; its dialog ended %s, the next attempt started %s)", end.Format(time.RFC3339Nano), next.Format(time.RFC3339Nano))
+}
 
 // Where an attempt's ending came from.
 const (
@@ -124,17 +176,18 @@ type ContactResult struct {
 // simulator's record of its dialog, and whether its own assertions held.
 type AttemptResult struct {
 	// Index counts from 1.
-	Index       int        `json:"index"`
-	Number      string     `json:"number"`
-	CallID      string     `json:"callId"`
-	LegID       string     `json:"legId"`
-	State       string     `json:"state"`
-	Outcome     string     `json:"outcome"`
-	HangupCause string     `json:"hangupCause"`
-	StartedAt   time.Time  `json:"startedAt"`
-	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
-	Source      string     `json:"source"`
-	CDRs        []api.CDR  `json:"cdrs"`
+	Index       int       `json:"index"`
+	Number      string    `json:"number"`
+	CallID      string    `json:"callId"`
+	LegID       string    `json:"legId"`
+	State       string    `json:"state"`
+	Outcome     string    `json:"outcome"`
+	HangupCause string    `json:"hangupCause"`
+	StartedAt   time.Time `json:"startedAt"`
+	// FinishedAt is switch time.
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	Source     string     `json:"source"`
+	CDRs       []api.CDR  `json:"cdrs"`
 	// Dialog is the simulator's record of this attempt's INVITE.
 	Dialog   *calleesim.DialogRecord `json:"dialog,omitempty"`
 	Passed   bool                    `json:"passed"`
@@ -149,6 +202,13 @@ type AttemptResult struct {
 	// RetryLatenessMs is how long after the previous nextAttemptAt this
 	// attempt started. Reported, never asserted beyond "not early".
 	RetryLatenessMs *float64 `json:"retryLatenessMs,omitempty"`
+	// SwitchOffsetMs is the measured offset of the switch's clock from the
+	// host's: the attempt's finishedAt (switch time) minus the end of its
+	// dialog as the simulator saw it (host time). It includes the signalling
+	// latency between the two events, added when the callee ended the dialog
+	// and subtracted when the switch did (its BYE or CANCEL); it is set for an
+	// attempt that has a dialog and a finish.
+	SwitchOffsetMs *float64 `json:"switchOffsetMs,omitempty"`
 	// InviteGapMs is the time from the previous attempt's INVITE to this
 	// one's. Reported, never asserted beyond "not before the interval".
 	InviteGapMs *float64 `json:"inviteGapMs,omitempty"`
@@ -437,7 +497,11 @@ func assessContact(rv RegionView, cv ContactView, key string, dialogs []calleesi
 		if i < len(dialogs) {
 			dlg = &dialogs[i]
 		}
-		res.Attempts = append(res.Attempts, assessAttempt(rv, cs, i, a, key, expected, dlg, cdrs[a.CallID.String()], &firstCause, findings))
+		var next *time.Time
+		if i+1 < len(cv.Attempts) {
+			next = &cv.Attempts[i+1].StartedAt
+		}
+		res.Attempts = append(res.Attempts, assessAttempt(rv, cs, i, a, key, expected, dlg, cdrs[a.CallID.String()], next, &firstCause, findings))
 	}
 
 	spend := func(n int) (int, int) {
@@ -463,7 +527,7 @@ func assessContact(rv RegionView, cv ContactView, key string, dialogs []calleesi
 				measured = gap.String()
 				ok = absDuration(gap-RetryIntervalSec*time.Second) <= retryTolerance
 			}
-			col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)", RetryIntervalSec, measured)
+			col.That(ok, "after the first attempt: nextAttemptAt is its end + %d s, the policy's interval (measured %s)"+switchTime, RetryIntervalSec, measured)
 		} else {
 			col.That(string(af.Status) == design.TerminalStatus, "after the first attempt: the contact is %s (%s)", design.TerminalStatus, af.Status)
 			col.That(af.NextAttemptAt == nil, "after the first attempt: no next attempt is scheduled")
@@ -485,12 +549,13 @@ func assessContact(rv RegionView, cv ContactView, key string, dialogs []calleesi
 		late := cv.Attempts[1].StartedAt.Sub(*cv.AfterFirst.NextAttemptAt)
 		ms := float64(late.Milliseconds())
 		res.Attempts[1].RetryLatenessMs = &ms
-		col.That(late >= -inviteSlack, "the retry did not start before nextAttemptAt (it started %s after it)", late)
+		col.That(late >= -inviteSlack, "the retry did not start before nextAttemptAt (it started %s after it)"+switchTime, late)
 	}
-	if !retried && len(cv.Attempts) >= 1 && cv.Attempts[0].FinishedAt != nil {
-		watched := observedAt.Sub(*cv.Attempts[0].FinishedAt)
+	if !retried && len(cv.Attempts) >= 1 {
+		from, anchor := watchAnchor(cv.Attempts[0], dialogs)
+		watched := observedAt.Sub(from)
 		col.That(watched >= RetryIntervalSec*time.Second,
-			"the contact was watched for at least the %d s retry interval after its attempt, with no further attempt (%s)", RetryIntervalSec, watched.Round(time.Second))
+			"the contact was watched for at least the %d s retry interval after its attempt (%s), with no further attempt (%s)", RetryIntervalSec, anchor, watched.Round(time.Second))
 	}
 
 	res.Checks, res.Failures = nonNil(col.checks), nonNil(col.failures)
@@ -503,7 +568,7 @@ func assessContact(rv RegionView, cv ContactView, key string, dialogs []calleesi
 
 // assessAttempt checks one attempt against its CDR and its dialog.
 func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, expected string,
-	dlg *calleesim.DialogRecord, cdrs []api.CDR, firstCause *string, findings *[]string) AttemptResult {
+	dlg *calleesim.DialogRecord, cdrs []api.CDR, next *time.Time, firstCause *string, findings *[]string) AttemptResult {
 	pre := fmt.Sprintf("attempt %d: ", i+1)
 	outcome, cause := deref(a.Outcome), deref(a.HangupCause)
 	ar := AttemptResult{
@@ -557,18 +622,19 @@ func assessAttempt(rv RegionView, cs Case, i int, a api.CampaignAttempt, key, ex
 		col.That(dlg != nil, "%sthe simulator recorded the attempt's INVITE", pre)
 	}
 	if dlg != nil {
-		assessDialog(&col, pre, rv, cs, a, dlg, &ar)
+		setSwitchOffset(&ar, a, dlg)
+		assessDialog(&col, pre, rv, cs, a, dlg, next, &ar)
 	}
 	ar.Checks, ar.Failures = nonNil(col.checks), nonNil(col.failures)
 	ar.Passed = len(ar.Failures) == 0
 	return ar
 }
 
-func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.CampaignAttempt, d *calleesim.DialogRecord, ar *AttemptResult) {
+func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.CampaignAttempt, d *calleesim.DialogRecord, next *time.Time, ar *AttemptResult) {
 	from := sipUser(d.InviteHeaders["from"])
 	col.That(from == rv.DID.Number, pre+"the INVITE came from the campaign's caller id %s (%s)", rv.DID.Number, from)
-	inWindow := !d.InviteAt.Before(a.StartedAt.Add(-inviteSlack)) && (a.FinishedAt == nil || !d.InviteAt.After(a.FinishedAt.Add(inviteSlack)))
-	col.That(inWindow, pre+"the INVITE (%s) falls inside the attempt (%s to %v)", d.InviteAt.Format(time.RFC3339Nano), a.StartedAt.Format(time.RFC3339Nano), a.FinishedAt)
+	inWindow, desc := inviteWindow(d, a, next)
+	col.That(inWindow, "%s%s", pre, desc)
 
 	sent := false
 	for _, p := range d.Provisionals {
@@ -699,7 +765,7 @@ func crossRegion(rows []ProbeRow) CheckList {
 		for _, p := range list[1:] {
 			q := list[0]
 			col.That(q.signature() == p.signature() && sameInterval(q.RetryIntervalSec, p.RetryIntervalSec),
-				"%s: %s and %s agree (%s | %s)", id, q.Region, p.Region, q.signature(), p.signature())
+				"%s: %s and %s agree (%s | %s)"+switchTime, id, q.Region, p.Region, q.signature(), p.signature())
 		}
 	}
 	return col.list()
@@ -724,6 +790,59 @@ func intervalText(sec *float64) string {
 	return fmt.Sprintf("%.0fs", *sec)
 }
 
+// watchAnchor is where the "watched for the retry interval" check starts
+// counting for an attempt: the end of its dialog as the simulator saw it, or
+// the attempt's own start (the dialer's clock) when the simulator recorded no
+// end for it (the case has no dialog). Never the attempt's finishedAt, which
+// is switch time.
+func watchAnchor(a api.CampaignAttempt, dialogs []calleesim.DialogRecord) (time.Time, string) {
+	if len(dialogs) > 0 {
+		if end, ok := simDialogEnd(&dialogs[0]); ok {
+			return end, "from the end of its dialog on the simulator's clock"
+		}
+	}
+	return a.StartedAt, "from the attempt's start, the simulator having recorded no end of a dialog"
+}
+
+// SwitchClockTable renders the switch's measured clock offset as Markdown:
+// per region, the smallest and largest SwitchOffsetMs over the attempts that
+// have one, and how many that is.
+func SwitchClockTable(results []ScenarioResult) string {
+	type span struct {
+		lo, hi float64
+		n      int
+	}
+	by := map[string]*span{}
+	var order []string
+	for _, s := range results {
+		for _, a := range s.Attempts {
+			if a.SwitchOffsetMs == nil {
+				continue
+			}
+			sp := by[s.Region]
+			if sp == nil {
+				sp = &span{lo: *a.SwitchOffsetMs, hi: *a.SwitchOffsetMs}
+				by[s.Region] = sp
+				order = append(order, s.Region)
+			}
+			sp.lo, sp.hi = min(sp.lo, *a.SwitchOffsetMs), max(sp.hi, *a.SwitchOffsetMs)
+			sp.n++
+		}
+	}
+	var b strings.Builder
+	b.WriteString("\n### Switch clock (an attempt's finishedAt minus the end of its dialog on the simulator; includes signalling latency)\n\n")
+	b.WriteString("Checks marked [switch time] read the switch's clock; every other check reads the simulator's and the driver's, which share the host clock.\n\n")
+	b.WriteString("| region | min offset | max offset | attempts |\n|---|---|---|---|\n")
+	for _, region := range order {
+		sp := by[region]
+		fmt.Fprintf(&b, "| %s | %.0f ms | %.0f ms | %d |\n", region, sp.lo, sp.hi, sp.n)
+	}
+	if len(order) == 0 {
+		b.WriteString("| none | | | 0 |\n")
+	}
+	return b.String()
+}
+
 // ProbeTable renders the measured table as Markdown, one block per region.
 func ProbeTable(rows []ProbeRow) string {
 	var b strings.Builder
@@ -732,7 +851,7 @@ func ProbeTable(rows []ProbeRow) string {
 		if p.Region != region {
 			region = p.Region
 			fmt.Fprintf(&b, "\n### %s\n\n", region)
-			b.WriteString("| case | callee | SIP final | hangup_cause | outcome | source | budget | retry interval | after 1st | final | attempts | system failures | INVITEs | section 7.2 |\n")
+			b.WriteString("| case | callee | SIP final | hangup_cause | outcome | source | budget | retry interval [switch time] | after 1st | final | attempts | system failures | INVITEs | section 7.2 |\n")
 			b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 		}
 		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %d | %d | %d | %s |\n",

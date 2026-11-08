@@ -111,7 +111,7 @@ func RunCampaigns(ctx context.Context, cfg CampaignConfig) (*CampaignReport, err
 	if err := writeJSON(filepath.Join(cfg.OutDir, "report.json"), rep); err != nil && runErr == nil {
 		runErr = err
 	}
-	if err := os.WriteFile(filepath.Join(cfg.OutDir, "probes.md"), []byte(ProbeTable(rep.Probes)+FirstAudioTable(rep.FirstAudio)), 0o644); err != nil && runErr == nil {
+	if err := os.WriteFile(filepath.Join(cfg.OutDir, "probes.md"), []byte(ProbeTable(rep.Probes)+FirstAudioTable(rep.FirstAudio)+SwitchClockTable(rep.Scenarios)), 0o644); err != nil && runErr == nil {
 		runErr = err
 	}
 	if runErr != nil {
