@@ -105,9 +105,12 @@ func sessionLimitSnapshot(callID uuid.UUID, base, end time.Time, cause, summary 
 				Bridges: []telephony.BridgeSpan{{OtherChannelID: "chan-caller", StartedAt: base, EndedAt: *at(65)}},
 			},
 		},
+		// The bot ran its session for 65 s, so it stamped aicc_bot_started
+		// when the session began (#334), whether or not it handed over.
 		Bot: telephony.BotShare{
 			FlowID: &flowID, FlowSlug: "novanet_support", DID: "95012",
 			Summary: summary, Reason: "SESSION_LIMIT", IsStamped: stamped,
+			IsSessionStarted: true,
 		},
 	}
 	if !stamped {
