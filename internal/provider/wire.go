@@ -26,6 +26,9 @@ type wireEvent struct {
 	Delta      string `json:"delta"`
 	Transcript string `json:"transcript"`
 	ItemID     string `json:"item_id"`
+	// ResponseID names the response a delta belongs to, on the vendors that
+	// say (qwen). Read only to drop the late audio of an abandoned response.
+	ResponseID string `json:"response_id"`
 	// Status is on input-transcription events of vendors that repeat
 	// .completed while the text is still settling ("in_progress", then
 	// "completed"). Absent means final, which is what OpenAI sends.

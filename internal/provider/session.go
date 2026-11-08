@@ -265,6 +265,13 @@ type Event struct {
 	// is the same line: whatever marked the first turn (an aside) marks this
 	// one too.
 	IsLineAskedAgain bool
+	// IsAbandoned says, on EventTypeResponseDone, that the watchdog gave the
+	// response up (Realtime): the provider stopped producing it, or never
+	// started, and the client has asked it to cancel. The turn is over for the
+	// consumer now; whatever the provider sends for it later is not reported
+	// again. The consumer knows from its own frame count whether any of it was
+	// heard.
+	IsAbandoned bool
 
 	// Err is set on EventTypeError. IsFatal means the session cannot continue:
 	// provider state is unrecoverable, so the call must be routed elsewhere
