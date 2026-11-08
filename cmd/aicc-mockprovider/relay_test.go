@@ -412,6 +412,32 @@ func TestStallHoldRefusesNewResponsesAndReleasesOnBargeIn(t *testing.T) {
 	}
 }
 
+// The caller speaking over a stalled response ends it, as qwen's own barge-in
+// cancel does, whether its done has arrived yet or not; holding it for the
+// client's cancel would hand it over after the provider has moved on.
+func TestStallReleasesTheHeldDoneOnBargeIn(t *testing.T) {
+	for _, isDoneFirst := range []bool{true, false} {
+		s := connect(t, faultCfg(FaultStall, 1), "/x", nil)
+		s.upSend(sessionUpdated)
+		s.clientGetsType("session.updated")
+		s.vadSpeech()
+		s.upSend(created("r1"))
+		s.clientGetsType("response.created")
+		if isDoneFirst {
+			s.upSend(done("r1"))
+			s.expectMarker() // held
+		}
+		s.upSend(`{"type":"input_audio_buffer.speech_started"}`)
+		s.clientGetsType("input_audio_buffer.speech_started")
+		if !isDoneFirst {
+			s.upSend(done("r1"))
+		}
+		if got := s.clientGetsType("response.done"); !strings.Contains(got, `"cancelled"`) {
+			t.Fatalf("isDoneFirst=%v: done = %s", isDoneFirst, got)
+		}
+	}
+}
+
 func TestStallHoldReleasesAfterTheHoldTime(t *testing.T) {
 	cfg := faultCfg(FaultStallHold, 1)
 	cfg.Hold = 50 * time.Millisecond

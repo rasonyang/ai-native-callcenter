@@ -92,7 +92,9 @@ AICC_PROVIDER=qwen AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/api-ws/v1/realtime
 * `stall`: the chosen response's audio deltas are dropped, its transcript passes and
   its `response.done` is held. A client `response.cancel` goes upstream, the
   provider's "no active response" refusal is hidden, and the held done is delivered
-  with status `cancelled`. With no cancel within 30 s it is delivered as it came.
+  with status `cancelled`; the provider's `input_audio_buffer.speech_started` does the
+  same, as qwen's own barge-in cancel would. With neither within 30 s it is delivered
+  as it came.
 * `stall-hold`: as `stall`, but the cancel is not honoured. While the response is
   held the relay answers every client `response.create` itself with qwen's "Cannot
   create response while another response is in progress." (a `conversation.item.create`

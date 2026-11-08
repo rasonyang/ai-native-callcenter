@@ -368,9 +368,13 @@ func (s *relaySession) fromUpstream(data []byte) (toClient, toUp [][]byte) {
 	case "input_audio_buffer.speech_stopped", "input_audio_buffer.committed":
 		s.vadPending = true
 	case "input_audio_buffer.speech_started":
-		if s.fault() == FaultStallHold && s.phase != phaseIdle && s.phase != phaseReleased {
-			// qwen cancelled the response on barge-in on that call: the done
-			// follows the speech event, as it does on the wire.
+		isStall := s.fault() == FaultStall || s.fault() == FaultStallHold
+		if isStall && s.phase != phaseIdle && s.phase != phaseReleased {
+			// qwen cancels a response itself when the caller speaks over it
+			// (it ended the held response on the 2026-11-07 call that way):
+			// the done follows the speech event, as it does on the wire.
+			// Holding it longer would hand the client a done long after the
+			// provider moved on, which it could take for a later response's.
 			if m := s.releaseLocked("speech-started", true); m != nil {
 				return [][]byte{data, m}, nil
 			}
