@@ -93,6 +93,7 @@ func TestCampaigns(t *testing.T) {
 
 	t.Logf("measured table (dial form %s):%s", rep.DialForm, ProbeTable(rep.Probes))
 	t.Logf("%s", FirstAudioTable(rep.FirstAudio))
+	t.Logf("%s", SwitchClockTable(rep.Scenarios))
 	if len(rep.Findings) > 0 {
 		t.Logf("findings:\n  %s", strings.Join(rep.Findings, "\n  "))
 	}

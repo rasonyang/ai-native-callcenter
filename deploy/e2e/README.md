@@ -166,8 +166,10 @@ campaign starts, so never selected) does not. The callee refuses attempt 1 with
 contact right after that attempt, with its `nextAttemptAt` set, it posts the
 canonical number to `POST /dnc-numbers`, reads `GET /dnc-numbers` back and
 checks the number is on it. It does this for each country on its own, while
-the other cases carry on. The case fails when the listing was not before the
-contact's `nextAttemptAt` (it would test nothing), and otherwise asserts that
+the other cases carry on. The retry falls due 60 s after the callee's final
+response (the 486) on the simulator's clock. The case fails when the listing
+was posted before that response, or the API answered it only after the retry
+fell due (it would test nothing), and otherwise asserts that
 the attempts are exactly `BUSY`/`USER_BUSY` then `DNC_SKIPPED`/`NUMBER_ON_DNC`
 (the second started after the listing), that the contact is `DNC` having spent
 one attempt, that the simulator saw one INVITE for the number, that attempt 1
@@ -184,9 +186,30 @@ be dialled again: the skip is immediate, so its contact is skipped as soon as
 it is listed, and the removal does not revive it. C10's control is C03 instead: the same callee behaviour (180, then 486), the same
 retry interval, never listed. C10's assessment requires C03 of the same country
 to have been dialled twice, the second INVITE at or after the moment C10's
-retry fell due (give or take the INVITE slack), and the simulator's record that
+retry fell due (the callee's 486 plus 60 s; give or take the INVITE slack), and the simulator's record that
 counts C10's INVITEs to have been read after that moment. So C10 cannot pass
 because the platform dialled nothing from then on.
+
+### Clocks
+
+The driver, the callee simulator and the dialer read one clock, the VM's
+kernel clock. An attempt's `finishedAt`, a contact's `nextAttemptAt` and the
+CDR times are stamped from the switch's event timestamps instead, and the
+switch's clock drifts from the VM's: on one environment it ran 0.25 s ahead
+right after `make e2e-up` and 6.5 s ahead five runs later. A check that ordered
+one clock against the other would pass or fail with the environment's age, so
+the suite anchors on the simulator: when an INVITE is the attempt's (between
+the attempt's start and the next attempt's start), how long a contact was
+watched (from the end of the attempt's dialog), and when C10's retry fell due.
+The checks that must read switch time (that `nextAttemptAt` is the attempt's
+end plus the interval, that the retry did not start before `nextAttemptAt`, and
+the retry interval compared across countries and tabulated in `probes.md`)
+carry a `[switch time]` marker in their text. The report measures the offset
+for every attempt that has a dialog (`switchOffsetMs` in `report.json`, and the
+"Switch clock" table in `probes.md`: per country the smallest and largest
+offset; it includes the signalling latency). No tolerance is added for the
+drift: it grows with the switch's uptime, so a fixed one would only move the
+failure later.
 
 ### Dial forms
 

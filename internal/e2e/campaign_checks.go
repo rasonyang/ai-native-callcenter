@@ -128,8 +128,9 @@ type Listing struct {
 	ConfirmedAt time.Time `json:"confirmedAt"`
 	// IsOnList is whether the read-back list held the number.
 	IsOnList bool `json:"isOnList"`
-	// NextAttemptAt is the contact's own, as read before the listing: the
-	// moment the retry came due.
+	// NextAttemptAt is the contact's own, as read before the listing. It is
+	// switch time (the switch's finish stamp plus the interval), so checks do
+	// not order anything against it; they print it for reference.
 	NextAttemptAt time.Time `json:"nextAttemptAt"`
 }
 

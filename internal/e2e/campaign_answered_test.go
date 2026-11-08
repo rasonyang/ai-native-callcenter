@@ -299,3 +299,209 @@ func TestFinishedOnceInvariantFails(t *testing.T) {
 		}
 	})
 }
+
+// The clocks (issue #504). The driver, the callee simulator and the dialer read
+// the host clock; an attempt's finishedAt and a contact's nextAttemptAt are
+// stamped from the switch's, which drifts. A check that orders one against
+// the other passes or fails with the drift. These tests build a run whose
+// switch-stamped fields are moved by `sw` and leave everything else alone.
+
+// failureKey is a failure without the timestamps and durations it prints.
+func failureKey(f string) string { return strings.SplitN(f, " (", 2)[0] }
+
+func failureKeys(fs []string) []string {
+	out := make([]string, 0, len(fs))
+	for _, f := range fs {
+		out = append(out, failureKey(f))
+	}
+	return out
+}
+
+// c10Run2 is C10 US as the second `make e2e-campaign` run on one environment
+// recorded it (2026-11-07), the switch's clock 1.135 s ahead of the host's
+// and moved a further sw. isEarly lists the number 50 ms before the callee's
+// 486 instead of 268 ms after.
+func c10Run2(sw time.Duration, isEarly bool) ScenarioResult {
+	r := Regions[0]
+	cs := caseByID(AllCases, "C10")
+	base := time.Date(2026, 11, 7, 1, 28, 0, 0, time.UTC)
+	at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+	sat := func(ms int) *time.Time { t := at(ms).Add(sw); return &t } // switch-stamped
+	did := "95000001"
+	rv := RegionView{Region: r, DID: api.DID{Number: did}}
+	busy, skipped := api.CampaignOutcome("BUSY"), api.CampaignOutcome(listedSkipOutcome)
+	busyCause, dncCause := "USER_BUSY", listedSkipCause
+	skippedAt := at(19500)
+
+	a1 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+		Outcome: &busy, HangupCause: &busyCause, StartedAt: at(17850), FinishedAt: sat(20050)}
+	a2 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+		Outcome: &skipped, HangupCause: &dncCause, StartedAt: at(19400), FinishedAt: &skippedAt} // the dialer finishes a skip
+	campaignID := uuid.Must(uuid.NewV7())
+	key := r.DialKey(cs, phonenum.FormE164)
+	cdrEnd := sat(20050)
+	cdrs := map[string][]api.CDR{a1.CallID.String(): {{CallID: a1.CallID, HangupCause: &busyCause, ToNumber: key, DID: &did,
+		CallType: "OUTBOUND", CampaignID: &campaignID, EndedAt: *cdrEnd}}}
+
+	posted := at(19183)
+	if isEarly {
+		posted = at(18865) // 50 ms before the 486
+	}
+	next := sat(80050)
+	lastOutcome := skipped
+	af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: next, LastOutcome: &busy}
+	final := api.CampaignContact{Number: r.Number(cs), Status: "DNC", Attempts: 1, LastOutcome: &lastOutcome}
+	cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final,
+		Listing: &Listing{PostedAt: posted, ListedAt: posted.Add(7 * time.Millisecond), ConfirmedAt: posted.Add(17 * time.Millisecond),
+			IsOnList: true, NextAttemptAt: *next}}
+	dlg := calleesim.DialogRecord{Number: key, InviteAt: at(17900), InviteHeaders: map[string]string{"from": "<sip:" + did + "@10.0.0.11>"},
+		Provisionals: []calleesim.ProvisionalRecord{{Status: 180, SentAt: at(18115)}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(18915)}}
+	// The control, C03, is busy the same way and dialled again a minute later.
+	ctl1 := calleesim.DialogRecord{InviteAt: at(17900), Final: &calleesim.FinalRecord{Status: 486, SentAt: at(18900)}}
+	ctl2 := calleesim.DialogRecord{InviteAt: at(79000), Final: &calleesim.FinalRecord{Status: 486, SentAt: at(79900)}}
+	return assessListedMidRun(rv, cv, key, []calleesim.DialogRecord{dlg}, []calleesim.DialogRecord{ctl1, ctl2}, cdrs, at(90000))
+}
+
+func TestListedMidRunIsHeldToTheCalleesClock(t *testing.T) {
+	res := c10Run2(0, false)
+	if !res.Passed || len(res.Failures) != 0 {
+		t.Fatalf("run 2's data failed: %v", res.Failures)
+	}
+	if got := res.Attempts[0].SwitchOffsetMs; got == nil || *got != 1135 {
+		t.Fatalf("switch offset %v, want 1135 ms (finishedAt 20.050 minus the 486 at 18.915)", got)
+	}
+	if res.Attempts[1].SwitchOffsetMs != nil {
+		t.Fatal("the skipped attempt, which has no dialog, has a switch offset")
+	}
+	early := c10Run2(0, true)
+	if early.Passed || len(early.Failures) != 1 || !strings.Contains(early.Failures[0], "listed at or after the callee's final response") {
+		t.Fatalf("a listing 50 ms before the 486: passed %v, failures %v", early.Passed, early.Failures)
+	}
+}
+
+// The switch's clock, ahead or behind by 10 s, changes nothing: same verdict,
+// same checks, same failing check.
+func TestListedMidRunDoesNotDependOnTheSwitchClock(t *testing.T) {
+	for _, isEarly := range []bool{false, true} {
+		want := c10Run2(0, isEarly)
+		for _, sw := range []time.Duration{10 * time.Second, -10 * time.Second} {
+			got := c10Run2(sw, isEarly)
+			if got.Passed != want.Passed || len(got.Checks) != len(want.Checks) || len(got.Failures) != len(want.Failures) ||
+				strings.Join(failureKeys(got.Failures), "\n") != strings.Join(failureKeys(want.Failures), "\n") {
+				t.Errorf("early=%v switch %+v: passed %v, %d checks, failures %q; unshifted: passed %v, %d checks, failures %q",
+					isEarly, sw, got.Passed, len(got.Checks), got.Failures, want.Passed, len(want.Checks), want.Failures)
+			}
+		}
+	}
+}
+
+// Without the callee's final response there is no clock to anchor on: the
+// checks that need it fail, they are not skipped.
+func TestListedMidRunWithoutAFinalResponseFails(t *testing.T) {
+	r := Regions[0]
+	cs := caseByID(AllCases, "C10")
+	now := time.Date(2026, 11, 7, 1, 28, 0, 0, time.UTC)
+	cv := ContactView{Case: cs, Number: r.Number(cs), Listing: &Listing{PostedAt: now, ListedAt: now, ConfirmedAt: now, IsOnList: true}}
+	res := assessListedMidRun(RegionView{Region: r}, cv, "k", []calleesim.DialogRecord{{InviteAt: now}}, nil, nil, now)
+	for _, want := range []string{"listed at or after the callee's final response", "listed before the retry came due", "control's second INVITE", "read after the retry came due"} {
+		found := false
+		for _, f := range res.Failures {
+			found = found || strings.Contains(f, want)
+		}
+		if !found {
+			t.Errorf("no failure names %q: %q", want, res.Failures)
+		}
+	}
+}
+
+// A check that reads the switch's clock says so, and the others do not move
+// with it: on a shifted switch clock every failure carries the marker, and
+// the checks made are the same.
+func requireOnlySwitchTimeMoves(t *testing.T, run func(sw time.Duration) ScenarioResult) {
+	t.Helper()
+	want := run(0)
+	if !want.Passed {
+		t.Fatalf("the unshifted run failed: %v", want.Failures)
+	}
+	for _, sw := range []time.Duration{10 * time.Second, -10 * time.Second} {
+		got := run(sw)
+		if len(got.Checks) != len(want.Checks) {
+			t.Errorf("switch %+v: %d checks, want %d", sw, len(got.Checks), len(want.Checks))
+		}
+		for _, f := range got.Failures {
+			if !strings.HasSuffix(f, switchTime) {
+				t.Errorf("switch %+v: a check that is not marked as switch time failed: %s", sw, f)
+			}
+		}
+	}
+}
+
+func TestSteppedContactReadsTheSwitchClockOnlyWhereMarked(t *testing.T) {
+	requireOnlySwitchTimeMoves(t, func(sw time.Duration) ScenarioResult {
+		r := Regions[0]
+		cs := caseByID(AllCases, "C04")
+		base := time.Date(2026, 11, 7, 1, 30, 0, 0, time.UTC)
+		at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+		sat := func(ms int) *time.Time { t := at(ms).Add(sw); return &t }
+		did := "95000001"
+		rv := RegionView{Region: r, DID: api.DID{Number: did}}
+		busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
+		busyCause, normal := "USER_BUSY", "NORMAL_CLEARING"
+		a1 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+			Outcome: &busy, HangupCause: &busyCause, StartedAt: at(100), FinishedAt: sat(2285)}
+		a2 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+			Outcome: &answered, HangupCause: &normal, StartedAt: at(62300), FinishedAt: sat(66800)}
+		key := r.DialKey(cs, phonenum.FormE164)
+		answeredAt := sat(62600)
+		cdrs := map[string][]api.CDR{
+			a1.CallID.String(): {{CallID: a1.CallID, HangupCause: &busyCause, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(2285)}},
+			a2.CallID.String(): {{CallID: a2.CallID, HangupCause: &normal, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(66800),
+				AnsweredAt: answeredAt, Legs: []api.Leg{{Kind: "BOT"}}}},
+		}
+		af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: sat(62285), LastOutcome: &busy}
+		final := api.CampaignContact{Number: r.Number(cs), Status: "DONE", Attempts: 2, LastOutcome: &answered}
+		cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final}
+		from := map[string]string{"from": "<sip:" + did + "@10.0.0.11>"}
+		d1 := calleesim.DialogRecord{Number: key, InviteAt: at(150), InviteHeaders: from,
+			Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(1150)}}
+		ackAt := at(62650)
+		d2 := calleesim.DialogRecord{Number: key, InviteAt: at(62350), InviteHeaders: from,
+			Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 200, SentAt: at(62600)},
+			AckAt: &ackAt, End: &calleesim.EndRecord{Method: calleesim.EndedWithBye, By: calleesim.EndedByCallee, At: at(65650)},
+			Downlink: calleesim.Downlink{Energy: []calleesim.EnergyBucket{{PeakRMS: 3000}}}}
+		return assessSteppedContact(rv, cv, key, []calleesim.DialogRecord{d1, d2}, cdrs, nil, at(130000))
+	})
+}
+
+func TestRetriedContactReadsTheSwitchClockOnlyWhereMarked(t *testing.T) {
+	requireOnlySwitchTimeMoves(t, func(sw time.Duration) ScenarioResult {
+		r := Regions[0]
+		cs := caseByID(AllCases, "C03")
+		base := time.Date(2026, 11, 7, 1, 31, 0, 0, time.UTC)
+		at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+		sat := func(ms int) *time.Time { t := at(ms).Add(sw); return &t }
+		did := "95000001"
+		rv := RegionView{Region: r, DID: api.DID{Number: did}}
+		busy := api.CampaignOutcome("BUSY")
+		cause := "USER_BUSY"
+		a1 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+			Outcome: &busy, HangupCause: &cause, StartedAt: at(100), FinishedAt: sat(2285)}
+		a2 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+			Outcome: &busy, HangupCause: &cause, StartedAt: at(62300), FinishedAt: sat(63500)}
+		key := r.DialKey(cs, phonenum.FormE164)
+		cdr := func(a api.CampaignAttempt, end int) []api.CDR {
+			return []api.CDR{{CallID: a.CallID, HangupCause: &cause, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(end)}}
+		}
+		cdrs := map[string][]api.CDR{a1.CallID.String(): cdr(a1, 2285), a2.CallID.String(): cdr(a2, 63500)}
+		af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: sat(62285), LastOutcome: &busy}
+		final := api.CampaignContact{Number: r.Number(cs), Status: "EXHAUSTED", Attempts: 2, LastOutcome: &busy}
+		cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final}
+		from := map[string]string{"from": "<sip:" + did + "@10.0.0.11>"}
+		dlg := func(inv, fin int) calleesim.DialogRecord {
+			return calleesim.DialogRecord{Number: key, InviteAt: at(inv), InviteHeaders: from, Provisionals: []calleesim.ProvisionalRecord{{Status: 180}},
+				Final: &calleesim.FinalRecord{Status: 486, SentAt: at(fin)}}
+		}
+		var findings []string
+		return assessContact(rv, cv, key, []calleesim.DialogRecord{dlg(150, 1150), dlg(62350, 63350)}, cdrs, at(130000), &findings)
+	})
+}
