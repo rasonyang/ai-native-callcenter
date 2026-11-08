@@ -1720,3 +1720,50 @@ B1 shipped, by the decision rule and because it is the smallest change and helps
 The A arm (a per-response direction on the result turn) also measured 0 of 10 and was not shipped: it needs a profile trait and a per-response frame, and it did not stop the filler either (27 of 29 tool-call turns said it).
 
 **Fix verified on plus** (shipped rendering; owner clips, barge-in, 3 ms; 10 sessions): no repeat in 10 of 10 sessions, 30 of 30 result turns read, found=0 asks to check 10 of 10, no filler in any of the 30 tool-call turns (20 of 30 before the fix), and the wait line said on all 15 slow lookups and never repeated as the result turn. Flash on the shipped rendering is the B1 arm above: the zh text is byte for byte what that arm sent.
+
+## W-Q13: a caller turn committed while a manual response runs is refused, not answered (2026-11-08)
+
+**W-Q13 — qwen commits the caller's speech with `server_vad` and creates no response for it when a response this client asked for ("manual", typically the tool-result turn) is still in progress:** `invalid_value: Server VAD turn committed but no response was created because a manual response is already in progress.` Seen on 2026-10-13 (plus, call `01a13363-73fd-7af9-8223-8fe721f6027d`, lead_qualification on 95099): the caller's "Next week." waited 10 s for the dead-air cue. Issue #197.
+
+**What the client does now.** `handleError` recognises the words (`isVADTurnRefused`, any code) and owes the caller's turn through W-Q4's flag (`onVADTurnRefused`): with a response open it is asked for when that response ends; with a request in flight and nothing open it is owed past that request's creation, because the provider made that response before it committed the speech; with the floor free it is asked for at once, unless the caller is speaking again. One flag, so a turn already owed to a tool result or a cue is still one `response.create`. The error is no longer reported as an error: one INFO line (`the provider committed the caller's turn without answering it; the turn is owed`).
+
+**The window is narrow.** On the 2026-11-08 round, five natural attempts on flash (95088 x3, 95099 and 95555 outbound, the caller answering with two phrases without waiting for the bot) produced no refusal. The refusal needs the caller's next phrase to start before the tool-result response is created and to be committed while it is still generating, which takes about 1-2 s on flash. A phrase that starts once that response plays is a barge-in: qwen cancels the response itself (`01a1b8ec-a0d8-7b2b-a76f-5e8dc85ddf82`, early_collections: the bill_lookup answer cut at `playedMs=200`) and answers the new speech. On #448's live round (2026-11-06) one call in eleven produced it.
+
+**Verified by injection.** The fault-injecting relay (`aicc-mockprovider -upstream … -fault vad-refused`, docs/load-tests.md) hides qwen's reply to the first caller turn and sends this error in its place. On flash (`01a1b8e3-91df-7c10-9195-87f1c1c3e07e`, 95012) the turn was asked for at once and the bot spoke 868 ms after the caller stopped; no WARN. Behind the relay on the gateway profile (mlx-realtime, `01a1b8ce-a831-7e9f-9f61-c61165804298`): 724 ms, no WARN. The injected case is the free-floor branch; the open-response and in-flight branches are covered by `owed_vad_turn_test.go` only.
+
+**Which reply follows.** Not observed on a natural refusal (none occurred). On D1 above, flash's reply was the generic "您好，这里是星讯手机售后服务热线。请问有什么可以帮您？", its usual first reply to that question (W-Q14), and the next reply answered it.
+
+**Other profiles.** No findings doc records this error for openai, grok or gateway; the match is on qwen's words and changes nothing for a dialect that never sends them, so no profile trait. Doubao has no `server_vad` refusal of this shape (its own protocol, `docs/design/doubao-findings.md`).
+
+## W-Q14: an abandoned response stays open on qwen and blocks the next turn (2026-11-08)
+
+**W-Q14 — when the watchdog abandons a response (no audio for 3 s), qwen can keep that response open: it refuses every `response.create` meanwhile ("Cannot create response while another response is in progress") and ends it only when the caller speaks again.** Seen on 2026-11-07 (flash, call `01a1b3fd-f508-7da6-86e2-73be1f3a1f55`, mobile_support on 95012): the response server VAD made for "我想查一下我的套餐。" was abandoned at 11:12:25, the dead-air cue, its retry and the drop all failed, and the response ended 19.5 s later (`status=cancelled`) when the caller said "还在吗？". On 2026-10-22 (plus) the provider produced transcript text with no audio for two responses, and the caller's five "Hello." were never answered: speech_started cancels the dead-air watch and nothing else asked for a turn. Issue #310.
+
+**What the client does now** (`onResponseStalled`, `armTurnWatchLocked`):
+
+- An abandoned response is cancelled (`response.cancel`, reason SYSTEM), and the floor stays held for it (`isResponseOpen` stays true) until its `response.done`, a refused cancel ("no active response"), a new `response.created`, or a 3 s cap. The consumer is told the turn is over at once (`ResponseDone` with `IsAbandoned`); the response's late audio is dropped and its done only frees the floor.
+- A response nothing of which was heard owes the caller's turn, asked for once the hold ends: not for a line's or the opening's turn, and once per caller turn (reset by the caller's next speech), so a model that abandons every turn is not asked in a loop.
+- After the cap, a request refused because the abandoned response still runs is settled and stays owed, instead of being retried into the same refusal and dropped.
+- A caller turn with words that no `response.created` follows within 3 s of `speech_stopped` is asked for once (`the provider never answered the caller's turn; asking for it`). New speech ends the watch; a blank transcript is a silence.
+- In the session, a turn abandoned before any of it was queued does not count as answering the caller, so a dead air after it takes #448's path (the model asked to answer the caller) instead of a plain NO_INPUT reprompt.
+
+**Method.** A real stall cannot be provoked, so the round of 2026-11-08 used the fault-injecting relay (docs/load-tests.md) in front of qwen flash (owner-placed calls) and, first, in front of mlx-realtime (calls placed from fs41 with recorded caller audio). The fault hit the first VAD-answered caller turn of every call: `stall` drops the reply's audio and holds its done until the client cancels (or the caller speaks); `stall-hold` ignores the cancel, refuses `response.create` itself and releases the done after 15 s or on the caller's speech; `unanswered` hides the reply entirely. Built with the whole change through its aicall commit; the relay's barge-in fix ("mockprovider: a stalled response ends when the caller speaks over it") applied from the second stall call on.
+
+| Call | Fault | Caller | What happened |
+|---|---|---|---|
+| `01a1b8d4-e28f-7190-979e-b8156459ae7c` (95012) | stall | silent | cancel, the unheard item deleted, one re-ask: first audio 4.1 s after the caller stopped, "……套餐查询不属于我们的业务范围，建议您拨打运营商客服或登录官方APP查询……", played once |
+| `01a1b8d9-c31c-7201-8709-5b766ec155e7` (95001) | stall | silent | re-ask 3.9 s, answered the question, played once |
+| `01a1b8df-0802-77a4-be11-7abc158e43c2` (95012) | stall-hold | silent 25 s | the 11-07 shape: cap at 3 s, the re-ask refused once and kept owed, the dead air took #448's path and its cue waited in the owed turn (not sent); on the release exactly one `response.create`: "抱歉，这里是手机售后服务热线，套餐查询需要联系运营商。……" |
+| `01a1b8dd-8fc5-7e10-b2ac-f45f82ee46f9` (95012) | stall-hold | "还在吗？" after ~6 s | no request during the hold; the caller's speech released it and the owed turn was left to qwen's own reply (one reply); the replies that followed differed from each other |
+| `01a1b8e1-35c5-7061-b6f2-ef915cf8ba76` (95012) | unanswered | silent | caller-turn watch fired at 3001 ms, one request, first audio 3.7 s, answered the question |
+
+On mlx-realtime (gateway profile) the same five shapes and a control passed the same checks (`01a1b8c7-…` to `01a1b8d0-…`, 95001). Over the qwen round (18 calls, faults and controls) the new paths fired only on the faulted calls, and the old "never created the response this client asked for" WARN did not appear once (twice on 11-07).
+
+**Answers to the issue's questions.**
+
+- **Does the model repeat one line after a stall?** Not reproduced. Flash's *first* reply to "我想查一下我的套餐。" on mobile_support was the generic "您好，这里是星讯手机售后服务热线。请问有什么可以帮您？" in 3 of 5 first replies, before any recovery touched the conversation (the replies the relay dropped on two stall calls, and the injected #197 call). Every reply made after a stall's item was deleted and the turn asked for again answered the question, and no call repeated a line the way 11-07 did. The 11-07 repetition is more likely flash than the state the stall left, but one call is not enough to say.
+- **What does the model say to #448's cue after a held stall?** qwen answered the question; mlx-realtime's model took the cue's "if you did not catch it, ask them to repeat" branch (`01a1b8cb-95b8-7f6c-8994-aa0374c98e01`).
+- **Does qwen honour `response.cancel` on a stalled response?** Not observed: every stall this round was the relay's. If it does not, the hold's 3 s cap and the settled refusal bound the cost to one refused request, and the caller hears the bot when the provider lets go (on 11-07, when the caller spoke).
+- **Other profiles.** The client paths are provider-neutral and passed behind the relay on gateway. Whether openai and grok keep an abandoned response open is not known; a cancel that finds nothing is already absorbed (`isAnsweredCancel`). Doubao is a separate client with no server VAD replies to suppress; it was not changed.
+
+**Not covered.** A natural stall on qwen (none occurred); a stall with audio partway (unit tests only: cancelled, not re-asked); three abandoned caller turns in a row (unit test only).
