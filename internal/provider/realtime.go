@@ -54,6 +54,14 @@ const (
 	// mistaken for a drop, short enough that a dropped line is not heard as a
 	// call gone dead.
 	responseCreatedTimeout = 3 * time.Second
+	// stallHoldTimeout caps how long the floor is held for a response the
+	// watchdog gave up and asked the provider to cancel (onResponseStalled).
+	// A cancel is answered in one round trip (74 ms measured on qwen), so
+	// three seconds is a provider that has stopped answering altogether, and
+	// the cap is the same figure as the wait for a response to be created for
+	// the same reason: long enough that a slow answer is not mistaken for none,
+	// short enough that the caller is not left on a held floor.
+	stallHoldTimeout = responseCreatedTimeout
 )
 
 // responseKind is what asked for a response: the label the WARN and the
@@ -94,6 +102,9 @@ type responseRequest struct {
 	// the turn of its first request called a tool and said nothing
 	// (askForLineAgain).
 	isAskedAgain bool
+	// isStallReask marks the request for the turn an abandoned response
+	// owed the caller (onResponseStalled).
+	isStallReask bool
 }
 
 // Realtime is a session against any provider speaking the realtime protocol.
@@ -155,10 +166,12 @@ type Realtime struct {
 	// SendToolResult, SendUserText and releaseOwedTurn.
 	//
 	// isTurnOwed means something is in the conversation that wants a turn
-	// (a tool result, or a cue) and the turn it asks for has not been
-	// requested yet, because a response still held the floor when it arrived
-	// (W-Q4). It is a flag, not a count: however many results and cues one
-	// response produced, they are answered in one turn.
+	// (a tool result, a cue, or the caller's own speech that the provider
+	// committed and then refused to answer, #197) and the turn it asks for
+	// has not been requested yet, because a response still held the floor
+	// when it arrived (W-Q4). It is a flag, not a count: however many
+	// results, cues and refused turns one response produced, they are
+	// answered in one turn.
 	// isOwedPastCreate marks a turn owed while a request was in flight and
 	// nothing was open yet. The response that request makes was asked for
 	// before the item, so it is not the turn that was owed and its creation
@@ -278,6 +291,58 @@ type Realtime struct {
 	deltaStallDeadline time.Duration
 	// responseCreatedDeadline is responseCreatedTimeout, held the same way.
 	responseCreatedDeadline time.Duration
+	// stallHoldDeadline is stallHoldTimeout, held the same way.
+	stallHoldDeadline time.Duration
+
+	// The fields of an abandoned response the provider has not let go of
+	// (#310). See onResponseStalled.
+	//
+	// openID is the provider's id of the response now open, when response.created
+	// named it. isStallPending means the watchdog gave a response up and its
+	// response.done has not been seen: whatever arrives for it is dropped or
+	// absorbed, and nothing of it is reported a second time. isStallHeld is the
+	// narrower state in which the floor is still held for it (isResponseOpen
+	// stays true), until its done, a refused cancel, a new response or
+	// stallGen's timer ends the hold; isStallPending outlives the hold when the
+	// timer ends it. stalledID is the abandoned response's id, stallDropped the
+	// audio deltas of it that were dropped, and stallTimer the hold's cap.
+	// isStallOwed marks the owed turn as the re-ask of an abandoned response
+	// nothing of which was heard, and hasReasked says one re-ask has been made
+	// since the caller last spoke: a model that abandons every turn is asked
+	// once per caller turn, not in a loop.
+	openID         string
+	isStallPending bool
+	isStallHeld    bool
+	stalledID      string
+	// lastAbandonedID is the id of the latest response the watchdog gave up,
+	// kept after the hold ends without that response's done, so a done or a
+	// delta that arrives for it later is not taken for the response now open.
+	// stallCancelAt is the cancelSentAt of the cancel the abandon sent, which
+	// is how the hold's end knows whether cancelReason is still its own.
+	lastAbandonedID string
+	stallCancelAt   time.Time
+	stallDropped    int
+	stallGen        uint64
+	stallTimer      *time.Timer
+	isStallOwed     bool
+	hasReasked      bool
+
+	// The fields of the caller-turn watchdog (#310). See armTurnWatch.
+	//
+	// isTurnPending means the caller's speech has stopped and nothing has
+	// answered it: no response created and no new speech since. hasTurnWords
+	// says the provider's final transcript of the speech since the last
+	// speech_started had words in it. isTurnWatchExpired means the deadline
+	// passed with the floor free and no words yet, so a transcript that
+	// arrives with words asks for the turn then. turnGen numbers the arming,
+	// so a deadline that fires after it was disarmed knows it is stale, and
+	// turnStoppedAt is when the speech stopped.
+	isTurnPending      bool
+	hasTurnWords       bool
+	isTurnWatchExpired bool
+	turnGen            uint64
+	turnTimer          *time.Timer
+	turnStoppedAt      time.Time
 }
 
 // The names this client knows the watchdog's signals by.
@@ -318,6 +383,7 @@ func New(profile Profile, log *slog.Logger) (*Realtime, error) {
 		firstAudioDeadline:      firstAudioTimeout,
 		deltaStallDeadline:      deltaStallTimeout,
 		responseCreatedDeadline: responseCreatedTimeout,
+		stallHoldDeadline:       stallHoldTimeout,
 	}, nil
 }
 
@@ -587,6 +653,10 @@ func (r *Realtime) claimFloorLocked(request responseRequest) {
 	r.isResponseRequested = true
 	r.isTurnOwed = false
 	r.isOwedPastCreate = false
+	r.isStallOwed = false
+	if request.isStallReask {
+		r.hasReasked = true
+	}
 
 	r.request = request
 	r.requestGen++
@@ -956,6 +1026,7 @@ func (r *Realtime) onResponseCreated() (isLine, isAskedAgain bool) {
 	wasTurnOwed := r.isTurnOwed && !r.isOwedPastCreate
 	if wasTurnOwed {
 		r.isTurnOwed = false
+		r.isStallOwed = false
 	}
 	r.isOwedPastCreate = false
 	isCancelNeeded := r.pendingSpeak != "" && !r.isCancelSentForSpeak
@@ -1083,8 +1154,11 @@ func (r *Realtime) SendToolResult(toolCallID, output string) error {
 		map[string]any{"type": "response.create"})
 }
 
-// releaseOwedTurn asks for the turn a tool result is owed, now that the
-// response that held the floor has ended. The read loop calls it after
+// releaseOwedTurn asks for the turn that is owed, now that the response that
+// held the floor has ended. What is owed a turn is a tool result, a cue, or
+// the caller's speech that server VAD committed while a response this client
+// asked for was running (onVADTurnRefused). It is the one place that asks for
+// an owed turn. The read loop calls it after
 // dispatchPendingSpeak, so a line that was waiting has already taken the
 // floor and — through requestResponse — discharged the tool turn: the line
 // is said with the result in view, and one turn is all the floor holds.
@@ -1101,9 +1175,9 @@ func (r *Realtime) SendToolResult(toolCallID, output string) error {
 // caller is still talking. The provider's response.created
 // discharges the held turn (onResponseCreated), as does any request this
 // client makes in the meantime: a keypress's SendUserText, a SpeakText, the
-// dead-air prompt. What is given up is the case where the provider hears
-// speech and then answers nothing; the dead-air prompt is what covers a
-// silent line, and it asks for a turn that reads the output too.
+// dead-air prompt. The case where the provider hears speech and then
+// answers nothing is covered by the caller-turn watchdog (armTurnWatch),
+// which feeds this same flag, and by the dead-air prompt behind it.
 //
 // Once the speech has ended the turn is no longer held. The provider's reply
 // normally follows within a round trip, and a request of ours in that gap
@@ -1122,10 +1196,11 @@ func (r *Realtime) releaseOwedTurn() {
 		r.log.Debug("the caller is speaking; the owed turn is left to the provider's reply")
 		return
 	}
+	isReask := r.isStallOwed
 	r.mu.Unlock()
 
 	r.log.Debug("the floor is free; asking for the owed turn (a tool result or a cue was waiting)")
-	if err := r.requestResponse(responseRequest{kind: responseKindOwed},
+	if err := r.requestResponse(responseRequest{kind: responseKindOwed, isStallReask: isReask},
 		map[string]any{"type": "response.create"}); err != nil {
 		r.log.Warn("could not ask for the owed turn", "error", err)
 	}
@@ -1338,6 +1413,12 @@ func (r *Realtime) Close(_ context.Context) error {
 	r.closeOnce.Do(func() {
 		r.mu.Lock()
 		r.stopRequestTimerLocked()
+		r.stallGen++
+		if r.stallTimer != nil {
+			r.stallTimer.Stop()
+			r.stallTimer = nil
+		}
+		r.disarmTurnWatchLocked()
 		r.mu.Unlock()
 		if r.conn != nil {
 			r.conn.Close()
@@ -1532,12 +1613,19 @@ func (r *Realtime) handle(event *wireEvent) {
 	case "input_audio_buffer.speech_started":
 		r.mu.Lock()
 		r.isCallerSpeaking = true
+		// New speech is a new turn: the watchdog of the last one is off, its
+		// words are not this turn's, and an abandoned response may be
+		// re-asked once more for it.
+		r.disarmTurnWatchLocked()
+		r.hasTurnWords = false
+		r.hasReasked = false
 		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeSpeechStarted})
 
 	case "input_audio_buffer.speech_stopped":
 		r.mu.Lock()
 		r.isCallerSpeaking = false
+		r.armTurnWatchLocked()
 		r.mu.Unlock()
 		r.emit(Event{Type: EventTypeSpeechStopped})
 
@@ -1546,7 +1634,21 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.responseItemID = ""
 		r.callItems, r.finishedCalls = nil, nil
 		r.spokenItems, r.unheardItems = nil, nil
+		r.openID = ""
+		if event.Response != nil {
+			r.openID = event.Response.ID
+		}
+		// The provider has moved on to a response of its own: an abandoned
+		// one is no longer held for, and nothing is pending for the caller's
+		// turn any more.
+		wasStalled, droppedDeltas := r.endStallLocked()
+		r.forgetStallCancelLocked()
+		r.disarmTurnWatchLocked()
 		r.mu.Unlock()
+		if wasStalled {
+			r.log.Debug("a new response was created; the abandoned one is let go",
+				"droppedAudioDeltas", droppedDeltas)
+		}
 		r.hasResponseAudio.Store(false)
 		r.isResponseOpen.Store(true)
 		isLine, isAskedAgain := r.onResponseCreated()
@@ -1582,6 +1684,19 @@ func (r *Realtime) handle(event *wireEvent) {
 
 	// Both the current and the older names for model audio.
 	case "response.audio.delta", "response.output_audio.delta":
+		// Audio of a response the watchdog gave up is not played: the
+		// consumer was told the turn is over, and a late sound would be a
+		// turn nobody is tracking. The transcript still passes (below).
+		r.mu.Lock()
+		isAbandonedAudio := r.isStallPending ||
+			(event.ResponseID != "" && event.ResponseID == r.lastAbandonedID && event.ResponseID != r.openID)
+		if isAbandonedAudio {
+			r.stallDropped++
+		}
+		r.mu.Unlock()
+		if isAbandonedAudio {
+			return
+		}
 		audio, err := base64.StdEncoding.AppendDecode(nil, []byte(event.Delta))
 		if err != nil {
 			r.emit(Event{Type: EventTypeError, Err: fmt.Errorf("undecodable audio: %w", err)})
@@ -1617,6 +1732,7 @@ func (r *Realtime) handle(event *wireEvent) {
 			return
 		}
 		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Transcript, IsFinal: true})
+		r.onCallerTranscript(event.Transcript)
 
 	case "ping":
 		// A keep-alive some vendors send every few seconds. No state, no log.
@@ -1654,11 +1770,34 @@ func (r *Realtime) handle(event *wireEvent) {
 }
 
 func (r *Realtime) handleResponseDone(event *wireEvent) {
+	// Decided with the open flag cleared under the lock, so the watchdog
+	// abandoning this very response (onResponseStalled, which reads the flag
+	// under the same lock) and this end agree on whether the consumer was told.
+	r.mu.Lock()
+	isAbandoned := r.isStallPending &&
+		(event.Response == nil || event.Response.ID == "" || r.stalledID == "" || event.Response.ID == r.stalledID)
+	// The done of an abandoned response whose hold ended without it (the
+	// provider moved on to another response) is not the end of the response
+	// open now: nothing is handled and the open one stays open.
+	if !isAbandoned && event.Response != nil && event.Response.ID != "" &&
+		event.Response.ID == r.lastAbandonedID && r.openID != "" && r.openID != event.Response.ID {
+		openID := r.openID
+		r.mu.Unlock()
+		r.log.Debug("ignored the done of an abandoned response; another response is open",
+			"abandonedId", event.Response.ID, "openId", openID)
+		return
+	}
+	if isAbandoned {
+		r.lastAbandonedID = ""
+	}
+	var droppedDeltas int
+	if isAbandoned {
+		_, droppedDeltas = r.endStallLocked()
+	}
 	r.isResponseOpen.Store(false)
 	// A refusal of a request sent in place of a late one arrives while the late
 	// turn is still running, so once a turn has ended there is none left to
 	// expect: the same words after this are someone else's, and are reported.
-	r.mu.Lock()
 	r.recoverySentAt, r.recoveryLine = time.Time{}, nil
 	r.mu.Unlock()
 	cancelledFor := r.takeCancelReason()
@@ -1688,6 +1827,13 @@ func (r *Realtime) handleResponseDone(event *wireEvent) {
 	// line just asked for is that turn.
 	if !isLineAskedAgain {
 		r.releaseOwedTurn()
+	}
+	// The consumer was told this turn ended when the watchdog gave it up
+	// (onResponseStalled); a second end would flush and count it twice.
+	if isAbandoned {
+		r.log.Debug("the abandoned response has ended; the floor is free",
+			"status", status, "droppedAudioDeltas", droppedDeltas)
+		return
 	}
 	// A cancelled response is a turn that was cut short, whether we asked for
 	// it or the provider decided on its own when it heard the caller. Either
@@ -2238,6 +2384,57 @@ func (r *Realtime) isAnsweredDelete(err *wireError) bool {
 	return false
 }
 
+// isVADTurnRefused reports whether an error is qwen saying that server VAD
+// committed the caller's speech but made no response for it, because a
+// response this client asked for ("manual") was already in progress:
+//
+//	Server VAD turn committed but no response was created because a manual
+//	response is already in progress.
+//
+// Matched on the words alone, with any code, because the error names neither
+// the item nor the frame; the phrase is specific enough that nothing else
+// says it, and a dialect that does not send it is unaffected.
+func isVADTurnRefused(err *wireError) bool {
+	message := strings.ToLower(err.Message)
+	return strings.Contains(message, "server vad turn committed") &&
+		strings.Contains(message, "no response was created")
+}
+
+// onVADTurnRefused owes the caller's turn. The provider heard the caller and
+// committed the speech to the conversation, but its own answer was suppressed
+// by the response this client had asked for, so nothing will answer the caller
+// unless this client does: the dead-air prompt would be the only thing left,
+// 8 s later.
+//
+// It rides the mechanism a tool result waiting for the floor uses (W-Q4), so
+// the turn is asked for once whatever else is owed:
+//   - a response is open: the turn is owed and releaseOwedTurn asks for it when
+//     that response's response.done is handled;
+//   - a request is in flight and nothing is open: the response it makes was
+//     created by the provider before it committed the caller's speech, so it
+//     does not answer it, and its creation must not discharge the debt
+//     (isOwedPastCreate);
+//   - nothing is open or requested: the turn is asked for now, unless the
+//     caller is speaking again, in which case the provider's own reply to that
+//     speech is the answer (releaseOwedTurn).
+func (r *Realtime) onVADTurnRefused() {
+	r.mu.Lock()
+	isOpen := r.isResponseOpen.Load()
+	isRequested := r.isResponseRequested
+	wasOwed := r.isTurnOwed
+	r.isTurnOwed = true
+	if !isOpen && isRequested {
+		r.isOwedPastCreate = true
+	}
+	r.mu.Unlock()
+
+	r.log.Info("the provider committed the caller's turn without answering it; the turn is owed",
+		"isResponseOpen", isOpen, "isResponseRequested", isRequested, "wasOwed", wasOwed)
+	if !isOpen && !isRequested {
+		r.releaseOwedTurn()
+	}
+}
+
 func (r *Realtime) handleError(event *wireEvent) {
 	if event.Error == nil {
 		r.emit(Event{Type: EventTypeError, Err: errors.New("provider reported an unspecified error")})
@@ -2266,12 +2463,24 @@ func (r *Realtime) handleError(event *wireEvent) {
 	if r.isAnsweredCancel(err) {
 		r.log.Debug("the provider refused a cancel because the response had already ended",
 			"code", err.Code, "message", err.Message)
+		// An abandoned response the provider says it is not running is the
+		// hold's answer: nothing is left to wait for.
+		r.freeStallHold("the provider has no response to cancel", false)
 		return
 	}
 
 	if r.isAnsweredDelete(err) {
 		r.log.Debug("the provider refused to delete an item",
 			"code", err.Code, "message", err.Message)
+		return
+	}
+
+	// The provider committed the caller's speech and then declined to answer
+	// it, because a response this client asked for was still running (#197).
+	// Nothing here is a failure and nothing is settled: the response in
+	// flight is a good one, and the caller's turn is simply owed.
+	if isVADTurnRefused(err) {
+		r.onVADTurnRefused()
 		return
 	}
 
@@ -2293,6 +2502,10 @@ func (r *Realtime) handleError(event *wireEvent) {
 				}
 			}
 		}
+		return
+	}
+
+	if r.settleRefusalByAbandoned(err) {
 		return
 	}
 
@@ -2353,24 +2566,308 @@ func (r *Realtime) finishStart(err error) {
 // onResponseStalled closes out a turn the provider walked away from. The
 // watchdog calls it on its own goroutine, having already decided that a
 // response really is open.
+//
+// The provider has not walked away from the response, though: on the call of
+// 2026-11-07 qwen kept the abandoned response open for another 20 seconds and
+// refused every request made meanwhile ("Cannot create response while another
+// response is in progress"), so the dead-air prompt, its retry and the drop
+// that followed all failed, and the response ended only when the caller spoke
+// again. So the response is cancelled, and the floor stays held for it
+// (isResponseOpen stays true, which every floor decision already respects)
+// until the provider lets go: its response.done, a refused cancel
+// ("no active response"), a new response.created, or stallHoldDeadline.
+//
+// The consumer is told the turn is over now, not when the hold ends, with
+// IsAbandoned on the ResponseDone: it knows from its own frame count whether
+// any of the turn was heard. What the provider sends for the response after
+// this is not reported again: its audio is dropped (late sound of a turn nobody
+// is tracking) and its done only frees the floor.
+//
+// A turn nothing of which was heard did not answer the caller, so the turn is
+// owed (isTurnOwed, the flag a tool result waiting for the floor uses), and
+// releaseOwedTurn asks for it when the hold ends. Not for a line's turn or the
+// opening's, which the flow and the orchestrator own with caps of their own,
+// nor for a response that was itself such a re-ask (hasReasked, reset by the
+// caller's next speech): a model that abandons every turn is asked once per
+// caller turn. A turn some of which was heard is not re-asked; the caller
+// heard part, and they or the dead-air prompt take it from there.
+//
+// The call is idempotent per response: a late delta that re-arms the watchdog
+// finds the response already given up.
 func (r *Realtime) onResponseStalled(hasAudioArrived bool) {
 	reason := "the provider never started speaking"
 	if hasAudioArrived {
 		reason = "the provider stopped partway through speaking"
 	}
-	r.isResponseOpen.Store(false)
+	r.mu.Lock()
+	if !r.isResponseOpen.Load() || r.isStallPending {
+		r.mu.Unlock()
+		return
+	}
+	r.isStallPending, r.isStallHeld = true, true
+	r.stalledID, r.stallDropped = r.openID, 0
+	r.lastAbandonedID = r.openID
+	isOwing := !hasAudioArrived && !r.isLineResponse && !r.isOpeningResponse && !r.hasReasked
+	if isOwing {
+		r.isTurnOwed, r.isStallOwed = true, true
+	}
+	r.stallGen++
+	gen := r.stallGen
+	deadline := r.stallHoldDeadline
+	if deadline <= 0 {
+		deadline = stallHoldTimeout
+	}
+	if r.stallTimer != nil {
+		r.stallTimer.Stop()
+	}
+	r.stallTimer = time.AfterFunc(deadline, func() { r.onStallHoldExpired(gen) })
+	r.mu.Unlock()
+
 	r.log.Warn("response abandoned", "reason", reason,
-		"hasAudioArrived", hasAudioArrived)
-	// This path never reaches handleResponseDone, so a line waiting for
-	// a turn the provider walked away from would wait for ever.
-	r.dispatchPendingSpeak(false)
-	// Nor would a tool result's turn that was waiting for it.
-	r.releaseOwedTurn()
+		"hasAudioArrived", hasAudioArrived, "isCancelSent", true, "isTurnOwed", isOwing)
+	if err := r.sendCancel(InterruptReasonSystem); err != nil {
+		r.log.Warn("could not cancel the abandoned response", "error", err)
+	}
+	r.mu.Lock()
+	r.stallCancelAt = r.cancelSentAt
+	r.mu.Unlock()
 	// Not fatal: the session is still usable, and the caller has heard
 	// whatever did arrive. The flow decides what to say next.
 	r.emit(Event{Type: EventTypeError, Text: reason,
 		Err: errors.New(reason)})
-	r.emit(Event{Type: EventTypeResponseDone})
+	r.emit(Event{Type: EventTypeResponseDone, IsAbandoned: true})
+}
+
+// endStallLocked forgets the abandoned response: its done was seen, the
+// provider created another, or the session is ending. It reports whether one
+// was pending and how many of its audio deltas were dropped. The caller holds
+// mu.
+func (r *Realtime) endStallLocked() (wasPending bool, droppedDeltas int) {
+	wasPending, droppedDeltas = r.isStallPending, r.stallDropped
+	r.isStallPending, r.isStallHeld = false, false
+	r.stalledID, r.stallDropped = "", 0
+	r.stallGen++
+	if r.stallTimer != nil {
+		r.stallTimer.Stop()
+		r.stallTimer = nil
+	}
+	return wasPending, droppedDeltas
+}
+
+// forgetStallCancelLocked drops the reason the abandon's cancel recorded
+// (cancelReason, SYSTEM), when the hold ends by anything but the abandoned
+// response's own done, which is what spends it (takeCancelReason). Left, it
+// would label a caller's barge-in on the next response, within
+// cancelAnswerWindow, as this client's own cut, and the session reports no
+// barge-in for those (#493). Only if it is still that cancel's: a later cancel
+// has recorded its own. The caller holds mu.
+func (r *Realtime) forgetStallCancelLocked() {
+	if !r.stallCancelAt.IsZero() && r.cancelSentAt.Equal(r.stallCancelAt) {
+		r.cancelReason = ""
+	}
+	r.stallCancelAt = time.Time{}
+}
+
+// onStallHoldExpired ends the hold on the stall timer's own goroutine: the
+// provider answered neither the cancel nor the response.
+func (r *Realtime) onStallHoldExpired(gen uint64) {
+	if r.conn != nil {
+		select {
+		case <-r.conn.Done():
+			return
+		default:
+		}
+	}
+	r.mu.Lock()
+	if gen != r.stallGen {
+		r.mu.Unlock()
+		return
+	}
+	r.mu.Unlock()
+	r.freeStallHold("the provider did not confirm the cancel of an abandoned response; freeing the floor", true)
+}
+
+// freeStallHold gives the floor back while the abandoned response's done has
+// still not been seen (isStallPending stays, so that done is recognised when
+// it comes), and then does what the end of any response does: the line that
+// waited goes out and the owed turn is asked for. It does nothing when the
+// floor is not held for an abandoned response.
+func (r *Realtime) freeStallHold(why string, isWarn bool) {
+	r.mu.Lock()
+	if !r.isStallHeld {
+		r.mu.Unlock()
+		return
+	}
+	r.isStallHeld = false
+	r.stallGen++
+	if r.stallTimer != nil {
+		r.stallTimer.Stop()
+		r.stallTimer = nil
+	}
+	r.isResponseOpen.Store(false)
+	r.forgetStallCancelLocked()
+	r.mu.Unlock()
+
+	if isWarn {
+		r.log.Warn(why)
+	} else {
+		r.log.Debug(why)
+	}
+	r.dispatchPendingSpeak(false)
+	r.releaseOwedTurn()
+}
+
+// settleRefusalByAbandoned handles a request of ours that the provider refuses
+// because the abandoned response is still running after the hold's cap, and
+// reports whether it did.
+//
+// Without it the refusal is not a recovery (nothing was late), so the request
+// would sit until its own deadline, be retried into the same refusal and be
+// dropped: three seconds of churn, a WARN and a drop count for a state this
+// side caused. The request is settled instead and its turn stays owed (not
+// past a create: no response of this request is coming); the abandoned
+// response's done, or the provider's answer to the caller, releases or
+// discharges it. A line is put back to wait for the floor. Only in this state;
+// elsewhere a refusal is handled as before.
+func (r *Realtime) settleRefusalByAbandoned(err *wireError) bool {
+	message := strings.ToLower(err.Message)
+	if err.Code != "conversation_already_has_active_response" &&
+		!strings.Contains(message, "already has an active response") &&
+		!strings.Contains(message, "another response is in progress") {
+		return false
+	}
+	r.mu.Lock()
+	if !r.isStallPending || r.isStallHeld || r.isResponseOpen.Load() ||
+		!r.isResponseRequested || r.request.kind == responseKindOpening {
+		r.mu.Unlock()
+		return false
+	}
+	refused := r.request
+	r.settleRequestLocked()
+	if refused.kind == responseKindLine && r.pendingSpeak == "" {
+		r.pendingSpeak, r.isPendingSpeakClosing = refused.text, refused.isClosing
+	} else if refused.kind != responseKindLine {
+		r.isTurnOwed, r.isOwedPastCreate = true, false
+	}
+	r.mu.Unlock()
+	r.log.Info("the provider refused a request because the abandoned response is still running; "+
+		"the turn stays owed until it ends", "kind", refused.kind)
+	return true
+}
+
+// armTurnWatchLocked starts the caller-turn watchdog at the end of the
+// caller's speech (#310). The provider's turn detection is meant to answer
+// that speech; when it commits the turn and answers nothing — a response it
+// suppressed while a manual one ran, a response that never came — the caller
+// is left to the dead-air prompt, which never ran at all on the call of
+// 2026-10-22 because the caller kept saying "Hello" and every speech start
+// cancelled it. The watch is one deadline per end of speech
+// (responseCreatedDeadline); a response.created or new speech disarms it. The
+// caller holds mu.
+func (r *Realtime) armTurnWatchLocked() {
+	r.disarmTurnWatchLocked()
+	r.isTurnPending = true
+	r.turnStoppedAt = time.Now()
+	deadline := r.responseCreatedDeadline
+	if deadline <= 0 {
+		deadline = responseCreatedTimeout
+	}
+	gen := r.turnGen
+	r.turnTimer = time.AfterFunc(deadline, func() { r.onTurnWatchExpired(gen) })
+}
+
+// disarmTurnWatchLocked ends the watch on the caller's turn. The caller holds
+// mu.
+func (r *Realtime) disarmTurnWatchLocked() {
+	r.isTurnPending, r.isTurnWatchExpired = false, false
+	r.turnGen++
+	if r.turnTimer != nil {
+		r.turnTimer.Stop()
+		r.turnTimer = nil
+	}
+}
+
+// onTurnWatchExpired is the caller-turn deadline, on the timer's own goroutine.
+func (r *Realtime) onTurnWatchExpired(gen uint64) {
+	if r.conn != nil {
+		select {
+		case <-r.conn.Done():
+			return
+		default:
+		}
+	}
+	r.mu.Lock()
+	if gen != r.turnGen || !r.isTurnPending {
+		r.mu.Unlock()
+		return
+	}
+	r.isTurnWatchExpired = true
+	r.turnTimer = nil
+	r.settleTurnWatchLocked()
+}
+
+// onCallerTranscript feeds the watchdog the provider's final transcript of the
+// caller's speech. A blank one is silence or noise and ends the watch, as an
+// empty transcript ends #448's unanswered turn: nothing is owed to it. Words
+// either make the turn owed now, if the deadline has passed waiting for them,
+// or are kept for the deadline.
+func (r *Realtime) onCallerTranscript(text string) {
+	r.mu.Lock()
+	if strings.TrimSpace(text) == "" {
+		r.disarmTurnWatchLocked()
+		r.mu.Unlock()
+		return
+	}
+	r.hasTurnWords = true
+	if !r.isTurnPending || !r.isTurnWatchExpired {
+		r.mu.Unlock()
+		return
+	}
+	r.settleTurnWatchLocked()
+}
+
+// settleTurnWatchLocked decides what the caller's unanswered turn is owed,
+// once its deadline has passed. It unlocks mu. One request per turn: the watch
+// ends here whenever it decides, and only the next end of speech arms it
+// again.
+//
+//   - a request is in flight: nothing. Its turn is made with the caller's
+//     speech in view, and onRequestExpired bounds it.
+//   - no words yet: the watch stays pending until the transcript arrives
+//     (onCallerTranscript), or is ended by a blank one.
+//   - a response is open (including the hold for an abandoned one): the turn is
+//     owed and released when it ends. This is the speech the provider
+//     committed and dropped while a manual response was running.
+//   - the floor is free: the turn is asked for now. It rides the owed flag, so
+//     a tool result or #197's refusal that already owes the turn makes
+//     it one request, not two.
+func (r *Realtime) settleTurnWatchLocked() {
+	waited := time.Since(r.turnStoppedAt)
+	isOpen := r.isResponseOpen.Load()
+	switch {
+	case r.isResponseRequested:
+		r.disarmTurnWatchLocked()
+		r.mu.Unlock()
+		return
+	case !r.hasTurnWords:
+		r.mu.Unlock()
+		return
+	}
+	wasOwed := r.isTurnOwed
+	r.isTurnOwed = true
+	r.disarmTurnWatchLocked()
+	if !isOpen {
+		// If the response the provider was about to make was only late, it
+		// refuses the one asked for here; that is expected, as for a retry.
+		r.recoverySentAt, r.recoveryLine = time.Now(), nil
+	}
+	r.mu.Unlock()
+
+	r.log.Info("the provider never answered the caller's turn; asking for it",
+		"waitedMs", waited.Milliseconds(), "isResponseOpen", isOpen, "wasOwed", wasOwed)
+	if !isOpen {
+		r.releaseOwedTurn()
+	}
 }
 
 // signal notifies the watchdog without ever blocking the read loop.

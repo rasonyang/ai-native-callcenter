@@ -32,6 +32,22 @@ carries the one-line installer's files.
   (`BOT_START_FAILED`, or the stamped `BOT_LEG_FAILED` on an AI outbound
   call). A campaign attempt that ends in `BOT_START_FAILED` finishes
   `BOT_FAILED`. Rows already written are left as they are. (#334)
+- On qwen, a caller who answers while the bot's previous reply is still being
+  made is now answered. qwen took the caller's words into the conversation but
+  refused to reply to them ("Server VAD turn committed but no response was
+  created because a manual response is already in progress"), and the bot said
+  nothing until the eight-second dead-air prompt. The reply is now asked for as
+  soon as the bot's current turn ends, once, even when a tool result is waiting
+  for the same turn. The refusal is no longer logged as a warning. (#197)
+- The bot no longer goes silent after the voice provider stops producing a
+  reply. A reply that produced no audio for three seconds is now cancelled at
+  the provider, and the caller's turn is asked for again once the provider lets
+  go of it, once per caller turn; on qwen, a reply left open had refused every
+  request, so the dead-air prompt failed too. A caller turn the provider never
+  answers at all is asked for three seconds after the caller stops speaking, so
+  a caller who keeps saying "hello?" into the silence is answered. A dead air
+  after a reply the caller heard none of now asks the bot to answer the caller,
+  as for any turn the engine dropped. (#310)
 - A call whose bot says goodbye in words and never hangs up now ends on that
   goodbye. Before, the flow's closing line was said on top of it after about ten
   seconds of silence (a double goodbye), and a caller who answered the goodbye

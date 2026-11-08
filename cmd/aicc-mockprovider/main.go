@@ -11,6 +11,21 @@
 //	AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/v1/realtime \
 //	OPENAI_API_KEY=not-a-key ./aicc
 //
+// With -upstream it is a fault-injecting relay instead: it forwards every
+// session to a real provider and, on a seeded share of sessions, breaks one
+// turn the way the provider has been seen to (see -fault). The application
+// keeps its real profile and only its endpoint changes:
+//
+//	aicc-mockprovider -addr 127.0.0.1:9099 \
+//	    -upstream wss://dashscope.aliyuncs.com/api-ws/v1/realtime \
+//	    -fault stall -fault-ratio 0.5 -fault-turns 2-4 -seed 1 &
+//	AICC_PROVIDER=qwen \
+//	AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/api-ws/v1/realtime \
+//	ALIYUN_API_KEY=... ./aicc
+//
+// Every injection is logged at WARN with the relay's session number, so a
+// call can be matched against the application's log afterwards.
+//
 // See docs/load-tests.md.
 package main
 
@@ -38,6 +53,16 @@ func main() {
 		"wait between deltas; 0 delivers a turn as fast as the socket takes it, as real providers do")
 	scenarioFile := flag.String("scenario", "",
 		"scenario file: sessions play scripted steps (speak, call a tool, await its result, end) instead of timed turns; see docs/load-tests.md")
+	upstream := flag.String("upstream", "",
+		"relay mode: forward sessions to this real provider WebSocket URL (ws:// or wss://) instead of playing the mock")
+	faultName := flag.String("fault", "",
+		"relay mode: stall | stall-hold | unanswered | vad-refused; empty relays untouched")
+	faultRatio := flag.Float64("fault-ratio", 1, "relay mode: fraction of sessions that are faulted, 0 to 1")
+	faultTurns := flag.String("fault-turns", "2-4",
+		"relay mode: the fault hits one turn chosen uniformly in this inclusive range (N or LO-HI), counted over the caller turns the provider's VAD answered")
+	seed := flag.Int64("seed", 1, "relay mode: with the session number, decides which sessions are faulted and on which turn")
+	hold := flag.Duration("hold", 20*time.Second,
+		"relay mode, stall-hold: how long a held response.done is kept when no barge-in releases it")
 	quiet := flag.Bool("quiet", false, "log warnings only")
 	flag.Parse()
 
@@ -46,6 +71,32 @@ func main() {
 		level = slog.LevelWarn
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+
+	if *upstream != "" {
+		fault, err := ParseFault(*faultName)
+		turns, err2 := ParseTurnRange(*faultTurns)
+		if err != nil || err2 != nil || *faultRatio < 0 || *faultRatio > 1 {
+			if err == nil {
+				err = err2
+			}
+			if err == nil {
+				err = fmt.Errorf("fault-ratio %v: want 0 to 1", *faultRatio)
+			}
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(2)
+		}
+		relay := NewRelay(RelayConfig{
+			Upstream: *upstream, Fault: fault, Ratio: *faultRatio, Turns: turns,
+			Seed: *seed, Hold: *hold, Log: log,
+		})
+		log.Info("mockprovider relay listening", "addr", *addr, "upstream", *upstream,
+			"fault", fault, "ratio", *faultRatio, "turns", *faultTurns, "seed", *seed)
+		if err := http.ListenAndServe(*addr, relay.Handler()); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	var scenario *mockprovider.Scenario
 	if *scenarioFile != "" {

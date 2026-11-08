@@ -67,6 +67,58 @@ provider. The default mode is unchanged. Each session plays one script:
   error and the application rescues the caller instead.
 * Unknown fields and malformed scripts are rejected at startup.
 
+**Relay mode** (`-upstream wss://...`) is for fault injection on the dev stack,
+not for load. The command then serves no script: it accepts the application's
+WebSocket on any path, dials the real provider (the client's query string and its
+`Authorization` and `OpenAI-Beta` headers carried over; the key is never logged) and
+relays frames both ways verbatim. The application keeps its real provider profile
+and only its endpoint changes:
+
+```sh
+go run ./cmd/aicc-mockprovider -addr 127.0.0.1:9099 \
+    -upstream wss://dashscope.aliyuncs.com/api-ws/v1/realtime \
+    -fault stall -fault-ratio 0.5 -fault-turns 2-4 -seed 1
+AICC_PROVIDER=qwen AICC_PROVIDER_ENDPOINT=ws://127.0.0.1:9099/api-ws/v1/realtime ...
+```
+
+* Sessions are numbered 1, 2, 3... in arrival order and every log line about one
+  carries `session=N`. At start the relay logs whether the session is faulted, with
+  which fault and on which turn; each injection is a WARN line with the session,
+  turn, fault and response id, to match against the application's log.
+* `-fault-ratio` is the share of sessions faulted (default 1); `-fault-turns`
+  the inclusive range the faulted turn is drawn from (default 2-4); `-seed`
+  (default 1). Whether a session is faulted, and its turn, is a pure function of the
+  seed and the session number.
+* `stall`: the chosen response's audio deltas are dropped, its transcript passes and
+  its `response.done` is held. A client `response.cancel` goes upstream, the
+  provider's "no active response" refusal is hidden, and the held done is delivered
+  with status `cancelled`; the provider's `input_audio_buffer.speech_started` does the
+  same, as qwen's own barge-in cancel would. With neither within 30 s it is delivered
+  as it came.
+* `stall-hold`: as `stall`, but the cancel is not honoured. While the response is
+  held the relay answers every client `response.create` itself with qwen's "Cannot
+  create response while another response is in progress." (a `conversation.item.create`
+  still goes upstream). The done is delivered as `cancelled` on the provider's
+  `input_audio_buffer.speech_started` or after `-hold` (default 20s).
+* Every fault counts VAD turns only (see below), so the greeting and any response
+  the application asked for never count, and the faulted turn is the provider's own
+  answer to a caller turn. A chosen turn whose `response.created` carries no response
+  id is skipped with a WARN and the next VAD turn takes the fault.
+* `unanswered`: on the chosen VAD turn the relay cancels the response upstream,
+  hides every event of it from the client, then deletes its output items upstream
+  once it is done and hides the replies (a delete refusal such as "item not found"
+  within 3 s; any other provider error still reaches the client). The caller's speech events and input
+  transcription still pass. A VAD turn is a `response.created` that follows
+  `input_audio_buffer.speech_stopped` or `committed` with no client
+  `response.create` since the previous one; only these are counted.
+* `vad-refused`: as `unanswered`, plus qwen's "Server VAD turn committed but no
+  response was created because a manual response is already in progress." error
+  sent to the client in place of the hidden `response.created`.
+
+The relay only reshapes what the real provider sends, so it cannot reproduce a
+provider that fails by itself: the upstream still generated (and bills for) the
+response it hides, and timing around a real stall is the relay's, not the provider's.
+
 **`aicc-loadgen`** is the switch's side of the bot leg: an INVITE with the
 `X-AICC-*` headers the dialplan puts on one, a PCMU offer, 20 ms frames uplink,
 and a stopwatch on every frame downlink.
