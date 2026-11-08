@@ -65,6 +65,7 @@ func TestAnAnsweredCall(t *testing.T) {
 		{"reaped by recovery", CallEnd{HangupCause: "RECOVERY_ON_TIMER_EXPIRE", IsAnswered: true}, OutcomeBotFailed},
 		{"answered after the window closed", CallEnd{HangupCause: "ALLOTTED_TIMEOUT", IsAnswered: true}, OutcomeBotFailed},
 		{"the bridge to the bot never ran", CallEnd{HangupCause: "BOT_BRIDGE_UNCONFIRMED", IsAnswered: true}, OutcomeBotFailed},
+		{"the bot answered and its session never started", CallEnd{HangupCause: "BOT_START_FAILED", IsAnswered: true}, OutcomeBotFailed},
 		{"vanished after a bot talked", CallEnd{HangupCause: "CHANNEL_VANISHED", IsAnswered: true, HasBot: true}, OutcomeAnswered},
 		{"vanished with no bot", CallEnd{HangupCause: "CHANNEL_VANISHED", IsAnswered: true}, OutcomeBotFailed},
 		{"no bot slot", CallEnd{HangupCause: "OVERFLOW", IsAnswered: true}, OutcomeOverflow},

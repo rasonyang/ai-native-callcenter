@@ -2656,7 +2656,7 @@ export interface components {
             did?: string;
             /**
              * Format: uuid
-             * @description The conversation the call was for: the DID's flow. Recorded on every call the bot answered, when it starts the conversation, and on an AI outbound call from the moment it is placed, so one whose bridge to the bot never ran still names it. Absent where no flow was resolved for the call: one that never reached a bot number (a person's call out, a caller sent straight to a queue), a person's call to a bot number the bot never answered, and a row written before this was recorded.
+             * @description The conversation the call was for: the DID's flow. Recorded on every call the bot answered, when it starts the conversation, and on an AI outbound call from the moment it is placed, so one whose bridge to the bot never ran still names it. When the bot answered and never started the conversation, the row takes the DID's flow at the moment it is written. Absent where no flow was resolved for the call: one that never reached a bot number (a person's call out, a caller sent straight to a queue), a number with no flow, a person's call to a bot number the bot never answered, and a row written before this was recorded.
              */
             flowId?: string;
             /**

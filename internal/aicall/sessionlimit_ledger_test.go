@@ -165,7 +165,7 @@ func TestASessionLimitTransferKeepsTheFinalLegsCause(t *testing.T) {
 					hasAgent := cause == "NORMAL_CLEARING"
 					snap := sessionLimitSnapshot(callID, base, end, cause, summary.text, hasAgent, true)
 
-					recorder := newCallRecorder(callID, base, nil)
+					recorder := newStartedRecorder(callID, base, nil)
 					recorder.markSessionLimit()
 					recorder.markTransferred(summary.text, hangupCauseSessionLimit)
 					recorder.markHandedOver(queueID)
@@ -248,7 +248,7 @@ func TestASessionLimitTheBotEndedKeepsSessionLimit(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			callID := uuid.Must(uuid.NewV7())
 			base := time.Now().Add(-70 * time.Second).Truncate(time.Millisecond)
-			recorder := newCallRecorder(callID, base, nil)
+			recorder := newStartedRecorder(callID, base, nil)
 			recorder.markSessionLimit()
 			snapSummary := ""
 			if tc.isTransferDecided {

@@ -191,7 +191,7 @@ func newClaimsHarnessSetup(t *testing.T, profile provider.Profile, flowJSON, lan
 		t.Fatalf("load flow: %v", err)
 	}
 	engine := flow.NewEngine(spec, lang, nil, log)
-	h.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	h.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	h.actions = &callActions{orchestrator: o, session: session, log: log,
 		callerChannel: "chan-9", recorder: h.recorder, facts: testFacts()}
 	h.runtime = flow.NewRuntime(engine, h.actions, flow.NewBackend(backendURL), nil, log)

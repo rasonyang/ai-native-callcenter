@@ -88,7 +88,8 @@ type BotShare struct {
 	// the customer leg when an AI outbound call is placed, and by the bot on
 	// the caller's channel when it starts the conversation. A flow being known
 	// is not a bot having been there — the journey asks whether the bot joined
-	// (botJoined), and who writes the row asks IsStamped.
+	// (botJoined), and who writes the row asks IsSessionStarted and
+	// HandedOver.
 	FlowID *uuid.UUID
 	// FlowSlug names the flow for a reader; the ledger's BOT leg is labelled
 	// with it, as the bot's own row labels it when it writes the row itself.
@@ -100,25 +101,32 @@ type BotShare struct {
 	// UnbackedClaims is each kind of claim the bot made with no tool call
 	// behind it, stamped at the handover.
 	UnbackedClaims []string
-	// IsStamped records that the bot wrote its share onto the caller's
-	// channel, which it does when it hands the call to a person and at no
-	// other time. It is not the same as any field being set: the dialplan
+	// IsStamped records that the bot wrote its duration (aicc_bot_sec) onto
+	// the caller's channel, which it does when it hands the call to a person
+	// and at no other time: the bot handed the call over. It is no longer the
+	// only thing that decides who writes the row (IsSessionStarted is the
+	// other). It is not the same as any field being set: the dialplan
 	// exports the DID and the language to the leg it dials towards the bot, so
 	// every bot call carries those whether or not a person was ever asked for
 	// — and a transfer decided inside the first second stamps a duration of 0.
 	IsStamped bool
+	// IsSessionStarted records that the bot's conversation started
+	// (aicc_bot_started, stamped on the caller's channel once the session is
+	// up). A bot that has started owns the row of a call it keeps: its
+	// session holds the transcript and the containment. A bot leg that
+	// answered but never started has no session to write anything, so the
+	// human path writes the row.
+	IsSessionStarted bool
 }
 
-// HandedOver reports whether the bot passed this call to a person, which is
-// what decides who writes the ledger row: a call the bot kept is the bot's
-// story, told from a session that holds the transcript and the containment
-// this path cannot see.
-//
-// It is not the only reason this path writes a row. A call an agent's phone
-// placed to a bot number is written here whoever ended it (isAgentPlaced, which
-// reads the originating leg's own extension and never its caller id); the
-// bot stamps aicc_bot_sec on it too, as the tally the row needs, and that
-// stamp changes nothing about who owns the row.
+// HandedOver reports whether the bot passed this call to a person (IsStamped).
+// It is one of the reasons the human path writes the row, not the only one:
+// the other is a bot that never started its session (IsSessionStarted), and
+// a call an agent's phone placed to a bot number is written here whoever ended
+// it (isAgentPlaced, which reads the originating leg's own extension and never
+// its caller id). The bot stamps aicc_bot_sec on an agent-placed call too, as
+// the tally the row needs, and that stamp changes nothing about who owns the
+// row.
 func (b BotShare) HandedOver() bool { return b.IsStamped }
 
 // IsZero reports whether the call knows nothing about a bot: no time with one,
@@ -167,6 +175,9 @@ func (b *BotShare) Merge(other BotShare) {
 	if !b.IsStamped {
 		b.IsStamped = other.IsStamped
 	}
+	if !b.IsSessionStarted {
+		b.IsSessionStarted = other.IsSessionStarted
+	}
 }
 
 func botShare(ev *esl.Event) BotShare {
@@ -187,6 +198,10 @@ func botShare(ev *esl.Event) BotShare {
 // language to every leg it dials towards the bot, so those say only that a
 // call met one; the duration is written when the caller is handed to a person
 // and at no other time, which is the question this answers.
+//
+// IsSessionStarted follows aicc_bot_started: the bot stamps it once its
+// session is up, so its absence on a bot leg that answered means the bot never
+// had a conversation to write a row from.
 func botShareFrom(get func(string) string) BotShare {
 	var out BotShare
 	if raw := get("aicc_bot_sec"); raw != "" {
@@ -200,6 +215,7 @@ func botShareFrom(get func(string) string) BotShare {
 			out.FlowID = &parsed
 		}
 	}
+	out.IsSessionStarted = get(botStartedVar) != ""
 	out.FlowSlug = get("aicc_flow_slug")
 	out.DID = get("aicc_did")
 	out.Queue = get("aicc_queue")

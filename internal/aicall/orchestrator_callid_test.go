@@ -66,6 +66,17 @@ func awaitLogLine(t *testing.T, b *syncBuffer, msg string) {
 // sendInvite drives a real UAS the way the switch does: INVITE, 200, ACK.
 func sendInvite(t *testing.T, uasPort int, sipCallID string, aiccHeader []string) {
 	t.Helper()
+	extra := "X-Aicc-Did: 95001\r\nX-Aicc-Channel-Id: chan-1\r\n"
+	for _, h := range aiccHeader {
+		extra += h + "\r\n"
+	}
+	sendInviteWith(t, uasPort, sipCallID, extra)
+}
+
+// sendInviteWith is sendInvite with the whole of the custom headers given, as
+// CRLF-terminated lines.
+func sendInviteWith(t *testing.T, uasPort int, sipCallID, extra string) {
+	t.Helper()
 	sip, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
@@ -82,10 +93,6 @@ func sendInvite(t *testing.T, uasPort int, sipCallID string, aiccHeader []string
 	sdp := "v=0\r\no=peer 1 1 IN IP4 127.0.0.1\r\ns=test\r\nc=IN IP4 127.0.0.1\r\nt=0 0\r\n" +
 		fmt.Sprintf("m=audio %d RTP/AVP 0 101\r\n", rtpPort) +
 		"a=rtpmap:0 PCMU/8000\r\na=rtpmap:101 telephone-event/8000\r\na=ptime:20\r\na=sendrecv\r\n"
-	extra := "X-Aicc-Did: 95001\r\nX-Aicc-Channel-Id: chan-1\r\n"
-	for _, h := range aiccHeader {
-		extra += h + "\r\n"
-	}
 	request := func(method, body string) {
 		ct := ""
 		if body != "" {

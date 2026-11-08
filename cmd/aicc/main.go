@@ -310,6 +310,11 @@ func run() error {
 	if postCall != nil {
 		postCallAPI = postCall
 	}
+	// The assembler finds a number's flow through the same directory, when it
+	// implements telephony.FlowDirectory: a never-started bot's row takes the
+	// DID's flow from it (#334). Asserted, so that a renamed method fails the
+	// build rather than quietly emptying those rows' flowId.
+	var _ telephony.FlowDirectory = catalogSvc
 	cdrAssembler := telephony.NewCDRAssembler(st.Ledger(), catalogSvc, recordingStorage, slog.Default())
 	if postCall != nil {
 		cdrAssembler.SetRecordingOffer(postCall)

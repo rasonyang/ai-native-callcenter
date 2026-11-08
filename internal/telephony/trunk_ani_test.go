@@ -187,15 +187,18 @@ func TestWhoWritesACallIsDecidedByTheSwitchNotByTheCallersNumber(t *testing.T) {
 					"Other-Leg-Unique-ID": callerChan}))
 				c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", benChan, "outbound", map[string]string{
 					"variable_dialed_user": benExt, "variable_aicc_call_id": minted}))
-				callerEnd = merged(callerVars, map[string]string{"variable_aicc_bot_sec": "1"})
+				callerEnd = merged(callerVars, map[string]string{
+					"variable_aicc_bot_sec": "1", "variable_aicc_bot_started": "true"})
 			case clickToDial, keypadDial:
 				// The bot ends it and has stamped its tally on the agent's
 				// channel on the way out (aicc_bot_sec).
 				c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", botChan, "outbound", botLeg))
-				callerEnd = merged(callerVars, map[string]string{"variable_aicc_bot_sec": "1"})
+				callerEnd = merged(callerVars, map[string]string{
+					"variable_aicc_bot_sec": "1", "variable_aicc_bot_started": "true"})
 			default:
 				c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", botChan, "outbound", botLeg))
-				callerEnd = callerVars
+				// A call the bot kept: its session started and stamped so.
+				callerEnd = merged(callerVars, map[string]string{"variable_aicc_bot_started": "true"})
 			}
 			c.Handle(ctx, raw("CHANNEL_HANGUP_COMPLETE", callerChan, direction, callerEnd))
 
@@ -208,7 +211,7 @@ func TestWhoWritesACallIsDecidedByTheSwitchNotByTheCallersNumber(t *testing.T) {
 			// that was handed over, and one the dialplan typed as an agent's
 			// own (OUTBOUND or INTERNAL, not placed to a customer). It writes
 			// the rest. Both read the same facts off this snapshot.
-			botLedgerWrites := botJoined(snap, snap.Bot.Sec) && !snap.Bot.HandedOver() &&
+			botLedgerWrites := snap.Bot.IsSessionStarted && !snap.Bot.HandedOver() &&
 				snap.CallType == events.CallTypeInbound
 			ledger.mu.Lock()
 			rows := slices.Clone(ledger.cdrs)

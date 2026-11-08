@@ -455,7 +455,7 @@ func TestDriveAnswersToolCallsThroughTheFlow(t *testing.T) {
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.recorder = recorder
 
 	done := make(chan struct{})
@@ -537,7 +537,7 @@ func TestAFatalProviderErrorIsRecordedAsAMediaOrProviderFailure(t *testing.T) {
 			actions := &callActions{orchestrator: o, session: session, log: log}
 			runtime := flow.NewRuntime(flow.NewEngine(spec, "en", nil, log),
 				actions, flow.NewBackend(""), nil, log)
-			recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+			recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 			actions.recorder = recorder
 
 			done := make(chan struct{})
@@ -594,7 +594,7 @@ func TestATerminalPhaseSaysItsLineAndStillWaitsForTheCallerToHearIt(t *testing.T
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 	model.answerLinesWithATurn(session)
 
@@ -645,7 +645,7 @@ func TestATerminalPhaseThatFindsAnArmedTransferStillSaysItsLine(t *testing.T) {
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 	model.answerLinesWithATurn(session)
 
@@ -715,7 +715,7 @@ func deadAirHarness(t *testing.T, flowJSON string) (*Orchestrator, *Session,
 	}
 	engine := flow.NewEngine(spec, "en", nil, log)
 	actions := &callActions{orchestrator: o, session: session, log: log}
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 	return o, session, model, engine, runtime, actions, log
 }
@@ -987,7 +987,7 @@ func wallHarness(t *testing.T, hasAnnounce bool) (*Orchestrator, *Session,
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 	model.answerLinesWithATurn(session)
 	return o, session, model, engine, runtime, actions, log, sw
@@ -1135,7 +1135,7 @@ func TestDriveClosesAToolLessLoopThroughTheWall(t *testing.T) {
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.recorder = recorder
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
@@ -1298,7 +1298,7 @@ func TestATerminalTransferPhaseDoesNotHangUpOnTheCallerInstead(t *testing.T) {
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.recorder = recorder
 
 	done := make(chan struct{})
@@ -1492,7 +1492,7 @@ func TestAFlowThatConcludesAlsoSaysSo(t *testing.T) {
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "caller-channel-1",
 	}
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(""), nil, log)
 
 	o.afterMove(engine.OnNoInput(), session, runtime, actions, log)
@@ -1521,7 +1521,7 @@ func TestTheBotStampsItsDurationWhenTheCallerIsHandedOnNotWhenItDecides(t *testi
 	sw := &fakeSwitch{}
 	actions, session, model := testActions(t, sw)
 	actions.facts = testFacts()
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-7*time.Second), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-7*time.Second), nil)
 
 	model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	time.Sleep(20 * time.Millisecond)
@@ -1708,7 +1708,7 @@ func startToolPathFull(t *testing.T, profile provider.Profile, lang, flowJSON,
 	actions := &callActions{
 		orchestrator: o, session: session, log: log, callerChannel: "chan-9",
 	}
-	recorder := newCallRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
+	recorder := newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now(), nil)
 	actions.recorder = recorder
 	actionsRef.Store(actions)
 	runtime := flow.NewRuntime(engine, actions, flow.NewBackend(backendURL), nil, log)
@@ -2460,7 +2460,7 @@ func TestABotThatEndsAnAgentsCallLeavesItsShareOnTheirChannel(t *testing.T) {
 	actions, _, _ := testActions(t, sw)
 	actions.facts = testFacts()
 	actions.facts.callType = callTypeOutbound
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-9*time.Second), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-9*time.Second), nil)
 	actions.recorder.markUnbackedClaim("TRANSFER")
 
 	actions.markFinished("HANGUP")
@@ -2482,7 +2482,7 @@ func TestABotThatEndsAnInboundCallStampsNoTally(t *testing.T) {
 	sw := &fakeSwitch{}
 	actions, _, _ := testActions(t, sw)
 	actions.facts = testFacts()
-	actions.recorder = newCallRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-9*time.Second), nil)
+	actions.recorder = newStartedRecorder(uuid.Must(uuid.NewV7()), time.Now().Add(-9*time.Second), nil)
 
 	actions.markFinished("HANGUP")
 

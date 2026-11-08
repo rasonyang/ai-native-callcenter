@@ -487,6 +487,11 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		return err
 	}
 	obs.OutboundSessionReady(ledgerCallID, time.Now())
+	// The session runs. From here the bot owns the row of a call it keeps, and
+	// the human path is told so (stampSessionStarted). After the readiness
+	// mark, so the time to the first word does not count this stamp.
+	recorder.markStarted()
+	actions.stampSessionStarted()
 	log.Info("ai conversation started", "flowId", spec.ID,
 		"provider", profile.Name, "language", language)
 	// Only now. Everything before this point could still have ended with the
@@ -1544,8 +1549,10 @@ func (o *Orchestrator) rescue(dialog *voice.Dialog) {
 		o.rescuePlaced(dialog, channel)
 		return
 	}
-	queue, ok := o.fallbackQueue(headers[headerDID], false)
+	queue, ok := o.fallbackQueue(log, headers[headerDID], false)
 	if !ok {
+		log.Info("no fallback queue for the number; the dialplan decides what the caller hears",
+			"did", headers[headerDID])
 		return
 	}
 	o.transferToFallback(dialog, channel, queue)
@@ -1563,7 +1570,7 @@ func (o *Orchestrator) rescuePlaced(dialog *voice.Dialog, channel string) {
 		log.Info("campaign call: the bot leg failed; ending it, which hangs the customer up")
 		return
 	}
-	if queue, ok := o.fallbackQueue(headers[headerDID], true); ok {
+	if queue, ok := o.fallbackQueue(log, headers[headerDID], true); ok {
 		o.transferToFallback(dialog, channel, queue)
 		return
 	}
@@ -1578,20 +1585,34 @@ func (o *Orchestrator) rescuePlaced(dialog *voice.Dialog, channel string) {
 // fallbackQueue is the number's fallback queue. mustBeEnabled refuses a closed
 // one: an inbound call keeps sending to it (its dialplan reads the same
 // column), a call placed to a customer takes the prompt instead.
-func (o *Orchestrator) fallbackQueue(didNumber string, mustBeEnabled bool) (catalog.Queue, bool) {
+//
+// Every refusal says why on log (the dialog's logger), so a caller left
+// without a rescue can be explained from the logs.
+func (o *Orchestrator) fallbackQueue(log *slog.Logger, didNumber string, mustBeEnabled bool) (catalog.Queue, bool) {
 	did, err := o.findDID(context.Background(), didNumber)
-	if err != nil || did.FallbackQueueID == nil {
+	if err != nil {
+		log.Warn("could not read the number to find its fallback queue", "did", didNumber, "error", err)
+		return catalog.Queue{}, false
+	}
+	if did.FallbackQueueID == nil {
+		log.Info("the number has no fallback queue", "did", didNumber)
 		return catalog.Queue{}, false
 	}
 	queues, err := o.cfg.Catalog.Queues(context.Background())
 	if err != nil {
+		log.Warn("could not read the queues to find the fallback queue", "did", didNumber, "error", err)
 		return catalog.Queue{}, false
 	}
 	for _, queue := range queues {
 		if queue.ID == *did.FallbackQueueID {
+			if mustBeEnabled && !queue.IsEnabled {
+				log.Info("the fallback queue is closed", "did", didNumber, "queue", queue.Name)
+			}
 			return queue, !mustBeEnabled || queue.IsEnabled
 		}
 	}
+	log.Warn("the number's fallback queue is not in the catalogue", "did", didNumber,
+		"queueId", *did.FallbackQueueID)
 	return catalog.Queue{}, false
 }
 
