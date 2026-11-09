@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -352,6 +353,97 @@ func TestCancelDuringRingingIsAnswered487AndRecorded(t *testing.T) {
 		t.Errorf("final = %+v", rec.Final)
 	}
 	eventually(t, "the ACK to the 487", func() bool { return only(t, sim.Report()).AckAt != nil })
+}
+
+// afterInviteBounds fails unless got lies between hold (the test waited that
+// long between two events it saw in order) and elapsed (the test's own time
+// from before the INVITE to after the report was read): the simulator's
+// interval is contained in the test's. elapsed is taken after Report returns,
+// since a BYE's 200 is sent before the End record is written. Both sides keep
+// sub-millisecond precision.
+func afterInviteBounds(t *testing.T, what string, got float64, hold, elapsed time.Duration) {
+	t.Helper()
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	if got < ms(hold) || got > ms(elapsed) {
+		t.Errorf("%s: AfterInviteMs = %.3f, want between %.3f and %.3f", what, got, ms(hold), ms(elapsed))
+	}
+}
+
+// A ringing dialog ended by CANCEL records how long it rang on the
+// simulator's monotonic clock.
+func TestCancelRecordsTheWaitOnTheMonotonicClock(t *testing.T) {
+	const hold = 700 * time.Millisecond
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"1": {{Provisionals: []Provisional{{Status: 180}}, FinalAfterMs: 5000}},
+	}), nil)
+	uac := newUAC(t, loopback, sim.Addr(), "1")
+	start := time.Now()
+	uac.invite()
+	uac.waitResponse(180, "INVITE")
+	time.Sleep(hold)
+	uac.cancel()
+	uac.waitResponse(487, "INVITE")
+	rec := only(t, sim.Report())
+	elapsed := time.Since(start)
+	if rec.End == nil || rec.End.Method != EndedWithCancel {
+		t.Fatalf("end = %+v", rec.End)
+	}
+	afterInviteBounds(t, "CANCEL", rec.End.AfterInviteMs, hold, elapsed)
+}
+
+func TestByeFromEachSideRecordsTheWaitOnTheMonotonicClock(t *testing.T) {
+	const hold = 400 * time.Millisecond
+	t.Run("caller", func(t *testing.T) {
+		sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{"1": {{}}}), nil)
+		uac := newUAC(t, loopback, sim.Addr(), "1")
+		start := time.Now()
+		uac.invite()
+		uac.waitFinal()
+		time.Sleep(hold)
+		uac.bye()
+		uac.waitResponse(200, "BYE")
+		rec := only(t, sim.Report())
+		elapsed := time.Since(start)
+		if rec.End == nil || rec.End.By != EndedByCaller {
+			t.Fatalf("end = %+v", rec.End)
+		}
+		afterInviteBounds(t, "caller BYE", rec.End.AfterInviteMs, hold, elapsed)
+	})
+	t.Run("callee", func(t *testing.T) {
+		const after = 400
+		sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{"1": {{ByeAfterMs: intp(after)}}}), nil)
+		uac := newUAC(t, loopback, sim.Addr(), "1")
+		start := time.Now()
+		uac.invite()
+		uac.waitFinal()
+		eventually(t, "the callee's BYE", func() bool { return uac.byeCount() > 0 })
+		rec := only(t, sim.Report())
+		elapsed := time.Since(start)
+		if rec.End == nil || rec.End.By != EndedByCallee {
+			t.Fatalf("end = %+v", rec.End)
+		}
+		afterInviteBounds(t, "callee BYE", rec.End.AfterInviteMs, after*time.Millisecond, elapsed)
+	})
+}
+
+// The measurement reads the INVITE's monotonic reading; Time.UTC() strips it
+// without a sound, which would turn the measurement back into a wall-clock
+// subtraction. Time.String() prints an m= field only while one is present.
+func TestTheInviteTimeKeepsItsMonotonicReading(t *testing.T) {
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{"1": {{}}}), nil)
+	uac := newUAC(t, loopback, sim.Addr(), "1")
+	uac.invite()
+	uac.waitFinal()
+	sim.mu.Lock()
+	if len(sim.order) != 1 {
+		sim.mu.Unlock()
+		t.Fatalf("dialogs = %d, want 1", len(sim.order))
+	}
+	at := sim.order[0].inviteAt
+	sim.mu.Unlock()
+	if !strings.Contains(at.String(), " m=") {
+		t.Errorf("the INVITE time %q has no monotonic reading", at.String())
+	}
 }
 
 func TestEachAttemptOnANumberUsesItsOwnBehaviour(t *testing.T) {

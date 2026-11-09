@@ -118,7 +118,7 @@ be replaced by one a real trunk rings.
 | C03 | 180, then 486 | `BUSY`, cause `USER_BUSY` |
 | C05 | 180, then 603 | `REJECTED`, cause `CALL_REJECTED` |
 | C06 | 180, then 404 | `INVALID_NUMBER`, cause `UNALLOCATED_NUMBER`; contact `INVALID_NUMBER`; no further INVITE |
-| C07 | 180, never answered | `NO_ANSWER`; CANCEL at the 5 s ring timeout ±1 s; no provider session |
+| C07 | 180, never answered | `NO_ANSWER`; CANCEL 3.75 to 6 s after the INVITE (the 5 s ring timeout, read on the simulator's monotonic clock); no provider session |
 | C08 | 183 with early media, never answered | `NO_ANSWER`; CANCEL; no provider session |
 | C09 | number on the do-not-call list | `DNC_SKIPPED`, cause `NUMBER_ON_DNC`; contact `DNC`; zero INVITEs |
 | C10 | 180, then 486; the driver lists the number while the retry waits | attempt 1 `BUSY` (`USER_BUSY`), attempt 2 `DNC_SKIPPED` (`NUMBER_ON_DNC`); contact `DNC`; exactly one INVITE, one CDR (attempt 1's), none for the skipped attempt |
@@ -127,12 +127,17 @@ be replaced by one a real trunk rings.
 | C02 | 200, then the customer's BYE at 1 s | `ANSWERED`; contact `DONE`, no lead, no callback; no further INVITE to the number for the rest of the run |
 | C04 | 486 on attempt 1, 200 on attempt 2 (BYE at 3 s) | `BUSY` (`USER_BUSY`), then `ANSWERED`; exactly two INVITEs, at least the 60 s interval apart; contact `DONE` with 2 attempts |
 
-C07's bound is read from the attempt's `startedAt`, which the dialer writes
-just before it sends the originate whose timeout the ring timeout is. The
-switch checks that timeout in whole seconds, so a 5 s ring timeout rings for
-more than 4 s and at most 5 s; measured from the INVITE, a ring that began
-late in a second can read just under 4 s although nothing is wrong. Both
-times are in the report (`cancelAfterStartMs`, `cancelAfterInviteMs`).
+C07's bound is read from the INVITE to the CANCEL on the simulator's
+monotonic clock (`afterInviteMs` on the dialog's `end`, `cancelAfterInviteMs`
+on the attempt), not from two wall-clock stamps: see "Clocks". The switch
+checks the ring timeout in whole seconds from the start of the originate, so a
+5 s ring timeout rings for more than 4 s and at most 5 s; the INVITE leaves
+slightly after the originate begins, so the lower bound is the 5 s timeout
+less the 1 s tolerance less a 0.25 s allowance for that lag, which is 3.75 s,
+and the upper bound is the timeout plus the tolerance, 6 s. The report also
+holds the wall-clock readings of the same ring (`cancelAfterInviteWallMs`,
+`cancelAfterStartMs`); the gap between the monotonic and the wall value is how
+a step of the VM's wall clock shows up.
 
 The policy is the validated minimum: ring timeout 5 s, every interval and the
 transient backoff 60 s, `maxAttempts` and `maxSystemRetries` 2, calling window
@@ -192,24 +197,28 @@ because the platform dialled nothing from then on.
 
 ### Clocks
 
-The driver, the callee simulator and the dialer read one clock, the VM's
-kernel clock. An attempt's `finishedAt`, a contact's `nextAttemptAt` and the
-CDR times are stamped from the switch's event timestamps instead, and the
-switch's clock drifts from the VM's: on one environment it ran 0.25 s ahead
-right after `make e2e-up` and 6.5 s ahead five runs later. A check that ordered
-one clock against the other would pass or fail with the environment's age, so
-the suite anchors on the simulator: when an INVITE is the attempt's (between
-the attempt's start and the next attempt's start), how long a contact was
-watched (from the end of the attempt's dialog), and when C10's retry fell due.
-The checks that must read switch time (that `nextAttemptAt` is the attempt's
+The driver, the callee simulator and the dialer read one clock, the VM's wall
+clock. That clock steps: on Colima `lima-guestagent` sets it from the host
+every 10 s, by as much as a few seconds, so a duration taken from two of its
+stamps can be wrong by that much. C07 therefore reads the simulator's
+monotonic clock (`afterInviteMs`). An attempt's `finishedAt`, a contact's
+`nextAttemptAt` and the CDR times are stamped from the switch's event
+timestamps instead. The switch follows the kernel's monotonic clock and does
+not step, so against the VM's wall clock it sits at an offset that moves as
+the wall clock does: on one environment it ran 0.25 s ahead right after
+`make e2e-up` and 6.5 s ahead five runs later. A check that ordered one clock
+against the other would pass or fail with the environment's age, so the suite
+anchors on the simulator: when an INVITE is the attempt's (between the
+attempt's start and the next attempt's start), how long a contact was watched
+(from the end of the attempt's dialog), and when C10's retry fell due. The
+checks that must read switch time (that `nextAttemptAt` is the attempt's
 end plus the interval, that the retry did not start before `nextAttemptAt`, and
 the retry interval compared across countries and tabulated in `probes.md`)
 carry a `[switch time]` marker in their text. The report measures the offset
 for every attempt that has a dialog (`switchOffsetMs` in `report.json`, and the
 "Switch clock" table in `probes.md`: per country the smallest and largest
 offset; it includes the signalling latency). No tolerance is added for the
-drift: it grows with the switch's uptime, so a fixed one would only move the
-failure later.
+offset: it is not bounded, so a fixed one would only move the failure later.
 
 ### Dial forms
 

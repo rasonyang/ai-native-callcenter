@@ -27,6 +27,11 @@ const (
 	// RingTimeoutTolerance is the functional bound of C07 (from the issue):
 	// the simulator sees the CANCEL at the ring timeout, give or take this.
 	RingTimeoutTolerance = time.Second
+	// RingInviteLagAllowance lowers C07's lower bound. The switch counts the
+	// timeout from the originate's start and the INVITE leaves slightly after
+	// that, so a ring that began late in a second can read just under the
+	// bound from the INVITE although nothing is wrong.
+	RingInviteLagAllowance = 250 * time.Millisecond
 )
 
 // Region is one campaign: a country and the numbers it dials. Numbers are
