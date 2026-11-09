@@ -13,10 +13,12 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
 )
 
-// readLoop is the only goroutine that reads the socket, and the only one that
-// emits. Everything a caller-side method decides is recorded under the mutex
-// and reported from here: those methods are called from the goroutine draining
-// Events, and emitting from one would deadlock the call.
+// readLoop is the only goroutine that reads the socket, and it owns the events
+// channel. The watchdog (onTurnStalled) is the only other goroutine that emits;
+// the read loop stops it before its last events (see emit). Everything a
+// caller-side method decides is recorded under the mutex and reported from
+// here: those methods are called from the goroutine draining Events, and
+// emitting from one would deadlock the call.
 func (s *Session) readLoop() {
 	// readDone closes before the channel does, so a Close called from the
 	// consumer's own goroutine never waits on itself.
@@ -26,6 +28,11 @@ func (s *Session) readLoop() {
 	for {
 		event, raw, err := s.receive()
 		if err != nil {
+			// The socket is gone: no turn is open any more, and the watchdog
+			// must not emit into the channel this goroutine is about to
+			// close. Stop waits for a stall in progress.
+			s.isTurnOpen.Store(false)
+			s.dog.Stop()
 			// The outcome is recorded before Start is released, because
 			// finishStart hands control back to the caller: one that gets it
 			// first can Close the session and stamp a clean outcome over the
@@ -406,6 +413,12 @@ func (s *Session) onTurnStalled(hasAudioArrived bool) {
 
 // emit delivers an event, dropping it only once the session is finished and
 // there is nowhere left to put it.
+//
+// The read loop owns the channel and closes it when it ends. The watchdog is
+// the only other goroutine that emits, and the read loop stops it and waits for
+// it (dog.Stop) before its last events, so nothing follows CLOSED and nothing
+// sends on a closed channel. Anything new that emits from another goroutine has
+// to be stopped there as well.
 //
 // The room in the channel is tried first, on its own. The last events of a
 // session — the failure that ended it, and the CLOSED that follows — are
