@@ -43,6 +43,12 @@ nothing, in the language this session is being held in. Both are shared because
 every client that uses them means the same thing by them, which is the only
 test.
 
+`Watchdog` comes with one duty. Its `OnStall` runs on the watchdog's own
+goroutine and emits, so the read loop that owns the client's event channel calls
+`Stop` before its last events. `Stop` waits for a stall in progress, so nothing
+follows `CLOSED` and nothing sends on a closed channel, which would take the
+whole process down.
+
 ## What a profile is
 
 Every field of `provider.Profile` exists because a vendor forced it to

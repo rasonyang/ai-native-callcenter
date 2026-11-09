@@ -24,9 +24,9 @@
 //
 //	goroutine    | owner        | started by         | stops on                 | in-flight work on stop
 //	-------------|--------------|--------------------|--------------------------|------------------------
-//	read loop    | Session      | Start, after dial  | socket read error/close  | sole closer of Events(); emits CLOSED last
+//	read loop    | Session      | Start, after dial  | socket read error/close  | sole closer of Events(); stops the watchdog first, emits CLOSED last
 //	pacer        | Session      | Start, once up     | stopping closed          | queued frames discarded, never flushed
-//	watchdog     | Session      | Start, after dial  | conn.Done()              | disarms; emits nothing after Done
+//	watchdog     | Session      | Start, after dial  | conn.Done(), or Stop     | waits for a stall in progress; emits nothing once Stop returns
 //	keepalive    | wsconn.Conn  | wsconn.Dial        | conn.Done() / write fail | none
 //
 // One timer runs besides them, and only while tool results are held for a line

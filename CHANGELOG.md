@@ -20,6 +20,12 @@ carries the one-line installer's files.
 
 ### Fixed
 
+- A voice provider dropping its socket while a response was open could crash
+  the whole process, and with it every call: the response watchdog fired after
+  the read loop had closed the event stream and sent on the closed channel. The
+  read loop now stops the watchdog, and waits for a stall in progress, before
+  its last events, on the Realtime protocol (openai, grok, qwen, gateway) and
+  on doubao. (#508)
 - A call whose bot leg answered but whose session never started now gets one
   CDR row, written by the call's switch side. The bot stamps
   `aicc_bot_started` on the caller's channel once its session is up and writes
