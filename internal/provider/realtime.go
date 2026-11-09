@@ -1408,17 +1408,24 @@ func (r *Realtime) isAnsweredRecovery(err *wireError) (isRecovery bool, line *re
 	return true, line
 }
 
+// stopTimersLocked stops every timer the session runs: the request deadline,
+// the stall hold and the caller-turn watch. A timer that is already firing
+// finds its generation stale. The caller holds mu.
+func (r *Realtime) stopTimersLocked() {
+	r.stopRequestTimerLocked()
+	r.stallGen++
+	if r.stallTimer != nil {
+		r.stallTimer.Stop()
+		r.stallTimer = nil
+	}
+	r.disarmTurnWatchLocked()
+}
+
 // Close ends the session.
 func (r *Realtime) Close(_ context.Context) error {
 	r.closeOnce.Do(func() {
 		r.mu.Lock()
-		r.stopRequestTimerLocked()
-		r.stallGen++
-		if r.stallTimer != nil {
-			r.stallTimer.Stop()
-			r.stallTimer = nil
-		}
-		r.disarmTurnWatchLocked()
+		r.stopTimersLocked()
 		r.mu.Unlock()
 		if r.conn != nil {
 			r.conn.Close()
@@ -1568,10 +1575,17 @@ func (r *Realtime) readLoop() {
 			// that cannot be rebuilt, so a lost socket ends the session and
 			// the call is routed somewhere a person can take it.
 			r.finishStart(err)
-			// Nothing will be created on a connection that is gone.
+			// Nothing will be created on a connection that is gone: no timer
+			// may fire into a dead socket (a stall hold or a turn watch would
+			// re-arm the request timer), and no response is open any more.
 			r.mu.Lock()
-			r.stopRequestTimerLocked()
+			r.stopTimersLocked()
+			r.isResponseOpen.Store(false)
 			r.mu.Unlock()
+			// The watchdog is the only other goroutine that emits. Stop it,
+			// and wait for a stall in progress, before the last events and the
+			// close of the channel; mu is not held, onResponseStalled takes it.
+			r.dog.Stop()
 			if !isNormalClosure(err) {
 				r.emit(Event{
 					Type: EventTypeError, Err: err, IsFatal: true,
@@ -2874,6 +2888,12 @@ func (r *Realtime) settleTurnWatchLocked() {
 func (r *Realtime) signal(s WatchSignal) { r.dog.Signal(s) }
 
 // emit delivers an event, dropping it only once the session is finished.
+//
+// The read loop owns the channel and closes it when it ends. The watchdog
+// (onResponseStalled) is the only other goroutine that emits, and the read
+// loop stops it and waits for it (dog.Stop) before its last events, so nothing
+// follows CLOSED and nothing sends on a closed channel. Anything new that emits
+// from another goroutine has to be stopped there as well.
 func (r *Realtime) emit(event Event) {
 	select {
 	case r.events <- event:

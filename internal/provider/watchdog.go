@@ -2,7 +2,10 @@
 
 package provider
 
-import "time"
+import (
+	"sync"
+	"time"
+)
 
 // WatchSignal tells the watchdog where a response has got to.
 type WatchSignal uint8
@@ -33,6 +36,12 @@ const watchBuffer = 16
 type Watchdog struct {
 	cfg     WatchdogConfig
 	signals chan WatchSignal
+
+	// stop and finished serve Stop: stop is closed once to ask Run to return,
+	// finished is closed by Run as it returns.
+	stop     chan struct{}
+	stopOnce sync.Once
+	finished chan struct{}
 }
 
 // WatchdogConfig is everything the watchdog needs from its client.
@@ -62,7 +71,39 @@ type WatchdogConfig struct {
 
 // NewWatchdog builds a watchdog. Nothing runs until Run is called.
 func NewWatchdog(cfg WatchdogConfig) *Watchdog {
-	return &Watchdog{cfg: cfg, signals: make(chan WatchSignal, watchBuffer)}
+	return &Watchdog{
+		cfg:      cfg,
+		signals:  make(chan WatchSignal, watchBuffer),
+		stop:     make(chan struct{}),
+		finished: make(chan struct{}),
+	}
+}
+
+// Stop ends the watchdog and waits for it to be gone.
+//
+// When Stop returns, OnStall is not running and never will run again. A stall
+// already in progress is waited for, so OnStall may still deliver its last
+// events before Stop returns; that is what lets a client that owns a channel
+// close it afterwards without a send racing the close.
+//
+// Stop must not be called from OnStall, which it would wait on forever. Run
+// must have been started, or be about to be: a client that starts the read
+// loop and Run as two goroutines may reach Stop first, and then Stop returns
+// once Run has started and seen it. Stop is idempotent, and safe to call
+// alongside the session's Done closing.
+func (w *Watchdog) Stop() {
+	w.stopOnce.Do(func() { close(w.stop) })
+	<-w.finished
+}
+
+// isStopped reports whether Stop has been asked for.
+func (w *Watchdog) isStopped() bool {
+	select {
+	case <-w.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 // Signals is where progress arrives. It is exposed for the client that wants to
@@ -81,9 +122,10 @@ func (w *Watchdog) Signal(s WatchSignal) {
 	}
 }
 
-// Run watches until the session ends. It is one goroutine and the caller owns
-// it: nothing else here starts or stops it.
+// Run watches until the session ends or Stop is called. It is one goroutine
+// and the caller owns it.
 func (w *Watchdog) Run() {
+	defer close(w.finished)
 	timer := time.NewTimer(time.Hour)
 	if !timer.Stop() {
 		<-timer.C
@@ -118,6 +160,9 @@ func (w *Watchdog) Run() {
 		case <-w.cfg.Done:
 			return
 
+		case <-w.stop:
+			return
+
 		case signal := <-w.signals:
 			switch signal {
 			case WatchResponseStarted:
@@ -138,7 +183,7 @@ func (w *Watchdog) Run() {
 			// cleanly. The state cannot be lost the way a signal can, so it
 			// is what decides. Found under sustained load, where about 1% of
 			// turns were reported abandoned while the model was fine.
-			if !w.cfg.IsResponseOpen() {
+			if w.isStopped() || !w.cfg.IsResponseOpen() {
 				continue
 			}
 			w.cfg.OnStall(hasAudioArrived)
