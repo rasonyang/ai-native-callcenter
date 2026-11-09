@@ -81,6 +81,11 @@ type EndRecord struct {
 	Method string    `json:"method"`
 	By     string    `json:"by"`
 	At     time.Time `json:"at"`
+	// AfterInviteMs is how long after the INVITE this request arrived, on the
+	// simulator's monotonic clock. At minus the dialog's InviteAt is the wall
+	// clock's reading of the same interval; the two differ when the wall clock
+	// stepped in between.
+	AfterInviteMs float64 `json:"afterInviteMs"`
 }
 
 // Downlink is the audio the caller sent.

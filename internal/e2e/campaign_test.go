@@ -5,7 +5,10 @@ package e2e
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/api"
+	"github.com/rasonyang/ai-native-callcenter/internal/calleesim"
 	"github.com/rasonyang/ai-native-callcenter/internal/phonenum"
 )
 
@@ -61,5 +64,91 @@ func TestSIPUserOfAFromHeader(t *testing.T) {
 		if got := sipUser(in); got != want {
 			t.Errorf("sipUser(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// c07Ring runs assessDialog on a C07 dialog whose stamps are set as given:
+// the INVITE at t0, the CANCEL wallMs later on the wall clock, the attempt
+// started startMs before the INVITE, and the simulator's monotonic reading of
+// the ring is monoMs. It returns the failures of the ring check and the
+// attempt result.
+func c07Ring(t *testing.T, wallMs, monoMs float64, startMs int) ([]string, AttemptResult) {
+	t.Helper()
+	var cs Case
+	for _, c := range AllCases {
+		if c.ID == "C07" {
+			cs = c
+		}
+	}
+	t0 := time.Date(2026, 11, 9, 0, 52, 34, 468e6, time.UTC)
+	rv := RegionView{}
+	rv.DID.Number = "95000001"
+	d := calleesim.DialogRecord{
+		InviteAt:      t0,
+		InviteHeaders: map[string]string{"from": "<sip:95000001@10.0.0.11>"},
+		Provisionals:  []calleesim.ProvisionalRecord{{Status: 180}},
+		Final:         &calleesim.FinalRecord{Status: 487},
+		End: &calleesim.EndRecord{
+			Method: calleesim.EndedWithCancel, By: calleesim.EndedByCaller,
+			At: t0.Add(time.Duration(wallMs * float64(time.Millisecond))), AfterInviteMs: monoMs,
+		},
+	}
+	a := api.CampaignAttempt{StartedAt: t0.Add(-time.Duration(startMs) * time.Millisecond)}
+	var col Checks
+	var ar AttemptResult
+	assessDialog(&col, "", rv, cs, a, &d, nil, &ar)
+	var ring []string
+	for _, f := range col.failures {
+		if strings.Contains(f, "the CANCEL came at the 5 s ring timeout") {
+			ring = append(ring, f)
+		}
+	}
+	for _, c := range col.checks {
+		if strings.Contains(c, "the CANCEL came at the 5 s ring timeout") {
+			return ring, ar
+		}
+	}
+	t.Fatal("the ring check did not run")
+	return nil, ar
+}
+
+// C07 reads the ring on the simulator's monotonic clock, from 3.75 s (the 4 s
+// the switch's whole-second check guarantees, less the INVITE's lag behind the
+// originate) to 6 s (the timeout and the tolerance).
+func TestC07BoundReadsTheMonotonicRing(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		wall, mo float64
+		pass     bool
+	}{
+		{"below the lower bound", 5000, 3749, false},
+		{"the lower bound", 5000, 3750, true},
+		{"a true ring", 5000, 4879, true},
+		{"the upper bound", 5000, 6000, true},
+		{"above the upper bound", 5000, 6001, false},
+		{"no measured value", 5000, 0, false},
+		// Measured: the wall clock stepped back 2050 ms inside a 4864 ms ring.
+		{"wall 2814 ms, monotonic 4864 ms", 2814, 4864, true},
+		// The wall clock reads a perfect 5 s; the ring was only 2.5 s.
+		{"wall 5000 ms, monotonic 2500 ms", 5000, 2500, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failures, ar := c07Ring(t, tc.wall, tc.mo, 23)
+			if got := len(failures) == 0; got != tc.pass {
+				t.Fatalf("passed = %v, want %v: %v", got, tc.pass, failures)
+			}
+			if ar.CancelAfterInviteMs == nil || *ar.CancelAfterInviteMs != tc.mo {
+				t.Errorf("cancelAfterInviteMs = %v, want %v", ar.CancelAfterInviteMs, tc.mo)
+			}
+			if ar.CancelAfterInviteWallMs == nil || *ar.CancelAfterInviteWallMs != tc.wall {
+				t.Errorf("cancelAfterInviteWallMs = %v, want %v", ar.CancelAfterInviteWallMs, tc.wall)
+			}
+			if ar.CancelAfterStartMs == nil || *ar.CancelAfterStartMs != tc.wall+23 {
+				t.Errorf("cancelAfterStartMs = %v, want %v", ar.CancelAfterStartMs, tc.wall+23)
+			}
+			if len(failures) > 0 && !strings.Contains(failures[0], "wall clock") {
+				t.Errorf("the failure does not give the wall-clock values: %s", failures[0])
+			}
+		})
 	}
 }

@@ -335,13 +335,14 @@ func FirstAudioTable(rows []FirstAudioRow) string {
 // Without that, a platform that dialled nothing from the retry's due time on
 // would pass for one that skipped the number.
 //
-// Every ordering here is read on one clock, the host's, which the driver, the
-// simulator and the dialer share. The retry falls due RetryIntervalSec after
-// the callee's final response to attempt 1; the listing is held to that
-// response, not to the attempt's finishedAt or the contact's nextAttemptAt,
-// which are stamped from the switch's clock and drift from the host's (issue
-// #504). Those two are only printed, marked as switch time. A dialog with no
-// final response fails each check that needs it; nothing is skipped.
+// Every ordering here is read on one clock, the host's wall clock, which the
+// driver, the simulator and the dialer share. The retry falls due
+// RetryIntervalSec after the callee's final response to attempt 1; the
+// listing is held to that response, not to the attempt's finishedAt or the
+// contact's nextAttemptAt, which are stamped from the switch's clock, which
+// part ways with the host's wall clock (issues #504, #506). Those two are only
+// printed, marked as switch time. A dialog with no final response fails each
+// check that needs it; nothing is skipped.
 func assessListedMidRun(rv RegionView, cv ContactView, key string, dialogs, control []calleesim.DialogRecord,
 	cdrs map[string][]api.CDR, calleeReadAt time.Time) ScenarioResult {
 	cs := cv.Case

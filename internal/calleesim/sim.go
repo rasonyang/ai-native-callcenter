@@ -194,13 +194,14 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 	behaviour, known := s.cfg.Scenario.For(number, attempt)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	inviteAt := time.Now() // keeps its monotonic reading; see dialog.inviteAt
 	d := &dialog{
-		s: s, invite: msg, from: from, behaviour: behaviour, ctx: ctx, cancel: cancel,
+		s: s, invite: msg, inviteAt: inviteAt, from: from, behaviour: behaviour, ctx: ctx, cancel: cancel,
 		toTag: randomHex(4),
 		ackCh: make(chan struct{}),
 		rec: DialogRecord{
 			CallID: msg.CallID(), Number: number, Attempt: attempt, IsExpected: known,
-			RemoteAddr: from.String(), InviteAt: time.Now().UTC(), RequestURI: msg.RequestURI(),
+			RemoteAddr: from.String(), InviteAt: inviteAt.UTC(), RequestURI: msg.RequestURI(),
 			InviteHeaders: msg.Headers(), Provisionals: []ProvisionalRecord{},
 			Downlink: Downlink{Energy: []EnergyBucket{}},
 		},
@@ -244,8 +245,12 @@ func (s *Server) localIPFor(peer *net.UDPAddr) string {
 
 // dialog is one INVITE being played out.
 type dialog struct {
-	s         *Server
-	invite    *voice.SIPMessage
+	s      *Server
+	invite *voice.SIPMessage
+	// inviteAt is the INVITE's arrival with its monotonic reading. Time.UTC()
+	// strips that reading silently, so rec.InviteAt cannot serve: AfterInviteMs
+	// is measured from this field, on the clock a wall-clock step cannot move.
+	inviteAt  time.Time
 	from      *net.UDPAddr
 	behaviour Behaviour
 	toTag     string
@@ -438,7 +443,7 @@ func (d *dialog) hangUp() {
 	// order, and byeTarget sends the BYE to the first of them.
 	packet := voice.BuildBye(d.rec.CallID, d.invite.From(), d.invite.To(), d.toTag,
 		d.localIP, d.s.Addr().Port, d.invite.RecordRoutes(), d.invite.Contact())
-	d.rec.End = &EndRecord{Method: EndedWithBye, By: EndedByCallee, At: time.Now().UTC()}
+	d.rec.End = d.endRecord(EndedWithBye, EndedByCallee, time.Now())
 	d.s.send(target, packet)
 	d.mu.Unlock()
 	d.finish()
@@ -485,7 +490,7 @@ func (d *dialog) onBye(bye *voice.SIPMessage) {
 		return
 	}
 	d.ended = true
-	d.rec.End = &EndRecord{Method: EndedWithBye, By: EndedByCaller, At: time.Now().UTC()}
+	d.rec.End = d.endRecord(EndedWithBye, EndedByCaller, time.Now())
 	d.mu.Unlock()
 	d.finish()
 }
@@ -500,14 +505,24 @@ func (d *dialog) onCancel(cancel *voice.SIPMessage) {
 		return
 	}
 	d.ringing, d.ended = false, true
-	now := time.Now().UTC()
+	nowMono := time.Now()
+	now := nowMono.UTC()
 	packet := d.invite.Response487(d.toTag)
 	d.lastResponse = packet
 	d.rec.Final = &FinalRecord{Status: 487, SentAt: now}
-	d.rec.End = &EndRecord{Method: EndedWithCancel, By: EndedByCaller, At: now}
+	d.rec.End = d.endRecord(EndedWithCancel, EndedByCaller, nowMono)
 	d.s.send(d.from, packet)
 	d.mu.Unlock()
 	d.finish()
+}
+
+// endRecord is the record of the request that ended the dialog, which arrived
+// at now (a reading that still carries its monotonic part). Callers hold d.mu.
+func (d *dialog) endRecord(method, by string, now time.Time) *EndRecord {
+	return &EndRecord{
+		Method: method, By: by, At: now.UTC(),
+		AfterInviteMs: float64(now.Sub(d.inviteAt)) / float64(time.Millisecond),
+	}
 }
 
 // shutdown ends a dialog the process is abandoning. It records nothing: the

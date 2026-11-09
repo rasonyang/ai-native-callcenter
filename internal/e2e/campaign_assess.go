@@ -27,10 +27,13 @@ const inviteSlack = time.Second
 
 // switchTime marks a check that reads the switch's clock: an attempt's
 // finishedAt and the contact's nextAttemptAt are stamped from the switch's
-// event timestamps, and that clock drifts from the host's (issue #504). Every
-// other check anchors on the simulator, whose clock the driver and the dialer
-// share. No tolerance is added for the drift: it grows with the switch's
-// uptime, so a fixed one would only make the failure come later.
+// event timestamps. That clock follows the kernel's monotonic clock and does
+// not step, while the host's wall clock does (on Colima the VM's is stepped
+// every 10 s), so the two part ways (issues #504, #506). Every other
+// check anchors on the simulator, whose wall clock the driver and the dialer
+// share. No tolerance is added for the offset: it is not bounded, so a fixed
+// one would only make the failure come later. C07 reads the simulator's
+// monotonic clock instead.
 const switchTime = " [switch time]"
 
 // simDialogEnd is the simulator's end of a dialog on the host clock: the end of
@@ -195,10 +198,15 @@ type AttemptResult struct {
 	Failures []string                `json:"failures"`
 	// Bundle is the failure bundle's directory, relative to the run's.
 	Bundle string `json:"bundle,omitempty"`
-	// CancelAfterInviteMs and CancelAfterStartMs are a ringing case's time
-	// from the INVITE, and from the attempt's start, to the caller's CANCEL.
-	CancelAfterInviteMs *float64 `json:"cancelAfterInviteMs,omitempty"`
-	CancelAfterStartMs  *float64 `json:"cancelAfterStartMs,omitempty"`
+	// CancelAfterInviteMs is a ringing case's time from the INVITE to the
+	// caller's CANCEL on the simulator's monotonic clock: the value C07's bound
+	// reads. CancelAfterInviteWallMs is the same interval as two wall-clock
+	// stamps and CancelAfterStartMs runs from the attempt's start to the CANCEL
+	// on the wall clock. A gap between the monotonic and the wall value is a
+	// step of the host's wall clock.
+	CancelAfterInviteMs     *float64 `json:"cancelAfterInviteMs,omitempty"`
+	CancelAfterInviteWallMs *float64 `json:"cancelAfterInviteWallMs,omitempty"`
+	CancelAfterStartMs      *float64 `json:"cancelAfterStartMs,omitempty"`
 	// RetryLatenessMs is how long after the previous nextAttemptAt this
 	// attempt started. Reported, never asserted beyond "not early".
 	RetryLatenessMs *float64 `json:"retryLatenessMs,omitempty"`
@@ -658,22 +666,27 @@ func assessDialog(col *Checks, pre string, rv RegionView, cs Case, a api.Campaig
 	if !cancelled {
 		return
 	}
-	after := d.End.At.Sub(d.InviteAt)
-	ms := float64(after.Milliseconds())
+	// The ring is read on the simulator's monotonic clock: the host's wall
+	// clock steps (on Colima by as much as a few seconds), so two wall-clock stamps can misstate
+	// a 5 s ring by that much. The switch checks the ring timeout in whole
+	// seconds from the start of the originate, which the INVITE trails, so a
+	// true ring is 4 to 5 s from the originate and the lower bound allows
+	// RingInviteLagAllowance below that. The wall-clock readings are reported
+	// beside it; the gap between them is the step.
+	ring := time.Duration(d.End.AfterInviteMs * float64(time.Millisecond))
+	ms := d.End.AfterInviteMs
 	ar.CancelAfterInviteMs = &ms
-	// The ring timeout is the originate's, and the switch checks it in whole
-	// seconds from the moment the originate began: a 5 s timeout rings for
-	// more than 4 s and at most 5 s. The attempt's start is written just
-	// before the originate is sent, so it is the clock the bound is read on;
-	// measured from the INVITE, a ring that began late in a second could
-	// read just under 4 s although the switch behaved.
-	ring := d.End.At.Sub(a.StartedAt)
-	ringMs := float64(ring.Milliseconds())
-	ar.CancelAfterStartMs = &ringMs
+	wallMs := float64(d.End.At.Sub(d.InviteAt).Milliseconds())
+	ar.CancelAfterInviteWallMs = &wallMs
+	startMs := float64(d.End.At.Sub(a.StartedAt).Milliseconds())
+	ar.CancelAfterStartMs = &startMs
 	if cs.HasRingTimeoutBound {
-		col.That(absDuration(ring-RingTimeoutSec*time.Second) <= RingTimeoutTolerance,
-			pre+"the CANCEL came at the %d s ring timeout, within %s (%.0f ms after the attempt started, %.0f ms after the INVITE)",
-			RingTimeoutSec, RingTimeoutTolerance, ringMs, ms)
+		lo := RingTimeoutSec*time.Second - RingTimeoutTolerance - RingInviteLagAllowance
+		hi := RingTimeoutSec*time.Second + RingTimeoutTolerance
+		// A dialog with no measured value (zero) fails: a ring is never 0 ms.
+		col.That(ring >= lo && ring <= hi,
+			pre+"the CANCEL came at the %d s ring timeout, %s to %s after the INVITE (%.0f ms on the simulator's monotonic clock; wall clock: %.0f ms after the INVITE, %.0f ms after the attempt started)",
+			RingTimeoutSec, lo, hi, ms, wallMs, startMs)
 	}
 }
 
@@ -831,7 +844,7 @@ func SwitchClockTable(results []ScenarioResult) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n### Switch clock (an attempt's finishedAt minus the end of its dialog on the simulator; includes signalling latency)\n\n")
-	b.WriteString("Checks marked [switch time] read the switch's clock; every other check reads the simulator's and the driver's, which share the host clock.\n\n")
+	b.WriteString("Checks marked [switch time] read the switch's clock; every other check reads the simulator's and the driver's, which share the host's wall clock (C07 reads the simulator's monotonic clock).\n\n")
 	b.WriteString("| region | min offset | max offset | attempts |\n|---|---|---|---|\n")
 	for _, region := range order {
 		sp := by[region]
