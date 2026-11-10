@@ -54,7 +54,6 @@ services:
         BASE_IMAGE: ${BASE_IMAGE:-gcr.io/distroless/static-debian12:nonroot}
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
-        NPM_MIRROR: x
     restart: unless-stopped
     depends_on:
       postgres:

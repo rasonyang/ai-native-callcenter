@@ -135,7 +135,7 @@ jobs:
           cache-from: |
             type=gha
             type=gha,scope=image
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=image,mode=max' || '' }}
+          cache-to: type=gha,scope=image,mode=max
 
       # The arm64 binary cannot be run here without an emulator, so check what
       # it was built for: a TARGETARCH that does not reach `go build` builds
