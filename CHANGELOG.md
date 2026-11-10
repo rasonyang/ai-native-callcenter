@@ -7,6 +7,73 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+## v0.8.0 - 2026-11-10
+
+### Upgrade notes
+
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image changed in this release:
+  its RTP range is now 20000-25999 (it was 16384-16584) and the image exposes
+  that range (#417, #450); the `internal-ipv6` and `external-ipv6` SIP profiles
+  are no longer shipped (#422); and it carries the product's own "bot
+  unavailable" prompts, `sounds/aicc/<zh|en>/bot-unavailable.wav`, which
+  `aicc_inbound.lua` plays when the bot cannot take a call. They ship even
+  with `SOUNDS=none`, and an image build fails if they are missing (#485). A
+  switch installed natively is not updated by an image: copy the two prompt
+  files in once (`docs/dev-stack.md`) and keep its RTP range clear of the
+  bot's.
+- The application adds one migration, 00047, which runs at startup. It creates
+  the function `enforce_call_id_is_uuidv7()` with a before-insert and a
+  before-update-of-`call_id` trigger on each of `cdrs` and `campaign_attempts`,
+  and adds the check `ck_campaigns_id_uuidv7` (`NOT VALID`, as every campaign
+  id was already a v7) on `campaigns`. No row is rewritten: rows written by
+  earlier versions keep their v4 call ids and stay updatable, and a new row
+  whose call id is not a v7 is refused. Rolling it back drops the triggers, the
+  function and the check and loses no data; the database then accepts any call
+  id again (#400). A call still in progress across the upgrade, whose v4 id the
+  previous version minted, has its CDR refused, so upgrade between calls.
+- Settings. Removed: `AICC_BOT_ADVERTISE_IP`; a deployment that still sets it
+  starts and logs one warning that it is ignored (#349). Changed defaults:
+  `AICC_BOT_RTP_PORT_LOW` and `AICC_BOT_RTP_PORT_HIGH` are now 26000 and 29999
+  (they were 40000 and 40999; the Linux overlay set 30000-30999), and a
+  deployment that sets them keeps its values (#450). With `AICC_PROVIDER=qwen`
+  the default model is now `qwen-audio-3.1-realtime-flash` (it was
+  `qwen-audio-3.1-realtime-plus`); set `AICC_PROVIDER_MODEL` to the old name to
+  stay on it (#463). The deploy stack's `RTP_START` and `RTP_END` defaults move
+  to 20000-20099 (bridge network), 20000-25999 (Linux overlay) and 20000-20199
+  (macOS overlay), from 16384-16484, 16384-29999 and 16384-16583; a `.env` that
+  sets them keeps its values. No setting is added.
+- Media ports and the firewall. The installer rewrites a `.env` range that is
+  exactly the previous installer default (16384-29999 on Linux, 16384-16583 on
+  macOS) to the new one and prints a note; a range you set yourself is never
+  changed. On Linux its firewall note now lists `20000-25999/udp` for the
+  switch's media and `26000-29999/udp` for the bot's, where it listed
+  16384-29999 and 30000-30999: move your rules. A native switch on
+  FreeSWITCH's built-in 16384-32768 overlaps the bot's range: set
+  `rtp-start-port` and `rtp-end-port` as `docs/dev-stack.md` says. `aicc
+  doctor` fails with `BOT_RTP_RANGE_OVERLAPS_SWITCH`, and `/readyz` answers 503,
+  while the two ranges share a port (#450).
+- Installer. `install.sh --external-ip`, and an address typed at its prompt,
+  must now be one of the host's own addresses, or the run stops with
+  `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`, in `--check` too (#421); with the flag,
+  `FS_LOCAL_IP` follows it (#346). Its image preflight no longer stops on a
+  Docker daemon that pulls through a registry mirror (#348).
+- Webhooks. A subscription URL that answers with a redirect is now a failed
+  attempt, so a subscription pointing at a URL that redirects has to name the
+  final URL (#412). A delivery is attempted at most 7 times, the first retry 10
+  seconds after the first failure (#446).
+- The seeded flows `novanet_support`, `mobile_support`,
+  `field_service_appointment` and `early_collections`, and the
+  `knowledge_support` example, changed. The seed never replaces a flow that
+  exists, so a deployment seeded earlier keeps its revisions; load the new ones
+  from `internal/seed/flows/` with `aicc flowadd` if you use them (#350, #466,
+  #491).
+- API contract: `make api-breaking BASE=v0.7.1` reports one error, pinned in
+  `.oasdiff-breaking-ignore.txt`: a client-supplied `callId` on `POST /calls`
+  must now be a UUIDv7 (see Breaking (API) above). The rest is additive: the
+  `webhooks.cdrDelivery` declaration, `total` on the `GET /callbacks` response
+  (always present) and the optional `handledByName` on a callback.
+
 ### Breaking (API)
 
 - `POST /calls`: a `callId` sent by the client must now be a UUIDv7 (RFC 9562:
@@ -17,6 +84,143 @@ carries the one-line installer's files.
   integration that mints its own ids switches to a v7 generator, for example
   `uuid.NewV7` in Go or `uuidv7()` in PostgreSQL 18. Recorded in
   `.oasdiff-breaking-ignore.txt`. (#400)
+
+### Added
+
+- Supervisors and administrators have a callbacks screen, `/admin/callbacks`
+  under Manage next to Campaigns: the shared callback queue, read-only, with a
+  status filter (open by default), who handled each callback by name, and how
+  the last attempt went. `GET /callbacks` now answers a `total`, the rows
+  matching the `status` and `callId` filters whatever `limit` and `offset` say
+  (additive). A callback now carries `handledByName`, the display name of the
+  user in `handledBy` (additive; absent when nobody handled it or that user no
+  longer exists), in every response and in the `CALLBACK_*` event, so the
+  screen names an administrator or a supervisor as well as an agent. Both
+  callbacks screens page with 50 rows a page, so a queue past 50 is no longer
+  cut off in the agent's view, and a row stays on one line at 1024px: the
+  status and the time no longer wrap. (#469; thanks
+  @siyingchao007-maker)
+- The CDR webhook is in the API contract. `docs/openapi.json` declares a
+  top-level `webhooks.cdrDelivery` (`POST`): the `WebhookCdrDelivery` body
+  (`deliveryId`, `subscriptionId`, `revision`, `attempt`, `cdr`), the
+  `Authorization: Bearer <subscription token>` and `X-AICC-Webhook-Id` headers,
+  what acknowledges a delivery (any 2xx), the retry schedule and the
+  last-`revision`-wins rule per `callId`, so a rendered reference shows the
+  request the platform sends and not only the subscription CRUD. A test in
+  `internal/webhook` validates the body and headers the worker really sends
+  against that declaration. A new guide, `docs/events.md`, covers the event
+  stream (framing, scope, `?types=`, resuming with `Last-Event-ID`,
+  `SYSTEM_RESET`, slow consumers) and lists every `SseEventType` value with its
+  payload schema; a test fails when a value in the contract has no row in it.
+  `info.description` and `streamEvents` link to the guide. (#431)
+- When the switch runs out of RTP ports the application now says so: an ERROR
+  log line `switch out of RTP ports` (`legId`, `callId` when known, `media`,
+  `fix`) and a counter `aicc_switch_rtp_ports_exhausted_total{media}`. `aicc
+  doctor` gets a `switch_rtp_range` check that prints the switch's range and
+  the legs it carries, fails with `SWITCH_RTP_RANGE_INVALID` (end below start,
+  a value outside 1-65535 or not a number, or no pair in the range) and warns
+  with `SWITCH_RTP_RANGE_NARROW` when the bot is enabled and the legs are fewer
+  than 2 x `AICC_BOT_MAX_CALLS`. (#417)
+
+### Changed
+
+- A contact whose call recorded a lead is never dialled again, whatever the
+  call's outcome. Before, a call that recorded a lead and then left no trace
+  (the application died and the customer hung up) was reconciled as `UNKNOWN`,
+  a retryable outcome, so the contact stayed `ACTIVE` and was called again the
+  next day while a person also chased its callback. Now any recorded lead
+  settles the contact `DONE` (`DNC` for `DO_NOT_CALL`) with no next attempt,
+  whatever the outcome; `UNKNOWN` still spends one of `maxAttempts`. The
+  reconcile warning names the attempt, the contact and why it ended. (#264)
+- qwen: the default model is now `qwen-audio-3.1-realtime-flash` (it was
+  `qwen-audio-3.1-realtime-plus`), after the profile's traits were re-measured
+  on it. A deployment that sets `AICC_PROVIDER_MODEL` keeps its model; setting
+  it to `qwen-audio-3.1-realtime-plus` returns to the earlier model with no
+  rebuild. Flash is weaker on lookup-heavy flows: on a second lookup in the
+  same call it can repeat its "let me check" filler instead of reading the
+  result (#466); a deployment whose flows lean on HTTP lookups can stay on plus.
+  (#463)
+- Realtime providers: every tool's `parameters` now carries a top-level
+  `required` (an empty list when the flow names none). Flash fails the first
+  response of a session whose tool has none; the other engines accept either
+  form. (#463)
+- Log keys: `callId` now always means the call's own id and nothing else. The
+  AI leg's lines (the bot's SIP and RTP lines, and the flow, provider and
+  session lines of an AI call) used to log the bot leg's SIP Call-ID as
+  `callId`. They now log it as `sipCallId` and carry the call's real `callId`
+  next to it, so a log search by a call's `callId` finds its AI leg. The
+  `aiccCallId` key on those lines is gone. A provider tool-call id logs as
+  `toolCallId`, the callee simulator's SIP Call-ID as `sipCallId`, and an
+  unparseable `aicc_call_id` channel variable as `aiccCallId`. A CI gate
+  (`internal/callidgate`) fails the build when a `callId` attribute holds
+  anything but a call id. (#439)
+- The switch image's own RTP range is now 20000-25999 (3,000 legs, one RTP/RTCP
+  pair each; a call holds two legs), the Linux installer's range, instead of
+  16384-16584 (101 legs). The odd end keeps the last pair's RTCP port inside the
+  range; the switch logs one `Rounding odd end port` warning at the first call.
+  The manual quick start's default is 20000-20099 (50 legs, every RTCP port
+  inside the published range) and the macOS installer's 20000-20199 (100 legs);
+  both keep their widths and only move. (#417, #450)
+- The bot's RTP range is now 26000-29999 (2,000 pairs for the default
+  `AICC_BOT_MAX_CALLS` of 220), moved from 40000-40999 (and, on Linux host
+  networking, from 30000-30999). It sits next to the switch's range and below
+  Linux's ephemeral ports (32768-60999), so the two ranges never overlap each
+  other or an outgoing connection's port. (#450)
+- Upgrading: the installer moves a `.env` range that equals the previous
+  installer default (16384-29999 on Linux, 16384-16583 on macOS) to the new one
+  and prints a note saying so; a range you set yourself is never changed. A
+  firewall rule for the old ranges has to move to the new ones
+  (`20000-25999/udp` on Linux). A native switch on FreeSWITCH's built-in
+  16384-32768 overlaps the bot's range; set `rtp-start-port`/`rtp-end-port` as
+  `docs/dev-stack.md` says. (#450)
+- `aicc doctor` fails with `BOT_RTP_RANGE_OVERLAPS_SWITCH` when the bot's RTP
+  range shares a port with the switch's, and warns with
+  `BOT_RTP_RANGE_EPHEMERAL` when it overlaps the operating system's ephemeral
+  range; `/readyz` answers 503 with a `bot-rtp-range` line while the ranges
+  overlap. The bot also binds its RTP port before it answers the call, so a
+  port it cannot take refuses the call instead of answering it with no media.
+  (#450)
+- `install.sh --external-ip`, and an address typed at the installer's prompt,
+  is now refused unless it is one of this host's own addresses (one `ip addr`
+  or `ifconfig` lists, or inside a range of the kernel's local table such as
+  127.0.0.0/8), with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`, in `--check` too.
+  The switch stays on the LAN and public traffic reaches it through an edge
+  SBC, so a NAT or public address could only produce a stack that
+  `aicc doctor` fails; the LAN address, or a loopback address an SBC on the
+  same host forwards to, is what belongs there. Before, any IPv4 address was
+  written to `.env`. (#421)
+- On a campaign call, while the call is in a phase that declares a `lead`, the
+  model's `record_lead` is now refused: it is answered with an error, nothing is
+  written, and the phase's lead stands. Before, a stray `record_lead` made after
+  the call entered such a phase (or batched after the move into it) replaced the
+  declared lead, for instance a `NONE` over a `HIGH` so that no callback was
+  filed. The tool is still offered, and a phase without a declared lead is
+  unchanged. In the flow simulator such a call comes back `isRefused`. (#358)
+- The seeded `novanet_support`, `mobile_support`, `field_service_appointment`
+  and `early_collections` flows changed (see Fixed). The seed never replaces a
+  flow that already exists, so a deployment seeded earlier keeps its published
+  revision; load the new ones from `internal/seed/flows/` with `aicc flowadd`
+  if you use them.
+- Every id the server mints is now a UUIDv7, so call ids are time-ordered.
+  This covers the call ids of campaign calls, callback dials and the bot's
+  fallback; the leg ids the app gives the switch; agent, API key and seeded
+  ids; and the demo seed's history. A database seeded earlier keeps its
+  history. Calls placed by earlier versions keep their v4 ids.
+  - Migration 00047: the database now refuses a new `cdrs` or
+    `campaign_attempts` row whose call id is not a v7, and a campaign whose id
+    is not. Rows written earlier keep their ids and can still be updated.
+  - A call still in progress across the upgrade whose v4 id the previous
+    version minted (a callback dial, a campaign call, a client-supplied v4)
+    has its CDR refused. Upgrade between such calls. (#400)
+- At every ESL connect the app asks the switch to mint a UUID (`create_uuid`),
+  because the switch mints the call id of every inbound DID call. FreeSWITCH
+  1.10 ignores `uuid-version=7`; the shipped `switch.conf.xml` sets it.
+  - If the switch mints anything but a v7, `/readyz` answers 503. This is the
+    first switch fact that fails readiness.
+  - A new `switch-uuid:` line in `/readyz` reads `v7`, `unknown` or
+    `NOT_V7 version=N`.
+  - `aicc doctor` has a matching `switch_uuid` check (`SWITCH_UUID_NOT_V7`).
+    (#400)
 
 ### Fixed
 
@@ -55,23 +259,24 @@ carries the one-line installer's files.
   after a reply the caller heard none of now asks the bot to answer the caller,
   as for any turn the engine dropped. (#310)
 - A call whose bot says goodbye in words and never hangs up now ends on that
-  goodbye. Before, the flow's closing line was said on top of it after about ten
-  seconds of silence (a double goodbye), and a caller who answered the goodbye
-  ("why don't you hang up?") got another goodbye from the model, again and again.
-  Now a goodbye the caller heard to its end, followed by two seconds of caller
-  silence, hangs the call up; a second goodbye in a row hangs it up as soon as it
-  has played. The call still moves to `global.closingTarget`, so the final node
-  and the record are unchanged, but the target's `announce` is not said and no
-  further goodbye is asked for. A caller who starts speaking inside the two
-  seconds, or talks over the goodbye, keeps the call open. This now applies to
-  campaign calls, to flows with no `closingTarget`, to closing phases without an
-  `announce` and to doubao. The eight-second dead-air timer remains as the
-  fallback and closes the same way. The goodbye detector also recognises
-  "我就先不打扰您了", "先不打扰了", "那就先这样", "您先忙，有需要随时来电", "I'll let
-  you go", "that's all from me" and "feel free to call back anytime", including when the condition is a clause of its own ("好的，那如果您没有其他
-  问题，我就先不打扰您了"), and still ignores phrases that carry on ("不打扰您的话，我再确认
-  一下", "before I let you go, ...", a goodbye followed by "but first ...") and turns
-  that end in a question ("请问还有其他问题吗？"), which are not goodbyes. (#453)
+  goodbye. Before, the flow's closing line was said on top of it after about
+  ten seconds of silence (a double goodbye), and a caller who answered the
+  goodbye ("why don't you hang up?") got another goodbye from the model, again
+  and again. Now a goodbye the caller heard to its end, followed by two seconds
+  of caller silence, hangs the call up; a second goodbye in a row hangs it up
+  as soon as it has played. The call still moves to `global.closingTarget`, so
+  the final node and the record are unchanged, but the target's `announce` is
+  not said and no further goodbye is asked for. A caller who starts speaking
+  inside the two seconds, or talks over the goodbye, keeps the call open. This
+  now applies to campaign calls, to flows with no `closingTarget`, to closing
+  phases without an `announce` and to doubao. The eight-second dead-air timer
+  remains as the fallback and closes the same way. The goodbye detector also
+  recognises "我就先不打扰您了", "先不打扰了", "那就先这样", "您先忙，有需要随时来电", "I'll let you go",
+  "that's all from me" and "feel free to call back anytime", including when the
+  condition is a clause of its own ("好的，那如果您没有其他问题，我就先不打扰您了"), and still
+  ignores phrases that carry on ("不打扰您的话，我再确认一下", "before I let you go, ...",
+  a goodbye followed by "but first ...") and turns that end in a question
+  ("请问还有其他问题吗？"), which are not goodbyes. (#453)
 - A caller hanging up on an AI call is no longer recorded as a media or
   provider failure. The hang-up closes the model's session, and a send of the
   caller's audio that was in flight at that moment then failed; that error
@@ -147,161 +352,20 @@ carries the one-line installer's files.
   long call opened at its first line and stopped following as soon as a line
   arrived, and a reader who had scrolled up carried that position into the next
   call. (#456)
-- An inbound caller whose bot cannot take the call, on a number with no fallback
-  queue, now hears a short prompt in the number's language ("Sorry, we are
-  unable to continue this call right now. Please try again later. Goodbye.", or
-  its zh version), then the call ends. Before, every caller heard the switch's
-  stock English recording about a number that "cannot be completed as dialed",
-  even on a zh number, and an image built with `SOUNDS=none` played nothing.
-  The two recordings ship in the switch image, `SOUNDS=none` included, at
-  `sounds/aicc/<zh|en>/bot-unavailable.wav`; `zh` plays zh and any other language
-  plays en. A switch installed natively needs them copied in once
+- An inbound caller whose bot cannot take the call, on a number with no
+  fallback queue, now hears a short prompt in the number's language ("Sorry, we
+  are unable to continue this call right now. Please try again later.
+  Goodbye.", or its zh version), then the call ends. Before, every caller heard
+  the switch's stock English recording about a number that "cannot be completed
+  as dialed", even on a zh number, and an image built with `SOUNDS=none` played
+  nothing. The two recordings ship in the switch image, `SOUNDS=none` included,
+  at `sounds/aicc/<zh|en>/bot-unavailable.wav`; `zh` plays zh and any other
+  language plays en. A switch installed natively needs them copied in once
   (`docs/dev-stack.md`). (#485)
 - A webhook subscription's `name` longer than 120 characters or `authToken`
   longer than 1024 is refused with 422 `VALIDATION_FAILED`
   (`{"field": "name"}` / `{"field": "authToken"}`), as the contract says;
   before, both were stored. Characters are counted, not bytes. (#470)
-
-### Changed
-
-- A contact whose call recorded a lead is never dialled again, whatever the
-  call's outcome. Before, a call that recorded a lead and then left no trace (the
-  application died and the customer hung up) was reconciled as `UNKNOWN`, a
-  retryable outcome, so the contact stayed `ACTIVE` and was called again the next
-  day while a person also chased its callback. Now any recorded lead settles the
-  contact `DONE` (`DNC` for `DO_NOT_CALL`) with no next attempt, whatever the
-  outcome; `UNKNOWN` still spends one of `maxAttempts`. The reconcile warning
-  names the attempt, the contact and why it ended. (#264)
-- qwen: the default model is now `qwen-audio-3.1-realtime-flash` (it was
-  `qwen-audio-3.1-realtime-plus`), after the profile's traits were re-measured
-  on it. A deployment that sets `AICC_PROVIDER_MODEL` keeps its model; setting
-  it to `qwen-audio-3.1-realtime-plus` returns to the earlier model with no
-  rebuild. Flash is weaker on lookup-heavy flows: on a second lookup in the
-  same call it can repeat its "let me check" filler instead of reading the
-  result (#466); a deployment whose flows lean on HTTP lookups can stay on plus.
-  (#463)
-- Realtime providers: every tool's `parameters` now carries a top-level
-  `required` (an empty list when the flow names none). Flash fails the first
-  response of a session whose tool has none; the other engines accept either
-  form. (#463)
-- Log keys: `callId` now always means the call's own id and nothing else. The
-  AI leg's lines (the bot's SIP and RTP lines, and the flow, provider and
-  session lines of an AI call) used to log the bot leg's SIP Call-ID as
-  `callId`. They now log it as `sipCallId` and carry the call's real `callId`
-  next to it, so a log search by a call's `callId` finds its AI leg. The
-  `aiccCallId` key on those lines is gone. A provider tool-call id logs as
-  `toolCallId`, the callee simulator's SIP Call-ID as `sipCallId`, and an
-  unparseable `aicc_call_id` channel variable as `aiccCallId`. A CI gate
-  (`internal/callidgate`) fails the build when a `callId` attribute holds
-  anything but a call id. (#439)
-
-- The switch image's own RTP range is now 20000-25999 (3,000 legs, one RTP/RTCP
-  pair each; a call holds two legs), the Linux installer's range, instead of
-  16384-16584 (101 legs). The odd end keeps the last pair's RTCP port inside the
-  range; the switch logs one `Rounding odd end port` warning at the first call.
-  The manual quick start's default is 20000-20099 (50 legs, every RTCP port
-  inside the published range) and the macOS installer's 20000-20199 (100 legs);
-  both keep their widths and only move. (#417, #450)
-- The bot's RTP range is now 26000-29999 (2,000 pairs for the default
-  `AICC_BOT_MAX_CALLS` of 220), moved from 40000-40999 (and, on Linux host
-  networking, from 30000-30999). It sits next to the switch's range and below
-  Linux's ephemeral ports (32768-60999), so the two ranges never overlap each
-  other or an outgoing connection's port. (#450)
-- Upgrading: the installer moves a `.env` range that equals the previous
-  installer default (16384-29999 on Linux, 16384-16583 on macOS) to the new
-  one and prints a note saying so; a range you set yourself is never changed.
-  A firewall rule for the old ranges has to move to the new ones (`20000-25999/udp`
-  on Linux). A native switch on FreeSWITCH's built-in 16384-32768 overlaps the
-  bot's range; set `rtp-start-port`/`rtp-end-port` as `docs/dev-stack.md` says. (#450)
-- `aicc doctor` fails with `BOT_RTP_RANGE_OVERLAPS_SWITCH` when the bot's RTP
-  range shares a port with the switch's, and warns with `BOT_RTP_RANGE_EPHEMERAL`
-  when it overlaps the operating system's ephemeral range; `/readyz` answers 503
-  with a `bot-rtp-range` line while the ranges overlap. The bot also binds its
-  RTP port before it answers the call, so a port it cannot take refuses the call
-  instead of answering it with no media. (#450)
-- `install.sh --external-ip`, and an address typed at the installer's prompt,
-  is now refused unless it is one of this host's own addresses (one `ip addr`
-  or `ifconfig` lists, or inside a range of the kernel's local table such as
-  127.0.0.0/8), with `PREFLIGHT_EXTERNAL_IP_NOT_ON_HOST`, in `--check` too.
-  The switch stays on the LAN and public traffic reaches it through an edge
-  SBC, so a NAT or public address could only produce a stack that
-  `aicc doctor` fails; the LAN address, or a loopback address an SBC on the
-  same host forwards to, is what belongs there. Before, any IPv4 address was
-  written to `.env`. (#421)
-- On a campaign call, while the call is in a phase that declares a `lead`, the
-  model's `record_lead` is now refused: it is answered with an error, nothing is
-  written, and the phase's lead stands. Before, a stray `record_lead` made after
-  the call entered such a phase (or batched after the move into it) replaced the
-  declared lead, for instance a `NONE` over a `HIGH` so that no callback was
-  filed. The tool is still offered, and a phase without a declared lead is
-  unchanged. In the flow simulator such a call comes back `isRefused`. (#358)
-- The seeded `novanet_support`, `mobile_support`, `field_service_appointment`
-  and `early_collections` flows changed (see Fixed). The seed never replaces a
-  flow that already exists, so a deployment seeded earlier keeps its published
-  revision; load the new ones from `internal/seed/flows/` with `aicc flowadd`
-  if you use them.
-- Every id the server mints is now a UUIDv7, so call ids are time-ordered.
-  This covers the call ids of campaign calls, callback dials and the bot's
-  fallback; the leg ids the app gives the switch; agent, API key and seeded
-  ids; and the demo seed's history. A database seeded earlier keeps its
-  history. Calls placed by earlier versions keep their v4 ids.
-  - Migration 00047: the database now refuses a new `cdrs` or
-    `campaign_attempts` row whose call id is not a v7, and a campaign whose id
-    is not. Rows written earlier keep their ids and can still be updated.
-  - A call still in progress across the upgrade whose v4 id the previous
-    version minted (a callback dial, a campaign call, a client-supplied v4)
-    has its CDR refused. Upgrade between such calls. (#400)
-- At every ESL connect the app asks the switch to mint a UUID (`create_uuid`),
-  because the switch mints the call id of every inbound DID call. FreeSWITCH
-  1.10 ignores `uuid-version=7`; the shipped `switch.conf.xml` sets it.
-  - If the switch mints anything but a v7, `/readyz` answers 503. This is the
-    first switch fact that fails readiness.
-  - A new `switch-uuid:` line in `/readyz` reads `v7`, `unknown` or
-    `NOT_V7 version=N`.
-  - `aicc doctor` has a matching `switch_uuid` check (`SWITCH_UUID_NOT_V7`).
-    (#400)
-
-### Added
-
-- Supervisors and administrators have a callbacks screen, `/admin/callbacks`
-  under Manage next to Campaigns: the shared callback queue, read-only, with a
-  status filter (open by default), who handled each callback by name, and how
-  the last attempt went. `GET /callbacks` now answers a `total`, the rows
-  matching the `status` and `callId` filters whatever `limit` and `offset` say
-  (additive). A callback now carries `handledByName`, the display name of the
-  user in `handledBy` (additive; absent when nobody handled it or that user no
-  longer exists), in every response and in the `CALLBACK_*` event, so the
-  screen names an administrator or a supervisor as well as an agent. Both
-  callbacks screens page with 50 rows a page, so a queue past 50 is no longer
-  cut off in the agent's view, and a row stays on one line at 1024px: the
-  status and the time no longer wrap. (#469; thanks
-  @siyingchao007-maker)
-
-- The CDR webhook is in the API contract. `docs/openapi.json` declares a
-  top-level `webhooks.cdrDelivery` (`POST`): the `WebhookCdrDelivery` body
-  (`deliveryId`, `subscriptionId`, `revision`, `attempt`, `cdr`), the
-  `Authorization: Bearer <subscription token>` and `X-AICC-Webhook-Id` headers,
-  what acknowledges a delivery (any 2xx), the retry schedule and the
-  last-`revision`-wins rule per `callId`, so a rendered reference shows the
-  request the platform sends and not only the subscription CRUD. A test in
-  `internal/webhook` validates the body and headers the worker really sends
-  against that declaration. A new guide, `docs/events.md`, covers the event
-  stream (framing, scope, `?types=`, resuming with `Last-Event-ID`,
-  `SYSTEM_RESET`, slow consumers) and lists every `SseEventType` value with its
-  payload schema; a test fails when a value in the contract has no row in it.
-  `info.description` and `streamEvents` link to the guide. (#431)
-
-- When the switch runs out of RTP ports the application now says so: an ERROR
-  log line `switch out of RTP ports` (`legId`, `callId` when known, `media`,
-  `fix`) and a counter `aicc_switch_rtp_ports_exhausted_total{media}`. `aicc
-  doctor` gets a `switch_rtp_range` check that prints the switch's range and
-  the legs it carries, fails with `SWITCH_RTP_RANGE_INVALID` (end below start,
-  a value outside 1-65535 or not a number, or no pair in the range) and warns
-  with `SWITCH_RTP_RANGE_NARROW` when the bot is enabled and the legs are fewer
-  than 2 x `AICC_BOT_MAX_CALLS`. (#417)
-
-### Fixed
-
 - Webhooks: the retry schedule skipped its first step. The first retry came 1
   minute after the first failure instead of 10 seconds, and a delivery was
   attempted 6 times. It is now attempted at most 7 times: the waits after
@@ -309,7 +373,6 @@ carries the one-line installer's files.
   2 hours and 6 hours (about 8.6 hours in all), and the seventh failure marks
   the delivery FAILED. The `attempt` field of a delivery can now reach 7; the
   contract's maximum and the retry text of `webhooks.cdrDelivery` say so. (#446)
-
 - Webhooks: a fuller CDR written for a call while its earlier delivery was in
   flight, or waiting to retry, could be lost or sent under the wrong identity.
   The receiver's 2xx for the old body marked the replaced delivery delivered,
@@ -500,14 +563,22 @@ carries the one-line installer's files.
   recommended; any other scheme, or an address with no host, is refused with
   422. A `url` longer than the contract's 2048 characters is now refused with
   422 `VALIDATION_FAILED` `{"field": "url"}`; it used to be stored. (#461)
+- Text outside a table that shows a value someone typed now wraps instead of
+  running out of its box. A confirmation message, a dialog title, a page title
+  or description and a detail card (a campaign's actions, the delete
+  confirmations, the issued API key, a CDR's hangup cause, `userData`, journey
+  and transcript lines, a flow's persona and rules) used to let a value with no
+  break opportunity, such as a long name without spaces or a 40-digit number,
+  run out of its popover or dialog or scroll the page sideways. Ordinary
+  values render as before. (#385)
 
 ### Removed
 
 - `AICC_BOT_ADVERTISE_IP`. The bot's SDP answer now names the address the
   switch sent the INVITE to, which the switch can by definition send media to,
   so there is nothing left to override (#349). A deployment that still sets it
-  starts, and logs one warning that the setting is ignored. `deploy/compose.linux.yml`
-  no longer sets it.
+  starts, and logs one warning that the setting is ignored.
+  `deploy/compose.linux.yml` no longer sets it.
 
 ### Docs and CI
 
@@ -522,6 +593,29 @@ carries the one-line installer's files.
   - Random tokens that are not ids use `crypto/rand`: the SIP Call-IDs, tags and
     branches of the load and callee simulators, and the audio stream's token
     nonce. (#400)
+- The web console has layout tests in a real Chromium (Vitest browser mode),
+  next to the jsdom suite: `npm run test:browser` or `make test-browser`, and
+  `.github/workflows/web-layout.yml` on pull requests that touch `web/`. They
+  render every screen inside the real shell at 1024, 1280 and 1920 px wide, in
+  English and Chinese, with hostile values, and assert no sideways scroll, no
+  table wider than its card and no button out of reach. A full-width row under
+  a table record is a `DetailRow`, and a test fails on a `colSpan` on a cell.
+  (#378, #377)
+- The development switch on macOS keeps its threads off the throttled
+  priority tier.
+  `deploy/dev/freeswitch/` gains an interposer library built by `install.sh`,
+  `start.sh` to start the switch with it and `check-priority.sh` to check
+  before a live round (`docs/dev-stack.md`). Nothing in either image changes.
+  (#451)
+- The outbound e2e suite takes its dial form as a parameter,
+  `E2E_OUTBOUND_DIAL_FORM` (`E164` by default, `E164_NO_PLUS` or `NATIONAL`),
+  and the callee simulator's scenario follows it (#496). Checks that compared
+  the switch's clock with the host's now read the callee's clock (#504), and
+  C07 reads the ring on the simulator's monotonic clock, so a stepped VM wall
+  clock no longer fails it (#506).
+- Documentation: the switch commands the application sends prefer `bgapi`,
+  and `bgapi` gives no ordering (`CLAUDE.md`, #333, #407); a documentation
+  audit deleted stale records and corrected drift against the tree.
 
 ## v0.7.1 - 2026-10-28
 
