@@ -977,6 +977,15 @@ func (l *LedgerStore) InsertRecording(ctx context.Context, r Recording) (Recordi
 	return recordingFromRow(row), nil
 }
 
+// BookedRecordingCallIDs returns the calls among ids that already have a
+// recording row, including one retention has marked deleted.
+func (l *LedgerStore) BookedRecordingCallIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	return l.q.BookedRecordingCallIDs(ctx, ids)
+}
+
 // GetRecording reads one artifact that still exists.
 func (l *LedgerStore) GetRecording(ctx context.Context, id uuid.UUID) (Recording, error) {
 	row, err := l.q.GetRecording(ctx, id)

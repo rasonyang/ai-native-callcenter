@@ -138,6 +138,14 @@ INSERT INTO recordings (id, call_id, backend, bucket, object_key, size_bytes, du
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
+-- Which of these calls already have a recording row, deleted or not. The spool
+-- sweep asks it once per pass: a call with any row is booked, and a second row
+-- for it would double its audio on every screen (recordings has no unique key
+-- on call_id).
+
+-- name: BookedRecordingCallIDs :many
+SELECT DISTINCT call_id FROM recordings WHERE call_id = ANY($1::uuid[]);
+
 -- name: GetRecording :one
 SELECT * FROM recordings WHERE id = $1 AND deleted_at IS NULL;
 
