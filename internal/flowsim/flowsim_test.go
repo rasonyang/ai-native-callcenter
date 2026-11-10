@@ -265,3 +265,28 @@ func TestWriteReportsFailuresAndCoverage(t *testing.T) {
 		}
 	}
 }
+
+// The renewal-offer fixture is meant to be taken live on any engine: it loads
+// without a problem, and its terminal phases all have a line, which is what
+// publishing asks of a flow on an engine that cannot be cued (doubao).
+func TestTheRenewalOfferFixtureIsPublishable(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(testdataFlows, "renewal_offer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, found, err := flow.LoadTolerant(data)
+	if err != nil || len(found) != 0 {
+		t.Fatalf("load: %v, unknown fields %v", err, found)
+	}
+	if err := flow.RequireTerminalAnnounce(spec); err != nil {
+		t.Error(err)
+	}
+	if !spec.HasCallerNextPhase() {
+		t.Error("the fixture declares no caller-next phase")
+	}
+	for _, id := range []string{"after_first_question", "after_second_question"} {
+		if node, _ := spec.Node(id); !node.IsCallerNext {
+			t.Errorf("phase %s is not caller-next", id)
+		}
+	}
+}

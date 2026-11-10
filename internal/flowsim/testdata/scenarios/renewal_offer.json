@@ -1,0 +1,104 @@
+{
+  "scenarios": [
+    {
+      "name": "a question, then agreement",
+      "description": "The model answers in one sentence and records the question in the same response; the move lands in a phase where the caller speaks next. Agreement classifies and ends in the closing phase with its line.",
+      "lang": "en",
+      "caller": "13900001111",
+      "steps": [
+        {"say": "OK, so does it cost anything to renew?"},
+        {"call": "record_question", "args": {"value": "does it cost anything to renew"},
+          "expect": {"phase": "after_first_question", "slots": {"first_question": "does it cost anything to renew"}}},
+        {"say": "Yes, go ahead and renew it."},
+        {"call": "classify", "args": {"value": "agree"},
+          "expect": {"phase": "close_agree", "announce": "Wonderful, your plan is renewed. A confirmation text is on its way. Goodbye."}}
+      ],
+      "expect": {
+        "path": ["offer", "after_first_question", "close_agree"],
+        "toolsRun": ["record_question", "classify"],
+        "ending": "none"
+      }
+    },
+    {
+      "name": "两个问题，然后拒绝",
+      "description": "第二个问题在来电者下一句话的阶段里回答，记录后进入不再接受提问的阶段；拒绝后进入带结束语的结束阶段。",
+      "lang": "zh",
+      "caller": "13900001111",
+      "steps": [
+        {"say": "每个月多少钱？"},
+        {"call": "record_question", "args": {"value": "每个月多少钱"}, "expect": {"phase": "after_first_question"}},
+        {"say": "流量用完了会怎么样？"},
+        {"call": "record_second_question", "args": {"value": "流量用完了会怎么样"},
+          "expect": {"phase": "after_second_question", "slots": {"second_question": "流量用完了会怎么样"}}},
+        {"say": "我再考虑一下，先不续了。"},
+        {"call": "classify", "args": {"value": "decline"},
+          "expect": {"phase": "close_decline", "announce": "明白了，感谢您的时间。再见。"}}
+      ],
+      "expect": {
+        "path": ["offer", "after_first_question", "after_second_question", "close_decline"],
+        "toolsRun": ["record_question", "record_second_question", "classify"]
+      }
+    },
+    {
+      "name": "a second question is refused outside its phase",
+      "description": "record_second_question belongs to the phase after the first question; called from the opening phase it is refused as not allowed, and the call stays where it is.",
+      "lang": "en",
+      "steps": [
+        {"call": "record_second_question", "args": {"value": "is 5G included"}, "expect": {"isRefused": true, "phase": "offer"}}
+      ],
+      "expect": {"path": ["offer"]}
+    },
+    {
+      "name": "agreement straight away",
+      "lang": "en",
+      "steps": [
+        {"say": "Yes, please renew it."},
+        {"call": "classify", "args": {"value": "agree"}, "expect": {"phase": "close_agree"}}
+      ],
+      "expect": {"path": ["offer", "close_agree"]}
+    },
+    {
+      "name": "拒绝续约",
+      "lang": "zh",
+      "steps": [
+        {"say": "不用了，谢谢。"},
+        {"call": "classify", "args": {"value": "decline"}, "expect": {"phase": "close_decline"}}
+      ],
+      "expect": {"path": ["offer", "close_decline"]}
+    },
+    {
+      "name": "a third question is answered without a tool and the call stays put",
+      "description": "After two questions no more are taken: the model says so in words, which counts as a reply without a tool, and the caller can still decide.",
+      "lang": "en",
+      "steps": [
+        {"call": "record_question", "args": {"value": "is 5G included"}, "expect": {"phase": "after_first_question"}},
+        {"call": "record_second_question", "args": {"value": "can I add a second SIM"}, "expect": {"phase": "after_second_question"}},
+        {"exchange": "And can I keep my number?", "expect": {"phase": "after_second_question"}},
+        {"call": "classify", "args": {"value": "agree"}, "expect": {"phase": "close_agree"}}
+      ],
+      "expect": {"path": ["offer", "after_first_question", "after_second_question", "close_agree"]}
+    },
+    {
+      "name": "the caller wants to hang up",
+      "lang": "en",
+      "steps": [
+        {"say": "Sorry, I have to go."},
+        {"call": "hangup", "expect": {"phase": "close_decline"}}
+      ],
+      "expect": {"path": ["offer", "close_decline"], "ending": "hangup"}
+    },
+    {
+      "name": "silence after two questions closes the call",
+      "description": "Dead air three times in the phase where the caller speaks next moves the call to the closing target and its line.",
+      "lang": "en",
+      "steps": [
+        {"call": "record_question", "args": {"value": "is 5G included"}, "expect": {"phase": "after_first_question"}},
+        {"call": "record_second_question", "args": {"value": "can I add a second SIM"}, "expect": {"phase": "after_second_question"}},
+        {"noInput": true},
+        {"noInput": true},
+        {"noInput": true, "expect": {"phase": "close_no_answer"}}
+      ],
+      "expect": {"path": ["offer", "after_first_question", "after_second_question", "close_no_answer"]}
+    }
+  ]
+}
