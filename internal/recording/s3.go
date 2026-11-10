@@ -171,8 +171,12 @@ func (s *s3Storage) SelfCheck(ctx context.Context) (err error) {
 	key := selfCheckPrefix + hex.EncodeToString(rnd[:]) + ".bin"
 	defer func() {
 		// Best effort on every path: a probe left behind is clutter, and a
-		// failing delete must not mask the failure being reported.
-		if rmErr := s.client.RemoveObject(context.WithoutCancel(ctx), s.bucket, key,
+		// failing delete must not mask the failure being reported. The delete
+		// outlives a cancelled caller but keeps its own bound: start-up waits
+		// on it, and the client retries a hung request for minutes.
+		rmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if rmErr := s.client.RemoveObject(rmCtx, s.bucket, key,
 			minio.RemoveObjectOptions{}); rmErr != nil && err == nil {
 			err = fmt.Errorf("recording self-check: delete probe %s: %w", key, rmErr)
 		}

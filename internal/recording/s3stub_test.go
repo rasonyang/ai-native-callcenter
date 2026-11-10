@@ -22,7 +22,7 @@ type stubRequest struct {
 	BodyLen                int
 }
 
-// s3Stub is an in-memory S3 that is as strict as the stores behind #520: it
+// s3Stub is an in-memory S3 as strict as the stores that refuse aws-chunked: it
 // refuses an aws-chunked or streaming-signed PUT ("Aws MultiChunkedEncoding is
 // not supported."), a PUT with no X-Amz-Content-Sha256, a PUT whose header is
 // not the SHA-256 of the body it received, and every multipart call. It does
