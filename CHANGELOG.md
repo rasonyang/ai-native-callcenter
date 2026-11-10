@@ -5,7 +5,30 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.1 - 2026-11-10
+
+### Upgrade notes
+
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release; its tag moves so that the pair still matches.
+- No migration, no setting added, removed or changed in default, and no change
+  to the API contract.
+- S3 recording storage. A deployment with `AICC_RECORDING_BACKEND=S3` and a
+  spool directory (`AICC_RECORDING_DIR`) now uploads each recording as one
+  signed PUT, and its store must accept that and serve GET, HEAD and DELETE.
+  At start the application uploads, reads back and deletes a probe under
+  `_aicc/selfcheck/`; a store or credential that refuses any of the three
+  (including a key that may not delete) is logged as an ERROR, "recording
+  storage self-check failed: recordings will not be stored", and calls still
+  work. `aicc doctor` has a new check, `recording_storage`, which fails with
+  `RECORDING_UPLOAD_FAILED`; it is the only check that writes, and it removes
+  what it wrote. See Recordings in `deploy/README.md` (#520).
+- Spool files now stay until the recording is booked, and the application
+  retries them every minute. A file left in the spool is a recording that could
+  not be booked: leave it in place. New metrics:
+  `aicc_recording_ingest_failures_total{reason}` and
+  `aicc_recording_spool_unbooked` (#519).
 
 ### Added
 
