@@ -38,6 +38,19 @@ carries the one-line installer's files.
   and the new `aicc doctor` check `recording_storage` fails with
   `RECORDING_UPLOAD_FAILED`. The store must accept a signed single PUT and
   serve GET, HEAD and DELETE; see Recordings in `deploy/README.md`. (#520)
+- A recording whose upload or booking failed was lost without a word: the
+  failure was logged as if the call had simply not been recorded, nothing tried
+  again, and with an S3 store the local copy was deleted as soon as it was
+  uploaded, so a database error right after left audio in the bucket that no
+  call listed. A call that started recording and cannot be ingested is now an
+  ERROR in the log ("recording not ingested") and is counted in
+  `aicc_recording_ingest_failures_total{reason}`. The local copy is removed only
+  after the recording is booked, and the application goes through the spool
+  every minute, booking every recording older than five minutes that has no row
+  (retries back off from one minute to an hour, ten attempts per file until the
+  next restart). A file that still cannot be booked stays in the spool and in
+  `aicc_recording_spool_unbooked`. Calls that were never recorded stay quiet.
+  (#519)
 
 ## v0.8.0 - 2026-11-10
 
