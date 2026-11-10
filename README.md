@@ -1,6 +1,6 @@
 # AI Native Call Center
 
-An open-source call center where the AI is the default answer, not an add-on.
+An open source call center where the AI is the default answer, not an add-on.
 
 Calls arrive at FreeSWITCH and are answered by a voice model over a
 speech-to-speech connection the application terminates itself. The model talks;
