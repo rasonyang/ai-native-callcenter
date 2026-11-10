@@ -173,6 +173,16 @@ func (r Result) asToolOutput() string {
 	return string(encoded)
 }
 
+// IsToolOutputOK reports whether a tool output, as Dispatch returns it,
+// carries ok "1" (asToolOutput always writes the flag as a string): the tool ran
+// and succeeded. Anything else, such as a refusal, is not.
+func IsToolOutputOK(output string) bool {
+	var payload struct {
+		OK string `json:"ok"`
+	}
+	return json.Unmarshal([]byte(output), &payload) == nil && payload.OK == "1"
+}
+
 // boolAsFlag renders success as "1"/"0". Backends in this domain speak that
 // dialect, and flow conditions compare against it.
 func boolAsFlag(isOK bool) string {

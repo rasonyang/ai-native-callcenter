@@ -101,6 +101,16 @@ func (e *Engine) NodeID() string { return e.current.id }
 // leave.
 func (e *Engine) IsTerminal() bool { return e.current.IsTerminal }
 
+// IsCallerNext reports whether the current phase declares that the caller
+// speaks next (Node.IsCallerNext).
+func (e *Engine) IsCallerNext() bool { return e.current.IsCallerNext }
+
+// OnToolReplyNotComing records that the tool results of the turn last passed
+// to OnBotTurnDone were sent without asking for a turn (Node.IsCallerNext), so
+// the next turn to finish is the caller's reply, not the answer to a result:
+// it counts towards maxTurnsWithoutTool like any other reply.
+func (e *Engine) OnToolReplyNotComing() { e.isToolReplyNext = false }
+
 // Slots exposes what has been collected, for templates and diagnostics.
 func (e *Engine) Slots() map[string]any {
 	return maps.Clone(e.slots)
@@ -359,7 +369,9 @@ func (e *Engine) OnCallerKeyed() {
 //     caller. Skipping it is also what keeps a transcript that arrives after
 //     the turn it prompted (the Realtime clients deliver the caller's
 //     transcript independently of the reply) from being charged to the
-//     result's turn;
+//     result's turn. When the result was sent without asking for a turn
+//     (Node.IsCallerNext), there is no such turn and OnToolReplyNotComing
+//     takes the skip back;
 //   - a turn cut short never finished replying to anybody.
 //
 // A transcript that arrives late is therefore charged to the next reply, or

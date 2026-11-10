@@ -186,6 +186,12 @@ func (s *Spec) validate() error {
 		if node.IsTerminal && len(node.Transitions) > 0 {
 			report("phase %q is terminal but declares transitions", id)
 		}
+		if node.IsCallerNext && node.IsTerminal {
+			report("phase %q is terminal but declares isCallerNext", id)
+		}
+		if node.IsCallerNext && !node.Announce.IsEmpty() {
+			report("phase %q declares isCallerNext but has an announce: the line is the next turn, not the caller's", id)
+		}
 		s.validateTransitions("phase "+id, node.Transitions, &problems)
 		if node.Lead != nil {
 			validateDeclaredLead(id, node.Lead, report)

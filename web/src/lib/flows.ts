@@ -71,6 +71,12 @@ export interface FlowNode {
   transitions?: FlowTransition[]
   isTerminal?: boolean
   /**
+   * The caller speaks next in this phase: a slot tool called in a response that
+   * already answered the caller gets its result without a new model turn.
+   * Rejected on a terminal phase and on a phase with an announce.
+   */
+  isCallerNext?: boolean
+  /**
    * The campaign lead the call records on entering this phase, as a
    * record_lead call would. Ignored on a call that is not a campaign call.
    * While the call is in this phase the model's record_lead is refused.
