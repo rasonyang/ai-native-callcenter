@@ -22,6 +22,10 @@ type fixedStorage struct {
 func (fixedStorage) Backend() string                                 { return "FS" }
 func (fixedStorage) Bucket() string                                  { return "" }
 func (s fixedStorage) Ingest(context.Context, string) (int64, error) { return s.size, s.err }
+func (fixedStorage) Release(context.Context, string) error           { return nil }
+func (fixedStorage) Pending(context.Context, time.Time) ([]string, error) {
+	return nil, nil
+}
 
 type offerRecorder struct {
 	got chan offered

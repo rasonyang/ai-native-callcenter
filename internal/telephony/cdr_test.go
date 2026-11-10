@@ -49,6 +49,10 @@ func (m *memoryLedger) InsertRecording(_ context.Context, r store.Recording) (st
 
 func (m *memoryLedger) MarkRecorded(context.Context, uuid.UUID) error { return nil }
 
+func (m *memoryLedger) BookedRecordingCallIDs(context.Context, []uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 type staticQueues map[string]uuid.UUID
 
 func (q staticQueues) QueueIDByName(_ context.Context, name string) (uuid.UUID, bool) {
@@ -1922,6 +1926,10 @@ func (finishedStorage) Bucket() string  { return "" }
 func (s finishedStorage) Ingest(context.Context, string) (int64, error) {
 	close(s.reached)
 	return 0, errors.New("no file")
+}
+func (finishedStorage) Release(context.Context, string) error { return nil }
+func (finishedStorage) Pending(context.Context, time.Time) ([]string, error) {
+	return nil, nil
 }
 
 // finishCall hands the snapshot to CallFinished and returns the rows this path

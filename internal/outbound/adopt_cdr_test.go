@@ -39,6 +39,10 @@ func (b *cdrBook) InsertRecording(_ context.Context, r store.Recording) (store.R
 }
 func (b *cdrBook) MarkRecorded(context.Context, uuid.UUID) error { return nil }
 
+func (b *cdrBook) BookedRecordingCallIDs(context.Context, []uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func (b *cdrBook) all() []store.CDR {
 	b.mu.Lock()
 	defer b.mu.Unlock()

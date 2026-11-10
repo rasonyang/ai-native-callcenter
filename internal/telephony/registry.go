@@ -305,6 +305,15 @@ func (r *Registry) Count() int {
 	return len(r.byCall)
 }
 
+// IsLive reports whether the registry still holds the call. It is a map
+// lookup and never waits on the call's mailbox.
+func (r *Registry) IsLive(callID uuid.UUID) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	_, ok := r.byCall[callID]
+	return ok
+}
+
 // Shutdown stops every actor and waits for them.
 func (r *Registry) Shutdown() {
 	r.mu.Lock()
@@ -536,6 +545,7 @@ func (a *actor) applySwitchEvent(ev SwitchEvent) {
 	// id when there is one to fetch. What a screen needs from this event is
 	// that it happened, and when — both of which the envelope already carries.
 	case KindRecordStart:
+		a.call.IsRecordingStarted = true
 		a.publish(events.TypeCallRecordingStarted, nil, nil)
 
 	case KindRecordStop:

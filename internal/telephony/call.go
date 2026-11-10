@@ -345,6 +345,12 @@ type Call struct {
 	// is gone for good: the process that ran it died, and recovery is ending
 	// the call. The row then falls to this path.
 	IsBotAbandoned bool
+	// IsRecordingStarted records that the switch announced RECORD_START for
+	// this call, which it does once the file is open, so a file exists and
+	// the ledger is owed a recording. Never cleared by RECORD_STOP. A call
+	// adopted after a restart mid-call does not have it; the spool sweep is
+	// what books such a recording.
+	IsRecordingStarted bool
 
 	CreatedAt time.Time
 	EndedAt   time.Time
@@ -828,9 +834,11 @@ type Snapshot struct {
 	QueueStays []QueueFacts `json:"-"`
 	Bot        BotShare     `json:"-"`
 	// IsBotAbandoned: see Call.IsBotAbandoned.
-	IsBotAbandoned bool       `json:"-"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	EndedAt        *time.Time `json:"endedAt,omitempty"`
+	IsBotAbandoned bool `json:"-"`
+	// IsRecordingStarted: see Call.IsRecordingStarted.
+	IsRecordingStarted bool       `json:"-"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	EndedAt            *time.Time `json:"endedAt,omitempty"`
 }
 
 // PartySnapshot is an immutable view of one leg.
@@ -867,18 +875,19 @@ func (p PartySnapshot) IsActive() bool {
 // Snapshot copies the call into a value safe to hand outside the actor.
 func (c *Call) Snapshot() Snapshot {
 	s := Snapshot{
-		CallID:         c.CallID,
-		CallType:       c.CallType,
-		State:          c.State,
-		Language:       c.Language,
-		QueueID:        c.QueueID,
-		UserData:       maps.Clone(c.UserData),
-		Queue:          c.CurrentQueue(),
-		QueueStays:     slices.Clone(c.QueueStays),
-		Bot:            c.Bot,
-		CreatedAt:      c.CreatedAt,
-		IsBotAbandoned: c.IsBotAbandoned,
-		Parties:        make([]PartySnapshot, 0, len(c.Parties)),
+		CallID:             c.CallID,
+		CallType:           c.CallType,
+		State:              c.State,
+		Language:           c.Language,
+		QueueID:            c.QueueID,
+		UserData:           maps.Clone(c.UserData),
+		Queue:              c.CurrentQueue(),
+		QueueStays:         slices.Clone(c.QueueStays),
+		Bot:                c.Bot,
+		CreatedAt:          c.CreatedAt,
+		IsBotAbandoned:     c.IsBotAbandoned,
+		IsRecordingStarted: c.IsRecordingStarted,
+		Parties:            make([]PartySnapshot, 0, len(c.Parties)),
 	}
 	if !c.EndedAt.IsZero() {
 		ended := c.EndedAt

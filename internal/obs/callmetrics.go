@@ -55,6 +55,9 @@ var (
 
 	webhookDeliveries metric.Int64Counter
 
+	recordingIngestFailures metric.Int64Counter
+	recordingSpoolUnbooked  metric.Int64Gauge
+
 	campaignUnmappedCause metric.Int64Counter
 	campaignAttempts      metric.Int64Counter
 	dialerInFlight        metric.Int64UpDownCounter
@@ -198,6 +201,16 @@ func init() {
 	webhookDeliveries, _ = meter.Int64Counter("aicc_webhook_deliveries_total",
 		metric.WithDescription("CDR deliveries that settled, by outcome. FAILED means the "+
 			"retry schedule ran out and that call was never told to that subscriber."))
+	recordingIngestFailures, _ = meter.Int64Counter("aicc_recording_ingest_failures_total",
+		metric.WithDescription("Attempts to book a call's recording that failed, by reason: "+
+			"MISSING (a recording was expected and the file is not there), PERMISSION, "+
+			"TIMEOUT, STORE (the object store or the disk refused) or LEDGER (the audio is "+
+			"stored and the database would not take the row). A file that keeps failing "+
+			"counts once per retry; calls that were never recorded are not counted."))
+	recordingSpoolUnbooked, _ = meter.Int64Gauge("aicc_recording_spool_unbooked",
+		metric.WithDescription("Recordings older than the retry threshold that the "+
+			"periodic pass could not book and left in place, as of its last run. Zero "+
+			"is healthy; a number that stays up is a file that needs a person."))
 	campaignUnmappedCause, _ = meter.Int64Counter("aicc_campaign_unmapped_cause_total",
 		metric.WithDescription("Campaign attempts that ended with a hangup cause the "+
 			"outcome table has no row for. Each was treated as TRANSIENT (retried within "+
@@ -510,6 +523,25 @@ func countWebhook(subscriptionID, outcome string) {
 		attribute.String("subscriptionId", subscriptionID),
 		attribute.String("outcome", outcome),
 	))
+}
+
+// RecordingIngestFailed counts one failed attempt to book a recording, by
+// reason class (MISSING, PERMISSION, TIMEOUT, STORE, LEDGER).
+func RecordingIngestFailed(reason string) {
+	if recordingIngestFailures == nil {
+		return
+	}
+	recordingIngestFailures.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// RecordingSpoolUnbooked records, after each pass of the spool sweep, how many
+// old recordings are still not booked.
+func RecordingSpoolUnbooked(n int) {
+	if recordingSpoolUnbooked == nil {
+		return
+	}
+	recordingSpoolUnbooked.Record(context.Background(), int64(n))
 }
 
 // The states of aicc_bot_slots.
