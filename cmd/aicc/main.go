@@ -280,6 +280,13 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	// An S3 spool is cleared by the switch that wrote it, on the
+	// application's request; the switch's directories are not the
+	// application's to unlink in.
+	var spoolProbe *spoolCheck
+	if recordings != nil && recording.AttachSpoolReleaser(recordings, adapter) {
+		spoolProbe = newSpoolCheck(adapter, cfg.RecordingDir, slog.Default())
+	}
 	if recordings != nil {
 		if s3, ok := recordings.(interface{ EnsureBucket(context.Context) error }); ok {
 			if err := s3.EnsureBucket(ctx); err != nil {
@@ -453,6 +460,7 @@ func run() error {
 		Log:         slog.Default(),
 		SwitchUUID:  switchUUID,
 		BotRTPRange: botRTPRange,
+		Spool:       spoolProbe,
 		Reconcile: reconcileLive(coordinator, outboundSvc, hasBotSession,
 			link.IsUp, slog.Default(), reconcileBackoffMin),
 	}.connect()

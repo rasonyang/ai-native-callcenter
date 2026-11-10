@@ -120,9 +120,14 @@ services:
       AICC_DEFAULT_COUNTRY_CODE: ${AICC_DEFAULT_COUNTRY_CODE-86}
 
       # The switch records into the shared volume; the application serves what
-      # it finds there.
+      # it finds there. FS keeps the files in the volume. S3 (set
+      # AICC_RECORDING_BACKEND=S3 and the AICC_S3_* lines in .env) uploads each
+      # one and then clears the volume: the spool stays /recordings, and the
+      # switch removes its own copy when the application asks. S3 without a
+      # spool needs the switch pointed at the store, which this stack does not
+      # wire.
       AICC_RECORDING_DIR: /recordings
-      AICC_RECORDING_BACKEND: FS
+      AICC_RECORDING_BACKEND: ${AICC_RECORDING_BACKEND:-FS}
 
       # Metrics and health have no authentication of their own, so they are
       # opened onto the compose network only and no port is published.
@@ -131,7 +136,11 @@ services:
     # The switch writes recordings as its own user into directories it creates
     # 0750, so reading them takes membership of its group rather than a mode
     # change on every new day's folder. 999 is the freeswitch group in the
-    # pinned image below.
+    # pinned image below. The application only reads the volume and never
+    # writes into it, hence the read-only mount: with an S3 spool the switch
+    # removes its own copy when the application asks (aicc_spool.lua), because
+    # group membership could never give the application the right to unlink
+    # in a 0750 directory.
     group_add:
       - "999"
     volumes:

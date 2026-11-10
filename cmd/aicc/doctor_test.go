@@ -37,9 +37,46 @@ type capturedSwitch struct {
 	// conf is the switch.conf XML xml_locate answers with; empty is a switch
 	// on the image's default range.
 	conf string
+	// spoolDir is the directory the switch's aicc_spool.lua writes its probe
+	// file in; the application's recordings directory in a healthy
+	// deployment. Empty answers +OK without touching a disk.
+	spoolDir string
+	// spoolReply, when set, is what the script answers instead of working
+	// (what a refusal or an image without the script looks like).
+	spoolReply string
+	// spoolElsewhere makes the script write somewhere the application does not
+	// look, as a switch recording into a volume the application has not mounted.
+	spoolElsewhere bool
+}
+
+// spool plays aicc_spool.lua's probe pair against a real directory.
+func (c capturedSwitch) spool(command, token string) string {
+	if c.spoolReply != "" {
+		return c.spoolReply
+	}
+	if c.spoolDir == "" {
+		return "+OK\n"
+	}
+	dir := c.spoolDir
+	if c.spoolElsewhere {
+		dir = c.t.TempDir()
+	}
+	file := filepath.Join(dir, telephony.SpoolProbeFilePrefix+token)
+	switch command {
+	case "probe-write":
+		if err := os.WriteFile(file, []byte("probe"), 0o600); err != nil {
+			return "-ERR WRITE_FAILED " + err.Error() + "\n"
+		}
+	case "probe-remove":
+		_ = os.Remove(file)
+	}
+	return "+OK\n"
 }
 
 func (c capturedSwitch) API(cmd string) (string, error) {
+	if f := strings.Fields(cmd); len(f) == 4 && f[0] == "lua" && f[1] == "aicc_spool.lua" {
+		return c.spool(f[2], f[3]), nil
+	}
 	if strings.HasPrefix(cmd, "xml_locate configuration") {
 		if c.conf != "" {
 			return c.conf, nil
@@ -120,11 +157,14 @@ type harness struct {
 	opts    doctorOptions
 	session *fakeSession
 	sleeps  int
+	// spool is the recordings directory, shared by the application and the
+	// healthy switch's probe.
+	spool string
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
-	h := &harness{session: &fakeSession{events: make(chan provider.Event)}}
+	h := &harness{session: &fakeSession{events: make(chan provider.Event)}, spool: t.TempDir()}
 	now := time.Unix(1_800_000_000, 0)
 	h.deps = doctorDeps{
 		cfg: config.Config{
@@ -150,7 +190,7 @@ func newHarness(t *testing.T) *harness {
 			return fakeMigrations{state: store.MigrationState{DBVersion: 33, LatestVersion: 33}}, func() {}, nil
 		},
 		dialSwitch: func(context.Context) (switchReader, func(), error) {
-			return telephony.NewAdapter(capturedSwitch{t: t}, "aicc.test"), func() {}, nil
+			return telephony.NewAdapter(capturedSwitch{t: t, spoolDir: h.spool}, "aicc.test"), func() {}, nil
 		},
 		sessions: func(provider.Profile, *slog.Logger) (provider.VoiceSession, error) {
 			return h.session, nil
@@ -177,7 +217,7 @@ func newHarness(t *testing.T) *harness {
 	}
 	// A healthy deployment records to S3 through a spool, the one mode in
 	// which this application uploads.
-	h.withRecordings("/spool", &fakeRecordings{backend: "S3"})
+	h.withRecordings(h.spool, &fakeRecordings{backend: "S3"})
 	return h
 }
 
@@ -372,6 +412,9 @@ func (f fakeStatus) UUIDVersion() (int, error) {
 	}
 	return f.uuidVersion, f.uuidErr
 }
+
+func (f fakeStatus) SpoolProbeWrite(string) error  { return nil }
+func (f fakeStatus) SpoolProbeRemove(string) error { return nil }
 
 func (f fakeStatus) Profiles() ([]telephony.SwitchProfile, error) { return f.profiles, nil }
 func (f fakeStatus) GatewayUp(name string) (bool, error) {
@@ -1353,4 +1396,80 @@ func TestDoctorRecordingStorageFailsWithItsCode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDoctorRecordingSpoolSkipsWhereTheSwitchClearsNothing(t *testing.T) {
+	t.Parallel()
+	for name, setup := range map[string]func(h *harness){
+		"none configured": func(h *harness) { h.deps.recordings = func() (recording.Storage, error) { return nil, nil } },
+		"filesystem":      func(h *harness) { h.withRecordings("/spool", &fakeRecordings{backend: "FS"}) },
+		"S3 without a spool": func(h *harness) {
+			h.withRecordings("", &fakeRecordings{backend: "S3"})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			setup(h)
+			wantState(t, h.run(), DoctorCheckRecordingSpool, DoctorStateSkip)
+		})
+	}
+}
+
+func TestDoctorRecordingSpoolPassesWhenTheSwitchClearsTheSpoolTheAppReads(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	wantState(t, h.run(), DoctorCheckRecordingSpool, DoctorStatePass)
+	if left, _ := filepath.Glob(filepath.Join(h.spool, ".aicc-spool-probe-*")); len(left) != 0 {
+		t.Errorf("the probe left %v behind", left)
+	}
+}
+
+func TestDoctorRecordingSpoolFailsWithItsCodes(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		sw   func(t *testing.T, dir string) capturedSwitch
+		code DoctorCode
+		fix  string
+	}{
+		"the switch cannot write": {
+			sw: func(t *testing.T, dir string) capturedSwitch {
+				return capturedSwitch{t: t, spoolDir: dir, spoolReply: "-ERR WRITE_FAILED Permission denied\n"}
+			},
+			code: DoctorCodeRecordingSpoolNotClearable, fix: "update the switch image",
+		},
+		"an image without the script": {
+			sw: func(t *testing.T, dir string) capturedSwitch {
+				return capturedSwitch{t: t, spoolDir: dir, spoolReply: "-ERR no such file aicc_spool.lua\n"}
+			},
+			code: DoctorCodeRecordingSpoolNotClearable, fix: "update the switch image",
+		},
+		"the application does not see the file": {
+			sw: func(t *testing.T, dir string) capturedSwitch {
+				return capturedSwitch{t: t, spoolDir: dir, spoolElsewhere: true}
+			},
+			code: DoctorCodeRecordingSpoolNotShared, fix: "AICC_RECORDING_DIR",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+				return telephony.NewAdapter(tc.sw(t, h.spool), "aicc.test"), func() {}, nil
+			}
+			r := h.run()[DoctorCheckRecordingSpool]
+			if r.State != DoctorStateFail || r.Code != tc.code || !strings.Contains(r.Fix, tc.fix) {
+				t.Errorf("%+v", r)
+			}
+		})
+	}
+}
+
+func TestDoctorRecordingSpoolSkipsWithoutASwitch(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.deps.dialSwitch = func(context.Context) (switchReader, func(), error) {
+		return nil, nil, errors.New("dial esl: refused")
+	}
+	wantState(t, h.run(), DoctorCheckRecordingSpool, DoctorStateSkip)
 }

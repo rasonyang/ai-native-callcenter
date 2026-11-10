@@ -170,6 +170,7 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `external_ip` | `EXTERNAL_IP_NOT_ON_HOST` |
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
 | `recording_storage` | `RECORDING_UPLOAD_FAILED` |
+| `recording_spool` | `RECORDING_SPOOL_NOT_CLEARABLE`, `RECORDING_SPOOL_NOT_SHARED` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
 | `switch_rtp_range` | `SWITCH_RTP_RANGE_INVALID`, `SWITCH_RTP_RANGE_NARROW` (a `WARN`, not a failure) |
@@ -185,6 +186,18 @@ for the filesystem backend, for no recording storage and for S3 without a spool
 (the switch uploads directly, so the application writes nothing). It is the only
 check that writes anywhere, and it removes what it wrote. See
 [Recordings](#recordings) for what the store must accept.
+
+`recording_spool` applies to the same mode and is a `SKIP` in the same cases.
+With an S3 spool the switch removes its own copy of a booked recording when the
+application asks, so the check has the switch write a small probe file in its
+recordings directory, looks for it under `AICC_RECORDING_DIR`, has the switch
+remove it and looks again. It fails with `RECORDING_SPOOL_NOT_CLEARABLE` when
+the switch cannot write or remove there, or when the switch image predates the
+script that does it (update the switch image), and with
+`RECORDING_SPOOL_NOT_SHARED` when the switch wrote the probe and the application
+does not see it (the volume the switch records into is not mounted at
+`AICC_RECORDING_DIR`). The probe file is named `.aicc-spool-probe-` and a token,
+and is removed on every path the check controls.
 
 `switch_uuid` asks the switch to mint a UUID and requires version 7: the
 switch mints the call id of every inbound DID call, and the database refuses
@@ -738,10 +751,26 @@ See [the provider notes](../docs/provider-extension.md).
 - S3-compatible storage: set `AICC_RECORDING_BACKEND=S3` and the `AICC_S3_*`
   lines in `.env`. With a spool directory (`AICC_RECORDING_DIR`) the switch
   records locally and the application uploads each recording on hangup, books
-  it, then clears the spool copy; without one the switch uploads straight into
+  it, then clears the spool copy (the switch removes its own copy when the
+  application asks; see below); without one the switch uploads straight into
   the store and the application only confirms the object arrived. Playback is
   not a redirect: the application downloads the object from the store and
   serves it itself.
+- **The switch clears the spool, not the application.** The switch creates the
+  dated directories with a mode only its own user can write in, so the
+  application, which reads the `recordings` volume through the switch's group
+  and mounts it read-only, can never unlink a file there. After it has booked a
+  recording it therefore asks the switch to remove its copy and the empty
+  dated directories (the switch's `aicc_spool.lua`, run as the switch's user);
+  nothing in the stack needs to be made writable. This needs a switch image
+  that carries the script, so upgrade both images together. A natively
+  installed switch needs the same script in its script directory
+  (`freeswitch/scripts/aicc_spool.lua`), and its recordings directory must be
+  an absolute local path. At every connect to the switch the application runs
+  the same probe as `recording_spool` and logs one ERROR, "recording spool
+  check failed: spool copies of booked recordings will stay on disk", with
+  `cause=NOT_CLEARABLE` or `cause=NOT_SHARED` if it fails; calls still work and
+  recordings are still stored, only the spool copy stays.
 - What the store must accept. The upload is a single PUT, at any size, signed
   with the file's SHA-256 in `X-Amz-Content-Sha256`. It is the same request on
   HTTP and HTTPS: the client library would otherwise stream the body as
@@ -800,6 +829,17 @@ hand instead of pulling it.
   `docker compose logs aicc`, and for files still under the spool directory
   (`recordings/YYYY/MM/DD/`). They are retried every minute; see
   [Recordings](#recordings) for what the metrics say and how to re-run them.
+- **`could not remove the spool copy of a booked recording; the sweep retries`
+  (S3 with a spool).** The recording is uploaded and booked; only the local
+  copy stays, and the volume grows with every call. The log line names both
+  causes: the application's own removal is refused (expected, see
+  [Recordings](#recordings)) and the switch's was too or never answered. Run
+  `aicc doctor`: `RECORDING_SPOOL_NOT_CLEARABLE` means the switch image has no
+  `aicc_spool.lua` (pull the switch image of the application's tag) or the
+  switch cannot remove in its recordings directory;
+  `RECORDING_SPOOL_NOT_SHARED` means the switch and the application are not
+  looking at the same directory. Files already left behind are removed by the
+  same sweep once it works, and by hand otherwise.
 - **A call to a bot number only plays hold music.** The bot session did not
   start, and the caller went to the number's fallback queue with nobody
   staffed. Find the reason with
