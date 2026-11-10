@@ -27,8 +27,8 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 # The lockfile resolves every package on registry.npmjs.org. Mainland China:
 # pass a mirror here (deploy/.env.example); anywhere else the default holds.
-ARG NPM_REGISTRY=https://registry.npmjs.org/
 RUN npm ci --registry="${NPM_REGISTRY}"
+ARG NPM_REGISTRY=https://registry.npmjs.org/
 
 COPY web/ ./
 RUN npm run build
