@@ -1767,3 +1767,60 @@ On mlx-realtime (gateway profile) the same five shapes and a control passed the 
 - **Other profiles.** The client paths are provider-neutral and passed behind the relay on gateway. Whether openai and grok keep an abandoned response open is not known; a cancel that finds nothing is already absorbed (`isAnsweredCancel`). Doubao is a separate client with no server VAD replies to suppress; it was not changed.
 
 **Not covered.** A natural stall on qwen (none occurred); a stall with audio partway (unit tests only: cancelled, not re-asked); three abandoned caller turns in a row (unit test only).
+
+## W-Q15: a slot tool's result sent with no turn asked for: nothing follows it, and the caller's next turn is answered (2026-11-09)
+
+The measurement in #387 (`qwen-audio-3.1-realtime-plus`, zh) stopped once the tool result was answered. This one is on flash, the current default, in both languages, and goes on to the caller's next turn. It is the premise of `isCallerNext` (`docs/flow-authoring.md` 4.5).
+
+**Method.** `TestLiveQuietToolResult`, one run: the real `provider.Realtime` client, `qwen-audio-3.1-realtime-flash`, the instructions and tools `flow.Runtime` renders for the `renewal_offer` fixture, 12 sequential sessions (6 en, 6 zh) with one synthetic voice (qwen3-tts-flash, Cherry). At `response.done` the instructions are re-pinned to the new phase and the result is sent with `SendToolResultQuietly` when the response spoke, and with `SendToolResult` when it did not, as `closeToolBatch` decides. Nothing is sent for 4 s, then the caller's next turn rotates through a second question, an agreement, a refusal and silence. It runs on the client, not the orchestrator: no dead-air cue, no phase engine, no line. **The sample is small: read these as whether a thing happens, not as rates.**
+
+| Measured | Result |
+|---|---|
+| Sessions where the slot tool was called | 10 of 12 (the other 2 not measured, see below) |
+| The response spoke, with its first audio before the tool call | 9 of 10; no call overtook the first audio |
+| The response only called the tool | 1 of 10: ordinary result, and the follow-up turn gave the right answer |
+| A response starting within 4 s of a quiet result | **0 of 9** |
+| Caller's next turn after a quiet result: a second question | 2 answered from the fact list, each with `record_second_question` in the same response; 1 not measured |
+| ... an agreement | 2 of 2 `classify`, no audio |
+| ... a refusal | 2 of 2 `hangup`, no audio (not `classify` with `decline`; both end in the same closing phase) |
+| ... silence (8 s) | 0 of 2 responded, so a silent caller is the dead-air path's to handle |
+| Provider errors | none |
+
+First audio from `speech_stopped`, over the 9 first answers: 460 to 704 ms.
+
+**Three sessions were not measured, and the likely cause is the probe.** Sessions 3 and 9 (the first question, "OK, so how much data do I get?" and "Right, can I keep my phone number?") and session 10 (the second question, "哦，那每个月有多少流量？") ended with a truncated transcript and no audio ("So, would you", "Hi,", "您还有其他问题吗？"). All three are an acknowledgement followed by a question. `say` streams a clip in the background, and the probe's settle rule did not look at the caller's speech. So a reply to "OK," that the caller's next words cut could end the watch 1.5 s later, in the middle of the sentence, with the real answer still to come. The log has no event timeline, so this is the likely reason and not a proven one. The rule now waits for the caller to stop. The fixed test has **not** been run again, to save spend.
+
+**What this says about acknowledgement forms.** Two of them were answered normally on the first question (sessions 4 and 10, zh). Whether a reply cut in the pause is followed by a proper answer, in a phase where the tool result went quietly, is left to owner-placed calls.
+
+**Not covered.** More than one voice; a second round after the second question; a barge-in during the answer (unit tests only); openai and grok, which share this client and protocol and were not run.
+
+### Owner-placed calls (2026-11-10)
+
+The dev stack ran main `0135862` plus this change, on qwen flash. The fixture `renewal_offer` was bound to 95012 (zh) and 95001 (en), and a baseline (the same flow, tool first and answer in the next turn, no `isCallerNext`) to 95002 (zh) and 95011 (en). There were ten calls.
+
+| # | Call | Script | What happened |
+|---|---|---|---|
+| 1 | `01a1c2d9-33f8-781a-a74a-2b5807a97a29` (95012) | question, then silence | Answered and recorded in one response, quiet. Nothing was said until the dead-air prompt ("请问您还在吗？"), 8 s after the answer played. "不用了谢谢" → `classify` decline |
+| 2 | `01a1c2da-0376-7b02-be64-b9049bedbd12` (95012) | two questions, then agree | Both answered and recorded in one response each, both quiet; agree |
+| 3 | `01a1c2da-ba0a-7b02-88a2-e013e8a8ef27` (95012) | "哦，" + question, then refuse | "哦。" got a reply of its own and a fragment of the question got a cut answer ("月费保持 50"). The whole question was then answered and recorded, quiet; decline |
+| 4 | `01a1c2db-4423-71fb-a695-3804b4a2eebb` (95012) | question, barge-in with a second question, then agree | The answer was quiet, and the caller cut its tail (1720 ms played, generation finished). The provider's own reply answered the new question with `record_second_question`, quiet; agree |
+| 5 | `01a1c2db-ee16-740f-9c80-9ce037ea0ea2` (95001) | question, then silence | Quiet; "Are you still there?" after 8 s. "No, thanks." got "I said the monthly price stays at 50 yuan, the same as now.", with no tool. A second dead-air prompt followed, then a later "No thanks." got "The price stays at 50 yuan a month." The caller's "bye" → `hangup` |
+| 6 | `01a1c2dd-2131-73fa-9361-ebfeebe338de` (95001) | two questions, then agree | Both quiet; agree |
+| 7 | `01a1c2e2-2087-7fea-be36-39d53e41dbb2` (95001) | "OK," + question, then refuse | "OK" got its own reply, cut at 120 ms. The response to the whole question only called `record_question`, with no audio, so the result went the ordinary way and the follow-up turn answered. The refusal, transcribed as "Lalu? 会打。", was classified as agree |
+| 8 | `01a1c2e2-bf4f-7656-b99f-50e528a476b6` (95001) | question, then barge-in | Server VAD split "Can I cancel if I change my mind?". The first half got a cut reply, and the second half was classified as agree in `offer`, before any quiet result. The caller's next question was answered over the closing line, and then the line was said again |
+| 9 | `01a1c2e3-6eac-79fd-b22e-e16c858eeca7` (95002, baseline) | two questions, then refuse | Tool first, the follow-up turn answered, twice; decline |
+| 10 | `01a1c2e4-0e15-7fd2-b3b3-52006011f0b9` (95011, baseline) | two questions, then refuse | The same; decline |
+
+**`turn latency` from the log** (`speech_stopped` to first audio) for the answer to a question:
+
+- the 9 answers on the quiet path: 385 to 553 ms;
+- the 4 baseline answers, each in a follow-up turn: 1356, 1499, 1635 and 1588 ms;
+- call 7's fallback: 1858 ms.
+
+These are single calls on the development box, not a benchmark.
+
+**What the calls show:**
+
+- **The rule held.** All 9 quiet results were followed by nothing until the caller spoke or the dead-air prompt came. The dead-air prompt was sent, not refused (calls 1 and 5). A barge-in over the answer's tail left one reply, the provider's own (call 4). A response that only called the tool kept today's path (call 7).
+- **Two wrong classifications came from turns the change does not touch.** In call 7, a refusal that was transcribed as noise was taken as agreement, after an ordinary follow-up turn. In call 8, a question split by server VAD was taken as agreement in the opening phase, before any quiet result. The issue's tool-first probe arm showed the same failure.
+- **Still open: call 5.** After the dead-air prompt, "No, thanks" was twice read as not having heard the answer, and the price was repeated. The dead-air cue ends "briefly repeat the current question". In a caller-next phase the bot's last turn answered a question rather than asked one, and that answer may be what it repeated. The same cue in zh (call 1) worked. This is one call, so it is not resolved here.

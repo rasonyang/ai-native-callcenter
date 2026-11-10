@@ -7,6 +7,21 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Added
+
+- A flow phase can declare `"isCallerNext": true`: the caller speaks next. A
+  slot tool the model calls in a response that already answered the caller, in
+  a batch that ends in such a phase, now has its result sent without asking
+  the model for another turn, so a question answered from a fact list and
+  recorded in the same response is no longer followed by a second turn that
+  has nothing to say. It applies to a batch whose tools are all slot tools
+  that succeeded, with no closing line owed and no ending armed; every other
+  case, and every flow that does not declare the field, keeps the follow-up
+  turn as before. Load rejects the field on a terminal phase and on a phase
+  with an `announce`. It works on the OpenAI-protocol engines (openai, grok,
+  qwen, gateway) and has no effect on doubao. The pattern is in
+  `docs/flow-authoring.md` section 4.5. (#387)
+
 ## v0.8.0 - 2026-11-10
 
 ### Upgrade notes

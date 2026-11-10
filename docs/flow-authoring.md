@@ -73,6 +73,7 @@ A revision stored before this check existed may still carry such a key. It keeps
 | `tools` | The allowlist for this phase. `"*"` allows every tool. Empty allows only `alwaysAllowedTools`. |
 | `transitions` | Rules that move the call out of this phase (2.5). |
 | `isTerminal` | The conversation does not leave this phase. A terminal phase may not declare `transitions`. |
+| `isCallerNext` | Optional. The caller speaks next in this phase. A slot tool called in a response that already spoke, in a batch that ends here, gets its result without a new model turn (4.5). Allowed only on a phase that is not terminal and has no `announce`: the load rejects it otherwise, because both owe the caller a turn of their own. |
 | `lead` | Optional. `{"intent": "HIGH", "notes": "{slots.x}"}`: the campaign lead the call records on entering this phase (2.7.1). `intent` is one of `HIGH`, `MEDIUM`, `LOW`, `NONE`, `DO_NOT_CALL`, in capitals; `notes` is optional text (a string or per language) rendered like `announce`. Ignored on a call that is not a campaign call. |
 
 Every user-facing string (`persona`, `instruction`, `announce`, tool `description`) is either a plain string, meaning the same text in both languages, or an object `{"en": "...", "zh": "..."}`. A missing translation falls back to the other language rather than to silence. One flow serves every language; business logic is never duplicated per language, only wording. The call's `language` picks the wording and nothing else; it never selects the provider or the voice.
@@ -539,6 +540,52 @@ Whether a step needs a person is a business decision, so the backend makes it, n
 `tools: []` is enough because `transfer_to_agent` is in `alwaysAllowedTools` in the seeded flows. The global transition on a successful `transfer_to_agent` then moves the call to a terminal phase whose `announce` is the hand-over line (the seeded `finish_transfer`). The same phase is the right `fallbackTarget`: a model that loops, or a tool that fails repeatedly, ends in a person. The seeded flows do this by counting calls (`plan_verify.calls GTE 2`, priority 1).
 
 Do not let a prompt rule such as "never change a plan over 200" be the only guard. The model can be talked past a prompt; it cannot call a tool the phase does not allow, and it cannot make the backend return a different decision.
+
+### 4.5 Answer a question, record it, and let the caller speak
+
+A phase that classifies the caller often has a second job: a caller who asks a question gets a short answer from a fact list, and the question is recorded with a slot tool (2.8) that moves the call on. By default every tool result asks the model for another turn. Here that turn has nothing to say, and the model says something anyway.
+
+What was measured (qwen, `qwen-audio-3.1-realtime-plus`, zh, synthetic caller speech, 15 questions of which 3 were an acknowledgement followed by a question, 2 voices; #387):
+
+- **Tool first, answer in the follow-up turn** (the workaround that needs no platform support): the slot tool was called in 46 of 60 sessions, the answer matched the fact list in 45 of 58, and 3 of 60 times an acknowledgement followed by a question ("OK, so does it cost anything?") was taken as agreement and ended the call. It also costs a second model round trip on every question.
+- **Answer first, then the tool, with the usual follow-up turn:** the answer matched the fact list in 58 of 58, but the follow-up turn spoke in 42 of 44 sessions where the tool was called. It almost never repeated the answer (1 of 41). In about 30 sessions it fell back on an earlier phase's fixed prompt ("can you hear me? ..."), and in about 8 it pushed a topic the phase forbids. An instruction such as "if you have already answered, say nothing and wait for the caller" did not stop that turn.
+- **Answer first, then the tool, no follow-up turn requested:** nothing was said after the answer in 30 of 30 sessions, and the tool was called in 24 of 30.
+
+A smaller check on `qwen-audio-3.1-realtime-flash`, in en and zh, went on to the caller's next turn (`docs/design/qwen-findings.md` W-Q15): nothing started on its own after 9 of 9 such results, a second question, an agreement and a refusal each got the model's own reply, and a silent caller got none. That sample is small.
+
+The rule has been measured on qwen only. openai, grok and gateway get it because they share the client and the protocol, not because they were measured.
+
+So the flow declares where the caller speaks next, and the platform leaves the follow-up turn out when that is true. Mark the phase the slot tool moves the call into with `isCallerNext`:
+
+```json
+"after_first_question": {
+  "isCallerNext": true,
+  "instruction": {
+    "en": "One question has been answered; one more is allowed. Answer it in one short sentence from the fact list and call record_second_question in the same response: the answer first, the tool in the same response, never the tool first. ...",
+    "zh": "..."
+  },
+  "tools": ["record_second_question", "classify"]
+}
+```
+
+`internal/flowsim/testdata/flows/renewal_offer.json` is a complete example: a renewal offer with a fact list of 16 entries, up to two questions answered, and the decision (agree or decline) classified into closing phases with an `announce`.
+
+When the result goes out without a turn. All of these hold, for the whole tool batch of one model response, decided when that response ends:
+
+- every tool of the batch is a slot tool and succeeded (`ok: "1"`); a refusal still gets a turn, so the model can correct itself;
+- the batch ends in a phase with `isCallerNext` (after every move of the batch);
+- the response spoke: it queued audio for the caller, or the caller cut it in;
+- no line is owed and no ending is armed: the batch did not enter a phase with an `announce`, and the call is not closing.
+
+In every other case the results are answered as always and the model gets its turn: a response that only called the tool (the follow-up turn is then the answer), a batch with an HTTP tool or a built-in, a call into a closing phase. A flow that declares no `isCallerNext` phase behaves exactly as before, and so does a flow on an engine that cannot do it. Only the OpenAI-protocol engines (openai, grok, qwen, gateway) can; on doubao the field has no effect, until it has been measured there (`docs/provider-extension.md`).
+
+After such a result the next turn is the caller's. Speech gets the provider's own reply; silence goes through the dead-air path. The bot's next reply counts towards `maxTurnsWithoutTool` and its claims are judged, like any reply to the caller. The log line `tool results sent without asking for a turn` says when this happened on a call.
+
+Things to keep in mind:
+
+- Write the instruction so the answer comes first and the tool call is in the same response. A model that calls the tool first has said nothing, and the follow-up turn is then its answer, at the price of the extra round trip.
+- Do not use `isCallerNext` where the next question comes from the follow-up turn. `lead_qualification` relies on that turn ("got it", then the next question under the phase's instruction), and with the field its caller would be left in silence. The flow has to say that the caller speaks next; the platform cannot tell.
+- The simulator's tier 2 (`aicc flowsim -tier 2`) honours the rule: a spoken response that records a slot and ends in an `isCallerNext` phase gets no further model round. Tier 1 replays scripted steps and does not model turns, so it can only check the phases and slots.
 
 ## 5. Rules the platform already enforces for flows
 
