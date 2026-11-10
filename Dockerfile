@@ -40,7 +40,6 @@ WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 COPY go.mod go.sum ./
-COPY does-not-exist ./
 RUN go mod download
 
 COPY . .

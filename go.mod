@@ -3,6 +3,7 @@ module github.com/rasonyang/ai-native-callcenter
 go 1.27.3
 
 require (
+	github.com/DataDog/zstd v1.5.7
 	github.com/getkin/kin-openapi v0.146.0
 	github.com/go-chi/chi/v5 v5.3.1
 	github.com/google/uuid v1.6.0
