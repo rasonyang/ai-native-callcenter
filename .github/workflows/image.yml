@@ -1,0 +1,156 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# The application image, built from Dockerfile on both architectures whenever
+# one of its build inputs changes, and pushed nowhere. ci.yml builds and tests
+# on the runner and never goes through Dockerfile, and e2e.yml is filtered to
+# the call paths, so without this a pull request could break the image and pass
+# every check: the release of the next tag would be the first build to notice,
+# after the switch image had been published under that tag (#527).
+#
+# A workflow of its own because ci.yml runs on every path and GitHub has no
+# per-job path filter. The paths are the image's own build inputs:
+#
+# - Dockerfile and .dockerignore.
+# - web/package.json and web/package-lock.json: the image runs `npm ci` itself,
+#   in node:24-alpine (musl), where a platform-specific optional package that
+#   installs on the runner's glibc can be missing.
+# - go.mod and go.sum: the image builds with CGO_ENABLED=0, and the `go` job
+#   builds with cgo for -race, so a dependency that needs cgo passes there.
+# - deploy/docker-compose.yml: its build.args are passed to this Dockerfile by
+#   `make stack-up`, and Docker only warns about an argument nothing declares.
+#
+# It checks that the image builds and starts, not how calls behave; that is
+# e2e.yml. Nothing is pushed: there is no login step, and neither build has a
+# registry output.
+name: image
+
+on:
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'deploy/docker-compose.yml'
+      - '.github/workflows/image.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'go.mod'
+      - 'go.sum'
+      - 'deploy/docker-compose.yml'
+      - '.github/workflows/image.yml'
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels that pull request's run. A push to
+# main never cancels or replaces another run (see e2e.yml for why each gets a
+# group of its own).
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('image-pr-{0}', github.ref) || format('image-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  app:
+    name: app image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VERSION: ci-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      # Every argument the stack passes must be one the Dockerfile declares:
+      # a misspelt or renamed one is dropped with a warning, and the stack
+      # builds with the Dockerfile's default instead of the value it set.
+      - name: Check the stack's build arguments
+        run: |
+          args="$(FS_EXTERNAL_IP=192.0.2.10 FS_LOCAL_IP=192.0.2.10 \
+            docker compose -f deploy/docker-compose.yml config --format json \
+            | jq -r '.services[] | .build.args // {} | keys[]' | sort -u)"
+          if [ -z "$args" ]; then
+            echo "::error file=deploy/docker-compose.yml::no service in deploy/docker-compose.yml passes build arguments; update this check"
+            exit 1
+          fi
+          failed=0
+          for arg in $args; do
+            if ! grep -Eq "^ARG ${arg}(=|$)" Dockerfile; then
+              echo "::error file=deploy/docker-compose.yml::build argument ${arg} is not declared by an ARG in Dockerfile"
+              failed=1
+            fi
+          done
+          exit "$failed"
+
+      # No QEMU (owner's rule for every workflow). The Dockerfile's build
+      # stages run on the runner's own architecture and cross-compile, and the
+      # final stage has no RUN, so the arm64 leg needs no emulator; a stage
+      # that ever needs the target platform fails here instead of slowing down.
+      - uses: docker/setup-buildx-action@v4
+
+      # Cache: read the release's (the default scope) and this workflow's own;
+      # write this workflow's own, from main only. A pull request writes
+      # nothing, so it can neither evict nor replace what a release reads.
+      - name: Build linux/amd64 for the version check
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          load: true
+          tags: aicc:image-check
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: |
+            type=gha
+            type=gha,scope=image
+
+      # As the release checks it: an image that builds but cannot start, or
+      # cannot say which build it is, fails here.
+      - name: Check the image starts
+        run: |
+          out="$(docker run --rm aicc:image-check --version)"
+          echo "$out"
+          case "$out" in
+            "aicc ${VERSION} linux/amd64 "*) ;;
+            *) echo "::error::--version does not start with 'aicc ${VERSION} linux/amd64': ${out}"; exit 1 ;;
+          esac
+
+      # Both architectures, as the release builds them, exported to the
+      # runner's disk rather than to a registry. The amd64 half is the build
+      # above, from the builder's cache.
+      - name: Build linux/amd64 and linux/arm64
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: false
+          outputs: type=local,dest=${{ runner.temp }}/image
+          build-args: VERSION=${{ env.VERSION }}
+          cache-from: |
+            type=gha
+            type=gha,scope=image
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=image,mode=max' || '' }}
+
+      # The arm64 binary cannot be run here without an emulator, so check what
+      # it was built for: a TARGETARCH that does not reach `go build` builds
+      # the runner's architecture into both images, and the amd64 run above
+      # passes regardless.
+      - name: Check each image carries its own architecture's binary
+        run: |
+          failed=0
+          for want in "linux_amd64:x86-64" "linux_arm64:ARM aarch64"; do
+            bin="${RUNNER_TEMP}/image/${want%%:*}/usr/local/bin/aicc"
+            desc="$(file -b "$bin")"
+            echo "${want%%:*}: ${desc}"
+            case "$desc" in
+              *"${want#*:}"*) ;;
+              *) echo "::error::the ${want%%:*} image's aicc is not a ${want#*:} executable: ${desc}"; failed=1 ;;
+            esac
+          done
+          exit "$failed"

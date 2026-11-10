@@ -2,8 +2,9 @@
 #
 # The build gate. Everything that must hold for any change, on both halves of
 # the product. The API contract has a gate of its own (api.yml); this one never
-# duplicates it. No container image is built here: the two images are built
-# only by release.yml, when a release is cut.
+# duplicates it. No container image is built here: image.yml builds the
+# application image when one of its build inputs changes, and release.yml
+# builds and publishes both images when a release is cut.
 name: ci
 
 # A change that touches only Markdown runs nothing this workflow checks, so
