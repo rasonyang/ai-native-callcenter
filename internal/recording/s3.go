@@ -8,8 +8,10 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -22,10 +24,11 @@ import (
 //
 // Two ways in, one way out. With a spool directory, the switch records
 // locally and ingestion is the upload that makes the file durable, after
-// which the spool copy is deleted. Without one, the switch uploads directly —
-// mod_http_cache PUTs the finished file over HTTP (on SeaweedFS the filer
-// path /buckets/<bucket>/<key> and the S3 object <bucket>/<key> are the same
-// file) — and ingestion only confirms the object arrived.
+// which the spool copy is released once the ledger holds the row. Without
+// one, the switch uploads directly — mod_http_cache PUTs the finished file
+// over HTTP (on SeaweedFS the filer path /buckets/<bucket>/<key> and the S3
+// object <bucket>/<key> are the same file) — and ingestion only confirms the
+// object arrived.
 //
 // The client library speaks plain S3, and S3-compatible stores agree on the
 // basics, but not on how a PUT body is signed. The one behaviour this
@@ -105,13 +108,11 @@ func (s *s3Storage) Ingest(ctx context.Context, key string) (int64, error) {
 		info, statErr := os.Stat(local)
 		if statErr == nil {
 			if err := s.upload(ctx, key, local); err != nil {
-				return 0, fmt.Errorf("recording: upload %s: %w", key, err)
+				return 0, fmt.Errorf("recording: upload %s: %w", key, classify(err))
 			}
-			// The spool copy has served its purpose. Failing to remove it
-			// costs disk, not correctness, so it is logged by the caller
-			// rather than fatal here.
-			_ = os.Remove(local)
-			_ = removeEmptyParents(local, s.spool.root)
+			// The spool copy stays until the caller has booked the row
+			// (Release): removing it here would leave an object in the store
+			// that nothing could ever book if the ledger write then failed.
 			return info.Size(), nil
 		}
 		if !os.IsNotExist(statErr) {
@@ -231,7 +232,59 @@ func (s *s3Storage) statUploaded(ctx context.Context, key string) (int64, error)
 		}
 		lastErr = err
 	}
-	return 0, fmt.Errorf("recording: not in the store: %w", lastErr)
+	return 0, fmt.Errorf("recording: not in the store: %w", classify(lastErr))
+}
+
+// Release removes the spool copy once the ledger holds the row.
+func (s *s3Storage) Release(_ context.Context, key string) error {
+	if s.spool == nil {
+		return nil
+	}
+	local, err := s.spool.resolve(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(local); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	_ = removeEmptyParents(local, s.spool.root)
+	return nil
+}
+
+// Pending lists the spool's files; with no spool there is nothing local.
+func (s *s3Storage) Pending(ctx context.Context, writtenBefore time.Time) ([]string, error) {
+	if s.spool == nil {
+		return nil, nil
+	}
+	return s.spool.pendingIn(ctx, writtenBefore, nil)
+}
+
+// classifiedError keeps the store's own error and message while answering to
+// the standard library's sentinels, which is how the caller tells a recording
+// that was never made from one that could not be stored.
+type classifiedError struct {
+	err      error
+	sentinel error
+}
+
+func (e *classifiedError) Error() string        { return e.err.Error() }
+func (e *classifiedError) Unwrap() error        { return e.err }
+func (e *classifiedError) Is(target error) bool { return target == e.sentinel }
+
+// classify marks a store's "no such object" as fs.ErrNotExist and its
+// "forbidden" as fs.ErrPermission, and leaves every other error as it is.
+func classify(err error) error {
+	if err == nil {
+		return nil
+	}
+	resp := minio.ToErrorResponse(err)
+	switch {
+	case resp.Code == "NoSuchKey" || resp.Code == "NotFound" || resp.StatusCode == 404:
+		return &classifiedError{err: err, sentinel: fs.ErrNotExist}
+	case resp.Code == "AccessDenied" || resp.StatusCode == 403 || resp.StatusCode == 401:
+		return &classifiedError{err: err, sentinel: fs.ErrPermission}
+	}
+	return err
 }
 
 // Open downloads to a seekable temporary file.

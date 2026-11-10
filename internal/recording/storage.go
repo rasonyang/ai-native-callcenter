@@ -11,7 +11,10 @@ import (
 	"io"
 	"net/http"
 	"path"
+	"regexp"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Storage is one place recordings live.
@@ -28,9 +31,28 @@ type Storage interface {
 
 	// Ingest takes the file the switch wrote and makes it durable, returning
 	// its size. On the filesystem that is a stat — the file is already where
-	// it belongs. On S3 it is an upload followed by removing the local spool
-	// copy.
+	// it belongs. On S3 it is an upload. It never removes the local spool
+	// copy: that is Release, called once the ledger holds the row, because a
+	// spool copy deleted before the row exists is a recording nothing can
+	// ever book. An error for a file that is not there satisfies
+	// errors.Is(err, fs.ErrNotExist); one the store or the disk refused for
+	// lack of rights satisfies fs.ErrPermission.
 	Ingest(ctx context.Context, key string) (sizeBytes int64, err error)
+
+	// Release removes the local spool copy of a recording whose row is booked
+	// and tidies the empty dated directories it leaves. Only the S3 backend
+	// with a spool has anything to remove; the filesystem backend, whose
+	// directory is the store itself, and S3 without a spool do nothing. A
+	// copy already gone is not an error.
+	Release(ctx context.Context, key string) error
+
+	// Pending lists the keys of recordings the switch wrote that are older
+	// than writtenBefore (by modification time) and may not be booked: the
+	// S3 spool's files, or on the filesystem the files of today and
+	// yesterday (UTC), which bounds a pass over a directory that keeps every
+	// recording for good. Anything not named like a recording key is
+	// skipped. S3 without a spool has nothing local and lists nothing.
+	Pending(ctx context.Context, writtenBefore time.Time) ([]string, error)
 
 	// Open returns the audio for streaming. The reader seeks, which is what
 	// lets playback honour range requests.
@@ -44,6 +66,25 @@ type Storage interface {
 // started, then the call id. Both backends use it verbatim.
 func Key(startedAt time.Time, callID string) string {
 	return path.Join(startedAt.UTC().Format("2006/01/02"), callID+".wav")
+}
+
+// keyPattern is the shape Key produces: UTC date directories, then the call id.
+var keyPattern = regexp.MustCompile(
+	`^\d{4}/\d{2}/\d{2}/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.wav$`)
+
+// CallIDOf is the call a key belongs to, and false for a name that is not a
+// recording key (the stock dialplan's recordings at the root of the directory,
+// for one).
+func CallIDOf(key string) (uuid.UUID, bool) {
+	m := keyPattern.FindStringSubmatch(key)
+	if m == nil {
+		return uuid.Nil, false
+	}
+	id, err := uuid.Parse(m[1])
+	if err != nil {
+		return uuid.Nil, false
+	}
+	return id, true
 }
 
 // wavHeaderSize is what a canonical RIFF/WAVE header occupies before samples.

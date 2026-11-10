@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -42,6 +43,11 @@ func (fakeStorage) Backend() string { return "FS" }
 func (fakeStorage) Bucket() string  { return "" }
 func (fakeStorage) Ingest(context.Context, string) (int64, error) {
 	return 0, nil
+}
+
+func (fakeStorage) Release(context.Context, string) error { return nil }
+func (fakeStorage) Pending(context.Context, time.Time) ([]string, error) {
+	return nil, nil
 }
 
 func (fakeStorage) Open(context.Context, string) (io.ReadSeekCloser, int64, error) {

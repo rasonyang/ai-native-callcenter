@@ -187,7 +187,7 @@ func TestS3RoundTrip(t *testing.T) {
 	}
 	awaitBucket(t, s3, 30*time.Second)
 
-	// The switch wrote a spool file; ingestion uploads it and clears the spool.
+	// The switch wrote a spool file; ingestion uploads it and release clears it.
 	key := Key(time.Now(), "call-s3")
 	local := writeSpoolFile(t, spool, key, wavHeaderSize+32000)
 
@@ -198,8 +198,14 @@ func TestS3RoundTrip(t *testing.T) {
 	if size != wavHeaderSize+32000 {
 		t.Errorf("size = %d", size)
 	}
+	if _, err := os.Stat(local); err != nil {
+		t.Error("ingest removed the spool copy before the row was booked")
+	}
+	if err := storage.Release(t.Context(), key); err != nil {
+		t.Fatalf("release: %v", err)
+	}
 	if _, err := os.Stat(local); !os.IsNotExist(err) {
-		t.Error("the spool copy survived the upload")
+		t.Error("the spool copy survived its release")
 	}
 
 	// The audio comes back byte-identical and seekable.
