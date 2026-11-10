@@ -194,6 +194,11 @@ lint: ## Vet Go code and lint the frontend
 	go vet ./...
 	gofmt -l . | grep -v node_modules && exit 1 || true
 	cd $(WEB) && npx oxlint .
+	scripts/check-web-lockfile.sh
+
+.PHONY: web-lock-fix
+web-lock-fix: ## Point web/package-lock.json back at registry.npmjs.org after an install behind a mirror (#525)
+	scripts/check-web-lockfile.sh --fix
 
 .PHONY: web-install
 web-install: ## Install frontend dependencies

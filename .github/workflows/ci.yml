@@ -136,6 +136,11 @@ jobs:
       - name: Lint
         run: npx oxlint .
 
+      # Every package must resolve on registry.npmjs.org, not a mirror (#525).
+      - name: Lockfile registry
+        working-directory: .
+        run: scripts/check-web-lockfile.sh
+
       - name: Test
         run: npm run test
 
