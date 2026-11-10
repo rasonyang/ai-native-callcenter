@@ -308,3 +308,5 @@ func transferParameters(queues []string) json.RawMessage {
 		"required": ["queue", "reason", "summary"]
 	}`)
 }
+
+// verification-only comment.
