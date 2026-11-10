@@ -9,7 +9,7 @@ API, with a scoped API key.
 
 ```sh
 make e2e-up        # fresh database, application built from the working tree
-make e2e-smoke     # one AI outbound call; checks the callee's record and the CDR
+make e2e-smoke     # one AI outbound call; checks the callee's record, the CDR, the webhook and the event stream
 make e2e-campaign  # two campaigns (US, CN): answered and unanswered outcomes, SIP probes, run-wide invariants
 make e2e-capacity  # bot-slot overflow (K1), the DID outbound line limit (K2) and a refused bot leg (K3), each in its own application start
 make e2e-down      # collect logs, remove containers, volumes and the network
@@ -38,6 +38,17 @@ The isolation is a property of the network, not of configuration.
   directory and mounted as that one file; the directory is never mounted, so
   `aicc_bot.xml` stays). Nothing from `deploy/dev/freeswitch`, the development
   machine's trunk, is mounted.
+- That gateway carries `destination-prefix` `a1b2cc`, so every call of every
+  run is dialled with the prefix in front of the Request-URI and To users, as a
+  carrier that requires one would see it (`deploy/carrier.md`, "A called-number
+  prefix"). The prefix is one constant in `e2e.sh` (`CALLED_PREFIX`), rendered
+  into the gateway file and passed to the simulator (`-called-prefix`) and the
+  driver (`E2E_CALLED_PREFIX`). The dial string has no prefix. One shared
+  gateway rather than a second one: the smoke, the campaigns and the capacity
+  scenarios, in every dial form, all dial through it, so every check that the
+  CDR's dialled number equals the number sent is also a leak check, and
+  `AICC_OUTBOUND_ENDPOINT`, which is deployment-wide, stays a single pinned
+  value.
 - `AICC_OUTBOUND_ENDPOINT` is `sofia/gateway/e2e_calleesim/%s`. The provider is
   the mock, reached by endpoint, with the placeholder key `not-a-key`; no real
   key is passed. It plays `provider-scenario.json` (see "The mock provider's
@@ -79,10 +90,26 @@ Addresses on the network, from the prefix: `.10` application, `.11` switch,
 2. It publishes a one-phase flow (`flow.json`) and creates a DID that allows
    outbound calls, then places `POST /calls` with `kind: AI_OUTBOUND` to
    `13800000001`, the number `scenario.json` answers with 200.
-3. It asserts: exactly one new dialog in the simulator's record, for that
+3. Before the call it creates a webhook subscription for the DID through the
+   public API, pointing at an HTTP receiver the driver runs itself on the
+   network (its address is the one the route to the application uses; the
+   webhook sender has no destination restriction, and the subscription is
+   deleted afterwards), and opens `GET /events` as the administrator, which
+   sees every event.
+4. It asserts: exactly one new dialog in the simulator's record, for that
    number, answered with 200 and acknowledged, with downlink audio above
    silence; exactly one CDR for the DID, and exactly one more row in the ledger,
    for that call, typed `OUTBOUND` and with an answer time.
+5. It asserts the called-number prefix stayed on the wire (the simulator
+   removes it before its scenario lookup and fails an INVITE without it):
+   the INVITE's Request-URI user and To user are the prefix plus the dialled
+   number; the CDR's `toNumber`, and the `toNumber` of every webhook delivery
+   for the call, is the dialled number; no delivery body and no event carries
+   the prefix in any field, in either case. The stream is held until the CDR
+   and the webhook are final, and the check is not vacuous: it also asserts
+   that at least one `PARTY_*` and one `CALL_*` event of the call were seen.
+   The summary's `prefix` block records the users, the delivery count and the
+   event counts.
 
 Every equality is paired with a count, so an empty result fails. Latency
 (`firstAudioAfterAnswer`, `inviteToAnswer`, `placeToInvite`) is written to the

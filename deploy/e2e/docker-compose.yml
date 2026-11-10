@@ -100,6 +100,9 @@ services:
       - -scenario=/etc/e2e/scenario.json
       - -http=0.0.0.0:8771
       - -out=/run/e2e/calleesim-final.json
+      # The gateway's destination-prefix (calleesim-gateway.xml.in): removed
+      # before the scenario lookup, and an INVITE without it is unexpected.
+      - -called-prefix=${E2E_CALLED_PREFIX:?}
       - -rtp-min=30000
       - -rtp-max=30200
     volumes:
@@ -135,6 +138,7 @@ services:
     environment:
       ESL_PASSWORD: ${ESL_PASSWORD:-aicc@123}
       E2E_PASSWORD: ${E2E_PASSWORD:?}
+      E2E_CALLED_PREFIX: ${E2E_CALLED_PREFIX:?}
     volumes:
       - ./e2e/flow.json:/etc/e2e/flow.json:ro
       # The campaign driver checks its cases against the simulator's scenario

@@ -973,3 +973,60 @@ func TestShuttingDownEndsOpenDialogsAndKeepsTheirRecord(t *testing.T) {
 		t.Errorf("record = %+v", rec)
 	}
 }
+
+// With a called-number prefix configured, the gateway's prefix is taken off
+// before the scenario lookup: the record keeps the dialled number, the wire
+// form stays in the Request-URI and the To header, and a second dialog on the
+// same number counts as its second attempt.
+func TestACalledPrefixIsRemovedBeforeTheScenarioLookup(t *testing.T) {
+	const prefix = "a1b2cc"
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"13800000001": {{FinalStatus: 486}, {}},
+	}), func(c *Config) { c.CalledPrefix = prefix })
+
+	var finals []int
+	for range 2 {
+		uac := newUAC(t, loopback, sim.Addr(), prefix+"13800000001")
+		uac.invite()
+		finals = append(finals, uac.waitFinal().status)
+	}
+	if !equalInts(finals, []int{486, 200}) {
+		t.Fatalf("finals = %v, want [486 200]", finals)
+	}
+	report := sim.Report()
+	if report.Failed || report.UnexpectedCount != 0 {
+		t.Fatalf("failed=%v unexpected=%d, want a clean run", report.Failed, report.UnexpectedCount)
+	}
+	for i, d := range report.Dialogs {
+		if d.Number != "13800000001" || !d.IsExpected || d.Attempt != i {
+			t.Errorf("dialog %d: number=%q expected=%v attempt=%d", i, d.Number, d.IsExpected, d.Attempt)
+		}
+		if !strings.HasPrefix(d.RequestURI, "sip:"+prefix+"13800000001@") {
+			t.Errorf("dialog %d: request URI %q lost the prefix", i, d.RequestURI)
+		}
+		if !strings.Contains(d.InviteHeaders["to"], "sip:"+prefix+"13800000001@") {
+			t.Errorf("dialog %d: To %q lost the prefix", i, d.InviteHeaders["to"])
+		}
+	}
+}
+
+// A gateway that lost its prefix is caught: the INVITE for a number the
+// scenario knows, but without the prefix, is unexpected and fails the run.
+func TestAnInviteWithoutTheCalledPrefixIsUnexpected(t *testing.T) {
+	sim := startSim(t, loopback, scenarioOf(t, map[string][]Behaviour{
+		"13800000001": {{}},
+	}), func(c *Config) { c.CalledPrefix = "a1b2cc" })
+
+	bare := newUAC(t, loopback, sim.Addr(), "13800000001")
+	bare.invite()
+	if final := bare.waitFinal(); final.status != 404 {
+		t.Fatalf("final = %d, want 404", final.status)
+	}
+	report := sim.Report()
+	if !report.Failed || report.UnexpectedCount != 1 {
+		t.Fatalf("failed=%v unexpected=%d, want the run failed with one unexpected dialog", report.Failed, report.UnexpectedCount)
+	}
+	if d := only(t, report); d.IsExpected || d.Number != "13800000001" {
+		t.Errorf("record = number %q expected %v", d.Number, d.IsExpected)
+	}
+}

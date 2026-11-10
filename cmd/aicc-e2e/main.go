@@ -83,12 +83,13 @@ func smoke(ctx context.Context, args []string) error {
 	fs.StringVar(&cfg.FlowFile, "flow", "", "flow spec file")
 	fs.StringVar(&cfg.DID, "did", "", "the DID the call goes out from (default: a random one)")
 	fs.StringVar(&cfg.To, "to", "", "the number the simulator answers")
+	fs.StringVar(&cfg.CalledPrefix, "called-prefix", os.Getenv("E2E_CALLED_PREFIX"), "the gateway's destination-prefix, which must reach the wire and no record")
 	fs.StringVar(&cfg.OutDir, "out", "", "run directory")
 	fs.DurationVar(&cfg.Wait, "wait", 90*time.Second, "bound for each wait")
 	_ = fs.Parse(args)
 	for name, v := range map[string]string{"api": cfg.API, "ready": cfg.ReadyURL, "calleesim": cfg.CalleeSim,
 		"esl": cfg.ESLAddr, "compose-config": cfg.ComposeConfig, "username": cfg.Username, "password": cfg.Password,
-		"flow": cfg.FlowFile, "to": cfg.To, "out": cfg.OutDir} {
+		"flow": cfg.FlowFile, "to": cfg.To, "called-prefix": cfg.CalledPrefix, "out": cfg.OutDir} {
 		if v == "" {
 			return fmt.Errorf("-%s is required", name)
 		}

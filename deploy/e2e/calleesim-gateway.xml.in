@@ -11,6 +11,16 @@
   The directory is never mounted, because that would hide aicc_bot.xml. The
   proxy is an IP address, never a service name.
 
+  destination-prefix puts the carrier-style prefix in front of the user part
+  of the Request-URI and the To header of every call dialled through the
+  gateway, and nowhere else (issue #531). The application's dial string stays
+  sofia/gateway/e2e_calleesim/%s, so the prefix exists only on the SIP wire:
+  the simulator expects it (-called-prefix) and fails any INVITE without it,
+  and the smoke checks it never reaches a CDR, a webhook or an event. Every
+  call of every e2e run is dialled through it.
+
+  e2e.sh renders @CALLED_PREFIX@ from its one constant.
+
   No registration and no OPTIONS ping: the simulator is a UAS for INVITE.
 -->
 <include>
@@ -18,5 +28,6 @@
     <param name="proxy" value="@CALLEESIM_IP@:5080"/>
     <param name="register" value="false"/>
     <param name="caller-id-in-from" value="true"/>
+    <param name="destination-prefix" value="@CALLED_PREFIX@"/>
   </gateway>
 </include>
