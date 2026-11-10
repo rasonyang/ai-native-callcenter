@@ -24,6 +24,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/config"
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -174,6 +175,9 @@ func newHarness(t *testing.T) *harness {
 		readyzURL:  readyzServer(t, readyBody("up")).URL + "/readyz",
 		externalIP: "192.168.31.111",
 	}
+	// A healthy deployment records to S3 through a spool, the one mode in
+	// which this application uploads.
+	h.withRecordings("/spool", &fakeRecordings{backend: "S3"})
 	return h
 }
 
@@ -1256,5 +1260,97 @@ func TestAnUnreadableEphemeralRangeIsNotAWarning(t *testing.T) {
 	wantState(t, got, DoctorCheckBotRTPEphemeral, DoctorStateSkip)
 	if _, _, err := parseEphemeralLinux("garbage"); err == nil {
 		t.Error("accepted garbage")
+	}
+}
+
+// fakeRecordings is a recording store with a scripted answer to the bucket
+// check and the self-check.
+type fakeRecordings struct {
+	recording.Storage
+	backend     string
+	bucketErr   error
+	selfCheckEr error
+	selfChecks  int
+}
+
+func (f *fakeRecordings) Backend() string { return f.backend }
+func (f *fakeRecordings) Bucket() string  { return "aicc-recordings" }
+func (f *fakeRecordings) CheckBucket(context.Context) error {
+	return f.bucketErr
+}
+func (f *fakeRecordings) SelfCheck(context.Context) error {
+	f.selfChecks++
+	return f.selfCheckEr
+}
+
+func (h *harness) withRecordings(dir string, st recording.Storage) {
+	h.deps.cfg.RecordingDir = dir
+	h.deps.cfg.S3Endpoint = "store.example:9000"
+	h.deps.recordings = func() (recording.Storage, error) { return st, nil }
+}
+
+func TestDoctorRecordingStorageSkipsWhereTheApplicationNeverUploads(t *testing.T) {
+	t.Parallel()
+	cases := map[string]func(h *harness) *fakeRecordings{
+		"none configured": func(h *harness) *fakeRecordings {
+			h.deps.recordings = func() (recording.Storage, error) { return nil, nil }
+			return nil
+		},
+		"filesystem": func(h *harness) *fakeRecordings {
+			f := &fakeRecordings{backend: "FS"}
+			h.withRecordings("/spool", f)
+			return f
+		},
+		"S3 without a spool": func(h *harness) *fakeRecordings {
+			f := &fakeRecordings{backend: "S3"}
+			h.withRecordings("", f)
+			return f
+		},
+	}
+	for name, setup := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			f := setup(h)
+			got := h.run()
+			wantState(t, got, DoctorCheckRecordingStorage, DoctorStateSkip)
+			if f != nil && f.selfChecks != 0 {
+				t.Errorf("the self-check ran %d times, want none", f.selfChecks)
+			}
+		})
+	}
+}
+
+func TestDoctorRecordingStoragePassesWhenTheUploadWorks(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	f := &fakeRecordings{backend: "S3"}
+	h.withRecordings("/spool", f)
+	wantState(t, h.run(), DoctorCheckRecordingStorage, DoctorStatePass)
+	if f.selfChecks != 1 {
+		t.Errorf("self-checks = %d, want 1", f.selfChecks)
+	}
+}
+
+func TestDoctorRecordingStorageFailsWithItsCode(t *testing.T) {
+	t.Parallel()
+	for name, f := range map[string]*fakeRecordings{
+		"upload refused": {backend: "S3", selfCheckEr: errors.New("Aws MultiChunkedEncoding is not supported.")},
+		"no bucket":      {backend: "S3", bucketErr: errors.New("bucket aicc-recordings does not exist")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			h := newHarness(t)
+			h.withRecordings("/spool", f)
+			got := h.run()
+			wantState(t, got, DoctorCheckRecordingStorage, DoctorStateFail)
+			r := got[DoctorCheckRecordingStorage]
+			if r.Code != DoctorCodeRecordingUploadFailed || r.Fix == "" {
+				t.Errorf("code = %q fix = %q", r.Code, r.Fix)
+			}
+			if f.bucketErr != nil && f.selfChecks != 0 {
+				t.Error("the self-check ran against a bucket that is not there")
+			}
+		})
 	}
 }

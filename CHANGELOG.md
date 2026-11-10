@@ -22,6 +22,23 @@ carries the one-line installer's files.
   qwen, gateway) and has no effect on doubao. The pattern is in
   `docs/flow-authoring.md` section 4.5. (#387)
 
+### Fixed
+
+- With the S3 recording backend, an S3-compatible store reached over plain HTTP
+  (`AICC_S3_SSL=false`) could refuse every recording upload with "Aws
+  MultiChunkedEncoding is not supported.", so no recording was ever stored
+  while startup and the bucket check looked healthy. The upload was an
+  `aws-chunked` streaming request over HTTP and a different request over
+  HTTPS, depending on the client library's default. A recording is now
+  uploaded as one PUT signed with the file's SHA-256, the same on HTTP and
+  HTTPS and at every size, with no multipart upload. A spool deployment also
+  checks this at start: the application uploads, reads back and deletes a
+  small probe object under `_aicc/selfcheck/` and logs an ERROR saying
+  recordings will not be stored if the store refuses it (calls still work),
+  and the new `aicc doctor` check `recording_storage` fails with
+  `RECORDING_UPLOAD_FAILED`. The store must accept a signed single PUT and
+  serve GET, HEAD and DELETE; see Recordings in `deploy/README.md`. (#520)
+
 ## v0.8.0 - 2026-11-10
 
 ### Upgrade notes
