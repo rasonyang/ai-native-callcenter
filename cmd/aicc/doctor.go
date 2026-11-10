@@ -24,6 +24,7 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
+	"github.com/rasonyang/ai-native-callcenter/internal/recording"
 	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
@@ -31,8 +32,9 @@ import (
 // `aicc doctor` checks a running deployment from the inside: it runs in the
 // application's own network namespace (`docker compose exec aicc aicc doctor`)
 // and asks each dependency the question an installer would otherwise have to
-// answer by hand. It changes nothing: no migration, no instance lock, nothing
-// written to the switch.
+// answer by hand. It changes nothing durable: no migration, no instance lock,
+// nothing written to the switch. The one thing it writes is a probe object in
+// the recording store (S3 with a spool only), which it deletes again.
 //
 // Each check prints one line: its state, its name and a message, and a failed
 // check also its code and a second line with what to do about it. The exit
@@ -73,6 +75,7 @@ const (
 	DoctorCheckBotGateway           DoctorCheck = "bot_gateway"
 	DoctorCheckExternalIP           DoctorCheck = "external_ip"
 	DoctorCheckExternalIPAdvertised DoctorCheck = "external_ip_advertised"
+	DoctorCheckRecordingStorage     DoctorCheck = "recording_storage"
 	DoctorCheckProviderKey          DoctorCheck = "provider_key"
 	DoctorCheckProviderSession      DoctorCheck = "provider_session"
 	DoctorCheckOutboundEndpoint     DoctorCheck = "outbound_endpoint"
@@ -102,6 +105,7 @@ const (
 	DoctorCodeBotGatewayDown        DoctorCode = "BOT_GATEWAY_DOWN"
 	DoctorCodeExternalIPNotOnHost   DoctorCode = "EXTERNAL_IP_NOT_ON_HOST"
 	DoctorCodeExternalIPStale       DoctorCode = "EXTERNAL_IP_STALE"
+	DoctorCodeRecordingUploadFailed DoctorCode = "RECORDING_UPLOAD_FAILED"
 	DoctorCodeProviderKeyMissing    DoctorCode = "PROVIDER_KEY_MISSING"
 	DoctorCodeProviderSessionFailed DoctorCode = "PROVIDER_SESSION_FAILED"
 	// DoctorCodeOutboundEndpointUnset and DoctorCodeOutboundGatewayMissing are
@@ -148,6 +152,7 @@ var doctorChecks = []struct {
 	{DoctorCheckSwitchRTPRange, DoctorCodeSwitchRTPRangeInvalid},
 	{DoctorCheckBotRTPRange, DoctorCodeBotRTPRangeOverlapsSwitch},
 	{DoctorCheckBotRTPEphemeral, DoctorCodeBotRTPRangeEphemeral},
+	{DoctorCheckRecordingStorage, DoctorCodeRecordingUploadFailed},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
 	{DoctorCheckProviderSession, DoctorCodeProviderSessionFailed},
 	{DoctorCheckDNCCountryCode, DoctorCodeDNCCountryCodeUnset},
@@ -225,6 +230,9 @@ type doctorDeps struct {
 	// dialSwitch opens doctor's own connection to the switch, with the
 	// application's credentials.
 	dialSwitch func(ctx context.Context) (switchReader, func(), error)
+	// recordings builds the application's recording storage, nil when none is
+	// configured.
+	recordings func() (recording.Storage, error)
 	// sessions is the application's own provider factory.
 	sessions       func(provider.Profile, *slog.Logger) (provider.VoiceSession, error)
 	interfaceAddrs func() ([]net.Addr, error)
@@ -290,6 +298,7 @@ func runDoctor(args []string) error {
 			return telephony.NewAdapter(oneShotSwitch{client}, cfg.SwitchDomain),
 				func() { _ = client.Close() }, nil
 		},
+		recordings:     func() (recording.Storage, error) { return newRecordingStorage(cfg) },
 		sessions:       voiceSession,
 		interfaceAddrs: net.InterfaceAddrs,
 		ephemeralPorts: osEphemeralPorts,
@@ -346,6 +355,7 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	out = append(out, checkSwitchRTPRange(d, sw.reader)...)
 	out = append(out, checkBotRTPRange(d, sw.reader)...)
 	out = append(out, checkBotRTPEphemeral(d)...)
+	out = append(out, checkRecordingStorage(ctx, d)...)
 	out = append(out, checkProvider(ctx, d, opts)...)
 	return out
 }
@@ -922,6 +932,53 @@ func hostAddresses(d doctorDeps, opts doctorOptions) ([]hostAddr, string, error)
 		}
 	}
 	return out, "this namespace's addresses", nil
+}
+
+// recordingProbeTimeout bounds the recording store probe: a bucket lookup, a
+// small PUT, a GET and a DELETE.
+const recordingProbeTimeout = 30 * time.Second
+
+// checkRecordingStorage proves the store takes the upload Ingest makes. The
+// bucket existing is not proof of that: a store can answer every bucket call
+// and still refuse the PUT body.
+func checkRecordingStorage(ctx context.Context, d doctorDeps) []doctorResult {
+	const check = DoctorCheckRecordingStorage
+	var st recording.Storage
+	if d.recordings != nil {
+		var err error
+		if st, err = d.recordings(); err != nil {
+			return []doctorResult{fail(check, "recording storage: "+oneLine(err.Error()),
+				"check AICC_RECORDING_BACKEND, AICC_S3_ENDPOINT and AICC_S3_BUCKET")}
+		}
+	}
+	if st == nil {
+		return []doctorResult{skip(check, "no recording storage is configured")}
+	}
+	if st.Backend() != "S3" {
+		return []doctorResult{skip(check, "the recording backend is "+st.Backend()+", not S3")}
+	}
+	if d.cfg.RecordingDir == "" {
+		return []doctorResult{skip(check,
+			"no spool directory (AICC_RECORDING_DIR): the switch uploads recordings itself, this application never writes to the store")}
+	}
+	probe, ok := st.(interface {
+		CheckBucket(context.Context) error
+		SelfCheck(context.Context) error
+	})
+	if !ok {
+		return []doctorResult{skip(check, "this recording backend has no self-check")}
+	}
+	ctx, cancel := context.WithTimeout(ctx, recordingProbeTimeout)
+	defer cancel()
+	where := "bucket " + st.Bucket() + " at " + d.cfg.S3Endpoint
+	fix := "check AICC_S3_ENDPOINT, AICC_S3_SSL, the access key and secret and the bucket, and that the store accepts a single PUT signed with the payload's SHA-256 (not aws-chunked streaming, not multipart)"
+	if err := probe.CheckBucket(ctx); err != nil {
+		return []doctorResult{fail(check, oneLine(err.Error()), fix)}
+	}
+	if err := probe.SelfCheck(ctx); err != nil {
+		return []doctorResult{fail(check, oneLine(err.Error()), fix)}
+	}
+	return []doctorResult{pass(check, "uploaded, read back and deleted a probe object in "+where)}
 }
 
 func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResult {

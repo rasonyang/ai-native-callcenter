@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"path"
 	"time"
 )
@@ -77,6 +78,10 @@ type Config struct {
 	S3SecretKey string
 	S3Bucket    string
 	S3IsSSL     bool
+
+	// s3Transport replaces the HTTP transport of the S3 client; tests use it
+	// to trust a TLS stub's certificate.
+	s3Transport http.RoundTripper
 }
 
 // New builds the configured backend.

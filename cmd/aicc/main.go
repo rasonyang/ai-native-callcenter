@@ -286,8 +286,23 @@ func run() error {
 				return fmt.Errorf("recording storage: %w", err)
 			}
 		}
-		slog.Info("recording storage ready", "backend", recordings.Backend(),
-			"dir", cfg.RecordingDir, "endpoint", cfg.S3Endpoint)
+		// The bucket existing proves nothing about the upload: a store can
+		// answer every bucket call and still refuse the PUT. Calls work
+		// without recordings, so a failure is loud, not fatal.
+		selfChecked := true
+		if probe, ok := recordings.(interface{ SelfCheck(context.Context) error }); ok {
+			checkCtx, cancelCheck := context.WithTimeout(ctx, 30*time.Second)
+			if err := probe.SelfCheck(checkCtx); err != nil {
+				selfChecked = false
+				slog.Error("recording storage self-check failed: recordings will not be stored",
+					"error", err, "endpoint", cfg.S3Endpoint, "bucket", recordings.Bucket())
+			}
+			cancelCheck()
+		}
+		if selfChecked {
+			slog.Info("recording storage ready", "backend", recordings.Backend(),
+				"dir", cfg.RecordingDir, "endpoint", cfg.S3Endpoint)
+		}
 	}
 
 	var recordingStorage telephony.RecordingStorage

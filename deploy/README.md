@@ -169,12 +169,22 @@ just-recreated `aicc_bot` gateway up to 45 seconds to answer again.
 | `outbound_gateway` | `OUTBOUND_GATEWAY_MISSING` (a `WARN`, not a failure) |
 | `external_ip` | `EXTERNAL_IP_NOT_ON_HOST` |
 | `external_ip_advertised` | `EXTERNAL_IP_STALE` |
+| `recording_storage` | `RECORDING_UPLOAD_FAILED` |
 | `provider_key` | `PROVIDER_KEY_MISSING` |
 | `provider_session` | `PROVIDER_SESSION_FAILED` |
 | `switch_rtp_range` | `SWITCH_RTP_RANGE_INVALID`, `SWITCH_RTP_RANGE_NARROW` (a `WARN`, not a failure) |
 | `bot_rtp_range` | `BOT_RTP_RANGE_OVERLAPS_SWITCH` |
 | `bot_rtp_ephemeral` | `BOT_RTP_RANGE_EPHEMERAL` (a `WARN`, not a failure) |
 | `dnc_country_code` | `DNC_COUNTRY_CODE_UNSET` (a `WARN`, not a failure) |
+
+`recording_storage` applies to the S3 recording backend with a spool directory,
+the only mode in which this application uploads. It checks the bucket exists
+(it never creates it), then uploads a few bytes under `_aicc/selfcheck/` the
+way a recording is uploaded, reads them back and deletes them. It is a `SKIP`
+for the filesystem backend, for no recording storage and for S3 without a spool
+(the switch uploads directly, so the application writes nothing). It is the only
+check that writes anywhere, and it removes what it wrote. See
+[Recordings](#recordings) for what the store must accept.
 
 `switch_uuid` asks the switch to mint a UUID and requires version 7: the
 switch mints the call id of every inbound DID call, and the database refuses
@@ -726,8 +736,24 @@ See [the provider notes](../docs/provider-extension.md).
   agent right.
 - Retention is a product setting, applied by a daily job.
 - S3-compatible storage: set `AICC_RECORDING_BACKEND=S3` and the `AICC_S3_*`
-  lines in `.env`. The application uploads each recording on hangup, clears the
-  spool, and plays it back through a presigned URL.
+  lines in `.env`. With a spool directory (`AICC_RECORDING_DIR`) the switch
+  records locally and the application uploads each recording on hangup, then
+  clears the spool; without one the switch uploads straight into the store and
+  the application only confirms the object arrived. Playback is not a
+  redirect: the application downloads the object from the store and serves it
+  itself.
+- What the store must accept. The upload is a single PUT, at any size, signed
+  with the file's SHA-256 in `X-Amz-Content-Sha256`. It is the same request on
+  HTTP and HTTPS: the client library would otherwise stream the body as
+  `aws-chunked` over HTTP (some S3-compatible stores answer "Aws
+  MultiChunkedEncoding is not supported.") and send an unsigned payload over
+  HTTPS. There is no multipart upload. Playback, the direct-upload
+  confirmation and retention need GET, HEAD and DELETE on the bucket.
+- Proof, not assumption. With a spool, the application uploads, reads back and
+  deletes a probe object under `_aicc/selfcheck/` at every start and logs an
+  ERROR ("recording storage self-check failed: recordings will not be stored")
+  if the store refuses it; calls still work. `aicc doctor` runs the same probe
+  as `recording_storage` (`RECORDING_UPLOAD_FAILED`).
 
 ## Upgrading
 

@@ -3,6 +3,7 @@
 package recording
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -231,6 +232,37 @@ func TestS3RoundTrip(t *testing.T) {
 	}
 	if got := DurationSec(size); got != 1 {
 		t.Errorf("duration = %d", got)
+	}
+
+	// A real store takes a 300 KB and a 20 MB recording (the latter is past
+	// the library's multipart threshold, which upload must not use), and the
+	// self-check passes and leaves nothing behind.
+	for _, n := range []int{300 << 10, 20 << 20} {
+		bigKey := Key(time.Now(), fmt.Sprintf("call-s3-%d", n))
+		bigLocal := writeSpoolFile(t, spool, bigKey, n)
+		wantBytes, err := os.ReadFile(bigLocal)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotSize, err := storage.Ingest(t.Context(), bigKey)
+		if err != nil || gotSize != int64(n) {
+			t.Fatalf("ingest %d bytes = %d, %v", n, gotSize, err)
+		}
+		r, _, err := storage.Open(t.Context(), bigKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gotBytes, err := io.ReadAll(r)
+		r.Close()
+		if err != nil || !bytes.Equal(gotBytes, wantBytes) {
+			t.Errorf("%d-byte recording came back different (err=%v)", n, err)
+		}
+		if err := storage.Delete(t.Context(), bigKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s3.SelfCheck(t.Context()); err != nil {
+		t.Errorf("self-check: %v", err)
 	}
 
 	// Direct upload: the switch PUTs the file into the store itself

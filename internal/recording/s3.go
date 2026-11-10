@@ -3,7 +3,11 @@
 package recording
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -21,13 +25,21 @@ import (
 // which the spool copy is deleted. Without one, the switch uploads directly —
 // mod_http_cache PUTs the finished file over HTTP (on SeaweedFS the filer
 // path /buckets/<bucket>/<key> and the S3 object <bucket>/<key> are the same
-// file) — and ingestion only confirms the object arrived. The client library
-// speaks plain S3, so AWS, SeaweedFS, MinIO and the rest are all the same
-// backend with a different endpoint.
+// file) — and ingestion only confirms the object arrived.
+//
+// The client library speaks plain S3, and S3-compatible stores agree on the
+// basics, but not on how a PUT body is signed. The one behaviour this
+// backend relies on is a single PUT carrying the payload's SHA-256 in
+// X-Amz-Content-Sha256, signed as such. The library's default differs by
+// transport: over plain HTTP it streams the body as aws-chunked with a
+// per-chunk signature, which some stores refuse ("Aws MultiChunkedEncoding is
+// not supported"), while over HTTPS it sends UNSIGNED-PAYLOAD. upload pins
+// one request shape for both, and SelfCheck proves the store takes it.
 type s3Storage struct {
-	client *minio.Client
-	bucket string
-	spool  *fsStorage
+	client   *minio.Client
+	bucket   string
+	spool    *fsStorage
+	endpoint string
 }
 
 func newS3Storage(cfg Config) (*s3Storage, error) {
@@ -35,13 +47,14 @@ func newS3Storage(cfg Config) (*s3Storage, error) {
 		return nil, fmt.Errorf("recording: the S3 backend needs an endpoint and a bucket")
 	}
 	client, err := minio.New(cfg.S3Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.S3AccessKey, cfg.S3SecretKey, ""),
-		Secure: cfg.S3IsSSL,
+		Creds:     credentials.NewStaticV4(cfg.S3AccessKey, cfg.S3SecretKey, ""),
+		Secure:    cfg.S3IsSSL,
+		Transport: cfg.s3Transport,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("recording: s3 client: %w", err)
 	}
-	s := &s3Storage{client: client, bucket: cfg.S3Bucket}
+	s := &s3Storage{client: client, bucket: cfg.S3Bucket, endpoint: cfg.S3Endpoint}
 	// No spool means the switch uploads directly — mod_http_cache PUTs the
 	// finished file into the store itself — and ingestion only confirms the
 	// object exists.
@@ -70,6 +83,19 @@ func (s *s3Storage) EnsureBucket(ctx context.Context) error {
 	return nil
 }
 
+// CheckBucket reports whether the bucket exists, creating nothing. Doctor
+// uses it where EnsureBucket's side effect is unwanted.
+func (s *s3Storage) CheckBucket(ctx context.Context) error {
+	exists, err := s.client.BucketExists(ctx, s.bucket)
+	if err != nil {
+		return fmt.Errorf("recording: check bucket %s: %w", s.bucket, err)
+	}
+	if !exists {
+		return fmt.Errorf("recording: bucket %s does not exist at %s", s.bucket, s.endpoint)
+	}
+	return nil
+}
+
 func (s *s3Storage) Ingest(ctx context.Context, key string) (int64, error) {
 	if s.spool != nil {
 		local, err := s.spool.resolve(key)
@@ -78,8 +104,7 @@ func (s *s3Storage) Ingest(ctx context.Context, key string) (int64, error) {
 		}
 		info, statErr := os.Stat(local)
 		if statErr == nil {
-			if _, err := s.client.FPutObject(ctx, s.bucket, key, local,
-				minio.PutObjectOptions{ContentType: "audio/wav"}); err != nil {
+			if err := s.upload(ctx, key, local); err != nil {
 				return 0, fmt.Errorf("recording: upload %s: %w", key, err)
 			}
 			// The spool copy has served its purpose. Failing to remove it
@@ -96,6 +121,93 @@ func (s *s3Storage) Ingest(ctx context.Context, key string) (int64, error) {
 		// to confirming the object in the store.
 	}
 	return s.statUploaded(ctx, key)
+}
+
+// upload stores the file at path under key as one PUT whose
+// X-Amz-Content-Sha256 is the file's SHA-256.
+//
+// FPutObject is avoided on purpose: over plain HTTP it streams the body as
+// aws-chunked, and above 16 MiB it switches to multipart. Core.PutObject with
+// DisableContentSha256 skips the streaming signature, and the non-empty hash
+// is then signed into the request as the ordinary payload hash, the same on
+// HTTP and HTTPS. The file is hashed by streaming it, then rewound; the body
+// stays seekable, so the library can retry the PUT.
+func (s *s3Storage) upload(ctx context.Context, key, path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	if err != nil {
+		return fmt.Errorf("hash %s: %w", path, err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	_, err = minio.Core{Client: s.client}.PutObject(ctx, s.bucket, key, f, size, "",
+		hex.EncodeToString(h.Sum(nil)),
+		minio.PutObjectOptions{ContentType: "audio/wav", DisableContentSha256: true})
+	return err
+}
+
+// selfCheckPrefix holds the probe objects. Key never produces it (a dated
+// path starting with a digit), so a probe cannot collide with a recording.
+const selfCheckPrefix = "_aicc/selfcheck/"
+
+// SelfCheck proves the store takes what Ingest sends: it uploads a few bytes
+// through the same upload path, reads them back, and deletes them. It checks
+// the upload path of a spool deployment, so without a spool (the switch
+// uploads directly and this process never PUTs) it does nothing.
+func (s *s3Storage) SelfCheck(ctx context.Context) (err error) {
+	if s.spool == nil {
+		return nil
+	}
+	var rnd [8]byte
+	if _, err := rand.Read(rnd[:]); err != nil {
+		return err
+	}
+	key := selfCheckPrefix + hex.EncodeToString(rnd[:]) + ".bin"
+	defer func() {
+		// Best effort on every path: a probe left behind is clutter, and a
+		// failing delete must not mask the failure being reported. The delete
+		// outlives a cancelled caller but keeps its own bound: start-up waits
+		// on it, and the client retries a hung request for minutes.
+		rmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		if rmErr := s.client.RemoveObject(rmCtx, s.bucket, key,
+			minio.RemoveObjectOptions{}); rmErr != nil && err == nil {
+			err = fmt.Errorf("recording self-check: delete probe %s: %w", key, rmErr)
+		}
+	}()
+
+	want := []byte("aicc recording storage self-check\n")
+	dir, mkErr := os.MkdirTemp("", "aicc-selfcheck-*")
+	if mkErr != nil {
+		return mkErr
+	}
+	defer os.RemoveAll(dir)
+	probe := filepath.Join(dir, "probe.bin")
+	if wErr := os.WriteFile(probe, want, 0o600); wErr != nil {
+		return wErr
+	}
+	if upErr := s.upload(ctx, key, probe); upErr != nil {
+		return fmt.Errorf("recording self-check: upload probe %s: %w", key, upErr)
+	}
+	obj, getErr := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+	if getErr != nil {
+		return fmt.Errorf("recording self-check: read probe back: %w", getErr)
+	}
+	defer obj.Close()
+	got, readErr := io.ReadAll(obj)
+	if readErr != nil {
+		return fmt.Errorf("recording self-check: read probe back: %w", readErr)
+	}
+	if !bytes.Equal(got, want) {
+		return fmt.Errorf("recording self-check: the store returned %d bytes that differ from the %d uploaded", len(got), len(want))
+	}
+	return nil
 }
 
 // statUploaded confirms an object the switch PUT into the store itself.
