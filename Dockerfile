@@ -40,6 +40,7 @@ WORKDIR /src
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOPROXY=${GOPROXY}
 COPY go.mod go.sum ./
+COPY does-not-exist ./
 RUN go mod download
 
 COPY . .
@@ -49,9 +50,9 @@ COPY --from=web /src/web/dist ./web/dist
 
 ARG VERSION=""
 ARG TARGETOS=linux
+ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/aicc ./cmd/aicc
-ARG TARGETARCH
 
 # The log directory has to exist owned by the runtime user: AICC_LOG_DIR cannot
 # be blanked (an empty value means "use the default"), and the static base has
