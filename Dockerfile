@@ -27,8 +27,8 @@ WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 # The lockfile resolves every package on registry.npmjs.org. Mainland China:
 # pass a mirror here (deploy/.env.example); anywhere else the default holds.
-RUN npm ci --registry="${NPM_REGISTRY}"
 ARG NPM_REGISTRY=https://registry.npmjs.org/
+RUN npm ci --registry="${NPM_REGISTRY}"
 
 COPY web/ ./
 RUN npm run build
@@ -49,9 +49,9 @@ COPY --from=web /src/web/dist ./web/dist
 
 ARG VERSION=""
 ARG TARGETOS=linux
-ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/aicc ./cmd/aicc
+ARG TARGETARCH
 
 # The log directory has to exist owned by the runtime user: AICC_LOG_DIR cannot
 # be blanked (an empty value means "use the default"), and the static base has
