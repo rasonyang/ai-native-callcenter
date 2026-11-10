@@ -48,10 +48,12 @@ services:
       context: ..
       args:
         VERSION: ${AICC_VERSION:-local}
-        # Mainland China cannot reach gcr.io or proxy.golang.org; .env names
-        # the mirrors and the Dockerfile's own defaults apply everywhere else.
+        # Mainland China cannot reach gcr.io or proxy.golang.org, and reaches
+        # registry.npmjs.org slowly; .env names the mirrors and the
+        # Dockerfile's own defaults apply everywhere else.
         BASE_IMAGE: ${BASE_IMAGE:-gcr.io/distroless/static-debian12:nonroot}
         GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org/}
     restart: unless-stopped
     depends_on:
       postgres:

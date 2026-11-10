@@ -12,8 +12,9 @@ carries the one-line installer's files.
 - Upgrade both images together, as always: they are published under one tag
   and the deploy stack names both. The switch image has no change in this
   release; its tag moves so that the pair still matches.
-- No migration, no setting added, removed or changed in default, and no change
-  to the API contract.
+- No migration, no application setting added, removed or changed in default,
+  and no change to the API contract. Building from a checkout on the
+  mainland-China network now also takes `NPM_REGISTRY` (`deploy/.env.example`).
 - S3 recording storage. A deployment with `AICC_RECORDING_BACKEND=S3` and a
   spool directory (`AICC_RECORDING_DIR`) now uploads each recording as one
   signed PUT, and its store must accept that and serve GET, HEAD and DELETE.
@@ -74,6 +75,11 @@ carries the one-line installer's files.
   next restart). A file that still cannot be booked stays in the spool and in
   `aicc_recording_spool_unbooked`. Calls that were never recorded stay quiet.
   (#519)
+- Building the application image, or installing the web dependencies, downloaded
+  every npm package from a mainland-China registry mirror wherever it ran, so a
+  slow or failing mirror stalled or failed builds elsewhere. They now come from
+  the npm registry, and `NPM_REGISTRY` opts into a mirror the way `GOPROXY`
+  does. (#525)
 
 ## v0.8.0 - 2026-11-10
 

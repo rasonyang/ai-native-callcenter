@@ -89,3 +89,23 @@ drops the `libc` fields npm 11 writes (#389). A lock written by npm 11 can fail
 `npm ci` under npm 10, and one rewritten by npm 10 loses information. After a
 web dependency change, commit the lock npm 11 wrote; do not regenerate it from
 scratch.
+
+### The lockfile resolves on registry.npmjs.org
+
+Every `resolved` URL in `web/package-lock.json` is on
+`https://registry.npmjs.org/`, because the image build and the release install
+from it, and a lock that names a mirror pins every machine to that mirror
+(#525). `make lint` and the `web` CI job fail otherwise.
+
+npm writes the registry of the machine that ran the install into the entries it
+adds. Behind a mirror (`registry=` in `~/.npmrc`) `npm ci` is harmless: it still
+works from a lock that names npmjs.org, and fetches through your mirror. Only a
+new or changed dependency records the mirror. After `npm install <package>`,
+run:
+
+```sh
+make web-lock-fix
+```
+
+It rewrites the host of every `resolved` and nothing else; `integrity` does not
+depend on the host. Review the diff and commit the lock.
