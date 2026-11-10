@@ -76,6 +76,7 @@ const (
 	DoctorCheckExternalIP           DoctorCheck = "external_ip"
 	DoctorCheckExternalIPAdvertised DoctorCheck = "external_ip_advertised"
 	DoctorCheckRecordingStorage     DoctorCheck = "recording_storage"
+	DoctorCheckRecordingSpool       DoctorCheck = "recording_spool"
 	DoctorCheckProviderKey          DoctorCheck = "provider_key"
 	DoctorCheckProviderSession      DoctorCheck = "provider_session"
 	DoctorCheckOutboundEndpoint     DoctorCheck = "outbound_endpoint"
@@ -106,8 +107,15 @@ const (
 	DoctorCodeExternalIPNotOnHost   DoctorCode = "EXTERNAL_IP_NOT_ON_HOST"
 	DoctorCodeExternalIPStale       DoctorCode = "EXTERNAL_IP_STALE"
 	DoctorCodeRecordingUploadFailed DoctorCode = "RECORDING_UPLOAD_FAILED"
-	DoctorCodeProviderKeyMissing    DoctorCode = "PROVIDER_KEY_MISSING"
-	DoctorCodeProviderSessionFailed DoctorCode = "PROVIDER_SESSION_FAILED"
+	// DoctorCodeRecordingSpoolNotClearable is a FAIL: the switch cannot write
+	// or remove in its recordings directory, or lacks the script that does.
+	// DoctorCodeRecordingSpoolNotShared is a FAIL too: the switch's probe file
+	// is not visible under AICC_RECORDING_DIR. One check, two codes; the table
+	// below lists the first.
+	DoctorCodeRecordingSpoolNotClearable DoctorCode = "RECORDING_SPOOL_NOT_CLEARABLE"
+	DoctorCodeRecordingSpoolNotShared    DoctorCode = "RECORDING_SPOOL_NOT_SHARED"
+	DoctorCodeProviderKeyMissing         DoctorCode = "PROVIDER_KEY_MISSING"
+	DoctorCodeProviderSessionFailed      DoctorCode = "PROVIDER_SESSION_FAILED"
 	// DoctorCodeOutboundEndpointUnset and DoctorCodeOutboundGatewayMissing are
 	// WARNs: a deployment nobody runs campaigns on works without them.
 	DoctorCodeOutboundEndpointUnset  DoctorCode = "OUTBOUND_ENDPOINT_UNSET"
@@ -153,6 +161,7 @@ var doctorChecks = []struct {
 	{DoctorCheckBotRTPRange, DoctorCodeBotRTPRangeOverlapsSwitch},
 	{DoctorCheckBotRTPEphemeral, DoctorCodeBotRTPRangeEphemeral},
 	{DoctorCheckRecordingStorage, DoctorCodeRecordingUploadFailed},
+	{DoctorCheckRecordingSpool, DoctorCodeRecordingSpoolNotClearable},
 	{DoctorCheckProviderKey, DoctorCodeProviderKeyMissing},
 	{DoctorCheckProviderSession, DoctorCodeProviderSessionFailed},
 	{DoctorCheckDNCCountryCode, DoctorCodeDNCCountryCodeUnset},
@@ -206,6 +215,10 @@ type switchReader interface {
 	SwitchConf() (string, error)
 	// UUIDVersion is the version of a UUID the switch mints now.
 	UUIDVersion() (int, error)
+	// SpoolProbeWrite and SpoolProbeRemove make the switch write and remove a
+	// probe file in its recordings directory.
+	SpoolProbeWrite(token string) error
+	SpoolProbeRemove(token string) error
 }
 
 // doctorOptions are the command's flags.
@@ -233,6 +246,9 @@ type doctorDeps struct {
 	// recordings builds the application's recording storage, nil when none is
 	// configured.
 	recordings func() (recording.Storage, error)
+	// statSpool looks at a path in the application's own recordings
+	// directory. Nil means os.Stat.
+	statSpool func(string) (os.FileInfo, error)
 	// sessions is the application's own provider factory.
 	sessions       func(provider.Profile, *slog.Logger) (provider.VoiceSession, error)
 	interfaceAddrs func() ([]net.Addr, error)
@@ -356,6 +372,7 @@ func doctor(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResul
 	out = append(out, checkBotRTPRange(d, sw.reader)...)
 	out = append(out, checkBotRTPEphemeral(d)...)
 	out = append(out, checkRecordingStorage(ctx, d)...)
+	out = append(out, checkRecordingSpool(d, sw.reader)...)
 	out = append(out, checkProvider(ctx, d, opts)...)
 	return out
 }
@@ -979,6 +996,48 @@ func checkRecordingStorage(ctx context.Context, d doctorDeps) []doctorResult {
 		return []doctorResult{fail(check, oneLine(err.Error()), fix)}
 	}
 	return []doctorResult{pass(check, "uploaded, read back and deleted a probe object in "+where)}
+}
+
+// checkRecordingSpool proves that the switch can clear its own spool and that
+// it is the spool the application reads. With the S3 backend and a spool the
+// application uploads a recording and then asks the switch to remove its copy
+// (the switch's directories are not the application's to unlink in); a switch
+// that cannot, or a volume the two do not share, leaves every recording on the
+// disk.
+func checkRecordingSpool(d doctorDeps, sw switchReader) []doctorResult {
+	const check = DoctorCheckRecordingSpool
+	var st recording.Storage
+	if d.recordings != nil {
+		// A storage that cannot be built is recording_storage's finding.
+		st, _ = d.recordings()
+	}
+	switch {
+	case st == nil:
+		return []doctorResult{skip(check, "no recording storage is configured")}
+	case st.Backend() != "S3":
+		return []doctorResult{skip(check, "the recording backend is "+st.Backend()+", not S3")}
+	case d.cfg.RecordingDir == "":
+		return []doctorResult{skip(check, "no spool directory (AICC_RECORDING_DIR): the switch uploads recordings itself")}
+	case sw == nil:
+		return []doctorResult{skip(check, "doctor could not connect to the switch")}
+	}
+	stat := d.statSpool
+	if stat == nil {
+		stat = os.Stat
+	}
+	err := probeSpool(sw, d.cfg.RecordingDir, stat)
+	var pe *spoolProbeError
+	switch {
+	case err == nil:
+		return []doctorResult{pass(check, "the switch wrote and removed a probe file in the spool the application reads, "+d.cfg.RecordingDir)}
+	case errors.As(err, &pe) && pe.Fault == spoolNotShared:
+		r := fail(check, oneLine(err.Error()),
+			"mount the volume the switch records into at AICC_RECORDING_DIR in the application (read-only is enough)")
+		r.Code = DoctorCodeRecordingSpoolNotShared
+		return []doctorResult{r}
+	}
+	return []doctorResult{fail(check, oneLine(err.Error()),
+		"update the switch image: the switch removes its own spool files through aicc_spool.lua, and check that the switch's user can write in its recordings directory")}
 }
 
 func checkProvider(ctx context.Context, d doctorDeps, opts doctorOptions) []doctorResult {

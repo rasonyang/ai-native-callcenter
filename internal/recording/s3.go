@@ -43,6 +43,8 @@ type s3Storage struct {
 	bucket   string
 	spool    *fsStorage
 	endpoint string
+	// releaser clears the spool through the switch; nil removes locally only.
+	releaser SpoolReleaser
 }
 
 func newS3Storage(cfg Config) (*s3Storage, error) {
@@ -235,7 +237,39 @@ func (s *s3Storage) statUploaded(ctx context.Context, key string) (int64, error)
 	return 0, fmt.Errorf("recording: not in the store: %w", classify(lastErr))
 }
 
+// SpoolReleaser removes a spool file on the application's behalf. The switch
+// that wrote the file owns it and the directories around it; those are created
+// with a mode the application cannot unlink in, so the application asks the
+// switch to do the removal. telephony.Adapter implements it.
+type SpoolReleaser interface {
+	// ReleaseSpoolFile removes the spool copy of the recording at key and the
+	// empty dated directories it leaves. A copy already gone is success.
+	ReleaseSpoolFile(key string) error
+}
+
+// SetSpoolReleaser gives the storage a way to clear the spool when the
+// application itself may not. Set once at start-up, before the first Release.
+func (s *s3Storage) SetSpoolReleaser(r SpoolReleaser) { s.releaser = r }
+
+// AttachSpoolReleaser gives st a SpoolReleaser if it keeps a spool that
+// needs one, and reports whether it did.
+func AttachSpoolReleaser(st Storage, r SpoolReleaser) bool {
+	s3, ok := st.(*s3Storage)
+	if !ok || s3.spool == nil {
+		return false
+	}
+	s3.SetSpoolReleaser(r)
+	return true
+}
+
 // Release removes the spool copy once the ledger holds the row.
+//
+// The application removes the file itself first: that is all a deployment
+// needs where it runs as the switch's user, and it needs no switch. When the
+// operating system refuses (the switch's directories are not the
+// application's to unlink in) and a releaser is configured, the switch is
+// asked. A refusal from both returns both causes; with no releaser the local
+// error is returned as it is.
 func (s *s3Storage) Release(_ context.Context, key string) error {
 	if s.spool == nil {
 		return nil
@@ -244,10 +278,18 @@ func (s *s3Storage) Release(_ context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(local); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
+	rmErr := os.Remove(local)
+	if rmErr == nil || errors.Is(rmErr, fs.ErrNotExist) {
+		_ = removeEmptyParents(local, s.spool.root)
+		return nil
 	}
-	_ = removeEmptyParents(local, s.spool.root)
+	if s.releaser == nil {
+		return rmErr
+	}
+	if switchErr := s.releaser.ReleaseSpoolFile(key); switchErr != nil {
+		return fmt.Errorf("recording: release %s: the application could not remove it (%w) and the switch could not either (%w)",
+			key, rmErr, switchErr)
+	}
 	return nil
 }
 

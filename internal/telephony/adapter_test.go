@@ -463,3 +463,92 @@ func TestUUIDVersionReadsTheVersionTheSwitchMints(t *testing.T) {
 		})
 	}
 }
+
+func TestSpoolCommandsAndReplies(t *testing.T) {
+	t.Parallel()
+	const key = "2026/11/10/0190a1b2-c3d4-7e5f-8a9b-0c1d2e3f4a5b.wav"
+	const token = "0123456789abcdef"
+	for name, tc := range map[string]struct {
+		call func(a *Adapter) error
+		want string
+	}{
+		"release":      {func(a *Adapter) error { return a.ReleaseSpoolFile(key) }, "lua aicc_spool.lua release " + key},
+		"probe write":  {func(a *Adapter) error { return a.SpoolProbeWrite(token) }, "lua aicc_spool.lua probe-write " + token},
+		"probe remove": {func(a *Adapter) error { return a.SpoolProbeRemove(token) }, "lua aicc_spool.lua probe-remove " + token},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a, c := newTestAdapter()
+			c.reply = "+OK\n"
+			if err := tc.call(a); err != nil {
+				t.Fatal(err)
+			}
+			if len(c.sent) != 1 || c.sent[0] != tc.want {
+				t.Errorf("sent %q, want %q", c.sent, tc.want)
+			}
+		})
+	}
+
+	for name, tc := range map[string]struct {
+		reply     string
+		isMissing bool
+	}{
+		"refusal":             {"-ERR REMOVE_FAILED Permission denied\n", false},
+		"empty reply":         {"\n", true},
+		"missing script":      {"-ERR Cannot execute script\n", true}, // mod_lua's own, found live
+		"something else":      {"huh", true},
+		"success with a tail": {"+OK done", true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			a, c := newTestAdapter()
+			c.reply = tc.reply
+			c.replyFor = func(string) (string, error) { return tc.reply, nil }
+			err := a.ReleaseSpoolFile(key)
+			if err == nil {
+				t.Fatalf("reply %q was taken as success", tc.reply)
+			}
+			if got := errors.Is(err, ErrSpoolScriptMissing); got != tc.isMissing {
+				t.Errorf("errors.Is(ErrSpoolScriptMissing) = %v, want %v: %v", got, tc.isMissing, err)
+			}
+			if name == "refusal" && !strings.Contains(err.Error(), "REMOVE_FAILED") {
+				t.Errorf("the cause is lost: %v", err)
+			}
+		})
+	}
+
+	t.Run("link error", func(t *testing.T) {
+		t.Parallel()
+		a, c := newTestAdapter()
+		c.err = errors.New("link down")
+		if err := a.ReleaseSpoolFile(key); err == nil || !strings.Contains(err.Error(), "link down") {
+			t.Errorf("err = %v", err)
+		}
+	})
+
+	t.Run("nothing unsafe reaches the switch", func(t *testing.T) {
+		t.Parallel()
+		a, c := newTestAdapter()
+		for _, bad := range []string{"", "../" + key, "2026/11/10/x.wav", key + " ; hupall", key + "\nhupall", "/" + key} {
+			if err := a.ReleaseSpoolFile(bad); err == nil {
+				t.Errorf("key %q accepted", bad)
+			}
+		}
+		for _, bad := range []string{"", "ABCDEF0123456789", "0123456789abcde", "../../etc/passwd", token + "0"} {
+			if a.SpoolProbeWrite(bad) == nil || a.SpoolProbeRemove(bad) == nil {
+				t.Errorf("token %q accepted", bad)
+			}
+		}
+		if len(c.sent) != 0 {
+			t.Errorf("sent %q", c.sent)
+		}
+	})
+
+	t.Run("token", func(t *testing.T) {
+		t.Parallel()
+		tok, err := NewSpoolProbeToken()
+		if err != nil || !spoolProbeToken.MatchString(tok) {
+			t.Errorf("token %q, %v", tok, err)
+		}
+	})
+}

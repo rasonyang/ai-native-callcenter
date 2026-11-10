@@ -123,6 +123,9 @@ type composition struct {
 	// BotRTPRange asserts on every connect that the bot's RTP range and the
 	// switch's share no port. Nil in tests that do not care.
 	BotRTPRange *botRTPRangeCheck
+	// Spool probes the recording spool on every connect (S3 backend with a
+	// spool). Nil otherwise.
+	Spool *spoolCheck
 }
 
 // systemPublisher is the slice of the hub used to announce facts about the
@@ -185,6 +188,9 @@ func (c composition) connect() {
 	if c.BotRTPRange != nil {
 		c.Link.OnConnect(c.BotRTPRange.onConnect)
 		c.Link.OnLost(c.BotRTPRange.onLost)
+	}
+	if c.Spool != nil {
+		c.Link.OnConnect(c.Spool.onConnect)
 	}
 
 	// What the switch is holding that this process knows nothing about: calls

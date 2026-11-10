@@ -20,6 +20,7 @@ tree onto a FreeSWITCH you built yourself.
 | `scripts/aicc_did_route.lua` | Delivers a platform number (`luacc.dids`) dialled from an agent's phone to the public doorway; any other number falls through |
 | `scripts/aicc_outbound.lua` | Run by a deployment's outbound dialplan before its trunk `bridge`: starts the call's recording and stamps the caller-id DID as `aicc_did` on the call, appended to `export_vars` so the trunk leg inherits it (the per-DID outbound line count reads it). Test: `lua freeswitch/tests/aicc_outbound_test.lua` |
 | `scripts/aicc_queue.lua` | Queue entry point and overflow handling |
+| `scripts/aicc_spool.lua` | Run by the application through `lua`: removes a booked recording from the spool (S3 backend), because the switch owns the spool's directories; also the probe the connect check and `aicc doctor` use. Test: `lua freeswitch/tests/aicc_spool_test.lua` |
 | `scripts/aicc_track.lua` | Names the agent an internal call is ringing, so mod_callcenter stops offering them queue calls |
 | `Dockerfile` | Builds FreeSWITCH v1.11.3 from source, with this tree and `mod_audio_stream` inside it |
 | `modules.conf` | The 26 modules that build compiles. The build fails if the shipped `modules.conf.xml` loads anything not on the list |

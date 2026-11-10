@@ -19,6 +19,23 @@ carries the one-line installer's files.
   fails when the prefix reaches a CDR, a webhook or an event. No application
   change, no setting, no change to the API contract. (#531)
 
+### Fixed
+
+- S3 recording storage with a spool no longer leaves every spool copy behind.
+  The switch creates the dated spool directories with a mode the application
+  cannot unlink in, so removing a booked recording failed with "permission
+  denied" and the volume grew with every call. The application now asks the
+  switch to remove its own copy (a new script in the switch image,
+  `aicc_spool.lua`, run through `lua`); the application's mount stays
+  read-only and the switch itself is unchanged. Upgrade both images together:
+  a switch without the script keeps the old behaviour and the log says so.
+  At every connect the application has the switch write and remove a probe
+  file in the spool and logs one ERROR, "recording spool check failed", if it
+  cannot; `aicc doctor` has a new check, `recording_spool`
+  (`RECORDING_SPOOL_NOT_CLEARABLE`, `RECORDING_SPOOL_NOT_SHARED`). The bundled
+  compose file now honours `AICC_RECORDING_BACKEND` from `.env` instead of
+  forcing `FS`. (#534)
+
 ## v0.8.1 - 2026-11-10
 
 ### Upgrade notes
