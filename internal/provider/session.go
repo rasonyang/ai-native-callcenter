@@ -54,6 +54,8 @@ type VoiceSession interface {
 	// (MergeHint) so it reaches the model as part of what it just learned.
 	//
 	// toolCallID identifies the model's function call, not the telephone call.
+	// It asks the model for the turn that answers the result; a client that
+	// can send the result without that turn also implements QuietToolAnswerer.
 	SendToolResult(toolCallID, output string) error
 
 	// UpdateInstructions replaces the standing instructions mid-call, which is
@@ -106,6 +108,29 @@ type VoiceSession interface {
 	// Close ends the session. It is idempotent.
 	Close(ctx context.Context) error
 }
+
+// QuietToolAnswerer is the optional second way to answer a tool call, for a
+// session whose client can put a result into the conversation without asking
+// for a turn. The call actor asks for it by type assertion; it is not part of
+// VoiceSession, which stays narrow, and a client that does not implement it is
+// simply never asked.
+//
+// It is for a tool called in a response that has already answered the caller,
+// in a phase where the caller speaks next (flow.Node.IsCallerNext): the model
+// has nothing left to say, and a turn asked for anyway is used to say
+// something regardless. The output joins the conversation for whatever turn
+// comes next, the caller's or one already owed. Nothing else changes: a turn
+// already owed or requested still happens, and the output is not counted as a
+// result the caller is waiting to hear.
+//
+// *Realtime implements it (openai, grok, qwen, gateway). doubao does not, so
+// the rule is off there until it has been measured.
+type QuietToolAnswerer interface {
+	// SendToolResultQuietly is SendToolResult without the turn.
+	SendToolResultQuietly(toolCallID, output string) error
+}
+
+var _ QuietToolAnswerer = (*Realtime)(nil)
 
 // SessionConfig is everything the model needs before it hears anything.
 //
