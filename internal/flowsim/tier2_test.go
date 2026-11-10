@@ -385,3 +385,46 @@ func TestHTTPChatRejectsMalformedAnswers(t *testing.T) {
 		server.Close()
 	}
 }
+
+// A response that spoke and recorded the caller's question in a phase where
+// the caller speaks next is not followed by another model round, as on a call
+// (the results go out without a turn): the next thing the bot model is asked
+// for is its reply to the caller. A response that only called the tool still
+// gets its round.
+func TestTier2ASpokenSlotCallInACallerNextPhaseGetsNoFollowUpRound(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(testdataFlows, "renewal_offer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := flow.Load(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scenario := scenarioOf(t, `{"name":"question","lang":"en",
+		"callerPersona":{"goal":"ask about the price, then decline"},
+		"model":{"phase":"close_decline","visits":["after_first_question"]}}`)
+	caller := queue(text("Does the price change?"), text("No thanks."), text(callerHangup))
+
+	spoke := tool("record_question", `{"value":"does the price change"}`)
+	spoke.Content = "It stays at fifty yuan a month."
+	bot := queue(spoke, tool("classify", `{"value":"decline"}`))
+	reports := RunModel(context.Background(), spec, MockBackends(),
+		ModelConfig{Bot: bot, Caller: caller, BotModel: "b", CallerModel: "c", Runs: 1},
+		[]Scenario{scenario})
+	if !reports[0].Succeeded() {
+		t.Fatalf("scenario failed: %+v", reports[0])
+	}
+	if got := len(bot.requests); got != 2 {
+		t.Errorf("the bot model was asked %d times, want 2: the question, then the caller's decision", got)
+	}
+
+	silent := tool("record_question", `{"value":"does the price change"}`)
+	bot = queue(silent, text("It stays at fifty yuan."), tool("classify", `{"value":"decline"}`))
+	caller = queue(text("Does the price change?"), text("No thanks."), text(callerHangup))
+	RunModel(context.Background(), spec, MockBackends(),
+		ModelConfig{Bot: bot, Caller: caller, BotModel: "b", CallerModel: "c", Runs: 1},
+		[]Scenario{scenario})
+	if got := len(bot.requests); got != 3 {
+		t.Errorf("a response that only called the tool: the bot model was asked %d times, want 3", got)
+	}
+}

@@ -348,9 +348,23 @@ func startBridge(t *testing.T, profile provider.Profile) (*Session, *fakeLeg, *f
 
 func startBridgeWith(t *testing.T, profile provider.Profile, cfg Config) (*Session, *fakeLeg, *fakeModel) {
 	t.Helper()
+	return startBridgeModel(t, profile, cfg, nil)
+}
+
+// startBridgeModel is startBridgeWith with the model the session talks to
+// wrapped: wrap receives the fake and returns what the session is given, which
+// is how a test makes a model that answers tool calls quietly
+// (quietModel). The fake is returned all the same, for its recordings.
+func startBridgeModel(t *testing.T, profile provider.Profile, cfg Config,
+	wrap func(*fakeModel) provider.VoiceSession) (*Session, *fakeLeg, *fakeModel) {
+	t.Helper()
 
 	leg := newFakeLeg(media.LawMu)
 	model := newFakeModel()
+	var voice provider.VoiceSession = model
+	if wrap != nil {
+		voice = wrap(model)
+	}
 
 	cfg.Session = provider.SessionConfig{
 		Instructions: "answer the phone",
@@ -358,7 +372,7 @@ func startBridgeWith(t *testing.T, profile provider.Profile, cfg Config) (*Sessi
 	}
 	cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	session, err := New(leg, model, profile, cfg)
+	session, err := New(leg, voice, profile, cfg)
 	if err != nil {
 		t.Fatalf("new session: %v", err)
 	}

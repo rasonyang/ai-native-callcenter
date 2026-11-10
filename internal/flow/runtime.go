@@ -304,6 +304,20 @@ func (r *Runtime) IsHTTPTool(name string) bool {
 	return ok && tool.Kind != ToolKindSlot
 }
 
+// IsSlotTool reports whether Dispatch would run the named tool as a slot tool:
+// a flow-declared slot tool the current phase allows. It is asked before
+// Dispatch, which can move the phase.
+func (r *Runtime) IsSlotTool(name string) bool {
+	if slices.Contains(BuiltinToolNames, name) || !r.IsToolAllowed(name) {
+		return false
+	}
+	tool, ok := r.engine.Spec().Tools[name]
+	return ok && tool.Kind == ToolKindSlot
+}
+
+// OnToolReplyNotComing is Engine.OnToolReplyNotComing.
+func (r *Runtime) OnToolReplyNotComing() { r.engine.OnToolReplyNotComing() }
+
 // BeginToolBatch starts the tool calls of one model response: until
 // EndToolBatch, Dispatch judges each of them in the phase the response was
 // made in (Engine.BeginToolBatch).

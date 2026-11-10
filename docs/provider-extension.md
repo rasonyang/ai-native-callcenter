@@ -346,6 +346,44 @@ history is not trimmed; the response finishes and its call is answered as
 ever. What the muted turn had already played is heard as a fragment. A terminal
 phase without an `announce` keeps the model's own words as the goodbye.
 
+### A tool result that asks for no turn (`QuietToolAnswerer`)
+
+`VoiceSession.SendToolResult` always asks the model for the turn that answers the
+result. A flow whose phase declares `isCallerNext` (`docs/flow-authoring.md` 4.5)
+needs the opposite for a slot tool the model called while answering the caller:
+the result goes into the conversation and nothing is asked for, because the
+caller speaks next. That is a second, optional interface in
+`internal/provider/session.go` and not a change to `VoiceSession`, which stays
+narrow:
+
+```go
+type QuietToolAnswerer interface {
+	SendToolResultQuietly(toolCallID, output string) error
+}
+```
+
+`aicall.Session` asks by type assertion, once, and a client that does not
+implement it is never asked: the field then has no effect on that engine and
+every result asks for its turn as always.
+
+- **`provider.Realtime` implements it,** so openai, grok, qwen and gateway all
+  do, with no trait to set. It sends the same `function_call_output` item
+  `SendToolResult` does and nothing else. It does not discharge, add or claim a
+  turn: a turn already owed or requested (a cue, a line, a caller turn held under
+  an open response) still happens exactly once and reads the result. It does not
+  mark the result as unheard (`isResultUnheard`): the answer the caller heard was
+  said before the result existed, and a later cut of the reply to the caller's
+  next words must not be reported to the model as a result the caller missed.
+- **doubao does not implement it,** and a test asserts that. Its protocol carries
+  all of a response's results in one message, and the model goes on when that
+  message arrives (`doubao.Session.SendToolResult`). Whether a result can be
+  sent without that has not been measured, so the rule is off there until it has
+  been; turning it on is a method on `*doubao.Session` and a live round, not a
+  profile trait.
+- **A new client** that can send a result without a turn implements the same
+  interface. The orchestrator decides when to use it (`closeToolBatch`); the
+  client only has to keep it from touching its turn bookkeeping.
+
 ## Attaching something that is not a vendor
 
 The interesting case is the one the design reserves: a **Realtime gateway** — a

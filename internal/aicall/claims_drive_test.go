@@ -164,7 +164,15 @@ func newClaimsHarnessOn(t *testing.T, profile provider.Profile, flowJSON, lang, 
 func newClaimsHarnessSetup(t *testing.T, profile provider.Profile, flowJSON, lang, backendURL string,
 	cfg Config, setup func(h *claimsHarness)) *claimsHarness {
 	t.Helper()
-	session, leg, model := startBridgeWith(t, profile, cfg)
+	return newClaimsHarnessModel(t, profile, flowJSON, lang, backendURL, cfg, nil, setup)
+}
+
+// newClaimsHarnessModel is newClaimsHarnessSetup with the model the session
+// talks to wrapped (startBridgeModel).
+func newClaimsHarnessModel(t *testing.T, profile provider.Profile, flowJSON, lang, backendURL string,
+	cfg Config, wrap func(*fakeModel) provider.VoiceSession, setup func(h *claimsHarness)) *claimsHarness {
+	t.Helper()
+	session, leg, model := startBridgeModel(t, profile, cfg, wrap)
 	awaitBridgeEvent(t, session, EventTypeReady)
 
 	h := &claimsHarness{session: session, leg: leg, model: model,

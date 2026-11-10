@@ -212,7 +212,10 @@ type Session struct {
 	// the stages of an AI outbound call's time to the first word.
 	ledgerCallID uuid.UUID
 
-	cfg    Config
+	cfg Config
+	// quiet is the model's way of answering a tool call without asking for a
+	// turn, nil when it has none (provider.QuietToolAnswerer). Set once in New.
+	quiet  provider.QuietToolAnswerer
 	uplink *media.Converter
 	// uplinkSilence is the fill frame for a slot with no caller audio, in the
 	// provider's input format.
@@ -362,9 +365,11 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 		return nil, fmt.Errorf("aicall: provider audio to caller: %w", err)
 	}
 
+	quiet, _ := model.(provider.QuietToolAnswerer)
 	return &Session{
 		leg:           leg,
 		model:         model,
+		quiet:         quiet,
 		log:           log,
 		providerName:  profile.Name,
 		cfg:           cfg,
@@ -581,6 +586,22 @@ func (s *Session) AnswerTool(toolCallID, output string) error {
 	}
 	s.askedForATurn()
 	return nil
+}
+
+// CanAnswerQuietly reports whether the model can answer a tool call without
+// asking for a turn (AnswerToolQuietly).
+func (s *Session) CanAnswerQuietly() bool { return s.quiet != nil }
+
+// AnswerToolQuietly replies to a tool call and asks for no turn: the caller
+// speaks next (flow.Node.IsCallerNext). Unlike AnswerTool it claims no floor
+// (askedForATurn): nothing is owed, so the bot does not hold the floor for
+// actionGraceCap and a dead-air prompt a moment later is not refused.
+// It fails when the model cannot (CanAnswerQuietly).
+func (s *Session) AnswerToolQuietly(toolCallID, output string) error {
+	if s.quiet == nil {
+		return errors.New("aicall: the model cannot answer a tool call without a turn")
+	}
+	return s.quiet.SendToolResultQuietly(toolCallID, output)
 }
 
 // SendCue sends the model a text it answers with a turn of its own: a

@@ -1106,14 +1106,7 @@ func (r *Realtime) dispatchPendingSpeak(isRecovery bool) (wasPreempted bool) {
 // responseCreatedDeadline: then it is asked for again, with the results in the
 // conversation for it to read (onRequestExpired).
 func (r *Realtime) SendToolResult(toolCallID, output string) error {
-	if err := r.sendEvent(map[string]any{
-		"type": "conversation.item.create",
-		"item": map[string]any{
-			"type":    "function_call_output",
-			"call_id": toolCallID,
-			"output":  output,
-		},
-	}); err != nil {
+	if err := r.sendToolOutput(toolCallID, output); err != nil {
 		return err
 	}
 
@@ -1152,6 +1145,40 @@ func (r *Realtime) SendToolResult(toolCallID, output string) error {
 	}
 	return r.requestResponse(responseRequest{kind: responseKindTool},
 		map[string]any{"type": "response.create"})
+}
+
+// sendToolOutput puts a tool call's output into the conversation. It asks for
+// nothing.
+func (r *Realtime) sendToolOutput(toolCallID, output string) error {
+	return r.sendEvent(map[string]any{
+		"type": "conversation.item.create",
+		"item": map[string]any{
+			"type":    "function_call_output",
+			"call_id": toolCallID,
+			"output":  output,
+		},
+	})
+}
+
+// SendToolResultQuietly answers a tool call without asking for a turn
+// (QuietToolAnswerer): the output joins the conversation and nothing else
+// happens. The caller has already been answered, in the response that made the
+// call, and the caller speaks next.
+//
+// It touches none of the bookkeeping SendToolResult keeps, on purpose:
+//
+//   - A turn already owed or requested (a cue, a line, the caller's speech
+//     that server VAD committed under an open response) still happens, and
+//     reads this output with the rest of the conversation. Nothing is
+//     discharged and nothing is added.
+//   - The output is not marked unheard (isResultUnheard). That mark means a
+//     turn the result produced was cut before the caller heard it, which
+//     noteUnheardResult then says to the model. Here the result produced no
+//     turn: what the caller heard, the answer, came before the result existed,
+//     and a later cut of the bot's reply to the caller's next words would be
+//     reported as a result they did not hear.
+func (r *Realtime) SendToolResultQuietly(toolCallID, output string) error {
+	return r.sendToolOutput(toolCallID, output)
 }
 
 // releaseOwedTurn asks for the turn that is owed, now that the response that

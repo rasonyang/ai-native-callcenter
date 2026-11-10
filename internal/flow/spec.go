@@ -207,6 +207,14 @@ type Node struct {
 	Transitions []Transition `json:"transitions,omitempty"`
 	// IsTerminal marks a phase the conversation does not leave.
 	IsTerminal bool `json:"isTerminal,omitempty"`
+	// IsCallerNext says the caller speaks next in this phase. When a response's
+	// tool batch ends here and the response already spoke, the slot tools'
+	// results are sent without asking the model for another turn: it has
+	// nothing left to say, and a turn asked for anyway is used to say
+	// something regardless. A flow that does not declare it keeps the follow-up
+	// turn on every result. Rejected on a terminal phase and on a phase with an
+	// announce, which both owe the caller a turn of their own.
+	IsCallerNext bool `json:"isCallerNext,omitempty"`
 	// Lead is the campaign lead the call records on entering this phase
 	// (DeclaredLead). Optional, and ignored on a call that is not a campaign
 	// call.
@@ -591,6 +599,17 @@ type Spec struct {
 func (s *Spec) Node(id string) (Node, bool) {
 	node, ok := s.Nodes[id]
 	return node, ok
+}
+
+// HasCallerNextPhase reports whether any phase declares isCallerNext. A flow
+// that does not never holds a tool result back.
+func (s *Spec) HasCallerNextPhase() bool {
+	for _, node := range s.Nodes {
+		if node.IsCallerNext {
+			return true
+		}
+	}
+	return false
 }
 
 // Lang normalises a call language to one the spec is written in.

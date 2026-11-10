@@ -299,15 +299,23 @@ func (m *modelRun) botTurn(ctx context.Context) error {
 			return nil
 		}
 
-		if text := strings.TrimSpace(resp.Content); text != "" {
+		text := strings.TrimSpace(resp.Content)
+		if text != "" {
 			m.say(text)
 		}
 		before := m.engine.NodeID()
 		m.runtime.BeginToolBatch()
+		// isQuiet is the voice path's rule for a tool result that asks for no
+		// turn (Orchestrator.closeToolBatch): the response spoke, every tool
+		// of it is a slot tool that succeeded, and the batch ends in a phase
+		// where the caller speaks next.
+		isQuiet := text != ""
 		for _, call := range resp.ToolCalls {
 			isAllowed := m.runtime.IsToolAllowed(call.Name) &&
 				!(call.Name == flow.ToolRecordLead && m.runtime.IsLeadSetByPhase())
+			isSlot := m.runtime.IsSlotTool(call.Name)
 			output, _ := m.runtime.Dispatch(ctx, call.Name, call.Arguments)
+			isQuiet = isQuiet && isSlot && flow.IsToolOutputOK(output)
 			m.log(fmt.Sprintf("TOOL %s(%s) -> %s", call.Name, call.Arguments, flow.TranscriptOutput(output)))
 			if isAllowed {
 				m.report.ToolsRun = append(m.report.ToolsRun, call.Name)
@@ -320,6 +328,13 @@ func (m *modelRun) botTurn(ctx context.Context) error {
 		if m.engine.IsTerminal() && m.runtime.Announce() != "" {
 			// The closing phase has its own line, said as written; the call
 			// ends after it, so the model is not asked for another.
+			return nil
+		}
+		if isQuiet && m.engine.IsCallerNext() {
+			// The caller speaks next: the results are in the conversation and
+			// the model is not asked for another turn. The next reply is the
+			// caller's, and counts as one.
+			m.runtime.OnToolReplyNotComing()
 			return nil
 		}
 	}
