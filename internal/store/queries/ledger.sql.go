@@ -13,6 +13,35 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const bookedRecordingCallIDs = `-- name: BookedRecordingCallIDs :many
+
+SELECT DISTINCT call_id FROM recordings WHERE call_id = ANY($1::uuid[])
+`
+
+// Which of these calls already have a recording row, deleted or not. The spool
+// sweep asks it once per pass: a call with any row is booked, and a second row
+// for it would double its audio on every screen (recordings has no unique key
+// on call_id).
+func (q *Queries) BookedRecordingCallIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, bookedRecordingCallIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var call_id uuid.UUID
+		if err := rows.Scan(&call_id); err != nil {
+			return nil, err
+		}
+		items = append(items, call_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimCallback = `-- name: ClaimCallback :one
 UPDATE callbacks
 SET status = 'CLAIMED', handled_by = $2

@@ -737,11 +737,11 @@ See [the provider notes](../docs/provider-extension.md).
 - Retention is a product setting, applied by a daily job.
 - S3-compatible storage: set `AICC_RECORDING_BACKEND=S3` and the `AICC_S3_*`
   lines in `.env`. With a spool directory (`AICC_RECORDING_DIR`) the switch
-  records locally and the application uploads each recording on hangup, then
-  clears the spool; without one the switch uploads straight into the store and
-  the application only confirms the object arrived. Playback is not a
-  redirect: the application downloads the object from the store and serves it
-  itself.
+  records locally and the application uploads each recording on hangup, books
+  it, then clears the spool copy; without one the switch uploads straight into
+  the store and the application only confirms the object arrived. Playback is
+  not a redirect: the application downloads the object from the store and
+  serves it itself.
 - What the store must accept. The upload is a single PUT, at any size, signed
   with the file's SHA-256 in `X-Amz-Content-Sha256`. It is the same request on
   HTTP and HTTPS: the client library would otherwise stream the body as
@@ -754,6 +754,24 @@ See [the provider notes](../docs/provider-extension.md).
   ERROR ("recording storage self-check failed: recordings will not be stored")
   if the store refuses it; calls still work. `aicc doctor` runs the same probe
   as `recording_storage` (`RECORDING_UPLOAD_FAILED`).
+- **A file left in the spool is a recording that could not be booked.** On the
+  hangup the application uploads the file and writes the recording's row; the
+  local copy goes only after the row exists. If either step fails, the log says
+  `recording not ingested` (or `could not book the recording`) with the call id,
+  the key and the reason, and `aicc_recording_ingest_failures_total{reason}`
+  counts it (`MISSING`, `PERMISSION`, `TIMEOUT`, `STORE`, `LEDGER`). A call that
+  never started recording is not an error and is not counted.
+- The application retries on its own: every minute it looks at the spool
+  (or, on the filesystem backend, at the files of today and yesterday) for
+  recordings older than five minutes with no row, backs off from one minute to
+  an hour between attempts for the same file, and gives up after ten attempts,
+  logging one ERROR that says the retries are exhausted. A file that is still
+  unbooked after a pass is counted in `aicc_recording_spool_unbooked`. A
+  recording the sweep books is logged as `recording booked from the spool`.
+- To ingest by hand, fix the cause the log names (credentials, the endpoint,
+  the database), then restart the application: it forgets the attempt counts
+  and retries every file in the spool from scratch. Leave the files in place;
+  deleting one deletes the recording.
 
 ## Upgrading
 
@@ -777,6 +795,11 @@ hand instead of pulling it.
 
 ## Troubleshooting
 
+- **Calls were recorded but do not show a recording.** Look for
+  `recording not ingested` or `could not book the recording` in
+  `docker compose logs aicc`, and for files still under the spool directory
+  (`recordings/YYYY/MM/DD/`). They are retried every minute; see
+  [Recordings](#recordings) for what the metrics say and how to re-run them.
 - **A call to a bot number only plays hold music.** The bot session did not
   start, and the caller went to the number's fallback queue with nobody
   staffed. Find the reason with

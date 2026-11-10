@@ -82,6 +82,14 @@ func TestIngestUploadsOneSignedPUTOverPlainHTTP(t *testing.T) {
 			if !ok || !bytes.Equal(stored, want) {
 				t.Error("the stored object is not the spool file")
 			}
+			// Ingest keeps the spool copy until the row is booked; Release
+			// is what clears it (#519).
+			if _, err := os.Stat(local); err != nil {
+				t.Fatalf("ingest removed the spool copy: %v", err)
+			}
+			if err := st.Release(t.Context(), key); err != nil {
+				t.Fatalf("release: %v", err)
+			}
 			if _, err := os.Stat(local); !os.IsNotExist(err) {
 				t.Errorf("the spool copy is still there: %v", err)
 			}

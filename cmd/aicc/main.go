@@ -334,6 +334,8 @@ func run() error {
 	if postCall != nil {
 		cdrAssembler.SetRecordingOffer(postCall)
 	}
+	cdrAssembler.SetRecordingMetrics(recordingMetrics{})
+	cdrAssembler.SetLiveCheck(registry.IsLive)
 	// The bot's capacity, one number for the UAS and for the outbound
 	// originator, which reserves a slot on answer.
 	botSlots, err := voice.NewBotSlots(voice.BotSlotsConfig{
@@ -595,6 +597,8 @@ func run() error {
 	// otherwise, so upgrading into this feature deletes nothing until somebody
 	// chooses a number.
 	if recordings != nil {
+		// Recordings whose booking failed at hangup are retried from the spool.
+		go cdrAssembler.RunSpoolSweep(ctx)
 		go recording.NewSweeper(st.Ledger(), recordings, cfg.RecordingRetentionDays,
 			slog.Default()).Run(ctx)
 	}
@@ -782,6 +786,13 @@ func (r seqReserver) ReserveSeqBlock(ctx context.Context, name string, size int6
 // live. A thin adapter rather than an import of obs inside the worker, so the
 // worker stays testable without a meter.
 type webhookMetrics struct{}
+
+// recordingMetrics reports what the assembler could not book to the one place
+// instrument names are kept.
+type recordingMetrics struct{}
+
+func (recordingMetrics) IngestFailed(reason string) { obs.RecordingIngestFailed(reason) }
+func (recordingMetrics) SpoolUnbooked(n int)        { obs.RecordingSpoolUnbooked(n) }
 
 func (webhookMetrics) DeliverySucceeded(subscriptionID uuid.UUID) {
 	obs.WebhookDelivered(subscriptionID.String())

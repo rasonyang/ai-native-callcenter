@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,13 +24,19 @@ type CDRLedger interface {
 		callID *uuid.UUID, queueID uuid.UUID, event string, agentID *uuid.UUID, waitMs int) error
 	InsertRecording(ctx context.Context, r store.Recording) (store.Recording, error)
 	MarkRecorded(ctx context.Context, callID uuid.UUID) error
+	// BookedRecordingCallIDs is the subset of ids that already have a
+	// recording row, deleted or not.
+	BookedRecordingCallIDs(ctx context.Context, ids []uuid.UUID) ([]uuid.UUID, error)
 }
 
 // RecordingStorage is where call audio lives; nil disables recording ingestion.
+// The methods are recording.Storage's; see it for the contract.
 type RecordingStorage interface {
 	Backend() string
 	Bucket() string
 	Ingest(ctx context.Context, key string) (int64, error)
+	Release(ctx context.Context, key string) error
+	Pending(ctx context.Context, writtenBefore time.Time) ([]string, error)
 }
 
 // recordingFlushWait gives the switch time to close the file after the last
@@ -93,6 +100,19 @@ type CDRAssembler struct {
 	// flushWait is how long ingestion waits for the switch to close the file;
 	// shortened in tests.
 	flushWait time.Duration
+
+	// The spool sweep's state (recordingsweep.go).
+	metrics RecordingMetrics
+	isLive  func(uuid.UUID) bool
+	now     func() time.Time
+	mu      sync.Mutex
+	// inflight holds the keys a booking is working on right now, claimed by
+	// the hangup path and the sweep alike so one recording is never booked
+	// twice.
+	inflight map[string]struct{}
+	// attempts is the sweep's per-key retry state, in memory: a restart
+	// starts every count again.
+	attempts map[string]*spoolAttempt
 }
 
 // NewCDRAssembler builds one. storage may be nil when recordings are off.
@@ -101,7 +121,8 @@ func NewCDRAssembler(ledger CDRLedger, queues QueueDirectory, storage RecordingS
 		log = slog.Default()
 	}
 	return &CDRAssembler{ledger: ledger, queues: queues, storage: storage,
-		log: log, flushWait: recordingFlushWait}
+		log: log, flushWait: recordingFlushWait, metrics: noRecordingMetrics{},
+		now: time.Now, inflight: map[string]struct{}{}, attempts: map[string]*spoolAttempt{}}
 }
 
 // RecordingOffer is told that a call's recording is booked, so it can decide
@@ -185,44 +206,41 @@ func isAgentPlaced(originator *PartySnapshot) bool {
 // ingestRecording books the call's audio into the ledger, if any was made.
 //
 // Absence is normal — recording is per number and per queue — so a missing
-// file is silence, not an error. This runs for every finished call, which is
-// what makes it the one place recordings are booked regardless of whether the
-// call was a bot's, a person's, or both in turn.
+// file on a call that never started recording is silence, not an error. A call
+// that did (RECORD_START: the switch opens the file before it announces it)
+// and has no file to show, or any failure other than absence, is an ERROR and
+// is counted. This runs for every finished call, which is what makes it the
+// one place recordings are booked on the hangup, regardless of whether the call
+// was a bot's, a person's, or both in turn; whatever it could not book, the
+// spool sweep retries.
 func (a *CDRAssembler) ingestRecording(snap Snapshot) {
 	if a.storage == nil {
 		return
 	}
 	time.Sleep(a.flushWait)
 
+	key := recordingKeyFor(snap)
+	if !a.claim(key) {
+		return // the sweep has it
+	}
+	defer a.unclaim(key)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	key := recordingKeyFor(snap)
-	size, err := a.storage.Ingest(ctx, key)
-	if err != nil {
-		// Absence is normal — recording is per number and per queue — but the
-		// reason must be visible: a silent skip here cost a live debugging
-		// session when every ingest was failing for a real cause.
-		a.log.Info("no recording ingested", "callId", snap.CallID, "key", key, "reason", err)
+	booked, outcome, fail := a.book(ctx, snap.CallID, key)
+	if fail != nil {
+		if fail.class == ReasonMissing && !snap.IsRecordingStarted {
+			a.log.Info("no recording ingested", "callId", snap.CallID, "key", key, "reason", fail.err)
+			return
+		}
+		a.reportFailure(snap.CallID, key, fail)
 		return
 	}
-
-	booked, err := a.ledger.InsertRecording(ctx, store.Recording{
-		CallID:      snap.CallID,
-		Backend:     a.storage.Backend(),
-		Bucket:      a.storage.Bucket(),
-		ObjectKey:   key,
-		SizeBytes:   size,
-		DurationSec: recording.DurationSec(size),
-	})
-	if err != nil {
-		a.log.Error("could not book the recording", "callId", snap.CallID, "error", err)
-		return
+	if outcome == alreadyBooked {
+		return // the sweep booked it first; it was offered nowhere and is not again
 	}
-	if err := a.ledger.MarkRecorded(ctx, snap.CallID); err != nil {
-		a.log.Error("could not flag the cdr as recorded", "callId", snap.CallID, "error", err)
-	}
-	a.log.Info("recording booked", "callId", snap.CallID, "key", key, "sizeBytes", size)
+	a.log.Info("recording booked", "callId", snap.CallID, "key", key, "sizeBytes", booked.SizeBytes)
 	if a.offer != nil {
 		hadBot, hadHuman := answeredSides(snap)
 		a.offer.OfferRecording(booked, hadBot, hadHuman)
