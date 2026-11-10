@@ -577,6 +577,10 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 	// batch is the tool calls of the response being answered, from the first
 	// of them to that response's TURN_DONE.
 	var batch toolBatch
+	// bargedTurn is the turn the latest barge-in cut, zero for none. A turn cut
+	// while it was being made reports no audio (the flush emptied the queue),
+	// yet it spoke: closeToolBatch needs to know.
+	var bargedTurn int
 	events := session.Events()
 	for {
 		select {
@@ -721,9 +725,16 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				}
 				actions.onTurnDone(event.Turn, event.IsInterrupted, event.HasAudio)
 				wall.onTurnDone(event.Turn, event.IsInterrupted, runtime)
-				o.closeToolBatch(&batch, session, runtime, log)
+				// After the claim watch and the wall: both note a tool-call turn
+				// as one whose reply is a tool's, which a quiet close undoes.
+				spoke := event.HasAudio || event.IsInterrupted || bargedTurn == event.Turn
+				if o.closeToolBatch(&batch, spoke, session, runtime, actions, log) {
+					claims.onToolReplyNotComing()
+					runtime.OnToolReplyNotComing()
+				}
 
 			case EventTypeBargeIn:
+				bargedTurn = event.Turn
 				actions.onBargeIn(event)
 				claims.onBargeIn(event.Turn)
 				fw.due = nil
@@ -927,11 +938,22 @@ const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
 // response before its later calls arrived, and on doubao, which
 // wait for every call's answer, it would go out while one was still owed.
 // closeToolBatch says it once the response is over and every call answered.
+//
+// The answer is the other thing that can wait for the batch. In a flow with a
+// phase where the caller speaks next (Node.IsCallerNext), a slot tool's answer
+// that succeeded is held on the batch (isAnswerHeld) rather than sent, because
+// whether it asks for a turn depends on how the batch ends: closeToolBatch sends
+// it quietly if the response spoke and the call is in such a phase, and the
+// ordinary way otherwise. Any answer that is not held releases the ones that
+// are first. A flow without the field never holds one.
 func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *toolBatch,
 	session *Session, runtime *flow.Runtime, actions *callActions, recorder *callRecorder,
 	log *slog.Logger) {
 
 	recorder.toolCall(event.ToolName, event.ToolArgs)
+	// Asked before the call runs: Dispatch can move the phase, and the tool is
+	// judged in the phase it was called in.
+	isSlotTool := runtime.IsSlotTool(event.ToolName)
 	output, moved := o.dispatch(ctx, event, batch, session, runtime, actions, log)
 
 	// Into a closing phase that has a line of its own, the line is the only
@@ -967,9 +989,13 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 				batch.lineOwedIn = moved
 			}
 		}
-		if err := session.AnswerTool(event.ToolCallID, output); err != nil {
-			log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
+		if o.isAnswerHeld(isSlotTool, output, batch, session, runtime, actions) {
+			batch.held = append(batch.held, heldAnswer{id: event.ToolCallID, tool: event.ToolName, output: output})
+			log.Debug("a slot tool's answer waits for the end of the response",
+				"tool", event.ToolName, "node", runtime.Engine().NodeID())
+			return
 		}
+		o.answerNow(event, output, batch, session, log)
 		return
 	}
 	// The line rides in this answer; an earlier move's line is superseded.
@@ -990,8 +1016,62 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	// and no playback would ever count.
 	o.enterPhase(moved, session, runtime, actions, log)
 	log.Info("the tool's answer asks for the phase's own line", "node", moved)
+	o.answerNow(event, output, batch, session, log)
+}
+
+// answerNow sends a tool call's answer, asking the model for the turn that
+// answers it, after the answers held back for the batch (releaseHeld). Every
+// answer that is not held goes this way, and it is what makes the batch one
+// that asked for a turn: the answers after it ride on that turn.
+func (o *Orchestrator) answerNow(event Event, output string, batch *toolBatch,
+	session *Session, log *slog.Logger) {
+
+	o.releaseHeld(batch, session, log)
+	batch.isTurnAsked = true
 	if err := session.AnswerTool(event.ToolCallID, output); err != nil {
 		log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
+	}
+}
+
+// isAnswerHeld reports whether a tool call's answer is held back until its
+// response ends, to be sent without asking for a turn when the response spoke
+// and the batch ends in a phase where the caller speaks next
+// (Node.IsCallerNext). It is decided at the call only so far as the answer
+// can be: that the batch can still end quietly. Whether it does is not known
+// until TURN_DONE (closeToolBatch), since a later tool of the batch may move
+// the call, or be one that must be answered with a turn.
+//
+// All of these hold at the call:
+//
+//   - the flow declares a caller-next phase and the model can answer quietly;
+//     otherwise nothing is ever held, and answers go out as they arrive;
+//   - the tool is a slot tool and its result is ok: a refusal gets a turn, so
+//     the model can correct itself;
+//   - no answer of the batch has asked for a turn already: one that did covers
+//     the rest;
+//   - nothing is armed and no phase line is owed by this move: those need the
+//     turn the answer asks for.
+func (o *Orchestrator) isAnswerHeld(isSlotTool bool, output string, batch *toolBatch,
+	session *Session, runtime *flow.Runtime, actions *callActions) bool {
+
+	return isSlotTool &&
+		!batch.isTurnAsked &&
+		batch.lineOwedIn == "" &&
+		session.CanAnswerQuietly() &&
+		runtime.Engine().Spec().HasCallerNextPhase() &&
+		flow.IsToolOutputOK(output) &&
+		!actions.isArmed()
+}
+
+// releaseHeld sends the answers held for the batch the ordinary way, in the
+// order they were made: the first asks for the turn and the rest ride on it.
+func (o *Orchestrator) releaseHeld(batch *toolBatch, session *Session, log *slog.Logger) {
+	held := batch.held
+	batch.held = nil
+	for _, answer := range held {
+		if err := session.AnswerTool(answer.id, answer.output); err != nil {
+			log.Warn("could not answer a tool call", "tool", answer.tool, "error", err)
+		}
 	}
 }
 
@@ -1164,25 +1244,66 @@ type toolBatch struct {
 	// has a line of its own that waits for the batch to close
 	// (answerToolCall). Empty is no line owed.
 	lineOwedIn string
+	// held are the answers kept back so far, in the order the calls came
+	// (isAnswerHeld). Empty once an answer has asked for a turn.
+	held []heldAnswer
+	// isTurnAsked says an answer of this batch has gone out with a request for
+	// a turn (answerNow): the batch is answered the ordinary way.
+	isTurnAsked bool
+}
+
+// heldAnswer is a tool call's answer kept back until its response ends.
+type heldAnswer struct {
+	id, tool, output string
 }
 
 // closeToolBatch ends the batch of the response that has just finished, if
-// there is one, and says the line its last move left owed. Every call of the
-// response has been answered by now: they all arrive before its TURN_DONE. A
-// call that has moved on since, other than by a tool (the time limit), said
-// its own phase's line on the way, and owes nothing more.
-func (o *Orchestrator) closeToolBatch(batch *toolBatch, session *Session,
-	runtime *flow.Runtime, log *slog.Logger) {
+// there is one, sends the answers held for it and says the line its last move
+// left owed. Every call of the response has been answered by now: they all
+// arrive before its TURN_DONE. A call that has moved on since, other than by a
+// tool (the time limit), said its own phase's line on the way, and owes
+// nothing more.
+//
+// The held answers go out one of two ways, decided once for the batch. Quietly
+// (Session.AnswerToolQuietly) when the response spoke (spoke: audio queued, or
+// the caller cut it), the batch ended in a phase where the caller speaks next,
+// and nothing is owed to the caller: no line, no armed ending, no answer of
+// the batch that asked for a turn. The caller's reply, or their silence, is
+// the next turn. Otherwise the ordinary way, as if they had gone out at the
+// call: the first asks for the turn, the rest ride on it. Either way they go
+// before the phase's line, which pre-empts.
+//
+// It reports whether the answers went quietly, so that the caller can tell the
+// reply bookkeeping that no tool reply is coming (it runs after the turn was
+// accounted for as one that made a tool call).
+func (o *Orchestrator) closeToolBatch(batch *toolBatch, spoke bool, session *Session,
+	runtime *flow.Runtime, actions *callActions, log *slog.Logger) (isQuiet bool) {
 
 	if !batch.isOpen {
-		return
+		return false
 	}
 	runtime.EndToolBatch()
 	lineOwedIn := batch.lineOwedIn
+	isQuiet = len(batch.held) > 0 && !batch.isTurnAsked && spoke &&
+		lineOwedIn == "" && runtime.Engine().IsCallerNext() && !actions.isArmed()
+	if isQuiet {
+		held := batch.held
+		log.Info("the response answered the caller and the caller speaks next; "+
+			"tool results sent without asking for a turn",
+			"tools", len(held), "node", runtime.Engine().NodeID())
+		for _, answer := range held {
+			if err := session.AnswerToolQuietly(answer.id, answer.output); err != nil {
+				log.Warn("could not answer a tool call quietly", "tool", answer.tool, "error", err)
+			}
+		}
+	} else {
+		o.releaseHeld(batch, session, log)
+	}
 	*batch = toolBatch{}
 	if lineOwedIn != "" && lineOwedIn == runtime.Engine().NodeID() {
 		o.sayPhaseLine(session, runtime, log)
 	}
+	return isQuiet
 }
 
 // enterPhase re-pins the standing instructions for the phase the call has just

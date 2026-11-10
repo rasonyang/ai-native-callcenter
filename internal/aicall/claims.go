@@ -392,6 +392,12 @@ func (w *claimWatch) onToolCall() {
 	w.consumeStanding()
 }
 
+// onToolReplyNotComing says the tool results of the turn just judged were sent
+// without asking for a turn (Session.AnswerToolQuietly): the next turn to
+// finish answers the caller, so what it says is its own and is judged as such,
+// not taken as backed by the result.
+func (w *claimWatch) onToolReplyNotComing() { w.isToolReplyNext = false }
+
 // onTurnInterrupted takes the farewell back: a turn the caller talked over was
 // not heard to the end, so nothing was said that the call could be left on.
 func (w *claimWatch) onTurnInterrupted() {
