@@ -329,7 +329,7 @@ The fallback: the same stack from a git checkout, without the installer.
 **1. Get the stack and copy the example config.**
 
 ```sh
-git clone --depth 1 --branch v0.8.1 https://github.com/rasonyang/ai-native-callcenter
+git clone --depth 1 --branch v0.8.2 https://github.com/rasonyang/ai-native-callcenter
 cd ai-native-callcenter/deploy
 cp .env.example .env
 ```
@@ -367,8 +367,8 @@ first start builds the application from this checkout (a few minutes; later
 starts take seconds). To skip the build, uncomment these two lines in `.env`:
 
 ```ini
-AICC_IMAGE=rasonyang/ai-native-callcenter:v0.8.1
-AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.8.1
+AICC_IMAGE=rasonyang/ai-native-callcenter:v0.8.2
+AICC_FS_IMAGE=rasonyang/freeswitch-aicc:v0.8.2
 ```
 
 - The application image contains the executable with the SPA embedded;

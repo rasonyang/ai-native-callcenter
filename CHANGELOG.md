@@ -5,7 +5,28 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
-## Unreleased
+## v0.8.2 - 2026-11-10
+
+### Upgrade notes
+
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. This time the switch image changes too: it
+  carries a new script, `aicc_spool.lua`. With S3 recording storage and a
+  spool, a v0.8.2 application next to an older switch image keeps every spool
+  copy on disk, logs the ERROR "recording spool check failed" at every connect
+  to the switch, and `aicc doctor` fails `recording_spool` with
+  `RECORDING_SPOOL_NOT_CLEARABLE`. A natively installed switch needs
+  `freeswitch/scripts/aicc_spool.lua` copied into its script directory. The
+  filesystem backend and S3 without a spool are not affected (#534).
+- No migration, no application setting added, removed or changed in default,
+  and no change to the API contract.
+- The bundled compose stack now takes `AICC_RECORDING_BACKEND` from `.env`;
+  until now it forced `FS` whatever `.env` said. A `.env` that already sets
+  `AICC_RECORDING_BACKEND=S3` therefore switches the stack to S3 storage with
+  this upgrade: check its `AICC_S3_*` lines first, or remove the line to keep
+  the filesystem backend. Without the line nothing changes (#534).
+- Spool copies of booked recordings that earlier releases left behind are
+  removed by the minute sweep once `recording_spool` passes (#534).
 
 ### Added
 
