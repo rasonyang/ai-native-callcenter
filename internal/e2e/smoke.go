@@ -56,6 +56,9 @@ type SmokeConfig struct {
 	FlowFile string
 	DID      string
 	To       string
+	// CalledPrefix is the gateway's destination-prefix: it must be on the wire
+	// in front of To, and in no CDR, webhook or event.
+	CalledPrefix string
 
 	// OutDir receives smoke.json, calleesim-report.json and cdr.json.
 	OutDir string
@@ -76,6 +79,8 @@ type Summary struct {
 
 	Dialog *DialogSummary `json:"dialog,omitempty"`
 	CDR    *CDRSummary    `json:"cdr,omitempty"`
+	// Prefix is what the smoke saw of the called-number prefix.
+	Prefix *PrefixFacts `json:"prefix,omitempty"`
 	// Latency is reported and never asserted.
 	Latency map[string]float64 `json:"latencyMs"`
 }
@@ -197,6 +202,31 @@ func runCall(ctx context.Context, cfg SmokeConfig, c *httpc, sum *Summary, col *
 		return fmt.Errorf("simulator report: %w", err)
 	}
 
+	// Before the call: a subscription for the DID at a receiver of the
+	// driver's own, and the administrator's event stream. Both must exist when
+	// the call starts.
+	facts := &PrefixFacts{Prefix: cfg.CalledPrefix}
+	sum.Prefix = facts
+	recv, err := newWebhookReceiver(cfg.API)
+	if err != nil {
+		return err
+	}
+	defer recv.close()
+	subID, err := c.createSubscription(ctx, "e2e-smoke-"+cfg.DID, recv.url, cfg.DID)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+		_ = c.do(dctx, http.MethodDelete, "/webhook-subscriptions/"+subID.String(), nil, nil, http.StatusNoContent)
+	}()
+	tap, err := openEventTap(ctx, cfg.API, cfg.Username, cfg.Password)
+	if err != nil {
+		return err
+	}
+	defer func() { _, _ = tap.stop() }()
+
 	callID := uuid.Must(uuid.NewV7())
 	sum.CallID = callID.String()
 	kind := api.CreateCallRequestKind("AI_OUTBOUND")
@@ -219,6 +249,9 @@ func runCall(ctx context.Context, cfg SmokeConfig, c *httpc, sum *Summary, col *
 		return err
 	}
 	assertDialog(report, len(pre.Dialogs), cfg, placedAt, sum, col)
+	if len(report.Dialogs) == len(pre.Dialogs)+1 {
+		judgeWire(report.Dialogs[len(pre.Dialogs)], cfg.CalledPrefix, cfg.To, facts, col)
+	}
 
 	cdrs, err := waitCDR(ctx, c, cfg)
 	if err != nil {
@@ -233,6 +266,16 @@ func runCall(ctx context.Context, cfg SmokeConfig, c *httpc, sum *Summary, col *
 	}
 	col.that(all.Total == before.Total+1, "the ledger grew by exactly one row (%d -> %d)", before.Total, all.Total)
 	assertCDR(cdrs, callID, cfg, sum, col)
+
+	// The webhook is sent after the ledger row; the stream is held until both
+	// are final.
+	if err := recv.waitDeliveries(ctx, callID, cfg.Wait); err != nil {
+		col.that(false, "%v", err)
+	}
+	judgeWebhooks(recv.received(), callID, cfg.CalledPrefix, cfg.To, facts, col)
+	events, err := tap.stop()
+	col.that(err == nil, "the event stream stayed open until the call was final (%v)", err)
+	judgeEvents(events, callID, cfg.CalledPrefix, facts, col)
 	return nil
 }
 

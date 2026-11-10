@@ -10,6 +10,11 @@
 // not know) exits 1. Like aicc-loadgen it is built from the repository and is
 // not shipped in a release.
 //
+// With -called-prefix the numbers are the dialled numbers without it: the
+// prefix a trunk's gateway adds to the Request-URI user is removed before the
+// lookup, the record keeps the dialled number, and an INVITE that lacks the
+// prefix gets 404 like an unknown number.
+//
 // A scenario keys a list of behaviours by the dialled number. Attempt n on a
 // number uses entry n; attempts past the end use the last entry. A number not
 // listed gets 404 and fails the run.
@@ -50,6 +55,7 @@ func main() {
 	out := flag.String("out", "", "file to write the report to on exit")
 	rtpMin := flag.Int("rtp-min", 0, "lowest RTP port; 0 lets the system choose")
 	rtpMax := flag.Int("rtp-max", 0, "highest RTP port")
+	calledPrefix := flag.String("called-prefix", "", "string the gateway puts before the number in the Request-URI user (destination-prefix); it is removed before the scenario lookup, and an INVITE without it is unexpected; empty expects none")
 	flag.Parse()
 
 	if *scenarioPath == "" {
@@ -68,7 +74,7 @@ func main() {
 
 	sim, err := calleesim.New(calleesim.Config{
 		Addr: *listen, Advertise: *advertise, Scenario: scenario,
-		RTPPortMin: *rtpMin, RTPPortMax: *rtpMax, Log: slog.Default(),
+		RTPPortMin: *rtpMin, RTPPortMax: *rtpMax, CalledPrefix: *calledPrefix, Log: slog.Default(),
 	})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "aicc-calleesim:", err)

@@ -34,6 +34,15 @@ type Config struct {
 	// choose.
 	RTPPortMin, RTPPortMax int
 
+	// CalledPrefix is the string the trunk's gateway puts in front of the
+	// user part of the Request-URI (the gateway parameter destination-prefix).
+	// When set, an INVITE's user must start with it; the prefix is removed
+	// before the number keys the scenario, so DialogRecord.Number stays the
+	// number that was dialled, while RequestURI keeps the wire form. An INVITE
+	// whose user lacks the prefix is not expected: a gateway that lost the
+	// prefix fails the run. Empty means no prefix is expected or removed.
+	CalledPrefix string
+
 	Scenario *Scenario
 	Log      *slog.Logger
 }
@@ -188,10 +197,13 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 		existing.retransmit() // the caller did not see our last response
 		return
 	}
-	number := numberOf(msg.RequestURI())
+	number, prefixed := stripPrefix(numberOf(msg.RequestURI()), s.cfg.CalledPrefix)
 	attempt := s.attempts[number]
 	s.attempts[number]++
 	behaviour, known := s.cfg.Scenario.For(number, attempt)
+	if !prefixed {
+		known = false
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	inviteAt := time.Now() // keeps its monotonic reading; see dialog.inviteAt
@@ -215,6 +227,16 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 		defer s.wg.Done()
 		d.run(known)
 	}()
+}
+
+// stripPrefix removes the called-number prefix from a Request-URI user. With
+// no prefix configured the user is returned as it is; with one, ok is false
+// when the user does not start with it.
+func stripPrefix(user, prefix string) (number string, ok bool) {
+	if prefix == "" {
+		return user, true
+	}
+	return strings.CutPrefix(user, prefix)
 }
 
 // numberOf is the user part of a SIP request URI.

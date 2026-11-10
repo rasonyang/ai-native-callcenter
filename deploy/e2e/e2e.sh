@@ -33,6 +33,11 @@ RUN="$WORK/run"
 TOOLS="$WORK/tools"
 APP_IP="$NET.10"; FS_IP="$NET.11"; MOCK_IP="$NET.12"; CALLEE_IP="$NET.13"
 TO_NUMBER=13800000001
+# The called-number prefix of the one gateway (destination-prefix, #531): the
+# simulator expects it on every INVITE and the smoke checks it never reaches
+# the application's records. Lower case, letters and digits mixed; the value
+# is defined here and nowhere else.
+CALLED_PREFIX=a1b2cc
 # The dial form the environment was started with, written by `up` and removed
 # by `down`.
 FORM_FILE="$WORK/dial-form"
@@ -56,7 +61,7 @@ compose() {
     E2E_APP_IP="$APP_IP" E2E_FS_IP="$FS_IP" E2E_MOCK_IP="$MOCK_IP" E2E_CALLEESIM_IP="$CALLEE_IP" \
     E2E_UID="$(id -u)" E2E_GID="$(id -g)" FS_EXTERNAL_IP="$FS_IP" \
     ${E2E_OUTBOUND_ENDPOINT:+E2E_OUTBOUND_ENDPOINT="$E2E_OUTBOUND_ENDPOINT"} \
-    E2E_OUTBOUND_DIAL_FORM="$DIAL_FORM" E2E_SCENARIO_FILE="$SCENARIO_FILE" \
+    E2E_OUTBOUND_DIAL_FORM="$DIAL_FORM" E2E_SCENARIO_FILE="$SCENARIO_FILE" E2E_CALLED_PREFIX="$CALLED_PREFIX" \
     E2E_BOT_MAX_CALLS="$APP_BOT_MAX_CALLS" E2E_BOT_INBOUND_RESERVE="$APP_BOT_INBOUND_RESERVE" \
     E2E_OVERFLOW_HOLD="$APP_OVERFLOW_HOLD" \
     E2E_BOT_RTP_PORT_LOW="$APP_BOT_RTP_PORT_LOW" E2E_BOT_RTP_PORT_HIGH="$APP_BOT_RTP_PORT_HIGH" \
@@ -123,7 +128,7 @@ build_tools() {
 # refuses to go on when the configuration is not the isolated environment.
 render() {
   mkdir -p "$RUN"
-  sed "s/@CALLEESIM_IP@/$CALLEE_IP/" "$E2E/calleesim-gateway.xml.in" > "$RUN/e2e_calleesim.xml"
+  sed -e "s/@CALLEESIM_IP@/$CALLEE_IP/" -e "s/@CALLED_PREFIX@/$CALLED_PREFIX/" "$E2E/calleesim-gateway.xml.in" > "$RUN/e2e_calleesim.xml"
   compose config --format json > "$RUN/compose.json"
   "$WORK/aicc-e2e-host" guard -compose-config "$RUN/compose.json" >&2
 }
@@ -187,7 +192,7 @@ cmd_smoke() {
       -api "http://$APP_IP:8080" -ready "http://$APP_IP:9090/readyz" \
       -calleesim "http://$CALLEE_IP:8771" -esl "$FS_IP:18021" \
       -compose-config /run/e2e/compose.json -username admin \
-      -flow /etc/e2e/flow.json -to "$TO_NUMBER" -out "$out" >&2; then
+      -flow /etc/e2e/flow.json -to "$TO_NUMBER" -called-prefix "$CALLED_PREFIX" -out "$out" >&2; then
     cat "$RUN/$id/smoke.json"
     say "smoke passed. Results: $RUN/$id"
   else

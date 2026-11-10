@@ -5,6 +5,20 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Added
+
+- `deploy/carrier.md` documents a called-number prefix: a trunk that routes
+  only when the called number carries a carrier-assigned prefix such as
+  `a1b2cc` gets it from the gateway's `destination-prefix` parameter, outbound
+  only, while `AICC_OUTBOUND_ENDPOINT` and the dialplan's bridge stay without
+  it. The prefix then exists only on the SIP wire; the API, the events, the CDR,
+  the webhook and contact matching keep the plain number. The end-to-end
+  environment dials every call through a prefixed gateway and its smoke test
+  fails when the prefix reaches a CDR, a webhook or an event. No application
+  change, no setting, no change to the API contract. (#531)
+
 ## v0.8.1 - 2026-11-10
 
 ### Upgrade notes
