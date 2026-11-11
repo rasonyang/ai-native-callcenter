@@ -41,6 +41,10 @@ var (
 	providerSessions   metric.Int64Counter
 	providerUnanswered metric.Int64Counter
 	botInterruptions   metric.Int64Counter
+	echoDelay          metric.Int64Histogram
+	echoReturnLoss     metric.Float64Histogram
+	echoCalls          metric.Int64Counter
+	echoInterruptions  metric.Int64Counter
 	botSessionLimits   metric.Int64Counter
 	botUnbacked        metric.Int64Counter
 	botClaimCues       metric.Int64Counter
@@ -170,6 +174,32 @@ func init() {
 			"took it: SPEECH or DTMF. Speech inside the barge-in guard is not counted — "+
 			"it is line echo and was ignored — which makes this the only measurement of "+
 			"whether that guard is set right."))
+	echoDelay, _ = meter.Int64Histogram("aicc_bot_echo_delay_ms",
+		metric.WithDescription("Per AI call in which an echo of the bot's own voice was "+
+			"found on the uplink: the estimated delay between what the leg sent and what "+
+			"came back, in milliseconds. Measurement only; no audio is altered."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(20, 40, 80, 120, 160, 240, 320, 480, 640, 800, 1000))
+	echoReturnLoss, _ = meter.Float64Histogram("aicc_bot_echo_return_loss_db",
+		metric.WithDescription("Per AI call in which an echo of the bot's own voice was "+
+			"found on the uplink: how much quieter the returning copy is than what was "+
+			"sent, in dB. Small values are the calls the barge-in guard cannot protect."),
+		metric.WithExplicitBucketBoundaries(0, 3, 6, 9, 12, 15, 20, 25, 30, 40))
+	echoCalls, _ = meter.Int64Counter("aicc_bot_echo_calls_total",
+		metric.WithDescription("AI calls by what the echo measurement concluded: FOUND "+
+			"(three agreeing estimates), NOT_FOUND (estimates ran and none agreed on an "+
+			"echo), UNMEASURED (the bot spoke too little for an estimate, the leg offered "+
+			"no reference, or the measurement failed)."))
+	echoInterruptions, _ = meter.Int64Counter("aicc_bot_speech_interruptions_total",
+		metric.WithDescription("Speech interruptions of the bot by the echo measurement's "+
+			"verdict on the last 600 ms of uplink, from its waveform correlation with "+
+			"what the bot sent: ECHO (the bot's own voice coming back), NOT_ECHO (there "+
+			"was bot speech it could have been the echo of, and it is not), UNKNOWN "+
+			"(nothing to judge from, or a correlation too weak to tell with no echo "+
+			"delay known on the call). Both the session's own barge-ins and the cuts "+
+			"an engine with turn detection of its own reports are counted, on calls "+
+			"whose leg is measured; aicc_bot_interruptions_total{reason=SPEECH} counts "+
+			"only the former, on every call."))
 	botFirstMedia, _ = meter.Int64Histogram("aicc_bot_first_media_ms",
 		metric.WithDescription("Per bot call: the answer to the first inbound RTP packet, "+
 			"in milliseconds. A carrier may open its media path seconds after the "+
@@ -375,6 +405,55 @@ func RecordBotInterruption(reason string) {
 	}
 	botInterruptions.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("reason", reason)))
+}
+
+// Echo measurement results (RecordEchoCall).
+const (
+	EchoResultFound      = "FOUND"
+	EchoResultNotFound   = "NOT_FOUND"
+	EchoResultUnmeasured = "UNMEASURED"
+)
+
+// RecordEchoCall publishes one AI call's echo measurement when the call ends:
+// the result, and for a found echo its delay and return loss.
+func RecordEchoCall(result string, delayMs int64, returnLossDb float64) {
+	ctx := context.Background()
+	if echoCalls != nil {
+		echoCalls.Add(ctx, 1, metric.WithAttributes(attribute.String("result", result)))
+	}
+	if result != EchoResultFound {
+		return
+	}
+	if echoDelay != nil {
+		echoDelay.Record(ctx, delayMs)
+	}
+	if echoReturnLoss != nil {
+		echoReturnLoss.Record(ctx, returnLossDb)
+	}
+}
+
+// Echo verdicts on a speech interruption (RecordSpeechInterruption).
+const (
+	EchoVerdictEcho    = "ECHO"
+	EchoVerdictNotEcho = "NOT_ECHO"
+	EchoVerdictUnknown = "UNKNOWN"
+)
+
+// RecordSpeechInterruption counts one speech interruption of the bot with the
+// echo measurement's verdict on it (EchoVerdict*; anything else is counted as
+// UNKNOWN, so the label stays bounded). It sits beside RecordBotInterruption
+// and does not replace it.
+func RecordSpeechInterruption(verdict string) {
+	if echoInterruptions == nil {
+		return
+	}
+	switch verdict {
+	case EchoVerdictEcho, EchoVerdictNotEcho:
+	default:
+		verdict = EchoVerdictUnknown
+	}
+	echoInterruptions.Add(context.Background(), 1,
+		metric.WithAttributes(attribute.String("verdict", verdict)))
 }
 
 // SessionLimitOutcome labels how a call that reached its time limit ended.

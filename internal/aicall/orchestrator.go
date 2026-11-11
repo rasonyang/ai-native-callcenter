@@ -171,6 +171,9 @@ type OrchestratorConfig struct {
 	// last word before the flow gets NO_INPUT; see Config. Zero means the
 	// session's default (8 s).
 	NoInput time.Duration
+	// EchoDumpDir is AICC_BOT_ECHO_DUMP_DIR; see Config.EchoDumpDir. Empty is
+	// off.
+	EchoDumpDir string
 	// Profile is the provider this deployment runs, resolved at startup. The
 	// same one answers every call, whatever language it is in.
 	Profile provider.Profile
@@ -1788,6 +1791,7 @@ func (o *Orchestrator) sessionConfig(session provider.SessionConfig, isEndingArm
 		IsGreetingGated:   o.cfg.IsGreetingGated,
 		GreetingMediaWait: o.cfg.GreetingMediaWait,
 		NoInput:           o.cfg.NoInput,
+		EchoDumpDir:       o.cfg.EchoDumpDir,
 		IsEndingArmed:     isEndingArmed,
 		Logger:            log,
 	}

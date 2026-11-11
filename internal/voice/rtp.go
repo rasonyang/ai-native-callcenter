@@ -140,6 +140,9 @@ type RTPSession struct {
 	// sequence number of the packet this tick is about to send. Set it before Run.
 	beforeTxRecv func()
 
+	// txTap, when set, is told what every send tick put on the wire (SetTxTap).
+	txTap atomic.Pointer[TxTap]
+
 	// bindIP is the local address the RTP socket (and the RTCP socket beside
 	// it) binds. Nil means every IPv4 interface. The UAS sets it to the address
 	// the switch sent the INVITE to, the one its SDP answer names, so no media
@@ -268,6 +271,22 @@ func (r *RTPSession) MediaStarted() <-chan struct{} { return r.mediaStarted }
 // it is the time Start ran; ask HasReceived whether anything has come at all.
 func (r *RTPSession) LastPacketAt() time.Time {
 	return time.Unix(0, r.lastRTPNano.Load())
+}
+
+// TxTap observes the send loop: it is called once per 20 ms tick with the G.711
+// frame that tick sent and the time it was sent, or nil when the tick sent
+// silence padding instead of queued audio. It runs on the send goroutine, so it
+// must return at once, copy what it keeps and never retain the frame.
+type TxTap func(frame []byte, at time.Time)
+
+// SetTxTap installs (or, with nil, removes) the send loop's observer. It is
+// safe to call while the loop runs.
+func (r *RTPSession) SetTxTap(tap TxTap) {
+	if tap == nil {
+		r.txTap.Store(nil)
+		return
+	}
+	r.txTap.Store(&tap)
 }
 
 // Send queues one 20 ms G.711 frame. The frame is copied, so the caller keeps
@@ -490,6 +509,15 @@ func (r *RTPSession) Run() {
 		}
 		if len(frame) > media.FrameSamples {
 			frame = frame[:media.FrameSamples]
+		}
+		if tap := r.txTap.Load(); tap != nil {
+			// The frame actually handed to the socket this tick; nil when the
+			// tick carried padding rather than the bot's audio.
+			if pooled {
+				(*tap)(frame, time.Now())
+			} else {
+				(*tap)(nil, time.Now())
+			}
 		}
 
 		packet = packRTPHeader(packet, r.seq, r.timestamp.Load(), r.ssrc.Load(), r.payloadType)

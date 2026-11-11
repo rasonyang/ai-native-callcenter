@@ -193,3 +193,70 @@ func TestSwitchRTPExhaustionIsCountedByMedia(t *testing.T) {
 		t.Errorf("before %v after %v: want audio +2, video +1", before, after)
 	}
 }
+
+// echoCounts reads the echo measurement's instruments: observations of each
+// counter series by its label, and the histograms' sample counts.
+func echoCounts(t *testing.T, reader sdkmetric.Reader) map[string]int64 {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]int64{}
+	for _, sm := range rm.ScopeMetrics {
+		for _, m := range sm.Metrics {
+			switch data := m.Data.(type) {
+			case metricdata.Sum[int64]:
+				for _, dp := range data.DataPoints {
+					switch m.Name {
+					case "aicc_bot_echo_calls_total":
+						v, _ := dp.Attributes.Value("result")
+						out["calls."+v.AsString()] += dp.Value
+					case "aicc_bot_speech_interruptions_total":
+						v, _ := dp.Attributes.Value("verdict")
+						out["interruptions."+v.AsString()] += dp.Value
+					}
+				}
+			case metricdata.Histogram[int64]:
+				for _, dp := range data.DataPoints {
+					if m.Name == "aicc_bot_echo_delay_ms" {
+						out["delay"] += int64(dp.Count)
+					}
+				}
+			case metricdata.Histogram[float64]:
+				for _, dp := range data.DataPoints {
+					if m.Name == "aicc_bot_echo_return_loss_db" {
+						out["returnLoss"] += int64(dp.Count)
+					}
+				}
+			}
+		}
+	}
+	return out
+}
+
+func TestTheEchoMeasurementRecordsDelayAndLossOnlyForAFoundEcho(t *testing.T) {
+	reader := useTestReader()
+	before := echoCounts(t, reader)
+
+	RecordEchoCall(EchoResultFound, 240, 12.5)
+	RecordEchoCall(EchoResultNotFound, 0, 0)
+	RecordEchoCall(EchoResultUnmeasured, 0, 0)
+	RecordSpeechInterruption(EchoVerdictEcho)
+	RecordSpeechInterruption(EchoVerdictNotEcho)
+	RecordSpeechInterruption(EchoVerdictNotEcho)
+	RecordSpeechInterruption(EchoVerdictUnknown)
+	RecordSpeechInterruption("MAYBE") // not a verdict: kept inside the label's values
+
+	got := echoCounts(t, reader)
+	for key, want := range map[string]int64{
+		"calls.FOUND": 1, "calls.NOT_FOUND": 1, "calls.UNMEASURED": 1,
+		"delay": 1, "returnLoss": 1,
+		"interruptions.ECHO": 1, "interruptions.NOT_ECHO": 2, "interruptions.UNKNOWN": 2,
+		"interruptions.MAYBE": 0,
+	} {
+		if d := got[key] - before[key]; d != want {
+			t.Errorf("%s moved by %d, want %d (all: %v)", key, d, want, got)
+		}
+	}
+}

@@ -644,6 +644,7 @@ func botConfig(
 	isGreetingGated bool,
 	greetingMediaWait time.Duration,
 	noInput time.Duration,
+	echoDumpDir string,
 	countryCode string,
 	dialForm phonenum.DialForm,
 ) aicall.OrchestratorConfig {
@@ -673,6 +674,8 @@ func botConfig(
 		GreetingMediaWait: greetingMediaWait,
 		// Dead air before NO_INPUT: the deployment's AICC_BOT_NO_INPUT_TIMEOUT.
 		NoInput: noInput,
+		// Development aid: the deployment's AICC_BOT_ECHO_DUMP_DIR, empty off.
+		EchoDumpDir: echoDumpDir,
 		// take_message writes a callback number the way this deployment
 		// dials: AICC_DEFAULT_COUNTRY_CODE and AICC_OUTBOUND_DIAL_FORM.
 		DefaultCountryCode: countryCode,

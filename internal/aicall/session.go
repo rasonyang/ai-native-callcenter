@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/rasonyang/ai-native-callcenter/internal/echoprobe"
 	"github.com/rasonyang/ai-native-callcenter/internal/media"
 	"github.com/rasonyang/ai-native-callcenter/internal/obs"
 	"github.com/rasonyang/ai-native-callcenter/internal/provider"
@@ -194,6 +195,12 @@ type Config struct {
 	// session's locks; nil does nothing.
 	OnCutAcknowledged func(cut Event)
 
+	// EchoDumpDir, when set, is a directory the echo measurement writes each
+	// call's two signals into, one stereo WAV named by call id (left: what the
+	// bot sent, right: the uplink as clocked). A development aid that records
+	// call audio; empty is off.
+	EchoDumpDir string
+
 	// Logger is the call's logger. The orchestrator has already bound the
 	// call's identity to it (callId, aiccCallId, did), so the session adds
 	// no key of its own: slog writes a key bound twice twice.
@@ -357,6 +364,10 @@ type Session struct {
 	// afterPlaybackDone, set only by tests, runs right after PLAYBACK_DONE is
 	// published and before the dead-air watch starts.
 	afterPlaybackDone func()
+
+	// echo is the call's echo measurement (echo.go); nil until the uplink pump
+	// starts, and for a leg that cannot report what it sends.
+	echo atomic.Pointer[echoprobe.Monitor]
 
 	// isHushed is set while a transfer the switch has not confirmed is
 	// settled (hush): nothing passes between the caller and the model.
@@ -788,6 +799,7 @@ func (s *Session) pumpCallerAudio() {
 	now := s.uplinkNow
 	clock := newUplinkClock(now())
 	defer s.finishUplink(clock)
+	probe := s.startEchoProbe(clock.start)
 
 	ticks := s.uplinkTicks
 	if ticks == nil {
@@ -814,7 +826,7 @@ func (s *Session) pumpCallerAudio() {
 			// The time is read here, not taken from the tick: a tick that was
 			// waiting while this goroutine ran late carries the time it fired.
 			var err error
-			if converted, err = s.sendDueSlots(clock, now(), converted); err != nil {
+			if converted, err = s.sendDueSlots(clock, probe, now(), converted); err != nil {
 				// A model that cannot be fed is a call that cannot continue.
 				// Nothing names this one: a socket that stopped taking audio
 				// has not said why.
@@ -845,9 +857,14 @@ func takeArrived(clock *uplinkClock, frames <-chan []byte) bool {
 // now: the oldest queued caller frame, or silence. Hushed, the slots pass and
 // nothing is sent, fills included. converted is the conversion buffer, handed
 // back for reuse.
-func (s *Session) sendDueSlots(clock *uplinkClock, now time.Time, converted []byte) ([]byte, error) {
+func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now time.Time, converted []byte) ([]byte, error) {
 	for n := clock.owed(now); n > 0; n-- {
 		frame := clock.pop()
+		if probe != nil {
+			// A read-only look at the slot, hushed or not, so the measurement's
+			// axis keeps the clock's.
+			probe.FeedUplink(frame)
+		}
 		if s.isHushed.Load() {
 			if frame != nil {
 				media.PutBytes(frame)
@@ -884,6 +901,7 @@ func (s *Session) feedSlot(clock *uplinkClock, frame, converted []byte) ([]byte,
 // finishUplink releases what the clock still holds and reports its counters:
 // one log line and the matching metrics.
 func (s *Session) finishUplink(clock *uplinkClock) {
+	s.finishEchoProbe()
 	queued := clock.queued()
 	clock.release()
 	st := clock.stats
@@ -1034,9 +1052,18 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			// an interruption that leaves no trace cannot be told apart
 			// afterwards from one that never happened. This path reports the
 			// provider's own decision, so it names who decided.
-			s.log.Info("the provider took the floor back",
-				"reason", string(event.InterruptedBy), "playedMs", playedMs)
+			//
+			// The provider is told first: the echo verdict below is computed
+			// afterwards and must not delay the trim.
 			s.tellTheModelWhatWasHeard(event.InterruptedBy, playedMs)
+			args := []any{"reason", string(event.InterruptedBy), "playedMs", playedMs}
+			if event.InterruptedBy == provider.InterruptReasonSpeech {
+				// Measurement only, as in bargeIn: an engine that cuts by itself
+				// reports its cut here, and an echo it took for the caller is
+				// what the measurement is for.
+				args = s.withEchoVerdict(args)
+			}
+			s.log.Info("the provider took the floor back", args...)
 			// A provider with turn detection of its own (qwen, grok, doubao)
 			// cancels the turn the moment it hears the caller, before it says
 			// so: the speech_started that follows finds the queue already
@@ -1203,8 +1230,13 @@ func (s *Session) cutIn(reason provider.InterruptReason, isGuarded bool) {
 	// case — a Debug line for speech that turned out to be echo — so the
 	// interruptions that happened left no trace at all and the ones that did
 	// not left one.
-	s.log.Info("the caller took the floor back",
-		"reason", string(reason), "playedMs", playedMs, "wasGenerating", isGenerating)
+	args := []any{"reason", string(reason), "playedMs", playedMs, "wasGenerating", isGenerating}
+	if reason == provider.InterruptReasonSpeech {
+		// Measurement only: whether what the detector heard is the bot's own
+		// voice returning is reported, and changes nothing here.
+		args = s.withEchoVerdict(args)
+	}
+	s.log.Info("the caller took the floor back", args...)
 	obs.RecordBotInterruption(string(reason))
 	played := time.Duration(playedMs) * time.Millisecond
 	if playedMs < 0 {
