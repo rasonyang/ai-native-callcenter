@@ -645,6 +645,7 @@ func botConfig(
 	greetingMediaWait time.Duration,
 	noInput time.Duration,
 	echoDumpDir string,
+	isEchoSuppressionEnabled bool,
 	countryCode string,
 	dialForm phonenum.DialForm,
 ) aicall.OrchestratorConfig {
@@ -676,6 +677,8 @@ func botConfig(
 		NoInput: noInput,
 		// Development aid: the deployment's AICC_BOT_ECHO_DUMP_DIR, empty off.
 		EchoDumpDir: echoDumpDir,
+		// The deployment's AICC_BOT_ECHO_SUPPRESS, off by default.
+		IsEchoSuppressionEnabled: isEchoSuppressionEnabled,
 		// take_message writes a callback number the way this deployment
 		// dials: AICC_DEFAULT_COUNTRY_CODE and AICC_OUTBOUND_DIAL_FORM.
 		DefaultCountryCode: countryCode,

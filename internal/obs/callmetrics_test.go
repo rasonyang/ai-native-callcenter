@@ -215,6 +215,13 @@ func echoCounts(t *testing.T, reader sdkmetric.Reader) map[string]int64 {
 					case "aicc_bot_speech_interruptions_total":
 						v, _ := dp.Attributes.Value("verdict")
 						out["interruptions."+v.AsString()] += dp.Value
+					case "aicc_bot_echo_suppression_calls_total":
+						v, _ := dp.Attributes.Value("state")
+						out["suppression."+v.AsString()] += dp.Value
+					case "aicc_bot_echo_suppressed_frames_total":
+						out["suppressedFrames"] += dp.Value
+					case "aicc_bot_echo_gate_openings_total":
+						out["gateOpenings"] += dp.Value
 					}
 				}
 			case metricdata.Histogram[int64]:
@@ -254,6 +261,27 @@ func TestTheEchoMeasurementRecordsDelayAndLossOnlyForAFoundEcho(t *testing.T) {
 		"delay": 1, "returnLoss": 1,
 		"interruptions.ECHO": 1, "interruptions.NOT_ECHO": 2, "interruptions.UNKNOWN": 2,
 		"interruptions.MAYBE": 0,
+	} {
+		if d := got[key] - before[key]; d != want {
+			t.Errorf("%s moved by %d, want %d (all: %v)", key, d, want, got)
+		}
+	}
+}
+
+func TestTheEchoSuppressorCountsCallsByStateAndItsFrames(t *testing.T) {
+	reader := useTestReader()
+	before := echoCounts(t, reader)
+
+	RecordEchoSuppression(EchoSuppressionOff, 0, 0)
+	RecordEchoSuppression(EchoSuppressionIdle, 0, 0)
+	RecordEchoSuppression(EchoSuppressionEngaged, 120, 3)
+	RecordEchoSuppression(EchoSuppressionFailed, 7, 1)
+	RecordEchoSuppression("HALF", 0, 0) // not a state: kept inside the label's values
+
+	got := echoCounts(t, reader)
+	for key, want := range map[string]int64{
+		"suppression.OFF": 2, "suppression.IDLE": 1, "suppression.ENGAGED": 1, "suppression.FAILED": 1,
+		"suppression.HALF": 0, "suppressedFrames": 127, "gateOpenings": 4,
 	} {
 		if d := got[key] - before[key]; d != want {
 			t.Errorf("%s moved by %d, want %d (all: %v)", key, d, want, got)

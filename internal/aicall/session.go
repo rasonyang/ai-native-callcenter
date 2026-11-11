@@ -201,6 +201,12 @@ type Config struct {
 	// call audio; empty is off.
 	EchoDumpDir string
 
+	// IsEchoSuppressionEnabled turns on the echo suppressor
+	// (AICC_BOT_ECHO_SUPPRESS): an uplink slot that holds nothing louder than
+	// the bot's own echo reaches the provider as silence (echo.go). False, the
+	// default, sends the provider exactly what it was sent before.
+	IsEchoSuppressionEnabled bool
+
 	// Logger is the call's logger. The orchestrator has already bound the
 	// call's identity to it (callId, aiccCallId, did), so the session adds
 	// no key of its own: slog writes a key bound twice twice.
@@ -862,7 +868,8 @@ func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now
 		frame := clock.pop()
 		if probe != nil {
 			// A read-only look at the slot, hushed or not, so the measurement's
-			// axis keeps the clock's.
+			// axis keeps the clock's. The suppressor, when on, judges the slot
+			// here too, after the measurement has seen it raw.
 			probe.FeedUplink(frame)
 		}
 		if s.isHushed.Load() {
@@ -871,6 +878,13 @@ func (s *Session) sendDueSlots(clock *uplinkClock, probe *echoprobe.Monitor, now
 				clock.stats.DroppedHushed++
 			}
 			continue
+		}
+		if probe != nil && frame != nil {
+			// A slot that held only the bot's own voice becomes silence in the
+			// leg's law, in place, and is still sent: the provider gets its
+			// frame for the slot as before. Nothing changes with suppression
+			// off.
+			probe.Suppress(frame)
 		}
 		var err error
 		converted, err = s.feedSlot(clock, frame, converted)

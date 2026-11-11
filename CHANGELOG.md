@@ -42,6 +42,28 @@ carries the one-line installer's files.
   directory that receives each AI call's two signals as a time-aligned stereo
   8 kHz WAV named by call id (left: what the bot sent, right: the uplink as
   clocked), for studying echo offline. The files hold call audio.
+- `AICC_BOT_ECHO_SUPPRESS`, off by default: keeps the bot's own voice coming
+  back on an AI call's uplink out of what the provider hears, so its turn
+  detection no longer takes the bot for the caller and cuts it off. Every
+  20 ms of uplink is compared with what the bot sent; a slot holding nothing
+  louder than the echo the call has been learned to return reaches the
+  provider as silence, and a caller louder than that opens it again after a
+  slot or two. The echo measurement, its interruption verdicts and
+  `AICC_BOT_ECHO_DUMP_DIR` still see the uplink unchanged, and with the
+  setting off the provider gets exactly the audio it got before. Costs while
+  the bot is speaking: on a call with echo a caller is heard only when at
+  least 6 dB louder than the echo itself, so one speaking at about the echo's
+  level (typically a speakerphone at full volume) cannot interrupt the bot and
+  is heard only between its lines; a caller much quieter than the bot is not
+  heard until it stops; the first 20-40 ms of a caller talking over it are
+  lost; a callee greeting over the bot's first line on a call with echo may
+  not be heard; and a leak louder than the bot at the start of a line can still
+  get through the first time.
+  It does not help when what comes back is not the bot's own waveform. The
+  call-end line `ai echo suppression` reports what it did; new metrics:
+  `aicc_bot_echo_suppression_calls_total` (by `state`: OFF, IDLE, ENGAGED,
+  FAILED), `aicc_bot_echo_suppressed_frames_total` and
+  `aicc_bot_echo_gate_openings_total` (#539).
 
 ## v0.8.2 - 2026-11-10
 

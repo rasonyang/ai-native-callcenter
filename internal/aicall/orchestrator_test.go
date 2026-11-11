@@ -2672,6 +2672,20 @@ func TestAToolResultThatChangesThePhasesInstructionRepinsItBeforeTheAnswer(t *te
 	}
 }
 
+// The deployment's AICC_BOT_ECHO_SUPPRESS reaches each call's session; unset
+// is off.
+func TestTheOrchestratorPassesEchoSuppressionToTheSession(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if testOrchestrator(t, &fakeSwitch{}).sessionConfig(provider.SessionConfig{}, nil, log).IsEchoSuppressionEnabled {
+		t.Error("echo suppression is on in a session the deployment did not switch it on for")
+	}
+	o := testOrchestrator(t, &fakeSwitch{})
+	o.cfg.IsEchoSuppressionEnabled = true
+	if !o.sessionConfig(provider.SessionConfig{}, nil, log).IsEchoSuppressionEnabled {
+		t.Error("the deployment's echo suppression did not reach the session")
+	}
+}
+
 // The deployment's dead-air timeout (AICC_BOT_NO_INPUT_TIMEOUT) reaches each
 // call's session, and a non-default value changes when NO_INPUT fires.
 func TestTheOrchestratorPassesTheDeadAirTimeoutToTheSession(t *testing.T) {

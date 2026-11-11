@@ -570,3 +570,21 @@ func TestTheEchoDumpDirectoryIsOffByDefaultAndMustBeAbsolute(t *testing.T) {
 		t.Fatalf("relative: err %v, want one naming the setting", err)
 	}
 }
+
+func TestEchoSuppressionIsOffByDefault(t *testing.T) {
+	t.Setenv("AICC_BOT_ECHO_SUPPRESS", "")
+	c, err := Load()
+	if err != nil || c.IsBotEchoSuppressionEnabled {
+		t.Fatalf("default: on %v, err %v", c.IsBotEchoSuppressionEnabled, err)
+	}
+	t.Setenv("AICC_BOT_ECHO_SUPPRESS", "true")
+	if c, err = Load(); err != nil || !c.IsBotEchoSuppressionEnabled {
+		t.Fatalf("true: on %v, err %v", c.IsBotEchoSuppressionEnabled, err)
+	}
+	// Like every boolean setting here, a value that does not parse is the
+	// default.
+	t.Setenv("AICC_BOT_ECHO_SUPPRESS", "maybe")
+	if c, err = Load(); err != nil || c.IsBotEchoSuppressionEnabled {
+		t.Fatalf("unparsable: on %v, err %v", c.IsBotEchoSuppressionEnabled, err)
+	}
+}
