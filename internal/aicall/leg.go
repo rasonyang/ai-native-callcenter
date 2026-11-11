@@ -52,6 +52,14 @@ type Leg interface {
 	Stop()
 }
 
+// txTapper is what a leg offers when it can report the frames it puts on the
+// wire (the echo measurement's reference). It is optional: a leg without it
+// simply goes unmeasured.
+type txTapper interface {
+	// SetTxTap installs the observer; nil removes it. See voice.TxTap.
+	SetTxTap(tap voice.TxTap)
+}
+
 // dialogLeg adapts a SIP dialog to the bridge.
 type dialogLeg struct{ dialog *voice.Dialog }
 
@@ -71,3 +79,10 @@ func (l dialogLeg) AnsweredAt() time.Time         { return l.dialog.AnsweredAt }
 func (l dialogLeg) Stopped() <-chan struct{}      { return l.dialog.Stopped }
 func (l dialogLeg) RxDropped() int64              { return l.dialog.RTP.RxDropped() }
 func (l dialogLeg) Stop()                         { l.dialog.Stop() }
+
+// SetTxTap implements txTapper.
+func (l dialogLeg) SetTxTap(tap voice.TxTap) {
+	if l.dialog.RTP != nil {
+		l.dialog.RTP.SetTxTap(tap)
+	}
+}

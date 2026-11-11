@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -123,6 +124,11 @@ type Config struct {
 	// before the flow gets NO_INPUT. Between 2s and 60s; there is no off.
 	BotNoInputTimeout time.Duration
 	botNoInputErr     error // a malformed value, refused by validate
+	// BotEchoDumpDir is AICC_BOT_ECHO_DUMP_DIR: a directory (absolute) that
+	// receives each AI call's two signals as a stereo WAV named by call id,
+	// the bot's own audio on the left and the uplink on the right. A
+	// development aid that records call audio; empty (the default) is off.
+	BotEchoDumpDir string
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
 	// ToolAllowedHosts is AICC_TOOL_ALLOWED_HOSTS: the public hosts a flow's
@@ -456,6 +462,7 @@ func Load() (Config, error) {
 		botGreetingWaitErr:      greetingErr,
 		BotNoInputTimeout:       noInput,
 		botNoInputErr:           noInputErr,
+		BotEchoDumpDir:          env("AICC_BOT_ECHO_DUMP_DIR", ""),
 		BotBackendBase:          env("AICC_BOT_BACKEND_BASE", ""),
 		ToolAllowedHosts:        env("AICC_TOOL_ALLOWED_HOSTS", ""),
 		IsBotEnabled:            envBool("AICC_BOT_ENABLED", true),
@@ -730,6 +737,13 @@ func (c Config) validate() error {
 		errs = append(errs, fmt.Errorf(
 			"AICC_BOT_NO_INPUT_TIMEOUT must be between %ds and %ds, got %s",
 			int(MinBotNoInputTimeout.Seconds()), int(MaxBotNoInputTimeout.Seconds()), c.BotNoInputTimeout))
+	}
+	if c.BotEchoDumpDir != "" && !filepath.IsAbs(c.BotEchoDumpDir) {
+		// A relative path resolves against the working directory, which on a
+		// development machine is the repository: call audio must never land
+		// there.
+		errs = append(errs, fmt.Errorf(
+			"AICC_BOT_ECHO_DUMP_DIR must be an absolute path, got %q", c.BotEchoDumpDir))
 	}
 	if c.WebhookDeliveredRetentionDays < 0 || c.WebhookFailedRetentionDays < 0 {
 		errs = append(errs, fmt.Errorf(

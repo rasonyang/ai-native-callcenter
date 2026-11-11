@@ -513,6 +513,7 @@ func run() error {
 			cfg.IsBotGreetingGated,
 			cfg.BotGreetingMediaWait,
 			cfg.BotNoInputTimeout,
+			cfg.BotEchoDumpDir,
 			cfg.DefaultCountryCode,
 			cfg.OutboundDialForm,
 		))

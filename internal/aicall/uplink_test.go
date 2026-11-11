@@ -130,7 +130,7 @@ func runUplink(t *testing.T, f uplinkFormat, total time.Duration, arrivals []arr
 		}
 		session.hush(hushedTo > hushedFrom && at >= hushedFrom && at < hushedTo)
 		var err error
-		if converted, err = session.sendDueSlots(run.clock, epoch.Add(at), converted); err != nil {
+		if converted, err = session.sendDueSlots(run.clock, nil, epoch.Add(at), converted); err != nil {
 			t.Fatal(err)
 		}
 		if epoch.Add(at).After(run.last) {
@@ -535,6 +535,15 @@ type virtualPump struct {
 
 func startVirtualPump(t *testing.T, leg Leg, frames chan []byte, profile provider.Profile) *virtualPump {
 	t.Helper()
+	return startVirtualPumpWith(t, leg, frames, profile, nil)
+}
+
+// startVirtualPumpWith is startVirtualPump with a hook that may adjust the
+// session before it starts.
+func startVirtualPumpWith(t *testing.T, leg Leg, frames chan []byte, profile provider.Profile,
+	adjust func(*Session)) *virtualPump {
+
+	t.Helper()
 	v := &virtualPump{
 		t: t, model: newFakeModel(), frames: frames,
 		epoch: time.Unix(1_000_000, 0), ticks: make(chan time.Time), logs: &lockedBuffer{},
@@ -556,6 +565,9 @@ func startVirtualPump(t *testing.T, leg Leg, frames chan []byte, profile provide
 		return at
 	}
 	session.uplinkTicks = v.ticks
+	if adjust != nil {
+		adjust(session)
+	}
 	v.session = session
 	if err := session.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -876,7 +888,7 @@ func BenchmarkUplinkClockFill(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		now = now.Add(uplinkSlot)
-		converted, _ = session.sendDueSlots(clock, now, converted)
+		converted, _ = session.sendDueSlots(clock, nil, now, converted)
 	}
 }
 

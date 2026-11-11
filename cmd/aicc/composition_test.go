@@ -602,6 +602,7 @@ func TestEveryBotDependencyIsPlumbed(t *testing.T) {
 		true,
 		3*time.Second,
 		8*time.Second,
+		"/var/tmp/aicc-echo",
 		"86",
 		phonenum.FormNational,
 	)
@@ -669,7 +670,7 @@ func TestBotConfigCarriesTheGreetingMediaWait(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.DefaultCountryCode, cfg.OutboundDialForm)
+				cfg.BotEchoDumpDir, cfg.DefaultCountryCode, cfg.OutboundDialForm)
 			if got.IsGreetingGated != tc.wantGated || got.GreetingMediaWait != tc.wantWait {
 				t.Errorf("orchestrator gate = %v, %s, want %v, %s",
 					got.IsGreetingGated, got.GreetingMediaWait, tc.wantGated, tc.wantWait)
@@ -703,7 +704,7 @@ func TestBotConfigCarriesTheNoInputTimeout(t *testing.T) {
 			}
 			got := botConfig(botUAS(cfg, nil), nil, nil, nil, nil, nil, nil, provider.Profile{},
 				nil, nil, nil, nil, nil, cfg.IsBotGreetingGated, cfg.BotGreetingMediaWait, cfg.BotNoInputTimeout,
-				cfg.DefaultCountryCode, cfg.OutboundDialForm)
+				cfg.BotEchoDumpDir, cfg.DefaultCountryCode, cfg.OutboundDialForm)
 			if got.NoInput != tc.want {
 				t.Errorf("orchestrator NoInput = %s, want %s", got.NoInput, tc.want)
 			}

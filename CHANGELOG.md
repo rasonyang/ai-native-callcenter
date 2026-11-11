@@ -18,6 +18,31 @@ carries the one-line installer's files.
   closing line that already counts as said it ends the call instead of being
   answered (#403).
 
+### Added
+
+- Every AI call now measures whether the bot's own voice comes back on the
+  uplink (speakerphone without echo cancellation, line echo). Nothing is
+  cancelled and no audio changes. The RTP send loop reports what it put on
+  the wire, which is compared with what the uplink clock fed the provider:
+  the call-end log gets an `ai echo measurement` line (echo found or not, its
+  delay and return loss with the range the estimates saw, how many estimates
+  ran, how many found an echo and how long the final agreeing run was), and
+  the lines `the caller took the floor back` and `the provider took the floor
+  back` get, for a speech interruption, a verdict from the waveform: the last
+  600 ms of uplink correlated with what the bot sent over delays of 0 to
+  1000 ms. They carry `isEchoLikely` when there is a verdict (left out when
+  it is unknown) and the peak it was taken from (`echoCorrelation`,
+  `echoSecondCorrelation`, `echoLagMs`, `echoUplinkLevelDb`). New
+  metrics: `aicc_bot_echo_delay_ms`, `aicc_bot_echo_return_loss_db`,
+  `aicc_bot_echo_calls_total` (FOUND, NOT_FOUND, UNMEASURED) and
+  `aicc_bot_speech_interruptions_total` (by `verdict`: ECHO, NOT_ECHO,
+  UNKNOWN). It is the evidence for deciding whether echo cancellation is
+  needed and where (#539).
+- `AICC_BOT_ECHO_DUMP_DIR`, a development aid and off by default: an absolute
+  directory that receives each AI call's two signals as a time-aligned stereo
+  8 kHz WAV named by call id (left: what the bot sent, right: the uplink as
+  clocked), for studying echo offline. The files hold call audio.
+
 ## v0.8.2 - 2026-11-10
 
 ### Upgrade notes

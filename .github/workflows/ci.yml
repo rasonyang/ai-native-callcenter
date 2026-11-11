@@ -111,7 +111,7 @@ jobs:
       # at one call and fatal at two hundred.
       - name: Allocation benchmarks
         run: |
-          go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/ \
+          go test -run XXX -bench . -benchmem ./internal/media/ ./internal/aicall/ ./internal/echoprobe/ \
             | tee /tmp/bench.txt
           if grep -E '^Benchmark' /tmp/bench.txt | grep -vE '[[:space:]]0 allocs/op'; then
             echo "a hot-path benchmark allocates; see 06 §7 L1"; exit 1

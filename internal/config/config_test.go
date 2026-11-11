@@ -552,3 +552,21 @@ func TestTheTextModelIsOffByDefaultAndChecksItsSettings(t *testing.T) {
 		t.Error("a budget smaller than the instructions was accepted")
 	}
 }
+
+func TestTheEchoDumpDirectoryIsOffByDefaultAndMustBeAbsolute(t *testing.T) {
+	t.Setenv("AICC_BOT_ECHO_DUMP_DIR", "")
+	c, err := Load()
+	if err != nil || c.BotEchoDumpDir != "" {
+		t.Fatalf("default: dir %q, err %v", c.BotEchoDumpDir, err)
+	}
+
+	t.Setenv("AICC_BOT_ECHO_DUMP_DIR", "/var/tmp/aicc-echo")
+	if c, err = Load(); err != nil || c.BotEchoDumpDir != "/var/tmp/aicc-echo" {
+		t.Fatalf("absolute: dir %q, err %v", c.BotEchoDumpDir, err)
+	}
+
+	t.Setenv("AICC_BOT_ECHO_DUMP_DIR", "dumps")
+	if _, err = Load(); err == nil || !strings.Contains(err.Error(), "AICC_BOT_ECHO_DUMP_DIR") {
+		t.Fatalf("relative: err %v, want one naming the setting", err)
+	}
+}
