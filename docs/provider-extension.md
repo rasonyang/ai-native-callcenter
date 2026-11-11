@@ -67,6 +67,7 @@ Every field of `provider.Profile` exists because a vendor forced it to
 | `AcceptsG711` | Whether telephone audio passes through untouched. True removes conversion from the hot path entirely. |
 | `LinearInput` / `LinearOutput` | The PCM formats used when it does not. Fixed by the vendor, not negotiated. |
 | `CancelsResponseItself` | Whether it stops generating when it hears the caller, or has to be told |
+| `ControlsInterruption` | Whether the client can switch off the server's two reactions to speech (`create_response:false`, `interrupt_response:false` in `turn_detection`), so that a one-word acknowledgement neither cuts the response nor is answered, and the call decides from the transcript (`docs/design/11-backchannels.md`). True on openai only, measured. With it the client asks for the caller's turn itself (`provider.CallerTurnController`) and sends the cancel of an interruption (so openai's `CancelsResponseItself` is false). **No control** on qwen and grok (the fields are accepted and ignored), doubao (none) and gateway (honoured, but its own barge-in hold hides short speech during playback): they keep their own interruption, and the session limits the damage after the fact. |
 | `NeedsCueForFirstTurn` | Whether it refuses to speak into an empty conversation. Our bot greets first, so those providers need a synthetic cue. Where the flow names an opening line, the cue is its say-exactly direction, and the client deletes that caller message when the opening turn ends (`removeOpeningDirection`, qwen-findings W-Q11); the bare greeting cue of a flow with no opening line stays in the conversation. |
 | `NeedsDirectedLineInConversation` | Whether a mid-call line that *ends the call* (`SpeakText(text, isClosing=true)`) must also be put in the conversation as a caller message carrying the same `SayExactly` direction, ahead of the request that carries it as a per-response override. True on qwen, where the override alone lost to the conversation already there (qwen-findings W-Q1). A line the call goes on from keeps the override alone on every profile. |
 | `IgnoresOverrideOnceTalking` | Whether a `response.create` carrying only a per-response `instructions` override is silently dropped once the conversation holds a turn: no `response.created`, no error. True on grok (0 of 5; grok-findings 5.2). Every mid-call line asked for with `SpeakText`, closing or not, then goes into the conversation as a caller message first and the override follows (3 of 3 verbatim) — the mechanism `NeedsDirectedLineInConversation` applies to closing lines only. The opening line is exempt: the override alone works on an empty conversation. |
@@ -98,7 +99,7 @@ the call if it is wrong.
 
 A profile answered by a client other than the Realtime one fills in only what
 that client reads. `DoubaoProfile` leaves `Style`, `TranscribeModel`,
-`CancelsResponseItself`, `NeedsCueForFirstTurn`,
+`CancelsResponseItself`, `ControlsInterruption`, `NeedsCueForFirstTurn`,
 `NeedsDirectedLineInConversation`, `AcceptsResponseToolChoice`,
 `NeedsToolFreeLineDirection` at zero, and
 says so in its doc comment: a trait nothing reads is worse than an absent one,

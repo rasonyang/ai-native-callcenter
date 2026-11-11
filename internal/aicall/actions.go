@@ -109,6 +109,10 @@ type callActions struct {
 	// audio has drained. A further interruption clears it (onBargeIn). Reset by
 	// armAs.
 	goodbyeTurn int
+	// finishedLineCutTurn is the turn whose cut was an interruption of a closing
+	// line that had finished generating (onBargeIn), zero for none: the one cut
+	// an acknowledgement verdict can promote (onCutAcknowledged).
+	finishedLineCutTurn int
 	// audioTurnsAtInterrupt is Session.audioProgress's finished-turn count when
 	// the interruption was seen; a larger count later means the model has
 	// answered aloud since.
@@ -1051,6 +1055,7 @@ func (a *callActions) onBargeIn(cut Event) {
 	}
 	if unplayed > closingTailAck {
 		count, capIn := a.interruptLocked()
+		a.finishedLineCutTurn = cut.Turn
 		var finalSentence time.Duration
 		isFinalSentence := false
 		if count == 1 && a.closingLine != "" {
@@ -1079,6 +1084,45 @@ func (a *callActions) onBargeIn(cut Event) {
 	a.log.Info("caller spoke after the closing line; running the armed action now",
 		"unplayedMs", unplayed.Milliseconds(), "isByProvider", cut.IsByProvider)
 	armed()
+}
+
+// onCutAcknowledged is told, after the fact, that a cut the engine made by
+// itself was only an acknowledgement ("mm-hmm"). A cut of a closing line that
+// had finished generating was counted as the first interruption (onBargeIn, the
+// verdict was not known yet); the acknowledgement makes it the
+// second-interruption case of #465: the line counts as said by rule.
+//
+// Once the line counts as said, by that or by an earlier interruption, the
+// ending runs now. Nothing is left to answer, and the only thing still to come
+// is the model's reply to the acknowledgement, which on qwen was as bad as a
+// made-up "[系统提示] 本轮通话已结束" read out to the caller. A first cut of a
+// line still being generated leaves the line owed and changes nothing here
+// (#493). Called on the session's goroutine, which an ending must not hold, so
+// it runs on its own, as it does from the cap's timer.
+func (a *callActions) onCutAcknowledged(cut Event) {
+	a.mu.Lock()
+	if a.armed == nil || cut.Turn == 0 || cut.Turn <= a.armedInTurn {
+		a.mu.Unlock()
+		return
+	}
+	if a.finishedLineCutTurn == cut.Turn {
+		a.finishedLineCutTurn = 0
+		if a.interruptions < 2 {
+			a.interruptions = 2
+		}
+		a.isLineOwed = false
+		a.isLineSaidByRule = true
+	}
+	if !a.isLineSaidByRule {
+		a.mu.Unlock()
+		return
+	}
+	armed := a.armed
+	a.armed = nil
+	a.mu.Unlock()
+	a.log.Info("the cut over the closing line was only an acknowledgement and the line counts as said; "+
+		"running the armed action now", "turn", cut.Turn, "isByProvider", cut.IsByProvider)
+	go armed()
 }
 
 // interruptLocked counts a cut over the armed ending as an interruption and

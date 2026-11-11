@@ -179,6 +179,29 @@ func (e *Engine) toolPhase() Node {
 	return e.current
 }
 
+// CanMoveOnTool reports whether a result of the tool could move the call to
+// another phase: some rule of the phase the tool is judged in, or a flow-wide
+// one, fires on that tool's result and leads somewhere else. It looks at the
+// rules alone, not at their conditions, which depend on the result that does
+// not exist yet, so it is an upper bound: true means "might", false means "never
+// from here". It reads and changes nothing.
+func (e *Engine) CanMoveOnTool(tool string) bool {
+	if e.current.IsTerminal {
+		return false
+	}
+	from := e.toolPhase()
+	rules := append(slices.Clone(from.Transitions), e.spec.Global.Transitions...)
+	for _, rule := range rules {
+		if !rule.matches(EventTypeToolResult, tool) {
+			continue
+		}
+		if rule.Target != from.id && rule.Target != e.current.id {
+			return true
+		}
+	}
+	return false
+}
+
 // Instruction is what the model should be doing now, with collected values
 // substituted in.
 func (e *Engine) Instruction() string {

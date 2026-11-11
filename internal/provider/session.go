@@ -132,6 +132,28 @@ type QuietToolAnswerer interface {
 
 var _ QuietToolAnswerer = (*Realtime)(nil)
 
+// CallerTurnController is the optional pair of verbs of a session whose
+// provider no longer answers the caller by itself (Profile.ControlsInterruption).
+// The call asks for it by type assertion, as it does QuietToolAnswerer;
+// VoiceSession stays narrow.
+//
+// The caller's utterance is named by the id the speech events carry
+// (Event.ItemID). An empty id means the latest utterance.
+type CallerTurnController interface {
+	// AnswerCallerTurn asks for the turn that answers the utterance: one
+	// response.create, released only once the provider has committed the
+	// audio buffer for it, and riding the same owed-turn flag a tool result or
+	// a cue uses, so it is one request however much else is owed and it waits
+	// for a response that still holds the floor.
+	AnswerCallerTurn(itemID string) error
+	// DeclineCallerTurn takes the utterance out of the conversation
+	// (conversation.item.delete) and cancels an answer still waiting for its
+	// commit: an acknowledgement the model is not to read or answer.
+	DeclineCallerTurn(itemID string) error
+}
+
+var _ CallerTurnController = (*Realtime)(nil)
+
 // SessionConfig is everything the model needs before it hears anything.
 //
 // Some providers freeze parts of this after the first audio frame, so it is
@@ -262,6 +284,13 @@ type Event struct {
 	// Audio carries model speech in the session's output format
 	// (EventTypeAudioDelta).
 	Audio []byte
+
+	// ItemID names the caller's utterance on the events the wire attributes to
+	// one: EventTypeSpeechStarted, EventTypeSpeechStopped and
+	// EventTypeInputTranscript (Realtime; empty where the dialect sends none).
+	// A partial transcript carries the utterance's id too, so a consumer can
+	// join its pieces.
+	ItemID string
 
 	// Text is transcript text (EventTypeInputTranscript,
 	// EventTypeOutputTranscript) or a message (EventTypeError).
