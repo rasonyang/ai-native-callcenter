@@ -174,6 +174,9 @@ type OrchestratorConfig struct {
 	// EchoDumpDir is AICC_BOT_ECHO_DUMP_DIR; see Config.EchoDumpDir. Empty is
 	// off.
 	EchoDumpDir string
+	// IsEchoSuppressionEnabled is AICC_BOT_ECHO_SUPPRESS; see
+	// Config.IsEchoSuppressionEnabled. False is off.
+	IsEchoSuppressionEnabled bool
 	// Profile is the provider this deployment runs, resolved at startup. The
 	// same one answers every call, whatever language it is in.
 	Profile provider.Profile
@@ -1787,12 +1790,13 @@ func callTypeFromHeader(v string) callType {
 // OrchestratorConfig around what this call's flow and ending state supply.
 func (o *Orchestrator) sessionConfig(session provider.SessionConfig, isEndingArmed func() bool, log *slog.Logger) Config {
 	return Config{
-		Session:           session,
-		IsGreetingGated:   o.cfg.IsGreetingGated,
-		GreetingMediaWait: o.cfg.GreetingMediaWait,
-		NoInput:           o.cfg.NoInput,
-		EchoDumpDir:       o.cfg.EchoDumpDir,
-		IsEndingArmed:     isEndingArmed,
-		Logger:            log,
+		Session:                  session,
+		IsGreetingGated:          o.cfg.IsGreetingGated,
+		GreetingMediaWait:        o.cfg.GreetingMediaWait,
+		NoInput:                  o.cfg.NoInput,
+		EchoDumpDir:              o.cfg.EchoDumpDir,
+		IsEchoSuppressionEnabled: o.cfg.IsEchoSuppressionEnabled,
+		IsEndingArmed:            isEndingArmed,
+		Logger:                   log,
 	}
 }

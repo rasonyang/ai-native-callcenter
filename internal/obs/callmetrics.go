@@ -45,6 +45,9 @@ var (
 	echoReturnLoss     metric.Float64Histogram
 	echoCalls          metric.Int64Counter
 	echoInterruptions  metric.Int64Counter
+	echoSuppressCalls  metric.Int64Counter
+	echoSuppressFrames metric.Int64Counter
+	echoGateOpenings   metric.Int64Counter
 	botSessionLimits   metric.Int64Counter
 	botUnbacked        metric.Int64Counter
 	botClaimCues       metric.Int64Counter
@@ -200,6 +203,20 @@ func init() {
 			"an engine with turn detection of its own reports are counted, on calls "+
 			"whose leg is measured; aicc_bot_interruptions_total{reason=SPEECH} counts "+
 			"only the former, on every call."))
+	echoSuppressCalls, _ = meter.Int64Counter("aicc_bot_echo_suppression_calls_total",
+		metric.WithDescription("AI calls by what the echo suppressor did "+
+			"(AICC_BOT_ECHO_SUPPRESS): OFF (not switched on), IDLE (on, and no uplink "+
+			"frame was suppressed), ENGAGED (on, and at least one was), FAILED (on, "+
+			"and it turned itself off during the call after an internal error; the "+
+			"uplink passed unchanged from then). Counted on calls whose leg is measured."))
+	echoSuppressFrames, _ = meter.Int64Counter("aicc_bot_echo_suppressed_frames_total",
+		metric.WithDescription("Uplink frames the echo suppressor sent to the provider as "+
+			"silence (or faded out) because bot audio was within echo reach and nothing "+
+			"in them was louder than the echo the call had been learned to return."))
+	echoGateOpenings, _ = meter.Int64Counter("aicc_bot_echo_gate_openings_total",
+		metric.WithDescription("Times the echo suppressor's gate opened for the caller "+
+			"while bot audio was within echo reach: the caller talking over the bot, "+
+			"or an echo louder than the one learned."))
 	botFirstMedia, _ = meter.Int64Histogram("aicc_bot_first_media_ms",
 		metric.WithDescription("Per bot call: the answer to the first inbound RTP packet, "+
 			"in milliseconds. A carrier may open its media path seconds after the "+
@@ -454,6 +471,35 @@ func RecordSpeechInterruption(verdict string) {
 	}
 	echoInterruptions.Add(context.Background(), 1,
 		metric.WithAttributes(attribute.String("verdict", verdict)))
+}
+
+// Echo suppression states of a call (RecordEchoSuppression).
+const (
+	EchoSuppressionOff     = "OFF"
+	EchoSuppressionIdle    = "IDLE"
+	EchoSuppressionEngaged = "ENGAGED"
+	EchoSuppressionFailed  = "FAILED"
+)
+
+// RecordEchoSuppression publishes one AI call's echo suppression when it ends:
+// its state (EchoSuppression*; anything else is counted as OFF, so the label
+// stays bounded), the frames it suppressed and the times its gate opened.
+func RecordEchoSuppression(state string, framesSuppressed, gateOpenings int64) {
+	ctx := context.Background()
+	switch state {
+	case EchoSuppressionIdle, EchoSuppressionEngaged, EchoSuppressionFailed:
+	default:
+		state = EchoSuppressionOff
+	}
+	if echoSuppressCalls != nil {
+		echoSuppressCalls.Add(ctx, 1, metric.WithAttributes(attribute.String("state", state)))
+	}
+	if echoSuppressFrames != nil && framesSuppressed > 0 {
+		echoSuppressFrames.Add(ctx, framesSuppressed)
+	}
+	if echoGateOpenings != nil && gateOpenings > 0 {
+		echoGateOpenings.Add(ctx, gateOpenings)
+	}
 }
 
 // SessionLimitOutcome labels how a call that reached its time limit ended.

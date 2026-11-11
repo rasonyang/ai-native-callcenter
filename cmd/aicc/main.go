@@ -514,6 +514,7 @@ func run() error {
 			cfg.BotGreetingMediaWait,
 			cfg.BotNoInputTimeout,
 			cfg.BotEchoDumpDir,
+			cfg.IsBotEchoSuppressionEnabled,
 			cfg.DefaultCountryCode,
 			cfg.OutboundDialForm,
 		))

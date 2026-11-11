@@ -15,7 +15,9 @@ import (
 )
 
 // The echo measurement (internal/echoprobe) watches two signals and alters
-// neither.
+// neither. The echo suppressor (AICC_BOT_ECHO_SUPPRESS, off by default) runs
+// inside it and alters only what the provider is fed, never what the
+// measurement, its verdicts or the dump see.
 //
 //   - The reference is what the leg put on the wire. It is tapped where the
 //     RTP session's send loop hands a frame to the socket (voice.RTPSession.Run,
@@ -27,6 +29,13 @@ import (
 //     fill, observed in sendDueSlots on the uplink pump's goroutine, the one
 //     that owns the clock. It is the same time axis: the monitor starts at the
 //     clock's start and places both signals on it.
+//   - Suppression happens after that observation, on the same goroutine and
+//     the same slot: a real frame (never a fill, never a hushed slot) that the
+//     suppressor judged to hold only the bot's echo is overwritten with the
+//     law's silence before feedSlot converts it, so the provider still gets
+//     one frame per slot. On the G.711 passthrough path that means the
+//     suppressor re-encodes the slots where its gate opens or closes; the
+//     bytes it leaves alone are the bytes that came in.
 
 // startEchoProbe creates the call's measurement, attaches it to the leg's send
 // loop and publishes it for the barge-in path. It returns nil, measuring
@@ -36,7 +45,8 @@ func (s *Session) startEchoProbe(start time.Time) *echoprobe.Monitor {
 	if !ok {
 		return nil
 	}
-	cfg := echoprobe.Config{Start: start, Law: s.leg.Law(), Logger: s.log}
+	cfg := echoprobe.Config{Start: start, Law: s.leg.Law(), Logger: s.log,
+		Suppress: s.cfg.IsEchoSuppressionEnabled}
 	if dir := s.cfg.EchoDumpDir; dir != "" && s.ledgerCallID != uuid.Nil {
 		path := filepath.Join(dir, s.ledgerCallID.String()+".wav")
 		cfg.Dump = echoprobe.NewDumper(func() (io.WriteSeeker, io.Closer, error) {
@@ -93,6 +103,33 @@ func (s *Session) finishEchoProbe() {
 		"referenceFramesDropped", sum.ReferenceDropped,
 		"dumpFramesDropped", sum.DumpDropped,
 		"isMeasurementFailed", sum.IsFailed)
+
+	sup := sum.Suppression
+	state := obs.EchoSuppressionOff
+	switch {
+	case !sup.IsOn:
+	case sup.IsFailed:
+		state = obs.EchoSuppressionFailed
+	case sup.FramesSuppressed > 0:
+		state = obs.EchoSuppressionEngaged
+	default:
+		state = obs.EchoSuppressionIdle
+	}
+	obs.RecordEchoSuppression(state, sup.FramesSuppressed, sup.GateOpenings)
+	s.log.Info("ai echo suppression",
+		"isEchoSuppressionOn", sup.IsOn,
+		"state", state,
+		"framesExamined", sup.FramesExamined,
+		"framesSuppressed", sup.FramesSuppressed,
+		"gateOpenings", sup.GateOpenings,
+		"framesCorrelated", sup.FramesCorrelated,
+		"framesWithEchoDelay", sup.FramesWithDelay,
+		"lagWindowFromMs", sup.LagFromMs,
+		"lagWindowToMs", sup.LagToMs,
+		"isLagWindowFromEchoDelay", sup.IsLagFromDelay,
+		"echoGainDb", sup.EchoGainDb,
+		"onsetEchoGainDb", sup.OnsetEchoGainDb,
+		"isSuppressionFailed", sup.IsFailed)
 }
 
 // withEchoVerdict judges a speech interruption for the echo measurement: it

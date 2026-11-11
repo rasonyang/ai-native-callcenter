@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package echoprobe measures the bot's own voice coming back on an AI call's
-// uplink. It never alters audio: it watches what the leg sent (the reference)
-// and what the uplink clock handed the provider, estimates the delay and the
-// return loss of any echo between them, and can say whether the uplink of the
-// last 600 ms is the bot's own waveform coming back (Judge).
+// uplink. The measurement never alters audio: it watches what the leg sent
+// (the reference) and what the uplink clock handed the provider, estimates the
+// delay and the return loss of any echo between them, and can say whether the
+// uplink of the last 600 ms is the bot's own waveform coming back (Judge).
+//
+// A Monitor built with Config.Suppress also keeps that echo out of what the
+// provider hears (suppress.go): it judges each slot after the measurement has
+// seen it raw, and Suppress silences the slots that hold only the bot's own
+// voice.
 //
 // It is pure Go and takes plain frames, so the same code runs on recorded
 // calls offline (the dump this package writes is that input).
@@ -93,6 +98,11 @@ type Monitor struct {
 	waveLagMs       int
 	hasWaveLag      bool
 	waveLoudestGain float64
+
+	// sup is the echo suppressor (suppress.go); nil when the call does not
+	// suppress. It is read and written under mu; its decisions are taken and
+	// applied on the uplink goroutine.
+	sup *suppressor
 }
 
 // Config builds a Monitor.
@@ -105,6 +115,9 @@ type Config struct {
 	Dump *Dumper
 	// Logger reports an internal failure, once.
 	Logger *slog.Logger
+	// Suppress turns the echo suppressor on for the call (Suppress). False
+	// leaves the Monitor a measurement that alters nothing.
+	Suppress bool
 }
 
 // New returns a Monitor.
@@ -113,13 +126,17 @@ func New(cfg Config) *Monitor {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Monitor{
+	m := &Monitor{
 		law:          cfg.Law,
 		start:        cfg.Start,
 		log:          log,
 		dump:         cfg.Dump,
 		nextEstimate: firstEstimateBins,
 	}
+	if cfg.Suppress {
+		m.sup = newSuppressor(defaultSuppressParams)
+	}
+	return m
 }
 
 // PushReference records what the leg put on the wire in the 20 ms slot that
@@ -192,6 +209,11 @@ func (m *Monitor) FeedUplink(frame []byte) {
 		}
 	}
 	m.maybeEstimate()
+	if m.sup != nil {
+		// After the measurement has taken the raw slot, so that what it
+		// measures, its verdicts and the dump never see a suppressed uplink.
+		m.judgeSlot(frame != nil)
+	}
 }
 
 // takeReference moves the pending reference frames onto the time axis.
@@ -245,6 +267,9 @@ func (m *Monitor) setReferenceBin(bin int64, part []int16) {
 	env := meanAbs(part)
 	m.refEnv[bin&envMask] = env
 	copy(m.refPCM[(bin%pcmBins)*binSamples:], part)
+	if m.sup != nil {
+		m.sup.refDb[bin&envMask] = float32(levelDb(part))
+	}
 	if env >= activeLevel {
 		m.activeBins++
 	}
@@ -347,6 +372,9 @@ type Summary struct {
 	// DumpDropped is stereo frames the dump writer was too slow for.
 	DumpDropped int64
 	IsFailed    bool
+	// Suppression is what the suppressor did; its IsOn is false when the
+	// call did not suppress.
+	Suppression SuppressionSummary
 }
 
 // Summary closes the dump and returns the call's totals.
@@ -387,6 +415,9 @@ func (m *Monitor) Summary() Summary {
 		s.IsCandidateOnly = true
 		s.DelayMs = m.track.lastSeen.lagBins * binMs
 		s.ReturnLossDb = round1(m.track.lastSeen.returnLossDb())
+	}
+	if m.sup != nil {
+		s.Suppression = m.sup.summary(m.failed)
 	}
 	return s
 }

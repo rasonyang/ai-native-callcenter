@@ -106,3 +106,51 @@ func BenchmarkJudge(b *testing.B) {
 		m.Judge()
 	}
 }
+
+// benchSuppress is the uplink pump's cost per slot with suppression on: the
+// measurement (as BenchmarkFeedUplink) plus the suppressor's decision and
+// Suppress, on loud bot audio and a loud uplink, so that the waveform
+// correlation runs on every slot unless the case skips it. hint, when set,
+// runs before each slot.
+func benchSuppress(b *testing.B, hasBot bool, hint func(m *Monitor)) {
+	start := time.Unix(1, 0)
+	m := New(Config{Start: start, Law: media.LawMu, Suppress: true})
+	frames := benchFrames()
+	frame := make([]byte, frameSamples)
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ref []byte
+		if hasBot {
+			ref = frames[i&63]
+		}
+		m.PushReference(ref, start.Add(time.Duration(i)*20*time.Millisecond))
+		if hint != nil {
+			hint(m)
+		}
+		copy(frame, frames[(i+7)&63])
+		m.FeedUplink(frame)
+		m.Suppress(frame)
+	}
+	b.StopTimer()
+	if hasBot && m.sup.correlated < int64(b.N)/2 {
+		b.Fatalf("%d of %d slots correlated: the case does not measure the correlation", m.sup.correlated, b.N)
+	}
+}
+
+// BenchmarkSuppressWithDelay: the measurement knows the delay, so one
+// transform pair covers the ±80 ms window.
+func BenchmarkSuppressWithDelay(b *testing.B) {
+	benchSuppress(b, true, func(m *Monitor) { m.track.isFound, m.track.lagBins = true, 40 })
+}
+
+// BenchmarkSuppressWithoutDelay: no delay known, the 20-700 ms window.
+func BenchmarkSuppressWithoutDelay(b *testing.B) {
+	benchSuppress(b, true, func(m *Monitor) { m.track.isFound, m.track.hasLast = false, false })
+}
+
+// BenchmarkSuppressNoBotAudio: nothing the bot sent is in reach; the slot
+// passes without a correlation.
+func BenchmarkSuppressNoBotAudio(b *testing.B) {
+	benchSuppress(b, false, nil)
+}

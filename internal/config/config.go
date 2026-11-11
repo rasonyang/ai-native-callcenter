@@ -129,6 +129,11 @@ type Config struct {
 	// the bot's own audio on the left and the uplink on the right. A
 	// development aid that records call audio; empty (the default) is off.
 	BotEchoDumpDir string
+	// IsBotEchoSuppressionEnabled is AICC_BOT_ECHO_SUPPRESS: keep the bot's
+	// own voice coming back on an AI call's uplink out of what the provider
+	// hears (internal/echoprobe). False, the default, sends the provider the
+	// uplink unchanged.
+	IsBotEchoSuppressionEnabled bool
 	// BotBackendBase is the base URL flows' declarative HTTP tools call.
 	BotBackendBase string
 	// ToolAllowedHosts is AICC_TOOL_ALLOWED_HOSTS: the public hosts a flow's
@@ -492,6 +497,7 @@ func Load() (Config, error) {
 		Provider:                      env("AICC_PROVIDER", "openai"),
 		ProviderEndpoint:              env("AICC_PROVIDER_ENDPOINT", ""),
 		ProviderModel:                 env("AICC_PROVIDER_MODEL", ""),
+		IsBotEchoSuppressionEnabled:   envBool("AICC_BOT_ECHO_SUPPRESS", false),
 		OutboundEndpoint:              env("AICC_OUTBOUND_ENDPOINT", ""),
 		OutboundRingTimeout:           ringTimeout,
 		outboundRingTimeoutErr:        ringErr,
