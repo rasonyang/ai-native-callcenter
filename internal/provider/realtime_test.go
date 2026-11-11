@@ -974,7 +974,7 @@ func TestAProviderThatCancelsOnSpeechIsStillToldToCancelForAKeypress(t *testing.
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeProvider(t, acceptSession)
-			session := testSession(t, f, OpenAIProfile())
+			session := testSession(t, f, GrokProfile())
 			if err := session.Start(t.Context(), basicConfig()); err != nil {
 				t.Fatalf("start: %v", err)
 			}

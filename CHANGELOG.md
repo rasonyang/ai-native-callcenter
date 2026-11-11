@@ -5,6 +5,19 @@ under one tag, `rasonyang/ai-native-callcenter` and `rasonyang/freeswitch-aicc`;
 run them together. From v0.2.0 on, the GitHub release of the same tag also
 carries the one-line installer's files.
 
+## Unreleased
+
+### Changed
+
+- A one-word acknowledgement ("嗯", "mm-hmm") said over the bot no longer takes
+  the floor on `openai`: the bot keeps talking, the words stay in the
+  transcript and the model does not answer them. A real interruption now waits
+  for its first words to be recognised before the bot stops. The other engines
+  cut by themselves and cannot be told not to, so there the bot is still
+  interrupted, but an acknowledgement can no longer move the flow, and over a
+  closing line that already counts as said it ends the call instead of being
+  answered (#403).
+
 ## v0.8.2 - 2026-11-10
 
 ### Upgrade notes

@@ -343,6 +343,15 @@ type Realtime struct {
 	turnGen            uint64
 	turnTimer          *time.Timer
 	turnStoppedAt      time.Time
+
+	// The fields of a provider that no longer answers the caller itself
+	// (Profile.ControlsInterruption). See AnswerCallerTurn.
+	//
+	// committedItems are the utterances whose audio buffer the provider has
+	// committed; wantedItems are the ones asked to be answered before that
+	// happened (the empty id is "the next commit"). Both are bounded.
+	committedItems map[string]struct{}
+	wantedItems    map[string]struct{}
 }
 
 // The names this client knows the watchdog's signals by.
@@ -1487,7 +1496,13 @@ func (r *Realtime) buildSessionUpdate(cfg SessionConfig, isReduced bool) map[str
 			"turn_detection": r.buildTurnDetection(cfg.Turn),
 		}
 		if r.profile.TranscribeModel != "" && !isReduced {
-			input["transcription"] = map[string]any{"model": r.profile.TranscribeModel}
+			transcription := map[string]any{"model": r.profile.TranscribeModel}
+			// Without it a one-syllable "嗯" comes back as "うん" or "Sí", and the
+			// call's acknowledgement list cannot recognise it (live, 2026-11-11).
+			if language := transcriptionLanguage(cfg.Language); language != "" {
+				transcription["language"] = language
+			}
+			input["transcription"] = transcription
 		}
 		output := map[string]any{"format": audioFormatPayload(outputName, outputRate)}
 		if voice != "" {
@@ -1533,6 +1548,12 @@ func (r *Realtime) buildTurnDetection(turn TurnDetection) any {
 	detection := map[string]any{"type": "server_vad"}
 	if turn.SilenceMs > 0 {
 		detection["silence_duration_ms"] = turn.SilenceMs
+	}
+	if r.profile.ControlsInterruption {
+		// Speech neither answers itself nor cuts the response playing: this
+		// client decides after the transcript whether it took the floor.
+		detection["create_response"] = false
+		detection["interrupt_response"] = false
 	}
 	return detection
 }
@@ -1661,14 +1682,35 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.hasTurnWords = false
 		r.hasReasked = false
 		r.mu.Unlock()
-		r.emit(Event{Type: EventTypeSpeechStarted})
+		r.emit(Event{Type: EventTypeSpeechStarted, ItemID: event.ItemID})
 
 	case "input_audio_buffer.speech_stopped":
 		r.mu.Lock()
 		r.isCallerSpeaking = false
-		r.armTurnWatchLocked()
+		// A provider this client answers for never answers the caller itself,
+		// so the watch over its answer has nothing to watch: the turn is asked
+		// for, or declined, by the call (AnswerCallerTurn).
+		if !r.profile.ControlsInterruption {
+			r.armTurnWatchLocked()
+		}
 		r.mu.Unlock()
-		r.emit(Event{Type: EventTypeSpeechStopped})
+		r.emit(Event{Type: EventTypeSpeechStopped, ItemID: event.ItemID})
+		if r.profile.ControlsInterruption {
+			// A turn that came due while the caller was speaking was left for
+			// the end of the speech: nobody else will release it. Only on a
+			// free floor: with the switches off the caller can stop speaking
+			// in the middle of a response, whose own end releases the turn,
+			// and the provider refuses a second one while it runs.
+			r.mu.Lock()
+			isFloorFree := !r.isResponseOpen.Load() && !r.isResponseRequested
+			r.mu.Unlock()
+			if isFloorFree {
+				r.releaseOwedTurn()
+			}
+		}
+
+	case "input_audio_buffer.committed":
+		r.onBufferCommitted(event.ItemID)
 
 	case "response.created":
 		r.mu.Lock()
@@ -1756,7 +1798,7 @@ func (r *Realtime) handle(event *wireEvent) {
 		r.emit(Event{Type: EventTypeOutputTranscript, Text: event.Transcript, IsFinal: true})
 
 	case "conversation.item.input_audio_transcription.delta":
-		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Delta})
+		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Delta, ItemID: event.ItemID})
 
 	case "conversation.item.input_audio_transcription.updated":
 		// A cumulative running text of the same utterance (Grok). Nothing
@@ -1772,7 +1814,8 @@ func (r *Realtime) handle(event *wireEvent) {
 		if event.Status != "" && event.Status != "completed" {
 			return
 		}
-		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Transcript, IsFinal: true})
+		r.emit(Event{Type: EventTypeInputTranscript, Text: event.Transcript, IsFinal: true,
+			ItemID: event.ItemID})
 		r.onCallerTranscript(event.Transcript)
 
 	case "ping":
@@ -2459,6 +2502,12 @@ func isVADTurnRefused(err *wireError) bool {
 //     caller is speaking again, in which case the provider's own reply to that
 //     speech is the answer (releaseOwedTurn).
 func (r *Realtime) onVADTurnRefused() {
+	r.oweCallerTurn("the provider committed the caller's turn without answering it; the turn is owed")
+}
+
+// oweCallerTurn owes the caller's turn and asks for it when nothing holds the
+// floor. why is the Info line it logs.
+func (r *Realtime) oweCallerTurn(why string) {
 	r.mu.Lock()
 	isOpen := r.isResponseOpen.Load()
 	isRequested := r.isResponseRequested
@@ -2469,7 +2518,7 @@ func (r *Realtime) onVADTurnRefused() {
 	}
 	r.mu.Unlock()
 
-	r.log.Info("the provider committed the caller's turn without answering it; the turn is owed",
+	r.log.Info(why,
 		"isResponseOpen", isOpen, "isResponseRequested", isRequested, "wasOwed", wasOwed)
 	if !isOpen && !isRequested {
 		r.releaseOwedTurn()

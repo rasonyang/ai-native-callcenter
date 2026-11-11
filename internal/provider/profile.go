@@ -49,6 +49,19 @@ type Profile struct {
 	// explicitly, and a missed cancel leaves the model talking over the caller.
 	CancelsResponseItself bool
 
+	// ControlsInterruption means the provider lets the client switch off both
+	// of its server-side reactions to detected speech, create_response and
+	// interrupt_response, so that speech neither cuts the response playing nor
+	// is answered until the client decides. It is what makes holding a
+	// one-word acknowledgement possible (docs/design/11-backchannels.md): the
+	// client decides after the transcript whether the caller took the floor.
+	// With it set the provider never answers the caller by itself, so this
+	// client asks for that turn (CallerTurnController) and sends the
+	// response.cancel of an interruption whatever CancelsResponseItself says.
+	// Measured on openai alone; the other engines accept the fields and ignore
+	// them, or have no control, and keep their own interruption.
+	ControlsInterruption bool
+
 	// NeedsCueForFirstTurn means the provider refuses to speak into an empty
 	// conversation and must be given something to answer. Our bot answers the
 	// phone and greets first, so on those providers the opening turn has to be
@@ -214,11 +227,14 @@ func OpenAIProfile() Profile {
 		// traces, with nothing the caller said in it. The model name and the
 		// field it goes in are both measured (design 08 §Appendix, the
 		// transcription session's audio.input.transcription.model).
-		TranscribeModel:       "gpt-live-transcribe",
-		AcceptsG711:           true,
-		LinearInput:           media.PCM16Format(media.RateProviderOut),
-		LinearOutput:          media.PCM16Format(media.RateProviderOut),
-		CancelsResponseItself: true,
+		TranscribeModel: "gpt-live-transcribe",
+		AcceptsG711:     true,
+		LinearInput:     media.PCM16Format(media.RateProviderOut),
+		LinearOutput:    media.PCM16Format(media.RateProviderOut),
+		// The server's own cancel is switched off (ControlsInterruption), so
+		// the client sends response.cancel when it takes the floor.
+		CancelsResponseItself: false,
+		ControlsInterruption:  true,
 		// Documented: the GA response object takes tool_choice ("none",
 		// "auto", "required" or a forced function), read 2026-10-22. Not
 		// measured live here.

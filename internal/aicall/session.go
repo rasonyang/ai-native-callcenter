@@ -123,6 +123,18 @@ type Event struct {
 	// playback "finishes" at once.
 	HasAudio bool
 
+	// IsBackchannel marks a final CUSTOMER_SAID that was only an
+	// acknowledgement ("mm-hmm", "嗯") said over the bot's audio and held, not
+	// taken as the caller's turn (docs/design/11-backchannels.md). It is
+	// recorded as the caller's words and is otherwise nothing: it does not
+	// reach the flow, the farewell watch or the dead-air accounting.
+	IsBackchannel bool
+
+	// cut, on a TOOL_CALL, is the cut the call's response answers, when the
+	// engine cut the bot by itself and the verdict on the words is still
+	// pending or known (openCut). Only the orchestrator in this package reads it.
+	cut *openCut
+
 	// IsInterrupted marks a TURN_DONE whose turn was cut short — by the
 	// caller, by a keypress, or to make room for another turn. Such a turn
 	// never reaches PLAYBACK_DONE, and what it produced is not a line anybody
@@ -175,6 +187,13 @@ type Config struct {
 	// actions' own lock. Nil is never armed.
 	IsEndingArmed func() bool
 
+	// OnCutAcknowledged is told when the engine cut the bot by itself and the
+	// words that did it turn out to be only an acknowledgement. cut is the
+	// BARGE_IN that reported it. The orchestrator uses it to keep the cut from
+	// counting as the caller answering the armed closing line. Called off the
+	// session's locks; nil does nothing.
+	OnCutAcknowledged func(cut Event)
+
 	// Logger is the call's logger. The orchestrator has already bound the
 	// call's identity to it (callId, aiccCallId, did), so the session adds
 	// no key of its own: slog writes a key bound twice twice.
@@ -215,8 +234,19 @@ type Session struct {
 	cfg Config
 	// quiet is the model's way of answering a tool call without asking for a
 	// turn, nil when it has none (provider.QuietToolAnswerer). Set once in New.
-	quiet  provider.QuietToolAnswerer
-	uplink *media.Converter
+	quiet provider.QuietToolAnswerer
+	// turns is the model's way of answering the caller's turn and declining an
+	// acknowledgement, nil unless the provider's client controls interruption
+	// (Profile.ControlsInterruption) and implements it. Non-nil is what makes
+	// this session hold backchannels (backchannel_hold.go). Set once in New.
+	turns provider.CallerTurnController
+	// bc is the backchannel state; holdAfter and cutWait are the clocks of the
+	// hold's cap and of the verdict wait, nil for the real ones. A test sets
+	// them before Start.
+	bc        backchannelState
+	holdAfter func(d time.Duration, f func()) (stop func() bool)
+	cutWait   func(d time.Duration) <-chan time.Time
+	uplink    *media.Converter
 	// uplinkSilence is the fill frame for a slot with no caller audio, in the
 	// provider's input format.
 	uplinkSilence []byte
@@ -366,10 +396,15 @@ func New(leg Leg, model provider.VoiceSession, profile provider.Profile,
 	}
 
 	quiet, _ := model.(provider.QuietToolAnswerer)
+	var turns provider.CallerTurnController
+	if profile.ControlsInterruption {
+		turns, _ = model.(provider.CallerTurnController)
+	}
 	return &Session{
 		leg:           leg,
 		model:         model,
 		quiet:         quiet,
+		turns:         turns,
 		log:           log,
 		providerName:  profile.Name,
 		cfg:           cfg,
@@ -961,19 +996,12 @@ func (s *Session) handleModelEvent(event provider.Event) {
 
 	case provider.EventTypeSpeechStarted:
 		// The caller is talking, so there is no dead air to report whether or
-		// not this turns out to be a real interruption.
-		s.cancelDeadAirWatch()
-		s.mu.Lock()
-		s.timer.onSpeechStarted()
-		s.mu.Unlock()
-		s.bargeIn(provider.InterruptReasonSpeech)
-		// After the barge-in, so a consumer sees the cut before the speech.
-		s.emit(Event{Type: EventTypeCallerSpeech})
+		// not this turns out to be a real interruption; a held utterance
+		// leaves the watch alone until it takes the floor.
+		s.onSpeechStarted(event.ItemID)
 
 	case provider.EventTypeSpeechStopped:
-		s.mu.Lock()
-		s.timer.onSpeechStopped()
-		s.mu.Unlock()
+		s.onSpeechStopped(event.ItemID)
 
 	case provider.EventTypeInterrupted:
 		// The provider confirming a turn was cut short. It may have decided
@@ -1023,9 +1051,13 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			// speech_started nothing to take in bargeIn; seen by bargeIn
 			// first, its flush leaves nothing queued here (hadQueued).
 			if isCurrent && event.InterruptedBy != provider.InterruptReasonSystem {
-				s.emit(Event{Type: EventTypeBargeIn, Text: string(event.InterruptedBy), Turn: turn,
+				cut := Event{Type: EventTypeBargeIn, Text: string(event.InterruptedBy), Turn: turn,
 					Unplayed: unplayed, Played: time.Duration(playedMs) * time.Millisecond,
-					IsGenerating: true, IsByProvider: true})
+					IsGenerating: true, IsByProvider: true}
+				s.emit(cut)
+				if event.InterruptedBy == provider.InterruptReasonSpeech {
+					s.openCut(cut)
+				}
 			}
 		}
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside})
@@ -1039,12 +1071,7 @@ func (s *Session) handleModelEvent(event provider.Event) {
 		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside})
 
 	case provider.EventTypeInputTranscript:
-		if event.IsFinal {
-			s.mu.Lock()
-			s.timer.onCallerWords(event.Text)
-			s.mu.Unlock()
-		}
-		s.emit(Event{Type: EventTypeCustomerSaid, Text: event.Text, IsFinal: event.IsFinal})
+		s.onInputTranscript(event)
 
 	case provider.EventTypeOutputTranscript:
 		// The turn rides along so the line can be judged with the tool calls
@@ -1054,10 +1081,11 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			Turn: turn, IsAside: isAside})
 
 	case provider.EventTypeToolCall:
+		turn := s.currentTurn()
 		s.emit(Event{
 			Type: EventTypeToolCall, ToolCallID: event.ToolCallID,
 			ToolName: event.ToolName, ToolArgs: event.ToolArgs,
-			Turn: s.currentTurn(),
+			Turn: turn, cut: s.cutFor(turn),
 		})
 
 	case provider.EventTypeError:
@@ -1083,7 +1111,12 @@ func (s *Session) handleModelEvent(event provider.Event) {
 // what the caller actually notices, and it is the only part that cannot be
 // done by anyone else. About two frames are already in flight, so the caller
 // hears silence within roughly forty milliseconds.
-func (s *Session) bargeIn(reason provider.InterruptReason) {
+func (s *Session) bargeIn(reason provider.InterruptReason) { s.cutIn(reason, true) }
+
+// cutIn is bargeIn. isGuarded says detected speech is judged against the
+// barge-in guard; a held utterance that reaches a verdict is not (its speech
+// began long enough ago, and the words are known).
+func (s *Session) cutIn(reason provider.InterruptReason, isGuarded bool) {
 	s.mu.Lock()
 	isSpeaking := s.isBotSpeaking
 	isGenerating := s.isResponding
@@ -1106,6 +1139,13 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	// detection with nothing audible to echo would only duplicate it.
 	isKeyOverGeneration := reason == provider.InterruptReasonDTMF && isGenerating
 	if !isSpeaking && !isAudioInFlight && !isKeyOverGeneration {
+		if s.isHolding() && reason == provider.InterruptReasonSpeech && isGenerating {
+			// The provider no longer cancels a response on speech by itself,
+			// so a turn still being made and not yet heard is cancelled here,
+			// as its own detection did before. Nothing is queued, so there is
+			// nothing to flush, trim or report as a barge-in.
+			s.tellTheModelWhatWasHeard(reason, -1)
+		}
 		return
 	}
 
@@ -1113,7 +1153,7 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	// not: for the first moments of a turn, what the detector hears is very
 	// often the bot's own voice returning down the line, and acting on it makes
 	// the bot interrupt itself mid-sentence.
-	if reason == provider.InterruptReasonSpeech {
+	if reason == provider.InterruptReasonSpeech && isGuarded {
 		if guard := s.bargeGuard(); guard > 0 && audibleFor < guard {
 			// Info, not Debug: a swallowed interruption is invisible from the
 			// outside, and the call log has to be able to tell it from speech
@@ -1170,8 +1210,12 @@ func (s *Session) bargeIn(reason provider.InterruptReason) {
 	if playedMs < 0 {
 		played = -1
 	}
-	s.emit(Event{Type: EventTypeBargeIn, Text: string(reason), Turn: turn,
-		Unplayed: unplayed, Played: played, IsGenerating: isGenerating})
+	cut := Event{Type: EventTypeBargeIn, Text: string(reason), Turn: turn,
+		Unplayed: unplayed, Played: played, IsGenerating: isGenerating}
+	s.emit(cut)
+	if reason == provider.InterruptReasonSpeech {
+		s.openCut(cut)
+	}
 }
 
 // muteRecord is what a muted turn reports when it ends (logMuted).
@@ -1350,6 +1394,7 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.isResponding = true
 	s.turnOwedUntil = time.Time{}
 	s.openTurns = min(s.openTurns+1, 2)
+	s.noteResponseStarted(s.turnSeq)
 	// A muted turn that was cut short never reached its end.
 	s.logMuted()
 	if s.isCutOff {

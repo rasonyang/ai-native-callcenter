@@ -469,8 +469,9 @@ func (o *Orchestrator) runCall(ctx context.Context, dialog *voice.Dialog) error 
 		})
 	}
 
-	session, err := New(FromDialog(dialog), model, profile,
-		o.sessionConfig(sessionConfigFor(spec, runtime, language), actions.isArmed, log))
+	sessionCfg := o.sessionConfig(sessionConfigFor(spec, runtime, language), actions.isArmed, log)
+	sessionCfg.OnCutAcknowledged = actions.onCutAcknowledged
+	session, err := New(FromDialog(dialog), model, profile, sessionCfg)
 	if err != nil {
 		return err
 	}
@@ -634,7 +635,13 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 			}
 			switch event.Type {
 			case EventTypeCustomerSaid:
-				if event.IsFinal {
+				if event.IsFinal && event.IsBackchannel {
+					// An acknowledgement said over the bot, held and
+					// declined: the caller's words in the transcript, and
+					// nothing else. The flow, the farewell watch and the
+					// dead-air accounting never hear it.
+					recorder.say(store.SpeakerCustomer, event.Text)
+				} else if event.IsFinal {
 					recorder.say(store.SpeakerCustomer, event.Text)
 					runtime.OnCallerSpoke(event.Text)
 					fw.onCallerSpoke()
@@ -954,7 +961,15 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	// Asked before the call runs: Dispatch can move the phase, and the tool is
 	// judged in the phase it was called in.
 	isSlotTool := runtime.IsSlotTool(event.ToolName)
-	output, moved := o.dispatch(ctx, event, batch, session, runtime, actions, log)
+	var output, moved string
+	if event.cut != nil && runtime.CanMoveOnTool(event.ToolName) && session.cutWasAcknowledgement(event.cut) {
+		// The engine cut the bot for a bare acknowledgement and this response
+		// answers it: a tool that would move the call is refused as a
+		// conversation, and a tool that only reads is not (docs/design/11).
+		output = runtime.RefuseAsAcknowledgement(event.ToolName)
+	} else {
+		output, moved = o.dispatch(ctx, event, batch, session, runtime, actions, log)
+	}
 
 	// Into a closing phase that has a line of its own, the line is the only
 	// goodbye (#441): whatever the response that made this call says is not

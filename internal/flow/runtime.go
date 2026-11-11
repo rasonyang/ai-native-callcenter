@@ -382,6 +382,30 @@ func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output 
 	return output, newNode
 }
 
+// CanMoveOnTool is Engine.CanMoveOnTool for a tool the phase allows. A tool the
+// phase refuses never moves anything.
+func (r *Runtime) CanMoveOnTool(name string) bool {
+	return r.IsToolAllowed(name) && r.engine.CanMoveOnTool(name)
+}
+
+// RefuseAsAcknowledgement is the answer to a tool that could move the call when
+// the caller's last words were only an acknowledgement ("mm-hmm"), not an answer
+// to what was asked: a refusal as a conversation, with ok=0 and a reason that
+// tells the model so, and the current phase's instruction as the way on. It
+// runs nothing and changes no state, so the tool can be called again once the
+// caller has answered. Read-only lookups are not refused by this; the caller
+// asks CanMoveOnTool first.
+func (r *Runtime) RefuseAsAcknowledgement(name string) string {
+	r.log.Info("tool refused: the caller only acknowledged, it is not an answer",
+		"tool", name, "node", r.engine.NodeID())
+	reason := "the caller only acknowledged what was said (a short \"mm-hmm\" or \"okay\"); " +
+		"that is not an answer, so " + name + " was not carried out"
+	if r.engine.Lang() == LangZH {
+		reason = "来电者只是应了一声(如“嗯”“好的”),并没有回答问题,所以没有执行 " + name
+	}
+	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
 // OnNoInput reports dead air to the flow, returning the new phase if the flow
 // treats silence as a reason to move on.
 func (r *Runtime) OnNoInput() string { return r.engine.OnNoInput() }
