@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,8 +26,9 @@ import (
 // after the fact — the explorer, reports, the wallboard's history.
 type LedgerStore struct {
 	q *queries.Queries
-	// pool is here for the one write that is not a single statement: a CDR and
-	// the webhook deliveries it owes have to land together or not at all.
+	// pool is here for the writes that are not a single statement: a CDR and
+	// the webhook deliveries it owes have to land together or not at all, and
+	// a callback's attempt mark takes its call's outcome under a lock.
 	pool *pgxpool.Pool
 	// onCallbackSettled announces a callback whose attempt just ended; see
 	// Store.OnCallbackSettled.
@@ -253,9 +255,14 @@ func (l *LedgerStore) InsertCDR(ctx context.Context, cdr CDR) error {
 		if err != nil || written == 0 {
 			return err
 		}
-		rows, err := q.SettleCallbackAttempt(ctx, queries.SettleCallbackAttemptParams{
-			LastAttemptCallID: &cdr.CallID, LastAttemptStatus: &cdr.Status, LastAttemptAt: stamp(cdr.EndedAt),
-		})
+		// The outcome is read back from the row just written, by the statement
+		// a mark for this call runs too, and under the lock the mark takes:
+		// a mark written at the same moment is either seen here or sees this
+		// row (MarkCallbackAttempt).
+		if err := lockCallAttempt(ctx, q, cdr.CallID); err != nil {
+			return err
+		}
+		rows, err := q.SettleCallbackAttempt(ctx, queries.SettleCallbackAttemptParams{CallID: cdr.CallID})
 		if err != nil {
 			return err
 		}
@@ -866,18 +873,69 @@ func (l *LedgerStore) ReleaseCallback(ctx context.Context, id, userID uuid.UUID)
 	return l.named(ctx, l.q, callbackFromRow(row))
 }
 
-// MarkCallbackAttempt notes on a callback that a call is being placed to
-// keep it. Only its holder may: the row is updated only while CLAIMED by
-// userID, so a dial from a stale screen — or for a callback somebody else
-// took — is refused rather than recorded against the wrong person's work.
+// IsCallbackHeldBy reports whether userID holds the callback: it is CLAIMED,
+// by them. A dial made to keep a callback asks this before anything is sent,
+// and writes nothing; MarkCallbackAttempt asks again when the call is placed.
+func (l *LedgerStore) IsCallbackHeldBy(ctx context.Context, id, userID uuid.UUID) (bool, error) {
+	return l.q.IsCallbackHeldBy(ctx, queries.IsCallbackHeldByParams{ID: id, UserID: userID})
+}
+
+// MarkCallbackAttempt notes on a callback that a call was placed to keep it:
+// written once the dial has placed the call (or could not confirm it), never
+// before, so a dial refused before anything is sent leaves the last attempt
+// as it was (#478). Only its holder may: the row is updated only while
+// CLAIMED by userID, else pgx.ErrNoRows, so a dial for a callback somebody
+// else took, or that was released while the call was being placed, is not
+// recorded against the wrong person's work.
+//
+// The call may already have ended by then: an originate the switch fails at
+// once has its placement-failure CDR written while the request is still on
+// its way here, and that CDR found no callback to settle. So the mark takes
+// the outcome from the call's CDR when there is one, by the same statement the
+// CDR's own transaction settles with, and has none otherwise. Both run under
+// lockCallAttempt, taken first: a single statement would not do, because
+// under READ COMMITTED the mark could read the CDR before its transaction
+// commits while that transaction's settle reads the callback before the mark
+// commits, and neither would see the other.
 func (l *LedgerStore) MarkCallbackAttempt(ctx context.Context, id, callID, userID uuid.UUID) (Callback, error) {
-	row, err := l.q.MarkCallbackAttempt(ctx, queries.MarkCallbackAttemptParams{
-		ID: id, LastAttemptCallID: &callID, HandledBy: &userID,
+	var marked Callback
+	err := txFor(ctx, l.pool, func(q *queries.Queries) error {
+		if err := lockCallAttempt(ctx, q, callID); err != nil {
+			return err
+		}
+		row, err := q.MarkCallbackAttempt(ctx, queries.MarkCallbackAttemptParams{
+			ID: id, LastAttemptCallID: &callID, HandledBy: &userID,
+		})
+		if err != nil {
+			return err
+		}
+		settled, err := q.SettleCallbackAttempt(ctx, queries.SettleCallbackAttemptParams{
+			CallID: callID, CallbackID: &id,
+		})
+		if err != nil {
+			return err
+		}
+		if len(settled) == 1 {
+			row = settled[0]
+		}
+		marked, err = l.named(ctx, q, callbackFromRow(row))
+		return err
 	})
 	if err != nil {
 		return Callback{}, err
 	}
-	return l.named(ctx, l.q, callbackFromRow(row))
+	return marked, nil
+}
+
+// lockCallAttempt takes, until the transaction ends, the lock that serialises
+// the writers of one call's callback attempt: MarkCallbackAttempt and the
+// settle in InsertCDR. Two call ids that share a key only wait for each other.
+func lockCallAttempt(ctx context.Context, q *queries.Queries, callID uuid.UUID) error {
+	return q.LockCallAttempt(ctx, queries.LockCallAttemptParams{
+		LockClass: callAttemptLockClass,
+		// The last four bytes: random in a UUIDv7, and any id still spreads.
+		LockKey: int32(binary.BigEndian.Uint32(callID[12:])),
+	})
 }
 
 // HandleCallback closes a callback as done or dismissed.
