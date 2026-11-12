@@ -7,6 +7,27 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+## v0.8.3 - 2026-11-12
+
+### Upgrade notes
+
+- Upgrade both images together, as always: they are published under one tag
+  and the deploy stack names both. The switch image has no change in this
+  release; its tag moves so that the pair still matches.
+- No migration, and no application setting removed or changed in default. Two
+  settings are added, both off by default: `AICC_BOT_ECHO_SUPPRESS` and
+  `AICC_BOT_ECHO_DUMP_DIR`; `.env.example` describes both. The server refuses
+  to start when `AICC_BOT_ECHO_DUMP_DIR` is set to a relative path (#539).
+- With `AICC_PROVIDER=openai`, a one-word acknowledgement no longer interrupts
+  the bot and a real interruption waits for its first words to be recognised.
+  There is no setting for it (#403, see Changed).
+- API contract: wording only. The description of `callbackId` on `POST /calls`
+  now says that the callback's last attempt is noted once the call is placed
+  (`201`) or its placement is unconfirmed (`202`), and not for a refusal or an
+  `isDuplicate` retry (#478). `make api-breaking BASE=v0.8.2` reports no
+  breaking change.
+- Building from source needs Go 1.27.4 or later (#545).
+
 ### Changed
 
 - A one-word acknowledgement ("嗯", "mm-hmm") said over the bot no longer takes
@@ -45,7 +66,7 @@ carries the one-line installer's files.
 - `AICC_BOT_ECHO_DUMP_DIR`, a development aid and off by default: an absolute
   directory that receives each AI call's two signals as a time-aligned stereo
   8 kHz WAV named by call id (left: what the bot sent, right: the uplink as
-  clocked), for studying echo offline. The files hold call audio.
+  clocked), for studying echo offline. The files hold call audio (#539).
 - `AICC_BOT_ECHO_SUPPRESS`, off by default: keeps the bot's own voice coming
   back on an AI call's uplink out of what the provider hears, so its turn
   detection no longer takes the bot for the caller and cuts it off. Every
