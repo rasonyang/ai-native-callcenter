@@ -737,6 +737,28 @@ func (q *Queries) InsertTranscriptLine(ctx context.Context, arg InsertTranscript
 	return err
 }
 
+const isCallbackHeldBy = `-- name: IsCallbackHeldBy :one
+SELECT EXISTS (
+    SELECT 1 FROM callbacks
+    WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2::uuid
+)
+`
+
+type IsCallbackHeldByParams struct {
+	ID     uuid.UUID `json:"id"`
+	UserID uuid.UUID `json:"userId"`
+}
+
+// The claim check of a dial made to keep a callback, asked before anything is
+// sent. MarkCallbackAttempt carries the same condition, because the claim can
+// be lost while the call is being placed.
+func (q *Queries) IsCallbackHeldBy(ctx context.Context, arg IsCallbackHeldByParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isCallbackHeldBy, arg.ID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listAuditLogs = `-- name: ListAuditLogs :many
 SELECT a.id, a.occurred_at, a.actor_id, COALESCE(u.username, '')::text AS actor_username,
        a.action, a.target_kind, a.target_id, a.detail, a.ip,
@@ -1210,6 +1232,27 @@ func (q *Queries) ListWrapUpsForCalls(ctx context.Context, callIds []uuid.UUID) 
 	return items, nil
 }
 
+const lockCallAttempt = `-- name: LockCallAttempt :exec
+SELECT pg_advisory_xact_lock($1::int, $2::int)
+`
+
+type LockCallAttemptParams struct {
+	LockClass int32 `json:"lockClass"`
+	LockKey   int32 `json:"lockKey"`
+}
+
+// Serialises the two writers of a callback attempt's outcome for one call:
+// the mark (MarkCallbackAttempt, then SettleCallbackAttempt) and the call's
+// CDR (InsertCDR, then SettleCallbackAttempt). A statement of its own, taken
+// before the statements it guards, so that each of those runs on a snapshot
+// that sees whatever the other writer committed. Two 32-bit keys: that
+// keyspace never meets the single 64-bit keys of the instance and extension
+// pool locks. Transaction-scoped, released by commit or rollback.
+func (q *Queries) LockCallAttempt(ctx context.Context, arg LockCallAttemptParams) error {
+	_, err := q.db.Exec(ctx, lockCallAttempt, arg.LockClass, arg.LockKey)
+	return err
+}
+
 const markCallbackAttempt = `-- name: MarkCallbackAttempt :one
 UPDATE callbacks
 SET last_attempt_call_id = $2, last_attempt_at = now(), last_attempt_status = NULL
@@ -1655,20 +1698,28 @@ func (q *Queries) SaveWrapUpDraft(ctx context.Context, arg SaveWrapUpDraftParams
 }
 
 const settleCallbackAttempt = `-- name: SettleCallbackAttempt :many
-UPDATE callbacks
-SET last_attempt_status = $2, last_attempt_at = $3
-WHERE last_attempt_call_id = $1
-RETURNING id, call_id, queue_id, phone_number, message, status, created_at, handled_by, handled_at, last_attempt_call_id, last_attempt_at, last_attempt_status
+UPDATE callbacks c
+SET last_attempt_status = d.status, last_attempt_at = d.ended_at
+FROM cdrs d
+WHERE d.call_id = $1
+  AND c.last_attempt_call_id = d.call_id
+  AND ($2::uuid IS NULL OR c.id = $2)
+RETURNING c.id, c.call_id, c.queue_id, c.phone_number, c.message, c.status, c.created_at, c.handled_by, c.handled_at, c.last_attempt_call_id, c.last_attempt_at, c.last_attempt_status
 `
 
 type SettleCallbackAttemptParams struct {
-	LastAttemptCallID *uuid.UUID         `json:"lastAttemptCallId"`
-	LastAttemptStatus *string            `json:"lastAttemptStatus"`
-	LastAttemptAt     pgtype.Timestamptz `json:"lastAttemptAt"`
+	CallID     uuid.UUID  `json:"callId"`
+	CallbackID *uuid.UUID `json:"callbackId"`
 }
 
+// A callback whose last attempt is this call takes the attempt's outcome from
+// the call's CDR: its status, and the time the call ended. Run by both
+// writers under LockCallAttempt: the CDR's transaction right after writing
+// the row, the mark's right after writing the mark, so whichever comes second
+// settles it. Nothing is written while the call has no CDR. callback_id, when
+// given, keeps it to that one callback.
 func (q *Queries) SettleCallbackAttempt(ctx context.Context, arg SettleCallbackAttemptParams) ([]Callback, error) {
-	rows, err := q.db.Query(ctx, settleCallbackAttempt, arg.LastAttemptCallID, arg.LastAttemptStatus, arg.LastAttemptAt)
+	rows, err := q.db.Query(ctx, settleCallbackAttempt, arg.CallID, arg.CallbackID)
 	if err != nil {
 		return nil, err
 	}

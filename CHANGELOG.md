@@ -65,6 +65,24 @@ carries the one-line installer's files.
   FAILED), `aicc_bot_echo_suppressed_frames_total` and
   `aicc_bot_echo_gate_openings_total` (#539).
 
+### Fixed
+
+- Redialling a callback when the call is refused before anything rings (a
+  number on the do-not-call list, a number that cannot be dialled, a switch
+  still starting up or unreachable) no longer leaves an attempt that never
+  happened on the callback. Until now the attempt was written before the dial,
+  so the refused redial replaced the previous attempt's call, time and outcome
+  with one that no CDR would ever settle, and other screens were not told. The
+  claim is now checked first and the attempt written only once the call is
+  placed, or its placement is unconfirmed (`202`), which keeps its note
+  because the phone may still ring. A retry answering `isDuplicate` no longer
+  writes the attempt again either, so it can no longer clear an outcome the
+  call's CDR already gave it or put an older call back over a newer one. A
+  call that has already ended when its attempt is written gets its outcome at
+  once. A claim lost while the call is being placed leaves the callback alone
+  and the call is answered as placed. The `createCall` contract says so on
+  `callbackId` (wording only). (#478)
+
 ## v0.8.2 - 2026-11-10
 
 ### Upgrade notes

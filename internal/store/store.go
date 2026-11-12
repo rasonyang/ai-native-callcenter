@@ -39,6 +39,13 @@ const advisoryLockKey int64 = 0x41494343 // "AICC"
 // never going to release — a hang with no error and no timeout.
 const extensionPoolLockKey int64 = 0x414943430001 // "AICC" + 1
 
+// callAttemptLockClass is the first of the two 32-bit keys of the lock that
+// serialises a callback attempt's mark with its call's CDR (lockCallAttempt);
+// the second is taken from the call id. PostgreSQL keeps two-key advisory
+// locks in a keyspace of their own, so this can never meet advisoryLockKey or
+// extensionPoolLockKey, whatever a call id hashes to.
+const callAttemptLockClass int32 = 0x41494343 // "AICC"
+
 // Store is the database facade handed to services.
 type Store struct {
 	Pool *pgxpool.Pool

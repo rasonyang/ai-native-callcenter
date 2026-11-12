@@ -194,8 +194,13 @@ callbacks(id uuid pk, call_id, queue_id, phone_number text, message text,
           last_attempt_call_id uuid, last_attempt_at, last_attempt_status varchar)   -- 00027
                                    -- ringing the customer is not the same as keeping the promise, so
                                    -- a dial does not close the callback — it is noted on it. The
-                                   -- call's id is written at once and its CDR status copied back when
-                                   -- it lands, so the row reads "tried at 10:42, no answer" and stays
+                                   -- claim is checked before the dial and the call's id written once
+                                   -- the call is placed (or unconfirmed), never before: a dial refused
+                                   -- before anything is sent leaves the last attempt as it was (#478).
+                                   -- Its CDR status is copied back when the CDR lands, or taken from
+                                   -- the CDR by the mark if it landed first; both run one statement
+                                   -- under a per-call advisory lock, so neither misses the other. The
+                                   -- row reads "tried at 10:42, no answer" and stays
                                    -- in the pool. handled_by follows the *agent's* user id (never a
                                    -- key id): the column has always meant a person, and "it was a key
                                    -- that asked" is the audit row's job, not this column's.

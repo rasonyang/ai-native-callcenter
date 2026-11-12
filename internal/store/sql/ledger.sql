@@ -209,17 +209,45 @@ SET status = 'OPEN', handled_by = NULL
 WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $2
 RETURNING *;
 
+-- name: IsCallbackHeldBy :one
+-- The claim check of a dial made to keep a callback, asked before anything is
+-- sent. MarkCallbackAttempt carries the same condition, because the claim can
+-- be lost while the call is being placed.
+SELECT EXISTS (
+    SELECT 1 FROM callbacks
+    WHERE id = sqlc.arg('id') AND status = 'CLAIMED' AND handled_by = sqlc.arg('user_id')::uuid
+);
+
 -- name: MarkCallbackAttempt :one
 UPDATE callbacks
 SET last_attempt_call_id = $2, last_attempt_at = now(), last_attempt_status = NULL
 WHERE id = $1 AND status = 'CLAIMED' AND handled_by = $3
 RETURNING *;
 
+-- name: LockCallAttempt :exec
+-- Serialises the two writers of a callback attempt's outcome for one call:
+-- the mark (MarkCallbackAttempt, then SettleCallbackAttempt) and the call's
+-- CDR (InsertCDR, then SettleCallbackAttempt). A statement of its own, taken
+-- before the statements it guards, so that each of those runs on a snapshot
+-- that sees whatever the other writer committed. Two 32-bit keys: that
+-- keyspace never meets the single 64-bit keys of the instance and extension
+-- pool locks. Transaction-scoped, released by commit or rollback.
+SELECT pg_advisory_xact_lock(sqlc.arg(lock_class)::int, sqlc.arg(lock_key)::int);
+
 -- name: SettleCallbackAttempt :many
-UPDATE callbacks
-SET last_attempt_status = $2, last_attempt_at = $3
-WHERE last_attempt_call_id = $1
-RETURNING *;
+-- A callback whose last attempt is this call takes the attempt's outcome from
+-- the call's CDR: its status, and the time the call ended. Run by both
+-- writers under LockCallAttempt: the CDR's transaction right after writing
+-- the row, the mark's right after writing the mark, so whichever comes second
+-- settles it. Nothing is written while the call has no CDR. callback_id, when
+-- given, keeps it to that one callback.
+UPDATE callbacks c
+SET last_attempt_status = d.status, last_attempt_at = d.ended_at
+FROM cdrs d
+WHERE d.call_id = sqlc.arg('call_id')
+  AND c.last_attempt_call_id = d.call_id
+  AND (sqlc.narg('callback_id')::uuid IS NULL OR c.id = sqlc.narg('callback_id'))
+RETURNING c.*;
 
 -- name: ReportOverview :one
 SELECT

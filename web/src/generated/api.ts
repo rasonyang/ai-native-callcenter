@@ -2304,7 +2304,7 @@ export interface components {
             language?: string;
             /**
              * Format: uuid
-             * @description AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409. The call id is noted on the callback at once and its outcome is copied back when the call ends; the callback itself stays CLAIMED until the agent closes it.
+             * @description AGENT_OUTBOUND only: the callback this call is placed to keep. It must be CLAIMED by the caller — a dial for a callback somebody else holds, or nobody does, is refused with 409 before anything is dialled or written. The call id is noted on the callback (lastAttemptCallId, lastAttemptAt) once the call is placed (201) or its placement is unconfirmed (202), and its outcome is copied back when the call ends, or at once if the call has already ended by then. A request that places nothing leaves the callback's last attempt as it was: a refusal of any kind, and a retry answering isDuplicate, whose call was noted by the request that placed it. A claim lost while the call is being placed leaves the callback alone; the call is still answered as placed. The callback itself stays CLAIMED until the agent closes it.
              */
             callbackId?: string;
             userData?: components["schemas"]["UserData"];

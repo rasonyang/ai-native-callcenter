@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,7 +18,6 @@ import (
 	"github.com/rasonyang/ai-native-callcenter/internal/esl"
 	"github.com/rasonyang/ai-native-callcenter/internal/events"
 	"github.com/rasonyang/ai-native-callcenter/internal/outbound"
-	"github.com/rasonyang/ai-native-callcenter/internal/store"
 	"github.com/rasonyang/ai-native-callcenter/internal/telephony"
 )
 
@@ -237,11 +237,12 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		dial.CallID = *req.CallID
 	}
 
-	// A dial made to keep a callback is written on the callback before the
-	// phone rings, under an id minted here so the two can be joined when the
-	// call's CDR lands. The write doubles as the check that the caller holds
-	// the callback: nobody else's promise gets a call recorded against it.
-	var kept *store.Callback
+	// A dial made to keep a callback is checked against the callback before
+	// anything is sent: nobody else's promise gets a call recorded against
+	// it. The check writes nothing. The attempt is written once the call is
+	// placed (keepCallback), under an id minted here so the two can be joined
+	// when the call's CDR lands; a dial refused before the phone rings leaves
+	// the callback's last attempt as it was (#478).
 	if req.CallbackID != nil {
 		if s.ledger == nil || !ac.IsActingForAPerson() {
 			writeError(w, http.StatusBadRequest, CodeValidationFailed,
@@ -251,40 +252,68 @@ func (s *Server) createAgentCall(w http.ResponseWriter, r *http.Request, req api
 		if dial.CallID == uuid.Nil {
 			dial.CallID = uuid.Must(uuid.NewV7())
 		}
-		callback, err := s.ledger.MarkCallbackAttempt(r.Context(), *req.CallbackID, dial.CallID, ac.ActorUserID)
+		isHeld, err := s.ledger.IsCallbackHeldBy(r.Context(), *req.CallbackID, ac.ActorUserID)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				writeError(w, http.StatusConflict, CodeConflict, "claim the callback before calling back", nil)
-				return
-			}
-			writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot note the callback attempt", nil)
+			writeError(w, http.StatusInternalServerError, CodeStorageDown, "cannot read the callback", nil)
 			return
 		}
-		kept = &callback
+		if !isHeld {
+			writeError(w, http.StatusConflict, CodeConflict, "claim the callback before calling back", nil)
+			return
+		}
 	}
 
 	callID, err := s.outbound.Dial(r.Context(), dial)
 	if err != nil {
 		if errors.Is(err, outbound.ErrAlreadyPlaced) {
+			// Nothing was placed by this request: the call it names was, by an
+			// earlier one, which noted it on the callback when it did. Noting
+			// it again would only move that attempt's time, wipe the outcome
+			// its CDR gave it, or put it back over a newer attempt.
 			writeDuplicate(w, callID)
 			return
 		}
 		if errors.Is(err, outbound.ErrPlacementUnconfirmed) {
 			// The agent's phone may still ring: the call is kept, and so is
 			// the callback's note of it.
-			if kept != nil {
-				s.publishCallback(r, events.TypeCallbackUpdated, *kept)
-			}
+			s.keepCallback(r, req.CallbackID, callID, ac.ActorUserID)
 			writeUnconfirmed(w, callID)
 			return
 		}
 		writeOutboundError(w, r, err)
 		return
 	}
-	if kept != nil {
-		s.publishCallback(r, events.TypeCallbackUpdated, *kept)
-	}
+	s.keepCallback(r, req.CallbackID, callID, ac.ActorUserID)
 	writeJSON(w, http.StatusCreated, api.CreateCallResponse{CallID: callID})
+}
+
+// callbackMarkTimeout bounds the write of a callback's attempt after its call
+// was placed.
+const callbackMarkTimeout = 5 * time.Second
+
+// keepCallback notes on the callback, if the dial was made to keep one, the
+// call just placed to keep it, and tells every screen. The call is placed by
+// now, so nothing here changes the answer: a client that has gone away still
+// gets its attempt written, and a write that fails is logged and the call
+// answered as placed. A claim lost while the call was being placed (released,
+// or closed) leaves the callback alone; it is no longer the caller's.
+func (s *Server) keepCallback(r *http.Request, callbackID *uuid.UUID, callID, userID uuid.UUID) {
+	if callbackID == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), callbackMarkTimeout)
+	defer cancel()
+	callback, err := s.ledger.MarkCallbackAttempt(ctx, *callbackID, callID, userID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		slog.WarnContext(ctx, "callback attempt not noted: the claim was lost while the call was being placed",
+			"callId", callID, "callbackId", *callbackID)
+		return
+	case err != nil:
+		slog.ErrorContext(ctx, "callback attempt not noted", "callId", callID, "callbackId", *callbackID, "error", err)
+		return
+	}
+	s.publishCallback(r, events.TypeCallbackUpdated, callback)
 }
 
 // isPhoneReachable refuses a call at a phone that cannot take it, and says
