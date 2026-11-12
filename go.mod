@@ -1,6 +1,6 @@
 module github.com/rasonyang/ai-native-callcenter
 
-go 1.27.3
+go 1.27.4
 
 require (
 	github.com/getkin/kin-openapi v0.146.0
