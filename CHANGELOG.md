@@ -17,6 +17,10 @@ carries the one-line installer's files.
   interrupted, but an acknowledgement can no longer move the flow, and over a
   closing line that already counts as said it ends the call instead of being
   answered (#403).
+- Go 1.27.4, for a reported vulnerability in `net/http` (GO-2026-6859), which
+  serves the API, the event stream and the web app and carries the provider
+  and webhook clients. The fix reaches a deployment through the rebuilt
+  images. Building from source needs Go 1.27.4 or later (#545).
 
 ### Added
 
