@@ -27,6 +27,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }
@@ -117,6 +120,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }
@@ -205,6 +211,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }
@@ -332,6 +341,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }
@@ -422,6 +434,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }
@@ -510,6 +525,9 @@
     },
     {
      "call": "hangup",
+     "args": {
+      "reason": "CALLER_DECLINED_MORE_HELP"
+     },
      "expect": {
       "phase": "farewell"
      }

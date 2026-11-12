@@ -1847,7 +1847,7 @@ func TestAToolThatEndsTheCallCarriesTheClosingLineOnARealtimeProfile(t *testing.
 				h.model.mu.Unlock()
 			}
 
-			answer := h.callTool(t, flow.ToolHangup, `{}`)
+			answer := h.callTool(t, flow.ToolHangup, goodbyeHangup)
 			toolTurn := h.session.currentTurn()
 
 			if got, want := hintOf(t, answer.output),
@@ -1898,7 +1898,7 @@ func TestAClosingLineCutShortEndsTheCallOnlyAtTheCap(t *testing.T) {
 	h := startToolPath(t, provider.QwenProfile(), "zh")
 	h.actions.graceCap = 400 * time.Millisecond
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseStarted}
 	h.model.events <- provider.Event{Type: provider.EventTypeInterrupted, InterruptedBy: provider.InterruptReasonSpeech}
@@ -1922,7 +1922,7 @@ func TestAClosingLineQueuedBehindTheToolCallsTurnIsHeardBeforeTheCap(t *testing.
 
 	// The turn keeps speaking after the tool call, and its audio is still
 	// queued when the line — the tool result's turn — finishes generating.
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{
 		Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*2),
 	}
@@ -1945,7 +1945,7 @@ func TestAClosingLineThatNeverFinishesPlayingStillEndsTheCall(t *testing.T) {
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 100 * time.Millisecond
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.leg.holdFrames(5)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.playTurn()
@@ -1975,7 +1975,7 @@ func TestAToolThatEndsTheCallOnDoubaoSpeaksTheLineAsItsOwnTurn(t *testing.T) {
 				"en": "Thank you for calling, goodbye.", "zh": "感谢您的来电，再见。",
 			}[lang]
 
-			answer := h.callTool(t, flow.ToolHangup, `{}`)
+			answer := h.callTool(t, flow.ToolHangup, goodbyeHangup)
 
 			hint := hintOf(t, answer.output)
 			if !strings.Contains(hint, "Say goodbye.") {
@@ -2120,7 +2120,7 @@ func TestTheSecondToolOfOneResponseIsNotRefusedByTheFirstsMove(t *testing.T) {
 
 			answers := h.callTools(t,
 				[2]string{flow.ToolTakeMessage, `{"message":"call me back"}`},
-				[2]string{flow.ToolHangup, `{}`})
+				[2]string{flow.ToolHangup, goodbyeHangup})
 
 			for _, answer := range answers {
 				if !strings.Contains(answer.output, `"ok":"1"`) {
@@ -2164,7 +2164,7 @@ func TestTheLastMoveOfOneResponseWins(t *testing.T) {
 
 			answers := h.callTools(t,
 				[2]string{flow.ToolTakeMessage, `{"message":"call me back"}`},
-				[2]string{flow.ToolHangup, `{}`})
+				[2]string{flow.ToolHangup, goodbyeHangup})
 			h.endResponse()
 
 			if h.engine.NodeID() != "farewell" {
@@ -2214,7 +2214,7 @@ func TestAKeypressAfterTheEndingIsArmedLeavesTheClosingLineAlone(t *testing.T) {
 	h.actions.graceCap = 5 * time.Second
 	fired := make(chan struct{})
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	if !h.actions.isArmed() {
 		t.Fatal("the hangup did not arm the ending")
 	}
@@ -2272,7 +2272,7 @@ func TestSpeechAfterTheClosingLineStillRunsTheArmedAction(t *testing.T) {
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 5 * time.Second
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	// 40 frames is 800 ms of the line still to play: inside closingTailAck.
 	h.leg.holdFrames(40)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
@@ -2293,7 +2293,7 @@ func TestSpeechOverTheLastSecondOfTheClosingLineEndsTheCallAtOnce(t *testing.T) 
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 5 * time.Second
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.leg.holdFrames(50) // 1 s still to play
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.playTurn()
@@ -2311,7 +2311,7 @@ func TestSpeechEarlyInTheClosingLineIsAnsweredBeforeTheCallEnds(t *testing.T) {
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 5 * time.Second
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.leg.holdFrames(350) // 7 s still to play
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.playTurn()
@@ -2342,7 +2342,7 @@ func TestTheSameRuleHoldsOverTheAnswerToAnInterruption(t *testing.T) {
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 5 * time.Second
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.leg.holdFrames(350)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.playTurn()
@@ -2376,7 +2376,7 @@ func TestAnInterruptedClosingLineStillEndsAtTheCapWhenTheAnswerNeverFinishesPlay
 	h := startToolPath(t, provider.QwenProfile(), "en")
 	h.actions.graceCap = 300 * time.Millisecond
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.leg.holdFrames(350)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.playTurn()

@@ -338,7 +338,7 @@ func TestAnArmedEndingKeepsTodaysPath(t *testing.T) {
 	h := newQuietHarness(t, quietFlow, true, quietConfig())
 
 	h.started()
-	h.toolCall("fc_h", flow.ToolHangup, `{}`)
+	h.toolCall("fc_h", flow.ToolHangup, goodbyeHangup)
 	h.ended()
 	h.awaitSends(t, "SendToolResult")
 	if !h.actions.isArmed() {

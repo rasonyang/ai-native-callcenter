@@ -285,7 +285,7 @@ func TestAHandoverTheSwitchDidNotConfirmIsSettledByTheSwitch(t *testing.T) {
 				t.Fatal("the call is not held silent while the transfer is unconfirmed")
 			}
 			// Nothing the model asks for in the meantime arms an ending.
-			h.turn("", flow.ToolHangup, `{}`)
+			h.turn("", flow.ToolHangup, goodbyeHangup)
 			if results := h.toolResults(t, 2); !strings.Contains(results[1].output, `"ok":"1"`) ||
 				h.actions.isArmed() {
 				t.Fatalf("a hangup during the handover was armed: %+v", results[1])
@@ -336,7 +336,7 @@ func TestAHandoverTheSwitchDidNotConfirmIsSettledByTheSwitch(t *testing.T) {
 			}
 			// Never run: the call goes on and may end the ordinary way, the
 			// flow's hangup rule taking it to its goodbye.
-			h.turn("", flow.ToolHangup, `{}`)
+			h.turn("", flow.ToolHangup, goodbyeHangup)
 			results := h.toolResults(t, 4)
 			if !strings.Contains(results[3].output, farewellLine) || !h.actions.isArmed() {
 				t.Errorf("a hangup after the failed handover did not reach the goodbye: %s armed=%v",

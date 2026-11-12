@@ -1647,8 +1647,26 @@ func (r *Realtime) readLoop() {
 			r.log.Debug("ignored non-text frame", "bytes", len(raw))
 			continue
 		}
+		r.traceEvent(event)
 		r.handle(event)
 	}
+}
+
+// traceEvent writes one DEBUG line per provider event, in wire order: the
+// record of what a response's items were and in which order they came (text
+// first or the call first, #484). Sizes only, never the audio or the words.
+// At any other level it costs the one level check.
+func (r *Realtime) traceEvent(event *wireEvent) {
+	if !r.log.Enabled(context.Background(), slog.LevelDebug) {
+		return
+	}
+	itemType := ""
+	if event.Item != nil {
+		itemType = event.Item.Type
+	}
+	r.log.Debug("provider event", "type", event.Type, "itemId", event.ItemID,
+		"responseId", event.ResponseID, "itemType", itemType, "name", event.Name,
+		"deltaBytes", len(event.Delta), "transcriptBytes", len(event.Transcript))
 }
 
 func (r *Realtime) handle(event *wireEvent) {

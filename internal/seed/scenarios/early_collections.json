@@ -57,7 +57,7 @@
       "caller": "92223333",
       "steps": [
         {"say": "No, this is his wife."},
-        {"call": "hangup", "expect": {"phase": "finish", "announce": "Sorry to have bothered you. Thank you, goodbye."}}
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish", "announce": "Sorry to have bothered you. Thank you, goodbye."}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "toolsRun": ["hangup"]}
     },
@@ -79,7 +79,7 @@
       "caller": "18688886666",
       "steps": [
         {"say": "不是,我是他家人"},
-        {"call": "hangup", "expect": {"phase": "finish", "announce": "不好意思打扰了,感谢配合,再见。"}}
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish", "announce": "不好意思打扰了,感谢配合,再见。"}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "toolsRun": ["hangup"]}
     },
@@ -102,7 +102,7 @@
       "caller": "92223333",
       "steps": [
         {"say": "我是机主,我不想聊这个。"},
-        {"call": "hangup", "expect": {"phase": "finish",
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish",
           "announce": "不好意思打扰了,感谢配合,再见。"}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "toolsRun": ["hangup"]}
@@ -115,7 +115,7 @@
       "steps": [
         {"call": "bill_lookup", "expect": {"phase": "remind"}},
         {"say": "我不想谈这个。"},
-        {"call": "hangup", "expect": {"phase": "finish_declined",
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish_declined",
           "announce": "好的,不打扰您了。您也可以随时通过手机营业厅或线下网点缴费。感谢配合,再见。"}}
       ],
       "expect": {"path": ["greet", "remind", "finish_declined"], "ending": "hangup"}

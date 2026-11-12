@@ -347,6 +347,22 @@ history is not trimmed; the response finishes and its call is answered as
 ever. What the muted turn had already played is heard as a fragment. A terminal
 phase without an `announce` keeps the model's own words as the goodbye.
 
+A hangup in a response that was answering the caller is refused before it
+runs, and nothing is muted (issue [#484](https://github.com/rasonyang/ai-native-callcenter/issues/484),
+`internal/aicall/answer_guard.go`). The evidence is the model's own transcript
+deltas of that response up to the moment the call arrived, which every client
+already emits as non-final `OUTPUT_TRANSCRIPT` events (the Realtime client maps
+both `response.audio_transcript.delta` and `response.output_audio_transcript.delta`;
+doubao maps `response.output_text.delta`). A new client needs nothing more than
+to emit its deltas before the tool call they precede, in wire order. A client
+that synthesises a tool call as a turn of its own (doubao) never has words in
+that turn, so the guard never fires there; that is not a trait to set. The
+refusal is held and decided at the response's end only on a client that
+implements `QuietToolAnswerer` (below); elsewhere it goes out at once, asking
+for a turn. `hangup` also takes a required `reason` (`flow.HangupReasons`), so
+its schema in `session.update` is no longer an empty object; nothing about it
+is provider-specific.
+
 ### A tool result that asks for no turn (`QuietToolAnswerer`)
 
 `VoiceSession.SendToolResult` always asks the model for the turn that answers the
@@ -384,6 +400,9 @@ every result asks for its turn as always.
 - **A new client** that can send a result without a turn implements the same
   interface. The orchestrator decides when to use it (`closeToolBatch`); the
   client only has to keep it from touching its turn bookkeeping.
+- **The answer guard's refusal of a hangup** (#484, above) rides the same path:
+  held to the response's end, it is sent quietly when the response's words end
+  in a question, and the ordinary way otherwise.
 
 ## Attaching something that is not a vendor
 

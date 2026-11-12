@@ -164,7 +164,7 @@ func TestTheAnnounceIsTheOnlyGoodbye(t *testing.T) {
 				h := startMutedPath(t, provider.OpenAIProfile(), lang, owedLineFlow)
 				words := mutedWords[lang][i]
 
-				h.callAndAwait(t, flow.ToolHangup, `{}`)
+				h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 				out := h.model.recordedToolResults()[0].output
 				if got, want := hintOf(t, out), provider.SayExactly(owedLines[lang], lang); got != want {
 					t.Fatalf("hint = %q, want the line %q", got, want)
@@ -227,7 +227,7 @@ func TestThePartOfAGoodbyeAfterTheCallIsFlushed(t *testing.T) {
 	// 10 of the 30 frames are still queued when the call arrives: 400 ms played.
 	h.leg.holdFrames(10)
 	h.model.events <- provider.Event{Type: provider.EventTypeToolCall,
-		ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: `{}`}
+		ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: goodbyeHangup}
 	deadline := time.Now().Add(2 * time.Second)
 	for h.leg.clears() == 0 && time.Now().Before(deadline) {
 		time.Sleep(2 * time.Millisecond)
@@ -260,7 +260,7 @@ func TestAHangupWithNoAudioEndsInsideTheGraceCap(t *testing.T) {
 	h.actions.graceCap = 400 * time.Millisecond
 	h.actions.mu.Unlock()
 	start := time.Now()
-	h.callAndAwait(t, flow.ToolHangup, `{}`)
+	h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.awaitCallEnded(t, 3*time.Second)
 	if time.Since(start) < 300*time.Millisecond {
@@ -278,7 +278,7 @@ func TestAHangupWithNoAudioEndsInsideTheGraceCap(t *testing.T) {
 // line the bot said, and it is not the closing line.
 func TestAMutedTurnsLateTranscriptIsNotHeardNorTheClosingLine(t *testing.T) {
 	h := startMutedPath(t, provider.OpenAIProfile(), "en", owedLineFlow)
-	h.callAndAwait(t, flow.ToolHangup, `{}`)
+	h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.settle()
 	h.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript,
@@ -307,7 +307,7 @@ func TestOnDoubaoTheTurnIsMutedAndTheLineIsSpoken(t *testing.T) {
 	for _, lang := range []string{"en", "zh"} {
 		t.Run(lang, func(t *testing.T) {
 			h := startMutedPath(t, provider.DoubaoProfile(), lang, owedLineFlow)
-			h.callAndAwait(t, flow.ToolHangup, `{}`)
+			h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 			h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: frames(600)}
 			h.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript,
 				Text: mutedWords[lang][0], IsFinal: true}
@@ -342,7 +342,7 @@ func TestATerminalPhaseWithoutAnAnnounceIsNotMuted(t *testing.T) {
 				"zh": "谢谢您{slots.name}，再见 👋"
 			},`, "", 1)
 	h := startMutedPath(t, provider.OpenAIProfile(), "en", noLine)
-	h.callAndAwait(t, flow.ToolHangup, `{}`)
+	h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: frames(200)}
 	h.model.events <- provider.Event{Type: provider.EventTypeOutputTranscript,
 		Text: "Goodbye, take care!", IsFinal: true}
@@ -378,7 +378,7 @@ func TestAMoveIntoANonTerminalPhaseIsNotMuted(t *testing.T) {
 // barge-in like any other.
 func TestTheCallerCanTalkOverTheAnnounce(t *testing.T) {
 	h := startMutedPath(t, provider.OpenAIProfile(), "en", owedLineFlow)
-	h.callAndAwait(t, flow.ToolHangup, `{}`)
+	h.callAndAwait(t, flow.ToolHangup, goodbyeHangup)
 	h.model.events <- provider.Event{Type: provider.EventTypeAudioDelta, Audio: frames(400)}
 	h.model.events <- provider.Event{Type: provider.EventTypeResponseDone}
 	h.settle()
@@ -444,7 +444,7 @@ func TestMuteTurnTouchesOnlyItsOwnTurn(t *testing.T) {
 
 // A stray isFarewellSpoken from a model that still believes in it is ignored.
 func TestAStrayFarewellArgumentIsIgnored(t *testing.T) {
-	for _, arg := range []string{`{"isFarewellSpoken":true}`, `{"isFarewellSpoken":false}`} {
+	for _, arg := range []string{`{"reason":"CALLER_GOODBYE","isFarewellSpoken":true}`, `{"isFarewellSpoken":false,"reason":"CALLER_DECLINED_MORE_HELP"}`} {
 		h := startMutedPath(t, provider.OpenAIProfile(), "en", owedLineFlow)
 		h.callAndAwait(t, flow.ToolHangup, arg)
 		out := h.model.recordedToolResults()[0].output

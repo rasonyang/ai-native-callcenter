@@ -24,7 +24,7 @@ func batchPath(t *testing.T, lang string) (*toolPath, *syncBuffer) {
 	h, sink := startOwedLinePath(t, provider.QwenProfile(), lang, 0)
 	answers := h.callTools(t,
 		[2]string{flow.ToolTakeMessage, `{"message":"a"}`},
-		[2]string{flow.ToolHangup, `{}`})
+		[2]string{flow.ToolHangup, goodbyeHangup})
 	if len(answers) != 2 {
 		t.Fatalf("answers = %d, want 2", len(answers))
 	}

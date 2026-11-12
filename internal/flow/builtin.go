@@ -38,6 +38,28 @@ const (
 // LeadIntents is the closed set of record_lead intents.
 var LeadIntents = []string{LeadHigh, LeadMedium, LeadLow, LeadNone, LeadDoNotCall}
 
+// Hangup reasons, the values hangup's reason argument accepts (#484). The model
+// says why it ends the call, in one of these words. The reason is an audit of
+// that choice, kept in the log and the call's record; it claims nothing about
+// what was said or heard, and nothing but its presence is judged.
+const (
+	// HangupCallerGoodbye: the caller said goodbye.
+	HangupCallerGoodbye = "CALLER_GOODBYE"
+	// HangupCallerDeclinedMoreHelp: asked whether they need anything else, the
+	// caller said no.
+	HangupCallerDeclinedMoreHelp = "CALLER_DECLINED_MORE_HELP"
+	// HangupCallerAskedToEnd: the caller asked to end the call, or said they
+	// called the wrong number.
+	HangupCallerAskedToEnd = "CALLER_ASKED_TO_END"
+	// HangupFlowInstructed: the current phase's instructions say to end the
+	// call now (a wrong party, a DO_NOT_CALL, a refusal to talk).
+	HangupFlowInstructed = "FLOW_INSTRUCTED"
+)
+
+// HangupReasons is the closed set of hangup reasons.
+var HangupReasons = []string{HangupCallerGoodbye, HangupCallerDeclinedMoreHelp,
+	HangupCallerAskedToEnd, HangupFlowInstructed}
+
 // MaxLeadNotesRunes caps record_lead's notes. A lead note is a sentence or two
 // an agent reads before the follow-up call, and it becomes the message of the
 // callback a HIGH lead files; a thousand characters holds a full summary in
@@ -88,10 +110,18 @@ type MessageRequest struct {
 	CallbackNumber string `json:"callbackNumber"`
 }
 
-// HangupRequest ends the call. It takes no argument: whether the farewell is
-// the model's or the phase's announce is decided by the flow (a terminal phase
-// with an announce speaks it alone), not by the model's claim about itself.
-type HangupRequest struct{}
+// HangupRequest ends the call. Whether the farewell is the model's or the
+// phase's announce is decided by the flow (a terminal phase with an announce
+// speaks it alone), not by the model's claim about itself, so the request
+// carries no claim about speech (#441).
+type HangupRequest struct {
+	// Reason is why the model ends the call: one of HangupReasons, upper-cased
+	// and trimmed, once the runtime has judged it (#484). A hangup over an
+	// ending already under way, or in a terminal phase, is not judged (the
+	// closing paths answer it as they always did), and carries whatever the
+	// model sent, possibly nothing.
+	Reason string
+}
 
 // LeadRequest is the model recording the stance of a campaign customer. Intent
 // is one of LeadIntents and Notes is within MaxLeadNotesRunes by the time the
@@ -207,6 +237,16 @@ type Actions interface {
 	RecordLead(ctx context.Context, request LeadRequest) (Result, error)
 }
 
+// EndingState is what an Actions may also report: whether the call's ending is
+// already under way. The runtime asks it before judging a hangup's reason
+// (#484): a hangup over an ending already armed, or decided by the platform
+// (the time limit), is the closing paths' to answer (a repeat, a refusal while
+// the closing line is owed, a goodbye over an interruption), exactly as before
+// the reason existed. An Actions without it is never under way.
+type EndingState interface {
+	IsEndingUnderway() bool
+}
+
 // builtinSchemas describes the built-ins to the model, in the call's language.
 //
 // queues are the names the deployment actually has. They become the enum of
@@ -222,8 +262,17 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 		"needed, without announcing it first; say the transfer line afterwards, when the " +
 		"result tells you to."
 	messageDescription := "Take a message for a callback, for when no agent can take the call."
-	hangupDescription := "End the call. Call this as soon as the caller wants to finish, " +
-		"without saying goodbye first; say goodbye afterwards, when the result tells you to."
+	// When, not how fast (#484): "as soon as the caller wants to finish" had a
+	// model answer the caller's first question and end the call in the same
+	// reply. The guards in the runtime and the orchestrator back this text; the
+	// text is what keeps a model from needing them.
+	hangupDescription := "End the call. Call it only when the caller has said goodbye, has " +
+		"asked to end the call, has said they have the wrong number or called by mistake, or " +
+		"has said they need nothing more after you asked whether there is anything else, or " +
+		"when your current instructions tell you to end the call. " +
+		"Never call it in the same reply as an answer to the caller, and never in reply to a " +
+		"question: answer, ask whether there is anything else, and wait for their reply. Do " +
+		"not say goodbye before calling it; say goodbye afterwards, when the result tells you to."
 	leadDescription := "Record what this call concluded about the customer. Call it as soon as " +
 		"their stance is clear and again whenever it changes; the last call counts. Intent: HIGH = " +
 		"wants the offer or a follow-up from a person, MEDIUM = interested but undecided, LOW = " +
@@ -237,8 +286,12 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 		transferDescription = "转接人工坐席。需要转人工时立即调用，不要先播报；" +
 			"工具返回后再按提示播报转接话术。"
 		messageDescription = "记录留言与回电号码，用于无人接听或非营业时间。"
-		hangupDescription = "结束通话。用户表示要结束时立即调用，不要先道别；" +
-			"工具返回后再道别，道别说完线路自动挂断。"
+		hangupDescription = "结束通话。只在以下情况调用：来电者已经道别；来电者要求结束通话；" +
+			"来电者说打错电话或拨错号码了；" +
+			"你问过还有没有其他需要，来电者说没有了；或者当前指令要求你结束通话。" +
+			"不要在回答来电者的同一次回复里调用，来电者提问时也不要调用：先回答，" +
+			"再问还有没有其他需要，等对方回复。调用前不要先道别；" +
+			"工具返回后按提示道别，道别说完线路自动挂断。"
 	}
 
 	return map[string]Tool{
@@ -274,12 +327,35 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 		ToolHangup: {
 			name:        ToolHangup,
 			Description: Text{EN: hangupDescription, ZH: hangupDescription},
-			Parameters: json.RawMessage(`{
-				"type": "object",
-				"properties": {}
-			}`),
+			Parameters:  hangupParameters(isZH),
 		},
 	}
+}
+
+// hangupParameters is hangup's schema: the one required argument, reason, an
+// enum of HangupReasons with each value's meaning, in the call's language.
+func hangupParameters(isZH bool) json.RawMessage {
+	description := "Why the call ends. CALLER_GOODBYE: the caller said goodbye. " +
+		"CALLER_DECLINED_MORE_HELP: you asked whether they need anything else and they said no. " +
+		"CALLER_ASKED_TO_END: the caller asked to end the call, or said they called the wrong number. " +
+		"FLOW_INSTRUCTED: your current instructions tell you to end the call now."
+	if isZH {
+		description = "结束通话的原因。CALLER_GOODBYE：来电者道别了。" +
+			"CALLER_DECLINED_MORE_HELP：你问过还有没有其他需要，来电者说没有了。" +
+			"CALLER_ASKED_TO_END：来电者要求结束通话，或者说打错电话了。" +
+			"FLOW_INSTRUCTED：当前指令要求你现在结束通话。"
+	}
+	schema, err := json.Marshal(map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"reason": map[string]any{"type": "string", "description": description, "enum": HangupReasons},
+		},
+		"required": []string{"reason"},
+	})
+	if err != nil {
+		return json.RawMessage(`{"type": "object", "properties": {}}`)
+	}
+	return schema
 }
 
 // transferParameters is transfer_to_agent's schema, with the queues this

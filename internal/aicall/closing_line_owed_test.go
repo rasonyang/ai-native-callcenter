@@ -108,7 +108,7 @@ func TestAnAudioLessTurnAfterTheLineIsAskedForIsNotTheLine(t *testing.T) {
 			h, _ := startOwedLinePath(t, provider.QwenProfile(), lang, 0)
 			line := owedLines[lang]
 
-			first := h.callTool(t, flow.ToolHangup, `{}`)
+			first := h.callTool(t, flow.ToolHangup, goodbyeHangup)
 			if got, want := hintOf(t, first.output), provider.SayExactly(line, lang); got != want {
 				t.Fatalf("hint = %q, want the rendered line %q", got, want)
 			}
@@ -146,7 +146,7 @@ func TestAnAudioLessTurnAfterTheLineIsAskedForIsNotTheLine(t *testing.T) {
 func TestAModelThatNeverSpeaksTheOwedLineEndsAtTheCapWithAWarning(t *testing.T) {
 	h, sink := startOwedLinePath(t, provider.QwenProfile(), "en", 500*time.Millisecond)
 
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.endResponse()
 	h.bareHangup(t, 2)
 	h.endResponse()
@@ -166,7 +166,7 @@ func TestAModelThatNeverSpeaksTheOwedLineEndsAtTheCapWithAWarning(t *testing.T) 
 // and ends the call.
 func TestAParaphrasedLineStillEndsTheCall(t *testing.T) {
 	h, _ := startOwedLinePath(t, provider.QwenProfile(), "en", 0)
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.endResponse()
 	h.playTurn()
 	h.awaitCallEnded(t, 2*time.Second)
@@ -176,7 +176,7 @@ func TestAParaphrasedLineStillEndsTheCall(t *testing.T) {
 // ends on the playback of that turn, not on the cap.
 func TestAModelThatInsistsOnHangupAfterTheRefusalGetsIt(t *testing.T) {
 	h, sink := startOwedLinePath(t, provider.QwenProfile(), "en", 0)
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.endResponse()
 	if r := h.bareHangup(t, 2); !strings.Contains(r.output, "CALL_ENDING") {
 		t.Fatalf("second hangup answered %s, want a refusal", r.output)
@@ -202,7 +202,7 @@ func TestSeveralToolsThenHangupAskForOneResponseAndOweTheLine(t *testing.T) {
 	answers := h.callTools(t,
 		[2]string{flow.ToolTakeMessage, `{"message":"a"}`},
 		[2]string{flow.ToolTakeMessage, `{"message":"b"}`},
-		[2]string{flow.ToolHangup, `{}`})
+		[2]string{flow.ToolHangup, goodbyeHangup})
 	h.endResponse()
 	if len(answers) != 3 {
 		t.Fatalf("answers = %d, want 3", len(answers))
@@ -225,7 +225,7 @@ func TestSeveralToolsThenHangupAskForOneResponseAndOweTheLine(t *testing.T) {
 // nothing: neither is held back.
 func TestNoLineOwedOnDoubaoOrWithoutALine(t *testing.T) {
 	h, _ := startOwedLinePath(t, provider.DoubaoProfile(), "en", 0)
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h.actions.mu.Lock()
 	isOwed := h.actions.isLineOwed
 	h.actions.mu.Unlock()
@@ -238,7 +238,7 @@ func TestNoLineOwedOnDoubaoOrWithoutALine(t *testing.T) {
 				"en": "Thank you {slots.name}, goodbye 👋",
 				"zh": "谢谢您{slots.name}，再见 👋"
 			},`, "", 1))
-	h2.callTool(t, flow.ToolHangup, `{}`)
+	h2.callTool(t, flow.ToolHangup, goodbyeHangup)
 	h2.actions.mu.Lock()
 	isOwed = h2.actions.isLineOwed
 	h2.actions.mu.Unlock()
@@ -311,7 +311,7 @@ func TestATurnThatSpokeBeforeItsToolsDoesNotCountAsTheLine(t *testing.T) {
 		Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*2),
 	}
 	h.model.events <- provider.Event{
-		Type: provider.EventTypeToolCall, ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: `{}`,
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: goodbyeHangup,
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.model.recordedToolResults()) < 1 && time.Now().Before(deadline) {
@@ -342,7 +342,7 @@ func TestAModelThatInsistsAfterASpokenArmingTurnEndsWithoutWaitingForTheCap(t *t
 		Type: provider.EventTypeAudioDelta, Audio: make([]byte, media.FrameSamples*2),
 	}
 	h.model.events <- provider.Event{
-		Type: provider.EventTypeToolCall, ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: `{}`,
+		Type: provider.EventTypeToolCall, ToolCallID: "fc_1", ToolName: flow.ToolHangup, ToolArgs: goodbyeHangup,
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for len(h.model.recordedToolResults()) < 1 && time.Now().Before(deadline) {

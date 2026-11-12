@@ -403,8 +403,10 @@ func (a *callActions) leadHint() string {
 		"with the conversation, and you may try again later if it still matters."
 }
 
-// Hangup ends the call once the goodbye has been heard.
-func (a *callActions) Hangup(ctx context.Context, _ flow.HangupRequest) (flow.Result, error) {
+// Hangup ends the call once the goodbye has been heard. The reason the model
+// gave (#484) goes to the ledger with the hangup that arms the ending; one
+// that finds the ending already armed or decided changes nothing there.
+func (a *callActions) Hangup(ctx context.Context, request flow.HangupRequest) (flow.Result, error) {
 	if a.isEndingDecided() {
 		a.log.Info("hangup ignored: the call's time limit has already decided how it ends")
 		return flow.Succeeded(nil, ""), nil
@@ -434,9 +436,10 @@ func (a *callActions) Hangup(ctx context.Context, _ flow.HangupRequest) (flow.Re
 	}
 	if a.recorder != nil {
 		a.recorder.markHangup()
+		a.recorder.markHangupReason(request.Reason)
 	}
 	a.arm(ctx, func() {
-		a.log.Info("hanging up after the farewell")
+		a.log.Info("hanging up after the farewell", "reason", request.Reason)
 		a.markFinished("HANGUP")
 		a.session.Close(context.Background())
 	})
@@ -542,6 +545,13 @@ func (a *callActions) runAtCap(generation int) {
 			"after the action was armed")
 	}
 	armed()
+}
+
+// IsEndingUnderway is flow.EndingState: the call's ending is armed, decided by
+// the time limit, or a transfer is being handed over. A hangup then is the
+// closing paths' to answer, and the runtime does not judge its reason (#484).
+func (a *callActions) IsEndingUnderway() bool {
+	return a.isArmed() || a.isEndingDecided() || a.isSettlingHandover()
 }
 
 // isArmed reports whether an action is already waiting for the closing line.

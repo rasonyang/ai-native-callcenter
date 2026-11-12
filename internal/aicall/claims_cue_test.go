@@ -257,7 +257,7 @@ func TestABackedClaimIsNotAskedFor(t *testing.T) {
 	h.turn("好的，我帮您查询一下，维修中。", "", "")
 	settle()
 	// An armed ending.
-	h.turn("", "hangup", `{}`)
+	h.turn("", "hangup", goodbyeHangup)
 	h.awaitToolResults(t, 2)
 	h.turn("好的，我马上为您转接人工客服。", "", "")
 	settle()
