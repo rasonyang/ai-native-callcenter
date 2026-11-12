@@ -10,7 +10,7 @@
         {"call": "appt_slots", "expect": {"phase": "book"}},
         {"call": "appt_book", "args": {"date_choice": 1, "item": "phone screen repair", "address": "12 Lakeside Road"}, "expect": {
           "phase": "done_book", "slots": {"appt_book.args.item": "phone screen repair"}}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["welcome", "book", "done_book", "finish"], "ending": "hangup",
         "toolsRun": ["appt_lookup", "appt_slots", "appt_book", "hangup"]}
@@ -22,7 +22,7 @@
       "steps": [
         {"call": "appt_lookup", "expect": {"phase": "manage", "result": {"found": "1", "appt_id": "AP1999"}}},
         {"call": "appt_confirm", "expect": {"phase": "done_confirm", "result": {"confirmed": "1"}}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["welcome", "manage", "done_confirm", "finish"], "ending": "hangup"}
     },

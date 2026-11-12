@@ -61,7 +61,7 @@ func TestRenderCutOpenerSession(t *testing.T) {
 			Tools: runtime.Tools(), Temperature: spec.Global.Temperature}
 		s.RecordOutput, _ = runtime.Dispatch(t.Context(), ToolRecordLead,
 			`{"intent":"DO_NOT_CALL","notes":"The customer asked not to be called again."}`)
-		output, moved := runtime.Dispatch(t.Context(), "hangup", `{}`)
+		output, moved := runtime.Dispatch(t.Context(), "hangup", `{"reason":"FLOW_INSTRUCTED"}`)
 		if moved == "" || runtime.Announce() == "" {
 			t.Fatalf("%s: hangup moved to %q, which has no line", language, moved)
 		}

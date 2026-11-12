@@ -349,7 +349,7 @@ func TestDriveDoesNotFlagClaimsAToolBacks(t *testing.T) {
 	h.turn("I've passed on your message.", "", "")
 	h.callerSays("thanks, bye")
 	// Goodbye in the same turn as the hangup.
-	h.turn("Goodbye!", flow.ToolHangup, `{}`)
+	h.turn("Goodbye!", flow.ToolHangup, goodbyeHangup)
 	h.awaitToolResults(t, 2)
 	// The reply to the hangup is cut short, so the next turn is not a reply
 	// to anything — only the armed hangup backs its goodbye.

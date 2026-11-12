@@ -16,7 +16,7 @@
         "对方表示不方便或不感兴趣,礼貌感谢并尽快结束,不要纠缠。",
         "工具返回里的 hint 字段是给你的流程提示,照做。",
         "用户任何时候要求人工,立即调用 transfer_to_agent。",
-        "用户明确表达要结束通话,立即调用 hangup,不要自己道别:结束语由系统说。"
+        "只在来电者道别、要求结束通话,或者你问过还有没有其他需要而对方说没有了的时候调用 hangup,不要在回答问题的同一次回复里调用,来电者提问时也不要调用;不要自己道别:结束语由系统说。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, relaxed and friendly — no sales pressure.",
@@ -25,7 +25,7 @@
         "If the caller is busy or not interested, thank them politely and wrap up quickly — do not push.",
         "The hint field in tool results is your flow guidance; follow it.",
         "Whenever the caller asks for an agent, call transfer_to_agent immediately.",
-        "When the caller clearly wants to end the call, call hangup immediately and do not say goodbye yourself: the closing line is spoken for you."
+        "Call hangup only when the caller says goodbye, asks to end the call, or says they need nothing more after you asked whether there is anything else, never in the same reply as an answer or in reply to a question; do not say goodbye yourself: the closing line is spoken for you."
       ]
     },
     "voice": "",

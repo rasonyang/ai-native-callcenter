@@ -9,7 +9,7 @@
         {"say": "I'm interested, but I have to go. Bye."},
         {"batch": [
           {"call": "record_interest", "args": {"value": "mid"}},
-          {"call": "hangup"}
+          {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}
         ], "expect": {"phase": "finish", "announce": "Thanks for your time, goodbye."}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "slots": {"interest": "mid"}}
@@ -23,7 +23,7 @@
         {"say": "有点兴趣,不过我得走了,再见。"},
         {"batch": [
           {"call": "record_interest", "args": {"value": "mid"}},
-          {"call": "hangup"}
+          {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}
         ], "expect": {"phase": "finish", "announce": "感谢您的时间,再见。"}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup", "slots": {"interest": "mid"}}
@@ -67,7 +67,7 @@
       "lang": "en",
       "caller": "13900008888",
       "steps": [
-        {"call": "hangup", "expect": {"phase": "finish", "announce": "Thanks for your time, goodbye."}}
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "Thanks for your time, goodbye."}}
       ],
       "expect": {"path": ["greet", "finish"], "ending": "hangup"}
     },

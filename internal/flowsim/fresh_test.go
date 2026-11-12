@@ -39,7 +39,7 @@ func bookingBot(lookups *[]string) *fakeChat {
 			*lookups = append(*lookups, "1")
 			return text("You already have a booking."), nil
 		case last.Role == "tool" && strings.Contains(last.Content, "appt_id"):
-			return tool("hangup", `{}`), nil
+			return tool("hangup", `{"reason":"CALLER_GOODBYE"}`), nil
 		case last.Role == "tool":
 			return text("Bye."), nil
 		}

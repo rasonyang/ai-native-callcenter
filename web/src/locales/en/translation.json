@@ -787,7 +787,7 @@
     "builtin": {
       "transfer_to_agent": "Hand the caller to a queue of people. Always allowed; may refuse when the queue is closed.",
       "take_message": "Record a callback request for an agent to return.",
-      "hangup": "End the call once the caller is done."
+      "hangup": "End the call once the caller says goodbye, needs nothing more or has the wrong number. The model names the reason, which is recorded."
     },
     "required": "Required"
   },

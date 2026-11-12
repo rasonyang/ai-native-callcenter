@@ -16,7 +16,7 @@
         "只与机主本人沟通账单信息;对方表示不是机主本人时,不透露任何账单细节,礼貌结束通话。",
         "账单金额、逾期天数必须来自工具返回,严禁编造。工具返回里的 hint 字段是给你的流程提示,照做。",
         "用户任何时候要求人工,立即调用 transfer_to_agent;用户对账单有异议时不要争辩,记录异议并转专员。",
-        "用户明确表达要结束通话,立即调用 hangup,不要自己道别:结束语由系统说。"
+        "只在来电者道别、要求结束通话,或者你问过还有没有其他需要而对方说没有了的时候调用 hangup,不要在回答问题的同一次回复里调用,来电者提问时也不要调用;不要自己道别:结束语由系统说。"
       ],
       "en": [
         "This is a spoken phone conversation: keep every reply to one or two short sentences, conversational, no lists or written formatting.",
@@ -25,7 +25,7 @@
         "Discuss bill details only with the account owner; if the answerer is not the owner, disclose nothing and end the call politely.",
         "Bill amounts and overdue days must come from tool results — never invent them. The hint field is your flow guidance; follow it.",
         "Whenever the caller asks for an agent, call transfer_to_agent; if the caller disputes the bill, never argue — record the dispute and hand over to a specialist.",
-        "When the caller clearly wants to end the call, call hangup immediately and do not say goodbye yourself: the closing line is spoken for you."
+        "Call hangup only when the caller says goodbye, asks to end the call, or says they need nothing more after you asked whether there is anything else, never in the same reply as an answer or in reply to a question; do not say goodbye yourself: the closing line is spoken for you."
       ]
     },
     "voice": "",
@@ -63,8 +63,8 @@
         "en": "Hello, this is NovaNet Broadband customer service. Am I speaking with the account holder of the number ending in 6666?"
       },
       "instruction": {
-        "zh": "开场白已经报过号码尾数,并问过对方是不是机主本人:不要重复、改动或补充任何号码数字。根据对方的回答处理:对方确认是机主本人,立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,不要自己道歉或道别,立即调用 hangup,致歉和结束语由系统说。对方明确表示不想聊、不愿继续通话:不要自己道别,也不要追问,立即调用 hangup,结束语由系统说。对方问你们是谁、有什么事:用一句话简短回答,不提账单和金额,然后再问一次对方是不是机主本人。对方的话听不清、只有一两个字,或者没有回答这个问题:直接再问一次对方是不是机主本人。确认身份之前不要问“有什么可以帮您”,也不要报任何号码。",
-        "en": "The opening line has already named the number's last digits and asked whether you are speaking with the account holder: never repeat, change or add to any digits of a number. Go by the caller's answer. If they confirm they are the account holder: call bill_lookup immediately. If the answerer is not the account holder: disclose nothing and call hangup immediately without apologizing or saying goodbye yourself; the apology and goodbye are spoken for you. If they say they do not want to talk or continue the call: do not say goodbye yourself and do not ask anything more; call hangup immediately, the closing line is spoken for you. If they ask who is calling or why: answer in one short sentence without mentioning the bill or any amount, then ask again whether you are speaking with the account holder. If their answer is unclear, only a word or two, or does not answer the question: just ask again whether you are speaking with the account holder. Until they have confirmed, never ask how you can help, and never say any number."
+        "zh": "开场白已经报过号码尾数,并问过对方是不是机主本人:不要重复、改动或补充任何号码数字。根据对方的回答处理:对方确认是机主本人,立即调用 bill_lookup 查询账单。对方不是本人:不透露任何信息,不要自己道歉或道别,立即调用 hangup(reason 填 FLOW_INSTRUCTED),致歉和结束语由系统说。对方明确表示不想聊、不愿继续通话:不要自己道别,也不要追问,立即调用 hangup(reason 填 FLOW_INSTRUCTED),结束语由系统说。对方问你们是谁、有什么事:用一句话简短回答,不提账单和金额,然后再问一次对方是不是机主本人。对方的话听不清、只有一两个字,或者没有回答这个问题:直接再问一次对方是不是机主本人。确认身份之前不要问“有什么可以帮您”,也不要报任何号码。",
+        "en": "The opening line has already named the number's last digits and asked whether you are speaking with the account holder: never repeat, change or add to any digits of a number. Go by the caller's answer. If they confirm they are the account holder: call bill_lookup immediately. If the answerer is not the account holder: disclose nothing and call hangup immediately with reason FLOW_INSTRUCTED, without apologizing or saying goodbye yourself; the apology and goodbye are spoken for you. If they say they do not want to talk or continue the call: do not say goodbye yourself and do not ask anything more; call hangup immediately with reason FLOW_INSTRUCTED, the closing line is spoken for you. If they ask who is calling or why: answer in one short sentence without mentioning the bill or any amount, then ask again whether you are speaking with the account holder. If their answer is unclear, only a word or two, or does not answer the question: just ask again whether you are speaking with the account holder. Until they have confirmed, never ask how you can help, and never say any number."
       },
       "tools": [
         "bill_lookup"
@@ -95,8 +95,8 @@
     },
     "remind": {
       "instruction": {
-        "zh": "友好提醒:您有一笔 {slots.bill_lookup.amount} 元的账单,应缴日期是 {slots.bill_lookup.due_date},目前已过期 {slots.bill_lookup.days_overdue} 天,可能是忘记缴了。询问用户大概什么时候方便处理。用户给出时间:复述确认后调用 promise_record 记录。用户表示已缴、金额不对或有其它异议:不要争辩,简要确认异议内容后调用 dispute_record 记录。用户明确拒绝沟通:不纠缠,立即调用 hangup,不要自己道别;结束语(含缴费渠道提示)由系统说。",
-        "en": "Friendly reminder: there is a bill of {slots.bill_lookup.amount} yuan due on {slots.bill_lookup.due_date}, now {slots.bill_lookup.days_overdue} days overdue — likely just an oversight (translate dates to English naturally). Ask when it would be convenient to settle it. If the caller gives a time: restate it, confirm, and call promise_record. If they say it is wrong, already paid, or dispute anything: do not argue — summarize the dispute briefly and call dispute_record. If they refuse to engage: do not push; call hangup immediately without saying goodbye yourself; the closing line, which mentions the app and service centers, is spoken for you."
+        "zh": "友好提醒:您有一笔 {slots.bill_lookup.amount} 元的账单,应缴日期是 {slots.bill_lookup.due_date},目前已过期 {slots.bill_lookup.days_overdue} 天,可能是忘记缴了。询问用户大概什么时候方便处理。用户给出时间:复述确认后调用 promise_record 记录。用户表示已缴、金额不对或有其它异议:不要争辩,简要确认异议内容后调用 dispute_record 记录。用户明确拒绝沟通:不纠缠,立即调用 hangup(reason 填 FLOW_INSTRUCTED),不要自己道别;结束语(含缴费渠道提示)由系统说。",
+        "en": "Friendly reminder: there is a bill of {slots.bill_lookup.amount} yuan due on {slots.bill_lookup.due_date}, now {slots.bill_lookup.days_overdue} days overdue — likely just an oversight (translate dates to English naturally). Ask when it would be convenient to settle it. If the caller gives a time: restate it, confirm, and call promise_record. If they say it is wrong, already paid, or dispute anything: do not argue — summarize the dispute briefly and call dispute_record. If they refuse to engage: do not push; call hangup immediately with reason FLOW_INSTRUCTED, without saying goodbye yourself; the closing line, which mentions the app and service centers, is spoken for you."
       },
       "tools": [
         "promise_record",

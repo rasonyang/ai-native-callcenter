@@ -7,6 +7,37 @@ carries the one-line installer's files.
 
 ## Unreleased
 
+### Upgrade notes
+
+- The built-in `hangup` now takes a required argument, `reason`:
+  `CALLER_GOODBYE`, `CALLER_DECLINED_MORE_HELP`, `CALLER_ASKED_TO_END` or
+  `FLOW_INSTRUCTED`. A flow needs no change to keep working, but one whose
+  instructions order a hangup for the flow's own reasons (a wrong party, a
+  do-not-call request, a refusal to talk) should say "call hangup with reason
+  FLOW_INSTRUCTED", as the shipped flows now do. Flow simulator scenarios: a
+  `hangup` step gives the reason in `args`
+  (`{"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}`); one without it
+  now fails unless the step expects the refusal (`"isRefused": true`) (#484).
+- No migration and no API contract change.
+
+### Changed
+
+- A `hangup` the bot makes in a reply that has already started answering the
+  caller is refused: the answer keeps playing, and the bot asks whether
+  anything else is needed. The guard judges only the bot's own words, refuses
+  once per caller turn, cannot judge a `hangup` that arrives before the reply's
+  first words (that case is logged), and leaves a real goodbye alone ("No,
+  that's all, bye" still ends the call, with the closing line heard). A
+  `hangup` without a valid `reason` is refused as well and changes nothing. The
+  reason is written to the log and, for a call the bot hung up, to the CDR's
+  `userData.botReason` (not on a call an agent placed to a bot number, whose
+  record the agent's side writes). The tool's description, the platform's
+  standing rules and the shipped flows now say when to hang up (the caller said
+  goodbye, asked to end the call, or declined more help after being asked)
+  rather than to hang up as soon as the caller seems to want to finish. The
+  description and `novanet_support` also count a caller who says they have the
+  wrong number as asking to end the call (`CALLER_ASKED_TO_END`) (#484).
+
 ## v0.8.3 - 2026-11-12
 
 ### Upgrade notes

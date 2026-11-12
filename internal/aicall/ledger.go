@@ -75,6 +75,9 @@ type callRecorder struct {
 	// channel; a transfer that never ran leaves this row as the only one.
 	transferSummary string
 	transferReason  string
+	// hangupReason is why the model ended the call (flow.HangupReasons,
+	// #484), from the hangup that armed the ending; empty when none did.
+	hangupReason string
 	// endReason distinguishes how the conversation closed, for containment:
 	// "" (caller hung up or failure), "HANGUP" (the bot closed it properly),
 	// "TRANSFER".
@@ -244,6 +247,15 @@ func (r *callRecorder) markHangup() {
 	r.mu.Unlock()
 }
 
+// markHangupReason records why the model ended the call (#484). It reaches the
+// row as userData.botReason, the key a transfer's reason is kept under, on a
+// row this recorder writes for a call the bot hung up.
+func (r *callRecorder) markHangupReason(reason string) {
+	r.mu.Lock()
+	r.hangupReason = reason
+	r.mu.Unlock()
+}
+
 // hangupCauseSessionLimit is what a call ended by the flow's time limit is
 // released with (02 §7).
 const hangupCauseSessionLimit = "SESSION_LIMIT"
@@ -319,6 +331,7 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	transferQueue := r.transferQueue
 	transferSummary := r.transferSummary
 	transferReason := r.transferReason
+	hangupReason := r.hangupReason
 	isSessionLimited := r.isSessionLimited
 	r.mu.Unlock()
 	unbackedClaims := r.unbackedClaimList()
@@ -363,8 +376,17 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 	// (telephony's CDRAssembler.assemble), so a reader finds the same fields
 	// whichever path wrote the row. Without it a transfer the caller hung up
 	// on lost the summary from the ledger, though the bot had produced it.
+	//
+	// A call the bot hung up carries the model's reason for it (#484) under
+	// the same botReason, unless a transfer's reason is already there (a
+	// transfer that never ran, then a hangup): that one says why the caller
+	// was going to a person, which the row cannot say otherwise.
 	userData := call.userData
-	if transferSummary != "" || transferReason != "" {
+	botReason := transferReason
+	if botReason == "" && endReason == "HANGUP" {
+		botReason = hangupReason
+	}
+	if transferSummary != "" || botReason != "" {
 		userData = maps.Clone(call.userData)
 		if userData == nil {
 			userData = map[string]any{}
@@ -372,8 +394,8 @@ func (r *callRecorder) finish(ledger Ledger, call *callFacts, log *slog.Logger) 
 		if transferSummary != "" {
 			userData["botSummary"] = transferSummary
 		}
-		if transferReason != "" {
-			userData["botReason"] = transferReason
+		if botReason != "" {
+			userData["botReason"] = botReason
 		}
 	}
 

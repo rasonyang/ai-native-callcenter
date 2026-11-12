@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -135,6 +136,14 @@ type Event struct {
 	// engine cut the bot by itself and the verdict on the words is still
 	// pending or known (openCut). Only the orchestrator in this package reads it.
 	cut *openCut
+
+	// soFar is, on a TOOL_CALL, what the response that made the call had said
+	// and queued when the call arrived, and how many calls it had made before
+	// it; on a TURN_DONE, the turn's words (soFar.text). Read at emit, like
+	// cut, because the session runs ahead of the orchestrator and its state
+	// has moved on by the time the event is handled (#484). Only the
+	// orchestrator in this package reads it.
+	soFar responseSoFar
 
 	// IsInterrupted marks a TURN_DONE whose turn was cut short — by the
 	// caller, by a keypress, or to make room for another turn. Such a turn
@@ -355,6 +364,15 @@ type Session struct {
 	idleGeneration  uint64
 	// turnSeq numbers model turns, so events can say which turn they belong to.
 	turnSeq int
+	// turnText is what the turn in progress has said so far, from the model's
+	// transcript (noteBotWords), at most maxTurnTextBytes; turnTextHasDeltas
+	// says a delta fed it, so the final that repeats them is not added again;
+	// turnToolCalls counts the tool calls the turn has made. All three are
+	// reset by beginTurn and read into a TOOL_CALL or TURN_DONE when it is
+	// emitted (Event.soFar). The buffer is reused from turn to turn.
+	turnText          []byte
+	turnTextHasDeltas bool
+	turnToolCalls     int
 	// isAsideOwed says SpeakAside asked for a line and no turn has started
 	// since; asideTurn is the turn that said the latest aside, zero for none.
 	// See SpeakAside.
@@ -1101,7 +1119,8 @@ func (s *Session) handleModelEvent(event provider.Event) {
 				}
 			}
 		}
-		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside})
+		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, IsInterrupted: true, IsAside: isAside,
+			soFar: responseSoFar{text: s.turnWords()}})
 
 	case provider.EventTypeResponseStarted:
 		s.beginTurn(event.IsSpokenLine, event.IsLineAskedAgain)
@@ -1109,12 +1128,16 @@ func (s *Session) handleModelEvent(event provider.Event) {
 	case provider.EventTypeResponseDone:
 		hasAudio := s.finishTurn(event.IsAbandoned)
 		turn, isAside := s.turnState()
-		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside})
+		s.emit(Event{Type: EventTypeTurnDone, Turn: turn, HasAudio: hasAudio, IsAside: isAside,
+			soFar: responseSoFar{text: s.turnWords()}})
 
 	case provider.EventTypeInputTranscript:
 		s.onInputTranscript(event)
 
 	case provider.EventTypeOutputTranscript:
+		// Kept for the turn first, so a tool call that follows is judged with
+		// every word that came before it on the wire (Event.soFar).
+		s.noteBotWords(event.Text, event.IsFinal)
 		// The turn rides along so the line can be judged with the tool calls
 		// of its own response (claimWatch).
 		turn, isAside := s.turnState()
@@ -1122,11 +1145,11 @@ func (s *Session) handleModelEvent(event provider.Event) {
 			Turn: turn, IsAside: isAside})
 
 	case provider.EventTypeToolCall:
-		turn := s.currentTurn()
+		turn, soFar := s.toolCallSoFar()
 		s.emit(Event{
 			Type: EventTypeToolCall, ToolCallID: event.ToolCallID,
 			ToolName: event.ToolName, ToolArgs: event.ToolArgs,
-			Turn: turn, cut: s.cutFor(turn),
+			Turn: turn, cut: s.cutFor(turn), soFar: soFar,
 		})
 
 	case provider.EventTypeError:
@@ -1425,6 +1448,9 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.mu.Lock()
 	s.framesQueued = 0
 	s.turnSeq++
+	s.turnText = s.turnText[:0]
+	s.turnTextHasDeltas = false
+	s.turnToolCalls = 0
 	switch {
 	case s.isAsideOwed:
 		s.isAsideOwed = false
@@ -1462,6 +1488,82 @@ func (s *Session) beginTurn(isSpokenLine, isLineAskedAgain bool) {
 	s.drainGeneration++
 	s.idleGeneration++
 	s.mu.Unlock()
+}
+
+// responseSoFar is what a response had done by the moment one of its events
+// was emitted (Event.soFar).
+type responseSoFar struct {
+	// text is the words it had said, as the model's transcript gave them
+	// (noteBotWords), at most maxTurnTextBytes.
+	text string
+	// audio is how much of its own audio it had queued for the caller.
+	audio time.Duration
+	// queued is how much audio, of any turn, was still waiting to be played.
+	queued time.Duration
+	// priorCalls is how many tool calls it had made before this one.
+	priorCalls int
+}
+
+// maxTurnTextBytes bounds the words a turn keeps for judging the tool calls
+// it makes (#484). A KiB is a long spoken answer in either language, and what
+// is judged lies near its start: whether it says anything at all, and whether
+// it is a goodbye.
+const maxTurnTextBytes = 1024
+
+// noteBotWords adds a piece of the model's transcript to the words of the turn
+// in progress. The deltas are the words as they come (both Realtime event
+// names, and doubao's text deltas, arrive as non-final OUTPUT_TRANSCRIPTs); a
+// final repeats what its deltas said and is added only for a turn that sent
+// none. Past maxTurnTextBytes the rest is dropped, cut at a character
+// boundary. This is not the per-frame path, but it runs on every delta, so it
+// reuses one buffer and allocates nothing once that has grown.
+func (s *Session) noteBotWords(text string, isFinal bool) {
+	if text == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if isFinal && s.turnTextHasDeltas {
+		return
+	}
+	if !isFinal {
+		s.turnTextHasDeltas = true
+	} else if len(s.turnText) > 0 {
+		s.turnText = append(s.turnText, ' ')
+	}
+	room := maxTurnTextBytes - len(s.turnText)
+	if room <= 0 {
+		return
+	}
+	if len(text) > room {
+		for room > 0 && !utf8.RuneStart(text[room]) {
+			room--
+		}
+		text = text[:room]
+	}
+	s.turnText = append(s.turnText, text...)
+}
+
+// turnWords is the words of the turn in progress so far.
+func (s *Session) turnWords() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return string(s.turnText)
+}
+
+// toolCallSoFar numbers a tool call of the turn in progress and reports the
+// turn and what its response had done before the call (responseSoFar).
+func (s *Session) toolCallSoFar() (turn int, soFar responseSoFar) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	soFar = responseSoFar{
+		text:       string(s.turnText),
+		audio:      time.Duration(s.framesQueued*frameDurationMs) * time.Millisecond,
+		queued:     time.Duration(s.leg.Pending()*frameDurationMs) * time.Millisecond,
+		priorCalls: s.turnToolCalls,
+	}
+	s.turnToolCalls++
+	return s.turnSeq, soFar
 }
 
 // isHoldingTheFloor reports whether the bot has the floor: a turn is being

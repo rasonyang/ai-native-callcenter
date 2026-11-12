@@ -5,10 +5,24 @@
     "tools": [
       {
         "Name": "hangup",
-        "Description": "End the call. Call this as soon as the caller wants to finish, without saying goodbye first; say goodbye afterwards, when the result tells you to.",
+        "Description": "End the call. Call it only when the caller has said goodbye, has asked to end the call, has said they have the wrong number or called by mistake, or has said they need nothing more after you asked whether there is anything else, or when your current instructions tell you to end the call. Never call it in the same reply as an answer to the caller, and never in reply to a question: answer, ask whether there is anything else, and wait for their reply. Do not say goodbye before calling it; say goodbye afterwards, when the result tells you to.",
         "Parameters": {
-          "type": "object",
-          "properties": {}
+          "properties": {
+            "reason": {
+              "description": "Why the call ends. CALLER_GOODBYE: the caller said goodbye. CALLER_DECLINED_MORE_HELP: you asked whether they need anything else and they said no. CALLER_ASKED_TO_END: the caller asked to end the call, or said they called the wrong number. FLOW_INSTRUCTED: your current instructions tell you to end the call now.",
+              "enum": [
+                "CALLER_GOODBYE",
+                "CALLER_DECLINED_MORE_HELP",
+                "CALLER_ASKED_TO_END",
+                "FLOW_INSTRUCTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
         }
       },
       {
@@ -51,10 +65,24 @@
     "tools": [
       {
         "Name": "hangup",
-        "Description": "结束通话。用户表示要结束时立即调用，不要先道别；工具返回后再道别，道别说完线路自动挂断。",
+        "Description": "结束通话。只在以下情况调用：来电者已经道别；来电者要求结束通话；来电者说打错电话或拨错号码了；你问过还有没有其他需要，来电者说没有了；或者当前指令要求你结束通话。不要在回答来电者的同一次回复里调用，来电者提问时也不要调用：先回答，再问还有没有其他需要，等对方回复。调用前不要先道别；工具返回后按提示道别，道别说完线路自动挂断。",
         "Parameters": {
-          "type": "object",
-          "properties": {}
+          "properties": {
+            "reason": {
+              "description": "结束通话的原因。CALLER_GOODBYE：来电者道别了。CALLER_DECLINED_MORE_HELP：你问过还有没有其他需要，来电者说没有了。CALLER_ASKED_TO_END：来电者要求结束通话，或者说打错电话了。FLOW_INSTRUCTED：当前指令要求你现在结束通话。",
+              "enum": [
+                "CALLER_GOODBYE",
+                "CALLER_DECLINED_MORE_HELP",
+                "CALLER_ASKED_TO_END",
+                "FLOW_INSTRUCTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason"
+          ],
+          "type": "object"
         }
       },
       {

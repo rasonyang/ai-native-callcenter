@@ -155,7 +155,9 @@ type StepExpect struct {
 	// IsOK is whether the tool succeeded (default true). Applies to the last
 	// tool of a step.
 	IsOK *bool `json:"isOk,omitempty"`
-	// IsRefused expects the phase to refuse the tool as not allowed.
+	// IsRefused expects the tool to be refused before it runs: not allowed in
+	// the phase, record_lead in a phase that declares its own lead, or a
+	// hangup with no valid reason (#484).
 	IsRefused bool `json:"isRefused,omitempty"`
 	// Result is a subset of the tool output the model receives (fields as
 	// the flow maps them, plus ok/error).

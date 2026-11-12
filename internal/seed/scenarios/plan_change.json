@@ -18,7 +18,7 @@
           "phase": "submitted", "result": {"state": "PROCESSING"}}},
         {"call": "plan_status", "args": {"ticket": "PC-12001"}, "expect": {
           "phase": "submitted", "result": {"state": "DONE"}}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["identity", "confirm", "submitted", "finish"],
@@ -36,7 +36,7 @@
           "instructionContains": ["100M 光纤，每月 68 元", "套餐二，500M 光纤，每月 108 元"]}},
         {"call": "plan_submit", "args": {"service_no": "10086001", "plan_id": "1"}, "expect": {
           "phase": "submitted", "instructionContains": ["PC-12001", "下一个账期生效"]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["identity", "confirm", "submitted", "finish"], "ending": "hangup"}
     },
@@ -134,7 +134,7 @@
         {"call": "transfer_to_agent", "args": {"queue": "support-en", "reason": "NEED_HUMAN", "summary": "ARREARS"},
           "expect": {"isOk": false, "phase": "need_transfer"}},
         {"call": "take_message", "args": {"message": "Call me back about my account"}, "expect": {"phase": "need_transfer"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["identity", "need_transfer", "finish"], "ending": "hangup", "toolsRun": ["plan_check", "transfer_to_agent", "take_message", "hangup"]}
     },
@@ -217,7 +217,7 @@
         {"call": "plan_submit", "args": {"service_no": "10086001", "plan_id": "1"}, "expect": {"phase": "submitted"}},
         {"call": "kb_search", "args": {"query": "price of the plans"}, "expect": {"phase": "submitted", "result": {"found": "1"}}},
         {"exchange": "ok thanks, that is all", "expect": {"phase": "submitted"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["identity", "confirm", "submitted", "finish"], "ending": "hangup"}
     },

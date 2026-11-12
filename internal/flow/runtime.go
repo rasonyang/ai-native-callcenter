@@ -351,6 +351,11 @@ func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output 
 	if name == ToolRecordLead {
 		return r.recordLead(ctx, args), ""
 	}
+	if name == ToolHangup {
+		if refusal, isRefused := r.refuseHangupReason(args); isRefused {
+			return refusal, ""
+		}
+	}
 
 	result, err := r.run(ctx, name, args)
 	if err != nil {
@@ -375,11 +380,79 @@ func (r *Runtime) Dispatch(ctx context.Context, name, arguments string) (output 
 	// no way to learn why without reading the transcript table.
 	fields := []any{"tool", name, "node", r.engine.NodeID(),
 		"isOk", result.IsOK, "movedTo", newNode}
+	if name == ToolHangup {
+		// Why the model ended the call (#484), the audit the reason exists for.
+		fields = append(fields, "reason", hangupReason(args))
+	}
 	if !result.IsOK && result.Error != "" {
 		fields = append(fields, "error", result.Error)
 	}
 	r.log.Info("tool ran", fields...)
 	return output, newNode
+}
+
+// hangupReason is hangup's reason argument as it is judged and recorded:
+// trimmed and upper-cased, empty when the model gave none.
+func hangupReason(args map[string]any) string {
+	return strings.ToUpper(strings.TrimSpace(stringArg(args, "reason")))
+}
+
+// isHangupReasonJudged reports whether a hangup made now has its reason judged:
+// the call is not in a terminal phase, and its ending is not already under way
+// (EndingState). Either way the closing paths answer a hangup as they did
+// before the reason existed: a repeat of an armed hangup, the refusals while
+// the closing line is owed, a goodbye over an interruption (#465), an ending
+// the time limit has decided. A refusal there would only get in their way.
+func (r *Runtime) isHangupReasonJudged() bool {
+	if r.engine.IsTerminal() {
+		return false
+	}
+	if state, ok := r.actions.(EndingState); ok && state.IsEndingUnderway() {
+		return false
+	}
+	return true
+}
+
+// IsHangupReasonRefused reports whether Dispatch would refuse a hangup with
+// these arguments for its reason (refuseHangupReason), without running it or
+// logging anything. The flow simulator asks it before the call, as it asks
+// IsToolAllowed.
+func (r *Runtime) IsHangupReasonRefused(arguments string) bool {
+	return r.isHangupReasonJudged() &&
+		!slices.Contains(HangupReasons, hangupReason(parseArguments(arguments)))
+}
+
+// refuseHangupReason judges hangup's reason (#484). A hangup with no reason, or
+// one outside HangupReasons, is refused as a conversation, the way record_lead
+// refuses an unknown intent: ok=0, an error that names the reasons it accepts,
+// and the current phase's instruction as the way on. It runs nothing: no ending
+// is armed, no transition reads it and no turn is counted, so a flow whose rule
+// moves to the goodbye on any hangup result does not move on a refused one. A
+// stray argument beside the reason (isFarewellSpoken, from a model that still
+// believes in it) is ignored.
+func (r *Runtime) refuseHangupReason(args map[string]any) (output string, isRefused bool) {
+	if !r.isHangupReasonJudged() {
+		return "", false
+	}
+	reason := hangupReason(args)
+	if slices.Contains(HangupReasons, reason) {
+		return "", false
+	}
+	given := stringArg(args, "reason")
+	r.log.Info("hangup refused: no valid reason", "tool", ToolHangup,
+		"node", r.engine.NodeID(), "reason", given)
+	allowed := strings.Join(HangupReasons, ", ")
+	message := "hangup needs a reason, one of " + allowed + "; the call was not ended"
+	if given != "" {
+		message = fmt.Sprintf("%q is not a hangup reason; use one of %s. The call was not ended", given, allowed)
+	}
+	if r.engine.Lang() == LangZH {
+		message = "hangup 需要 reason 参数，取值为 " + allowed + " 之一；通话没有结束"
+		if given != "" {
+			message = fmt.Sprintf("%q 不是有效的 hangup 原因，请用 %s 之一；通话没有结束", given, allowed)
+		}
+	}
+	return Failed(message, r.phasePreamble()+r.engine.Instruction()).asToolOutput(), true
 }
 
 // CanMoveOnTool is Engine.CanMoveOnTool for a tool the phase allows. A tool the
@@ -404,6 +477,25 @@ func (r *Runtime) RefuseAsAcknowledgement(name string) string {
 		reason = "来电者只是应了一声(如“嗯”“好的”),并没有回答问题,所以没有执行 " + name
 	}
 	return Failed(reason, r.phasePreamble()+r.engine.Instruction()).asToolOutput()
+}
+
+// RefuseWhileAnswering is the answer to a hangup made in a response that was
+// answering the caller (#484): a refusal as a conversation, with ok=0 and a
+// reason that tells the model the call goes on, not to repeat its answer, to
+// ask whether anything else is needed, and to call the tool only once the
+// caller has said goodbye or that they need nothing more. It carries no hint:
+// the reason is the way on, and the phase's instruction is the standing one.
+// It runs nothing and changes no state, as RefuseAsAcknowledgement does not;
+// the caller, which judged the response, logs the decision.
+func (r *Runtime) RefuseWhileAnswering(name string) string {
+	reason := "the call was not ended: you were answering the caller in the same reply. " +
+		"Do not repeat your answer. Ask whether they need anything else, and call " + name +
+		" only after they say goodbye or that they need nothing more"
+	if r.engine.Lang() == LangZH {
+		reason = "通话没有结束：你在同一次回复里正在回答来电者。不要重复刚才的回答。" +
+			"问对方还有没有其他需要；对方道别或说没有其他需要之后，再调用 " + name
+	}
+	return Failed(reason, "").asToolOutput()
 }
 
 // OnNoInput reports dead air to the flow, returning the new phase if the flow
@@ -456,7 +548,7 @@ func (r *Runtime) run(ctx context.Context, name string, args map[string]any) (Re
 			CallbackNumber: stringArg(args, "callbackNumber"),
 		})
 	case ToolHangup:
-		return r.actions.Hangup(ctx, HangupRequest{})
+		return r.actions.Hangup(ctx, HangupRequest{Reason: hangupReason(args)})
 	}
 
 	tool, ok := r.engine.Spec().Tools[name]
@@ -615,22 +707,31 @@ func (r *Runtime) confidentialityRule() string {
 // "let me check" together with the tool call, and on qwen flash that filler,
 // said in the tool-call turn, was repeated as a later lookup's result turn
 // instead of the result (#466); see lookupSilenceRule.
+//
+// Ending the call is not in the list any more. The rule used to name it with
+// the others, which endorsed announcing the end in the reply that calls
+// hangup, and the hangup tool says the opposite: no goodbye before the call,
+// and never in the same reply as an answer (#484). So the rule says so.
 func (r *Runtime) actionClaimRule() string {
 	if r.engine.Lang() == LangZH {
 		return "不要对来电者说你正在或已经做某件需要工具完成的事——" +
-			"转接人工、查询、记录留言、结束通话——除非你在同一次回复里调用了对应的工具。" +
+			"转接人工、查询、记录留言——除非你在同一次回复里调用了对应的工具。" +
 			"只说不调用，什么都不会发生，来电者只会一直等。" +
 			"这次回复不调用工具，就不要说你在做。" +
+			"结束通话不要预告：调用 hangup 的那次回复里不要说要结束通话，也不要道别；" +
+			"需要你道别时，工具结果会告诉你。" +
 			"例如：没有调用查询工具，就不要说“我帮您查询一下”。"
 	}
 	return "Never tell the caller you are doing something a tool does — " +
 		"transferring or connecting them, looking something up, saving a " +
-		"message, ending the call — unless you call that tool in the same " +
-		"reply. Saying it does not do it: without the tool call nothing " +
-		"happens and the caller waits for something that never comes. If you " +
-		"are not calling the tool now, do not say you are doing it. For " +
-		"example, if you are not calling the lookup tool, do not say " +
-		"\"Let me check that order for you.\""
+		"message — unless you call that tool in the same reply. Saying it " +
+		"does not do it: without the tool call nothing happens and the caller " +
+		"waits for something that never comes. If you are not calling the " +
+		"tool now, do not say you are doing it. Ending the call is never " +
+		"announced: in the reply that calls hangup, say nothing about ending " +
+		"the call and no goodbye; when a goodbye is yours to say, the result " +
+		"tells you. For example, if you are not calling the lookup tool, do " +
+		"not say \"Let me check that order for you.\""
 }
 
 // lookupSilenceRule tells the model to say nothing in a reply that calls an

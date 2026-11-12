@@ -19,6 +19,10 @@ type scriptedActions struct {
 	lead *flow.LeadRequest
 	// last is the name of the last built-in that succeeded.
 	last string
+	// isEndingArmed says a transfer or a hangup has succeeded: in the
+	// application the call's ending is then armed, and a later hangup is the
+	// closing paths' to answer, its reason unjudged (flow.EndingState).
+	isEndingArmed bool
 }
 
 func newActions(sc Scenario) *scriptedActions { return &scriptedActions{sc: sc} }
@@ -50,6 +54,7 @@ func (a *scriptedActions) TransferToAgent(_ context.Context, req flow.TransferRe
 	result := a.answer(flow.ToolTransferToAgent)
 	if result.IsOK {
 		a.transfer = &req
+		a.isEndingArmed = true
 	}
 	return result, nil
 }
@@ -59,8 +64,16 @@ func (a *scriptedActions) TakeMessage(context.Context, flow.MessageRequest) (flo
 }
 
 func (a *scriptedActions) Hangup(context.Context, flow.HangupRequest) (flow.Result, error) {
-	return a.answer(flow.ToolHangup), nil
+	result := a.answer(flow.ToolHangup)
+	if result.IsOK {
+		a.isEndingArmed = true
+	}
+	return result, nil
 }
+
+// IsEndingUnderway is flow.EndingState: true once a transfer or a hangup has
+// succeeded, as the application's armed ending is.
+func (a *scriptedActions) IsEndingUnderway() bool { return a.isEndingArmed }
 
 // RecordLead keeps the last lead, as the attempt row does, whether record_lead
 // or a phase's declaration wrote it; a scripted record_lead failure refuses

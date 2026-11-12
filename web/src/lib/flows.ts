@@ -561,9 +561,11 @@ export function starterSpec(slug: string): FlowSpec {
           zh: '感谢致电，请问有什么可以帮您？',
         },
         instruction: {
-          en: 'Find out what the caller needs and help them with it. When they say ' +
-            'they need nothing else, call hangup at once and do not ask again.',
-          zh: '了解来电者的需求，并帮助他们解决。对方说没有其它需要了，就立即调用 hangup，不要再问一次。',
+          en: 'Find out what the caller needs and help them with it. Never call hangup in ' +
+            'the same reply as an answer. When they say goodbye or that they need nothing ' +
+            'else, call hangup and do not ask again.',
+          zh: '了解来电者的需求，并帮助他们解决。回答问题的那次回复里不要调用 hangup。' +
+            '对方道别或说没有其它需要了，就调用 hangup，不要再问一次。',
         },
         tools: [],
       },

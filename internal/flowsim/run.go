@@ -203,6 +203,10 @@ func (r *runner) call(name string, args map[string]any) error {
 		return fmt.Errorf("the flow has no tool %q (its tools: %s)", name, strings.Join(r.knownTools(), ", "))
 	}
 	node := r.engine.NodeID()
+	encoded, err := json.Marshal(args)
+	if err != nil {
+		return fmt.Errorf("arguments are not JSON: %w", err)
+	}
 	if !r.runtime.IsToolAllowed(name) {
 		r.lastRefused = true
 		if !r.expectsRefusal() {
@@ -219,14 +223,19 @@ func (r *runner) call(name string, args map[string]any) error {
 				"so a model's record_lead there is refused and the declared lead stays. "+
 				"Mark the step \"isRefused\", or remove the call", name, node)
 		}
+	} else if name == flow.ToolHangup && r.runtime.IsHangupReasonRefused(string(encoded)) {
+		// hangup takes a required reason (#484); one without it is refused
+		// and runs nothing, as the application refuses it.
+		r.lastRefused = true
+		if !r.expectsRefusal() {
+			return fmt.Errorf("the hangup in phase %q has no valid reason (args %s), so it is refused and "+
+				"nothing ends the call. Give it \"args\": {\"reason\": ...}, one of %s, or mark the step \"isRefused\"",
+				node, encoded, strings.Join(flow.HangupReasons, ", "))
+		}
 	} else if !r.isOffered(name) {
 		return fmt.Errorf("the tool %q is allowed in phase %q but never offered to the model (Runtime.Tools omits it)", name, node)
 	}
 
-	encoded, err := json.Marshal(args)
-	if err != nil {
-		return fmt.Errorf("arguments are not JSON: %w", err)
-	}
 	output, _ := r.runtime.Dispatch(r.ctx, name, string(encoded))
 	r.lastOutput = map[string]any{}
 	if err := json.Unmarshal([]byte(output), &r.lastOutput); err != nil {

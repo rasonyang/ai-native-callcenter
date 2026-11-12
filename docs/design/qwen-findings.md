@@ -1824,3 +1824,41 @@ These are single calls on the development box, not a benchmark.
 - **The rule held.** All 9 quiet results were followed by nothing until the caller spoke or the dead-air prompt came. The dead-air prompt was sent, not refused (calls 1 and 5). A barge-in over the answer's tail left one reply, the provider's own (call 4). A response that only called the tool kept today's path (call 7).
 - **Two wrong classifications came from turns the change does not touch.** In call 7, a refusal that was transcribed as noise was taken as agreement, after an ordinary follow-up turn. In call 8, a question split by server VAD was taken as agreement in the opening phase, before any quiet result. The issue's tool-first probe arm showed the same failure.
 - **Still open: call 5.** After the dead-air prompt, "No, thanks" was twice read as not having heard the answer, and the price was repeated. The dead-air cue ends "briefly repeat the current question". In a caller-next phase the bot's last turn answered a question rather than asked one, and that answer may be what it repeated. The same cue in zh (call 1) worked. This is one call, so it is not resolved here.
+
+## W-Q16: flash answered the caller's first question and hung up in the same response (#484, 2026-11-04)
+
+**The incident.** One owner-placed call on the dev stack, `qwen-audio-3.1-realtime-flash`, DID 95001, `novanet_support` (en), call `01a1a445-2cf5-7696-974f-8879e6d74fc8`. To "What service do you offer?" the model started the answer ("NovaNet is a telecommunications company. We provide internet, mobile, and home phone services. How can I help you today?") and called `hangup` with `{}` in the same response. The hangup moved the call into `farewell`, the answer was muted under #441 (the log has `playedMs=200`, `flushedMs=600`), and the caller heard the farewell line and the call ended. The flow then told the model twice to "call hangup immediately" when the caller wanted to finish, with `hangup` always offered. No DEBUG trace of the provider events exists for the call, so whether the words or the call came first on the wire is not known. The final transcript of the turn was logged after the call had run.
+
+**The change** (`docs/design/02-ai-voice.md` §6, "Why the model hangs up"):
+
+- the built-in's description, the action-claim rule and the shipped flows say *when* to hang up (the caller said goodbye, asked to end the call, or declined more help after being asked), never in the same reply as an answer and never in reply to a question;
+- `hangup` takes a required `reason` (`CALLER_GOODBYE`, `CALLER_DECLINED_MORE_HELP`, `CALLER_ASKED_TO_END`, `FLOW_INSTRUCTED`); a hangup without one is refused and runs nothing;
+- the answer guard refuses, once per caller turn, a `hangup` in a response whose transcript deltas before the call already hold an answer (four words or more, a Chinese character counting as half, and no goodbye). The answer keeps playing.
+
+The guard can only judge words that arrived before the call. A `hangup` that passes with audio of its own queued and no words yet is logged (`a hangup arrived before any words of its response`), which counts how often flash puts the call first.
+
+**Live set, 2026-11-12** (owner-placed, flash only, `novanet_support`, provider events at DEBUG). The same 20 calls before and after the change: 10 on 95001 (en) and 10 on 95002 (zh); question openers ("What service do you offer?", "你们提供什么服务？", "你们深圳能装吗？", a question after a pause, one ending in "thanks"), then a goodbye, a goodbye phrased as a question, a hang-up mid-answer, a mixed turn ("好的谢谢，那宽带多少钱？") and a wrong number at the greeting. Plus was not measured.
+
+| | before (main) | after |
+|---|---|---|
+| calls ended on a caller's question | 0 of 20 | 0 of 20 |
+| `hangup` calls, all after a goodbye, closing line played | 17 | 16 |
+| `hangup` in a response with words of its own | 0 of 17 | 3 of 16 |
+| answer-guard refusals | n/a | 0 |
+| `hangup` without a valid `reason` | n/a | 0 of 16 |
+
+- **The incident did not recur**, before or after: no response answered a question and called `hangup`. The guard therefore never fired on a live call; its refusal is covered by the deterministic tests only.
+- **Item order.** In the three mixed responses (all zh, all a goodbye: "好的，再见。" twice, "好的，那我先挂了。") the message item and its whole transcript arrived before `function_call_arguments.done`. No `hangup` arrived before the words of its own response, so the guard's blind spot was not observed. Three responses are not a rate.
+- **Reasons.** 15 `CALLER_GOODBYE`, 1 `CALLER_ASKED_TO_END` ("好的，就这些，快挂了吧"), each matching what the caller said.
+- **A goodbye in the hangup's own response** appeared only after the change (0 of 17 before). The turn was muted and the closing line played, as for any hangup into a phase with a line. "好的，那我先挂了。" has no goodbye the claim patterns know and is seven characters, one under the guard's floor.
+- **A wrong number at the greeting** ("打错了，不好意思") ended the zh call by `hangup` before the change and did not after it: the model asked again how it could help. The en call asked again both times.
+
+  Since then the built-in's description and `novanet_support` name a caller who says they have the wrong number or called by mistake as a reason to end the call (`CALLER_ASKED_TO_END`). Four more calls on that text: "Sorry, I called by mistake." and "打错了不好意思。" ended at once; "Wrong number, sorry." ended on the second saying; "不好意思，拨错电话了。" said twice did not end, and the caller hung up. Two of four at the first saying: better, not reliable.
+- The caller's transcript arrives after the `hangup` it led to (by 0.2 to 0.5 s here), so a stored transcript can show the tool call before the goodbye that caused it.
+
+**The guard, provoked** (same day, 8 owner-placed calls). The incident's shape was forced with a probe copy of `novanet_support` whose rules order the answer and `hangup` (`FLOW_INSTRUCTED`) in one reply, bound to one en and one zh number and removed afterwards.
+
+- **Four responses answered and called `hangup`** (3 en, 1 zh). In each the words arrived before the call (31 to 166 characters of transcript at the call), the guard refused, the answer played on and the call went on. None arrived call-first.
+- **How the refusal was answered.** Two answers ended in a question and the refusal went quietly: the caller spoke next, or stayed silent and got the dead-air prompts and the closing line. Two did not and the refusal asked for a turn: one model turn asked "请问您还有其他需要吗？", the other said its whole answer again in spite of the refusal's "do not repeat your answer". In both the caller's goodbye then ended the call by `hangup` with `CALLER_GOODBYE`.
+- **Three zh responses were a bare `hangup` in reply to the question**, no words and no audio, as the probe ordered. The guard judges the bot's words and had none: those calls ended on the question, with the closing line. Nothing in the engine stops a wordless `hangup` after a question; the description and the flows' rules are what stand against it, and the 40 calls on the shipped flow had none.
+- In one en call the model made no tool call and repeated its answer to each goodbye; in another it repeated a refused answer to the caller's goodbyes. The probe's rules say nothing about a goodbye, so this is put down to the probe, not measured further.

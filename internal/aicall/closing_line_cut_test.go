@@ -59,7 +59,7 @@ func startCutRigOn(t *testing.T, profile provider.Profile, graceCap time.Duratio
 	h.actions.mu.Lock()
 	h.actions.graceCap = graceCap
 	h.actions.mu.Unlock()
-	h.callTool(t, flow.ToolHangup, `{}`)
+	h.callTool(t, flow.ToolHangup, goodbyeHangup)
 	return &cutRig{toolPath: h, logs: logs}
 }
 
@@ -961,7 +961,7 @@ func TestCutsThatAreNotTheCallerCuttingTheLineAreNotCounted(t *testing.T) {
 		r.actions.mu.Lock()
 		r.actions.graceCap = time.Minute
 		r.actions.mu.Unlock()
-		r.callTool(t, flow.ToolHangup, `{}`)
+		r.callTool(t, flow.ToolHangup, goodbyeHangup)
 		armed := r.session.currentTurn()
 		r.leg.holdFrames(generatingTail)
 		r.model.events <- provider.Event{

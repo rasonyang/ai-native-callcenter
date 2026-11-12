@@ -161,7 +161,7 @@ func TestTier2PassRate(t *testing.T) {
 		if run == 2 {
 			return text("Just chatting."), nil
 		}
-		return tool("hangup", `{}`), nil
+		return tool("hangup", `{"reason":"CALLER_GOODBYE"}`), nil
 	}}
 	caller := queue(text("hi"))
 	cfg := ModelConfig{Bot: bot, Caller: caller, Runs: 3, MaxCallerTurns: 1}
@@ -287,7 +287,7 @@ func TestJudgeNamesWhatWentWrong(t *testing.T) {
 	backend := MockBackends()
 	sc := scenarioOf(t, `{"name":"wrong","caller":"92223333","callerPersona":{"goal":"g"},
 		"model":{"phase":"finish_transfer","ending":"transfer_to_agent","transfer":{"queue":"billing"},"visits":["disputed"],"avoids":["remind"]}}`)
-	bot := queue(tool("bill_lookup", `{}`), text("ok"), tool("hangup", `{}`), text("bye"))
+	bot := queue(tool("bill_lookup", `{}`), text("ok"), tool("hangup", `{"reason":"CALLER_GOODBYE"}`), text("bye"))
 	r := RunModel(context.Background(), earlyCollections(t), backend,
 		ModelConfig{Bot: bot, Caller: queue(text("hi"), text("bye")), Runs: 1}, []Scenario{sc})[0]
 	for _, want := range []string{`ended in phase "finish_declined", want "finish_transfer"`, `ended with "hangup"`, "no transfer succeeded",
@@ -426,5 +426,29 @@ func TestTier2ASpokenSlotCallInACallerNextPhaseGetsNoFollowUpRound(t *testing.T)
 		[]Scenario{scenario})
 	if got := len(bot.requests); got != 3 {
 		t.Errorf("a response that only called the tool: the bot model was asked %d times, want 3", got)
+	}
+}
+
+// #484: a hangup the bot makes with no reason is refused, as the application
+// refuses it. It is not a tool that ran and it does not end the call; the same
+// bot giving a reason next ends it.
+func TestTier2RefusesAHangupWithNoReason(t *testing.T) {
+	backend := MockBackends()
+	sc := scenarioOf(t, `{"name":"reason","caller":"92223333","callerPersona":{"goal":"g"},
+		"model":{"ending":"hangup"}}`)
+	bot := queue(tool("hangup", `{}`), text("Is there anything else?"),
+		tool("hangup", `{"reason":"CALLER_DECLINED_MORE_HELP"}`), text("bye"))
+	r := RunModel(context.Background(), earlyCollections(t), backend,
+		ModelConfig{Bot: bot, Caller: queue(text("no, that's all")), Runs: 1, MaxCallerTurns: 3}, []Scenario{sc})[0]
+	run := r.Runs[0]
+	if !run.Passed() {
+		t.Fatalf("the run failed: %s\n%s", run.Failure, strings.Join(run.Log, "\n"))
+	}
+	if got := strings.Join(run.ToolsRun, ","); got != "hangup" {
+		t.Errorf("tools run = %s, want the one hangup that had a reason", got)
+	}
+	log := strings.Join(run.Log, "\n")
+	if !strings.Contains(log, `TOOL hangup({}) -> {"error":"hangup needs a reason`) {
+		t.Errorf("the refusal is not in the log:\n%s", log)
 	}
 }

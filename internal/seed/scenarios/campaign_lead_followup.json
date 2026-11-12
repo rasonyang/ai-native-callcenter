@@ -10,7 +10,7 @@
         {"say": "Sounds good, send me the details. Bye."},
         {"batch": [
           {"call": "record_lead", "args": {"intent": "HIGH", "notes": "wants the details"}},
-          {"call": "hangup"}
+          {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}
         ], "expect": {"phase": "finish", "announce": "Thank you for your time, and sorry for the interruption. Have a good day, goodbye."}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "HIGH"}}
@@ -25,7 +25,7 @@
         {"say": "好的,把资料发给我吧,再见。"},
         {"batch": [
           {"call": "record_lead", "args": {"intent": "HIGH", "notes": "想要资料"}},
-          {"call": "hangup"}
+          {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}}
         ], "expect": {"phase": "finish", "announce": "感谢您的时间,打扰了,祝您生活愉快,再见。"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "HIGH"}}
@@ -43,7 +43,7 @@
           "instructionContains": ["name=Mia Chen", "product of interest=Nova X phone", "offer=20% off with a 24-month plan"]}},
         {"say": "That sounds good, please send me the details."},
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "wants the details of the 20% offer"}, "expect": {"phase": "talk"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["talk", "finish"],
@@ -62,7 +62,7 @@
         {"say": "可以,你说。"},
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "想了解合约套餐优惠,希望发详细资料"},
           "expect": {"phase": "talk", "instructionContains": ["姓名=王芳", "关注的产品=星讯 Nova X 手机", "当前优惠=合约套餐立减 20%"]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["talk", "finish"],
@@ -81,7 +81,7 @@
         {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "will think about it"}},
         {"say": "Actually, send me the offer."},
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "changed their mind, wants the offer"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"intent": "HIGH", "notes": "changed their mind, wants the offer"}, "ending": "hangup"}
     },
@@ -95,7 +95,7 @@
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "想看优惠"}},
         {"say": "算了,我再考虑考虑。"},
         {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "改口,还要再考虑"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"intent": "MEDIUM", "notes": "改口,还要再考虑"}, "ending": "hangup"}
     },
@@ -113,7 +113,7 @@
         {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "changed their mind, still thinking"}, "expect": {"phase": "talk"}},
         {"botTurn": "reply"},
         {"say": "No, that's all."},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["talk", "finish"],
@@ -136,7 +136,7 @@
         {"call": "record_lead", "args": {"intent": "MEDIUM", "notes": "改口,还要再想想"}, "expect": {"phase": "talk"}},
         {"botTurn": "reply"},
         {"say": "没有了,就这样。"},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["talk", "finish"],
@@ -155,7 +155,7 @@
         {"call": "record_lead", "args": {"intent": "LOW", "notes": "not that keen"}, "expect": {"phase": "talk"}},
         {"botTurn": "reply"},
         {"say": "No, that's it. Bye."},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "LOW"}}
     },
@@ -169,7 +169,7 @@
         {"call": "record_lead", "args": {"intent": "LOW", "notes": "兴趣不大"}, "expect": {"phase": "talk"}},
         {"botTurn": "reply"},
         {"say": "没有了,再见。"},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_GOODBYE"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "LOW"}}
     },
@@ -180,8 +180,8 @@
       "caller": "18688886666",
       "steps": [
         {"say": "No, I'm not interested at all."},
-        {"call": "record_lead", "args": {"intent": "NONE", "notes": "not interested at all"}, "expect": {"phase": "talk", "instructionContains": ["(NONE)", "call hangup immediately with no confirmation and no further pitch"]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "record_lead", "args": {"intent": "NONE", "notes": "not interested at all"}, "expect": {"phase": "talk", "instructionContains": ["(NONE)", "call hangup immediately with reason FLOW_INSTRUCTED, with no confirmation and no further pitch"]}},
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "NONE"}}
     },
@@ -192,8 +192,8 @@
       "caller": "18688886666",
       "steps": [
         {"say": "不需要,我一点兴趣都没有。"},
-        {"call": "record_lead", "args": {"intent": "NONE", "notes": "一点兴趣都没有"}, "expect": {"phase": "talk", "instructionContains": ["明确没有兴趣记 NONE", "记录后立即调用 hangup,不必确认,也不要再介绍优惠"]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "record_lead", "args": {"intent": "NONE", "notes": "一点兴趣都没有"}, "expect": {"phase": "talk", "instructionContains": ["明确没有兴趣记 NONE", "记录后立即调用 hangup(reason 填 FLOW_INSTRUCTED),不必确认,也不要再介绍优惠"]}},
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "NONE"}}
     },
@@ -205,7 +205,7 @@
       "steps": [
         {"say": "Stop calling me. Take me off your list."},
         {"call": "record_lead", "args": {"intent": "DO_NOT_CALL", "notes": "asked to be taken off the list"}, "expect": {"phase": "talk"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "lead": {"intent": "DO_NOT_CALL"}}
     },
@@ -217,7 +217,7 @@
       "steps": [
         {"say": "别再给我打电话了。"},
         {"call": "record_lead", "args": {"intent": "DO_NOT_CALL", "notes": "要求不再来电"}, "expect": {"phase": "talk"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "FLOW_INSTRUCTED"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "lead": {"intent": "DO_NOT_CALL"}}
     },
@@ -234,7 +234,7 @@
           "expect": {"isRefused": true, "phase": "talk"}},
         {"call": "take_message", "args": {"message": "call me back"}, "expect": {"isRefused": true, "phase": "talk"}},
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "asked for a person; a colleague should follow up"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {
         "path": ["talk", "finish"],
@@ -254,7 +254,7 @@
         {"call": "transfer_to_agent", "args": {"queue": "support-zh", "reason": "CALLER_REQUEST", "summary": "要求人工"},
           "expect": {"isRefused": true, "phase": "talk"}},
         {"call": "record_lead", "args": {"intent": "HIGH", "notes": "要求人工跟进"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["talk", "finish"], "ending": "hangup", "toolsRun": ["record_lead", "hangup"], "lead": {"intent": "HIGH"}}
     },
@@ -290,7 +290,7 @@
       "caller": "18688886666",
       "steps": [
         {"call": "record_lead", "args": {"intent": "VERY_HIGH", "notes": "x"}, "expect": {"isOk": false, "phase": "talk"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"isUnrecorded": true}}
     },
@@ -303,7 +303,7 @@
       "steps": [
         {"say": "Hello?"},
         {"call": "record_lead", "args": {"intent": "LOW"}, "expect": {"instructionContains": ["name=Ana;", "product of interest=;", "offer=."]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"intent": "LOW"}}
     },
@@ -315,7 +315,7 @@
       "steps": [
         {"say": "喂?"},
         {"call": "record_lead", "args": {"intent": "NONE"}, "expect": {"instructionContains": ["姓名=;", "关注的产品=;", "当前优惠=。"]}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"intent": "NONE"}}
     },
@@ -325,7 +325,7 @@
       "caller": "18688886666",
       "steps": [
         {"call": "record_lead", "args": {"intent": "HIGH"}, "expect": {"isRefused": true, "phase": "talk"}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"lead": {"isUnrecorded": true}}
     },

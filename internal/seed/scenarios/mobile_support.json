@@ -10,7 +10,7 @@
           "phase": "repair_report",
           "result": {"found": "1", "device": "星讯 X1 手机"},
           "slots": {"repair_status.args.rma": "RMA1001"}}},
-        {"call": "hangup", "expect": {"phase": "finish"}}
+        {"call": "hangup", "args": {"reason": "CALLER_DECLINED_MORE_HELP"}, "expect": {"phase": "finish"}}
       ],
       "expect": {"path": ["welcome", "repair_report", "finish"], "ending": "hangup", "toolsRun": ["repair_status", "hangup"]}
     },
