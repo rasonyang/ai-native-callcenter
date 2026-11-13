@@ -689,6 +689,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				recorder.say(store.SpeakerCustomer, "[keypad] "+event.Text)
 				runtime.OnCallerKeyed()
 				fw.onCallerSpoke()
+				guard.onCallerActed()
 
 			case EventTypeToolCall:
 				claims.onToolCall()
@@ -717,7 +718,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					callerWords = event.Text
 				}
 				o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims,
-					callerWords, log)
+					&guard, callerWords, log)
 				claims.consumeFarewell()
 
 			case EventTypeTurnDone:
@@ -730,6 +731,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 					// response's TURN_DONE, which came first.
 					continue
 				}
+				guard.onTurnDone(event.Turn)
 				reportClaims(event.Turn, claims.onTurnDone(event.Turn,
 					event.Turn == wall.toolCallTurn, actions.isArmed()))
 				if event.IsInterrupted {
@@ -743,10 +745,17 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				wall.onTurnDone(event.Turn, event.IsInterrupted, runtime)
 				// After the claim watch and the wall: both note a tool-call turn
 				// as one whose reply is a tool's, which a quiet close undoes.
-				spoke := event.HasAudio || event.IsInterrupted || bargedTurn == event.Turn
-				if o.closeToolBatch(&batch, spoke, event.soFar.text, session, runtime, actions, log) {
+				isCut := event.IsInterrupted || bargedTurn == event.Turn
+				spoke := event.HasAudio || isCut
+				isQuiet, refusals := o.closeToolBatch(&batch, spoke, event.soFar.text, session, runtime,
+					actions, recorder, log)
+				if isQuiet {
 					claims.onToolReplyNotComing()
 					runtime.OnToolReplyNotComing()
+					if refusals > 0 {
+						guard.onRefusalAnsweredQuietly(event.Turn, runtime.Engine().NodeID(),
+							event.soFar.text, isCut, log)
+					}
 				}
 
 			case EventTypeBargeIn:
@@ -754,6 +763,7 @@ func (o *Orchestrator) drive(ctx context.Context, session *Session,
 				actions.onBargeIn(event)
 				claims.onBargeIn(event.Turn)
 				fw.due = nil
+				guard.onCallerActed()
 
 			case EventTypePlaybackDone:
 				// A limit waiting for the floor goes first, ahead of the
@@ -964,12 +974,16 @@ const hangupCauseMediaOrProvider = "MEDIA_OR_PROVIDER_FAILURE"
 // are first. A flow without the field never holds one.
 //
 // A hangup the answer guard refuses (#484, answer_guard.go) is held the same
-// way, on a model that can answer quietly: whether its refusal asks for a turn
-// depends on how the response that was answering ends. closeToolBatch sends it
-// quietly if that response ended in a question (the caller speaks next), and
-// the ordinary way otherwise, so the model asks whether anything else is
-// needed. The guard is judged first; a hangup it lets through has its reason
-// judged in Dispatch (flow.Runtime.refuseHangupReason).
+// way, on a model that can answer quietly, and closeToolBatch sends it quietly
+// whenever the batch can go quiet at all, whatever the answer ended in (#555):
+// a refusal that asked for a turn had qwen flash say the whole answer again.
+// Its text is chosen when it is sent, because a refusal read with the caller's
+// next words must not tell the model to ask something now
+// (flow.Runtime.RefuseWhileAnswering); so is its line in the transcript. One
+// that cannot be held goes at once, the ordinary way, and tells the model to
+// ask whether anything else is needed. The guard is judged first; a hangup it
+// lets through has its reason judged in Dispatch
+// (flow.Runtime.refuseHangupReason).
 func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *toolBatch,
 	guard *answerGuard, session *Session, runtime *flow.Runtime, actions *callActions,
 	recorder *callRecorder, log *slog.Logger) {
@@ -983,8 +997,9 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	switch {
 	case o.refusesHangup(event, guard, runtime, actions, log):
 		// The response was answering the caller: the answer plays on, and
-		// nothing runs.
-		output = runtime.RefuseWhileAnswering(event.ToolName)
+		// nothing runs. This is the refusal that asks for a turn; a held one
+		// is sent quietly with its other text (closeToolBatch).
+		output = runtime.RefuseWhileAnswering(event.ToolName, true)
 		isGuardRefusal = true
 	case event.cut != nil && runtime.CanMoveOnTool(event.ToolName) && session.cutWasAcknowledgement(event.cut):
 		// The engine cut the bot for a bare acknowledgement and this response
@@ -1004,7 +1019,14 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	}
 
 	if !o.isLineTheToolAnswer(moved, runtime) {
-		recorder.toolResult(event.ToolName, output, moved)
+		// Decided before the result is written. A refusal moves nothing, so
+		// the batch it reads is the same here as below.
+		isRefusalHeld := isGuardRefusal && o.isRefusalHeld(batch, session, actions)
+		if !isRefusalHeld {
+			// A held refusal's line is written when it is sent: which text it
+			// carries is decided then.
+			recorder.toolResult(event.ToolName, output, moved)
+		}
 		if moved == "" && runtime.IsInstructionStale() {
 			// Nothing is armed and no line is said: the phase did not change.
 			// A move later in the batch re-pins through enterPhase anyway.
@@ -1028,7 +1050,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 				batch.lineOwedIn = moved
 			}
 		}
-		if isGuardRefusal && o.isRefusalHeld(batch, session, actions) {
+		if isRefusalHeld {
 			batch.held = append(batch.held, heldAnswer{id: event.ToolCallID, tool: event.ToolName,
 				output: output, isGuardRefusal: true})
 			log.Debug("a refused hangup's answer waits for the end of the response",
@@ -1041,7 +1063,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 				"tool", event.ToolName, "node", runtime.Engine().NodeID())
 			return
 		}
-		o.answerNow(event, output, batch, session, log)
+		o.answerNow(event, output, batch, session, recorder, log)
 		return
 	}
 	// The line rides in this answer; an earlier move's line is superseded.
@@ -1062,7 +1084,7 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 	// and no playback would ever count.
 	o.enterPhase(moved, session, runtime, actions, log)
 	log.Info("the tool's answer asks for the phase's own line", "node", moved)
-	o.answerNow(event, output, batch, session, log)
+	o.answerNow(event, output, batch, session, recorder, log)
 }
 
 // answerNow sends a tool call's answer, asking the model for the turn that
@@ -1070,9 +1092,9 @@ func (o *Orchestrator) answerToolCall(ctx context.Context, event Event, batch *t
 // answer that is not held goes this way, and it is what makes the batch one
 // that asked for a turn: the answers after it ride on that turn.
 func (o *Orchestrator) answerNow(event Event, output string, batch *toolBatch,
-	session *Session, log *slog.Logger) {
+	session *Session, recorder *callRecorder, log *slog.Logger) {
 
-	o.releaseHeld(batch, session, log)
+	o.releaseHeld(batch, session, recorder, log)
 	batch.isTurnAsked = true
 	if err := session.AnswerTool(event.ToolCallID, output); err != nil {
 		log.Warn("could not answer a tool call", "tool", event.ToolName, "error", err)
@@ -1111,7 +1133,7 @@ func (o *Orchestrator) isAnswerHeld(isSlotTool bool, output string, batch *toolB
 
 // isRefusalHeld reports whether the answer guard's refusal of a hangup (#484)
 // is held back until its response ends, to be sent without asking for a turn
-// if that response ends in a question (closeToolBatch). As for a slot tool's
+// if the batch can go quiet (closeToolBatch, #555). As for a slot tool's
 // answer (isAnswerHeld): only on a model that can answer quietly, with no
 // answer of the batch that asked for a turn already, no phase line owed and
 // nothing armed. Otherwise it goes out at once, the ordinary way.
@@ -1124,10 +1146,17 @@ func (o *Orchestrator) isRefusalHeld(batch *toolBatch, session *Session, actions
 
 // releaseHeld sends the answers held for the batch the ordinary way, in the
 // order they were made: the first asks for the turn and the rest ride on it.
-func (o *Orchestrator) releaseHeld(batch *toolBatch, session *Session, log *slog.Logger) {
+// A held refusal goes with the text that asks for a turn, which it was made
+// with, and its line is written to the transcript now.
+func (o *Orchestrator) releaseHeld(batch *toolBatch, session *Session, recorder *callRecorder,
+	log *slog.Logger) {
+
 	held := batch.held
 	batch.held = nil
 	for _, answer := range held {
+		if answer.isGuardRefusal {
+			recorder.toolResult(answer.tool, answer.output, "")
+		}
 		if err := session.AnswerTool(answer.id, answer.output); err != nil {
 			log.Warn("could not answer a tool call", "tool", answer.tool, "error", err)
 		}
@@ -1315,7 +1344,9 @@ type toolBatch struct {
 type heldAnswer struct {
 	id, tool, output string
 	// isGuardRefusal marks the answer guard's refusal of a hangup (#484),
-	// held by isRefusalHeld rather than isAnswerHeld.
+	// held by isRefusalHeld rather than isAnswerHeld. Its output is the text
+	// that asks for a turn; sent quietly, it carries the other one
+	// (closeToolBatch). It is not in the transcript until it is sent.
 	isGuardRefusal bool
 }
 
@@ -1336,25 +1367,29 @@ type heldAnswer struct {
 // before the phase's line, which pre-empts.
 //
 // The answer guard's refusal of a hangup (#484) is held under the same rules
-// but asks a different question of the response: not whether the phase says
-// the caller speaks next, but whether the response's own words (words, the
-// TURN_DONE's) end in a question. If they do, the caller has been asked and
-// speaks next; if not, the refusal asks for a turn, in which the model asks
-// whether anything else is needed. A batch holding both kinds is quiet only
-// when both would be.
+// and goes quietly whenever they allow, whatever the response's words (words,
+// the TURN_DONE's) ended in (#555): the response answered the caller, so the
+// caller speaks next, or stays silent and the dead-air path asks them. A
+// refusal that asked for a turn after an answer ending in a statement had qwen
+// flash say the whole answer again. Sent quietly, it carries the text for a
+// refusal read with the caller's next words (flow.Runtime.
+// RefuseWhileAnswering). A batch that also holds slot answers is quiet only
+// when they would be: in a caller-next phase.
 //
 // It reports whether the answers went quietly, so that the caller can tell the
 // reply bookkeeping that no tool reply is coming (it runs after the turn was
-// accounted for as one that made a tool call).
+// accounted for as one that made a tool call), and how many of them were
+// refusals, so that it can tell the guard (answerGuard.
+// onRefusalAnsweredQuietly).
 func (o *Orchestrator) closeToolBatch(batch *toolBatch, spoke bool, words string, session *Session,
-	runtime *flow.Runtime, actions *callActions, log *slog.Logger) (isQuiet bool) {
+	runtime *flow.Runtime, actions *callActions, recorder *callRecorder,
+	log *slog.Logger) (isQuiet bool, refusals int) {
 
 	if !batch.isOpen {
-		return false
+		return false, 0
 	}
 	runtime.EndToolBatch()
 	lineOwedIn := batch.lineOwedIn
-	refusals := 0
 	for _, answer := range batch.held {
 		if answer.isGuardRefusal {
 			refusals++
@@ -1363,8 +1398,7 @@ func (o *Orchestrator) closeToolBatch(batch *toolBatch, spoke bool, words string
 	hasSlotAnswers := len(batch.held) > refusals
 	isQuiet = len(batch.held) > 0 && !batch.isTurnAsked && spoke &&
 		lineOwedIn == "" && !actions.isArmed() &&
-		(!hasSlotAnswers || runtime.Engine().IsCallerNext()) &&
-		(refusals == 0 || endsInQuestion(words))
+		(!hasSlotAnswers || runtime.Engine().IsCallerNext())
 	if refusals > 0 {
 		log.Info("the response whose hangup was refused has ended",
 			"endsInQuestion", endsInQuestion(words), "isQuiet", isQuiet,
@@ -1376,18 +1410,23 @@ func (o *Orchestrator) closeToolBatch(batch *toolBatch, spoke bool, words string
 			"tool results sent without asking for a turn",
 			"tools", len(held), "refusals", refusals, "node", runtime.Engine().NodeID())
 		for _, answer := range held {
-			if err := session.AnswerToolQuietly(answer.id, answer.output); err != nil {
+			output := answer.output
+			if answer.isGuardRefusal {
+				output = runtime.RefuseWhileAnswering(answer.tool, false)
+				recorder.toolResult(answer.tool, output, "")
+			}
+			if err := session.AnswerToolQuietly(answer.id, output); err != nil {
 				log.Warn("could not answer a tool call quietly", "tool", answer.tool, "error", err)
 			}
 		}
 	} else {
-		o.releaseHeld(batch, session, log)
+		o.releaseHeld(batch, session, recorder, log)
 	}
 	*batch = toolBatch{}
 	if lineOwedIn != "" && lineOwedIn == runtime.Engine().NodeID() {
 		o.sayPhaseLine(session, runtime, log)
 	}
-	return isQuiet
+	return isQuiet, refusals
 }
 
 // enterPhase re-pins the standing instructions for the phase the call has just
@@ -1457,7 +1496,16 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 //     bot's own goodbye did not catch (farewell.go): the call is hung up, and
 //     the closing target's announce is not said.
 //  4. A standing unbacked claim's cue.
-//  5. The silent-caller cue.
+//  5. The silent-caller cue: the goodbye cue when this silence moved the flow
+//     into a terminal phase, the anything-else cue (anythingElseCue) when it
+//     follows the answer of a refused hangup that ended in a statement and was
+//     answered quietly (#555), the generic one otherwise.
+//
+// guard is the call's answer guard (nil when there is none to consult). What
+// it owes is owed to this dead air whatever takes it: the caller's words (1),
+// a step before 5 that takes the silence, and a move at this silence all drop
+// it. The NO_INPUT is counted and the flow's rules run exactly as for any
+// silence; only the cue's words differ.
 //
 // isFarewellUnhung says the bot's last finished turn said goodbye in words
 // and made no tool call (claimWatch). That conversation is over and nobody
@@ -1474,9 +1522,12 @@ func (o *Orchestrator) armTheEnding(moved string, session *Session,
 // lookup, transfer or message the bot promised and never made (#438) gets the
 // claim cue in place of the generic one, which would ask for the promise again.
 func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
-	actions *callActions, isFarewellUnhung bool, claims *claimWatch, callerWords string,
-	log *slog.Logger) {
+	actions *callActions, isFarewellUnhung bool, claims *claimWatch, guard *answerGuard,
+	callerWords string, log *slog.Logger) {
 
+	// Asked before the flow is told: the phase is still the one the silence
+	// fell in.
+	isAnythingElse := guard.takeAnythingElse(runtime.Engine().NodeID(), actions)
 	if callerWords != "" {
 		o.answerDroppedTurn(callerWords, session, runtime, actions, claims, log)
 		return
@@ -1524,10 +1575,17 @@ func (o *Orchestrator) handleDeadAir(session *Session, runtime *flow.Runtime,
 		cue = "（来电者一直没有说话。如果你上一轮已经结束了对话（道别或说了结束语），请立即调用 hangup，不要再说话。" +
 			"否则请温和地确认对方是否还在线，并简短重复当前的问题。）"
 	}
-	if moved != "" && runtime.Engine().IsTerminal() {
+	switch {
+	case moved != "" && runtime.Engine().IsTerminal():
 		// The flow has decided the conversation is over; the model's next words
 		// are the goodbye, not another prompt.
 		cue = goodbyeCue(runtime.Engine().Lang(), true)
+	case isAnythingElse && moved == "":
+		// The last thing the caller heard was an answer, not a question, and
+		// "repeat the current question" had the answer said again (#555).
+		log.Info("dead air after the answer of a refused hangup; asking only whether anything else is needed",
+			"node", runtime.Engine().NodeID())
+		cue = anythingElseCue(runtime.Engine().Lang())
 	}
 	if err := session.SendCue(cue); err != nil {
 		log.Warn("could not prompt a silent caller", "error", err)

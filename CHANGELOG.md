@@ -23,11 +23,16 @@ carries the one-line installer's files.
 ### Changed
 
 - A `hangup` the bot makes in a reply that has already started answering the
-  caller is refused: the answer keeps playing, and the bot asks whether
-  anything else is needed. The guard judges only the bot's own words, refuses
-  once per caller turn, cannot judge a `hangup` that arrives before the reply's
-  first words (that case is logged), and leaves a real goodbye alone ("No,
-  that's all, bye" still ends the call, with the closing line heard). A
+  caller is refused: the answer keeps playing, the call goes on, and the bot
+  is told not to say the answer again. A refusal made while the answer is
+  being heard does not ask the model for another turn: the caller speaks next,
+  and if they stay silent after an answer that did not end in a question, the
+  first dead-air prompt asks only whether they need anything else instead of
+  repeating the current question. The silence is counted as any other (#555).
+  The guard judges only the bot's own words, refuses once per caller turn,
+  cannot judge a `hangup` that arrives before the reply's first words (that
+  case is logged), and leaves a real goodbye alone ("No, that's all, bye"
+  still ends the call, with the closing line heard). A
   `hangup` without a valid `reason` is refused as well and changes nothing. The
   reason is written to the log and, for a call the bot hung up, to the CDR's
   `userData.botReason` (not on a call an agent placed to a bot number, whose

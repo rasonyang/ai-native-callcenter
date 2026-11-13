@@ -481,19 +481,38 @@ func (r *Runtime) RefuseAsAcknowledgement(name string) string {
 
 // RefuseWhileAnswering is the answer to a hangup made in a response that was
 // answering the caller (#484): a refusal as a conversation, with ok=0 and a
-// reason that tells the model the call goes on, not to repeat its answer, to
-// ask whether anything else is needed, and to call the tool only once the
-// caller has said goodbye or that they need nothing more. It carries no hint:
-// the reason is the way on, and the phase's instruction is the standing one.
-// It runs nothing and changes no state, as RefuseAsAcknowledgement does not;
-// the caller, which judged the response, logs the decision.
-func (r *Runtime) RefuseWhileAnswering(name string) string {
-	reason := "the call was not ended: you were answering the caller in the same reply. " +
-		"Do not repeat your answer. Ask whether they need anything else, and call " + name +
-		" only after they say goodbye or that they need nothing more"
-	if r.engine.Lang() == LangZH {
+// reason that tells the model the call goes on, not to repeat its answer, and
+// to call the tool only once the caller has said goodbye or that they need
+// nothing more. It carries no hint: the reason is the way on, and the phase's
+// instruction is the standing one. It runs nothing and changes no state, as
+// RefuseAsAcknowledgement does not; the caller, which judged the response,
+// logs the decision.
+//
+// What it tells the model to do next depends on when the model reads it.
+// isTurnAsked says the refusal asks for a turn of its own (SendToolResult):
+// the model answers it at once, so it is told to ask whether anything else is
+// needed. Otherwise the refusal goes into the conversation without a turn
+// (#555), and the model reads it together with the caller's next words: it is
+// told the caller has heard the answer and to answer what they say next, not
+// to ask anything now, which would be an instruction for a moment that has
+// passed.
+func (r *Runtime) RefuseWhileAnswering(name string, isTurnAsked bool) string {
+	var reason string
+	switch {
+	case isTurnAsked && r.engine.Lang() == LangZH:
 		reason = "通话没有结束：你在同一次回复里正在回答来电者。不要重复刚才的回答。" +
 			"问对方还有没有其他需要；对方道别或说没有其他需要之后，再调用 " + name
+	case isTurnAsked:
+		reason = "the call was not ended: you were answering the caller in the same reply. " +
+			"Do not repeat your answer. Ask whether they need anything else, and call " + name +
+			" only after they say goodbye or that they need nothing more"
+	case r.engine.Lang() == LangZH:
+		reason = "通话没有结束：你在同一次回复里正在回答来电者。来电者已经听到了你的回答，不要再说一遍。" +
+			"回应对方接下来说的话；对方道别或说没有其他需要之后，再调用 " + name
+	default:
+		reason = "the call was not ended: you were answering the caller in the same reply. " +
+			"The caller has heard your answer; do not say it again. Answer what they say next, and call " + name +
+			" only after they say goodbye or that they need nothing more"
 	}
 	return Failed(reason, "").asToolOutput()
 }
