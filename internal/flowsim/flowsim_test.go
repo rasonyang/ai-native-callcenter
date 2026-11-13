@@ -229,6 +229,45 @@ func TestUnknownToolIsNamed(t *testing.T) {
 	}
 }
 
+// The scenario's expect.hangupReason is the reason of the last hangup that
+// succeeded, as the runtime handed it to the call (#554); a refused hangup's
+// reason is not it.
+func TestTheHangupReasonIsChecked(t *testing.T) {
+	backend := MockBackends()
+	spec, _ := brokenEarlyCollections(t, func(map[string]any) {})
+	file, err := ParseScenarios([]byte(`{"scenarios":[
+		{"name":"match","steps":[
+			{"call":"hangup","args":{"reason":"CALLER_LEFT"},"expect":{"isRefused":true}},
+			{"call":"hangup","args":{"reason":" caller_asked_to_end "},"expect":{"phase":"finish"}}],
+		 "expect":{"ending":"hangup","hangupReason":"CALLER_ASKED_TO_END"}},
+		{"name":"mismatch","steps":[
+			{"call":"hangup","args":{"reason":"FLOW_INSTRUCTED"},"expect":{"phase":"finish"}}],
+		 "expect":{"hangupReason":"CALLER_ASKED_TO_END"}},
+		{"name":"none","steps":[{"noInput":true}],
+		 "expect":{"hangupReason":"CALLER_GOODBYE"}}
+	]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := Run(context.Background(), spec, backend, file.Scenarios)
+	if r := reports[0]; !r.Passed() || r.HangupReason != flow.HangupCallerAskedToEnd {
+		t.Errorf("match: failure %q, reason %q", r.Failure, r.HangupReason)
+	}
+	for i, want := range map[int]string{
+		1: `the last hangup that succeeded had reason "FLOW_INSTRUCTED", want "CALLER_ASKED_TO_END"`,
+		2: `the last hangup that succeeded had reason "", want "CALLER_GOODBYE"`,
+	} {
+		if r := reports[i]; !strings.Contains(r.Failure, want) {
+			t.Errorf("%s: failure = %q, want it to contain %q", r.Scenario, r.Failure, want)
+		}
+	}
+	var out bytes.Buffer
+	Write(&out, spec.ID, reports[:1], Measure(spec, reports[:1]), false)
+	if !strings.Contains(out.String(), "ending: hangup (CALLER_ASKED_TO_END)") {
+		t.Errorf("the report does not show the reason:\n%s", out.String())
+	}
+}
+
 // A batch is judged in the phase the response was made in and the last move
 // wins (02 §6); the simulator drives it through the same engine calls.
 func TestBatchLastMoveWins(t *testing.T) {

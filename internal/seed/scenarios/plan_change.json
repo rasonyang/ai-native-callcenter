@@ -1,6 +1,17 @@
 {
   "scenarios": [
     {
+      "name": "the caller has the wrong number (#554)",
+      "description": "A caller who says at the greeting that the call is a mistake is let go: hangup with CALLER_ASKED_TO_END moves the call to its closing line (#554).",
+      "lang": "en",
+      "caller": "13700001113",
+      "steps": [
+        {"say": "Oh, I dialled the wrong number.", "expect": {"phase": "identity", "instructionContains": ["If the caller says this call is a mistake", "call hangup with reason CALLER_ASKED_TO_END straight away: say nothing first, do not ask for the service number again"]}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "Thank you for calling, goodbye."}}
+      ],
+      "expect": {"path": ["identity", "finish"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "eligible account: check, submit, status, hangup",
       "description": "10086001 is OK_TO_CHANGE: no identity check. The submit returns a ticket at once; the first status is PROCESSING, the second DONE.",
       "lang": "en",

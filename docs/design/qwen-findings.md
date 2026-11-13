@@ -1911,3 +1911,82 @@ The model followed the probe in 7 of 12 answers. Those 7 hangups were all refuse
 - **The caller was never left without a prompt.** Each silence was answered at the dead-air timer: by the anything-else cue after a refused answer, by the generic cue otherwise. In the two calls where the caller never spoke again, the NO_INPUTs counted as any others and the third closed the call with the closing line.
 - **The generic cue did not repeat an answer here** (calls 2, 8, 9b: a statement with no hangup made, so no refusal and no anything-else cue). W-Q15's call 5 remains the only recorded case of it; these three do not close it.
 - **Not covered:** en; a caller who speaks at once after a refused answer (deterministic tests only); a refusal sent the ordinary way (none occurred).
+
+## W-Q18: a wrong number at the greeting (#554, 2026-11-13)
+
+**The problem.** On `qwen-audio-3.1-realtime-flash`, a caller whose first words at `novanet_support`'s greeting say the call is a mistake is not reliably let go: the model answers with a reassurance and the greeting's question again, and the caller has to say it twice or hang up. Over W-Q16's calls and the four placed after it, 3 of 8 first sayings ended the call.
+
+| # | Text in force | Number | Caller's first saying | First saying |
+|---|---|---|---|---|
+| 1 | main, before #484 | 95002 (zh) | "打错了，不好意思" | `hangup` |
+| 2 | main, before #484 | 95001 (en) | a wrong number | asked again |
+| 3 | #484's first text | 95002 (zh) | "打错了，不好意思" | asked again |
+| 4 | #484's first text | 95001 (en) | a wrong number | asked again |
+| 5 | #484 with the case named | 95001 (en) | "Wrong number, sorry." | "No problem. What can I help you with today?"; ended on the second saying |
+| 6 | #484 with the case named | 95001 (en) | "Sorry, I called by mistake." | `hangup` |
+| 7 | #484 with the case named | 95002 (zh) | "打错了不好意思。" | `hangup` |
+| 8 | #484 with the case named | 95002 (zh) | "不好意思，拨错电话了。" | "没关系，请问有什么可以帮您？", twice; the caller hung up |
+
+**What the transcripts show.**
+
+- Every miss was a response with words and no tool call. The answer guard (#484) had nothing to judge and refused nothing.
+- Every hit was a bare `hangup`: no words before or after it in its response.
+- A response that opened with a reassurance never called the tool. The choice is made from the caller's audio as the response starts, not corrected later in it.
+- The same sentence went both ways inside one call: in call 5, "Wrong number, sorry." was met with the question at the first saying and ended the call at the second. The en miss in call 5 used the rule's own words, so listing more phrasings is not the answer.
+
+**The pulls.** Text the model read that points at the miss:
+
+- The built-in's description listed the wrong number as the third of five cases under "Call it only when", then said "never in reply to a question: answer, ask whether there is anything else, and wait for their reply". A caller who says "wrong number" is answering the greeting's question ("how can I help you today?"), not asking one, but the clause read as any question, and the sequence it prescribes is the shape of the miss.
+- `novanet_support` had the case mid-list in global rule 6 and as the last sentence of the `welcome` instruction, which opened "Understand what the caller needs".
+- The zh text gave phrasings ("说打错电话或拨错号码了"); the caller of call 8 said "拨错电话".
+- The greeting ends in a question, and the miss mirrors it.
+- Known, left alone: the platform's confidentiality rule (`flow.Runtime.confidentialityRule`) gives as its example reply "What can I help you with today?" ("请问有什么可以帮您？"), the miss's words. It governs questions about the bot's instructions and is outside #554; it is the next candidate if the live set still shows the re-ask.
+
+**The decision** (owner, 2026-11-13). Text only, stating the intent rather than phrasings. No engine rule on the caller's words (a per-language phrase list for a caller's intent is what a flow's text is for), no new `reason` value, no API contract change.
+
+- **The built-in `hangup`** (`internal/flow/builtin.go`, en and zh). The only-when list no longer holds the case. It has a sentence of its own: a caller who says this call is a mistake (they have the wrong number, did not mean to call, or were looking for someone else) is asking to end it; call `hangup` straight away with `CALLER_ASKED_TO_END`, saying nothing first, with no reassurance ("no problem", "没关系") and without asking again how you can help. The question clause now reads "never in reply to a question the caller asked" (zh already said "来电者提问时"), and a caller who only asks whether they have the right number is asking such a question. The rest of #484's text stands. The `reason` description gives `CALLER_ASKED_TO_END` the same intent.
+- **`novanet_support`.** The `welcome` instruction opens with the case: call `hangup` with `CALLER_ASKED_TO_END` straight away, do not reassure first, do not ask again how you can help, do not say goodbye, the goodbye is spoken for you; a caller who only asks whether they have the right number is asking a question, to be answered. Global rule 6 has the case as a sentence of its own after the only-when list. The old closing sentence of `welcome` is gone, so each place says it once.
+- **The other shipped flows that answer inbound calls** (`mobile_support`, `early_collections`, `field_service_appointment`, `lead_qualification`) name it in their hangup rule in the same words; `plan_change`, which has no such rule, opens `identity` with it. `early_collections`'s identity check is unchanged: an answerer who is not the account holder still ends with `FLOW_INSTRUCTED`. `campaign_lead_followup` places its calls and is not changed. No flow declares `isCallerNext` for it.
+- **Deterministic checks.** `TestHangupIsDescribedByWhenNotHowSoon` and `TestTheAskedToEndReasonNamesAMistakenCall` (`internal/flow`) pin the sentence, the scoped question clause and the right-number question in both languages, and that the only-when list no longer names the case. `TestEveryInboundFlowNamesAMistakenCallNextToHangup` and `TestNovanetWelcomeOpensWithAMistakenCall` (`internal/seed`) check every inbound flow in both languages and that `welcome`'s first sentence is the case. Flow simulator scenarios in all six inbound flows walk a wrong number at the greeting to the closing line, `novanet_support`'s in both languages; the simulator now records the reason of the last successful `hangup` and a scenario can expect it (`expect.hangupReason`, `CALLER_ASKED_TO_END` there).
+
+**A probe before the calls.** `TestLiveQwenWrongNumber` (`internal/provider/live_wrong_number_test.go`) measures the choice without the owner's call time. Each run is one session opened from a rendered fixture (`testdata/wrong_number.json`, `novanet_support` on this change; `testdata/wrong_number_before.json`, the text of calls 5 to 8, for an A/B): the opening line is played out on the wall clock with room tone, then one caller clip (macOS `say`, the issue's live set, `q_wn_*.pcm`) at real time, and the first response after it is classified as a bare `hangup` (with its reason), words and a `hangup`, words only (transcript logged), another tool, or none. Its calls are not answered. It fails only on a harness error, never on the model's choice, and prints a per-clip table; "ask" ("Is this the right number for billing?", "我是不是打错了？你们是 NovaNet 吗？") is the clip that must not end the call. Each run logs its session length (`session=`). A variant wording is a scratch copy of the flow rendered by `flow.TestRenderWrongNumberSession` and passed as `AICC_LIVE_WRONG_FIXTURE`:
+
+```sh
+AICC_LIVE_PROVIDER_TEST=1 AICC_LIVE_RUNS=10 go test -count=1 -run 'TestLiveQwenWrongNumber/zh' -v ./internal/provider/
+AICC_LIVE_PROVIDER_TEST=1 AICC_LIVE_WRONG_FIXTURE=testdata/wrong_number_before.json AICC_LIVE_RUNS=10 go test -count=1 -run 'TestLiveQwenWrongNumber/zh' -v ./internal/provider/
+```
+
+Synthetic clips are not owner calls: a probe result says which wording to place calls on, not whether the issue is closed.
+
+**Probe result, 2026-11-13** (flash, zh, 3 runs per clip, 30 sessions). The probe did not reproduce the defect, so it says nothing about which wording is better:
+
+| Fixture | 4 mistake clips: bare `hangup`, `CALLER_ASKED_TO_END` | words, then `hangup` | asked again | the right-number question |
+|---|---|---|---|---|
+| `wrong_number_before.json` (the text of calls 5 to 8) | 11 of 12 | 1 of 12 ("好的，没关系。") | 0 of 12 | answered, 3 of 3 |
+| `wrong_number.json` (this change) | 12 of 12 | 0 of 12 | 0 of 12 | answered, 3 of 3 |
+
+The old text asked again in two of four owner calls and in none of twelve probe runs: a synthesized voice on a clean line is not a caller. What the probe does show is that the new text did not end a call on the right-number question, and never spoke before the `hangup`. The owner's calls decide.
+
+### Live set, 2026-11-13 (owner-placed, zh)
+
+Eleven calls on flash, 95002, with this change deployed and provider events at DEBUG. Each caller sentence is the provider's own input transcript.
+
+| # | Caller said | Must end the call | First saying | Reason | What the bot said |
+|---|---|---|---|---|---|
+| 1 | 打错了不好意思。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 2 | 打错了不好意思。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 3 | 不好意思，拨错电话了。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 4 | 不好意思，拨错电话了。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 5 | 拨错电话了。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 6 | 拨错 (a pause) 号码了。 | yes | bare `hangup` once the sentence was whole | `CALLER_ASKED_TO_END` | "好的" in the pause, cut by the rest of the sentence; then the closing line |
+| 7 | 拨错号码了。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 8 | 我找的不是你们。 | yes | **`hangup` refused by the answer guard** | `CALLER_ASKED_TO_END` | "好的，我这就结束通话。", then "请问还有什么可以帮您？" and "请问您还在线吗？" on the caller's silence; the closing line after 44 s |
+| 9 | 我找的不是你们。 | yes | bare `hangup` | `CALLER_ASKED_TO_END` | nothing; the closing line |
+| 10 | 我是不是打错了？你们是 NovaNet 吗？ | **no** | answered | n/a | "是的，这里是 NovaNet 客服热线。请问有什么可以帮您？"; the caller's "好的，再见。" ended it with `CALLER_GOODBYE` |
+| 11 | 我是不是打错了？你们是 NovaNet 吗？ | **no** | answered | n/a | the same answer; ended the same way |
+
+- **The model called `hangup` at the first saying in nine of nine mistaken calls**, each with `CALLER_ASKED_TO_END`, and in neither of the two questions. No response asked again how it could help, the defect of calls 5 and 8 in the table above.
+- **Eight of the nine ended there.** In call 8 the response said "好的，我这就结束通话。" before its `hangup`. The answer guard (W-Q16) took those eleven characters for an answer: they hold no goodbye its claim patterns know and are over its floor, so it refused the `hangup` (`textRunes=11`). The line stayed open through the silent-caller prompts and closed on the third `NO_INPUT`. A sentence that announces the ending is not an answer; W-Q16 had already met "好的，那我先挂了。", which passed only for being one character under the floor. Left to #561 (owner, 2026-11-13): this change is the wording only.
+- Call 6 shows a pause inside the sentence being taken as a turn; the call still ended at the whole sentence.
+
+The en half (95001: "Wrong number, sorry.", "Sorry, I called by mistake.", "Oh, I dialled the wrong number.", "I was trying to reach someone else.", and "Is this the right number for billing?", which must not end the call) waits with the other en live rounds.

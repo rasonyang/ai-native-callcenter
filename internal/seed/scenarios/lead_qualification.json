@@ -1,6 +1,17 @@
 {
   "scenarios": [
     {
+      "name": "来电者打错了电话(#554)",
+      "description": "来电者开场就说打错了:hangup 用 CALLER_ASKED_TO_END,通话直接进入结束语(#554)。",
+      "lang": "zh",
+      "caller": "13900006666",
+      "steps": [
+        {"say": "打错了,不好意思。", "expect": {"phase": "greet"}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "感谢您的时间,再见。"}}
+      ],
+      "expect": {"path": ["greet", "finish"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "a stance and the hangup in one response end in finish with its line",
       "description": "record_interest and hangup in one response (#262): the batch is judged in greet and the hangup moves the call to finish, whose line is said as written. The simulator runs only the flow; that the caller hears the line itself is held by internal/aicall.",
       "lang": "en",

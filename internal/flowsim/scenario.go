@@ -180,6 +180,9 @@ type Final struct {
 	// Ending is the last built-in action that succeeded: "hangup",
 	// "transfer_to_agent" or "take_message"; "none" when no built-in did.
 	Ending string `json:"ending,omitempty"`
+	// HangupReason is the reason of the last hangup that succeeded, one of
+	// flow.HangupReasons (#484). Empty is not checked.
+	HangupReason string `json:"hangupReason,omitempty"`
 	// Transfer is the queue and reason of the last transfer that succeeded.
 	Transfer *TransferExpect `json:"transfer,omitempty"`
 	// ToolsRun lists the tools that ran (allowed ones), in order.

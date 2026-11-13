@@ -1,6 +1,17 @@
 {
   "scenarios": [
     {
+      "name": "来电者打错了电话(#554)",
+      "description": "来电者开场就说打错了:hangup 用 CALLER_ASKED_TO_END,通话直接进入结束语(#554)。",
+      "lang": "zh",
+      "caller": "13800009999",
+      "steps": [
+        {"say": "拨错号码了。", "expect": {"phase": "welcome"}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "感谢来电,再见。"}}
+      ],
+      "expect": {"path": ["welcome", "finish"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "caller checks a repair order that exists",
       "lang": "en",
       "caller": "13800001111",
