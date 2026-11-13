@@ -263,30 +263,52 @@ func TestTheReasonIsNotJudgedOnceTheEndingIsUnderwayOrInATerminalPhase(t *testin
 }
 
 // The guard's refusal (#484, the orchestrator's) runs nothing and says why, in
-// the call's language.
+// the call's language. The one that asks for a turn has the model ask whether
+// anything else is needed; the one sent without a turn (#555), read with the
+// caller's next words, has it answer them and asks nothing now.
 func TestRefuseWhileAnsweringIsAConversation(t *testing.T) {
 	t.Parallel()
-	for lang, want := range map[string][]string{
-		LangEN: {"the call was not ended", "Do not repeat your answer", "anything else", "goodbye"},
-		LangZH: {"通话没有结束", "不要重复", "还有没有其他需要", "道别"},
+	for name, tc := range map[string]struct {
+		lang        string
+		isTurnAsked bool
+		want, not   []string
+	}{
+		"en, turn asked": {LangEN, true,
+			[]string{"the call was not ended", "Do not repeat your answer", "Ask whether they need anything else", "goodbye"},
+			[]string{"Answer what they say next"}},
+		"zh, turn asked": {LangZH, true,
+			[]string{"通话没有结束", "不要重复", "问对方还有没有其他需要", "道别"},
+			[]string{"回应对方接下来说的话"}},
+		"en, quiet": {LangEN, false,
+			[]string{"the call was not ended", "The caller has heard your answer; do not say it again",
+				"Answer what they say next", "goodbye", "need nothing more"},
+			[]string{"anything else", "Ask"}},
+		"zh, quiet": {LangZH, false,
+			[]string{"通话没有结束", "来电者已经听到了你的回答，不要再说一遍", "回应对方接下来说的话", "道别"},
+			[]string{"问对方还有没有其他需要"}},
 	} {
 		actions := &fakeActions{}
-		r, _ := reasonRuntime(t, actions, lang)
-		got := decodeOutput(t, r.RefuseWhileAnswering(ToolHangup))
+		r, _ := reasonRuntime(t, actions, tc.lang)
+		got := decodeOutput(t, r.RefuseWhileAnswering(ToolHangup, tc.isTurnAsked))
 		if got["ok"] != "0" {
-			t.Errorf("%s: ok = %v, want 0", lang, got["ok"])
+			t.Errorf("%s: ok = %v, want 0", name, got["ok"])
 		}
 		if _, hasHint := got["hint"]; hasHint {
-			t.Errorf("%s: the refusal carries a hint: %v", lang, got["hint"])
+			t.Errorf("%s: the refusal carries a hint: %v", name, got["hint"])
 		}
 		errText, _ := got["error"].(string)
-		for _, fragment := range append(want, ToolHangup) {
+		for _, fragment := range append(tc.want, ToolHangup) {
 			if !strings.Contains(errText, fragment) {
-				t.Errorf("%s: error = %q, lacks %q", lang, errText, fragment)
+				t.Errorf("%s: error = %q, lacks %q", name, errText, fragment)
+			}
+		}
+		for _, fragment := range tc.not {
+			if strings.Contains(errText, fragment) {
+				t.Errorf("%s: error = %q, says %q", name, errText, fragment)
 			}
 		}
 		if len(actions.hangups) != 0 || r.Engine().NodeID() != "talk" {
-			t.Errorf("%s: the refusal acted: hangups %v, node %s", lang, actions.hangups, r.Engine().NodeID())
+			t.Errorf("%s: the refusal acted: hangups %v, node %s", name, actions.hangups, r.Engine().NodeID())
 		}
 	}
 }

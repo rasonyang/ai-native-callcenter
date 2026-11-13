@@ -358,8 +358,13 @@ to emit its deltas before the tool call they precede, in wire order. A client
 that synthesises a tool call as a turn of its own (doubao) never has words in
 that turn, so the guard never fires there; that is not a trait to set. The
 refusal is held and decided at the response's end only on a client that
-implements `QuietToolAnswerer` (below); elsewhere it goes out at once, asking
-for a turn. `hangup` also takes a required `reason` (`flow.HangupReasons`), so
+implements `QuietToolAnswerer` (below), and there it asks for no turn whenever
+its response spoke and nothing else in that response needs one (issue
+[#555](https://github.com/rasonyang/ai-native-callcenter/issues/555)); elsewhere
+it goes out at once, asking for a turn. A silence after a quietly refused answer that ended in a statement
+gets a dead-air cue of its own (ask only whether anything else is needed, do
+not repeat the answer), sent through `SendUserText` like any cue: a client
+needs nothing for it. `hangup` also takes a required `reason` (`flow.HangupReasons`), so
 its schema in `session.update` is no longer an empty object; nothing about it
 is provider-specific.
 
@@ -401,8 +406,11 @@ every result asks for its turn as always.
   interface. The orchestrator decides when to use it (`closeToolBatch`); the
   client only has to keep it from touching its turn bookkeeping.
 - **The answer guard's refusal of a hangup** (#484, above) rides the same path:
-  held to the response's end, it is sent quietly when the response's words end
-  in a question, and the ordinary way otherwise.
+  held to the response's end, it is sent quietly whatever the response's words
+  ended in (#555), and the ordinary way only when the batch cannot go quiet (the
+  response queued no audio, or a later call of it asked for a turn, owes a line
+  or armed an ending). Its text differs between the two, and is chosen when it
+  is sent.
 
 ## Attaching something that is not a vendor
 

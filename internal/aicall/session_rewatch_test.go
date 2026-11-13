@@ -75,7 +75,7 @@ func TestAFailedRepromptStillLetsRepeatedSilenceClose(t *testing.T) {
 	// The orchestrator's loop, reduced to its reaction to NO_INPUT.
 	for range 3 {
 		awaitBridgeEvent(t, session, EventTypeNoInput)
-		o.handleDeadAir(session, runtime, actions, false, nil, "", log)
+		o.handleDeadAir(session, runtime, actions, false, nil, nil, "", log)
 	}
 
 	if !engine.IsTerminal() {

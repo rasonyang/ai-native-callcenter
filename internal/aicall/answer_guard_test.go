@@ -73,6 +73,14 @@ var guardAnswers = map[string]struct {
 
 func newGuardHarness(t *testing.T, profile provider.Profile, lang string, isQuietModel bool) *quietHarness {
 	t.Helper()
+	return newGuardHarnessWith(t, profile, guardFlow, lang, isQuietModel, quietConfig())
+}
+
+// newGuardHarnessWith is newGuardHarness on a flow and a session configuration
+// of the test's own.
+func newGuardHarnessWith(t *testing.T, profile provider.Profile, flowJSON, lang string, isQuietModel bool,
+	cfg Config) *quietHarness {
+	t.Helper()
 	h := &quietHarness{}
 	wrap := func(m *fakeModel) provider.VoiceSession {
 		if !isQuietModel {
@@ -81,9 +89,17 @@ func newGuardHarness(t *testing.T, profile provider.Profile, lang string, isQuie
 		h.quiet = &quietModel{fakeModel: m}
 		return h.quiet
 	}
-	h.claimsHarness = newClaimsHarnessModel(t, profile, guardFlow, lang, "", quietConfig(), wrap, nil)
+	h.claimsHarness = newClaimsHarnessModel(t, profile, flowJSON, lang, "", cfg, wrap, nil)
 	return h
 }
+
+// The two texts of the guard's refusal (flow.Runtime.RefuseWhileAnswering), by
+// what tells them apart: the one that asks for a turn has the model ask whether
+// anything else is needed, the quiet one has it answer the caller's next words.
+var (
+	refusalAsksForATurn = map[string]string{"en": "Ask whether they need anything else", "zh": "问对方还有没有其他需要"}
+	refusalSentQuietly  = map[string]string{"en": "Answer what they say next", "zh": "回应对方接下来说的话"}
+)
 
 // delta is a piece of the model's transcript, as the Realtime deltas carry it.
 func (h *quietHarness) delta(text string) {
@@ -145,8 +161,9 @@ func TestAHangupInAResponseThatAnsweredIsRefused(t *testing.T) {
 			if lang == "zh" {
 				want = "通话没有结束"
 			}
-			if !strings.Contains(out, `"ok":"0"`) || !strings.Contains(out, want) {
-				t.Errorf("result = %s, want a refusal that says %q", out, want)
+			if !strings.Contains(out, `"ok":"0"`) || !strings.Contains(out, want) ||
+				!strings.Contains(out, refusalSentQuietly[lang]) {
+				t.Errorf("result = %s, want the quiet refusal that says %q", out, want)
 			}
 			if h.node() != "welcome" || h.actions.isArmed() {
 				t.Errorf("node %q, armed %v: the refused hangup moved or armed something", h.node(), h.actions.isArmed())
@@ -174,29 +191,47 @@ func TestAHangupInAResponseThatAnsweredIsRefused(t *testing.T) {
 	}
 }
 
-// The same response ending in a statement: the refusal asks for a turn, in
-// which the model asks whether anything else is needed.
-func TestARefusalAfterAStatementAsksForATurn(t *testing.T) {
-	h := newGuardHarness(t, provider.OpenAIProfile(), "en", true)
+// The same response ending in a statement: the refusal goes quietly too
+// (#555). Asked for a turn, qwen flash said the whole answer again; now no
+// turn is asked for, the bot holds no floor, and the refusal tells the model
+// to answer what the caller says next.
+func TestARefusalAfterAStatementGoesQuietly(t *testing.T) {
+	for _, lang := range []string{"en", "zh"} {
+		t.Run(lang, func(t *testing.T) {
+			eachProfile(t, func(t *testing.T, profile provider.Profile) {
+				h := newGuardHarness(t, profile, lang, true)
 
-	h.answerAndHangUp("en", false, goodbyeHangup)
-	h.awaitSends(t, "SendToolResult")
-	if got := h.quiet.quietResults(); len(got) != 0 {
-		t.Errorf("the refusal went quietly after a statement: %v", got)
-	}
-	if out := h.model.recordedToolResults()[0].output; !strings.Contains(out, "the call was not ended") {
-		t.Errorf("result = %s, want the refusal", out)
-	}
-	if !strings.Contains(h.logs.String(), "endsInQuestion=false isQuiet=false") {
-		t.Errorf("the close was not logged:\n%s", h.logs.String())
-	}
-	if h.node() != "welcome" || h.actions.isArmed() {
-		t.Errorf("node %q, armed %v", h.node(), h.actions.isArmed())
+				h.answerAndHangUp(lang, false, goodbyeHangup)
+				h.awaitSends(t, "SendToolResultQuietly")
+				settle()
+				if got := h.sends(); got != "SendToolResultQuietly" {
+					t.Errorf("sends = %s, want the quiet refusal and nothing more", got)
+				}
+				if got := h.model.recordedToolResults(); len(got) != 0 {
+					t.Errorf("a turn was asked for: %v", got)
+				}
+				out := h.quiet.quietResults()[0].output
+				if !strings.Contains(out, `"ok":"0"`) || !strings.Contains(out, refusalSentQuietly[lang]) ||
+					strings.Contains(out, refusalAsksForATurn[lang]) {
+					t.Errorf("result = %s, want the quiet refusal", out)
+				}
+				if h.holdsTheFloor() || h.session.isHoldingTheFloor() {
+					t.Error("the bot holds the floor for a turn nobody asked for")
+				}
+				if !strings.Contains(h.logs.String(), "endsInQuestion=false isQuiet=true") {
+					t.Errorf("the close was not logged:\n%s", h.logs.String())
+				}
+				if h.node() != "welcome" || h.actions.isArmed() {
+					t.Errorf("node %q, armed %v", h.node(), h.actions.isArmed())
+				}
+			})
+		})
 	}
 }
 
 // A model that cannot answer quietly gets the refusal at once, the ordinary
-// way, before its response has even ended.
+// way, before its response has even ended, with the text that has the model
+// ask whether anything else is needed.
 func TestARefusalOnAModelWithoutQuietAnswersGoesAtOnce(t *testing.T) {
 	h := newGuardHarness(t, provider.OpenAIProfile(), "en", false)
 
@@ -208,13 +243,45 @@ func TestARefusalOnAModelWithoutQuietAnswersGoesAtOnce(t *testing.T) {
 	h.audio()
 	h.toolCall("fc_h", flow.ToolHangup, goodbyeHangup)
 	h.awaitSends(t, "SendToolResult")
-	if out := h.model.recordedToolResults()[0].output; !strings.Contains(out, `"ok":"0"`) {
-		t.Errorf("result = %s, want the refusal", out)
+	if out := h.model.recordedToolResults()[0].output; !strings.Contains(out, `"ok":"0"`) ||
+		!strings.Contains(out, refusalAsksForATurn["en"]) {
+		t.Errorf("result = %s, want the refusal that asks whether anything else is needed", out)
 	}
 	h.ended()
 	settle()
 	if h.node() != "welcome" || h.actions.isArmed() {
 		t.Errorf("node %q, armed %v", h.node(), h.actions.isArmed())
+	}
+}
+
+// On a model that can answer quietly, a held refusal whose response cannot go
+// quiet (it queued no audio) is released the ordinary way at the response's
+// end, with the text that asks whether anything else is needed.
+func TestAHeldRefusalThatCannotGoQuietAsksForATurn(t *testing.T) {
+	for _, lang := range []string{"en", "zh"} {
+		t.Run(lang, func(t *testing.T) {
+			h := newGuardHarness(t, provider.QwenProfile(), lang, true)
+
+			answer := guardAnswers[lang]
+			h.started()
+			for _, piece := range answer.before {
+				h.delta(piece)
+			}
+			h.toolCall("fc_h", flow.ToolHangup, goodbyeHangup)
+			h.said(answer.statement)
+			settle()
+			if got := h.sends(); got != "" {
+				t.Fatalf("sends = %q while the response is open, want the refusal held", got)
+			}
+			h.ended()
+			h.awaitSends(t, "SendToolResult")
+			if out := h.model.recordedToolResults()[0].output; !strings.Contains(out, refusalAsksForATurn[lang]) {
+				t.Errorf("result = %s, want the refusal that asks whether anything else is needed", out)
+			}
+			if !strings.Contains(h.logs.String(), "endsInQuestion=false isQuiet=false") {
+				t.Errorf("the close was not logged:\n%s", h.logs.String())
+			}
+		})
 	}
 }
 

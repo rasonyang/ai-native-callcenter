@@ -729,7 +729,7 @@ func TestSilenceThatMovesIntoALineAsksForOneTurnOnly(t *testing.T) {
 	o, session, model, engine, runtime, actions, log := deadAirHarness(t, announcingFlow)
 	model.answerLinesWithATurn(session)
 
-	o.handleDeadAir(session, runtime, actions, false, nil, "", log)
+	o.handleDeadAir(session, runtime, actions, false, nil, nil, "", log)
 
 	if !engine.IsTerminal() {
 		t.Fatal("the test flow did not move on the silence")
@@ -759,7 +759,7 @@ func TestSilenceWithNoMoveStillPromptsTheModel(t *testing.T) {
 		"nodes": {"welcome": {"instruction": "Greet.", "tools": []}}
 	}`)
 
-	o.handleDeadAir(session, runtime, actions, false, nil, "", log)
+	o.handleDeadAir(session, runtime, actions, false, nil, nil, "", log)
 
 	if got := model.spokenLines(); len(got) != 0 {
 		t.Errorf("spoken lines = %v, want none", got)
@@ -785,7 +785,7 @@ func TestSilenceThatMovesIntoAPhaseWithoutALineStillPromptsTheModel(t *testing.T
 		}
 	}`)
 
-	o.handleDeadAir(session, runtime, actions, false, nil, "", log)
+	o.handleDeadAir(session, runtime, actions, false, nil, nil, "", log)
 
 	if !engine.IsTerminal() {
 		t.Fatal("the test flow did not move on the silence")
@@ -825,7 +825,7 @@ func TestAGoodbyeWithoutHangupThenSilenceClosesTheCallWithoutAskingTheModel(t *t
 		t.Fatalf("claims = %+v, want the unbacked farewell", found)
 	}
 
-	o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, "", log)
+	o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, nil, "", log)
 
 	if !engine.IsTerminal() {
 		t.Fatal("the call did not move to the closing target")
@@ -853,7 +853,7 @@ func TestSilenceAfterAnOrdinaryTurnStillSendsTheCue(t *testing.T) {
 	claims.onBotSaid(1, "What is your account number?")
 	claims.onTurnDone(1, false, false)
 
-	o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, "", log)
+	o.handleDeadAir(session, runtime, actions, claims.hasFarewellWithoutHangup(), &claims, nil, "", log)
 
 	if engine.IsTerminal() || actions.isArmed() {
 		t.Fatal("an ordinary question ended the call")
@@ -898,7 +898,7 @@ func TestTheFarewellBackstopLeavesOnlyAnArmedEndingAlone(t *testing.T) {
 	t.Run("armed", func(t *testing.T) {
 		o, session, model, engine, runtime, actions, log := deadAirHarness(t, farewellBackstopFlow)
 		actions.arm(t.Context(), func() {})
-		o.handleDeadAir(session, runtime, actions, true, nil, "", log)
+		o.handleDeadAir(session, runtime, actions, true, nil, nil, "", log)
 		if engine.IsTerminal() {
 			t.Error("the backstop moved a call whose ending is already armed")
 		}
@@ -910,7 +910,7 @@ func TestTheFarewellBackstopLeavesOnlyAnArmedEndingAlone(t *testing.T) {
 		// Included since #453: the same rule as on any call.
 		o, session, model, engine, runtime, actions, log := deadAirHarness(t, farewellBackstopFlow)
 		actions.campaignID = "c-1"
-		o.handleDeadAir(session, runtime, actions, true, nil, "", log)
+		o.handleDeadAir(session, runtime, actions, true, nil, nil, "", log)
 		if !engine.IsTerminal() || !session.isClosed() {
 			t.Error("the backstop left a campaign call open")
 		}
@@ -928,7 +928,7 @@ func TestTheFarewellBackstopLeavesOnlyAnArmedEndingAlone(t *testing.T) {
 			"global": {"persona": "You answer the phone."},
 			"nodes": {"welcome": {"instruction": "Greet.", "tools": []}}
 		}`)
-		o.handleDeadAir(session, runtime, actions, true, nil, "", log)
+		o.handleDeadAir(session, runtime, actions, true, nil, nil, "", log)
 		if engine.IsTerminal() {
 			t.Error("the backstop moved a flow with nowhere to go")
 		}

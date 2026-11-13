@@ -639,7 +639,7 @@ func dropThreeTurns(t *testing.T, callerWords string) (cues, lines []string, clo
 	model.answerLinesWithATurn(session)
 	for range 3 {
 		runtime.OnCallerSpoke(callerWords)
-		o.handleDeadAir(session, runtime, actions, false, nil, callerWords, log)
+		o.handleDeadAir(session, runtime, actions, false, nil, nil, callerWords, log)
 	}
 	return model.recordedUserText(), model.spokenLines(), engine.IsTerminal()
 }

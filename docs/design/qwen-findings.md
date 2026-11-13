@@ -1862,3 +1862,52 @@ The guard can only judge words that arrived before the call. A `hangup` that pas
 - **How the refusal was answered.** Two answers ended in a question and the refusal went quietly: the caller spoke next, or stayed silent and got the dead-air prompts and the closing line. Two did not and the refusal asked for a turn: one model turn asked "请问您还有其他需要吗？", the other said its whole answer again in spite of the refusal's "do not repeat your answer". In both the caller's goodbye then ended the call by `hangup` with `CALLER_GOODBYE`.
 - **Three zh responses were a bare `hangup` in reply to the question**, no words and no audio, as the probe ordered. The guard judges the bot's words and had none: those calls ended on the question, with the closing line. Nothing in the engine stops a wordless `hangup` after a question; the description and the flows' rules are what stand against it, and the 40 calls on the shipped flow had none.
 - In one en call the model made no tool call and repeated its answer to each goodbye; in another it repeated a refused answer to the caller's goodbyes. The probe's rules say nothing about a goodbye, so this is put down to the probe, not measured further.
+
+## W-Q17: after a refused hangup, flash can say its whole answer again (#555, 2026-11-13)
+
+**The problem.** In W-Q16's provoked round, two of the four refused responses ended in a statement, and the refusal went the ordinary way: it asked for a turn, in which the model was to ask whether anything else was needed. One turn did ("请问您还有其他需要吗？"). The other said its whole answer again, although the refusal said "do not repeat your answer". The turn the refusal asks for comes after the caller has been answered and has nothing new to say, the shape `isCallerNext` was made for (#387, `docs/flow-authoring.md` 4.5, W-Q15). One repeat in two is not a rate; the repeat is the defect.
+
+**The decision** (owner, 2026-11-13; option 1 of the issue, strengthened):
+
+- **A held refusal is always answered quietly.** On a client with `QuietToolAnswerer`, `closeToolBatch` sends the refusal without asking for a turn whatever the answer ended in. The other conditions stay: the response spoke, no answer of the batch asked for a turn, no line owed, nothing armed, and a batch that also holds slot answers only in a caller-next phase. When they fail, the refusal still asks for a turn. The `the response whose hangup was refused has ended` line still logs `endsInQuestion`.
+- **Two refusal texts** (`flow.Runtime.RefuseWhileAnswering`, `ok:"0"`, no hint). A quiet refusal is read with the caller's next words, so "ask whether they need anything else" would be an instruction for a moment that has passed. It says the call was not ended because the model was answering in the same reply, that the caller has heard the answer and it is not to be said again, to answer what the caller says next, and to call `hangup` only after a goodbye or "nothing more". The refusal that asks for a turn keeps the old meaning: ask whether anything else is needed. The text is chosen, and written to the transcript, when the refusal is sent.
+- **A dead-air cue of its own.** After an answer that ended in a question, the caller has been asked something, and the generic silent-caller cue ("briefly repeat the current question") is right. After one that ended in a statement there is no question to repeat, and on W-Q15's call 5 that cue had the bot repeat its answer instead (the price, twice). So the first `NO_INPUT` after a quietly refused statement gets the anything-else cue instead: "(The caller has heard your answer and has been silent since. Do not repeat any of it. Ask only, in one short sentence, whether they need anything else.)", and in zh "（来电者已经听到了你的回答，之后一直没有说话。不要重复回答里的任何内容。只用一句简短的话问对方还有没有其他需要。）". Only the cue's words change: the silence is counted, the flow's `NO_INPUT` rules and the closing-target default run, and #448's words path, the unhung-farewell backstop and a standing claim's cue come first. It is owed to one dead air and dropped by caller words, a keypress, a barge-in, any other bot turn finishing, a move, or an ending armed or decided. No provider mechanism: it is sent through `SendCue` like the generic cue.
+
+**Deterministic checks** (fake provider, `internal/aicall/anything_else_test.go` and `answer_guard_test.go`; each asserts the exact sequence of what the model was sent):
+
+| Scenario | Sent to the model |
+|---|---|
+| statement, the caller speaks next | the quiet refusal only (`SendToolResultQuietly`) |
+| question, then silence | the quiet refusal, then the generic silent-caller cue |
+| statement, then silence | the quiet refusal, then the anything-else cue; the next dead air gets the generic cue, and the third in a row closes the call through `closingTarget` with its line (`noInput.count` 1, 2, 3) |
+| statement, caller words, later silence | the quiet refusal, then the generic cue |
+| statement, then a silence a `NO_INPUT` rule moves to the goodbye | the quiet refusal, then the closing line; no cue |
+| no audio in the refusing response | the refusal asks for a turn, with the "anything else" text |
+| a model without quiet answers | the refusal at once, asking for a turn, with the "anything else" text |
+
+The reply to the anything-else cue is judged for unbacked claims and is not counted towards `maxTurnsWithoutTool` (`TestTheReplyToTheAnythingElseCueIsJudgedAndNotCountedTowardsTheWall`). On the Realtime client a quiet result followed by a cue is exactly one `response.create` (`TestAQuietResultThenACueAsksForOneTurn`, openai and qwen).
+
+### Live round: zh (2026-11-13, 10 owner-placed calls); en not run
+
+Owner-placed calls on `qwen-audio-3.1-realtime-flash` to a zh number, with a probe copy of `novanet_support` whose last rule orders the answer (statements only) and `hangup` (`FLOW_INSTRUCTED`) in one reply. After each answer the caller waited without speaking until the bot spoke again. The en half of the set was not placed (owner's decision on the day), so the en repeat of W-Q16 has not been re-tested on a live call.
+
+The model followed the probe in 7 of 12 answers. Those 7 hangups were all refused, all 7 refusals went quietly (`isQuiet=true`, none the ordinary way), and all 7 silences after them got the anything-else cue. No sentence of a refused answer was said twice; every reply to the cue was the question alone.
+
+| # | Caller asked | Answer | Hangup refused | Said twice | After the caller's silence | How the call ended |
+|---|---|---|---|---|---|---|
+| 1 | 你们有手机套餐吗？ | two sentences, ended in a question | no hangup made | no | generic cue: "您好，请问您还在吗？您想了解哪类手机套餐呢？" | caller's goodbye, `hangup`, closing line |
+| 2 | 你们客服几点上班？ | one sentence | no hangup made | no | generic cue: "请问您还在线吗？" | caller's goodbye, `hangup`, closing line |
+| 3 | 你们有光纤宽带吗？ | one sentence | yes, quiet | no | anything-else cue: "请问还有其他需要帮助的吗？" | caller's goodbye, `hangup`, closing line |
+| 4a | 可以在网上交费吗？ | one sentence | yes, quiet | no | anything-else cue: "请问还有其他需要帮忙的吗？" | caller asked 4b |
+| 4b | 你们作息几点上班？ | one sentence | yes, quiet | no | anything-else cue: "请问还有其他需要帮忙的吗？" | caller's goodbye; the bot said "好的，再见。" with no tool call and the call closed on its own farewell (#453) |
+| 5 | 你们有手机app吗。 | one sentence | yes, quiet | no | anything-else cue: "请问还有其他需要帮助的吗？" | caller silent throughout: generic cue ("请问您还在线吗？"), then the closing line on the third silence |
+| 6 | 你们提供什么服务？怎么办理？ | three sentences, ended in a question | no hangup made | no | generic cue: "您好，请问您还在线吗？" | caller's goodbye, `hangup`, closing line |
+| 7 | 怎么查我的套餐？ | one sentence | yes, quiet | no | anything-else cue: "请问还有其他需要帮助的吗？" | caller's goodbye, `hangup`, closing line |
+| 8 | 光纤和移动上网有什么区别？ | one sentence | no hangup made | no | generic cue: "您好，请问您还在线吗？" | caller's goodbye, `hangup`, closing line |
+| 9a | 怎么报故障？一般多久能修好？ | two sentences | yes, quiet | no | anything-else cue: "请问还有其他需要吗？" | caller asked 9b |
+| 9b | 光纤宽带有哪几种？ | one sentence | no hangup made | no | generic cue: "您好，请问您还在吗？" | caller's goodbye, `hangup`, closing line |
+| 10 | 支付有哪些付款方式？账单一般什么时候到期？ | two sentences | yes, quiet | no | anything-else cue: "请问还有其他需要帮忙的吗？" | caller silent throughout: generic cue ("请问您还在吗？"), then the closing line on the third silence |
+
+- **The caller was never left without a prompt.** Each silence was answered at the dead-air timer: by the anything-else cue after a refused answer, by the generic cue otherwise. In the two calls where the caller never spoke again, the NO_INPUTs counted as any others and the third closed the call with the closing line.
+- **The generic cue did not repeat an answer here** (calls 2, 8, 9b: a statement with no hangup made, so no refusal and no anything-else cue). W-Q15's call 5 remains the only recorded case of it; these three do not close it.
+- **Not covered:** en; a caller who speaks at once after a refused answer (deterministic tests only); a refusal sent the ordinary way (none occurred).

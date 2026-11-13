@@ -61,6 +61,33 @@ func TestAQuietResultMidResponseLeavesNoTurnOwed(t *testing.T) {
 	}
 }
 
+// A quiet result (the answer guard's refusal of a hangup, #555), then, once the
+// caller has stayed silent, the dead-air cue: the cue asks for its one turn and
+// the result for none, and nothing more is asked once that turn has ended.
+func TestAQuietResultThenACueAsksForOneTurn(t *testing.T) {
+	for _, profile := range []Profile{OpenAIProfile(), QwenProfile()} {
+		t.Run(profile.Name, func(t *testing.T) {
+			f, session := startQuietCall(t, profile)
+			before := len(f.messagesOfType("response.create"))
+
+			if err := session.SendToolResultQuietly("fc_1", `{"ok":"0"}`); err != nil {
+				t.Fatalf("send quietly: %v", err)
+			}
+			completeResponse(t, f, session)
+			f.awaitMessages("response.create", before)
+
+			if err := session.SendUserText("(The caller has heard your answer and has been silent since.)"); err != nil {
+				t.Fatalf("cue: %v", err)
+			}
+			f.awaitMessages("response.create", before+1)
+			f.send(map[string]any{"type": "response.created"})
+			awaitEvent(t, session, EventTypeResponseStarted)
+			completeResponse(t, f, session)
+			f.awaitMessages("response.create", before+1)
+		})
+	}
+}
+
 // A turn already owed or requested still happens, once, and reads the quiet
 // result with the rest of the conversation.
 func TestATurnAlreadyOwedOrRequestedStillHappensOnce(t *testing.T) {
