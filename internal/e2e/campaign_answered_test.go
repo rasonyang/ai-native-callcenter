@@ -301,10 +301,11 @@ func TestFinishedOnceInvariantFails(t *testing.T) {
 }
 
 // The clocks (issue #504). The driver, the callee simulator and the dialer read
-// the host clock; an attempt's finishedAt and a contact's nextAttemptAt are
-// stamped from the switch's, which drifts. A check that orders one against
-// the other passes or fails with the drift. These tests build a run whose
-// switch-stamped fields are moved by `sw` and leave everything else alone.
+// the host's wall clock; an attempt's finishedAt and a contact's nextAttemptAt
+// are stamped from the switch's, which parts ways with it. A check that orders
+// one against the other passes or fails with the offset. These tests build a
+// run whose switch-stamped fields are moved by `sw` and leave everything else
+// alone. The steps of the wall clock itself are clocks_test.go's (#515).
 
 // failureKey is a failure without the timestamps and durations it prints.
 func failureKey(f string) string { return strings.SplitN(f, " (", 2)[0] }
@@ -317,11 +318,32 @@ func failureKeys(fs []string) []string {
 	return out
 }
 
+// c10Fixture is a C10 run's pieces, to adjust before assessListedMidRun.
+type c10Fixture struct {
+	rv      RegionView
+	cv      ContactView
+	key     string
+	dialogs []calleesim.DialogRecord
+	control []calleesim.DialogRecord
+	cdrs    map[string][]api.CDR
+	readAt  time.Time
+	takenMs float64
+}
+
+func (f *c10Fixture) assess() ScenarioResult {
+	return assessListedMidRun(f.rv, f.cv, f.key, f.dialogs, f.control, f.cdrs, f.readAt, f.takenMs)
+}
+
 // c10Run2 is C10 US as the second `make e2e-campaign` run on one environment
 // recorded it (2026-11-07), the switch's clock 1.135 s ahead of the host's
-// and moved a further sw. isEarly lists the number 50 ms before the callee's
-// 486 instead of 268 ms after.
+// and moved a further sw. isEarly lists the number before the driver had seen
+// attempt 1 finish (50 ms before the callee's 486 on the wall clock), instead
+// of after (268 ms after it). Both clocks agree.
 func c10Run2(sw time.Duration, isEarly bool) ScenarioResult {
+	return c10Run2Fixture(sw, isEarly).assess()
+}
+
+func c10Run2Fixture(sw time.Duration, isEarly bool) *c10Fixture {
 	r := Regions[0]
 	cs := caseByID(AllCases, "C10")
 	base := time.Date(2026, 11, 7, 1, 28, 0, 0, time.UTC)
@@ -344,8 +366,11 @@ func c10Run2(sw time.Duration, isEarly bool) ScenarioResult {
 		CallType: "OUTBOUND", CampaignID: &campaignID, EndedAt: *cdrEnd}}}
 
 	posted := at(19183)
+	// What the driver had read before it posted: attempt 1 finished.
+	seen := a1
 	if isEarly {
 		posted = at(18865) // 50 ms before the 486
+		seen.State, seen.Outcome, seen.HangupCause, seen.FinishedAt = "DIALING", nil, nil, nil
 	}
 	next := sat(80050)
 	lastOutcome := skipped
@@ -353,16 +378,21 @@ func c10Run2(sw time.Duration, isEarly bool) ScenarioResult {
 	final := api.CampaignContact{Number: r.Number(cs), Status: "DNC", Attempts: 1, LastOutcome: &lastOutcome}
 	cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final,
 		Listing: &Listing{PostedAt: posted, ListedAt: posted.Add(7 * time.Millisecond), ConfirmedAt: posted.Add(17 * time.Millisecond),
-			IsOnList: true, NextAttemptAt: *next}}
+			IsOnList: true, NextAttemptAt: *next, FirstAttempt: &seen, ContactBefore: &af}}
 	dlg := calleesim.DialogRecord{Number: key, InviteAt: at(17900), InviteHeaders: map[string]string{"from": "<sip:" + did + "@10.0.0.11>"},
 		Provisionals: []calleesim.ProvisionalRecord{{Status: 180, SentAt: at(18115)}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(18915)}}
 	// The control, C03, is busy the same way and dialled again a minute later.
 	ctl1 := calleesim.DialogRecord{InviteAt: at(17900), Final: &calleesim.FinalRecord{Status: 486, SentAt: at(18900)}}
 	ctl2 := calleesim.DialogRecord{InviteAt: at(79000), Final: &calleesim.FinalRecord{Status: 486, SentAt: at(79900)}}
-	return assessListedMidRun(rv, cv, key, []calleesim.DialogRecord{dlg}, []calleesim.DialogRecord{ctl1, ctl2}, cdrs, at(90000))
+	for _, d := range []*calleesim.DialogRecord{&dlg, &ctl1, &ctl2} {
+		onBothClocks(d)
+	}
+	readAt := at(90000)
+	return &c10Fixture{rv: rv, cv: cv, key: key, dialogs: []calleesim.DialogRecord{dlg}, control: []calleesim.DialogRecord{ctl1, ctl2},
+		cdrs: cdrs, readAt: readAt, takenMs: durMs(readAt.Sub(testSimStart))}
 }
 
-func TestListedMidRunIsHeldToTheCalleesClock(t *testing.T) {
+func TestListedMidRunOnRun2sData(t *testing.T) {
 	res := c10Run2(0, false)
 	if !res.Passed || len(res.Failures) != 0 {
 		t.Fatalf("run 2's data failed: %v", res.Failures)
@@ -373,9 +403,12 @@ func TestListedMidRunIsHeldToTheCalleesClock(t *testing.T) {
 	if res.Attempts[1].SwitchOffsetMs != nil {
 		t.Fatal("the skipped attempt, which has no dialog, has a switch offset")
 	}
+	// Listed before the driver had seen attempt 1 finish: neither order with
+	// the callee's response nor with its INVITE is established.
 	early := c10Run2(0, true)
-	if early.Passed || len(early.Failures) != 1 || !strings.Contains(early.Failures[0], "listed at or after the callee's final response") {
-		t.Fatalf("a listing 50 ms before the 486: passed %v, failures %v", early.Passed, early.Failures)
+	if early.Passed || len(early.Failures) != 2 || !strings.Contains(early.Failures[0], "listed at or after the callee's final response") ||
+		!strings.Contains(early.Failures[1], "the only INVITE") {
+		t.Fatalf("a listing before attempt 1 was seen finished: passed %v, failures %v", early.Passed, early.Failures)
 	}
 }
 
@@ -402,7 +435,7 @@ func TestListedMidRunWithoutAFinalResponseFails(t *testing.T) {
 	cs := caseByID(AllCases, "C10")
 	now := time.Date(2026, 11, 7, 1, 28, 0, 0, time.UTC)
 	cv := ContactView{Case: cs, Number: r.Number(cs), Listing: &Listing{PostedAt: now, ListedAt: now, ConfirmedAt: now, IsOnList: true}}
-	res := assessListedMidRun(RegionView{Region: r}, cv, "k", []calleesim.DialogRecord{{InviteAt: now}}, nil, nil, now)
+	res := assessListedMidRun(RegionView{Region: r}, cv, "k", []calleesim.DialogRecord{{InviteAt: now}}, nil, nil, now, 1e9)
 	for _, want := range []string{"listed at or after the callee's final response", "listed before the retry came due", "control's second INVITE", "read after the retry came due"} {
 		found := false
 		for _, f := range res.Failures {
@@ -436,41 +469,62 @@ func requireOnlySwitchTimeMoves(t *testing.T, run func(sw time.Duration) Scenari
 	}
 }
 
+// steppedFixture is a stepped case's pieces, to adjust before
+// assessSteppedContact.
+type steppedFixture struct {
+	rv         RegionView
+	cv         ContactView
+	key        string
+	dialogs    []calleesim.DialogRecord
+	cdrs       map[string][]api.CDR
+	observedAt time.Time
+}
+
+func (f *steppedFixture) assess() ScenarioResult {
+	return assessSteppedContact(f.rv, f.cv, f.key, f.dialogs, f.cdrs, nil, f.observedAt)
+}
+
+// c04Fixture is C04 (busy, then answered a minute later), with the
+// switch-stamped fields moved by sw. Both of the simulator's clocks agree.
+func c04Fixture(sw time.Duration) *steppedFixture {
+	r := Regions[0]
+	cs := caseByID(AllCases, "C04")
+	base := time.Date(2026, 11, 7, 1, 30, 0, 0, time.UTC)
+	at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
+	sat := func(ms int) *time.Time { t := at(ms).Add(sw); return &t }
+	did := "95000001"
+	rv := RegionView{Region: r, DID: api.DID{Number: did}}
+	busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
+	busyCause, normal := "USER_BUSY", "NORMAL_CLEARING"
+	a1 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+		Outcome: &busy, HangupCause: &busyCause, StartedAt: at(100), FinishedAt: sat(2285)}
+	a2 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
+		Outcome: &answered, HangupCause: &normal, StartedAt: at(62300), FinishedAt: sat(66800)}
+	key := r.DialKey(cs, phonenum.FormE164)
+	answeredAt := sat(62600)
+	cdrs := map[string][]api.CDR{
+		a1.CallID.String(): {{CallID: a1.CallID, HangupCause: &busyCause, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(2285)}},
+		a2.CallID.String(): {{CallID: a2.CallID, HangupCause: &normal, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(66800),
+			AnsweredAt: answeredAt, Legs: []api.Leg{{Kind: "BOT"}}}},
+	}
+	af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: sat(62285), LastOutcome: &busy}
+	final := api.CampaignContact{Number: r.Number(cs), Status: "DONE", Attempts: 2, LastOutcome: &answered}
+	cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final}
+	from := map[string]string{"from": "<sip:" + did + "@10.0.0.11>"}
+	d1 := calleesim.DialogRecord{Number: key, InviteAt: at(150), InviteHeaders: from,
+		Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(1150)}}
+	ackAt := at(62650)
+	d2 := calleesim.DialogRecord{Number: key, InviteAt: at(62350), InviteHeaders: from,
+		Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 200, SentAt: at(62600)},
+		AckAt: &ackAt, End: &calleesim.EndRecord{Method: calleesim.EndedWithBye, By: calleesim.EndedByCallee, At: at(65650)},
+		Downlink: calleesim.Downlink{Energy: []calleesim.EnergyBucket{{PeakRMS: 3000}}}}
+	onBothClocks(&d1)
+	onBothClocks(&d2)
+	return &steppedFixture{rv: rv, cv: cv, key: key, dialogs: []calleesim.DialogRecord{d1, d2}, cdrs: cdrs, observedAt: at(130000)}
+}
+
 func TestSteppedContactReadsTheSwitchClockOnlyWhereMarked(t *testing.T) {
-	requireOnlySwitchTimeMoves(t, func(sw time.Duration) ScenarioResult {
-		r := Regions[0]
-		cs := caseByID(AllCases, "C04")
-		base := time.Date(2026, 11, 7, 1, 30, 0, 0, time.UTC)
-		at := func(ms int) time.Time { return base.Add(time.Duration(ms) * time.Millisecond) }
-		sat := func(ms int) *time.Time { t := at(ms).Add(sw); return &t }
-		did := "95000001"
-		rv := RegionView{Region: r, DID: api.DID{Number: did}}
-		busy, answered := api.CampaignOutcome("BUSY"), api.CampaignOutcome("ANSWERED")
-		busyCause, normal := "USER_BUSY", "NORMAL_CLEARING"
-		a1 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
-			Outcome: &busy, HangupCause: &busyCause, StartedAt: at(100), FinishedAt: sat(2285)}
-		a2 := api.CampaignAttempt{ID: uuid.Must(uuid.NewV7()), CallID: uuid.Must(uuid.NewV7()), Number: r.Number(cs), State: attemptFinished,
-			Outcome: &answered, HangupCause: &normal, StartedAt: at(62300), FinishedAt: sat(66800)}
-		key := r.DialKey(cs, phonenum.FormE164)
-		answeredAt := sat(62600)
-		cdrs := map[string][]api.CDR{
-			a1.CallID.String(): {{CallID: a1.CallID, HangupCause: &busyCause, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(2285)}},
-			a2.CallID.String(): {{CallID: a2.CallID, HangupCause: &normal, ToNumber: key, DID: &did, CallType: "OUTBOUND", EndedAt: *sat(66800),
-				AnsweredAt: answeredAt, Legs: []api.Leg{{Kind: "BOT"}}}},
-		}
-		af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: sat(62285), LastOutcome: &busy}
-		final := api.CampaignContact{Number: r.Number(cs), Status: "DONE", Attempts: 2, LastOutcome: &answered}
-		cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final}
-		from := map[string]string{"from": "<sip:" + did + "@10.0.0.11>"}
-		d1 := calleesim.DialogRecord{Number: key, InviteAt: at(150), InviteHeaders: from,
-			Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(1150)}}
-		ackAt := at(62650)
-		d2 := calleesim.DialogRecord{Number: key, InviteAt: at(62350), InviteHeaders: from,
-			Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 200, SentAt: at(62600)},
-			AckAt: &ackAt, End: &calleesim.EndRecord{Method: calleesim.EndedWithBye, By: calleesim.EndedByCallee, At: at(65650)},
-			Downlink: calleesim.Downlink{Energy: []calleesim.EnergyBucket{{PeakRMS: 3000}}}}
-		return assessSteppedContact(rv, cv, key, []calleesim.DialogRecord{d1, d2}, cdrs, nil, at(130000))
-	})
+	requireOnlySwitchTimeMoves(t, func(sw time.Duration) ScenarioResult { return c04Fixture(sw).assess() })
 }
 
 func TestRetriedContactReadsTheSwitchClockOnlyWhereMarked(t *testing.T) {

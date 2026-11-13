@@ -121,6 +121,9 @@ func TestPeakConcurrent(t *testing.T) {
 		"an unended dialog stays up": {[]calleesim.DialogRecord{open, cancelled(9000, 9500)}, 2, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
+			for i := range tc.dialogs {
+				onBothClocks(&tc.dialogs[i])
+			}
 			peak, unended := PeakConcurrent(tc.dialogs)
 			if peak != tc.peak || unended != tc.unended {
 				t.Fatalf("peak %d, unended %d; want %d and %d", peak, unended, tc.peak, tc.unended)
@@ -193,6 +196,7 @@ aicc_campaign_overflow_total{campaign="` + campaignID.String() + `"} 2
 aicc_bot_overflow_hold_ms_milliseconds_count{outcome="OVERFLOW"} 2
 aicc_bot_overflow_hold_ms_milliseconds_sum{outcome="OVERFLOW"} 3002
 `)
+	onBothClocksAll(v, nil)
 	return v
 }
 
@@ -258,6 +262,7 @@ func TestAssessOverflowFails(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				v := fakeK1(t, form)
 				spoil(v)
+				onBothClocksAll(v, nil) // the spoils move the wall-clock stamps
 				if c := overflowChecks(v); !c.Failed() {
 					t.Fatalf("passed (%d checks)", len(c.checks))
 				}
@@ -344,6 +349,7 @@ func fakeK2(t *testing.T, form phonenum.DialForm) *RunView {
 aicc_did_outbound_in_use{did="95000003"} 0
 aicc_dialer_admission_blocked_total{reason="DID_LINES"} 4
 `)
+	onBothClocksAll(v, nil)
 	return v
 }
 
@@ -377,6 +383,7 @@ func TestAssessLineLimit(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				v := fakeK2(t, form)
 				spoil(v)
+				onBothClocksAll(v, nil) // the spoils move the wall-clock stamps
 				if c := lineChecks(v, 2); !c.Failed() {
 					t.Fatalf("passed (%d checks)", len(c.checks))
 				}

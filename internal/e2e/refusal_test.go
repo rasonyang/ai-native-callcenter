@@ -242,6 +242,7 @@ aicc_did_outbound_in_use{did="95000005"} 0
 `)
 	// The probes find the campaign's leg through its attempt, the direct
 	// calls' through the channels read while they were up.
+	onBothClocksAll(v, &f)
 	return v, f
 }
 
@@ -348,6 +349,7 @@ func TestAssessRefusalFails(t *testing.T) {
 			t.Run(name, func(t *testing.T) {
 				v, f := fakeK3(t, form)
 				spoil(v, &f)
+				onBothClocksAll(v, &f) // the spoils move the wall-clock stamps
 				if c, _, _ := refusalAssess(v, f); !c.Failed() {
 					t.Fatalf("passed (%d checks)", len(c.checks))
 				}

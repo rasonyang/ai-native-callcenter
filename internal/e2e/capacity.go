@@ -66,12 +66,16 @@ type CapacityRow struct {
 	EndedBy     string `json:"endedBy"`
 	HasBotLeg   bool   `json:"hasBotLeg"`
 	// InviteAtMs, AnswerAtMs and EndAtMs are counted from the run's first
-	// INVITE; HoldMs is the answer to the end, which for an OVERFLOW leg is
-	// how long it was parked. Reported, never asserted.
+	// INVITE on the simulator's wall clock; reported, never asserted. HoldMs
+	// is the answer to the end, which for an OVERFLOW leg is how long it was
+	// parked, on the simulator's monotonic clock (K3 asserts it on its
+	// refused calls); HoldWallMs is the same interval as two wall-clock
+	// stamps, and differs from it when the wall clock stepped in between.
 	InviteAtMs float64  `json:"inviteAtMs"`
 	AnswerAtMs *float64 `json:"answerAtMs,omitempty"`
 	EndAtMs    *float64 `json:"endAtMs,omitempty"`
 	HoldMs     *float64 `json:"answerToEndMs,omitempty"`
+	HoldWallMs *float64 `json:"answerToEndWallMs,omitempty"`
 	// DownlinkFrames and DownlinkPeakRMS are the audio the callee received.
 	DownlinkFrames  int     `json:"downlinkFrames"`
 	DownlinkPeakRMS float64 `json:"downlinkPeakRms"`
@@ -83,7 +87,7 @@ type LineRow struct {
 	DID    string `json:"did"`
 	Limit  int    `json:"limit"`
 	// PeakDialogs is the simulator's largest number of dialogs from this
-	// caller id that were up at the same time.
+	// caller id that were up at the same time, on its monotonic timeline.
 	PeakDialogs int `json:"peakDialogs"`
 	Dialogs     int `json:"dialogs"`
 	// GaugePeak is the largest aicc_did_outbound_in_use the driver read,
@@ -134,11 +138,12 @@ func RunCapacity(ctx context.Context, cfg CampaignConfig, sc CapacityScenario) (
 		return nil, err
 	}
 
+	started := time.Now()
 	rep := &CapacityReport{
-		Scenario: sc.ID, StartedAt: time.Now().UTC(), DialForm: string(pre.form), AppEnv: env,
+		Scenario: sc.ID, StartedAt: started.UTC(), DialForm: string(pre.form), AppEnv: env,
 		Latency: map[string]float64{}, Contacts: []CapacityRow{},
 	}
-	d := &driver{cfg: cfg, c: pre.c, form: pre.form, rep: &CampaignReport{Latency: rep.Latency}, plan: sc.Plan}
+	d := &driver{cfg: cfg, c: pre.c, form: pre.form, rep: &CampaignReport{Latency: rep.Latency}, plan: sc.Plan, runStart: started}
 	cr := &capacityRun{sc: sc, gaugePeak: map[string]float64{}, atCapacity: map[string]bool{}}
 	view, runErr := cr.run(ctx, d)
 
@@ -436,14 +441,15 @@ func (cr *capacityRun) placeDirect(ctx context.Context, d *driver) error {
 		callID := uuid.Must(uuid.NewV7())
 		did := cr.directDID.Number
 		var created api.CreateCallResponse
-		placed := time.Now().UTC()
+		placed := time.Now()
 		if err := d.c.do(ctx, http.MethodPost, "/calls", api.CreateCallRequest{CallID: &callID, Kind: &kind, To: ds.Number(), DID: &did}, &created, http.StatusCreated); err != nil {
 			return fmt.Errorf("place the direct call to %s: %w", ds.Number(), err)
 		}
 		if created.CallID != callID {
 			return fmt.Errorf("the direct call to %s was placed as %s, not under the id sent (%s)", ds.Number(), created.CallID, callID)
 		}
-		cr.direct = append(cr.direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(), DID: did, CallID: callID.String(), Placed: placed, CDRs: []api.CDR{}})
+		cr.direct = append(cr.direct, DirectCall{Number: ds.Number(), DialKey: ds.DialKey(), DID: did, CallID: callID.String(),
+			Placed: placed.UTC(), PlacedAfterRunStartMs: d.sinceRunStartMs(placed), CDRs: []api.CDR{}})
 	}
 	return nil
 }

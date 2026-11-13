@@ -30,10 +30,14 @@ const inviteSlack = time.Second
 // event timestamps. That clock follows the kernel's monotonic clock and does
 // not step, while the host's wall clock does (on Colima the VM's is stepped
 // every 10 s), so the two part ways (issues #504, #506). Every other
-// check anchors on the simulator, whose wall clock the driver and the dialer
-// share. No tolerance is added for the offset: it is not bounded, so a fixed
-// one would only make the failure come later. C07 reads the simulator's
-// monotonic clock instead.
+// check anchors on the simulator. A duration or an order between two of its
+// events (C07's ring, C04's INVITE gap, C10's control) is read on its
+// monotonic clock (clocks.go, issue #515); C10's listing is held to the
+// callee's response by what the driver had read, not by a clock; the rest
+// compare the simulator's wall clock with the driver's or the dialer's, which
+// it shares, with a margin of a second or more. No tolerance is added for the
+// offset: it is not bounded, so a fixed one would only make the failure come
+// later.
 const switchTime = " [switch time]"
 
 // simDialogEnd is the simulator's end of a dialog on the host clock: the end of
@@ -218,8 +222,11 @@ type AttemptResult struct {
 	// attempt that has a dialog and a finish.
 	SwitchOffsetMs *float64 `json:"switchOffsetMs,omitempty"`
 	// InviteGapMs is the time from the previous attempt's INVITE to this
-	// one's. Reported, never asserted beyond "not before the interval".
-	InviteGapMs *float64 `json:"inviteGapMs,omitempty"`
+	// one's on the simulator's monotonic clock, asserted only to be not
+	// shorter than the interval (C04); InviteGapWallMs is the same interval as
+	// two wall-clock stamps, reported only.
+	InviteGapMs     *float64 `json:"inviteGapMs,omitempty"`
+	InviteGapWallMs *float64 `json:"inviteGapWallMs,omitempty"`
 	// IsAnswered marks an attempt the callee answered. FirstAudioAfterAnswerMs
 	// runs from its 200 OK to the first downlink frame above silence, and
 	// AnswerToEndMs to the BYE. Reported, never asserted.
@@ -272,7 +279,7 @@ func assess(rep *CampaignReport, v *RunView, cases []Case, form phonenum.DialFor
 			if cv.Case.IsListedMidRun {
 				control := rv.Region.DialKey(caseByID(cases, cv.Case.ControlID), form)
 				rep.Scenarios = append(rep.Scenarios, assessListedMidRun(rv, cv, key, dialogsFor(v.Dialogs, key),
-					dialogsFor(v.Dialogs, control), cdrs, v.CalleeReadAt))
+					dialogsFor(v.Dialogs, control), cdrs, v.CalleeReadAt, v.Callee.AfterStartMs))
 				continue
 			}
 			if len(cv.Case.Steps) > 0 {
@@ -844,7 +851,7 @@ func SwitchClockTable(results []ScenarioResult) string {
 	}
 	var b strings.Builder
 	b.WriteString("\n### Switch clock (an attempt's finishedAt minus the end of its dialog on the simulator; includes signalling latency)\n\n")
-	b.WriteString("Checks marked [switch time] read the switch's clock; every other check reads the simulator's and the driver's, which share the host's wall clock (C07 reads the simulator's monotonic clock).\n\n")
+	b.WriteString("Checks marked [switch time] read the switch's clock. C04's INVITE gap, C07's ring and C10's control read the simulator's monotonic clock, and C10's listing is held to the callee's response by what the driver had read; every other check reads the simulator's and the driver's wall clock, which they share.\n\n")
 	b.WriteString("| region | min offset | max offset | attempts |\n|---|---|---|---|\n")
 	for _, region := range order {
 		sp := by[region]

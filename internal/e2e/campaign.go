@@ -94,8 +94,9 @@ func RunCampaigns(ctx context.Context, cfg CampaignConfig) (*CampaignReport, err
 	}
 	c, form := pre.c, pre.form
 
-	rep := &CampaignReport{StartedAt: time.Now().UTC(), DialForm: string(form), Latency: map[string]float64{}}
-	d := &driver{cfg: cfg, c: c, form: form, rep: rep, plan: defaultPlan}
+	started := time.Now()
+	rep := &CampaignReport{StartedAt: started.UTC(), DialForm: string(form), Latency: map[string]float64{}}
+	d := &driver{cfg: cfg, c: c, form: form, rep: rep, plan: defaultPlan, runStart: started}
 	runErr := d.run(ctx)
 
 	rep.FinishedAt = time.Now().UTC()
@@ -413,14 +414,17 @@ type driver struct {
 	regions []*regionRun
 	dnc     []string
 	// calleeBase is how many dialogs the simulator held before the run.
-	calleeBase      int
-	unexpectedBase  int
-	providerBefore  mockprovider.Stats
-	providerAfter   mockprovider.Stats
-	metricsBefore   Metrics
-	metricsAfter    Metrics
-	callbacks       []api.Callback
-	startedAt       time.Time
+	calleeBase     int
+	unexpectedBase int
+	providerBefore mockprovider.Stats
+	providerAfter  mockprovider.Stats
+	metricsBefore  Metrics
+	metricsAfter   Metrics
+	callbacks      []api.Callback
+	startedAt      time.Time
+	// runStart is the zero of the driver's monotonic timeline: the report's
+	// startedAt, with its monotonic reading kept (see sinceRunStartMs).
+	runStart        time.Time
 	lastObservation time.Time
 	// calleeReadAt is when the simulator's final record was read.
 	calleeReadAt time.Time
@@ -432,6 +436,15 @@ type driver struct {
 	fallbackQueue *uuid.UUID
 }
 
+// sinceRunStartMs places t, a reading that still carries its monotonic part
+// (time.Now(), never a value passed through UTC or JSON), on the driver's
+// monotonic timeline: milliseconds after the run started. An order between
+// two of the driver's own moments is read from it, since the wall clock can
+// step between them.
+func (d *driver) sinceRunStartMs(t time.Time) float64 {
+	return float64(t.Sub(d.runStart)) / float64(time.Millisecond)
+}
+
 // regionRun is one campaign of the run as the driver tracks it.
 type regionRun struct {
 	region   Region
@@ -440,11 +453,13 @@ type regionRun struct {
 	// byNumber maps a contact's canonical number to its case.
 	byNumber map[string]Case
 	// afterFirst is each contact as first seen with exactly one attempt, that
-	// one finished: the contact right after its first attempt.
-	afterFirst map[string]api.CampaignContact
-	contacts   map[string]api.CampaignContact
-	attempts   map[string][]api.CampaignAttempt
-	cdrs       []api.CDR
+	// one finished: the contact right after its first attempt. firstFinished
+	// is that attempt, as read in the same observation.
+	afterFirst    map[string]api.CampaignContact
+	firstFinished map[string]api.CampaignAttempt
+	contacts      map[string]api.CampaignContact
+	attempts      map[string][]api.CampaignAttempt
+	cdrs          []api.CDR
 	// listings is each mid-run listing the driver made, by canonical number.
 	listings map[string]*Listing
 }
@@ -555,7 +570,8 @@ func (d *driver) provision(ctx context.Context, r Region, usedDIDs map[string]bo
 
 	rr := &regionRun{
 		region: r, did: did, byNumber: map[string]Case{},
-		afterFirst: map[string]api.CampaignContact{}, listings: map[string]*Listing{},
+		afterFirst: map[string]api.CampaignContact{}, firstFinished: map[string]api.CampaignAttempt{},
+		listings: map[string]*Listing{},
 	}
 	for _, cs := range d.cfg.Cases {
 		rr.byNumber[r.Number(cs)] = cs
@@ -631,6 +647,10 @@ var errListing = errors.New("list a number mid-run")
 // while its contact waits. The list is read back to confirm it. A region
 // whose contact is not there yet is left for the next observation, and none
 // of this holds the other cases back.
+//
+// The listing keeps what the driver had read before it posted (the finished
+// first attempt and the contact): the check that the listing came after the
+// callee's final response reads that, not a clock (assessListedMidRun).
 func (d *driver) listMidRun(ctx context.Context) error {
 	for _, rr := range d.regions {
 		for _, cs := range d.cfg.Cases {
@@ -639,10 +659,11 @@ func (d *driver) listMidRun(ctx context.Context) error {
 			}
 			n := rr.region.Number(cs)
 			af, seen := rr.afterFirst[n]
-			if rr.listings[n] != nil || !seen || af.NextAttemptAt == nil {
+			first, finished := rr.firstFinished[n]
+			if rr.listings[n] != nil || !seen || !finished || af.NextAttemptAt == nil {
 				continue
 			}
-			l := &Listing{NextAttemptAt: *af.NextAttemptAt}
+			l := &Listing{NextAttemptAt: *af.NextAttemptAt, FirstAttempt: &first, ContactBefore: &af}
 			d.dnc = append(d.dnc, n)
 			l.PostedAt = time.Now().UTC()
 			if err := d.c.do(ctx, http.MethodPost, "/dnc-numbers", api.DNCNumberWrite{Number: n}, nil, http.StatusOK, http.StatusCreated); err != nil {
@@ -848,6 +869,7 @@ func (d *driver) observe(ctx context.Context) error {
 			if _, seen := rr.afterFirst[n]; !seen && len(list) == 1 && list[0].State == attemptFinished {
 				if ct, ok := rr.contacts[n]; ok {
 					rr.afterFirst[n] = ct
+					rr.firstFinished[n] = list[0]
 				}
 			}
 		}

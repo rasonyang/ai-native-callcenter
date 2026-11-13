@@ -309,8 +309,10 @@ func fakeC10(t *testing.T) (RegionView, ContactView, []calleesim.DialogRecord, [
 	lastOutcome := skipped
 	af := api.CampaignContact{Number: r.Number(cs), Status: "ACTIVE", Attempts: 1, NextAttemptAt: &nextAt, LastOutcome: &busy}
 	final := api.CampaignContact{Number: r.Number(cs), Status: "DNC", Attempts: 1, LastOutcome: &lastOutcome}
+	seen := a1 // what the driver had read before it listed
 	cv := ContactView{Case: cs, Number: r.Number(cs), Attempts: []api.CampaignAttempt{a1, a2}, AfterFirst: &af, Contact: &final,
-		Listing: &Listing{PostedAt: at(8990), ListedAt: at(9000), ConfirmedAt: at(9010), IsOnList: true, NextAttemptAt: nextAt}}
+		Listing: &Listing{PostedAt: at(8990), ListedAt: at(9000), ConfirmedAt: at(9010), IsOnList: true, NextAttemptAt: nextAt,
+			FirstAttempt: &seen, ContactBefore: &af}}
 	dlg := calleesim.DialogRecord{Number: toNumber, InviteAt: at(100), InviteHeaders: map[string]string{"from": "<sip:" + did + "@10.0.0.11>"},
 		Provisionals: []calleesim.ProvisionalRecord{{Status: 180}}, Final: &calleesim.FinalRecord{Status: 486, SentAt: at(400)}}
 	ctl := calleesim.DialogRecord{InviteAt: at(100)}
@@ -324,7 +326,14 @@ func TestAssessListedMidRun(t *testing.T) {
 		if mutate != nil {
 			mutate(&cv, &dlg, &ctl, cdrs, &read)
 		}
-		return assessListedMidRun(rv, cv, Regions[0].DialKey(cv.Case, phonenum.FormE164), dlg, ctl, cdrs, read)
+		// Both of the simulator's clocks agree here; clocks_test.go has them
+		// part.
+		for _, list := range [][]calleesim.DialogRecord{dlg, ctl} {
+			for i := range list {
+				onBothClocks(&list[i])
+			}
+		}
+		return assessListedMidRun(rv, cv, Regions[0].DialKey(cv.Case, phonenum.FormE164), dlg, ctl, cdrs, read, durMs(read.Sub(testSimStart)))
 	}
 	if res := ok(nil); !res.Passed || len(res.Checks) < 20 {
 		t.Fatalf("the designed run failed or made %d checks: %v", len(res.Checks), res.Failures)
@@ -364,6 +373,9 @@ func TestAssessListedMidRun(t *testing.T) {
 		},
 		"the skipped attempt came before the listing": func(cv *ContactView, _, _ *[]calleesim.DialogRecord, _ map[string][]api.CDR, _ *time.Time) {
 			cv.Attempts[1].StartedAt = cv.Listing.PostedAt.Add(-time.Minute)
+		},
+		"listed before attempt 1 was seen finished": func(cv *ContactView, _, _ *[]calleesim.DialogRecord, _ map[string][]api.CDR, _ *time.Time) {
+			cv.Listing.FirstAttempt.State, cv.Listing.FirstAttempt.Outcome, cv.Listing.FirstAttempt.HangupCause = "DIALING", nil, nil
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

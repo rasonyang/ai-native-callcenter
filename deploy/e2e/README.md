@@ -152,7 +152,7 @@ be replaced by one a real trunk rings.
 | P1–P5 | 180, then 480, 408, 503, 484, 410 | recorded, and held to design 10 §7.2's cause table |
 | C01 | 180, then 200 after 2 s, a tone on the uplink; the bot records `record_lead` `HIGH` and ends the call | `ANSWERED`; lead `HIGH` on the attempt and the contact; exactly one callback, for that call and number, the notes as its message; contact `DONE`; the caller's BYE |
 | C02 | 200, then the customer's BYE at 1 s | `ANSWERED`; contact `DONE`, no lead, no callback; no further INVITE to the number for the rest of the run |
-| C04 | 486 on attempt 1, 200 on attempt 2 (BYE at 3 s) | `BUSY` (`USER_BUSY`), then `ANSWERED`; exactly two INVITEs, at least the 60 s interval apart; contact `DONE` with 2 attempts |
+| C04 | 486 on attempt 1, 200 on attempt 2 (BYE at 3 s) | `BUSY` (`USER_BUSY`), then `ANSWERED`; exactly two INVITEs, at least the 60 s interval apart (less the 1 s INVITE slack, on the simulator's monotonic clock); contact `DONE` with 2 attempts |
 
 C07's bound is read from the INVITE to the CANCEL on the simulator's
 monotonic clock (`afterInviteMs` on the dialog's `end`, `cancelAfterInviteMs`
@@ -200,9 +200,13 @@ canonical number to `POST /dnc-numbers`, reads `GET /dnc-numbers` back and
 checks the number is on it. It does this for each country on its own, while
 the other cases carry on. The retry falls due 60 s after the callee's final
 response (the 486) on the simulator's clock. The case fails when the listing
-was posted before that response, or the API answered it only after the retry
-fell due (it would test nothing), and otherwise asserts that
-the attempts are exactly `BUSY`/`USER_BUSY` then `DNC_SKIPPED`/`NUMBER_ON_DNC`
+may have been posted before that response: the driver keeps what it had read
+before it posted (`firstAttemptBeforeListing` and `contactBeforeListing` in the
+report's `listedMidRun`), and the case requires that to be attempt 1,
+`FINISHED` as `BUSY`/`USER_BUSY`, the switch's reading of the 486 the
+simulator recorded (see "Clocks"). It also fails when the API answered the
+listing only after the retry fell due (it would test nothing), and otherwise
+asserts that the attempts are exactly `BUSY`/`USER_BUSY` then `DNC_SKIPPED`/`NUMBER_ON_DNC`
 (the second started after the listing), that the contact is `DNC` having spent
 one attempt, that the simulator saw one INVITE for the number, that attempt 1
 has one CDR with the dialled string and the skipped attempt none. The platform
@@ -219,33 +223,70 @@ it is listed, and the removal does not revive it. C10's control is C03 instead: 
 retry interval, never listed. C10's assessment requires C03 of the same country
 to have been dialled twice, the second INVITE at or after the moment C10's
 retry fell due (the callee's 486 plus 60 s; give or take the INVITE slack), and the simulator's record that
-counts C10's INVITEs to have been read after that moment. So C10 cannot pass
-because the platform dialled nothing from then on.
+counts C10's INVITEs to have been taken after that moment, both read on the
+simulator's monotonic clock. So C10 cannot pass because the platform dialled
+nothing from then on.
 
 ### Clocks
 
-The driver, the callee simulator and the dialer read one clock, the VM's wall
-clock. That clock steps: on Colima `lima-guestagent` sets it from the host
-every 10 s, by as much as a few seconds, so a duration taken from two of its
-stamps can be wrong by that much. C07 therefore reads the simulator's
-monotonic clock (`afterInviteMs`). An attempt's `finishedAt`, a contact's
-`nextAttemptAt` and the CDR times are stamped from the switch's event
-timestamps instead. The switch follows the kernel's monotonic clock and does
-not step, so against the VM's wall clock it sits at an offset that moves as
-the wall clock does: on one environment it ran 0.25 s ahead right after
-`make e2e-up` and 6.5 s ahead five runs later. A check that ordered one clock
-against the other would pass or fail with the environment's age, so the suite
-anchors on the simulator: when an INVITE is the attempt's (between the
-attempt's start and the next attempt's start), how long a contact was watched
-(from the end of the attempt's dialog), and when C10's retry fell due. The
-checks that must read switch time (that `nextAttemptAt` is the attempt's
-end plus the interval, that the retry did not start before `nextAttemptAt`, and
-the retry interval compared across countries and tabulated in `probes.md`)
-carry a `[switch time]` marker in their text. The report measures the offset
-for every attempt that has a dialog (`switchOffsetMs` in `report.json`, and the
-"Switch clock" table in `probes.md`: per country the smallest and largest
-offset; it includes the signalling latency). No tolerance is added for the
-offset: it is not bounded, so a fixed one would only move the failure later.
+The driver, the callee simulator and the dialer stamp events on one clock, the
+VM's wall clock. That clock steps: on Colima `lima-guestagent` sets it from the
+host every 10 s, by as much as a few seconds, so a duration or an order taken
+from two of its stamps can be wrong by that much (#506, #515). So the checks
+read it as follows.
+
+- **Between two events the simulator recorded: its monotonic clock.** Beside
+  each wall-clock stamp, the simulator's record carries the same moment on its
+  monotonic clock: `afterInviteMs` on the dialog's `final` and `end` (time
+  since the INVITE), and `inviteAfterStartMs` on the dialog and `afterStartMs`
+  on `final` and `end` (time since the simulator started, one timeline for
+  every dialog it saw). The record's `startedAt` and `afterStartMs` say when
+  the simulator started and when the record was taken. C07's ring, C04's
+  INVITE gap, C10's control INVITE and the time C10's record was taken
+  (against C10's retry falling due), K1's and K3's preconditions, K2's peak of
+  dialogs up at once and K3's times from the answer to the BYE
+  (`answerToEndMs`) read these.
+- **Between two of the driver's own moments: its monotonic clock.** K3's
+  holder seen on the bot before the refused calls were placed reads
+  `holderOnBotAfterRunStartMs` and `placedAfterRunStartMs` (time since the
+  run's `startedAt`).
+- **C10's listing against the callee's 486, and against the INVITE: no
+  clock.** The driver and the simulator are two processes. The driver posts
+  the listing only after it has read attempt 1 `FINISHED`, and the platform
+  finishes a refused attempt from the switch's hangup, whose cause the switch
+  has only once the callee's response arrived. The listing keeps what the
+  driver had read (`firstAttemptBeforeListing`, `contactBeforeListing`), and
+  the check holds it to that: attempt 1, `FINISHED`, `BUSY`/`USER_BUSY`, with
+  the simulator's record showing the 486. The wall clock's reading of the
+  same order is printed in the check, not compared.
+- **The rest: the wall clock the simulator shares with the driver and the
+  dialer**, each with a slack or margin of its own (#515 lists them): when an
+  INVITE is the attempt's (between the attempt's start and the next attempt's
+  start), how long a contact was watched (from the end of the attempt's
+  dialog), whether C10's listing was answered before its retry fell due, and
+  whether C10's skipped attempt started after the listing.
+
+The reports keep the wall-clock readings beside the monotonic ones
+(`cancelAfterInviteWallMs`, `inviteGapWallMs`, `answerToEndWallMs`, and the
+wall clock's reading in each check's text), so a step shows up as the gap
+between the two. Where the wall clock does not step, the two agree.
+
+An attempt's `finishedAt`, a contact's `nextAttemptAt` and the CDR times are
+stamped from the switch's event timestamps instead. The switch follows the
+kernel's monotonic clock and does not step, so against the VM's wall clock it
+sits at an offset that moves as the wall clock does: on one environment it ran
+0.25 s ahead right after `make e2e-up` and 6.5 s ahead five runs later. A check
+that ordered one clock against the other would pass or fail with the
+environment's age, so the suite anchors on the simulator, as above. The checks
+that must read switch time (that `nextAttemptAt` is the attempt's end plus the
+interval, that the retry did not start before `nextAttemptAt`, and the retry
+interval compared across countries and tabulated in `probes.md`) carry a
+`[switch time]` marker in their text. The report measures the offset for every
+attempt that has a dialog (`switchOffsetMs` in `report.json`, and the "Switch
+clock" table in `probes.md`: per country the smallest and largest offset; it
+includes the signalling latency). No tolerance is added for the offset or for
+a step of the wall clock: neither is bounded, so a fixed one would only move
+the failure later.
 
 ### Dial forms
 
@@ -391,9 +432,9 @@ way a production deployment loses them, to calls the campaign does not see
 (design 10 names an inbound surge): two single AI calls that answer at once
 and stay up. When the contacts answer, one slot is free. The run first holds
 itself to that order (every contact ringing before the first answer, both slot
-holders answered before it and still up after the last overflow) and fails
-when it did not hold, rather than report a split it did not set up. Which
-contact gets the slot is a race between three answers; the scenario asserts
+holders answered before it and still up after the last overflow, read on the
+simulator's monotonic clock) and fails when it did not hold, rather than
+report a split it did not set up. Which contact gets the slot is a race between three answers; the scenario asserts
 the split, not the winner. The one free slot is global, so K1 uses one
 country: a second one would share it and neither could be held to one
 `ANSWERED` and two `OVERFLOW`.
@@ -408,7 +449,12 @@ a pair, and the run can see it (the callee answered, a bot slot is in use, the
 mock has a session open). The run holds itself to the order, as K1 does: the
 holder answered and on the bot before the first refused call is placed, and
 still up when the last refused call ended (28 s against about 8), and fails
-rather than report a split it did not set up. The three refused cases are
+rather than report a split it did not set up. The order of the calls' events
+is read on the simulator's monotonic clock, and the holder seen on the bot
+against the refused calls' placing on the driver's; R1's 8 s ±1 s, R2's 14 s
+and R3's 6 s run from the 200 OK to the BYE on the simulator's monotonic clock
+(`answerToEndMs`), with the wall clock's reading beside them
+(`answerToEndWallMs`). See "Clocks". The three refused cases are
 placed together; N1 waits for the holder's end and for the slots to be free.
 The bot's range is checked against the switch's (`FS_RTP_START_PORT` and
 `FS_RTP_END_PORT` in the resolved configuration, else the image's
@@ -423,10 +469,14 @@ campaign attempt's `legId`); `e2e.sh` copies the log out and a second test
 `report.json` and `capacity.md`. A leg with no lines in the log fails.
 
 Reported, never asserted: each call's answer and end times from the run's
-first INVITE, each `OVERFLOW` leg's hold (200 OK to the platform's BYE) next to
-the configured hold, the spread of the three answers, the application's own
-mean hold (`aicc_bot_overflow_hold_ms`), the line gauge's sampled peak, and
-whether a campaign read `AT_CAPACITY`.
+first INVITE (on the simulator's wall clock), each `OVERFLOW` leg's hold (200
+OK to the platform's BYE, on its monotonic clock, the wall clock's reading
+beside it) next to the configured hold, the spread of the three answers, the
+application's own mean hold (`aicc_bot_overflow_hold_ms`), the line gauge's
+sampled peak, and whether a campaign read `AT_CAPACITY`. K2's peak of dialogs
+up at once is read on the simulator's monotonic clock: a step of the wall
+clock between one dialog's end and the next one's INVITE would otherwise count
+a line handed on as two lines up at once.
 
 The run-wide invariants (`AfterRunChecks`) run on all three, with these
 adaptations, each written into the check it changes:

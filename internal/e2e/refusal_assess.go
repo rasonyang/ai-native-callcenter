@@ -38,7 +38,7 @@ func botReasonOf(cdr api.CDR) (reason string, present bool) {
 	return s, true
 }
 
-func refusalRow(rc RefusalCall, dc DirectCall, region string, t0 time.Time, f RefusalFacts) RefusalRow {
+func refusalRow(rc RefusalCall, dc DirectCall, region string, t0 simMoment, f RefusalFacts) RefusalRow {
 	r := row(region, rc.ID, dc.Number, dc.Dialog, dc.CDRs, t0)
 	if dc.Dialog != nil {
 		r.Invites = 1
@@ -79,11 +79,22 @@ func endedByBye(dlg *calleesim.DialogRecord, who string) bool {
 	return dlg != nil && dlg.End != nil && dlg.End.By == who && dlg.End.Method == calleesim.EndedWithBye
 }
 
+// holdMs is a row's answer-to-end time on the simulator's monotonic clock,
+// the value K3's bounds read; -1 when it has none, so any bound fails.
 func holdMs(r RefusalRow) float64 {
 	if r.HoldMs == nil {
 		return -1
 	}
 	return *r.HoldMs
+}
+
+// holdWall is the same interval as two wall-clock stamps, for the check's
+// text: a step of the wall clock shows as the gap between the two.
+func holdWall(r RefusalRow) string {
+	if r.HoldWallMs == nil {
+		return "none"
+	}
+	return fmt.Sprintf("%.0f ms", *r.HoldWallMs)
 }
 
 // AssessRefusal makes K3's assertions. It first holds the run to its order:
@@ -92,6 +103,11 @@ func holdMs(r RefusalRow) float64 {
 // R1, R2, R3 and N1 and the holder's own CDR. Latency is reported only. The
 // run-wide invariants (AfterRunChecks) are made by the caller, and what the
 // switch's log must show goes out as probes.
+//
+// Every order and duration here is read on a monotonic clock (issue #515):
+// the simulator's for its dialogs (the holds and the order of the calls'
+// events), the driver's for its own moments (the holder seen on the bot, the
+// refused calls placed). The wall-clock readings are printed beside them.
 func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([]RefusalRow, []SwitchProbe) {
 	rows, probes := []RefusalRow{}, []SwitchProbe{}
 	c.That(len(v.Direct) == len(sc.Direct) && len(v.Regions) == 1 && len(v.Regions[0].Contacts) == 1,
@@ -128,31 +144,45 @@ func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([
 	}
 
 	// The order the run was held to.
-	c.That(f.HolderOnBotAt != nil && !f.HolderOnBotAt.IsZero(), "precondition: the driver saw the holder answered and on the bot (a bot slot in use, a session open on the mock) before it placed the first refused call")
+	onBot := f.HolderOnBotAt != nil && !f.HolderOnBotAt.IsZero() && f.HolderOnBotAfterRunStartMs != nil
+	c.That(onBot, "precondition: the driver saw the holder answered and on the bot (a bot slot in use, a session open on the mock) before it placed the first refused call")
 	c.That(holder.Dialog != nil && holder.IsAnswered() && r1.Dialog != nil && r2.Dialog != nil && r3dlg != nil,
 		"precondition: the holder, R1, R2 and R3 all reached the simulator (holder answered %v)", holder.IsAnswered())
 	if holder.Dialog != nil && holder.IsAnswered() && r1.Dialog != nil && r2.Dialog != nil && r3dlg != nil {
-		answer := holder.Dialog.Final.SentAt
-		first := minTime(r1.Dialog.InviteAt, r2.Dialog.InviteAt, r3dlg.InviteAt)
-		c.That(answer.Before(first),
-			"precondition: the holder was answered before the first refused INVITE (answered at %.0f ms, first refused INVITE at %.0f ms)", msSince(t0, answer), msSince(t0, first))
-		if f.HolderOnBotAt != nil {
+		answer, _ := finalMoment(*holder.Dialog)
+		first := earliest(inviteMoment(*r1.Dialog), inviteMoment(*r2.Dialog), inviteMoment(*r3dlg))
+		c.That(answer.before(first),
+			"precondition: the holder was answered before the first refused INVITE (answered at %s, first refused INVITE at %s)", atMs(answer, t0), atMs(first, t0))
+		if onBot {
+			// Both are the driver's own moments, on its monotonic clock.
+			placedMs := min(r1.PlacedAfterRunStartMs, r2.PlacedAfterRunStartMs)
 			placed := minTime(r1.Placed, r2.Placed)
-			c.That(f.HolderOnBotAt.Before(placed),
-				"precondition: the holder was on the bot before the first refused call was placed (on the bot at %s, first placed at %s)", f.HolderOnBotAt.Format(time.RFC3339Nano), placed.Format(time.RFC3339Nano))
+			c.That(*f.HolderOnBotAfterRunStartMs < placedMs,
+				"precondition: the holder was on the bot before the first refused call was placed (on the bot %.0f ms after the run started, first placed at %.0f ms, on the driver's monotonic clock; wall clock: on the bot at %s, first placed at %s)",
+				*f.HolderOnBotAfterRunStartMs, placedMs, f.HolderOnBotAt.Format(time.RFC3339Nano), placed.Format(time.RFC3339Nano))
 		}
-		var lastEnd time.Time
+		var lastEnd simMoment
+		refusedEnded := 0
 		for _, d := range []*calleesim.DialogRecord{r1.Dialog, r2.Dialog, r3dlg} {
-			if end, ok := dialogEnd(*d); ok && end.After(lastEnd) {
-				lastEnd = end
+			if end, ok := dialogEnd(*d); ok {
+				if refusedEnded == 0 || lastEnd.before(end) {
+					lastEnd = end
+				}
+				refusedEnded++
 			}
 		}
 		holderEnd, ended := dialogEnd(*holder.Dialog)
-		c.That(!lastEnd.IsZero() && ended && holderEnd.After(lastEnd),
-			"precondition: the holder was still up when the last refused call ended (holder ended at %.0f ms, last refused call at %.0f ms)", msSince(t0, holderEnd), msSince(t0, lastEnd))
+		c.That(refusedEnded > 0 && ended && lastEnd.before(holderEnd),
+			"precondition: the holder was still up when the last refused call ended (holder ended at %s, last refused call at %s)", atMs(holderEnd, t0), atMs(lastEnd, t0))
 	}
-	c.That(n1.Dialog != nil && holder.Dialog != nil && n1.Dialog.InviteAt.After(endOr(holder.Dialog)),
-		"precondition: the normal call was placed after the holder ended")
+	normalAfter := false
+	if n1.Dialog != nil && holder.Dialog != nil {
+		// A holder that never ended counts as ended before everything, as it
+		// always has here; the precondition above fails that run.
+		holderEnd, ended := dialogEnd(*holder.Dialog)
+		normalAfter = !ended || holderEnd.before(inviteMoment(*n1.Dialog))
+	}
+	c.That(normalAfter, "precondition: the normal call was placed after the holder ended")
 
 	// The holder.
 	{
@@ -179,7 +209,8 @@ func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([
 			pre+"the callee hung up: the platform did not drop the customer (%s)", r.EndedBy)
 		want := float64(k3QueuedByeMs)
 		c.That(r.HoldMs != nil && holdMs(r) >= want-k3QueuedByeSlackMs && holdMs(r) <= want+k3QueuedByeSlackMs,
-			pre+"the callee's BYE came at its scripted %d ms after the answer, +/- %d ms (%.0f ms)", k3QueuedByeMs, k3QueuedByeSlackMs, holdMs(r))
+			pre+"the callee's BYE came at its scripted %d ms after the answer, +/- %d ms (%.0f ms on the simulator's monotonic clock; wall clock %s)",
+			k3QueuedByeMs, k3QueuedByeSlackMs, holdMs(r), holdWall(r))
 		c.That(f.Channels[r1.CallID] != "", "%sthe customer leg's channel id was read from the live call, to find its lines in the switch log", pre)
 		probes = append(probes, SwitchProbe{Case: "R1", CallID: r1.CallID, LegID: f.Channels[r1.CallID], Kind: ProbeQueueTransfer, QueueExt: f.QueueExt})
 	}
@@ -194,7 +225,8 @@ func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([
 		c.That(endedByBye(r2.Dialog, calleesim.EndedByCaller),
 			pre+"the platform hung the customer up with a BYE, ahead of the callee's scripted %d ms (%s)", k3StaysUpByeMs, r.EndedBy)
 		c.That(r.HoldMs != nil && holdMs(r) <= k3PromptByeMaxMs,
-			pre+"the platform's BYE came within %d ms of the answer, the prompt included (%.0f ms)", k3PromptByeMaxMs, holdMs(r))
+			pre+"the platform's BYE came within %d ms of the answer, the prompt included (%.0f ms on the simulator's monotonic clock; wall clock %s)",
+			k3PromptByeMaxMs, holdMs(r), holdWall(r))
 		if cdr != nil {
 			c.That(deref(cdr.HangupCause) == causeTemporaryFailure, pre+"the CDR's hangup cause is the switch's %s (%s)", causeTemporaryFailure, deref(cdr.HangupCause))
 			c.That(cdr.QueueID == nil, pre+"the call never reached a queue (queueId %s)", uuidText(cdr.QueueID))
@@ -228,7 +260,8 @@ func AssessRefusal(v *RunView, sc RefusalScenario, f RefusalFacts, c *Checks) ([
 		c.That(endedByBye(r3dlg, calleesim.EndedByCaller),
 			pre+"the platform hung the customer up with a BYE, ahead of the callee's scripted %d ms (%s)", k3StaysUpByeMs, r.EndedBy)
 		c.That(r.HoldMs != nil && holdMs(RefusalRow{CapacityRow: r}) <= k3PlatformByeMaxMs,
-			pre+"the platform's BYE came within %d ms of the answer (%.0f ms)", k3PlatformByeMaxMs, holdMs(RefusalRow{CapacityRow: r}))
+			pre+"the platform's BYE came within %d ms of the answer (%.0f ms on the simulator's monotonic clock; wall clock %s)",
+			k3PlatformByeMaxMs, holdMs(RefusalRow{CapacityRow: r}), holdWall(RefusalRow{CapacityRow: r}))
 		if cdr != nil {
 			c.That(deref(cdr.HangupCause) == causeTemporaryFailure, pre+"the CDR's hangup cause is the switch's %s (%s)", causeTemporaryFailure, deref(cdr.HangupCause))
 			c.That(cdr.QueueID == nil, pre+"the call never reached the DID's fallback queue (queueId %s)", uuidText(cdr.QueueID))
@@ -271,13 +304,6 @@ func minTime(first time.Time, rest ...time.Time) time.Time {
 		}
 	}
 	return first
-}
-
-// endOr is when the dialog ended, or the zero time (before everything) when
-// it has not.
-func endOr(d *calleesim.DialogRecord) time.Time {
-	end, _ := dialogEnd(*d)
-	return end
 }
 
 // Probe kinds: what the switch's log must show for a refused call's leg.
@@ -497,9 +523,9 @@ func RefusalTable(rep *RefusalReport) string {
 	if rep.Facts.QueueExt != "" {
 		fmt.Fprintf(&b, "- the fallback queue = extension %s\n", rep.Facts.QueueExt)
 	}
-	b.WriteString("\nTimes from the run's first INVITE, in ms; reported, never asserted.\n\n")
-	b.WriteString("| call | role | number | outcome | cause | botReason | queue | contact | INVITEs | answered at | ended at | answer to end | ended by | bot leg | peak rms | leg |\n")
-	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
+	b.WriteString("\n" + capacityTimesNote + "\n\n")
+	b.WriteString("| call | role | number | outcome | cause | botReason | queue | contact | INVITEs | answered at | ended at | answer to end | answer to end (wall) | ended by | bot leg | peak rms | leg |\n")
+	b.WriteString("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n")
 	opt := func(p *float64) string {
 		if p == nil {
 			return "-"
@@ -513,9 +539,9 @@ func RefusalTable(rep *RefusalReport) string {
 		return s
 	}
 	for _, r := range rep.Calls {
-		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %d | %s | %s | %s | %s | %v | %.0f | %s |\n",
+		fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s | %s | %s | %d | %s | %s | %s | %s | %s | %v | %.0f | %s |\n",
 			r.ID, r.Role, r.Number, dash(r.Outcome), dash(r.HangupCause), dash(r.BotReason), dash(r.QueueID), dash(r.ContactEnd), r.Invites,
-			opt(r.AnswerAtMs), opt(r.EndAtMs), opt(r.HoldMs), dash(r.EndedBy), r.HasBotLeg, r.DownlinkPeakRMS, dash(r.ChannelID))
+			opt(r.AnswerAtMs), opt(r.EndAtMs), opt(r.HoldMs), opt(r.HoldWallMs), dash(r.EndedBy), r.HasBotLeg, r.DownlinkPeakRMS, dash(r.ChannelID))
 	}
 	if rep.SwitchLog != nil {
 		b.WriteString("\nThe switch's log:\n\n")

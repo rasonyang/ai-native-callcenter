@@ -53,6 +53,9 @@ type Server struct {
 	log  *slog.Logger
 	conn *net.UDPConn
 	wav  map[string][]int16
+	// startedAt is the zero of the monotonic timeline every afterStartMs is
+	// read on. It keeps its monotonic reading; see dialog.inviteAt.
+	startedAt time.Time
 
 	mu       sync.Mutex
 	dialogs  map[string]*dialog
@@ -70,11 +73,12 @@ func New(cfg Config) (*Server, error) {
 		cfg.Log = slog.Default()
 	}
 	s := &Server{
-		cfg:      cfg,
-		log:      cfg.Log,
-		wav:      map[string][]int16{},
-		dialogs:  map[string]*dialog{},
-		attempts: map[string]int{},
+		cfg:       cfg,
+		log:       cfg.Log,
+		wav:       map[string][]int16{},
+		startedAt: time.Now(),
+		dialogs:   map[string]*dialog{},
+		attempts:  map[string]int{},
 	}
 	for number, behaviours := range cfg.Scenario.Numbers {
 		for i, b := range behaviours {
@@ -132,10 +136,13 @@ func (s *Server) Serve(ctx context.Context) error {
 // Report snapshots every dialog seen so far.
 func (s *Server) Report() Report {
 	s.mu.Lock()
+	// Taken under the lock onInvite stamps and registers a dialog under, so
+	// every INVITE stamped before this moment is in the list copied below.
+	takenMs := s.sinceStartMs(time.Now())
 	dialogs := append([]*dialog(nil), s.order...)
 	s.mu.Unlock()
 
-	report := Report{Dialogs: make([]DialogRecord, 0, len(dialogs))}
+	report := Report{StartedAt: s.startedAt.UTC(), AfterStartMs: takenMs, Dialogs: make([]DialogRecord, 0, len(dialogs))}
 	for _, d := range dialogs {
 		d.mu.Lock()
 		rec := d.rec.snapshot()
@@ -213,8 +220,8 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 		ackCh: make(chan struct{}),
 		rec: DialogRecord{
 			CallID: msg.CallID(), Number: number, Attempt: attempt, IsExpected: known,
-			RemoteAddr: from.String(), InviteAt: inviteAt.UTC(), RequestURI: msg.RequestURI(),
-			InviteHeaders: msg.Headers(), Provisionals: []ProvisionalRecord{},
+			RemoteAddr: from.String(), InviteAt: inviteAt.UTC(), InviteAfterStartMs: s.sinceStartMs(inviteAt),
+			RequestURI: msg.RequestURI(), InviteHeaders: msg.Headers(), Provisionals: []ProvisionalRecord{},
 			Downlink: Downlink{Energy: []EnergyBucket{}},
 		},
 	}
@@ -227,6 +234,19 @@ func (s *Server) onInvite(msg *voice.SIPMessage, from *net.UDPAddr) {
 		defer s.wg.Done()
 		d.run(known)
 	}()
+}
+
+// sinceStartMs places t, a reading that still carries its monotonic part, on
+// the simulator's monotonic timeline.
+func (s *Server) sinceStartMs(t time.Time) float64 {
+	return monotonicMs(t, s.startedAt)
+}
+
+// monotonicMs is t minus from in milliseconds. Both must carry their monotonic
+// readings (time.Now(), never a value passed through UTC, Round or JSON), or
+// the subtraction falls back to the wall clock without a sound.
+func monotonicMs(t, from time.Time) float64 {
+	return float64(t.Sub(from)) / float64(time.Millisecond)
 }
 
 // stripPrefix removes the called-number prefix from a Request-URI user. With
@@ -386,7 +406,7 @@ func (d *dialog) finalResponse(status int, line string) {
 	d.ringing = false
 	packet := d.invite.Response(line, d.toTag, "", "", nil)
 	d.lastResponse = packet
-	d.rec.Final = &FinalRecord{Status: status, SentAt: time.Now().UTC()}
+	d.rec.Final = d.finalRecord(status, time.Now())
 	d.s.send(d.from, packet)
 	d.mu.Unlock()
 	d.stopMedia()
@@ -412,7 +432,7 @@ func (d *dialog) answer(offer *voice.SDPOffer, payloadType int) {
 		[]byte(d.sdpLocked(payloadType, offer)))
 	d.lastResponse = packet
 	d.answeredAt = time.Now()
-	d.rec.Final = &FinalRecord{Status: 200, SentAt: d.answeredAt.UTC()}
+	d.rec.Final = d.finalRecord(200, d.answeredAt)
 	d.s.send(d.from, packet)
 	d.mu.Unlock()
 
@@ -527,15 +547,23 @@ func (d *dialog) onCancel(cancel *voice.SIPMessage) {
 		return
 	}
 	d.ringing, d.ended = false, true
-	nowMono := time.Now()
-	now := nowMono.UTC()
+	now := time.Now()
 	packet := d.invite.Response487(d.toTag)
 	d.lastResponse = packet
-	d.rec.Final = &FinalRecord{Status: 487, SentAt: now}
-	d.rec.End = d.endRecord(EndedWithCancel, EndedByCaller, nowMono)
+	d.rec.Final = d.finalRecord(487, now)
+	d.rec.End = d.endRecord(EndedWithCancel, EndedByCaller, now)
 	d.s.send(d.from, packet)
 	d.mu.Unlock()
 	d.finish()
+}
+
+// finalRecord is the record of the final response sent at now (a reading
+// that still carries its monotonic part). Callers hold d.mu.
+func (d *dialog) finalRecord(status int, now time.Time) *FinalRecord {
+	return &FinalRecord{
+		Status: status, SentAt: now.UTC(),
+		AfterInviteMs: monotonicMs(now, d.inviteAt), AfterStartMs: d.s.sinceStartMs(now),
+	}
 }
 
 // endRecord is the record of the request that ended the dialog, which arrived
@@ -543,7 +571,7 @@ func (d *dialog) onCancel(cancel *voice.SIPMessage) {
 func (d *dialog) endRecord(method, by string, now time.Time) *EndRecord {
 	return &EndRecord{
 		Method: method, By: by, At: now.UTC(),
-		AfterInviteMs: float64(now.Sub(d.inviteAt)) / float64(time.Millisecond),
+		AfterInviteMs: monotonicMs(now, d.inviteAt), AfterStartMs: d.s.sinceStartMs(now),
 	}
 }
 
