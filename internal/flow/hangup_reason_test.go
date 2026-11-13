@@ -103,23 +103,95 @@ func TestHangupOffersARequiredReasonEnum(t *testing.T) {
 	}
 }
 
-// The description says when, not how fast.
+// The description says when, not how fast. A mistaken call is a sentence of
+// its own, stated as the caller's intent and ended with no words first (#554):
+// as a slot in the only-when list, followed by an unscoped "never in reply to a
+// question: answer, ask whether there is anything else", flash met a wrong
+// number at the greeting by asking again how it could help. The question clause
+// is about a question the caller asked, and asking whether this is the right
+// number is one.
 func TestHangupIsDescribedByWhenNotHowSoon(t *testing.T) {
 	t.Parallel()
-	for lang, want := range map[string][]string{
-		LangEN: {"only when", "the wrong number", "Never call it in the same reply as an answer", "never in reply to a question"},
-		LangZH: {"只在以下情况调用", "打错电话", "不要在回答来电者的同一次回复里调用", "来电者提问时也不要调用"},
+	type text struct {
+		// when is the only-when list, which no longer holds the mistake; mistake
+		// is the sentence that does.
+		when, mistake string
+		want          []string
+		stale         []string
+	}
+	for lang, tc := range map[string]text{
+		LangEN: {
+			when:    "Call it only when",
+			mistake: "When the caller says this call is a mistake",
+			want: []string{
+				"they have the wrong number, did not mean to call, or were looking for someone else",
+				"call it straight away with reason CALLER_ASKED_TO_END, saying nothing first",
+				`no reassurance such as "no problem"`,
+				"without asking again how you can help",
+				"Never call it in the same reply as an answer",
+				"never in reply to a question the caller asked",
+				"A caller who only asks whether they have the right number is asking such a question.",
+			},
+			stale: []string{"as soon as", "in reply to a question:", "called by mistake, or"},
+		},
+		LangZH: {
+			when:    "只在以下情况调用",
+			mistake: "来电者说这通电话打错了",
+			want: []string{
+				"拨错号码、不小心打来，或者要找的是别人",
+				"直接调用，reason 用 CALLER_ASKED_TO_END，调用前什么都不要说",
+				"不要先说“没关系”",
+				"也不要再问有什么可以帮您",
+				"不要在回答来电者的同一次回复里调用",
+				"来电者提问时也不要调用",
+				"来电者只是问自己有没有打对电话，也是提问。",
+			},
+			stale: []string{"立即调用", "来电者说打错电话或拨错号码了；"},
+		},
 	} {
 		description := builtinSchemas(lang, nil)[ToolHangup].Description.For(lang)
-		for _, fragment := range want {
+		for _, fragment := range append([]string{tc.when, tc.mistake}, tc.want...) {
 			if !strings.Contains(description, fragment) {
 				t.Errorf("%s: the description lacks %q: %q", lang, fragment, description)
 			}
 		}
-		for _, stale := range []string{"as soon as", "立即调用"} {
+		for _, stale := range tc.stale {
 			if strings.Contains(description, stale) {
 				t.Errorf("%s: the description still says %q", lang, stale)
 			}
+		}
+		// Its own sentence: the only-when list ends before the mistake starts.
+		when, mistake := strings.Index(description, tc.when), strings.Index(description, tc.mistake)
+		if when < 0 || mistake < 0 {
+			continue
+		}
+		list := description[when:mistake]
+		if strings.Contains(list, "CALLER_ASKED_TO_END") || strings.Contains(list, "wrong number") ||
+			strings.Contains(list, "打错") || strings.Contains(list, "拨错") {
+			t.Errorf("%s: the only-when list still names the mistaken call: %q", lang, list)
+		}
+	}
+}
+
+// The reason's description gives a mistaken call to CALLER_ASKED_TO_END in
+// the same intent words as the tool's description (#554).
+func TestTheAskedToEndReasonNamesAMistakenCall(t *testing.T) {
+	t.Parallel()
+	for lang, want := range map[string]string{
+		LangEN: "CALLER_ASKED_TO_END: the caller asked to end the call, or said this call is a mistake " +
+			"(the wrong number, a call they did not mean to make, someone else they were looking for).",
+		LangZH: "CALLER_ASKED_TO_END：来电者要求结束通话，或者说这通电话打错了（拨错号码、不小心打来、要找的是别人）。",
+	} {
+		var schema struct {
+			Properties map[string]struct {
+				Description string `json:"description"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(hangupParameters(lang == LangZH), &schema); err != nil {
+			t.Fatal(err)
+		}
+		if got := schema.Properties["reason"].Description; !strings.Contains(got, want) {
+			t.Errorf("%s: the reason's description lacks %q: %q", lang, want, got)
 		}
 	}
 }

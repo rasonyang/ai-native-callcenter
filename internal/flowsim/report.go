@@ -56,7 +56,11 @@ func Write(w io.Writer, flowID string, reports []Report, coverage Coverage, verb
 		}
 		fmt.Fprintf(w, "  %s  %s\n", status, r.Scenario)
 		fmt.Fprintf(w, "        path:   %s\n", strings.Join(r.Path, " > "))
-		fmt.Fprintf(w, "        ending: %s\n", r.Ending)
+		if r.Ending == flow.ToolHangup && r.HangupReason != "" {
+			fmt.Fprintf(w, "        ending: %s (%s)\n", r.Ending, r.HangupReason)
+		} else {
+			fmt.Fprintf(w, "        ending: %s\n", r.Ending)
+		}
 		if verbose {
 			for i, line := range r.Log {
 				fmt.Fprintf(w, "        %2d. %s\n", i+1, line)

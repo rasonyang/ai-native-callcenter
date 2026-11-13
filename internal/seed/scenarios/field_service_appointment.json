@@ -1,6 +1,17 @@
 {
   "scenarios": [
     {
+      "name": "the caller has the wrong number (#554)",
+      "description": "A caller who says at the greeting that the call is a mistake is let go: hangup with CALLER_ASKED_TO_END moves the call to its closing line (#554).",
+      "lang": "en",
+      "caller": "13600006666",
+      "steps": [
+        {"say": "I was trying to reach someone else.", "expect": {"phase": "welcome"}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "Thank you for calling, goodbye."}}
+      ],
+      "expect": {"path": ["welcome", "finish"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "new caller books an appointment",
       "description": "No booking on the number: lookup finds nothing, slots are offered, one is booked.",
       "lang": "en",

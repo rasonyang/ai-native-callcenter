@@ -1,6 +1,17 @@
 {
   "scenarios": [
     {
+      "name": "来电者打错了电话(#554)",
+      "description": "来电者开场就说打错了:hangup 用 CALLER_ASKED_TO_END,通话直接进入结束语(#554)。",
+      "lang": "zh",
+      "caller": "90000001",
+      "steps": [
+        {"say": "我找的不是你们。", "expect": {"phase": "greet"}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"}, "expect": {"phase": "finish", "announce": "不好意思打扰了,感谢配合,再见。"}}
+      ],
+      "expect": {"path": ["greet", "finish"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "caller promises a date and the platform ends the call",
       "description": "The main branch: overdue bill found, a payment date recorded; promised is a terminal phase, so the line is said as written and the call ends without a hangup from the model.",
       "lang": "en",

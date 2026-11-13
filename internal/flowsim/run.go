@@ -23,6 +23,9 @@ type Report struct {
 	Path []string
 	// Ending is the last built-in action that succeeded, or "none".
 	Ending string
+	// HangupReason is the reason of the last hangup that succeeded, empty if
+	// none did.
+	HangupReason string
 	// Lead is the last lead stored, by record_lead or by a phase that
 	// declares one (flow.DeclaredLead), if any.
 	Lead *flow.LeadRequest
@@ -89,6 +92,7 @@ func RunScenario(ctx context.Context, spec *flow.Spec, source BackendSource, sc 
 		}
 	}
 	r.report.Ending = actions.ending()
+	r.report.HangupReason = actions.hangupReason
 	r.report.Transfer = actions.transfer
 	r.report.Lead = actions.lead
 	return r.report
@@ -331,6 +335,10 @@ func (r *runner) final() error {
 	}
 	if want.Ending != "" && want.Ending != r.actions.ending() {
 		return fmt.Errorf("the call ended with %q, want %q", r.actions.ending(), want.Ending)
+	}
+	if want.HangupReason != "" && want.HangupReason != r.actions.hangupReason {
+		return fmt.Errorf("the last hangup that succeeded had reason %q, want %q",
+			r.actions.hangupReason, want.HangupReason)
 	}
 	if t := want.Transfer; t != nil {
 		got := r.actions.transfer

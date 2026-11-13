@@ -19,6 +19,9 @@ type scriptedActions struct {
 	lead *flow.LeadRequest
 	// last is the name of the last built-in that succeeded.
 	last string
+	// hangupReason is the reason of the last hangup that succeeded, as the
+	// runtime passed it on (flow.HangupRequest.Reason).
+	hangupReason string
 	// isEndingArmed says a transfer or a hangup has succeeded: in the
 	// application the call's ending is then armed, and a later hangup is the
 	// closing paths' to answer, its reason unjudged (flow.EndingState).
@@ -63,10 +66,11 @@ func (a *scriptedActions) TakeMessage(context.Context, flow.MessageRequest) (flo
 	return a.answer(flow.ToolTakeMessage), nil
 }
 
-func (a *scriptedActions) Hangup(context.Context, flow.HangupRequest) (flow.Result, error) {
+func (a *scriptedActions) Hangup(_ context.Context, req flow.HangupRequest) (flow.Result, error) {
 	result := a.answer(flow.ToolHangup)
 	if result.IsOK {
 		a.isEndingArmed = true
+		a.hangupReason = req.Reason
 	}
 	return result, nil
 }

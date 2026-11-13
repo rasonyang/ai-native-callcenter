@@ -42,6 +42,19 @@ carries the one-line installer's files.
   rather than to hang up as soon as the caller seems to want to finish. The
   description and `novanet_support` also count a caller who says they have the
   wrong number as asking to end the call (`CALLER_ASKED_TO_END`) (#484).
+- A caller who says at the greeting that the call is a mistake (the wrong
+  number, a call they did not mean to make, someone else they were looking
+  for) now has a sentence of its own in the `hangup` description, stated as
+  the caller's intent rather than a list of phrasings: end the call at once
+  with `CALLER_ASKED_TO_END`, saying nothing first, without reassuring the
+  caller or asking again how the bot can help. The description's rule against
+  hanging up in reply to a question now says a question the caller asked, and
+  a caller who only asks whether they have the right number is answered.
+  `novanet_support` opens its greeting phase with the case, and every shipped
+  flow that answers inbound calls names it next to `hangup`; a flow of your own
+  can do the same (`docs/flow-authoring.md` 5.3). Flow simulator scenarios can
+  check the reason of the last hangup that succeeded (`expect.hangupReason`)
+  (#554).
 
 ## v0.8.3 - 2026-11-12
 

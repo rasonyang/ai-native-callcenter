@@ -48,8 +48,9 @@ const (
 	// HangupCallerDeclinedMoreHelp: asked whether they need anything else, the
 	// caller said no.
 	HangupCallerDeclinedMoreHelp = "CALLER_DECLINED_MORE_HELP"
-	// HangupCallerAskedToEnd: the caller asked to end the call, or said they
-	// called the wrong number.
+	// HangupCallerAskedToEnd: the caller asked to end the call, or said this
+	// call is a mistake (the wrong number, a call they did not mean to make,
+	// someone else they were looking for).
 	HangupCallerAskedToEnd = "CALLER_ASKED_TO_END"
 	// HangupFlowInstructed: the current phase's instructions say to end the
 	// call now (a wrong party, a DO_NOT_CALL, a refusal to talk).
@@ -266,13 +267,25 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 	// model answer the caller's first question and end the call in the same
 	// reply. The guards in the runtime and the orchestrator back this text; the
 	// text is what keeps a model from needing them.
+	//
+	// A mistaken call has a sentence of its own, stated as the caller's intent
+	// (#554): as the third of five cases, followed by "never in reply to a
+	// question: answer, ask whether there is anything else", flash met a wrong
+	// number at the greeting with "No problem. What can I help you with today?"
+	// in five of eight first sayings, the very sequence that clause prescribes,
+	// though the caller was answering the greeting's question, not asking one.
 	hangupDescription := "End the call. Call it only when the caller has said goodbye, has " +
-		"asked to end the call, has said they have the wrong number or called by mistake, or " +
-		"has said they need nothing more after you asked whether there is anything else, or " +
-		"when your current instructions tell you to end the call. " +
+		"asked to end the call, or has said they need nothing more after you asked whether " +
+		"there is anything else, or when your current instructions tell you to end the call. " +
+		"When the caller says this call is a mistake (they have the wrong number, did not mean " +
+		"to call, or were looking for someone else), they are asking to end it: call it " +
+		"straight away with reason CALLER_ASKED_TO_END, saying nothing first, with no " +
+		"reassurance such as \"no problem\" and without asking again how you can help. " +
 		"Never call it in the same reply as an answer to the caller, and never in reply to a " +
-		"question: answer, ask whether there is anything else, and wait for their reply. Do " +
-		"not say goodbye before calling it; say goodbye afterwards, when the result tells you to."
+		"question the caller asked: answer, ask whether there is anything else, and wait for " +
+		"their reply. A caller who only asks whether they have the right number is asking " +
+		"such a question. Do not say goodbye before calling it; say goodbye afterwards, when " +
+		"the result tells you to."
 	leadDescription := "Record what this call concluded about the customer. Call it as soon as " +
 		"their stance is clear and again whenever it changes; the last call counts. Intent: HIGH = " +
 		"wants the offer or a follow-up from a person, MEDIUM = interested but undecided, LOW = " +
@@ -287,11 +300,13 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 			"工具返回后再按提示播报转接话术。"
 		messageDescription = "记录留言与回电号码，用于无人接听或非营业时间。"
 		hangupDescription = "结束通话。只在以下情况调用：来电者已经道别；来电者要求结束通话；" +
-			"来电者说打错电话或拨错号码了；" +
 			"你问过还有没有其他需要，来电者说没有了；或者当前指令要求你结束通话。" +
+			"来电者说这通电话打错了（拨错号码、不小心打来，或者要找的是别人），就是要求结束通话：" +
+			"直接调用，reason 用 CALLER_ASKED_TO_END，调用前什么都不要说，" +
+			"不要先说“没关系”这类的话，也不要再问有什么可以帮您。" +
 			"不要在回答来电者的同一次回复里调用，来电者提问时也不要调用：先回答，" +
-			"再问还有没有其他需要，等对方回复。调用前不要先道别；" +
-			"工具返回后按提示道别，道别说完线路自动挂断。"
+			"再问还有没有其他需要，等对方回复。来电者只是问自己有没有打对电话，也是提问。" +
+			"调用前不要先道别；工具返回后按提示道别，道别说完线路自动挂断。"
 	}
 
 	return map[string]Tool{
@@ -337,12 +352,13 @@ func builtinSchemas(lang string, queues []string) map[string]Tool {
 func hangupParameters(isZH bool) json.RawMessage {
 	description := "Why the call ends. CALLER_GOODBYE: the caller said goodbye. " +
 		"CALLER_DECLINED_MORE_HELP: you asked whether they need anything else and they said no. " +
-		"CALLER_ASKED_TO_END: the caller asked to end the call, or said they called the wrong number. " +
+		"CALLER_ASKED_TO_END: the caller asked to end the call, or said this call is a mistake " +
+		"(the wrong number, a call they did not mean to make, someone else they were looking for). " +
 		"FLOW_INSTRUCTED: your current instructions tell you to end the call now."
 	if isZH {
 		description = "结束通话的原因。CALLER_GOODBYE：来电者道别了。" +
 			"CALLER_DECLINED_MORE_HELP：你问过还有没有其他需要，来电者说没有了。" +
-			"CALLER_ASKED_TO_END：来电者要求结束通话，或者说打错电话了。" +
+			"CALLER_ASKED_TO_END：来电者要求结束通话，或者说这通电话打错了（拨错号码、不小心打来、要找的是别人）。" +
 			"FLOW_INSTRUCTED：当前指令要求你现在结束通话。"
 	}
 	schema, err := json.Marshal(map[string]any{

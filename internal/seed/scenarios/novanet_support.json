@@ -58,6 +58,34 @@
       "expect": {"path": ["welcome", "farewell"], "ending": "hangup"}
     },
     {
+      "name": "english caller has the wrong number (#554)",
+      "description": "A caller who says at the greeting that the call is a mistake is let go at once: the welcome opens with the case, hangup with CALLER_ASKED_TO_END goes straight to the farewell line.",
+      "lang": "en",
+      "caller": "8005550110",
+      "steps": [
+        {"say": "Wrong number, sorry.", "expect": {"phase": "welcome", "instructionContains": [
+          "If the caller says this call is a mistake",
+          "call hangup with reason CALLER_ASKED_TO_END straight away: do not reassure them first, do not ask again how you can help"]}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"},
+          "expect": {"phase": "farewell", "announce": "Thank you for calling NovaNet. Goodbye."}}
+      ],
+      "expect": {"path": ["welcome", "farewell"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
+      "name": "chinese caller has the wrong number (#554)",
+      "description": "The same in Chinese.",
+      "lang": "zh",
+      "caller": "8005550111",
+      "steps": [
+        {"say": "不好意思，拨错电话了。", "expect": {"phase": "welcome", "instructionContains": [
+          "来电者说这通电话打错了",
+          "直接调用 hangup，reason 用 CALLER_ASKED_TO_END：不要先说“没关系”这类的话，不要再问有什么可以帮您"]}},
+        {"call": "hangup", "args": {"reason": "CALLER_ASKED_TO_END"},
+          "expect": {"phase": "farewell", "announce": "感谢您致电 NovaNet，再见。"}}
+      ],
+      "expect": {"path": ["welcome", "farewell"], "ending": "hangup", "hangupReason": "CALLER_ASKED_TO_END", "toolsRun": ["hangup"]}
+    },
+    {
       "name": "a hangup with no reason is refused and the call goes on (#484)",
       "lang": "en",
       "caller": "8005550109",

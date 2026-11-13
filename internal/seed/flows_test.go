@@ -4,6 +4,7 @@ package seed
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -278,6 +279,96 @@ func TestNoInstructionStillAsksForAGoodbyeAfterHangup(t *testing.T) {
 			for id, node := range spec.Nodes {
 				check("instruction of "+strconv.Quote(id), node.Instruction.For(lang))
 			}
+		}
+	}
+}
+
+// mistakenCall is the stable fragment, per language, by which a shipped flow
+// names a caller who says this call is a mistake (#554). The flows state the
+// intent, not phrasings: on qwen flash a wrong number at the greeting was met
+// with "No problem. What can I help you with today?" in five of eight first
+// sayings while the flow listed it as one case among several.
+var mistakenCall = map[string]string{
+	flow.LangEN: "says this call is a mistake",
+	flow.LangZH: "这通电话打错了",
+}
+
+// sentences splits text at its sentence ends, in either language.
+func sentences(text string) []string {
+	return regexp.MustCompile(`\.\s+|。`).Split(text, -1)
+}
+
+// Every shipped flow that answers inbound calls tells the model, in both
+// languages and in one sentence, that a caller who says this call is a mistake
+// is ended with hangup and CALLER_ASKED_TO_END, and its entry phase offers
+// hangup, so the greeting can be answered that way. The outbound-only campaign
+// flow places its calls and is not held to it.
+func TestEveryInboundFlowNamesAMistakenCallNextToHangup(t *testing.T) {
+	t.Parallel()
+	flows := shippedFlows(t)
+	for _, f := range demoFlows {
+		if f.isOutboundOnly() {
+			continue
+		}
+		file := strings.TrimPrefix(f.file, "flows/")
+		spec, ok := flows[file]
+		if !ok {
+			t.Errorf("%s is not shipped", file)
+			continue
+		}
+		entry, _ := spec.Node(spec.InitialNode)
+		if !slices.Contains(spec.Global.AlwaysAllowedTools, flow.ToolHangup) &&
+			!slices.Contains(entry.Tools, flow.ToolHangup) {
+			t.Errorf("%s: the entry phase %q does not offer hangup, so a caller who has the "+
+				"wrong number at the greeting cannot be let go", file, spec.InitialNode)
+		}
+		for _, lang := range []string{flow.LangEN, flow.LangZH} {
+			texts := slices.Clone(spec.Global.Rules.For(lang))
+			for _, node := range spec.Nodes {
+				texts = append(texts, node.Instruction.For(lang))
+			}
+			isNamed := false
+			for _, text := range texts {
+				for _, s := range sentences(text) {
+					if strings.Contains(s, mistakenCall[lang]) && strings.Contains(s, flow.ToolHangup) &&
+						strings.Contains(s, flow.HangupCallerAskedToEnd) {
+						isNamed = true
+					}
+				}
+			}
+			if !isNamed {
+				t.Errorf("%s: no %s rule or instruction has a sentence that names a caller who %q "+
+					"together with hangup and %s", file, lang, mistakenCall[lang], flow.HangupCallerAskedToEnd)
+			}
+		}
+	}
+}
+
+// novanet_support is the main line: its welcome opens with the mistaken call,
+// so it is the first thing the model reads about the caller's first words,
+// ahead of "understand what the caller needs" (#554).
+func TestNovanetWelcomeOpensWithAMistakenCall(t *testing.T) {
+	t.Parallel()
+	spec := shippedFlows(t)["novanet_support.json"]
+	if spec == nil {
+		t.Fatal("novanet_support.json is not shipped")
+	}
+	welcome, ok := spec.Node(spec.InitialNode)
+	if !ok {
+		t.Fatalf("initialNode %q is not a phase", spec.InitialNode)
+	}
+	for _, lang := range []string{flow.LangEN, flow.LangZH} {
+		instruction := welcome.Instruction.For(lang)
+		first := sentences(instruction)[0]
+		for _, want := range []string{mistakenCall[lang], flow.ToolHangup, flow.HangupCallerAskedToEnd} {
+			if !strings.Contains(first, want) {
+				t.Errorf("%s: the welcome instruction's first sentence lacks %q: %q", lang, want, first)
+			}
+		}
+		// Said once: the old closing sentence on the same case is gone.
+		if n := strings.Count(instruction, flow.HangupCallerAskedToEnd); n != 1 {
+			t.Errorf("%s: the welcome instruction names %s %d times, want once", lang,
+				flow.HangupCallerAskedToEnd, n)
 		}
 	}
 }
